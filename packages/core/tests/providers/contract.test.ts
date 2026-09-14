@@ -22,6 +22,20 @@ describeProviderContract('in-memory fake, provider reports whole subtrees', () =
 	provider: createFakeProvider({ folderChanges: 'recursive' }),
 }));
 
+// One entry per page, so the adapter's `has_more` loops — in `list` and in
+// `changes` — are walked rather than assumed.
+describeProviderContract('dropbox over a stubbed transport, one entry per page', () => {
+	const stub = createDropboxStub({ pageSize: 1 });
+	return {
+		provider: createDropboxProvider({
+			fetch: stub.fetch,
+			getAccessToken: () => Promise.resolve('stub-token'),
+			appVersion: '0.1.0',
+			clientId: 'stub-client',
+		}),
+	};
+});
+
 describeProviderContract('dropbox over a stubbed transport', () => {
 	const stub = createDropboxStub();
 	return {

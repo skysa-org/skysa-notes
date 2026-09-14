@@ -125,6 +125,7 @@ export interface DropboxStub {
 
 export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStub => {
 	const backing = createFakeProvider({ ...options, kind: 'dropbox' });
+	const pageSize = options.pageSize ?? Number.POSITIVE_INFINITY;
 	const requests: DropboxStub['requests'] = [];
 
 	/** Dropbox sends everything as JSON strings; anything else is a stub bug. */
@@ -153,12 +154,35 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 			has_more: set.more,
 		});
 
-	const listFolder = async (body: Record<string, unknown>): Promise<Response> => {
+	/**
+	 * A listing paginates like the real one, so the adapter's `has_more` loop is
+	 * actually walked. List cursors are tagged so `continue` can tell them from
+	 * the delta cursors it also serves — Dropbox uses one route for both.
+	 */
+	const LIST_CURSOR = /^stub:list:(\d+):(.*)$/;
+
+	const listPage = async (folder: string, offset: number): Promise<Response> => {
+		const all = await backing.list(folder);
+		const page = all.slice(offset, offset + pageSize);
+		const next = offset + page.length;
+		return json({
+			entries: page.map(metadataOf),
+			cursor: `stub:list:${String(next)}:${folder}`,
+			has_more: next < all.length,
+		});
+	};
+
+	const listFolder = (body: Record<string, unknown>): Promise<Response> => {
 		// `recursive` is how the adapter distinguishes a delta scan from a
 		// one-level listing, exactly as the real API does.
-		if (body.recursive === true) return asChangeSet(await backing.changes());
-		const entries = await backing.list(fromDropboxPath(str(body.path)));
-		return json({ entries: entries.map(metadataOf), cursor: 'stub:list', has_more: false });
+		if (body.recursive === true) return backing.changes().then(asChangeSet);
+		return listPage(fromDropboxPath(str(body.path)), 0);
+	};
+
+	const continueFrom = async (cursor: string): Promise<Response> => {
+		const listing = LIST_CURSOR.exec(cursor);
+		if (listing !== null) return listPage(listing[2] ?? '', Number(listing[1]));
+		return asChangeSet(await backing.changes(cursor));
 	};
 
 	const upload = async (arg: Record<string, unknown>, content: string): Promise<Response> => {
@@ -214,8 +238,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 	> = {
 		'files/get_metadata': getMetadata,
 		'files/list_folder': listFolder,
-		'files/list_folder/continue': async (body) =>
-			asChangeSet(await backing.changes(str(body.cursor))),
+		'files/list_folder/continue': (body) => continueFrom(str(body.cursor)),
 		'files/upload': (_body, arg, content) => upload(arg, content),
 		'files/download': (_body, arg) => download(arg),
 		'files/create_folder_v2': async (body) =>

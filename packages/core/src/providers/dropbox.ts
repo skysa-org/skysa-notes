@@ -26,8 +26,8 @@ import {
  * - Error handling: https://developers.dropbox.com/error-handling-guide
  *
  * `fetch` is injected rather than taken from the global, because `core` has to
- * run in the browser, in Node and in Workers, and compiles with no ambient
- * types at all.
+ * run in the browser, in Node and in Workers, and must not assume which of them
+ * it is in.
  */
 
 const RPC = 'https://api.dropboxapi.com/2';
@@ -79,7 +79,16 @@ const toDropboxPath = (path: string): string => {
 	return normalized === ROOT ? '' : `/${normalized}`;
 };
 
-const fromDropboxPath = (path: string | undefined): string => normalizePath(path ?? '');
+/**
+ * `path_display` is nullable in Dropbox's own spec. Defaulting a missing one to
+ * `''` would quietly produce an entry pointing at the app-folder root — which a
+ * later `delete` would then act on. Refusing loudly is the only safe reading.
+ */
+const fromDropboxPath = (path: string | undefined): string => {
+	const normalized = normalizePath(path ?? '');
+	if (normalized === ROOT) throw new Error('dropbox returned an entry with no usable path');
+	return normalized;
+};
 
 /**
  * `Dropbox-API-Arg` is an HTTP header, so it has to be ASCII, and Dropbox's own
@@ -117,7 +126,10 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		const text = await response.text().catch(() => '');
 		const parsed = ((): { error_summary?: string; error?: { retry_after?: number } } => {
 			try {
-				return JSON.parse(text) as { error_summary?: string };
+				const value: unknown = JSON.parse(text);
+				// `null`, a number and a bare string are all valid JSON, and none of
+				// them has the shape below.
+				return typeof value === 'object' && value !== null ? value : {};
 			} catch {
 				return {};
 			}
@@ -133,14 +145,25 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	};
 
 	/**
+	 * Endpoint-specific errors arrive as 409 with a `/`-separated summary. Any
+	 * other status carries a body Dropbox makes no promises about — a plaintext
+	 * 400, or an HTML error page from something in between — so matching a tag
+	 * there would let `upstream conflict detected` in a 503 masquerade as a real
+	 * conflict, and the conflict rule would copy the user's note aside over an
+	 * outage.
+	 */
+	const tagged = (failure: DropboxFailure, tag: string): boolean =>
+		failure.status === 409 && failure.summary.split('/').includes(tag);
+
+	/**
 	 * Everything that maps the same way whatever the route. Conflicts are not
 	 * raised here: only the caller knows which path conflicted and can fetch the
 	 * entry the conflict rule needs.
 	 */
-	const raise = (failure: DropboxFailure): never => {
+	const raise = (failure: DropboxFailure, path?: string): never => {
 		if (failure.status === 401) throw new AuthError(failure.summary);
-		if (failure.summary.startsWith('reset')) throw new CursorResetError(failure.summary);
-		if (failure.summary.includes('not_found')) throw new NotFoundError(failure.summary);
+		if (tagged(failure, 'reset')) throw new CursorResetError(failure.summary);
+		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
 		if (failure.status === 429) {
 			// Deliberately untyped: the engine's per-op backoff treats an unknown
 			// error as transient, which is exactly right here. See docs/PLAN.md §4.
@@ -237,8 +260,16 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (response.ok) return toEntry((await response.json()) as Metadata);
 
 		const failure = await failureOf(response);
-		if (failure.summary.includes('conflict')) return conflictAt(path, failure);
-		return raise(failure);
+		if (!tagged(failure, 'conflict')) return raise(failure, path);
+
+		const current = await metadataAt(path);
+		if (current !== undefined) throw new ConflictError(current);
+		// `strict_conflict` makes Dropbox answer `conflict` even when the file has
+		// been deleted, so a conflict with nothing there is the "expected a version
+		// of a file that is gone" case. docs/PLAN.md §4 calls that not-found, and
+		// the engine's re-create-on-push path depends on telling them apart.
+		if (opts.expectedVersion !== undefined) throw new NotFoundError(path);
+		return raise(failure, path);
 	};
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
@@ -301,12 +332,12 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 
 		// Idempotent, so a replayed `mkdir` op is harmless: a folder already there
 		// is the outcome the caller wanted.
-		if (result.failure.summary.includes('conflict')) {
+		if (tagged(result.failure, 'conflict')) {
 			const existing = await metadataAt(path);
 			if (existing?.kind === 'folder') return existing;
 			if (existing !== undefined) throw new ConflictError(existing);
 		}
-		return raise(result.failure);
+		return raise(result.failure, path);
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
@@ -316,22 +347,31 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 			autorename: false,
 		});
 		if (result.ok) return toEntry(result.value.metadata ?? {});
-		if (result.failure.summary.includes('conflict')) {
-			return conflictAt(newPath, result.failure);
-		}
-		return raise(result.failure);
+		if (tagged(result.failure, 'conflict')) return conflictAt(newPath, result.failure);
+		return raise(result.failure, entry.path);
 	};
 
 	const remove = async (entry: EntryRef): Promise<void> => {
 		const result = await tryRpc<unknown>('files/delete_v2', { path: target(entry) });
 		// Idempotent: something already gone is the outcome the caller wanted.
-		if (result.ok || result.failure.summary.includes('not_found')) return;
-		raise(result.failure);
+		if (result.ok || tagged(result.failure, 'not_found')) return;
+		raise(result.failure, entry.path);
+	};
+
+	const continued = async (cursor: string): Promise<ListFolderResult> => {
+		const result = await tryRpc<ListFolderResult>('files/list_folder/continue', { cursor });
+		if (result.ok) return result.value;
+		// Dropbox answers `reset` for a cursor that has expired, and a plain 400
+		// for one it cannot parse — a truncated value read back from IndexedDB,
+		// say. Both mean discard it and re-scan; only the first is typed, and
+		// without this the engine would retry a dead cursor forever.
+		if (result.failure.status === 400) throw new CursorResetError(result.failure.summary);
+		return raise(result.failure);
 	};
 
 	const changes = async (cursor?: string): Promise<ChangeSet> => {
 		const result =
-			cursor === undefined
+			cursor === undefined || cursor === ''
 				? await rpc<ListFolderResult>('files/list_folder', {
 						path: '',
 						recursive: true,
@@ -340,7 +380,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 						// were already dead before the first scan.
 						include_deleted: false,
 					})
-				: await rpc<ListFolderResult>('files/list_folder/continue', { cursor });
+				: await continued(cursor);
 
 		return {
 			entries: (result.entries ?? []).map(toChangeEntry),
