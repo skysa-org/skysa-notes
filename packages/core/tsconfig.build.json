@@ -1,8 +1,11 @@
 {
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
-  },
-  "include": ["src/**/*.ts"]
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"rootDir": "src",
+		"outDir": "dist",
+		// src must compile with no ambient Node types at all: core runs in the
+		// browser and in Workers too. Only the tests get @types/node.
+		"types": []
+	},
+	"include": ["src/**/*.ts"]
 }
