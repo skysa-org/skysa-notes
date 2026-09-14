@@ -1,9 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { type EditorMode, isModeToggleShortcut, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
+import { RichEditor } from '../editor/RichEditor.js';
 import { useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord } from '../store/db.js';
-import { deleteNote, renameNote, saveNoteBody } from '../store/notes.js';
+import { useDefaultEditorMode } from '../store/hooks.js';
+import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
 
@@ -49,6 +52,14 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 
 export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const noteId = note?.id;
+	const defaultMode = useDefaultEditorMode();
+
+	/**
+	 * The note the rich editor reported it could not represent. Held by id rather
+	 * than as a boolean so moving to another note clears it without an effect.
+	 */
+	const [unsupportedId, setUnsupportedId] = useState<string | null>(null);
+	const unsupported = noteId !== undefined && unsupportedId === noteId;
 
 	const save = useCallback(
 		(body: string) => {
@@ -59,6 +70,30 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	);
 
 	const autosave = useAutosave({ key: noteId ?? 'none', save });
+	const { flush } = autosave;
+
+	const mode: EditorMode | undefined = unsupported ? 'raw' : (note?.editorMode ?? defaultMode);
+
+	const toggleMode = useCallback(() => {
+		if (noteId === undefined || mode === undefined || unsupported) return;
+		// Write the pending edit first: the incoming editor loads from the note
+		// record, and the mode switch itself must never be what saves — or lose —
+		// what the user typed.
+		flush();
+		void setNoteEditorMode(db, noteId, otherMode(mode));
+	}, [flush, mode, noteId, unsupported]);
+
+	useEffect(() => {
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (!isModeToggleShortcut(event)) return;
+			event.preventDefault();
+			toggleMode();
+		};
+		window.addEventListener('keydown', onKeyDown);
+		return () => {
+			window.removeEventListener('keydown', onKeyDown);
+		};
+	}, [toggleMode]);
 
 	if (note === undefined) {
 		return (
@@ -76,6 +111,21 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 					<span className="muted path" title={note.path}>
 						{note.path}
 					</span>
+					{mode !== undefined && (
+						<button
+							type="button"
+							onClick={toggleMode}
+							disabled={unsupported}
+							aria-pressed={mode === 'raw'}
+							title={
+								unsupported
+									? 'This note has to stay in markdown mode'
+									: `Switch to ${MODE_LABELS[otherMode(mode)].toLowerCase()} (Ctrl/Cmd+E)`
+							}
+						>
+							{MODE_LABELS[mode]}
+						</button>
+					)}
 					<button
 						type="button"
 						onClick={() => {
@@ -88,7 +138,26 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				</div>
 			</header>
 
-			<RawEditor noteId={note.id} body={note.body} onUserEdit={autosave.change} />
+			{unsupported && (
+				<p className="banner" role="status">
+					This note uses markdown the rich editor has no way to show, so it stays in
+					markdown mode. Nothing in it has been changed.
+				</p>
+			)}
+
+			{mode === 'raw' && (
+				<RawEditor noteId={note.id} body={note.body} onUserEdit={autosave.change} />
+			)}
+			{mode === 'rich' && (
+				<RichEditor
+					noteId={note.id}
+					body={note.body}
+					onUserEdit={autosave.change}
+					onUnsupported={() => {
+						setUnsupportedId(note.id);
+					}}
+				/>
+			)}
 		</section>
 	);
 };

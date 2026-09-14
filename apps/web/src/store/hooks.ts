@@ -1,9 +1,11 @@
 import { ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 
+import { type EditorMode } from '../editor/mode.js';
 import { db, type NoteRecord } from './db.js';
 import { folderTree } from './folders.js';
 import { listNotes } from './notes.js';
+import { getDefaultEditorMode } from './prefs.js';
 import { buildFolderTree, type FolderNode } from './tree.js';
 
 /**
@@ -27,6 +29,10 @@ export const useNotesInFolder = (folderPath: string = ROOT): NoteRecord[] | unde
 
 export const useNote = (id: string | undefined): NoteRecord | undefined =>
 	useLiveQuery(async () => (id === undefined ? undefined : db.notes.get(id)), [id]);
+
+/** The mode a note opens in unless it remembers one of its own. */
+export const useDefaultEditorMode = (): EditorMode | undefined =>
+	useLiveQuery(() => getDefaultEditorMode(db), []);
 
 /** Count of notes with unpushed edits, for the sync indicator in Phase 2. */
 export const useDirtyCount = (): number | undefined =>

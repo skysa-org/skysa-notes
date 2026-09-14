@@ -16,6 +16,7 @@ import {
 	renameNote,
 	restoreNote,
 	saveNoteBody,
+	setNoteEditorMode,
 	setNoteTags,
 } from '../src/store/notes.js';
 
@@ -397,5 +398,21 @@ describe('noteFileContents', () => {
 		expect(note.frontmatter).toBeNull();
 		// Serializing adds the block, because the app now has an id and title for it.
 		expect(noteFileContents(note)).toMatch(/^---\n/);
+	});
+});
+
+describe('setNoteEditorMode', () => {
+	it('remembers the mode without touching the note', async () => {
+		const note = await importNoteFile(db, { path: 'a.md', source: '# A\n' });
+
+		await setNoteEditorMode(db, note.id, 'raw');
+
+		const stored = await db.notes.get(note.id);
+		expect(stored?.editorMode).toBe('raw');
+		// Which editor a note is shown in says nothing about the file, so it must
+		// not queue a write to the provider.
+		expect(stored?.dirty).toBe(0);
+		expect(stored?.updatedAt).toBe(note.updatedAt);
+		expect(stored?.contentHash).toBe(note.contentHash);
 	});
 });

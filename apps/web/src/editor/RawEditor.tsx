@@ -5,6 +5,7 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 
 import { isUserEdit, programmatic } from './dirty.js';
+import { useIncomingBody } from './incoming.js';
 
 /**
  * Raw markdown mode: CodeMirror 6 over the note body. The body string is the
@@ -29,6 +30,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 	useEffect(() => {
 		notify.current = onUserEdit;
 	}, [onUserEdit]);
+	const incoming = useIncomingBody(noteId, body);
 
 	useEffect(() => {
 		const parent = host.current;
@@ -45,7 +47,10 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 					markdown(),
 					EditorView.lineWrapping,
 					EditorView.updateListener.of((update) => {
-						if (isUserEdit(update)) notify.current(update.state.doc.toString());
+						if (!isUserEdit(update)) return;
+						const edited = update.state.doc.toString();
+						incoming.emit(edited);
+						notify.current(edited);
 					}),
 				],
 			}),
@@ -66,6 +71,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 	useEffect(() => {
 		const instance = view.current;
 		if (instance === null) return;
+		if (!incoming.shouldAdopt(body)) return;
 
 		const current = instance.state.doc.toString();
 		if (current === body) return;
@@ -74,7 +80,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 			changes: { from: 0, to: current.length, insert: body },
 			...programmatic,
 		});
-	}, [body]);
+	}, [body, incoming]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;
 };
