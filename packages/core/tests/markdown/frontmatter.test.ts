@@ -1,0 +1,176 @@
+import { describe, expect, it } from 'vitest'
+import {
+  joinFrontmatter,
+  readFrontmatter,
+  splitFrontmatter,
+  writeFrontmatter,
+} from '../../src/markdown/frontmatter.js'
+
+describe('splitFrontmatter', () => {
+  it('splits a fenced YAML mapping from the body', () => {
+    expect(splitFrontmatter('---\ntitle: Hi\n---\nBody\n')).toEqual({
+      frontmatter: 'title: Hi',
+      body: 'Body\n',
+    })
+  })
+
+  it('treats a file with no frontmatter as all body', () => {
+    expect(splitFrontmatter('# Just a note\n')).toEqual({
+      frontmatter: null,
+      body: '# Just a note\n',
+    })
+  })
+
+  it('accepts empty frontmatter', () => {
+    expect(splitFrontmatter('---\n---\nBody\n')).toEqual({ frontmatter: '', body: 'Body\n' })
+  })
+
+  it('requires a closing fence', () => {
+    const source = '---\ntitle: Hi\n\nNo closing fence.\n'
+    expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source })
+  })
+
+  it('requires the opening fence on the very first line', () => {
+    const source = 'Intro\n\n---\ntitle: Hi\n---\n'
+    expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source })
+  })
+
+  it('handles CRLF line endings', () => {
+    expect(splitFrontmatter('---\r\ntitle: Hi\r\n---\r\nBody\r\n')).toEqual({
+      frontmatter: 'title: Hi',
+      body: 'Body\r\n',
+    })
+  })
+
+  it('rejects a fenced block that is not a mapping', () => {
+    const source = '---\n\nProse between two thematic breaks.\n\n---\n\nMore.\n'
+    expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source })
+  })
+
+  it('rejects a fenced block of invalid YAML rather than eating it', () => {
+    const source = '---\n: : :\n---\nBody\n'
+    expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source })
+  })
+
+  it('is inverted exactly by joinFrontmatter', () => {
+    for (const source of [
+      '---\ntitle: Hi\n---\n\nBody\n',
+      '---\n---\nBody\n',
+      '# No frontmatter\n',
+      '',
+    ]) {
+      const { frontmatter, body } = splitFrontmatter(source)
+      expect(joinFrontmatter(frontmatter, body)).toBe(source)
+    }
+  })
+})
+
+describe('joinFrontmatter', () => {
+  it('returns the body unchanged when there is no frontmatter', () => {
+    expect(joinFrontmatter(null, '# Note\n')).toBe('# Note\n')
+  })
+
+  it('terminates the YAML block even if the caller forgot the newline', () => {
+    expect(joinFrontmatter('title: Hi', 'Body\n')).toBe('---\ntitle: Hi\n---\nBody\n')
+  })
+})
+
+describe('readFrontmatter', () => {
+  it('reads the fields the app understands', () => {
+    const data = readFrontmatter(
+      ['id: 018f3c4e', 'title: Planning', 'created: 2026-09-14T13:02:11Z', 'tags: [a, b]'].join(
+        '\n',
+      ),
+    )
+    expect(data).toEqual({
+      id: '018f3c4e',
+      title: 'Planning',
+      created: '2026-09-14T13:02:11Z',
+      tags: ['a', 'b'],
+    })
+  })
+
+  it('returns nothing for a file with no frontmatter', () => {
+    expect(readFrontmatter(null)).toEqual({})
+  })
+
+  it('accepts a comma-separated tag string', () => {
+    expect(readFrontmatter('tags: planning, work').tags).toEqual(['planning', 'work'])
+  })
+
+  it('accepts a block sequence of tags', () => {
+    expect(readFrontmatter('tags:\n  - planning\n  - work').tags).toEqual(['planning', 'work'])
+  })
+
+  it('keeps a bare date as written, since YAML 1.2 has no timestamp type', () => {
+    expect(readFrontmatter('created: 2026-09-14').created).toBe('2026-09-14')
+  })
+
+  it('treats malformed YAML as no data instead of throwing', () => {
+    expect(readFrontmatter(': : :')).toEqual({})
+  })
+
+  it('ignores a YAML document that is not a mapping', () => {
+    expect(readFrontmatter('- just\n- a list')).toEqual({})
+  })
+
+  it('ignores fields of the wrong shape', () => {
+    expect(readFrontmatter('title:\n  nested: value')).toEqual({})
+  })
+})
+
+describe('writeFrontmatter', () => {
+  it('creates frontmatter when a file had none', () => {
+    const yaml = writeFrontmatter(null, { id: 'abc', title: 'Hi' })
+    expect(readFrontmatter(yaml)).toEqual({ id: 'abc', title: 'Hi' })
+  })
+
+  it('updates a field in place', () => {
+    const yaml = writeFrontmatter('id: abc\ntitle: Old\n', { title: 'New' })
+    expect(readFrontmatter(yaml).title).toBe('New')
+    expect(readFrontmatter(yaml).id).toBe('abc')
+  })
+
+  it('preserves keys the app does not know about', () => {
+    const yaml = writeFrontmatter('id: abc\nobsidian_banner: cover.png\naliases: [x]\n', {
+      title: 'New',
+    })
+    expect(yaml).toContain('obsidian_banner: cover.png')
+    // Re-stringifying may normalize spacing inside a flow collection, but the
+    // key and its values survive.
+    expect(readFrontmatter(yaml)).toMatchObject({ id: 'abc', title: 'New' })
+    expect(yaml).toMatch(/aliases: \[ ?x ?\]/)
+  })
+
+  it('preserves comments and key order', () => {
+    const yaml = writeFrontmatter('# my notes header\nid: abc\ntitle: Old\n', { title: 'New' })
+    expect(yaml).toContain('# my notes header')
+    expect(yaml.indexOf('id:')).toBeLessThan(yaml.indexOf('title:'))
+  })
+
+  it('removes a field set to undefined', () => {
+    const yaml = writeFrontmatter('id: abc\ntitle: Old\n', { title: undefined })
+    expect(yaml).not.toContain('title')
+    expect(yaml).toContain('id: abc')
+  })
+
+  it('leaves a field alone when the patch does not mention it', () => {
+    const yaml = writeFrontmatter('id: abc\ntitle: Old\n', {})
+    expect(readFrontmatter(yaml)).toEqual({ id: 'abc', title: 'Old' })
+  })
+
+  it('never rewrites YAML it cannot parse', () => {
+    const broken = ': : :'
+    expect(writeFrontmatter(broken, { title: 'New' })).toBe(broken)
+  })
+
+  it('round-trips through split and join', () => {
+    const file = '---\nid: abc\ncustom: keep\n---\n\n# Body\n'
+    const { frontmatter, body } = splitFrontmatter(file)
+    const updated = joinFrontmatter(writeFrontmatter(frontmatter, { title: 'Set' }), body)
+    const reread = splitFrontmatter(updated)
+    expect(readFrontmatter(reread.frontmatter)).toEqual({ id: 'abc', title: 'Set' })
+    expect(reread.frontmatter).toContain('custom: keep')
+    expect(reread.body).toBe(body)
+  })
+})

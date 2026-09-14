@@ -24,3 +24,5 @@ export {
   type EntitlementDecision,
   type EntitlementProvider,
 } from './entitlements.js'
+
+export * from './markdown/index.js'
