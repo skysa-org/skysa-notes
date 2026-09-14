@@ -261,6 +261,25 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
   Settings shows linked providers and encourages linking a second one. No magic link at launch; the `identities` design leaves room for an `email` provider type later (see §14).
 - WebDAV proxy: stream request/response bodies straight through (`c.req.raw.body` → upstream `fetch` → return `Response`); enforce a 30 s upstream timeout with `AbortSignal.timeout` and a 20 MB cap regardless of Cloudflare plan limits.
 
+### Storage OAuth, as built (Phase 2)
+
+Dropbox is the first storage flow and the shape the others follow.
+
+- **Hand-rolled, not Arctic.** The storage flows are Authorization Code + PKCE and about forty lines each; `arctic` is deprecated (see above) and is not installed. Identity sign-in in Phase 9 is a separate decision.
+- **The PKCE verifier and `state` ride in a short-lived signed cookie** (`skysa_flow`, 10 minutes, `httpOnly`, `sameSite=lax`), not a table. §9 wants `state` bound to the browser that started the flow, which is what a cookie *is*; a table would need a sweep job and a KV binding neither of which exists. The payload is signed because an attacker who could rewrite it could otherwise substitute their own `state` and complete a flow the user never began.
+- **`sameSite=lax`, not `strict`**, on both cookies: the callback is a top-level navigation arriving from the provider, and `strict` would drop the cookie exactly when it is needed. `secure` is derived from `APP_ORIGIN` so plain-HTTP local development still works.
+- **The HMAC key is derived from `SECRETS_KEY` through HKDF**, not imported from the same bytes that do AES-GCM. One key, two algorithms, is how key-separation bugs start.
+- **`token_access_type=offline`**, and a grant that comes back without a refresh token is a 502 rather than a stored connection that would stop working in four hours with no way to recover.
+- **A unique index on `connections(user_id, provider)`** (migration `0001_connection_per_provider`) turns reconnecting into an `ON CONFLICT DO UPDATE` instead of a read-then-write race between two tabs. It also makes §12.3 a constraint rather than a UI convention. Reconnecting clears `root_id`: a new grant can point at a different account.
+- **`SECRETS_KEY` must decode to exactly 32 bytes**, checked at boot. It was `.min(1)`, which meant an operator mistake surfaced the first time somebody tried to connect an account. (The existing test fixture turned out to decode to 30 bytes.)
+- **`returnTo` is confined to this app.** Anything not starting with a single `/` becomes `/`.
+- **`/api/token` decrypts the refresh token and returns only the access token.** It is the first `entitlements.check(userId)` call site, and it re-seals a rotated refresh token so the connection survives a rotation Dropbox is allowed to do.
+- **Disconnecting revokes best-effort and deletes regardless.** A user who asked to disconnect must not be left connected because the provider was down.
+
+**Test harness.** `@cloudflare/vitest-pool-workers` — which would give the tests Miniflare's real D1 — still peers on `vitest ^4.1.0` against this workspace's 5, so it cannot be installed. The fallback is a ~120-line D1 shim over Node 22's built-in `node:sqlite` (`apps/api/tests/d1.ts`), which keeps the real `drizzle-orm/d1` driver, the real schema and the real migration files; only the process hosting SQLite differs. No new dependency. Swap it for the pool once that supports Vitest 5.
+
+**Still open at the end of this PR:** the Dropbox app is not registered, so the OAuth round trip is proven against a scripted `fetch` and against `wrangler dev`, not against Dropbox.
+
 ### Data model (Drizzle, D1)
 ```
 users          id, email, email_verified, created_at
@@ -399,7 +418,7 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 ### Phase 2 — Backend + Dropbox end to end (2 days)
 Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Contract test suite + in-memory fake provider (write this before the first adapter, as the round-trip suite was written before the editor)
-- [ ] Auth start/callback, sessions, encrypted connections table, `/api/token`
+- [x] Auth start/callback, sessions, encrypted connections table, `/api/token`
 - [x] `DropboxProvider` implementing the full interface
 - [ ] Sync engine: pull, push, cursor persistence, opQueue
 - [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"

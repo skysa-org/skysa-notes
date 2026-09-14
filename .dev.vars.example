@@ -11,6 +11,8 @@ AUTH_MODE="storage-first"
 ENABLED_PROVIDERS="dropbox,webdav"
 
 # 32 random bytes, base64. Generate with: openssl rand -base64 32
+# Checked at boot: anything that does not decode to exactly 32 bytes is refused
+# there rather than at the first attempt to connect an account.
 SECRETS_KEY=""
 # Names the current key so rows encrypted with an older one stay readable.
 SECRETS_KEY_ID="k1"
@@ -32,5 +34,8 @@ MICROSOFT_TENANT="common"
 
 # Dropbox App Console — required when ENABLED_PROVIDERS includes dropbox.
 # Create the app with the name "skysa-notes"; Dropbox app names are immutable.
+# Choose Scoped access / App folder, grant the five storage scopes listed in
+# apps/api/src/oauth/dropbox.ts, and register this redirect URI:
+#   <APP_ORIGIN>/api/auth/connect/dropbox/callback
 DROPBOX_CLIENT_ID=""
 DROPBOX_CLIENT_SECRET=""

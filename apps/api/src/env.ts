@@ -39,8 +39,24 @@ const rawEnvSchema = z.object({
 	/** Public origin of this deployment; OAuth redirect URIs are built from it. */
 	APP_ORIGIN: z.url(),
 
-	/** Base64 of 32 random bytes. `openssl rand -base64 32`. */
-	SECRETS_KEY: z.string().min(1),
+	/**
+	 * Base64 of 32 random bytes. `openssl rand -base64 32`.
+	 *
+	 * Checked here rather than at first use: a key of the wrong length is an
+	 * operator mistake, and finding it at boot is the difference between a
+	 * deployment that refuses to start and one that fails the first time
+	 * somebody tries to connect an account.
+	 */
+	SECRETS_KEY: z
+		.string()
+		.min(1)
+		.refine((value) => {
+			try {
+				return atob(value.replace(/-/g, '+').replace(/_/g, '/')).length === 32;
+			} catch {
+				return false;
+			}
+		}, 'SECRETS_KEY must be base64 of exactly 32 bytes'),
 	/** Names the current key so rows encrypted with an older one stay readable. */
 	SECRETS_KEY_ID: z.string().min(1).default('k1'),
 
@@ -61,6 +77,8 @@ export type AppConfig = {
 	authMode: 'storage-first' | 'account-first';
 	enabledProviders: ProviderKind[];
 	appOrigin: string;
+	/** False only for a plain-HTTP origin, which in practice means localhost. */
+	cookiesSecure: boolean;
 	secretsKey: string;
 	secretsKeyId: string;
 	webdavAllowPrivate: boolean;
@@ -159,6 +177,7 @@ export const parseEnv = (raw: unknown): AppConfig => {
 		authMode: env.AUTH_MODE,
 		enabledProviders: env.ENABLED_PROVIDERS,
 		appOrigin: env.APP_ORIGIN.replace(/\/$/, ''),
+		cookiesSecure: env.APP_ORIGIN.startsWith('https://'),
 		secretsKey: env.SECRETS_KEY,
 		secretsKeyId: env.SECRETS_KEY_ID,
 		webdavAllowPrivate: env.WEBDAV_ALLOW_PRIVATE,

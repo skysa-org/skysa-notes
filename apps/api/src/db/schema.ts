@@ -78,7 +78,13 @@ export const connections = sqliteTable(
 		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 		lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
 	},
-	(t) => [index('connections_user_id_idx').on(t.userId)]
+	(t) => [
+		index('connections_user_id_idx').on(t.userId),
+		// One connection per provider per user until Phase 7 (docs/PLAN.md §12.3).
+		// Enforced here rather than by convention so reconnecting is an atomic
+		// upsert instead of a read-then-write race between two tabs.
+		uniqueIndex('connections_user_provider_idx').on(t.userId, t.provider),
+	]
 );
 
 export type User = typeof users.$inferSelect;
