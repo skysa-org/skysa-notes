@@ -141,3 +141,28 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ── skysa-notes ──────────────────────────────────────────────────────
+
+# Cloudflare Workers secrets (see .dev.vars.example for the full key list)
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Wrangler local state, including the local D1 SQLite database
+.wrangler/
+
+# vite-plugin-pwa dev service worker output
+dev-dist/
+
+# Local WebDAV test target (docker/nextcloud-compose.yml) volumes
+docker/data/
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+
+# macOS
+.DS_Store
