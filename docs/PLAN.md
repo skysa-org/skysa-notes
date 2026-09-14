@@ -469,6 +469,7 @@ Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may impor
 3. **Single connection per user until Phase 7.** Schema supports many; UI exposes one.
 4. **Hosting: Cloudflare Workers** for API + static SPA, D1 for the database. See §6.
 5. **Cold start is a full scan.** No remote index file. Revisit if cold start exceeds ~10 s at ~2k notes.
+6. **Every note lives in a notebook; the root is not one.** The sidebar lists notebooks only, and opens the first one when the URL names none. The root is the container notebooks live in, not a place to put notes, so it has no row and the app will not create a note there. **Phase 2 follow-up:** a `.md` file sitting loose at the root of the remote app folder — put there by hand, or by another tool — imports to a note with no notebook, which the sidebar has no way to show. The scanner must give those a home (or the sidebar must grow a row for them) before Phase 2 ships. See §7.
 
 ## 13. Distribution and licensing
 
