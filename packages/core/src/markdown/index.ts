@@ -7,7 +7,14 @@ export {
 	type SplitDocument,
 	type NoteFrontmatter,
 } from './frontmatter.js';
-export { noteFilename, normalizeTag, slugify, uniqueFilename } from './slug.js';
+export {
+	noteFilename,
+	normalizeTag,
+	sanitizeFolderName,
+	slugify,
+	uniqueFilename,
+	UNTITLED_SLUG,
+} from './slug.js';
 export { deriveTitle, titleFromFilename, type DeriveTitleInput } from './title.js';
 export {
 	parseNoteFile,

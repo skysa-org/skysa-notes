@@ -31,4 +31,4 @@ registrations at all, which makes it the quickest way to run this locally.
 | `pnpm db:generate` | Generate a Drizzle migration from the schema |
 | `pnpm db:migrate` / `pnpm db:migrate:remote` | Apply migrations locally / to Cloudflare |
 
-Current status: **Phase 1 in progress** (markdown pipeline landed). See [`docs/PLAN.md`](docs/PLAN.md).
+Current status: **Phase 1 in progress.** The app runs locally: notebooks, notes, and a raw markdown editor over IndexedDB. The rich editor is next. See [`docs/PLAN.md`](docs/PLAN.md).

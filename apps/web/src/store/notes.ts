@@ -10,6 +10,7 @@ import {
 	replaceBasename,
 	serializeNoteFile,
 	uniqueFilename,
+	UNTITLED_SLUG,
 	writeFrontmatter,
 } from '@skysa/core';
 
@@ -27,9 +28,17 @@ import { ensureFolder } from './folders.js';
 
 const NOTE_EXTENSION = '.md';
 
+/** What `deriveTitle` returns when a note has nothing to take a name from. */
+const UNTITLED_TITLE = 'Untitled';
+
 export interface NoteScope {
 	connectionId?: string;
 }
+
+/** A note still sitting at the fallback filename, with no title of its own. */
+const isUnnamed = (note: NoteRecord): boolean =>
+	basename(note.path) === `${UNTITLED_SLUG}${NOTE_EXTENSION}` &&
+	readFrontmatter(note.frontmatter).title === undefined;
 
 /** Everything a note needs written back to its file. */
 export const noteFileContents = (note: NoteRecord): string =>
@@ -38,7 +47,9 @@ export const noteFileContents = (note: NoteRecord): string =>
 		body: note.body,
 		metadata: {
 			id: note.id,
-			title: note.title,
+			// An unnamed note has no title worth recording; writing "Untitled"
+			// would pin it and stop the first heading from ever naming the note.
+			...(isUnnamed(note) ? {} : { title: note.title }),
 			created: new Date(note.createdAt).toISOString(),
 			updated: new Date(note.updatedAt).toISOString(),
 			...(note.tags.length > 0 ? { tags: note.tags } : {}),
@@ -103,7 +114,10 @@ export const createNote = async (
 		body,
 		frontmatter: writeFrontmatter(null, {
 			id,
-			title,
+			// Only pin a title in frontmatter when the user actually chose one.
+			// Writing "Untitled" here would stop the first heading from ever
+			// naming the note.
+			...(input.title === undefined ? {} : { title }),
 			created: new Date(now).toISOString(),
 			updated: new Date(now).toISOString(),
 		}),
@@ -175,15 +189,46 @@ const applyEdit = async (
 };
 
 /**
- * Record a user edit to the body. The title follows the body only when the file
- * has no explicit `title` in its frontmatter.
+ * Record a user edit to the body.
+ *
+ * The title follows the body only when the file has no explicit `title` in its
+ * frontmatter. A brand new note additionally takes its filename from its first
+ * heading — otherwise every note created from the + button would stay
+ * `untitled.md` no matter what the user typed. Once a note has a name, editing a
+ * heading never renames the file: a note imported from another tool must not be
+ * renamed on disk just because someone edited it.
  */
 export const saveNoteBody = async (
 	db: NotesDatabase,
 	id: string,
 	body: string
-): Promise<NoteRecord> =>
-	applyEdit(db, id, (note) => ({ body, title: titleFor(note.frontmatter, body, note.path) }));
+): Promise<NoteRecord> => {
+	const existing = await db.notes.get(id);
+	if (existing === undefined) throw new Error(`No note with id ${id}`);
+
+	if (!isUnnamed(existing)) {
+		return applyEdit(db, id, (note) => ({
+			body,
+			title: titleFor(note.frontmatter, body, note.path),
+		}));
+	}
+
+	const heading = deriveTitle({ body });
+	if (heading === UNTITLED_TITLE) return applyEdit(db, id, () => ({ body }));
+
+	const folderPath = parentPath(existing.path);
+	const taken = await takenNamesIn(db, existing.connectionId, folderPath, id);
+	const filename = uniqueFilename(heading, taken);
+
+	return applyEdit(db, id, (note) => ({
+		body,
+		title: heading,
+		// Deliberately not writing `title` to frontmatter here. Naming the file
+		// is enough; pinning the title as well would stop it following later
+		// heading edits, which only an explicit rename should do.
+		path: replaceBasename(note.path, filename),
+	}));
+};
 
 /**
  * Rename a note. The title is the identity the user sees; the filename follows

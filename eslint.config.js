@@ -164,6 +164,8 @@ export default tseslint.config(
 	{
 		ignores: [
 			'**/dist/**',
+			// vite-plugin-pwa's generated dev service worker.
+			'**/dev-dist/**',
 			'**/coverage/**',
 			'**/node_modules/**',
 			'**/.wrangler/**',
@@ -196,7 +198,10 @@ export default tseslint.config(
 		},
 		rules: {
 			...typescriptRules,
-			'functional/immutable-data': ['error', { ignoreMapsAndSets: true }],
+			'functional/immutable-data': [
+				'error',
+				{ ignoreMapsAndSets: true, ignoreAccessorPattern: ['**.current', 'window.**'] },
+			],
 		},
 	},
 	{

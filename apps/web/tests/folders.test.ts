@@ -44,15 +44,23 @@ describe('ensureFolder', () => {
 });
 
 describe('createFolder', () => {
-	it('slugs the name', async () => {
+	it('keeps the name the user typed: a notebook name is a directory name', async () => {
 		const folder = await createFolder(db, { name: 'Work Notes' });
-		expect(folder.path).toBe('work-notes');
+		expect(folder.path).toBe('Work Notes');
+	});
+
+	it('strips only what would actually break a path', async () => {
+		expect((await createFolder(db, { name: 'Q3 / Q4: plans?' })).path).toBe('Q3 Q4 plans');
+	});
+
+	it('refuses to create a hidden folder, which the UI would never show', async () => {
+		expect((await createFolder(db, { name: '.git' })).path).toBe('git');
 	});
 
 	it('nests under a parent', async () => {
 		await createFolder(db, { name: 'Work' });
-		const nested = await createFolder(db, { parentPath: 'work', name: 'Meetings' });
-		expect(nested.path).toBe('work/meetings');
+		const nested = await createFolder(db, { parentPath: 'Work', name: 'Meetings' });
+		expect(nested.path).toBe('Work/Meetings');
 	});
 
 	it('refuses to create one twice', async () => {
@@ -135,11 +143,11 @@ describe('moveFolder', () => {
 });
 
 describe('renameFolder', () => {
-	it('renames in place and slugs the new name', async () => {
+	it('renames in place, keeping the name as typed', async () => {
 		await ensureFolder(db, 'work/meetings');
 		await renameFolder(db, 'work/meetings', 'Team Meetings');
 
-		expect(await folderTree(db)).toEqual(['work', 'work/team-meetings']);
+		expect(await folderTree(db)).toEqual(['work', 'work/Team Meetings']);
 	});
 });
 

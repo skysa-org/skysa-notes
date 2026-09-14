@@ -338,9 +338,9 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 ### Phase 1 — Local-only notes (2–3 days)
 - [x] Dexie schema, notes/folders CRUD in IndexedDB
 - [x] Markdown parse/serialize wrappers in `core` + round-trip fidelity suite (write this before wiring the editor)
-- [ ] Sidebar folder tree, note list
+- [x] Sidebar folder tree, note list
 - [ ] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version
-- [ ] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test
+- [ ] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test — raw editor and the dirty rule are done; the toggle and per-note mode memory land with the rich editor
 - [x] Frontmatter strip/reattach, slug filename logic
 - [ ] Works fully offline; installable
 

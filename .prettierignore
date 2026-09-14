@@ -1,5 +1,6 @@
 pnpm-lock.yaml
 dist
+dev-dist
 .wrangler
 **/routeTree.gen.ts
 **/worker-configuration.d.ts

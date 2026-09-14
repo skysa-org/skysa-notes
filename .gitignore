@@ -175,3 +175,6 @@ docker/data/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+
+# vite-plugin-pwa generates a dev service worker here
+dev-dist/
