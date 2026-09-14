@@ -115,45 +115,76 @@ Rules:
 - Line endings normalized to `\n` on write. UTF-8 only.
 
 ---
-
 ## 4. Provider adapter interface
 
 Every provider implements this. The sync engine only talks to this interface.
 
 ```ts
 export interface RemoteEntry {
-  remoteId: string;        // provider file id, or path for WebDAV
-  path: string;            // relative to app root, POSIX separators
+  remoteId: string;        // provider file id; the path itself on WebDAV
+  path: string;            // relative to app root, POSIX separators, normalized
   kind: 'file' | 'folder';
   version: string;         // etag / rev / cTag / headRevisionId — opaque, compare for equality only
   modifiedAt: string;      // ISO
-  size?: number;
+  size?: number;           // UTF-8 bytes; absent for folders
 }
 
+/** What read/move/delete need, which is all the local store keeps. */
+export type EntryRef = Pick<RemoteEntry, 'remoteId' | 'path'>;
+
+export interface ChangeEntry extends RemoteEntry { deleted?: boolean }
+
 export interface ChangeSet {
-  entries: Array<RemoteEntry & { deleted?: boolean }>;
+  entries: readonly ChangeEntry[];
   cursor: string;          // opaque; persist per connection
   more: boolean;
 }
 
-export interface StorageProvider {
-  readonly kind: 'gdrive' | 'onedrive' | 'dropbox' | 'webdav';
-
-  ensureRoot(): Promise<{ rootId: string }>;                  // create app folder if missing; write .notesapp.json only if absent
-  list(folderPath: string): Promise<RemoteEntry[]>;            // one level
-  read(entry: RemoteEntry): Promise<{ content: string; version: string }>;
-  write(path: string, content: string, opts: { expectedVersion?: string }): Promise<RemoteEntry>; // throws ConflictError on version mismatch
-  createFolder(path: string): Promise<RemoteEntry>;
-  move(entry: RemoteEntry, newPath: string): Promise<RemoteEntry>;
-  delete(entry: RemoteEntry): Promise<void>;
-  changes(cursor?: string): Promise<ChangeSet>;                // null cursor = full initial scan producing a cursor
+export interface WriteOptions {
+  /** Omitted means "create": a file already there is a ConflictError. */
+  expectedVersion?: string;
 }
 
-export class ConflictError extends Error { constructor(public remote: RemoteEntry) { super('conflict'); } }
-export class AuthError extends Error {}   // sync engine responds by requesting a fresh token from backend
+export interface StorageProvider {
+  readonly kind: ProviderKind;
+  readonly ensureRoot: () => Promise<{ rootId: string }>;
+  readonly list: (folderPath: string) => Promise<RemoteEntry[]>;
+  readonly read: (entry: EntryRef) => Promise<{ content: string; version: string }>;
+  readonly write: (path: string, content: string, opts: WriteOptions) => Promise<RemoteEntry>;
+  readonly createFolder: (path: string) => Promise<RemoteEntry>;
+  readonly move: (entry: EntryRef, newPath: string) => Promise<RemoteEntry>;
+  readonly delete: (entry: EntryRef) => Promise<void>;
+  readonly changes: (cursor?: string) => Promise<ChangeSet>;
+}
+
+export class ConflictError extends Error { constructor(readonly remote: RemoteEntry) { … } }
+export class AuthError extends Error {}          // engine asks the backend for a fresh token
+export class NotFoundError extends Error {}      // entry gone, or expectedVersion for an absent path
+export class CursorResetError extends Error {}   // cursor unusable; discard it and full-scan
 ```
 
-Adapter contract tests (`tests/providers/contract.test.ts`) run the same scenario suite against every adapter: create root, write, read back, overwrite with stale version → ConflictError, move, delete, changes cursor reflects each step. Run against in-memory fakes in CI and against live accounts via `PROVIDER_LIVE_TESTS=1` locally.
+Three shapes differ from the sketch this section used to carry. Members are property signatures rather than methods, which is both the house style (`EntitlementProvider`) and what `functional/prefer-property-signatures` requires. `kind` reuses `ProviderKind` from `config.ts` so `PROVIDER_KINDS` stays single-sourced with the marker schema. And `read`/`move`/`delete` take an `EntryRef`, not a whole `RemoteEntry`: a note record persists only `remoteId`, `remoteVersion` and `path`, so passing the full entry would have every caller inventing a `kind` and a `modifiedAt` — and let an adapter come to depend on the invented value.
+
+`NotFoundError` and `CursorResetError` are additions. A cursor can go stale on every provider (Dropbox answers `reset`, Graph `410 resyncRequired`, WebDAV invalidates its sync-token) and without a type for it the engine cannot tell a dead cursor from a transient failure, so it retries forever. `NotFoundError` is what lets `ConflictError.remote` stay non-optional.
+
+Each error carries a `code` alongside its class, and ships with an `isXError` guard. `instanceof` is the ergonomic check and is correct today, since `@skysa/core` resolves to one module per bundle; the code keeps the guards honest if core is ever published and a consumer ends up holding two copies of it either side of a sync boundary.
+
+Semantics the signatures do not carry:
+
+- `write` is create-or-update, never a blind overwrite. No `expectedVersion` means "I expect nothing here" — literally WebDAV's `If-None-Match: *` — so a file already at that path is a `ConflictError`. That is what makes §7's "remote deleted, local dirty → re-create on push" safe: if the file came back in the meantime the write conflicts instead of clobbering it. An `expectedVersion` for a path with no file is a `NotFoundError`.
+- `createFolder` and `delete` are idempotent, so a queued op is always safe to replay.
+- `move` may or may not change `version` — Dropbox's `rev` survives it, OneDrive's `eTag` does not — so the caller stores the returned entry rather than assuming either way. `remoteId` survives a move on every id-based provider; on WebDAV it *is* the path and so cannot, which is why renames there are re-linked through frontmatter `id`.
+- `list` is one level. `changes` covers the whole tree at every depth. Neither filters hidden paths: `.notesapp.json` has to reach the engine, and the UI filters with `isHidden`.
+- `rootId` is opaque, non-empty and stable. A provider whose root has no id of its own — a Dropbox app folder, where the root simply *is* `/` — returns a synthetic constant.
+- Content is UTF-8 text. Binary attachments are out of scope (§14).
+- No `AbortSignal`: operations are short and the engine discards results it no longer wants. Revisit in Phase 6 if a hung request ever blocks a queue.
+- Transport failures (429 with `Retry-After`, 5xx) surface as plain errors and are handled by the engine's per-op backoff. A typed `RateLimitError` is purely additive and can land with whichever adapter first needs the server's hint.
+
+Adapter contract tests: the scenario suite is `describeProviderContract(name, harnessFactory, { stableIds })` in `packages/core/tests/providers/contract.ts` — a helper rather than a test file, so Vitest's `tests/**/*.test.ts` glob does not collect it on its own. `tests/providers/contract.test.ts` is the registry every adapter is added to: the in-memory fake in CI, and live accounts via `PROVIDER_LIVE_TESTS=1` locally. `stableIds: false` exempts path-based providers from the move-preserves-id scenarios.
+
+Scenarios: idempotent `ensureRoot` including write-the-marker-only-if-absent, path normalization at the adapter edge, byte fidelity on read-back, the four `write` cases above, one-level `list` including hidden entries, idempotent `createFolder`, move (file, into a folder, whole folder rebasing its descendants, onto an occupied path), idempotent recursive `delete`, and a `changes` feed that scans current state on a cold start rather than replaying history, reflects each step, survives being persisted, and is drained through its `more` loop.
+
+The in-memory fake in `src/providers/fake.ts` is deliberately the strictest provider in the repo: where this section leaves a case open it takes the least forgiving reading, because a lenient fake lets the engine grow assumptions that only fail against a real account. It never creates a missing parent, re-versions even a byte-identical write, and never reuses an id. Its `pageSize`, `folderChanges` and `setFault` options are what let the engine's drain loop, folder rebasing, and auth-retry paths be tested at all.
 
 ---
 
@@ -357,9 +388,9 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 
 ### Phase 2 — Backend + Dropbox end to end (2 days)
 Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
+- [x] Contract test suite + in-memory fake provider (write this before the first adapter, as the round-trip suite was written before the editor)
 - [ ] Auth start/callback, sessions, encrypted connections table, `/api/token`
 - [ ] `DropboxProvider` implementing the full interface
-- [ ] Contract test suite + in-memory fake provider
 - [ ] Sync engine: pull, push, cursor persistence, opQueue
 - [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"
 
