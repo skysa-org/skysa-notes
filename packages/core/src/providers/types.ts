@@ -37,9 +37,20 @@ export interface RemoteEntry {
  */
 export type EntryRef = Pick<RemoteEntry, 'remoteId' | 'path'>;
 
-export interface ChangeEntry extends RemoteEntry {
-	deleted?: boolean;
+/**
+ * A change that removed something. Deliberately not a `RemoteEntry` with a
+ * flag: Dropbox's `DeletedMetadata` carries only a path — no id, no rev, no
+ * timestamp — so anything richer would have adapters fabricating fields, and
+ * the engine trusting them. Deletions are matched by path; `remoteId` is a
+ * bonus from providers that do identify them.
+ */
+export interface DeletedEntry {
+	path: string;
+	deleted: true;
+	remoteId?: string;
 }
+
+export type ChangeEntry = (RemoteEntry & { deleted?: false }) | DeletedEntry;
 
 export interface ChangeSet {
 	entries: readonly ChangeEntry[];

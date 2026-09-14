@@ -66,6 +66,26 @@ describe('strictness the contract cannot require', () => {
 	});
 });
 
+describe('deletions', () => {
+	it('passes the id along when it has one', async () => {
+		// `DeletedEntry.remoteId` is optional because Dropbox has none to give.
+		// A provider that does know it must still report it, or the field is
+		// dead weight in the type.
+		const provider = await ready();
+		const entry = await provider.write('a.md', 'x\n', {});
+		const { cursor } = await drainChanges(provider);
+
+		await provider.delete(entry);
+		const { entries } = await drainChanges(provider, cursor);
+
+		expect(entries).toContainEqual({
+			path: 'a.md',
+			deleted: true,
+			remoteId: entry.remoteId,
+		});
+	});
+});
+
 describe('pagination', () => {
 	it('walks a cold start one entry at a time and lands on the same set', async () => {
 		const seed = async (pageSize: number) => {
