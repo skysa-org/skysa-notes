@@ -336,12 +336,12 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 - [x] Env validation (`zod`) for all provider client ids/secrets and `SECRETS_KEY`
 
 ### Phase 1 — Local-only notes (2–3 days)
-- [ ] Dexie schema, notes/folders CRUD in IndexedDB
-- [ ] Markdown parse/serialize wrappers in `core` + round-trip fidelity suite (write this before wiring the editor)
+- [x] Dexie schema, notes/folders CRUD in IndexedDB
+- [x] Markdown parse/serialize wrappers in `core` + round-trip fidelity suite (write this before wiring the editor)
 - [ ] Sidebar folder tree, note list
 - [ ] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version
 - [ ] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test
-- [ ] Frontmatter strip/reattach, slug filename logic
+- [x] Frontmatter strip/reattach, slug filename logic
 - [ ] Works fully offline; installable
 
 ### Phase 2 — Backend + Dropbox end to end (2 days)

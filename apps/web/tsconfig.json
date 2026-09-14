@@ -6,5 +6,11 @@
 		"types": ["vite/client", "vite-plugin-pwa/react"],
 		"noEmit": true
 	},
-	"include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.tsx",
+		"tests/**/*.ts",
+		"vite.config.ts",
+		"vitest.config.ts"
+	]
 }

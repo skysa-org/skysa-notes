@@ -196,9 +196,6 @@ export default tseslint.config(
 		},
 		rules: {
 			...typescriptRules,
-			// `core` runs in the browser, Node and Workers, so nothing here may be
-			// class-based or depend on an environment-specific global.
-			'functional/no-classes': 'error',
 			'functional/immutable-data': ['error', { ignoreMapsAndSets: true }],
 		},
 	},
@@ -231,9 +228,9 @@ export default tseslint.config(
 		rules: {
 			...reactHooks.configs['recommended-latest'].rules,
 			...typescriptRules,
-			// Two relaxations for React specifically. `functional/no-classes` would
-			// flag a future error boundary, which has no non-class API, and
-			// `functional/immutable-data` flags ordinary useState setter patterns.
+			// `functional/immutable-data` is deliberately not enabled here: it flags
+			// ordinary useState setter patterns that the accessor carve-out does not
+			// quite cover.
 			'react/react-in-jsx-scope': 'off', // React 19 automatic JSX runtime
 			'react/prop-types': 'off', // types come from TypeScript
 		},
@@ -243,6 +240,25 @@ export default tseslint.config(
 		files: ['packages/core/src/**/*.ts'],
 		languageOptions: { globals: globals.browser },
 		rules: {
+			// core's tsconfig includes lib.dom for the web standards it does use
+			// (Web Crypto, TextEncoder, fetch, URL). These are the ones that would
+			// tie it to a browser, and no lib setting excludes them on its own.
+			'no-restricted-globals': [
+				'error',
+				...[
+					'document',
+					'window',
+					'localStorage',
+					'sessionStorage',
+					'navigator',
+					'location',
+					'alert',
+					'indexedDB',
+				].map((name) => ({
+					name,
+					message: 'packages/core must run in the browser, Node and Workers alike.',
+				})),
+			],
 			'no-restricted-imports': [
 				'error',
 				{

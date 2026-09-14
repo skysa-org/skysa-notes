@@ -3,6 +3,12 @@
 	"compilerOptions": {
 		"rootDir": ".",
 		"outDir": "dist",
+		// DOM is here for the web *standards* core relies on — Web Crypto,
+		// TextEncoder, fetch, URL — which exist in the browser, Node 18+ and
+		// Workers alike. The genuinely browser-only globals it also pulls in
+		// (document, window, localStorage, ...) are blocked by ESLint instead,
+		// since there is no lib that draws the line where we need it.
+		"lib": ["ES2022", "DOM"],
 		"types": ["node"]
 	},
 	"include": ["src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
