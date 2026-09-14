@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["./worker-configuration.d.ts"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "drizzle.config.ts", "worker-configuration.d.ts"]
+}

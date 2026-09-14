@@ -1,0 +1,87 @@
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+
+/**
+ * D1 holds tokens and connection metadata only. No note content is ever stored
+ * here — see docs/PLAN.md §6.
+ */
+
+export const users = sqliteTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    email: text('email').notNull(),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  // Deliberately not unique: an unverified sign-in with an existing address must
+  // create a separate user rather than merge into one. See docs/PLAN.md §6.
+  (t) => [index('users_email_idx').on(t.email)],
+)
+
+/**
+ * `account-first` mode only: one row per external sign-in attached to a user.
+ * `storage-first` instances leave this table empty.
+ */
+export const identities = sqliteTable(
+  'identities',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider', { enum: ['google', 'microsoft'] }).notNull(),
+    subject: text('subject').notNull(),
+    email: text('email').notNull(),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [
+    // An external identity belongs to exactly one user; linking it to a second
+    // must fail rather than silently merge accounts.
+    uniqueIndex('identities_provider_subject_idx').on(t.provider, t.subject),
+    index('identities_user_id_idx').on(t.userId),
+  ],
+)
+
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [index('sessions_user_id_idx').on(t.userId)],
+)
+
+export const connections = sqliteTable(
+  'connections',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider', { enum: ['gdrive', 'onedrive', 'dropbox', 'webdav'] }).notNull(),
+    displayName: text('display_name').notNull(),
+    /** Provider id of the app-owned root folder, once `ensureRoot()` has run. */
+    rootId: text('root_id'),
+    /**
+     * AES-256-GCM over `{ refresh_token }` (OAuth) or `{ url, username, password }`
+     * (WebDAV). Never logged, never returned to the client.
+     */
+    secretCiphertext: text('secret_ciphertext').notNull(),
+    secretIv: text('secret_iv').notNull(),
+    /** Identifies which `SECRETS_KEY` encrypted this row, so keys can be rotated. */
+    secretKeyId: text('secret_key_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
+  },
+  (t) => [index('connections_user_id_idx').on(t.userId)],
+)
+
+export type User = typeof users.$inferSelect
+export type Identity = typeof identities.$inferSelect
+export type Session = typeof sessions.$inferSelect
+export type Connection = typeof connections.$inferSelect

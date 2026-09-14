@@ -213,7 +213,7 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
 - **Provider enablement** (`ENABLED_PROVIDERS` env, default `gdrive,onedrive,dropbox,webdav`): the WebDAV routes and proxy are not mounted when `webdav` is absent, and the client hides the option.
 - **Identity modes** (`AUTH_MODE` env): `storage-first` (default: user = first connected storage account, as below) or `account-first` (Sign in with Google or Microsoft creates the user; storage is connected in a separate flow afterward). Both write to the same `users` table. `account-first` suits instances shared by several people, and users who want to change storage provider without losing their account.
 - **Two OAuth flows per provider, never combined.** `/auth/login/:provider` requests identity scopes only (`openid email profile`); `/auth/connect/:provider` requests storage scopes only. They share one Google client id / one Entra registration but use distinct redirect URIs and distinct callback routes. On the storage request pass `include_granted_scopes=true` (Google) so the second consent screen shows only the new scope; frame it in the UI as "Connect your storage", not as a second login.
-- **Identity providers via Arctic** (`arctic` npm, Workers-compatible): Google and Microsoft Entra at launch. `IdentityProvider` interface in `apps/api/src/identity/` returns `{ providerId, subject, email, emailVerified, name }`. Adding Facebook or Apple is a new adapter + registration; Facebook would additionally need an email-confirmation fallback (email is not guaranteed from Meta) and Meta App Review with a data-deletion URL, so it is deferred.
+- **Identity providers via Arctic** (`arctic` npm, Workers-compatible): Google and Microsoft Entra at launch. **Open (2026-09-14): `arctic` was deprecated by its author in July 2026 ("no longer supported"); they suggest copying the per-provider client code, which is ~50 lines each.** Nothing depends on it before Phase 9, so the dependency is not installed yet. Decide then between vendoring the two clients into `apps/api/src/identity/` (no runtime dep, and the storage OAuth in `oauth/` is hand-rolled anyway) or a maintained alternative. `IdentityProvider` interface in `apps/api/src/identity/` returns `{ providerId, subject, email, emailVerified, name }`. Adding Facebook or Apple is a new adapter + registration; Facebook would additionally need an email-confirmation fallback (email is not guaranteed from Meta) and Meta App Review with a data-deletion URL, so it is deferred.
 - **Account linking (`account-first` mode):** `identities` table (`user_id, provider, subject, email, email_verified`). Two paths:
   1. *Automatic merge-by-verified-email.* On any sign-in, look up `identities` by `(provider, subject)` first. If absent, and the provider asserts `email_verified: true`, and a user with that email exists, attach the new identity to that user. Unverified emails and relay addresses never auto-link; they create a new user.
   2. *Explicit in-session link.* From Settings, a signed-in user starts `/auth/login/:provider/start?link=1`; the callback attaches the resulting identity to the current user regardless of email. This is the path for Apple Hide-My-Email, differing emails across providers, and account recovery. If the identity is already attached to a different user, refuse with a clear message rather than merging users.
@@ -326,14 +326,14 @@ Title is derived from frontmatter `title`, else the first `# ` heading, else the
 Each phase ends with something runnable. Don't start the next phase until the current one's checklist is green.
 
 ### Phase 0 — Scaffold (½ day)
-- [ ] pnpm workspace with `apps/web` (Vite + React + TS), `apps/api` (Hono + TS), `packages/core` (shared TS, no framework deps); shared ESLint/Prettier/tsconfig base
-- [ ] TanStack Router with a single `/` route plus `/auth/callback` landing route
-- [ ] `wrangler.toml` with D1 binding + `[assets]` for the SPA; Drizzle schema + first migration; `pnpm db:migrate` (local and remote)
-- [ ] `packages/core/src/config.ts` exporting `APP_FOLDER_NAME = 'skysa-notes'`, `MARKER_FILE = '.notesapp.json'`, `MARKER_SCHEMA_VERSION = 1`; `marker.ts` with `buildMarker()` / `parseMarker()` and the read-only-on-newer-version rule
-- [ ] `vite-plugin-pwa` wired, manifest generated, Lighthouse PWA installable
-- [ ] Vite dev proxy → `wrangler dev` on `:8787`; single `pnpm dev` runs both
-- [ ] Register provider apps (Google Cloud, Entra, Dropbox App Console) with the name `skysa-notes` and the callback URLs for local + prod
-- [ ] Env validation (`zod`) for all provider client ids/secrets and `SECRETS_KEY`
+- [x] pnpm workspace with `apps/web` (Vite + React + TS), `apps/api` (Hono + TS), `packages/core` (shared TS, no framework deps); shared ESLint/Prettier/tsconfig base
+- [x] TanStack Router with a single `/` route plus `/auth/callback` landing route
+- [x] `wrangler.toml` with D1 binding + `[assets]` for the SPA; Drizzle schema + first migration; `pnpm db:migrate` (local and remote)
+- [x] `packages/core/src/config.ts` exporting `APP_FOLDER_NAME = 'skysa-notes'`, `MARKER_FILE = '.notesapp.json'`, `MARKER_SCHEMA_VERSION = 1`; `marker.ts` with `buildMarker()` / `parseMarker()` and the read-only-on-newer-version rule
+- [x] `vite-plugin-pwa` wired, manifest generated, PWA installable (manifest, service worker, and 192/512 + maskable icons all present and served; not yet confirmed with a Lighthouse run in a real browser)
+- [x] Vite dev proxy → `wrangler dev` on `:8787`; single `pnpm dev` runs both
+- [ ] Register provider apps (Google Cloud, Entra, Dropbox App Console) with the name `skysa-notes` and the callback URLs for local + prod — **operator task, not done in-repo.** `ENABLED_PROVIDERS` lets an instance run with only the providers it has registered; `webdav` needs no registration at all
+- [x] Env validation (`zod`) for all provider client ids/secrets and `SECRETS_KEY`
 
 ### Phase 1 — Local-only notes (2–3 days)
 - [ ] Dexie schema, notes/folders CRUD in IndexedDB
