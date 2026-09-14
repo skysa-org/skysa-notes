@@ -11,9 +11,12 @@ import {
 import type { Ctx } from '@milkdown/kit/ctx';
 import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { history } from '@milkdown/kit/plugin/history';
+import { slashFactory } from '@milkdown/kit/plugin/slash';
+import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
+import type { PluginSpec } from '@milkdown/kit/prose/state';
 import { $prose } from '@milkdown/kit/utils';
 import { sameMarkdownStructure, STRINGIFY_OPTIONS } from '@skysa/core';
 
@@ -30,15 +33,28 @@ import { PROGRAMMATIC_META, userEditPlugin } from './dirty.js';
  * that can pretend to be typed into. See docs/PLAN.md §7.
  */
 
+/**
+ * The floating menus. Both are ProseMirror plugin views, and both are React
+ * components, so the editor cannot build them itself — it is handed the specs by
+ * the component that has the adapter.
+ */
+export const slash = slashFactory('SKYSA_SLASH');
+export const tooltip = tooltipFactory('SKYSA_TOOLTIP');
+
 export interface RichEditorSetup {
 	root: HTMLElement;
 	/** The body to open with. Later changes go through `adoptBody`. */
 	body: string;
 	/** Called with the serialized markdown after every user edit, and only those. */
 	onUserEdit: (markdown: string) => void;
+	/** Plugin view specs for the slash menu and the formatting toolbar. */
+	menus?: {
+		slash: PluginSpec<unknown>;
+		tooltip: PluginSpec<unknown>;
+	};
 }
 
-export const createRichEditor = ({ root, body, onUserEdit }: RichEditorSetup): Editor =>
+export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSetup): Editor =>
 	Editor.make()
 		.config((ctx) => {
 			ctx.set(rootCtx, root);
@@ -48,11 +64,15 @@ export const createRichEditor = ({ root, body, onUserEdit }: RichEditorSetup): E
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': 'Note body' },
 			}));
+			if (menus === undefined) return;
+			ctx.set(slash.key, menus.slash);
+			ctx.set(tooltip.key, menus.tooltip);
 		})
 		.use(commonmark)
 		.use(gfm)
 		.use(history)
 		.use(clipboard)
+		.use(menus === undefined ? [] : [slash, tooltip].flat())
 		.use(
 			$prose((ctx) =>
 				userEditPlugin((doc) => {

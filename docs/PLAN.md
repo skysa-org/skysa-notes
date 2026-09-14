@@ -290,6 +290,8 @@ Two modes over one markdown string. Default is rich text; a toolbar/shortcut tog
 
 **Packaging:** the presets and plugins are taken from `@milkdown/kit`, the aggregate package Milkdown publishes, rather than as a dozen separately versioned dependencies. Same code, one version to pin — which is what "pin the version" was asking for.
 
+**Menus.** The slash menu (`/`) and the inline formatting toolbar are ProseMirror plugin views written in React, mounted through `@prosemirror-adapter/react` — the adapter Milkdown's own React examples use. Both offer only constructs the fidelity suites already cover, so nothing reachable from a menu can put something in a note that the file format cannot hold. Picking a command is a user edit like any typed one: it removes the `/query` the user typed and marks the note dirty, which is the point.
+
 **Not `@milkdown/plugin-listener`.** Its `markdownUpdated` is the obvious way to hear about changes, but it debounces on a timer of its own and, more importantly, hands over a markdown string with no way to tell whether a person or the app caused it. That is exactly the distinction the dirty rule is made of. A small ProseMirror plugin — the one in `editor/dirty.ts`, which reads transaction metadata — answers it directly, and the serialization happens where the answer is already known.
 
 **Source-of-truth rules (these matter more than the editor choice):**
@@ -344,7 +346,7 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 - [x] Dexie schema, notes/folders CRUD in IndexedDB
 - [x] Markdown parse/serialize wrappers in `core` + round-trip fidelity suite (write this before wiring the editor)
 - [x] Sidebar folder tree, note list
-- [ ] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version — the editor, both presets, history and clipboard are done, via `@milkdown/react` and pinned at 7.22.1. The slash menu and the inline tooltip need `@prosemirror-adapter/react` and land next. `plugin-listener` is deliberately not used: see §7
+- [x] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version — pinned at 7.22.1. `plugin-listener` is deliberately not used: see §7
 - [x] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test
 - [x] Frontmatter strip/reattach, slug filename logic
 - [ ] Works fully offline; installable
