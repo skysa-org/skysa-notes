@@ -2,10 +2,13 @@ import '@milkdown/kit/prose/view/style/prosemirror.css';
 import '@milkdown/kit/prose/tables/style/tables.css';
 
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
+import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
 import { useEffect, useRef } from 'react';
 
 import { useIncomingBody } from './incoming.js';
+import { InlineToolbar } from './InlineToolbar.js';
 import { adoptBody, createRichEditor, representsFaithfully } from './rich.js';
+import { SlashMenu } from './SlashMenu.js';
 
 /**
  * Rich text mode. The editor lives in `rich.ts`; this is the React side of it —
@@ -39,6 +42,7 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 	}, [onUnsupported]);
 
 	const incoming = useIncomingBody(noteId, body);
+	const pluginView = usePluginViewFactory();
 
 	// The body the editor was built with. Read once per note: the effect below
 	// keeps a mounted editor in step, and rebuilding it on every keystroke would
@@ -58,6 +62,10 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 				onUserEdit: (markdown) => {
 					incoming.emit(markdown);
 					notify.current(markdown);
+				},
+				menus: {
+					slash: { view: pluginView({ component: SlashMenu }) },
+					tooltip: { view: pluginView({ component: InlineToolbar }) },
 				},
 			}),
 		[noteId]
@@ -91,7 +99,9 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 export const RichEditor = (props: RichEditorProps) => (
 	<div className="editor editor-rich" data-testid="rich-editor">
 		<MilkdownProvider>
-			<EditorBody {...props} />
+			<ProsemirrorAdapterProvider>
+				<EditorBody {...props} />
+			</ProsemirrorAdapterProvider>
 		</MilkdownProvider>
 	</div>
 );
