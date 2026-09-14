@@ -57,3 +57,25 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 
 	return childrenOf(ROOT);
 };
+
+/** Is `path` one of the folders in this tree? */
+export const containsPath = (tree: readonly FolderNode[], path: string): boolean =>
+	tree.some((node) => node.path === path || containsPath(node.children, path));
+
+/**
+ * Which notebook to open. The root is not a notebook and is not listed, so a
+ * request for a folder that no longer exists — a stale link, or a notebook
+ * deleted underneath the user — falls back to the first notebook rather than
+ * to a pane the sidebar offers no way out of.
+ *
+ * Returns `undefined` while the tree is still loading, and when there are no
+ * notebooks at all.
+ */
+export const selectedFolderPath = (
+	tree: readonly FolderNode[] | undefined,
+	requested: string | undefined
+): string | undefined => {
+	if (tree === undefined) return requested;
+	if (requested !== undefined && containsPath(tree, requested)) return requested;
+	return tree[0]?.path;
+};

@@ -1,4 +1,3 @@
-import { ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 import { type EditorMode } from '../editor/mode.js';
@@ -24,8 +23,12 @@ export const useFolderTree = (): FolderNode[] | undefined =>
 		return buildFolderTree({ paths, notePaths: notes.map((note) => note.path) });
 	}, []);
 
-export const useNotesInFolder = (folderPath: string = ROOT): NoteRecord[] | undefined =>
-	useLiveQuery(() => listNotes(db, { folderPath }), [folderPath]);
+/** Notes in a folder. With no folder open there is nothing to list. */
+export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] | undefined =>
+	useLiveQuery(
+		async () => (folderPath === undefined ? [] : listNotes(db, { folderPath })),
+		[folderPath]
+	);
 
 export const useNote = (id: string | undefined): NoteRecord | undefined =>
 	useLiveQuery(async () => (id === undefined ? undefined : db.notes.get(id)), [id]);

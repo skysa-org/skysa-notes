@@ -1,4 +1,3 @@
-import { ROOT } from '@skysa/core';
 import { useEffect, useRef, useState } from 'react';
 
 import { type FolderNode } from '../store/tree.js';
@@ -6,14 +5,18 @@ import { type FolderNode } from '../store/tree.js';
 /**
  * The notebook tree. Folders are real directories on the provider, so this is a
  * view of the user's actual directory structure, not an app-only abstraction.
+ *
+ * Only notebooks are listed. The root is where notebooks live, not a notebook
+ * itself, so it has no row of its own.
  */
 
 export interface SidebarProps {
 	tree: FolderNode[] | undefined;
-	selectedFolder: string;
+	/** Undefined until the tree has loaded, and when there are no notebooks. */
+	selectedFolder: string | undefined;
 	onSelectFolder: (path: string) => void;
-	onCreateFolder: (parentPath: string, name: string) => void;
-	rootNoteCount: number;
+	/** A new notebook goes inside the open one, or at the root when there is none. */
+	onCreateFolder: (parentPath: string | undefined, name: string) => void;
 }
 
 /**
@@ -68,7 +71,7 @@ const NewFolderField = ({ onCancel, onSubmit }: NewFolderFieldProps) => {
 interface FolderRowsProps {
 	nodes: FolderNode[];
 	depth: number;
-	selectedFolder: string;
+	selectedFolder: string | undefined;
 	onSelectFolder: (path: string) => void;
 }
 
@@ -103,13 +106,7 @@ const FolderRows = ({ nodes, depth, selectedFolder, onSelectFolder }: FolderRows
 	</>
 );
 
-export const Sidebar = ({
-	tree,
-	selectedFolder,
-	onSelectFolder,
-	onCreateFolder,
-	rootNoteCount,
-}: SidebarProps) => {
+export const Sidebar = ({ tree, selectedFolder, onSelectFolder, onCreateFolder }: SidebarProps) => {
 	const [creating, setCreating] = useState(false);
 
 	return (
@@ -142,25 +139,14 @@ export const Sidebar = ({
 			)}
 
 			<ul className="tree">
-				<li>
-					<button
-						type="button"
-						className={selectedFolder === ROOT ? 'row selected' : 'row'}
-						onClick={() => {
-							onSelectFolder(ROOT);
-						}}
-						aria-current={selectedFolder === ROOT ? 'true' : undefined}
-					>
-						<span className="row-label">All notes</span>
-						{rootNoteCount > 0 && <span className="count">{rootNoteCount}</span>}
-					</button>
-				</li>
-				{tree === undefined ? (
-					<li className="muted placeholder">Loading…</li>
-				) : (
+				{tree === undefined && <li className="muted placeholder">Loading…</li>}
+				{tree?.length === 0 && (
+					<li className="muted placeholder">No notebooks yet. Create one to start.</li>
+				)}
+				{tree !== undefined && (
 					<FolderRows
 						nodes={tree}
-						depth={1}
+						depth={0}
 						selectedFolder={selectedFolder}
 						onSelectFolder={onSelectFolder}
 					/>

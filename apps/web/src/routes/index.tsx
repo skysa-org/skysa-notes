@@ -1,4 +1,3 @@
-import { ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 
 import { NoteList } from '../components/NoteList.js';
@@ -8,6 +7,7 @@ import { db } from '../store/db.js';
 import { createFolder } from '../store/folders.js';
 import { useFolderTree, useNote, useNotesInFolder } from '../store/hooks.js';
 import { createNote } from '../store/notes.js';
+import { selectedFolderPath } from '../store/tree.js';
 
 /**
  * The app. Which folder and note are open lives in the URL rather than in
@@ -16,30 +16,35 @@ import { createNote } from '../store/notes.js';
  */
 
 export interface AppSearch {
-	folder: string;
+	/** Absent until the user picks a notebook; the first one is opened instead. */
+	folder?: string;
 	note?: string;
 }
 
 const Home = () => {
-	const { folder, note: noteId } = Route.useSearch();
+	const { folder: requestedFolder, note: noteId } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
 
 	const tree = useFolderTree();
+	// Derived rather than written back to the URL: the URL records the user's
+	// choice, and opening the first notebook is a default, not a choice. Writing
+	// it would also mean redirecting from an effect on the very first render.
+	const folder = selectedFolderPath(tree, requestedFolder);
 	const notes = useNotesInFolder(folder);
 	const openNote = useNote(noteId);
-	const rootNotes = useNotesInFolder(ROOT);
 
 	const select = (next: Partial<AppSearch>) => {
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
 
 	const onCreateNote = () => {
+		if (folder === undefined) return;
 		void createNote(db, { folderPath: folder }).then((created) => {
 			select({ note: created.id });
 		});
 	};
 
-	const onCreateFolder = (parentPath: string, name: string) => {
+	const onCreateFolder = (parentPath: string | undefined, name: string) => {
 		void createFolder(db, { parentPath, name }).then((created) => {
 			select({ folder: created.path });
 		});
@@ -54,7 +59,6 @@ const Home = () => {
 					select({ folder: path, note: undefined });
 				}}
 				onCreateFolder={onCreateFolder}
-				rootNoteCount={rootNotes?.length ?? 0}
 			/>
 
 			<NoteList
@@ -64,7 +68,8 @@ const Home = () => {
 					select({ note: id });
 				}}
 				onCreateNote={onCreateNote}
-				folderLabel={folder === ROOT ? 'All notes' : folder}
+				folderLabel={folder}
+				notebooksLoaded={tree !== undefined}
 			/>
 
 			<NoteView
@@ -79,7 +84,9 @@ const Home = () => {
 
 export const Route = createFileRoute('/')({
 	validateSearch: (search: Record<string, unknown>): AppSearch => ({
-		folder: typeof search.folder === 'string' ? search.folder : ROOT,
+		...(typeof search.folder === 'string' && search.folder !== ''
+			? { folder: search.folder }
+			: {}),
 		...(typeof search.note === 'string' && search.note !== '' ? { note: search.note } : {}),
 	}),
 	component: Home,
