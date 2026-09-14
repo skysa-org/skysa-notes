@@ -288,13 +288,18 @@ Two modes over one markdown string. Default is rich text; a toolbar/shortcut tog
 
 **Raw mode:** CodeMirror 6 with `@codemirror/lang-markdown`, same autosave path.
 
+**Packaging:** the presets and plugins are taken from `@milkdown/kit`, the aggregate package Milkdown publishes, rather than as a dozen separately versioned dependencies. Same code, one version to pin — which is what "pin the version" was asking for.
+
+**Not `@milkdown/plugin-listener`.** Its `markdownUpdated` is the obvious way to hear about changes, but it debounces on a timer of its own and, more importantly, hands over a markdown string with no way to tell whether a person or the app caused it. That is exactly the distinction the dirty rule is made of. A small ProseMirror plugin — the one in `editor/dirty.ts`, which reads transaction metadata — answers it directly, and the serialization happens where the answer is already known.
+
 **Source-of-truth rules (these matter more than the editor choice):**
 - The note record stores `body` as a markdown string. Neither editor persists its own document model.
 - Frontmatter is stripped before the body reaches either editor and re-attached on save. Editors never see it.
 - Switching modes serializes the current editor to markdown, updates `body`, and loads the other editor from that string. There is exactly one dirty-tracking path.
 - A note becomes dirty only on an editor transaction that changes the document, never on load, mode switch, or re-serialization. Opening a note in rich mode and closing it must not rewrite the file. This prevents normalization churn on notes authored by other tools.
 - On first *user* edit in rich mode, the whole file is re-serialized through remark-stringify, so some normalization (list markers, emphasis style, blank lines) is accepted at that point. Configure `remark-stringify` for the most conventional output: `bullet: '-'`, `emphasis: '*'`, `strong: '*'`, ATX headings, `fences: true` with language tag. Use the identical options in `core`'s normalizer so editor output and test expectations agree.
-- Anything the rich editor can't represent (raw HTML blocks, footnotes, unknown syntax) must survive round-trip as an opaque block rather than being dropped. If the parser can't guarantee that for a given note, open it in raw mode with a banner explaining why.
+- Anything the rich editor can't represent (raw HTML blocks, footnotes, unknown syntax) must survive round-trip as an opaque block rather than being dropped. If the parser can't guarantee that for a given note, open it in raw mode with a banner explaining why. Checked per note against the editor's own parser and serializer before the user can type, because ProseMirror's schema is a narrower model than mdast and is where a construct would actually be dropped — `core`'s remark suite cannot see that. Nothing in the corpus fails it today.
+- A body arriving at a mounted editor is loaded only when it is genuinely new and did not come from that editor. Autosave is debounced, so the note's stored body is always a little behind what is on screen; reloading the editor from it — when the save echoes back, or on any re-render that happens to carry the same stale prop — silently deletes everything typed since. This is the rule with the sharpest teeth in the editor layer and it has its own tests.
 
 **Fidelity test suite** (`packages/core/tests/markdown/roundtrip.test.ts`): a corpus of markdown fixtures — CommonMark spec samples, GFM tables/task lists, nested lists, code fences with languages, hard breaks, HTML blocks, files from Obsidian/iA Writer/Bear exports. For each: `serialize(parse(md))` must equal `md` after both sides pass through the same normalizer, and `parse(serialize(parse(md)))` must be structurally identical to `parse(md)`. Because Milkdown uses remark, `core`'s `parse.ts`/`serialize.ts` wrap the same remark plugins the editor is configured with, so this suite exercises the editor's actual pipeline headless in CI. Add a second layer that mounts Milkdown in jsdom/Vitest browser mode and round-trips through the editor instance itself.
 
@@ -339,8 +344,8 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 - [x] Dexie schema, notes/folders CRUD in IndexedDB
 - [x] Markdown parse/serialize wrappers in `core` + round-trip fidelity suite (write this before wiring the editor)
 - [x] Sidebar folder tree, note list
-- [ ] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version
-- [ ] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test — raw editor and the dirty rule are done; the toggle and per-note mode memory land with the rich editor
+- [ ] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version — the editor, both presets, history and clipboard are done, via `@milkdown/react` and pinned at 7.22.1. The slash menu and the inline tooltip need `@prosemirror-adapter/react` and land next. `plugin-listener` is deliberately not used: see §7
+- [x] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test
 - [x] Frontmatter strip/reattach, slug filename logic
 - [ ] Works fully offline; installable
 

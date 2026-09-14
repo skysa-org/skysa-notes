@@ -1,6 +1,8 @@
 import { type ProviderKind } from '@skysa/core';
 import Dexie, { type Table } from 'dexie';
 
+import { type EditorMode } from '../editor/mode.js';
+
 /**
  * The local store. The app boots and renders from here before any network call,
  * and every read and write works offline; sync is a separate concern layered on
@@ -44,6 +46,12 @@ export interface NoteRecord {
 	deletedLocally: Flag;
 	createdAt: number;
 	updatedAt: number;
+	/**
+	 * Which editor this note was last open in. Local only — it says nothing
+	 * about the file, so it is never written to frontmatter and never syncs.
+	 * Changing it must not mark the note dirty.
+	 */
+	editorMode?: EditorMode;
 }
 
 export interface FolderRecord {
@@ -63,6 +71,16 @@ export interface SyncStateRecord {
 	lastSyncAt?: number;
 	/** Random per browser install, reported in the marker file for debugging. */
 	clientId: string;
+}
+
+/**
+ * App-wide settings. A table rather than `localStorage` because the store is
+ * already here, it is the same place everything else lives, and it works the
+ * same in a test as in the browser.
+ */
+export interface PreferenceRecord {
+	key: string;
+	value: string;
 }
 
 export type QueuedOperation = 'write' | 'move' | 'delete' | 'mkdir';
@@ -85,6 +103,7 @@ export type NotesDatabase = Dexie & {
 	folders: Table<FolderRecord, [string, string]>;
 	syncState: Table<SyncStateRecord, string>;
 	opQueue: Table<OpQueueRecord, number>;
+	prefs: Table<PreferenceRecord, string>;
 };
 
 export const DATABASE_NAME = 'skysa-notes';
@@ -101,6 +120,12 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		folders: '[connectionId+path], connectionId, path',
 		syncState: 'connectionId',
 		opQueue: '++seq, connectionId, noteId, path',
+	});
+
+	// `editorMode` on a note needs no version of its own: it is not indexed, and
+	// IndexedDB stores whatever properties a record happens to carry.
+	db.version(2).stores({
+		prefs: 'key',
 	});
 
 	return db;

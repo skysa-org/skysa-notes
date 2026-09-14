@@ -1,4 +1,6 @@
-import { Annotation, type Transaction } from '@codemirror/state';
+import { Annotation, type Transaction as CodeMirrorTransaction } from '@codemirror/state';
+import type { Node as ProseNode } from '@milkdown/kit/prose/model';
+import { Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
 
 /**
  * The single rule that decides whether an editor change counts as a user edit.
@@ -21,7 +23,7 @@ export const programmatic = { annotations: ProgrammaticChange.of(true) };
 
 export interface ChangeLike {
 	docChanged: boolean;
-	transactions: readonly Transaction[];
+	transactions: readonly CodeMirrorTransaction[];
 }
 
 /**
@@ -39,3 +41,46 @@ export const isUserEdit = (update: ChangeLike): boolean => {
 
 	return changing.some((transaction) => transaction.annotation(ProgrammaticChange) !== true);
 };
+
+/**
+ * The same decision for the rich editor.
+ *
+ * ProseMirror has no annotations, so the marker is transaction metadata under
+ * this key. Everything the app puts *into* the editor — the initial document, a
+ * body that changed underneath, a mode switch — carries it; anything the user
+ * types does not.
+ */
+export const PROGRAMMATIC_META = 'skysa/programmatic';
+
+export const isUserTransaction = (transaction: Transaction): boolean =>
+	transaction.docChanged && transaction.getMeta(PROGRAMMATIC_META) !== true;
+
+/**
+ * Counts user edits. A count rather than a boolean because a single dispatch can
+ * apply several transactions — a user edit followed by an appended one from
+ * another plugin — and the last one having changed nothing must not hide the
+ * edit that came before it.
+ */
+export const userEditKey = new PluginKey<number>('skysa-user-edit');
+
+/**
+ * Reports user edits to the rich editor's document, and nothing else. The
+ * callback receives the document; serializing it back to markdown is the
+ * editor's job, not this rule's.
+ */
+export const userEditPlugin = (onUserEdit: (doc: ProseNode) => void): Plugin =>
+	new Plugin({
+		key: userEditKey,
+		state: {
+			init: () => 0,
+			apply: (transaction, count: number) =>
+				isUserTransaction(transaction) ? count + 1 : count,
+		},
+		view: () => ({
+			update: (view, previous) => {
+				const before = userEditKey.getState(previous) ?? 0;
+				const after = userEditKey.getState(view.state) ?? 0;
+				if (after > before) onUserEdit(view.state.doc);
+			},
+		}),
+	});

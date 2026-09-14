@@ -14,6 +14,7 @@ import {
 	writeFrontmatter,
 } from '@skysa/core';
 
+import { type EditorMode } from '../editor/mode.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
 
@@ -356,6 +357,21 @@ export const importNoteFile = async (
 
 	await db.notes.put(record);
 	return record;
+};
+
+/**
+ * Remember which editor a note was last open in.
+ *
+ * Deliberately not routed through `applyEdit`: the mode is a local view
+ * preference, not a change to the file. Marking the note dirty here would queue
+ * a write to the provider every time someone looked at a note in the other mode.
+ */
+export const setNoteEditorMode = async (
+	db: NotesDatabase,
+	id: string,
+	mode: EditorMode
+): Promise<void> => {
+	await db.notes.update(id, { editorMode: mode });
 };
 
 /** Notes with unpushed local changes, oldest edit first. */
