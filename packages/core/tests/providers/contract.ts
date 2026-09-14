@@ -62,11 +62,17 @@ export const drainChanges = async (
 	return { entries: all, cursor };
 };
 
-const paths = (entries: readonly RemoteEntry[]): string[] =>
+const paths = (entries: readonly { path: string }[]): string[] =>
 	entries.map((entry) => entry.path).sort();
 
 const at = (entries: readonly ChangeEntry[], path: string): ChangeEntry | undefined =>
 	entries.filter((entry) => entry.path === path).at(-1);
+
+/** The latest change at `path`, when it is not a deletion. */
+const liveAt = (entries: readonly ChangeEntry[], path: string): RemoteEntry | undefined => {
+	const entry = at(entries, path);
+	return entry === undefined || entry.deleted === true ? undefined : entry;
+};
 
 export const describeProviderContract = (
 	name: string,
@@ -406,17 +412,19 @@ export const describeProviderContract = (
 
 				const created = await seedFile(provider, 'note.md', 'one\n');
 				const afterWrite = await drainChanges(provider, start.cursor);
-				expect(at(afterWrite.entries, 'note.md')?.version).toBe(created.version);
+				expect(liveAt(afterWrite.entries, 'note.md')?.version).toBe(created.version);
 
 				const moved = await provider.move(created, 'renamed.md');
 				const afterMove = await drainChanges(provider, afterWrite.cursor);
-				expect(at(afterMove.entries, 'renamed.md')).toBeDefined();
+				expect(liveAt(afterMove.entries, 'renamed.md')).toBeDefined();
 
 				await provider.delete(moved);
 				const afterDelete = await drainChanges(provider, afterMove.cursor);
 				const gone = at(afterDelete.entries, 'renamed.md');
+
+				// A deletion is identified by its path and nothing else: Dropbox's
+				// DeletedMetadata carries no id, no rev and no timestamp.
 				expect(gone?.deleted).toBe(true);
-				if (stableIds) expect(gone?.remoteId).toBe(created.remoteId);
 			});
 
 			it('hands back entries that can be read directly', config, async () => {
@@ -426,7 +434,7 @@ export const describeProviderContract = (
 				await seedFile(provider, 'note.md', 'body\n');
 
 				const { entries } = await drainChanges(provider);
-				const note = at(entries, 'note.md')!;
+				const note = liveAt(entries, 'note.md')!;
 				expect((await provider.read(note)).content).toBe('body\n');
 			});
 

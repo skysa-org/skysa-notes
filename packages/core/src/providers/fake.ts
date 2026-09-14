@@ -137,7 +137,10 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	const drop = (node: FakeNode, record: boolean): void => {
 		nodes.delete(node.path);
-		if (record) log.set(bump('seq'), { ...toEntry(node), deleted: true });
+		// The fake knows the id, and reports it, but a `DeletedEntry` does not
+		// promise one — Dropbox has none to give.
+		if (record)
+			log.set(bump('seq'), { path: node.path, deleted: true, remoteId: node.remoteId });
 	};
 
 	/**

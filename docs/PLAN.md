@@ -132,7 +132,10 @@ export interface RemoteEntry {
 /** What read/move/delete need, which is all the local store keeps. */
 export type EntryRef = Pick<RemoteEntry, 'remoteId' | 'path'>;
 
-export interface ChangeEntry extends RemoteEntry { deleted?: boolean }
+/** A deletion carries only a path: Dropbox's DeletedMetadata has no id or rev. */
+export interface DeletedEntry { path: string; deleted: true; remoteId?: string }
+
+export type ChangeEntry = (RemoteEntry & { deleted?: false }) | DeletedEntry;
 
 export interface ChangeSet {
   entries: readonly ChangeEntry[];
@@ -174,6 +177,7 @@ Semantics the signatures do not carry:
 - `write` is create-or-update, never a blind overwrite. No `expectedVersion` means "I expect nothing here" — literally WebDAV's `If-None-Match: *` — so a file already at that path is a `ConflictError`. That is what makes §7's "remote deleted, local dirty → re-create on push" safe: if the file came back in the meantime the write conflicts instead of clobbering it. An `expectedVersion` for a path with no file is a `NotFoundError`.
 - `createFolder` and `delete` are idempotent, so a queued op is always safe to replay.
 - `move` may or may not change `version` — Dropbox's `rev` survives it, OneDrive's `eTag` does not — so the caller stores the returned entry rather than assuming either way. `remoteId` survives a move on every id-based provider; on WebDAV it *is* the path and so cannot, which is why renames there are re-linked through frontmatter `id`.
+- A deletion is identified by its **path**, not its id. Dropbox's `DeletedMetadata` carries a name and a path and nothing else — no id, no rev, no timestamp — so `ChangeEntry` is a union rather than an entry with a flag. Anything richer would have adapters fabricating fields and the engine trusting them.
 - `list` is one level. `changes` covers the whole tree at every depth. Neither filters hidden paths: `.notesapp.json` has to reach the engine, and the UI filters with `isHidden`.
 - `rootId` is opaque, non-empty and stable. A provider whose root has no id of its own — a Dropbox app folder, where the root simply *is* `/` — returns a synthetic constant.
 - Content is UTF-8 text. Binary attachments are out of scope (§14).
@@ -211,7 +215,10 @@ The in-memory fake in `src/providers/fake.ts` is deliberately the strictest prov
 ### 5.3 Dropbox
 - App type: **App folder** access. Scopes: `files.metadata.read files.metadata.write files.content.read files.content.write account_info.read`.
 - Root: with App folder access, the API root *is* `/Apps/<AppName>`, where `<AppName>` is the app name set in the Dropbox App Console (immutable after creation — create it as `skysa-notes`). All paths are relative to it. ensureRoot just writes `.notesapp.json` at `/`.
-- Files: `POST content.dropboxapi.com/2/files/upload` with `mode: { ".tag": "update", update: rev }` for conflict-safe overwrite (Dropbox returns a conflict error rather than auto-renaming when `autorename: false`). `mode: add` for create.
+- Files: `POST content.dropboxapi.com/2/files/upload` with `mode: { ".tag": "update", update: rev }` for conflict-safe overwrite (Dropbox returns a conflict error rather than auto-renaming when `autorename: false`). `mode: add` for create. **`strict_conflict: true` is required**: without it an `update` whose rev no longer matches still succeeds when the file has since been deleted, which is exactly the case the expected version exists to catch.
+- `Dropbox-API-Arg` is an HTTP header, so it must be ASCII: every character above printable ASCII has to be `\uXXXX`-escaped or a notebook named in a non-Latin script fails at the transport with an unhelpful 400.
+- Errors: match `error_summary` by **prefix**, not equality — Dropbox says the tail carries detail that can change. A conflict does not include the current entry, so the adapter fetches it with `files/get_metadata` before raising `ConflictError`; that extra round trip happens only on the conflict path.
+- Folders have no `rev` and no `server_modified`. The adapter reports both as empty rather than inventing them, and nothing compares either for a folder.
 - Version: `rev`.
 - Changes: `files/list_folder` with `recursive: true` on first sync (returns cursor), then `files/list_folder/continue`. Optional later: `files/list_folder/longpoll` for near-instant sync while the tab is open.
 - Paths: use `path_display`; Dropbox also gives an `id` (`id:...`) — store both, prefer id for identity.
@@ -390,7 +397,7 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Contract test suite + in-memory fake provider (write this before the first adapter, as the round-trip suite was written before the editor)
 - [ ] Auth start/callback, sessions, encrypted connections table, `/api/token`
-- [ ] `DropboxProvider` implementing the full interface
+- [x] `DropboxProvider` implementing the full interface
 - [ ] Sync engine: pull, push, cursor persistence, opQueue
 - [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"
 

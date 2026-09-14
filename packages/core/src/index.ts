@@ -28,6 +28,7 @@ export {
 export {
 	AuthError,
 	type ChangeEntry,
+	type DeletedEntry,
 	type ChangeSet,
 	ConflictError,
 	CursorResetError,
@@ -42,6 +43,12 @@ export {
 	type StorageProvider,
 	type WriteOptions,
 } from './providers/types.js';
+
+export {
+	createDropboxProvider,
+	type DropboxProviderOptions,
+	type FetchLike,
+} from './providers/dropbox.js';
 
 export {
 	createFakeProvider,
