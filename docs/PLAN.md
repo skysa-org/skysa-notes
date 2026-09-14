@@ -292,6 +292,8 @@ Two modes over one markdown string. Default is rich text; a toolbar/shortcut tog
 
 **Menus.** The slash menu (`/`) and the inline formatting toolbar are ProseMirror plugin views written in React, mounted through `@prosemirror-adapter/react` — the adapter Milkdown's own React examples use. Both offer only constructs the fidelity suites already cover, so nothing reachable from a menu can put something in a note that the file format cannot hold. Picking a command is a user edit like any typed one: it removes the `/query` the user typed and marks the note dirty, which is the point.
 
+**Empty paragraphs become `<br />`.** Markdown has no way to say "a blank paragraph here" — blank lines are separators, not content — so Milkdown writes an HTML break for one and reads it back as an empty paragraph. It is the one place the editor puts something in a file the user did not type. It stays because it is a bijection and loses nothing in either direction: stripping it instead would delete a `<br />` that came from the user's own file, which is the worse failure. Pinned by a test in `apps/web/tests/rich.test.ts`.
+
 **Not `@milkdown/plugin-listener`.** Its `markdownUpdated` is the obvious way to hear about changes, but it debounces on a timer of its own and, more importantly, hands over a markdown string with no way to tell whether a person or the app caused it. That is exactly the distinction the dirty rule is made of. A small ProseMirror plugin — the one in `editor/dirty.ts`, which reads transaction metadata — answers it directly, and the serialization happens where the answer is already known.
 
 **Source-of-truth rules (these matter more than the editor choice):**
@@ -315,6 +317,8 @@ Title is derived from frontmatter `title`, else the first `# ` heading, else the
 - Dev: enable `devOptions.enabled` so the SW runs under `vite dev`; `wrangler dev` serves the API on `:8787` and Vite `server.proxy` forwards `/api` to it so cookies stay same-origin. Prod is genuinely same-origin (SPA served as Worker static assets).
 - All note data lives in IndexedDB; the app boots and renders from local state before any network call.
 - Tokens: keep provider access tokens in memory (React state) with a copy in IndexedDB `syncState` so a reload doesn't force a backend round-trip. Never in localStorage.
+- Installability is a checklist the browser applies silently — a missing 192px icon or a bad `start_url` and the install option simply never appears, with nothing in the build to say why. The manifest and Workbox options live in `apps/web/pwa.ts` rather than inline in `vite.config.ts` so that checklist can be a test (`tests/pwa.test.ts`), down to reading each icon's real dimensions out of its PNG header.
+- With `registerType: 'prompt'` the worker does not claim the first page load, by design: the page that registered it keeps running the build it was served, and the next navigation is the first one the worker controls. So "works offline" means from the second visit onwards, which is the only thing it could mean — the first visit is the one that downloads the app.
 
 ---
 
@@ -349,7 +353,7 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 - [x] Rich editor (Milkdown: commonmark + gfm presets, slash, tooltip, history, listener) via `@milkdown/react`; pin version — pinned at 7.22.1. `plugin-listener` is deliberately not used: see §7
 - [x] Raw editor (CodeMirror 6), mode toggle, per-note mode memory, "dirty only on real edits" rule verified by test
 - [x] Frontmatter strip/reattach, slug filename logic
-- [ ] Works fully offline; installable
+- [x] Works fully offline; installable
 
 ### Phase 2 — Backend + Dropbox end to end (2 days)
 Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
