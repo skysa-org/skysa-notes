@@ -1,10 +1,9 @@
-import { drizzle } from 'drizzle-orm/d1'
-import * as schema from './schema.js'
+import { drizzle } from 'drizzle-orm/d1';
 
-export type Database = ReturnType<typeof createDb>
+import * as schema from './schema.js';
 
-export function createDb(binding: D1Database) {
-  return drizzle(binding, { schema, casing: 'snake_case' })
-}
+export const createDb = (binding: D1Database) => drizzle(binding, { schema, casing: 'snake_case' });
 
-export { schema }
+export type Database = ReturnType<typeof createDb>;
+
+export { schema };

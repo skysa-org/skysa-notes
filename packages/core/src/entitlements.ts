@@ -5,17 +5,15 @@
  * `createApp` rather than living here. See docs/PLAN.md §6.
  */
 export interface EntitlementDecision {
-  allowed: boolean
-  /** Shown to the user when `allowed` is false. Never include internal detail. */
-  reason?: string
+	allowed: boolean;
+	/** Shown to the user when `allowed` is false. Never include internal detail. */
+	reason?: string;
 }
 
 export interface EntitlementProvider {
-  check(userId: string): Promise<EntitlementDecision>
+	readonly check: (userId: string) => Promise<EntitlementDecision>;
 }
 
 export const alwaysAllowed: EntitlementProvider = {
-  check() {
-    return Promise.resolve({ allowed: true })
-  },
-}
+	check: () => Promise.resolve({ allowed: true }),
+};

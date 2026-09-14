@@ -1,4 +1,4 @@
-import { NOTE_EXTENSION } from '../config.js'
+import { NOTE_EXTENSION } from '../config.js';
 
 /**
  * Filenames are a slug of the title; `id` in frontmatter is the stable identity,
@@ -6,65 +6,59 @@ import { NOTE_EXTENSION } from '../config.js'
  */
 
 /** Illegal or hostile in a filename on Windows, macOS, or a provider API. */
-const UNSAFE = /[/\\:*?"<>|#%{}^[\]`~$&+=;@!'()]/g
+const UNSAFE = /[/\\:*?"<>|#%{}^[\]`~$&+=;@!'()]/g;
 
 /** C0 and C1 control characters, which no provider accepts in a name. */
 // eslint-disable-next-line no-control-regex
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 
 /** Reserved device names on Windows, which several providers also reject. */
-const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
-const FALLBACK = 'untitled'
+const FALLBACK = 'untitled';
 
 /**
  * Long enough for any reasonable title, short enough to leave room for a
  * conflict suffix inside the 255-byte limit every provider enforces.
  */
-const MAX_SLUG_LENGTH = 120
+const MAX_SLUG_LENGTH = 120;
 
 /**
  * Lowercase, hyphen-separated, safe on every provider. Non-Latin scripts are
  * kept rather than transliterated: a note titled in Japanese should not become
  * `untitled`.
  */
-export function slugify(title: string): string {
-  const slug = title
-    .normalize('NFC')
-    .toLowerCase()
-    .replace(CONTROL, ' ')
-    .replace(UNSAFE, ' ')
-    // Whitespace and the punctuation people use as separators all collapse to
-    // a single hyphen.
-    .replace(/[\s._,-]+/g, '-')
-    // A leading dot hides the file; trailing dots and spaces are stripped
-    // silently by Windows, which would desynchronize the path we think we wrote.
-    .replace(/^[-.\s]+|[-.\s]+$/g, '')
-    .slice(0, MAX_SLUG_LENGTH)
-    .replace(/-+$/, '')
+export const slugify = (title: string): string => {
+	const slug = title
+		.normalize('NFC')
+		.toLowerCase()
+		.replace(CONTROL, ' ')
+		.replace(UNSAFE, ' ')
+		// Whitespace and the punctuation people use as separators all collapse to
+		// a single hyphen.
+		.replace(/[\s._,-]+/g, '-')
+		// A leading dot hides the file; trailing dots and spaces are stripped
+		// silently by Windows, which would desynchronize the path we think we wrote.
+		.replace(/^[-.\s]+|[-.\s]+$/g, '')
+		.slice(0, MAX_SLUG_LENGTH)
+		.replace(/-+$/, '');
 
-  if (slug === '') return FALLBACK
-  return RESERVED.test(slug) ? `${slug}-note` : slug
-}
+	if (slug === '') return FALLBACK;
+	return RESERVED.test(slug) ? `${slug}-note` : slug;
+};
 
 /** The filename for a note with this title, extension included. */
-export function noteFilename(title: string): string {
-  return `${slugify(title)}${NOTE_EXTENSION}`
-}
+export const noteFilename = (title: string): string => `${slugify(title)}${NOTE_EXTENSION}`;
 
 /**
  * Disambiguate against names already in the folder by appending `-2`, `-3`, and
  * so on — the convention every file manager uses. Comparison is
  * case-insensitive because Drive, Dropbox, and macOS all treat names that way.
  */
-export function uniqueFilename(title: string, taken: Iterable<string>): string {
-  const used = new Set<string>()
-  for (const name of taken) used.add(name.toLowerCase())
+const nextFreeName = (base: string, used: ReadonlySet<string>, n: number): string => {
+	const candidate = n === 1 ? `${base}${NOTE_EXTENSION}` : `${base}-${n}${NOTE_EXTENSION}`;
+	return used.has(candidate.toLowerCase()) ? nextFreeName(base, used, n + 1) : candidate;
+};
 
-  const base = slugify(title)
-  let candidate = `${base}${NOTE_EXTENSION}`
-  for (let n = 2; used.has(candidate.toLowerCase()); n++) {
-    candidate = `${base}-${n}${NOTE_EXTENSION}`
-  }
-  return candidate
-}
+export const uniqueFilename = (title: string, taken: Iterable<string>): string =>
+	nextFreeName(slugify(title), new Set([...taken].map((name) => name.toLowerCase())), 1);

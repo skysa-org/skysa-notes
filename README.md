@@ -24,8 +24,11 @@ registrations at all, which makes it the quickest way to run this locally.
 | `pnpm dev` | Web + API dev servers |
 | `pnpm build` | Build core, SPA, then a Worker dry-run bundle |
 | `pnpm test` | Vitest across all packages |
-| `pnpm lint` / `pnpm typecheck` | ESLint / `tsc --noEmit` across all packages |
+| `pnpm lint` / `pnpm lint:fix` | ESLint across all packages, with or without auto-fix |
+| `pnpm typecheck` | `tsc --noEmit` across all packages |
+| `pnpm format` / `pnpm format:check` | Prettier write / check |
+| `pnpm verify` | format:check + lint + typecheck + test — run before every commit |
 | `pnpm db:generate` | Generate a Drizzle migration from the schema |
 | `pnpm db:migrate` / `pnpm db:migrate:remote` | Apply migrations locally / to Cloudflare |
 
-Current status: **Phase 0 (scaffold) complete.** See [`docs/PLAN.md`](docs/PLAN.md).
+Current status: **Phase 1 in progress** (markdown pipeline landed). See [`docs/PLAN.md`](docs/PLAN.md).

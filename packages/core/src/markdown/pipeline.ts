@@ -1,8 +1,8 @@
-import { unified, type Processor } from 'unified'
-import remarkParse from 'remark-parse'
-import remarkStringify, { type Options as StringifyOptions } from 'remark-stringify'
-import remarkGfm from 'remark-gfm'
-import type { Root } from 'mdast'
+import type { Root } from 'mdast';
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import remarkStringify, { type Options as StringifyOptions } from 'remark-stringify';
+import { type Processor, unified } from 'unified';
 
 /**
  * The single remark pipeline. Milkdown's transformer is built on `remark` ^15 /
@@ -17,32 +17,27 @@ import type { Root } from 'mdast'
  * like something a person would have typed.
  */
 export const STRINGIFY_OPTIONS: StringifyOptions = {
-  bullet: '-',
-  emphasis: '*',
-  strong: '*',
-  fences: true,
-  // `*` rather than `-`: a thematic break written as `---` at the top of a file
-  // is ambiguous with a frontmatter fence, and a body that opened with one
-  // would come back from disk with its first section swallowed.
-  rule: '*',
-  listItemIndent: 'one',
-}
+	bullet: '-',
+	emphasis: '*',
+	strong: '*',
+	fences: true,
+	// `*` rather than `-`: a thematic break written as `---` at the top of a file
+	// is ambiguous with a frontmatter fence, and a body that opened with one
+	// would come back from disk with its first section swallowed.
+	rule: '*',
+	listItemIndent: 'one',
+};
 
-function createProcessor(): Processor<Root, undefined, undefined, Root, string> {
-  return unified().use(remarkParse).use(remarkGfm).use(remarkStringify, STRINGIFY_OPTIONS).freeze()
-}
+const createProcessor = (): Processor<Root, undefined, undefined, Root, string> =>
+	unified().use(remarkParse).use(remarkGfm).use(remarkStringify, STRINGIFY_OPTIONS).freeze();
 
-const processor = createProcessor()
+const processor = createProcessor();
 
 /** Markdown string → mdast. The body only; frontmatter is split off first. */
-export function parse(markdown: string): Root {
-  return processor.parse(markdown)
-}
+export const parse = (markdown: string): Root => processor.parse(markdown);
 
 /** mdast → markdown string, in the app's conventional style. */
-export function serialize(tree: Root): string {
-  return processor.stringify(tree)
-}
+export const serialize = (tree: Root): string => processor.stringify(tree);
 
 /**
  * The canonical form of a body. Applied to both sides of a comparison so that
@@ -52,6 +47,4 @@ export function serialize(tree: Root): string {
  * real user edit, so notes authored elsewhere keep their own formatting until
  * someone actually edits them.
  */
-export function normalize(markdown: string): string {
-  return serialize(parse(markdown))
-}
+export const normalize = (markdown: string): string => serialize(parse(markdown));
