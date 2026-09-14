@@ -25,6 +25,33 @@ export {
 	type EntitlementProvider,
 } from './entitlements.js';
 
+export {
+	AuthError,
+	type ChangeEntry,
+	type ChangeSet,
+	ConflictError,
+	CursorResetError,
+	type EntryRef,
+	isAuthError,
+	isConflictError,
+	isCursorResetError,
+	isNotFoundError,
+	NotFoundError,
+	type ProviderErrorCode,
+	type RemoteEntry,
+	type StorageProvider,
+	type WriteOptions,
+} from './providers/types.js';
+
+export {
+	createFakeProvider,
+	type FakeCall,
+	type FakeFault,
+	type FakeOperation,
+	type FakeProvider,
+	type FakeProviderOptions,
+} from './providers/fake.js';
+
 export * from './hash.js';
 export * from './markdown/index.js';
 export * from './paths.js';
