@@ -1,6 +1,6 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
-import { Selection } from '@milkdown/kit/prose/state';
+import { Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -111,6 +111,30 @@ describe('adoptBody', () => {
 
 		expect(after).toBe(before);
 		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+});
+
+describe('an empty paragraph', () => {
+	it('round-trips as an HTML break, because markdown has no other word for it', async () => {
+		// Markdown cannot say "a blank paragraph here" — blank lines are only
+		// separators — so Milkdown writes `<br />` and reads it back. Pinned
+		// because it is the one place the editor puts something in a file the
+		// user did not type, and it must stay a bijection rather than becoming a
+		// one-way accumulation of HTML.
+		const { withCtx } = await mount('first\n\nsecond\n');
+
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+			view.dispatch(view.state.tr.split(view.state.selection.from));
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('<br />\n\nfirst\n\nsecond\n');
+	});
+
+	it('comes back as an empty paragraph, not as literal HTML in the text', async () => {
+		const { withCtx } = await mount('<br />\n\nfirst\n');
+		expect(withCtx(currentMarkdown)).toBe('<br />\n\nfirst\n');
 	});
 });
 
