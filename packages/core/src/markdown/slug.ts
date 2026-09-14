@@ -28,8 +28,8 @@ const MAX_SLUG_LENGTH = 120;
  * kept rather than transliterated: a note titled in Japanese should not become
  * `untitled`.
  */
-export const slugify = (title: string): string => {
-	const slug = title
+const toSlug = (title: string): string =>
+	title
 		.normalize('NFC')
 		.toLowerCase()
 		.replace(CONTROL, ' ')
@@ -43,9 +43,18 @@ export const slugify = (title: string): string => {
 		.slice(0, MAX_SLUG_LENGTH)
 		.replace(/-+$/, '');
 
+export const slugify = (title: string): string => {
+	const slug = toSlug(title);
 	if (slug === '') return FALLBACK;
 	return RESERVED.test(slug) ? `${slug}-note` : slug;
 };
+
+/**
+ * Same character rules, but a tag with nothing usable in it is dropped rather
+ * than replaced by a placeholder — an empty tag is not a tag called `untitled`,
+ * and a tag is not a filename, so reserved device names need no suffix here.
+ */
+export const normalizeTag = (tag: string): string | undefined => toSlug(tag) || undefined;
 
 /** The filename for a note with this title, extension included. */
 export const noteFilename = (title: string): string => `${slugify(title)}${NOTE_EXTENSION}`;
