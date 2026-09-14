@@ -1,0 +1,33 @@
+# Placeholders only. A self-hoster fills in database_id after `wrangler d1 create`
+# and sets every secret with `wrangler secret put` (see .dev.vars.example).
+name = "skysa-notes"
+main = "src/worker.ts"
+# No nodejs_compat: the Worker uses only Web Crypto and fetch (docs/PLAN.md §6).
+compatibility_date = "2026-09-14"
+
+# The SPA is served from this same Worker so /api/* and the app share an origin
+# and session cookies stay first-party.
+# https://developers.cloudflare.com/workers/static-assets/routing/worker-script/
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skysa-notes"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+AUTH_MODE = "storage-first"
+ENABLED_PROVIDERS = "gdrive,onedrive,dropbox,webdav"
+WEBDAV_ALLOW_PRIVATE = "false"
+
+[observability]
+enabled = true
+
+# Workers Paid only: caps runaway CPU cost. Harmless to leave set on Free.
+[limits]
+cpu_ms = 50

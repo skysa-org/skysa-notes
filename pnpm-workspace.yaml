@@ -1,0 +1,8 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Native/postinstall builds we accept. Everything else is blocked by default.
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

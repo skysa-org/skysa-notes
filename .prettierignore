@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+dist
+.wrangler
+**/routeTree.gen.ts
+**/worker-configuration.d.ts
+apps/api/migrations
+LICENSE
+
+# Prose is hand-formatted; Prettier rewrites markdown tables into unreadable diffs.
+*.md
