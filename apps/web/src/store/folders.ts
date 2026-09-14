@@ -1,4 +1,11 @@
-import { isWithin, joinPath, normalizePath, parentPath, rebasePath, slugify } from '@skysa/core';
+import {
+	isWithin,
+	joinPath,
+	normalizePath,
+	parentPath,
+	rebasePath,
+	sanitizeFolderName,
+} from '@skysa/core';
 
 import { type FolderRecord, LOCAL_CONNECTION_ID, type NotesDatabase } from './db.js';
 
@@ -60,7 +67,7 @@ export const createFolder = async (
 	input: CreateFolderInput
 ): Promise<FolderRecord> => {
 	const connectionId = input.connectionId ?? LOCAL_CONNECTION_ID;
-	const name = slugify(input.name);
+	const name = sanitizeFolderName(input.name);
 	const path = joinPath(input.parentPath ?? '', name);
 
 	const existing = await db.folders.get([connectionId, path]);
@@ -135,7 +142,8 @@ export const renameFolder = async (
 	path: string,
 	name: string,
 	options: FolderScope = {}
-): Promise<void> => moveFolder(db, path, joinPath(parentPath(path), slugify(name)), options);
+): Promise<void> =>
+	moveFolder(db, path, joinPath(parentPath(path), sanitizeFolderName(name)), options);
 
 /**
  * Delete a folder and tombstone every note beneath it, so each deletion is

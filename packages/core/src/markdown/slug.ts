@@ -15,7 +15,8 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 /** Reserved device names on Windows, which several providers also reject. */
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
-const FALLBACK = 'untitled';
+/** Filename for a note with no usable title yet. */
+export const UNTITLED_SLUG = 'untitled';
 
 /**
  * Long enough for any reasonable title, short enough to leave room for a
@@ -45,7 +46,7 @@ const toSlug = (title: string): string =>
 
 export const slugify = (title: string): string => {
 	const slug = toSlug(title);
-	if (slug === '') return FALLBACK;
+	if (slug === '') return UNTITLED_SLUG;
 	return RESERVED.test(slug) ? `${slug}-note` : slug;
 };
 
@@ -55,6 +56,28 @@ export const slugify = (title: string): string => {
  * and a tag is not a filename, so reserved device names need no suffix here.
  */
 export const normalizeTag = (tag: string): string | undefined => toSlug(tag) || undefined;
+
+/**
+ * Folder names are the notebook names the user typed, and every provider
+ * accepts spaces and capitals in a directory name — so unlike a note filename,
+ * which is derived from a title, this only removes what would actually break.
+ * See docs/PLAN.md §3.
+ */
+export const sanitizeFolderName = (name: string): string => {
+	const cleaned = name
+		.normalize('NFC')
+		.replace(CONTROL, ' ')
+		.replace(UNSAFE, ' ')
+		.replace(/\s+/g, ' ')
+		// A leading dot hides the folder; trailing dots and spaces are stripped
+		// silently by Windows, desynchronizing the path we think we wrote.
+		.replace(/^[.\s]+|[.\s]+$/g, '')
+		.slice(0, MAX_SLUG_LENGTH)
+		.trim();
+
+	if (cleaned === '') return 'Untitled';
+	return RESERVED.test(cleaned) ? `${cleaned} folder` : cleaned;
+};
 
 /** The filename for a note with this title, extension included. */
 export const noteFilename = (title: string): string => `${slugify(title)}${NOTE_EXTENSION}`;

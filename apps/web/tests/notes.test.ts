@@ -73,6 +73,12 @@ describe('createNote', () => {
 		expect(note.title).toBe('Derived Title');
 		expect(note.path).toBe('derived-title.md');
 	});
+
+	it('does not pin "Untitled" into frontmatter, which would block auto-naming', async () => {
+		const note = await createNote(db);
+		expect(note.path).toBe('untitled.md');
+		expect(noteFileContents(note)).not.toContain('title:');
+	});
 });
 
 describe('saveNoteBody', () => {
@@ -108,6 +114,64 @@ describe('saveNoteBody', () => {
 
 	it('rejects an unknown id', async () => {
 		await expect(saveNoteBody(db, 'nope', 'x')).rejects.toThrow(/No note with id/);
+	});
+});
+
+describe('naming an untitled note by its first heading', () => {
+	it('renames the file once the user types a heading', async () => {
+		const note = await createNote(db);
+		expect(note.path).toBe('untitled.md');
+
+		const named = await saveNoteBody(db, note.id, '# Q3 Planning\n\nBody.\n');
+		expect(named.title).toBe('Q3 Planning');
+		expect(named.path).toBe('q3-planning.md');
+	});
+
+	it('keeps it untitled while there is no heading to take', async () => {
+		const note = await createNote(db);
+		const edited = await saveNoteBody(db, note.id, 'Just prose, no heading.\n');
+
+		expect(edited.title).toBe('Untitled');
+		expect(edited.path).toBe('untitled.md');
+	});
+
+	it('names it inside its own folder', async () => {
+		const note = await createNote(db, { folderPath: 'work' });
+		const named = await saveNoteBody(db, note.id, '# Standup\n');
+		expect(named.path).toBe('work/standup.md');
+	});
+
+	it('avoids colliding with a note already named that', async () => {
+		await createNote(db, { title: 'Taken' });
+		const note = await createNote(db);
+		expect((await saveNoteBody(db, note.id, '# Taken\n')).path).toBe('taken-2.md');
+	});
+
+	it('stops following the heading once the note has a name', async () => {
+		const note = await createNote(db);
+		await saveNoteBody(db, note.id, '# First Name\n');
+		const again = await saveNoteBody(db, note.id, '# Second Name\n');
+
+		// The title follows, because nothing pinned it...
+		expect(again.title).toBe('Second Name');
+		// ...but the file is not renamed a second time.
+		expect(again.path).toBe('first-name.md');
+	});
+
+	it('never renames a note imported from another tool', async () => {
+		const note = await importNoteFile(db, { path: 'their-file.md', source: '# Old\n' });
+		const edited = await saveNoteBody(db, note.id, '# New Heading\n');
+
+		expect(edited.title).toBe('New Heading');
+		expect(edited.path).toBe('their-file.md');
+	});
+
+	it('leaves a note created with an explicit title alone', async () => {
+		const note = await createNote(db, { title: 'Chosen' });
+		const edited = await saveNoteBody(db, note.id, '# Something Else\n');
+
+		expect(edited.title).toBe('Chosen');
+		expect(edited.path).toBe('chosen.md');
 	});
 });
 
