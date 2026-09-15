@@ -327,6 +327,47 @@ export const describeSyncStoreContract = (
 				expect((await store.noteById('ours'))?.content).toBe('mine\n');
 			});
 
+			it('does not make room for an upsert by deleting what is there', async () => {
+				// The note at that path is about to be moved by a change further
+				// down the batch. Deleting it to clear the way takes its unpushed
+				// edits with it — and that is the shape of a store that "helps"
+				// by enforcing one row per path.
+				const { store, seed } = await harness();
+				await seed({ id: 'ours', path: 'a.md', content: 'mine\n', dirty: true });
+				await seed({ id: 'theirs', path: 'b.md', content: 'theirs\n', remoteId: 'r2' });
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'theirs',
+							path: 'a.md',
+							content: 'theirs\n',
+							remote: remote('a.md', 'r2'),
+						},
+						{ kind: 'displace-note', id: 'ours', path: 'a (conflict x).md' },
+					],
+					cursor: 'c1',
+				});
+
+				expect((await store.noteById('ours'))?.content).toBe('mine\n');
+				expect((await store.noteById('ours'))?.path).toBe('a (conflict x).md');
+				expect((await store.noteByPath('a.md'))?.id).toBe('theirs');
+			});
+
+			it('accepts a displacement of a note that is already gone', async () => {
+				// Same reasoning as the deletes: a batch the store rejects is
+				// retried for ever, because the cursor moves only with it.
+				const { store } = await harness();
+
+				await store.applyPull({
+					changes: [{ kind: 'displace-note', id: 'nobody', path: 'x.md' }],
+					cursor: 'c1',
+				});
+
+				expect(await store.cursor()).toBe('c1');
+			});
+
 			it('accepts a delete for a note that is already gone', async () => {
 				// A provider that reports a folder deletion recursively names the
 				// folder and then everything that was in it, and the folder took

@@ -191,7 +191,11 @@ export const createMemoryStore = (): MemoryStore => {
 		if (change.kind === 'displace-note') {
 			// Contents and dirty flag untouched: the note is only being moved out
 			// of the way, and it is the user's writing.
-			const note = requireNote(change.id);
+			const note = notes.get(change.id);
+			if (note === undefined) {
+				anomalies.push(`displace-note for unknown note ${change.id}`);
+				return;
+			}
 			ensureFolderChain(parentPath(change.path));
 			notes.set(note.id, { ...note, path: change.path });
 			return;

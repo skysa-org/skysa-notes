@@ -67,6 +67,22 @@ afterEach(() => {
 	expect(store.anomalies()).toEqual([]);
 });
 
+/**
+ * The two things that must be true of the store between batches, whatever the
+ * provider said. Two rows at one path is a note the sidebar shows twice and two
+ * queued writes racing for one file; two rows with one `remoteId` is worse —
+ * `noteByRemoteId` only ever hands back one of them, so the other is stale for
+ * ever and every edit to it conflicts. Asserted after every test rather than in
+ * the handful that happen to think of it.
+ */
+afterEach(() => {
+	const notes = store.notes();
+	const paths = notes.map((note) => note.path);
+	expect(paths).toEqual([...new Set(paths)]);
+	const remotes = notes.flatMap((note) => (note.remoteId === undefined ? [] : [note.remoteId]));
+	expect(remotes).toEqual([...new Set(remotes)]);
+});
+
 /** Puts a file on the remote and returns what the provider called it. */
 const remoteFile = async (path: string, content: string) => provider.write(path, content, {});
 
@@ -1288,24 +1304,181 @@ describe('a note of ours where a remote one lands', () => {
 		expect(new Set(store.notes().map((note) => note.path)).size).toBe(2);
 	});
 
-	it('does not rename a synced note behind the user\u2019s back', async () => {
-		// Ours has a `remoteId`, so its file is somewhere else by now and the
-		// entry that says where is coming — in this batch or a later one. Giving
-		// it a `(conflict …)` name here alarms the user about a note that is not
-		// in conflict, and the rename never reaches the remote anyway. The
-		// duplicate path lasts until the next pull; a renamed note lasts.
+	it('moves a synced note aside too, and brings it home next time', async () => {
+		// Ours has been pushed, but it has no claim to this path either: the
+		// remote has something else here, so our note's own file is elsewhere by
+		// now. Leaving it would be two rows on one path until whenever the entry
+		// saying where it went turns up — and `noteByRemoteId` only ever hands
+		// back one of two rows, so the other would be stale for ever.
 		const mine = await remoteFile('a.md', 'mine\n');
 		const theirs = await remoteFile('b.md', 'theirs\n');
 		await engine.pull();
-		// On the remote, ours moved out and theirs moved in. Only the second
-		// half reaches us in this batch, so we still think ours is at `a.md`.
-		await provider.move(mine, 'c.md');
-		const moved = await provider.move(theirs, 'a.md');
+		const before = noteAt('a.md');
+		// On the remote, ours moved out and theirs moved in. Only the second half
+		// reaches us in this batch, so we still think ours is at `a.md`.
+		const movedMine = await provider.move(mine, 'c.md');
+		const movedTheirs = await provider.move(theirs, 'a.md');
 
-		await pullNow([moved]);
+		await pullNow([movedTheirs]);
 
-		expect(store.notes().find((note) => note.remoteId === mine.remoteId)?.path).toBe('a.md');
-		expect(store.notes().every((note) => !note.path.includes('conflict'))).toBe(true);
+		expect(noteAt('a.md')?.content).toBe('theirs\n');
+		const ours = store.notes().find((note) => note.id === before?.id);
+		expect(ours?.path).toContain('conflict');
+		// It keeps its `remoteId`, so the entry that says where it went — this
+		// is the other half, a batch later — puts it back where it belongs.
+		await pullNow([movedMine]);
+
+		expect(noteAt('c.md')?.id).toBe(before?.id);
+		expect(store.notes()).toHaveLength(2);
+	});
+
+	it('moves aside a note the same batch detached', async () => {
+		// The occupant had been pushed when the batch started and is unpushed by
+		// the time this change runs: a remote delete of a note we had edits for
+		// detaches it and leaves it where it is. Asking the store as it was gets
+		// the wrong answer, and the two notes end up on one path — and then, on
+		// the next push, one `remoteId` between them.
+		await provider.createFolder('Work');
+		const ours = await remoteFile('Work/b.md', 'theirs-old\n');
+		const loose = await remoteFile('loose.md', 'theirs\n');
+		await engine.pull();
+		const mine = noteAt('Work/b.md');
+		if (mine === undefined) throw new Error('no note');
+		store.put({ ...mine, content: 'my unpushed edit\n', dirty: true });
+
+		// On the remote: ours deleted, and `loose.md` renamed into its place.
+		await provider.delete(ours);
+		const moved = await provider.move(loose, 'Work/b.md');
+
+		await pullNow([{ path: 'Work/b.md', deleted: true, remoteId: ours.remoteId }, moved]);
+
+		expect(noteAt('Work/b.md')?.content).toBe('theirs\n');
+		const kept = store.notes().find((note) => note.id === mine.id);
+		expect(kept?.content).toBe('my unpushed edit\n');
+		expect(kept?.path).toContain('conflict');
+		expect(kept?.remoteId).toBeUndefined();
+	});
+
+	it('gives a displacement and a conflict copy of one entry different names', async () => {
+		// A note moved *and* edited remotely, onto a path we have something at.
+		// The one entry needs both — and both are named from the same path, so
+		// without one seeing the other they get the same name and the store is
+		// handed two notes for one file.
+		await provider.createFolder('Work');
+		const entry = await remoteFile('Work/old.md', 'theirs\n');
+		await engine.pull();
+		const theirs = noteAt('Work/old.md');
+		if (theirs === undefined) throw new Error('no note');
+		store.put({ ...theirs, content: 'my edit\n', dirty: true });
+		store.put({ id: 'squatter', path: 'Work/a.md', content: 'squatting\n', dirty: true });
+
+		const moved = await provider.move(entry, 'Work/a.md');
+		const edited = await provider.write('Work/a.md', 'theirs, edited\n', {
+			expectedVersion: moved.version,
+		});
+
+		await pullNow([edited]);
+
+		expect(noteAt('Work/a.md')?.content).toBe('theirs, edited\n');
+		const aside = store.notes().filter((note) => note.path.includes('conflict'));
+		expect(aside).toHaveLength(2);
+		expect(new Set(aside.map((note) => note.path)).size).toBe(2);
+		expect(store.notes().map((note) => note.content)).toContain('squatting\n');
+		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+	});
+
+	it('does not move a note an earlier folder delete already took', async () => {
+		// The clean, never-pushed note at `Work/a.md` goes with the folder, so
+		// by the time the entry lands there is nothing to move aside. Asking the
+		// store to move it anyway fails the batch — for ever, since the cursor
+		// moves only with it.
+		await provider.createFolder('Work');
+		const loose = await remoteFile('loose.md', 'theirs\n');
+		await engine.pull();
+		store.put({ id: 'goner', path: 'Work/a.md', content: 'never pushed\n' });
+
+		// On the remote, `Work` was deleted and made again, and a file moved in.
+		// One batch can carry the deletion of the old one and the file in the new.
+		const old = provider.snapshot().find((node) => node.path === 'Work');
+		if (old === undefined) throw new Error('no folder');
+		await provider.delete(old);
+		await provider.createFolder('Work');
+		const moved = await provider.move(loose, 'Work/a.md');
+
+		const result = await pullNow([
+			{ path: 'Work', deleted: true, remoteId: old.remoteId },
+			moved,
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('Work/a.md')?.content).toBe('theirs\n');
+	});
+
+	it('does not move a note an earlier entry already moved out', async () => {
+		// Two files swapped places remotely. The second entry lands where the
+		// first one's note used to be, and the store still says our note is
+		// there — so the occupant check has to know the batch has moved it on,
+		// or the note is dragged off to a conflict name instead of its new home.
+		const mine = await remoteFile('a.md', 'mine\n');
+		const theirs = await remoteFile('b.md', 'theirs\n');
+		await engine.pull();
+		const before = noteAt('a.md');
+		const movedMine = await provider.move(mine, 'c.md');
+		const movedTheirs = await provider.move(theirs, 'a.md');
+
+		await pullNow([movedMine, movedTheirs]);
+
+		expect(noteAt('c.md')?.id).toBe(before?.id);
+		expect(noteAt('a.md')?.content).toBe('theirs\n');
+		expect(store.notes()).toHaveLength(2);
+	});
+
+	it('does not move a note an earlier conflict already moved out', async () => {
+		// Same again, where what moved our note on was a conflict: the note
+		// takes the remote's path, which is not the one it was at.
+		const mine = await remoteFile('a.md', 'mine\n');
+		const theirs = await remoteFile('b.md', 'theirs\n');
+		await engine.pull();
+		const before = noteAt('a.md');
+		if (before === undefined) throw new Error('no note');
+		store.put({ ...before, content: 'my edit\n', dirty: true });
+
+		const movedMine = await provider.move(mine, 'c.md');
+		const editedMine = await provider.write('c.md', 'theirs, edited\n', {
+			expectedVersion: movedMine.version,
+		});
+		const movedTheirs = await provider.move(theirs, 'a.md');
+
+		await pullNow([editedMine, movedTheirs]);
+
+		expect(noteAt('c.md')?.id).toBe(before.id);
+		expect(noteAt('a.md')?.content).toBe('theirs\n');
+		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+	});
+
+	it('does not move a note a folder move already carried off', async () => {
+		// `Work` was renamed and a new `Work` made in its place, with a file
+		// moved in. Our note went with the rename; the store still has it at the
+		// old path, so without following the folder move the occupant check
+		// drags it into the new `Work` under a conflict name.
+		await provider.createFolder('Work');
+		const file = await remoteFile('Work/a.md', 'mine\n');
+		const loose = await remoteFile('loose.md', 'theirs\n');
+		await engine.pull();
+		const before = noteAt('Work/a.md');
+		const old = provider.snapshot().find((node) => node.path === 'Work');
+		if (old === undefined) throw new Error('no folder');
+
+		const renamed = await provider.move(old, 'Archive');
+		const fresh = await provider.createFolder('Work');
+		const moved = await provider.move(loose, 'Work/a.md');
+
+		await pullNow([renamed, fresh, moved]);
+
+		expect(noteAt('Archive/a.md')?.id).toBe(before?.id);
+		expect(noteAt('Archive/a.md')?.content).toBe('mine\n');
+		expect(noteAt('Work/a.md')?.content).toBe('theirs\n');
+		expect(file.remoteId).toBe(noteAt('Archive/a.md')?.remoteId);
 	});
 
 	it('does not displace a note the same batch has already removed', async () => {
@@ -1322,24 +1495,6 @@ describe('a note of ours where a remote one lands', () => {
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')?.content).toBe('theirs\n');
-	});
-
-	it('leaves a note that has been pushed where it is', async () => {
-		// One that has a `remoteId` is a note whose file is somewhere else by
-		// now, and its own entry is what moves it. Renaming it here would take
-		// it away from a remote file that still exists.
-		const mine = await remoteFile('a.md', 'mine\n');
-		const theirs = await remoteFile('b.md', 'theirs\n');
-		await engine.pull();
-		const movedMine = await provider.move(mine, 'c.md');
-		const movedTheirs = await provider.move(theirs, 'a.md');
-
-		await pullNow([movedTheirs, movedMine]);
-
-		expect(store.notes()).toHaveLength(2);
-		expect(noteAt('a.md')?.content).toBe('theirs\n');
-		expect(noteAt('c.md')?.content).toBe('mine\n');
-		expect(store.notes().every((note) => !note.path.includes('conflict'))).toBe(true);
 	});
 });
 
@@ -1728,6 +1883,28 @@ describe('a dead cursor', () => {
 
 		expect(result.status).toBe('ok');
 		expect(noteAt('a.md')).toBeDefined();
+	});
+
+	it('keeps a notebook the scan only mentioned by way of a note inside it', async () => {
+		// A provider that lists files and not folders — the scan never names the
+		// folder, so reconciling deletes it, and the delete cascades over the
+		// note the same batch has just brought in. The exemption for that note
+		// is undone from the other direction.
+		await provider.createFolder('Work');
+		const entry = await remoteFile('Work/a.md', 'one\n');
+		store.putFolder({ path: 'Work', remoteId: 'f-from-an-older-sync' });
+		store.put({
+			id: 'n1',
+			path: 'Work/a.md',
+			content: 'old\n',
+			remoteId: entry.remoteId,
+			remoteVersion: 'stale',
+		});
+
+		await pullNow([entry]);
+
+		expect(noteAt('Work/a.md')?.content).toBe('one\n');
+		expect(store.folders().map((each) => each.path)).toContain('Work');
 	});
 
 	it('leaves a notebook that was never pushed alone', async () => {

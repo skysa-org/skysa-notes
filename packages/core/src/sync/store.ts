@@ -125,12 +125,19 @@ export type PullChange =
 			/**
 			 * A note created here and never pushed is sitting where a remote one
 			 * is about to land. Move ours aside, keeping its contents and its
-			 * dirty flag: it is the user's writing, it has never been anywhere
-			 * else, and the remote keeps the path (docs/PLAN.md §7). Two rows at
-			 * one path is a note the sidebar shows twice and two queued writes
-			 * racing for one file.
+			 * dirty flag: it is the user's writing and the remote keeps the path
+			 * (docs/PLAN.md §7). Two rows at one path is a note the sidebar shows
+			 * twice, two queued writes racing for one file, and — once both have
+			 * been pushed — one `remoteId` between them, after which
+			 * `noteByRemoteId` only ever hands back one and the other is stale
+			 * for ever.
 			 */
 			kind: 'displace-note';
+			/**
+			 * An id that is not in the store must succeed and do nothing, for the
+			 * same reason `delete-note` must: a rejected batch is retried for
+			 * ever, since the cursor moves only with the batch.
+			 */
 			id: string;
 			path: string;
 	  }>
@@ -237,6 +244,11 @@ export interface SyncStore {
 	/** Where the last pull got to, or `undefined` for a cold start. */
 	readonly cursor: () => Promise<string | undefined>;
 	readonly noteById: (id: string) => Promise<SyncNote | undefined>;
+	/**
+	 * Only ever asked between batches, when exactly one note is at each path.
+	 * Within a batch two can be — a note moving out of the way is a change of
+	 * its own — but nothing reads the store while one is being applied.
+	 */
 	readonly noteByPath: (path: string) => Promise<SyncNote | undefined>;
 	readonly noteByRemoteId: (remoteId: string) => Promise<SyncNote | undefined>;
 	/** Every live note, for reconciling a full scan against what we hold. */

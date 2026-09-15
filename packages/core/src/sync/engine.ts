@@ -7,6 +7,7 @@ import {
 	isWithin,
 	normalizePath,
 	parentPath,
+	rebasePath,
 	ROOT,
 } from '../paths.js';
 import {
@@ -116,17 +117,29 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		new Set(entries.flatMap((entry) => (entry.deleted === true ? [] : [entry.path])));
 
 	/**
-	 * Names a conflict copy in this folder must not take.
-	 *
-	 * Copies made earlier in the same batch are deliberately not in here: a copy
-	 * is named after the note it came from, and two notes in one folder have two
-	 * different filenames, so two copies cannot collide with each other. What
-	 * they can collide with is a copy another device made and pushed, which
-	 * arrives as an ordinary entry — hence `claimed`.
+	 * Names a conflict copy or a displacement in this folder must not take:
+	 * what is already there, what this batch is bringing in (`claimed` — the
+	 * copy another device made a minute ago arrives as an ordinary entry), and
+	 * what this batch has already chosen.
 	 */
-	const takenIn = async (folder: string, claimed: ReadonlySet<string>): Promise<string[]> => {
+	const takenIn = async (
+		folder: string,
+		claimed: ReadonlySet<string>,
+		decided: readonly PullChange[]
+	): Promise<string[]> => {
 		const stored = await store.notesUnder(folder);
-		const paths = [...stored.map((note) => note.path), ...claimed];
+		const paths = [
+			...stored.map((note) => note.path),
+			...claimed,
+			// And every name this batch has already put a note at. One entry can
+			// need two of these — a note moved *and* edited remotely onto a path
+			// we have something at wants a displacement and a conflict copy, both
+			// named from the same path — and they would otherwise get the same one.
+			...decided.flatMap((change) => {
+				if (change.kind === 'displace-note') return [change.path];
+				return change.kind === 'conflict' ? [change.resolution.copyPath] : [];
+			}),
+		];
 		return paths.filter((path) => parentPath(path) === folder).map(basename);
 	};
 
@@ -134,7 +147,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		local: SyncNote,
 		remoteContent: string,
 		remote: RemoteEntry,
-		claimed: ReadonlySet<string>
+		claimed: ReadonlySet<string>,
+		decided: readonly PullChange[]
 	): Promise<ConflictResolution> => {
 		const copyId = newId();
 		// Beside where the note ends up, not where it was. The two are the same
@@ -142,7 +156,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// edited between syncs — and there the old folder may be one this very
 		// batch is deleting, so a copy left behind in it either resurrects a
 		// folder the user removed or lands somewhere the sidebar never shows.
-		const taken = await takenIn(parentPath(remote.path), claimed);
+		const taken = await takenIn(parentPath(remote.path), claimed, decided);
 		return {
 			noteId: local.id,
 			remoteContent,
@@ -342,7 +356,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		local: SyncNote,
 		content: string,
 		entry: RemoteEntry,
-		claimed: ReadonlySet<string>
+		claimed: ReadonlySet<string>,
+		decided: readonly PullChange[]
 	): Promise<PullChange[]> | PullChange[] => {
 		// Same bytes, new version: our own write coming back, two devices that
 		// saved the same thing, or a move on a provider whose version does not
@@ -361,27 +376,57 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				{ kind: 'upsert-note', id: local.id, path: entry.path, content, remote: entry },
 			];
 		}
-		return resolutionFor(local, content, entry, claimed).then((resolution) => [
+		return resolutionFor(local, content, entry, claimed, decided).then((resolution) => [
 			{ kind: 'conflict' as const, resolution },
 		]);
 	};
 
 	/**
-	 * A note of ours sitting where a remote one is about to land, which the
-	 * remote knows nothing about — it was created here and never pushed. Two
-	 * devices both writing an `Untitled.md` offline is the ordinary way to get
-	 * there, and so is a note moved remotely into a folder where we happen to
-	 * have one of the same name.
+	 * Where a note is once the decisions so far have been applied, or
+	 * `undefined` if they have taken it away. Every decision is reached against
+	 * the store as it was, so "is anything at this path" cannot be answered from
+	 * the store alone — by the time a later change runs, an earlier one may have
+	 * moved the occupant out, deleted it, or dragged it along with a folder.
+	 */
+	const whereNow = (note: SyncNote, decided: readonly PullChange[]): string | undefined =>
+		decided.reduce<string | undefined>((at, change) => {
+			if (at === undefined) return undefined;
+			if (change.kind === 'delete-note') return change.id === note.id ? undefined : at;
+			// A folder delete cascades: clean notes go with it, dirty ones stay
+			// where they are and are only detached.
+			if (change.kind === 'delete-folder') {
+				return !note.dirty && isWithin(at, change.path) ? undefined : at;
+			}
+			if (change.kind === 'move-folder') {
+				return isWithin(at, change.from) ? rebasePath(at, change.from, change.to) : at;
+			}
+			if (change.kind === 'conflict') {
+				return change.resolution.noteId === note.id ? change.resolution.remote.path : at;
+			}
+			// `upsert-note`, `move-note`, `displace-note`. `adopt-version` and
+			// `detach-note` carry an id but no path, and move nothing.
+			return 'id' in change && change.id === note.id && 'path' in change ? change.path : at;
+		}, note.path);
+
+	/**
+	 * A note of ours sitting where a remote one is about to land. Two devices
+	 * both writing an `Untitled.md` offline is the ordinary way to get there,
+	 * and so is a note moved remotely into a folder where we happen to have one
+	 * of the same name.
 	 *
-	 * The remote keeps the path, per §7, and ours moves aside under the same
-	 * name a conflict copy would get — because that is what this is. Left where
-	 * it was, the two notes share a path: the sidebar shows the same row twice,
-	 * and the queued write for ours eventually lands on the other one's file.
+	 * The remote keeps the path, per §7, and ours moves aside under the name a
+	 * conflict copy would get — because that is what this is. Left where it was,
+	 * the two share a path: the sidebar shows one row twice, the queued write
+	 * for ours eventually lands on the other one's file, and both rows end up
+	 * carrying one `remoteId`, after which `noteByRemoteId` only ever hands back
+	 * one of them and the other is stale for ever.
 	 *
-	 * Only a note with no `remoteId` is displaced. One that has been pushed is a
-	 * note whose file is somewhere else by now, and its own entry — in this
-	 * batch or a later one — is what moves it; renaming it here would take it
-	 * away from a remote file that still exists.
+	 * Ours moves whether or not it has been pushed. A note that has been pushed
+	 * has no claim to this path either — the remote has something else here, so
+	 * that note's own file is elsewhere or gone, and the entry saying which will
+	 * move it home. Its queued write does not reach the new name meanwhile:
+	 * `runWrite` finds nothing at that path and checks by `remoteId` before
+	 * creating anything.
 	 */
 	const displaceOccupant = async (
 		path: string,
@@ -391,11 +436,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<PullChange[]> => {
 		const occupant = await store.noteByPath(path);
 		if (occupant === undefined || occupant.id === keeper) return [];
-		if (occupant.remoteId !== undefined) return [];
-		// Already dealt with by an earlier decision in this batch.
-		if (decidedNotes(decided).has(occupant.id)) return [];
+		// Gone, or moved on, by the time this change runs. Asking the store to
+		// move a note that is not there fails the batch — and a batch the store
+		// rejects is retried for ever, because the cursor moves only with it.
+		if (whereNow(occupant, decided) !== path) return [];
 
-		const taken = await takenIn(parentPath(path), claimed);
+		const taken = await takenIn(parentPath(path), claimed, decided);
 		return [{ kind: 'displace-note', id: occupant.id, path: conflictPath(path, now(), taken) }];
 	};
 
@@ -445,7 +491,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				{ kind: 'upsert-note', id: local.id, path: entry.path, content, remote: entry },
 			];
 		}
-		return [...room, ...(await decideKnown(local, content, entry, claimed))];
+		return [...room, ...(await decideKnown(local, content, entry, claimed, after))];
 	};
 
 	const decide = async (
@@ -571,6 +617,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		changes: readonly PullChange[]
 	): Promise<PullChange[]> => {
 		const kept = { notes: decidedNotes(changes), folders: reestablished(changes).folders };
+		// Folders the batch has just put a note into. Deleting one cascades over
+		// what is inside it, so the exemption above would be undone from the
+		// other direction — the note is spared by name and taken by its folder.
+		const holding = changes.flatMap((change) =>
+			'path' in change && change.kind !== 'delete-folder' ? [change.path] : []
+		);
 		const notes = await store.allNotes();
 		const folders = await store.foldersWithRemote();
 		return [
@@ -593,7 +645,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 						normalizePath(folder.path) !== ROOT &&
 						folder.remoteId !== undefined &&
 						!seen.has(folder.remoteId) &&
-						!kept.folders.has(folder.path)
+						!kept.folders.has(folder.path) &&
+						!holding.some((path) => isWithin(path, folder.path))
 				)
 				.map((folder): PullChange => ({ kind: 'delete-folder', path: folder.path })),
 		];
@@ -826,7 +879,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return '';
 		}
 
-		const resolution = await resolutionFor(note, content, remote, new Set());
+		const resolution = await resolutionFor(note, content, remote, new Set(), []);
 		await store.resolveConflict(op.seq, resolution);
 		return resolution.copyPath;
 	};
