@@ -26,7 +26,7 @@ This repo is the complete, self-hostable product: one Cloudflare Worker serving 
 | Note content | The server never stores note content, only tokens and connection metadata. For OAuth providers content never transits the server at all; WebDAV content streams through the proxy and is never persisted | Core privacy promise |
 | Token flow | Backend does Authorization Code + PKCE with every OAuth provider, stores refresh tokens encrypted, mints short-lived provider access tokens for the client; **client talks directly to provider APIs for file content** | Uniform auth across providers, no client secrets in bundle, no file bytes through our server (except WebDAV) |
 | Offline | Full read/write offline against IndexedDB; sync queue drains when online | It's a PWA; sync is a background concern |
-| Conflicts | Never lose data. On conflict, keep the remote version at the original path and write local as `<name> (conflict <ISO date>).md` | Simple, predictable, recoverable |
+| Conflicts | Never lose data. On conflict, keep the remote version at the original path and write local as `<name> (conflict <YYYY-MM-DDTHH-mm>).md` | Simple, predictable, recoverable |
 | Editor | Rich-text (WYSIWYG) by default, raw markdown mode as a toggle; **the markdown string is the only source of truth** — the rich editor is a view over it | Notes are files; the editor must never own state the file can't represent |
 
 Non-goals for v1: real-time collaboration, sharing, full-drive access, mobile-native wrappers, attachments/images, syntax beyond CommonMark + GFM (tables, task lists, strikethrough).
@@ -387,6 +387,24 @@ A remote folder rename or move is applied locally unconditionally, including whe
 ### Conflict rule (concrete)
 Remote wins the original path. Local content is saved as a new note at `<path minus .md> (conflict <YYYY-MM-DDTHH-mm>).md` with the same frontmatter except a fresh `id`. Both appear in the UI; a small banner links to the pair.
 
+The stamp is UTC and minute-resolution, with the `:` replaced — a colon is illegal in a filename on Windows and rejected outright by several provider APIs, and a copy the provider refuses to store is the lost edit this rule exists to prevent. UTC so two devices in different zones name the same conflict the same way rather than producing two copies that look hours apart and unrelated. A minute is not unique enough on its own, so a second conflict on the same note inside one minute gets `-2`, `-3`, and so on; the comparison is case-insensitive, because Drive, Dropbox and macOS all are. The name is deliberately **not** slugified: the copy has to be recognisable as the note it came from and sort next to it.
+
+Implemented in `packages/core/src/sync/conflicts.ts`.
+
+### What the loop above left open, and how the engine answers it
+
+The branch table is the specification; these are the cases it does not mention, each decided in the direction that cannot lose an edit. They live in `packages/core/src/sync/engine.ts`.
+
+- **A file that is not a note is ignored**, as is anything at a hidden path. The app owns the folder but not everything in it: a PDF the user dropped beside their notes would be corrupted by being read as markdown and written back, and `.notesapp.json` is our own bookkeeping. Two separate checks, because the marker happens to satisfy both and would otherwise hide the loss of either.
+- **Same bytes, new version → adopt the version, do not conflict.** This is our own write coming back, or two devices that saved the same thing. Keeping the old version would make the next push send an `expectedVersion` the remote has moved past, manufacturing a conflict over a file that already agrees with us.
+- **A move reported as a deletion plus an entry** — which is what Dropbox and Graph do — must not act on the deletion. Applied after the move it deletes the note outright, and which order they arrive in is the provider's business. A remote id still alive anywhere in the batch has not been deleted.
+- **A move may or may not change the version**, so the path is followed on both routes through the decision. Dropbox's `rev` survives a move; OneDrive's `eTag` does not.
+- **A remote folder delete keeps the dirty notes inside it**, detaching them so the next push re-creates them. The folder is the user's remote layout; the note is their writing, and losing the second to a change in the first is not a trade worth making. It matters on providers that report only the folder.
+- **A full scan reconciles.** A scan says what exists, never what was removed, so after a `CursorResetError` every note deleted while the cursor was dead would come back. Notes with a `remoteId` the scan did not mention are treated as remotely deleted; notes never pushed are left alone. The scan is one batch: its pages carry no cursor and the last one carries both the cursor and what the scan proved was gone.
+- **A note that changed while it was being pushed stays dirty.** The outcome handed to the store carries the exact bytes that were sent, and the store clears the flag only if the note still holds them. Otherwise the last thing the user typed is marked as saved and never sent.
+- **A failed push stops the queue rather than stepping over it.** The queue is ordered because later ops depend on earlier ones — a write into a folder whose `mkdir` failed would land nowhere, or resurrect a folder on a provider that creates missing parents. An op that has failed five times is surfaced rather than retried.
+- **The op that hit a conflict is finished, not re-queued.** Its content is preserved in the copy; replaying it would overwrite the remote with the very bytes the user has just been handed a copy of.
+
 ### Editor
 
 Two modes over one markdown string. Default is rich text; a toolbar/shortcut toggle (`Cmd/Ctrl+E`) switches to raw markdown. The mode is remembered per note and there's a global "default mode" preference.
@@ -468,7 +486,8 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Auth start/callback, sessions, encrypted connections table, `/api/token`
 - [x] `DropboxProvider` implementing the full interface
 - [x] "Loose notes" sidebar row, resolving the §12.6 ship blocker. Split out of the sync-engine PR because it depends on nothing the engine adds, and the engine is large enough on its own.
-- [ ] Sync engine: pull, push, cursor persistence, opQueue. Note while writing it: `useNote` reads `db.notes.get(id)`, which returns a tombstone, so a note deleted remotely while it is open stays fully editable in the right pane after the list and sidebar have moved on. Harmless today — only the in-app Delete button can remove a note, and it clears `note` from the URL — but the engine is what makes it reachable.
+- [x] Sync engine: pull, push, cursor persistence, opQueue (`packages/core/src/sync/`). The `SyncStore` port is defined here and implemented over Dexie in the UI PR below, where it registers against `tests/sync/storeContract.ts`.
+- [ ] UI note, carried from the PR above: `useNote` reads `db.notes.get(id)`, which returns a tombstone, so a note deleted remotely while it is open stays fully editable in the right pane after the list and sidebar have moved on. Harmless until the engine runs in the browser, which is the PR below.
 - [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"
 
 ### Phase 3 — OneDrive (1 day)
