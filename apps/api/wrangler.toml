@@ -22,13 +22,17 @@ migrations_dir = "migrations"
 
 [vars]
 AUTH_MODE = "storage-first"
-# Only what this deployment has credentials for. `parseEnv` refuses to boot
-# when a provider is listed here without its client id and secret, so listing
-# all four by default means a clean clone answers 500 to every request until
-# the operator registers apps with Google *and* Microsoft — for flows that do
-# not exist yet. WebDAV needs no registration at all, which makes it the one
-# default that works out of the box. Matches `.dev.vars.example`'s advice.
-ENABLED_PROVIDERS = "webdav"
+# Only what this deployment can actually do. Dropbox is the one storage flow
+# that exists (Phase 2); the rest arrive in Phases 3-5.
+#
+# Listing a provider commits the deployment to having its credentials —
+# `parseEnv` refuses to boot without them — so a clean clone answers 500 until
+# the operator registers a Dropbox app and sets the two secrets. That is the
+# intended failure: it names the missing key at boot. Listing something
+# credential-free instead would boot and then turn Dropbox off even for an
+# operator who had set it up, and `/auth/connect/dropbox/start` would answer
+# 404 `unsupported_provider` with nothing to say why.
+ENABLED_PROVIDERS = "dropbox"
 WEBDAV_ALLOW_PRIVATE = "false"
 
 [observability]

@@ -34,7 +34,11 @@ const rawEnvSchema = z.object({
 	AUTH_MODE: z.enum(['storage-first', 'account-first']).default('storage-first'),
 	// `prefault` (not `default`): the fallback is the raw string, fed through the
 	// same split-and-validate pipeline as an operator-supplied value.
-	ENABLED_PROVIDERS: providerList.prefault('gdrive,onedrive,dropbox,webdav'),
+	//
+	// Only what is implemented. Defaulting to all four would refuse to boot
+	// until an operator had registered apps with Google *and* Microsoft, for
+	// flows that do not exist yet.
+	ENABLED_PROVIDERS: providerList.prefault('dropbox'),
 
 	/** Public origin of this deployment; OAuth redirect URIs are built from it. */
 	APP_ORIGIN: z.url(),

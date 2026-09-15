@@ -5,7 +5,7 @@ Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, O
 ## Stack (do not substitute)
 - pnpm workspace: `apps/web` (Vite + React + TS, TanStack Router, Dexie, vite-plugin-pwa), `apps/api` (Hono on Cloudflare Workers, D1 via Drizzle), `packages/core` (framework-free TS).
 - Rich editor: Milkdown. Raw editor: CodeMirror 6.
-- Identity: hand-rolled OAuth over Web Crypto — Arctic was deprecated by its author before we needed it, so `docs/PLAN.md` §6 rejected it and nothing imports it. Validation: zod. Tests: Vitest.
+- Identity: not built yet (Phase 9). `docs/PLAN.md` §6 planned Arctic, its author deprecated it, and the choice between vendoring the two clients and a maintained alternative is still **open** — do not close it here. Storage OAuth, which is a different thing, is hand-rolled over Web Crypto and installs no dependency. Validation: zod. Tests: Vitest.
 
 ## Hard rules
 - `packages/core` imports nothing from `apps/*` and has no framework, DOM, or Node-only dependencies. It must run in browser, Node, and Workers.
