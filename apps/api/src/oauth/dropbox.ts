@@ -108,7 +108,11 @@ const postForm = async (
 		// put the client straight into a refresh loop; an hour is short enough to
 		// be safe if the real lifetime is shorter than Dropbox documents.
 		expiresAt: now + (body.expires_in ?? 3600) * 1000,
-		...(body.account_id === undefined ? {} : { accountId: body.account_id }),
+		// A present-but-empty or null id is worse than none: `''` matches every
+		// other `''` and would adopt two different accounts into one user.
+		...(typeof body.account_id === 'string' && body.account_id !== ''
+			? { accountId: body.account_id }
+			: {}),
 	};
 };
 

@@ -681,8 +681,10 @@ describe('what the fixes got wrong', () => {
 			{ cookies: second }
 		);
 
-		expect(response.status).toBe(409);
-		expect(await response.json()).toEqual({ error: 'account_already_connected' });
+		// A redirect, not JSON: the callback is a top-level navigation, and a raw
+		// body at `/api/auth/connect/...` is a dead end with no way back.
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=conflict');
 	});
 
 	it('returns a signed-out visitor to the one user that account belongs to', async () => {
@@ -703,31 +705,139 @@ describe('what the fixes got wrong', () => {
 		expect(await drizzle.select().from(schema.users)).toHaveLength(2);
 	});
 
-	it('refuses a grant that does not say which account it is for', async () => {
+	it.each([
+		['omitted', undefined],
+		['null', null],
+		['empty', ''],
+	])('refuses a grant whose account id is %s', async (_name, accountId) => {
 		const app = buildApp({
 			script: {
 				exchange: () =>
 					new Response(
-						JSON.stringify({ access_token: 'a', refresh_token: 'r', expires_in: 1 }),
-						{
-							headers: { 'content-type': 'application/json' },
-						}
+						JSON.stringify({
+							access_token: 'a',
+							refresh_token: 'r',
+							expires_in: 14400,
+							account_id: accountId,
+						}),
+						{ headers: { 'content-type': 'application/json' } }
 					),
 			},
 		});
 		const jar = createJar();
 		jar.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: jar }));
 
-		// Without an account id there is no way to tell a returning user from a
-		// new one, and minting one strands the old user's connection with a live
-		// refresh token nobody can reach to revoke.
+		// Without an account id there is no telling a returning user from a new
+		// one, and minting one strands the old user's connection with a live
+		// refresh token nobody can reach to revoke. An *empty* id is worse than a
+		// missing one: it matches every other empty id, so two different Dropbox
+		// accounts would adopt into the same user.
 		const response = await app.request(
 			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
 			{ cookies: jar }
 		);
 
-		expect(response.status).toBe(502);
-		expect(await response.json()).toEqual({ error: 'no_account_id' });
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=failed');
 		expect(await createDb(app.db).select().from(schema.users)).toHaveLength(0);
+	});
+
+	it('will not sign anyone in through a recognised account in account-first', async () => {
+		// The sibling test above covers an *unrecognised* account reaching
+		// `adopt`. This is the other half: an account the instance already knows,
+		// where issuing a session would be a second door into signing in.
+		const storageFirst = buildApp();
+		const { jar: owner } = await storageFirst.connect(createJar(), 'dbid:known');
+		owner.absorb(
+			await storageFirst.request('/api/auth/logout', { method: 'POST', cookies: owner })
+		);
+
+		const visitor = createJar();
+		visitor.absorb(
+			await storageFirst.request('/api/auth/connect/dropbox/start', { cookies: visitor })
+		);
+
+		const accountFirst = buildApp({ config: testConfig({ authMode: 'account-first' }) });
+		accountFirst.stub.as('dbid:known');
+		const response = await accountFirst.app.fetch(
+			new Request(
+				`https://notes.example.com/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(visitor)}`,
+				{ headers: { cookie: visitor.header() ?? '' }, redirect: 'manual' }
+			),
+			{ DB: storageFirst.db }
+		);
+
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'sign_in_required' });
+		expect(response.headers.getSetCookie().join()).not.toContain('skysa_session=');
+	});
+
+	it('leaves one user behind when two signed-out callbacks race for one account', async () => {
+		const app = buildApp();
+
+		const start = async () => {
+			const jar = createJar();
+			jar.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: jar }));
+			return jar;
+		};
+		const [one, two] = [await start(), await start()];
+
+		// Both flows find the account unclaimed, both mint a user, and only one
+		// insert can win the unique index. The loser has to undo itself rather
+		// than leave a second user holding a live refresh token that no session
+		// can ever reach.
+		const outcomes = await Promise.all(
+			[one, two].map(async (jar) =>
+				app.request(`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`, {
+					cookies: jar,
+				})
+			)
+		);
+
+		const drizzle = createDb(app.db);
+		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
+		expect(await drizzle.select().from(schema.users)).toHaveLength(1);
+
+		const locations = outcomes.map((response) => response.headers.get('location'));
+		expect(locations).toContain('/?connect=ok');
+		expect(outcomes.every((response) => response.status === 302)).toBe(true);
+	});
+
+	it('will not blank a known account id on a signed-in reconnect', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect(createJar(), 'dbid:1');
+		const drizzle = createDb(app.db);
+		await drizzle.update(schema.connections).set({ rootId: 'id:root' });
+
+		// The guard used to be gated on being signed out, so a signed-in reconnect
+		// wrote a null over the id — setting up the orphan one connect later.
+		const blank = buildApp({
+			script: {
+				exchange: () =>
+					new Response(
+						JSON.stringify({
+							access_token: 'a',
+							refresh_token: 'r',
+							expires_in: 14400,
+						}),
+						{ headers: { 'content-type': 'application/json' } }
+					),
+			},
+		});
+		const send = (path: string) =>
+			blank.app.fetch(
+				new Request(`https://notes.example.com${path}`, {
+					headers: { cookie: jar.header() ?? '', origin: 'https://notes.example.com' },
+					redirect: 'manual',
+				}),
+				{ DB: app.db }
+			);
+
+		jar.absorb(await send('/api/auth/connect/dropbox/start'));
+		await send(`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`);
+
+		const [row] = await drizzle.select().from(schema.connections);
+		expect(row?.accountId).toBe('dbid:1');
+		expect(row?.rootId).toBe('id:root');
 	});
 });

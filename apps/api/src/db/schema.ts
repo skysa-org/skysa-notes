@@ -91,9 +91,12 @@ export const connections = sqliteTable(
 		// Enforced here rather than by convention so reconnecting is an atomic
 		// upsert instead of a read-then-write race between two tabs.
 		uniqueIndex('connections_user_provider_idx').on(t.userId, t.provider),
-		// Not unique: two users of a shared instance may legitimately connect the
-		// same Dropbox account. This index only has to make the lookup cheap.
-		index('connections_provider_account_idx').on(t.provider, t.accountId),
+		// Unique, because in `storage-first` the account *is* the identity: two
+		// user rows claiming one account is an ambiguity nothing can resolve, and
+		// leaving it to a read-then-write left the answer up to row order. NULLs
+		// do not conflict in SQLite, which is only relevant to rows written before
+		// the id became mandatory.
+		uniqueIndex('connections_provider_account_idx').on(t.provider, t.accountId),
 	]
 );
 

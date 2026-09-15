@@ -305,6 +305,17 @@ A second review round found four more, three of them introduced by the first rou
 
 Three tests were also passing for the wrong reason and have been made load-bearing: the log-leak test asserted against a session id the failing query never bound; the shim's join test compared empty results; and the account-first test's 400 came from the session check, not the guard it named.
 
+A third round found six more, and closed the question the second round had only half-answered:
+
+- **The `no_account_id` guard only caught an *omitted* key.** A JSON `null` or `""` walked past it — and `""` is worse than missing, because it matches every other `""` and adopted two different Dropbox accounts into one user. The parser now accepts only a non-empty string.
+- **The same guard was gated on being signed out**, so a signed-in reconnect wrote a null over the account id it already had, setting up the orphan one connect later. It applies unconditionally now.
+- **`(provider, account_id)` is now unique** (migration `0003_one_user_per_account`). Two user rows claiming one account is an ambiguity nothing can resolve, and leaving it to a read-then-write meant two concurrent signed-out callbacks could each mint a user. The callback's own check is now belt-and-braces; the loser of the race undoes the user it created rather than leaving one holding a live refresh token. **This is a deviation from the schema comment written in PR 3**, which claimed two users of a shared instance may legitimately connect the same account: in `storage-first` the account *is* the identity, so they cannot, and `account-first` has no use for the second claim either. Revisit in Phase 9 if identity-first sign-in gives a reason to.
+- **`account-first` could adopt a *recognised* account** — the second round guarded creating a user but not issuing a session for one the instance already knew, which is the same door.
+- **The 409 and 502 rendered raw JSON at a top-level navigation**, the same dead end round one fixed for a replayed code. Every post-exchange failure now redirects with an outcome the UI can read.
+- **The shim's `describe()` ran outside `settle()`**, so bad SQL threw where D1 rejects — the very property round one had added.
+
+One thing to remember when reading the suite: the test database is built from the **migration files**, not from `schema.ts`. Mutating the schema alone changes nothing; the constraint has to be mutated where it lives.
+
 **Deliberately not done:** AES-GCM is used without additional authenticated data. Binding the connection id as AAD would stop a ciphertext copied between rows from decrypting, but an attacker who can write to `connections` has already lost the user the game. Recorded here rather than done, because the seal/open signature is cheaper to change now than after WebDAV credentials use it too.
 
 **Still open at the end of this PR:** the Dropbox app is not registered, so the OAuth round trip is proven against a scripted `fetch` and against `wrangler dev`, not against Dropbox.

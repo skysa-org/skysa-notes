@@ -43,6 +43,34 @@ describe('the node:sqlite D1 shim', () => {
 		await expect(insert('b')).rejects.toThrow();
 	});
 
+	it('enforces one user per provider account', async () => {
+		const db = createD1();
+		const user = (id: string) =>
+			db
+				.prepare(
+					'INSERT INTO users (id, email, email_verified, created_at) VALUES (?, ?, 0, 0)'
+				)
+				.bind(id, `${id}@example.com`)
+				.run();
+		const connect = (id: string, userId: string, accountId: string) =>
+			db
+				.prepare(
+					'INSERT INTO connections (id, user_id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)'
+				)
+				.bind(id, userId, 'dropbox', accountId, 'x', 'c', 'i', 'k1')
+				.run();
+
+		await user('a');
+		await user('b');
+		await connect('ca', 'a', 'dbid:shared');
+
+		// Two user rows claiming one account is an ambiguity nothing can resolve,
+		// and it is what let a signed-out connect land in the wrong user. The
+		// constraint is what makes the callback's own check belt-and-braces
+		// rather than the only thing standing between two racing requests.
+		await expect(connect('cb', 'b', 'dbid:shared')).rejects.toThrow();
+	});
+
 	it('enforces foreign keys, which SQLite does not do by default', async () => {
 		const db = createD1();
 		await expect(
@@ -87,6 +115,6 @@ describe('the node:sqlite D1 shim', () => {
 		// Two columns both named `id`. Against empty tables this test would pass
 		// whether or not they collapsed, which is why there is a row in them.
 		if (outcome.ok) expect(outcome.rows).toEqual([['user-1', 'connection-1']]);
-		else expect(String(outcome.error)).toContain('duplicate column names would collapse');
+		else expect(String(outcome.error)).toContain('duplicate column names');
 	});
 });

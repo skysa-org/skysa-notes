@@ -83,31 +83,31 @@ const statement = (db: DatabaseSync, sql: string, params: readonly Param[]) => {
 		 * the query instead: a join is refused loudly rather than answered wrong.
 		 * Node ≥ 23 has `columns()`, and the check disappears the moment it does.
 		 */
-		raw: () => {
-			const columns = describe(db, sql);
-			// Duplicate names collapse in the row object whether or not this Node
-			// can name the columns, so both branches have to refuse them: with
-			// `columns()` the duplicate is visible, without it a join is the proxy.
-			const ambiguous =
-				columns === undefined
-					? /\bjoin\b/i.test(sql)
-					: new Set(columns).size !== columns.length;
-			if (ambiguous) {
-				return Promise.reject(
-					new Error(
-						'the node:sqlite D1 shim cannot return positional rows for a join on ' +
-							'this Node version: duplicate column names would collapse. Run the ' +
-							'suite on Node >= 23, or switch to @cloudflare/vitest-pool-workers.'
-					)
-				);
-			}
+		raw: () =>
+			settle(() => {
+				// Preparing the statement is itself a throw for bad SQL, so it has to
+				// happen inside the settle: D1 rejects, it does not throw.
+				const columns = describe(db, sql);
 
-			return settle(() => {
+				// Duplicate names collapse in the row object whether or not this Node
+				// can name the columns, so both branches refuse them: with `columns()`
+				// the duplicate is visible, without it a join is the only proxy.
+				const ambiguous =
+					columns === undefined
+						? /\bjoin\b/i.test(sql)
+						: new Set(columns).size !== columns.length;
+				if (ambiguous) {
+					throw new Error(
+						'the node:sqlite D1 shim cannot return positional rows for a query ' +
+							'with duplicate column names: they would collapse. Switch to ' +
+							'@cloudflare/vitest-pool-workers when it supports Vitest 5.'
+					);
+				}
+
 				const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
 				if (columns === undefined) return rows.map((row) => Object.values(row));
 				return rows.map((row) => columns.map((column) => row[column]));
-			});
-		},
+			}),
 
 		first: async (column?: string) => {
 			const { results } = await self.all();

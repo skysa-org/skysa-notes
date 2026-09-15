@@ -51,7 +51,7 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
-const back = (returnTo: string, outcome: 'ok' | 'denied' | 'failed'): string =>
+const back = (returnTo: string, outcome: 'ok' | 'denied' | 'failed' | 'conflict'): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
 
 export const connectRoutes = (doFetch: FetchLike) => {
@@ -149,45 +149,68 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// hours with no way to recover, so this is a failure, not a warning.
 		if (tokens.refreshToken === undefined) return c.json({ error: 'no_refresh_token' }, 502);
 
-		// In storage-first the account id *is* the identity. Without one there is
-		// no way to tell a returning user from a new one, and guessing means
-		// stranding the old user's connection with a refresh token nobody can
-		// reach to revoke. Dropbox always sends it; a response without one is a
-		// failure, not something to work around.
-		if (sessionUser === undefined && tokens.accountId === undefined) {
-			return c.json({ error: 'no_account_id' }, 502);
-		}
+		// The account id *is* the identity in storage-first, and in both modes it
+		// is what tells a reconnect to the same account from a reconnect to a
+		// different one. Without it a signed-out connect cannot recognise a
+		// returning user, and a signed-in one would write a null over the id it
+		// already had — which sets up the same failure a connect later. Dropbox
+		// always sends it; a response without one is a failure, not something to
+		// paper over, so this is checked whether or not anyone is signed in.
+		if (tokens.accountId === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
 		const displayName = await accountName(doFetch, tokens.accessToken);
 		const now = Date.now();
 
-		// Storage-first treats the account as the identity, so an account already
-		// connected to somebody else is not a second claim on it — it is either
-		// two people sharing a login, or an attempt to reach that account's notes.
-		// Either way the answer is no, and refusing here is what keeps `adopt`
-		// unambiguous.
+		// The account is the identity, so an account already connected to somebody
+		// else is not a second claim on it — it is either two people sharing a
+		// login, or an attempt to reach that account's notes.
 		const claimed = await claimedBy(db, tokens.accountId);
-		const someoneElse = claimed !== undefined && claimed !== sessionUser;
+
 		// A signed-out visitor presenting a claimed account is that account's
 		// owner coming back, and is adopted below. A *signed-in* user presenting
-		// somebody else's is the case to refuse.
-		if (config.authMode === 'storage-first' && someoneElse && sessionUser !== undefined) {
-			return c.json({ error: 'account_already_connected' }, 409);
+		// somebody else's is the case to refuse — in either mode, since the unique
+		// index would refuse it anyway and a constraint violation is a 500.
+		if (claimed !== undefined && sessionUser !== undefined && claimed !== sessionUser) {
+			return c.redirect(back(flow.returnTo, 'conflict'));
 		}
 
-		const userId = sessionUser ?? (await adopt(c, db, config, tokens, displayName, now));
+		/**
+		 * Whose connection this is. Signed in: theirs. Signed out and the account
+		 * is already known: its owner, coming back. Signed out and it is not: a
+		 * new user, but only where creating one is allowed.
+		 */
+		const minted = sessionUser === undefined && claimed === undefined;
+		const userId = await (async (): Promise<string | undefined> => {
+			if (sessionUser !== undefined) return sessionUser;
+			// Neither branch below may run in account-first, where a connection
+			// attaches only to a user who signed in first — issuing a session for a
+			// recognised account would be a second door into signing in.
+			if (config.authMode !== 'storage-first') return undefined;
+			if (claimed !== undefined) {
+				await issueSession(c, db, claimed, cookies, now);
+				return claimed;
+			}
+			return adopt(c, db, config, displayName, now);
+		})();
 		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
 
-		await store(
+		const stored = await store(
 			db,
 			userId,
 			tokens,
 			displayName,
-			await sealOAuthSecret(c.get('secretKey'), {
-				refreshToken: tokens.refreshToken,
-			}),
+			await sealOAuthSecret(c.get('secretKey'), { refreshToken: tokens.refreshToken }),
 			now
 		);
+
+		// Two signed-out callbacks for the same account, racing: both found it
+		// unclaimed, and the unique index let exactly one of them win. The loser
+		// undoes the user it just created — the cascade takes the session with it
+		// — rather than leaving a second user holding a live refresh token.
+		if (!stored) {
+			if (minted) await db.delete(schema.users).where(eq(schema.users.id, userId));
+			return c.redirect(back(flow.returnTo, 'conflict'));
+		}
 
 		return c.redirect(back(flow.returnTo, 'ok'));
 	});
@@ -196,24 +219,13 @@ export const connectRoutes = (doFetch: FetchLike) => {
 };
 
 /**
- * `storage-first` with no session: the user is whoever this Dropbox account
- * already belongs to, and only a genuinely new account creates a new user.
- *
- * Matching on the provider's account id rather than on the session is what stops
- * every sign-out-then-reconnect from minting a second user whose connection no
- * session can ever reach again — an orphaned row holding a live, unrevokable
- * refresh token.
- *
- * Returns undefined in `account-first`, where a connection may only attach to a
- * user who signed in first.
- */
-/**
  * Which user, if any, already holds this provider account.
  *
- * Storage-first refuses a second claim outright, so there is normally one row to
- * find. The ordering is for `account-first`, where the index is deliberately not
- * unique and two users may legitimately connect the same account: an unordered
- * `findFirst` would answer by row order, which is no answer at all.
+ * At most one can: `connections_provider_account_idx` is unique. Matching on the
+ * provider's account id rather than on the session is what stops every
+ * sign-out-then-reconnect from minting a second user whose connection no session
+ * can ever reach again — an orphaned row holding a live, unrevokable refresh
+ * token.
  */
 const claimedBy = async (
 	db: Database,
@@ -225,26 +237,24 @@ const claimedBy = async (
 			eq(schema.connections.provider, 'dropbox'),
 			eq(schema.connections.accountId, accountId)
 		),
-		orderBy: (connections, { asc }) => [asc(connections.createdAt), asc(connections.id)],
 	});
 	return row?.userId;
 };
+
+/**
+ * A brand new user for a brand new account. `storage-first` only: in
+ * `account-first` a connection may attach only to a user who signed in first,
+ * which is why this returns undefined there rather than creating one.
+ */
 
 const adopt = async (
 	c: Parameters<typeof issueSession>[0],
 	db: Database,
 	config: AppConfig,
-	tokens: TokenSet,
 	displayName: string,
 	now: number
 ): Promise<string | undefined> => {
 	if (config.authMode !== 'storage-first') return undefined;
-
-	const known = await claimedBy(db, tokens.accountId);
-	if (known !== undefined) {
-		await issueSession(c, db, known, { secure: config.cookiesSecure }, now);
-		return known;
-	}
 
 	const id = randomBase64Url(16);
 	await db.insert(schema.users).values({
@@ -273,7 +283,7 @@ const store = async (
 	displayName: string,
 	sealed: SealedSecret,
 	now: number
-): Promise<void> => {
+): Promise<boolean> => {
 	const existing = await db.query.connections.findFirst({
 		where: and(
 			eq(schema.connections.userId, userId),
@@ -296,26 +306,32 @@ const store = async (
 	// race between two tabs would leave the row under an id neither returned.
 	const id = sameAccount ? existing.id : randomBase64Url(16);
 
-	await db
-		.insert(schema.connections)
-		.values({
-			id,
-			userId,
-			provider: 'dropbox',
-			accountId: tokens.accountId ?? null,
-			displayName,
-			...secret,
-			createdAt: new Date(now),
-			lastUsedAt: new Date(now),
-		})
-		.onConflictDoUpdate({
-			target: [schema.connections.userId, schema.connections.provider],
-			set: {
-				...(sameAccount ? {} : { id, rootId: null }),
+	return (
+		db
+			.insert(schema.connections)
+			.values({
+				id,
+				userId,
+				provider: 'dropbox',
 				accountId: tokens.accountId ?? null,
 				displayName,
 				...secret,
+				createdAt: new Date(now),
 				lastUsedAt: new Date(now),
-			},
-		});
+			})
+			.onConflictDoUpdate({
+				target: [schema.connections.userId, schema.connections.provider],
+				set: {
+					...(sameAccount ? {} : { id, rootId: null }),
+					accountId: tokens.accountId ?? null,
+					displayName,
+					...secret,
+					lastUsedAt: new Date(now),
+				},
+			})
+			.then(() => true)
+			// The only constraint that can fire here is the unique account index:
+			// somebody else claimed this account between the lookup and the write.
+			.catch(() => false)
+	);
 };
