@@ -282,6 +282,51 @@ export const describeSyncStoreContract = (
 				expect(note?.dirty).toBe(true);
 			});
 
+			it('moves a displaced note without touching its contents', async () => {
+				// It is only being got out of the way of a remote note landing
+				// on its path. The text is the user's, it has never been
+				// anywhere else, and it still needs pushing.
+				const { store, seed } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+
+				await store.applyPull({
+					changes: [{ kind: 'displace-note', id: 'n1', path: 'a (conflict x).md' }],
+					cursor: 'c1',
+				});
+
+				const note = await store.noteById('n1');
+				expect(note?.path).toBe('a (conflict x).md');
+				expect(note?.content).toBe('mine\n');
+				expect(note?.dirty).toBe(true);
+				expect(await store.noteByPath('a.md')).toBeUndefined();
+			});
+
+			it('holds two notes at one path while a batch is mid-flight', async () => {
+				// A note moving out of the way is a change of its own and can
+				// come later in the batch. A unique index on `path` would reject
+				// this and be retried for ever; making room by deleting what is
+				// there takes that note's unpushed edits with it.
+				const { store, seed } = await harness();
+				await seed({ id: 'ours', path: 'a.md', content: 'mine\n', dirty: true });
+				await seed({ id: 'theirs', path: 'b.md', content: 'theirs\n', remoteId: 'r2' });
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'move-note',
+							id: 'theirs',
+							path: 'a.md',
+							remote: remote('a.md', 'r2'),
+						},
+						{ kind: 'displace-note', id: 'ours', path: 'a (conflict x).md' },
+					],
+					cursor: 'c1',
+				});
+
+				expect((await store.noteByPath('a.md'))?.id).toBe('theirs');
+				expect((await store.noteById('ours'))?.content).toBe('mine\n');
+			});
+
 			it('accepts a delete for a note that is already gone', async () => {
 				// A provider that reports a folder deletion recursively names the
 				// folder and then everything that was in it, and the folder took

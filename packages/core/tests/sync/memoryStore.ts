@@ -1,4 +1,4 @@
-import { isWithin, parentPath, rebasePath, ROOT } from '../../src/paths.js';
+import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../src/paths.js';
 import type {
 	ConflictResolution,
 	OpOutcome,
@@ -169,20 +169,38 @@ export const createMemoryStore = (): MemoryStore => {
 			return;
 		}
 		if (change.kind === 'ensure-folder') {
-			ensureFolderChain(parentPath(change.path));
-			if (change.path !== ROOT) {
-				folders.set(change.path, {
-					path: change.path,
-					...(change.remoteId === undefined ? {} : { remoteId: change.remoteId }),
-				});
+			// The app folder is not a notebook and holds no row. A store that
+			// kept one would have it reconciled away after the next cursor
+			// reset — and since every path is within the root, that one
+			// `delete-folder` is every note on the device.
+			if (change.path === ROOT) {
+				anomalies.push('ensure-folder for the root');
+				return;
 			}
+			ensureFolderChain(parentPath(change.path));
+			folders.set(change.path, {
+				path: change.path,
+				...(change.remoteId === undefined ? {} : { remoteId: change.remoteId }),
+			});
 			return;
 		}
 		if (change.kind === 'move-folder') {
 			applyFolderMove(change.from, change.to, change.remoteId);
 			return;
 		}
+		if (change.kind === 'displace-note') {
+			// Contents and dirty flag untouched: the note is only being moved out
+			// of the way, and it is the user's writing.
+			const note = requireNote(change.id);
+			ensureFolderChain(parentPath(change.path));
+			notes.set(note.id, { ...note, path: change.path });
+			return;
+		}
 		if (change.kind === 'delete-folder') {
+			if (normalizePath(change.path) === ROOT) {
+				anomalies.push('delete-folder for the root');
+				return;
+			}
 			// Everything beneath it, not just the row itself: a folder that is
 			// gone remotely cannot leave its subfolders behind, and it cannot
 			// leave its notes floating at paths whose folder no longer exists.

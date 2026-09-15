@@ -218,12 +218,20 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (remoteId !== undefined && live.has(remoteId)) return true;
 		if (local?.remoteId !== undefined && live.has(local.remoteId)) return true;
 
-		// The folder it was in, or any folder above that. A provider that
-		// renames `Work` and re-lists nothing inside it — the children's bytes
-		// did not change — reports `Work/a.md` as deleted with no id at all, and
-		// the only thing left saying otherwise is that `Work` itself is alive
-		// under its new name somewhere in this batch. Read literally, the whole
-		// notebook was deleted.
+		// Only for a deletion that names nothing but a path, which is the shape
+		// this rule exists for — Dropbox's `DeletedMetadata`. A provider that
+		// renames `Work` and re-lists nothing inside it (the children's bytes did
+		// not change) reports `Work/a.md` that way, and the only thing left
+		// saying the note is alive is that `Work` itself is somewhere in this
+		// batch under its new name.
+		//
+		// A deletion that does carry an id is answered by the rules above, and
+		// must not be second-guessed here: the provider knew the file well enough
+		// to name it, so "some folder above it is in this batch" is not evidence
+		// against it — and a deletion dropped here is dropped for ever, because
+		// the cursor moves on and nothing ever mentions it again.
+		if (remoteId !== undefined) return false;
+
 		const candidates = [path, ...ancestorPaths(path)];
 		const folders = await Promise.all(candidates.map((each) => store.folderByPath(each)));
 		return folders.some(
@@ -277,6 +285,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	const decideFolder = async (entry: RemoteEntry): Promise<PullChange[]> => {
+		// The app folder itself, which several providers report as an entry of
+		// its own — Graph's `delta` returns the root item. There is nothing above
+		// it to hold a row, and a row for it would be reconciled away after the
+		// next cursor reset as a folder the scan did not mention. Since every
+		// path is within the root, that one `delete-folder` means every note on
+		// the device. The root is not a notebook, so it is not a folder row.
+		if (normalizePath(entry.path) === ROOT) return [];
+
 		const existing = await store.folderByRemoteId(entry.remoteId);
 		if (existing !== undefined && existing.path !== entry.path) {
 			return [
@@ -311,7 +327,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<string> => {
 		const claimed = parseNoteFile(content).id;
 		if (claimed === undefined) return newId();
-		const held = (await store.noteById(claimed)) !== undefined;
+
+		// Held by a note that is still going to be there. One this batch has
+		// already taken away is not a competing claim — a file moved in a way the
+		// provider reports as a delete plus a create is one note, and the id in
+		// the file is the only thing tying the two halves together.
+		const holder = await store.noteById(claimed);
+		const held = holder !== undefined && !removedInBatch(holder, decided);
 		return held || reestablished(decided).notes.has(claimed) ? newId() : claimed;
 	};
 
@@ -344,6 +366,39 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		]);
 	};
 
+	/**
+	 * A note of ours sitting where a remote one is about to land, which the
+	 * remote knows nothing about — it was created here and never pushed. Two
+	 * devices both writing an `Untitled.md` offline is the ordinary way to get
+	 * there, and so is a note moved remotely into a folder where we happen to
+	 * have one of the same name.
+	 *
+	 * The remote keeps the path, per §7, and ours moves aside under the same
+	 * name a conflict copy would get — because that is what this is. Left where
+	 * it was, the two notes share a path: the sidebar shows the same row twice,
+	 * and the queued write for ours eventually lands on the other one's file.
+	 *
+	 * Only a note with no `remoteId` is displaced. One that has been pushed is a
+	 * note whose file is somewhere else by now, and its own entry — in this
+	 * batch or a later one — is what moves it; renaming it here would take it
+	 * away from a remote file that still exists.
+	 */
+	const displaceOccupant = async (
+		path: string,
+		keeper: string | undefined,
+		decided: readonly PullChange[],
+		claimed: ReadonlySet<string>
+	): Promise<PullChange[]> => {
+		const occupant = await store.noteByPath(path);
+		if (occupant === undefined || occupant.id === keeper) return [];
+		if (occupant.remoteId !== undefined) return [];
+		// Already dealt with by an earlier decision in this batch.
+		if (decidedNotes(decided).has(occupant.id)) return [];
+
+		const taken = await takenIn(parentPath(path), claimed);
+		return [{ kind: 'displace-note', id: occupant.id, path: conflictPath(path, now(), taken) }];
+	};
+
 	const decideFile = async (
 		entry: RemoteEntry,
 		decided: readonly PullChange[],
@@ -358,20 +413,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// user keeps one note rather than watching one vanish and another appear.
 		const removed = local !== undefined && removedInBatch(local, decided);
 
+		// Whatever we decide below puts a note at `entry.path`, so anything of
+		// ours already there has to move first — in that order, or the store is
+		// asked to hold two notes at one path with no way to tell them apart.
+		const room = await displaceOccupant(entry.path, local?.id, decided, claimed);
+		const after = [...decided, ...room];
+
 		// The version we already hold. Either nothing happened, or the file was
 		// renamed — a rename alone changes no bytes, so there is nothing to read.
 		if (local !== undefined && !removed && local.remoteVersion === entry.version) {
-			return local.path === entry.path
-				? []
-				: [{ kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
+			if (local.path === entry.path) return [];
+			return [...room, { kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
 		}
 
 		const { content } = await provider.read(entry);
 		if (local === undefined) {
 			return [
+				...room,
 				{
 					kind: 'upsert-note',
-					id: await idForNewNote(content, decided),
+					id: await idForNewNote(content, after),
 					path: entry.path,
 					content,
 					remote: entry,
@@ -380,10 +441,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 		if (removed) {
 			return [
+				...room,
 				{ kind: 'upsert-note', id: local.id, path: entry.path, content, remote: entry },
 			];
 		}
-		return decideKnown(local, content, entry, claimed);
+		return [...room, ...(await decideKnown(local, content, entry, claimed))];
 	};
 
 	const decide = async (
@@ -470,7 +532,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				if (change.kind === 'conflict') {
 					return [change.resolution.noteId, change.resolution.copyId];
 				}
-				return 'id' in change ? [change.id] : [];
+				// Written back, not merely mentioned. A `delete-note` carries an
+				// id too, and counting it here would mean a file arriving with
+				// the id of a note this batch deleted was refused that id — two
+				// devices then disagreeing for ever about which note it is.
+				const writes = ['upsert-note', 'adopt-version', 'move-note'];
+				return writes.includes(change.kind) && 'id' in change ? [change.id] : [];
 			})
 		),
 		folders: new Set(
@@ -481,11 +548,29 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		),
 	});
 
+	/**
+	 * Every note this batch has already said something about, whatever it said.
+	 * A wider question than `reestablished`, and a different one: reconciling is
+	 * about the notes the scan never mentioned, so a note the batch has already
+	 * decided — written back *or* taken away — is not its business either way.
+	 * Saying it twice is at best a duplicate and at worst a second delete of
+	 * something the batch has already removed, which fails the whole batch.
+	 */
+	const decidedNotes = (changes: readonly PullChange[]): ReadonlySet<string> =>
+		new Set(
+			changes.flatMap((change) => {
+				if (change.kind === 'conflict') {
+					return [change.resolution.noteId, change.resolution.copyId];
+				}
+				return 'id' in change ? [change.id] : [];
+			})
+		);
+
 	const reconcile = async (
 		seen: ReadonlySet<string>,
 		changes: readonly PullChange[]
 	): Promise<PullChange[]> => {
-		const kept = reestablished(changes);
+		const kept = { notes: decidedNotes(changes), folders: reestablished(changes).folders };
 		const notes = await store.allNotes();
 		const folders = await store.foldersWithRemote();
 		return [
@@ -502,6 +587,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			...folders
 				.filter(
 					(folder) =>
+						// Belt and braces with `decideFolder`: a row for the root
+						// should not exist, and if one ever does, deleting it takes
+						// every note with it — `isWithin` is true of everything.
+						normalizePath(folder.path) !== ROOT &&
 						folder.remoteId !== undefined &&
 						!seen.has(folder.remoteId) &&
 						!kept.folders.has(folder.path)
@@ -721,6 +810,22 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (note === undefined) return undefined;
 
 		const { content } = await provider.read(remote);
+
+		// Same bytes on both sides, which is what an interrupted push looks like
+		// from here: the write landed and the store could not be told before the
+		// tab closed, so the op is still queued with a version the remote has
+		// moved past. Conflicting would hand the user a copy of the note they
+		// already have. Pull's "same bytes, new version" rule, on this side.
+		if (content === note.content) {
+			await store.completeOp(op.seq, {
+				kind: 'pushed',
+				noteId: note.id,
+				remote,
+				content: note.content,
+			});
+			return '';
+		}
+
 		const resolution = await resolutionFor(note, content, remote, new Set());
 		await store.resolveConflict(op.seq, resolution);
 		return resolution.copyPath;
@@ -768,13 +873,21 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		progress: PushProgress,
 		retriedAuth: boolean
 	): Promise<SyncOutcome> => {
-		const copy = isConflictError(error)
-			? await resolvePushConflict(op, error.remote)
+		// The resolution reads the remote and writes to the store, either of
+		// which can fail in its own right — and a failure there must land in the
+		// same place as any other, or the op's `attempts` never moves and it can
+		// never reach `blocked` however long it has been failing.
+		const resolved = isConflictError(error)
+			? await resolvePushConflict(op, error.remote).catch(() => undefined)
 			: undefined;
-		if (copy !== undefined) {
+		if (resolved !== undefined) {
 			return drainOps(
 				ops.slice(1),
-				{ pushed: progress.pushed, conflicts: [...progress.conflicts, copy] },
+				{
+					pushed: progress.pushed + (resolved === '' ? 1 : 0),
+					conflicts:
+						resolved === '' ? progress.conflicts : [...progress.conflicts, resolved],
+				},
 				retriedAuth
 			);
 		}

@@ -72,10 +72,16 @@ export type PullChange =
 			 */
 			id: string;
 			/**
-			 * Where the note ends up — it moves if it was elsewhere. The engine
-			 * guarantees no *other* note is already here: two rows at one path
-			 * is a note the sidebar shows twice and two queued writes racing for
-			 * one file, so the store is not asked to arbitrate.
+			 * Where the note ends up — it moves if it was elsewhere.
+			 *
+			 * Another note may be at this path *while the batch is being
+			 * applied*: a note moving out of the way is a change of its own, and
+			 * it can come later in the same batch. So the store must not enforce
+			 * uniqueness on `path` (a unique index would reject the batch, and a
+			 * rejected batch is retried for ever) and must not make room by
+			 * deleting whatever is there — that note is about to be moved, and
+			 * deleting it takes its unpushed edits with it. By the end of the
+			 * batch exactly one note is at each path; the engine sees to that.
 			 */
 			path: string;
 			content: string;
@@ -117,8 +123,22 @@ export type PullChange =
 	  }>
 	| Readonly<{
 			/**
+			 * A note created here and never pushed is sitting where a remote one
+			 * is about to land. Move ours aside, keeping its contents and its
+			 * dirty flag: it is the user's writing, it has never been anywhere
+			 * else, and the remote keeps the path (docs/PLAN.md §7). Two rows at
+			 * one path is a note the sidebar shows twice and two queued writes
+			 * racing for one file.
+			 */
+			kind: 'displace-note';
+			id: string;
+			path: string;
+	  }>
+	| Readonly<{
+			/**
 			 * A folder that must exist, with this `remoteId`. Idempotent: the
-			 * folder may already be there, with an id or without one.
+			 * folder may already be there, with an id or without one. Never the
+			 * root: the app folder itself is not a notebook and holds no row.
 			 */
 			kind: 'ensure-folder';
 			path: string;
