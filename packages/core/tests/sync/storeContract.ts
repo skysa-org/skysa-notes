@@ -607,6 +607,32 @@ export const describeSyncStoreContract = (
 				expect(ops.find((op) => op.seq === seq)?.path).toBe('Archive/a.md');
 			});
 
+			it('carries a queued move’s target with it too', async () => {
+				// `targetPath` is the half that says where the note is going, and
+				// a store that rebases only `path` leaves the move aimed at a
+				// folder that no longer exists. It then fails on every attempt,
+				// and the ordered queue strands every op behind it — for every
+				// note, not just this one.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'Work/a.md',
+					targetPath: 'Work/renamed.md',
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'move-folder', from: 'Work', to: 'Archive', remoteId: 'f1' }],
+					cursor: 'c1',
+				});
+
+				const moved = (await store.pendingOps()).find((op) => op.seq === seq);
+				expect(moved?.path).toBe('Archive/a.md');
+				expect(moved?.targetPath).toBe('Archive/renamed.md');
+			});
+
 			it('does not clean a dirty note on the way', async () => {
 				const { store, seed, seedFolder } = await harness();
 				await seedFolder({ path: 'Work', remoteId: 'f1' });
@@ -675,6 +701,55 @@ export const describeSyncStoreContract = (
 
 				const ops = await store.pendingOps();
 				expect(ops.map((op) => op.path)).toContain('a (conflict 2026-09-15T14-32).md');
+			});
+
+			it('drops the write the losing edit had queued', async () => {
+				// That op carries the content the copy now holds, and the note
+				// itself holds the remote's bytes. Replaying it writes the
+				// remote's own content straight back to it under a new version,
+				// which every other device pulls as a change that changed
+				// nothing — and which can lose a race against a real edit made
+				// between the two. The user's writing is not at risk: it is in
+				// the copy, which is queued in its place.
+				const { store, seed, seedOp } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					remoteVersion: 'v1',
+					dirty: true,
+				});
+				const seq = await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+				await store.applyPull({ changes: [{ kind: 'conflict', resolution }], cursor: 'x' });
+
+				const ops = await store.pendingOps();
+				expect(ops.some((op) => op.seq === seq)).toBe(false);
+				expect(ops.map((op) => op.path)).toContain('a (conflict 2026-09-15T14-32).md');
+			});
+
+			it('leaves the user’s rename queued', async () => {
+				// The conflict rule is about content. A queued `move` is the
+				// user's own rename of the note, and nothing about the remote
+				// winning the path makes it wrong to ask for it.
+				const { store, seed, seedOp } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					remoteVersion: 'v1',
+					dirty: true,
+				});
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'a.md',
+					targetPath: 'b.md',
+				});
+				await store.applyPull({ changes: [{ kind: 'conflict', resolution }], cursor: 'x' });
+
+				expect((await store.pendingOps()).some((op) => op.seq === seq)).toBe(true);
 			});
 
 			it('does not give the copy the remote the original had', async () => {

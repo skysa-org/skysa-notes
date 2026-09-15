@@ -95,6 +95,12 @@ export const createMemoryStore = (): MemoryStore => {
 			content: resolution.copyContent,
 			dirty: true,
 		});
+		// The edit that lost is in the copy now, and the note holds the remote's
+		// bytes. Anything still queued to write the old content would put it
+		// straight back on the remote under a new version.
+		for (const op of [...ops.values()]) {
+			if (op.op === 'write' && op.noteId === resolution.noteId) ops.delete(op.seq);
+		}
 		// The copy only exists locally, so it needs a push of its own.
 		queue({ op: 'write', noteId: resolution.copyId, path: resolution.copyPath });
 	};

@@ -3336,3 +3336,395 @@ describe('sync', () => {
 		expect(store.ops()).toEqual([]);
 	});
 });
+
+/**
+ * Round 8 of adversarial review. Every one of these is the same mistake in a
+ * different place — a decision reached against the store when the question it
+ * was really asking was about the batch in front of it — and what they have in
+ * common beyond that is folders. A folder change says one word about a whole
+ * subtree, so the gap between what the feed reports and what actually moves is
+ * widest here.
+ */
+describe('a folder move landing on top of what is already there', () => {
+	it('moves the notes in the way aside, not just the folder', async () => {
+		// The user deleted `B` and renamed `A` onto its name. `B/x.md` had an
+		// unpushed edit, so the cascade keeps it and merely cuts it loose — and
+		// that leaves nothing at `B` for `clearTheWay` to find while there is
+		// still something at `B/x.md`. `A/x.md` then lands on top of it: two
+		// rows at one path, and after the next push both point at one file,
+		// each overwriting the other for ever.
+		const fa = await provider.createFolder('A');
+		await remoteFile('A/x.md', 'from A\n');
+		const fb = await provider.createFolder('B');
+		await remoteFile('B/x.md', 'from B\n');
+		await engine.pull();
+		const mine = noteAt('B/x.md');
+		if (mine === undefined) throw new Error('nothing at B/x.md');
+		store.put({ ...mine, content: 'my edit\n', dirty: true });
+
+		await provider.delete(fb);
+		const renamed = await provider.move(fa, 'B');
+
+		await pullNow([{ path: 'B', deleted: true, remoteId: fb.remoteId }, renamed]);
+
+		expect(noteAt('B/x.md')?.content).toBe('from A\n');
+		const kept = store.notes().find((note) => note.content === 'my edit\n');
+		expect(kept?.path).toContain('conflict');
+		expect(parentPath(kept?.path ?? '')).toBe('B');
+	});
+
+	it('leaves a folder moving within itself alone', async () => {
+		// Every note under `Work` is both a mover and a sitter here. Displacing
+		// them against themselves would rename every note in the notebook to a
+		// conflict copy over a change that moved nothing at all.
+		await provider.createFolder('Work');
+		await remoteFile('Work/a.md', 'a\n');
+		await engine.pull();
+		const folder = await provider
+			.list('')
+			.then((entries) => entries.find((entry) => entry.path === 'Work'));
+		if (folder === undefined) throw new Error('no Work folder');
+		const renamed = await provider.move(folder, 'Archive');
+
+		await pullNow([renamed]);
+
+		expect(store.notes().map((note) => note.path)).toEqual(['Archive/a.md']);
+	});
+});
+
+describe('a folder deletion decided against a path that changed hands', () => {
+	it('acts on a deletion inside a folder the batch has just moved in', async () => {
+		// Delete `B`, rename `A` onto `B`, delete `B/sub`. The third is about
+		// `A/sub`, which is at `B/sub` by the time it is decided — and the store
+		// has never held a row at that path. Asking the store alone drops the
+		// deletion, and a dropped deletion is dropped for ever: the cursor moves
+		// on and nothing says it again.
+		const fa = await provider.createFolder('A');
+		await provider.createFolder('A/sub');
+		await remoteFile('A/sub/inside.md', 'inside\n');
+		const fb = await provider.createFolder('B');
+		await engine.pull();
+
+		await provider.delete(fb);
+		const renamed = await provider.move(fa, 'B');
+
+		await pullNow([
+			{ path: 'B', deleted: true, remoteId: fb.remoteId },
+			renamed,
+			{ path: 'B/sub', deleted: true },
+		]);
+
+		expect(store.notes()).toEqual([]);
+		expect(store.folders().map((folder) => folder.path)).toEqual(['B']);
+	});
+
+	it('acts on a second deletion of a path re-occupied in the same batch', () =>
+		(async () => {
+			// Delete `A`, rename `B` onto `A`, delete `A`. The two deletions name
+			// one path and mean two different folders. Reading the second as
+			// already covered by the first leaves the notebook the user deleted
+			// in the sidebar until something else happens to it.
+			const fa = await provider.createFolder('A');
+			await remoteFile('A/in A.md', 'in A\n');
+			const fb = await provider.createFolder('B');
+			await remoteFile('B/in B.md', 'in B\n');
+			await engine.pull();
+
+			await provider.delete(fa);
+			const renamed = await provider.move(fb, 'A');
+
+			await pullNow([
+				{ path: 'A', deleted: true, remoteId: fa.remoteId },
+				renamed,
+				{ path: 'A', deleted: true, remoteId: fb.remoteId },
+			]);
+
+			expect(store.notes()).toEqual([]);
+			expect(store.folders()).toEqual([]);
+		})());
+});
+
+describe('two different files deleted at one path', () => {
+	it('lets go of both of them', async () => {
+		// A file replaced and then removed inside one cursor window. Keying the
+		// deletions by path alone folds them into one, and the one kept is the
+		// last — so the first file's note is never let go of, and survives as a
+		// conflict copy of something the remote no longer has.
+		const first = await remoteFile('x.md', 'first\n');
+		await engine.pull();
+		await provider.delete(first);
+		const second = await remoteFile('x.md', 'second\n');
+		await provider.delete(second);
+
+		await pullNow([
+			{ path: 'x.md', deleted: true, remoteId: first.remoteId },
+			second,
+			{ path: 'x.md', deleted: true, remoteId: second.remoteId },
+		]);
+
+		expect(store.notes()).toEqual([]);
+	});
+});
+
+describe('a note the batch put back after taking it away', () => {
+	it('lets go of it when the same batch then deletes it', async () => {
+		// `A` deleted, `A` made again, `A/x.md` written and then deleted, all in
+		// one window. The note is taken away by the cascade, written back by the
+		// new file, and deleted again — and a decision that stops looking at a
+		// note the moment it is first removed never sees the last two.
+		const folder = await provider.createFolder('A');
+		const file = await remoteFile('A/x.md', 'x\n');
+		await engine.pull();
+		await provider.delete(folder);
+		const again = await provider.createFolder('A');
+		const back = await remoteFile('A/x.md', 'x again\n');
+		await provider.delete(back);
+
+		await pullNow([
+			{ path: 'A', deleted: true, remoteId: folder.remoteId },
+			{ path: 'A/x.md', deleted: true, remoteId: file.remoteId },
+			again,
+			back,
+			{ path: 'A/x.md', deleted: true, remoteId: back.remoteId },
+		]);
+
+		expect(store.notes()).toEqual([]);
+	});
+});
+
+describe('an entry matched by path to a note that has moved', () => {
+	it('does not hand a note carried off by a folder rename somebody else’s file', async () => {
+		// The rename of `A` takes `A/x.md` to `Z/x.md`, and one entry for the
+		// folder is the whole report — nothing in the feed says anything about
+		// the file. A different file then arrives at `A/x.md`, and the store
+		// still shows our note sitting there, so matching by path writes their
+		// bytes over our note while its own file goes on existing as `Z/x.md`.
+		const folder = await provider.createFolder('A');
+		await remoteFile('A/x.md', 'mine\n');
+		await engine.pull();
+		const before = noteAt('A/x.md');
+
+		const renamed = await provider.move(folder, 'Z');
+		await provider.createFolder('A');
+		const theirs = await remoteFile('A/x.md', 'theirs\n');
+
+		await pullNow([renamed, theirs]);
+
+		expect(noteAt('Z/x.md')?.content).toBe('mine\n');
+		expect(noteAt('Z/x.md')?.id).toBe(before?.id);
+		expect(noteAt('A/x.md')?.content).toBe('theirs\n');
+	});
+});
+
+describe('a queued move whose destination folder is not on the remote yet', () => {
+	it('makes the folder rather than dropping the rename', async () => {
+		// The user made a notebook here and dragged a note into it. Nothing
+		// queues a `mkdir` for a folder that has only ever been moved into, so
+		// the `move` is the first thing to name it — and the provider answers
+		// not found for a missing destination exactly as it does for a missing
+		// source. Reading that as "the file is gone" completes the op and the
+		// user's drag is lost with nothing said anywhere.
+		const file = await remoteFile('x.md', 'x\n');
+		store.put({
+			id: 'n1',
+			path: 'Work/Deep/x.md',
+			content: 'x\n',
+			remoteId: file.remoteId,
+			remoteVersion: file.version,
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'Work/Deep/x.md' });
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(provider.contentAt('Work/Deep/x.md')).toBe('x\n');
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('still drops a move whose file is genuinely gone', async () => {
+		const file = await remoteFile('x.md', 'x\n');
+		store.put({
+			id: 'n1',
+			path: 'x.md',
+			content: 'x\n',
+			remoteId: file.remoteId,
+			remoteVersion: file.version,
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'x.md', targetPath: 'y.md' });
+		await provider.delete(file);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(provider.snapshot().some((entry) => entry.path === 'y.md')).toBe(false);
+	});
+});
+
+describe('a note the pull conflicted with a write still queued', () => {
+	it('does not send the remote its own bytes back', async () => {
+		// The local edit is in the copy now and the note holds the remote's
+		// content. Replaying the write puts the remote's own bytes back under a
+		// new version, which every other device then pulls as a change that
+		// changed nothing — and which can lose a race against a real edit made
+		// in between.
+		const file = await remoteFile('x.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'x.md',
+			content: 'my edit\n',
+			remoteId: file.remoteId,
+			remoteVersion: file.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'x.md' });
+		const theirs = await provider.write('x.md', 'theirs\n', { expectedVersion: file.version });
+
+		await pullNow([theirs]);
+		await engine.push();
+
+		expect(provider.contentAt('x.md')).toBe('theirs\n');
+		expect(provider.snapshot().find((entry) => entry.path === 'x.md')?.version).toBe(
+			theirs.version
+		);
+		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+	});
+});
+
+describe('two devices making a conflict copy at once', () => {
+	it('does not name ours what theirs already claims', async () => {
+		// The other device conflicted first and its copy is arriving in the very
+		// batch that makes ours. Both are named from the same path and the same
+		// minute, so the obvious name is taken — by a file that is not in the
+		// store yet and will not be until this batch commits. Naming ours the
+		// same puts two notes at one path, which the sidebar shows twice and the
+		// next push has overwrite each other for ever.
+		const file = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const mine = noteAt('a.md');
+		if (mine === undefined) throw new Error('nothing at a.md');
+		store.put({ ...mine, content: 'my edit\n', dirty: true });
+
+		const theirs = await provider.write('a.md', 'theirs\n', { expectedVersion: file.version });
+		const theirCopy = await remoteFile('a (conflict 2026-09-15T14-32).md', 'their edit\n');
+
+		await pullNow([theirs, theirCopy]);
+
+		const copies = store
+			.notes()
+			.filter((note) => note.path.includes('conflict'))
+			.map((note) => note.path);
+		expect(copies).toHaveLength(2);
+		expect(copies).toContain('a (conflict 2026-09-15T14-32).md');
+		expect(copies).toContain('a (conflict 2026-09-15T14-32)-2.md');
+	});
+});
+
+describe('the deeper reaches of a folder move', () => {
+	it('moves a note two levels down out of the way', async () => {
+		// A folder move says one word about a whole subtree, and the collisions
+		// it causes are not all at the top of it. Looking only at the immediate
+		// children of the destination leaves the nested ones to land on top of
+		// each other.
+		const fa = await provider.createFolder('A');
+		await provider.createFolder('A/sub');
+		await remoteFile('A/sub/x.md', 'from A\n');
+		const fb = await provider.createFolder('B');
+		await provider.createFolder('B/sub');
+		await remoteFile('B/sub/x.md', 'from B\n');
+		await engine.pull();
+		const mine = noteAt('B/sub/x.md');
+		if (mine === undefined) throw new Error('nothing at B/sub/x.md');
+		store.put({ ...mine, content: 'my edit\n', dirty: true });
+
+		await provider.delete(fb);
+		const renamed = await provider.move(fa, 'B');
+
+		await pullNow([{ path: 'B', deleted: true, remoteId: fb.remoteId }, renamed]);
+
+		expect(noteAt('B/sub/x.md')?.content).toBe('from A\n');
+		const kept = store.notes().find((note) => note.content === 'my edit\n');
+		expect(kept?.path).toContain('conflict');
+		expect(parentPath(kept?.path ?? '')).toBe('B/sub');
+	});
+});
+
+describe('an id-less deletion arriving behind a folder rename', () => {
+	it('is about the note the batch put at that path, not the one that left', async () => {
+		// The rename of `A` takes our note to `Z/x.md` without the feed saying a
+		// word about the file, a different file arrives at `A/x.md`, and then a
+		// deletion names that path with no id to say which file it means. The
+		// store still shows our note sitting there, so matching by path lets go
+		// of the note that just moved — which is alive and well at `Z/x.md`, and
+		// is the one the user has been writing in.
+		const folder = await provider.createFolder('A');
+		await remoteFile('A/x.md', 'mine\n');
+		await engine.pull();
+		const before = noteAt('A/x.md');
+
+		const renamed = await provider.move(folder, 'Z');
+		await provider.createFolder('A');
+		const theirs = await remoteFile('A/x.md', 'theirs\n');
+
+		await pullNow([renamed, theirs, { path: 'A/x.md', deleted: true }]);
+
+		expect(noteAt('Z/x.md')?.id).toBe(before?.id);
+		expect(noteAt('Z/x.md')?.content).toBe('mine\n');
+	});
+});
+
+describe('a rescan that finds a whole notebook tree gone', () => {
+	it('says so once, not once per folder in it', async () => {
+		// `delete-folder` cascades over everything beneath it, so naming the
+		// nested one as well is a second delete of a row the first has already
+		// taken away. The store forgives that — a rejected batch is retried for
+		// ever — but forgiveness is not the same as being right, and a store
+		// that does reject would strand this user's sync permanently.
+		await provider.createFolder('Work');
+		await provider.createFolder('Work/Sub');
+		await remoteFile('Work/Sub/a.md', 'a\n');
+		await engine.pull();
+		expect(store.folders().map((folder) => folder.path)).toEqual(['Work', 'Work/Sub']);
+
+		const folder = await provider
+			.list('')
+			.then((entries) => entries.find((entry) => entry.path === 'Work'));
+		if (folder === undefined) throw new Error('no Work folder');
+		await provider.delete(folder);
+		killTheCursor();
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.folders()).toEqual([]);
+		expect(store.notes()).toEqual([]);
+	});
+});
+
+describe('an id-less deletion behind a folder moved out of the way', () => {
+	it('is about the note that ends up at the path, not the one carried off it', async () => {
+		// Another folder is renamed onto `A` while our `A` is still there, so
+		// ours is displaced and every note in it goes along — without the feed
+		// saying one word about any of the files. A deletion then names
+		// `A/x.md` with no id to say which file it means. The store still shows
+		// our note at that path, and letting go of it throws away a note that is
+		// alive under its new name while the file the deletion is about goes on
+		// being held.
+		await provider.createFolder('A');
+		await remoteFile('A/x.md', 'mine\n');
+		const other = await provider.createFolder('A2');
+		const theirs = await remoteFile('A2/x.md', 'theirs\n');
+		await engine.pull();
+		const before = noteAt('A/x.md');
+
+		await pullNow([
+			{ ...other, path: 'A' },
+			{ ...theirs, path: 'A/x.md' },
+			{ path: 'A/x.md', deleted: true },
+		]);
+
+		const mine = store.notes().find((note) => note.id === before?.id);
+		expect(mine?.content).toBe('mine\n');
+		expect(parentPath(mine?.path ?? '')).toContain('conflict');
+	});
+});

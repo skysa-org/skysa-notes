@@ -176,6 +176,12 @@ export type PullChange =
 			 * docs/PLAN.md §7 applies a remote folder move unconditionally, even
 			 * over dirty notes, because it is metadata and cannot conflict with
 			 * an edit to the contents.
+			 *
+			 * Both halves of an op's address, not just `path`: a queued `move`
+			 * says where the note is *and* where it is going, and one left aimed
+			 * at a folder that no longer exists fails on every attempt. The
+			 * queue is ordered, so that strands every op behind it — for every
+			 * note, not only this one.
 			 */
 			kind: 'move-folder';
 			from: string;
@@ -207,6 +213,15 @@ export type PullChange =
  * One value rather than a pair of calls, because a crash between the two halves
  * is the case this whole scheme exists to prevent: it would leave the user's
  * edit overwritten with no copy of it anywhere.
+ *
+ * Applying one discards `noteId`'s queued `write` ops, wherever it is applied
+ * from — `applyPull` as well as `resolveConflict`. Those ops carry the edit
+ * that lost, which is exactly what the copy now holds, and the note itself now
+ * holds the remote's bytes and is clean. Sending them anyway writes the
+ * remote's own content back to it under a new version, which every other device
+ * then pulls as a change that changed nothing — and can lose a race against a
+ * real edit made between the two. A queued `move` is left alone: it is the
+ * user's rename, and the conflict rule is about content.
  */
 export interface ConflictResolution {
 	/** The note that was already there, which becomes the remote's copy. */
