@@ -261,6 +261,72 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
   Settings shows linked providers and encourages linking a second one. No magic link at launch; the `identities` design leaves room for an `email` provider type later (see §14).
 - WebDAV proxy: stream request/response bodies straight through (`c.req.raw.body` → upstream `fetch` → return `Response`); enforce a 30 s upstream timeout with `AbortSignal.timeout` and a 20 MB cap regardless of Cloudflare plan limits.
 
+### Storage OAuth, as built (Phase 2)
+
+Dropbox is the first storage flow and the shape the others follow.
+
+- **Hand-rolled, not Arctic.** The storage flows are Authorization Code + PKCE and about forty lines each; `arctic` is deprecated (see above) and is not installed. Identity sign-in in Phase 9 is a separate decision.
+- **The PKCE verifier and `state` ride in a short-lived signed cookie** (`skysa_flow`, 10 minutes, `httpOnly`, `sameSite=lax`), not a table. §9 wants `state` bound to the browser that started the flow, which is what a cookie *is*; a table would need a sweep job and a KV binding neither of which exists. The payload is signed because an attacker who could rewrite it could otherwise substitute their own `state` and complete a flow the user never began.
+- **`sameSite=lax`, not `strict`**, on both cookies: the callback is a top-level navigation arriving from the provider, and `strict` would drop the cookie exactly when it is needed. `secure` is derived from `APP_ORIGIN` so plain-HTTP local development still works.
+- **The HMAC key is derived from `SECRETS_KEY` through HKDF**, not imported from the same bytes that do AES-GCM. One key, two algorithms, is how key-separation bugs start.
+- **`token_access_type=offline`**, and a grant that comes back without a refresh token is a 502 rather than a stored connection that would stop working in four hours with no way to recover.
+- **A unique index on `connections(user_id, provider)`** (migration `0001_connection_per_provider`) turns reconnecting into an `ON CONFLICT DO UPDATE` instead of a read-then-write race between two tabs. It also makes §12.3 a constraint rather than a UI convention. Reconnecting clears `root_id`: a new grant can point at a different account.
+- **`SECRETS_KEY` must decode to exactly 32 bytes**, checked at boot. It was `.min(1)`, which meant an operator mistake surfaced the first time somebody tried to connect an account. (The existing test fixture turned out to decode to 30 bytes.)
+- **`returnTo` is confined to this app.** Anything not starting with a single `/` becomes `/`.
+- **`/api/token` decrypts the refresh token and returns only the access token.** It is the first `entitlements.check(userId)` call site, and it re-seals a rotated refresh token so the connection survives a rotation Dropbox is allowed to do.
+- **Disconnecting revokes best-effort and deletes regardless.** A user who asked to disconnect must not be left connected because the provider was down.
+
+**Test harness.** `@cloudflare/vitest-pool-workers` — which would give the tests Miniflare's real D1 — still peers on `vitest ^4.1.0` against this workspace's 5, so it cannot be installed. The fallback is a ~120-line D1 shim over Node 22's built-in `node:sqlite` (`apps/api/tests/d1.ts`), which keeps the real `drizzle-orm/d1` driver, the real schema and the real migration files; only the process hosting SQLite differs. No new dependency. Swap it for the pool once that supports Vitest 5.
+
+### What review changed (Phase 2, PR 3)
+
+Fourteen findings, each reproduced before it was fixed and each now pinned by a test. Worth recording because most of them are the *kind* of bug the next three providers can repeat:
+
+- **A malformed cookie signature threw where a wrong one returns false.** `crypto.subtle.verify` answers `false`; `atob` throws. The caller reads a cookie an attacker may have written, so the two must look the same — and because the flow cookie was only cleared after being read, one bad cookie wedged every later callback with a 500. The cookie is now cleared first, unconditionally.
+- **The callback bound the grant to whatever session was present, not the one that started the flow.** §9 says the state is bound to the *session*; it was bound to the browser. `FlowState` now carries the starting `userId` and the callback refuses a mismatch. Both cookies also carry the `__Host-` prefix wherever `Secure` is on, so no sibling subdomain can plant either one.
+- **`account-first` could still create a user through the callback.** The guard lived only on `/start`. It is now on both ends, which matters for a real case: an operator changing `AUTH_MODE` while a flow is in the air.
+- **Failed queries logged their bound parameters.** drizzle's `DrizzleQueryError` builds its message from the SQL *and* its parameters — session ids, ciphertext, IVs. `onError` now logs a summary: error name, first line, and the parameterised SQL.
+- **`storage-first` minted a new user on every connect.** Signing out and reconnecting left an unreachable user whose connection held a live refresh token nobody could revoke. Connections now store the provider's `account_id` (migration `0002_connection_account_id`) and a returning account is recognised rather than duplicated. The same column tells a reconnect to the same account (keep the id and `rootId`) from a reconnect to a different one (fresh id, `rootId` cleared) — without it a client's notes could sync into a stranger's folder.
+- **Provider calls had no deadline**, so a stalled Dropbox could hold `DELETE /api/connections/:id` open forever, contradicting that route's own promise that the row goes either way. `createApp` now wraps the injected fetch with one (`providerTimeoutMs`, default 10 s).
+- **Key rotation was a 500.** A row sealed under a retired key is a reconnect, not a fault: `/api/token` answers `reauthorize_required`.
+- **A base64url `SECRETS_KEY` passed the boot check and then failed every request**, including `/api/health`, because the validator normalized the alphabet and the decoder did not. They agree now.
+- **A failed code exchange was a raw 500** in the user's address bar. A replayed or expired code is ordinary; the user goes back to the app with `connect=failed`.
+- **`returnTo` with its own query got a second `?`**, so `connect=ok` became part of the previous parameter's value.
+- **Sessions were not sliding**, despite §6 saying so: every user would have been logged out 90 days after their first connect. `currentUserId` now extends the window at most once a day, and swallows a failed extension.
+- **`SameSite=Lax` does not cover same-site cross-origin.** A sibling subdomain could `POST /api/token` and read the minted token. `hono/csrf` now checks `Origin` on state-changing methods; the OAuth callback is a GET and is unaffected.
+- **Two harness defects**, both of the "a cooperative stub validates the stub" kind: the cookie jar skipped the percent-decode Hono applies, so the flow-cookie assertions worked only for payload lengths that happened to need no escape; and the `node:sqlite` shim's `raw()` collapsed duplicate column names (Node 22 has no `StatementSync.columns()`), which would silently shift every column after the first join. The jar decodes properly, the flow payload is base64url so nothing needs escaping, and the shim now refuses a join rather than answering it wrongly — and rejects instead of throwing, which is what D1 does.
+
+A second review round found four more, three of them introduced by the first round's fixes:
+
+- **The `__Host-` session cookie fell back to the un-prefixed name**, which is exactly the cookie a sibling subdomain can set — so the prefix bought nothing for a signed-out visitor, and the new sliding-expiry write then promoted the planted value to a `__Host-` cookie. Verified end to end: a victim's Dropbox account landed under the attacker's user id and their access token was mintable through the attacker's own session. There is now exactly one cookie name per deployment and no fallback.
+- **`account_id` resolved to an arbitrary user when two rows shared it.** In `storage-first` the account *is* the identity, so a second user claiming an already-connected account is now refused with a 409 rather than resolved by row order. `account-first` still permits sharing — the index is deliberately not unique — so the lookup is ordered as well.
+- **A grant with no `account_id` fell straight back to minting a user**, reintroducing the orphan the column was added to prevent. Dropbox always sends one; a response without one is now a 502 rather than a guess.
+- **The D1 shim's join guard only worked because Node 22 lacks `StatementSync.columns()`.** On Node ≥ 23 it would have taken the `columns()` path and read the already-collapsed row object, answering wrongly again. Both branches now refuse duplicate names.
+
+Three tests were also passing for the wrong reason and have been made load-bearing: the log-leak test asserted against a session id the failing query never bound; the shim's join test compared empty results; and the account-first test's 400 came from the session check, not the guard it named.
+
+A third round found six more, and closed the question the second round had only half-answered:
+
+- **The `no_account_id` guard only caught an *omitted* key.** A JSON `null` or `""` walked past it — and `""` is worse than missing, because it matches every other `""` and adopted two different Dropbox accounts into one user. The parser now accepts only a non-empty string.
+- **The same guard was gated on being signed out**, so a signed-in reconnect wrote a null over the account id it already had, setting up the orphan one connect later. It applies unconditionally now.
+- **`(provider, account_id)` is now unique** (migration `0003_one_user_per_account`). Two user rows claiming one account is an ambiguity nothing can resolve, and leaving it to a read-then-write meant two concurrent signed-out callbacks could each mint a user. The callback's own check is now belt-and-braces; the loser of the race undoes the user it created rather than leaving one holding a live refresh token. **This is a deviation from the schema comment written in PR 3**, which claimed two users of a shared instance may legitimately connect the same account: in `storage-first` the account *is* the identity, so they cannot, and `account-first` has no use for the second claim either. Revisit in Phase 9 if identity-first sign-in gives a reason to.
+- **`account-first` could adopt a *recognised* account** — the second round guarded creating a user but not issuing a session for one the instance already knew, which is the same door.
+- **The 409 and 502 rendered raw JSON at a top-level navigation**, the same dead end round one fixed for a replayed code. Every post-exchange failure now redirects with an outcome the UI can read.
+- **The shim's `describe()` ran outside `settle()`**, so bad SQL threw where D1 rejects — the very property round one had added.
+
+One thing to remember when reading the suite: the test database is built from the **migration files**, not from `schema.ts`. Mutating the schema alone changes nothing; the constraint has to be mutated where it lives.
+
+A fourth round confirmed the identity model is coherent — every reachable combination of mode, session and claim was executed — and found four smaller things, none of them data loss:
+
+- **`store()` swallowed every error, not just the constraint**, so a D1 blip told a user their own account belonged to a stranger, and logged nothing at all. Only a unique-constraint violation is a conflict now; anything else is a 500 with a log line. (The cleanup that follows was verified safe by fault injection: `minted` can only be true for a user created microseconds earlier, so it cannot delete a pre-existing one.)
+- **The session was issued before the connection was stored**, so a failure left a returning owner signed in *and* told the connect had failed. Nobody is signed in until the row is written.
+- **Migration `0003` was not safe to re-run.** Applied to a database already holding two users on one account, the `DROP INDEX` committed and the `CREATE UNIQUE INDEX` failed — leaving the table with *neither* index, and every retry then dying on `no such index`. It now drops `IF EXISTS`, de-duplicates (keeping the older connection; the newer user reconnects, and only a token is lost, never a note), and can be run again from any state including the wedged one.
+- **Two post-exchange failures still rendered raw JSON** into the address bar. All of them redirect now, with `connect=ok|denied|failed|conflict|signin`.
+
+**Deliberately not done:** AES-GCM is used without additional authenticated data. Binding the connection id as AAD would stop a ciphertext copied between rows from decrypting, but an attacker who can write to `connections` has already lost the user the game. Recorded here rather than done, because the seal/open signature is cheaper to change now than after WebDAV credentials use it too.
+
+**Still open at the end of this PR:** the Dropbox app is not registered, so the OAuth round trip is proven against a scripted `fetch` and against `wrangler dev`, not against Dropbox.
+
 ### Data model (Drizzle, D1)
 ```
 users          id, email, email_verified, created_at
@@ -399,7 +465,7 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 ### Phase 2 — Backend + Dropbox end to end (2 days)
 Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Contract test suite + in-memory fake provider (write this before the first adapter, as the round-trip suite was written before the editor)
-- [ ] Auth start/callback, sessions, encrypted connections table, `/api/token`
+- [x] Auth start/callback, sessions, encrypted connections table, `/api/token`
 - [x] `DropboxProvider` implementing the full interface
 - [ ] Sync engine: pull, push, cursor persistence, opQueue
 - [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"

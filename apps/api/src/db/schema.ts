@@ -64,6 +64,13 @@ export const connections = sqliteTable(
 			.notNull()
 			.references(() => users.id, { onDelete: 'cascade' }),
 		provider: text('provider', { enum: ['gdrive', 'onedrive', 'dropbox', 'webdav'] }).notNull(),
+		/**
+		 * The provider's own id for the account this connection points at. In
+		 * `storage-first` it is what lets a returning user be recognised as the
+		 * same user instead of a new one, and it is how a reconnect tells "the
+		 * same account again" from "a different account in the same slot".
+		 */
+		accountId: text('account_id'),
 		displayName: text('display_name').notNull(),
 		/** Provider id of the app-owned root folder, once `ensureRoot()` has run. */
 		rootId: text('root_id'),
@@ -78,7 +85,19 @@ export const connections = sqliteTable(
 		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 		lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
 	},
-	(t) => [index('connections_user_id_idx').on(t.userId)]
+	(t) => [
+		index('connections_user_id_idx').on(t.userId),
+		// One connection per provider per user until Phase 7 (docs/PLAN.md §12.3).
+		// Enforced here rather than by convention so reconnecting is an atomic
+		// upsert instead of a read-then-write race between two tabs.
+		uniqueIndex('connections_user_provider_idx').on(t.userId, t.provider),
+		// Unique, because in `storage-first` the account *is* the identity: two
+		// user rows claiming one account is an ambiguity nothing can resolve, and
+		// leaving it to a read-then-write left the answer up to row order. NULLs
+		// do not conflict in SQLite, which is only relevant to rows written before
+		// the id became mandatory.
+		uniqueIndex('connections_provider_account_idx').on(t.provider, t.accountId),
+	]
 );
 
 export type User = typeof users.$inferSelect;

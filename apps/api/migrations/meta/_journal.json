@@ -8,6 +8,27 @@
       "when": 1789407992180,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789428389444,
+      "tag": "0001_connection_per_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789429994093,
+      "tag": "0002_connection_account_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789432699003,
+      "tag": "0003_one_user_per_account",
+      "breakpoints": true
     }
   ]
 }

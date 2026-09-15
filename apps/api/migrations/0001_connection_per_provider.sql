@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `connections_user_provider_idx` ON `connections` (`user_id`,`provider`);
