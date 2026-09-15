@@ -71,6 +71,12 @@ export type PullChange =
 			 * path is reused, and overwrites it.
 			 */
 			id: string;
+			/**
+			 * Where the note ends up — it moves if it was elsewhere. The engine
+			 * guarantees no *other* note is already here: two rows at one path
+			 * is a note the sidebar shows twice and two queued writes racing for
+			 * one file, so the store is not asked to arbitrate.
+			 */
 			path: string;
 			content: string;
 			remote: RemoteEntry;
@@ -109,7 +115,15 @@ export type PullChange =
 			kind: 'detach-note';
 			id: string;
 	  }>
-	| Readonly<{ kind: 'ensure-folder'; path: string; remoteId?: string }>
+	| Readonly<{
+			/**
+			 * A folder that must exist, with this `remoteId`. Idempotent: the
+			 * folder may already be there, with an id or without one.
+			 */
+			kind: 'ensure-folder';
+			path: string;
+			remoteId?: string;
+	  }>
 	| Readonly<{
 			/**
 			 * A folder moved. The store rebases every note beneath it *and* every
@@ -130,6 +144,11 @@ export type PullChange =
 			 * detached and kept — rather than the engine listing them: a provider
 			 * that reports the descendants too would then name each note twice,
 			 * and the second mention would be a delete of something already gone.
+			 *
+			 * A path with no folder at it must succeed and do nothing, for the
+			 * same reason `delete-note` must: rejecting fails the batch, and
+			 * since the cursor moves only with the batch the user is left with a
+			 * sync that never recovers on its own.
 			 */
 			kind: 'delete-folder';
 			path: string;
@@ -206,6 +225,13 @@ export interface SyncStore {
 	 * Every live note at or beneath a folder. Used to name a conflict copy
 	 * without colliding, and to decide what a remote folder delete takes with it
 	 * on a provider that reports only the folder.
+	 *
+	 * The root (`ROOT`, the empty string) means every note in the store, loose
+	 * ones included. It is asked for by name — every loose note's parent is the
+	 * root — and an implementation that reads this as a path prefix and answers
+	 * `startsWith('/')` returns nothing for it, so conflict copies at the root
+	 * stop avoiding names that are already taken and quietly overwrite the copy
+	 * that was there. The contract suite asks for it directly.
 	 */
 	readonly notesUnder: (folderPath: string) => Promise<SyncNote[]>;
 	readonly folderByRemoteId: (remoteId: string) => Promise<SyncFolder | undefined>;
@@ -225,7 +251,22 @@ export interface SyncStore {
 	 */
 	readonly foldersWithRemote: () => Promise<SyncFolder[]>;
 
-	/** Apply a pull batch and its cursor atomically. */
+	/**
+	 * Apply a pull batch and its cursor atomically, **in the order given**.
+	 *
+	 * Both halves of that are load-bearing. Atomically, because §7 requires the
+	 * cursor to be persisted only after the batch it describes has committed: a
+	 * cursor stored ahead of its batch skips work that never happened, and
+	 * nothing ever asks for it again.
+	 *
+	 * In order, because the engine reaches every decision against the store as
+	 * it was and relies on them being carried out one after another — a folder
+	 * deleted before the note that moved out of it is written back, a note
+	 * deleted before the file that replaced it at that path is imported. An
+	 * implementation that grouped by kind to batch its writes (all the deletes,
+	 * then all the puts) would turn each of those into a lost note, and would
+	 * look perfectly reasonable doing it.
+	 */
 	readonly applyPull: (batch: PullBatch) => Promise<void>;
 
 	/** Queued pushes in order. */

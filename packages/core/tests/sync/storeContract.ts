@@ -71,6 +71,20 @@ export const describeSyncStoreContract = (
 				expect(await store.folderByRemoteId('nope')).toBeUndefined();
 			});
 
+			it('lists every note in the store for the root', async () => {
+				// The root is asked for by name — every loose note's parent is
+				// the root — and an implementation that reads `folderPath` as a
+				// prefix and answers `startsWith(folderPath + '/')` returns
+				// nothing for it. A conflict copy at the root then stops
+				// avoiding names already taken and overwrites the copy there.
+				const { store, seed } = await harness();
+				await seed({ id: 'n1', path: 'loose.md', content: 'x\n' });
+				await seed({ id: 'n2', path: 'Work/a.md', content: 'x\n' });
+
+				const under = await store.notesUnder('');
+				expect(under.map((note) => note.id).sort()).toEqual(['n1', 'n2']);
+			});
+
 			it('lists notes beneath a folder at every depth', async () => {
 				const { store, seed } = await harness();
 				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n' });
@@ -288,6 +302,68 @@ export const describeSyncStoreContract = (
 				});
 
 				expect(await store.noteById('n1')).toBeUndefined();
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('applies the changes in the order they are given', async () => {
+				// The engine reaches every decision against the store as it was
+				// and relies on them being carried out one after another. A
+				// store that grouped by kind to batch its writes — all the
+				// deletes, then all the puts — would drop the note this batch
+				// re-establishes, and would look perfectly reasonable doing it.
+				const { store, seed } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'old\n', remoteId: 'r1' });
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'delete-note', id: 'n1' },
+						{
+							kind: 'upsert-note',
+							id: 'n1',
+							path: 'a.md',
+							content: 'new\n',
+							remote: remote('a.md', 'r2'),
+						},
+					],
+					cursor: 'c1',
+				});
+
+				expect((await store.noteById('n1'))?.content).toBe('new\n');
+			});
+
+			it('leaves one row at a path an upsert names', async () => {
+				// Two notes at one path is a row the sidebar shows twice and two
+				// queued writes racing for one file. The note the engine names
+				// ends up there; whatever was there before has moved.
+				const { store, seed } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'old\n', remoteId: 'r1' });
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'n1',
+							path: 'b.md',
+							content: 'moved\n',
+							remote: remote('b.md', 'r1'),
+						},
+					],
+				});
+
+				expect(await store.noteByPath('a.md')).toBeUndefined();
+				expect((await store.noteByPath('b.md'))?.id).toBe('n1');
+			});
+
+			it('accepts a delete for a folder that is not there', async () => {
+				// Same reasoning as the delete of a note that is already gone: a
+				// batch that rejects is a batch that is retried for ever.
+				const { store } = await harness();
+
+				await store.applyPull({
+					changes: [{ kind: 'delete-folder', path: 'Nowhere' }],
+					cursor: 'c1',
+				});
+
 				expect(await store.cursor()).toBe('c1');
 			});
 

@@ -1,7 +1,7 @@
+import { ancestorPaths } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
 import {
-	ancestorPaths,
 	buildFolderTree,
 	containsPath,
 	folderLabel,

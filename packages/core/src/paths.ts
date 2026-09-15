@@ -43,6 +43,12 @@ export const parentPath = (path: string): string => pathSegments(path).slice(0, 
 /** The final segment: a filename, or a folder's own name. */
 export const basename = (path: string): string => pathSegments(path).at(-1) ?? ROOT;
 
+/** Every folder above a path, outermost first, excluding the root. */
+export const ancestorPaths = (path: string): string[] => {
+	const parent = parentPath(path);
+	return parent === ROOT ? [] : [...ancestorPaths(parent), parent];
+};
+
 /** Replace the final segment, keeping the same parent. */
 export const replaceBasename = (path: string, name: string): string =>
 	joinPath(parentPath(path), name);

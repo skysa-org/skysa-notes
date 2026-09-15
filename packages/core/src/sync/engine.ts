@@ -1,6 +1,14 @@
 import { NOTE_EXTENSION } from '../config.js';
 import { parseNoteFile } from '../markdown/note.js';
-import { basename, isHidden, isWithin, normalizePath, parentPath, ROOT } from '../paths.js';
+import {
+	ancestorPaths,
+	basename,
+	isHidden,
+	isWithin,
+	normalizePath,
+	parentPath,
+	ROOT,
+} from '../paths.js';
 import {
 	type ChangeEntry,
 	isAuthError,
@@ -209,8 +217,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<boolean> => {
 		if (remoteId !== undefined && live.has(remoteId)) return true;
 		if (local?.remoteId !== undefined && live.has(local.remoteId)) return true;
-		const folder = await store.folderByPath(path);
-		return folder?.remoteId !== undefined && live.has(folder.remoteId);
+
+		// The folder it was in, or any folder above that. A provider that
+		// renames `Work` and re-lists nothing inside it — the children's bytes
+		// did not change — reports `Work/a.md` as deleted with no id at all, and
+		// the only thing left saying otherwise is that `Work` itself is alive
+		// under its new name somewhere in this batch. Read literally, the whole
+		// notebook was deleted.
+		const candidates = [path, ...ancestorPaths(path)];
+		const folders = await Promise.all(candidates.map((each) => store.folderByPath(each)));
+		return folders.some(
+			(folder) => folder?.remoteId !== undefined && live.has(folder.remoteId)
+		);
 	};
 
 	const decideDeleted = async (
@@ -226,24 +244,35 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (normalizePath(path) === ROOT) return [];
 
 		// A deletion names a path, so unlike an entry it does have to be matched
-		// by path when there is no id: that is the only thing it carries.
+		// by path when it carries no id: that is the only thing it has. When it
+		// does carry one and we do not know it, the file being deleted is not a
+		// file we hold — the path has been reused since — and matching by path
+		// anyway would delete a note over an event that was never about it.
 		const local =
-			(remoteId === undefined ? undefined : await store.noteByRemoteId(remoteId)) ??
-			(await store.noteByPath(path));
+			remoteId === undefined
+				? await store.noteByPath(path)
+				: await store.noteByRemoteId(remoteId);
 
 		if (await movedNotDeleted(path, remoteId, local, live)) return [];
 		if (local !== undefined) {
-			return removedInBatch(local, decided) ? [] : [forgetNote(local)];
+			// Already taken away by an earlier decision, or already written back
+			// by one. The second is the file that was replaced at this path: the
+			// note has been re-pointed at the new file, and this deletion is
+			// about the old one, so acting on it deletes what was just imported.
+			const settled =
+				removedInBatch(local, decided) || reestablished(decided).notes.has(local.id);
+			return settled ? [] : [forgetNote(local)];
 		}
 
-		// No note here, so this was a folder. The store cascades to what was
-		// inside it, so a folder already inside one this batch deleted needs
-		// nothing said about it.
-		if (
-			decided.some((change) => change.kind === 'delete-folder' && isWithin(path, change.path))
-		) {
-			return [];
-		}
+		// Not a note we hold, so the only thing left it could be about is a
+		// folder we hold. Anything else — a PDF beside the notes, a file we
+		// never imported, a folder that was never ours — is not news, and
+		// saying otherwise would tell the user something happened to them.
+		if ((await store.folderByPath(path)) === undefined) return [];
+
+		// The store cascades to what was inside it, so a folder already within
+		// one this batch is deleting needs nothing said about it.
+		if (decided.some((c) => c.kind === 'delete-folder' && isWithin(path, c.path))) return [];
 		return [{ kind: 'delete-folder', path }];
 	};
 
@@ -265,10 +294,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/**
 	 * What to call a note arriving for the first time. A file this app wrote
 	 * carries its `id` in frontmatter (docs/PLAN.md §3), and adopting it is what
-	 * makes two devices agree about which note a file is; only a file written by
+	 * makes two devices agree about which note a file is; a file written by
 	 * something else needs an id invented for it.
+	 *
+	 * Unless the id is already spoken for. Duplicating a file is an ordinary
+	 * thing to do in a folder the user can see, and the copy carries the
+	 * original's id — so adopting it blindly would write the copy over the note
+	 * it came from, unpushed edits included, and leave the two files fighting
+	 * over one row on every sync afterwards. Two files claiming one id is the
+	 * state the whole scheme is built to avoid; the second one to arrive is a
+	 * new note.
 	 */
-	const idForNewNote = (content: string): string => parseNoteFile(content).id ?? newId();
+	const idForNewNote = async (
+		content: string,
+		decided: readonly PullChange[]
+	): Promise<string> => {
+		const claimed = parseNoteFile(content).id;
+		if (claimed === undefined) return newId();
+		const held = (await store.noteById(claimed)) !== undefined;
+		return held || reestablished(decided).notes.has(claimed) ? newId() : claimed;
+	};
 
 	/** A note we already hold, whose remote version has moved. */
 	const decideKnown = (
@@ -326,7 +371,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return [
 				{
 					kind: 'upsert-note',
-					id: idForNewNote(content),
+					id: await idForNewNote(content, decided),
 					path: entry.path,
 					content,
 					remote: entry,
@@ -362,11 +407,32 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
-	 * Sequentially, because a decision can depend on the ones before it — two
-	 * conflicts in one folder must not be handed the same filename — and because
-	 * each may fetch content.
+	 * One entry per thing, keeping the last. Dropbox documents that a path may
+	 * appear more than once in a batch and that the last entry for it is the
+	 * current state; a second entry for a note we have edited would otherwise be
+	 * decided against the same pre-batch store as the first and produce a second
+	 * conflict copy at the very same path, which the store has no way to keep
+	 * apart and the push then writes over itself.
+	 *
+	 * Deletions are keyed by path and live entries by id, deliberately: a file
+	 * deleted and another created at that path in one batch is two things
+	 * happening, not one thing said twice.
 	 */
-	const decideAll = async (entries: readonly ChangeEntry[]): Promise<PullChange[]> => {
+	const deduped = (entries: readonly ChangeEntry[]): ChangeEntry[] => {
+		const keyOf = (entry: ChangeEntry): string =>
+			entry.deleted === true ? `deleted:${entry.path}` : `live:${entry.remoteId}`;
+		const last = new Map<string, number>();
+		entries.forEach((entry, index) => last.set(keyOf(entry), index));
+		return entries.filter((entry, index) => last.get(keyOf(entry)) === index);
+	};
+
+	/**
+	 * Sequentially, because a decision can depend on the ones before it — what an
+	 * earlier one removed, what names it took — and because each may fetch
+	 * content.
+	 */
+	const decideAll = async (reported: readonly ChangeEntry[]): Promise<PullChange[]> => {
+		const entries = deduped(reported);
 		// Everything this batch says still exists, so a deletion elsewhere in it
 		// can be recognised as the first half of a move.
 		const live = new Set(
@@ -387,18 +453,59 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 *
 	 * Only entries that have a `remoteId` are candidates: one created here and
 	 * never pushed was never in the scan to begin with.
+	 *
+	 * And, like every other decision, this one is reached against the store as
+	 * it was and applied after the changes in front of it — so anything the scan
+	 * has just re-established has to be exempt. The `remoteId` on the row is the
+	 * *old* one when a file was replaced at the same path while the cursor was
+	 * dead, and it is missing from a scan that only ever saw the new one; acting
+	 * on that deletes the note the same batch has just imported, reports `ok`,
+	 * and stores the cursor, so it never comes back.
 	 */
-	const reconcile = async (seen: ReadonlySet<string>): Promise<PullChange[]> => {
+	const reestablished = (
+		changes: readonly PullChange[]
+	): Readonly<{ notes: ReadonlySet<string>; folders: ReadonlySet<string> }> => ({
+		notes: new Set(
+			changes.flatMap((change) => {
+				if (change.kind === 'conflict') {
+					return [change.resolution.noteId, change.resolution.copyId];
+				}
+				return 'id' in change ? [change.id] : [];
+			})
+		),
+		folders: new Set(
+			changes.flatMap((change) => {
+				if (change.kind === 'ensure-folder') return [change.path];
+				return change.kind === 'move-folder' ? [change.to] : [];
+			})
+		),
+	});
+
+	const reconcile = async (
+		seen: ReadonlySet<string>,
+		changes: readonly PullChange[]
+	): Promise<PullChange[]> => {
+		const kept = reestablished(changes);
 		const notes = await store.allNotes();
 		const folders = await store.foldersWithRemote();
 		return [
 			...notes
-				.filter((note) => note.remoteId !== undefined && !seen.has(note.remoteId))
+				.filter(
+					(note) =>
+						note.remoteId !== undefined &&
+						!seen.has(note.remoteId) &&
+						!kept.notes.has(note.id)
+				)
 				.map(forgetNote),
 			// Folders too, or a notebook deleted while the cursor was dead stays
 			// in the sidebar for ever with nothing behind it.
 			...folders
-				.filter((folder) => folder.remoteId !== undefined && !seen.has(folder.remoteId))
+				.filter(
+					(folder) =>
+						folder.remoteId !== undefined &&
+						!seen.has(folder.remoteId) &&
+						!kept.folders.has(folder.path)
+				)
 				.map((folder): PullChange => ({ kind: 'delete-folder', path: folder.path })),
 		];
 	};
@@ -432,7 +539,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		// A scan is one logical batch: its pages carry no cursor, and the last
 		// one carries both the cursor and whatever the scan proved was deleted.
-		const tail = set.more || !scanning ? [] : await reconcile(seen);
+		const tail = set.more || !scanning ? [] : await reconcile(seen, changes);
 		const batch = [...changes, ...tail];
 		await store.applyPull({
 			changes: batch,
@@ -461,7 +568,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		error: messageOf(error),
 	});
 
-	const pull = async (): Promise<SyncOutcome> => {
+	const runPull = async (): Promise<SyncOutcome> => {
 		const stored = await store.cursor();
 		const empty: PullProgress = { pulled: 0, conflicts: [], seen: new Set() };
 		const attempt = (): Promise<SyncOutcome> => drainPull(stored, stored === undefined, empty);
@@ -471,13 +578,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// scanning is the documented recovery, and the stored one is left in
 			// place so an interrupted rescan tries again rather than continuing
 			// from a cursor the provider has already rejected.
-			if (isCursorResetError(error)) {
-				return drainPull(undefined, true, empty).catch(transient);
-			}
-			if (isAuthError(error)) return authRetry(attempt).catch(transient);
-			return transient(error);
+			if (isCursorResetError(error)) return drainPull(undefined, true, empty);
+			if (isAuthError(error)) return authRetry(attempt);
+			throw error;
 		});
 	};
+
+	// Everything, not just the drain: reading the cursor is a store call too, and
+	// a store that is closed or corrupt rejects there, before the loop that was
+	// carrying the `catch`.
+	const pull = (): Promise<SyncOutcome> => runPull().catch(transient);
 
 	// ---------------------------------------------------------------- push
 
@@ -522,14 +632,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	const runMove = async (op: SyncOp, note: SyncNote): Promise<void> => {
+		// A move with nowhere to go is a store that lost the column, not a move
+		// with nothing to do. Completing it would drop the user's rename with
+		// nothing said anywhere; failing it stops the queue and says so.
+		if (op.targetPath === undefined) {
+			throw new Error(`move of ${op.path} has no target path`);
+		}
 		// Never pushed, so there is nothing at the old path to move. The note's
 		// own write op will create it where it now lives.
-		if (note.remoteId === undefined || op.targetPath === undefined) {
+		if (note.remoteId === undefined) {
 			await store.completeOp(op.seq, { kind: 'done' });
 			return;
 		}
+		// Addressed by where the note is now, not where it was when the op was
+		// queued: a pull in between rebases the note and leaves the op's own
+		// `path` behind. Invisible where `remoteId` identifies the file, and the
+		// whole address where it does not (WebDAV, Phase 5).
 		const entry = await provider.move(
-			{ remoteId: note.remoteId, path: op.path },
+			{ remoteId: note.remoteId, path: note.path },
 			op.targetPath
 		);
 		await store.completeOp(op.seq, { kind: 'moved', noteId: note.id, remote: entry });
@@ -550,7 +670,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// Already gone is the outcome we wanted. `delete` is idempotent by
 		// contract, but a provider that reports it as missing is not an error.
 		await provider
-			.delete({ remoteId: note.remoteId, path: op.path })
+			.delete({ remoteId: note.remoteId, path: note.path })
 			.catch((error: unknown) => {
 				if (isNotFoundError(error)) return;
 				throw error;
@@ -685,8 +805,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		});
 	};
 
-	const push = async (): Promise<SyncOutcome> =>
+	const runPush = async (): Promise<SyncOutcome> =>
 		drainOps(await store.pendingOps(), { pushed: 0, conflicts: [] }, false);
+
+	// Same reasoning as `pull`: reading the queue, recording a failure and
+	// completing an op are all store calls, and a store that cannot answer is
+	// the same kind of news as a provider that cannot — something to report and
+	// come back to, not something to throw at a caller who has no better answer.
+	const push = (): Promise<SyncOutcome> => runPush().catch(transient);
 
 	const sync = async (): Promise<SyncOutcome> => {
 		const pulled = await pull();
