@@ -49,8 +49,98 @@ describe('splitFrontmatter', () => {
 	});
 
 	it('rejects a fenced block of invalid YAML rather than eating it', () => {
+		// `: : :` recovers as a mapping — `{'': {'': {'': null}}}` — but names
+		// nothing that metadata is ever named, so there is no evidence it was
+		// meant as anything but a stray line between two thematic breaks.
 		const source = '---\n: : :\n---\nBody\n';
 		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	/**
+	 * The mistakes people actually make in frontmatter. `yaml` reads through all
+	 * three, so all three are still frontmatter. Pushing them into the body puts
+	 * the raw YAML between two fences, which markdown reads as a setext heading
+	 * — and the note then takes its title, and its filename, from its own
+	 * metadata.
+	 */
+	const recoverable = {
+		'a duplicate key': 'id: abc\ntitle: Real\ntitle: Real',
+		'a tab-indented sequence': 'id: abc\ntags:\n\t- one\n\t- two',
+		'an unterminated quote': 'id: abc\ntitle: "oops',
+	};
+
+	Object.entries(recoverable).forEach(([what, yaml]) => {
+		it(`keeps a block the parser had to recover from: ${what}`, () => {
+			expect(splitFrontmatter(`---\n${yaml}\n---\nBody\n`)).toEqual({
+				frontmatter: yaml,
+				body: 'Body\n',
+			});
+		});
+	});
+
+	/**
+	 * The other half of recovery, and the half that decides how much of the
+	 * user's writing it costs. `yaml` will make a mapping out of almost any
+	 * prose containing a colon, so recovery on its own admits far too much:
+	 * every one of these is an ordinary note that happens to open with a rule,
+	 * and swallowing it takes that section out of the editor, where the user can
+	 * no longer read it, change it, or delete it.
+	 *
+	 * A document the parser had to repair therefore has to carry a key the app
+	 * actually reads before it counts as frontmatter.
+	 */
+	const notFrontmatter = {
+		'a line with a colon in it': 'Next steps: see below\n- Do the thing',
+		'two of them': 'Note: first point\nNote: second point',
+		'a tab-indented list under one': 'Agenda: today\n\t- one\n\t- two',
+		'a checklist': 'Status: open\n- [ ] one\n- [x] two',
+		'a code fence': 'Example: run this\n```sh\nls\n```',
+		'a block quote': 'Quote: someone said\n> hello',
+		'ratios and an unclosed quote': 'Ratio: 3:1\nMix: 2:1:1\nOther: "unclosed',
+	};
+
+	/**
+	 * The same mistakes, in frontmatter written by something other than this app
+	 * — which is the case this recovery exists for, since a block this app wrote
+	 * is well formed. None of these names a field this app reads, so a gate
+	 * asking for one of those five rejected every one of them and handed the
+	 * user the whole harm chain: block into the body, YAML as the title, YAML as
+	 * the filename, a second block on the next write.
+	 */
+	const otherTools = {
+		'Jekyll, duplicate key':
+			'layout: post\ndate: 2026-09-14\ncategories: notes\ncategories: notes',
+		'Jekyll, unterminated quote': 'layout: post\npermalink: "/notes/one',
+		'Hugo, tab-indented list': 'draft: false\nweight: 10\nkeywords:\n\t- one\n\t- two',
+		'Obsidian, duplicate alias': 'aliases: [one]\ncssclass: wide\naliases: [two]',
+		'Obsidian, tab-indented list': 'publish: true\naliases:\n\t- one',
+		'Docusaurus, duplicate key': 'sidebar_position: 1\ntitle: A\ntitle: A',
+		'Astro, unterminated quote': 'pubDate: 2026-01-01\nimage: "./a.png',
+		'Pandoc, duplicate key': 'bibliography: refs.bib\nbibliography: refs.bib',
+	};
+
+	Object.entries(otherTools).forEach(([what, yaml]) => {
+		it(`keeps frontmatter another tool wrote: ${what}`, () => {
+			expect(splitFrontmatter(`---\n${yaml}\n---\nBody\n`).frontmatter).toBe(yaml);
+		});
+	});
+
+	/**
+	 * And what that costs, stated rather than discovered. A tool whose block
+	 * names only ordinary words — Zettlr writes `author` and `keywords` — is not
+	 * rescued, because a note opening `author: me` is likelier to be someone
+	 * writing than a tool. Recovering it would mean swallowing the note.
+	 */
+	it('does not rescue a block that names only ordinary words', () => {
+		const source = '---\nauthor: Someone\nkeywords: "one\n---\nBody\n';
+		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	Object.entries(notFrontmatter).forEach(([what, text]) => {
+		it(`leaves prose in the body even though YAML can read it: ${what}`, () => {
+			const source = `---\n${text}\n---\nBody\n`;
+			expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+		});
 	});
 
 	it('is inverted exactly by joinFrontmatter', () => {
@@ -114,6 +204,55 @@ describe('readFrontmatter', () => {
 		expect(readFrontmatter(': : :')).toEqual({});
 	});
 
+	/**
+	 * `apps/web` stores a note under its frontmatter `id`, so a wrong id is not a
+	 * wrong field: it is a second row for a note that already exists, and the
+	 * first one — with whatever the user had not yet pushed — is left where
+	 * nothing will look for it again. Absent is cheap; approximate is not.
+	 */
+	describe('an id that could not be one', () => {
+		it('refuses a value the parser cut short', () => {
+			// An unterminated quote on the id line recovers the UUID one character
+			// short. Nothing about the string says so — only the parser knows.
+			const truncated = readFrontmatter('id: "018f3c4e-1111-4111-8111-111111111111');
+			expect(truncated.id).toBeUndefined();
+			expect(readFrontmatter("id: '018f3c4e-1111-4111-8111-111111111111").id).toBeUndefined();
+		});
+
+		it('refuses prose the parser made a mapping out of', () => {
+			expect(readFrontmatter('id: the blue notebook\ntags:\n\t- one').id).toBeUndefined();
+		});
+
+		it('refuses a value YAML did not read as a string', () => {
+			// `0123` and `123` are one number, so two files collide on one id —
+			// and writing it back changes what the user had.
+			expect(readFrontmatter('id: 0123\ntitle: A\ntitle: A').id).toBeUndefined();
+			expect(readFrontmatter('id: 1e5\ntitle: A\ntitle: A').id).toBeUndefined();
+			expect(readFrontmatter('id: 0123').id).toBeUndefined();
+		});
+
+		it('leaves a well-formed file alone, whatever it says', () => {
+			// Only a block the parser had to repair is second-guessed. A file that
+			// parses means what it says, even if this app would not have written it.
+			expect(readFrontmatter('id: my note id\ntitle: A').id).toBe('my note id');
+		});
+
+		it('still reads everything an id actually looks like', () => {
+			expect(readFrontmatter('id: 018f3c4e-1111-4111-8111-111111111111').id).toBe(
+				'018f3c4e-1111-4111-8111-111111111111'
+			);
+			expect(readFrontmatter('id: 018f3c4e\ntitle: A\ntitle: A').id).toBe('018f3c4e');
+		});
+	});
+
+	it('recovers the id from YAML the parser had to repair', () => {
+		// Losing the id is the one outcome a note cannot survive: on the next
+		// import it is a different note, and the one it used to be is orphaned.
+		expect(readFrontmatter('id: abc\ntitle: Real\ntitle: Real').id).toBe('abc');
+		expect(readFrontmatter('id: abc\ntags:\n\t- one').id).toBe('abc');
+		expect(readFrontmatter('id: abc\ntitle: "oops').id).toBe('abc');
+	});
+
 	it('ignores a YAML document that is not a mapping', () => {
 		expect(readFrontmatter('- just\n- a list')).toEqual({});
 	});
@@ -166,6 +305,30 @@ describe('writeFrontmatter', () => {
 	it('never rewrites YAML it cannot parse', () => {
 		const broken = ': : :';
 		expect(writeFrontmatter(broken, { title: 'New' })).toBe(broken);
+	});
+
+	/**
+	 * Known limitation, pinned here so it stays a decision rather than a
+	 * surprise: a block the parser had to recover from is readable but not
+	 * editable, so a patch to one is dropped. `readFrontmatter` will now find
+	 * the note's `id` in it, which is what makes the note survive at all.
+	 *
+	 * The cost is not only that the file misses the change. The app's own row
+	 * takes it, the file does not, and the next pull reads the file — so the
+	 * rename is undone, and a note left with a filename saying one thing and a
+	 * title saying another. `frontmatterIsEditable` exists so the app can say so
+	 * in front of the note rather than let the user discover it.
+	 *
+	 * The alternative is to rebuild the block from what the parser recovered,
+	 * which would silently write `title: oop` over the user's `title: "oops`.
+	 * Refusing is the safer half of a choice with no good half; the place where
+	 * refusing is not acceptable is `conflictContent`, which cannot let two
+	 * files claim one id and therefore rebuilds — see `sync/conflicts.ts`.
+	 */
+	it('drops a patch to a block the parser had to recover from', () => {
+		const recovered = 'id: abc\ntitle: Real\ntitle: Real';
+		expect(writeFrontmatter(recovered, { title: 'New' })).toBe(recovered);
+		expect(readFrontmatter(writeFrontmatter(recovered, { title: 'New' })).title).toBe('Real');
 	});
 
 	it('round-trips through split and join', () => {

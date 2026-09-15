@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { splitFrontmatter } from '../../src/markdown/frontmatter.js';
+import {
+	frontmatterIsEditable,
+	readFrontmatter,
+	splitFrontmatter,
+} from '../../src/markdown/frontmatter.js';
 import {
 	conflictContent,
 	conflictFilename,
@@ -124,5 +128,49 @@ describe('conflictContent', () => {
 		const copy = conflictContent('# Just markdown\n', 'fresh-id');
 		expect(copy).toContain('id: fresh-id');
 		expect(copy).toContain('# Just markdown');
+	});
+
+	/**
+	 * A block the YAML parser had to recover from is still frontmatter, and
+	 * still carries the note's id — but it cannot be edited in place, because
+	 * rewriting a guess would put words in the user's file. The copy therefore
+	 * has to be given a block of its own, or it goes out claiming to be the very
+	 * note it was copied from, which is the one outcome this function exists to
+	 * prevent.
+	 */
+	describe('when the frontmatter is malformed', () => {
+		const malformed = [
+			'---',
+			'id: original-id',
+			'title: Notes',
+			'title: Notes',
+			'---',
+			'',
+			'# Notes',
+			'',
+		].join('\n');
+
+		it('still gives the copy an identity of its own', () => {
+			const copy = conflictContent(malformed, 'fresh-id');
+			expect(readFrontmatter(splitFrontmatter(copy).frontmatter).id).toBe('fresh-id');
+			expect(copy).not.toContain('original-id');
+		});
+
+		it('carries what the parser could read into the block it builds', () => {
+			const copy = conflictContent(malformed, 'fresh-id');
+			const block = splitFrontmatter(copy).frontmatter;
+
+			// Not just present in the file: in a block that parses, which the one
+			// it was copied from did not. Reading it back is the whole point —
+			// a copy nobody can patch would have the same problem again.
+			expect(block).not.toBe(malformed);
+			expect(frontmatterIsEditable(block)).toBe(true);
+			expect(readFrontmatter(block).title).toBe('Notes');
+		});
+
+		it('keeps the body, and only the frontmatter changes', () => {
+			const copy = conflictContent(malformed, 'fresh-id');
+			expect(splitFrontmatter(copy).body).toBe(splitFrontmatter(malformed).body);
+		});
 	});
 });
