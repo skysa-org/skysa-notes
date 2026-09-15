@@ -44,6 +44,24 @@ describe('ensureFolder', () => {
 });
 
 describe('createFolder', () => {
+	/**
+	 * The existence check and the create are one step. Made separately, two
+	 * concurrent creates of one name both passed the check and both reported
+	 * success — harmless in the store, since `ensureFolder` is idempotent and one
+	 * row results, but this is the one function whose refusal the user is shown,
+	 * so a check that only usually refuses is the wrong kind.
+	 */
+	it('refuses the second of two creates of the same name', async () => {
+		const results = await Promise.allSettled([
+			createFolder(db, { name: 'Work' }),
+			createFolder(db, { name: 'Work' }),
+		]);
+
+		expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+		expect(await listFolders(db)).toHaveLength(1);
+	});
+
 	it('keeps the name the user typed: a notebook name is a directory name', async () => {
 		const folder = await createFolder(db, { name: 'Work Notes' });
 		expect(folder.path).toBe('Work Notes');

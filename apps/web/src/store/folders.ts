@@ -56,6 +56,23 @@ export const ensureFolder = async (
 	return created;
 };
 
+/**
+ * A notebook of that name is already there. Typed rather than a bare `Error` so
+ * the UI can say so in the user's words instead of showing the message meant for
+ * whoever is reading the logs.
+ */
+export class FolderExistsError extends Error {
+	override readonly name = 'FolderExistsError';
+
+	constructor(
+		readonly path: string,
+		/** The name as the user typed it, after sanitizing. */
+		readonly folderName: string
+	) {
+		super(`Folder already exists: ${path}`);
+	}
+}
+
 export interface CreateFolderInput extends FolderScope {
 	/** Folder to create it in. Defaults to the root. */
 	parentPath?: string;
@@ -70,13 +87,19 @@ export const createFolder = async (
 	const name = sanitizeFolderName(input.name);
 	const path = joinPath(input.parentPath ?? '', name);
 
-	const existing = await db.folders.get([connectionId, path]);
-	if (existing !== undefined) throw new Error(`Folder already exists: ${path}`);
+	// The check and the create are one step. `ensureFolder` is idempotent, so
+	// two concurrent creates of one name did no damage — but both passed the
+	// check and both reported success, and this is the one function whose error
+	// the user is now shown, which makes an advisory check the wrong kind.
+	return db.transaction('rw', db.folders, async () => {
+		const existing = await db.folders.get([connectionId, path]);
+		if (existing !== undefined) throw new FolderExistsError(path, name);
 
-	await ensureFolder(db, path, { connectionId });
-	const created = await db.folders.get([connectionId, path]);
-	if (created === undefined) throw new Error(`Failed to create folder: ${path}`);
-	return created;
+		await ensureFolder(db, path, { connectionId });
+		const created = await db.folders.get([connectionId, path]);
+		if (created === undefined) throw new Error(`Failed to create folder: ${path}`);
+		return created;
+	});
 };
 
 export const listFolders = async (

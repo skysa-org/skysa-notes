@@ -13,6 +13,7 @@ import {
 	UNTITLED_SLUG,
 	writeFrontmatter,
 } from '@skysa/core';
+import Dexie from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
@@ -102,42 +103,48 @@ export const createNote = async (
 	const body = input.body ?? '';
 	const now = Date.now();
 
-	const title = input.title ?? deriveTitle({ body });
-	const filename = uniqueFilename(title, await takenNamesIn(db, connectionId, folderPath));
-	const path = joinPath(folderPath, filename);
-	const id = crypto.randomUUID();
+	// One transaction, for the same reason `applyEdit` is one: the filename is
+	// chosen from the names already taken, and the digest between that read and
+	// the `add` is long enough for a second "New note" click to choose the very
+	// same name. Two rows at one path is one file on the remote and a note lost.
+	return db.transaction('rw', db.notes, db.folders, async () => {
+		const title = input.title ?? deriveTitle({ body });
+		const filename = uniqueFilename(title, await takenNamesIn(db, connectionId, folderPath));
+		const path = joinPath(folderPath, filename);
+		const id = crypto.randomUUID();
 
-	const record: NoteRecord = {
-		id,
-		connectionId,
-		path,
-		title,
-		body,
-		frontmatter: writeFrontmatter(null, {
+		const record: NoteRecord = {
 			id,
-			// Only pin a title in frontmatter when the user actually chose one.
-			// Writing "Untitled" here would stop the first heading from ever
-			// naming the note.
-			...(input.title === undefined ? {} : { title }),
-			created: new Date(now).toISOString(),
-			updated: new Date(now).toISOString(),
-		}),
-		tags: [],
-		contentHash: '',
-		dirty: 1,
-		deletedLocally: 0,
-		createdAt: now,
-		updatedAt: now,
-	};
+			connectionId,
+			path,
+			title,
+			body,
+			frontmatter: writeFrontmatter(null, {
+				id,
+				// Only pin a title in frontmatter when the user actually chose one.
+				// Writing "Untitled" here would stop the first heading from ever
+				// naming the note.
+				...(input.title === undefined ? {} : { title }),
+				created: new Date(now).toISOString(),
+				updated: new Date(now).toISOString(),
+			}),
+			tags: [],
+			contentHash: '',
+			dirty: 1,
+			deletedLocally: 0,
+			createdAt: now,
+			updatedAt: now,
+		};
 
-	const withHash: NoteRecord = {
-		...record,
-		contentHash: await contentHash(noteFileContents(record)),
-	};
+		const withHash: NoteRecord = {
+			...record,
+			contentHash: await Dexie.waitFor(contentHash(noteFileContents(record))),
+		};
 
-	if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
-	await db.notes.add(withHash);
-	return withHash;
+		if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
+		await db.notes.add(withHash);
+		return withHash;
+	});
 };
 
 export const getNote = async (db: NotesDatabase, id: string): Promise<NoteRecord | undefined> =>
@@ -166,28 +173,68 @@ export const listNotes = async (
 		.sort((a, b) => b.updatedAt - a.updatedAt);
 };
 
+/**
+ * Read, change, write — as one transaction, because it is none of those things
+ * on its own.
+ *
+ * `contentHash` is genuinely asynchronous (`crypto.subtle.digest`), so between
+ * reading the note and writing it back there is a real window in which another
+ * write to the same row lands, and the `put` below is a whole-record write that
+ * takes no notice of it. Everything the app does to a note goes through here or
+ * through a sibling that writes the same row, and the app deliberately puts two
+ * of them next to each other: `NoteView` flushes a pending autosave immediately
+ * before renaming, deleting, or switching mode. Those survive only while both
+ * land in the same tick. When the 2s debounce fires on its own and the user then
+ * clicks, the second write wins the race and the first is gone — a paragraph
+ * typed and then renamed within two seconds simply disappears, a delete is
+ * undone and the note comes back, a mode switch is forgotten.
+ *
+ * `Dexie.waitFor` is what keeps the transaction alive across the digest: an
+ * ordinary `await` on a promise Dexie did not create lets the transaction
+ * commit early, which is the bug again with extra steps. Pass it a promise
+ * that has already been started — never `() => …`, which reads as the same
+ * thing and is not: `waitFor` runs a function argument under
+ * `ignoreTransaction`, outside the very transaction it is here to hold, and
+ * the wait then times out sixty seconds later with everything rolled back.
+ *
+ * `change` runs inside the transaction and may read the database itself. That
+ * is not a convenience: deciding what to write is half of the read-modify-write
+ * and has to be inside the same window. A caller that works out the new title
+ * and filename from its own earlier read is deciding against a note that may
+ * already have been renamed by the time the decision lands, and it will then
+ * write that stale answer over the rename.
+ */
+type NoteEdit = Omit<Partial<NoteRecord>, 'contentHash' | 'dirty' | 'updatedAt'>;
+
 const applyEdit = async (
 	db: NotesDatabase,
 	id: string,
-	change: (note: NoteRecord) => Omit<Partial<NoteRecord>, 'contentHash' | 'dirty' | 'updatedAt'>
-): Promise<NoteRecord> => {
-	const existing = await db.notes.get(id);
-	if (existing === undefined) throw new Error(`No note with id ${id}`);
+	change: (note: NoteRecord) => NoteEdit | Promise<NoteEdit>
+): Promise<NoteRecord> =>
+	// `folders` is in scope because a note can move into a folder that does not
+	// exist yet, and creating it belongs to the same all-or-nothing step.
+	db.transaction('rw', db.notes, db.folders, async () => {
+		const existing = await db.notes.get(id);
+		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
-	const updated: NoteRecord = {
-		...existing,
-		...change(existing),
-		dirty: 1,
-		updatedAt: Date.now(),
-	};
-	const withHash: NoteRecord = {
-		...updated,
-		contentHash: await contentHash(noteFileContents(updated)),
-	};
+		const updated: NoteRecord = {
+			...existing,
+			// `Dexie.waitFor` again, and for the same reason: `change` is an
+			// ordinary async function, so what it hands back is a native promise,
+			// and awaiting one of those inside a transaction lets the transaction
+			// commit out from under the rest of this.
+			...(await Dexie.waitFor(change(existing))),
+			dirty: 1,
+			updatedAt: Date.now(),
+		};
+		const withHash: NoteRecord = {
+			...updated,
+			contentHash: await Dexie.waitFor(contentHash(noteFileContents(updated))),
+		};
 
-	await db.notes.put(withHash);
-	return withHash;
-};
+		await db.notes.put(withHash);
+		return withHash;
+	});
 
 /**
  * Record a user edit to the body.
@@ -203,33 +250,32 @@ export const saveNoteBody = async (
 	db: NotesDatabase,
 	id: string,
 	body: string
-): Promise<NoteRecord> => {
-	const existing = await db.notes.get(id);
-	if (existing === undefined) throw new Error(`No note with id ${id}`);
+): Promise<NoteRecord> =>
+	// Every one of these questions — is the note still unnamed, what is it called
+	// now, which filenames are taken — is asked inside the transaction. Asked
+	// outside it, an autosave that fires on its own two seconds after the user
+	// typed can decide the note is unnamed, then land after the user has named
+	// it, and put the heading back over the name they chose.
+	applyEdit(db, id, async (note) => {
+		if (!isUnnamed(note)) {
+			return { body, title: titleFor(note.frontmatter, body, note.path) };
+		}
 
-	if (!isUnnamed(existing)) {
-		return applyEdit(db, id, (note) => ({
+		const heading = deriveTitle({ body });
+		if (heading === UNTITLED_TITLE) return { body };
+
+		const folderPath = parentPath(note.path);
+		const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
+
+		return {
 			body,
-			title: titleFor(note.frontmatter, body, note.path),
-		}));
-	}
-
-	const heading = deriveTitle({ body });
-	if (heading === UNTITLED_TITLE) return applyEdit(db, id, () => ({ body }));
-
-	const folderPath = parentPath(existing.path);
-	const taken = await takenNamesIn(db, existing.connectionId, folderPath, id);
-	const filename = uniqueFilename(heading, taken);
-
-	return applyEdit(db, id, (note) => ({
-		body,
-		title: heading,
-		// Deliberately not writing `title` to frontmatter here. Naming the file
-		// is enough; pinning the title as well would stop it following later
-		// heading edits, which only an explicit rename should do.
-		path: replaceBasename(note.path, filename),
-	}));
-};
+			title: heading,
+			// Deliberately not writing `title` to frontmatter here. Naming the file
+			// is enough; pinning the title as well would stop it following later
+			// heading edits, which only an explicit rename should do.
+			path: replaceBasename(note.path, uniqueFilename(heading, taken)),
+		};
+	});
 
 /**
  * Rename a note. The title is the identity the user sees; the filename follows
@@ -239,39 +285,35 @@ export const renameNote = async (
 	db: NotesDatabase,
 	id: string,
 	title: string
-): Promise<NoteRecord> => {
-	const existing = await db.notes.get(id);
-	if (existing === undefined) throw new Error(`No note with id ${id}`);
+): Promise<NoteRecord> =>
+	applyEdit(db, id, async (note) => {
+		const taken = await takenNamesIn(db, note.connectionId, parentPath(note.path), id);
 
-	const folderPath = parentPath(existing.path);
-	const taken = await takenNamesIn(db, existing.connectionId, folderPath, id);
-	const filename = uniqueFilename(title, taken);
-
-	return applyEdit(db, id, (note) => ({
-		title,
-		path: replaceBasename(note.path, filename),
-		frontmatter: writeFrontmatter(note.frontmatter, { title }),
-	}));
-};
+		return {
+			title,
+			path: replaceBasename(note.path, uniqueFilename(title, taken)),
+			frontmatter: writeFrontmatter(note.frontmatter, { title }),
+		};
+	});
 
 /** Move a note to another folder, keeping its filename where possible. */
 export const moveNote = async (
 	db: NotesDatabase,
 	id: string,
 	folderPath: string
-): Promise<NoteRecord> => {
-	const existing = await db.notes.get(id);
-	if (existing === undefined) throw new Error(`No note with id ${id}`);
+): Promise<NoteRecord> =>
+	applyEdit(db, id, async (note) => {
+		const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
+		const name = basename(note.path);
+		const stem = name.endsWith(NOTE_EXTENSION) ? name.slice(0, -NOTE_EXTENSION.length) : name;
+		const filename = taken.includes(name) ? uniqueFilename(stem, taken) : name;
 
-	const taken = await takenNamesIn(db, existing.connectionId, folderPath, id);
-	const name = basename(existing.path);
-	const stem = name.endsWith(NOTE_EXTENSION) ? name.slice(0, -NOTE_EXTENSION.length) : name;
-	const filename = taken.includes(name) ? uniqueFilename(stem, taken) : name;
-
-	if (folderPath !== '')
-		await ensureFolder(db, folderPath, { connectionId: existing.connectionId });
-	return applyEdit(db, id, () => ({ path: joinPath(folderPath, filename) }));
-};
+		// Inside the transaction, so a move that fails leaves no empty folder
+		// behind for a notebook the note never reached.
+		if (folderPath !== '')
+			await ensureFolder(db, folderPath, { connectionId: note.connectionId });
+		return { path: joinPath(folderPath, filename) };
+	});
 
 export const setNoteTags = async (
 	db: NotesDatabase,
@@ -329,34 +371,49 @@ export const importNoteFile = async (
 	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
 	const now = Date.now();
 
-	const existing =
-		parsed.id === undefined
-			? await db.notes.where('[connectionId+path]').equals([connectionId, input.path]).first()
-			: await db.notes.get(parsed.id);
+	// Transactional for the same reason every other write here is, and more
+	// urgently: this one writes `dirty: 0`. An import that lands in the middle of
+	// a local save does not merely overwrite the user's paragraph, it also marks
+	// the note clean, so nothing will ever push what it overwrote.
+	//
+	// `folders` is in scope although nothing here touches it, so that every
+	// writer in this file takes the same scope. A caller that wraps several of
+	// these in one transaction of its own — which is what a sync pull batch will
+	// be — has then only one scope to open, instead of a `SubTransactionError`
+	// the first time it reaches the one writer that asked for less.
+	return db.transaction('rw', db.notes, db.folders, async () => {
+		const existing =
+			parsed.id === undefined
+				? await db.notes
+						.where('[connectionId+path]')
+						.equals([connectionId, input.path])
+						.first()
+				: await db.notes.get(parsed.id);
 
-	const id = parsed.id ?? existing?.id ?? crypto.randomUUID();
+		const id = parsed.id ?? existing?.id ?? crypto.randomUUID();
 
-	const record: NoteRecord = {
-		id,
-		connectionId,
-		path: input.path,
-		title: parsed.title,
-		body: parsed.body,
-		frontmatter: parsed.frontmatter,
-		tags: parsed.tags,
-		...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
-		...(input.remoteVersion === undefined ? {} : { remoteVersion: input.remoteVersion }),
-		contentHash: await contentHash(input.source),
-		dirty: 0,
-		deletedLocally: 0,
-		createdAt:
-			existing?.createdAt ??
-			(parsed.created === undefined ? now : Date.parse(parsed.created)),
-		updatedAt: parsed.updated === undefined ? now : Date.parse(parsed.updated),
-	};
+		const record: NoteRecord = {
+			id,
+			connectionId,
+			path: input.path,
+			title: parsed.title,
+			body: parsed.body,
+			frontmatter: parsed.frontmatter,
+			tags: parsed.tags,
+			...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
+			...(input.remoteVersion === undefined ? {} : { remoteVersion: input.remoteVersion }),
+			contentHash: await Dexie.waitFor(contentHash(input.source)),
+			dirty: 0,
+			deletedLocally: 0,
+			createdAt:
+				existing?.createdAt ??
+				(parsed.created === undefined ? now : Date.parse(parsed.created)),
+			updatedAt: parsed.updated === undefined ? now : Date.parse(parsed.updated),
+		};
 
-	await db.notes.put(record);
-	return record;
+		await db.notes.put(record);
+		return record;
+	});
 };
 
 /**

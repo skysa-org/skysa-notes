@@ -91,14 +91,34 @@ code {
 /* ---- App shell -------------------------------------------------------- */
 
 .app,
+.app-frame,
 .app-shell {
 	height: 100dvh;
+}
+
+/*
+ * The shell is a three-column grid with exactly one child per column, so a
+ * banner placed inside it becomes a fourth grid item: it takes the sidebar's
+ * column and pushes the note view into an implicit second row, which
+ * `overflow: hidden` then clips away. Anything that sits above the panes goes
+ * here instead.
+ */
+.app-frame {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 }
 
 .app-shell {
 	display: grid;
 	grid-template-columns: 15rem 19rem 1fr;
 	overflow: hidden;
+}
+
+.app-frame > .app-shell {
+	flex: 1;
+	height: auto;
+	min-height: 0;
 }
 
 .sidebar,
@@ -562,11 +582,25 @@ button.row.selected {
 }
 
 @media (max-width: 60rem) {
+	.app,
+	.app-frame {
+		height: auto;
+		min-height: 100dvh;
+		overflow: visible;
+	}
+
 	.app-shell {
 		grid-template-columns: 1fr;
 		grid-template-rows: auto auto 1fr;
 		height: auto;
 		min-height: 100dvh;
+	}
+
+	/* The frame already carries the full height. Leaving the shell's own
+	   `min-height` on would make the page `banner + 100dvh` tall and grow a
+	   scrollbar, rather than the shell taking what is left. */
+	.app-frame > .app-shell {
+		min-height: 0;
 	}
 
 	.sidebar,

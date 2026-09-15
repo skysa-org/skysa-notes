@@ -1,4 +1,5 @@
 import { parseNoteFile, splitFrontmatter } from '@skysa/core';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
@@ -414,5 +415,164 @@ describe('setNoteEditorMode', () => {
 		expect(stored?.dirty).toBe(0);
 		expect(stored?.updatedAt).toBe(note.updatedAt);
 		expect(stored?.contentHash).toBe(note.contentHash);
+	});
+});
+
+/**
+ * `applyEdit` reads the note, computes a hash, then writes the whole record
+ * back. `contentHash` is `crypto.subtle.digest`, which is genuinely async, so
+ * without a transaction around all three steps any write that lands in that
+ * window is overwritten wholesale — and the app deliberately puts writes next
+ * to each other: `NoteView` flushes a pending autosave immediately before
+ * renaming, deleting, or switching mode.
+ *
+ * The competing write is fired from inside the stubbed digest, which is the
+ * only way to place it in that window exactly. Starting it alongside and
+ * hoping is not a test: it lands before the read on any machine fast enough,
+ * and then passes while proving nothing.
+ */
+describe('an edit that overlaps another write to the same note', () => {
+	const digest = crypto.subtle.digest.bind(crypto.subtle);
+	afterEach(() => {
+		crypto.subtle.digest = digest;
+	});
+
+	/**
+	 * Runs `competing` while the first hash is in flight, and returns a promise
+	 * for it. It is started rather than awaited: with the transaction in place
+	 * it blocks until the edit commits, so awaiting it here would deadlock the
+	 * test rather than exercise the code.
+	 */
+	const during = (competing: () => Promise<unknown>): Promise<unknown> => {
+		let started: (value: Promise<unknown>) => void = () => undefined;
+		const ran = new Promise<unknown>((resolve) => {
+			started = resolve;
+		});
+		let seen = 0;
+		crypto.subtle.digest = async (algorithm: AlgorithmIdentifier, data: BufferSource) => {
+			seen += 1;
+			if (seen === 1) {
+				// Outside the running transaction's zone. Dexie adopts any db
+				// call made inside it into that same transaction, which would
+				// make the competing write part of the edit rather than a rival
+				// to it — the one arrangement where nothing can go wrong, and so
+				// the one arrangement that proves nothing. A real second write
+				// comes from an event handler, which is what this is.
+				started(Dexie.ignoreTransaction(competing));
+				for (let i = 0; i < 20; i += 1)
+					await new Promise((resolve) => setTimeout(resolve, 0));
+			}
+			return digest(algorithm, data);
+		};
+		return ran;
+	};
+
+	it('does not lose the body when a rename lands during the hash', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+		const renaming = during(() => renameNote(db, note.id, 'Renamed'));
+
+		await saveNoteBody(db, note.id, 'a paragraph the user typed\n');
+		await renaming;
+
+		const after = await getNote(db, note.id);
+		expect(after?.body).toBe('a paragraph the user typed\n');
+		expect(after?.title).toBe('Renamed');
+	});
+
+	it('does not resurrect a note deleted during the hash', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+		const deleting = during(() => deleteNote(db, note.id));
+
+		await saveNoteBody(db, note.id, 'typed then deleted\n');
+		await deleting;
+
+		expect((await getNote(db, note.id))?.deletedLocally).toBe(1);
+	});
+
+	it('does not forget a mode switch made during the hash', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+		const switching = during(() => setNoteEditorMode(db, note.id, 'raw'));
+
+		await saveNoteBody(db, note.id, 'typed then switched\n');
+		await switching;
+
+		expect((await getNote(db, note.id))?.editorMode).toBe('raw');
+	});
+
+	/**
+	 * The pull side of sync is the same shape: read the row, hash, write the row
+	 * whole. Read outside a transaction, what it writes back is a note that may
+	 * no longer be there — and since it writes the id and `createdAt` it read, it
+	 * puts a deleted note back under its old identity.
+	 *
+	 * Which of an import and a local edit wins the *content* is the conflict
+	 * question, and is not this; this is only that one of them happens after the
+	 * other rather than through the middle of it.
+	 */
+	it('does not bring a purged note back from a stale read', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+		const purging = during(() => purgeNote(db, note.id));
+
+		await importNoteFile(db, { path: note.path, source: '# From the remote\n' });
+		await purging;
+
+		expect(await getNote(db, note.id)).toBeUndefined();
+	});
+});
+
+/**
+ * Holding the row for the write is only half of it. An autosave on a note with
+ * no name of its own also decides *what to call it* — from the first heading —
+ * and that decision has to be made in the same window as the write it informs.
+ * Decided beforehand, it is an answer about a note that has since been given a
+ * name, and it goes in over the name the user chose.
+ *
+ * The rename goes first here and the save second, which is the order the app
+ * produces: the 2s autosave debounce fires on its own, and the user is still
+ * looking at the note when they rename it.
+ */
+describe('an autosave that decides the note is still unnamed', () => {
+	it('does not put the heading back over the name the user chose', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+
+		await Promise.all([
+			renameNote(db, note.id, 'User chose this'),
+			saveNoteBody(db, note.id, '# A heading\n'),
+		]);
+
+		const after = await getNote(db, note.id);
+		expect(after?.title).toBe('User chose this');
+		expect(after?.path).toBe('Notebook/user-chose-this.md');
+		expect(after?.body).toBe('# A heading\n');
+	});
+});
+
+/**
+ * Two clicks on "New note" are one user action as far as the user is concerned,
+ * and the button is neither disabled nor debounced. Both pick a filename from
+ * the names already taken, and the digest between that read and the insert is
+ * long enough for each to see a folder without the other's note in it.
+ */
+describe('two notes created at once', () => {
+	it('do not both take the same filename', async () => {
+		const [one, two] = await Promise.all([
+			createNote(db, { folderPath: 'Notebook' }),
+			createNote(db, { folderPath: 'Notebook' }),
+		]);
+
+		expect(one.path).not.toBe(two.path);
+		expect(
+			(await listNotes(db, { folderPath: 'Notebook' })).map((note) => note.path).sort()
+		).toEqual([one.path, two.path].sort());
+	});
+
+	it('do not both take the same filename when renamed at once', async () => {
+		const one = await createNote(db, { folderPath: 'Notebook', title: 'One' });
+		const two = await createNote(db, { folderPath: 'Notebook', title: 'Two' });
+
+		await Promise.all([renameNote(db, one.id, 'Same'), renameNote(db, two.id, 'Same')]);
+
+		const paths = (await listNotes(db, { folderPath: 'Notebook' })).map((note) => note.path);
+		expect(new Set(paths).size).toBe(2);
 	});
 });

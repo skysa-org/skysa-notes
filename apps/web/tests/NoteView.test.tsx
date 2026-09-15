@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
-import { createNote } from '../src/store/notes.js';
+import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 /**
@@ -120,5 +120,27 @@ describe('NoteView mode toggle', () => {
 		await waitFor(() => {
 			expect(richSurface()).not.toBeNull();
 		});
+	});
+});
+
+describe('abandoning a rename', () => {
+	it('leaves the note alone when the user presses Escape', async () => {
+		// `blur()` dispatches synchronously, so the blur handler runs against the
+		// render in which the draft is still the typed value. Clearing state and
+		// blurring renames the note — and the file on disk — to the very text the
+		// user was throwing away.
+		const user = userEvent.setup();
+		const note = await createNote(db, { title: 'Original', body: 'body\n' });
+		render(<Harness id={note.id} />);
+
+		const field = await screen.findByLabelText('Note title');
+		await user.clear(field);
+		await user.type(field, 'Typed by mistake');
+		await user.keyboard('{Escape}');
+
+		expect(await screen.findByDisplayValue('Original')).toBeDefined();
+		const after = await getNote(db, note.id);
+		expect(after?.title).toBe('Original');
+		expect(after?.path).toBe(note.path);
 	});
 });

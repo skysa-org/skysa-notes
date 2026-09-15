@@ -72,15 +72,25 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 	);
 
 	// Can this note be shown at all? Checked once the editor exists, because only
-	// then do its parser and serializer exist. This runs inside `create()`, before
-	// the user has any way to type, so a failing note reaches raw mode untouched.
+	// then do its parser and serializer exist. This runs before the user has any
+	// way to type, so a failing note reaches raw mode untouched.
+	//
+	// Once per editor, and deliberately not on `get`. `useEditor` returns a fresh
+	// `get` closure on every render, so an effect that depends on it re-runs on
+	// every render of this component — including the one autosave causes two
+	// seconds after the user starts typing. It would then compare the document
+	// the user has been writing in against `initial.current`, which is the text
+	// the editor was *built* with, find they differ, and declare the note
+	// unrepresentable. Typing one word into any note was enough.
 	useEffect(() => {
 		if (loading) return;
 		get()?.action((ctx) => {
 			if (representsFaithfully(ctx, initial.current)) return;
 			unsupported.current();
 		});
-	}, [loading, get, noteId]);
+		// `get` is intentionally absent; see above.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [loading, noteId]);
 
 	// Adopt a body that changed underneath us — a sync pull, or an edit made in
 	// raw mode. `shouldAdopt` is what keeps a stale prop on an unrelated re-render
@@ -90,15 +100,41 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 		if (!incoming.shouldAdopt(body)) return;
 		get()?.action((ctx) => {
 			adoptBody(ctx, body);
+			// The same question the editor was built with, asked again of a body
+			// that arrived from somewhere else. A sync pull can bring in markdown
+			// this editor cannot show, and since the check above runs once, this
+			// is the only place left to notice.
+			if (!representsFaithfully(ctx, body)) unsupported.current();
 		});
 	}, [body, get, incoming, loading]);
 
 	return <Milkdown />;
 };
 
+/**
+ * Keyed by note, so moving to another note builds a new editor rather than
+ * re-pointing the old one.
+ *
+ * `useEditor` already asks for a rebuild on `noteId`, but it does not get one
+ * synchronously: Milkdown tears the old editor down and awaits `create()`
+ * inside the provider, so for at least one render after the note changes
+ * `get()` still hands back the *previous* note's editor while the props and
+ * refs around it describe the new one. Everything downstream — the fidelity
+ * check, `adoptBody`, the incoming-body bookkeeping — then reasons about one
+ * note's document using another note's text. The fidelity check is where it
+ * showed: an ordinary click from one note to the next compared two unrelated
+ * documents, decided they disagreed, and locked the destination note out of
+ * rich text for the session under a banner claiming its markdown could not be
+ * shown.
+ *
+ * A key is the blunt fix and the right one. The document is genuinely
+ * different, so there is nothing in the old editor worth keeping — no cursor,
+ * no undo history that belongs to this note — and remounting makes the stale
+ * window impossible rather than merely narrow.
+ */
 export const RichEditor = (props: RichEditorProps) => (
 	<div className="editor editor-rich" data-testid="rich-editor">
-		<MilkdownProvider>
+		<MilkdownProvider key={props.noteId}>
 			<ProsemirrorAdapterProvider>
 				<EditorBody {...props} />
 			</ProsemirrorAdapterProvider>
