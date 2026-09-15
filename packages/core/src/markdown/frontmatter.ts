@@ -21,15 +21,39 @@ export interface SplitDocument {
 	body: string;
 }
 
-/** Parse YAML, yielding the mapping only if that is what it is. Never throws. */
+/**
+ * Parse YAML, yielding the mapping only if that is what it is. Never throws.
+ *
+ * A document the parser had to recover from still counts. `yaml` reads through
+ * the mistakes people actually make in frontmatter — a duplicate key, a tab used
+ * to indent a list, an unterminated quote — and hands back the mapping it could
+ * see, `id` and all. Turning those away was expensive in a way that is not
+ * obvious: the block stopped being frontmatter, so the raw YAML went into the
+ * body, where the fences around it read as a setext heading. The note lost its
+ * identity, took its title and therefore its filename from its own metadata,
+ * and gained a second frontmatter block above the first on the next write —
+ * which is then what the next reader parses. Recovering what is readable is the
+ * only reading that keeps a note the note it was.
+ *
+ * What the app does with the recovered fields is only ever to display them.
+ * `writeFrontmatter` still refuses to rewrite a block with errors in it, so the
+ * user's file is never edited on the strength of a guess.
+ */
 const readMapping = (yaml: string | null): Record<string, unknown> | undefined => {
 	if (yaml === null) return undefined;
 	try {
 		const doc = parseDocument(yaml);
-		if (doc.errors.length > 0) return undefined;
 		const data: unknown = doc.toJS();
 		if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined;
-		return data as Record<string, unknown>;
+		const record = data as Record<string, unknown>;
+		// Recovery on its own is not evidence. `: : :` recovers as a mapping too
+		// — `{'': {'': {'': null}}}` — and that is a stray line between two
+		// thematic breaks, not a note's metadata. A document the parser had to
+		// repair has to have named something before it counts.
+		if (doc.errors.length > 0 && !Object.keys(record).some((key) => key !== '')) {
+			return undefined;
+		}
+		return record;
 	} catch {
 		return undefined;
 	}

@@ -49,8 +49,38 @@ describe('splitFrontmatter', () => {
 	});
 
 	it('rejects a fenced block of invalid YAML rather than eating it', () => {
+		// `: : :` recovers as a mapping, but every key in it is empty: nothing in
+		// it was named, so there is no evidence it was ever meant as metadata.
 		const source = '---\n: : :\n---\nBody\n';
 		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	/**
+	 * The mistakes people actually make in frontmatter. `yaml` reads through all
+	 * three, so all three are still frontmatter. Pushing them into the body puts
+	 * the raw YAML between two fences, which markdown reads as a setext heading
+	 * — and the note then takes its title, and its filename, from its own
+	 * metadata.
+	 */
+	const recoverable = {
+		'a duplicate key': 'id: abc\ntitle: Real\ntitle: Real',
+		'a tab-indented sequence': 'id: abc\ntags:\n\t- one\n\t- two',
+		'an unterminated quote': 'id: abc\ntitle: "oops',
+	};
+
+	Object.entries(recoverable).forEach(([what, yaml]) => {
+		it(`keeps a block the parser had to recover from: ${what}`, () => {
+			expect(splitFrontmatter(`---\n${yaml}\n---\nBody\n`)).toEqual({
+				frontmatter: yaml,
+				body: 'Body\n',
+			});
+		});
+
+		it(`is still inverted exactly by joinFrontmatter: ${what}`, () => {
+			const source = `---\n${yaml}\n---\nBody\n`;
+			const { frontmatter, body } = splitFrontmatter(source);
+			expect(joinFrontmatter(frontmatter, body)).toBe(source);
+		});
 	});
 
 	it('is inverted exactly by joinFrontmatter', () => {
@@ -112,6 +142,14 @@ describe('readFrontmatter', () => {
 
 	it('treats malformed YAML as no data instead of throwing', () => {
 		expect(readFrontmatter(': : :')).toEqual({});
+	});
+
+	it('recovers the id from YAML the parser had to repair', () => {
+		// Losing the id is the one outcome a note cannot survive: on the next
+		// import it is a different note, and the one it used to be is orphaned.
+		expect(readFrontmatter('id: abc\ntitle: Real\ntitle: Real').id).toBe('abc');
+		expect(readFrontmatter('id: abc\ntags:\n\t- one').id).toBe('abc');
+		expect(readFrontmatter('id: abc\ntitle: "oops').id).toBe('abc');
 	});
 
 	it('ignores a YAML document that is not a mapping', () => {
