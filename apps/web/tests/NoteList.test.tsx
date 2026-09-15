@@ -29,8 +29,8 @@ const renderList = (props: Partial<Parameters<typeof NoteList>[0]> = {}) =>
 			selectedNoteId={undefined}
 			onSelectNote={() => undefined}
 			onCreateNote={() => undefined}
-			folderLabel="work"
-			notebooksLoaded
+			folderPath="work"
+			storeLoaded
 			{...props}
 		/>
 	);
@@ -55,24 +55,44 @@ describe('NoteList', () => {
 	});
 
 	it('asks for a notebook when there are none', () => {
-		renderList({ notes: [], folderLabel: undefined });
+		renderList({ notes: [], folderPath: undefined });
 		expect(screen.getByText('Create a notebook to start writing.')).toBeDefined();
 	});
 
-	it('waits rather than asking for a notebook before the notebooks have loaded', () => {
-		renderList({ notes: undefined, folderLabel: undefined, notebooksLoaded: false });
+	it('waits rather than asking for a notebook before the store has loaded', () => {
+		renderList({ notes: undefined, folderPath: undefined, storeLoaded: false });
 
 		expect(screen.getByText('Loading…')).toBeDefined();
 		expect(screen.queryByText('Create a notebook to start writing.')).toBeNull();
 	});
 
 	it('cannot create a note with no notebook to put it in', () => {
-		renderList({ notes: [], folderLabel: undefined });
+		renderList({ notes: [], folderPath: undefined });
 		expect(createButton().hasAttribute('disabled')).toBe(true);
 	});
 
 	it('can create a note once a notebook is open', () => {
 		renderList();
 		expect(createButton().hasAttribute('disabled')).toBe(false);
+	});
+
+	describe('at the root', () => {
+		it('names the pane for what it holds rather than showing an empty path', () => {
+			renderList({ folderPath: '' });
+			expect(screen.getByRole('heading', { name: 'Loose notes' })).toBeDefined();
+		});
+
+		it('cannot create a note there', () => {
+			// The app never adds to the loose notes; they are what the remote
+			// folder already had. See docs/PLAN.md §12.6.
+			renderList({ folderPath: '' });
+			expect(createButton().hasAttribute('disabled')).toBe(true);
+		});
+
+		it('does not ask for a notebook, because there is somewhere to look', () => {
+			renderList({ folderPath: '' });
+			expect(screen.queryByText('Create a notebook to start writing.')).toBeNull();
+			expect(screen.getByText('Alpha')).toBeDefined();
+		});
 	});
 });

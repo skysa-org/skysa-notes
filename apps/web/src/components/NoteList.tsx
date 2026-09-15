@@ -1,4 +1,7 @@
+import { ROOT } from '@skysa/core';
+
 import { type NoteRecord } from '../store/db.js';
+import { folderLabel } from '../store/tree.js';
 
 /** Notes in the selected notebook, most recently edited first. */
 
@@ -7,11 +10,17 @@ export interface NoteListProps {
 	selectedNoteId: string | undefined;
 	onSelectNote: (id: string) => void;
 	onCreateNote: () => void;
-	/** The open notebook, or undefined when no notebook is open. */
-	folderLabel: string | undefined;
-	/** False while the notebooks are still loading, so an empty app is not
-	 * mistaken for one that has no notebooks. */
-	notebooksLoaded: boolean;
+	/**
+	 * The open folder, or undefined when nothing is open. The root is a folder
+	 * like any other here — it just holds the loose notes rather than a notebook.
+	 */
+	folderPath: string | undefined;
+	/**
+	 * False while the store is still loading — the notebooks or the count of
+	 * loose notes — so an app that is merely slow is not mistaken for an empty
+	 * one and told to create a notebook it may already have notes outside of.
+	 */
+	storeLoaded: boolean;
 }
 
 /**
@@ -21,11 +30,11 @@ export interface NoteListProps {
  */
 const placeholderFor = ({
 	notes,
-	folderLabel,
-	notebooksLoaded,
-}: Pick<NoteListProps, 'notes' | 'folderLabel' | 'notebooksLoaded'>): string | undefined => {
-	if (folderLabel === undefined) {
-		return notebooksLoaded ? 'Create a notebook to start writing.' : 'Loading…';
+	folderPath,
+	storeLoaded,
+}: Pick<NoteListProps, 'notes' | 'folderPath' | 'storeLoaded'>): string | undefined => {
+	if (folderPath === undefined) {
+		return storeLoaded ? 'Create a notebook to start writing.' : 'Loading…';
 	}
 	if (notes === undefined) return 'Loading…';
 	return notes.length === 0 ? 'No notes here yet.' : undefined;
@@ -53,23 +62,24 @@ export const NoteList = ({
 	selectedNoteId,
 	onSelectNote,
 	onCreateNote,
-	folderLabel,
-	notebooksLoaded,
+	folderPath,
+	storeLoaded,
 }: NoteListProps) => {
-	const placeholder = placeholderFor({ notes, folderLabel, notebooksLoaded });
+	const placeholder = placeholderFor({ notes, folderPath, storeLoaded });
 
 	return (
 		<section className="note-list" aria-label="Notes">
 			<div className="pane-header">
-				<h2>{folderLabel ?? 'Notes'}</h2>
+				<h2>{folderPath === undefined ? 'Notes' : folderLabel(folderPath)}</h2>
 				<button
 					type="button"
 					className="icon"
 					title="New note"
 					aria-label="New note"
-					// Every note lives in a notebook, so there is nowhere to put one
-					// until a notebook is open.
-					disabled={folderLabel === undefined}
+					// Every note the app creates lives in a notebook, so there is
+					// nowhere to put one until a notebook is open. The root is not
+					// a notebook: loose notes are imported, never created here.
+					disabled={folderPath === undefined || folderPath === ROOT}
 					onClick={onCreateNote}
 				>
 					+

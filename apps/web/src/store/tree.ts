@@ -63,19 +63,56 @@ export const containsPath = (tree: readonly FolderNode[], path: string): boolean
 	tree.some((node) => node.path === path || containsPath(node.children, path));
 
 /**
- * Which notebook to open. The root is not a notebook and is not listed, so a
- * request for a folder that no longer exists — a stale link, or a notebook
- * deleted underneath the user — falls back to the first notebook rather than
- * to a pane the sidebar offers no way out of.
+ * What the root of the app folder is called when it holds notes. A note there
+ * belongs to no notebook, which is a shape the remote folder can hand us — the
+ * app itself never creates one (docs/PLAN.md §12.6).
+ */
+export const LOOSE_NOTES_LABEL = 'Loose notes';
+
+/** What to call a folder in a pane heading. Only the root needs a name. */
+export const folderLabel = (path: string): string => (path === ROOT ? LOOSE_NOTES_LABEL : path);
+
+/**
+ * Which notebook to open. The root is not a notebook, and it is only selectable
+ * at all while it holds loose notes, so a request for a folder that is not
+ * there — a stale link, or a notebook deleted underneath the user — falls back
+ * to the first notebook rather than to a pane the sidebar offers no way out of.
  *
- * Returns `undefined` while the tree is still loading, and when there are no
- * notebooks at all.
+ * With both notebooks and loose notes present and nothing asked for, the first
+ * notebook wins: loose notes are an exception to the structure, not the place
+ * to start.
+ *
+ * Both `tree` and `looseNoteCount` arrive from separate live queries that
+ * resolve in either order, so both carry `undefined` for "not known yet" and
+ * neither may be read as "there are none". Answering too early means opening
+ * one folder and jumping to another a frame later, which reads as the app
+ * losing the user's place.
+ *
+ * While the tree is still loading, `requested` is returned unchanged for the
+ * same reason. `undefined` means nothing is open: no folder asked for and none
+ * to fall back to.
  */
 export const selectedFolderPath = (
 	tree: readonly FolderNode[] | undefined,
-	requested: string | undefined
+	requested: string | undefined,
+	looseNoteCount: number | undefined
 ): string | undefined => {
 	if (tree === undefined) return requested;
+
+	// `containsPath` never finds the root, so it is answered before the lookup.
+	if (requested === ROOT) {
+		// Still counting. Keep the user where they asked to be: if the root does
+		// turn out to be empty the fallback below happens once, a moment later,
+		// rather than a notebook opening and the root snapping back over it.
+		if (looseNoteCount === undefined) return ROOT;
+		return looseNoteCount > 0 ? ROOT : tree[0]?.path;
+	}
+
 	if (requested !== undefined && containsPath(tree, requested)) return requested;
-	return tree[0]?.path;
+	if (tree[0] !== undefined) return tree[0].path;
+
+	// No notebooks, so the root is the only thing there could be to open — but
+	// only once we know it holds something. Until then nothing is open, and the
+	// note list says it is still loading rather than that there is nothing here.
+	return looseNoteCount !== undefined && looseNoteCount > 0 ? ROOT : undefined;
 };

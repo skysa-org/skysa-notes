@@ -146,6 +146,14 @@ button.icon {
 	cursor: pointer;
 }
 
+/* "New note" is disabled wherever a note cannot be created — no notebook open,
+   or the loose notes, which the app never adds to. Without this it reads as a
+   button that simply does nothing when clicked. */
+button.icon:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
 .tree,
 .note-list ul {
 	list-style: none;
