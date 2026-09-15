@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { isHidden } from '../../src/paths.js';
+import { isHidden, parentPath } from '../../src/paths.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import {
 	AuthError,
@@ -9,7 +9,7 @@ import {
 	NotFoundError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
-import { conflictPath } from '../../src/sync/conflicts.js';
+import { conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
 import { createSyncEngine, type SyncEngine } from '../../src/sync/engine.js';
 import type { SyncStore } from '../../src/sync/store.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
@@ -1294,6 +1294,50 @@ describe('a batch that both deletes a folder and reconciles a scan', () => {
 
 		expect(store.notes()).toEqual([]);
 		expect(store.folders()).toEqual([]);
+	});
+});
+
+describe('a file created, deleted and re-created in one window', () => {
+	it('leaves one note at that path, not one per entry', async () => {
+		// Three entries about one path, and each of the last two has to see what
+		// the ones before it did — the store cannot say, because none of the
+		// batch has been applied. The deletion finds nothing and falls through
+		// to the folder branch; the second file finds no occupant and lands on
+		// top. Two rows at one path is a note the sidebar shows twice, and on a
+		// path-based provider they would share a `remoteId` as well.
+		await engine.pull();
+		const first = await remoteFile('a.md', 'one\n');
+		await provider.delete(first);
+		await remoteFile('a.md', 'two\n');
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.notes()).toHaveLength(1);
+		expect(noteAt('a.md')?.content).toBe('two\n');
+	});
+});
+
+describe('two entries for one path with nothing said about the first', () => {
+	it('moves the stale one aside rather than keeping two rows at the path', async () => {
+		// `deduped` keeps entries for different things apart on purpose — a file
+		// deleted and another created at one path is two things happening — so
+		// one path can be claimed twice in a batch with no deletion between
+		// them. The second claim has to see the note the first just made, and
+		// the store cannot say: none of the batch has been applied.
+		await engine.pull();
+		const first = await remoteFile('a.md', 'one\n');
+		await provider.delete(first);
+		const second = await remoteFile('a.md', 'two\n');
+
+		const result = await pullNow([first, second]);
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('a.md')?.remoteId).toBe(second.remoteId);
+		expect(store.notes()).toHaveLength(2);
+		expect(store.notes().find((note) => note.remoteId === first.remoteId)?.path).toContain(
+			'conflict'
+		);
 	});
 });
 
@@ -2955,6 +2999,226 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		]);
 
 		expect(store.folders().map((folder) => folder.path)).toEqual(['Archive']);
+	});
+
+	it('deletes the folder being replaced before moving the new one in', async () => {
+		// The user deleted `Archive` and renamed `Archive 2024` onto its name,
+		// and both halves arrive together. The store keeps one row per path, so
+		// the move overwrites `Archive`'s row and strands its notes under a
+		// notebook that is now somebody else's — and the deletion, decided
+		// afterwards against a path that has changed hands, then takes the
+		// newcomer's notes instead. Both folders' notes gone, `ok` reported,
+		// cursor stored, and only a cursor reset would ever bring them back.
+		const doomed = await provider.createFolder('Archive');
+		await remoteFile('Archive/old.md', 'old\n');
+		const renaming = await provider.createFolder('Archive 2024');
+		await remoteFile('Archive 2024/new.md', 'new\n');
+		await engine.pull();
+
+		await provider.delete(doomed);
+		const renamed = await provider.move(renaming, 'Archive');
+
+		const result = await pullNow([
+			renamed,
+			{ path: 'Archive', deleted: true, remoteId: doomed.remoteId },
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+		expect(store.folders().map((folder) => folder.path)).toEqual(['Archive']);
+	});
+
+	it('recognises a deletion that carries no id at all', async () => {
+		// Dropbox's `DeletedMetadata` is a path and nothing else, so the folder
+		// being replaced can only be matched by where it was.
+		const doomed = await provider.createFolder('Archive');
+		await remoteFile('Archive/old.md', 'old\n');
+		const renaming = await provider.createFolder('Archive 2024');
+		await remoteFile('Archive 2024/new.md', 'new\n');
+		await engine.pull();
+
+		await provider.delete(doomed);
+		const renamed = await provider.move(renaming, 'Archive');
+
+		await pullNow([renamed, { path: 'Archive', deleted: true }]);
+
+		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+	});
+
+	it('recognises a deletion whose path is not where we think the folder is', async () => {
+		// The folder was moved remotely in a window we never saw, so the
+		// deletion names a path our row has never held. The id is the only
+		// thing tying the two together, and without it the folder is read as
+		// merely in the way and moved aside rather than deleted.
+		const doomed = await provider.createFolder('Archive');
+		await remoteFile('Archive/old.md', 'old\n');
+		const renaming = await provider.createFolder('Archive 2024');
+		await remoteFile('Archive 2024/new.md', 'new\n');
+		await engine.pull();
+
+		await provider.delete(doomed);
+		const renamed = await provider.move(renaming, 'Archive');
+
+		await pullNow([renamed, { path: 'Vault', deleted: true, remoteId: doomed.remoteId }]);
+
+		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+	});
+
+	it('gives two folders displaced out of one path different names', async () => {
+		// Dropbox documents that a path may appear more than once in a batch,
+		// and `deduped` keeps entries for different things apart deliberately.
+		// So one path can be claimed twice, and the folder each claim displaces
+		// needs a name of its own — landing on the same one puts two folders at
+		// one path, which is where a notebook's notes get merged into another's.
+		const first = await provider.createFolder('A');
+		await remoteFile('A/one.md', 'one\n');
+		const second = await provider.createFolder('B');
+		await remoteFile('B/two.md', 'two\n');
+		const third = await provider.createFolder('C');
+		await remoteFile('C/three.md', 'three\n');
+		await engine.pull();
+
+		await pullNow([
+			{ ...second, path: 'A' },
+			{ ...third, path: 'A' },
+		]);
+
+		const paths = store.notes().map((note) => note.path);
+		expect(paths).toEqual([...new Set(paths)]);
+		expect(store.notes()).toHaveLength(3);
+		expect(noteAt('A/three.md')?.content).toBe('three\n');
+		// And the two that were pushed out are still two notebooks, each with
+		// its own note. Landing on one name merges them, which reads as "both
+		// notes are somewhere called conflict" unless the folders are compared.
+		const one = store.notes().find((note) => note.content === 'one\n')?.path ?? '';
+		const two = store.notes().find((note) => note.content === 'two\n')?.path ?? '';
+		expect(one).toContain('conflict');
+		expect(two).toContain('conflict');
+		expect(parentPath(one)).not.toBe(parentPath(two));
+		expect(first.remoteId).not.toBe(second.remoteId);
+	});
+
+	it('asks which folder is in the way now, not which one used to be', async () => {
+		// `A` is deleted and `B` renamed onto its name, and then `C` is renamed
+		// onto that. By the second claim the folder standing at `A` is `B` — the
+		// one that is *not* deleted — so it has to be moved aside. Reading the
+		// occupant off the store instead answers `A`, which the batch says is
+		// doomed, and the delete that follows takes `B`'s notes with it.
+		const doomed = await provider.createFolder('A');
+		await remoteFile('A/one.md', 'one\n');
+		const second = await provider.createFolder('B');
+		await remoteFile('B/two.md', 'two\n');
+		const third = await provider.createFolder('C');
+		await remoteFile('C/three.md', 'three\n');
+		await engine.pull();
+		await provider.delete(doomed);
+
+		await pullNow([
+			{ ...second, path: 'A' },
+			{ ...third, path: 'A' },
+			{ path: 'A', deleted: true, remoteId: doomed.remoteId },
+		]);
+
+		// `B` kept its own notebook rather than being merged into `C`'s: both
+		// notes surviving is not the same as both notebooks surviving, and the
+		// merge leaves them side by side under one name.
+		const two = store.notes().find((note) => note.content === 'two\n')?.path ?? '';
+		expect(two).toContain('conflict');
+		expect(parentPath(two)).not.toBe('A');
+		expect(noteAt('A/three.md')?.content).toBe('three\n');
+		expect(store.notes().some((note) => note.content === 'one\n')).toBe(false);
+	});
+
+	it('does not displace a folder onto a name already standing', async () => {
+		// A folder displaced in an earlier batch and never claimed is still
+		// sitting there under its conflict name. Taking that name again puts
+		// two notebooks at one path and merges their notes.
+		await provider.createFolder('A');
+		await remoteFile('A/one.md', 'one\n');
+		const second = await provider.createFolder('B');
+		await remoteFile('B/two.md', 'two\n');
+		await engine.pull();
+		store.putFolder({ path: conflictFolderPath('A', AT, []) });
+		store.put({
+			id: 'stranded',
+			path: `${conflictFolderPath('A', AT, [])}/old.md`,
+			content: 'from before\n',
+			dirty: true,
+		});
+
+		await pullNow([{ ...second, path: 'A' }]);
+
+		const paths = store.notes().map((note) => note.path);
+		expect(paths).toEqual([...new Set(paths)]);
+		expect(store.notes().find((note) => note.id === 'stranded')?.content).toBe('from before\n');
+		expect(store.notes().find((note) => note.content === 'one\n')?.path).toContain('-2');
+	});
+
+	it('is right when the deletion comes first, too', async () => {
+		// The order the engine has always handled. Asserted beside the other so
+		// a fix for one that breaks the other cannot pass.
+		const doomed = await provider.createFolder('Archive');
+		await remoteFile('Archive/old.md', 'old\n');
+		const renaming = await provider.createFolder('Archive 2024');
+		await remoteFile('Archive 2024/new.md', 'new\n');
+		await engine.pull();
+
+		await provider.delete(doomed);
+		const renamed = await provider.move(renaming, 'Archive');
+
+		await pullNow([{ path: 'Archive', deleted: true, remoteId: doomed.remoteId }, renamed]);
+
+		expect(store.notes().map((note) => note.path)).toEqual(['Archive/new.md']);
+	});
+
+	it('moves a folder merely in the way aside, and brings it home', async () => {
+		// Two drags in one window: `Archive` renamed to `Older`, and
+		// `Archive 2024` renamed onto the name it left. Nothing says `Archive`
+		// is gone, so deleting it would take notes nobody asked to lose —
+		// and leaving it merges both folders into one notebook, which is how
+		// `Archive/old.md` ends up inside `Older`. It moves aside, and the
+		// entry saying where it really went moves it on from there.
+		const other = await provider.createFolder('Archive');
+		await remoteFile('Archive/old.md', 'old\n');
+		const renaming = await provider.createFolder('Archive 2024');
+		await remoteFile('Archive 2024/new.md', 'new\n');
+		await engine.pull();
+
+		const lifted = await provider.move(other, 'Older');
+		const renamed = await provider.move(renaming, 'Archive');
+
+		await pullNow([renamed, lifted]);
+
+		expect(
+			store
+				.notes()
+				.map((note) => note.path)
+				.sort()
+		).toEqual(['Archive/new.md', 'Older/old.md']);
+	});
+
+	it('keeps a displaced folder and its notes together when nothing claims it', async () => {
+		// The batch never says where `Archive` went — the entry is in the next
+		// window, or the provider never sends one. It stays where it was put,
+		// under a name the user can recognise, with its notes still inside it.
+		// The alternative is the merge: two notebooks' notes in one, and a row
+		// gone for good.
+		const other = await provider.createFolder('Archive');
+		await remoteFile('Archive/old.md', 'old\n');
+		const renaming = await provider.createFolder('Archive 2024');
+		await remoteFile('Archive 2024/new.md', 'new\n');
+		await engine.pull();
+		await provider.move(other, 'Older');
+		const renamed = await provider.move(renaming, 'Archive');
+
+		await pullNow([renamed]);
+
+		expect(noteAt('Archive/new.md')?.content).toBe('new\n');
+		const kept = store.notes().find((note) => note.content === 'old\n');
+		expect(kept?.path).toContain('conflict');
+		expect(store.folders().map((folder) => folder.path)).toContain(
+			parentPath(kept?.path ?? '')
+		);
 	});
 
 	it('forgets a folder created and deleted inside one window', async () => {

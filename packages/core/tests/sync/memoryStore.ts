@@ -222,6 +222,13 @@ export const createMemoryStore = (): MemoryStore => {
 				anomalies.push('delete-folder for the root');
 				return;
 			}
+			// The contract forgives a path with no folder at it — a batch the
+			// store rejects is retried for ever — but an engine that says it
+			// twice is still wrong, so it is recorded like the other no-ops.
+			if (!folders.has(change.path)) {
+				anomalies.push(`delete-folder for unknown folder ${change.path}`);
+				return;
+			}
 			// Everything beneath it, not just the row itself: a folder that is
 			// gone remotely cannot leave its subfolders behind, and it cannot
 			// leave its notes floating at paths whose folder no longer exists.

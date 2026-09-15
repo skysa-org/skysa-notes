@@ -34,6 +34,24 @@ export const conflictStamp = (at: Date): string => at.toISOString().slice(0, 16)
  * because the minute-resolution stamp is not enough on its own and the second
  * copy must never overwrite the first.
  */
+const conflictName = (
+	stem: string,
+	extension: string,
+	at: Date,
+	taken: Iterable<string>
+): string => {
+	const base = `${stem} (conflict ${conflictStamp(at)})`;
+	const used = new Set([...taken].map((name) => name.toLowerCase()));
+
+	// Case-insensitive, because Drive, Dropbox and macOS all treat names that
+	// way and a name that only differs in case is not actually free.
+	const free = (n: number): string => {
+		const candidate = n === 1 ? `${base}${extension}` : `${base}-${n}${extension}`;
+		return used.has(candidate.toLowerCase()) ? free(n + 1) : candidate;
+	};
+	return free(1);
+};
+
 export const conflictFilename = (
 	filename: string,
 	at: Date,
@@ -42,17 +60,25 @@ export const conflictFilename = (
 	const stem = filename.endsWith(NOTE_EXTENSION)
 		? filename.slice(0, -NOTE_EXTENSION.length)
 		: filename;
-	const base = `${stem} (conflict ${conflictStamp(at)})`;
-	const used = new Set([...taken].map((name) => name.toLowerCase()));
-
-	// Case-insensitive, because Drive, Dropbox and macOS all treat names that
-	// way and a name that only differs in case is not actually free.
-	const free = (n: number): string => {
-		const candidate = n === 1 ? `${base}${NOTE_EXTENSION}` : `${base}-${n}${NOTE_EXTENSION}`;
-		return used.has(candidate.toLowerCase()) ? free(n + 1) : candidate;
-	};
-	return free(1);
+	return conflictName(stem, NOTE_EXTENSION, at, taken);
 };
+
+/**
+ * The same name for a folder, which carries no extension.
+ *
+ * A folder needs one when a remote move lands on a path another of ours is
+ * still at: the store keeps one row per path, so without moving that one aside
+ * first its row is overwritten and the two folders' notes are merged into one
+ * notebook. Usually it is there for the length of a batch — the entry saying
+ * where that folder really went moves it on — but it can be left standing if
+ * that entry never comes, so it is named the way a note would be rather than
+ * something the user would not recognise.
+ */
+export const conflictFolderName = (name: string, at: Date, taken: Iterable<string> = []): string =>
+	conflictName(name, '', at, taken);
+
+export const conflictFolderPath = (path: string, at: Date, taken: Iterable<string> = []): string =>
+	replaceBasename(path, conflictFolderName(basename(path), at, taken));
 
 /** Where the copy of `path` goes: beside it, in the same folder. */
 export const conflictPath = (path: string, at: Date, taken: Iterable<string> = []): string =>

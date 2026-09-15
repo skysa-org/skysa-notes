@@ -310,6 +310,32 @@ export const describeSyncStoreContract = (
 				expect(note?.dirty).toBe(true);
 			});
 
+			it('makes the folders above a note that has none', async () => {
+				// The engine emits `ensure-folder` only for folders the remote
+				// reported, and a feed that mentions a file without its parent
+				// is ordinary. A note at a path with no notebook behind it is
+				// invisible in the sidebar and still holding its name.
+				const { store, seed } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'x\n' });
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'n2',
+							path: 'Work/Meetings/b.md',
+							content: 'deep\n',
+							remote: remote('Work/Meetings/b.md', 'r2'),
+						},
+					],
+					cursor: 'c1',
+				});
+
+				expect((await store.notesUnder('Work')).map((note) => note.id)).toEqual(['n2']);
+				expect(await store.folderByPath('Work')).toBeDefined();
+				expect(await store.folderByPath('Work/Meetings')).toBeDefined();
+			});
+
 			it('moves a displaced note without touching its contents', async () => {
 				// It is only being got out of the way of a remote note landing
 				// on its path. The text is the user's, it has never been

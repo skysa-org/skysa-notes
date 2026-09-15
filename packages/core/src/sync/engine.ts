@@ -19,8 +19,15 @@ import {
 	type RemoteEntry,
 	type StorageProvider,
 } from '../providers/types.js';
-import { conflictContent, conflictPath } from './conflicts.js';
-import type { ConflictResolution, PullChange, SyncNote, SyncOp, SyncStore } from './store.js';
+import { conflictContent, conflictFolderPath, conflictPath } from './conflicts.js';
+import type {
+	ConflictResolution,
+	PullChange,
+	SyncFolder,
+	SyncNote,
+	SyncOp,
+	SyncStore,
+} from './store.js';
 
 /**
  * Pull, push, and the queue between them. docs/PLAN.md §7 is the specification;
@@ -132,6 +139,28 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * being mentioned: a rename re-lists no children, so the entry for the
 	 * folder is the only thing in the batch that says where they went.
 	 */
+	/**
+	 * Notes this batch has made, as rows. A file deleted and re-created at one
+	 * path inside one cursor window arrives as three entries — the first file,
+	 * its deletion, the second file — and each of the last two has to see what
+	 * the ones before it did. The store cannot say: none of it has been applied.
+	 */
+	const madeInBatch = (decided: readonly PullChange[]): SyncNote[] =>
+		decided.flatMap((change) =>
+			change.kind === 'upsert-note'
+				? [
+						{
+							id: change.id,
+							path: change.path,
+							content: change.content,
+							remoteId: change.remote.remoteId,
+							remoteVersion: change.remote.version,
+							dirty: false,
+						},
+					]
+				: []
+		);
+
 	const notesEndingIn = async (
 		folder: string,
 		decided: readonly PullChange[]
@@ -142,8 +171,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const groups = await Promise.all(
 			[folder, ...sources].map((each) => store.notesUnder(each))
 		);
-		// The two sources overlap when a folder moves within itself.
-		const candidates = new Map(groups.flat().map((note) => [note.id, note]));
+		// The batch's own first, so a row the store also holds wins: `whereNow`
+		// replays the decisions from the pre-batch position, which is the one to
+		// start from wherever there is one. The store's two sources overlap with
+		// each other when a folder moves within itself.
+		const candidates = new Map(
+			[...madeInBatch(decided), ...groups.flat()].map((note) => [note.id, note])
+		);
 		return [...candidates.values()].flatMap((note) => {
 			const at = whereNow(note, decided);
 			return at === undefined || parentPath(at) !== folder ? [] : [{ note, path: at }];
@@ -420,10 +454,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// does carry one and we do not know it, the file being deleted is not a
 		// file we hold — the path has been reused since — and matching by path
 		// anyway would delete a note over an event that was never about it.
+		// Including one this batch has just made, which the store has never heard
+		// of: a file created and deleted inside one window is both an entry and
+		// a deletion here, and without this the deletion finds nothing, falls
+		// through to the folder branch, and the row stays for ever.
 		const local =
 			remoteId === undefined
 				? await store.noteByPath(path)
-				: await store.noteByRemoteId(remoteId);
+				: ((await store.noteByRemoteId(remoteId)) ??
+					madeInBatch(decided).find((note) => note.remoteId === remoteId));
 
 		if (await movedNotDeleted(path, remoteId, local, live, at)) return [];
 		if (local !== undefined) {
@@ -467,9 +506,101 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return [{ kind: 'delete-folder', path }];
 	};
 
+	/** What this batch says has been deleted, by remote id and by path. */
+	interface Doomed {
+		ids: ReadonlySet<string>;
+		paths: ReadonlySet<string>;
+	}
+
+	const doomedIn = (entries: readonly ChangeEntry[]): Doomed => ({
+		ids: new Set(
+			entries.flatMap((entry) =>
+				entry.deleted === true && entry.remoteId !== undefined ? [entry.remoteId] : []
+			)
+		),
+		paths: new Set(entries.flatMap((entry) => (entry.deleted === true ? [entry.path] : []))),
+	});
+
+	/**
+	 * A different folder of ours sitting where this one is about to land, which
+	 * this batch also says is gone — the user deleted `Archive` and renamed
+	 * `Archive 2024` onto its name, and both halves arrive together.
+	 *
+	 * The store keeps one row per path, so the move overwrites that row and
+	 * strands its notes under a notebook that now belongs to somebody else. The
+	 * deletion, decided afterwards against a path that has changed hands, then
+	 * takes the newcomer's notes instead of theirs — both folders' notes gone,
+	 * `ok` reported, cursor stored. Deleting it first is the order the remote
+	 * did it in, and the store's cascade takes its subfolders with it.
+	 *
+	 * Deleted only when the batch says so. A folder that is merely in the way is
+	 * on its way somewhere else — the user renamed `Archive` to `Older` and
+	 * `Archive 2024` to `Archive`, two drags, one window — and the entry saying
+	 * where may come later. That one is moved aside instead, exactly as a note
+	 * in the same position is, and the entry that says where it went moves it on
+	 * from there. Deleting it on suspicion would take notes nobody asked to
+	 * lose; leaving it merges both folders' notes into one notebook and loses a
+	 * row, which is how `Archive/old.md` ends up inside `Older`.
+	 */
+	const freeFolderPath = async (path: string, taken: readonly string[]): Promise<string> => {
+		const candidate = conflictFolderPath(path, now(), taken);
+		if ((await store.folderByPath(candidate)) === undefined) return candidate;
+		return freeFolderPath(path, [...taken, basename(candidate)]);
+	};
+
+	/**
+	 * Which folder row is at `path` once the decisions so far have run. Walked
+	 * backwards through them to find where whatever is there now came from,
+	 * because the store can only be asked about the paths it already holds — the
+	 * same reason `notesEndingIn` exists on the note side.
+	 */
+	const folderAt = async (
+		path: string,
+		decided: readonly PullChange[]
+	): Promise<SyncFolder | undefined> => {
+		const origin = decided.reduceRight<string | undefined>((at, change) => {
+			if (at === undefined) return undefined;
+			if (change.kind === 'move-folder') {
+				return isWithin(at, change.to) ? rebasePath(at, change.to, change.from) : at;
+			}
+			if (change.kind === 'delete-folder') return isWithin(at, change.path) ? undefined : at;
+			return at;
+		}, path);
+		return origin === undefined ? undefined : store.folderByPath(origin);
+	};
+
+	const clearTheWay = async (
+		to: string,
+		remoteId: string,
+		decided: readonly PullChange[],
+		doomed: Doomed
+	): Promise<PullChange[]> => {
+		const occupant = await folderAt(to, decided);
+		// Belt and braces on the second half: our own folder cannot be the thing
+		// in our way, because we only got here with `folderNow` saying it is
+		// somewhere else. `folderNow` walks the batch forwards and `folderAt`
+		// walks it backwards, though, and a disagreement between them would
+		// otherwise have this folder displace itself and then move from a path
+		// it has just left.
+		if (occupant === undefined || occupant.remoteId === remoteId) return [];
+
+		const named =
+			doomed.paths.has(occupant.path) ||
+			(occupant.remoteId !== undefined && doomed.ids.has(occupant.remoteId));
+		if (named) return [{ kind: 'delete-folder', path: to }];
+
+		// Names this batch has already put a folder at, so two folders displaced
+		// out of one path do not both take the same one.
+		const chosen = decided.flatMap((change) =>
+			change.kind === 'move-folder' ? [basename(change.to)] : []
+		);
+		return [{ kind: 'move-folder', from: to, to: await freeFolderPath(to, chosen) }];
+	};
+
 	const decideFolder = async (
 		entry: RemoteEntry,
-		decided: readonly PullChange[]
+		decided: readonly PullChange[],
+		doomed: Doomed
 	): Promise<PullChange[]> => {
 		// The app folder itself, which several providers report as an entry of
 		// its own — Graph's `delta` returns the root item. There is nothing above
@@ -488,7 +619,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// the remote abandoned for as long as the cursor lives.
 		const from = existing === undefined ? undefined : folderNow(existing.path, decided);
 		if (from !== undefined && from !== entry.path) {
-			return [{ kind: 'move-folder', from, to: entry.path, remoteId: entry.remoteId }];
+			const room = await clearTheWay(entry.path, entry.remoteId, decided, doomed);
+			return [
+				...room,
+				{ kind: 'move-folder', from, to: entry.path, remoteId: entry.remoteId },
+			];
 		}
 		return [{ kind: 'ensure-folder', path: entry.path, remoteId: entry.remoteId }];
 	};
@@ -672,7 +807,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		decided: readonly PullChange[],
 		live: LiveEntries,
 		claimed: ReadonlySet<string>,
-		at: number
+		at: number,
+		doomed: Doomed
 	): Promise<PullChange[]> => {
 		// The marker file and any provider bookkeeping. `isHidden` is the same
 		// rule the UI uses, so nothing the user cannot see becomes a note.
@@ -680,7 +816,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (entry.deleted === true) {
 			return decideDeleted(entry.path, entry.remoteId, live, decided, at);
 		}
-		if (entry.kind === 'folder') return decideFolder(entry, decided);
+		if (entry.kind === 'folder') return decideFolder(entry, decided, doomed);
 
 		// A file that is not a note. The app owns the folder but does not own
 		// everything in it — the user may have dropped a PDF beside their notes,
@@ -721,9 +857,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// elsewhere in it can be recognised as the first half of a move.
 		const live = liveEntries(entries);
 		const claimed = claimedPaths(entries);
+		const doomed = doomedIn(entries);
 		return entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const decided = await pending;
-			return [...decided, ...(await decide(entry, decided, live, claimed, at))];
+			return [...decided, ...(await decide(entry, decided, live, claimed, at, doomed))];
 		}, Promise.resolve([]));
 	};
 

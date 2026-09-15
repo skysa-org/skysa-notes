@@ -57,6 +57,15 @@ export interface SyncOp {
 /**
  * One decision the engine reached about one remote change. The engine works out
  * which of these applies; the store only has to carry them out.
+ *
+ * Anything that puts a note at a path — `upsert-note`, `move-note`,
+ * `displace-note`, and a conflict's copy — creates the folder rows above it
+ * that are missing, in the same transaction. The engine emits `ensure-folder`
+ * only for folders the *remote* reported, and a provider that reports a file
+ * without its parent is ordinary (a scan page boundary, a `changes` feed that
+ * only mentions what changed), so a store that skipped this would leave notes
+ * at paths with no notebook behind them — invisible in the sidebar, and still
+ * taking up their names.
  */
 export type PullChange =
 	| Readonly<{
