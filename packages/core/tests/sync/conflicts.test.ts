@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { readFrontmatter, splitFrontmatter } from '../../src/markdown/frontmatter.js';
+import {
+	frontmatterIsEditable,
+	readFrontmatter,
+	splitFrontmatter,
+} from '../../src/markdown/frontmatter.js';
 import {
 	conflictContent,
 	conflictFilename,
@@ -152,15 +156,21 @@ describe('conflictContent', () => {
 			expect(copy).not.toContain('original-id');
 		});
 
-		it('keeps what the parser could read', () => {
+		it('carries what the parser could read into the block it builds', () => {
 			const copy = conflictContent(malformed, 'fresh-id');
-			expect(readFrontmatter(splitFrontmatter(copy).frontmatter).title).toBe('Notes');
+			const block = splitFrontmatter(copy).frontmatter;
+
+			// Not just present in the file: in a block that parses, which the one
+			// it was copied from did not. Reading it back is the whole point —
+			// a copy nobody can patch would have the same problem again.
+			expect(block).not.toBe(malformed);
+			expect(frontmatterIsEditable(block)).toBe(true);
+			expect(readFrontmatter(block).title).toBe('Notes');
 		});
 
-		it('keeps the body', () => {
-			expect(splitFrontmatter(conflictContent(malformed, 'fresh-id')).body).toContain(
-				'# Notes'
-			);
+		it('keeps the body, and only the frontmatter changes', () => {
+			const copy = conflictContent(malformed, 'fresh-id');
+			expect(splitFrontmatter(copy).body).toBe(splitFrontmatter(malformed).body);
 		});
 	});
 });

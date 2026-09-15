@@ -357,13 +357,6 @@ export interface ImportNoteFileInput extends NoteScope {
 }
 
 /**
- * Take a note file into the store as-is.
- *
- * Nothing here marks the note dirty and nothing re-serializes the body: a note
- * written by Obsidian or iA Writer keeps its own formatting, and opening it in
- * this app does not queue a write that would reformat the user's file.
- */
-/**
  * A frontmatter date, or now.
  *
  * `Date.parse` answers `NaN` for anything it cannot read, and these two fields
@@ -380,6 +373,13 @@ const timeFrom = (value: string | undefined, fallback: number): number => {
 	return Number.isNaN(parsed) ? fallback : parsed;
 };
 
+/**
+ * Take a note file into the store as-is.
+ *
+ * Nothing here marks the note dirty and nothing re-serializes the body: a note
+ * written by Obsidian or iA Writer keeps its own formatting, and opening it in
+ * this app does not queue a write that would reformat the user's file.
+ */
 export const importNoteFile = async (
 	db: NotesDatabase,
 	input: ImportNoteFileInput

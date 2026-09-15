@@ -107,8 +107,11 @@ export const conflictContent = (localContent: string, id: string): string => {
 	// of what it does today.
 	//
 	// So the copy gets a block built from everything the parser could read, plus
-	// the new id. Keys this app does not know about are lost, and only here: the
-	// original file keeps the path and every one of its bytes, which is the half
+	// the new id. That is less than the block held: keys this app does not read
+	// are gone, a key the parser could not finish reading is gone with them, and
+	// what it half-read — an unterminated quote swallows the line after it — is
+	// written out as though it were meant. All of that is confined to the copy:
+	// the original keeps the path and every one of its bytes, and it is the half
 	// of the pair the user's own text is in.
 	return serializeNoteFile({
 		frontmatter: null,

@@ -25,6 +25,45 @@ export interface SplitDocument {
 const KNOWN_KEYS = ['id', 'title', 'created', 'updated', 'tags'] as const;
 
 /**
+ * Keys that mean "this block is metadata", used to settle one question only:
+ * whether a block of YAML the parser had to repair was meant as frontmatter.
+ *
+ * It is a vocabulary, not a schema. Nothing here is read; a block naming any of
+ * these is still handed on whole with every key it has, known or not. It exists
+ * because recovery alone decides nothing — `yaml` will make a mapping out of
+ * any prose containing a colon, so `Next steps: see below` recovers too, and
+ * mistaking a paragraph for frontmatter takes it out of the editor where the
+ * user can no longer read or delete it.
+ *
+ * Restricting it to the five keys this app reads was too narrow in the
+ * direction that matters: frontmatter written by another tool is exactly what
+ * this recovery is for, and a Jekyll post's `layout`/`date`/`categories` names
+ * none of them. The rest are the front matter keys Jekyll, Hugo, Obsidian,
+ * Quartz and Zettlr write. Adding one is cheap and safe; the cost of a wrong
+ * addition is only that a paragraph opening with that word and a colon is
+ * mistaken for metadata.
+ */
+const METADATA_KEYS: readonly string[] = [
+	...KNOWN_KEYS,
+	'aliases',
+	'author',
+	'categories',
+	'category',
+	'cssclass',
+	'cssclasses',
+	'date',
+	'description',
+	'draft',
+	'keywords',
+	'layout',
+	'permalink',
+	'publish',
+	'slug',
+	'summary',
+	'weight',
+];
+
+/**
  * Parse YAML, yielding the mapping only if that is what it is. Never throws.
  *
  * A document the parser had to recover from still counts. `yaml` reads through
@@ -56,10 +95,8 @@ const readMapping = (yaml: string | null): Record<string, unknown> | undefined =
 		// `---\nNext steps: see below\n- do the thing\n---` recovers too, and
 		// swallowing that takes a section of the user's note out of the editor
 		// where they can no longer see or delete it. A document the parser had
-		// to repair therefore has to carry a key this app actually reads before
-		// it counts as frontmatter — which the malformed metadata this is here
-		// for always does, and a paragraph of prose essentially never does.
-		if (doc.errors.length > 0 && !KNOWN_KEYS.some((key) => key in record)) {
+		// to repair therefore has to name something metadata is named.
+		if (doc.errors.length > 0 && !METADATA_KEYS.some((key) => Object.hasOwn(record, key))) {
 			return undefined;
 		}
 		return record;
@@ -119,6 +156,23 @@ const asString = (value: unknown): string | undefined => {
 	return undefined;
 };
 
+/**
+ * `id` is the note's identity, and downstream it is a primary key: `apps/web`
+ * stores the row under it, so two files claiming one id are one row and the
+ * first note simply disappears from the app.
+ *
+ * That makes it the one field worth being strict about. The app writes a UUID,
+ * so an id with whitespace in it was not written by this app and is far more
+ * likely to be a line of prose the YAML parser recovered — `id: the blue
+ * notebook` is a plausible thing to write in a note and an implausible thing to
+ * mean as an identity. Refusing it costs a fresh UUID; accepting it can cost a
+ * note.
+ */
+const asId = (value: unknown): string | undefined => {
+	const id = asString(value);
+	return id === undefined || id.trim() === '' || /\s/u.test(id) ? undefined : id;
+};
+
 const asTags = (value: unknown): string[] | undefined => {
 	if (typeof value === 'string') {
 		const tags = value
@@ -146,12 +200,33 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 	if (record === undefined) return {};
 
 	return defined({
-		id: asString(record.id),
+		id: asId(record.id),
 		title: asString(record.title),
 		created: asString(record.created),
 		updated: asString(record.updated),
 		tags: asTags(record.tags),
 	});
+};
+
+/**
+ * Can this block be edited, or only read?
+ *
+ * `writeFrontmatter` will not rewrite YAML the parser had to recover from —
+ * rewriting a guess would put words in the user's file — so it hands the block
+ * back unchanged and the patch is dropped. That is the right refusal and the
+ * wrong silence: the app takes the rename, the file does not, and the next pull
+ * reads the old title back over it. The note ends up with a filename saying one
+ * thing and a title saying another, permanently, with nothing to explain it.
+ *
+ * So callers that are about to write metadata can ask first, and say so.
+ */
+export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
+	if (frontmatter === null || frontmatter.trim() === '') return true;
+	try {
+		return parseDocument(frontmatter).errors.length === 0;
+	} catch {
+		return false;
+	}
 };
 
 /**

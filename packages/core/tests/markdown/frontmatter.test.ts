@@ -49,8 +49,9 @@ describe('splitFrontmatter', () => {
 	});
 
 	it('rejects a fenced block of invalid YAML rather than eating it', () => {
-		// `: : :` recovers as a mapping, but every key in it is empty: nothing in
-		// it was named, so there is no evidence it was ever meant as metadata.
+		// `: : :` recovers as a mapping — `{'': {'': {'': null}}}` — but names
+		// nothing that metadata is ever named, so there is no evidence it was
+		// meant as anything but a stray line between two thematic breaks.
 		const source = '---\n: : :\n---\nBody\n';
 		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
 	});
@@ -97,6 +98,30 @@ describe('splitFrontmatter', () => {
 		'a block quote': 'Quote: someone said\n> hello',
 		'ratios and an unclosed quote': 'Ratio: 3:1\nMix: 2:1:1\nOther: "unclosed',
 	};
+
+	/**
+	 * The same mistakes, in frontmatter written by something other than this app
+	 * — which is the case this recovery exists for, since a block this app wrote
+	 * is well formed. None of these names a field this app reads, so a gate
+	 * asking for one of those five rejected every one of them and handed the
+	 * user the whole harm chain: block into the body, YAML as the title, YAML as
+	 * the filename, a second block on the next write.
+	 */
+	const otherTools = {
+		'Jekyll, duplicate key':
+			'layout: post\ndate: 2026-09-14\ncategories: notes\ncategories: notes',
+		'Jekyll, unterminated quote': 'layout: post\npermalink: "/notes/one',
+		'Hugo, tab-indented list': 'draft: false\nweight: 10\nkeywords:\n\t- one\n\t- two',
+		'Obsidian, duplicate alias': 'aliases: [one]\ncssclass: wide\naliases: [two]',
+		'Obsidian, tab-indented list': 'publish: true\naliases:\n\t- one',
+		'Zettlr, unterminated quote': 'author: Someone\nkeywords: "one',
+	};
+
+	Object.entries(otherTools).forEach(([what, yaml]) => {
+		it(`keeps frontmatter another tool wrote: ${what}`, () => {
+			expect(splitFrontmatter(`---\n${yaml}\n---\nBody\n`).frontmatter).toBe(yaml);
+		});
+	});
 
 	Object.entries(notFrontmatter).forEach(([what, text]) => {
 		it(`leaves prose in the body even though YAML can read it: ${what}`, () => {
@@ -166,6 +191,24 @@ describe('readFrontmatter', () => {
 		expect(readFrontmatter(': : :')).toEqual({});
 	});
 
+	/**
+	 * `apps/web` stores a note under its frontmatter `id`, so two files claiming
+	 * one id are one row and the first note disappears from the app. A line of
+	 * prose the parser recovered is the way a file comes to claim an id it was
+	 * never given — `id: the blue notebook` is a plausible thing to write in a
+	 * note and an implausible thing to mean as an identity.
+	 */
+	it('refuses an id that could not be one', () => {
+		expect(readFrontmatter('id: the blue notebook\ntitle: A').id).toBeUndefined();
+		expect(readFrontmatter('id: "  "\ntitle: A').id).toBeUndefined();
+		expect(readFrontmatter('id: one\ttwo\ntitle: A').id).toBeUndefined();
+		// Everything an id actually looks like still reads.
+		expect(readFrontmatter('id: 018f3c4e-1111-4111-8111-111111111111').id).toBe(
+			'018f3c4e-1111-4111-8111-111111111111'
+		);
+		expect(readFrontmatter('id: 018f3c4e').id).toBe('018f3c4e');
+	});
+
 	it('recovers the id from YAML the parser had to repair', () => {
 		// Losing the id is the one outcome a note cannot survive: on the next
 		// import it is a different note, and the one it used to be is orphaned.
@@ -232,9 +275,13 @@ describe('writeFrontmatter', () => {
 	 * Known limitation, pinned here so it stays a decision rather than a
 	 * surprise: a block the parser had to recover from is readable but not
 	 * editable, so a patch to one is dropped. `readFrontmatter` will now find
-	 * the note's `id` in it, which is what makes the note survive at all — but
-	 * a rename or a tag edit reaches the app's own row and never reaches the
-	 * file, and the user is told nothing.
+	 * the note's `id` in it, which is what makes the note survive at all.
+	 *
+	 * The cost is not only that the file misses the change. The app's own row
+	 * takes it, the file does not, and the next pull reads the file — so the
+	 * rename is undone, and a note left with a filename saying one thing and a
+	 * title saying another. `frontmatterIsEditable` exists so the app can say so
+	 * in front of the note rather than let the user discover it.
 	 *
 	 * The alternative is to rebuild the block from what the parser recovered,
 	 * which would silently write `title: oop` over the user's `title: "oops`.

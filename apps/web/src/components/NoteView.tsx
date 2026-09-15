@@ -1,3 +1,4 @@
+import { frontmatterIsEditable } from '@skysa/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { type EditorMode, isModeToggleShortcut, MODE_LABELS, otherMode } from '../editor/mode.js';
@@ -151,6 +152,21 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				<p className="banner" role="status">
 					This note uses markdown the rich editor has no way to show, so it stays in
 					markdown mode. Nothing in it has been changed.
+				</p>
+			)}
+
+			{/*
+			 * A rename or a tag edit cannot reach a file whose frontmatter has a
+			 * YAML error in it: the app will not rewrite a block it had to guess
+			 * at, so the change lands in the app and not in the file, and the next
+			 * sync reads the old values back over it. Saying so is the difference
+			 * between a limitation and a note that quietly refuses to be renamed.
+			 */}
+			{!frontmatterIsEditable(note.frontmatter) && (
+				<p className="banner" role="status">
+					There is a YAML error in this note’s frontmatter, so its title and tags cannot
+					be saved back to the file — the text is left exactly as it is rather than
+					guessed at. Everything else about the note works as usual.
 				</p>
 			)}
 

@@ -5,6 +5,7 @@ export {
 	joinFrontmatter,
 	readFrontmatter,
 	writeFrontmatter,
+	frontmatterIsEditable,
 	type SplitDocument,
 	type NoteFrontmatter,
 } from './frontmatter.js';
