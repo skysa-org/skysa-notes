@@ -51,7 +51,9 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
-const back = (returnTo: string, outcome: 'ok' | 'denied' | 'failed' | 'conflict'): string =>
+type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin';
+
+const back = (returnTo: string, outcome: Outcome): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
 
 export const connectRoutes = (doFetch: FetchLike) => {
@@ -147,7 +149,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 
 		// Without a refresh token the connection would stop working in a few
 		// hours with no way to recover, so this is a failure, not a warning.
-		if (tokens.refreshToken === undefined) return c.json({ error: 'no_refresh_token' }, 502);
+		if (tokens.refreshToken === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
 		// The account id *is* the identity in storage-first, and in both modes it
 		// is what tells a reconnect to the same account from a reconnect to a
@@ -177,26 +179,27 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		/**
 		 * Whose connection this is. Signed in: theirs. Signed out and the account
 		 * is already known: its owner, coming back. Signed out and it is not: a
-		 * new user, but only where creating one is allowed.
+		 * new user — but only where creating one is allowed.
+		 *
+		 * No session is issued here. Signing someone in before the connection is
+		 * actually stored leaves them signed in *and* told the connect failed.
 		 */
-		const minted = sessionUser === undefined && claimed === undefined;
-		const userId = await (async (): Promise<string | undefined> => {
-			if (sessionUser !== undefined) return sessionUser;
+		const resolved = await (async (): Promise<
+			{ userId: string; minted: boolean } | undefined
+		> => {
+			if (sessionUser !== undefined) return { userId: sessionUser, minted: false };
 			// Neither branch below may run in account-first, where a connection
 			// attaches only to a user who signed in first — issuing a session for a
 			// recognised account would be a second door into signing in.
 			if (config.authMode !== 'storage-first') return undefined;
-			if (claimed !== undefined) {
-				await issueSession(c, db, claimed, cookies, now);
-				return claimed;
-			}
-			return adopt(c, db, config, displayName, now);
+			if (claimed !== undefined) return { userId: claimed, minted: false };
+			return { userId: await createUser(db, displayName, now), minted: true };
 		})();
-		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
+		if (resolved === undefined) return c.redirect(back(flow.returnTo, 'signin'));
 
 		const stored = await store(
 			db,
-			userId,
+			resolved.userId,
 			tokens,
 			displayName,
 			await sealOAuthSecret(c.get('secretKey'), { refreshToken: tokens.refreshToken }),
@@ -205,11 +208,18 @@ export const connectRoutes = (doFetch: FetchLike) => {
 
 		// Two signed-out callbacks for the same account, racing: both found it
 		// unclaimed, and the unique index let exactly one of them win. The loser
-		// undoes the user it just created — the cascade takes the session with it
-		// — rather than leaving a second user holding a live refresh token.
+		// undoes the user it just created — the cascade takes nothing else, since
+		// nothing else references it yet — rather than leaving a second user
+		// holding a live refresh token.
 		if (!stored) {
-			if (minted) await db.delete(schema.users).where(eq(schema.users.id, userId));
+			if (resolved.minted) {
+				await db.delete(schema.users).where(eq(schema.users.id, resolved.userId));
+			}
 			return c.redirect(back(flow.returnTo, 'conflict'));
+		}
+
+		if (sessionUser === undefined) {
+			await issueSession(c, db, resolved.userId, cookies, now);
 		}
 
 		return c.redirect(back(flow.returnTo, 'ok'));
@@ -217,6 +227,15 @@ export const connectRoutes = (doFetch: FetchLike) => {
 
 	return app;
 };
+
+/**
+ * Drizzle wraps the driver's error, so the constraint is named somewhere down
+ * the `cause` chain rather than on the error itself.
+ */
+const isUniqueViolation = (error: unknown): boolean =>
+	error instanceof Error &&
+	(/UNIQUE constraint failed/i.test(error.message) ||
+		isUniqueViolation((error as { cause?: unknown }).cause));
 
 /**
  * Which user, if any, already holds this provider account.
@@ -242,20 +261,10 @@ const claimedBy = async (
 };
 
 /**
- * A brand new user for a brand new account. `storage-first` only: in
- * `account-first` a connection may attach only to a user who signed in first,
- * which is why this returns undefined there rather than creating one.
+ * A brand new user for a brand new account. `storage-first` only — the caller
+ * enforces that; this just writes the row.
  */
-
-const adopt = async (
-	c: Parameters<typeof issueSession>[0],
-	db: Database,
-	config: AppConfig,
-	displayName: string,
-	now: number
-): Promise<string | undefined> => {
-	if (config.authMode !== 'storage-first') return undefined;
-
+const createUser = async (db: Database, displayName: string, now: number): Promise<string> => {
 	const id = randomBase64Url(16);
 	await db.insert(schema.users).values({
 		id,
@@ -263,7 +272,6 @@ const adopt = async (
 		emailVerified: false,
 		createdAt: new Date(now),
 	});
-	await issueSession(c, db, id, { secure: config.cookiesSecure }, now);
 	return id;
 };
 
@@ -330,8 +338,13 @@ const store = async (
 				},
 			})
 			.then(() => true)
-			// The only constraint that can fire here is the unique account index:
-			// somebody else claimed this account between the lookup and the write.
-			.catch(() => false)
+			// Only the unique account index means "somebody else claimed this
+			// account between the lookup and the write". Swallowing everything else
+			// would report a database outage to the user as a conflict with a
+			// stranger, and log nothing at all.
+			.catch((error: unknown) => {
+				if (isUniqueViolation(error)) return false;
+				throw error;
+			})
 	);
 };

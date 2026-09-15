@@ -316,6 +316,13 @@ A third round found six more, and closed the question the second round had only 
 
 One thing to remember when reading the suite: the test database is built from the **migration files**, not from `schema.ts`. Mutating the schema alone changes nothing; the constraint has to be mutated where it lives.
 
+A fourth round confirmed the identity model is coherent — every reachable combination of mode, session and claim was executed — and found four smaller things, none of them data loss:
+
+- **`store()` swallowed every error, not just the constraint**, so a D1 blip told a user their own account belonged to a stranger, and logged nothing at all. Only a unique-constraint violation is a conflict now; anything else is a 500 with a log line. (The cleanup that follows was verified safe by fault injection: `minted` can only be true for a user created microseconds earlier, so it cannot delete a pre-existing one.)
+- **The session was issued before the connection was stored**, so a failure left a returning owner signed in *and* told the connect had failed. Nobody is signed in until the row is written.
+- **Migration `0003` was not safe to re-run.** Applied to a database already holding two users on one account, the `DROP INDEX` committed and the `CREATE UNIQUE INDEX` failed — leaving the table with *neither* index, and every retry then dying on `no such index`. It now drops `IF EXISTS`, de-duplicates (keeping the older connection; the newer user reconnects, and only a token is lost, never a note), and can be run again from any state including the wedged one.
+- **Two post-exchange failures still rendered raw JSON** into the address bar. All of them redirect now, with `connect=ok|denied|failed|conflict|signin`.
+
 **Deliberately not done:** AES-GCM is used without additional authenticated data. Binding the connection id as AAD would stop a ciphertext copied between rows from decrypting, but an attacker who can write to `connections` has already lost the user the game. Recorded here rather than done, because the seal/open signature is cheaper to change now than after WebDAV credentials use it too.
 
 **Still open at the end of this PR:** the Dropbox app is not registered, so the OAuth round trip is proven against a scripted `fetch` and against `wrangler dev`, not against Dropbox.

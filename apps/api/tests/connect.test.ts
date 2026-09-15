@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { importSecretKey, openOAuthSecret, sign, signingKey } from '../src/crypto.js';
 import { createDb, schema } from '../src/db/client.js';
@@ -308,7 +308,9 @@ describe('callback', () => {
 			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
 			{ cookies: jar }
 		);
-		expect(response.status).toBe(502);
+		// A redirect rather than a raw 502: the callback is a top-level navigation.
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=failed');
 		expect(await createDb(db).select().from(schema.connections)).toHaveLength(0);
 	});
 
@@ -505,8 +507,8 @@ describe('what the first draft got wrong', () => {
 			{ DB: storageFirst.db }
 		);
 
-		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({ error: 'sign_in_required' });
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=signin');
 		expect(await createDb(storageFirst.db).select().from(schema.users)).toHaveLength(0);
 	});
 
@@ -767,8 +769,8 @@ describe('what the fixes got wrong', () => {
 			{ DB: storageFirst.db }
 		);
 
-		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({ error: 'sign_in_required' });
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=signin');
 		expect(response.headers.getSetCookie().join()).not.toContain('skysa_session=');
 	});
 
@@ -798,8 +800,11 @@ describe('what the fixes got wrong', () => {
 		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
 		expect(await drizzle.select().from(schema.users)).toHaveLength(1);
 
-		const locations = outcomes.map((response) => response.headers.get('location'));
-		expect(locations).toContain('/?connect=ok');
+		// Sorted equality, not `toContain`: a fully serialized run would give two
+		// `ok`s and still satisfy everything above, so the test would keep passing
+		// while no longer testing the race.
+		const locations = outcomes.map((response) => response.headers.get('location')).sort();
+		expect(locations).toEqual(['/?connect=conflict', '/?connect=ok']);
 		expect(outcomes.every((response) => response.status === 302)).toBe(true);
 	});
 
@@ -839,5 +844,80 @@ describe('what the fixes got wrong', () => {
 		const [row] = await drizzle.select().from(schema.connections);
 		expect(row?.accountId).toBe('dbid:1');
 		expect(row?.rootId).toBe('id:root');
+	});
+});
+
+/** Round four: the error paths around storing the connection. */
+describe('when the database misbehaves', () => {
+	/** A D1 that fails one kind of statement and passes everything else. */
+	const breaking = (db: D1Database, match: string): D1Database =>
+		({
+			...db,
+			prepare: (sql: string) =>
+				sql.includes(match)
+					? {
+							bind: () => ({
+								run: () =>
+									Promise.reject(new Error('D1_ERROR: Network connection lost')),
+								all: () =>
+									Promise.reject(new Error('D1_ERROR: Network connection lost')),
+								raw: () =>
+									Promise.reject(new Error('D1_ERROR: Network connection lost')),
+								first: () =>
+									Promise.reject(new Error('D1_ERROR: Network connection lost')),
+							}),
+						}
+					: db.prepare(sql),
+		}) as unknown as D1Database;
+
+	it('does not report an outage as a conflict with a stranger', async () => {
+		const app = buildApp();
+		const jar = createJar();
+		jar.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: jar }));
+
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const response = await app.app.fetch(
+			new Request(
+				`https://notes.example.com/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+				{ headers: { cookie: jar.header() ?? '' }, redirect: 'manual' }
+			),
+			{ DB: breaking(app.db, 'insert into "connections"') }
+		);
+		const calls = logged.mock.calls.length;
+		logged.mockRestore();
+
+		// Swallowing every error from the insert meant a database blip told the
+		// user their own account belonged to somebody else — and logged nothing.
+		expect(response.status).toBe(500);
+		expect(response.headers.get('location')).toBeNull();
+		expect(calls).toBeGreaterThan(0);
+	});
+
+	it('does not sign a returning owner in when the connection fails to store', async () => {
+		const app = buildApp();
+		// The owner exists and is signed out.
+		const { jar: owner } = await app.connect(createJar(), 'dbid:known');
+		owner.absorb(await app.request('/api/auth/logout', { method: 'POST', cookies: owner }));
+
+		const visitor = createJar();
+		visitor.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: visitor }));
+		app.stub.as('dbid:known');
+
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const response = visitor.absorb(
+			await app.app.fetch(
+				new Request(
+					`https://notes.example.com/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(visitor)}`,
+					{ headers: { cookie: visitor.header() ?? '' }, redirect: 'manual' }
+				),
+				{ DB: breaking(app.db, 'insert into "connections"') }
+			)
+		);
+		logged.mockRestore();
+
+		// The session used to be issued before the store, so a failure left the
+		// visitor signed in and told the connect had failed.
+		expect(response.status).toBe(500);
+		expect(visitor.get(cookieNames.session)).toBeUndefined();
 	});
 });
