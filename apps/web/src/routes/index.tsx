@@ -1,5 +1,6 @@
 import { ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
 
 import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
@@ -30,6 +31,14 @@ const Home = () => {
 	const notes = useNotesInFolder(folder);
 	const openNote = useNote(noteId);
 
+	/**
+	 * Why the last notebook could not be made. `createFolder` rejects on a
+	 * duplicate name, and the field has already closed by then, so without
+	 * somewhere to put this the user types a name, presses Enter, and nothing
+	 * whatsoever happens.
+	 */
+	const [folderError, setFolderError] = useState<string | null>(null);
+
 	const select = (next: Partial<AppSearch>) => {
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
@@ -44,13 +53,28 @@ const Home = () => {
 	};
 
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
-		void createFolder(db, { parentPath, name }).then((created) => {
-			select({ folder: folderToSearch(created.path) });
-		});
+		// `createFolder` throws on a duplicate name, and the field has already
+		// closed by the time it does: without this the user types a name, presses
+		// Enter, and nothing whatsoever happens — plus an unhandled rejection.
+		setFolderError(null);
+		void createFolder(db, { parentPath, name })
+			.then((created) => {
+				select({ folder: folderToSearch(created.path) });
+			})
+			.catch((error: unknown) => {
+				setFolderError(
+					error instanceof Error ? error.message : 'Could not make that notebook'
+				);
+			});
 	};
 
 	return (
 		<div className="app-shell">
+			{folderError !== null && (
+				<p className="banner" role="alert">
+					{folderError}
+				</p>
+			)}
 			<Sidebar
 				tree={tree}
 				selectedFolder={folder}

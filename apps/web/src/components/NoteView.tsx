@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { type EditorMode, isModeToggleShortcut, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
@@ -22,10 +22,19 @@ export interface NoteViewProps {
  */
 const TitleField = ({ note }: { note: NoteRecord }) => {
 	const [draft, setDraft] = useState<string | null>(null);
+	// Escape has to reach `commit` through something `commit` can read
+	// synchronously. `blur()` dispatches the blur event before React has
+	// re-rendered, so `commit` runs against the render in which `draft` is still
+	// the typed value: clearing state and blurring means Escape renames the note
+	// — and the file on disk — to whatever the user was trying to throw away.
+	const cancelled = useRef(false);
 
 	const commit = () => {
 		const trimmed = draft?.trim();
+		const abandoned = cancelled.current;
+		cancelled.current = false;
 		setDraft(null);
+		if (abandoned) return;
 		if (trimmed === undefined || trimmed === '' || trimmed === note.title) return;
 		void renameNote(db, note.id, trimmed);
 	};
@@ -42,7 +51,7 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 			onKeyDown={(event) => {
 				if (event.key === 'Enter') event.currentTarget.blur();
 				if (event.key === 'Escape') {
-					setDraft(null);
+					cancelled.current = true;
 					event.currentTarget.blur();
 				}
 			}}

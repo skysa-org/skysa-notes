@@ -90,15 +90,41 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 		if (!incoming.shouldAdopt(body)) return;
 		get()?.action((ctx) => {
 			adoptBody(ctx, body);
+			// The document is this body now. Leaving `initial` on the body the
+			// editor was built with means the next render checks the adopted
+			// document against text it no longer holds, and calls the note
+			// unsupported for having accepted a perfectly ordinary update.
+			initial.current = body;
 		});
 	}, [body, get, incoming, loading]);
 
 	return <Milkdown />;
 };
 
+/**
+ * Keyed by note, so moving to another note builds a new editor rather than
+ * re-pointing the old one.
+ *
+ * `useEditor` already asks for a rebuild on `noteId`, but it does not get one
+ * synchronously: Milkdown tears the old editor down and awaits `create()`
+ * inside the provider, so for at least one render after the note changes
+ * `get()` still hands back the *previous* note's editor while the props and
+ * refs around it describe the new one. Everything downstream — the fidelity
+ * check, `adoptBody`, the incoming-body bookkeeping — then reasons about one
+ * note's document using another note's text. The fidelity check is where it
+ * showed: an ordinary click from one note to the next compared two unrelated
+ * documents, decided they disagreed, and locked the destination note out of
+ * rich text for the session under a banner claiming its markdown could not be
+ * shown.
+ *
+ * A key is the blunt fix and the right one. The document is genuinely
+ * different, so there is nothing in the old editor worth keeping — no cursor,
+ * no undo history that belongs to this note — and remounting makes the stale
+ * window impossible rather than merely narrow.
+ */
 export const RichEditor = (props: RichEditorProps) => (
 	<div className="editor editor-rich" data-testid="rich-editor">
-		<MilkdownProvider>
+		<MilkdownProvider key={props.noteId}>
 			<ProsemirrorAdapterProvider>
 				<EditorBody {...props} />
 			</ProsemirrorAdapterProvider>

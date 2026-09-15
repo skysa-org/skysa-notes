@@ -13,6 +13,7 @@ import {
 	UNTITLED_SLUG,
 	writeFrontmatter,
 } from '@skysa/core';
+import Dexie from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
@@ -166,28 +167,49 @@ export const listNotes = async (
 		.sort((a, b) => b.updatedAt - a.updatedAt);
 };
 
+/**
+ * Read, change, write — as one transaction, because it is none of those things
+ * on its own.
+ *
+ * `contentHash` is genuinely asynchronous (`crypto.subtle.digest`), so between
+ * reading the note and writing it back there is a real window in which another
+ * write to the same row lands, and the `put` below is a whole-record write that
+ * takes no notice of it. Everything the app does to a note goes through here or
+ * through a sibling that writes the same row, and the app deliberately puts two
+ * of them next to each other: `NoteView` flushes a pending autosave immediately
+ * before renaming, deleting, or switching mode. Those survive only while both
+ * land in the same tick. When the 2s debounce fires on its own and the user then
+ * clicks, the second write wins the race and the first is gone — a paragraph
+ * typed and then renamed within two seconds simply disappears, a delete is
+ * undone and the note comes back, a mode switch is forgotten.
+ *
+ * `Dexie.waitFor` is what keeps the transaction alive across the digest: an
+ * ordinary `await` on a promise Dexie did not create lets the transaction
+ * commit early, which is the bug again with extra steps.
+ */
 const applyEdit = async (
 	db: NotesDatabase,
 	id: string,
 	change: (note: NoteRecord) => Omit<Partial<NoteRecord>, 'contentHash' | 'dirty' | 'updatedAt'>
-): Promise<NoteRecord> => {
-	const existing = await db.notes.get(id);
-	if (existing === undefined) throw new Error(`No note with id ${id}`);
+): Promise<NoteRecord> =>
+	db.transaction('rw', db.notes, async () => {
+		const existing = await db.notes.get(id);
+		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
-	const updated: NoteRecord = {
-		...existing,
-		...change(existing),
-		dirty: 1,
-		updatedAt: Date.now(),
-	};
-	const withHash: NoteRecord = {
-		...updated,
-		contentHash: await contentHash(noteFileContents(updated)),
-	};
+		const updated: NoteRecord = {
+			...existing,
+			...change(existing),
+			dirty: 1,
+			updatedAt: Date.now(),
+		};
+		const withHash: NoteRecord = {
+			...updated,
+			contentHash: await Dexie.waitFor(contentHash(noteFileContents(updated))),
+		};
 
-	await db.notes.put(withHash);
-	return withHash;
-};
+		await db.notes.put(withHash);
+		return withHash;
+	});
 
 /**
  * Record a user edit to the body.
