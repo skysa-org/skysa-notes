@@ -15,6 +15,13 @@
       "when": 1789428389444,
       "tag": "0001_connection_per_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789429994093,
+      "tag": "0002_connection_account_id",
+      "breakpoints": true
     }
   ]
 }

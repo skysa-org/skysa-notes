@@ -1,5 +1,7 @@
 import { createApp, type CreateAppOptions } from '../src/app.js';
+import { fromBase64Url } from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
+import { flowCookieName, sessionCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
 
 /**
@@ -28,7 +30,12 @@ export interface DropboxScript {
 	revoke?: () => Response;
 }
 
-const answer = (script: DropboxScript, url: string, form: Record<string, string>): Response => {
+const answer = (
+	script: DropboxScript,
+	url: string,
+	form: Record<string, string>,
+	account: string
+): Response => {
 	if (url.endsWith('/oauth2/token')) {
 		if (form.grant_type === 'refresh_token') {
 			// Dropbox normally returns no new refresh token on a refresh.
@@ -37,7 +44,10 @@ const answer = (script: DropboxScript, url: string, form: Record<string, string>
 				tokenResponse({ refresh_token: undefined })
 			);
 		}
-		return script.exchange?.(form.code ?? '', form.code_verifier ?? '') ?? tokenResponse();
+		return (
+			script.exchange?.(form.code ?? '', form.code_verifier ?? '') ??
+			tokenResponse({ account_id: account })
+		);
 	}
 	if (url.endsWith('/users/get_current_account')) {
 		return script.account?.() ?? json({ email: 'user@example.com' });
@@ -50,12 +60,14 @@ const answer = (script: DropboxScript, url: string, form: Record<string, string>
 const json = (body: unknown, status = 200): Response =>
 	new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+export const DEFAULT_ACCOUNT = 'dbid:1';
+
 export const tokenResponse = (over: Record<string, unknown> = {}): Response =>
 	json({
 		access_token: 'access-1',
 		refresh_token: 'refresh-1',
 		expires_in: 14400,
-		account_id: 'dbid:1',
+		account_id: DEFAULT_ACCOUNT,
 		...over,
 	});
 
@@ -67,6 +79,8 @@ export interface DropboxCall {
 
 export const dropboxStub = (script: DropboxScript = {}) => {
 	const calls: DropboxCall[] = [];
+	/** Which Dropbox account the next exchange reports. */
+	const account = new Map<'account', string>();
 
 	const doFetch = (url: string, init: RequestInit): Promise<Response> => {
 		const body = typeof init.body === 'string' ? init.body : '';
@@ -74,10 +88,19 @@ export const dropboxStub = (script: DropboxScript = {}) => {
 		const headers = new Headers(init.headers);
 		calls.push({ url, form, authorization: headers.get('authorization') ?? undefined });
 
-		return Promise.resolve(answer(script, url, form));
+		return Promise.resolve(
+			answer(script, url, form, account.get('account') ?? DEFAULT_ACCOUNT)
+		);
 	};
 
-	return { fetch: doFetch, calls };
+	return {
+		fetch: doFetch,
+		calls,
+		/** Point the next exchange at a different Dropbox account. */
+		as: (id: string): void => {
+			account.set('account', id);
+		},
+	};
 };
 
 export const buildApp = (options: Partial<CreateAppOptions> & { script?: DropboxScript } = {}) => {
@@ -86,6 +109,8 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 	const app = createApp({
 		config: options.config ?? testConfig(),
 		fetch: options.fetch ?? stub.fetch,
+		// Short enough that a test for the deadline is a test, not a wait.
+		providerTimeoutMs: options.providerTimeoutMs ?? 50,
 		...(options.entitlements === undefined ? {} : { entitlements: options.entitlements }),
 	});
 
@@ -94,6 +119,9 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 		const headers = new Headers(init.headers);
 		const cookie = init.cookies?.header();
 		if (cookie !== undefined) headers.set('cookie', cookie);
+		// The app checks `Origin` on state-changing methods, so send what a
+		// browser on this origin would send.
+		if (!headers.has('origin')) headers.set('origin', 'https://notes.example.com');
 
 		return app.fetch(
 			new Request(`https://notes.example.com${path}`, {
@@ -111,7 +139,8 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 	 * The whole connect flow, which is also how a test gets a signed-in user:
 	 * in storage-first the first connected account *is* the account.
 	 */
-	const connect = async (jar = createJar()) => {
+	const connect = async (jar = createJar(), account = DEFAULT_ACCOUNT) => {
+		stub.as(account);
 		jar.absorb(await request('/api/auth/connect/dropbox/start', { cookies: jar }));
 
 		const state = flowStateOf(jar);
@@ -127,12 +156,27 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 	return { app, db, stub, request, connect };
 };
 
-/** Read the `state` back out of the flow cookie the way the route wrote it. */
-export const flowStateOf = (jar: Jar): string => {
-	const cookie = jar.get('skysa_flow') ?? '';
-	const [encoded = ''] = cookie.split('.');
-	return (JSON.parse(atob(encoded)) as { state: string }).state;
+/**
+ * The cookie names a secure deployment uses. They carry the `__Host-` prefix,
+ * so a test that hard-coded the bare name would silently stop finding them.
+ */
+export const cookieNames = {
+	session: sessionCookieName(true),
+	flow: flowCookieName(true),
+	insecure: { session: sessionCookieName(false), flow: flowCookieName(false) },
 };
+
+/** The flow cookie's payload, decoded the way `readFlowState` decodes it. */
+export const flowPayload = (jar: Jar): Record<string, unknown> => {
+	const [encoded = ''] = (
+		jar.get(flowCookieName(true)) ??
+		jar.get(flowCookieName(false)) ??
+		''
+	).split('.');
+	return JSON.parse(new TextDecoder().decode(fromBase64Url(encoded))) as Record<string, unknown>;
+};
+
+export const flowStateOf = (jar: Jar): string => String(flowPayload(jar).state);
 
 /**
  * A cookie jar, because half of what these routes do is set and read cookies,
@@ -150,9 +194,13 @@ export const createJar = () => {
 				const [pair = ''] = value.split(';');
 				const index = pair.indexOf('=');
 				const name = pair.slice(0, index).trim();
+				// Hono percent-encodes the value on the way out and decodes it on the
+				// way in; a jar that skipped the decode would only work for payloads
+				// that happen to contain nothing needing an escape.
+				const content = decodeURIComponent(pair.slice(index + 1));
 				// An expired cookie is a deletion, which is what `Max-Age=0` means.
 				if (/max-age=0/i.test(value)) cookies.delete(name);
-				else cookies.set(name, pair.slice(index + 1));
+				else cookies.set(name, content);
 			}
 			return response;
 		},
@@ -164,6 +212,8 @@ export const createJar = () => {
 		header: (): string | undefined =>
 			cookies.size === 0
 				? undefined
-				: [...cookies].map(([name, value]) => `${name}=${value}`).join('; '),
+				: [...cookies]
+						.map(([name, value]) => `${name}=${encodeURIComponent(value)}`)
+						.join('; '),
 	};
 };

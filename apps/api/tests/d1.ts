@@ -39,20 +39,67 @@ const meta = (changes: number, lastRowId: number | bigint) => ({
 	rows_written: changes,
 });
 
+/** The statement's real column names, on the Node versions that expose them. */
+const describe = (db: DatabaseSync, sql: string): string[] | undefined => {
+	const stmt = db.prepare(sql) as unknown as { columns?: () => { name: string }[] };
+	if (typeof stmt.columns !== 'function') return undefined;
+	return stmt.columns().map((column) => column.name);
+};
+
+/**
+ * node:sqlite is synchronous and throws; D1 is asynchronous and rejects. A
+ * caller written for the rejection would not survive the throw — the difference
+ * is exactly the kind a cooperative harness hides.
+ */
+const settle = <T>(run: () => T): Promise<T> => {
+	try {
+		return Promise.resolve(run());
+	} catch (error) {
+		return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+	}
+};
+
 const statement = (db: DatabaseSync, sql: string, params: readonly Param[]) => {
 	const self = {
 		bind: (...next: unknown[]) => statement(db, sql, next.map(toParam)),
 
-		all: () => {
-			const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
-			return Promise.resolve({ success: true, results: rows, meta: meta(0, 0) });
-		},
+		all: () =>
+			settle(() => {
+				const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
+				return { success: true, results: rows, meta: meta(0, 0) };
+			}),
 
-		// Column order is insertion order on the row objects node:sqlite returns,
-		// which is the order SQLite reports the columns in.
+		/**
+		 * Positional rows. drizzle routes every `select()` and `query.*` through
+		 * here, so this is the hot path.
+		 *
+		 * node:sqlite returns rows as *objects*, and Node 22 has no
+		 * `StatementSync.columns()` to recover the real column list — so two
+		 * columns with the same name (`users.id` and `connections.id` in a join,
+		 * or any `with:` relation) collapse into one key and every later column
+		 * shifts left. Real D1 returns all of them.
+		 *
+		 * There is no way to detect that from the row alone, so the guard is on
+		 * the query instead: a join is refused loudly rather than answered wrong.
+		 * Node ≥ 23 has `columns()`, and the check disappears the moment it does.
+		 */
 		raw: () => {
-			const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
-			return Promise.resolve(rows.map((row) => Object.values(row)));
+			const columns = describe(db, sql);
+			if (columns === undefined && /\bjoin\b/i.test(sql)) {
+				return Promise.reject(
+					new Error(
+						'the node:sqlite D1 shim cannot return positional rows for a join on ' +
+							'this Node version: duplicate column names would collapse. Run the ' +
+							'suite on Node >= 23, or switch to @cloudflare/vitest-pool-workers.'
+					)
+				);
+			}
+
+			return settle(() => {
+				const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
+				if (columns === undefined) return rows.map((row) => Object.values(row));
+				return rows.map((row) => columns.map((column) => row[column]));
+			});
 		},
 
 		first: async (column?: string) => {
@@ -62,14 +109,15 @@ const statement = (db: DatabaseSync, sql: string, params: readonly Param[]) => {
 			return column === undefined ? row : (row[column] ?? null);
 		},
 
-		run: () => {
-			const result = db.prepare(sql).run(...params);
-			return Promise.resolve({
-				success: true,
-				results: [],
-				meta: meta(Number(result.changes), result.lastInsertRowid),
-			});
-		},
+		run: () =>
+			settle(() => {
+				const result = db.prepare(sql).run(...params);
+				return {
+					success: true,
+					results: [],
+					meta: meta(Number(result.changes), result.lastInsertRowid),
+				};
+			}),
 	};
 	return self;
 };

@@ -25,8 +25,21 @@ export interface SecretKey {
 const toBase64 = (bytes: Uint8Array): string =>
 	btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
 
-const fromBase64 = (value: string): Uint8Array =>
-	Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+/**
+ * Accepts base64 and base64url alike, padded or not. `env.ts` normalizes the
+ * same way before checking `SECRETS_KEY`'s length, and the two had better agree:
+ * a key this rejects but the validator accepts is a deployment that passes its
+ * boot check and then fails every request.
+ */
+const fromBase64 = (value: string): Uint8Array => {
+	const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+	// `atob` rejects a length that is not a multiple of four, and base64url
+	// drops the padding that would have made it one.
+	const pad = (4 - (base64.length % 4)) % 4;
+	return Uint8Array.from(atob(base64.padEnd(base64.length + pad, '=')), (char) =>
+		char.charCodeAt(0)
+	);
+};
 
 /**
  * `SECRETS_KEY` is base64 of exactly 32 random bytes. A key of the wrong length
@@ -92,13 +105,11 @@ export const openOAuthSecret = async (
 export const toBase64Url = (bytes: Uint8Array): string =>
 	toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-const fromBase64Url = (value: string): Uint8Array => {
-	const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
-	// `atob` rejects a length that is not a multiple of four, and base64url
-	// drops the padding that would have made it one.
-	const pad = (4 - (base64.length % 4)) % 4;
-	return fromBase64(base64.padEnd(base64.length + pad, '='));
-};
+/**
+ * base64url in, bytes out. The same decoder as plain base64 — `fromBase64`
+ * normalizes both alphabets — but named at the call site so the intent is clear.
+ */
+export const fromBase64Url = fromBase64;
 
 export const randomBase64Url = (bytes: number): string =>
 	toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
@@ -140,6 +151,29 @@ export const sign = async (key: CryptoKey, value: string): Promise<string> =>
 		new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value)))
 	);
 
-/** Constant-time by construction: `verify` does not short-circuit on the first differing byte. */
-export const verify = (key: CryptoKey, value: string, signature: string): Promise<boolean> =>
-	crypto.subtle.verify('HMAC', key, fromBase64Url(signature), new TextEncoder().encode(value));
+/**
+ * Constant-time by construction: `crypto.subtle.verify` does not short-circuit
+ * on the first differing byte.
+ *
+ * A signature that is not base64 at all makes `atob` *throw* where a merely
+ * wrong one returns false, and the difference matters: the caller reads a
+ * cookie an attacker may have written, and an exception there is a 500 and a
+ * poisoned cookie that never gets cleared. Every malformed signature is just an
+ * invalid one.
+ */
+export const verify = async (
+	key: CryptoKey,
+	value: string,
+	signature: string
+): Promise<boolean> => {
+	try {
+		return await crypto.subtle.verify(
+			'HMAC',
+			key,
+			fromBase64(signature),
+			new TextEncoder().encode(value)
+		);
+	} catch {
+		return false;
+	}
+};

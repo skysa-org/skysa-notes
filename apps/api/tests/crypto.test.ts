@@ -127,3 +127,27 @@ describe('base64url', () => {
 		expect(values.size).toBe(64);
 	});
 });
+
+describe('what the first draft got wrong', () => {
+	it('returns false for a malformed signature instead of throwing', async () => {
+		const k = await signingKey(SECRETS_KEY);
+
+		// `crypto.subtle.verify` answers false; `atob` throws. The caller reads a
+		// cookie an attacker may have written, so the two must look the same.
+		for (const signature of ['!!!!', '', 'not base64 at all', '====', ' ']) {
+			expect(await verify(k, 'payload', signature)).toBe(false);
+		}
+	});
+
+	it('decodes a key in either base64 alphabet, as parseEnv validates it', async () => {
+		// `env.ts` normalizes `-`/`_` before checking the length. If this decoder
+		// did not, a key it accepts at boot would fail on every request after.
+		const url = '-wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL_GzdQ=';
+		const standard = '+wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL/GzdQ=';
+
+		const a = await importSecretKey(url, 'k1');
+		const b = await importSecretKey(standard, 'k1');
+		// The same 32 bytes either way, so one can open what the other sealed.
+		expect(await open(b, await seal(a, 'secret'))).toBe('secret');
+	});
+});

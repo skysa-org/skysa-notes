@@ -191,11 +191,67 @@ describe('POST /api/token', () => {
 		const response = await unconfigured.app.fetch(
 			new Request('https://notes.example.com/api/token', {
 				method: 'POST',
-				headers: { 'content-type': 'application/json', cookie: jar.header() ?? '' },
+				headers: {
+					'content-type': 'application/json',
+					cookie: jar.header() ?? '',
+					origin: 'https://notes.example.com',
+				},
 				body: JSON.stringify({ connectionId: id }),
 			}),
 			{ DB: app.db }
 		);
 		expect(response.status).toBe(501);
+	});
+});
+
+describe('what the first draft got wrong', () => {
+	it('asks for a reconnect when the row was sealed by a retired key', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+
+		// Rotating SECRETS_KEY is the reason `secret_key_id` exists. A row this
+		// deployment can no longer open is a reconnect, not a 500 the client will
+		// retry forever.
+		await createDb(app.db).update(schema.connections).set({ secretKeyId: 'k0' });
+		const id = await connectionId(app.db);
+
+		const response = await post(app.request, { connectionId: id }, jar);
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'reauthorize_required' });
+	});
+
+	it('does not mint a token for a cross-origin caller', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+		const id = await connectionId(app.db);
+
+		// SameSite=Lax already stops a cross-*site* POST. This is the same-site,
+		// cross-origin case — a sibling subdomain — with a content type that needs
+		// no preflight.
+		const response = await app.request('/api/token', {
+			method: 'POST',
+			headers: { 'content-type': 'text/plain', origin: 'https://evil.notes.example.com' },
+			body: JSON.stringify({ connectionId: id }),
+			cookies: jar,
+		});
+		expect(response.status).toBe(403);
+	});
+
+	it('does not treat a missing expires_in as an already-expired token', async () => {
+		const app = buildApp({
+			script: {
+				refresh: () =>
+					new Response(JSON.stringify({ access_token: 'fresh' }), {
+						headers: { 'content-type': 'application/json' },
+					}),
+			},
+		});
+		const { jar } = await app.connect();
+
+		const response = await post(app.request, { connectionId: await connectionId(app.db) }, jar);
+		const body: Record<string, unknown> = await response.json();
+
+		// `now + 0` would put the client straight into a refresh loop.
+		expect(Number(body.expiresAt)).toBeGreaterThan(Date.now() + 60_000);
 	});
 });

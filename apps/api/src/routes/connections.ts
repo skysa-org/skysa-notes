@@ -17,7 +17,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 
 	app.get('/connections', async (c) => {
 		const db = c.get('db');
-		const userId = await currentUserId(c, db);
+		const userId = await currentUserId(c, db, { secure: c.get('config').cookiesSecure });
 		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
 
 		const rows = await db.query.connections.findMany({
@@ -39,7 +39,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	app.delete('/connections/:id', async (c) => {
 		const db = c.get('db');
 		const config = c.get('config');
-		const userId = await currentUserId(c, db);
+		const userId = await currentUserId(c, db, { secure: config.cookiesSecure });
 		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
 
 		const connection = await db.query.connections.findFirst({

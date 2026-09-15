@@ -4,7 +4,14 @@ import { describe, expect, it } from 'vitest';
 import { importSecretKey, openOAuthSecret, sign, signingKey } from '../src/crypto.js';
 import { createDb, schema } from '../src/db/client.js';
 import { challengeFor } from '../src/oauth/pkce.js';
-import { buildApp, createJar, flowStateOf, SECRETS_KEY, testConfig } from './harness.js';
+import {
+	buildApp,
+	cookieNames,
+	createJar,
+	flowStateOf,
+	SECRETS_KEY,
+	testConfig,
+} from './harness.js';
 
 /**
  * The OAuth round trip, end to end over a real database and a scripted Dropbox.
@@ -43,7 +50,9 @@ describe('start', () => {
 		const { request } = buildApp();
 
 		const response = await request('/api/auth/connect/dropbox/start');
-		const cookie = response.headers.getSetCookie().find((c) => c.startsWith('skysa_flow='));
+		const cookie = response.headers
+			.getSetCookie()
+			.find((c) => c.startsWith(`${cookieNames.flow}=`));
 
 		expect(cookie).toBeDefined();
 		expect(cookie).toContain('HttpOnly');
@@ -61,8 +70,13 @@ describe('start', () => {
 
 		const cookie = (await request('/api/auth/connect/dropbox/start')).headers
 			.getSetCookie()
-			.find((c) => c.startsWith('skysa_flow='));
+			.find((c) => c.startsWith(`${cookieNames.insecure.flow}=`));
+
+		// `__Host-` requires `Secure`, so a plain-HTTP deployment gets the bare
+		// name and neither attribute. Everything else keeps both.
+		expect(cookie).toBeDefined();
 		expect(cookie).not.toContain('Secure');
+		expect(cookie).not.toContain('__Host-');
 	});
 
 	it('carries the challenge that only the matching verifier can answer', async () => {
@@ -76,7 +90,7 @@ describe('start', () => {
 			'code_challenge'
 		);
 
-		const cookie = jar.get('skysa_flow') ?? '';
+		const cookie = jar.get(cookieNames.flow) ?? '';
 		const [encoded = ''] = cookie.split('.');
 		const flow = JSON.parse(atob(encoded)) as { verifier: string };
 		expect(await challengeFor(flow.verifier)).toBe(challenge);
@@ -117,7 +131,7 @@ describe('start', () => {
 					}
 				)
 			);
-			const [encoded = ''] = (jar.get('skysa_flow') ?? '').split('.');
+			const [encoded = ''] = (jar.get(cookieNames.flow) ?? '').split('.');
 			expect((JSON.parse(atob(encoded)) as { returnTo: string }).returnTo).toBe('/');
 		}
 	});
@@ -131,7 +145,7 @@ describe('start', () => {
 				cookies: jar,
 			})
 		);
-		const [encoded = ''] = (jar.get('skysa_flow') ?? '').split('.');
+		const [encoded = ''] = (jar.get(cookieNames.flow) ?? '').split('.');
 		expect((JSON.parse(atob(encoded)) as { returnTo: string }).returnTo).toBe(
 			'/notes?folder=Inbox'
 		);
@@ -145,9 +159,9 @@ describe('callback', () => {
 
 		expect(callback.status).toBe(302);
 		expect(callback.headers.get('location')).toBe('/?connect=ok');
-		expect(jar.get('skysa_session')).toBeDefined();
+		expect(jar.get(cookieNames.session)).toBeDefined();
 		// The flow is finished; the cookie carrying the verifier must not outlive it.
-		expect(jar.get('skysa_flow')).toBeUndefined();
+		expect(jar.get(cookieNames.flow)).toBeUndefined();
 
 		const drizzle = createDb(db);
 		const [connection] = await drizzle.select().from(schema.connections);
@@ -227,7 +241,7 @@ describe('callback', () => {
 
 		// Substituting an attacker-chosen state is exactly what the signature is
 		// there to stop: without it they could complete a flow the user never began.
-		const [, signature] = (jar.get('skysa_flow') ?? '').split('.');
+		const [, signature] = (jar.get(cookieNames.flow) ?? '').split('.');
 		const forged = btoa(
 			JSON.stringify({
 				state: 'attacker',
@@ -236,7 +250,7 @@ describe('callback', () => {
 				expiresAt: Date.now() + 60_000,
 			})
 		);
-		jar.set('skysa_flow', `${forged}.${signature ?? ''}`);
+		jar.set(cookieNames.flow, `${forged}.${signature ?? ''}`);
 
 		const response = await request('/api/auth/connect/dropbox/callback?code=c&state=attacker', {
 			cookies: jar,
@@ -253,7 +267,7 @@ describe('callback', () => {
 		const encoded = btoa(
 			JSON.stringify({ state: 's', verifier: 'v', returnTo: '/', expiresAt: Date.now() - 1 })
 		);
-		jar.set('skysa_flow', `${encoded}.${await sign(key, encoded)}`);
+		jar.set(cookieNames.flow, `${encoded}.${await sign(key, encoded)}`);
 
 		const response = await request('/api/auth/connect/dropbox/callback?code=c&state=s', {
 			cookies: jar,
@@ -275,7 +289,7 @@ describe('callback', () => {
 		);
 		expect(response.status).toBe(302);
 		expect(response.headers.get('location')).toBe('/?connect=denied');
-		expect(jar.get('skysa_session')).toBeUndefined();
+		expect(jar.get(cookieNames.session)).toBeUndefined();
 	});
 
 	it('refuses a grant with no refresh token rather than storing a doomed connection', async () => {
@@ -353,5 +367,227 @@ describe('callback', () => {
 
 		const [connection] = await createDb(db).select().from(schema.connections);
 		expect(connection?.displayName).toBe('Dropbox');
+	});
+});
+
+/**
+ * One test per bug found reviewing this PR. Each of these passed the original
+ * suite: they are here because a reviewer, not the suite, caught them.
+ */
+describe('what the first draft got wrong', () => {
+	it('treats a malformed cookie signature as invalid, not as a server fault', async () => {
+		const { request } = buildApp();
+		const jar = createJar();
+		jar.absorb(await request('/api/auth/connect/dropbox/start', { cookies: jar }));
+
+		// `crypto.subtle.verify` answers false for a wrong signature but `atob`
+		// *throws* for one that is not base64 at all. Unguarded, that was a 500 —
+		// and because the flow cookie is only cleared after it is read, the bad
+		// cookie survived and every later callback 500ed too.
+		const [encoded = ''] = (jar.get(cookieNames.flow) ?? '').split('.');
+		jar.set(cookieNames.flow, `${encoded}.!!!!`);
+
+		const response = jar.absorb(
+			await request('/api/auth/connect/dropbox/callback?code=c&state=s', { cookies: jar })
+		);
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: 'flow_expired' });
+		expect(jar.get(cookieNames.flow)).toBeUndefined();
+	});
+
+	it('clears the flow cookie even when it refuses the callback outright', async () => {
+		const { request } = buildApp({ config: testConfig({ oauth: {} }) });
+		const jar = createJar();
+		// Start against a configured app, come back to one that is not.
+		const configured = buildApp();
+		jar.absorb(await configured.request('/api/auth/connect/dropbox/start', { cookies: jar }));
+		expect(jar.get(cookieNames.flow)).toBeDefined();
+
+		jar.absorb(
+			await request('/api/auth/connect/dropbox/callback?code=c&state=s', { cookies: jar })
+		);
+		// The cookie holds the PKCE verifier; a refusal is no reason to leave it
+		// sitting in the browser for the rest of its ten minutes.
+		expect(jar.get(cookieNames.flow)).toBeUndefined();
+	});
+
+	it('refuses a callback whose session is not the one that started the flow', async () => {
+		const app = buildApp({
+			script: {
+				exchange: (code) =>
+					new Response(
+						JSON.stringify({
+							access_token: 'a',
+							refresh_token: `refresh-${code}`,
+							expires_in: 14400,
+							account_id: 'dbid:attacker',
+						}),
+						{ headers: { 'content-type': 'application/json' } }
+					),
+			},
+		});
+
+		// Bob is connected.
+		const { jar: bob } = await app.connect();
+		const drizzle = createDb(app.db);
+		const [before] = await drizzle.select().from(schema.connections);
+
+		// Someone else starts a flow, then arranges for the callback to arrive
+		// carrying their flow cookie and Bob's session cookie.
+		const attacker = createJar();
+		attacker.absorb(
+			await app.request('/api/auth/connect/dropbox/start', { cookies: attacker })
+		);
+
+		const mixed = createJar();
+		mixed.set(cookieNames.flow, attacker.get(cookieNames.flow) ?? '');
+		mixed.set(cookieNames.session, bob.get(cookieNames.session) ?? '');
+
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=attacker&state=${flowStateOf(attacker)}`,
+			{ cookies: mixed }
+		);
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: 'session_mismatch' });
+
+		// Bob's refresh token is still Bob's.
+		const [after] = await drizzle.select().from(schema.connections);
+		expect(after?.secretCiphertext).toBe(before?.secretCiphertext);
+	});
+
+	it('will not create a user through the callback in account-first mode', async () => {
+		const bootstrap = buildApp();
+		const { jar } = await bootstrap.connect();
+		const accountFirst = buildApp({ config: testConfig({ authMode: 'account-first' }) });
+
+		const send = (path: string) =>
+			accountFirst.app.fetch(
+				new Request(`https://notes.example.com${path}`, {
+					headers: { cookie: jar.header() ?? '', origin: 'https://notes.example.com' },
+					redirect: 'manual',
+				}),
+				{ DB: bootstrap.db }
+			);
+
+		jar.absorb(await send('/api/auth/connect/dropbox/start'));
+		const state = flowStateOf(jar);
+
+		// Sign out between the start and the callback. The guard used to live only
+		// on `/start`, so the callback happily minted a brand new user — exactly
+		// the account creation that account-first exists to forbid.
+		jar.absorb(await bootstrap.request('/api/auth/logout', { method: 'POST', cookies: jar }));
+
+		const response = await send(`/api/auth/connect/dropbox/callback?code=c&state=${state}`);
+		expect(response.status).toBe(400);
+		expect(await createDb(bootstrap.db).select().from(schema.users)).toHaveLength(1);
+	});
+
+	it('will not create a user when the instance turns account-first mid-flow', async () => {
+		// Reachable without any cookie games: an operator flips AUTH_MODE while a
+		// flow is in the air. The callback must not be a second door into user
+		// creation just because `/start` guarded the first one.
+		const storageFirst = buildApp();
+		const jar = createJar();
+		jar.absorb(await storageFirst.request('/api/auth/connect/dropbox/start', { cookies: jar }));
+
+		const accountFirst = buildApp({ config: testConfig({ authMode: 'account-first' }) });
+		const response = await accountFirst.app.fetch(
+			new Request(
+				`https://notes.example.com/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+				{ headers: { cookie: jar.header() ?? '' }, redirect: 'manual' }
+			),
+			{ DB: storageFirst.db }
+		);
+
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'sign_in_required' });
+		expect(await createDb(storageFirst.db).select().from(schema.users)).toHaveLength(0);
+	});
+
+	it('recognises a returning account instead of minting a second user for it', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+		jar.absorb(await app.request('/api/auth/logout', { method: 'POST', cookies: jar }));
+
+		// Same Dropbox account, no session: this is the same person coming back,
+		// not a new one. Minting a user here stranded the old one's connection
+		// with a live refresh token nobody could ever reach to revoke.
+		const second = await app.connect(createJar());
+
+		const drizzle = createDb(app.db);
+		expect(await drizzle.select().from(schema.users)).toHaveLength(1);
+		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
+		expect(second.callback.headers.get('location')).toBe('/?connect=ok');
+	});
+
+	it('keeps the connection id and root when the same account reconnects', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+		const drizzle = createDb(app.db);
+		await drizzle.update(schema.connections).set({ rootId: 'id:root' });
+		const [before] = await drizzle.select().from(schema.connections);
+
+		await app.connect(jar);
+
+		const [after] = await drizzle.select().from(schema.connections);
+		expect(after?.id).toBe(before?.id);
+		// Re-discovering the root is pointless work when it is the same folder.
+		expect(after?.rootId).toBe('id:root');
+	});
+
+	it('takes a fresh connection id when a different account replaces it', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+		const drizzle = createDb(app.db);
+		await drizzle.update(schema.connections).set({ rootId: 'id:root' });
+		const [before] = await drizzle.select().from(schema.connections);
+
+		await app.connect(jar, 'dbid:other');
+
+		const [after] = await drizzle.select().from(schema.connections);
+		// A client holding notes keyed on the old connection id must not carry
+		// them into a stranger's folder, and the old root id is a path into it.
+		expect(after?.id).not.toBe(before?.id);
+		expect(after?.rootId).toBeNull();
+		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
+	});
+
+	it('sends the user back to the app when the exchange fails', async () => {
+		const app = buildApp({
+			script: { exchange: () => new Response('{"error":"invalid_grant"}', { status: 400 }) },
+		});
+		const jar = createJar();
+		jar.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: jar }));
+
+		// A replayed or expired authorization code is ordinary, not a server
+		// fault, and a raw 500 in the address bar is a dead end.
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=failed');
+	});
+
+	it('appends its outcome to a returnTo that already has a query', async () => {
+		const app = buildApp();
+		const jar = createJar();
+		jar.absorb(
+			await app.request(
+				'/api/auth/connect/dropbox/start?returnTo=%2Fnotes%3Ffolder%3DInbox',
+				{
+					cookies: jar,
+				}
+			)
+		);
+
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+		// `?` twice makes `connect=ok` part of the previous parameter's value.
+		expect(response.headers.get('location')).toBe('/notes?folder=Inbox&connect=ok');
 	});
 });

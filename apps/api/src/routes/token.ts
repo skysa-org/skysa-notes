@@ -24,7 +24,7 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		const db = c.get('db');
 		const config = c.get('config');
 
-		const userId = await currentUserId(c, db);
+		const userId = await currentUserId(c, db, { secure: config.cookiesSecure });
 		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
 
 		// The entitlement seam: an operator of a shared instance decides who may
@@ -49,11 +49,15 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		const credentials = config.oauth.dropbox;
 		if (credentials === undefined) return c.json({ error: 'provider_not_configured' }, 501);
 
+		// A row sealed under a key this deployment no longer holds cannot be
+		// recovered here, and the client can do nothing about it by retrying. It
+		// is the same answer as a revoked grant: reconnect.
 		const secret = await openOAuthSecret(c.get('secretKey'), {
 			ciphertext: connection.secretCiphertext,
 			iv: connection.secretIv,
 			keyId: connection.secretKeyId,
-		});
+		}).catch(() => undefined);
+		if (secret === undefined) return c.json({ error: 'reauthorize_required' }, 401);
 
 		const tokens = await refreshAccessToken(doFetch, {
 			clientId: credentials.clientId,

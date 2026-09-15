@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
-import { buildApp, createJar, testConfig } from './harness.js';
+import { buildApp, cookieNames, createJar, testConfig } from './harness.js';
 
 /**
  * Listing and removing connections. The rule these tests exist to hold: a
@@ -41,7 +41,8 @@ describe('GET /api/connections', () => {
 	it('shows a user only their own connections', async () => {
 		const app = buildApp();
 		const { jar } = await app.connect();
-		await app.connect(createJar());
+		// A different Dropbox account, which is what makes it a different user.
+		await app.connect(createJar(), 'dbid:2');
 
 		const body: { connections: unknown[] } = await (
 			await app.request('/api/connections', { cookies: jar })
@@ -100,7 +101,7 @@ describe('DELETE /api/connections/:id', () => {
 			})
 		);
 
-		expect(jar.get('skysa_session')).toBeUndefined();
+		expect(jar.get(cookieNames.session)).toBeUndefined();
 		expect((await app.request('/api/connections', { cookies: jar })).status).toBe(401);
 	});
 
@@ -116,20 +117,20 @@ describe('DELETE /api/connections/:id', () => {
 			await app.app.fetch(
 				new Request(`https://notes.example.com/api/connections/${connection?.id ?? ''}`, {
 					method: 'DELETE',
-					headers: { cookie: jar.header() ?? '' },
+					headers: { cookie: jar.header() ?? '', origin: 'https://notes.example.com' },
 				}),
 				{ DB: bootstrap.db }
 			)
 		);
 
 		expect(response.status).toBe(200);
-		expect(jar.get('skysa_session')).toBeDefined();
+		expect(jar.get(cookieNames.session)).toBeDefined();
 	});
 
 	it("will not delete someone else's connection", async () => {
 		const app = buildApp();
 		const { jar } = await app.connect();
-		const { jar: otherJar } = await app.connect(createJar());
+		const { jar: otherJar } = await app.connect(createJar(), 'dbid:2');
 
 		const listed: { connections: { id: string }[] } = await (
 			await app.request('/api/connections', { cookies: otherJar })
@@ -169,7 +170,7 @@ describe('POST /api/auth/logout', () => {
 		);
 
 		expect(response.status).toBe(200);
-		expect(jar.get('skysa_session')).toBeUndefined();
+		expect(jar.get(cookieNames.session)).toBeUndefined();
 		expect(await createDb(app.db).select().from(schema.sessions)).toHaveLength(0);
 		// The connection itself survives: signing out is not disconnecting.
 		expect(await rows(app.db)).toHaveLength(1);
@@ -178,5 +179,54 @@ describe('POST /api/auth/logout', () => {
 	it('is harmless without a session', async () => {
 		const app = buildApp();
 		expect((await app.request('/api/auth/logout', { method: 'POST' })).status).toBe(200);
+	});
+});
+
+describe('what the first draft got wrong', () => {
+	it('gives up on a provider that stalls instead of holding the request open', async () => {
+		// The route promises the row goes either way. That only holds if the
+		// revoke can actually give up, which needs a deadline, not just a catch.
+		const app = buildApp();
+		const { jar } = await app.connect();
+		const [connection] = await rows(app.db);
+
+		const signals: (AbortSignal | undefined)[] = [];
+		const stalling = buildApp({
+			fetch: (_url, init) => {
+				signals.push(init.signal ?? undefined);
+				return new Promise<Response>((_resolve, reject) => {
+					init.signal?.addEventListener('abort', () => {
+						reject(new Error('aborted'));
+					});
+				});
+			},
+		});
+
+		const response = await stalling.app.fetch(
+			new Request(`https://notes.example.com/api/connections/${connection?.id ?? ''}`, {
+				method: 'DELETE',
+				headers: { cookie: jar.header() ?? '', origin: 'https://notes.example.com' },
+			}),
+			{ DB: app.db }
+		);
+
+		expect(signals[0]).toBeInstanceOf(AbortSignal);
+		expect(response.status).toBe(200);
+		expect(await rows(app.db)).toHaveLength(0);
+	});
+
+	it('does not accept a disconnect from another origin', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+		const [connection] = await rows(app.db);
+
+		const response = await app.request(`/api/connections/${connection?.id ?? ''}`, {
+			method: 'DELETE',
+			headers: { origin: 'https://evil.notes.example.com' },
+			cookies: jar,
+		});
+
+		expect(response.status).toBe(403);
+		expect(await rows(app.db)).toHaveLength(1);
 	});
 });

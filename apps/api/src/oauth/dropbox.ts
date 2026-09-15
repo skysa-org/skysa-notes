@@ -72,6 +72,10 @@ interface TokenResponse {
 	error?: string;
 }
 
+/**
+ * The deadline lives in the caller: `createApp` wraps whatever fetch it is given
+ * so every provider call has one, rather than each call site remembering.
+ */
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 const postForm = async (
@@ -99,7 +103,11 @@ const postForm = async (
 		// Dropbox access tokens last about four hours. Treating the expiry as
 		// absolute means the client can decide to refresh early without knowing
 		// when the exchange happened.
-		expiresAt: now + (body.expires_in ?? 0) * 1000,
+		//
+		// A response with no `expires_in` would otherwise expire on arrival and
+		// put the client straight into a refresh loop; an hour is short enough to
+		// be safe if the real lifetime is shorter than Dropbox documents.
+		expiresAt: now + (body.expires_in ?? 3600) * 1000,
 		...(body.account_id === undefined ? {} : { accountId: body.account_id }),
 	};
 };

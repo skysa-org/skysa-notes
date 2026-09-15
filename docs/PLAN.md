@@ -278,6 +278,26 @@ Dropbox is the first storage flow and the shape the others follow.
 
 **Test harness.** `@cloudflare/vitest-pool-workers` — which would give the tests Miniflare's real D1 — still peers on `vitest ^4.1.0` against this workspace's 5, so it cannot be installed. The fallback is a ~120-line D1 shim over Node 22's built-in `node:sqlite` (`apps/api/tests/d1.ts`), which keeps the real `drizzle-orm/d1` driver, the real schema and the real migration files; only the process hosting SQLite differs. No new dependency. Swap it for the pool once that supports Vitest 5.
 
+### What review changed (Phase 2, PR 3)
+
+Fourteen findings, each reproduced before it was fixed and each now pinned by a test. Worth recording because most of them are the *kind* of bug the next three providers can repeat:
+
+- **A malformed cookie signature threw where a wrong one returns false.** `crypto.subtle.verify` answers `false`; `atob` throws. The caller reads a cookie an attacker may have written, so the two must look the same — and because the flow cookie was only cleared after being read, one bad cookie wedged every later callback with a 500. The cookie is now cleared first, unconditionally.
+- **The callback bound the grant to whatever session was present, not the one that started the flow.** §9 says the state is bound to the *session*; it was bound to the browser. `FlowState` now carries the starting `userId` and the callback refuses a mismatch. Both cookies also carry the `__Host-` prefix wherever `Secure` is on, so no sibling subdomain can plant either one.
+- **`account-first` could still create a user through the callback.** The guard lived only on `/start`. It is now on both ends, which matters for a real case: an operator changing `AUTH_MODE` while a flow is in the air.
+- **Failed queries logged their bound parameters.** drizzle's `DrizzleQueryError` builds its message from the SQL *and* its parameters — session ids, ciphertext, IVs. `onError` now logs a summary: error name, first line, and the parameterised SQL.
+- **`storage-first` minted a new user on every connect.** Signing out and reconnecting left an unreachable user whose connection held a live refresh token nobody could revoke. Connections now store the provider's `account_id` (migration `0002_connection_account_id`) and a returning account is recognised rather than duplicated. The same column tells a reconnect to the same account (keep the id and `rootId`) from a reconnect to a different one (fresh id, `rootId` cleared) — without it a client's notes could sync into a stranger's folder.
+- **Provider calls had no deadline**, so a stalled Dropbox could hold `DELETE /api/connections/:id` open forever, contradicting that route's own promise that the row goes either way. `createApp` now wraps the injected fetch with one (`providerTimeoutMs`, default 10 s).
+- **Key rotation was a 500.** A row sealed under a retired key is a reconnect, not a fault: `/api/token` answers `reauthorize_required`.
+- **A base64url `SECRETS_KEY` passed the boot check and then failed every request**, including `/api/health`, because the validator normalized the alphabet and the decoder did not. They agree now.
+- **A failed code exchange was a raw 500** in the user's address bar. A replayed or expired code is ordinary; the user goes back to the app with `connect=failed`.
+- **`returnTo` with its own query got a second `?`**, so `connect=ok` became part of the previous parameter's value.
+- **Sessions were not sliding**, despite §6 saying so: every user would have been logged out 90 days after their first connect. `currentUserId` now extends the window at most once a day, and swallows a failed extension.
+- **`SameSite=Lax` does not cover same-site cross-origin.** A sibling subdomain could `POST /api/token` and read the minted token. `hono/csrf` now checks `Origin` on state-changing methods; the OAuth callback is a GET and is unaffected.
+- **Two harness defects**, both of the "a cooperative stub validates the stub" kind: the cookie jar skipped the percent-decode Hono applies, so the flow-cookie assertions worked only for payload lengths that happened to need no escape; and the `node:sqlite` shim's `raw()` collapsed duplicate column names (Node 22 has no `StatementSync.columns()`), which would silently shift every column after the first join. The jar decodes properly, the flow payload is base64url so nothing needs escaping, and the shim now refuses a join rather than answering it wrongly — and rejects instead of throwing, which is what D1 does.
+
+**Deliberately not done:** AES-GCM is used without additional authenticated data. Binding the connection id as AAD would stop a ciphertext copied between rows from decrypting, but an attacker who can write to `connections` has already lost the user the game. Recorded here rather than done, because the seal/open signature is cheaper to change now than after WebDAV credentials use it too.
+
 **Still open at the end of this PR:** the Dropbox app is not registered, so the OAuth round trip is proven against a scripted `fetch` and against `wrangler dev`, not against Dropbox.
 
 ### Data model (Drizzle, D1)

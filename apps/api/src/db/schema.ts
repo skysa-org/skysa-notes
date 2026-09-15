@@ -64,6 +64,13 @@ export const connections = sqliteTable(
 			.notNull()
 			.references(() => users.id, { onDelete: 'cascade' }),
 		provider: text('provider', { enum: ['gdrive', 'onedrive', 'dropbox', 'webdav'] }).notNull(),
+		/**
+		 * The provider's own id for the account this connection points at. In
+		 * `storage-first` it is what lets a returning user be recognised as the
+		 * same user instead of a new one, and it is how a reconnect tells "the
+		 * same account again" from "a different account in the same slot".
+		 */
+		accountId: text('account_id'),
 		displayName: text('display_name').notNull(),
 		/** Provider id of the app-owned root folder, once `ensureRoot()` has run. */
 		rootId: text('root_id'),
@@ -84,6 +91,9 @@ export const connections = sqliteTable(
 		// Enforced here rather than by convention so reconnecting is an atomic
 		// upsert instead of a read-then-write race between two tabs.
 		uniqueIndex('connections_user_provider_idx').on(t.userId, t.provider),
+		// Not unique: two users of a shared instance may legitimately connect the
+		// same Dropbox account. This index only has to make the lookup cheap.
+		index('connections_provider_account_idx').on(t.provider, t.accountId),
 	]
 );
 

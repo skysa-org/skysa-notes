@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { importSecretKey, signingKey } from '../src/crypto.js';
 import { parseEnv } from '../src/env.js';
 
 const base = {
@@ -176,5 +177,18 @@ describe('cookiesSecure', () => {
 			parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav', APP_ORIGIN: 'http://localhost:5173' })
 				.cookiesSecure
 		).toBe(false);
+	});
+});
+
+describe('what the first draft got wrong', () => {
+	it('accepts exactly the keys the crypto module can import', async () => {
+		// The validator normalized `-`/`_` before measuring; the decoder did not.
+		// A base64url key therefore passed the boot check and then failed on every
+		// request, as a 500 from `/api/health` rather than as misconfiguration.
+		const key = '-wIJEBceJSwzOkFIT1ZdZGtyeYCHjpWco6qxuL_GzdQ=';
+		const config = parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav', SECRETS_KEY: key });
+
+		await expect(importSecretKey(config.secretsKey, 'k1')).resolves.toBeDefined();
+		await expect(signingKey(config.secretsKey)).resolves.toBeDefined();
 	});
 });
