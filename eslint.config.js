@@ -74,6 +74,18 @@ const googleRules = {
  * `.ts` and `.tsx` blocks so component code is held to the same standard as the
  * rest of the repo, rather than a looser one.
  */
+const RESTRICTED_SYNTAX = [
+	{
+		selector: 'IfStatement > IfStatement.alternate',
+		message: "'else if' is not allowed, use early returns instead.",
+	},
+	{
+		selector: 'AwaitExpression > ImportExpression',
+		message:
+			'Await with dynamic imports (await import()) is not allowed. Use static imports at the top of the file instead.',
+	},
+];
+
 const typescriptRules = {
 	'object-shorthand': 'error',
 	'no-param-reassign': 'error',
@@ -95,18 +107,11 @@ const typescriptRules = {
 		'error',
 		{ disallowPrototype: true, singleReturnOnly: false, classPropertiesAllowed: false },
 	],
-	'no-restricted-syntax': [
-		'error',
-		{
-			selector: 'IfStatement > IfStatement.alternate',
-			message: "'else if' is not allowed, use early returns instead.",
-		},
-		{
-			selector: 'AwaitExpression > ImportExpression',
-			message:
-				'Await with dynamic imports (await import()) is not allowed. Use static imports at the top of the file instead.',
-		},
-	],
+	// Kept in a named list because flat config *replaces* a rule's options
+	// rather than merging them: an override that sets `no-restricted-syntax`
+	// without spreading these turns both of them off for every file it covers,
+	// and no existing file violates them, so nothing would ever say so.
+	'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX],
 
 	'unused-imports/no-unused-imports': 'error',
 	'simple-import-sort/imports': 'error',
@@ -282,7 +287,10 @@ export default tseslint.config(
 		},
 	},
 	{
-		// Only worker.ts may read the Workers env.
+		// Only worker.ts may read *configuration*. Per-request bindings still
+		// arrive on the Hono context — `c.env.DB` in app.ts is the one of those
+		// that cannot be handed over at createApp time, because there is no
+		// request yet when the app is built.
 		files: ['apps/api/src/**/*.ts'],
 		ignores: ['apps/api/src/worker.ts'],
 		languageOptions: { globals: globals.node },
@@ -293,6 +301,56 @@ export default tseslint.config(
 					name: 'process',
 					message:
 						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+				},
+			],
+			// The bare identifier is only one of the three ways in. This covers
+			// the member expression; the import is covered below.
+			'no-restricted-syntax': [
+				'error',
+				...RESTRICTED_SYNTAX,
+				{
+					selector: "MemberExpression[object.name='globalThis'][property.name='process']",
+					message:
+						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+				},
+			],
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['node:process'],
+							message:
+								'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+						},
+					],
+				},
+			],
+		},
+	},
+	{
+		// Separate from the block above because that one exempts `worker.ts`,
+		// and this rule must not: the entry module is the likeliest place for a
+		// Node builtin to appear, and nothing else in the gate would notice.
+		// `pnpm typecheck` passes (apps/api's src and tests are one TypeScript
+		// program and the tests legitimately pull @types/node in) and so does
+		// `wrangler deploy --dry-run` — the import goes straight into the
+		// bundle, and only the deployed Worker finds out.
+		files: ['apps/api/src/**/*.ts'],
+		languageOptions: { globals: globals.node },
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							// wrangler.toml sets no `nodejs_compat`, so the Worker
+							// runtime has none of these.
+							group: ['node:*', 'fs', 'path', 'stream'],
+							message:
+								'the Worker runs without nodejs_compat — Web Crypto and fetch only.',
+						},
+					],
 				},
 			],
 		},

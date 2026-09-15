@@ -31,4 +31,8 @@ registrations at all, which makes it the quickest way to run this locally.
 | `pnpm db:generate` | Generate a Drizzle migration from the schema |
 | `pnpm db:migrate` / `pnpm db:migrate:remote` | Apply migrations locally / to Cloudflare |
 
-Current status: **Phase 1 complete.** The app runs locally and offline: notebooks, notes, and both editors — rich text with a slash menu and a formatting toolbar, and raw markdown — over IndexedDB, with the mode remembered per note. It installs as a PWA. Nothing syncs yet; that is Phase 2. See [`docs/PLAN.md`](docs/PLAN.md).
+Current status: **Phase 2 in progress — the engine and the backend are done, the client wiring is not.** Phase 1 shipped the app that runs locally and offline: notebooks, notes, and both editors — rich text with a slash menu and a formatting toolbar, and raw markdown — over IndexedDB, with the mode remembered per note, installable as a PWA.
+
+Since then: a provider contract suite and an in-memory fake, a `DropboxProvider` against it, the backend that holds only encrypted refresh tokens and mints short-lived access tokens (OAuth start/callback, sessions, `/api/token`), and the sync engine — pull, push, cursor persistence and the op queue — behind a `SyncStore` port.
+
+What is left before anything actually syncs is the client half: the typed API client, the scheduler, the connect and status UI, and the Dexie implementation of `SyncStore`. Until that lands the app still stores everything locally and talks to nobody. The Dropbox app is also not registered yet, so the OAuth round trip is proven against stubs rather than against Dropbox. See [`docs/PLAN.md`](docs/PLAN.md).
