@@ -1169,6 +1169,55 @@ describe('a deletion the same batch also describes as present', () => {
 		expect(noteAt('a.md')?.content).toBe('two\n');
 	});
 
+	it('leaves alone a note a conflict in the same batch re-pointed', async () => {
+		// The file at this path was replaced while we held an edit, so the entry
+		// is about a different file from the one the row pointed at: the note
+		// takes the remote's bytes and the edit leaves in a copy. The deletion
+		// behind it names the file that was replaced, which is nothing to do
+		// with the row any more — acting on it cuts the note loose from the
+		// file it has just been given, and the next push makes a duplicate.
+		const first = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const before = noteAt('a.md');
+		if (before === undefined) throw new Error('no note');
+		store.put({ ...before, content: 'my edit\n', dirty: true });
+		await provider.delete(first);
+		const second = await remoteFile('a.md', 'two\n');
+
+		await pullNow([second, { path: 'a.md', deleted: true, remoteId: first.remoteId }]);
+
+		expect(noteAt('a.md')?.content).toBe('two\n');
+		expect(noteAt('a.md')?.remoteId).toBe(second.remoteId);
+		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+	});
+
+	it('says nothing twice about a note it has already cut loose', async () => {
+		// One file reported deleted under two names — the old one and the new
+		// one — after a move. The first cuts the note loose; by the second the
+		// row points at no file at all, so there is nothing left the deletion
+		// could be about, and reporting it tells the user something happened
+		// twice when it happened once.
+		const entry = await remoteFile('a.md', 'body\n');
+		store.put({
+			id: 'mine',
+			path: 'a.md',
+			content: 'my edit\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		await provider.delete(entry);
+
+		const result = await pullNow([
+			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
+			{ path: 'b.md', deleted: true, remoteId: entry.remoteId },
+		]);
+
+		expect(result.pulled).toBe(1);
+		expect(noteAt('a.md')?.content).toBe('my edit\n');
+		expect(noteAt('a.md')?.remoteId).toBeUndefined();
+	});
+
 	it('still reads an entry elsewhere as the other half of a move', async () => {
 		// The correction above must not swallow the rule it narrows. Here the
 		// surviving entry is at a different path, whichever order it arrives
@@ -2886,6 +2935,26 @@ describe('a folder whose ancestor moved in the same batch', () => {
 		expect(store.notes().map((note) => note.path)).toEqual(['sub/x.md']);
 		expect(noteAt('sub/x.md')?.id).toBe(before?.id);
 		expect(store.folders().map((folder) => folder.path)).toEqual(['B', 'sub']);
+	});
+
+	it('makes a folder afresh when the batch already took the one it was', async () => {
+		// `Work` is gone and `Work/Sub` turns up at the root as `Archive`. By
+		// the time the second entry is decided the cascade has taken `Work/Sub`
+		// with its parent, so there is nothing at that path to move — a
+		// `move-folder` naming it moves nothing and says nothing about it, and
+		// the notebook never appears at all.
+		const work = await provider.createFolder('Work');
+		const sub = await provider.createFolder('Work/Sub');
+		await remoteFile('Work/Sub/x.md', 'x\n');
+		await engine.pull();
+		await provider.delete(work);
+
+		await pullNow([
+			{ path: 'Work', deleted: true },
+			{ ...sub, path: 'Archive' },
+		]);
+
+		expect(store.folders().map((folder) => folder.path)).toEqual(['Archive']);
 	});
 
 	it('forgets a folder created and deleted inside one window', async () => {

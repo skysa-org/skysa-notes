@@ -314,6 +314,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 						: state;
 				}
 				if (!('id' in change) || change.id !== note.id) return state;
+				// Cut loose from the remote: it points at no file at all now.
+				if (change.kind === 'detach-note') return { ...state, remoteId: undefined };
 				// `upsert-note`, `move-note` and `displace-note` carry a path;
 				// `adopt-version` and `detach-note` carry an id and move nothing.
 				// None of them changes `dirty`: the only kind that overwrites a
