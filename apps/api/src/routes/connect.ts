@@ -167,11 +167,11 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// Either way the answer is no, and refusing here is what keeps `adopt`
 		// unambiguous.
 		const claimed = await claimedBy(db, tokens.accountId);
-		if (
-			config.authMode === 'storage-first' &&
-			claimed !== undefined &&
-			claimed !== (sessionUser ?? claimed)
-		) {
+		const someoneElse = claimed !== undefined && claimed !== sessionUser;
+		// A signed-out visitor presenting a claimed account is that account's
+		// owner coming back, and is adopted below. A *signed-in* user presenting
+		// somebody else's is the case to refuse.
+		if (config.authMode === 'storage-first' && someoneElse && sessionUser !== undefined) {
 			return c.json({ error: 'account_already_connected' }, 409);
 		}
 
