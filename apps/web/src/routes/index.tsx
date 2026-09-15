@@ -6,7 +6,7 @@ import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { db } from '../store/db.js';
-import { createFolder } from '../store/folders.js';
+import { createFolder, FolderExistsError } from '../store/folders.js';
 import { useFolderTree, useLooseNoteCount, useNote, useNotesInFolder } from '../store/hooks.js';
 import { createNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
@@ -40,6 +40,10 @@ const Home = () => {
 	const [folderError, setFolderError] = useState<string | null>(null);
 
 	const select = (next: Partial<AppSearch>) => {
+		// Anything else the user does answers the banner: it is about the name they
+		// just tried, not about the app, and leaving it up means a message about a
+		// notebook they have since moved on from sits there for the session.
+		setFolderError(null);
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
 
@@ -63,47 +67,55 @@ const Home = () => {
 			})
 			.catch((error: unknown) => {
 				setFolderError(
-					error instanceof Error ? error.message : 'Could not make that notebook'
+					error instanceof FolderExistsError
+						? `There is already a notebook called “${error.folderName}” here.`
+						: 'That notebook could not be made.'
 				);
 			});
 	};
 
 	return (
-		<div className="app-shell">
+		// `app-shell` is a three-column grid with exactly three children. A banner
+		// put inside it becomes a fourth grid item, takes the sidebar's column and
+		// pushes the note view into a clipped second row, so anything that sits
+		// above the panes goes in the frame around them instead.
+		<div className="app-frame">
 			{folderError !== null && (
 				<p className="banner" role="alert">
 					{folderError}
 				</p>
 			)}
-			<Sidebar
-				tree={tree}
-				selectedFolder={folder}
-				onSelectFolder={(path) => {
-					select({ folder: folderToSearch(path), note: undefined });
-				}}
-				onCreateFolder={onCreateFolder}
-				looseNoteCount={looseNoteCount}
-			/>
+			<div className="app-shell">
+				<Sidebar
+					tree={tree}
+					selectedFolder={folder}
+					onSelectFolder={(path) => {
+						select({ folder: folderToSearch(path), note: undefined });
+					}}
+					onCreateFolder={onCreateFolder}
+					looseNoteCount={looseNoteCount}
+				/>
 
-			<NoteList
-				notes={notes}
-				selectedNoteId={noteId}
-				onSelectNote={(id) => {
-					select({ note: id });
-				}}
-				onCreateNote={onCreateNote}
-				folderPath={folder}
-				// Both queries, not just the tree: the notebooks alone cannot tell
-				// an empty app from one whose notes all sit loose at the root.
-				storeLoaded={tree !== undefined && looseNoteCount !== undefined}
-			/>
+				<NoteList
+					notes={notes}
+					selectedNoteId={noteId}
+					onSelectNote={(id) => {
+						select({ note: id });
+					}}
+					onCreateNote={onCreateNote}
+					folderPath={folder}
+					// Both queries, not just the tree: the notebooks alone cannot tell
+					// an empty app from one whose notes all sit loose at the root.
+					storeLoaded={tree !== undefined && looseNoteCount !== undefined}
+				/>
 
-			<NoteView
-				note={openNote}
-				onDeleted={() => {
-					select({ note: undefined });
-				}}
-			/>
+				<NoteView
+					note={openNote}
+					onDeleted={() => {
+						select({ note: undefined });
+					}}
+				/>
+			</div>
 		</div>
 	);
 };

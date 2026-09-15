@@ -498,4 +498,81 @@ describe('an edit that overlaps another write to the same note', () => {
 
 		expect((await getNote(db, note.id))?.editorMode).toBe('raw');
 	});
+
+	/**
+	 * The pull side of sync is the same shape: read the row, hash, write the row
+	 * whole. Read outside a transaction, what it writes back is a note that may
+	 * no longer be there — and since it writes the id and `createdAt` it read, it
+	 * puts a deleted note back under its old identity.
+	 *
+	 * Which of an import and a local edit wins the *content* is the conflict
+	 * question, and is not this; this is only that one of them happens after the
+	 * other rather than through the middle of it.
+	 */
+	it('does not bring a purged note back from a stale read', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+		const purging = during(() => purgeNote(db, note.id));
+
+		await importNoteFile(db, { path: note.path, source: '# From the remote\n' });
+		await purging;
+
+		expect(await getNote(db, note.id)).toBeUndefined();
+	});
+});
+
+/**
+ * Holding the row for the write is only half of it. An autosave on a note with
+ * no name of its own also decides *what to call it* — from the first heading —
+ * and that decision has to be made in the same window as the write it informs.
+ * Decided beforehand, it is an answer about a note that has since been given a
+ * name, and it goes in over the name the user chose.
+ *
+ * The rename goes first here and the save second, which is the order the app
+ * produces: the 2s autosave debounce fires on its own, and the user is still
+ * looking at the note when they rename it.
+ */
+describe('an autosave that decides the note is still unnamed', () => {
+	it('does not put the heading back over the name the user chose', async () => {
+		const note = await createNote(db, { folderPath: 'Notebook' });
+
+		await Promise.all([
+			renameNote(db, note.id, 'User chose this'),
+			saveNoteBody(db, note.id, '# A heading\n'),
+		]);
+
+		const after = await getNote(db, note.id);
+		expect(after?.title).toBe('User chose this');
+		expect(after?.path).toBe('Notebook/user-chose-this.md');
+		expect(after?.body).toBe('# A heading\n');
+	});
+});
+
+/**
+ * Two clicks on "New note" are one user action as far as the user is concerned,
+ * and the button is neither disabled nor debounced. Both pick a filename from
+ * the names already taken, and the digest between that read and the insert is
+ * long enough for each to see a folder without the other's note in it.
+ */
+describe('two notes created at once', () => {
+	it('do not both take the same filename', async () => {
+		const [one, two] = await Promise.all([
+			createNote(db, { folderPath: 'Notebook' }),
+			createNote(db, { folderPath: 'Notebook' }),
+		]);
+
+		expect(one.path).not.toBe(two.path);
+		expect(
+			(await listNotes(db, { folderPath: 'Notebook' })).map((note) => note.path).sort()
+		).toEqual([one.path, two.path].sort());
+	});
+
+	it('do not both take the same filename when renamed at once', async () => {
+		const one = await createNote(db, { folderPath: 'Notebook', title: 'One' });
+		const two = await createNote(db, { folderPath: 'Notebook', title: 'Two' });
+
+		await Promise.all([renameNote(db, one.id, 'Same'), renameNote(db, two.id, 'Same')]);
+
+		const paths = (await listNotes(db, { folderPath: 'Notebook' })).map((note) => note.path);
+		expect(new Set(paths).size).toBe(2);
+	});
 });

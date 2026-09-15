@@ -146,4 +146,28 @@ describe('RichEditor', () => {
 			expect(onUnsupported).toHaveBeenCalled();
 		});
 	});
+
+	/**
+	 * The check on the body the editor was built with runs once, so a body that
+	 * arrives afterwards — a sync pull, or an edit made in raw mode — is the only
+	 * other thing that can put markdown into this editor, and the only other
+	 * place the question can be asked.
+	 */
+	it('reports a body that arrives later and cannot be represented', async () => {
+		const onUnsupported = vi.fn();
+		const props = { noteId: 'a', onUserEdit: vi.fn(), onUnsupported };
+
+		const { rerender } = render(<RichEditor {...props} body="ordinary enough" />);
+		await waitFor(() => {
+			expect(representsFaithfully).toHaveBeenCalled();
+		});
+		expect(onUnsupported).not.toHaveBeenCalled();
+
+		vi.mocked(representsFaithfully).mockReturnValueOnce(false);
+		rerender(<RichEditor {...props} body="something exotic from the remote" />);
+
+		await waitFor(() => {
+			expect(onUnsupported).toHaveBeenCalled();
+		});
+	});
 });

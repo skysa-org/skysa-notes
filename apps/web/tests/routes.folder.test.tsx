@@ -46,7 +46,34 @@ describe('making a notebook that cannot be made', () => {
 		await nameIt(user, 'Ideas');
 
 		const alert = await screen.findByRole('alert');
-		expect(alert.textContent).toContain('Work/Ideas');
+		expect(alert.textContent).toContain('Ideas');
+		// The user's words, not the store's: no raw path, and "notebook" as the
+		// rest of the app calls it.
+		expect(alert.textContent).not.toContain('Work/Ideas');
+		expect(alert.textContent).not.toContain('Folder');
+		// `app-shell` is a three-column grid with one child per column. A fourth
+		// child takes the sidebar's column and pushes the note view into a second
+		// row that `overflow: hidden` clips: the app goes unusable behind the
+		// message about it. jsdom lays nothing out, so the claim that can be made
+		// here is the structural one the layout depends on.
+		expect(alert.closest('.app-shell')).toBeNull();
+		expect(document.querySelectorAll('.app-shell > *')).toHaveLength(3);
+	});
+
+	it('takes the banner away once the user does something else', async () => {
+		const user = userEvent.setup();
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Ideas' });
+		await createFolder(db, { parentPath: undefined, name: 'Zed' });
+		await openApp();
+		await nameIt(user, 'Ideas');
+		await screen.findByRole('alert');
+
+		await user.click(screen.getByRole('button', { name: 'Zed' }));
+
+		await waitFor(() => {
+			expect(screen.queryByRole('alert')).toBeNull();
+		});
 	});
 
 	it('says nothing when the notebook is made', async () => {

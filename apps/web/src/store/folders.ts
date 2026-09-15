@@ -56,6 +56,23 @@ export const ensureFolder = async (
 	return created;
 };
 
+/**
+ * A notebook of that name is already there. Typed rather than a bare `Error` so
+ * the UI can say so in the user's words instead of showing the message meant for
+ * whoever is reading the logs.
+ */
+export class FolderExistsError extends Error {
+	override readonly name = 'FolderExistsError';
+
+	constructor(
+		readonly path: string,
+		/** The name as the user typed it, after sanitizing. */
+		readonly folderName: string
+	) {
+		super(`Folder already exists: ${path}`);
+	}
+}
+
 export interface CreateFolderInput extends FolderScope {
 	/** Folder to create it in. Defaults to the root. */
 	parentPath?: string;
@@ -71,7 +88,7 @@ export const createFolder = async (
 	const path = joinPath(input.parentPath ?? '', name);
 
 	const existing = await db.folders.get([connectionId, path]);
-	if (existing !== undefined) throw new Error(`Folder already exists: ${path}`);
+	if (existing !== undefined) throw new FolderExistsError(path, name);
 
 	await ensureFolder(db, path, { connectionId });
 	const created = await db.folders.get([connectionId, path]);

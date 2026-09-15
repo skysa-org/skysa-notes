@@ -72,15 +72,25 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 	);
 
 	// Can this note be shown at all? Checked once the editor exists, because only
-	// then do its parser and serializer exist. This runs inside `create()`, before
-	// the user has any way to type, so a failing note reaches raw mode untouched.
+	// then do its parser and serializer exist. This runs before the user has any
+	// way to type, so a failing note reaches raw mode untouched.
+	//
+	// Once per editor, and deliberately not on `get`. `useEditor` returns a fresh
+	// `get` closure on every render, so an effect that depends on it re-runs on
+	// every render of this component — including the one autosave causes two
+	// seconds after the user starts typing. It would then compare the document
+	// the user has been writing in against `initial.current`, which is the text
+	// the editor was *built* with, find they differ, and declare the note
+	// unrepresentable. Typing one word into any note was enough.
 	useEffect(() => {
 		if (loading) return;
 		get()?.action((ctx) => {
 			if (representsFaithfully(ctx, initial.current)) return;
 			unsupported.current();
 		});
-	}, [loading, get, noteId]);
+		// `get` is intentionally absent; see above.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [loading, noteId]);
 
 	// Adopt a body that changed underneath us — a sync pull, or an edit made in
 	// raw mode. `shouldAdopt` is what keeps a stale prop on an unrelated re-render
@@ -90,11 +100,11 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 		if (!incoming.shouldAdopt(body)) return;
 		get()?.action((ctx) => {
 			adoptBody(ctx, body);
-			// The document is this body now. Leaving `initial` on the body the
-			// editor was built with means the next render checks the adopted
-			// document against text it no longer holds, and calls the note
-			// unsupported for having accepted a perfectly ordinary update.
-			initial.current = body;
+			// The same question the editor was built with, asked again of a body
+			// that arrived from somewhere else. A sync pull can bring in markdown
+			// this editor cannot show, and since the check above runs once, this
+			// is the only place left to notice.
+			if (!representsFaithfully(ctx, body)) unsupported.current();
 		});
 	}, [body, get, incoming, loading]);
 
