@@ -280,6 +280,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	interface Placement {
 		at: string | undefined;
 		dirty: boolean;
+		/** The remote file it points at, or `undefined` once cut loose. */
+		remoteId: string | undefined;
 	}
 
 	const placement = (note: SyncNote, decided: readonly PullChange[]): Placement =>
@@ -292,9 +294,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				// A folder delete cascades: the clean notes inside it go with it,
 				// while the dirty ones are kept and merely detached.
 				if (change.kind === 'delete-folder') {
-					return !state.dirty && isWithin(state.at, change.path)
-						? { ...state, at: undefined }
-						: state;
+					if (!isWithin(state.at, change.path)) return state;
+					return state.dirty
+						? { ...state, remoteId: undefined }
+						: { ...state, at: undefined };
 				}
 				if (change.kind === 'move-folder') {
 					return isWithin(state.at, change.from)
@@ -303,7 +306,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				}
 				if (change.kind === 'conflict') {
 					return change.resolution.noteId === note.id
-						? { at: change.resolution.remote.path, dirty: false }
+						? {
+								at: change.resolution.remote.path,
+								dirty: false,
+								remoteId: change.resolution.remote.remoteId,
+							}
 						: state;
 				}
 				if (!('id' in change) || change.id !== note.id) return state;
@@ -312,9 +319,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				// None of them changes `dirty`: the only kind that overwrites a
 				// note's bytes is `upsert-note`, and the engine never emits one
 				// for a note with unpushed edits — that is what `conflict` is.
-				return 'path' in change ? { ...state, at: change.path } : state;
+				const remoteId = 'remote' in change ? change.remote.remoteId : state.remoteId;
+				return 'path' in change
+					? { ...state, at: change.path, remoteId }
+					: { ...state, remoteId };
 			},
-			{ at: note.path, dirty: note.dirty }
+			{ at: note.path, dirty: note.dirty, remoteId: note.remoteId }
 		);
 
 	/** Where a note ends up, or `undefined` if the batch takes it away. */
@@ -324,6 +334,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/** Has an earlier decision in this batch already taken this note away? */
 	const removedInBatch = (local: SyncNote, decided: readonly PullChange[]): boolean =>
 		whereNow(local, decided) === undefined;
+
+	/** Which remote file the note points at once the batch has been applied. */
+	const remoteNow = (note: SyncNote, decided: readonly PullChange[]): string | undefined =>
+		placement(note, decided).remoteId;
+
+	/**
+	 * Where a folder is once the decisions so far have been applied. Same
+	 * reasoning as `placement`, and the same consequence for getting it wrong: a
+	 * folder move that names a path nothing is at any more moves nothing, and
+	 * says nothing about having failed.
+	 */
+	const folderNow = (path: string, decided: readonly PullChange[]): string | undefined =>
+		decided.reduce<string | undefined>((at, change) => {
+			if (at === undefined) return undefined;
+			if (change.kind === 'move-folder') {
+				return isWithin(at, change.from) ? rebasePath(at, change.from, change.to) : at;
+			}
+			if (change.kind === 'delete-folder') return isWithin(at, change.path) ? undefined : at;
+			return at;
+		}, path);
 
 	/** A note that vanished remotely: gone if we have no edits, kept if we do. */
 	const forgetNote = (local: SyncNote): PullChange =>
@@ -395,12 +425,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		if (await movedNotDeleted(path, remoteId, local, live, at)) return [];
 		if (local !== undefined) {
-			// Already taken away by an earlier decision, or already written back
-			// by one. The second is the file that was replaced at this path: the
-			// note has been re-pointed at the new file, and this deletion is
-			// about the old one, so acting on it deletes what was just imported.
+			// Already taken away by an earlier decision, or already re-pointed by
+			// one at a different file — that second case is the file replaced at
+			// this path, where the deletion is about the old one and acting on it
+			// would delete what the batch just imported.
+			//
+			// "Re-pointed" has to mean at a *different* file, not merely
+			// mentioned. A note is written back by an entry about the very file
+			// this deletion names all the time — our own push echo arriving
+			// alongside the other device's delete — and reading that as settled
+			// drops the deletion for ever, since the cursor moves on and nothing
+			// says it again. A deletion with no id names no file, so there it
+			// stays a question about the note: an id-less deletion after a write
+			// at that path is ambiguous, and keeping the note cannot lose one.
 			const settled =
-				removedInBatch(local, decided) || reestablished(decided).notes.has(local.id);
+				removedInBatch(local, decided) ||
+				(remoteId === undefined
+					? reestablished(decided).notes.has(local.id)
+					: remoteNow(local, decided) !== remoteId);
 			return settled ? [] : [forgetNote(local)];
 		}
 
@@ -408,7 +450,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// folder we hold. Anything else — a PDF beside the notes, a file we
 		// never imported, a folder that was never ours — is not news, and
 		// saying otherwise would tell the user something happened to them.
-		if ((await store.folderByPath(path)) === undefined) return [];
+		// Including one this batch has just made: a folder created and removed
+		// inside one cursor window is reported as both, and asking the store
+		// alone leaves a notebook in the sidebar with nothing behind it until
+		// the next cursor reset.
+		const held =
+			(await store.folderByPath(path)) !== undefined ||
+			reestablished(decided).folders.has(path);
+		if (!held) return [];
 
 		// The store cascades to what was inside it, so a folder already within
 		// one this batch is deleting needs nothing said about it.
@@ -416,7 +465,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return [{ kind: 'delete-folder', path }];
 	};
 
-	const decideFolder = async (entry: RemoteEntry): Promise<PullChange[]> => {
+	const decideFolder = async (
+		entry: RemoteEntry,
+		decided: readonly PullChange[]
+	): Promise<PullChange[]> => {
 		// The app folder itself, which several providers report as an entry of
 		// its own — Graph's `delta` returns the root item. There is nothing above
 		// it to hold a row, and a row for it would be reconciled away after the
@@ -426,15 +478,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (normalizePath(entry.path) === ROOT) return [];
 
 		const existing = await store.folderByRemoteId(entry.remoteId);
-		if (existing !== undefined && existing.path !== entry.path) {
-			return [
-				{
-					kind: 'move-folder',
-					from: existing.path,
-					to: entry.path,
-					remoteId: entry.remoteId,
-				},
-			];
+		// Where that folder is *now*, not where the store last saw it. A rename
+		// of `A` and a move of `A/sub` out of it land in one batch all the time
+		// — one drag after another — and the second decision is reached after
+		// the first has already rebased everything under `A`. Naming the old
+		// path moves nothing at all, silently, and the notebook keeps a position
+		// the remote abandoned for as long as the cursor lives.
+		const from = existing === undefined ? undefined : folderNow(existing.path, decided);
+		if (from !== undefined && from !== entry.path) {
+			return [{ kind: 'move-folder', from, to: entry.path, remoteId: entry.remoteId }];
 		}
 		return [{ kind: 'ensure-folder', path: entry.path, remoteId: entry.remoteId }];
 	};
@@ -626,7 +678,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (entry.deleted === true) {
 			return decideDeleted(entry.path, entry.remoteId, live, decided, at);
 		}
-		if (entry.kind === 'folder') return decideFolder(entry);
+		if (entry.kind === 'folder') return decideFolder(entry, decided);
 
 		// A file that is not a note. The app owns the folder but does not own
 		// everything in it — the user may have dropped a PDF beside their notes,
@@ -865,6 +917,31 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			expected === undefined ? {} : { expectedVersion: expected }
 		);
 
+	/**
+	 * A write that found nothing at the note's path, over a file that is still
+	 * there under the id we hold. Either the remote renamed it — in which case
+	 * the next pull rebases the note and this op with it — or the *user* renamed
+	 * it here and the `move` saying so is queued behind this write.
+	 *
+	 * The second can never resolve itself. No pull will move a note over a
+	 * rename the remote knows nothing about, and the ordered queue cannot reach
+	 * the `move` while the `write` in front of it is failing, so the note's
+	 * edits sit on the device for ever and every op behind them with it. The
+	 * queue is the only thing that can tell the two apart, so it is asked, and
+	 * the rename is done here rather than waited for. Addressed by `remoteId`,
+	 * which finds the file wherever the old path was left behind.
+	 */
+	const followTheRename = async (
+		note: SyncNote,
+		remoteId: string,
+		error: unknown
+	): Promise<RemoteEntry> => {
+		const queued = await store.pendingOps();
+		if (!queued.some((each) => each.op === 'move' && each.noteId === note.id)) throw error;
+		const moved = await provider.move({ remoteId, path: note.path }, note.path);
+		return write(note, moved.version);
+	};
+
 	const runWrite = async (op: SyncOp, note: SyncNote): Promise<void> => {
 		const entry = await write(note, note.remoteVersion).catch(async (error: unknown) => {
 			if (!isNotFoundError(error) || note.remoteVersion === undefined) throw error;
@@ -872,14 +949,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// Nothing at that path — but `write` is addressed by path, and a file
 			// renamed remotely is missing from its old one too. Creating it again
 			// would leave the user with two notes where they had one, so ask
-			// whether the file still exists under the id we hold. If it does, this
-			// is a move: the op stays queued, and the next pull rebases the path.
-			if (note.remoteId !== undefined) {
-				const stillThere = await provider
-					.read({ remoteId: note.remoteId, path: note.path })
+			// whether the file still exists under the id we hold.
+			const id = note.remoteId;
+			if (id !== undefined) {
+				const elsewhere = await provider
+					.read({ remoteId: id, path: note.path })
 					.then(() => true)
 					.catch(() => false);
-				if (stillThere) throw error;
+				if (elsewhere) return followTheRename(note, id, error);
 			}
 
 			// Genuinely deleted while we held edits. §7 says re-create it, and the
@@ -915,10 +992,21 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// queued: a pull in between rebases the note and leaves the op's own
 		// `path` behind. Invisible where `remoteId` identifies the file, and the
 		// whole address where it does not (WebDAV, Phase 5).
-		const entry = await provider.move(
-			{ remoteId: note.remoteId, path: note.path },
-			op.targetPath
-		);
+		const entry = await provider
+			.move({ remoteId: note.remoteId, path: note.path }, op.targetPath)
+			.catch((error: unknown) => {
+				if (isNotFoundError(error)) return undefined;
+				throw error;
+			});
+		// The file is gone from the remote, so there is nothing left to move and
+		// no number of retries will find one. Failing instead blocks the queue
+		// for ever and strands every op behind it — over a rename, which is the
+		// least of what the user has queued. The note keeps its contents, and the
+		// pull that reports the deletion cuts it loose or takes it away.
+		if (entry === undefined) {
+			await store.completeOp(op.seq, { kind: 'done' });
+			return;
+		}
 		await store.completeOp(op.seq, { kind: 'moved', noteId: note.id, remote: entry });
 	};
 

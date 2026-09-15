@@ -64,10 +64,21 @@ export const describeSyncStoreContract = (
 				const seq = await seedOp({ op: 'delete', noteId: 'n1', path: 'a.md' });
 
 				expect((await store.noteById('n1'))?.remoteId).toBe('r1');
+				// Every read, not just this one. A store with a `deleted` flag
+				// and filtered indexes satisfies `noteById` alone and still
+				// loses a note the first time one is deleted here and edited on
+				// another device: the pull cannot see the row, mints a second
+				// note at that path, and the queued delete removes the file that
+				// was just imported.
+				expect((await store.noteByPath('a.md'))?.id).toBe('n1');
+				expect((await store.noteByRemoteId('r1'))?.id).toBe('n1');
+				expect((await store.allNotes()).map((note) => note.id)).toContain('n1');
+				expect((await store.notesUnder('')).map((note) => note.id)).toContain('n1');
 
 				// And it goes when the op says the remote copy is gone, not before.
 				await store.completeOp(seq, { kind: 'purged', noteId: 'n1' });
 				expect(await store.noteById('n1')).toBeUndefined();
+				expect(await store.noteByPath('a.md')).toBeUndefined();
 			});
 
 			it('finds a note by id, path and remote id', async () => {
