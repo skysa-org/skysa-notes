@@ -24,12 +24,29 @@ export const useFolderTree = (): FolderNode[] | undefined =>
 		return buildFolderTree({ paths, notePaths: notes.map((note) => note.path) });
 	}, []);
 
-/** Notes in a folder. With no folder open there is nothing to list. */
-export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] | undefined =>
-	useLiveQuery(
-		async () => (folderPath === undefined ? [] : listNotes(db, { folderPath })),
+/**
+ * Notes in a folder. With no folder open there is nothing to list.
+ *
+ * The result carries the folder it describes, and a result for any other folder
+ * is reported as still loading. `useLiveQuery` keeps its last value across a
+ * change of dependencies, so without this the previous folder's notes are shown
+ * for a frame under the new folder's heading — a list that says "Loose notes"
+ * above a note from a notebook, which is worse than a moment of "Loading…".
+ */
+export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] | undefined => {
+	const result = useLiveQuery(
+		async () => ({
+			folderPath,
+			notes: folderPath === undefined ? [] : await listNotes(db, { folderPath }),
+		}),
 		[folderPath]
 	);
+	// `result?.folderPath === folderPath` would be true for an unresolved query
+	// of the root, where both sides are `undefined`, and then read `.notes` off
+	// nothing at all.
+	if (result === undefined) return undefined;
+	return result.folderPath === folderPath ? result.notes : undefined;
+};
 
 export const useNote = (id: string | undefined): NoteRecord | undefined =>
 	useLiveQuery(async () => (id === undefined ? undefined : db.notes.get(id)), [id]);

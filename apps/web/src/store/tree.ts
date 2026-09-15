@@ -82,17 +82,37 @@ export const folderLabel = (path: string): string => (path === ROOT ? LOOSE_NOTE
  * notebook wins: loose notes are an exception to the structure, not the place
  * to start.
  *
- * Returns `undefined` while the tree is still loading, and when there is
- * nothing to open at all.
+ * Both `tree` and `looseNoteCount` arrive from separate live queries that
+ * resolve in either order, so both carry `undefined` for "not known yet" and
+ * neither may be read as "there are none". Answering too early means opening
+ * one folder and jumping to another a frame later, which reads as the app
+ * losing the user's place.
+ *
+ * While the tree is still loading, `requested` is returned unchanged for the
+ * same reason. `undefined` means nothing is open: no folder asked for and none
+ * to fall back to.
  */
 export const selectedFolderPath = (
 	tree: readonly FolderNode[] | undefined,
 	requested: string | undefined,
-	hasLooseNotes = false
+	looseNoteCount: number | undefined
 ): string | undefined => {
 	if (tree === undefined) return requested;
+
 	// `containsPath` never finds the root, so it is answered before the lookup.
-	if (requested === ROOT) return hasLooseNotes ? ROOT : tree[0]?.path;
+	if (requested === ROOT) {
+		// Still counting. Keep the user where they asked to be: if the root does
+		// turn out to be empty the fallback below happens once, a moment later,
+		// rather than a notebook opening and the root snapping back over it.
+		if (looseNoteCount === undefined) return ROOT;
+		return looseNoteCount > 0 ? ROOT : tree[0]?.path;
+	}
+
 	if (requested !== undefined && containsPath(tree, requested)) return requested;
-	return tree[0]?.path ?? (hasLooseNotes ? ROOT : undefined);
+	if (tree[0] !== undefined) return tree[0].path;
+
+	// No notebooks, so the root is the only thing there could be to open — but
+	// only once we know it holds something. Until then nothing is open, and the
+	// note list says it is still loading rather than that there is nothing here.
+	return looseNoteCount !== undefined && looseNoteCount > 0 ? ROOT : undefined;
 };

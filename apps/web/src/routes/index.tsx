@@ -26,11 +26,7 @@ const Home = () => {
 	// Derived rather than written back to the URL: the URL records the user's
 	// choice, and opening the first notebook is a default, not a choice. Writing
 	// it would also mean redirecting from an effect on the very first render.
-	const folder = selectedFolderPath(
-		tree,
-		folderFromSearch(requestedFolder),
-		looseNoteCount !== undefined && looseNoteCount > 0
-	);
+	const folder = selectedFolderPath(tree, folderFromSearch(requestedFolder), looseNoteCount);
 	const notes = useNotesInFolder(folder);
 	const openNote = useNote(noteId);
 
@@ -73,7 +69,9 @@ const Home = () => {
 				}}
 				onCreateNote={onCreateNote}
 				folderPath={folder}
-				notebooksLoaded={tree !== undefined}
+				// Both queries, not just the tree: the notebooks alone cannot tell
+				// an empty app from one whose notes all sit loose at the root.
+				storeLoaded={tree !== undefined && looseNoteCount !== undefined}
 			/>
 
 			<NoteView

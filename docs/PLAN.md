@@ -577,13 +577,14 @@ Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may impor
 3. **Single connection per user until Phase 7.** Schema supports many; UI exposes one.
 4. **Hosting: Cloudflare Workers** for API + static SPA, D1 for the database. See §6.
 5. **Cold start is a full scan.** No remote index file. Revisit if cold start exceeds ~10 s at ~2k notes.
-6. **Every note the app creates lives in a notebook; the root is not one.** The sidebar lists notebooks only, and opens the first one when the URL names none. The root is the container notebooks live in, not a place to put notes, so the app will not create a note there.
+6. **Every note the app creates lives in a notebook; the root is not one.** The sidebar lists notebooks, and opens the first one when the URL names none. The root is the container notebooks live in, not a place to put notes, so the app will not create a note there — and it gets a row only in the case below.
 
    **Resolved (Phase 2).** A `.md` file sitting loose at the root of the remote app folder — put there by hand, or by another tool — imports to a note in no notebook, which the sidebar had no way to show. We do **not** move those files: relocating them would contradict "the user sees the same structure from any other tool" (§1) and quietly rewrite their remote layout. Instead the sidebar grows a **"Loose notes" row that appears only when the root actually contains notes**, below the notebooks, showing the count. It is not the "All notes" row removed in Phase 1: that one always showed and misdescribed what it held; this one names exactly what it holds and disappears when empty. Opening it lists those notes and leaves "New note" disabled, because the app still does not create notes at the root.
 
    Two consequences worth knowing about:
    - `ROOT` is `''`, and an empty search param is indistinguishable from an absent one, so the URL spells the root `/`. The translation lives in `apps/web/src/routes/search.ts` and nothing else in the app knows about the sentinel.
    - A notebook created while the loose notes are open goes beside them, at the root — the root is not a notebook and cannot be a parent.
+   - The tree and the count of loose notes come from two independent live queries. Neither `undefined` may be read as "there are none", or the app opens one folder and jumps to another a frame later — with no notebooks at all it would briefly tell a user whose whole library is loose notes that they have nothing. `selectedFolderPath` takes the count, not a boolean, for exactly this reason.
 
 ## 13. Distribution and licensing
 

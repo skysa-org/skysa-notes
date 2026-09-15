@@ -101,46 +101,46 @@ describe('selectedFolderPath', () => {
 	const tree = buildFolderTree({ paths: ['personal', 'work', 'work/meetings'] });
 
 	it('opens the first notebook when none is asked for', () => {
-		expect(selectedFolderPath(tree, undefined)).toBe('personal');
+		expect(selectedFolderPath(tree, undefined, 0)).toBe('personal');
 	});
 
 	it('opens the notebook that was asked for', () => {
-		expect(selectedFolderPath(tree, 'work/meetings')).toBe('work/meetings');
+		expect(selectedFolderPath(tree, 'work/meetings', 0)).toBe('work/meetings');
 	});
 
 	it('falls back to the first notebook when the one asked for is gone', () => {
 		// A stale link, or a notebook deleted underneath the user. Leaving the
 		// missing folder selected would strand them in a pane with no notes and
 		// no row in the sidebar to show where they are.
-		expect(selectedFolderPath(tree, 'archive')).toBe('personal');
+		expect(selectedFolderPath(tree, 'archive', 0)).toBe('personal');
 	});
 
 	it('opens nothing when there are no notebooks', () => {
-		expect(selectedFolderPath([], undefined)).toBeUndefined();
-		expect(selectedFolderPath([], 'work')).toBeUndefined();
+		expect(selectedFolderPath([], undefined, 0)).toBeUndefined();
+		expect(selectedFolderPath([], 'work', 0)).toBeUndefined();
 	});
 
 	it('keeps the requested notebook while the tree is still loading', () => {
 		// Dropping it here would open the first notebook for one frame and then
 		// jump, which reads as the app losing the user's place.
-		expect(selectedFolderPath(undefined, 'work')).toBe('work');
-		expect(selectedFolderPath(undefined, undefined)).toBeUndefined();
+		expect(selectedFolderPath(undefined, 'work', 0)).toBe('work');
+		expect(selectedFolderPath(undefined, undefined, 0)).toBeUndefined();
 	});
 
 	describe('with loose notes at the root', () => {
 		it('opens the root when it is asked for', () => {
-			expect(selectedFolderPath(tree, '', true)).toBe('');
+			expect(selectedFolderPath(tree, '', 2)).toBe('');
 		});
 
 		it('still opens a notebook by default', () => {
 			// Loose notes are an exception to the structure, not the place to
 			// start. The row exists to reach them, not to be landed on.
-			expect(selectedFolderPath(tree, undefined, true)).toBe('personal');
+			expect(selectedFolderPath(tree, undefined, 2)).toBe('personal');
 		});
 
 		it('opens the root when it is all there is', () => {
-			expect(selectedFolderPath([], undefined, true)).toBe('');
-			expect(selectedFolderPath([], '', true)).toBe('');
+			expect(selectedFolderPath([], undefined, 2)).toBe('');
+			expect(selectedFolderPath([], '', 2)).toBe('');
 		});
 	});
 
@@ -149,17 +149,47 @@ describe('selectedFolderPath', () => {
 			// The last loose note was moved or deleted while the URL still said
 			// the root. Honouring it would strand the user in a pane the sidebar
 			// no longer offers a way back to.
-			expect(selectedFolderPath(tree, '')).toBe('personal');
-			expect(selectedFolderPath(tree, '', false)).toBe('personal');
+			expect(selectedFolderPath(tree, '', 0)).toBe('personal');
 		});
 
 		it('opens nothing when there is no notebook either', () => {
-			expect(selectedFolderPath([], '')).toBeUndefined();
-			expect(selectedFolderPath([], undefined)).toBeUndefined();
+			expect(selectedFolderPath([], '', 0)).toBeUndefined();
+			expect(selectedFolderPath([], undefined, 0)).toBeUndefined();
 		});
 
 		it('keeps a requested root while the tree is still loading', () => {
-			expect(selectedFolderPath(undefined, '')).toBe('');
+			expect(selectedFolderPath(undefined, '', 0)).toBe('');
+		});
+	});
+
+	/**
+	 * The tree and the count come from two independent live queries that resolve
+	 * in either order. An unknown count is not a count of zero, and reading it
+	 * as one opens a notebook for a frame and then snaps back to the root.
+	 */
+	describe('before the loose notes have been counted', () => {
+		it('keeps a requested root rather than demoting it', () => {
+			expect(selectedFolderPath(tree, '', undefined)).toBe('');
+		});
+
+		it('keeps it even when there is a notebook to demote it to', () => {
+			// This is the whole bug: `tree` has landed and the count has not, so
+			// the fallback below would fire on a root that is about to be fine.
+			expect(
+				selectedFolderPath(buildFolderTree({ paths: ['personal'] }), '', undefined)
+			).toBe('');
+		});
+
+		it('opens nothing rather than guessing when there are no notebooks', () => {
+			// Answering `''` here would head the pane "Loose notes" for a frame
+			// before finding out the root is empty. Nothing open reads as the
+			// loading state it is.
+			expect(selectedFolderPath([], undefined, undefined)).toBeUndefined();
+		});
+
+		it('still opens the first notebook, which does not depend on the count', () => {
+			expect(selectedFolderPath(tree, undefined, undefined)).toBe('personal');
+			expect(selectedFolderPath(tree, 'work', undefined)).toBe('work');
 		});
 	});
 });

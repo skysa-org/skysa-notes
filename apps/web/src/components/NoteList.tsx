@@ -15,9 +15,12 @@ export interface NoteListProps {
 	 * like any other here — it just holds the loose notes rather than a notebook.
 	 */
 	folderPath: string | undefined;
-	/** False while the notebooks are still loading, so an empty app is not
-	 * mistaken for one that has no notebooks. */
-	notebooksLoaded: boolean;
+	/**
+	 * False while the store is still loading — the notebooks or the count of
+	 * loose notes — so an app that is merely slow is not mistaken for an empty
+	 * one and told to create a notebook it may already have notes outside of.
+	 */
+	storeLoaded: boolean;
 }
 
 /**
@@ -28,10 +31,10 @@ export interface NoteListProps {
 const placeholderFor = ({
 	notes,
 	folderPath,
-	notebooksLoaded,
-}: Pick<NoteListProps, 'notes' | 'folderPath' | 'notebooksLoaded'>): string | undefined => {
+	storeLoaded,
+}: Pick<NoteListProps, 'notes' | 'folderPath' | 'storeLoaded'>): string | undefined => {
 	if (folderPath === undefined) {
-		return notebooksLoaded ? 'Create a notebook to start writing.' : 'Loading…';
+		return storeLoaded ? 'Create a notebook to start writing.' : 'Loading…';
 	}
 	if (notes === undefined) return 'Loading…';
 	return notes.length === 0 ? 'No notes here yet.' : undefined;
@@ -60,9 +63,9 @@ export const NoteList = ({
 	onSelectNote,
 	onCreateNote,
 	folderPath,
-	notebooksLoaded,
+	storeLoaded,
 }: NoteListProps) => {
-	const placeholder = placeholderFor({ notes, folderPath, notebooksLoaded });
+	const placeholder = placeholderFor({ notes, folderPath, storeLoaded });
 
 	return (
 		<section className="note-list" aria-label="Notes">

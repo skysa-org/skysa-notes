@@ -157,7 +157,7 @@ export const Sidebar = ({
 
 			<ul className="tree">
 				{tree === undefined && <li className="muted placeholder">Loading…</li>}
-				{tree?.length === 0 && (
+				{tree?.length === 0 && looseNoteCount === 0 && (
 					<li className="muted placeholder">No notebooks yet. Create one to start.</li>
 				)}
 				{tree !== undefined && (

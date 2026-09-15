@@ -30,7 +30,7 @@ const renderList = (props: Partial<Parameters<typeof NoteList>[0]> = {}) =>
 			onSelectNote={() => undefined}
 			onCreateNote={() => undefined}
 			folderPath="work"
-			notebooksLoaded
+			storeLoaded
 			{...props}
 		/>
 	);
@@ -59,8 +59,8 @@ describe('NoteList', () => {
 		expect(screen.getByText('Create a notebook to start writing.')).toBeDefined();
 	});
 
-	it('waits rather than asking for a notebook before the notebooks have loaded', () => {
-		renderList({ notes: undefined, folderPath: undefined, notebooksLoaded: false });
+	it('waits rather than asking for a notebook before the store has loaded', () => {
+		renderList({ notes: undefined, folderPath: undefined, storeLoaded: false });
 
 		expect(screen.getByText('Loading…')).toBeDefined();
 		expect(screen.queryByText('Create a notebook to start writing.')).toBeNull();

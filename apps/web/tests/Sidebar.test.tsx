@@ -163,6 +163,18 @@ describe('the Loose notes row', () => {
 		expect(looseRow()).not.toBeNull();
 	});
 
+	it('does not let "no notebooks yet" stand above four notes', () => {
+		// Both statements were true at once, and together they read as the app
+		// contradicting itself about whether there is anything here.
+		renderSidebar({ tree: [], selectedFolder: '', looseNoteCount: 4 });
+		expect(screen.queryByText(/No notebooks yet/)).toBeNull();
+	});
+
+	it('still says there are no notebooks when the root is empty too', () => {
+		renderSidebar({ tree: [], selectedFolder: undefined, looseNoteCount: 0 });
+		expect(screen.getByText(/No notebooks yet/)).toBeDefined();
+	});
+
 	it('puts a new notebook beside the loose notes, not inside them', async () => {
 		// The root is not a notebook, so it cannot be a parent.
 		const onCreateFolder = vi.fn();
