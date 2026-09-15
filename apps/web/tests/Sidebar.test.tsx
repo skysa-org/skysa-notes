@@ -105,6 +105,23 @@ describe('the Loose notes row', () => {
 		expect(looseRow()).toBeNull();
 	});
 
+	it('says it is still loading rather than showing an empty sidebar', () => {
+		// No notebooks and no count yet: there is genuinely nothing to list, but
+		// a blank pane beside a note list that says "Loading…" reads as the two
+		// halves of the app disagreeing about whether anything is coming.
+		renderSidebar({ tree: [], selectedFolder: undefined, looseNoteCount: undefined });
+
+		expect(screen.getByText('Loading…')).toBeDefined();
+		expect(screen.queryByText(/No notebooks yet/)).toBeNull();
+	});
+
+	it('does not interrupt the notebooks to say the count is still loading', () => {
+		// The notebooks are already listed; a "Loading…" row among them would be
+		// about something the user cannot see.
+		renderSidebar({ looseNoteCount: undefined });
+		expect(screen.queryByText('Loading…')).toBeNull();
+	});
+
 	it('appears when the root holds notes, and says how many', () => {
 		renderSidebar({ looseNoteCount: 3 });
 

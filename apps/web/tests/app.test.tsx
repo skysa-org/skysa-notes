@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -24,32 +24,44 @@ beforeEach(async () => {
 	await db.folders.clear();
 });
 
-/** Opens the app at `url`, and waits for the store to have loaded. */
-const open = async (url = '/') => {
+/** The note list's heading: the second on the page, after "Notebooks". */
+const paneHeading = (): string | null | undefined => screen.getAllByRole('heading')[1]?.textContent;
+
+/**
+ * Opens the app at `url` and waits until `pane` is open and the app has stopped
+ * moving.
+ *
+ * Waiting for the absence of "Loading…" is not enough, and the difference is
+ * the bug this file exists to catch: with the tree resolved and the count of
+ * loose notes still pending, a requested root shows "Loose notes" over an empty
+ * list — nothing is loading, and the app is still about to change its mind. So
+ * the gate is the pane the test expects, plus a turn of the event loop to catch
+ * it flipping away again afterwards.
+ */
+const open = async (url: string, pane: string) => {
 	const router = createRouter({
 		routeTree,
 		history: createMemoryHistory({ initialEntries: [url] }),
 	});
 	render(<RouterProvider router={router} />);
 
-	// Two waits, and both are needed. The router renders nothing at all until it
-	// has resolved the route, so a store check that runs before that passes
-	// against an empty document and lets the test assert on a half-mounted app.
+	// The router renders nothing at all until it has resolved the route, so
+	// without this the store check runs against an empty document.
 	await screen.findByRole('heading', { name: 'Notebooks' });
 	await waitFor(() => {
 		expect(screen.queryAllByText('Loading…')).toHaveLength(0);
+		expect(paneHeading()).toBe(pane);
 	});
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	});
+	expect(paneHeading()).toBe(pane);
+
 	return router;
 };
 
-const sidebarRows = (): string[] =>
-	screen
-		.getAllByRole('button')
-		.map((button) => button.textContent)
-		.filter((text) => text !== '+' && text !== '');
-
-/** The note list's heading: the second on the page, after "Notebooks". */
-const paneHeading = (): string | null | undefined => screen.getAllByRole('heading')[1]?.textContent;
+/** Is there a row in the sidebar for the loose notes? */
+const looseRow = () => screen.queryByRole('button', { name: /Loose notes/ });
 
 /** A note sitting loose at the root: what a remote folder hands us. */
 const looseNote = (title: string) => createNote(db, { title });
@@ -57,18 +69,17 @@ const looseNote = (title: string) => createNote(db, { title });
 describe('the app', () => {
 	it('opens the first notebook when the root is empty', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open();
+		await open('/', 'Work');
 
-		expect(paneHeading()).toBe('Work');
-		expect(sidebarRows()).not.toContain('Loose notes');
+		expect(looseRow()).toBeNull();
 	});
 
 	it('offers no Loose notes row when every note is in a notebook', async () => {
 		await createFolder(db, { name: 'Work' });
 		await createNote(db, { title: 'Standup', folderPath: 'Work' });
-		await open();
+		await open('/', 'Work');
 
-		expect(screen.queryByText('Loose notes')).toBeNull();
+		expect(looseRow()).toBeNull();
 	});
 
 	it('opens the loose notes when the row is clicked', async () => {
@@ -76,7 +87,7 @@ describe('the app', () => {
 		// `selectedFolderPath`, this click silently does nothing.
 		await createFolder(db, { name: 'Work' });
 		await looseNote('Scratch');
-		const router = await open();
+		const router = await open('/', 'Work');
 
 		await userEvent.click(screen.getByRole('button', { name: /Loose notes/ }));
 
@@ -92,15 +103,14 @@ describe('the app', () => {
 		// dropped, and the root would be unreachable by link or bookmark.
 		await createFolder(db, { name: 'Work' });
 		await looseNote('Scratch');
-		await open('/?folder=%2F');
+		await open('/?folder=%2F', 'Loose notes');
 
-		expect(paneHeading()).toBe('Loose notes');
 		expect(screen.getByText('Scratch')).toBeDefined();
 	});
 
 	it('cannot create a note in the loose notes', async () => {
 		await looseNote('Scratch');
-		await open('/?folder=%2F');
+		await open('/?folder=%2F', 'Loose notes');
 
 		expect(screen.getByRole('button', { name: 'New note' }).hasAttribute('disabled')).toBe(
 			true
@@ -112,32 +122,34 @@ describe('the app', () => {
 		// notebooks at all. Telling this user to create a notebook would be the
 		// app claiming they have nothing.
 		await looseNote('Scratch');
-		await open();
+		await open('/', 'Loose notes');
 
-		expect(paneHeading()).toBe('Loose notes');
 		expect(screen.getByText('Scratch')).toBeDefined();
 		expect(screen.queryByText('Create a notebook to start writing.')).toBeNull();
 	});
 
 	it('falls back to a notebook when a stale link asks for an empty root', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=%2F');
+		await open('/?folder=%2F', 'Work');
 
-		expect(paneHeading()).toBe('Work');
-		expect(screen.queryByText('Loose notes')).toBeNull();
+		expect(looseRow()).toBeNull();
 	});
 
 	it('never lands on the loose notes when a notebook could be opened', async () => {
 		await createFolder(db, { name: 'Work' });
 		await looseNote('Scratch');
-		await open();
+		await open('/', 'Work');
 
-		expect(paneHeading()).toBe('Work');
+		expect(looseRow()).not.toBeNull();
 	});
 
-	it('creates a notebook beside the loose notes, not inside them', async () => {
+	it('opens a notebook created from the loose notes, at the root', async () => {
+		// That the new notebook is a sibling rather than a child is pinned in
+		// `Sidebar.test.tsx`, at the callback: `createFolder` maps `''` and
+		// `undefined` to the same path, so only the argument can tell them apart.
+		// What this adds is the URL leaving the sentinel behind afterwards.
 		await looseNote('Scratch');
-		const router = await open('/?folder=%2F');
+		const router = await open('/?folder=%2F', 'Loose notes');
 
 		await userEvent.click(screen.getByRole('button', { name: 'New notebook' }));
 		await userEvent.type(screen.getByLabelText('New notebook name'), 'Work{Enter}');
@@ -145,7 +157,6 @@ describe('the app', () => {
 		await waitFor(() => {
 			expect(router.state.location.search).toEqual({ folder: 'Work' });
 		});
-		// At the root, not nested under it — the root is not a notebook.
 		expect((await db.folders.toArray()).map((folder) => folder.path)).toEqual(['Work']);
 	});
 });

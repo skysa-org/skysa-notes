@@ -468,7 +468,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Auth start/callback, sessions, encrypted connections table, `/api/token`
 - [x] `DropboxProvider` implementing the full interface
 - [x] "Loose notes" sidebar row, resolving the §12.6 ship blocker. Split out of the sync-engine PR because it depends on nothing the engine adds, and the engine is large enough on its own.
-- [ ] Sync engine: pull, push, cursor persistence, opQueue
+- [ ] Sync engine: pull, push, cursor persistence, opQueue. Note while writing it: `useNote` reads `db.notes.get(id)`, which returns a tombstone, so a note deleted remotely while it is open stays fully editable in the right pane after the list and sidebar have moved on. Harmless today — only the in-app Delete button can remove a note, and it clears `note` from the URL — but the engine is what makes it reachable.
 - [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"
 
 ### Phase 3 — OneDrive (1 day)
@@ -581,7 +581,7 @@ Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may impor
 
    **Resolved (Phase 2).** A `.md` file sitting loose at the root of the remote app folder — put there by hand, or by another tool — imports to a note in no notebook, which the sidebar had no way to show. We do **not** move those files: relocating them would contradict "the user sees the same structure from any other tool" (§1) and quietly rewrite their remote layout. Instead the sidebar grows a **"Loose notes" row that appears only when the root actually contains notes**, below the notebooks, showing the count. It is not the "All notes" row removed in Phase 1: that one always showed and misdescribed what it held; this one names exactly what it holds and disappears when empty. Opening it lists those notes and leaves "New note" disabled, because the app still does not create notes at the root.
 
-   Two consequences worth knowing about:
+   Three consequences worth knowing about:
    - `ROOT` is `''`, and an empty search param is indistinguishable from an absent one, so the URL spells the root `/`. The translation lives in `apps/web/src/routes/search.ts` and nothing else in the app knows about the sentinel.
    - A notebook created while the loose notes are open goes beside them, at the root — the root is not a notebook and cannot be a parent.
    - The tree and the count of loose notes come from two independent live queries. Neither `undefined` may be read as "there are none", or the app opens one folder and jumps to another a frame later — with no notebooks at all it would briefly tell a user whose whole library is loose notes that they have nothing. `selectedFolderPath` takes the count, not a boolean, for exactly this reason.

@@ -156,7 +156,12 @@ export const Sidebar = ({
 			)}
 
 			<ul className="tree">
-				{tree === undefined && <li className="muted placeholder">Loading…</li>}
+				{/* With no notebooks and the loose notes not yet counted there is
+					nothing here to say — but "nothing" reads as an empty sidebar
+					beside a note list that says it is still loading. */}
+				{(tree === undefined || (tree.length === 0 && looseNoteCount === undefined)) && (
+					<li className="muted placeholder">Loading…</li>
+				)}
 				{tree?.length === 0 && looseNoteCount === 0 && (
 					<li className="muted placeholder">No notebooks yet. Create one to start.</li>
 				)}
