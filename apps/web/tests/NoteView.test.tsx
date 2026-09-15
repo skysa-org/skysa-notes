@@ -137,8 +137,11 @@ describe('a note whose frontmatter has a YAML error', () => {
 		});
 		render(<Harness id={note.id} />);
 
-		const banner = await screen.findByRole('status');
+		const banner = await screen.findByRole('note');
 		expect(banner.textContent).toContain('frontmatter');
+		// Not a live region: it is true of the note from the moment it opens, and
+		// the rich editor's own banner is the one that announces.
+		expect(screen.queryByRole('status')).toBeNull();
 	});
 
 	it('says nothing about a note whose frontmatter is fine', async () => {
@@ -149,6 +152,7 @@ describe('a note whose frontmatter has a YAML error', () => {
 		render(<Harness id={note.id} />);
 		await screen.findByDisplayValue('Real');
 
+		expect(screen.queryByRole('note')).toBeNull();
 		expect(screen.queryByRole('status')).toBeNull();
 	});
 });

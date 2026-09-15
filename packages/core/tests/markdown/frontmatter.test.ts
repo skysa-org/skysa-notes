@@ -114,13 +114,26 @@ describe('splitFrontmatter', () => {
 		'Hugo, tab-indented list': 'draft: false\nweight: 10\nkeywords:\n\t- one\n\t- two',
 		'Obsidian, duplicate alias': 'aliases: [one]\ncssclass: wide\naliases: [two]',
 		'Obsidian, tab-indented list': 'publish: true\naliases:\n\t- one',
-		'Zettlr, unterminated quote': 'author: Someone\nkeywords: "one',
+		'Docusaurus, duplicate key': 'sidebar_position: 1\ntitle: A\ntitle: A',
+		'Astro, unterminated quote': 'pubDate: 2026-01-01\nimage: "./a.png',
+		'Pandoc, duplicate key': 'bibliography: refs.bib\nbibliography: refs.bib',
 	};
 
 	Object.entries(otherTools).forEach(([what, yaml]) => {
 		it(`keeps frontmatter another tool wrote: ${what}`, () => {
 			expect(splitFrontmatter(`---\n${yaml}\n---\nBody\n`).frontmatter).toBe(yaml);
 		});
+	});
+
+	/**
+	 * And what that costs, stated rather than discovered. A tool whose block
+	 * names only ordinary words — Zettlr writes `author` and `keywords` — is not
+	 * rescued, because a note opening `author: me` is likelier to be someone
+	 * writing than a tool. Recovering it would mean swallowing the note.
+	 */
+	it('does not rescue a block that names only ordinary words', () => {
+		const source = '---\nauthor: Someone\nkeywords: "one\n---\nBody\n';
+		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
 	});
 
 	Object.entries(notFrontmatter).forEach(([what, text]) => {
@@ -192,21 +205,44 @@ describe('readFrontmatter', () => {
 	});
 
 	/**
-	 * `apps/web` stores a note under its frontmatter `id`, so two files claiming
-	 * one id are one row and the first note disappears from the app. A line of
-	 * prose the parser recovered is the way a file comes to claim an id it was
-	 * never given — `id: the blue notebook` is a plausible thing to write in a
-	 * note and an implausible thing to mean as an identity.
+	 * `apps/web` stores a note under its frontmatter `id`, so a wrong id is not a
+	 * wrong field: it is a second row for a note that already exists, and the
+	 * first one — with whatever the user had not yet pushed — is left where
+	 * nothing will look for it again. Absent is cheap; approximate is not.
 	 */
-	it('refuses an id that could not be one', () => {
-		expect(readFrontmatter('id: the blue notebook\ntitle: A').id).toBeUndefined();
-		expect(readFrontmatter('id: "  "\ntitle: A').id).toBeUndefined();
-		expect(readFrontmatter('id: one\ttwo\ntitle: A').id).toBeUndefined();
-		// Everything an id actually looks like still reads.
-		expect(readFrontmatter('id: 018f3c4e-1111-4111-8111-111111111111').id).toBe(
-			'018f3c4e-1111-4111-8111-111111111111'
-		);
-		expect(readFrontmatter('id: 018f3c4e').id).toBe('018f3c4e');
+	describe('an id that could not be one', () => {
+		it('refuses a value the parser cut short', () => {
+			// An unterminated quote on the id line recovers the UUID one character
+			// short. Nothing about the string says so — only the parser knows.
+			const truncated = readFrontmatter('id: "018f3c4e-1111-4111-8111-111111111111');
+			expect(truncated.id).toBeUndefined();
+			expect(readFrontmatter("id: '018f3c4e-1111-4111-8111-111111111111").id).toBeUndefined();
+		});
+
+		it('refuses prose the parser made a mapping out of', () => {
+			expect(readFrontmatter('id: the blue notebook\ntags:\n\t- one').id).toBeUndefined();
+		});
+
+		it('refuses a value YAML did not read as a string', () => {
+			// `0123` and `123` are one number, so two files collide on one id —
+			// and writing it back changes what the user had.
+			expect(readFrontmatter('id: 0123\ntitle: A\ntitle: A').id).toBeUndefined();
+			expect(readFrontmatter('id: 1e5\ntitle: A\ntitle: A').id).toBeUndefined();
+			expect(readFrontmatter('id: 0123').id).toBeUndefined();
+		});
+
+		it('leaves a well-formed file alone, whatever it says', () => {
+			// Only a block the parser had to repair is second-guessed. A file that
+			// parses means what it says, even if this app would not have written it.
+			expect(readFrontmatter('id: my note id\ntitle: A').id).toBe('my note id');
+		});
+
+		it('still reads everything an id actually looks like', () => {
+			expect(readFrontmatter('id: 018f3c4e-1111-4111-8111-111111111111').id).toBe(
+				'018f3c4e-1111-4111-8111-111111111111'
+			);
+			expect(readFrontmatter('id: 018f3c4e\ntitle: A\ntitle: A').id).toBe('018f3c4e');
+		});
 	});
 
 	it('recovers the id from YAML the parser had to repair', () => {

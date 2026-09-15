@@ -162,8 +162,14 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 			 * sync reads the old values back over it. Saying so is the difference
 			 * between a limitation and a note that quietly refuses to be renamed.
 			 */}
+			{/*
+			 * `role="note"`, not `status`: this is true of the note from the moment
+			 * it opens, so it is a standing remark rather than something that has
+			 * just happened — and two live regions announcing at once is one too
+			 * many when a note is also in the rich editor's unsupported state.
+			 */}
 			{!frontmatterIsEditable(note.frontmatter) && (
-				<p className="banner" role="status">
+				<p className="banner" role="note">
 					There is a YAML error in this note’s frontmatter, so its title and tags cannot
 					be saved back to the file — the text is left exactly as it is rather than
 					guessed at. Everything else about the note works as usual.

@@ -1,4 +1,11 @@
-import { isDocument, parseDocument, stringify as stringifyYaml } from 'yaml';
+import {
+	type Document,
+	isDocument,
+	isMap,
+	isScalar,
+	parseDocument,
+	stringify as stringifyYaml,
+} from 'yaml';
 
 /**
  * Frontmatter is handled as text, outside the remark pipeline: it is split off
@@ -32,37 +39,40 @@ const KNOWN_KEYS = ['id', 'title', 'created', 'updated', 'tags'] as const;
  * these is still handed on whole with every key it has, known or not. It exists
  * because recovery alone decides nothing — `yaml` will make a mapping out of
  * any prose containing a colon, so `Next steps: see below` recovers too, and
- * mistaking a paragraph for frontmatter takes it out of the editor where the
+ * mistaking a paragraph for frontmatter takes it out of the editor, where the
  * user can no longer read or delete it.
  *
- * Restricting it to the five keys this app reads was too narrow in the
- * direction that matters: frontmatter written by another tool is exactly what
- * this recovery is for, and a Jekyll post's `layout`/`date`/`categories` names
- * none of them. The rest are the front matter keys Jekyll, Hugo, Obsidian,
- * Quartz and Zettlr write. Adding one is cheap and safe; the cost of a wrong
- * addition is only that a paragraph opening with that word and a colon is
- * mistaken for metadata.
+ * The rule for what belongs here: **a word nobody begins a sentence with.**
+ * `permalink`, `cssclass`, `sidebar_position` and `pubDate` are things only a
+ * tool names. `summary`, `description`, `author`, `date`, `category`,
+ * `keywords` and `draft` are all of those too — and also the first word of an
+ * ordinary note. Twenty realistic note openings, each with a genuine YAML
+ * error: this list swallows none of them, and a list including those seven
+ * swallows seven. It rescues seventeen of twenty malformed blocks from real
+ * tools; the wider list rescued fourteen. Narrower wins on both counts, which
+ * is why the rule is about the word and not about the tool.
+ *
+ * Matching is exact, so `Summary:` is prose and `summary:` would not have been.
+ * That is not a safety net to lean on — it is why a capitalised spelling must
+ * never be added here.
  */
 const METADATA_KEYS: readonly string[] = [
 	...KNOWN_KEYS,
 	'aliases',
-	'author',
-	'categories',
-	'category',
+	'bibliography',
 	'cssclass',
 	'cssclasses',
-	'date',
-	'description',
-	'draft',
-	'keywords',
+	'jupyter',
 	'layout',
+	'marp',
 	'permalink',
+	'pubDate',
 	'publish',
+	'sidebar_position',
 	'slug',
-	'summary',
+	'taxonomies',
 	'weight',
 ];
-
 /**
  * Parse YAML, yielding the mapping only if that is what it is. Never throws.
  *
@@ -81,9 +91,18 @@ const METADATA_KEYS: readonly string[] = [
  * `created`/`updated` become its timestamps, `tags` become its tags — so
  * recovery is a claim about the file, not a cosmetic one. What does not happen
  * is the reverse: `writeFrontmatter` refuses to rewrite a block with errors in
- * it, so a guess never goes back into the user's file.
+ * it, so a guess never goes back into the file it came from. The one place a
+ * recovered value is written out is the *copy* a conflict makes, which cannot
+ * inherit the original's id and has to be given a block of its own — see
+ * `sync/conflicts.ts`.
  */
-const readMapping = (yaml: string | null): Record<string, unknown> | undefined => {
+interface Recovered {
+	readonly record: Record<string, unknown>;
+	/** Kept so a caller can ask *where* the parser had trouble, not just whether. */
+	readonly doc: Document;
+}
+
+const recover = (yaml: string | null): Recovered | undefined => {
 	if (yaml === null) return undefined;
 	try {
 		const doc = parseDocument(yaml);
@@ -99,11 +118,14 @@ const readMapping = (yaml: string | null): Record<string, unknown> | undefined =
 		if (doc.errors.length > 0 && !METADATA_KEYS.some((key) => Object.hasOwn(record, key))) {
 			return undefined;
 		}
-		return record;
+		return { record, doc };
 	} catch {
 		return undefined;
 	}
 };
+
+const readMapping = (yaml: string | null): Record<string, unknown> | undefined =>
+	recover(yaml)?.record;
 
 /**
  * A fenced block only counts as frontmatter if it is a YAML mapping (or empty).
@@ -158,19 +180,43 @@ const asString = (value: unknown): string | undefined => {
 
 /**
  * `id` is the note's identity, and downstream it is a primary key: `apps/web`
- * stores the row under it, so two files claiming one id are one row and the
- * first note simply disappears from the app.
+ * stores the row under it, so a wrong id is not a wrong field — it is a second
+ * row for a note that already exists, and the first one, with whatever the user
+ * had not yet pushed, is left behind where nothing will look for it again.
  *
- * That makes it the one field worth being strict about. The app writes a UUID,
- * so an id with whitespace in it was not written by this app and is far more
- * likely to be a line of prose the YAML parser recovered — `id: the blue
- * notebook` is a plausible thing to write in a note and an implausible thing to
- * mean as an identity. Refusing it costs a fresh UUID; accepting it can cost a
- * note.
+ * So this is the one field that has to be right or absent, never approximate.
+ * Absent costs a fresh UUID and, for a file at a path the app already knows,
+ * not even that: the import falls back to matching on the path. Three ways a
+ * recovered id can be wrong, and none of them look wrong:
+ *
+ * - The error is *in the id itself*. An unterminated quote on the id line
+ *   recovers the value one character short, so a UUID comes back 35 characters
+ *   long and otherwise perfect. Nothing about the string says so; only the
+ *   parser knows, so the parser is asked.
+ * - The value is prose the parser made a mapping out of. `id: the blue
+ *   notebook` is a plausible line to write in a note and an implausible
+ *   identity, and two notes written from one template would share it.
+ * - The value is not a string at all. YAML reads `id: 0123` as the number 123
+ *   and `id: 1e5` as 100000, so two different files collide on one id and the
+ *   app writes the changed value back over what the user had.
  */
-const asId = (value: unknown): string | undefined => {
-	const id = asString(value);
-	return id === undefined || id.trim() === '' || /\s/u.test(id) ? undefined : id;
+const idTruncated = (doc: Document): boolean => {
+	const node = doc.get('id', true);
+	// `range` is `Range | null`, and null for a node the parser synthesized
+	// rather than read — nothing to compare an error position against.
+	if (!isScalar(node) || node.range === null || node.range === undefined) return false;
+	const [start, valueEnd] = node.range;
+	return doc.errors.some((error) => error.pos[0] >= start && error.pos[0] <= valueEnd);
+};
+
+const asId = (value: unknown, doc: Document): string | undefined => {
+	// Not `asString`: its coercions are convenient for a title and wrong here.
+	if (typeof value !== 'string') return undefined;
+	if (value.trim() === '') return undefined;
+	if (doc.errors.length === 0) return value;
+	// Only for a block the parser had to repair. A well-formed file saying
+	// `id: my note id` means it, whatever this app would have written.
+	return /\s/u.test(value) || idTruncated(doc) ? undefined : value;
 };
 
 const asTags = (value: unknown): string[] | undefined => {
@@ -186,21 +232,23 @@ const asTags = (value: unknown): string[] | undefined => {
 	return tags.length > 0 ? tags : undefined;
 };
 
-/**
- * Read the fields the app cares about. Malformed YAML in a user's file is not an
- * error the user should have to fix: it yields empty fields and the raw text is
- * left exactly as it was.
- */
 /** Drop keys whose value is undefined, so `toEqual({})` means "nothing read". */
 const defined = <T extends object>(value: T): T =>
 	Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 
+/**
+ * Read the fields the app cares about. Malformed YAML in a user's file is not an
+ * error the user should have to fix: what the parser can recover is read, the
+ * raw text is left exactly as it was, and `id` alone is held to a stricter
+ * standard because it is the one field that cannot be approximately right.
+ */
 export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => {
-	const record = readMapping(frontmatter);
-	if (record === undefined) return {};
+	const recovered = recover(frontmatter);
+	if (recovered === undefined) return {};
+	const { record, doc } = recovered;
 
 	return defined({
-		id: asId(record.id),
+		id: asId(record.id, doc),
 		title: asString(record.title),
 		created: asString(record.created),
 		updated: asString(record.updated),
@@ -223,7 +271,14 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
 	if (frontmatter === null || frontmatter.trim() === '') return true;
 	try {
-		return parseDocument(frontmatter).errors.length === 0;
+		const doc = parseDocument(frontmatter);
+		// A mapping, and not only error-free. `writeFrontmatter` sets keys on the
+		// document, which a scalar or a sequence cannot take — those throw rather
+		// than drop the patch. `splitFrontmatter` never yields one, so this is a
+		// promise about the exported function rather than about anything the app
+		// reaches; an exported predicate that is right only for its callers is
+		// how the next caller gets caught.
+		return doc.errors.length === 0 && isMap(doc.contents);
 	} catch {
 		return false;
 	}

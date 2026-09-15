@@ -339,6 +339,34 @@ describe('importNoteFile — the rule that a note is dirty only on a real edit',
 		expect(() => noteFileContents(note)).not.toThrow();
 	});
 
+	/**
+	 * The whole reason `id` is read strictly. An unterminated quote on the id
+	 * line recovers the UUID one character short and otherwise perfect, so the
+	 * import looks up a note that does not exist, creates a second row at the
+	 * same path, and strands the first — along with anything the user had typed
+	 * and not yet pushed — where nothing will look for it again.
+	 */
+	it('does not split a note in two over an id the parser cut short', async () => {
+		const id = '018f3c4e-1111-4111-8111-111111111111';
+		const note = await importNoteFile(db, {
+			path: 'a.md',
+			source: `---\nid: ${id}\n---\n\n# From the remote\n`,
+		});
+		await saveNoteBody(db, note.id, 'typed and not yet pushed\n');
+
+		// The same file, with someone's unterminated quote now around the id. It
+		// recovers one character short — a perfectly plausible UUID that matches
+		// no note — so the import looks up nothing, and without the check it adds
+		// a second row at this path and strands the paragraph above in the first.
+		await importNoteFile(db, {
+			path: 'a.md',
+			source: `---\nid: "${id}\n---\n\n# From the remote\n`,
+		});
+
+		expect(await listNotes(db)).toHaveLength(1);
+		expect((await getNote(db, note.id))?.id).toBe(id);
+	});
+
 	it('re-importing an unchanged file leaves it clean', async () => {
 		const source = '---\nid: 018f3c4e\n---\n\n# A\n';
 		await importNoteFile(db, { path: 'a.md', source });
