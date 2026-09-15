@@ -123,14 +123,23 @@ export type PullChange =
 	  }>
 	| Readonly<{
 			/**
-			 * A note created here and never pushed is sitting where a remote one
-			 * is about to land. Move ours aside, keeping its contents and its
-			 * dirty flag: it is the user's writing and the remote keeps the path
-			 * (docs/PLAN.md §7). Two rows at one path is a note the sidebar shows
-			 * twice, two queued writes racing for one file, and — once both have
-			 * been pushed — one `remoteId` between them, after which
-			 * `noteByRemoteId` only ever hands back one and the other is stale
-			 * for ever.
+			 * A note of ours is sitting where a remote one is about to land. Move
+			 * ours aside, keeping its contents and its dirty flag: it is the
+			 * user's writing and the remote keeps the path (docs/PLAN.md §7).
+			 * Two rows at one path is a note the sidebar shows twice, two queued
+			 * writes racing for one file, and — once both have been pushed — one
+			 * `remoteId` between them, after which `noteByRemoteId` only ever
+			 * hands back one and the other is stale for ever.
+			 *
+			 * The store rebases the note's own queued ops in the same
+			 * transaction, exactly as `move-folder` does, and for a sharper
+			 * reason: a queued `move` is the user's rename, and its target is
+			 * the very path the remote has just taken. Left pointing there it
+			 * conflicts on every push and can never succeed — and since the
+			 * queue is ordered and a dead op stops the drain, every later op for
+			 * every other note is stranded behind it. On a provider whose move
+			 * overwrites rather than conflicting, it does something worse and
+			 * clobbers the file that displaced it.
 			 */
 			kind: 'displace-note';
 			/**
@@ -243,11 +252,20 @@ export type OpOutcome =
 export interface SyncStore {
 	/** Where the last pull got to, or `undefined` for a cold start. */
 	readonly cursor: () => Promise<string | undefined>;
+	/**
+	 * Including a note the user has deleted whose `delete` op is still queued.
+	 * The op carries only a `noteId`, and the `remoteId` it needs to remove the
+	 * file lives on the row — so a store that hid locally-deleted rows here
+	 * would have `runDelete` find nothing, complete the op as though there were
+	 * nothing to send, and leave the file on the remote for ever. The row goes
+	 * when the op completes as `purged`, not when the user presses delete.
+	 */
 	readonly noteById: (id: string) => Promise<SyncNote | undefined>;
 	/**
 	 * Only ever asked between batches, when exactly one note is at each path.
 	 * Within a batch two can be — a note moving out of the way is a change of
-	 * its own — but nothing reads the store while one is being applied.
+	 * its own — but nothing reads the store while one is being applied, so the
+	 * ambiguous case never arises and no implementation has to pick a winner.
 	 */
 	readonly noteByPath: (path: string) => Promise<SyncNote | undefined>;
 	readonly noteByRemoteId: (remoteId: string) => Promise<SyncNote | undefined>;

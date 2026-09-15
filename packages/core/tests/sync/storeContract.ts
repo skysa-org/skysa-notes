@@ -53,6 +53,23 @@ export const describeSyncStoreContract = (
 		const harness = create;
 
 		describe('reading', () => {
+			it('still answers for a note whose delete is still queued', async () => {
+				// The op carries only a `noteId`, and the `remoteId` it needs to
+				// remove the file lives on the row. A store that hid the row the
+				// moment the user pressed delete would have the engine find
+				// nothing, finish the op as though there were nothing to send,
+				// and leave the file on the remote for ever.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({ op: 'delete', noteId: 'n1', path: 'a.md' });
+
+				expect((await store.noteById('n1'))?.remoteId).toBe('r1');
+
+				// And it goes when the op says the remote copy is gone, not before.
+				await store.completeOp(seq, { kind: 'purged', noteId: 'n1' });
+				expect(await store.noteById('n1')).toBeUndefined();
+			});
+
 			it('finds a note by id, path and remote id', async () => {
 				const { store, seed } = await harness();
 				await seed({ id: 'n1', path: 'a.md', content: 'x\n', remoteId: 'r1' });
@@ -353,6 +370,55 @@ export const describeSyncStoreContract = (
 				expect((await store.noteById('ours'))?.content).toBe('mine\n');
 				expect((await store.noteById('ours'))?.path).toBe('a (conflict x).md');
 				expect((await store.noteByPath('a.md'))?.id).toBe('theirs');
+			});
+
+			it('points a displaced note\u2019s queued ops at where it went', async () => {
+				// A queued `move` is the user's rename, and its target is the
+				// path the remote has just taken. Left pointing there it
+				// conflicts on every push and can never succeed — and since the
+				// queue is ordered and a dead op stops the drain, every later op
+				// for every other note is stranded behind it.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'Groceries.md', content: 'mine\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'Untitled.md',
+					targetPath: 'Groceries.md',
+				});
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'displace-note', id: 'n1', path: 'Groceries (conflict x).md' },
+					],
+					cursor: 'c1',
+				});
+
+				const op = (await store.pendingOps()).find((each) => each.seq === seq);
+				expect(op?.targetPath).toBe('Groceries (conflict x).md');
+			});
+
+			it('leaves another note\u2019s ops alone when one is displaced', async () => {
+				// Somebody else queued to move into that path is not resolved by
+				// this: their op still has a race to lose, and rewriting it would
+				// send their note somewhere the user never asked for.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'mine\n' });
+				await seed({ id: 'n2', path: 'b.md', content: 'theirs\n', remoteId: 'r2' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n2',
+					path: 'b.md',
+					targetPath: 'a.md',
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'displace-note', id: 'n1', path: 'a (conflict x).md' }],
+					cursor: 'c1',
+				});
+
+				const op = (await store.pendingOps()).find((each) => each.seq === seq);
+				expect(op?.targetPath).toBe('a.md');
 			});
 
 			it('accepts a displacement of a note that is already gone', async () => {

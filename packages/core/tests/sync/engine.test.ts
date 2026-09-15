@@ -727,6 +727,35 @@ describe('push', () => {
 	});
 });
 
+describe('a note the user is still typing into', () => {
+	it('stays dirty when it changed while the push was in flight', async () => {
+		// The store clears `dirty` only if the note still holds the bytes that
+		// were sent, and the push is the only thing that knows which those were.
+		// Reporting what the note holds *now* calls an edit that never left the
+		// device saved, and the next remote change overwrites it.
+		store.put({ id: 'mine', path: 'a.md', content: 'first\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
+		const whileTyping: StorageProvider = {
+			...provider,
+			write: async (path, content, opts) => {
+				const entry = await provider.write(path, content, opts);
+				store.put({ id: 'mine', path: 'a.md', content: 'and then more\n', dirty: true });
+				return entry;
+			},
+		};
+
+		const result = await createSyncEngine({
+			provider: whileTyping,
+			store,
+			now: () => AT,
+		}).push();
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('a.md')?.content).toBe('and then more\n');
+		expect(noteAt('a.md')?.dirty).toBe(true);
+	});
+});
+
 describe('authorization', () => {
 	it('refreshes the token once and carries on', async () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
@@ -947,6 +976,179 @@ describe('a rescan of a remote that changed while the cursor was dead', () => {
 		expect(noteAt('ghost.md')).toBeUndefined();
 		expect(store.folders()).toEqual([]);
 		expect(noteAt('a.md')).toBeDefined();
+	});
+});
+
+describe('a file that is gone by the time we read it', () => {
+	it('does not stall the pull for ever', async () => {
+		// `changes` and `read` are separate round trips on every provider, so a
+		// file the feed named can be deleted in between — here by the other
+		// device, which edited it and then deleted it inside one cursor window.
+		// Throwing unwinds the whole pull, and since the cursor moves only with
+		// the batch the next attempt fetches the same batch and dies the same
+		// way. Push never runs either, because `sync` stops on a pull that is
+		// not `ok`, so the user's unpushed edit never leaves the device.
+		const entry = await remoteFile('a.md', 'theirs\n');
+		store.put({
+			id: 'mine',
+			path: 'a.md',
+			content: 'my edit\n',
+			remoteId: entry.remoteId,
+			remoteVersion: 'stale',
+			dirty: true,
+		});
+		await provider.delete(entry);
+
+		const result = await pullNow([
+			entry,
+			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
+		]);
+
+		expect(result.status).toBe('ok');
+		// And the deletion in the same batch is still acted on: the edit is
+		// kept, and cut loose so the next push re-creates the file.
+		expect(noteAt('a.md')?.content).toBe('my edit\n');
+		expect(noteAt('a.md')?.remoteId).toBeUndefined();
+	});
+
+	it('leaves our own note where it is', async () => {
+		// Nothing is landing on that path after all, so a note of ours sitting
+		// there has not been displaced by anything — moving it aside would
+		// rename the user's note for a file that never arrived.
+		const entry = await remoteFile('other.md', 'theirs\n');
+		store.put({
+			id: 'theirs',
+			path: 'other.md',
+			content: 'theirs\n',
+			remoteId: entry.remoteId,
+			remoteVersion: 'older',
+		});
+		store.put({ id: 'mine', path: 'x.md', content: 'never pushed\n', dirty: true });
+		await provider.delete(entry);
+
+		const result = await pullNow([{ ...entry, path: 'x.md' }]);
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('x.md')?.id).toBe('mine');
+	});
+
+	it('still reports a read that failed for any other reason', async () => {
+		// Only "it is not there" is news the pull can carry on past. A refused
+		// or broken read is a batch that has not been decided, and reporting it
+		// as applied would move the cursor past changes nobody looked at.
+		await remoteFile('a.md', 'theirs\n');
+		provider.setFault((call) => (call.op === 'read' ? new Error('network down') : undefined));
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('retry');
+		expect(result.error).toBe('network down');
+		expect(store.storedCursor()).toBeUndefined();
+	});
+});
+
+describe('a deletion the same batch also describes as present', () => {
+	it('honours the deletion when the entry before it is the state it deleted', async () => {
+		// Our own write coming back, and then the other device's deletion of
+		// that same file. "Alive anywhere in the batch" reads the first entry as
+		// evidence the file survived and drops the deletion — and a deletion
+		// dropped here is dropped for ever, because the cursor moves on and
+		// nothing mentions it again. The row is left holding a dead `remoteId`.
+		const entry = await remoteFile('a.md', 'body\n');
+		store.put({
+			id: 'mine',
+			path: 'a.md',
+			content: 'body\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		await provider.delete(entry);
+
+		const result = await pullNow([
+			entry,
+			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
+		]);
+
+		expect(result.pulled).toBe(1);
+		expect(store.notes()).toEqual([]);
+	});
+
+	it('still reads an entry elsewhere as the other half of a move', async () => {
+		// The correction above must not swallow the rule it narrows. Here the
+		// surviving entry is at a different path, whichever order it arrives
+		// in, so this is one file moving rather than two things happening.
+		const entry = await remoteFile('a.md', 'body\n');
+		await engine.pull();
+		const before = noteAt('a.md');
+		const moved = await provider.move(entry, 'b.md');
+
+		const result = await pullNow([
+			moved,
+			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
+		]);
+
+		expect(result.pulled).toBe(1);
+		expect(noteAt('b.md')?.id).toBe(before?.id);
+	});
+
+	it('takes the last word about a path, not the first', async () => {
+		// Deleted and then back again — moved away and moved home inside one
+		// cursor window. The entry after the deletion is the current state, so
+		// one thing happened to this note. Reading the deletion at face value
+		// and letting the entry put the note back reaches the same place by way
+		// of cutting it loose from the remote and telling the user twice.
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const before = noteAt('a.md');
+		const edited = await provider.write('a.md', 'two\n', { expectedVersion: entry.version });
+
+		const result = await pullNow([
+			{ path: 'a.md', deleted: true, remoteId: entry.remoteId },
+			edited,
+		]);
+
+		expect(result.pulled).toBe(1);
+		expect(noteAt('a.md')?.id).toBe(before?.id);
+		expect(noteAt('a.md')?.content).toBe('two\n');
+	});
+
+	it('keeps a note the same batch read successfully', async () => {
+		// The file was there when we read it, so whatever the deletion is about
+		// it is not the file we are holding — it was restored, or the feed is
+		// describing a path rather than a thing. Nothing here is worth losing a
+		// note over, and the version is adopted so the next push agrees.
+		const entry = await remoteFile('a.md', 'body\n');
+		store.put({
+			id: 'mine',
+			path: 'a.md',
+			content: 'body\n',
+			remoteId: entry.remoteId,
+			remoteVersion: 'older',
+		});
+
+		await pullNow([entry, { path: 'a.md', deleted: true }]);
+
+		expect(noteAt('a.md')?.id).toBe('mine');
+		expect(noteAt('a.md')?.remoteVersion).toBe(entry.version);
+	});
+});
+
+describe('a batch that both deletes a folder and reconciles a scan', () => {
+	it('does not name a note the folder delete already took', async () => {
+		// The scan sweeps up everything it did not mention, and the folder
+		// delete in front of it has already cascaded over the notes inside —
+		// which it named none of, so nothing in the batch says they are gone.
+		// The store forgives being told twice; that forgiveness is not what
+		// should be holding this up.
+		// No stored cursor, so this pull is a full scan and reconciles what the
+		// scan did not mention against what we hold.
+		store.putFolder({ path: 'Work', remoteId: 'rf' });
+		store.put({ id: 'inside', path: 'Work/a.md', content: 'x\n', remoteId: 'ra' });
+
+		await pullNow([{ path: 'Work', deleted: true, remoteId: 'rf' }]);
+
+		expect(store.notes()).toEqual([]);
+		expect(store.folders()).toEqual([]);
 	});
 });
 
@@ -1479,6 +1681,184 @@ describe('a note of ours where a remote one lands', () => {
 		expect(noteAt('Archive/a.md')?.content).toBe('mine\n');
 		expect(noteAt('Work/a.md')?.content).toBe('theirs\n');
 		expect(file.remoteId).toBe(noteAt('Archive/a.md')?.remoteId);
+	});
+
+	it('points a displaced note\u2019s queued rename at where it went', async () => {
+		// The user renamed `Untitled.md` to `Groceries.md` and the move is still
+		// queued; the other device moved its own note onto that name first.
+		// Ours is displaced, but its queued move still aims at `Groceries.md` —
+		// which the remote now owns, so it conflicts on every attempt and can
+		// never succeed. The queue is ordered, so everything behind it is
+		// stranded with it.
+		const ours = await remoteFile('Untitled.md', 'mine\n');
+		const theirs = await remoteFile('other.md', 'theirs\n');
+		store.put({
+			id: 'mine',
+			path: 'Groceries.md',
+			content: 'mine\n',
+			remoteId: ours.remoteId,
+			remoteVersion: ours.version,
+		});
+		store.put({
+			id: 'theirs',
+			path: 'other.md',
+			content: 'theirs\n',
+			remoteId: theirs.remoteId,
+			remoteVersion: theirs.version,
+		});
+		store.queue({
+			op: 'move',
+			noteId: 'mine',
+			path: 'Untitled.md',
+			targetPath: 'Groceries.md',
+		});
+		const moved = await provider.move(theirs, 'Groceries.md');
+
+		await pullNow([moved]);
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		// And the rename followed the note: the remote file it names is where
+		// the note now is, rather than still sitting under its first name.
+		const displaced = store.notes().find((note) => note.id === 'mine');
+		expect(displaced?.path).toContain('conflict');
+		expect(provider.snapshot().map((node) => node.path)).toContain(displaced?.path);
+	});
+
+	it('displaces a note a folder move in the same batch brings down on the path', async () => {
+		// `Old` was renamed to `New` and a file put at `New/b.md`, in one batch.
+		// Our `Old/b.md` is carried into `New` by the rename, so by the time the
+		// file lands there is something at that path — and the store, asked
+		// before any of it, says the path is free.
+		await provider.createFolder('Old');
+		await engine.pull();
+		store.put({ id: 'mine', path: 'Old/b.md', content: 'my edit\n', dirty: true });
+		const old = provider.snapshot().find((node) => node.path === 'Old');
+		if (old === undefined) throw new Error('no folder');
+
+		const renamed = await provider.move(old, 'New');
+		const landing = await remoteFile('New/b.md', 'theirs\n');
+
+		const result = await pullNow([renamed, landing]);
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('New/b.md')?.content).toBe('theirs\n');
+		const ours = store.notes().find((note) => note.id === 'mine');
+		expect(ours?.content).toBe('my edit\n');
+		expect(ours?.path).toContain('conflict');
+	});
+
+	it('does not name a copy after a note the same batch is moving in', async () => {
+		// Same rename, and this time the note being carried in is an older
+		// conflict copy — which is exactly the name the copy about to be made
+		// wants. Nothing else in the batch mentions it: a rename re-lists no
+		// children, so the folder entry is the only thing saying where it went.
+		await provider.createFolder('Old');
+		const file = await remoteFile('Old/b.md', 'theirs\n');
+		await engine.pull();
+		const before = noteAt('Old/b.md');
+		if (before === undefined) throw new Error('no note');
+		store.put({ ...before, content: 'my edit\n', dirty: true });
+		store.put({
+			id: 'older',
+			path: conflictPath('Old/b.md', AT, []),
+			content: 'an earlier copy\n',
+			dirty: true,
+		});
+		const old = provider.snapshot().find((node) => node.path === 'Old');
+		if (old === undefined) throw new Error('no folder');
+
+		const renamed = await provider.move(old, 'New');
+		const edited = await provider.write('New/b.md', 'theirs, edited\n', {
+			expectedVersion: file.version,
+		});
+
+		await pullNow([renamed, edited]);
+
+		expect(noteAt('New/b.md')?.content).toBe('theirs, edited\n');
+		expect(store.notes().find((note) => note.id === 'older')?.content).toBe(
+			'an earlier copy\n'
+		);
+		expect(store.notes().some((note) => note.content.includes('my edit'))).toBe(true);
+	});
+
+	it('gives a displacement a name nothing else is using', async () => {
+		// The name a displacement wants is the one a conflict copy would get,
+		// and there may already be one of those sitting beside it from an
+		// earlier sync. Taking it again is two notes at one path.
+		const entry = await remoteFile('other.md', 'theirs\n');
+		await engine.pull();
+		store.put({ id: 'mine', path: 'b.md', content: 'never pushed\n', dirty: true });
+		store.put({
+			id: 'older',
+			path: conflictPath('b.md', AT, []),
+			content: 'an earlier copy\n',
+			dirty: true,
+		});
+		await provider.move(entry, 'b.md');
+
+		await engine.pull();
+
+		expect(noteAt('b.md')?.content).toBe('theirs\n');
+		expect(store.notes().find((note) => note.id === 'older')?.content).toBe(
+			'an earlier copy\n'
+		);
+		expect(store.notes().find((note) => note.id === 'mine')?.content).toBe('never pushed\n');
+	});
+
+	it('gives two notes landing on one path two different names', async () => {
+		// A folder move can bring a note down on top of one already there, so
+		// more than one can be in the way of a single remote file. Named
+		// without each other they both take the same conflict name, and the
+		// sidebar shows one row twice.
+		const folder = await provider.createFolder('Old');
+		store.putFolder({ path: 'Old', remoteId: folder.remoteId });
+		const file = await remoteFile('other.md', 'theirs\n');
+		store.put({
+			id: 'theirs',
+			path: 'other.md',
+			content: 'theirs\n',
+			remoteId: file.remoteId,
+			remoteVersion: file.version,
+		});
+		store.put({ id: 'here', path: 'New/b.md', content: 'already here\n', dirty: true });
+		store.put({ id: 'carried', path: 'Old/b.md', content: 'carried in\n', dirty: true });
+
+		const renamed = await provider.move(folder, 'New');
+		const landing = await provider.move(file, 'New/b.md');
+
+		const result = await pullNow([renamed, landing]);
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('New/b.md')?.content).toBe('theirs\n');
+		expect(store.notes().find((note) => note.id === 'here')?.content).toBe('already here\n');
+		expect(store.notes().find((note) => note.id === 'carried')?.content).toBe('carried in\n');
+	});
+
+	it('does not move a note a conflict and a folder delete already took', async () => {
+		// The conflict hands the local edit to a copy, which leaves the note
+		// clean — and a clean note goes with the folder delete that follows
+		// rather than surviving it detached. Reading the dirty flag as it was
+		// before the batch has the engine move a note the store has dropped.
+		await provider.createFolder('Work');
+		const file = await remoteFile('Work/a.md', 'theirs\n');
+		const other = await remoteFile('Work/z.md', 'other\n');
+		await engine.pull();
+		const before = noteAt('Work/a.md');
+		if (before === undefined) throw new Error('no note');
+		store.put({ ...before, content: 'my edit\n', dirty: true });
+		const edited = await provider.write('Work/a.md', 'theirs, edited\n', {
+			expectedVersion: file.version,
+		});
+
+		const result = await pullNow([
+			edited,
+			{ path: 'Work', deleted: true, remoteId: 'no-such-folder' },
+			{ ...other, path: 'Work/a.md' },
+		]);
+
+		expect(result.status).toBe('ok');
 	});
 
 	it('does not displace a note the same batch has already removed', async () => {

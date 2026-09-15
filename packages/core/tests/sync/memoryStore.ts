@@ -116,6 +116,18 @@ export const createMemoryStore = (): MemoryStore => {
 		notes.set(note.id, rest);
 	};
 
+	/** Point one note's queued ops at where it has just been moved to. */
+	const rebaseOps = (noteId: string, from: string, to: string): void => {
+		for (const op of [...ops.values()]) {
+			if (op.noteId !== noteId) continue;
+			ops.set(op.seq, {
+				...op,
+				path: op.path === from ? to : op.path,
+				...(op.targetPath === from ? { targetPath: to } : {}),
+			});
+		}
+	};
+
 	const applyChange = (change: PullChange): void => {
 		if (change.kind === 'upsert-note') {
 			// The engine names the note; the store never guesses. Matching on the
@@ -198,6 +210,11 @@ export const createMemoryStore = (): MemoryStore => {
 			}
 			ensureFolderChain(parentPath(change.path));
 			notes.set(note.id, { ...note, path: change.path });
+			// And the note's own queued ops, as `move-folder` does. A queued
+			// `move` is the user's rename, and its target is the path the remote
+			// has just taken: left alone it conflicts for ever, and the ordered
+			// queue strands everything behind it.
+			rebaseOps(note.id, note.path, change.path);
 			return;
 		}
 		if (change.kind === 'delete-folder') {
