@@ -1,3 +1,4 @@
+import { ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 import { type EditorMode } from '../editor/mode.js';
@@ -36,6 +37,15 @@ export const useNote = (id: string | undefined): NoteRecord | undefined =>
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>
 	useLiveQuery(() => getDefaultEditorMode(db), []);
+
+/**
+ * How many notes sit at the root of the app folder, in no notebook. Zero is the
+ * normal case; a non-zero count only happens when a remote folder already had
+ * loose `.md` files in it, and it is what makes the sidebar's "Loose notes" row
+ * appear (docs/PLAN.md §12.6).
+ */
+export const useLooseNoteCount = (): number | undefined =>
+	useLiveQuery(async () => (await listNotes(db, { folderPath: ROOT })).length, []);
 
 /** Count of notes with unpushed edits, for the sync indicator in Phase 2. */
 export const useDirtyCount = (): number | undefined =>

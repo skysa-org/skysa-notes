@@ -63,19 +63,36 @@ export const containsPath = (tree: readonly FolderNode[], path: string): boolean
 	tree.some((node) => node.path === path || containsPath(node.children, path));
 
 /**
- * Which notebook to open. The root is not a notebook and is not listed, so a
- * request for a folder that no longer exists — a stale link, or a notebook
- * deleted underneath the user — falls back to the first notebook rather than
- * to a pane the sidebar offers no way out of.
+ * What the root of the app folder is called when it holds notes. A note there
+ * belongs to no notebook, which is a shape the remote folder can hand us — the
+ * app itself never creates one (docs/PLAN.md §12.6).
+ */
+export const LOOSE_NOTES_LABEL = 'Loose notes';
+
+/** What to call a folder in a pane heading. Only the root needs a name. */
+export const folderLabel = (path: string): string => (path === ROOT ? LOOSE_NOTES_LABEL : path);
+
+/**
+ * Which notebook to open. The root is not a notebook, and it is only selectable
+ * at all while it holds loose notes, so a request for a folder that is not
+ * there — a stale link, or a notebook deleted underneath the user — falls back
+ * to the first notebook rather than to a pane the sidebar offers no way out of.
  *
- * Returns `undefined` while the tree is still loading, and when there are no
- * notebooks at all.
+ * With both notebooks and loose notes present and nothing asked for, the first
+ * notebook wins: loose notes are an exception to the structure, not the place
+ * to start.
+ *
+ * Returns `undefined` while the tree is still loading, and when there is
+ * nothing to open at all.
  */
 export const selectedFolderPath = (
 	tree: readonly FolderNode[] | undefined,
-	requested: string | undefined
+	requested: string | undefined,
+	hasLooseNotes = false
 ): string | undefined => {
 	if (tree === undefined) return requested;
+	// `containsPath` never finds the root, so it is answered before the lookup.
+	if (requested === ROOT) return hasLooseNotes ? ROOT : tree[0]?.path;
 	if (requested !== undefined && containsPath(tree, requested)) return requested;
-	return tree[0]?.path;
+	return tree[0]?.path ?? (hasLooseNotes ? ROOT : undefined);
 };

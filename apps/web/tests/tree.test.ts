@@ -4,6 +4,7 @@ import {
 	ancestorPaths,
 	buildFolderTree,
 	containsPath,
+	folderLabel,
 	selectedFolderPath,
 } from '../src/store/tree.js';
 
@@ -124,5 +125,51 @@ describe('selectedFolderPath', () => {
 		// jump, which reads as the app losing the user's place.
 		expect(selectedFolderPath(undefined, 'work')).toBe('work');
 		expect(selectedFolderPath(undefined, undefined)).toBeUndefined();
+	});
+
+	describe('with loose notes at the root', () => {
+		it('opens the root when it is asked for', () => {
+			expect(selectedFolderPath(tree, '', true)).toBe('');
+		});
+
+		it('still opens a notebook by default', () => {
+			// Loose notes are an exception to the structure, not the place to
+			// start. The row exists to reach them, not to be landed on.
+			expect(selectedFolderPath(tree, undefined, true)).toBe('personal');
+		});
+
+		it('opens the root when it is all there is', () => {
+			expect(selectedFolderPath([], undefined, true)).toBe('');
+			expect(selectedFolderPath([], '', true)).toBe('');
+		});
+	});
+
+	describe('without loose notes at the root', () => {
+		it('refuses the root, which has no row to select', () => {
+			// The last loose note was moved or deleted while the URL still said
+			// the root. Honouring it would strand the user in a pane the sidebar
+			// no longer offers a way back to.
+			expect(selectedFolderPath(tree, '')).toBe('personal');
+			expect(selectedFolderPath(tree, '', false)).toBe('personal');
+		});
+
+		it('opens nothing when there is no notebook either', () => {
+			expect(selectedFolderPath([], '')).toBeUndefined();
+			expect(selectedFolderPath([], undefined)).toBeUndefined();
+		});
+
+		it('keeps a requested root while the tree is still loading', () => {
+			expect(selectedFolderPath(undefined, '')).toBe('');
+		});
+	});
+});
+
+describe('folderLabel', () => {
+	it('names the root for what it holds', () => {
+		expect(folderLabel('')).toBe('Loose notes');
+	});
+
+	it('leaves a notebook path alone', () => {
+		expect(folderLabel('work/meetings')).toBe('work/meetings');
 	});
 });
