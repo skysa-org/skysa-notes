@@ -103,6 +103,8 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	/** Normalized path → node. The root is not stored; it always exists. */
 	const nodes = new Map<string, FakeNode>();
+	/** Ids of files this provider has deleted. Never reused, never resolved. */
+	const retired = new Set<string>();
 	/** Monotonic sequence → the entry as it looked at that moment. The delta feed. */
 	const log = new Map<number, ChangeEntry>();
 	const counters = new Map<CounterKey, number>();
@@ -141,16 +143,28 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		// promise one — Dropbox has none to give.
 		if (record)
 			log.set(bump('seq'), { path: node.path, deleted: true, remoteId: node.remoteId });
+		retired.add(node.remoteId);
 	};
 
 	/**
 	 * `remoteId` first, path only as a fallback. An entry whose path is stale
 	 * because someone else moved the file still resolves — which is the whole
 	 * reason an id is worth storing alongside the path.
+	 *
+	 * The fallback is not taken for an id this provider has *retired*. Ids are
+	 * never reused here, so a caller naming one that has been deleted is naming
+	 * a file that is gone, and an id-addressed provider (Drive, Graph) answers
+	 * 404 rather than quietly acting on whatever now holds the path — which
+	 * would be a stranger's file. Being the strictest provider in the repo is
+	 * this fake's whole job: forgiveness here hides engine bugs rather than
+	 * finding them.
 	 */
-	const resolve = (ref: EntryRef): FakeNode | undefined =>
-		[...nodes.values()].find((node) => node.remoteId === ref.remoteId) ??
-		nodes.get(normalizePath(ref.path));
+	const resolve = (ref: EntryRef): FakeNode | undefined => {
+		const byId = [...nodes.values()].find((node) => node.remoteId === ref.remoteId);
+		if (byId !== undefined) return byId;
+		if (retired.has(ref.remoteId)) return undefined;
+		return nodes.get(normalizePath(ref.path));
+	};
 
 	const isFolder = (path: string): boolean => path === ROOT || nodes.get(path)?.kind === 'folder';
 

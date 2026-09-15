@@ -607,6 +607,31 @@ export const describeSyncStoreContract = (
 				expect(ops.find((op) => op.seq === seq)?.path).toBe('Archive/a.md');
 			});
 
+			it('carries a remotely moved note’s queued ops with it', async () => {
+				// `move-note` moves a note just as surely as `move-folder` does,
+				// and an op left aimed at the path the note has left fails on
+				// every attempt — which stops the ordered queue for every note,
+				// not only this one.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'a.md',
+					targetPath: 'renamed.md',
+				});
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'move-note', id: 'n1', path: 'b.md', remote: remote('b.md', 'r1') },
+					],
+					cursor: 'c1',
+				});
+
+				const moved = (await store.pendingOps()).find((op) => op.seq === seq);
+				expect(moved?.path).toBe('b.md');
+			});
+
 			it('carries a queued move’s target with it too', async () => {
 				// `targetPath` is the half that says where the note is going, and
 				// a store that rebases only `path` leaves the move aimed at a

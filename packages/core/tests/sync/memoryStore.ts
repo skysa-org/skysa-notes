@@ -168,6 +168,8 @@ export const createMemoryStore = (): MemoryStore => {
 				remoteId: change.remote.remoteId,
 				remoteVersion: change.remote.version,
 			});
+			// And its queued ops, as `move-folder` and `displace-note` do.
+			rebaseOps(note.id, note.path, change.path);
 			return;
 		}
 		if (change.kind === 'delete-note' || change.kind === 'detach-note') {

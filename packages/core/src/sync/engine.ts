@@ -12,6 +12,7 @@ import {
 } from '../paths.js';
 import {
 	type ChangeEntry,
+	type EntryRef,
 	isAuthError,
 	isConflictError,
 	isCursorResetError,
@@ -178,12 +179,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const groups = await Promise.all(
 			[folder, ...sources].map((each) => store.notesUnder(each))
 		);
+		// And every note an earlier decision has put somewhere by name. A folder
+		// is not the only thing that carries a note into this one: a `move-note`
+		// brings a single file in from anywhere at all, and its row is still at
+		// the old path in the store, so neither query above can see it. Missing
+		// it means nothing is displaced when a second file lands on the same
+		// name — two rows at one path, which the sidebar shows twice and which
+		// the next push has overwrite each other.
+		const named = decided.flatMap((change) => {
+			if (change.kind === 'conflict') return [change.resolution.noteId];
+			return 'id' in change && 'path' in change ? [change.id] : [];
+		});
+		const rows = await Promise.all([...new Set(named)].map((id) => store.noteById(id)));
 		// The batch's own first, so a row the store also holds wins: `whereNow`
 		// replays the decisions from the pre-batch position, which is the one to
 		// start from wherever there is one. The store's two sources overlap with
 		// each other when a folder moves within itself.
 		const candidates = new Map(
-			[...madeInBatch(decided), ...groups.flat()].map((note) => [note.id, note])
+			[...madeInBatch(decided), ...groups.flat(), ...rows.flatMap((row) => row ?? [])].map(
+				(note) => [note.id, note]
+			)
 		);
 		return [...candidates.values()];
 	};
@@ -833,7 +848,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		content: string,
 		entry: RemoteEntry,
 		claimed: ReadonlySet<string>,
-		decided: readonly PullChange[]
+		decided: readonly PullChange[],
+		renaming: ReadonlySet<string>
 	): Promise<PullChange[]> | PullChange[] => {
 		// Same bytes, new version: our own write coming back, two devices that
 		// saved the same thing, or a move on a provider whose version does not
@@ -842,8 +858,19 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// Adopting the version matters either way: leaving the old one would make
 		// the next push send an `expectedVersion` the remote has moved past, and
 		// manufacture a conflict over a file that already agrees.
+		//
+		// A different path is a rename — but whose? The feed cannot say, and the
+		// queue is the only thing that can: a `move` queued for this note is the
+		// user's own rename, not yet pushed, and the entry is our own echo from
+		// before it. Moving the row back undoes what the user just did in front
+		// of them, and worse, frees the path they renamed *to* — so a file
+		// arriving there in the same batch is imported rather than displaced,
+		// the queued move then conflicts on that path for ever, and the ordered
+		// queue strands every op behind it. The version is still adopted; only
+		// the path is left where the user put it. This is `followTheRename`'s
+		// question, asked from the pull side.
 		if (content === local.content) {
-			return local.path === entry.path
+			return local.path === entry.path || renaming.has(local.id)
 				? [{ kind: 'adopt-version', id: local.id, remote: entry }]
 				: [{ kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
 		}
@@ -913,7 +940,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		entry: RemoteEntry,
 		decided: readonly PullChange[],
 		live: LiveEntries,
-		claimed: ReadonlySet<string>
+		claimed: ReadonlySet<string>,
+		renaming: ReadonlySet<string>
 	): Promise<PullChange[]> => {
 		const local = await noteForEntry(entry, live, decided);
 		// Taken away by an earlier decision in this batch — the file was deleted
@@ -933,6 +961,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// renamed — a rename alone changes no bytes, so there is nothing to read.
 		if (local !== undefined && !removed && local.remoteVersion === entry.version) {
 			if (local.path === entry.path) return [];
+			if (renaming.has(local.id)) {
+				return [...room, { kind: 'adopt-version', id: local.id, remote: entry }];
+			}
 			return [...room, { kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
 		}
 
@@ -968,7 +999,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				{ kind: 'upsert-note', id: local.id, path: entry.path, content, remote: entry },
 			];
 		}
-		return [...room, ...(await decideKnown(local, content, entry, claimed, after))];
+		return [...room, ...(await decideKnown(local, content, entry, claimed, after, renaming))];
 	};
 
 	const decide = async (
@@ -977,7 +1008,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		live: LiveEntries,
 		claimed: ReadonlySet<string>,
 		at: number,
-		doomed: Doomed
+		doomed: Doomed,
+		renaming: ReadonlySet<string>
 	): Promise<PullChange[]> => {
 		// The marker file and any provider bookkeeping. `isHidden` is the same
 		// rule the UI uses, so nothing the user cannot see becomes a note.
@@ -992,7 +1024,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// and turning it into a note would corrupt the list and, on push, the
 		// file. See docs/PLAN.md §14.
 		if (!entry.path.endsWith(NOTE_EXTENSION)) return [];
-		return decideFile(entry, decided, live, claimed);
+		return decideFile(entry, decided, live, claimed, renaming);
 	};
 
 	/**
@@ -1027,17 +1059,54 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * earlier one removed, what names it took — and because each may fetch
 	 * content.
 	 */
+	/**
+	 * Folder rows for the notes a cascade kept. A `delete-folder` takes every
+	 * row beneath it, but not every note: a dirty one survives and is merely
+	 * cut loose, because an unsaved edit outranks a remote deletion (CLAUDE.md
+	 * — never lose user data). That leaves the note at a path with no notebook
+	 * behind it, where the sidebar cannot show it although it still holds its
+	 * name.
+	 *
+	 * Asked at the end of the batch rather than at the delete, because whether
+	 * a note is still there is not known until the batch is over — the same
+	 * note is often carried somewhere else by a later decision, and a row
+	 * re-established for it on the way past would outlive it.
+	 */
+	const roofOver = async (decided: readonly PullChange[]): Promise<PullChange[]> => {
+		const cascades = decided.flatMap((change) =>
+			change.kind === 'delete-folder' ? [change.path] : []
+		);
+		if (cascades.length === 0) return [];
+		const groups = await Promise.all(cascades.map((path) => notesUnderNow(path, decided)));
+		const wanted = groups
+			.flat()
+			.flatMap((entry) => [parentPath(entry.path), ...ancestorPaths(entry.path)]);
+		return [...new Set(wanted)]
+			.filter((path) => normalizePath(path) !== ROOT)
+			.sort((one, two) => one.length - two.length)
+			.map((path): PullChange => ({ kind: 'ensure-folder', path }));
+	};
+
 	const decideAll = async (reported: readonly ChangeEntry[]): Promise<PullChange[]> => {
 		const entries = deduped(reported);
+		// The notes whose rename is queued here and has not reached the remote.
+		// Asked once for the batch: the queue is what tells a rename the remote
+		// made from one the user made, and nothing in this batch changes it.
+		const renaming = new Set(
+			(await store.pendingOps()).flatMap((op) =>
+				op.op === 'move' && op.noteId !== undefined ? [op.noteId] : []
+			)
+		);
 		// Everything this batch says still exists, and where, so a deletion
 		// elsewhere in it can be recognised as the first half of a move.
 		const live = liveEntries(entries);
 		const claimed = claimedPaths(entries);
 		const doomed = doomedIn(entries);
-		return entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
-			const decided = await pending;
-			return [...decided, ...(await decide(entry, decided, live, claimed, at, doomed))];
+		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
+			const sofar = await pending;
+			return [...sofar, ...(await decide(entry, sofar, live, claimed, at, doomed, renaming))];
 		}, Promise.resolve([]));
+		return [...decided, ...(await roofOver(decided))];
 	};
 
 	/**
@@ -1152,7 +1221,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 								other.path !== folder.path && isWithin(folder.path, other.path)
 						)
 				)
-				.map((folder): PullChange => ({ kind: 'delete-folder', path: folder.path })),
+				// Where the row ends up, not where the store last saw it. A scan
+				// is one batch like any other, and a `move-folder` decided in
+				// front of this has already rebased the row — naming the old
+				// path asks the store to delete something that is not there,
+				// and leaves the notebook the remote no longer has sitting in
+				// the sidebar under its new name until the next cursor reset.
+				.flatMap((folder): PullChange[] => {
+					const at = folderNow(folder.path, changes);
+					return at === undefined ? [] : [{ kind: 'delete-folder', path: at }];
+				}),
 		];
 	};
 
@@ -1263,22 +1341,30 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		remoteId: string,
 		error: unknown
 	): Promise<RemoteEntry> => {
+		// The queued move has to be the one that *explains* this. `write` is
+		// addressed by where the note is now, so the rename that accounts for
+		// finding nothing there is one whose target is that same path; any other
+		// queued move for the note says nothing about it, and acting on it would
+		// rename the remote file to somewhere the user has not asked for.
 		const queued = await store.pendingOps();
-		if (!queued.some((each) => each.op === 'move' && each.noteId === note.id)) throw error;
+		const explains = queued.some(
+			(each) => each.op === 'move' && each.noteId === note.id && each.targetPath === note.path
+		);
+		if (!explains) throw error;
 		const moved = await provider.move({ remoteId, path: note.path }, note.path);
 		return write(note, moved.version);
 	};
 
 	const runWrite = async (op: SyncOp, note: SyncNote): Promise<void> => {
 		const entry = await write(note, note.remoteVersion).catch(async (error: unknown) => {
-			if (!isNotFoundError(error) || note.remoteVersion === undefined) throw error;
+			if (!isNotFoundError(error)) throw error;
 
 			// Nothing at that path — but `write` is addressed by path, and a file
 			// renamed remotely is missing from its old one too. Creating it again
 			// would leave the user with two notes where they had one, so ask
 			// whether the file still exists under the id we hold.
 			const id = note.remoteId;
-			if (id !== undefined) {
+			if (note.remoteVersion !== undefined && id !== undefined) {
 				const elsewhere = await provider
 					.read({ remoteId: id, path: note.path })
 					.then(() => true)
@@ -1286,10 +1372,21 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				if (elsewhere) return followTheRename(note, id, error);
 			}
 
-			// Genuinely deleted while we held edits. §7 says re-create it, and the
-			// retry deliberately carries no expected version — that means
-			// "create", so if something has taken the path since, this conflicts
-			// instead of overwriting it.
+			// Either the file was deleted while we held edits, or the folder it
+			// lives in was — a provider answers not found for both, and the
+			// second is the ordinary case of a notebook deleted on another device
+			// while a note inside it had unsaved work. The pull keeps that note
+			// and cuts it loose (§7: an unsaved edit outranks a remote deletion),
+			// which leaves nothing on the remote above it. Without the folder
+			// there is nowhere to put the file, every attempt fails the same way,
+			// and the ordered queue strands every op behind it for every note —
+			// so the user's edit never leaves the device and their sync never
+			// recovers on its own.
+			//
+			// §7 says re-create it, and the retry deliberately carries no
+			// expected version — that means "create", so if something has taken
+			// the path since, this conflicts instead of overwriting it.
+			await ensureRemoteFolder(parentPath(note.path));
 			return write(note, undefined);
 		});
 		// The content that actually went, so the store can tell whether the note
@@ -1314,6 +1411,23 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		await provider.createFolder(path);
 	};
 
+	/**
+	 * Puts a rename beside the name it wanted, when the remote will not give it
+	 * up. Bounded by the provider's own answer: each refusal adds the name it
+	 * refused to the list and asks for the next one.
+	 */
+	const moveAside = async (
+		from: EntryRef,
+		target: string,
+		taken: readonly string[] = []
+	): Promise<RemoteEntry> => {
+		const candidate = conflictPath(target, now(), taken);
+		return provider.move(from, candidate).catch((error: unknown) => {
+			if (!isConflictError(error) || taken.length > 8) throw error;
+			return moveAside(from, target, [...taken, basename(candidate)]);
+		});
+	};
+
 	const runMove = async (op: SyncOp, note: SyncNote): Promise<void> => {
 		// A move with nowhere to go is a store that lost the column, not a move
 		// with nothing to do. Completing it would drop the user's rename with
@@ -1334,6 +1448,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const from = { remoteId: note.remoteId, path: note.path };
 		const target = op.targetPath;
 		const entry = await provider.move(from, target).catch(async (error: unknown) => {
+			// The remote already has something at the name the user chose. No
+			// number of retries will free it, and a `move` is not a `write`, so
+			// the conflict rule has no second version to reconcile — leaving it
+			// queued blocks the drain for ever and strands every op behind it,
+			// over a rename. The remote keeps the path (CLAUDE.md) and the
+			// user's rename lands beside it under a conflict name, which is
+			// visible in the sidebar rather than silently dropped.
+			if (isConflictError(error)) return moveAside(from, target);
 			if (!isNotFoundError(error)) throw error;
 			// Two very different things report as not found here, and the
 			// provider does not say which: the file we are moving, or the folder
@@ -1411,6 +1533,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * same transaction, because replaying it would overwrite the remote with the
 	 * very bytes the user has just been handed a copy of.
 	 */
+	/**
+	 * A free path beside `path` for a note that has to move out of the way on
+	 * the push side. `freeFolderPath`'s counterpart, and asked of the store
+	 * rather than of a batch: nothing else is in flight here.
+	 */
+	const freeNotePath = async (path: string, taken: readonly string[] = []): Promise<string> => {
+		const candidate = conflictPath(path, now(), taken);
+		if ((await store.noteByPath(candidate)) === undefined) return candidate;
+		return freeNotePath(path, [...taken, basename(candidate)]);
+	};
+
 	const resolvePushConflict = async (
 		op: SyncOp,
 		remote: RemoteEntry
@@ -1442,6 +1575,29 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				content: note.content,
 			});
 			return '';
+		}
+
+		// The file in the way is one we already hold, as a different note. That
+		// is not this note's remote copy and there is no conflict between them:
+		// the path is simply taken, by a file whose own row is somewhere else
+		// because we have not pulled its rename yet. Resolving it would hand the
+		// note that file's `remoteId`, and two rows with one `remoteId` is the
+		// state the port calls unrecoverable — `noteByRemoteId` hands back one
+		// of them and the other is stale for ever, so the user sees one note
+		// twice and the next edit to the stale row pushes a third file.
+		//
+		// So the note moves aside instead, keeping its own bytes and its dirty
+		// flag, and the op is left to be retried at the path it has been given.
+		// The displacement rebases the queued write with it, so the next attempt
+		// creates the file where the note now is.
+		const taken = await store.noteByRemoteId(remote.remoteId);
+		if (taken !== undefined && taken.id !== note.id) {
+			await store.applyPull({
+				changes: [
+					{ kind: 'displace-note', id: note.id, path: await freeNotePath(note.path) },
+				],
+			});
+			return undefined;
 		}
 
 		const resolution = await resolutionFor(note, content, remote, new Set(), []);

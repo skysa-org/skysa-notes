@@ -103,7 +103,18 @@ export type PullChange =
 			remote: RemoteEntry;
 	  }>
 	| Readonly<{
-			/** Renamed or moved remotely, contents unchanged. */
+			/**
+			 * Renamed or moved remotely, contents unchanged. The note's queued
+			 * ops follow it, as they do for `move-folder` and `displace-note`:
+			 * anything that changes where a note is changes where its queued
+			 * work is aimed.
+			 *
+			 * The engine never emits one of these for a note whose own rename is
+			 * queued — a `move` in the queue is what tells the user's rename
+			 * from the remote's, and the note is left where the user put it
+			 * (docs/PLAN.md §7) — so this never has to decide what a pending
+			 * rename means once the note has moved somewhere else.
+			 */
 			kind: 'move-note';
 			id: string;
 			path: string;
