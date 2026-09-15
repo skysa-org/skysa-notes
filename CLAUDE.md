@@ -5,7 +5,7 @@ Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, O
 ## Stack (do not substitute)
 - pnpm workspace: `apps/web` (Vite + React + TS, TanStack Router, Dexie, vite-plugin-pwa), `apps/api` (Hono on Cloudflare Workers, D1 via Drizzle), `packages/core` (framework-free TS).
 - Rich editor: Milkdown. Raw editor: CodeMirror 6.
-- Identity: Arctic. Validation: zod. Tests: Vitest.
+- Identity: hand-rolled OAuth over Web Crypto — Arctic was deprecated by its author before we needed it, so `docs/PLAN.md` §6 rejected it and nothing imports it. Validation: zod. Tests: Vitest.
 
 ## Hard rules
 - `packages/core` imports nothing from `apps/*` and has no framework, DOM, or Node-only dependencies. It must run in browser, Node, and Workers.
@@ -20,7 +20,7 @@ Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, O
 
 ## Working style
 - Work one phase (or one checklist item) at a time from `docs/PLAN.md`. Start in plan mode for anything touching more than one package.
-- Prefer small PRs against `main`. Each PR: tests for new behavior, changeset if a package's public surface changed, and tick the checklist item in `docs/PLAN.md`.
+- Prefer small PRs against `main`. Each PR: tests for new behavior, and tick the checklist item in `docs/PLAN.md`. (Changesets are Phase 8 — there is no `.changeset/` directory or tooling yet, so do not write one.)
 - Commands: `pnpm dev` (web + wrangler dev), `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm db:migrate`, `pnpm build`.
 - When unsure about a provider API detail (scopes, endpoints, conflict semantics), check the current vendor docs rather than assuming; note the URL in a code comment.
 - Do not add dependencies without stating why in the PR description. Check license (MIT/Apache/ISC only).

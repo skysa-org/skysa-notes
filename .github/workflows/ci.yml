@@ -1,0 +1,46 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+
+# A second push to the same branch cancels the first: nothing is learned from
+# finishing a run against code that has already been replaced.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    verify:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            # Before setup-node, which needs the package manager on PATH to resolve
+            # its cache. The version comes from `packageManager` in package.json.
+            - run: corepack enable
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+
+            - run: pnpm install --frozen-lockfile
+
+            # The same gate the README tells humans to run before every commit, so
+            # the two cannot drift: format:check + lint + typecheck + test.
+            - run: pnpm verify
+
+            # Separate, and not merged into `verify`, because it is the only thing
+            # that checks two claims nothing else does: `packages/core` compiles
+            # under `tsconfig.build.json` with `types: []` — which is what enforces
+            # "no Node-only dependencies" — and the Worker still bundles, via
+            # `wrangler deploy --dry-run`.
+            - run: pnpm build
+
+            # Advisory. Both current advisories are dev-only and transitive, so
+            # gating on them would red-light every run without telling us anything
+            # about what ships.
+            - run: pnpm audit --prod
+              continue-on-error: true

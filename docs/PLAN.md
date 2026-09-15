@@ -13,7 +13,7 @@ This repo is the complete, self-hostable product: one Cloudflare Worker serving 
 | Storage model | App creates and owns a dedicated root folder on each provider; never touches anything outside it | Keeps every provider on user-consent-only scopes; avoids Google restricted-scope (CASA) review |
 | File format | One markdown file per note, folders = notebooks, optional YAML frontmatter | Human-readable, portable, diffable, editable by other tools |
 | Identity | Notes identified locally by UUID; remote identity is provider file id (Drive/Graph/Dropbox) or path (WebDAV) | Ids survive renames on id-based providers; WebDAV has nothing else |
-| Client | Vite + React + TypeScript SPA, `vite-plugin-pwa` (Workbox) for the service worker, TanStack Router, SWR for server state, Dexie (IndexedDB) for local store | Local-first app gets nothing from SSR; vite-plugin-pwa is the best-maintained PWA tooling in the React ecosystem |
+| Client | Vite + React + TypeScript SPA, `vite-plugin-pwa` (Workbox) for the service worker, TanStack Router, Dexie (IndexedDB) for local store | Local-first app gets nothing from SSR; vite-plugin-pwa is the best-maintained PWA tooling in the React ecosystem |
 | Backend | Hono + TypeScript on Cloudflare Workers, D1 via Drizzle | Tiny, streams bodies natively (WebDAV proxy), Workers-native |
 | Repo | pnpm workspace: `apps/web`, `apps/api`, `packages/core` (providers, sync, markdown — framework-agnostic) | Keeps the hard parts testable without any UI or server framework |
 | Hosting | Cloudflare Workers for the API, Workers static assets for the SPA (same origin), D1 for the database | One deploy, same-origin cookies, SQLite dialect in dev and prod |
@@ -596,7 +596,7 @@ apps/
       editor/                 # RichEditor (Milkdown), RawEditor (CodeMirror), ModeToggle, shared autosave hook
       store/                  # Dexie db, notes.ts, folders.ts
       sync/                   # scheduler.ts (triggers, visibility, online events) — wraps core engine
-      api/                    # typed client for apps/api (SWR hooks)
+      api/                    # typed client for apps/api
   api/                        # Hono on Cloudflare Workers
     wrangler.toml             # D1 binding, [assets] → ../web/dist
     src/

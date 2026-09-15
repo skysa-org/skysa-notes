@@ -282,7 +282,10 @@ export default tseslint.config(
 		},
 	},
 	{
-		// Only worker.ts may read the Workers env.
+		// Only worker.ts may read *configuration*. Per-request bindings still
+		// arrive on the Hono context — `c.env.DB` in app.ts is the one of those
+		// that cannot be handed over at createApp time, because there is no
+		// request yet when the app is built.
 		files: ['apps/api/src/**/*.ts'],
 		ignores: ['apps/api/src/worker.ts'],
 		languageOptions: { globals: globals.node },
@@ -293,6 +296,38 @@ export default tseslint.config(
 					name: 'process',
 					message:
 						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+				},
+			],
+			// The bare identifier is only one of the three ways in. This covers
+			// the member expression; the import is covered below.
+			'no-restricted-syntax': [
+				'error',
+				{
+					selector: "MemberExpression[object.name='globalThis'][property.name='process']",
+					message:
+						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+				},
+			],
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['node:process'],
+							message:
+								'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+						},
+						{
+							// wrangler.toml sets no `nodejs_compat`, so the Worker
+							// runtime has none of these. Nothing but the type
+							// checker would catch it before deploy: `apps/api`'s
+							// src and tests are one TypeScript program, and the
+							// tests legitimately pull @types/node in.
+							group: ['node:*', 'fs', 'path', 'stream'],
+							message:
+								'the Worker runs without nodejs_compat — Web Crypto and fetch only.',
+						},
+					],
 				},
 			],
 		},
