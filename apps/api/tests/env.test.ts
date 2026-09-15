@@ -10,18 +10,20 @@ const base = {
 };
 
 describe('parseEnv', () => {
-	it('defaults to storage-first with all providers enabled', () => {
+	/**
+	 * The default names only what is implemented. Defaulting to all four would
+	 * make a deployment that set no `ENABLED_PROVIDERS` refuse to boot until its
+	 * operator had registered apps with Google *and* Microsoft, for flows that
+	 * do not exist yet.
+	 */
+	it('defaults to storage-first with the one implemented provider', () => {
 		const config = parseEnv({
 			...base,
-			GOOGLE_CLIENT_ID: 'g',
-			GOOGLE_CLIENT_SECRET: 'gs',
-			MICROSOFT_CLIENT_ID: 'm',
-			MICROSOFT_CLIENT_SECRET: 'ms',
 			DROPBOX_CLIENT_ID: 'd',
 			DROPBOX_CLIENT_SECRET: 'ds',
 		});
 		expect(config.authMode).toBe('storage-first');
-		expect(config.enabledProviders).toEqual(['gdrive', 'onedrive', 'dropbox', 'webdav']);
+		expect(config.enabledProviders).toEqual(['dropbox']);
 		expect(config.secretsKeyId).toBe('k1');
 		expect(config.webdavAllowPrivate).toBe(false);
 	});

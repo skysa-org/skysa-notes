@@ -7,8 +7,10 @@ APP_ORIGIN="http://localhost:5173"
 # storage-first (default) | account-first  — see docs/PLAN.md §6
 AUTH_MODE="storage-first"
 
-# Any of: gdrive,onedrive,dropbox,webdav
-ENABLED_PROVIDERS="dropbox,webdav"
+# Any of: gdrive,onedrive,dropbox,webdav. Only `dropbox` is implemented —
+# onedrive is Phase 3, gdrive Phase 4, webdav Phase 5 — and each one listed
+# here must have its credentials below or the app refuses to boot.
+ENABLED_PROVIDERS="dropbox"
 
 # 32 random bytes, base64. Generate with: openssl rand -base64 32
 # Checked at boot: anything that does not decode to exactly 32 bytes is refused

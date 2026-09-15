@@ -13,7 +13,7 @@ This repo is the complete, self-hostable product: one Cloudflare Worker serving 
 | Storage model | App creates and owns a dedicated root folder on each provider; never touches anything outside it | Keeps every provider on user-consent-only scopes; avoids Google restricted-scope (CASA) review |
 | File format | One markdown file per note, folders = notebooks, optional YAML frontmatter | Human-readable, portable, diffable, editable by other tools |
 | Identity | Notes identified locally by UUID; remote identity is provider file id (Drive/Graph/Dropbox) or path (WebDAV) | Ids survive renames on id-based providers; WebDAV has nothing else |
-| Client | Vite + React + TypeScript SPA, `vite-plugin-pwa` (Workbox) for the service worker, TanStack Router, SWR for server state, Dexie (IndexedDB) for local store | Local-first app gets nothing from SSR; vite-plugin-pwa is the best-maintained PWA tooling in the React ecosystem |
+| Client | Vite + React + TypeScript SPA, `vite-plugin-pwa` (Workbox) for the service worker, TanStack Router, Dexie (IndexedDB) for local store | Local-first app gets nothing from SSR; vite-plugin-pwa is the best-maintained PWA tooling in the React ecosystem |
 | Backend | Hono + TypeScript on Cloudflare Workers, D1 via Drizzle | Tiny, streams bodies natively (WebDAV proxy), Workers-native |
 | Repo | pnpm workspace: `apps/web`, `apps/api`, `packages/core` (providers, sync, markdown — framework-agnostic) | Keeps the hard parts testable without any UI or server framework |
 | Hosting | Cloudflare Workers for the API, Workers static assets for the SPA (same origin), D1 for the database | One deploy, same-origin cookies, SQLite dialect in dev and prod |
@@ -251,7 +251,7 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
 - **Composition root:** `apps/api` exports `createApp({ entitlements, identityProviders, config })` as a library; its own `src/worker.ts` calls it with the defaults. An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking. Nothing in `apps/api` reads env directly except `worker.ts`.
 - Sessions with `hono/cookie`; request validation with `zod` + `@hono/zod-validator`.
 - **Entitlement seam:** every route that mints a token or proxies WebDAV calls `entitlements.check(userId)` from an `EntitlementProvider` interface in `core`. The repo ships `AlwaysAllowed`. Operators of a shared instance can substitute their own (an email allowlist, for example) through `createApp`; no such policy logic lives in the repo.
-- **Provider enablement** (`ENABLED_PROVIDERS` env, default `gdrive,onedrive,dropbox,webdav`): the WebDAV routes and proxy are not mounted when `webdav` is absent, and the client hides the option.
+- **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each provider listed must have its credentials or the app refuses to boot): the WebDAV routes and proxy are not mounted when `webdav` is absent, and the client hides the option.
 - **Identity modes** (`AUTH_MODE` env): `storage-first` (default: user = first connected storage account, as below) or `account-first` (Sign in with Google or Microsoft creates the user; storage is connected in a separate flow afterward). Both write to the same `users` table. `account-first` suits instances shared by several people, and users who want to change storage provider without losing their account.
 - **Two OAuth flows per provider, never combined.** `/auth/login/:provider` requests identity scopes only (`openid email profile`); `/auth/connect/:provider` requests storage scopes only. They share one Google client id / one Entra registration but use distinct redirect URIs and distinct callback routes. On the storage request pass `include_granted_scopes=true` (Google) so the second consent screen shows only the new scope; frame it in the UI as "Connect your storage", not as a second login.
 - **Identity providers via Arctic** (`arctic` npm, Workers-compatible): Google and Microsoft Entra at launch. **Open (2026-09-14): `arctic` was deprecated by its author in July 2026 ("no longer supported"); they suggest copying the per-provider client code, which is ~50 lines each.** Nothing depends on it before Phase 9, so the dependency is not installed yet. Decide then between vendoring the two clients into `apps/api/src/identity/` (no runtime dep, and the storage OAuth in `oauth/` is hand-rolled anyway) or a maintained alternative. `IdentityProvider` interface in `apps/api/src/identity/` returns `{ providerId, subject, email, emailVerified, name }`. Adding Facebook or Apple is a new adapter + registration; Facebook would additionally need an email-confirmation fallback (email is not guaranteed from Meta) and Meta App Review with a data-deletion URL, so it is deferred.
@@ -570,7 +570,8 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [ ] `docs/self-hosting.md`: Cloudflare account, `wrangler login`, D1 create + migrate, `wrangler secret put` for each key, registering Google/Entra/Dropbox apps named `skysa-notes` with callback URLs, expected "unverified app" screens, custom domain
 - [ ] `pnpm setup` script that prompts for provider credentials and writes secrets; `pnpm deploy` = build web + `wrangler deploy`
 - [ ] Verify a clean clone deploys end to end on a fresh Cloudflare account
-- [ ] GitHub Actions: lint, typecheck, contract tests, round-trip suite, `wrangler deploy --dry-run`; changesets for versioning, tags `vX.Y.Z`
+- [x] GitHub Actions: format, lint, typecheck, the whole test suite (contract and round-trip included) and `wrangler deploy --dry-run`, on every PR and every push to `main`
+- [ ] Changesets for versioning, tags `vX.Y.Z`
 - [ ] Repo hygiene: branch protection on `main`, Dependabot (npm + actions, weekly, grouped), issue templates, Discussions for support, `SECURITY.md` with private vulnerability reporting, `.dev.vars.example`
 
 ### Phase 9 — Account-first identity mode (optional, 2–3 days)
@@ -596,7 +597,7 @@ apps/
       editor/                 # RichEditor (Milkdown), RawEditor (CodeMirror), ModeToggle, shared autosave hook
       store/                  # Dexie db, notes.ts, folders.ts
       sync/                   # scheduler.ts (triggers, visibility, online events) — wraps core engine
-      api/                    # typed client for apps/api (SWR hooks)
+      api/                    # typed client for apps/api
   api/                        # Hono on Cloudflare Workers
     wrangler.toml             # D1 binding, [assets] → ../web/dist
     src/
