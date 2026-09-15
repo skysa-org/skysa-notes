@@ -319,6 +319,24 @@ export const describeProviderContract = (
 				}
 			});
 
+			it('accepts a move to where the entry already is', config, async () => {
+				// Not hypothetical: the engine performs a rename on the push
+				// path when it finds one queued behind a write, after which the
+				// queued `move` names the path the file is already at. The
+				// ordered queue stops on a failed op, so an adapter that reports
+				// this as an error — Dropbox's `files/move_v2` answers
+				// `duplicated_or_nested_paths` for identical paths — strands
+				// every op behind it. Adapters detect it and do nothing.
+				const provider = await open();
+				const entry = await seedFile(provider, 'a.md', 'body\n');
+
+				const moved = await provider.move(entry, 'a.md');
+
+				expect(moved.path).toBe('a.md');
+				expect((await provider.read(moved)).content).toBe('body\n');
+				expect(paths(await provider.list(''))).toContain('a.md');
+			});
+
 			it('refuses to move onto an occupied path', config, async () => {
 				const provider = await open();
 				const a = await seedFile(provider, 'a.md');

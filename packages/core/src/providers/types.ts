@@ -81,6 +81,13 @@ export interface WriteOptions {
  * - `move` may or may not change `version` — Dropbox's `rev` survives a move,
  *   OneDrive's `eTag` does not — so the caller stores the returned entry rather
  *   than assuming either way.
+ * - `move` to the path the entry is already at succeeds and changes nothing.
+ *   The engine renames on the push path when it finds a rename queued behind a
+ *   write, which leaves the queued `move` naming a path the file has already
+ *   reached; the queue is ordered and stops on a failed op, so an adapter that
+ *   reported this as an error would strand everything behind it. Dropbox's
+ *   `files/move_v2` answers `duplicated_or_nested_paths` here, so its adapter
+ *   has to check before sending.
  * - `list` is one level; `changes` covers the whole tree at every depth.
  * - Neither filters hidden paths: `.notesapp.json` has to reach the engine.
  *   Callers filter with `isHidden`.

@@ -30,6 +30,25 @@ describe('strictness the contract cannot require', () => {
 		await expect(provider.createFolder('Nowhere/Deep')).rejects.toThrow(NotFoundError);
 	});
 
+	it('does not resolve a deleted id to whatever now holds the path', async () => {
+		// Ids are never reused here, so a caller naming a deleted one is naming
+		// a file that is gone. An id-addressed provider (Drive, Graph) answers
+		// 404; falling back to the path would quietly act on a stranger's file,
+		// and a fake that forgives that hides engine bugs rather than finding
+		// them.
+		const provider = await ready();
+		const first = await provider.write('a.md', 'one\n', {});
+		await provider.delete(first);
+		await provider.write('a.md', 'two\n', {});
+
+		await expect(provider.read({ remoteId: first.remoteId, path: 'a.md' })).rejects.toThrow(
+			NotFoundError
+		);
+		await expect(
+			provider.move({ remoteId: first.remoteId, path: 'a.md' }, 'b.md')
+		).rejects.toThrow(NotFoundError);
+	});
+
 	it('gives a new version to every write, even one that changes nothing', async () => {
 		const provider = await ready();
 		const first = await provider.write('a.md', 'same\n', {});

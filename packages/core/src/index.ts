@@ -59,6 +59,33 @@ export {
 	type FakeProviderOptions,
 } from './providers/fake.js';
 
+export {
+	conflictContent,
+	conflictFilename,
+	conflictPath,
+	conflictStamp,
+} from './sync/conflicts.js';
+
+export {
+	createSyncEngine,
+	type SyncEngine,
+	type SyncEngineOptions,
+	type SyncOutcome,
+	type SyncStatus,
+} from './sync/engine.js';
+
+export type {
+	ConflictResolution,
+	OpOutcome,
+	PullBatch,
+	PullChange,
+	SyncFolder,
+	SyncNote,
+	SyncOp,
+	SyncOperation,
+	SyncStore,
+} from './sync/store.js';
+
 export * from './hash.js';
 export * from './markdown/index.js';
 export * from './paths.js';

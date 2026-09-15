@@ -1,4 +1,4 @@
-import { basename, parentPath, ROOT } from '@skysa/core';
+import { ancestorPaths, basename, parentPath, ROOT } from '@skysa/core';
 
 /**
  * Flat folder paths in, a nested tree out. Kept pure and separate from the
@@ -12,12 +12,6 @@ export interface FolderNode {
 	/** Number of live notes directly inside this folder. */
 	noteCount: number;
 }
-
-/** Every ancestor of a path, outermost first, excluding the root. */
-export const ancestorPaths = (path: string): string[] => {
-	const parent = parentPath(path);
-	return parent === ROOT ? [] : [...ancestorPaths(parent), parent];
-};
 
 export interface BuildFolderTreeInput {
 	paths: readonly string[];
