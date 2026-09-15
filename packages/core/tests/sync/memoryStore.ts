@@ -31,6 +31,14 @@ export interface MemoryStore extends SyncStore {
 	readonly queue: (op: Omit<SyncOp, 'seq' | 'attempts'> & { attempts?: number }) => SyncOp;
 	/** Fail the next `applyPull`, to prove the cursor does not move without it. */
 	readonly breakNextApply: () => void;
+	/**
+	 * Every no-op the contract required this store to tolerate. The contract
+	 * says a `delete-note` for an id that is not here must succeed, because a
+	 * batch that rejects is a batch that is retried for ever — but an engine
+	 * that emits one is still wrong, so the engine tests assert this is empty
+	 * and the strictness is kept without the deadlock.
+	 */
+	readonly anomalies: () => string[];
 	readonly lastError: (seq: number) => string | undefined;
 }
 
@@ -41,6 +49,7 @@ export const createMemoryStore = (): MemoryStore => {
 	const state = new Map<'cursor', string>();
 	const counters = new Map<'seq', number>();
 	const flags = new Map<'break', boolean>();
+	const anomalies: string[] = [];
 
 	const nextSeq = (): number => {
 		const seq = (counters.get('seq') ?? 0) + 1;
@@ -93,15 +102,28 @@ export const createMemoryStore = (): MemoryStore => {
 	const noteAt = (path: string): SyncNote | undefined =>
 		[...notes.values()].find((note) => note.path === path);
 
+	/**
+	 * What a folder delete does to one note inside it. A dirty note survives as
+	 * a local-only note rather than being thrown away with the folder: an
+	 * unsaved edit outranks a remote deletion (CLAUDE.md — never lose user data).
+	 */
+	const detachOrDelete = (note: SyncNote): void => {
+		if (!note.dirty) {
+			notes.delete(note.id);
+			return;
+		}
+		const { remoteId: _id, remoteVersion: _version, ...rest } = note;
+		notes.set(note.id, rest);
+	};
+
 	const applyChange = (change: PullChange): void => {
 		if (change.kind === 'upsert-note') {
-			const existing =
-				[...notes.values()].find((note) => note.remoteId === change.remote.remoteId) ??
-				noteAt(change.path);
+			// The engine names the note; the store never guesses. Matching on the
+			// path here instead would overwrite whatever note happened to be
+			// sitting at a path the remote has since reused.
 			ensureFolderChain(parentPath(change.path));
-			const id = existing?.id ?? change.remote.remoteId;
-			notes.set(id, {
-				id,
+			notes.set(change.id, {
+				id: change.id,
 				path: change.path,
 				content: change.content,
 				remoteId: change.remote.remoteId,
@@ -130,12 +152,19 @@ export const createMemoryStore = (): MemoryStore => {
 			});
 			return;
 		}
-		if (change.kind === 'delete-note') {
-			notes.delete(requireNote(change.id).id);
-			return;
-		}
-		if (change.kind === 'detach-note') {
-			const { remoteId: _id, remoteVersion: _version, ...rest } = requireNote(change.id);
+		if (change.kind === 'delete-note' || change.kind === 'detach-note') {
+			const note = notes.get(change.id);
+			// Already gone. Saying so twice is a no-op, not a failure: see
+			// `anomalies` above.
+			if (note === undefined) {
+				anomalies.push(`${change.kind} for unknown note ${change.id}`);
+				return;
+			}
+			if (change.kind === 'delete-note') {
+				notes.delete(note.id);
+				return;
+			}
+			const { remoteId: _id, remoteVersion: _version, ...rest } = note;
 			notes.set(change.id, rest);
 			return;
 		}
@@ -155,11 +184,14 @@ export const createMemoryStore = (): MemoryStore => {
 		}
 		if (change.kind === 'delete-folder') {
 			// Everything beneath it, not just the row itself: a folder that is
-			// gone remotely cannot leave its subfolders behind.
+			// gone remotely cannot leave its subfolders behind, and it cannot
+			// leave its notes floating at paths whose folder no longer exists.
 			const gone = [...folders.values()].filter((folder) =>
 				isWithin(folder.path, change.path)
 			);
 			for (const folder of gone) folders.delete(folder.path);
+			const inside = [...notes.values()].filter((note) => isWithin(note.path, change.path));
+			for (const note of inside) detachOrDelete(note);
 			return;
 		}
 		applyConflict(change.resolution);
@@ -256,6 +288,11 @@ export const createMemoryStore = (): MemoryStore => {
 			Promise.resolve([...notes.values()].filter((note) => isWithin(note.path, folderPath))),
 		folderByRemoteId: (remoteId) =>
 			Promise.resolve([...folders.values()].find((folder) => folder.remoteId === remoteId)),
+		folderByPath: (path) => Promise.resolve(folders.get(path)),
+		foldersWithRemote: () =>
+			Promise.resolve(
+				[...folders.values()].filter((folder) => folder.remoteId !== undefined)
+			),
 
 		applyPull: (batch: PullBatch) => {
 			const before = snapshot();
@@ -312,5 +349,6 @@ export const createMemoryStore = (): MemoryStore => {
 			flags.set('break', true);
 		},
 		lastError: (seq) => ops.get(seq)?.lastError,
+		anomalies: () => [...anomalies],
 	};
 };

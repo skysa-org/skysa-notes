@@ -62,6 +62,15 @@ export type PullChange =
 	| Readonly<{
 			/** Remote is authoritative: create the note, or overwrite a clean one. */
 			kind: 'upsert-note';
+			/**
+			 * Which local note this is. The engine decides it — an existing note's
+			 * id, the `id` the file carries in its frontmatter, or a fresh one —
+			 * because only the engine knows whether the note it found at this path
+			 * is the same file or a different one that has since taken the name. A
+			 * store left to match on its own picks the wrong note the moment a
+			 * path is reused, and overwrites it.
+			 */
+			id: string;
 			path: string;
 			content: string;
 			remote: RemoteEntry;
@@ -79,12 +88,23 @@ export type PullChange =
 			path: string;
 			remote: RemoteEntry;
 	  }>
-	| Readonly<{ kind: 'delete-note'; id: string }>
+	| Readonly<{
+			/**
+			 * Gone remotely, with nothing local worth keeping. An id that is not
+			 * in the store must succeed and do nothing: rejecting would fail the
+			 * whole batch, and since the cursor moves only with the batch the
+			 * same one would be retried for ever, leaving the user with a sync
+			 * that never recovers on its own.
+			 */
+			kind: 'delete-note';
+			id: string;
+	  }>
 	| Readonly<{
 			/**
 			 * The remote copy is gone but the local one has unpushed edits. Keep
 			 * the note and forget the remote, so the next push re-creates it
-			 * rather than writing to a file that no longer exists.
+			 * rather than writing to a file that no longer exists. Tolerates an
+			 * unknown id for the same reason `delete-note` does.
 			 */
 			kind: 'detach-note';
 			id: string;
@@ -103,7 +123,17 @@ export type PullChange =
 			to: string;
 			remoteId?: string;
 	  }>
-	| Readonly<{ kind: 'delete-folder'; path: string }>
+	| Readonly<{
+			/**
+			 * The folder is gone remotely, and so is everything under it. The
+			 * store cascades — clean notes beneath are deleted, dirty ones are
+			 * detached and kept — rather than the engine listing them: a provider
+			 * that reports the descendants too would then name each note twice,
+			 * and the second mention would be a delete of something already gone.
+			 */
+			kind: 'delete-folder';
+			path: string;
+	  }>
 	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>;
 
 /**
@@ -179,6 +209,21 @@ export interface SyncStore {
 	 */
 	readonly notesUnder: (folderPath: string) => Promise<SyncNote[]>;
 	readonly folderByRemoteId: (remoteId: string) => Promise<SyncFolder | undefined>;
+	/**
+	 * Used to recognise a folder move reported as a deletion of the old path:
+	 * the deletion may carry no id at all, and the only way to tell it from a
+	 * real one is that the folder that used to be there is alive elsewhere in
+	 * the same batch.
+	 */
+	readonly folderByPath: (path: string) => Promise<SyncFolder | undefined>;
+	/**
+	 * Every folder that has ever been pushed. Only needed after a cursor reset,
+	 * where a full scan reports what exists and never what was removed: a
+	 * notebook deleted while the cursor was dead would otherwise sit in the
+	 * sidebar for ever with nothing behind it. Folders with no `remoteId` were
+	 * never in the scan to begin with and are not candidates.
+	 */
+	readonly foldersWithRemote: () => Promise<SyncFolder[]>;
 
 	/** Apply a pull batch and its cursor atomically. */
 	readonly applyPull: (batch: PullBatch) => Promise<void>;

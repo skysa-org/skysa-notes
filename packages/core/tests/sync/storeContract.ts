@@ -81,6 +81,28 @@ export const describeSyncStoreContract = (
 				expect(under.map((note) => note.id).sort()).toEqual(['n1', 'n2']);
 			});
 
+			it('finds a folder by path and by remote id', async () => {
+				const { store, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+
+				expect((await store.folderByPath('Work'))?.remoteId).toBe('f1');
+				expect((await store.folderByRemoteId('f1'))?.path).toBe('Work');
+				expect(await store.folderByPath('Nope')).toBeUndefined();
+			});
+
+			it('lists only the folders that have reached the remote', async () => {
+				// What a rescan reconciles against. A folder created here and not
+				// pushed yet was never in the scan, so treating it as missing
+				// would delete a notebook the moment the cursor died.
+				const { store, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seedFolder({ path: 'Fresh' });
+
+				expect((await store.foldersWithRemote()).map((folder) => folder.path)).toEqual([
+					'Work',
+				]);
+			});
+
 			it('has no cursor before the first pull', async () => {
 				const { store } = await harness();
 				expect(await store.cursor()).toBeUndefined();
@@ -94,6 +116,7 @@ export const describeSyncStoreContract = (
 					changes: [
 						{
 							kind: 'upsert-note',
+							id: 'n1',
 							path: 'a.md',
 							content: 'x\n',
 							remote: remote('a.md'),
@@ -116,6 +139,7 @@ export const describeSyncStoreContract = (
 					changes: [
 						{
 							kind: 'upsert-note',
+							id: 'n1',
 							path: 'a.md',
 							content: 'x\n',
 							remote: remote('a.md'),
@@ -127,7 +151,7 @@ export const describeSyncStoreContract = (
 				expect(await store.cursor()).toBeUndefined();
 			});
 
-			it('keeps a note identity when the remote updates it', async () => {
+			it('writes an updated note under the id the engine names', async () => {
 				const { store, seed } = await harness();
 				await seed({
 					id: 'n1',
@@ -140,6 +164,7 @@ export const describeSyncStoreContract = (
 					changes: [
 						{
 							kind: 'upsert-note',
+							id: 'n1',
 							path: 'a.md',
 							content: 'new\n',
 							remote: remote('a.md', 'r1', 'v2'),
@@ -199,6 +224,73 @@ export const describeSyncStoreContract = (
 				expect(note?.dirty).toBe(true);
 			});
 
+			it('takes the contents of a folder with it when the folder is deleted', async () => {
+				// The engine sends one `delete-folder` and nothing else, because a
+				// provider that reports only the folder gives it nothing else to
+				// send. A store that deleted just the row would leave every note
+				// inside it at a path with no folder — invisible in the sidebar,
+				// and still claiming a remote file that no longer exists.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seedFolder({ path: 'Work/Deep', remoteId: 'f2' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+				await seed({ id: 'n2', path: 'Work/Deep/b.md', content: 'x\n', remoteId: 'r2' });
+				await seed({ id: 'n3', path: 'Other/c.md', content: 'x\n', remoteId: 'r3' });
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				expect(await store.folderByPath('Work')).toBeUndefined();
+				expect(await store.folderByPath('Work/Deep')).toBeUndefined();
+				expect(await store.noteById('n1')).toBeUndefined();
+				expect(await store.noteById('n2')).toBeUndefined();
+				expect(await store.noteById('n3')).toBeDefined();
+			});
+
+			it('keeps an edited note when its folder is deleted remotely', async () => {
+				// Never lose user data (CLAUDE.md). The folder is gone, but the
+				// edit in it was never anywhere else, so the note survives as a
+				// local one rather than following the folder into the bin.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({
+					id: 'n1',
+					path: 'Work/a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					dirty: true,
+				});
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				const note = await store.noteById('n1');
+				expect(note?.content).toBe('mine\n');
+				expect(note?.remoteId).toBeUndefined();
+				expect(note?.dirty).toBe(true);
+			});
+
+			it('accepts a delete for a note that is already gone', async () => {
+				// A provider that reports a folder deletion recursively names the
+				// folder and then everything that was in it, and the folder took
+				// them already. A store that rejected would fail the batch, and
+				// the cursor moves only with the batch — so the same batch would
+				// be retried for ever and the user's sync would never recover.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'delete-folder', path: 'Work' },
+						{ kind: 'delete-note', id: 'n1' },
+						{ kind: 'detach-note', id: 'n1' },
+					],
+					cursor: 'c1',
+				});
+
+				expect(await store.noteById('n1')).toBeUndefined();
+				expect(await store.cursor()).toBe('c1');
+			});
+
 			it('rolls the whole batch back when part of it fails', async () => {
 				// The cursor and the changes it describes are one promise. A
 				// cursor stored ahead of its batch skips work that never
@@ -212,6 +304,7 @@ export const describeSyncStoreContract = (
 						changes: [
 							{
 								kind: 'upsert-note',
+								id: 'n2',
 								path: 'b.md',
 								content: 'y\n',
 								remote: remote('b.md', 'r2'),
