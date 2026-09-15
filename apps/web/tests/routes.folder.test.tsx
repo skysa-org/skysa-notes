@@ -76,6 +76,26 @@ describe('making a notebook that cannot be made', () => {
 		});
 	});
 
+	/**
+	 * A note is the other thing this screen makes, and it fails more quietly:
+	 * there is no name field to leave open, just a button that does nothing.
+	 */
+	it('says so when a note cannot be made either', async () => {
+		const digest = crypto.subtle.digest.bind(crypto.subtle);
+		crypto.subtle.digest = () => Promise.reject(new Error('no'));
+		try {
+			const user = userEvent.setup();
+			await createFolder(db, { parentPath: undefined, name: 'Work' });
+			await openApp();
+
+			await user.click(await screen.findByRole('button', { name: 'New note' }));
+
+			expect((await screen.findByRole('alert')).textContent).toContain('note');
+		} finally {
+			crypto.subtle.digest = digest;
+		}
+	});
+
 	it('says nothing when the notebook is made', async () => {
 		const user = userEvent.setup();
 		await openApp();

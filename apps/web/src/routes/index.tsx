@@ -32,18 +32,18 @@ const Home = () => {
 	const openNote = useNote(noteId);
 
 	/**
-	 * Why the last notebook could not be made. `createFolder` rejects on a
-	 * duplicate name, and the field has already closed by then, so without
-	 * somewhere to put this the user types a name, presses Enter, and nothing
-	 * whatsoever happens.
+	 * Why the last thing the user asked for did not happen. Creating a notebook
+	 * or a note can reject — a duplicate name is the everyday case — and by then
+	 * the name field has closed and the click is over, so without somewhere to
+	 * put this the user acts and the app shows nothing at all.
 	 */
-	const [folderError, setFolderError] = useState<string | null>(null);
+	const [problem, setProblem] = useState<string | null>(null);
 
 	const select = (next: Partial<AppSearch>) => {
 		// Anything else the user does answers the banner: it is about the name they
 		// just tried, not about the app, and leaving it up means a message about a
 		// notebook they have since moved on from sits there for the session.
-		setFolderError(null);
+		setProblem(null);
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
 
@@ -51,22 +51,30 @@ const Home = () => {
 		// The root holds loose notes that arrived from the remote folder; the app
 		// does not add to them (docs/PLAN.md §12.6).
 		if (folder === undefined || folder === ROOT) return;
-		void createNote(db, { folderPath: folder }).then((created) => {
-			select({ note: created.id });
-		});
+		setProblem(null);
+		void createNote(db, { folderPath: folder })
+			.then((created) => {
+				select({ note: created.id });
+			})
+			// Rarer than a duplicate notebook name — this one needs the store
+			// itself to refuse — but the same silence if it happens: the button
+			// does nothing and the failure goes to the console.
+			.catch(() => {
+				setProblem('That note could not be made.');
+			});
 	};
 
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
 		// `createFolder` throws on a duplicate name, and the field has already
 		// closed by the time it does: without this the user types a name, presses
 		// Enter, and nothing whatsoever happens — plus an unhandled rejection.
-		setFolderError(null);
+		setProblem(null);
 		void createFolder(db, { parentPath, name })
 			.then((created) => {
 				select({ folder: folderToSearch(created.path) });
 			})
 			.catch((error: unknown) => {
-				setFolderError(
+				setProblem(
 					error instanceof FolderExistsError
 						? `There is already a notebook called “${error.folderName}” here.`
 						: 'That notebook could not be made.'
@@ -80,9 +88,9 @@ const Home = () => {
 		// pushes the note view into a clipped second row, so anything that sits
 		// above the panes goes in the frame around them instead.
 		<div className="app-frame">
-			{folderError !== null && (
+			{problem !== null && (
 				<p className="banner" role="alert">
-					{folderError}
+					{problem}
 				</p>
 			)}
 			<div className="app-shell">

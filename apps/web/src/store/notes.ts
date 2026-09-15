@@ -191,7 +191,11 @@ export const listNotes = async (
  *
  * `Dexie.waitFor` is what keeps the transaction alive across the digest: an
  * ordinary `await` on a promise Dexie did not create lets the transaction
- * commit early, which is the bug again with extra steps.
+ * commit early, which is the bug again with extra steps. Pass it a promise
+ * that has already been started — never `() => …`, which reads as the same
+ * thing and is not: `waitFor` runs a function argument under
+ * `ignoreTransaction`, outside the very transaction it is here to hold, and
+ * the wait then times out sixty seconds later with everything rolled back.
  *
  * `change` runs inside the transaction and may read the database itself. That
  * is not a convenience: deciding what to write is half of the read-modify-write
@@ -371,7 +375,13 @@ export const importNoteFile = async (
 	// urgently: this one writes `dirty: 0`. An import that lands in the middle of
 	// a local save does not merely overwrite the user's paragraph, it also marks
 	// the note clean, so nothing will ever push what it overwrote.
-	return db.transaction('rw', db.notes, async () => {
+	//
+	// `folders` is in scope although nothing here touches it, so that every
+	// writer in this file takes the same scope. A caller that wraps several of
+	// these in one transaction of its own — which is what a sync pull batch will
+	// be — has then only one scope to open, instead of a `SubTransactionError`
+	// the first time it reaches the one writer that asked for less.
+	return db.transaction('rw', db.notes, db.folders, async () => {
 		const existing =
 			parsed.id === undefined
 				? await db.notes
