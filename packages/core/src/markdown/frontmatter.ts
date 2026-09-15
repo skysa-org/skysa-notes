@@ -21,6 +21,9 @@ export interface SplitDocument {
 	body: string;
 }
 
+/** The fields the app reads out of a frontmatter block; see `NoteFrontmatter`. */
+const KNOWN_KEYS = ['id', 'title', 'created', 'updated', 'tags'] as const;
+
 /**
  * Parse YAML, yielding the mapping only if that is what it is. Never throws.
  *
@@ -35,9 +38,11 @@ export interface SplitDocument {
  * which is then what the next reader parses. Recovering what is readable is the
  * only reading that keeps a note the note it was.
  *
- * What the app does with the recovered fields is only ever to display them.
- * `writeFrontmatter` still refuses to rewrite a block with errors in it, so the
- * user's file is never edited on the strength of a guess.
+ * A recovered field is not only displayed — `id` is the note's primary key,
+ * `created`/`updated` become its timestamps, `tags` become its tags — so
+ * recovery is a claim about the file, not a cosmetic one. What does not happen
+ * is the reverse: `writeFrontmatter` refuses to rewrite a block with errors in
+ * it, so a guess never goes back into the user's file.
  */
 const readMapping = (yaml: string | null): Record<string, unknown> | undefined => {
 	if (yaml === null) return undefined;
@@ -46,11 +51,15 @@ const readMapping = (yaml: string | null): Record<string, unknown> | undefined =
 		const data: unknown = doc.toJS();
 		if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined;
 		const record = data as Record<string, unknown>;
-		// Recovery on its own is not evidence. `: : :` recovers as a mapping too
-		// — `{'': {'': {'': null}}}` — and that is a stray line between two
-		// thematic breaks, not a note's metadata. A document the parser had to
-		// repair has to have named something before it counts.
-		if (doc.errors.length > 0 && !Object.keys(record).some((key) => key !== '')) {
+		// Recovery on its own is not evidence, and it is cheap: `yaml` will make
+		// a mapping out of almost any prose that contains a colon, so
+		// `---\nNext steps: see below\n- do the thing\n---` recovers too, and
+		// swallowing that takes a section of the user's note out of the editor
+		// where they can no longer see or delete it. A document the parser had
+		// to repair therefore has to carry a key this app actually reads before
+		// it counts as frontmatter — which the malformed metadata this is here
+		// for always does, and a paragraph of prose essentially never does.
+		if (doc.errors.length > 0 && !KNOWN_KEYS.some((key) => key in record)) {
 			return undefined;
 		}
 		return record;
@@ -100,8 +109,6 @@ export interface NoteFrontmatter {
 	updated?: string;
 	tags?: string[];
 }
-
-const KNOWN_KEYS = ['id', 'title', 'created', 'updated', 'tags'] as const;
 
 const asString = (value: unknown): string | undefined => {
 	if (typeof value === 'string') return value;

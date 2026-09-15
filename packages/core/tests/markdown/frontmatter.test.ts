@@ -75,11 +75,33 @@ describe('splitFrontmatter', () => {
 				body: 'Body\n',
 			});
 		});
+	});
 
-		it(`is still inverted exactly by joinFrontmatter: ${what}`, () => {
-			const source = `---\n${yaml}\n---\nBody\n`;
-			const { frontmatter, body } = splitFrontmatter(source);
-			expect(joinFrontmatter(frontmatter, body)).toBe(source);
+	/**
+	 * The other half of recovery, and the half that decides how much of the
+	 * user's writing it costs. `yaml` will make a mapping out of almost any
+	 * prose containing a colon, so recovery on its own admits far too much:
+	 * every one of these is an ordinary note that happens to open with a rule,
+	 * and swallowing it takes that section out of the editor, where the user can
+	 * no longer read it, change it, or delete it.
+	 *
+	 * A document the parser had to repair therefore has to carry a key the app
+	 * actually reads before it counts as frontmatter.
+	 */
+	const notFrontmatter = {
+		'a line with a colon in it': 'Next steps: see below\n- Do the thing',
+		'two of them': 'Note: first point\nNote: second point',
+		'a tab-indented list under one': 'Agenda: today\n\t- one\n\t- two',
+		'a checklist': 'Status: open\n- [ ] one\n- [x] two',
+		'a code fence': 'Example: run this\n```sh\nls\n```',
+		'a block quote': 'Quote: someone said\n> hello',
+		'ratios and an unclosed quote': 'Ratio: 3:1\nMix: 2:1:1\nOther: "unclosed',
+	};
+
+	Object.entries(notFrontmatter).forEach(([what, text]) => {
+		it(`leaves prose in the body even though YAML can read it: ${what}`, () => {
+			const source = `---\n${text}\n---\nBody\n`;
+			expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
 		});
 	});
 
@@ -204,6 +226,26 @@ describe('writeFrontmatter', () => {
 	it('never rewrites YAML it cannot parse', () => {
 		const broken = ': : :';
 		expect(writeFrontmatter(broken, { title: 'New' })).toBe(broken);
+	});
+
+	/**
+	 * Known limitation, pinned here so it stays a decision rather than a
+	 * surprise: a block the parser had to recover from is readable but not
+	 * editable, so a patch to one is dropped. `readFrontmatter` will now find
+	 * the note's `id` in it, which is what makes the note survive at all — but
+	 * a rename or a tag edit reaches the app's own row and never reaches the
+	 * file, and the user is told nothing.
+	 *
+	 * The alternative is to rebuild the block from what the parser recovered,
+	 * which would silently write `title: oop` over the user's `title: "oops`.
+	 * Refusing is the safer half of a choice with no good half; the place where
+	 * refusing is not acceptable is `conflictContent`, which cannot let two
+	 * files claim one id and therefore rebuilds — see `sync/conflicts.ts`.
+	 */
+	it('drops a patch to a block the parser had to recover from', () => {
+		const recovered = 'id: abc\ntitle: Real\ntitle: Real';
+		expect(writeFrontmatter(recovered, { title: 'New' })).toBe(recovered);
+		expect(readFrontmatter(writeFrontmatter(recovered, { title: 'New' })).title).toBe('Real');
 	});
 
 	it('round-trips through split and join', () => {

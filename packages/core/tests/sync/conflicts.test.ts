@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { splitFrontmatter } from '../../src/markdown/frontmatter.js';
+import { readFrontmatter, splitFrontmatter } from '../../src/markdown/frontmatter.js';
 import {
 	conflictContent,
 	conflictFilename,
@@ -124,5 +124,43 @@ describe('conflictContent', () => {
 		const copy = conflictContent('# Just markdown\n', 'fresh-id');
 		expect(copy).toContain('id: fresh-id');
 		expect(copy).toContain('# Just markdown');
+	});
+
+	/**
+	 * A block the YAML parser had to recover from is still frontmatter, and
+	 * still carries the note's id — but it cannot be edited in place, because
+	 * rewriting a guess would put words in the user's file. The copy therefore
+	 * has to be given a block of its own, or it goes out claiming to be the very
+	 * note it was copied from, which is the one outcome this function exists to
+	 * prevent.
+	 */
+	describe('when the frontmatter is malformed', () => {
+		const malformed = [
+			'---',
+			'id: original-id',
+			'title: Notes',
+			'title: Notes',
+			'---',
+			'',
+			'# Notes',
+			'',
+		].join('\n');
+
+		it('still gives the copy an identity of its own', () => {
+			const copy = conflictContent(malformed, 'fresh-id');
+			expect(readFrontmatter(splitFrontmatter(copy).frontmatter).id).toBe('fresh-id');
+			expect(copy).not.toContain('original-id');
+		});
+
+		it('keeps what the parser could read', () => {
+			const copy = conflictContent(malformed, 'fresh-id');
+			expect(readFrontmatter(splitFrontmatter(copy).frontmatter).title).toBe('Notes');
+		});
+
+		it('keeps the body', () => {
+			expect(splitFrontmatter(conflictContent(malformed, 'fresh-id')).body).toContain(
+				'# Notes'
+			);
+		});
 	});
 });

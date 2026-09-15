@@ -1,5 +1,5 @@
 import { NOTE_EXTENSION } from '../config.js';
-import { splitFrontmatter } from '../markdown/frontmatter.js';
+import { readFrontmatter, splitFrontmatter } from '../markdown/frontmatter.js';
 import { serializeNoteFile } from '../markdown/note.js';
 import { basename, replaceBasename } from '../paths.js';
 
@@ -94,5 +94,25 @@ export const conflictPath = (path: string, at: Date, taken: Iterable<string> = [
  */
 export const conflictContent = (localContent: string, id: string): string => {
 	const { frontmatter, body } = splitFrontmatter(localContent);
-	return serializeNoteFile({ frontmatter, body, metadata: { id } });
+	const written = serializeNoteFile({ frontmatter, body, metadata: { id } });
+	if (readFrontmatter(splitFrontmatter(written).frontmatter).id === id) return written;
+
+	// The patch did not land. `writeFrontmatter` will not edit a block the YAML
+	// parser had to recover from — rewriting a guess would put words in the
+	// user's file — so it handed the block back unchanged, id and all, and the
+	// copy would have gone out claiming to be the note it was copied from.
+	//
+	// Checked by reading the result rather than by asking whether the block is
+	// well formed: this has to be true of whatever `serializeNoteFile` does, not
+	// of what it does today.
+	//
+	// So the copy gets a block built from everything the parser could read, plus
+	// the new id. Keys this app does not know about are lost, and only here: the
+	// original file keeps the path and every one of its bytes, which is the half
+	// of the pair the user's own text is in.
+	return serializeNoteFile({
+		frontmatter: null,
+		body,
+		metadata: { ...readFrontmatter(frontmatter), id },
+	});
 };
