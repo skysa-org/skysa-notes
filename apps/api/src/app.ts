@@ -62,7 +62,12 @@ export const createApp = (options: CreateAppOptions) => {
 	const doFetch: FetchLike = (url, init) =>
 		(options.fetch ?? globalThis.fetch)(url, {
 			...init,
-			signal: init.signal ?? AbortSignal.timeout(providerTimeoutMs),
+			// Combined, not replaced: a caller that brings its own signal keeps it
+			// *and* gets the deadline.
+			signal: AbortSignal.any([
+				...(init.signal === null || init.signal === undefined ? [] : [init.signal]),
+				AbortSignal.timeout(providerTimeoutMs),
+			]),
 		});
 
 	/**

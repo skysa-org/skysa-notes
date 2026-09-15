@@ -93,11 +93,15 @@ export const issueSession = async (
 export const currentUserId = async (
 	c: Context,
 	db: Database,
-	options?: SessionCookieOptions,
+	options: SessionCookieOptions,
 	now = Date.now()
 ): Promise<string | undefined> => {
-	const name = sessionCookieName(options?.secure ?? true);
-	const id = getCookie(c, name) ?? getCookie(c, sessionCookieName(false));
+	// Exactly one name, never a fallback to the other. A secure deployment that
+	// also accepted the bare `skysa_session` would be accepting precisely the
+	// cookie a sibling subdomain can set, which is the whole thing `__Host-`
+	// exists to prevent — and `slide` would then promote the planted value to a
+	// `__Host-` cookie on the next request.
+	const id = getCookie(c, sessionCookieName(options.secure));
 	if (id === undefined || id === '') return undefined;
 
 	const row = await db.query.sessions.findFirst({
@@ -105,10 +109,7 @@ export const currentUserId = async (
 	});
 	if (row === undefined) return undefined;
 
-	if (
-		options !== undefined &&
-		row.expiresAt.getTime() - now < SESSION_DAYS * DAY_MS - SLIDE_AFTER_MS
-	) {
+	if (row.expiresAt.getTime() - now < SESSION_DAYS * DAY_MS - SLIDE_AFTER_MS) {
 		await slide(c, db, row.id, options, now);
 	}
 	return row.userId;

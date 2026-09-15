@@ -57,6 +57,18 @@ describe('the node:sqlite D1 shim', () => {
 
 	it('refuses to answer a join rather than answering it wrongly', async () => {
 		const db = createD1();
+		await db
+			.prepare(
+				'INSERT INTO users (id, email, email_verified, created_at) VALUES (?, ?, 0, 0)'
+			)
+			.bind('user-1', 'u@example.com')
+			.run();
+		await db
+			.prepare(
+				'INSERT INTO connections (id, user_id, provider, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+			)
+			.bind('connection-1', 'user-1', 'dropbox', 'x', 'c', 'i', 'k1')
+			.run();
 
 		// Node 22 has no `StatementSync.columns()`, so duplicate column names in a
 		// join would silently collapse and shift every later column left. Whether
@@ -72,7 +84,9 @@ describe('the node:sqlite D1 shim', () => {
 			(error: unknown) => ({ ok: false as const, error })
 		);
 
-		if (outcome.ok) expect(outcome.rows).toEqual([]);
+		// Two columns both named `id`. Against empty tables this test would pass
+		// whether or not they collapsed, which is why there is a row in them.
+		if (outcome.ok) expect(outcome.rows).toEqual([['user-1', 'connection-1']]);
 		else expect(String(outcome.error)).toContain('duplicate column names would collapse');
 	});
 });

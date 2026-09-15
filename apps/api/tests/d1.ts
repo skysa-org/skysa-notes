@@ -85,7 +85,14 @@ const statement = (db: DatabaseSync, sql: string, params: readonly Param[]) => {
 		 */
 		raw: () => {
 			const columns = describe(db, sql);
-			if (columns === undefined && /\bjoin\b/i.test(sql)) {
+			// Duplicate names collapse in the row object whether or not this Node
+			// can name the columns, so both branches have to refuse them: with
+			// `columns()` the duplicate is visible, without it a join is the proxy.
+			const ambiguous =
+				columns === undefined
+					? /\bjoin\b/i.test(sql)
+					: new Set(columns).size !== columns.length;
+			if (ambiguous) {
 				return Promise.reject(
 					new Error(
 						'the node:sqlite D1 shim cannot return positional rows for a join on ' +

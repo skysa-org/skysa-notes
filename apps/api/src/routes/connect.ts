@@ -149,8 +149,32 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// hours with no way to recover, so this is a failure, not a warning.
 		if (tokens.refreshToken === undefined) return c.json({ error: 'no_refresh_token' }, 502);
 
+		// In storage-first the account id *is* the identity. Without one there is
+		// no way to tell a returning user from a new one, and guessing means
+		// stranding the old user's connection with a refresh token nobody can
+		// reach to revoke. Dropbox always sends it; a response without one is a
+		// failure, not something to work around.
+		if (sessionUser === undefined && tokens.accountId === undefined) {
+			return c.json({ error: 'no_account_id' }, 502);
+		}
+
 		const displayName = await accountName(doFetch, tokens.accessToken);
 		const now = Date.now();
+
+		// Storage-first treats the account as the identity, so an account already
+		// connected to somebody else is not a second claim on it — it is either
+		// two people sharing a login, or an attempt to reach that account's notes.
+		// Either way the answer is no, and refusing here is what keeps `adopt`
+		// unambiguous.
+		const claimed = await claimedBy(db, tokens.accountId);
+		if (
+			config.authMode === 'storage-first' &&
+			claimed !== undefined &&
+			claimed !== (sessionUser ?? claimed)
+		) {
+			return c.json({ error: 'account_already_connected' }, 409);
+		}
+
 		const userId = sessionUser ?? (await adopt(c, db, config, tokens, displayName, now));
 		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
 
@@ -183,6 +207,29 @@ export const connectRoutes = (doFetch: FetchLike) => {
  * Returns undefined in `account-first`, where a connection may only attach to a
  * user who signed in first.
  */
+/**
+ * Which user, if any, already holds this provider account.
+ *
+ * Storage-first refuses a second claim outright, so there is normally one row to
+ * find. The ordering is for `account-first`, where the index is deliberately not
+ * unique and two users may legitimately connect the same account: an unordered
+ * `findFirst` would answer by row order, which is no answer at all.
+ */
+const claimedBy = async (
+	db: Database,
+	accountId: string | undefined
+): Promise<string | undefined> => {
+	if (accountId === undefined) return undefined;
+	const row = await db.query.connections.findFirst({
+		where: and(
+			eq(schema.connections.provider, 'dropbox'),
+			eq(schema.connections.accountId, accountId)
+		),
+		orderBy: (connections, { asc }) => [asc(connections.createdAt), asc(connections.id)],
+	});
+	return row?.userId;
+};
+
 const adopt = async (
 	c: Parameters<typeof issueSession>[0],
 	db: Database,
@@ -193,19 +240,10 @@ const adopt = async (
 ): Promise<string | undefined> => {
 	if (config.authMode !== 'storage-first') return undefined;
 
-	const known =
-		tokens.accountId === undefined
-			? undefined
-			: await db.query.connections.findFirst({
-					where: and(
-						eq(schema.connections.provider, 'dropbox'),
-						eq(schema.connections.accountId, tokens.accountId)
-					),
-				});
-
+	const known = await claimedBy(db, tokens.accountId);
 	if (known !== undefined) {
-		await issueSession(c, db, known.userId, { secure: config.cookiesSecure }, now);
-		return known.userId;
+		await issueSession(c, db, known, { secure: config.cookiesSecure }, now);
+		return known;
 	}
 
 	const id = randomBase64Url(16);

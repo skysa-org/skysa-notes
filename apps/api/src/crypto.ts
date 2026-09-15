@@ -166,14 +166,16 @@ export const verify = async (
 	value: string,
 	signature: string
 ): Promise<boolean> => {
-	try {
-		return await crypto.subtle.verify(
-			'HMAC',
-			key,
-			fromBase64(signature),
-			new TextEncoder().encode(value)
-		);
-	} catch {
-		return false;
-	}
+	// Only the decode is guarded: a failure inside `crypto.subtle.verify` itself
+	// would be a bug worth seeing, not a signature to reject quietly.
+	const decoded = ((): Uint8Array | undefined => {
+		try {
+			return fromBase64(signature);
+		} catch {
+			return undefined;
+		}
+	})();
+	if (decoded === undefined) return false;
+
+	return crypto.subtle.verify('HMAC', key, decoded, new TextEncoder().encode(value));
 };

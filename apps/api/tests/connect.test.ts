@@ -315,12 +315,15 @@ describe('callback', () => {
 	it('replaces the connection on reconnect instead of accumulating one per attempt', async () => {
 		const app = buildApp({
 			script: {
+				// A different account each time, so this is the replace-not-accumulate
+				// path rather than the same-account one two tests below.
 				exchange: (code) =>
 					new Response(
 						JSON.stringify({
 							access_token: 'a',
 							refresh_token: `refresh-${code}`,
 							expires_in: 14400,
+							account_id: `dbid:${code}`,
 						}),
 						{ headers: { 'content-type': 'application/json' } }
 					),
@@ -457,7 +460,7 @@ describe('what the first draft got wrong', () => {
 		expect(after?.secretCiphertext).toBe(before?.secretCiphertext);
 	});
 
-	it('will not create a user through the callback in account-first mode', async () => {
+	it('refuses a callback whose session ended after the flow began', async () => {
 		const bootstrap = buildApp();
 		const { jar } = await bootstrap.connect();
 		const accountFirst = buildApp({ config: testConfig({ authMode: 'account-first' }) });
@@ -474,13 +477,14 @@ describe('what the first draft got wrong', () => {
 		jar.absorb(await send('/api/auth/connect/dropbox/start'));
 		const state = flowStateOf(jar);
 
-		// Sign out between the start and the callback. The guard used to live only
-		// on `/start`, so the callback happily minted a brand new user — exactly
-		// the account creation that account-first exists to forbid.
+		// Signing out between the start and the callback means the session that
+		// began the flow is gone. The sibling test below is the one that pins the
+		// account-first guard; this one pins the binding.
 		jar.absorb(await bootstrap.request('/api/auth/logout', { method: 'POST', cookies: jar }));
 
 		const response = await send(`/api/auth/connect/dropbox/callback?code=c&state=${state}`);
 		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: 'session_mismatch' });
 		expect(await createDb(bootstrap.db).select().from(schema.users)).toHaveLength(1);
 	});
 
@@ -589,5 +593,141 @@ describe('what the first draft got wrong', () => {
 		);
 		// `?` twice makes `connect=ok` part of the previous parameter's value.
 		expect(response.headers.get('location')).toBe('/notes?folder=Inbox&connect=ok');
+	});
+});
+
+/** Round two: bugs the first round of fixes introduced or left half-closed. */
+describe('what the fixes got wrong', () => {
+	it('ignores a bare session cookie on a deployment that uses __Host-', async () => {
+		const app = buildApp({
+			script: {
+				exchange: (code) =>
+					new Response(
+						JSON.stringify({
+							access_token: 'a',
+							refresh_token: `refresh-${code}`,
+							expires_in: 14400,
+							account_id: `dbid:${code}`,
+						}),
+						{ headers: { 'content-type': 'application/json' } }
+					),
+			},
+		});
+
+		// The attacker connects normally and keeps their session id.
+		const attacker = createJar();
+		attacker.absorb(
+			await app.request('/api/auth/connect/dropbox/start', { cookies: attacker })
+		);
+		attacker.absorb(
+			await app.request(
+				`/api/auth/connect/dropbox/callback?code=attacker&state=${flowStateOf(attacker)}`,
+				{ cookies: attacker }
+			)
+		);
+		const planted = attacker.get(cookieNames.session) ?? '';
+
+		// The victim's browser carries only the bare name — the one a sibling
+		// subdomain can set, and the one `__Host-` exists to make unusable. Read it
+		// as a fallback and the victim's Dropbox account lands under the
+		// attacker's user, reachable through the attacker's own `/api/token`.
+		const victim = createJar();
+		victim.set(cookieNames.insecure.session, planted);
+		victim.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: victim }));
+		victim.absorb(
+			await app.request(
+				`/api/auth/connect/dropbox/callback?code=victim&state=${flowStateOf(victim)}`,
+				{ cookies: victim }
+			)
+		);
+
+		const drizzle = createDb(app.db);
+		// Two users: the victim became their own, not the attacker.
+		expect(await drizzle.select().from(schema.users)).toHaveLength(2);
+
+		const rows = await drizzle.select().from(schema.connections);
+		const attackerConnection = rows.find((row) => row.accountId === 'dbid:attacker');
+		const victimConnection = rows.find((row) => row.accountId === 'dbid:victim');
+		expect(attackerConnection?.userId).not.toBe(victimConnection?.userId);
+	});
+
+	it('does not promote a planted bare cookie to a __Host- one', async () => {
+		const app = buildApp();
+		const { jar } = await app.connect();
+		const planted = jar.get(cookieNames.session) ?? '';
+
+		const bare = createJar();
+		bare.set(cookieNames.insecure.session, planted);
+		const response = bare.absorb(await app.request('/api/connections', { cookies: bare }));
+
+		// Sliding used to re-issue under the prefixed name, so one request turned
+		// an attacker's plantable cookie into an unplantable one.
+		expect(response.status).toBe(401);
+		expect(bare.get(cookieNames.session)).toBeUndefined();
+	});
+
+	it('refuses an account another user has already connected', async () => {
+		const app = buildApp();
+		await app.connect(createJar(), 'dbid:shared');
+		const { jar: second } = await app.connect(createJar(), 'dbid:b');
+
+		// In storage-first the account *is* the identity, so a second claim on it
+		// is either two people sharing a login or an attempt on the first user's
+		// notes. Allowing it also made `adopt` resolve by row order.
+		second.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: second }));
+		app.stub.as('dbid:shared');
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(second)}`,
+			{ cookies: second }
+		);
+
+		expect(response.status).toBe(409);
+		expect(await response.json()).toEqual({ error: 'account_already_connected' });
+	});
+
+	it('returns a signed-out visitor to the one user that account belongs to', async () => {
+		const app = buildApp();
+		const first = await app.connect(createJar(), 'dbid:shared');
+		const drizzle = createDb(app.db);
+		const [owner] = await drizzle.select().from(schema.users);
+
+		await app.connect(createJar(), 'dbid:b');
+		first.jar.absorb(
+			await app.request('/api/auth/logout', { method: 'POST', cookies: first.jar })
+		);
+
+		await app.connect(createJar(), 'dbid:shared');
+
+		const sessions = await drizzle.select().from(schema.sessions);
+		expect(sessions.at(-1)?.userId).toBe(owner?.id);
+		expect(await drizzle.select().from(schema.users)).toHaveLength(2);
+	});
+
+	it('refuses a grant that does not say which account it is for', async () => {
+		const app = buildApp({
+			script: {
+				exchange: () =>
+					new Response(
+						JSON.stringify({ access_token: 'a', refresh_token: 'r', expires_in: 1 }),
+						{
+							headers: { 'content-type': 'application/json' },
+						}
+					),
+			},
+		});
+		const jar = createJar();
+		jar.absorb(await app.request('/api/auth/connect/dropbox/start', { cookies: jar }));
+
+		// Without an account id there is no way to tell a returning user from a
+		// new one, and minting one strands the old user's connection with a live
+		// refresh token nobody can reach to revoke.
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+
+		expect(response.status).toBe(502);
+		expect(await response.json()).toEqual({ error: 'no_account_id' });
+		expect(await createDb(app.db).select().from(schema.users)).toHaveLength(0);
 	});
 });

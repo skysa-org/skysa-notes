@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildApp } from './harness.js';
+import { buildApp, cookieNames } from './harness.js';
 
 /**
  * What reaches the Worker log. `CLAUDE.md` and docs/PLAN.md §6 both say secrets
@@ -14,9 +14,10 @@ describe('the error log', () => {
 		const app = buildApp();
 		const { jar } = await app.connect();
 
-		// Drop the table out from under the request, so the next query fails the
-		// way a transient D1 error would.
-		await app.db.prepare('DROP TABLE connections').run();
+		// Drop `sessions`, so the query that fails is the one that binds the
+		// session id — a live credential — as a parameter. Dropping `connections`
+		// instead would make the assertion below pass no matter what was logged.
+		await app.db.prepare('DROP TABLE sessions').run();
 
 		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		const response = await app.request('/api/connections', { cookies: jar });
@@ -39,7 +40,7 @@ describe('the error log', () => {
 		expect(lines.join('\n')).not.toBe('');
 		// The session id is a live credential, and it is bound into the query that
 		// just failed.
-		expect(lines.join('\n')).not.toContain(jar.get('__Host-skysa_session') ?? 'unreachable');
+		expect(lines.join('\n')).not.toContain(jar.get(cookieNames.session) ?? 'unreachable');
 		expect(lines.join('\n')).not.toContain('params:');
 	});
 });
