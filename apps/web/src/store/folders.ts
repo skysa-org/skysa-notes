@@ -1,13 +1,22 @@
 import {
+	basename,
 	isWithin,
 	joinPath,
 	normalizePath,
+	NOTE_EXTENSION,
 	parentPath,
 	rebasePath,
+	replaceBasename,
 	sanitizeFolderName,
+	uniqueFilename,
 } from '@skysa/core';
 
-import { type FolderRecord, LOCAL_CONNECTION_ID, type NotesDatabase } from './db.js';
+import {
+	type FolderRecord,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	type NotesDatabase,
+} from './db.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -118,6 +127,25 @@ export const listFolders = async (
 };
 
 /**
+ * Where a note goes when the path it wants is already occupied.
+ *
+ * Asked only on a collision, so a note imported as `My Report.md` keeps that
+ * name: `uniqueFilename` slugifies, and renaming somebody's file to
+ * `my-report.md` merely because the notebook around it moved would be a change
+ * to their file that nothing asked for. Same rule `moveNote` follows.
+ */
+const freePath = (wanted: string, taken: ReadonlySet<string>): string => {
+	if (!taken.has(wanted)) return wanted;
+
+	const name = basename(wanted);
+	const stem = name.endsWith(NOTE_EXTENSION) ? name.slice(0, -NOTE_EXTENSION.length) : name;
+	const folder = parentPath(wanted);
+	const siblings = [...taken].filter((path) => parentPath(path) === folder).map(basename);
+
+	return replaceBasename(wanted, uniqueFilename(stem, siblings));
+};
+
+/**
  * Rename or move a folder, rewriting the path of every folder and note beneath
  * it. A note keeps its pending edits and its dirty flag: the move is metadata
  * only and does not conflict with content changes. See docs/PLAN.md §7.
@@ -132,30 +160,75 @@ export const moveFolder = async (
 	const source = normalizePath(from);
 	const target = normalizePath(to);
 	if (source === '' || target === '') throw new Error('The root folder cannot be moved');
+	// Ahead of the guard below, which a folder satisfies against itself: renaming
+	// a notebook to the name it already has is not an attempt to move it inside
+	// itself — it is a rename the user opened and thought better of — and the
+	// answer to it is nothing at all rather than an error about something else.
+	if (source === target) return;
 	if (isWithin(target, source)) throw new Error('A folder cannot be moved inside itself');
 
 	await db.transaction('rw', db.folders, db.notes, async () => {
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
-		const moved = folders
-			.filter((folder) => isWithin(folder.path, source))
-			.map((folder) => ({ ...folder, path: rebasePath(folder.path, source, target) }));
 
-		await db.folders.bulkDelete(
-			folders
-				.filter((folder) => isWithin(folder.path, source))
-				.map((f) => [f.connectionId, f.path])
-		);
+		// A notebook already at the destination is the everyday mistake — renaming
+		// "Drafts" to a name another notebook has — and merging the two is not what
+		// anyone meant by a rename. It is also the outcome here that cannot be
+		// undone: `bulkPut` replaces the destination's row, so it loses its
+		// `remoteId` and with it the link to the folder it stands for on the
+		// provider, and the next push makes a second folder rather than finding it.
+		//
+		// Raised as the error `createFolder` already raises, so the same mistake
+		// reaches the user in the same words.
+		//
+		// `isWithin` rather than equality: a row *under* the destination would be
+		// replaced just as quietly.
+		if (folders.some((folder) => isWithin(folder.path, target))) {
+			throw new FolderExistsError(target, basename(target));
+		}
+
+		const moving = folders.filter((folder) => isWithin(folder.path, source));
+		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		await ensureFolder(db, target, { connectionId });
+		const moved = moving.map((folder) => ({
+			...folder,
+			path: rebasePath(folder.path, source, target),
+		}));
 		if (moved.length > 0) await db.folders.bulkPut(moved);
 
 		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+
+		// Notes can sit under a path no folder row covers — importing a file
+		// creates no rows, and a pull can report a file before the folder holding
+		// it — so the check above does not catch every collision. It has to be
+		// caught somewhere: two notes at one path is two rows the sidebar shows as
+		// one notebook entry twice over, two queued writes aimed at one file, and
+		// after both have been pushed one `remoteId` between them, at which point
+		// whichever the store hands back second is stale for good.
+		//
+		// Tombstones are on neither side of this. A tombstone is a queued delete
+		// rather than a note at a path: nothing lists it, nothing counts its name
+		// as taken, and moving one aside would aim its delete at a file that is not
+		// the one it is deleting.
+		const taken = new Set(
+			notes
+				.filter((note) => !isWithin(note.path, source) && note.deletedLocally === 0)
+				.map((note) => note.path)
+		);
+
 		const relocated = notes
 			.filter((note) => isWithin(note.path, source))
-			.map((note) => ({
-				...note,
-				path: rebasePath(note.path, source, target),
+			.reduce<NoteRecord[]>((done, note) => {
+				const wanted = rebasePath(note.path, source, target);
+				if (note.deletedLocally === 1) return [...done, { ...note, path: wanted }];
+
+				const path = freePath(wanted, taken);
+				// Every note that lands takes its path out of circulation, so two
+				// notes moving together cannot be given the same one either.
+				taken.add(path);
 				// Deliberately not touching `dirty`: a folder move is metadata only.
-			}));
+				return [...done, { ...note, path }];
+			}, []);
+
 		if (relocated.length > 0) await db.notes.bulkPut(relocated);
 	});
 };

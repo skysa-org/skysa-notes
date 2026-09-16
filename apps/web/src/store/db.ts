@@ -115,6 +115,20 @@ export const DATABASE_NAME = 'skysa-notes';
 export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	const db = new Dexie(name) as NotesDatabase;
 
+	// `[connectionId+path]` is deliberately not declared `&` unique, though at
+	// the end of every operation exactly one live note is at each path.
+	//
+	// A pull batch reaches that state by passing through states that are not it:
+	// a note moving out of the way is a change of its own and can come later in
+	// the same batch, so the note taking its path lands first and the two
+	// briefly share one. A unique index rejects that write, which fails the
+	// batch — and since the cursor is persisted only with the batch, the same
+	// one is retried for ever and the user's sync never recovers on its own.
+	// The reasoning is set out in full on `PullChange` in
+	// `packages/core/src/sync/store.ts`.
+	//
+	// So the rule is kept by the writers rather than by IndexedDB: see
+	// `moveFolder` in `store/folders.ts` and `takenNamesIn` in `store/notes.ts`.
 	db.version(1).stores({
 		notes: 'id, connectionId, path, [connectionId+path], dirty, deletedLocally, updatedAt, remoteId',
 		folders: '[connectionId+path], connectionId, path',
