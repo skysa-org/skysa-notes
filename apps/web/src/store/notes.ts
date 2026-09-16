@@ -4,6 +4,7 @@ import {
 	deriveTitle,
 	joinPath,
 	normalizeTag,
+	NOTE_EXTENSION,
 	parentPath,
 	parseNoteFile,
 	readFrontmatter,
@@ -18,6 +19,7 @@ import Dexie from 'dexie';
 import { type EditorMode } from '../editor/mode.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
+import { foldPath, freeName } from './naming.js';
 
 /**
  * Notes CRUD over IndexedDB.
@@ -27,8 +29,6 @@ import { ensureFolder } from './folders.js';
  * flag, or the app would rewrite files it was only ever asked to display.
  * See docs/PLAN.md §7.
  */
-
-const NOTE_EXTENSION = '.md';
 
 /** What `deriveTitle` returns when a note has nothing to take a name from. */
 const UNTITLED_TITLE = 'Untitled';
@@ -72,12 +72,17 @@ const takenNamesIn = async (
 	exceptId?: string
 ): Promise<string[]> => {
 	const siblings = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const folder = foldPath(folderPath);
 	return siblings
 		.filter(
 			(note) =>
 				note.deletedLocally === 0 &&
 				note.id !== exceptId &&
-				parentPath(note.path) === folderPath
+				// Folded, or the fold in `freeName` below is for nothing: a folder
+				// spelled `Archive` where this one says `archive` is one directory
+				// on the provider, and comparing exactly empties this list, leaving
+				// `freeName` with nothing to avoid and handing back the taken name.
+				foldPath(parentPath(note.path)) === folder
 		)
 		.map((note) => basename(note.path));
 };
@@ -304,9 +309,10 @@ export const moveNote = async (
 ): Promise<NoteRecord> =>
 	applyEdit(db, id, async (note) => {
 		const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
-		const name = basename(note.path);
-		const stem = name.endsWith(NOTE_EXTENSION) ? name.slice(0, -NOTE_EXTENSION.length) : name;
-		const filename = taken.includes(name) ? uniqueFilename(stem, taken) : name;
+		// `freeName` rather than a comparison here: `taken.includes(name)` missed
+		// a name that differed only in case, which is one name to every provider
+		// the app syncs to and so exactly the collision this is asked to avoid.
+		const filename = freeName(basename(note.path), taken);
 
 		// Inside the transaction, so a move that fails leaves no empty folder
 		// behind for a notebook the note never reached.
@@ -357,6 +363,29 @@ export interface ImportNoteFileInput extends NoteScope {
 }
 
 /**
+ * The note at a path.
+ *
+ * Two rows can hold one path: a tombstone keeps its path until its delete has
+ * been pushed, and `takenNamesIn` frees a deleted note's name straight away on
+ * purpose, so a note created at the name of one the user just deleted is
+ * exactly that state. `.first()` picks between them by primary key, which is
+ * the order of two random UUIDs — so a file arriving at the path would land on
+ * the tombstone about half the time and revive it, on top of a note nobody
+ * deleted.
+ *
+ * The live note is the one a file at that path is about. The tombstone is a
+ * delete on its way out, and is only the answer when it is the only row there.
+ */
+const noteAtPath = async (
+	db: NotesDatabase,
+	connectionId: string,
+	path: string
+): Promise<NoteRecord | undefined> => {
+	const rows = await db.notes.where('[connectionId+path]').equals([connectionId, path]).toArray();
+	return rows.find((note) => note.deletedLocally === 0) ?? rows[0];
+};
+
+/**
  * A frontmatter date, or now.
  *
  * `Date.parse` answers `NaN` for anything it cannot read, and these two fields
@@ -401,10 +430,7 @@ export const importNoteFile = async (
 	return db.transaction('rw', db.notes, db.folders, async () => {
 		const existing =
 			parsed.id === undefined
-				? await db.notes
-						.where('[connectionId+path]')
-						.equals([connectionId, input.path])
-						.first()
+				? await noteAtPath(db, connectionId, input.path)
 				: await db.notes.get(parsed.id);
 
 		const id = parsed.id ?? existing?.id ?? crypto.randomUUID();

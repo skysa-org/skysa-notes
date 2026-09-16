@@ -8,6 +8,8 @@ import {
 import {
 	conflictContent,
 	conflictFilename,
+	conflictFolderName,
+	conflictFolderPath,
 	conflictPath,
 	conflictStamp,
 } from '../../src/sync/conflicts.js';
@@ -69,6 +71,18 @@ describe('conflictFilename', () => {
 		expect(conflictFilename('a.md', AT, taken)).toBe('a (conflict 2026-09-15T14-32)-3.md');
 	});
 
+	it('treats a name that differs only in normal form as taken', () => {
+		// NFD is what a macOS file and an iOS share sheet hand over, and it is one
+		// name with its NFC spelling on every provider. Missed, this copy lands on
+		// the existing one and overwrites it — and the copy is the only place the
+		// edit that lost the conflict exists.
+		const taken = ['caf\u00e9 (conflict 2026-09-15T14-32).md'.normalize('NFD')];
+
+		expect(conflictFilename('caf\u00e9.md', AT, taken)).toBe(
+			'caf\u00e9 (conflict 2026-09-15T14-32)-2.md'
+		);
+	});
+
 	it('treats a name that differs only in case as taken', () => {
 		// Drive, Dropbox and macOS all do, so a name that looks free here is not
 		// free where it matters.
@@ -78,6 +92,47 @@ describe('conflictFilename', () => {
 
 	it('copes with a name that has no extension', () => {
 		expect(conflictFilename('notes', AT)).toBe('notes (conflict 2026-09-15T14-32).md');
+	});
+
+	it('does not leave a shouted extension on the stem and take a second one', () => {
+		// `Report.MD` comes from a Windows tool, and it is a markdown file: the
+		// name has one extension, not a stem ending in `.MD` waiting for one.
+		expect(conflictFilename('Report.MD', AT)).toBe('Report (conflict 2026-09-15T14-32).md');
+	});
+});
+
+describe('conflictFolderName', () => {
+	// A folder carries no extension, and the only engine caller computes its
+	// expectation by calling this same function — so nothing anywhere says what
+	// the name should look like.
+	it('names a folder the way a note is named, without an extension', () => {
+		expect(conflictFolderName('Archive', AT)).toBe('Archive (conflict 2026-09-15T14-32)');
+	});
+
+	it('steps aside for a folder name already taken', () => {
+		expect(conflictFolderName('Archive', AT, ['Archive (conflict 2026-09-15T14-32)'])).toBe(
+			'Archive (conflict 2026-09-15T14-32)-2'
+		);
+	});
+
+	it('treats a taken name that differs only in case as taken', () => {
+		expect(conflictFolderName('Archive', AT, ['archive (CONFLICT 2026-09-15T14-32)'])).toBe(
+			'Archive (conflict 2026-09-15T14-32)-2'
+		);
+	});
+
+	it('keeps a folder whose name ends in .md intact', () => {
+		// `conflictFilename` strips the extension; this must not, or a folder
+		// someone called `notes.md` comes back as `notes`.
+		expect(conflictFolderName('notes.md', AT)).toBe('notes.md (conflict 2026-09-15T14-32)');
+	});
+});
+
+describe('conflictFolderPath', () => {
+	it('renames the folder in place, leaving its parents alone', () => {
+		expect(conflictFolderPath('Work/Archive', AT)).toBe(
+			'Work/Archive (conflict 2026-09-15T14-32)'
+		);
 	});
 });
 

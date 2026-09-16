@@ -115,6 +115,35 @@ export const DATABASE_NAME = 'skysa-notes';
 export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	const db = new Dexie(name) as NotesDatabase;
 
+	// `[connectionId+path]` is deliberately not declared `&` unique.
+	//
+	// It could not be, whatever else were true: a tombstone keeps its path until
+	// its delete has been pushed, so a note created at a name a deleted one still
+	// holds is two rows at one key, by design.
+	//
+	// A pull batch reaches that state by passing through states that are not it:
+	// a note moving out of the way is a change of its own and can come later in
+	// the same batch, so the note taking its path lands first and the two
+	// briefly share one. A unique index rejects that write, which fails the
+	// batch — and since the cursor is persisted only with the batch, the same
+	// one is retried for ever and the user's sync never recovers on its own.
+	// The reasoning is set out in full on `PullChange` in
+	// `packages/core/src/sync/store.ts`.
+	//
+	// So no live note is knowingly put where another one is, and that is kept by
+	// the writers rather than by IndexedDB: `freeName`/`freePath` in
+	// `store/naming.ts`, and `takenNamesIn` in `store/notes.ts`.
+	//
+	// Knowingly is the whole of the claim. Three writers can still do it and do
+	// not look: `restoreNote` lifts a tombstone with no idea whether its path has
+	// been taken since, `importNoteFile` writes a file carrying an `id` it has
+	// never seen straight to its path whatever is already there, and
+	// `moveFolder` rebases a tombstone onto the path it lands on rather than
+	// aiming its queued delete somewhere else. The first two are answered by the
+	// conflict rule rather than a name check — one is a question for the undo
+	// that does not exist yet, the other for the engine, which has
+	// `displace-note` for exactly it — and the third by reading the live row
+	// first, which `noteAtPath` in `store/notes.ts` does.
 	db.version(1).stores({
 		notes: 'id, connectionId, path, [connectionId+path], dirty, deletedLocally, updatedAt, remoteId',
 		folders: '[connectionId+path], connectionId, path',

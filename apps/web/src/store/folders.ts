@@ -1,4 +1,5 @@
 import {
+	basename,
 	isWithin,
 	joinPath,
 	normalizePath,
@@ -7,7 +8,13 @@ import {
 	sanitizeFolderName,
 } from '@skysa/core';
 
-import { type FolderRecord, LOCAL_CONNECTION_ID, type NotesDatabase } from './db.js';
+import {
+	type FolderRecord,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	type NotesDatabase,
+} from './db.js';
+import { foldPath, freePath } from './naming.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -28,6 +35,33 @@ const ancestorsOf = (path: string): string[] =>
 			(paths, segment) => [...paths, joinPath(paths.at(-1) ?? '', segment)],
 			[]
 		);
+
+/**
+ * Every path that is a notebook as far as the sidebar is concerned: the folder
+ * rows, plus the folder part of every note's path. `buildFolderTree` draws both,
+ * and a note pulled from a provider can arrive without a row of its own, so a
+ * question about "is there already a notebook here" that reads only the rows
+ * gets the wrong answer for exactly the notebooks the app did not create itself.
+ */
+const folderPaths = async (db: NotesDatabase, connectionId: string): Promise<string[]> => {
+	const [folders, notes] = await Promise.all([
+		db.folders.where('connectionId').equals(connectionId).toArray(),
+		db.notes.where('connectionId').equals(connectionId).toArray(),
+	]);
+	const implied = notes.flatMap((note) => ancestorsOf(parentPath(note.path)));
+	return [...new Set([...folders.map((folder) => folder.path), ...implied])];
+};
+
+/**
+ * The spelling `existing` already uses for `path`, or `path` unchanged when it
+ * names nothing yet. So a caller that asks for `work` when the store holds
+ * `Work` gets `Work`, and nothing downstream has to fold to stay consistent
+ * with a check that already did.
+ */
+const spellingOf = (path: string, existing: readonly string[]): string => {
+	const wanted = foldPath(path);
+	return existing.find((each) => foldPath(each) === wanted) ?? path;
+};
 
 /**
  * Create a folder and any missing parents. Idempotent: re-creating an existing
@@ -85,15 +119,45 @@ export const createFolder = async (
 ): Promise<FolderRecord> => {
 	const connectionId = input.connectionId ?? LOCAL_CONNECTION_ID;
 	const name = sanitizeFolderName(input.name);
-	const path = joinPath(input.parentPath ?? '', name);
 
 	// The check and the create are one step. `ensureFolder` is idempotent, so
 	// two concurrent creates of one name did no damage — but both passed the
 	// check and both reported success, and this is the one function whose error
 	// the user is now shown, which makes an advisory check the wrong kind.
-	return db.transaction('rw', db.folders, async () => {
-		const existing = await db.folders.get([connectionId, path]);
-		if (existing !== undefined) throw new FolderExistsError(path, name);
+	return db.transaction('rw', db.folders, db.notes, async () => {
+		// Folded, and this is the door that matters: `moveFolder` refuses a
+		// notebook whose name folds onto another's, but nothing calls `moveFolder`
+		// yet, while this is wired straight to the new-notebook field. Asked
+		// exactly, it let the user make `Archive` and then `archive` — two rows,
+		// two `remoteId`s, one directory on every provider the app syncs to — and
+		// then the store half-believed they were one folder and half-believed
+		// they were two, because `takenNamesIn` folds and `listNotes` does not.
+		//
+		// Deliberately not folded in `ensureFolder`, which creates rather than
+		// refuses: it would have to pick one of the two spellings for the row,
+		// and a note written under the other one sits at a path `listNotes` —
+		// which compares exactly — would never show. Refusing the second spelling
+		// here is what stops either from arising.
+		// Every notebook the sidebar shows, which is not the same as every folder
+		// row: `buildFolderTree` also makes a notebook out of the folder part of
+		// a note's path, and a note can arrive from a sync with no row of its
+		// own. Checking only the rows lets `Work` be created beside a note
+		// already living in `work/`, and the sidebar then draws both.
+		const existing = await folderPaths(db, connectionId);
+
+		// And the spelling the store already uses for the parent, not the one
+		// the caller passed. The check below folds; `ensureFolder` creates every
+		// missing ancestor byte-exactly. Handed `work` where the store holds
+		// `Work`, the folded check sees nothing wrong with `work/Meetings` and
+		// `ensureFolder` then writes the row `work` — leaving the two spellings
+		// this function exists to prevent, created by this function. A stale
+		// `?folder=` link is enough to send one in.
+		const path = joinPath(spellingOf(input.parentPath ?? '', existing), name);
+
+		const wanted = foldPath(path);
+		if (existing.some((folder) => foldPath(folder) === wanted)) {
+			throw new FolderExistsError(path, name);
+		}
 
 		await ensureFolder(db, path, { connectionId });
 		const created = await db.folders.get([connectionId, path]);
@@ -132,30 +196,129 @@ export const moveFolder = async (
 	const source = normalizePath(from);
 	const target = normalizePath(to);
 	if (source === '' || target === '') throw new Error('The root folder cannot be moved');
+	// Ahead of the guard below, which a folder satisfies against itself: renaming
+	// a notebook to the name it already has is not an attempt to move it inside
+	// itself — it is a rename the user opened and thought better of — and the
+	// answer to it is nothing at all rather than an error about something else.
+	if (source === target) return;
 	if (isWithin(target, source)) throw new Error('A folder cannot be moved inside itself');
 
 	await db.transaction('rw', db.folders, db.notes, async () => {
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
-		const moved = folders
-			.filter((folder) => isWithin(folder.path, source))
-			.map((folder) => ({ ...folder, path: rebasePath(folder.path, source, target) }));
 
-		await db.folders.bulkDelete(
-			folders
-				.filter((folder) => isWithin(folder.path, source))
-				.map((f) => [f.connectionId, f.path])
+		// A notebook already at the destination is the everyday mistake — renaming
+		// "Drafts" to a name another notebook has — and merging the two is not what
+		// anyone meant by a rename. It is also the outcome here that cannot be
+		// undone: `bulkPut` replaces the destination's row, so it loses its
+		// `remoteId` and with it the link to the folder it stands for on the
+		// provider, and the next push makes a second folder rather than finding it.
+		//
+		// Raised as the error `createFolder` already raises, so that a rename in
+		// the sidebar can report the same mistake in the same words the route
+		// already renders for a duplicate notebook name. Nothing calls this yet.
+		//
+		// `isWithin` rather than equality: a row *under* the destination would be
+		// replaced just as quietly.
+		//
+		// Folded, because `archive` and `Archive` are one directory on Drive, on
+		// Dropbox and on macOS. Told apart, a rename onto the other spelling is
+		// waved through and the app ends up with two notebook rows, two
+		// `remoteId`s, and one folder on the provider for them to fight over.
+		//
+		// The exclusion is exact, and deliberately not folded: it has to name the
+		// same rows `moving` does, just below, or a row could be discounted here
+		// and then not actually moved — which is the merge again, arrived at from
+		// the other side.
+		const moving = folders.filter((folder) => isWithin(folder.path, source));
+		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+		const inside = notes.filter((note) => isWithin(note.path, source));
+
+		// Nothing is there — before the refusal below, not after it: a move that
+		// moves nothing has no destination to report a duplicate for, and saying
+		// one notebook is in the way of another that does not exist is an answer
+		// to a question nobody asked.
+		//
+		// Read exactly, as `moving` and `inside` are. A source spelled `Archive`
+		// where the row says `archive` therefore finds nothing and does nothing,
+		// rather than the fold the destination gets — the asymmetry is on purpose
+		// and explained below. What it replaces is worse: the only thing that
+		// used to happen was `ensureFolder` conjuring the destination, a notebook
+		// the user never asked for out of a move that moved nothing.
+		if (moving.length === 0 && inside.length === 0) return;
+
+		const occupying = folders.filter(
+			(folder) =>
+				isWithin(foldPath(folder.path), foldPath(target)) && !isWithin(folder.path, source)
 		);
+		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
+
+		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		await ensureFolder(db, target, { connectionId });
+		const moved = moving.map((folder) => ({
+			...folder,
+			path: rebasePath(folder.path, source, target),
+		}));
 		if (moved.length > 0) await db.folders.bulkPut(moved);
 
-		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
-		const relocated = notes
-			.filter((note) => isWithin(note.path, source))
-			.map((note) => ({
-				...note,
-				path: rebasePath(note.path, source, target),
+		// Notes can sit under a path no folder row covers — importing a file
+		// creates no rows, and a pull can report a file before the folder holding
+		// it — so the check above does not catch every collision. It has to be
+		// caught somewhere: two notes at one path is two rows the sidebar shows as
+		// one notebook entry twice over, two queued writes aimed at one file, and
+		// after both have been pushed one `remoteId` between them, at which point
+		// whichever the store hands back second is stale for good.
+		//
+		// Tombstones are in here, and a live note gives way to one.
+		//
+		// Not because two rows at one key is forbidden — a note created at a name
+		// a deleted one still holds is exactly that, by design (see `db.ts`), and
+		// `takenNamesIn` frees a deleted note's name on purpose so the user can
+		// use it again straight away. It is that nothing is gained by adding one
+		// here. There the user chose the name; here the app is renaming somebody's
+		// file on its own, and giving way costs nothing.
+		const outside = notes.filter((note) => !isWithin(note.path, source));
+
+		// Tombstones are placed first, and keep whatever path they land on. A
+		// tombstone is a queued delete rather than a note, so aiming it elsewhere
+		// would delete a file that is not the one it is deleting.
+		//
+		// Where it lands on a path exactly, a reader that finds both rows takes
+		// the live one (`noteAtPath` in `store/notes.ts`). Where it lands on one
+		// that only *folds* to the same name, it does not: `noteAtPath` looks up
+		// a byte-exact key, so the two rows are two keys and nothing brings them
+		// together. That pair is one file on the provider, and a pull delivering
+		// it can revive the tombstone beside the live note. Left as it is
+		// deliberately — the alternative is aiming a delete at the wrong file —
+		// and it is the sharpest reason this whole module gives way early and
+		// often rather than relying on anything downstream to sort it out.
+		//
+		// First rather than in whatever order the rows came back in, because that
+		// order is the order of two random UUIDs: a live note and a tombstone
+		// moving together can hold one path already, and without this which of
+		// them kept it after the move would be a coin toss.
+		const buried = inside
+			.filter((note) => note.deletedLocally === 1)
+			.map((note) => ({ ...note, path: rebasePath(note.path, source, target) }));
+
+		const taken = new Set([...outside, ...buried].map((note) => note.path));
+
+		const relocated = inside
+			.filter((note) => note.deletedLocally === 0)
+			.reduce<NoteRecord[]>((done, note) => {
+				const path = freePath(rebasePath(note.path, source, target), taken);
+				// Every note that lands takes its path out of circulation, so two
+				// notes moving together cannot be given the same one either.
+				taken.add(path);
 				// Deliberately not touching `dirty`: a folder move is metadata only.
-			}));
+				//
+				// A note that gave way is a different case — that rename is ours
+				// rather than the folder move's, and the provider has not heard of
+				// it — but the answer to it is a `move` on the push queue, and
+				// nothing reads or writes `opQueue` yet. It belongs with the code
+				// that drains it (docs/PLAN.md §7).
+				return [...done, { ...note, path }];
+			}, buried);
+
 		if (relocated.length > 0) await db.notes.bulkPut(relocated);
 	});
 };

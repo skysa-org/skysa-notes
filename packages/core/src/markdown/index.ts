@@ -10,6 +10,7 @@ export {
 	type NoteFrontmatter,
 } from './frontmatter.js';
 export {
+	foldName,
 	noteFilename,
 	normalizeTag,
 	sanitizeFolderName,

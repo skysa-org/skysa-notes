@@ -303,6 +303,93 @@ describe('setNoteTags', () => {
 	});
 });
 
+describe('finding the note at a path when two rows hold it', () => {
+	/**
+	 * Two rows at one path is not a broken state: a deleted note keeps its path
+	 * until the delete has been pushed, and `takenNamesIn` frees its name at
+	 * once, so creating a note with the same name is exactly this.
+	 *
+	 * Both orders, with the ids written out. The rows come back in primary-key
+	 * order and the ids are random UUIDs, so a test that made them the ordinary
+	 * way would be asking a coin toss whether it noticed — which is the same coin
+	 * toss the bug itself turned on, and it passed a third of the time against
+	 * the broken code.
+	 */
+	const twoRowsAtOnePath = async (tombstoneId: string, liveId: string): Promise<void> => {
+		const live = await createNote(db, { title: 'Report' });
+		const row = await getNote(db, live.id);
+		expect(row).toBeDefined();
+		await db.notes.delete(live.id);
+		await db.notes.bulkPut([
+			{ ...row!, id: tombstoneId, deletedLocally: 1 },
+			{ ...row!, id: liveId, deletedLocally: 0 },
+		]);
+
+		await importNoteFile(db, { path: row!.path, source: '# From the remote\n' });
+
+		expect((await getNote(db, tombstoneId))?.deletedLocally).toBe(1);
+		expect((await getNote(db, liveId))?.body).toBe('# From the remote\n');
+	};
+
+	it('takes the live note when the tombstone sorts first', async () => {
+		await twoRowsAtOnePath(
+			'aaaaaaaa-0000-4000-8000-000000000000',
+			'ffffffff-0000-4000-8000-000000000000'
+		);
+	});
+
+	it('takes the live note when the tombstone sorts last', async () => {
+		await twoRowsAtOnePath(
+			'ffffffff-0000-4000-8000-000000000000',
+			'aaaaaaaa-0000-4000-8000-000000000000'
+		);
+	});
+});
+
+describe('naming a note beside a folder spelled differently', () => {
+	it('does not let moveNote land on a sibling in the other spelling', async () => {
+		// `takenNamesIn` gathers the siblings `freeName` avoids. Comparing the
+		// parent folder exactly hands it an empty list, so the fold in `freeName`
+		// has nothing to work on and the note lands on the taken path.
+		await importNoteFile(db, { path: 'Archive/Report.md', source: '# Theirs\n' });
+		const mine = await createNote(db, { title: 'Report' });
+
+		const moved = await moveNote(db, mine.id, 'archive');
+
+		expect(moved.path).toBe('archive/report-2.md');
+	});
+
+	it('does not let createNote land on one either', async () => {
+		await importNoteFile(db, { path: 'Archive/Report.md', source: '# Theirs\n' });
+
+		const made = await createNote(db, { title: 'Report', folderPath: 'archive' });
+
+		expect(made.path).toBe('archive/report-2.md');
+	});
+});
+
+describe('moveNote and a name that is already taken', () => {
+	it('gives way to a name that differs only in case', async () => {
+		// One name to Drive, to Dropbox and to macOS, so two rows holding them are
+		// two writes to one file. `uniqueFilename` compares lowercased; the check
+		// in front of it did not, and so never called it.
+		await importNoteFile(db, { path: 'work/Report.md', source: '# Theirs\n' });
+		const mine = await createNote(db, { title: 'Report' });
+
+		const moved = await moveNote(db, mine.id, 'work');
+
+		expect(moved.path).toBe('work/report-2.md');
+	});
+
+	it('keeps a name nothing is in the way of, exactly as it was', async () => {
+		const note = await importNoteFile(db, { path: 'My Report.md', source: '# Mine\n' });
+
+		const moved = await moveNote(db, note.id, 'work');
+
+		expect(moved.path).toBe('work/My Report.md');
+	});
+});
+
 describe('importNoteFile — the rule that a note is dirty only on a real edit', () => {
 	it('never marks an imported note dirty', async () => {
 		const note = await importNoteFile(db, { path: 'a.md', source: '# A\n' });
