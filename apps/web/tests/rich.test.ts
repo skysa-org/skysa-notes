@@ -174,4 +174,92 @@ describe('representsFaithfully', () => {
 		const { withCtx } = await mount('');
 		expect(withCtx((ctx) => representsFaithfully(ctx, ''))).toBe(true);
 	});
+
+	/**
+	 * Every other assertion about this check is `toBe(true)`, and a check that
+	 * is only ever asked about notes it passes is not a check — replacing its
+	 * body with `true` kept the whole suite green. This is the other branch,
+	 * driven through the real editor rather than a mock.
+	 *
+	 * A link reference definition is the note that proves it: ProseMirror's
+	 * schema has no node for the definition, so the editor inlines the link and
+	 * the definition is gone. `[a]: http://example.com` + `[a]` comes back as
+	 * `[a](http://example.com)` — the same rendering, a different file, and the
+	 * user's `[a]` shorthand is not there to be reused.
+	 */
+	it('fails a note whose link definitions the editor would dissolve', async () => {
+		const body = '[a]: http://example.com\n\n[a]\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx(currentMarkdown)).toBe('[a](http://example.com)\n');
+		expect(withCtx((ctx) => representsFaithfully(ctx, body))).toBe(false);
+	});
+
+	/**
+	 * The write path this PR unlocked. Folding line endings in `parse` is what
+	 * lets a Windows note into the rich editor at all — and Milkdown's own
+	 * serializer is not `core`'s: it writes block structure with `\n` but copies
+	 * a fenced code block's contents out verbatim, so without a fold on the way
+	 * back the saved file mixes both.
+	 */
+	it('emits one line ending after an edit to a Windows note with a code fence', async () => {
+		const edits: string[] = [];
+		const record = (markdown: string): void => {
+			edits.push(markdown);
+		};
+		// Two code lines, not one. Milkdown drops the `\r` before the closing
+		// fence but keeps the ones *between* lines, so a single-line fence has
+		// no carriage return left to lose and proves nothing.
+		const { type } = await mount(
+			'# T\r\n\r\n```js\r\nconst a = 1;\r\nconst b = 2;\r\n```\r\n',
+			record
+		);
+
+		type('!');
+
+		expect(edits).toHaveLength(1);
+		expect(edits[0]).not.toContain('\r');
+		expect(edits[0]).toContain('const a = 1;');
+		expect(edits[0]).toContain('const b = 2;');
+	});
+
+	/**
+	 * The cost of the fold, stated rather than left implicit. A `\r\n` between
+	 * two lines of a fenced code block survives Milkdown's parse and its
+	 * serializer, and folding the output turns it into `\n` — so a note that
+	 * arrives with one and is then typed into loses that byte.
+	 *
+	 * CommonMark calls it a line ending, not content: the block's content is its
+	 * lines, and how they were separated is not part of them. The raw editor has
+	 * always done exactly this (CodeMirror joins its document with one line
+	 * break throughout), so the alternative is not "keep the byte" but "keep it
+	 * in one editor and not the other", which is worse than either. It is also
+	 * why `representsFaithfully` cannot see this: both sides of that comparison
+	 * fold, deliberately.
+	 */
+	it('folds a line ending inside a code fence too, which is a line ending', async () => {
+		const edits: string[] = [];
+		const record = (markdown: string): void => {
+			edits.push(markdown);
+		};
+		const { type } = await mount('```\nfoo\r\nbar\n```\n', record);
+
+		type('!');
+
+		expect(edits[0]).toBe('```\nfoo\nbar!\n```\n');
+	});
+
+	it('emits one line ending after an edit to a Windows note with an HTML block', async () => {
+		// The other node whose contents Milkdown copies out verbatim.
+		const edits: string[] = [];
+		const record = (markdown: string): void => {
+			edits.push(markdown);
+		};
+		const { type } = await mount('# T\r\n\r\n<div>\r\n  <p>x</p>\r\n</div>\r\n', record);
+
+		type('!');
+
+		expect(edits[0]).not.toContain('\r');
+		expect(edits[0]).toContain('<p>x</p>');
+	});
 });

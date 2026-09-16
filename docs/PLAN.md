@@ -112,7 +112,11 @@ Rules:
 - Frontmatter is optional on read (files created by other tools are valid notes). The app adds it on first write.
 - Filename is a slug of the title; the app renames the file when the title changes. `id` in frontmatter is the stable identity.
 - Folder names are user-facing notebook names. Reserved prefix: anything starting with `.` is ignored by the UI.
-- Line endings normalized to `\n` on write. UTF-8 only.
+- Line endings: `\n`, `\r\n` and `\r` are **read** as one thing, because CommonMark says they are — the parser folds before remark sees the text, and both editors fold what they hand back. **Written**, in three parts, because each answers a different question:
+  - The *body* is never rewritten by the act of saving metadata. A note nobody edited comes back byte for byte, including a line ending sitting between two lines of a fenced code block.
+  - The *frontmatter block* is written the way that file writes lines — the body's first line ending; failing that the block's own interior endings; failing both, `\n`. Not "whichever ending appears somewhere in the body": one `\r\n` in a code sample would otherwise flip every line of an otherwise-`\n` file. The third fallback is reachable and bounded: a block has interior endings only with two or more keys, so a one-key CRLF note whose body has no line ending either is rewritten `\n`. Carrying the ending the fences had would close it, and only `splitFrontmatter` ever sees that.
+  - A body that has been through *either editor* is `\n` throughout, and the block follows it. That is where normalization happens, and it happens only after a real user edit — including the endings between the lines of a code fence, which CommonMark counts as line endings rather than as the block's content. The raw editor has always done this; the rich editor now does it too, rather than the two disagreeing.
+  (Amended twice: this first read "normalized to `\n` on write", which made adding an id on import a whole-file rewrite of every Windows-authored note; the amendment then claimed no file the app writes mixes endings, which was not true of a body carrying one inside a code fence, and is now stated as a promise about the block rather than about the file.) UTF-8 only.
 
 ---
 ## 4. Provider adapter interface
@@ -475,7 +479,7 @@ Two modes over one markdown string. Default is rich text; a toolbar/shortcut tog
 - Anything the rich editor can't represent (raw HTML blocks, footnotes, unknown syntax) must survive round-trip as an opaque block rather than being dropped. If the parser can't guarantee that for a given note, open it in raw mode with a banner explaining why. Checked per note against the editor's own parser and serializer before the user can type, because ProseMirror's schema is a narrower model than mdast and is where a construct would actually be dropped — `core`'s remark suite cannot see that. Nothing in the corpus fails it today.
 - A body arriving at a mounted editor is loaded only when it is genuinely new and did not come from that editor. Autosave is debounced, so the note's stored body is always a little behind what is on screen; reloading the editor from it — when the save echoes back, or on any re-render that happens to carry the same stale prop — silently deletes everything typed since. This is the rule with the sharpest teeth in the editor layer and it has its own tests.
 
-**Fidelity test suite** (`packages/core/tests/markdown/roundtrip.test.ts`): a corpus of markdown fixtures — CommonMark spec samples, GFM tables/task lists, nested lists, code fences with languages, hard breaks, HTML blocks, files from Obsidian/iA Writer/Bear exports. For each: `serialize(parse(md))` must equal `md` after both sides pass through the same normalizer, and `parse(serialize(parse(md)))` must be structurally identical to `parse(md)`. Because Milkdown uses remark, `core`'s `parse.ts`/`serialize.ts` wrap the same remark plugins the editor is configured with, so this suite exercises the editor's actual pipeline headless in CI. Add a second layer that mounts Milkdown in jsdom/Vitest browser mode and round-trips through the editor instance itself.
+**Fidelity test suite** (`packages/core/tests/markdown/roundtrip.test.ts`): a corpus of markdown fixtures — CommonMark spec samples, GFM tables/task lists, nested lists, code fences with languages, hard breaks, HTML blocks, files from Obsidian/iA Writer/Bear exports. For each: `serialize(parse(md))` must equal `md` after both sides pass through the same normalizer, and `parse(serialize(parse(md)))` must be structurally identical to `parse(md)`. And none of it may depend on how the file's lines end: the parser folds them first, so a note written on Windows is the same note. It did not, and the carriage return remark left inside a soft line break made every CRLF note fail the fidelity check in §7 and open with the banner saying the rich editor could not show it. Because Milkdown uses remark, `core`'s `pipeline.ts` wrap the same remark plugins the editor is configured with, so this suite exercises the editor's actual pipeline headless in CI. Add a second layer that mounts Milkdown in jsdom/Vitest browser mode and round-trips through the editor instance itself.
 
 Title is derived from frontmatter `title`, else the first `# ` heading, else the filename.
 
@@ -625,7 +629,8 @@ packages/
         engine.ts conflicts.ts
       markdown/
         frontmatter.ts slug.ts
-        parse.ts serialize.ts # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
+        pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
+        lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
     tests/
       providers/contract.test.ts
       markdown/roundtrip.test.ts

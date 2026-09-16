@@ -43,6 +43,22 @@ describe('sameMarkdownStructure', () => {
 		expect(sameMarkdownStructure('', '')).toBe(true);
 		expect(sameMarkdownStructure('', '\n\n')).toBe(true);
 	});
+
+	/**
+	 * The three guards inside `sameStructure` that make the comparison a real
+	 * equality rather than a one-way containment. `adoptBody` skips the update
+	 * when this says the document already means what the body says, so a
+	 * comparison that answers `true` for "b has everything a has, and more" is
+	 * a pulled paragraph that never reaches the editor.
+	 */
+	it('notices content only the second document has', () => {
+		expect(sameMarkdownStructure('a\n', 'a\n\nb\n')).toBe(false);
+		expect(sameMarkdownStructure('a\n\nb\n', 'a\n')).toBe(false);
+	});
+
+	it('notices a code fence losing its language, which changes how it renders', () => {
+		expect(sameMarkdownStructure('```js\nx\n```\n', '```\nx\n```\n')).toBe(false);
+	});
 });
 
 describe('roundTripsLosslessly', () => {

@@ -42,7 +42,10 @@ const placeholderFor = ({
 
 const preview = (body: string): string => {
 	const text = body
-		.split('\n')
+		// All three spellings: a note written on a pre-OS X Mac has no `\n` in it
+		// at all, and splitting on one yields a single line the `.slice(1)` below
+		// then drops, leaving every such note with an empty excerpt.
+		.split(/\r\n|\n|\r/)
 		.map((line) => line.replace(/^#{1,6}\s+/, '').trim())
 		.filter((line) => line !== '')
 		.slice(1)

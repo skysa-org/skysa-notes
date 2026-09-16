@@ -12,11 +12,11 @@ import { type NoteRecord } from '../src/store/db.js';
 
 afterEach(cleanup);
 
-const note = (title: string): NoteRecord =>
+const note = (title: string, body = ''): NoteRecord =>
 	({
 		id: title,
 		title,
-		body: '',
+		body,
 		path: `work/${title}.md`,
 		updatedAt: 0,
 		dirty: 0,
@@ -94,5 +94,23 @@ describe('NoteList', () => {
 			expect(screen.queryByText('Create a notebook to start writing.')).toBeNull();
 			expect(screen.getByText('Alpha')).toBeDefined();
 		});
+	});
+});
+
+describe('the excerpt', () => {
+	it('shows the second line of an ordinary note', () => {
+		renderList({ notes: [note('Alpha', '# Alpha\n\nthe first line of prose\n')] });
+
+		expect(screen.getByText('the first line of prose')).toBeDefined();
+	});
+
+	it('shows one for a note written on a Mac that predates OS X', () => {
+		// Every line of such a note ends `\r`, so splitting on `\n` yields a
+		// single line, which the heading-dropping `.slice(1)` then removes —
+		// leaving the note with no excerpt at all. `splitFrontmatter` accepts
+		// those files now, so they are notes like any other.
+		renderList({ notes: [note('Alpha', '# Alpha\rthe first line of prose\r')] });
+
+		expect(screen.getByText('the first line of prose')).toBeDefined();
 	});
 });

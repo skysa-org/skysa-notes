@@ -19,6 +19,9 @@ import { normalize, parse, serialize } from '../../src/markdown/pipeline.js';
  *     note never churns.
  *  2. `parse(serialize(parse(md)))` is structurally identical to `parse(md)` —
  *     i.e. nothing is dropped or reinterpreted on the way through.
+ *  3. None of the above depends on how the file's lines end. CommonMark says
+ *     `\n`, `\r\n` and `\r` are one thing; a note written on Windows is the
+ *     same note.
  */
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -52,11 +55,10 @@ describe.each(fixtures)('$name', ({ source }) => {
 		expect(stripPositions(parse(serialize(tree)))).toEqual(stripPositions(tree));
 	});
 
-	it('survives a second full cycle unchanged', () => {
-		const once = normalize(source);
-		const twice = normalize(once);
-		expect(twice).toBe(once);
-		expect(stripPositions(parse(twice))).toEqual(stripPositions(parse(once)));
+	it('reads the same when its lines end the Windows way', () => {
+		const crlf = source.replaceAll('\n', '\r\n');
+		expect(stripPositions(parse(crlf))).toEqual(stripPositions(parse(source)));
+		expect(normalize(crlf)).toBe(normalize(source));
 	});
 });
 
