@@ -116,6 +116,36 @@ describe('createFolder and a name another notebook already folds onto', () => {
 		expect(await folderTree(db)).toHaveLength(1);
 	});
 
+	/**
+	 * The check folds and `ensureFolder` does not, so the parent has to reach it
+	 * spelled the way the store already spells it. Handed `work` where the store
+	 * holds `Work`, the folded check finds nothing wrong with `work/Meetings` —
+	 * and `ensureFolder` then writes the row `work`, leaving the two spellings
+	 * this function exists to prevent, created by this function. A stale
+	 * `?folder=` link in the address bar is enough to send one in.
+	 */
+	it('creates under the spelling the store already uses for the parent', async () => {
+		await createFolder(db, { name: 'Work' });
+
+		await createFolder(db, { parentPath: 'work', name: 'Meetings' });
+
+		expect(await folderTree(db)).toEqual(['Work', 'Work/Meetings']);
+	});
+
+	/**
+	 * `buildFolderTree` makes a notebook out of the folder part of a note's
+	 * path, whether or not a folder row exists — and a note pulled from a
+	 * provider arrives without one. Checking only the rows lets a second
+	 * spelling of a notebook the sidebar is already drawing be created beside
+	 * it.
+	 */
+	it('refuses a second spelling of a notebook only a note implies', async () => {
+		await importNoteFile(db, { path: 'work/a.md', source: '# A\n' });
+		await db.folders.clear();
+
+		await expect(createFolder(db, { name: 'Work' })).rejects.toThrow(FolderExistsError);
+	});
+
 	it('still allows a name that is genuinely different', async () => {
 		await createFolder(db, { name: 'Archive' });
 		await createFolder(db, { name: 'Archived' });

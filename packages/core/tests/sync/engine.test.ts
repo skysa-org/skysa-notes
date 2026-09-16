@@ -170,6 +170,17 @@ describe('pull', () => {
 		expect(store.notes()).toEqual([]);
 	});
 
+	it('takes a note whose extension is shouted', async () => {
+		// `Report.MD` is what a Windows tool writes, and it is a markdown file.
+		// Deciding otherwise here is not a small inconsistency: it is the reason
+		// the fold in `conflictFilename` could never be reached by anything the
+		// engine actually pulls, because no note could ever carry `.MD`.
+		await remoteFile('Report.MD', '# Report\n');
+		await engine.pull();
+
+		expect(store.notes().map((note) => note.path)).toEqual(['Report.MD']);
+	});
+
 	it('overwrites a clean local note that changed remotely', async () => {
 		const first = await remoteFile('a.md', 'one\n');
 		store.put({

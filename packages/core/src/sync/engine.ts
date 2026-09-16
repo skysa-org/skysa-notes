@@ -22,6 +22,14 @@ import {
 	type StorageProvider,
 } from '../providers/types.js';
 import { conflictContent, conflictFolderPath, conflictPath } from './conflicts.js';
+
+/**
+ * How many times `freeFolderPath` may ask for a name before giving up. Names go
+ * `(conflict <stamp>)`, `-2`, `-3`… so reaching this means a hundred folders
+ * already stand aside from one path inside one minute, which is not a state a
+ * user produces — it is the two folds having drifted apart.
+ */
+const FREE_PATH_ATTEMPTS = 100;
 import type {
 	ConflictResolution,
 	PullChange,
@@ -250,6 +258,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// being spelled `Archive` where the folder says `archive` is a name the
 		// copy is then free to land on, and that copy is the only place the
 		// user's losing edit exists.
+		//
+		// Reaches `claimed` and the batch's own choices, and **not** the store's
+		// rows: `notesEndingIn` above filters by parent byte-exactly, and its
+		// candidates come from `store.notesUnder`, which is `isWithin` and also
+		// byte-exact. So a sibling the store holds under `Cafe\u0301/` is gone
+		// before this fold runs, and a copy for `Caf\u00e9/a.md` can still land
+		// on it. Closing that means folding `isWithin` — and `rebasePath` with
+		// it, since a folded check over a byte-exact rewriter is this bug again
+		// one level down. Tracked as its own change rather than widened here.
 		const at = foldName(folder);
 		return paths.filter((path) => foldName(parentPath(path)) === at).map(basename);
 	};
@@ -623,10 +640,31 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * lose; leaving it merges both folders' notes into one notebook and loses a
 	 * row, which is how `Archive/old.md` ends up inside `Older`.
 	 */
-	const freeFolderPath = async (path: string, taken: readonly string[]): Promise<string> => {
+	const freeFolderPath = async (
+		path: string,
+		taken: readonly string[],
+		left = FREE_PATH_ATTEMPTS
+	): Promise<string> => {
 		const candidate = conflictFolderPath(path, now(), taken);
 		if ((await store.folderByPath(candidate)) === undefined) return candidate;
-		return freeFolderPath(path, [...taken, basename(candidate)]);
+		// Bounded, because the loop's termination rests on `conflictFolderName`
+		// recognising the name it just produced when that name is handed back in
+		// `taken`. Those are two folds — the one that writes the name and the one
+		// that reads it — and if they ever disagree, `n` stops advancing and this
+		// recurses for ever. That is not a wrong name: it is `pull()` never
+		// returning, with no error, no cursor movement and no way for the user to
+		// tell. Running out of attempts throws instead, which stops the batch and
+		// leaves the cursor where it was, so the next sync retries the same work.
+		//
+		// Untestable by construction, and kept anyway: reaching the cap requires
+		// the drift it exists for, and a test that produced the drift would be
+		// asserting about a build of the code nobody ships. It was found the way
+		// such things are — a mutation of `conflictName`'s fold did not fail the
+		// suite, it hung it.
+		if (left <= 1) {
+			throw new Error(`could not find a free folder path beside ${path}`);
+		}
+		return freeFolderPath(path, [...taken, basename(candidate)], left - 1);
 	};
 
 	/**
@@ -1029,7 +1067,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// everything in it — the user may have dropped a PDF beside their notes,
 		// and turning it into a note would corrupt the list and, on push, the
 		// file. See docs/PLAN.md §14.
-		if (!entry.path.endsWith(NOTE_EXTENSION)) return [];
+		// Folded, like every other question about a name: `Report.MD` from a
+		// Windows tool is a markdown file, and a gate that says otherwise means
+		// the fold in `conflictFilename` below can never be reached by anything
+		// the engine actually pulls.
+		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) return [];
 		return decideFile(entry, decided, live, claimed, renaming);
 	};
 

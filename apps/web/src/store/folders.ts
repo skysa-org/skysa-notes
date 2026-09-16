@@ -37,6 +37,33 @@ const ancestorsOf = (path: string): string[] =>
 		);
 
 /**
+ * Every path that is a notebook as far as the sidebar is concerned: the folder
+ * rows, plus the folder part of every note's path. `buildFolderTree` draws both,
+ * and a note pulled from a provider can arrive without a row of its own, so a
+ * question about "is there already a notebook here" that reads only the rows
+ * gets the wrong answer for exactly the notebooks the app did not create itself.
+ */
+const folderPaths = async (db: NotesDatabase, connectionId: string): Promise<string[]> => {
+	const [folders, notes] = await Promise.all([
+		db.folders.where('connectionId').equals(connectionId).toArray(),
+		db.notes.where('connectionId').equals(connectionId).toArray(),
+	]);
+	const implied = notes.flatMap((note) => ancestorsOf(parentPath(note.path)));
+	return [...new Set([...folders.map((folder) => folder.path), ...implied])];
+};
+
+/**
+ * The spelling `existing` already uses for `path`, or `path` unchanged when it
+ * names nothing yet. So a caller that asks for `work` when the store holds
+ * `Work` gets `Work`, and nothing downstream has to fold to stay consistent
+ * with a check that already did.
+ */
+const spellingOf = (path: string, existing: readonly string[]): string => {
+	const wanted = foldPath(path);
+	return existing.find((each) => foldPath(each) === wanted) ?? path;
+};
+
+/**
  * Create a folder and any missing parents. Idempotent: re-creating an existing
  * folder is a no-op rather than an error, which is what every caller wants.
  */
@@ -92,13 +119,12 @@ export const createFolder = async (
 ): Promise<FolderRecord> => {
 	const connectionId = input.connectionId ?? LOCAL_CONNECTION_ID;
 	const name = sanitizeFolderName(input.name);
-	const path = joinPath(input.parentPath ?? '', name);
 
 	// The check and the create are one step. `ensureFolder` is idempotent, so
 	// two concurrent creates of one name did no damage — but both passed the
 	// check and both reported success, and this is the one function whose error
 	// the user is now shown, which makes an advisory check the wrong kind.
-	return db.transaction('rw', db.folders, async () => {
+	return db.transaction('rw', db.folders, db.notes, async () => {
 		// Folded, and this is the door that matters: `moveFolder` refuses a
 		// notebook whose name folds onto another's, but nothing calls `moveFolder`
 		// yet, while this is wired straight to the new-notebook field. Asked
@@ -112,9 +138,24 @@ export const createFolder = async (
 		// and a note written under the other one sits at a path `listNotes` —
 		// which compares exactly — would never show. Refusing the second spelling
 		// here is what stops either from arising.
-		const rows = await db.folders.where('connectionId').equals(connectionId).toArray();
+		// Every notebook the sidebar shows, which is not the same as every folder
+		// row: `buildFolderTree` also makes a notebook out of the folder part of
+		// a note's path, and a note can arrive from a sync with no row of its
+		// own. Checking only the rows lets `Work` be created beside a note
+		// already living in `work/`, and the sidebar then draws both.
+		const existing = await folderPaths(db, connectionId);
+
+		// And the spelling the store already uses for the parent, not the one
+		// the caller passed. The check below folds; `ensureFolder` creates every
+		// missing ancestor byte-exactly. Handed `work` where the store holds
+		// `Work`, the folded check sees nothing wrong with `work/Meetings` and
+		// `ensureFolder` then writes the row `work` — leaving the two spellings
+		// this function exists to prevent, created by this function. A stale
+		// `?folder=` link is enough to send one in.
+		const path = joinPath(spellingOf(input.parentPath ?? '', existing), name);
+
 		const wanted = foldPath(path);
-		if (rows.some((folder) => foldPath(folder.path) === wanted)) {
+		if (existing.some((folder) => foldPath(folder) === wanted)) {
 			throw new FolderExistsError(path, name);
 		}
 

@@ -2,6 +2,7 @@ import { toString as nodeToString } from 'mdast-util-to-string';
 
 import { NOTE_EXTENSION } from '../config.js';
 import { parse } from './pipeline.js';
+import { foldName } from './slug.js';
 
 /**
  * Title is frontmatter `title`, else the first heading, else the filename.
@@ -23,7 +24,7 @@ const firstHeadingText = (body: string): string | undefined =>
 
 /** Strip the extension and turn slug separators back into spaces. */
 export const titleFromFilename = (filename: string): string => {
-	const withoutExtension = filename.toLowerCase().endsWith(NOTE_EXTENSION)
+	const withoutExtension = foldName(filename).endsWith(NOTE_EXTENSION)
 		? filename.slice(0, -NOTE_EXTENSION.length)
 		: filename;
 	return withoutExtension.replace(/[-_]+/g, ' ').trim();
