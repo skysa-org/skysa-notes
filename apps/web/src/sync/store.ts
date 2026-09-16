@@ -583,6 +583,11 @@ export const createDexieSyncStore = (
 
 		pendingOps: async () => (await opsOf(db)).map(toSyncOp).sort((a, b) => a.seq - b.seq),
 
+		opBySeq: async (seq) => {
+			const op = await db.opQueue.get(seq);
+			return op?.connectionId === connectionId ? toSyncOp(op) : undefined;
+		},
+
 		completeOp: (seq, outcome) =>
 			inTransaction(async () => {
 				// Gone is not an error: a change the user made while the op was

@@ -9,10 +9,11 @@ import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js
  * op that carries it land together or not at all. Pulls never do — what a pull
  * writes came from the remote.
  *
- * The engine reads the queue once and holds each op while it is at the network,
- * and the user can go on editing meanwhile. So what is queued is kept to what
- * the engine needs and no more, and every rule below has to hold even for an op
- * that is already on its way:
+ * The engine reads the queue once, asks for each op again just before sending
+ * it — so one withdrawn here in the meantime is never sent — and holds it while
+ * it is at the network, and the user can go on editing meanwhile. So what is
+ * queued is kept to what the engine needs and no more, and every rule below has
+ * to hold even for an op that is already on its way:
  *
  * - **A write carries no content.** The engine reads the note when it runs the
  *   op, so one queued write covers every edit made before it runs, and a note
@@ -26,10 +27,12 @@ import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js
  *   and the store settles it as the note having moved on.
  * - **A note never pushed is not moved.** There is nothing at the old path; its
  *   write creates the file wherever the note is by then.
- * - **A delete leaves the note's writes and moves queued.** Dropping a write
- *   that was in flight creating the file would leave the store never learning
- *   its `remoteId`, the delete then purging the row with nothing to remove, and
- *   the file coming back on the next pull as a note the user deleted.
+ * - **A delete leaves the note's writes and moves queued, and a deleted note is
+ *   still moved.** Dropping a write that was in flight creating the file would
+ *   leave the store never learning its `remoteId`, the delete then purging the
+ *   row with nothing to remove, and the file coming back on the next pull as a
+ *   note the user deleted. And a deleted note carried along by a notebook
+ *   rename can be restored, when its write needs the file where the note is.
  *
  * Folder renames and deletes go up as the notes inside them moving or being
  * deleted one by one: the engine has no op for a folder beyond `mkdir`, so the
@@ -91,9 +94,10 @@ export const queueMove = (db: QueueDb, note: NoteRecord, from: string): Queued =
 		// queue rather than sending it to the back.
 		if (moves.length === 1 && moves[0]?.targetPath === note.path) return undefined;
 		const origin = moves[0]?.path ?? from;
-		// A tombstone is deleted by its `remoteId`, wherever its path has got to.
-		const owed =
-			note.remoteId !== undefined && note.deletedLocally === 0 && origin !== note.path;
+		// A tombstone is moved too. Its delete would find the file wherever it
+		// is, but it can be restored, and its write is then addressed to where
+		// the note has got to — which only a move queued for it explains.
+		const owed = note.remoteId !== undefined && origin !== note.path;
 		return db.opQueue.bulkDelete(seqsOf(moves)).then(() =>
 			owed
 				? add(db, {

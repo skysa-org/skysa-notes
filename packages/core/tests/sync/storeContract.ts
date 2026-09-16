@@ -963,6 +963,17 @@ export const describeSyncStoreContract = (
 				expect(ops[0]?.attempts).toBe(1);
 			});
 
+			it('hands back one queued op as it stands, and nothing once it is done', async () => {
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'x\n', dirty: true });
+				const seq = await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+				await store.failOp(seq, 'offline');
+
+				expect(await store.opBySeq(seq)).toMatchObject({ seq, op: 'write', attempts: 1 });
+				await store.completeOp(seq, { kind: 'done' });
+				expect(await store.opBySeq(seq)).toBeUndefined();
+			});
+
 			it('hands back queued ops in the order they were made', async () => {
 				const { store, seedOp } = await harness();
 				const first = await seedOp({ op: 'mkdir', path: 'Work' });

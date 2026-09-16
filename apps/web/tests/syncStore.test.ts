@@ -570,6 +570,8 @@ describe('another connection’s note under the same id', () => {
 		await mine.completeOp(own, { kind: 'purged', noteId: 'n1' });
 		expect(await theirs.noteById('n1')).toMatchObject({ remoteId: 'r1', dirty: false });
 		expect((await theirs.pendingOps()).map((op) => op.seq)).toEqual([seq]);
+		expect(await mine.opBySeq(seq)).toBeUndefined();
+		expect(await theirs.opBySeq(seq)).toMatchObject({ seq, op: 'delete' });
 	});
 });
 

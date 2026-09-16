@@ -5,6 +5,7 @@ import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.
 import {
 	AuthError,
 	type ChangeEntry,
+	ConflictError,
 	CursorResetError,
 	NotFoundError,
 	type StorageProvider,
@@ -2492,6 +2493,96 @@ describe('a write whose file is not where it was', () => {
 		expect(provider.contentAt('a.md')).toBeUndefined();
 	});
 
+	it('does not move a file changed on the remote since the pull, to write over it', async () => {
+		// Moved first, the write would be checked against the version the move
+		// hands back rather than the one the note was in step with, and the
+		// other device's edit would be gone with no conflict anywhere.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+
+		expect((await engine.push()).status).toBe('retry');
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(provider.contentAt('b.md')).toBeUndefined();
+
+		// And the next pull answers it as the conflict it is: both kept.
+		await engine.sync();
+		const texts = [
+			...store.notes().map((note) => note.content),
+			...provider.snapshot().map((node) => provider.contentAt(node.path)),
+		];
+		expect(texts).toContain('theirs\n');
+		expect(texts.some((text) => text?.includes('edited'))).toBe(true);
+	});
+
+	it('moves a note aside from a name taken while its rename was being followed', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		const other = await remoteFile('other.md', 'other\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		provider.setFault((call) =>
+			call.op === 'move' ? new ConflictError({ ...other, path: 'b.md' }) : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(result.conflicts).toEqual([]);
+		const mine = store.notes().find((note) => note.id === 'n1');
+		expect(mine).toMatchObject({ content: 'edited\n', remoteId: entry.remoteId });
+		expect(mine?.path).toContain('conflict');
+		expect(store.ops().find((op) => op.op === 'move')?.targetPath).toBe(mine?.path);
+		expect(store.notes()).toHaveLength(1);
+	});
+
+	it('moves a note aside from a file it does not hold, at the name it was renamed to', async () => {
+		// Another device wrote `b.md` after our pull. The write finds a file
+		// there, and it is not this note's: its id says so. A conflict would give
+		// this note that file's contents and id, and orphan its own file.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		const theirs = await remoteFile('b.md', 'other\n');
+
+		await engine.push();
+		await engine.sync();
+
+		const mine = store.notes().find((note) => note.id === 'n1');
+		expect(mine).toMatchObject({ content: 'edited\n', remoteId: entry.remoteId, dirty: false });
+		expect(mine?.path).toContain('conflict');
+		expect(provider.contentAt(mine?.path ?? '')).toBe('edited\n');
+		expect(provider.contentAt('b.md')).toBe('other\n');
+		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(store.notes().find((note) => note.remoteId === theirs.remoteId)?.content).toBe(
+			'other\n'
+		);
+	});
+
 	it('is one note when the version survives the move, as Dropbox rev does', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
 		store.put({
@@ -4113,6 +4204,34 @@ describe('our own echo arriving with a new version', () => {
 
 		expect(store.notes().map((each) => each.path)).toEqual(['c.md']);
 		expect(store.notes()[0]?.remoteVersion).toBe(file.version);
+	});
+});
+
+describe('an op withdrawn after the queue was read', () => {
+	it('is passed over, not sent', async () => {
+		// The engine reads the queue once. A restore that withdraws a delete
+		// while an earlier op is out would otherwise still delete the file.
+		const kept = await remoteFile('a.md', 'keep\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'keep\n',
+			remoteId: kept.remoteId,
+			remoteVersion: kept.version,
+		});
+		const remove = store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		const stale = await store.pendingOps();
+		await store.completeOp(remove.seq, { kind: 'done' });
+
+		const result = await createSyncEngine({
+			provider,
+			store: { ...store, pendingOps: () => Promise.resolve(stale) },
+			now: () => AT,
+		}).push();
+
+		expect(result).toMatchObject({ status: 'ok', pushed: 0 });
+		expect(provider.callLog().filter((call) => call.op === 'delete')).toEqual([]);
+		expect(provider.contentAt('a.md')).toBe('keep\n');
 	});
 });
 

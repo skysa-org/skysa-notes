@@ -22,7 +22,7 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 } from '../src/store/notes.js';
-import { queueMove, queueWrite } from '../src/store/queue.js';
+import { queueWrite } from '../src/store/queue.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 
 const CONNECTION = 'dropbox-1';
@@ -151,20 +151,24 @@ describe('the push queue a local change leaves behind', () => {
 		expect(await queued(db)).toEqual([{ op: 'write', path: 'a.md', noteId: note.id }]);
 	});
 
-	it('queues no write or move for a note once it is deleted', async () => {
+	it('queues no write for a note once it is deleted, but still moves it', async () => {
 		const db = freshDatabase();
-		const note = await pushedNote(db);
+		await createFolder(db, { ...scope, name: 'Work' });
+		const note = await pushedNote(db, 'Work/a.md');
+		await db.opQueue.clear();
 		await deleteNote(db, note.id);
 
-		// A tombstone is still carried along by a notebook rename, and settled
-		// by the sync store; neither owes the remote anything but the delete.
+		await renameFolder(db, 'Work', 'Play', scope);
 		await db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
 			const row = await db.notes.get(note.id);
-			await queueWrite(db, { ...row!, path: 'z.md' });
-			await queueMove(db, { ...row!, path: 'z.md' }, 'a.md');
+			await queueWrite(db, row!);
 		});
 
-		expect(await queued(db)).toEqual([{ op: 'delete', path: 'a.md', noteId: note.id }]);
+		expect(await queued(db)).toEqual([
+			{ op: 'delete', path: 'Work/a.md', noteId: note.id },
+			{ op: 'mkdir', path: 'Play' },
+			{ op: 'move', path: 'Work/a.md', targetPath: 'Play/a.md', noteId: note.id },
+		]);
 	});
 
 	it('queues a mkdir for every notebook a new one brings into being, outermost first', async () => {
@@ -594,5 +598,104 @@ describe('an op the user has moved on from, settled', () => {
 		await store.failOp(remove!.seq, 'offline');
 
 		expect(await store.pendingOps()).toEqual(before);
+	});
+});
+
+/** The provider, with `after` run once the pull has read its last page: another device, between our pull and our push. */
+const afterPull = (fake: FakeProvider, after: () => Promise<unknown>): StorageProvider => {
+	const done = new Set<boolean>();
+	return {
+		...fake,
+		changes: async (cursor) => {
+			const page = await fake.changes(cursor);
+			if (!done.has(true) && !page.more) {
+				done.add(true);
+				await after();
+			}
+			return page;
+		},
+	};
+};
+
+/** Every note's text, on the remote and here. */
+const everywhere = async (db: NotesDatabase, fake: FakeProvider) => [
+	...Object.values(remoteFiles(fake)),
+	...(await db.notes.toArray()).map(noteFile),
+];
+
+describe('a queue that has moved on by the time it is sent', () => {
+	it('pushes a note restored after its notebook was renamed while it was deleted', async () => {
+		const { db, fake, engine } = await connected();
+		await createFolder(db, { ...scope, name: 'Work' });
+		const note = await createNote(db, { ...scope, folderPath: 'Work', title: 'Plan' });
+		await engine.sync();
+		await engine.sync();
+
+		await deleteNote(db, note.id);
+		await renameFolder(db, 'Work', 'Play', scope);
+		await restoreNote(db, note.id);
+		expect((await engine.sync()).status).toBe('ok');
+
+		await expectMirrored(db, fake);
+		expect(Object.keys(remoteFiles(fake))).toEqual(['Play/plan.md']);
+	});
+
+	it('does not send a delete the user withdrew after the engine read the queue', async () => {
+		const { db, fake, engine, engineOver } = await connected();
+		const other = await createNote(db, { ...scope, title: 'Other' });
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nkeep\n' });
+		await engine.sync();
+		const before = (await getNote(db, note.id))?.remoteId;
+
+		await saveNoteBody(db, other.id, '# Other\n\nedit\n');
+		await deleteNote(db, note.id);
+		// Restored while the other note's write, ahead of the delete, is out.
+		await engineOver(inFlight(fake, 'write', () => restoreNote(db, note.id))).sync();
+		await engine.sync();
+
+		expect(fake.callLog().filter((call) => call.op === 'delete')).toEqual([]);
+		expect((await getNote(db, note.id))?.remoteId).toBe(before);
+		await expectMirrored(db, fake);
+	});
+
+	it('keeps an edit another device made to a note renamed here since the pull', async () => {
+		const { db, fake, engine, engineOver } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nmine\n' });
+		await engine.sync();
+		await engine.sync();
+		const version = (await getNote(db, note.id))?.remoteVersion;
+
+		await renameNote(db, note.id, 'Roadmap');
+		await engineOver(
+			afterPull(fake, () => fake.write('plan.md', 'THEIRS\n', { expectedVersion: version }))
+		).sync();
+		const settled = await engine.sync();
+		await engine.sync();
+
+		expect(settled.conflicts).not.toEqual([]);
+		const texts = await everywhere(db, fake);
+		expect(texts.some((text) => text?.includes('THEIRS'))).toBe(true);
+		expect(texts.some((text) => text?.includes('mine'))).toBe(true);
+		await expectMirrored(db, fake);
+	});
+
+	it('does not take over a file another device put at the name a note was renamed to', async () => {
+		const { db, fake, engine, engineOver } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nmine\n' });
+		await engine.sync();
+		await engine.sync();
+
+		await renameNote(db, note.id, 'Roadmap');
+		await engineOver(
+			afterPull(fake, () => fake.write('roadmap.md', 'OTHER NOTE\n', {}))
+		).sync();
+		await engine.sync();
+		await engine.sync();
+
+		const row = await getNote(db, note.id);
+		expect(noteFile(row!)).toContain('mine');
+		expect(fake.contentAt('roadmap.md')).toBe('OTHER NOTE\n');
+		expect(fake.contentAt('plan.md')).toBeUndefined();
+		await expectMirrored(db, fake);
 	});
 });

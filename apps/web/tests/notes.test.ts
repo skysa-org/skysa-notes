@@ -627,8 +627,10 @@ describe('an edit that overlaps another write to the same note', () => {
 				// the one arrangement that proves nothing. A real second write
 				// comes from an event handler, a task of its own, which is what
 				// a timer is. `Dexie.ignoreTransaction` leaves the zone too, but
-				// still runs inside this task, and a transaction opened from
-				// there broke the one it was racing rather than waiting for it.
+				// runs inside this task, and under fake-indexeddb a transaction
+				// opened from there failed with `TransactionInactiveError` once
+				// the edit's transaction also covered the push queue — which no
+				// call from a real handler has been found to reproduce.
 				setTimeout(() => {
 					started(competing());
 				}, 0);
