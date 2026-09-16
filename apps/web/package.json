@@ -21,7 +21,6 @@
 		"@prosemirror-adapter/react": "0.5.5",
 		"@skysa/core": "workspace:*",
 		"@tanstack/react-router": "^1.170.36",
-		"codemirror": "^6.0.2",
 		"dexie": "^4.4.6",
 		"dexie-react-hooks": "^4.4.0",
 		"react": "^19.3.0",

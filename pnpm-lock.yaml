@@ -53,9 +53,6 @@ importers:
 
   apps/api:
     dependencies:
-      '@hono/zod-validator':
-        specifier: ^0.9.1
-        version: 0.9.1(hono@4.13.7)(zod@4.6.5)
       '@skysa/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -69,6 +66,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@types/node':
+        specifier: ^22.20.2
+        version: 22.20.2
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
@@ -111,9 +111,6 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.170.36
         version: 1.170.36(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      codemirror:
-        specifier: ^6.0.2
-        version: 6.0.2
       dexie:
         specifier: ^4.4.6
         version: 4.4.6
@@ -1586,12 +1583,6 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
-
-  '@hono/zod-validator@0.9.1':
-    resolution: {integrity: sha512-iiv6w0qrIc0arfvCtUqBWsvl4fXjzaTcQcCJTTtCnkawF9HHGE+KjEl0ox3gQJ6rKZEgE3mLExlQCF72M+mNuw==}
-    peerDependencies:
-      hono: '>=4.11.2'
-      zod: ^3.25.0 || ^4.0.0
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -6186,11 +6177,6 @@ snapshots:
       '@floating-ui/utils': 0.2.12
 
   '@floating-ui/utils@0.2.12': {}
-
-  '@hono/zod-validator@0.9.1(hono@4.13.7)(zod@4.6.5)':
-    dependencies:
-      hono: 4.13.7
-      zod: 4.6.5
 
   '@humanfs/core@0.19.2':
     dependencies:
