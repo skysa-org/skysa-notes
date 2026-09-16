@@ -1,5 +1,6 @@
 import {
 	basename,
+	foldName,
 	normalizePath,
 	NOTE_EXTENSION,
 	parentPath,
@@ -28,15 +29,15 @@ import {
  * from whatever wrote them, NFD is what a macOS file and an iOS share sheet
  * hand you, and a folder other tools write to is the entire premise.
  *
- * `slugify` in core already folds both ways, for these reasons. This has to
- * agree with it, or the check and the renamer behind it disagree about what
- * "taken" means — and when they disagree, the check is the one that fails open.
+ * `foldName` is core's own answer to that question, and the one `uniqueFilename`
+ * compares with — imported rather than restated, because the check here guards
+ * that renamer and the two have to agree. Every time a copy of this has drifted
+ * from it, the check has been the half that failed open.
  *
  * The path is normalized too, since a row holds whatever path it was imported
  * with rather than one this app composed.
  */
-export const foldPath = (path: string): string =>
-	normalizePath(path).normalize('NFC').toLowerCase();
+export const foldPath = (path: string): string => foldName(normalizePath(path));
 
 /** The name without its `.md`, which is what `uniqueFilename` takes. */
 const stemOf = (filename: string): string =>
@@ -44,7 +45,7 @@ const stemOf = (filename: string): string =>
 	// exactly would leave the extension in the stem to be slugified into the
 	// name — `Report.MD` becoming `report-md.md`. `deriveTitle` in core asks the
 	// same question the same way.
-	filename.toLowerCase().endsWith(NOTE_EXTENSION)
+	foldName(filename).endsWith(NOTE_EXTENSION)
 		? filename.slice(0, -NOTE_EXTENSION.length)
 		: filename;
 

@@ -95,6 +95,42 @@ describe('createFolder', () => {
 	});
 });
 
+describe('createFolder and a name another notebook already folds onto', () => {
+	/**
+	 * The door the user can actually reach. `moveFolder` refuses this, and
+	 * nothing calls `moveFolder` — while this is wired straight to the
+	 * new-notebook field, so it was the only way to make the state the rest of
+	 * the module works to prevent.
+	 */
+	it('refuses a second spelling of a notebook that is already there', async () => {
+		await createFolder(db, { name: 'Archive' });
+
+		await expect(createFolder(db, { name: 'archive' })).rejects.toThrow(FolderExistsError);
+		expect(await folderTree(db)).toEqual(['Archive']);
+	});
+
+	it('refuses one that differs only in normal form', async () => {
+		await createFolder(db, { name: 'caf\u00e9' });
+
+		await expect(createFolder(db, { name: 'cafe\u0301' })).rejects.toThrow(FolderExistsError);
+		expect(await folderTree(db)).toHaveLength(1);
+	});
+
+	it('still allows a name that is genuinely different', async () => {
+		await createFolder(db, { name: 'Archive' });
+		await createFolder(db, { name: 'Archived' });
+
+		expect(await folderTree(db)).toEqual(['Archive', 'Archived']);
+	});
+
+	it('refuses only within the same parent', async () => {
+		await createFolder(db, { name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Archive' });
+
+		await expect(createFolder(db, { name: 'archive' })).resolves.toBeDefined();
+	});
+});
+
 describe('listFolders', () => {
 	it('can be restricted to direct children', async () => {
 		await ensureFolder(db, 'work/meetings');
@@ -398,6 +434,15 @@ describe('moveFolder', () => {
 
 		await moveFolder(db, 'nowhere', 'archive');
 
+		expect(await folderTree(db)).toEqual(['work']);
+	});
+
+	it('does not report a duplicate for a move that moves nothing', async () => {
+		// The destination is occupied, but the source holds nothing, so there is
+		// no move for the notebook there to be in the way of.
+		await createFolder(db, { name: 'work' });
+
+		await expect(moveFolder(db, 'nowhere', 'work')).resolves.toBeUndefined();
 		expect(await folderTree(db)).toEqual(['work']);
 	});
 

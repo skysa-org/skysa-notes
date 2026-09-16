@@ -1,6 +1,7 @@
 import { NOTE_EXTENSION } from '../config.js';
 import { readFrontmatter, splitFrontmatter } from '../markdown/frontmatter.js';
 import { serializeNoteFile } from '../markdown/note.js';
+import { foldName } from '../markdown/slug.js';
 import { basename, replaceBasename } from '../paths.js';
 
 /**
@@ -41,17 +42,15 @@ const conflictName = (
 	taken: Iterable<string>
 ): string => {
 	const base = `${stem} (conflict ${conflictStamp(at)})`;
-	// Case-folded and NFC-normalized, because Drive, Dropbox and macOS all treat
-	// names that way, and a name that differs only in one of those is not
-	// actually free. `uniqueFilename` compares the same two ways; a conflict
-	// copy that landed on an existing name would overwrite the very edit this
-	// whole rule exists to keep.
-	const fold = (name: string): string => name.normalize('NFC').toLowerCase();
-	const used = new Set([...taken].map(fold));
+	// `foldName`, the same one `uniqueFilename` uses, because it is the same
+	// question: a name that differs from a taken one only in case or in normal
+	// form is not actually free, and a conflict copy that landed on an existing
+	// name would overwrite the very edit this whole rule exists to keep.
+	const used = new Set([...taken].map(foldName));
 
 	const free = (n: number): string => {
 		const candidate = n === 1 ? `${base}${extension}` : `${base}-${n}${extension}`;
-		return used.has(fold(candidate)) ? free(n + 1) : candidate;
+		return used.has(foldName(candidate)) ? free(n + 1) : candidate;
 	};
 	return free(1);
 };
@@ -61,7 +60,10 @@ export const conflictFilename = (
 	at: Date,
 	taken: Iterable<string> = []
 ): string => {
-	const stem = filename.endsWith(NOTE_EXTENSION)
+	// Folded, so `Report.MD` from a Windows tool loses its extension here rather
+	// than keeping it and taking a second one — the same question `deriveTitle`
+	// and `store/naming.ts` ask, answered the same way.
+	const stem = foldName(filename).endsWith(NOTE_EXTENSION)
 		? filename.slice(0, -NOTE_EXTENSION.length)
 		: filename;
 	return conflictName(stem, NOTE_EXTENSION, at, taken);

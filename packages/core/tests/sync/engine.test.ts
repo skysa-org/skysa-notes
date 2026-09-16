@@ -487,6 +487,40 @@ describe('a conflict', () => {
 		);
 		expect(noteAt('a (conflict 2026-09-15T14-32).md')?.content).toContain('mine\n');
 	});
+
+	/**
+	 * The same two devices, where the other one is a Mac. A folder made through
+	 * the Finder carries its accents decomposed, so the copy that device saved a
+	 * minute ago arrives under `Cafe\u0301` while ours is under `Caf\u00e9` —
+	 * one folder to every provider in §5, two to a byte comparison. Reading the
+	 * folder byte-exactly drops that copy from the names this one must not take,
+	 * and the name is then free for a copy that is the only place the losing
+	 * edit exists.
+	 */
+	it('does not overwrite a copy another device left under a decomposed folder name', async () => {
+		const nfc = 'Caf\u00e9';
+		const nfd = 'Cafe\u0301';
+		await provider.createFolder(nfc);
+		await provider.createFolder(nfd);
+		const first = await remoteFile(`${nfc}/a.md`, 'original\n');
+		await remoteFile(`${nfd}/a (conflict 2026-09-15T14-32).md`, 'theirs, saved\n');
+		store.put({
+			id: 'n1',
+			path: `${nfc}/a.md`,
+			content: 'mine\n',
+			remoteId: first.remoteId,
+			remoteVersion: first.version,
+			dirty: true,
+		});
+		await provider.write(`${nfc}/a.md`, 'theirs\n', { expectedVersion: first.version });
+
+		await engine.pull();
+
+		expect(noteAt(`${nfd}/a (conflict 2026-09-15T14-32).md`)?.content).toContain(
+			'theirs, saved\n'
+		);
+		expect(noteAt(`${nfc}/a (conflict 2026-09-15T14-32)-2.md`)?.content).toContain('mine\n');
+	});
 });
 
 describe('push', () => {

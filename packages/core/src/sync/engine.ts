@@ -1,5 +1,6 @@
 import { NOTE_EXTENSION } from '../config.js';
 import { parseNoteFile } from '../markdown/note.js';
+import { foldName } from '../markdown/slug.js';
 import {
 	ancestorPaths,
 	basename,
@@ -245,7 +246,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				return change.kind === 'conflict' ? [change.resolution.copyPath] : [];
 			}),
 		];
-		return paths.filter((path) => parentPath(path) === folder).map(basename);
+		// Folded, because `conflictName` folds: a name dropped from this list for
+		// being spelled `Archive` where the folder says `archive` is a name the
+		// copy is then free to land on, and that copy is the only place the
+		// user's losing edit exists.
+		const at = foldName(folder);
+		return paths.filter((path) => foldName(parentPath(path)) === at).map(basename);
 	};
 
 	const resolutionFor = async (

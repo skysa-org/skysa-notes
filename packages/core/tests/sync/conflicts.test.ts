@@ -69,6 +69,18 @@ describe('conflictFilename', () => {
 		expect(conflictFilename('a.md', AT, taken)).toBe('a (conflict 2026-09-15T14-32)-3.md');
 	});
 
+	it('treats a name that differs only in normal form as taken', () => {
+		// NFD is what a macOS file and an iOS share sheet hand over, and it is one
+		// name with its NFC spelling on every provider. Missed, this copy lands on
+		// the existing one and overwrites it — and the copy is the only place the
+		// edit that lost the conflict exists.
+		const taken = ['caf\u00e9 (conflict 2026-09-15T14-32).md'.normalize('NFD')];
+
+		expect(conflictFilename('caf\u00e9.md', AT, taken)).toBe(
+			'caf\u00e9 (conflict 2026-09-15T14-32)-2.md'
+		);
+	});
+
 	it('treats a name that differs only in case as taken', () => {
 		// Drive, Dropbox and macOS all do, so a name that looks free here is not
 		// free where it matters.
@@ -78,6 +90,12 @@ describe('conflictFilename', () => {
 
 	it('copes with a name that has no extension', () => {
 		expect(conflictFilename('notes', AT)).toBe('notes (conflict 2026-09-15T14-32).md');
+	});
+
+	it('does not leave a shouted extension on the stem and take a second one', () => {
+		// `Report.MD` comes from a Windows tool, and it is a markdown file: the
+		// name has one extension, not a stem ending in `.MD` waiting for one.
+		expect(conflictFilename('Report.MD', AT)).toBe('Report (conflict 2026-09-15T14-32).md');
 	});
 });
 

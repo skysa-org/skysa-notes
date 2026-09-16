@@ -99,8 +99,24 @@ export const createFolder = async (
 	// check and both reported success, and this is the one function whose error
 	// the user is now shown, which makes an advisory check the wrong kind.
 	return db.transaction('rw', db.folders, async () => {
-		const existing = await db.folders.get([connectionId, path]);
-		if (existing !== undefined) throw new FolderExistsError(path, name);
+		// Folded, and this is the door that matters: `moveFolder` refuses a
+		// notebook whose name folds onto another's, but nothing calls `moveFolder`
+		// yet, while this is wired straight to the new-notebook field. Asked
+		// exactly, it let the user make `Archive` and then `archive` — two rows,
+		// two `remoteId`s, one directory on every provider the app syncs to — and
+		// then the store half-believed they were one folder and half-believed
+		// they were two, because `takenNamesIn` folds and `listNotes` does not.
+		//
+		// Deliberately not folded in `ensureFolder`, which creates rather than
+		// refuses: it would have to pick one of the two spellings for the row,
+		// and a note written under the other one sits at a path `listNotes` —
+		// which compares exactly — would never show. Refusing the second spelling
+		// here is what stops either from arising.
+		const rows = await db.folders.where('connectionId').equals(connectionId).toArray();
+		const wanted = foldPath(path);
+		if (rows.some((folder) => foldPath(folder.path) === wanted)) {
+			throw new FolderExistsError(path, name);
+		}
 
 		await ensureFolder(db, path, { connectionId });
 		const created = await db.folders.get([connectionId, path]);
@@ -172,22 +188,28 @@ export const moveFolder = async (
 		// same rows `moving` does, just below, or a row could be discounted here
 		// and then not actually moved — which is the merge again, arrived at from
 		// the other side.
+		const moving = folders.filter((folder) => isWithin(folder.path, source));
+		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+		const inside = notes.filter((note) => isWithin(note.path, source));
+
+		// Nothing is there — before the refusal below, not after it: a move that
+		// moves nothing has no destination to report a duplicate for, and saying
+		// one notebook is in the way of another that does not exist is an answer
+		// to a question nobody asked.
+		//
+		// Read exactly, as `moving` and `inside` are. A source spelled `Archive`
+		// where the row says `archive` therefore finds nothing and does nothing,
+		// rather than the fold the destination gets — the asymmetry is on purpose
+		// and explained below. What it replaces is worse: the only thing that
+		// used to happen was `ensureFolder` conjuring the destination, a notebook
+		// the user never asked for out of a move that moved nothing.
+		if (moving.length === 0 && inside.length === 0) return;
+
 		const occupying = folders.filter(
 			(folder) =>
 				isWithin(foldPath(folder.path), foldPath(target)) && !isWithin(folder.path, source)
 		);
 		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
-
-		const moving = folders.filter((folder) => isWithin(folder.path, source));
-		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
-		const inside = notes.filter((note) => isWithin(note.path, source));
-
-		// Nothing is there. Read exactly, as `moving` and `inside` are: a caller
-		// naming a folder that does not exist under that spelling has asked for
-		// nothing, and the only thing below that would still happen is
-		// `ensureFolder`, which would answer by conjuring the destination — a
-		// notebook the user did not ask for, from a move that moved nothing.
-		if (moving.length === 0 && inside.length === 0) return;
 
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		await ensureFolder(db, target, { connectionId });
