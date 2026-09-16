@@ -20,7 +20,7 @@ import {
  * relative to it — `ensureRoot` has nothing to create and only writes the
  * marker. See docs/PLAN.md §5.3.
  *
- * Docs consulted (2026-09-14):
+ * Docs consulted (2026-09-14, and `files.stone` again 2026-09-16):
  * - Endpoints and payloads: https://www.dropbox.com/developers/documentation/http/documentation
  * - Authoritative type definitions: https://github.com/dropbox/dropbox-api-spec (`files.stone`, `auth.stone`)
  * - Error handling: https://developers.dropbox.com/error-handling-guide
@@ -124,7 +124,13 @@ const toEntry = (metadata: Metadata): RemoteEntry => ({
  */
 const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
 	entry.remoteId === '' || current.remoteId === ''
-		? normalizePath(entry.path) === current.path
+		? // Folded, because Dropbox is case-insensitive and `path_display`
+			// carries the case the *user* typed — so the path that comes back is
+			// routinely spelled differently from the one the caller is holding
+			// for the very same file. Compared exactly, a move that had already
+			// happened would be reported as a conflict, and the conflict rule
+			// would write the user's note aside as a copy of itself.
+			normalizePath(entry.path).toLowerCase() === current.path.toLowerCase()
 		: entry.remoteId === current.remoteId;
 
 /**
@@ -385,16 +391,22 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		});
 		if (result.ok) return toEntry(result.value.metadata ?? {});
 
-		// Two ways of saying the destination is not free. `to/conflict` is the
-		// one for something in the way; `duplicated_or_nested_paths` is what
-		// Dropbox answers when the two paths it was given are the same, which
-		// a queued `move` naming the path the note is already at will do.
+		// Three ways of saying the destination is not free, and Dropbox does not
+		// document which it uses for a move to where the entry already is —
+		// which a queued `move` naming the path a note is at will be.
+		// `to/conflict` is what it has been observed to answer;
+		// `duplicated_or_nested_paths` is the one whose own description names
+		// the case ("duplicated/nested paths among from_path and to_path"); and
+		// `cant_move_folder_into_itself` is the plausible answer for a folder,
+		// which is what a notebook rename is.
 		// https://github.com/dropbox/dropbox-api-spec (`files.stone`, RelocationError)
 		//
-		// Neither is settled here, because neither says *what* is at the path,
-		// and that is the whole question: a move already done and a move onto
-		// someone else's file arrive as the same error.
+		// So none of them is settled from the tag. None of them says *what* is
+		// at the path either, and that is the whole question: a move already
+		// done and a move onto someone else's file arrive as the same error.
+		const intoItself = tagged(result.failure, 'cant_move_folder_into_itself');
 		const inTheWay =
+			intoItself ||
 			tagged(result.failure, 'conflict') ||
 			tagged(result.failure, 'duplicated_or_nested_paths');
 		if (!inTheWay) return raise(result.failure, entry.path);
@@ -413,6 +425,12 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// every note. Reporting it as a conflict would be worse still — the
 		// conflict rule would write the user's note aside as a copy of itself.
 		if (isSelf(entry, current)) return current;
+
+		// "Into itself" that turns out not to be itself is a folder being moved
+		// under its own descendant, which is not a conflict with the entry at
+		// the destination and must not be answered by copying a note aside. It
+		// goes back as the failure Dropbox sent.
+		if (intoItself) return raise(result.failure, newPath);
 		throw new ConflictError(current);
 	};
 

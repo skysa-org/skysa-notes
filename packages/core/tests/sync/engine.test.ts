@@ -696,6 +696,67 @@ describe('push', () => {
 		expect(provider.contentAt('Work/a.md')).toBeUndefined();
 	});
 
+	/**
+	 * Two places ask the provider "is it still there?" by reading it and taking
+	 * any rejection for a no. That is only true of a not-found. Everything else
+	 * — a rate limit, an outage, a response the adapter could not make sense of
+	 * — is the provider failing to answer, and a failure to answer read as "gone"
+	 * does the one thing the question was asked to avoid.
+	 */
+	it('does not re-create a note because the provider would not say', async () => {
+		const seeded = await provider.write('a.md', 'theirs\n', {});
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: seeded.remoteId,
+			remoteVersion: 'stale-rev',
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		// The write finds nothing at the path, so the engine asks whether the
+		// file still exists under the id it holds — and that read fails for a
+		// reason that is not an answer.
+		provider.setFault((call) => {
+			if (call.op === 'write') return new NotFoundError('a.md');
+			return call.op === 'read' ? new Error('service unavailable') : undefined;
+		});
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		// Not two notes where the user had one. (`isHidden` drops the marker file,
+		// which `ensureRoot` writes and which is a file like any other.)
+		const notes = provider.snapshot().filter((entry) => !isHidden(entry.path));
+		expect(notes.map((entry) => entry.path)).toEqual(['a.md']);
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(store.ops()).toHaveLength(1);
+	});
+
+	it('does not discard a rename because the provider would not say', async () => {
+		// Worse than the last one: `runMove` completes the op as done when it
+		// decides the source is gone, so the user's rename goes with nothing
+		// reported and nothing left to retry.
+		const seeded = await provider.write('a.md', 'mine\n', {});
+		store.put({
+			id: 'n1',
+			path: 'Work/a.md',
+			content: 'mine\n',
+			remoteId: seeded.remoteId,
+			remoteVersion: seeded.version,
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
+		provider.setFault((call) => {
+			if (call.op === 'move') return new NotFoundError('Work/a.md');
+			return call.op === 'read' ? new Error('service unavailable') : undefined;
+		});
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()).toHaveLength(1);
+	});
+
 	it('records the failure against the op it belongs to', async () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });

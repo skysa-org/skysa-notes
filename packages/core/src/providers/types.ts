@@ -86,8 +86,10 @@ export interface WriteOptions {
  *   write, which leaves the queued `move` naming a path the file has already
  *   reached; the queue is ordered and stops on a failed op, so an adapter that
  *   reported this as an error would strand everything behind it. Dropbox's
- *   `files/move_v2` answers `duplicated_or_nested_paths` here, so its adapter
- *   has to check before sending.
+ *   `files/move_v2` refuses it — with which of `to/conflict`,
+ *   `duplicated_or_nested_paths` and `cant_move_folder_into_itself` is not
+ *   documented — so its adapter reads the refusal and asks what is actually at
+ *   the path, rather than trusting the tag.
  * - `list` is one level; `changes` covers the whole tree at every depth.
  * - Neither filters hidden paths: `.notesapp.json` has to reach the engine.
  *   Callers filter with `isHidden`.

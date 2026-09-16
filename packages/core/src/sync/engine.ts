@@ -1368,7 +1368,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				const elsewhere = await provider
 					.read({ remoteId: id, path: note.path })
 					.then(() => true)
-					.catch(() => false);
+					// Only a not-found answers the question. Anything else — a
+					// rate limit, an outage, a response the adapter could not
+					// make sense of — is the provider failing to say, and reading
+					// that as "gone" re-creates a file that is still there and
+					// leaves the user with two notes where they had one. Rethrown,
+					// it is a failed op the backoff tries again.
+					.catch((problem: unknown) => {
+						if (!isNotFoundError(problem)) throw problem;
+						return false;
+					});
 				if (elsewhere) return followTheRename(note, id, error);
 			}
 
@@ -1467,7 +1476,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			const source = await provider
 				.read(from)
 				.then(() => true)
-				.catch(() => false);
+				// As in `runWrite`, and with more at stake: `undefined` below
+				// completes the op as done, so a provider that merely failed to
+				// answer would have the user's rename discarded outright, with
+				// nothing reported and nothing left to retry.
+				.catch((problem: unknown) => {
+					if (!isNotFoundError(problem)) throw problem;
+					return false;
+				});
 			if (!source) return undefined;
 			await ensureRemoteFolder(parentPath(target));
 			return provider.move(from, target);

@@ -235,8 +235,11 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 	 * never reached the adapter code that has to recognise it — the test passed
 	 * because the stub was kinder than the thing it stands in for.
 	 *
-	 * `duplicated_or_nested_paths` is the error that names the case.
-	 * https://github.com/dropbox/dropbox-api-spec (`files.stone`, RelocationError)
+	 * `to/conflict` is what Dropbox has been observed to answer, and with
+	 * `autorename: false` it is the mechanically obvious one, so it is what the
+	 * stub sends. It is not the only one it can send — see the two tags
+	 * `dropbox.test.ts` covers at the wire — which is the reason the adapter
+	 * settles this by asking what is at the path rather than by reading the tag.
 	 */
 	const moveEntry = async (body: Record<string, unknown>): Promise<Response> => {
 		const ref = refOf(str(body.from_path));
@@ -246,8 +249,9 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 			.find((entry) => entry.remoteId === ref.remoteId || entry.path === ref.path);
 
 		if (found?.path === to) {
-			return failure('duplicated_or_nested_paths/...', {
-				'.tag': 'duplicated_or_nested_paths',
+			return failure('to/conflict/file/...', {
+				'.tag': 'to',
+				reason: { '.tag': 'conflict', conflict: { '.tag': 'file' } },
 			});
 		}
 		return json({ metadata: metadataOf(await backing.move(ref, to)) });
