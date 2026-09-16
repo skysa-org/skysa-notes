@@ -264,6 +264,35 @@ describe('deleting', () => {
 		expect(stored?.dirty).toBe(1);
 	});
 
+	/**
+	 * A delete and an edit racing: another tab deletes the note while this one
+	 * still has an autosave pending. §7 decides this for the sync engine and the
+	 * same call holds here — the delete wins. It is something the user did, and
+	 * the edit may be their own from the other tab. Bringing the note back would
+	 * also need the queued delete withdrawn, or it purges the row it came back
+	 * in; and a rename racing a delete in one tab would undo the delete.
+	 */
+	it('stays deleted when an edit lands on its tombstone', async () => {
+		const note = await createNote(db, { title: 'Draft', body: 'before\n' });
+		await deleteNote(db, note.id);
+
+		await saveNoteBody(db, note.id, 'what I was typing\n');
+
+		const stored = await getNote(db, note.id);
+		expect(stored?.deletedLocally).toBe(1);
+		expect(stored?.body).toBe('what I was typing\n');
+		expect(await listNotes(db)).toEqual([]);
+	});
+
+	it('stays deleted when a rename lands on its tombstone', async () => {
+		const note = await createNote(db, { title: 'Draft' });
+		await deleteNote(db, note.id);
+
+		await renameNote(db, note.id, 'Kept');
+
+		expect((await getNote(db, note.id))?.deletedLocally).toBe(1);
+	});
+
 	it('restores a tombstoned note', async () => {
 		const note = await createNote(db, { title: 'Back' });
 		await deleteNote(db, note.id);
@@ -560,7 +589,7 @@ describe('setNoteEditorMode', () => {
  * without a transaction around all three steps any write that lands in that
  * window is overwritten wholesale — and the app deliberately puts writes next
  * to each other: `NoteView` flushes a pending autosave immediately before
- * renaming, deleting, or switching mode.
+ * deleting or switching mode.
  *
  * The competing write is fired from inside the stubbed digest, which is the
  * only way to place it in that window exactly. Starting it alongside and
