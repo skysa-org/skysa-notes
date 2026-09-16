@@ -2464,6 +2464,34 @@ describe('a write whose file is not where it was', () => {
 		expect(noteAt('b.md')?.dirty).toBe(false);
 	});
 
+	it('makes the notebook the note was moved into, when the remote has not got it yet', async () => {
+		// Edited, then dragged into a notebook made on this device. The `mkdir`
+		// for it is queued, but behind the write, which gets there first — and a
+		// provider answers the move into a folder that is not there with the
+		// same not-found as a file that is not there. `runMove` asks which; this
+		// has to as well, or the write fails the same way every time.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'Work/Inner/a.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'Work/Inner/a.md' });
+		store.queue({ op: 'mkdir', path: 'Work' });
+		store.queue({ op: 'mkdir', path: 'Work/Inner' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/Inner/a.md' });
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(provider.contentAt('Work/Inner/a.md')).toBe('edited\n');
+		expect(provider.contentAt('a.md')).toBeUndefined();
+	});
+
 	it('is one note when the version survives the move, as Dropbox rev does', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
 		store.put({

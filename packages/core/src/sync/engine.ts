@@ -1399,7 +1399,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			(each) => each.op === 'move' && each.noteId === note.id && each.targetPath === note.path
 		);
 		if (!explains) throw error;
-		const moved = await provider.move({ remoteId, path: note.path }, note.path);
+		const from = { remoteId, path: note.path };
+		const moved = await provider.move(from, note.path).catch(async (problem: unknown) => {
+			// The file is there — the read above found it — so a not-found here
+			// is the folder the note was moved into, made on this device and
+			// with its `mkdir` queued behind this write. As in `runMove`.
+			if (!isNotFoundError(problem)) throw problem;
+			await ensureRemoteFolder(parentPath(note.path));
+			return provider.move(from, note.path);
+		});
 		return write(note, moved.version);
 	};
 

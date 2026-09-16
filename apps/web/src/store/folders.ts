@@ -15,6 +15,7 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { foldPath, freePath } from './naming.js';
+import { queueDelete, queueMkdir, queueMove } from './queue.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -124,7 +125,7 @@ export const createFolder = async (
 	// two concurrent creates of one name did no damage — but both passed the
 	// check and both reported success, and this is the one function whose error
 	// the user is now shown, which makes an advisory check the wrong kind.
-	return db.transaction('rw', db.folders, db.notes, async () => {
+	return db.transaction('rw', db.folders, db.notes, db.opQueue, async () => {
 		// Folded, and this is the door that matters: `moveFolder` refuses a
 		// notebook whose name folds onto another's, but nothing calls `moveFolder`
 		// yet, while this is wired straight to the new-notebook field. Asked
@@ -159,7 +160,14 @@ export const createFolder = async (
 			throw new FolderExistsError(path, name);
 		}
 
-		await ensureFolder(db, path, { connectionId });
+		// Outermost first, one `mkdir` each: `createFolder` is not recursive on
+		// every provider, and an empty notebook has no note whose write would
+		// make it on the way.
+		const made = await ensureFolder(db, path, { connectionId });
+		await made.reduce<Promise<void>>(async (pending, folder) => {
+			await pending;
+			await queueMkdir(db, connectionId, folder.path);
+		}, Promise.resolve());
 		const created = await db.folders.get([connectionId, path]);
 		if (created === undefined) throw new Error(`Failed to create folder: ${path}`);
 		return created;
@@ -203,7 +211,7 @@ export const moveFolder = async (
 	if (source === target) return;
 	if (isWithin(target, source)) throw new Error('A folder cannot be moved inside itself');
 
-	await db.transaction('rw', db.folders, db.notes, async () => {
+	await db.transaction('rw', db.folders, db.notes, db.opQueue, async () => {
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 
 		// A notebook already at the destination is the everyday mistake — renaming
@@ -253,12 +261,22 @@ export const moveFolder = async (
 		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
-		await ensureFolder(db, target, { connectionId });
+		const made = await ensureFolder(db, target, { connectionId });
 		const moved = moving.map((folder) => ({
 			...folder,
 			path: rebasePath(folder.path, source, target),
 		}));
 		if (moved.length > 0) await db.folders.bulkPut(moved);
+		// Every notebook at its new path, outermost first, so the empty ones exist
+		// on the remote too; the notes inside go up as moves of their own, below.
+		// `mkdir` is idempotent, so a folder a note's move also makes costs nothing.
+		const paths = [...new Set([...made, ...moved].map((folder) => folder.path))].sort(
+			(a, b) => a.split('/').length - b.split('/').length
+		);
+		await paths.reduce<Promise<void>>(async (pending, path) => {
+			await pending;
+			await queueMkdir(db, connectionId, path);
+		}, Promise.resolve());
 
 		// Notes can sit under a path no folder row covers — importing a file
 		// creates no rows, and a pull can report a file before the folder holding
@@ -312,14 +330,18 @@ export const moveFolder = async (
 				// Deliberately not touching `dirty`: a folder move is metadata only.
 				//
 				// A note that gave way is a different case — that rename is ours
-				// rather than the folder move's, and the provider has not heard of
-				// it — but the answer to it is a `move` on the push queue, and
-				// nothing reads or writes `opQueue` yet. It belongs with the code
-				// that drains it (docs/PLAN.md §7).
+				// rather than the folder move's — but it needs nothing more than
+				// any other note here: each one is queued as a move to wherever it
+				// landed, below.
 				return [...done, { ...note, path }];
 			}, buried);
 
 		if (relocated.length > 0) await db.notes.bulkPut(relocated);
+		const from = new Map(inside.map((note) => [note.id, note.path]));
+		await relocated.reduce<Promise<void>>(async (pending, note) => {
+			await pending;
+			await queueMove(db, note, from.get(note.id) ?? note.path);
+		}, Promise.resolve());
 	});
 };
 
@@ -344,7 +366,7 @@ export const deleteFolder = async (
 	const target = normalizePath(path);
 	if (target === '') throw new Error('The root folder cannot be deleted');
 
-	await db.transaction('rw', db.folders, db.notes, async () => {
+	await db.transaction('rw', db.folders, db.notes, db.opQueue, async () => {
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 		await db.folders.bulkDelete(
 			folders
@@ -357,6 +379,10 @@ export const deleteFolder = async (
 			.filter((note) => isWithin(note.path, target) && note.deletedLocally === 0)
 			.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
 		if (tombstoned.length > 0) await db.notes.bulkPut(tombstoned);
+		await tombstoned.reduce<Promise<void>>(async (pending, note) => {
+			await pending;
+			await queueDelete(db, note);
+		}, Promise.resolve());
 	});
 };
 

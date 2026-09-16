@@ -24,6 +24,7 @@ import {
 	type OpQueueRecord,
 } from '../store/db.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
+import { queueMove, queueWrite } from '../store/queue.js';
 
 /**
  * The sync engine's `SyncStore` port, over the app's own IndexedDB tables.
@@ -425,7 +426,22 @@ export const createDexieSyncStore = (
 		}
 	};
 
-	const settle = async (scope: Scope, outcome: OpOutcome): Promise<void> => {
+	/**
+	 * Record what an op achieved, against the note as it now stands.
+	 *
+	 * The engine held the op while it was at the network, and the user may have
+	 * gone on meanwhile — typed, renamed, restored. `withdrawn` says the op
+	 * itself is gone from the queue, which only a later change of the user's
+	 * does (`store/queue.ts`): a second rename replaces a queued move, a restore
+	 * withdraws a delete. Whatever the op did on the remote is recorded either
+	 * way, and anything the note has done since is owed an op of its own.
+	 */
+	const settle = async (
+		scope: Scope,
+		seq: number,
+		outcome: OpOutcome,
+		withdrawn: boolean
+	): Promise<void> => {
 		if (outcome.kind === 'done') return;
 		if (outcome.kind === 'purged') {
 			const note = await ownNote(scope, outcome.noteId);
@@ -436,33 +452,63 @@ export const createDexieSyncStore = (
 			}
 			// Restored while its delete was on the way. The remote copy is gone,
 			// but the note is the user's again: keep it, cut loose from the file,
-			// so the next push re-creates it rather than aiming at nothing.
-			await scope.notes.put({ ...withoutRemote(note), dirty: 1 });
+			// and owe it a write that creates the file again. The restore queued
+			// one, unless a write was queued already — and that one can have run
+			// since, ahead of this delete, in the same push.
+			const restored: NoteRecord = { ...withoutRemote(note), dirty: 1 };
+			await scope.notes.put(restored);
+			await queueWrite(scope, restored);
 			return;
 		}
 		const note = await requireNote(scope, outcome.noteId);
-		const landed = {
-			...note,
-			path: outcome.remote.path,
+		const remote = {
 			remoteId: outcome.remote.remoteId,
 			remoteVersion: outcome.remote.version,
 		};
+		if (outcome.kind === 'moved' && !withdrawn) {
+			// Where it landed, which is not always where it was sent: a name the
+			// remote would not give up puts the rename beside it (§7).
+			await scope.notes.put({ ...note, ...remote, path: outcome.remote.path });
+			return;
+		}
 		if (outcome.kind === 'moved') {
-			await scope.notes.put(landed);
+			// Renamed again while this move was on its way. The file is at the
+			// name before; the note stays at the name after, and moves there.
+			const moved: NoteRecord = { ...note, ...remote };
+			await scope.notes.put(moved);
+			await queueMove(scope, moved, outcome.remote.path);
 			return;
 		}
 		// Typed again while the request was in flight: the bytes on the remote are
-		// not the bytes here, so the note stays dirty and the next push sends them.
+		// not the bytes here, so the note stays dirty and is owed another write.
 		const same = noteFile(note) === outcome.content;
-		await scope.notes.put({
-			...landed,
+		const pushed: NoteRecord = {
+			...note,
+			...remote,
 			...(same ? { dirty: 0 as const, source: outcome.content } : {}),
-		});
+		};
+		await scope.notes.put(pushed);
+		if (!same) await queueWrite(scope, pushed, seq);
+		// Renamed while its write was in flight — before it had a file to move,
+		// if this write is what created it. The file is where the write put it;
+		// the note stays where the user put it, and moves there.
+		if (note.path !== outcome.remote.path) {
+			await queueMove(scope, pushed, outcome.remote.path);
+		}
+	};
+
+	/** The op, or `undefined` if it has been withdrawn. Another connection's is refused. */
+	const queuedOp = async (scope: Scope, seq: number): Promise<OpQueueRecord | undefined> => {
+		const op = await scope.opQueue.get(seq);
+		if (op !== undefined && op.connectionId !== connectionId) {
+			throw new Error(`Queued op ${String(seq)} belongs to another connection`);
+		}
+		return op;
 	};
 
 	const requireOp = async (scope: Scope, seq: number): Promise<OpQueueRecord> => {
-		const op = await scope.opQueue.get(seq);
-		if (op?.connectionId !== connectionId) throw new Error(`No queued op ${String(seq)}`);
+		const op = await queuedOp(scope, seq);
+		if (op === undefined) throw new Error(`No queued op ${String(seq)}`);
 		return op;
 	};
 
@@ -539,14 +585,18 @@ export const createDexieSyncStore = (
 
 		completeOp: (seq, outcome) =>
 			inTransaction(async () => {
-				await requireOp(db, seq);
-				await settle(db, outcome);
-				await db.opQueue.delete(seq);
+				// Gone is not an error: a change the user made while the op was
+				// in flight withdrew it. See `settle`.
+				const op = await queuedOp(db, seq);
+				await settle(db, seq, outcome, op === undefined);
+				if (op !== undefined) await db.opQueue.delete(seq);
 			}),
 
 		failOp: (seq, error) =>
 			inTransaction(async () => {
-				const op = await requireOp(db, seq);
+				const op = await queuedOp(db, seq);
+				// Withdrawn while it was failing: there is nothing left to retry.
+				if (op === undefined) return;
 				await db.opQueue.put({ ...op, attempts: op.attempts + 1, lastError: error });
 			}),
 
