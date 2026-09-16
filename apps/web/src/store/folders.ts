@@ -14,7 +14,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
-import { freePath } from './naming.js';
+import { foldPath, freePath } from './naming.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -163,12 +163,18 @@ export const moveFolder = async (
 		// `isWithin` rather than equality: a row *under* the destination would be
 		// replaced just as quietly.
 		//
-		// Except the rows that are about to move, which is not a detail: a folder
-		// promoted one level up — `a/b` to `a`, with no `a` row behind it — is
-		// within its own destination, and counting it would refuse a move that
-		// collides with nothing at all.
+		// Folded, because `archive` and `Archive` are one directory on Drive, on
+		// Dropbox and on macOS. Told apart, a rename onto the other spelling is
+		// waved through and the app ends up with two notebook rows, two
+		// `remoteId`s, and one folder on the provider for them to fight over.
+		//
+		// The exclusion is exact, and deliberately not folded: it has to name the
+		// same rows `moving` does, just below, or a row could be discounted here
+		// and then not actually moved — which is the merge again, arrived at from
+		// the other side.
 		const occupying = folders.filter(
-			(folder) => isWithin(folder.path, target) && !isWithin(folder.path, source)
+			(folder) =>
+				isWithin(foldPath(folder.path), foldPath(target)) && !isWithin(folder.path, source)
 		);
 		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
@@ -191,24 +197,37 @@ export const moveFolder = async (
 		// after both have been pushed one `remoteId` between them, at which point
 		// whichever the store hands back second is stale for good.
 		//
-		// A tombstone holds its path but never gives it up. It is a queued delete
-		// rather than a note at a path, so moving one aside would aim its delete
-		// at a file that is not the one it is deleting — but a live note landing
-		// on one still puts two rows at the key, and `importNoteFile` looks a
-		// note up by exactly that key and takes `.first()`. Which of the two that
-		// is comes down to the order of two random UUIDs, and picking the
-		// tombstone revives it on top of a note that was never deleted.
-		const taken = new Set(
-			notes.filter((note) => !isWithin(note.path, source)).map((note) => note.path)
-		);
+		// Tombstones are in here, and a live note gives way to one.
+		//
+		// Not because two rows at one key is forbidden — a note created at a name
+		// a deleted one still holds is exactly that, by design (see `db.ts`), and
+		// `takenNamesIn` frees a deleted note's name on purpose so the user can
+		// use it again straight away. It is that nothing is gained by adding one
+		// here. There the user chose the name; here the app is renaming somebody's
+		// file on its own, and giving way costs nothing.
+		const outside = notes.filter((note) => !isWithin(note.path, source));
+		const inside = notes.filter((note) => isWithin(note.path, source));
 
-		const relocated = notes
-			.filter((note) => isWithin(note.path, source))
+		// Tombstones are placed first, and keep whatever path they land on. A
+		// tombstone is a queued delete rather than a note, so aiming it elsewhere
+		// would delete a file that is not the one it is deleting — and a reader
+		// that finds both rows takes the live one (`noteAtPath` in
+		// `store/notes.ts`).
+		//
+		// First rather than in whatever order the rows came back in, because that
+		// order is the order of two random UUIDs: a live note and a tombstone
+		// moving together can hold one path already, and without this which of
+		// them kept it after the move would be a coin toss.
+		const buried = inside
+			.filter((note) => note.deletedLocally === 1)
+			.map((note) => ({ ...note, path: rebasePath(note.path, source, target) }));
+
+		const taken = new Set([...outside, ...buried].map((note) => note.path));
+
+		const relocated = inside
+			.filter((note) => note.deletedLocally === 0)
 			.reduce<NoteRecord[]>((done, note) => {
-				const wanted = rebasePath(note.path, source, target);
-				if (note.deletedLocally === 1) return [...done, { ...note, path: wanted }];
-
-				const path = freePath(wanted, taken);
+				const path = freePath(rebasePath(note.path, source, target), taken);
 				// Every note that lands takes its path out of circulation, so two
 				// notes moving together cannot be given the same one either.
 				taken.add(path);
@@ -220,7 +239,7 @@ export const moveFolder = async (
 				// nothing reads or writes `opQueue` yet. It belongs with the code
 				// that drains it (docs/PLAN.md §7).
 				return [...done, { ...note, path }];
-			}, []);
+			}, buried);
 
 		if (relocated.length > 0) await db.notes.bulkPut(relocated);
 	});

@@ -358,6 +358,29 @@ export interface ImportNoteFileInput extends NoteScope {
 }
 
 /**
+ * The note at a path.
+ *
+ * Two rows can hold one path: a tombstone keeps its path until its delete has
+ * been pushed, and `takenNamesIn` frees a deleted note's name straight away on
+ * purpose, so a note created at the name of one the user just deleted is
+ * exactly that state. `.first()` picks between them by primary key, which is
+ * the order of two random UUIDs — so a file arriving at the path would land on
+ * the tombstone about half the time and revive it, on top of a note nobody
+ * deleted.
+ *
+ * The live note is the one a file at that path is about. The tombstone is a
+ * delete on its way out, and is only the answer when it is the only row there.
+ */
+const noteAtPath = async (
+	db: NotesDatabase,
+	connectionId: string,
+	path: string
+): Promise<NoteRecord | undefined> => {
+	const rows = await db.notes.where('[connectionId+path]').equals([connectionId, path]).toArray();
+	return rows.find((note) => note.deletedLocally === 0) ?? rows[0];
+};
+
+/**
  * A frontmatter date, or now.
  *
  * `Date.parse` answers `NaN` for anything it cannot read, and these two fields
@@ -402,10 +425,7 @@ export const importNoteFile = async (
 	return db.transaction('rw', db.notes, db.folders, async () => {
 		const existing =
 			parsed.id === undefined
-				? await db.notes
-						.where('[connectionId+path]')
-						.equals([connectionId, input.path])
-						.first()
+				? await noteAtPath(db, connectionId, input.path)
 				: await db.notes.get(parsed.id);
 
 		const id = parsed.id ?? existing?.id ?? crypto.randomUUID();

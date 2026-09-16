@@ -350,6 +350,46 @@ describe('moveFolder', () => {
 		expect((await getNote(db, mine.id))?.path).toBe('archive/report-2.md');
 	});
 
+	it('refuses a destination that differs from a notebook only in case', async () => {
+		// One directory on Drive, on Dropbox and on macOS. Allowed through, the
+		// app ends up with two notebook rows and two `remoteId`s for one folder.
+		await ensureFolder(db, 'Archive');
+		await ensureFolder(db, 'drafts');
+
+		await expect(moveFolder(db, 'drafts', 'archive')).rejects.toThrow(FolderExistsError);
+		expect(await folderTree(db)).toEqual(['Archive', 'drafts']);
+	});
+
+	it('gives way when the destination folder is spelled differently in case', async () => {
+		// No `archive` row to refuse on — the notes arrived from the provider and
+		// nothing created one — so this falls to the per-note check, which had
+		// been comparing the folders exactly and so finding nothing to avoid.
+		await importNoteFile(db, { path: 'Archive/Report.md', source: '# Theirs\n' });
+		const mine = await createNote(db, { title: 'Report', folderPath: 'drafts' });
+
+		await moveFolder(db, 'drafts', 'archive');
+
+		expect((await getNote(db, mine.id))?.path).toBe('archive/report-2.md');
+	});
+
+	it('lets the tombstone keep the path, whichever order the rows come back in', async () => {
+		// A tombstone and a live note already at one path — which is what deleting
+		// a note and then making another with the same name leaves behind, and is
+		// blessed as such in `db.ts`. Both move together. The tombstone is a
+		// queued delete aimed at that path, so it is the one that keeps it; left
+		// to the order the rows came back in, which of them did would be the order
+		// of two random UUIDs.
+		const doomed = await createNote(db, { title: 'Report', folderPath: 'drafts' });
+		await deleteNote(db, doomed.id);
+		const live = await createNote(db, { title: 'Report', folderPath: 'drafts' });
+		expect(live.path).toBe(doomed.path);
+
+		await moveFolder(db, 'drafts', 'archive');
+
+		expect((await getNote(db, doomed.id))?.path).toBe('archive/report.md');
+		expect((await getNote(db, live.id))?.path).toBe('archive/report-2.md');
+	});
+
 	it('does nothing when a notebook is renamed to the name it already has', async () => {
 		const note = await createNote(db, { title: 'Note', folderPath: 'work' });
 		await moveFolder(db, 'work', 'work');

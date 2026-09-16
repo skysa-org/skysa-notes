@@ -134,13 +134,16 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// the writers rather than by IndexedDB: `freeName`/`freePath` in
 	// `store/naming.ts`, and `takenNamesIn` in `store/notes.ts`.
 	//
-	// Knowingly is the whole of the claim. Two writers can still do it and do not
-	// look: `restoreNote` lifts a tombstone with no idea whether its path has
-	// been taken since, and `importNoteFile` writes a file carrying an `id` it
-	// has never seen straight to its path, whatever is already there. Both are
-	// answered by the conflict rule rather than by a name check — the first is a
-	// question for the undo that does not exist yet, the second for the engine,
-	// which has `displace-note` for exactly it.
+	// Knowingly is the whole of the claim. Three writers can still do it and do
+	// not look: `restoreNote` lifts a tombstone with no idea whether its path has
+	// been taken since, `importNoteFile` writes a file carrying an `id` it has
+	// never seen straight to its path whatever is already there, and
+	// `moveFolder` rebases a tombstone onto the path it lands on rather than
+	// aiming its queued delete somewhere else. The first two are answered by the
+	// conflict rule rather than a name check — one is a question for the undo
+	// that does not exist yet, the other for the engine, which has
+	// `displace-note` for exactly it — and the third by reading the live row
+	// first, which `noteAtPath` in `store/notes.ts` does.
 	db.version(1).stores({
 		notes: 'id, connectionId, path, [connectionId+path], dirty, deletedLocally, updatedAt, remoteId',
 		folders: '[connectionId+path], connectionId, path',

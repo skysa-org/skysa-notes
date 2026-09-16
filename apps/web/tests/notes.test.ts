@@ -303,6 +303,25 @@ describe('setNoteTags', () => {
 	});
 });
 
+describe('finding the note at a path when two rows hold it', () => {
+	it('takes the live note rather than the tombstone beside it', async () => {
+		// Two rows at one path is not a broken state: a deleted note keeps its
+		// path until the delete has been pushed, and its name is free again at
+		// once, so creating a note with the same name is exactly this. Picking
+		// between them by primary key is picking by the order of two random
+		// UUIDs — and picking the tombstone revives it over a live note.
+		const doomed = await createNote(db, { title: 'Report' });
+		await deleteNote(db, doomed.id);
+		const live = await createNote(db, { title: 'Report' });
+		expect(live.path).toBe(doomed.path);
+
+		await importNoteFile(db, { path: live.path, source: '# From the remote\n' });
+
+		expect((await getNote(db, doomed.id))?.deletedLocally).toBe(1);
+		expect((await getNote(db, live.id))?.body).toBe('# From the remote\n');
+	});
+});
+
 describe('moveNote and a name that is already taken', () => {
 	it('gives way to a name that differs only in case', async () => {
 		// One name to Drive, to Dropbox and to macOS, so two rows holding them are
