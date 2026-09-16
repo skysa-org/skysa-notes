@@ -147,11 +147,22 @@ const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
  */
 const downloadResult = (header: string | null): Metadata => {
 	if (header === null) throw new Error('dropbox sent a download with no metadata header');
-	try {
-		return JSON.parse(header) as Metadata;
-	} catch {
-		throw new Error('dropbox sent a download whose metadata header is not JSON');
+	const parsed = ((): unknown => {
+		try {
+			return JSON.parse(header);
+		} catch {
+			throw new Error('dropbox sent a download whose metadata header is not JSON');
+		}
+	})();
+	// `null`, a number and a bare string are all valid JSON and none of them has
+	// the shape below — and `null` in particular would get past a bare cast and
+	// come back out as a `TypeError` about reading a property of null, from a
+	// stack that says nothing about Dropbox. Which is the thing this function
+	// exists to stop. `failureOf` guards the same way for the same reason.
+	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+		throw new Error('dropbox sent a download whose metadata header is not an object');
 	}
+	return parsed;
 };
 
 const toChangeEntry = (metadata: Metadata): ChangeEntry =>
@@ -394,11 +405,16 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// Three ways of saying the destination is not free, and Dropbox does not
 		// document which it uses for a move to where the entry already is —
 		// which a queued `move` naming the path a note is at will be.
-		// `to/conflict` is what it has been observed to answer;
+		// `to/conflict` is the mechanically obvious one, since with
+		// `autorename: false` the destination is occupied — by the entry itself;
 		// `duplicated_or_nested_paths` is the one whose own description names
 		// the case ("duplicated/nested paths among from_path and to_path"); and
 		// `cant_move_folder_into_itself` is the plausible answer for a folder,
-		// which is what a notebook rename is.
+		// which `StorageProvider.move` takes as readily as a file — the contract
+		// suite moves one and rebases everything under it. (Not because a
+		// notebook rename reaches a provider: it does not. `SyncOperation` has no
+		// folder move, and `moveFolder` in `apps/web` rebases its notes locally
+		// and queues nothing.)
 		// https://github.com/dropbox/dropbox-api-spec (`files.stone`, RelocationError)
 		//
 		// So none of them is settled from the tag. None of them says *what* is
@@ -415,8 +431,12 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// can write the local copy aside without a round trip of its own.
 		// Dropbox does not put it in the error, so the extra call happens here —
 		// on the rare path, where being right is worth more than the request.
+		// Dropbox says the destination is not free and nothing is there. No path
+		// is passed: `raise` uses one only to name a `NotFoundError`, and none of
+		// the tags that reach here is a not-found, so handing it one would be
+		// saying something about an error it cannot be.
 		const current = await metadataAt(newPath);
-		if (current === undefined) return raise(result.failure, newPath);
+		if (current === undefined) return raise(result.failure);
 
 		// The entry is already where it was being sent, so the move is done and
 		// saying so is both true and idempotent. Reporting it as a failure would
@@ -424,13 +444,18 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// op, so one that can never succeed strands every op behind it, for
 		// every note. Reporting it as a conflict would be worse still — the
 		// conflict rule would write the user's note aside as a copy of itself.
+		// The entry as Dropbox has it, which for a rename that changes only the
+		// case of a name is the old spelling: Dropbox is case-insensitive, so
+		// such a rename is a move to where the entry already is, and reporting
+		// where it actually is leaves the store agreeing with the provider
+		// rather than holding a name no file has.
 		if (isSelf(entry, current)) return current;
 
 		// "Into itself" that turns out not to be itself is a folder being moved
 		// under its own descendant, which is not a conflict with the entry at
 		// the destination and must not be answered by copying a note aside. It
 		// goes back as the failure Dropbox sent.
-		if (intoItself) return raise(result.failure, newPath);
+		if (intoItself) return raise(result.failure);
 		throw new ConflictError(current);
 	};
 

@@ -704,32 +704,36 @@ describe('push', () => {
 	 * does the one thing the question was asked to avoid.
 	 */
 	it('does not re-create a note because the provider would not say', async () => {
-		const seeded = await provider.write('a.md', 'theirs\n', {});
+		// The file is at `moved.md` — renamed on another device — so `a.md` is
+		// genuinely free and an `add` there would succeed. That is what makes the
+		// probe load-bearing: the write finds nothing at the path, and the only
+		// thing standing between the user and a second copy of their note is the
+		// answer to "is it still there under the id we hold?".
+		//
+		// Only `read` faults, and not with a not-found: the provider is failing to
+		// answer rather than answering. Taken for a no, the re-create runs and
+		// succeeds, and the user has two notes where they had one.
+		const seeded = await provider.write('moved.md', 'mine\n', {});
 		store.put({
 			id: 'n1',
 			path: 'a.md',
 			content: 'mine\n',
 			dirty: true,
 			remoteId: seeded.remoteId,
-			remoteVersion: 'stale-rev',
+			remoteVersion: seeded.version,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		// The write finds nothing at the path, so the engine asks whether the
-		// file still exists under the id it holds — and that read fails for a
-		// reason that is not an answer.
-		provider.setFault((call) => {
-			if (call.op === 'write') return new NotFoundError('a.md');
-			return call.op === 'read' ? new Error('service unavailable') : undefined;
-		});
+		provider.setFault((call) =>
+			call.op === 'read' ? new Error('service unavailable') : undefined
+		);
 
 		const result = await engine.push();
 
-		expect(result.status).toBe('retry');
-		// Not two notes where the user had one. (`isHidden` drops the marker file,
-		// which `ensureRoot` writes and which is a file like any other.)
+		// (`isHidden` drops the marker file, which `ensureRoot` writes and which
+		// is a file like any other.)
 		const notes = provider.snapshot().filter((entry) => !isHidden(entry.path));
-		expect(notes.map((entry) => entry.path)).toEqual(['a.md']);
-		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(notes.map((entry) => entry.path)).toEqual(['moved.md']);
+		expect(result.status).toBe('retry');
 		expect(store.ops()).toHaveLength(1);
 	});
 

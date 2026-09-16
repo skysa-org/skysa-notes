@@ -90,6 +90,11 @@ export interface WriteOptions {
  *   `duplicated_or_nested_paths` and `cant_move_folder_into_itself` is not
  *   documented — so its adapter reads the refusal and asks what is actually at
  *   the path, rather than trusting the tag.
+ * - `read` fails with `NotFoundError` when there is nothing there, `AuthError`
+ *   when the token is the problem, and an untyped error for anything else. Never
+ *   `ConflictError` — the engine uses a read as an existence probe and takes a
+ *   `NotFoundError` for "gone" and everything else for "could not say", and a
+ *   conflict arriving from one would be routed as a conflict on the write.
  * - `list` is one level; `changes` covers the whole tree at every depth.
  * - Neither filters hidden paths: `.notesapp.json` has to reach the engine.
  *   Callers filter with `isHidden`.

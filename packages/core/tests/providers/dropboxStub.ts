@@ -235,11 +235,12 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 	 * never reached the adapter code that has to recognise it — the test passed
 	 * because the stub was kinder than the thing it stands in for.
 	 *
-	 * `to/conflict` is what Dropbox has been observed to answer, and with
-	 * `autorename: false` it is the mechanically obvious one, so it is what the
-	 * stub sends. It is not the only one it can send — see the two tags
-	 * `dropbox.test.ts` covers at the wire — which is the reason the adapter
-	 * settles this by asking what is at the path rather than by reading the tag.
+	 * `to/conflict` is what the stub sends: with `autorename: false` the
+	 * destination is occupied — by the entry itself — so it is the mechanically
+	 * obvious answer. That is a judgement rather than an observation, and it is
+	 * not the only tag Dropbox can send here; `dropbox.test.ts` covers the other
+	 * two at the wire. Which is the reason the adapter settles this by asking
+	 * what is at the path rather than by reading the tag at all.
 	 */
 	const moveEntry = async (body: Record<string, unknown>): Promise<Response> => {
 		const ref = refOf(str(body.from_path));

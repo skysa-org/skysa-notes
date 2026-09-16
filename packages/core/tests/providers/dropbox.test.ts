@@ -680,6 +680,32 @@ describe('not knowing, rather than guessing', () => {
 		expect(moved.path).toBe('Work/Notes.md');
 	});
 
+	it('recognises its own file through a path that was never normalized', async () => {
+		// An `EntryRef` carries whatever path its caller holds, and a note row
+		// holds whatever path it was imported with rather than one this app
+		// composed. Compared raw, the entry would not recognise itself.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(errorBody('to/conflict/file/...', 'to'), { status: 409 }),
+			'files/get_metadata': () =>
+				new Response(
+					JSON.stringify({
+						'.tag': 'file',
+						id: 'id:1',
+						rev: 'r1',
+						path_display: '/Work/a.md',
+					}),
+					{ status: 200 }
+				),
+		});
+
+		const moved = await provider(doFetch).move(
+			{ remoteId: '', path: 'Work//a.md' },
+			'Work/a.md'
+		);
+		expect(moved.path).toBe('Work/a.md');
+	});
+
 	it("does not bless a stranger's file as its own because the path matches", async () => {
 		// The inverse, and the worse one: an id on both sides that disagree means
 		// the file at the destination is somebody else's, whatever the path says.
@@ -692,6 +718,23 @@ describe('not knowing, rather than guessing', () => {
 		await expect(
 			provider(doFetch).move({ remoteId: 'id:mine', path: 'Work/a.md' }, 'Work/a.md')
 		).rejects.toThrow(ConflictError);
+	});
+
+	it('refuses a download whose metadata header is JSON but not an object', async () => {
+		// `null` is valid JSON. Cast and read, it comes back out as a `TypeError`
+		// about a property of null, from a stack that says nothing about Dropbox —
+		// which is the failure this whole helper exists to stop.
+		const { doFetch } = canned(
+			() =>
+				new Response('body\n', {
+					status: 200,
+					headers: { 'Dropbox-API-Result': 'null' },
+				})
+		);
+
+		await expect(provider(doFetch).read({ remoteId: 'id:1', path: 'a.md' })).rejects.toThrow(
+			/not an object/
+		);
 	});
 
 	it('recognises a folder move Dropbox calls moving it into itself', async () => {
