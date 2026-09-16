@@ -303,6 +303,28 @@ describe('setNoteTags', () => {
 	});
 });
 
+describe('moveNote and a name that is already taken', () => {
+	it('gives way to a name that differs only in case', async () => {
+		// One name to Drive, to Dropbox and to macOS, so two rows holding them are
+		// two writes to one file. `uniqueFilename` compares lowercased; the check
+		// in front of it did not, and so never called it.
+		await importNoteFile(db, { path: 'work/Report.md', source: '# Theirs\n' });
+		const mine = await createNote(db, { title: 'Report' });
+
+		const moved = await moveNote(db, mine.id, 'work');
+
+		expect(moved.path).toBe('work/report-2.md');
+	});
+
+	it('keeps a name nothing is in the way of, exactly as it was', async () => {
+		const note = await importNoteFile(db, { path: 'My Report.md', source: '# Mine\n' });
+
+		const moved = await moveNote(db, note.id, 'work');
+
+		expect(moved.path).toBe('work/My Report.md');
+	});
+});
+
 describe('importNoteFile — the rule that a note is dirty only on a real edit', () => {
 	it('never marks an imported note dirty', async () => {
 		const note = await importNoteFile(db, { path: 'a.md', source: '# A\n' });

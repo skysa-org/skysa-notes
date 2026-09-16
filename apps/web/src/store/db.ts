@@ -115,8 +115,11 @@ export const DATABASE_NAME = 'skysa-notes';
 export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	const db = new Dexie(name) as NotesDatabase;
 
-	// `[connectionId+path]` is deliberately not declared `&` unique, though at
-	// the end of every operation exactly one live note is at each path.
+	// `[connectionId+path]` is deliberately not declared `&` unique.
+	//
+	// It could not be, whatever else were true: a tombstone keeps its path until
+	// its delete has been pushed, so a note created at a name a deleted one still
+	// holds is two rows at one key, by design.
 	//
 	// A pull batch reaches that state by passing through states that are not it:
 	// a note moving out of the way is a change of its own and can come later in
@@ -127,8 +130,17 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// The reasoning is set out in full on `PullChange` in
 	// `packages/core/src/sync/store.ts`.
 	//
-	// So the rule is kept by the writers rather than by IndexedDB: see
-	// `moveFolder` in `store/folders.ts` and `takenNamesIn` in `store/notes.ts`.
+	// So no live note is knowingly put where another one is, and that is kept by
+	// the writers rather than by IndexedDB: `freeName`/`freePath` in
+	// `store/naming.ts`, and `takenNamesIn` in `store/notes.ts`.
+	//
+	// Knowingly is the whole of the claim. Two writers can still do it and do not
+	// look: `restoreNote` lifts a tombstone with no idea whether its path has
+	// been taken since, and `importNoteFile` writes a file carrying an `id` it
+	// has never seen straight to its path, whatever is already there. Both are
+	// answered by the conflict rule rather than by a name check — the first is a
+	// question for the undo that does not exist yet, the second for the engine,
+	// which has `displace-note` for exactly it.
 	db.version(1).stores({
 		notes: 'id, connectionId, path, [connectionId+path], dirty, deletedLocally, updatedAt, remoteId',
 		folders: '[connectionId+path], connectionId, path',

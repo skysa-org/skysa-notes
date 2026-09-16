@@ -11,7 +11,14 @@ import {
 	moveFolder,
 	renameFolder,
 } from '../src/store/folders.js';
-import { createNote, deleteNote, getNote, listNotes, saveNoteBody } from '../src/store/notes.js';
+import {
+	createNote,
+	deleteNote,
+	getNote,
+	importNoteFile,
+	listNotes,
+	saveNoteBody,
+} from '../src/store/notes.js';
 
 let db: NotesDatabase;
 let counter = 0;
@@ -207,8 +214,6 @@ describe('moveFolder', () => {
 	 */
 	it('does not put two notes at one path', async () => {
 		const mine = await createNote(db, { title: 'Report', folderPath: 'drafts' });
-		const theirs = await db.notes.get(mine.id);
-		expect(theirs).toBeDefined();
 		// A note at `archive/report.md` with no `archive` folder row behind it.
 		const loose = await createNote(db, { title: 'Report', folderPath: 'archive' });
 		await db.folders.delete([LOCAL_CONNECTION_ID, 'archive']);
@@ -261,6 +266,88 @@ describe('moveFolder', () => {
 
 		expect((await getNote(db, doomed.id))?.path).toBe('archive/report.md');
 		expect((await getNote(db, live.id))?.path).toBe('archive/report.md');
+	});
+
+	/**
+	 * Names that differ only in case are one name on Drive, on Dropbox, and on
+	 * macOS — which is why `uniqueFilename` compares them lowercased. A check
+	 * that did not would wave through the collision it exists to catch: two rows
+	 * here, one file there, and the two writing over each other from then on.
+	 */
+	it('does not put two notes on one path that differ only in case', async () => {
+		// `Report.md` is a name this app would never choose. It arrives from
+		// another tool, which is the whole reason the case can differ.
+		await importNoteFile(db, { path: 'archive/Report.md', source: '# Theirs\n' });
+		const mine = await createNote(db, { title: 'Report', folderPath: 'drafts' });
+
+		await moveFolder(db, 'drafts', 'archive');
+
+		const paths = (await listNotes(db, { folderPath: 'archive' })).map((note) => note.path);
+		expect(paths).toHaveLength(2);
+		expect(new Set(paths.map((path) => path.toLowerCase())).size).toBe(2);
+		expect((await getNote(db, mine.id))?.path).toBe('archive/report-2.md');
+	});
+
+	/**
+	 * Promoting a notebook one level up, where the level above holds no folder
+	 * row of its own. The source is inside its own destination, so a refusal
+	 * that counted every row under the destination counted the rows it was
+	 * about to move and refused a move that collides with nothing.
+	 */
+	it('promotes a folder into a parent path that holds no notebook', async () => {
+		const note = await createNote(db, { title: 'Note', folderPath: 'a/b' });
+		// After the note, because `ensureFolder` puts every missing ancestor back.
+		await db.folders.delete([LOCAL_CONNECTION_ID, 'a']);
+
+		await moveFolder(db, 'a/b', 'a');
+
+		expect(await folderTree(db)).toEqual(['a']);
+		expect((await getNote(db, note.id))?.path).toBe('a/note.md');
+	});
+
+	/**
+	 * The other half of the tombstone rule. A tombstone never moves aside, but it
+	 * does hold its path: `importNoteFile` looks a note up by `[connectionId+path]`
+	 * and takes `.first()`, and with two rows at the key which one that is comes
+	 * down to the order of two random UUIDs. Picking the tombstone revives it on
+	 * top of a note that was never deleted.
+	 */
+	it('does not land a live note on the path a queued delete is aimed at', async () => {
+		const doomed = await createNote(db, { title: 'Report', folderPath: 'archive' });
+		await deleteNote(db, doomed.id);
+		await db.folders.delete([LOCAL_CONNECTION_ID, 'archive']);
+		const live = await createNote(db, { title: 'Report', folderPath: 'drafts' });
+
+		await moveFolder(db, 'drafts', 'archive');
+
+		expect((await getNote(db, doomed.id))?.path).toBe('archive/report.md');
+		expect((await getNote(db, live.id))?.path).toBe('archive/report-2.md');
+	});
+
+	it('leaves a name the user did not choose alone when nothing is in its way', async () => {
+		// The cost of getting this wrong is a rename of somebody's file that
+		// nothing asked for, on every note in the notebook, every time it moves.
+		await importNoteFile(db, { path: 'drafts/My Report.md', source: '# Mine\n' });
+
+		await moveFolder(db, 'drafts', 'archive');
+
+		expect((await listNotes(db, { folderPath: 'archive' })).map((n) => n.path)).toEqual([
+			'archive/My Report.md',
+		]);
+	});
+
+	it('counts only the names in the folder it is landing in', async () => {
+		// `report-2.md` is taken somewhere else entirely. Counting it would push
+		// the note that gives way past a name that was never in its way.
+		await createNote(db, { title: 'Report', folderPath: 'archive' });
+		await createNote(db, { title: 'Report', folderPath: 'elsewhere' });
+		await createNote(db, { title: 'Report', folderPath: 'elsewhere' });
+		await db.folders.delete([LOCAL_CONNECTION_ID, 'archive']);
+		const mine = await createNote(db, { title: 'Report', folderPath: 'drafts' });
+
+		await moveFolder(db, 'drafts', 'archive');
+
+		expect((await getNote(db, mine.id))?.path).toBe('archive/report-2.md');
 	});
 
 	it('does nothing when a notebook is renamed to the name it already has', async () => {

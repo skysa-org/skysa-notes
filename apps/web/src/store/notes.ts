@@ -4,6 +4,7 @@ import {
 	deriveTitle,
 	joinPath,
 	normalizeTag,
+	NOTE_EXTENSION,
 	parentPath,
 	parseNoteFile,
 	readFrontmatter,
@@ -18,6 +19,7 @@ import Dexie from 'dexie';
 import { type EditorMode } from '../editor/mode.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
+import { freeName } from './naming.js';
 
 /**
  * Notes CRUD over IndexedDB.
@@ -27,8 +29,6 @@ import { ensureFolder } from './folders.js';
  * flag, or the app would rewrite files it was only ever asked to display.
  * See docs/PLAN.md §7.
  */
-
-const NOTE_EXTENSION = '.md';
 
 /** What `deriveTitle` returns when a note has nothing to take a name from. */
 const UNTITLED_TITLE = 'Untitled';
@@ -304,9 +304,10 @@ export const moveNote = async (
 ): Promise<NoteRecord> =>
 	applyEdit(db, id, async (note) => {
 		const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
-		const name = basename(note.path);
-		const stem = name.endsWith(NOTE_EXTENSION) ? name.slice(0, -NOTE_EXTENSION.length) : name;
-		const filename = taken.includes(name) ? uniqueFilename(stem, taken) : name;
+		// `freeName` rather than a comparison here: `taken.includes(name)` missed
+		// a name that differed only in case, which is one name to every provider
+		// the app syncs to and so exactly the collision this is asked to avoid.
+		const filename = freeName(basename(note.path), taken);
 
 		// Inside the transaction, so a move that fails leaves no empty folder
 		// behind for a notebook the note never reached.

@@ -3,12 +3,9 @@ import {
 	isWithin,
 	joinPath,
 	normalizePath,
-	NOTE_EXTENSION,
 	parentPath,
 	rebasePath,
-	replaceBasename,
 	sanitizeFolderName,
-	uniqueFilename,
 } from '@skysa/core';
 
 import {
@@ -17,6 +14,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
+import { freePath } from './naming.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -127,25 +125,6 @@ export const listFolders = async (
 };
 
 /**
- * Where a note goes when the path it wants is already occupied.
- *
- * Asked only on a collision, so a note imported as `My Report.md` keeps that
- * name: `uniqueFilename` slugifies, and renaming somebody's file to
- * `my-report.md` merely because the notebook around it moved would be a change
- * to their file that nothing asked for. Same rule `moveNote` follows.
- */
-const freePath = (wanted: string, taken: ReadonlySet<string>): string => {
-	if (!taken.has(wanted)) return wanted;
-
-	const name = basename(wanted);
-	const stem = name.endsWith(NOTE_EXTENSION) ? name.slice(0, -NOTE_EXTENSION.length) : name;
-	const folder = parentPath(wanted);
-	const siblings = [...taken].filter((path) => parentPath(path) === folder).map(basename);
-
-	return replaceBasename(wanted, uniqueFilename(stem, siblings));
-};
-
-/**
  * Rename or move a folder, rewriting the path of every folder and note beneath
  * it. A note keeps its pending edits and its dirty flag: the move is metadata
  * only and does not conflict with content changes. See docs/PLAN.md §7.
@@ -177,14 +156,21 @@ export const moveFolder = async (
 		// `remoteId` and with it the link to the folder it stands for on the
 		// provider, and the next push makes a second folder rather than finding it.
 		//
-		// Raised as the error `createFolder` already raises, so the same mistake
-		// reaches the user in the same words.
+		// Raised as the error `createFolder` already raises, so that a rename in
+		// the sidebar can report the same mistake in the same words the route
+		// already renders for a duplicate notebook name. Nothing calls this yet.
 		//
 		// `isWithin` rather than equality: a row *under* the destination would be
 		// replaced just as quietly.
-		if (folders.some((folder) => isWithin(folder.path, target))) {
-			throw new FolderExistsError(target, basename(target));
-		}
+		//
+		// Except the rows that are about to move, which is not a detail: a folder
+		// promoted one level up — `a/b` to `a`, with no `a` row behind it — is
+		// within its own destination, and counting it would refuse a move that
+		// collides with nothing at all.
+		const occupying = folders.filter(
+			(folder) => isWithin(folder.path, target) && !isWithin(folder.path, source)
+		);
+		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
 		const moving = folders.filter((folder) => isWithin(folder.path, source));
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
@@ -205,14 +191,15 @@ export const moveFolder = async (
 		// after both have been pushed one `remoteId` between them, at which point
 		// whichever the store hands back second is stale for good.
 		//
-		// Tombstones are on neither side of this. A tombstone is a queued delete
-		// rather than a note at a path: nothing lists it, nothing counts its name
-		// as taken, and moving one aside would aim its delete at a file that is not
-		// the one it is deleting.
+		// A tombstone holds its path but never gives it up. It is a queued delete
+		// rather than a note at a path, so moving one aside would aim its delete
+		// at a file that is not the one it is deleting — but a live note landing
+		// on one still puts two rows at the key, and `importNoteFile` looks a
+		// note up by exactly that key and takes `.first()`. Which of the two that
+		// is comes down to the order of two random UUIDs, and picking the
+		// tombstone revives it on top of a note that was never deleted.
 		const taken = new Set(
-			notes
-				.filter((note) => !isWithin(note.path, source) && note.deletedLocally === 0)
-				.map((note) => note.path)
+			notes.filter((note) => !isWithin(note.path, source)).map((note) => note.path)
 		);
 
 		const relocated = notes
@@ -226,6 +213,12 @@ export const moveFolder = async (
 				// notes moving together cannot be given the same one either.
 				taken.add(path);
 				// Deliberately not touching `dirty`: a folder move is metadata only.
+				//
+				// A note that gave way is a different case — that rename is ours
+				// rather than the folder move's, and the provider has not heard of
+				// it — but the answer to it is a `move` on the push queue, and
+				// nothing reads or writes `opQueue` yet. It belongs with the code
+				// that drains it (docs/PLAN.md §7).
 				return [...done, { ...note, path }];
 			}, []);
 
