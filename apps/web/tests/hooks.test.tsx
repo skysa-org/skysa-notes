@@ -2,8 +2,8 @@ import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { db } from '../src/store/db.js';
-import { useLooseNoteCount } from '../src/store/hooks.js';
-import { createNote, purgeNote } from '../src/store/notes.js';
+import { useLooseNoteCount, useNote } from '../src/store/hooks.js';
+import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
 
 /**
  * `useLooseNoteCount` is what decides whether the sidebar's "Loose notes" row
@@ -48,5 +48,36 @@ describe('useLooseNoteCount', () => {
 		await purgeNote(db, loose.id);
 
 		expect(await count()).toBe(0);
+	});
+});
+
+describe('useNote', () => {
+	it('reads the open note', async () => {
+		const note = await createNote(db, { title: 'Open' });
+		const { result } = renderHook(() => useNote(note.id));
+
+		await waitFor(() => {
+			expect(result.current?.id).toBe(note.id);
+		});
+	});
+
+	/**
+	 * `db.notes.get` returns a tombstone like any other row. The list and the
+	 * sidebar have already dropped it, so returning it here left the note fully
+	 * editable in the right pane after the rest of the app moved on — and
+	 * anything typed went into a row that is purged once the delete is pushed.
+	 */
+	it('lets go of a note once it is tombstoned', async () => {
+		const note = await createNote(db, { title: 'Open' });
+		const { result } = renderHook(() => useNote(note.id));
+		await waitFor(() => {
+			expect(result.current?.id).toBe(note.id);
+		});
+
+		await deleteNote(db, note.id);
+
+		await waitFor(() => {
+			expect(result.current).toBeUndefined();
+		});
 	});
 });

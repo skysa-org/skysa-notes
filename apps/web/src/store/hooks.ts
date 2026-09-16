@@ -48,8 +48,22 @@ export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] |
 	return result.folderPath === folderPath ? result.notes : undefined;
 };
 
+/**
+ * The open note, or `undefined` once it is gone — including gone as a tombstone.
+ *
+ * `db.notes.get` hands back a tombstoned row like any other, and a tombstone is a
+ * note on its way out: the list and the sidebar have already dropped it, so
+ * showing it here left a note fully editable in the right pane that nothing else
+ * in the app admitted existed. Anything typed into it went into a row that is
+ * purged once the delete reaches the provider. Reachable today with two tabs:
+ * delete a note in one while it is open in the other.
+ */
 export const useNote = (id: string | undefined): NoteRecord | undefined =>
-	useLiveQuery(async () => (id === undefined ? undefined : db.notes.get(id)), [id]);
+	useLiveQuery(async () => {
+		if (id === undefined) return undefined;
+		const note = await db.notes.get(id);
+		return note?.deletedLocally === 1 ? undefined : note;
+	}, [id]);
 
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>

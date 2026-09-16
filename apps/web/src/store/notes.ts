@@ -188,8 +188,8 @@ export const listNotes = async (
  * takes no notice of it. Everything the app does to a note goes through here or
  * through a sibling that writes the same row, and the app deliberately puts two
  * of them next to each other: `NoteView` flushes a pending autosave immediately
- * before renaming, deleting, or switching mode. Those survive only while both
- * land in the same tick. When the 2s debounce fires on its own and the user then
+ * before deleting or switching mode, and a rename can land while one is
+ * pending. Those survive only while both land in the same tick. When the 2s debounce fires on its own and the user then
  * clicks, the second write wins the race and the first is gone — a paragraph
  * typed and then renamed within two seconds simply disappears, a delete is
  * undone and the note comes back, a mode switch is forgotten.
