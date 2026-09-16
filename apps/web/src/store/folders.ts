@@ -179,6 +179,16 @@ export const moveFolder = async (
 		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
 		const moving = folders.filter((folder) => isWithin(folder.path, source));
+		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+		const inside = notes.filter((note) => isWithin(note.path, source));
+
+		// Nothing is there. Read exactly, as `moving` and `inside` are: a caller
+		// naming a folder that does not exist under that spelling has asked for
+		// nothing, and the only thing below that would still happen is
+		// `ensureFolder`, which would answer by conjuring the destination — a
+		// notebook the user did not ask for, from a move that moved nothing.
+		if (moving.length === 0 && inside.length === 0) return;
+
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		await ensureFolder(db, target, { connectionId });
 		const moved = moving.map((folder) => ({
@@ -186,8 +196,6 @@ export const moveFolder = async (
 			path: rebasePath(folder.path, source, target),
 		}));
 		if (moved.length > 0) await db.folders.bulkPut(moved);
-
-		const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
 
 		// Notes can sit under a path no folder row covers — importing a file
 		// creates no rows, and a pull can report a file before the folder holding
@@ -206,13 +214,20 @@ export const moveFolder = async (
 		// here. There the user chose the name; here the app is renaming somebody's
 		// file on its own, and giving way costs nothing.
 		const outside = notes.filter((note) => !isWithin(note.path, source));
-		const inside = notes.filter((note) => isWithin(note.path, source));
 
 		// Tombstones are placed first, and keep whatever path they land on. A
 		// tombstone is a queued delete rather than a note, so aiming it elsewhere
-		// would delete a file that is not the one it is deleting — and a reader
-		// that finds both rows takes the live one (`noteAtPath` in
-		// `store/notes.ts`).
+		// would delete a file that is not the one it is deleting.
+		//
+		// Where it lands on a path exactly, a reader that finds both rows takes
+		// the live one (`noteAtPath` in `store/notes.ts`). Where it lands on one
+		// that only *folds* to the same name, it does not: `noteAtPath` looks up
+		// a byte-exact key, so the two rows are two keys and nothing brings them
+		// together. That pair is one file on the provider, and a pull delivering
+		// it can revive the tombstone beside the live note. Left as it is
+		// deliberately — the alternative is aiming a delete at the wrong file —
+		// and it is the sharpest reason this whole module gives way early and
+		// often rather than relying on anything downstream to sort it out.
 		//
 		// First rather than in whatever order the rows came back in, because that
 		// order is the order of two random UUIDs: a live note and a tombstone

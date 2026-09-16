@@ -304,21 +304,67 @@ describe('setNoteTags', () => {
 });
 
 describe('finding the note at a path when two rows hold it', () => {
-	it('takes the live note rather than the tombstone beside it', async () => {
-		// Two rows at one path is not a broken state: a deleted note keeps its
-		// path until the delete has been pushed, and its name is free again at
-		// once, so creating a note with the same name is exactly this. Picking
-		// between them by primary key is picking by the order of two random
-		// UUIDs — and picking the tombstone revives it over a live note.
-		const doomed = await createNote(db, { title: 'Report' });
-		await deleteNote(db, doomed.id);
+	/**
+	 * Two rows at one path is not a broken state: a deleted note keeps its path
+	 * until the delete has been pushed, and `takenNamesIn` frees its name at
+	 * once, so creating a note with the same name is exactly this.
+	 *
+	 * Both orders, with the ids written out. The rows come back in primary-key
+	 * order and the ids are random UUIDs, so a test that made them the ordinary
+	 * way would be asking a coin toss whether it noticed — which is the same coin
+	 * toss the bug itself turned on, and it passed a third of the time against
+	 * the broken code.
+	 */
+	const twoRowsAtOnePath = async (tombstoneId: string, liveId: string): Promise<void> => {
 		const live = await createNote(db, { title: 'Report' });
-		expect(live.path).toBe(doomed.path);
+		const row = await getNote(db, live.id);
+		expect(row).toBeDefined();
+		await db.notes.delete(live.id);
+		await db.notes.bulkPut([
+			{ ...row!, id: tombstoneId, deletedLocally: 1 },
+			{ ...row!, id: liveId, deletedLocally: 0 },
+		]);
 
-		await importNoteFile(db, { path: live.path, source: '# From the remote\n' });
+		await importNoteFile(db, { path: row!.path, source: '# From the remote\n' });
 
-		expect((await getNote(db, doomed.id))?.deletedLocally).toBe(1);
-		expect((await getNote(db, live.id))?.body).toBe('# From the remote\n');
+		expect((await getNote(db, tombstoneId))?.deletedLocally).toBe(1);
+		expect((await getNote(db, liveId))?.body).toBe('# From the remote\n');
+	};
+
+	it('takes the live note when the tombstone sorts first', async () => {
+		await twoRowsAtOnePath(
+			'aaaaaaaa-0000-4000-8000-000000000000',
+			'ffffffff-0000-4000-8000-000000000000'
+		);
+	});
+
+	it('takes the live note when the tombstone sorts last', async () => {
+		await twoRowsAtOnePath(
+			'ffffffff-0000-4000-8000-000000000000',
+			'aaaaaaaa-0000-4000-8000-000000000000'
+		);
+	});
+});
+
+describe('naming a note beside a folder spelled differently', () => {
+	it('does not let moveNote land on a sibling in the other spelling', async () => {
+		// `takenNamesIn` gathers the siblings `freeName` avoids. Comparing the
+		// parent folder exactly hands it an empty list, so the fold in `freeName`
+		// has nothing to work on and the note lands on the taken path.
+		await importNoteFile(db, { path: 'Archive/Report.md', source: '# Theirs\n' });
+		const mine = await createNote(db, { title: 'Report' });
+
+		const moved = await moveNote(db, mine.id, 'archive');
+
+		expect(moved.path).toBe('archive/report-2.md');
+	});
+
+	it('does not let createNote land on one either', async () => {
+		await importNoteFile(db, { path: 'Archive/Report.md', source: '# Theirs\n' });
+
+		const made = await createNote(db, { title: 'Report', folderPath: 'archive' });
+
+		expect(made.path).toBe('archive/report-2.md');
 	});
 });
 

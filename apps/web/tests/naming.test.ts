@@ -29,7 +29,22 @@ describe('freeName', () => {
 		const composed = 'caf\u00e9.md';
 		const decomposed = 'cafe\u0301.md';
 		expect(composed).not.toBe(decomposed);
-		expect(freeName(decomposed, [composed])).not.toBe(decomposed);
+		const answer = freeName(decomposed, [composed]);
+		expect(answer.normalize('NFC')).not.toBe(composed.normalize('NFC'));
+	});
+
+	it('gives way whichever side the composed form is on', () => {
+		// The direction that was wrong. `slugify` always emits NFC, so a name
+		// arriving as NFD was recognised when the candidate was NFD too and
+		// missed when the candidate was the NFC a slug always produces — and
+		// missed, the function handed back the very name it was avoiding.
+		const composed = 'caf\u00e9.md';
+		const decomposed = 'cafe\u0301.md';
+		// Asserted as the property rather than as a literal: what matters is that
+		// the answer is not the taken name, however `slugify` chooses to spell it.
+		const answer = freeName(composed, [decomposed]);
+		expect(answer).not.toBe(composed);
+		expect(answer.normalize('NFC')).not.toBe(decomposed.normalize('NFC'));
 	});
 
 	it('does not take a capitalised extension for part of the name', () => {

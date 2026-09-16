@@ -83,14 +83,26 @@ export const sanitizeFolderName = (name: string): string => {
 export const noteFilename = (title: string): string => `${slugify(title)}${NOTE_EXTENSION}`;
 
 /**
+ * Two names are the same name when the provider says they are: case-folded and
+ * NFC-normalized, because Drive, Dropbox and macOS all treat them that way.
+ *
+ * Both folds, not just case. `slugify` normalizes the candidate, so a taken set
+ * folded by case alone agrees in one direction and not the other: a name
+ * arriving as NFD is recognised when the candidate is too, and missed when the
+ * candidate is the NFC the slug always produces. Missed, this hands back the
+ * very name it was asked to avoid — one file on the provider, under two names
+ * that nothing here can tell apart.
+ */
+const fold = (name: string): string => name.normalize('NFC').toLowerCase();
+
+/**
  * Disambiguate against names already in the folder by appending `-2`, `-3`, and
- * so on — the convention every file manager uses. Comparison is
- * case-insensitive because Drive, Dropbox, and macOS all treat names that way.
+ * so on — the convention every file manager uses.
  */
 const nextFreeName = (base: string, used: ReadonlySet<string>, n: number): string => {
 	const candidate = n === 1 ? `${base}${NOTE_EXTENSION}` : `${base}-${n}${NOTE_EXTENSION}`;
-	return used.has(candidate.toLowerCase()) ? nextFreeName(base, used, n + 1) : candidate;
+	return used.has(fold(candidate)) ? nextFreeName(base, used, n + 1) : candidate;
 };
 
 export const uniqueFilename = (title: string, taken: Iterable<string>): string =>
-	nextFreeName(slugify(title), new Set([...taken].map((name) => name.toLowerCase())), 1);
+	nextFreeName(slugify(title), new Set([...taken].map(fold)), 1);

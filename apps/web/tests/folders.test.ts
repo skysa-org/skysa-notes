@@ -390,6 +390,17 @@ describe('moveFolder', () => {
 		expect((await getNote(db, live.id))?.path).toBe('archive/report-2.md');
 	});
 
+	it('does not conjure the destination when nothing is under the source', async () => {
+		// A move of a notebook that is not there asked for nothing, and the only
+		// thing that used to happen was `ensureFolder` answering with a notebook
+		// the user never asked for.
+		await ensureFolder(db, 'work');
+
+		await moveFolder(db, 'nowhere', 'archive');
+
+		expect(await folderTree(db)).toEqual(['work']);
+	});
+
 	it('does nothing when a notebook is renamed to the name it already has', async () => {
 		const note = await createNote(db, { title: 'Note', folderPath: 'work' });
 		await moveFolder(db, 'work', 'work');

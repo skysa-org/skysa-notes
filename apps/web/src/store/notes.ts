@@ -19,7 +19,7 @@ import Dexie from 'dexie';
 import { type EditorMode } from '../editor/mode.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
-import { freeName } from './naming.js';
+import { foldPath, freeName } from './naming.js';
 
 /**
  * Notes CRUD over IndexedDB.
@@ -72,12 +72,17 @@ const takenNamesIn = async (
 	exceptId?: string
 ): Promise<string[]> => {
 	const siblings = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const folder = foldPath(folderPath);
 	return siblings
 		.filter(
 			(note) =>
 				note.deletedLocally === 0 &&
 				note.id !== exceptId &&
-				parentPath(note.path) === folderPath
+				// Folded, or the fold in `freeName` below is for nothing: a folder
+				// spelled `Archive` where this one says `archive` is one directory
+				// on the provider, and comparing exactly empties this list, leaving
+				// `freeName` with nothing to avoid and handing back the taken name.
+				foldPath(parentPath(note.path)) === folder
 		)
 		.map((note) => basename(note.path));
 };

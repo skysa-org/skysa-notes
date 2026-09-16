@@ -41,13 +41,17 @@ const conflictName = (
 	taken: Iterable<string>
 ): string => {
 	const base = `${stem} (conflict ${conflictStamp(at)})`;
-	const used = new Set([...taken].map((name) => name.toLowerCase()));
+	// Case-folded and NFC-normalized, because Drive, Dropbox and macOS all treat
+	// names that way, and a name that differs only in one of those is not
+	// actually free. `uniqueFilename` compares the same two ways; a conflict
+	// copy that landed on an existing name would overwrite the very edit this
+	// whole rule exists to keep.
+	const fold = (name: string): string => name.normalize('NFC').toLowerCase();
+	const used = new Set([...taken].map(fold));
 
-	// Case-insensitive, because Drive, Dropbox and macOS all treat names that
-	// way and a name that only differs in case is not actually free.
 	const free = (n: number): string => {
 		const candidate = n === 1 ? `${base}${extension}` : `${base}-${n}${extension}`;
-		return used.has(candidate.toLowerCase()) ? free(n + 1) : candidate;
+		return used.has(fold(candidate)) ? free(n + 1) : candidate;
 	};
 	return free(1);
 };
