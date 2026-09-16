@@ -40,6 +40,24 @@ export interface NoteRecord {
 	remoteVersion?: string;
 	/** SHA-256 of the serialized file as last written or last seen remotely. */
 	contentHash: string;
+	/**
+	 * The file, byte for byte, as it stands for this note right now: what a pull
+	 * brought in, or what the last edit here serialized to. This — not a fresh
+	 * `noteFileContents` — is what the sync engine is handed, because the two
+	 * differ for any file the app did not write: one with no frontmatter gains a
+	 * block, a `updated: 2026-01-01T00:00:00Z` gains milliseconds. An engine
+	 * handed the re-serialized version sees a change nobody made, and a store
+	 * that stored the re-serialized version rewrites every note it pulls.
+	 *
+	 * Every writer that changes what the file says keeps this in step —
+	 * `applyEdit`, `createNote`, `importNoteFile`, and the sync store. Deleting
+	 * and restoring are not edits to the file: they pin it as it was before they
+	 * move `updatedAt`, and a restored note pushes what it held.
+	 * Absent on
+	 * rows written before it existed, which fall back to `noteFileContents`:
+	 * nothing had pulled those, so the app wrote every byte of them.
+	 */
+	source?: string;
 	/** Set only by a real user edit, never by load, mode switch or re-serialize. */
 	dirty: Flag;
 	/** Tombstone: kept until the delete has been pushed, so sync can replay it. */

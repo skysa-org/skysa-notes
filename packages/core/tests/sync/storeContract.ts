@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RemoteEntry } from '../../src/providers/types.js';
+import { conflictContent } from '../../src/sync/conflicts.js';
 import type { SyncStore } from '../../src/sync/store.js';
 
 /**
@@ -556,6 +557,87 @@ export const describeSyncStoreContract = (
 				expect(await store.cursor()).toBe('c1');
 			});
 
+			describe('a decision about a note edited since it was made', () => {
+				// The engine reads a note, goes to the network for the remote
+				// file, and only then hands over the batch. What the user typed in
+				// between is in the store and nowhere else.
+				const edited = {
+					id: 'n1',
+					path: 'a.md',
+					content: 'typed since\n',
+					remoteId: 'r1',
+					remoteVersion: 'v1',
+					dirty: true,
+				};
+
+				it('refuses an upsert, rather than overwriting it and calling it clean', async () => {
+					const { store, seed } = await harness();
+					await seed(edited);
+
+					await expect(
+						store.applyPull({
+							changes: [
+								{
+									kind: 'upsert-note',
+									id: 'n1',
+									path: 'a.md',
+									content: 'remote\n',
+									remote: remote('a.md', 'r1', 'v2'),
+								},
+							],
+							cursor: 'c1',
+						})
+					).rejects.toThrow();
+
+					const note = await store.noteById('n1');
+					expect(note?.content).toBe('typed since\n');
+					expect(note?.dirty).toBe(true);
+					expect(await store.cursor()).toBeUndefined();
+				});
+
+				it('refuses a delete', async () => {
+					const { store, seed } = await harness();
+					await seed(edited);
+
+					await expect(
+						store.applyPull({
+							changes: [{ kind: 'delete-note', id: 'n1' }],
+							cursor: 'c1',
+						})
+					).rejects.toThrow();
+
+					expect((await store.noteById('n1'))?.content).toBe('typed since\n');
+				});
+
+				it('makes a conflict copy from the note as it stands, not as it was read', async () => {
+					// No refusal: the note is dirty either way, and refusing would stall
+					// every pull for as long as someone keeps typing into it.
+					const { store, seed } = await harness();
+					await seed(edited);
+
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'conflict',
+								resolution: {
+									noteId: 'n1',
+									remoteContent: 'theirs\n',
+									remote: remote('a.md', 'r1', 'v2'),
+									copyId: 'c1',
+									copyPath: 'a (conflict).md',
+									copyContent: conflictContent('what the engine read\n', 'c1'),
+								},
+							},
+						],
+						cursor: 'c1',
+					});
+
+					expect((await store.noteById('c1'))?.content).toBe(
+						conflictContent('typed since\n', 'c1')
+					);
+				});
+			});
+
 			it('rolls the whole batch back when part of it fails', async () => {
 				// The cursor and the changes it describes are one promise. A
 				// cursor stored ahead of its batch skips work that never
@@ -691,7 +773,7 @@ export const describeSyncStoreContract = (
 				remote: remote('a.md', 'r1', 'v2'),
 				copyId: 'c1',
 				copyPath: 'a (conflict 2026-09-15T14-32).md',
-				copyContent: 'mine\n',
+				copyContent: conflictContent('mine\n', 'c1'),
 			};
 
 			it('gives the remote the path and the local edit a note of its own', async () => {
@@ -708,7 +790,7 @@ export const describeSyncStoreContract = (
 
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
 				expect((await store.noteById('n1'))?.dirty).toBe(false);
-				expect((await store.noteById('c1'))?.content).toBe('mine\n');
+				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
 				expect((await store.noteById('c1'))?.dirty).toBe(true);
 			});
 
@@ -891,6 +973,62 @@ export const describeSyncStoreContract = (
 		});
 
 		describe('resolveConflict', () => {
+			it('leaves nothing behind when it refuses', async () => {
+				// One transaction, like a pull batch: a copy id that is taken fails
+				// the resolution after the note has already been rewritten, and the
+				// rewrite must not survive it.
+				const { store, seed, seedOp } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					dirty: true,
+				});
+				await seed({ id: 'c1', path: 'other.md', content: 'other\n' });
+				const seq = await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+
+				await expect(
+					store.resolveConflict(seq, {
+						noteId: 'n1',
+						remoteContent: 'theirs\n',
+						remote: remote('a.md', 'r1', 'v2'),
+						copyId: 'c1',
+						copyPath: 'a (conflict).md',
+						copyContent: conflictContent('mine\n', 'c1'),
+					})
+				).rejects.toThrow();
+
+				expect((await store.noteById('n1'))?.content).toBe('mine\n');
+				expect((await store.noteById('n1'))?.dirty).toBe(true);
+				expect((await store.noteById('c1'))?.content).toBe('other\n');
+				expect((await store.pendingOps()).map((op) => op.seq)).toEqual([seq]);
+			});
+
+			it('makes the folders above the path the remote takes', async () => {
+				const { store, seed, seedOp } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					dirty: true,
+				});
+				const seq = await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+
+				await store.resolveConflict(seq, {
+					noteId: 'n1',
+					remoteContent: 'theirs\n',
+					remote: remote('Moved/There/a.md', 'r1', 'v2'),
+					copyId: 'c1',
+					copyPath: 'a (conflict).md',
+					copyContent: conflictContent('mine\n', 'c1'),
+				});
+
+				expect(await store.folderByPath('Moved')).toBeDefined();
+				expect(await store.folderByPath('Moved/There')).toBeDefined();
+			});
+
 			it('finishes the op in the same breath as the copy', async () => {
 				// Replaying it would overwrite the remote with the bytes the user
 				// has just been handed a copy of.
@@ -911,14 +1049,14 @@ export const describeSyncStoreContract = (
 					remote: remote('a.md', 'r1', 'v2'),
 					copyId: 'c1',
 					copyPath: 'a (conflict).md',
-					copyContent: 'mine\n',
+					copyContent: conflictContent('mine\n', 'c1'),
 				});
 
 				const ops = await store.pendingOps();
 				expect(ops.find((op) => op.seq === seq)).toBeUndefined();
 				expect(ops.map((op) => op.path)).toEqual(['a (conflict).md']);
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
-				expect((await store.noteById('c1'))?.content).toBe('mine\n');
+				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
 			});
 		});
 	});
