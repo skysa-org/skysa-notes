@@ -1677,9 +1677,22 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		//
 		// The same goes for a file we do not hold at all yet, when the note has a
 		// file of its own elsewhere: another device put it at the name this note
-		// was renamed to, after our pull. The two ids say it is not this note's.
+		// was renamed to, after our pull. The two ids say it is not this note's —
+		// provided this note's own file is still there. Gone, the file at the path
+		// is its replacement (deleted and written again, as some editors save),
+		// and moving aside would leave two files claiming the note's frontmatter
+		// `id`. That is the conflict rule's case, whose copy takes a fresh one.
 		const taken = await store.noteByRemoteId(remote.remoteId);
-		const someoneElses = note.remoteId !== undefined && note.remoteId !== remote.remoteId;
+		const someoneElses =
+			note.remoteId !== undefined &&
+			note.remoteId !== remote.remoteId &&
+			(await provider
+				.read({ remoteId: note.remoteId, path: note.path })
+				.then(() => true)
+				.catch((problem: unknown) => {
+					if (!isNotFoundError(problem)) throw problem;
+					return false;
+				}));
 		if ((taken !== undefined && taken.id !== note.id) || someoneElses) {
 			await store.applyPull({
 				changes: [

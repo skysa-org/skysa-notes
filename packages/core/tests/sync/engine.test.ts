@@ -2583,6 +2583,30 @@ describe('a write whose file is not where it was', () => {
 		);
 	});
 
+	it('answers a file replaced at the note\u2019s own path with the conflict rule, not by moving aside', async () => {
+		// Deleted and written again — a new id at the same path — after our pull.
+		// Moved aside, this note would keep its frontmatter id beside a file that
+		// claims the same one. The conflict copy takes a fresh id instead.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.delete(entry);
+		await remoteFile('a.md', 'theirs\n');
+
+		const result = await engine.push();
+
+		expect(result.conflicts).toHaveLength(1);
+		expect(store.notes().find((note) => note.id === 'n1')?.content).toBe('theirs\n');
+		expect(store.notes().find((note) => note.id !== 'n1')?.content).toContain('edited');
+	});
+
 	it('is one note when the version survives the move, as Dropbox rev does', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
 		store.put({
