@@ -111,3 +111,52 @@ describe('contentHash', () => {
 		expect(await contentHash('日本語')).toMatch(/^[0-9a-f]{64}$/);
 	});
 });
+
+/**
+ * A duplicate key, a tab used to indent a list, an unterminated quote — YAML
+ * that is wrong but not unreadable, and that any other editor writes sooner or
+ * later. Rejecting the block outright pushed it into the body, and from there
+ * every consequence followed: the fences around the raw YAML are a setext
+ * heading in markdown, so the YAML became the note's title and therefore its
+ * filename, the `id` went missing so the note stopped being the same note, and
+ * the next write put a fresh frontmatter block above the old one — which is
+ * what the next reader then parses.
+ */
+describe('a note whose frontmatter the parser had to repair', () => {
+	const source = [
+		'---',
+		'id: 11111111-1111-4111-8111-111111111111',
+		'title: Real Title',
+		'title: Real Title',
+		'---',
+		'',
+		'# Heading',
+		'',
+	].join('\n');
+
+	it('keeps the note’s identity', () => {
+		expect(parseNoteFile(source).id).toBe('11111111-1111-4111-8111-111111111111');
+	});
+
+	it('does not make a title out of the raw YAML', () => {
+		expect(parseNoteFile(source).title).toBe('Real Title');
+	});
+
+	it('keeps the block out of the body', () => {
+		expect(parseNoteFile(source).body).toBe('\n# Heading\n');
+	});
+
+	it('leaves the file exactly as it was rather than adding a second block', () => {
+		const parsed = parseNoteFile(source);
+		const written = serializeNoteFile({
+			frontmatter: parsed.frontmatter,
+			body: parsed.body,
+			metadata: { title: 'Renamed', updated: '2026-09-15T00:00:00Z' },
+		});
+
+		// The patch is dropped, not applied: rewriting YAML the parser could only
+		// guess at would destroy whatever the user meant by it.
+		expect(written).toBe(source);
+		expect(written.split('\n').filter((line) => line === '---')).toHaveLength(2);
+	});
+});

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
-import { createNote, getNote } from '../src/store/notes.js';
+import { createNote, getNote, importNoteFile } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 /**
@@ -120,6 +120,40 @@ describe('NoteView mode toggle', () => {
 		await waitFor(() => {
 			expect(richSurface()).not.toBeNull();
 		});
+	});
+});
+
+/**
+ * A block the YAML parser had to recover from is readable but not writable: the
+ * app will not rewrite a guess back into the user's file, so a rename or a tag
+ * edit reaches the app and not the file, and the next sync reads the old values
+ * back over it. The note would otherwise just quietly refuse to be renamed.
+ */
+describe('a note whose frontmatter has a YAML error', () => {
+	it('says so, rather than failing silently later', async () => {
+		const note = await importNoteFile(db, {
+			path: 'broken.md',
+			source: '---\nid: abc\ntitle: Real\ntitle: Real\n---\n\n# Real\n',
+		});
+		render(<Harness id={note.id} />);
+
+		const banner = await screen.findByRole('note');
+		expect(banner.textContent).toContain('frontmatter');
+		// Not a live region: it is true of the note from the moment it opens, and
+		// the rich editor's own banner is the one that announces.
+		expect(screen.queryByRole('status')).toBeNull();
+	});
+
+	it('says nothing about a note whose frontmatter is fine', async () => {
+		const note = await importNoteFile(db, {
+			path: 'fine.md',
+			source: '---\nid: abc\ntitle: Real\n---\n\n# Real\n',
+		});
+		render(<Harness id={note.id} />);
+		await screen.findByDisplayValue('Real');
+
+		expect(screen.queryByRole('note')).toBeNull();
+		expect(screen.queryByRole('status')).toBeNull();
 	});
 });
 

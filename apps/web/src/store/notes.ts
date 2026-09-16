@@ -357,6 +357,23 @@ export interface ImportNoteFileInput extends NoteScope {
 }
 
 /**
+ * A frontmatter date, or now.
+ *
+ * `Date.parse` answers `NaN` for anything it cannot read, and these two fields
+ * come out of a file the app did not write — including one whose YAML the
+ * parser had to recover from, where an unterminated quote swallows the next
+ * line into the value. `NaN` in `updatedAt` is not a wrong date, it is a
+ * comparator that returns false both ways: the field is an IndexedDB index and
+ * the note list sorts on it, so one bad note leaves the whole list in no
+ * particular order, and `noteFileContents` throws `RangeError` on the row.
+ */
+const timeFrom = (value: string | undefined, fallback: number): number => {
+	if (value === undefined) return fallback;
+	const parsed = Date.parse(value);
+	return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+/**
  * Take a note file into the store as-is.
  *
  * Nothing here marks the note dirty and nothing re-serializes the body: a note
@@ -405,10 +422,8 @@ export const importNoteFile = async (
 			contentHash: await Dexie.waitFor(contentHash(input.source)),
 			dirty: 0,
 			deletedLocally: 0,
-			createdAt:
-				existing?.createdAt ??
-				(parsed.created === undefined ? now : Date.parse(parsed.created)),
-			updatedAt: parsed.updated === undefined ? now : Date.parse(parsed.updated),
+			createdAt: existing?.createdAt ?? timeFrom(parsed.created, now),
+			updatedAt: timeFrom(parsed.updated, now),
 		};
 
 		await db.notes.put(record);
