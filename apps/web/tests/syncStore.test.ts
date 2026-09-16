@@ -570,6 +570,8 @@ describe('another connection’s note under the same id', () => {
 		await mine.completeOp(own, { kind: 'purged', noteId: 'n1' });
 		expect(await theirs.noteById('n1')).toMatchObject({ remoteId: 'r1', dirty: false });
 		expect((await theirs.pendingOps()).map((op) => op.seq)).toEqual([seq]);
+		expect(await mine.opBySeq(seq)).toBeUndefined();
+		expect(await theirs.opBySeq(seq)).toMatchObject({ seq, op: 'delete' });
 	});
 });
 
@@ -592,14 +594,6 @@ describe('a note deleted here', () => {
 		const [note] = await listNotes(db, { connectionId: CONNECTION });
 
 		await deleteNote(db, note!.id);
-		await db.opQueue.add({
-			connectionId: CONNECTION,
-			op: 'delete',
-			noteId: note!.id,
-			path: 'a.md',
-			attempts: 0,
-			queuedAt: 0,
-		});
 		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
 
 		const result = await engine.sync();
@@ -629,22 +623,20 @@ describe('a note deleted here', () => {
 	it('is kept, cut loose from its file, when restored before its delete landed', async () => {
 		const { db, store } = await pulled();
 		await deleteNote(db, 'n1');
-		const seq = await db.opQueue.add({
-			connectionId: CONNECTION,
-			op: 'delete',
-			noteId: 'n1',
-			path: 'a.md',
-			attempts: 0,
-			queuedAt: 0,
-		});
+		// Read by the engine, and at the network, when the user restores it.
+		const [remove] = await store.pendingOps();
 		await restoreNote(db, 'n1');
 
-		await store.completeOp(seq, { kind: 'purged', noteId: 'n1' });
+		await store.completeOp(remove?.seq ?? -1, { kind: 'purged', noteId: 'n1' });
 
 		const row = await getNote(db, 'n1');
 		expect(row?.deletedLocally).toBe(0);
 		expect(row?.remoteId).toBeUndefined();
 		expect(row?.dirty).toBe(1);
+		// The file is gone, so the note is owed one: exactly one.
+		expect((await store.pendingOps()).map((op) => [op.op, op.noteId])).toEqual([
+			['write', 'n1'],
+		]);
 	});
 
 	it('goes when the remote deletes it too', async () => {
@@ -667,16 +659,10 @@ describe('a note deleted here', () => {
 		// the user deleted, queued to be written back to the remote.
 		const { db, store } = await pulled();
 		await saveNoteBody(db, 'n1', 'edited then deleted\n');
-		const write = await db.opQueue.add({
-			connectionId: CONNECTION,
-			op: 'write',
-			noteId: 'n1',
-			path: 'a.md',
-			attempts: 0,
-			queuedAt: 0,
-		});
+		const [write] = await store.pendingOps();
 		const read = (await store.noteById('n1'))?.content ?? '';
-		// A second autosave's write, still queued behind the first.
+		// The write owed to an edit made while the first was in flight, still
+		// queued behind it.
 		await db.opQueue.add({
 			connectionId: CONNECTION,
 			op: 'write',
@@ -686,16 +672,9 @@ describe('a note deleted here', () => {
 			queuedAt: 0,
 		});
 		await deleteNote(db, 'n1');
-		const remove = await db.opQueue.add({
-			connectionId: CONNECTION,
-			op: 'delete',
-			noteId: 'n1',
-			path: 'a.md',
-			attempts: 0,
-			queuedAt: 0,
-		});
+		const remove = (await db.opQueue.toArray()).find((op) => op.op === 'delete')?.seq;
 
-		await store.resolveConflict(write, {
+		await store.resolveConflict(write?.seq ?? -1, {
 			noteId: 'n1',
 			remoteContent: 'theirs\n',
 			remote: remote('a.md', 'r1', 'v2'),

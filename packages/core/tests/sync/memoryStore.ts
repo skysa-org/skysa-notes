@@ -388,6 +388,7 @@ export const createMemoryStore = (): MemoryStore => {
 		},
 
 		pendingOps: () => Promise.resolve([...ops.values()].sort((a, b) => a.seq - b.seq)),
+		opBySeq: (seq) => Promise.resolve(ops.get(seq)),
 		completeOp: (seq, outcome) => {
 			if (!ops.has(seq)) return Promise.reject(new Error(`no op ${String(seq)}`));
 			settle(outcome);

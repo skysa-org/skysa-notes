@@ -1387,6 +1387,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const followTheRename = async (
 		note: SyncNote,
 		remoteId: string,
+		found: string,
 		error: unknown
 	): Promise<RemoteEntry> => {
 		// The queued move has to be the one that *explains* this. `write` is
@@ -1399,7 +1400,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			(each) => each.op === 'move' && each.noteId === note.id && each.targetPath === note.path
 		);
 		if (!explains) throw error;
-		const moved = await provider.move({ remoteId, path: note.path }, note.path);
+		// The write that follows is checked against the version the move hands
+		// back, not the one this note was last in step with — so a file changed
+		// on another device since our pull would be moved and then overwritten,
+		// with no conflict anywhere. Not moved, it fails here instead, and the
+		// next pull finds the change and answers it as any other (§7).
+		if (found !== note.remoteVersion) {
+			throw new Error(`${note.path} has changed on the remote since it was last pulled`);
+		}
+		const from = { remoteId, path: note.path };
+		const moved = await provider.move(from, note.path).catch(async (problem: unknown) => {
+			// A conflict here — another device has taken the name since our
+			// pull — is thrown as it is. Its file is not this note's, and
+			// `resolvePushConflict` knows it by its id and moves the note aside.
+			// The file is there — the read above found it — so a not-found here
+			// is the folder the note was moved into, made on this device and
+			// with its `mkdir` queued behind this write. As in `runMove`.
+			if (!isNotFoundError(problem)) throw problem;
+			await ensureRemoteFolder(parentPath(note.path));
+			return provider.move(from, note.path);
+		});
 		return write(note, moved.version);
 	};
 
@@ -1415,7 +1435,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (note.remoteVersion !== undefined && id !== undefined) {
 				const elsewhere = await provider
 					.read({ remoteId: id, path: note.path })
-					.then(() => true)
+					.then((file): string | undefined => file.version)
 					// Only a not-found answers the question. Anything else — a
 					// rate limit, an outage, a response the adapter could not
 					// make sense of — is the provider failing to say, and reading
@@ -1424,9 +1444,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					// it is a failed op the backoff tries again.
 					.catch((problem: unknown) => {
 						if (!isNotFoundError(problem)) throw problem;
-						return false;
+						return undefined;
 					});
-				if (elsewhere) return followTheRename(note, id, error);
+				if (elsewhere !== undefined) return followTheRename(note, id, elsewhere, error);
 			}
 
 			// Either the file was deleted while we held edits, or the folder it
@@ -1654,8 +1674,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// flag, and the op is left to be retried at the path it has been given.
 		// The displacement rebases the queued write with it, so the next attempt
 		// creates the file where the note now is.
+		//
+		// The same goes for a file we do not hold at all yet, when the note has a
+		// file of its own elsewhere: another device put it at the name this note
+		// was renamed to, after our pull. The two ids say it is not this note's —
+		// provided this note's own file is still there. Gone, the file at the path
+		// is its replacement (deleted and written again, as some editors save),
+		// and moving aside would leave two files claiming the note's frontmatter
+		// `id`. That is the conflict rule's case, whose copy takes a fresh one.
 		const taken = await store.noteByRemoteId(remote.remoteId);
-		if (taken !== undefined && taken.id !== note.id) {
+		const someoneElses =
+			note.remoteId !== undefined &&
+			note.remoteId !== remote.remoteId &&
+			(await provider
+				.read({ remoteId: note.remoteId, path: note.path })
+				.then(() => true)
+				.catch((problem: unknown) => {
+					if (!isNotFoundError(problem)) throw problem;
+					return false;
+				}));
+		if ((taken !== undefined && taken.id !== note.id) || someoneElses) {
 			await store.applyPull({
 				changes: [
 					{ kind: 'displace-note', id: note.id, path: await freeNotePath(note.path) },
@@ -1679,10 +1717,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		progress: PushProgress,
 		retriedAuth: boolean
 	): Promise<SyncOutcome> => {
-		const [op, ...rest] = ops;
-		if (op === undefined) {
+		const [held, ...rest] = ops;
+		if (held === undefined) {
 			return ok({ pushed: progress.pushed, conflicts: progress.conflicts });
 		}
+		// The queue was read once, and the user has gone on since: a restore
+		// withdraws a delete, a second rename replaces a move, a pull's conflict
+		// drops a write. Sent anyway, a withdrawn delete removes a file the user
+		// has just asked to keep. So each op is asked for again just before it
+		// goes, and one that is gone is passed over.
+		const op = await store.opBySeq(held.seq);
+		if (op === undefined) return drainOps(rest, progress, retriedAuth);
 
 		// Ordered queue: a later op may depend on an earlier one having landed,
 		// so a dead op stops the drain rather than being stepped over.

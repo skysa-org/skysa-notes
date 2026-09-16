@@ -1,5 +1,4 @@
 import { parseNoteFile, splitFrontmatter } from '@skysa/core';
-import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
@@ -626,8 +625,15 @@ describe('an edit that overlaps another write to the same note', () => {
 				// make the competing write part of the edit rather than a rival
 				// to it — the one arrangement where nothing can go wrong, and so
 				// the one arrangement that proves nothing. A real second write
-				// comes from an event handler, which is what this is.
-				started(Dexie.ignoreTransaction(competing));
+				// comes from an event handler, a task of its own, which is what
+				// a timer is. `Dexie.ignoreTransaction` leaves the zone too, but
+				// runs inside this task, and under fake-indexeddb a transaction
+				// opened from there failed with `TransactionInactiveError` once
+				// the edit's transaction also covered the push queue — which no
+				// call from a real handler has been found to reproduce.
+				setTimeout(() => {
+					started(competing());
+				}, 0);
 				for (let i = 0; i < 20; i += 1)
 					await new Promise((resolve) => setTimeout(resolve, 0));
 			}

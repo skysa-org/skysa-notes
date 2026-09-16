@@ -394,6 +394,12 @@ export interface SyncStore {
 
 	/** Queued pushes in order. */
 	readonly pendingOps: () => Promise<SyncOp[]>;
+	/**
+	 * One queued op as it stands now, or `undefined` if it is no longer queued.
+	 * The engine asks before sending each op it read from `pendingOps`, because
+	 * the user can withdraw or replace one in between.
+	 */
+	readonly opBySeq: (seq: number) => Promise<SyncOp | undefined>;
 	readonly completeOp: (seq: number, outcome: OpOutcome) => Promise<void>;
 	/** Record a failure against the op and leave it queued. */
 	readonly failOp: (seq: number, error: string) => Promise<void>;

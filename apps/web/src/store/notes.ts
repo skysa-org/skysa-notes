@@ -20,6 +20,7 @@ import { type EditorMode } from '../editor/mode.js';
 import { type Flag, LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
 import { foldPath, freeName } from './naming.js';
+import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
 
 /**
  * Notes CRUD over IndexedDB.
@@ -115,7 +116,7 @@ export const createNote = async (
 	// chosen from the names already taken, and the digest between that read and
 	// the `add` is long enough for a second "New note" click to choose the very
 	// same name. Two rows at one path is one file on the remote and a note lost.
-	return db.transaction('rw', db.notes, db.folders, async () => {
+	return db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
 		const title = input.title ?? deriveTitle({ body });
 		const filename = uniqueFilename(title, await takenNamesIn(db, connectionId, folderPath));
 		const path = joinPath(folderPath, filename);
@@ -153,6 +154,7 @@ export const createNote = async (
 
 		if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
 		await db.notes.add(withHash);
+		await queueWrite(db, withHash);
 		return withHash;
 	});
 };
@@ -223,7 +225,7 @@ const applyEdit = async (
 ): Promise<NoteRecord> =>
 	// `folders` is in scope because a note can move into a folder that does not
 	// exist yet, and creating it belongs to the same all-or-nothing step.
-	db.transaction('rw', db.notes, db.folders, async () => {
+	db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
 		const existing = await db.notes.get(id);
 		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
@@ -248,6 +250,8 @@ const applyEdit = async (
 		};
 
 		await db.notes.put(withHash);
+		await queueWrite(db, withHash);
+		if (withHash.path !== existing.path) await queueMove(db, withHash, existing.path);
 		return withHash;
 	});
 
@@ -348,35 +352,29 @@ export const setNoteTags = async (
 };
 
 /**
- * Tombstone a note. The row survives until sync has pushed the delete, so the
- * deletion is not lost if the app is closed before it reaches the provider.
+ * Tombstone or restore a note. The row survives until sync has pushed the
+ * delete, so the deletion is not lost if the app is closed before it reaches the
+ * provider; the op that pushes it lands in the same transaction.
+ *
+ * Neither is an edit to the file, so `source` is pinned to what the file said
+ * before `updatedAt` moves — a row written before `source` existed would
+ * otherwise re-serialize with the new time in it. Asking for the state a note is
+ * already in changes nothing and queues nothing.
  */
-/**
- * Tombstone or restore a note. Neither is an edit to the file, so `source` is
- * pinned to what the file said before `updatedAt` moves — a row written before
- * `source` existed would otherwise re-serialize with the new time in it.
- */
-const setDeleted = async (db: NotesDatabase, id: string, deleted: Flag): Promise<void> => {
-	await db.notes
-		.where(':id')
-		.equals(id)
-		// `modify` rather than a transaction around a get and a put: it is one
-		// read-modify-write inside Dexie, so it stays atomic even when started
-		// from an event handler while another transaction is waiting on a digest
-		// — where an explicit transaction here is opened inactive and fails.
-		.modify((note, ref) => {
-			// Replacing `ref.value` is how `modify` takes a whole new record; the
-			// row is never mutated in place.
-			// eslint-disable-next-line functional/immutable-data
-			ref.value = {
-				...note,
-				source: noteFile(note),
-				deletedLocally: deleted,
-				dirty: 1,
-				updatedAt: Date.now(),
-			};
-		});
-};
+const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void> =>
+	db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
+		const note = await db.notes.get(id);
+		if (note === undefined || note.deletedLocally === deleted) return;
+		const updated: NoteRecord = {
+			...note,
+			source: noteFile(note),
+			deletedLocally: deleted,
+			dirty: 1,
+			updatedAt: Date.now(),
+		};
+		await db.notes.put(updated);
+		await (deleted === 1 ? queueDelete(db, updated) : queueRestore(db, updated));
+	});
 
 export const deleteNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 1);
 
@@ -460,7 +458,7 @@ export const importNoteFile = async (
 	// these in one transaction of its own — which is what a sync pull batch will
 	// be — has then only one scope to open, instead of a `SubTransactionError`
 	// the first time it reaches the one writer that asked for less.
-	return db.transaction('rw', db.notes, db.folders, async () => {
+	return db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
 		const existing =
 			parsed.id === undefined
 				? await noteAtPath(db, connectionId, input.path)
