@@ -20,7 +20,7 @@ import {
  * relative to it — `ensureRoot` has nothing to create and only writes the
  * marker. See docs/PLAN.md §5.3.
  *
- * Docs consulted (2026-09-14):
+ * Docs consulted (2026-09-14, and `files.stone` again 2026-09-16):
  * - Endpoints and payloads: https://www.dropbox.com/developers/documentation/http/documentation
  * - Authoritative type definitions: https://github.com/dropbox/dropbox-api-spec (`files.stone`, `auth.stone`)
  * - Error handling: https://developers.dropbox.com/error-handling-guide
@@ -113,6 +113,57 @@ const toEntry = (metadata: Metadata): RemoteEntry => ({
 	modifiedAt: metadata.server_modified ?? '',
 	...(metadata.size === undefined ? {} : { size: metadata.size }),
 });
+
+/**
+ * Is what is at a path the very entry we were asked to act on?
+ *
+ * By id wherever both sides have one: that is what the request addressed the
+ * entry by, and an `EntryRef`'s path is only as fresh as the caller's last
+ * look. A note that has never been pushed carries no id, and then the path is
+ * all there is to go on.
+ */
+const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
+	entry.remoteId === '' || current.remoteId === ''
+		? // Folded, because Dropbox is case-insensitive and `path_display`
+			// carries the case the *user* typed — so the path that comes back is
+			// routinely spelled differently from the one the caller is holding
+			// for the very same file. Compared exactly, a move that had already
+			// happened would be reported as a conflict, and the conflict rule
+			// would write the user's note aside as a copy of itself.
+			normalizePath(entry.path).toLowerCase() === current.path.toLowerCase()
+		: entry.remoteId === current.remoteId;
+
+/**
+ * The metadata for a download, which rides in a header because the body is the
+ * file itself.
+ *
+ * Every way of not having it is refused rather than defaulted. The alternative
+ * is a `version` of `''`: the caller stores that as the note's `remoteVersion`
+ * and sends it straight back as `update: ''` on the next push, which Dropbox
+ * rejects as a malformed rev — so one unreadable header leaves a note that is
+ * otherwise perfectly fine unable to be saved again, for as long as it exists.
+ * A read that cannot say what it read is a failed read, and the engine's
+ * backoff already knows what to do with one.
+ */
+const downloadResult = (header: string | null): Metadata => {
+	if (header === null) throw new Error('dropbox sent a download with no metadata header');
+	const parsed = ((): unknown => {
+		try {
+			return JSON.parse(header);
+		} catch {
+			throw new Error('dropbox sent a download whose metadata header is not JSON');
+		}
+	})();
+	// `null`, a number and a bare string are all valid JSON and none of them has
+	// the shape below — and `null` in particular would get past a bare cast and
+	// come back out as a `TypeError` about reading a property of null, from a
+	// stack that says nothing about Dropbox. Which is the thing this function
+	// exists to stop. `failureOf` guards the same way for the same reason.
+	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+		throw new Error('dropbox sent a download whose metadata header is not an object');
+	}
+	return parsed;
+};
 
 const toChangeEntry = (metadata: Metadata): ChangeEntry =>
 	metadata['.tag'] === 'deleted'
@@ -209,21 +260,22 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		return { ok: true, value: (await response.json()) as T };
 	};
 
+	/**
+	 * The entry at a path, or `undefined` when there is nothing there.
+	 *
+	 * `undefined` means absent, and nothing else. Answering it for a 503 or a
+	 * 429 as well would have every caller below read "I could not ask" as "it
+	 * is not there" — and `write` turns that into `NotFoundError`, which the
+	 * engine answers by forgetting the remote copy and pushing the note again
+	 * as a new file. A file that was there the whole time then comes back as a
+	 * conflict copy of itself, from nothing worse than a moment of Dropbox
+	 * being unavailable.
+	 */
 	const metadataAt = async (path: string): Promise<RemoteEntry | undefined> => {
 		const result = await tryRpc<Metadata>('files/get_metadata', { path: toDropboxPath(path) });
-		return result.ok ? toEntry(result.value) : undefined;
-	};
-
-	/**
-	 * A conflict has to carry the entry as it is now, so the conflict rule can
-	 * write the local copy aside without a round trip of its own. Dropbox does
-	 * not put it in the error, so the extra call happens here — on the rare path,
-	 * where being right is worth more than the request.
-	 */
-	const conflictAt = async (path: string, failure: DropboxFailure): Promise<never> => {
-		const current = await metadataAt(path);
-		if (current === undefined) return raise(failure);
-		throw new ConflictError(current);
+		if (result.ok) return toEntry(result.value);
+		if (tagged(result.failure, 'not_found')) return undefined;
+		return raise(result.failure, path);
 	};
 
 	/** Dropbox accepts an `id:...` in place of a path, which survives a move elsewhere. */
@@ -318,9 +370,11 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (!response.ok) return raise(await failureOf(response));
 
 		// The body is the file itself, so the metadata rides in a header.
-		const header = response.headers.get('dropbox-api-result') ?? '{}';
-		const metadata = JSON.parse(header) as Metadata;
-		return { content: await response.text(), version: metadata.rev ?? '' };
+		const metadata = downloadResult(response.headers.get('dropbox-api-result'));
+		if (metadata.rev === undefined || metadata.rev === '') {
+			throw new Error('dropbox sent a download with no rev');
+		}
+		return { content: await response.text(), version: metadata.rev };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
@@ -347,8 +401,62 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 			autorename: false,
 		});
 		if (result.ok) return toEntry(result.value.metadata ?? {});
-		if (tagged(result.failure, 'conflict')) return conflictAt(newPath, result.failure);
-		return raise(result.failure, entry.path);
+
+		// Three ways of saying the destination is not free, and Dropbox does not
+		// document which it uses for a move to where the entry already is —
+		// which a queued `move` naming the path a note is at will be.
+		// `to/conflict` is the mechanically obvious one, since with
+		// `autorename: false` the destination is occupied — by the entry itself;
+		// `duplicated_or_nested_paths` is the one whose own description names
+		// the case ("duplicated/nested paths among from_path and to_path"); and
+		// `cant_move_folder_into_itself` is the plausible answer for a folder,
+		// which `StorageProvider.move` takes as readily as a file — the contract
+		// suite moves one and rebases everything under it. (Not because a
+		// notebook rename reaches a provider: it does not. `SyncOperation` has no
+		// folder move, and `moveFolder` in `apps/web` rebases its notes locally
+		// and queues nothing.)
+		// https://github.com/dropbox/dropbox-api-spec (`files.stone`, RelocationError)
+		//
+		// So none of them is settled from the tag. None of them says *what* is
+		// at the path either, and that is the whole question: a move already
+		// done and a move onto someone else's file arrive as the same error.
+		const intoItself = tagged(result.failure, 'cant_move_folder_into_itself');
+		const inTheWay =
+			intoItself ||
+			tagged(result.failure, 'conflict') ||
+			tagged(result.failure, 'duplicated_or_nested_paths');
+		if (!inTheWay) return raise(result.failure, entry.path);
+
+		// A conflict has to carry the entry as it is now, so the conflict rule
+		// can write the local copy aside without a round trip of its own.
+		// Dropbox does not put it in the error, so the extra call happens here —
+		// on the rare path, where being right is worth more than the request.
+		// Dropbox says the destination is not free and nothing is there. No path
+		// is passed: `raise` uses one only to name a `NotFoundError`, and none of
+		// the tags that reach here is a not-found, so handing it one would be
+		// saying something about an error it cannot be.
+		const current = await metadataAt(newPath);
+		if (current === undefined) return raise(result.failure);
+
+		// The entry is already where it was being sent, so the move is done and
+		// saying so is both true and idempotent. Reporting it as a failure would
+		// be worse than untidy: the push queue is ordered and stops on a failed
+		// op, so one that can never succeed strands every op behind it, for
+		// every note. Reporting it as a conflict would be worse still — the
+		// conflict rule would write the user's note aside as a copy of itself.
+		// The entry as Dropbox has it, which for a rename that changes only the
+		// case of a name is the old spelling: Dropbox is case-insensitive, so
+		// such a rename is a move to where the entry already is, and reporting
+		// where it actually is leaves the store agreeing with the provider
+		// rather than holding a name no file has.
+		if (isSelf(entry, current)) return current;
+
+		// "Into itself" that turns out not to be itself is a folder being moved
+		// under its own descendant, which is not a conflict with the entry at
+		// the destination and must not be answered by copying a note aside. It
+		// goes back as the failure Dropbox sent.
+		if (intoItself) return raise(result.failure);
+		throw new ConflictError(current);
 	};
 
 	const remove = async (entry: EntryRef): Promise<void> => {

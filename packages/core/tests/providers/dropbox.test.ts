@@ -482,3 +482,323 @@ describe('encoding', () => {
 		);
 	});
 });
+
+/**
+ * Answering confidently without knowing.
+ *
+ * Each of these is a place the adapter had a default to fall back on — an
+ * absent file, an empty version — for a response that did not actually say
+ * that. A default is only safe where the caller can tell it apart from the
+ * real answer, and the engine cannot: it acts on `NotFoundError` by pushing the
+ * note again, and on a version by sending it back.
+ */
+describe('not knowing, rather than guessing', () => {
+	/** Answers the first route that matches, `503` for anything else. */
+	const routed = (routes: Record<string, () => Response>) => {
+		const doFetch: FetchLike = (url) => {
+			const route = Object.keys(routes).find((name) => url.endsWith(name));
+			return Promise.resolve(
+				route === undefined
+					? new Response('upstream is unavailable', { status: 503 })
+					: (routes[route] as () => Response)()
+			);
+		};
+		return doFetch;
+	};
+
+	const conflictResponse = () =>
+		new Response(errorBody('path/conflict/file/...', 'path'), { status: 409 });
+
+	it('does not call a file missing because Dropbox was unreachable', async () => {
+		// The sharp one. `files/upload` conflicts, so the adapter asks what is at
+		// the path — and that request fails transiently. Reading the silence as
+		// "nothing is there" made this a `NotFoundError`, which the engine answers
+		// by forgetting the remote copy and pushing the note as a new file. The
+		// file was there all along, so the push conflicts, and the user's note is
+		// written aside as a conflict copy of itself.
+		const doFetch = routed({ 'files/upload': conflictResponse });
+
+		const failed = await provider(doFetch)
+			.write('a.md', 'body\n', { expectedVersion: 'r1' })
+			.then(() => undefined)
+			.catch((error: unknown) => error);
+
+		expect(failed).toBeInstanceOf(Error);
+		expect(failed).not.toBeInstanceOf(NotFoundError);
+		// Untyped, which is how the engine's backoff is told to try again.
+		expect((failed as Error).message).toContain('503');
+	});
+
+	it('reports an auth failure while looking for the marker as one', async () => {
+		// Same defaulting, reached through `ensureRoot`: a 401 answered `undefined`
+		// too, so the adapter went on to write a marker over a folder it had no
+		// business writing to yet.
+		const doFetch = routed({
+			'files/get_metadata': () =>
+				new Response(errorBody('expired_access_token/...', 'expired_access_token'), {
+					status: 401,
+				}),
+		});
+
+		await expect(provider(doFetch).ensureRoot()).rejects.toThrow(AuthError);
+	});
+
+	it('refuses a download whose metadata header is missing', async () => {
+		// `version: ''` used to come back here. The caller stores that as the
+		// note's `remoteVersion` and sends it back as `update: ''` on the next
+		// push, which Dropbox rejects — so the note can never be saved again.
+		const { doFetch } = canned(() => new Response('body\n', { status: 200 }));
+
+		await expect(provider(doFetch).read({ remoteId: 'id:1', path: 'a.md' })).rejects.toThrow(
+			/no metadata header/
+		);
+	});
+
+	it('refuses a download whose metadata header is not JSON', async () => {
+		// A truncated header used to escape as a raw `SyntaxError` about column
+		// numbers, from a call stack that says nothing about Dropbox.
+		const { doFetch } = canned(
+			() =>
+				new Response('body\n', {
+					status: 200,
+					headers: { 'Dropbox-API-Result': '{"rev":"r1"' },
+				})
+		);
+
+		await expect(provider(doFetch).read({ remoteId: 'id:1', path: 'a.md' })).rejects.toThrow(
+			/not JSON/
+		);
+	});
+
+	it('refuses a download whose metadata carries no rev', async () => {
+		const { doFetch } = canned(
+			() =>
+				new Response('body\n', {
+					status: 200,
+					headers: { 'Dropbox-API-Result': JSON.stringify({ name: 'a.md' }) },
+				})
+		);
+
+		await expect(provider(doFetch).read({ remoteId: 'id:1', path: 'a.md' })).rejects.toThrow(
+			/no rev/
+		);
+	});
+
+	it('recognises a move that has already happened, through a stale path', async () => {
+		// The ref names the note by id, and its `path` is where the note was
+		// before something else moved it. The adapter cannot tell before asking
+		// that this is a move to where the note already is, so Dropbox tells it —
+		// and `duplicated_or_nested_paths` is not a tag the adapter used to know.
+		// Left untyped it is a transient failure, retried forever, and since the
+		// push queue is ordered every op behind it is stranded with it.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(
+					errorBody('duplicated_or_nested_paths/...', 'duplicated_or_nested_paths'),
+					{
+						status: 409,
+					}
+				),
+			'files/get_metadata': () => fileBody('Work/a.md'),
+		});
+
+		const moved = await provider(doFetch).move(
+			{ remoteId: 'id:1', path: 'stale/a.md' },
+			'Work/a.md'
+		);
+		expect(moved.path).toBe('Work/a.md');
+		expect(moved.remoteId).toBe('id:1');
+	});
+
+	it('does not read a missing file out of a body Dropbox never promised', async () => {
+		// The guard that makes the whole of this work: an endpoint-specific error
+		// is a 409, and anything else carries a body Dropbox makes no promises
+		// about. A 503 from something in between whose text happens to contain
+		// `not_found` must not be read as "the file is not there" — that answer
+		// has the engine push the note again as a new file.
+		const doFetch = routed({
+			'files/upload': conflictResponse,
+			// A `/`-separated summary in a body Dropbox never promised — which is
+			// the point: a proxy or an error page can say anything, and only the
+			// status says whether the tag in it means what it looks like.
+			'files/get_metadata': () =>
+				new Response(errorBody('path/not_found/...', 'path'), { status: 503 }),
+		});
+
+		await expect(
+			provider(doFetch).write('a.md', 'body\n', { expectedVersion: 'r1' })
+		).rejects.not.toThrow(NotFoundError);
+	});
+
+	it('refuses a download whose rev is empty rather than absent', async () => {
+		// The same hazard as a missing `rev` and one the type does not stop:
+		// `''` is a string, and it is `''` that gets sent back as `update: ''`.
+		const { doFetch } = canned(
+			() =>
+				new Response('body\n', {
+					status: 200,
+					headers: { 'Dropbox-API-Result': JSON.stringify({ rev: '' }) },
+				})
+		);
+
+		await expect(provider(doFetch).read({ remoteId: 'id:1', path: 'a.md' })).rejects.toThrow(
+			/no rev/
+		);
+	});
+
+	/**
+	 * A move settled by path rather than by id, which is what an `EntryRef` for a
+	 * note that has never been pushed carries.
+	 *
+	 * Dropbox is case-insensitive and `path_display` gives back the case the
+	 * *user* typed, so the path that comes back is routinely spelled differently
+	 * from the one the caller holds for the very same file.
+	 */
+	it('recognises its own file through a path Dropbox spells differently', async () => {
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(errorBody('to/conflict/file/...', 'to'), { status: 409 }),
+			// The entry has no id — it has never been pushed, so there is nothing
+			// but the path to go on — while the file Dropbox describes does, and
+			// carries the name as the user typed it.
+			'files/get_metadata': () =>
+				new Response(
+					JSON.stringify({
+						'.tag': 'file',
+						id: 'id:1',
+						rev: 'r1',
+						path_display: '/Work/Notes.md',
+					}),
+					{ status: 200 }
+				),
+		});
+
+		const moved = await provider(doFetch).move(
+			{ remoteId: '', path: 'work/notes.md' },
+			'Work/Notes.md'
+		);
+		expect(moved.path).toBe('Work/Notes.md');
+	});
+
+	it('recognises its own file through a path that was never normalized', async () => {
+		// An `EntryRef` carries whatever path its caller holds, and a note row
+		// holds whatever path it was imported with rather than one this app
+		// composed. Compared raw, the entry would not recognise itself.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(errorBody('to/conflict/file/...', 'to'), { status: 409 }),
+			'files/get_metadata': () =>
+				new Response(
+					JSON.stringify({
+						'.tag': 'file',
+						id: 'id:1',
+						rev: 'r1',
+						path_display: '/Work/a.md',
+					}),
+					{ status: 200 }
+				),
+		});
+
+		const moved = await provider(doFetch).move(
+			{ remoteId: '', path: 'Work//a.md' },
+			'Work/a.md'
+		);
+		expect(moved.path).toBe('Work/a.md');
+	});
+
+	it("does not bless a stranger's file as its own because the path matches", async () => {
+		// The inverse, and the worse one: an id on both sides that disagree means
+		// the file at the destination is somebody else's, whatever the path says.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(errorBody('to/conflict/file/...', 'to'), { status: 409 }),
+			'files/get_metadata': () => fileBody('Work/a.md'),
+		});
+
+		await expect(
+			provider(doFetch).move({ remoteId: 'id:mine', path: 'Work/a.md' }, 'Work/a.md')
+		).rejects.toThrow(ConflictError);
+	});
+
+	it('refuses a download whose metadata header is JSON but not an object', async () => {
+		// `null` is valid JSON. Cast and read, it comes back out as a `TypeError`
+		// about a property of null, from a stack that says nothing about Dropbox —
+		// which is the failure this whole helper exists to stop.
+		const { doFetch } = canned(
+			() =>
+				new Response('body\n', {
+					status: 200,
+					headers: { 'Dropbox-API-Result': 'null' },
+				})
+		);
+
+		await expect(provider(doFetch).read({ remoteId: 'id:1', path: 'a.md' })).rejects.toThrow(
+			/not an object/
+		);
+	});
+
+	it('recognises a folder move Dropbox calls moving it into itself', async () => {
+		// A notebook rename is a folder move, and what Dropbox answers for a
+		// folder sent to where it already is has no documented tag. This one is
+		// plausible enough that leaving it out would strand the queue on the
+		// commonest folder operation there is.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(
+					errorBody('cant_move_folder_into_itself/...', 'cant_move_folder_into_itself'),
+					{ status: 409 }
+				),
+			'files/get_metadata': () =>
+				new Response(
+					JSON.stringify({ '.tag': 'folder', id: 'id:1', path_display: '/Work' }),
+					{ status: 200 }
+				),
+		});
+
+		const moved = await provider(doFetch).move({ remoteId: 'id:1', path: 'Work' }, 'Work');
+		expect(moved.path).toBe('Work');
+		expect(moved.kind).toBe('folder');
+	});
+
+	it('does not answer a genuine nesting error by copying a note aside', async () => {
+		// `Work` into `Work/Sub`, where `Work/Sub` exists. It is the same tag, and
+		// it is not a conflict with what is at the destination — treating it as
+		// one would have the conflict rule write a note aside over a mistake no
+		// copy can fix.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(
+					errorBody('cant_move_folder_into_itself/...', 'cant_move_folder_into_itself'),
+					{ status: 409 }
+				),
+			'files/get_metadata': () =>
+				new Response(
+					JSON.stringify({ '.tag': 'folder', id: 'id:sub', path_display: '/Work/Sub' }),
+					{ status: 200 }
+				),
+		});
+
+		const failed = await provider(doFetch)
+			.move({ remoteId: 'id:work', path: 'Work' }, 'Work/Sub')
+			.then(() => undefined)
+			.catch((error: unknown) => error);
+
+		expect(failed).toBeInstanceOf(Error);
+		expect(failed).not.toBeInstanceOf(ConflictError);
+		expect((failed as Error).message).toContain('cant_move_folder_into_itself');
+	});
+
+	it('still reports a genuine conflict at the destination', async () => {
+		// The other half of the same branch: something *else* is at the path, so
+		// the conflict rule has to run rather than the move being called done.
+		const doFetch = routed({
+			'files/move_v2': () =>
+				new Response(errorBody('to/conflict/file/...', 'to'), { status: 409 }),
+			'files/get_metadata': () => fileBody('Work/a.md'),
+		});
+
+		await expect(
+			provider(doFetch).move({ remoteId: 'id:9', path: 'a.md' }, 'Work/a.md')
+		).rejects.toThrow(ConflictError);
+	});
+});

@@ -323,10 +323,10 @@ export const describeProviderContract = (
 				// Not hypothetical: the engine performs a rename on the push
 				// path when it finds one queued behind a write, after which the
 				// queued `move` names the path the file is already at. The
-				// ordered queue stops on a failed op, so an adapter that reports
-				// this as an error — Dropbox's `files/move_v2` answers
-				// `duplicated_or_nested_paths` for identical paths — strands
-				// every op behind it. Adapters detect it and do nothing.
+				// ordered queue stops on a failed op, so an adapter that
+				// reported this as an error would strand every op behind it.
+				// Dropbox's `files/move_v2` does refuse it, so its adapter has
+				// to recognise the refusal for what it is.
 				const provider = await open();
 				const entry = await seedFile(provider, 'a.md', 'body\n');
 

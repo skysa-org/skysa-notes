@@ -696,6 +696,71 @@ describe('push', () => {
 		expect(provider.contentAt('Work/a.md')).toBeUndefined();
 	});
 
+	/**
+	 * Two places ask the provider "is it still there?" by reading it and taking
+	 * any rejection for a no. That is only true of a not-found. Everything else
+	 * — a rate limit, an outage, a response the adapter could not make sense of
+	 * — is the provider failing to answer, and a failure to answer read as "gone"
+	 * does the one thing the question was asked to avoid.
+	 */
+	it('does not re-create a note because the provider would not say', async () => {
+		// The file is at `moved.md` — renamed on another device — so `a.md` is
+		// genuinely free and an `add` there would succeed. That is what makes the
+		// probe load-bearing: the write finds nothing at the path, and the only
+		// thing standing between the user and a second copy of their note is the
+		// answer to "is it still there under the id we hold?".
+		//
+		// Only `read` faults, and not with a not-found: the provider is failing to
+		// answer rather than answering. Taken for a no, the re-create runs and
+		// succeeds, and the user has two notes where they had one.
+		const seeded = await provider.write('moved.md', 'mine\n', {});
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: seeded.remoteId,
+			remoteVersion: seeded.version,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		provider.setFault((call) =>
+			call.op === 'read' ? new Error('service unavailable') : undefined
+		);
+
+		const result = await engine.push();
+
+		// (`isHidden` drops the marker file, which `ensureRoot` writes and which
+		// is a file like any other.)
+		const notes = provider.snapshot().filter((entry) => !isHidden(entry.path));
+		expect(notes.map((entry) => entry.path)).toEqual(['moved.md']);
+		expect(result.status).toBe('retry');
+		expect(store.ops()).toHaveLength(1);
+	});
+
+	it('does not discard a rename because the provider would not say', async () => {
+		// Worse than the last one: `runMove` completes the op as done when it
+		// decides the source is gone, so the user's rename goes with nothing
+		// reported and nothing left to retry.
+		const seeded = await provider.write('a.md', 'mine\n', {});
+		store.put({
+			id: 'n1',
+			path: 'Work/a.md',
+			content: 'mine\n',
+			remoteId: seeded.remoteId,
+			remoteVersion: seeded.version,
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
+		provider.setFault((call) => {
+			if (call.op === 'move') return new NotFoundError('Work/a.md');
+			return call.op === 'read' ? new Error('service unavailable') : undefined;
+		});
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()).toHaveLength(1);
+	});
+
 	it('records the failure against the op it belongs to', async () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
