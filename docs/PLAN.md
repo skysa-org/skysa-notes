@@ -537,7 +537,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] "Loose notes" sidebar row, resolving the §12.6 ship blocker. Split out of the sync-engine PR because it depends on nothing the engine adds, and the engine is large enough on its own.
 - [x] Sync engine: pull, push, cursor persistence, opQueue (`packages/core/src/sync/`). The `SyncStore` port is defined here and implemented over Dexie in the UI PR below, where it registers against `tests/sync/storeContract.ts`.
 - [x] UI note, carried from the PR above: `useNote` reads `db.notes.get(id)`, which returns a tombstone, so a note deleted remotely while it is open stays fully editable in the right pane after the list and sidebar have moved on. Harmless until the engine runs in the browser, which is the PR below. *Done:* `useNote` treats a tombstone as gone. The remote case above turned out not to exist — a pull hard-deletes a clean note and detaches a dirty one, and neither leaves a tombstone — but another tab deleting the open note does, today. An edit that lands on a tombstone anyway — an autosave still pending when another tab deletes the note — is written into it and the note stays deleted, the same call §7 makes ("the delete wins"). Still open, for the PR below: a pull that hard-deletes a clean note while an autosave is pending makes that save throw `No note with id`, and the words are lost with no conflict copy.
-- [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now"
+- [ ] UI: connect one account (replace/disconnect only, no multi-account), sync status indicator, manual "sync now" Split into four PRs: the Dexie `SyncStore` (`apps/web/src/sync/store.ts`, done), local edits queuing push ops, the connect flow, and the scheduler/status/sync-now/CSP. Two things the connect flow must guarantee, because the store refuses rather than guesses: no note row may be left under a connection other than the one being synced when its notes can reach the remote — the store refuses to pull a file over another connection's row with the same frontmatter `id`, and since the engine decides the same way on every retry, sync stops there until the rows are moved — and rows moved off `LOCAL_CONNECTION_ID` get `source` pinned as they move, so their bytes stop depending on `updatedAt` and path before the engine ever reads them. Part 2 should also drop a note's queued `write` ops when it is deleted.
 
 ### Phase 3 — OneDrive (1 day)
 - [ ] `OneDriveProvider` (approot, delta, If-Match)
@@ -600,7 +600,7 @@ apps/
       main.tsx routes/ components/
       editor/                 # RichEditor (Milkdown), RawEditor (CodeMirror), ModeToggle, shared autosave hook
       store/                  # Dexie db, notes.ts, folders.ts
-      sync/                   # scheduler.ts (triggers, visibility, online events) — wraps core engine
+      sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps core engine
       api/                    # typed client for apps/api
   api/                        # Hono on Cloudflare Workers
     wrangler.toml             # D1 binding, [assets] → ../web/dist

@@ -1,4 +1,5 @@
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../src/paths.js';
+import { conflictContent } from '../../src/sync/conflicts.js';
 import type {
 	ConflictResolution,
 	OpOutcome,
@@ -77,8 +78,12 @@ export const createMemoryStore = (): MemoryStore => {
 
 	const applyConflict = (resolution: ConflictResolution): void => {
 		const note = requireNote(resolution.noteId);
+		// From the note as it stands: the user may have typed since the engine
+		// read it, and a copy of the older file would leave those words out.
+		const copyContent = conflictContent(note.content, resolution.copyId);
 		// The remote takes the path it claims, which is not necessarily the one
 		// the local note was at: a note can be moved and edited between syncs.
+		ensureFolderChain(parentPath(resolution.remote.path));
 		notes.set(note.id, {
 			...note,
 			path: resolution.remote.path,
@@ -92,7 +97,7 @@ export const createMemoryStore = (): MemoryStore => {
 		notes.set(resolution.copyId, {
 			id: resolution.copyId,
 			path: resolution.copyPath,
-			content: resolution.copyContent,
+			content: copyContent,
 			dirty: true,
 		});
 		// The edit that lost is in the copy now, and the note holds the remote's
@@ -134,20 +139,48 @@ export const createMemoryStore = (): MemoryStore => {
 		}
 	};
 
+	const upsert = (change: Extract<PullChange, { kind: 'upsert-note' }>): void => {
+		// Decided against a clean note that has been edited since.
+		if (notes.get(change.id)?.dirty === true) {
+			throw new Error(`note ${change.id} changed since the upsert was decided`);
+		}
+		// The engine names the note; the store never guesses. Matching on the
+		// path here instead would overwrite whatever note happened to be
+		// sitting at a path the remote has since reused.
+		ensureFolderChain(parentPath(change.path));
+		notes.set(change.id, {
+			id: change.id,
+			path: change.path,
+			content: change.content,
+			remoteId: change.remote.remoteId,
+			remoteVersion: change.remote.version,
+			dirty: false,
+		});
+	};
+
+	const deleteOrDetach = (
+		change: Extract<PullChange, { kind: 'delete-note' | 'detach-note' }>
+	): void => {
+		const note = notes.get(change.id);
+		// Already gone. Saying so twice is a no-op, not a failure: see
+		// `anomalies` above.
+		if (note === undefined) {
+			anomalies.push(`${change.kind} for unknown note ${change.id}`);
+			return;
+		}
+		if (change.kind === 'delete-note') {
+			// Decided against a clean note that has been edited since.
+			if (note.dirty) throw new Error(`note ${note.id} changed since its delete was decided`);
+			notes.delete(note.id);
+			return;
+		}
+		const { remoteId: _id, remoteVersion: _version, ...rest } = note;
+		notes.set(change.id, rest);
+	};
+
 	const applyChange = (change: PullChange): void => {
 		if (change.kind === 'upsert-note') {
-			// The engine names the note; the store never guesses. Matching on the
-			// path here instead would overwrite whatever note happened to be
-			// sitting at a path the remote has since reused.
-			ensureFolderChain(parentPath(change.path));
-			notes.set(change.id, {
-				id: change.id,
-				path: change.path,
-				content: change.content,
-				remoteId: change.remote.remoteId,
-				remoteVersion: change.remote.version,
-				dirty: false,
-			});
+			upsert(change);
 			return;
 		}
 		if (change.kind === 'adopt-version') {
@@ -173,19 +206,7 @@ export const createMemoryStore = (): MemoryStore => {
 			return;
 		}
 		if (change.kind === 'delete-note' || change.kind === 'detach-note') {
-			const note = notes.get(change.id);
-			// Already gone. Saying so twice is a no-op, not a failure: see
-			// `anomalies` above.
-			if (note === undefined) {
-				anomalies.push(`${change.kind} for unknown note ${change.id}`);
-				return;
-			}
-			if (change.kind === 'delete-note') {
-				notes.delete(note.id);
-				return;
-			}
-			const { remoteId: _id, remoteVersion: _version, ...rest } = note;
-			notes.set(change.id, rest);
+			deleteOrDetach(change);
 			return;
 		}
 		if (change.kind === 'ensure-folder') {
@@ -381,7 +402,15 @@ export const createMemoryStore = (): MemoryStore => {
 		},
 		resolveConflict: (seq, resolution) => {
 			if (!ops.has(seq)) return Promise.reject(new Error(`no op ${String(seq)}`));
-			applyConflict(resolution);
+			const before = snapshot();
+			try {
+				applyConflict(resolution);
+			} catch (error) {
+				// One transaction, as `applyPull` is: a refused resolution leaves
+				// no half of itself behind.
+				restore(before);
+				return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+			}
 			ops.delete(seq);
 			return Promise.resolve();
 		},

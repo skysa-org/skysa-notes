@@ -17,7 +17,7 @@ import {
 import Dexie from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
-import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
+import { type Flag, LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
 import { foldPath, freeName } from './naming.js';
 
@@ -57,6 +57,9 @@ export const noteFileContents = (note: NoteRecord): string =>
 			...(note.tags.length > 0 ? { tags: note.tags } : {}),
 		},
 	});
+
+/** The file for a note, exactly: see `NoteRecord.source`. */
+export const noteFile = (note: NoteRecord): string => note.source ?? noteFileContents(note);
 
 const titleFor = (frontmatter: string | null, body: string, path: string): string =>
 	deriveTitle({
@@ -141,9 +144,11 @@ export const createNote = async (
 			updatedAt: now,
 		};
 
+		const source = noteFileContents(record);
 		const withHash: NoteRecord = {
 			...record,
-			contentHash: await Dexie.waitFor(contentHash(noteFileContents(record))),
+			source,
+			contentHash: await Dexie.waitFor(contentHash(source)),
 		};
 
 		if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
@@ -232,9 +237,14 @@ const applyEdit = async (
 			dirty: 1,
 			updatedAt: Date.now(),
 		};
+		// Serialized from the parts, never carried over: `updated` spreads the
+		// old `source` in with everything else, and a push would then send the
+		// file as it was before this edit.
+		const source = noteFileContents(updated);
 		const withHash: NoteRecord = {
 			...updated,
-			contentHash: await Dexie.waitFor(contentHash(noteFileContents(updated))),
+			source,
+			contentHash: await Dexie.waitFor(contentHash(source)),
 		};
 
 		await db.notes.put(withHash);
@@ -341,13 +351,36 @@ export const setNoteTags = async (
  * Tombstone a note. The row survives until sync has pushed the delete, so the
  * deletion is not lost if the app is closed before it reaches the provider.
  */
-export const deleteNote = async (db: NotesDatabase, id: string): Promise<void> => {
-	await db.notes.update(id, { deletedLocally: 1, dirty: 1, updatedAt: Date.now() });
+/**
+ * Tombstone or restore a note. Neither is an edit to the file, so `source` is
+ * pinned to what the file said before `updatedAt` moves — a row written before
+ * `source` existed would otherwise re-serialize with the new time in it.
+ */
+const setDeleted = async (db: NotesDatabase, id: string, deleted: Flag): Promise<void> => {
+	await db.notes
+		.where(':id')
+		.equals(id)
+		// `modify` rather than a transaction around a get and a put: it is one
+		// read-modify-write inside Dexie, so it stays atomic even when started
+		// from an event handler while another transaction is waiting on a digest
+		// — where an explicit transaction here is opened inactive and fails.
+		.modify((note, ref) => {
+			// Replacing `ref.value` is how `modify` takes a whole new record; the
+			// row is never mutated in place.
+			// eslint-disable-next-line functional/immutable-data
+			ref.value = {
+				...note,
+				source: noteFile(note),
+				deletedLocally: deleted,
+				dirty: 1,
+				updatedAt: Date.now(),
+			};
+		});
 };
 
-export const restoreNote = async (db: NotesDatabase, id: string): Promise<void> => {
-	await db.notes.update(id, { deletedLocally: 0, dirty: 1, updatedAt: Date.now() });
-};
+export const deleteNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 1);
+
+export const restoreNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 0);
 
 /** Drop a tombstoned note for good, once the provider has confirmed the delete. */
 export const purgeNote = async (db: NotesDatabase, id: string): Promise<void> => {
@@ -433,28 +466,70 @@ export const importNoteFile = async (
 				? await noteAtPath(db, connectionId, input.path)
 				: await db.notes.get(parsed.id);
 
-		const id = parsed.id ?? existing?.id ?? crypto.randomUUID();
-
 		const record: NoteRecord = {
-			id,
-			connectionId,
-			path: input.path,
-			title: parsed.title,
-			body: parsed.body,
-			frontmatter: parsed.frontmatter,
-			tags: parsed.tags,
+			...noteRecordFromFile({
+				id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
+				connectionId,
+				path: input.path,
+				source: input.source,
+				hash: await Dexie.waitFor(contentHash(input.source)),
+				existing,
+				now,
+			}),
 			...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
 			...(input.remoteVersion === undefined ? {} : { remoteVersion: input.remoteVersion }),
-			contentHash: await Dexie.waitFor(contentHash(input.source)),
-			dirty: 0,
 			deletedLocally: 0,
-			createdAt: existing?.createdAt ?? timeFrom(parsed.created, now),
-			updatedAt: timeFrom(parsed.updated, now),
 		};
 
 		await db.notes.put(record);
 		return record;
 	});
+};
+
+export interface NoteFileInput {
+	id: string;
+	connectionId: string;
+	path: string;
+	/** The file exactly as it exists remotely or on disk. */
+	source: string;
+	/** `contentHash(source)`, worked out by the caller: see below. */
+	hash: string;
+	/** The row this file replaces, if any. */
+	existing?: NoteRecord;
+	now: number;
+}
+
+/**
+ * A clean note record read from a file, with nothing remote on it yet.
+ *
+ * Synchronous, with the hash passed in, so a caller applying many files in one
+ * transaction can digest them all before opening it: `crypto.subtle.digest` is
+ * a promise Dexie did not make, and awaiting one inside a transaction commits
+ * it early.
+ *
+ * What a note keeps from the row it replaces is what the file does not say:
+ * when it was first seen here, which editor it was last open in, and whether
+ * the user has deleted it — a delete here outranks a change there (§7).
+ */
+export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
+	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
+	const { existing } = input;
+	return {
+		id: input.id,
+		connectionId: input.connectionId,
+		path: input.path,
+		title: parsed.title,
+		body: parsed.body,
+		frontmatter: parsed.frontmatter,
+		tags: parsed.tags,
+		source: input.source,
+		contentHash: input.hash,
+		dirty: 0,
+		deletedLocally: existing?.deletedLocally ?? 0,
+		createdAt: existing?.createdAt ?? timeFrom(parsed.created, input.now),
+		updatedAt: timeFrom(parsed.updated, input.now),
+		...(existing?.editorMode === undefined ? {} : { editorMode: existing.editorMode }),
+	};
 };
 
 /**

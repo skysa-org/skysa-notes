@@ -58,6 +58,19 @@ export interface SyncOp {
  * One decision the engine reached about one remote change. The engine works out
  * which of these applies; the store only has to carry them out.
  *
+ * With one exception, which only the store can make: **a decision reached about
+ * a note is carried out against the note as it stands, not as the engine read
+ * it.** The engine reads a note, goes to the network for the remote file, and
+ * only then hands the batch over — and the user can type in between.
+ * `upsert-note` and `delete-note` are decided only for a clean note; carried out
+ * against one that has since been edited, each throws away what was typed, and
+ * an upsert calls the note clean as it does. So they are refused: the store is
+ * the only place that can check atomically, the batch is rejected, the cursor
+ * stays where it was, and the next pull reads the note as it now stands and
+ * decides a conflict instead. A conflict needs no refusal — the note is dirty
+ * either way — so its copy is simply made from the note's current file (see
+ * `ConflictResolution`).
+ *
  * Anything that puts a note at a path — `upsert-note`, `move-note`,
  * `displace-note`, and a conflict's copy — creates the folder rows above it
  * that are missing, in the same transaction. The engine emits `ensure-folder`
@@ -69,7 +82,10 @@ export interface SyncOp {
  */
 export type PullChange =
 	| Readonly<{
-			/** Remote is authoritative: create the note, or overwrite a clean one. */
+			/**
+			 * Remote is authoritative: create the note, or overwrite a clean one.
+			 * Refused if the note is dirty by the time it is applied (see above).
+			 */
 			kind: 'upsert-note';
 			/**
 			 * Which local note this is. The engine decides it — an existing note's
@@ -127,6 +143,10 @@ export type PullChange =
 			 * whole batch, and since the cursor moves only with the batch the
 			 * same one would be retried for ever, leaving the user with a sync
 			 * that never recovers on its own.
+			 *
+			 * A note that is here and dirty is refused rather than deleted: it was
+			 * clean when the engine decided, so it has been edited since (see
+			 * above).
 			 */
 			kind: 'delete-note';
 			id: string;
@@ -233,6 +253,13 @@ export type PullChange =
  * then pulls as a change that changed nothing — and can lose a race against a
  * real edit made between the two. A queued `move` is left alone: it is the
  * user's rename, and the conflict rule is about content.
+ *
+ * `copyContent` is `conflictContent(noteContent, copyId)` for the note's content
+ * as the engine read it. The store makes the copy from the note as it is when
+ * the resolution is applied — the same thing unless the user typed while the
+ * engine was at the network, in which case the older copy would leave the newest
+ * words out. Refusing instead would stall every pull and push for as long as
+ * someone keeps typing into a conflicted note.
  */
 export interface ConflictResolution {
 	/** The note that was already there, which becomes the remote's copy. */

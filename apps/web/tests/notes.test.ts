@@ -296,9 +296,13 @@ describe('deleting', () => {
 	it('restores a tombstoned note', async () => {
 		const note = await createNote(db, { title: 'Back' });
 		await deleteNote(db, note.id);
+		// As though everything before the delete had already been pushed.
+		await db.notes.update(note.id, { dirty: 0 });
 		await restoreNote(db, note.id);
 
 		expect((await getNote(db, note.id))?.deletedLocally).toBe(0);
+		// Its delete may already be queued, so bringing it back is a change to push.
+		expect((await getNote(db, note.id))?.dirty).toBe(1);
 	});
 
 	it('purges for good once the provider has confirmed', async () => {
