@@ -18,7 +18,7 @@ import { gfm } from '@milkdown/kit/preset/gfm';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import type { PluginSpec } from '@milkdown/kit/prose/state';
 import { $prose } from '@milkdown/kit/utils';
-import { sameMarkdownStructure, STRINGIFY_OPTIONS } from '@skysa/core';
+import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 
 import { PROGRAMMATIC_META, userEditPlugin } from './dirty.js';
 
@@ -76,12 +76,31 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
 		.use(
 			$prose((ctx) =>
 				userEditPlugin((doc) => {
-					onUserEdit(ctx.get(serializerCtx)(doc));
+					// Folded, because Milkdown's serializer is not `core`'s: it
+					// writes block structure with `\n` but copies a fenced code
+					// block's and an HTML block's contents out verbatim, so a
+					// Windows note that reaches the rich editor — which is the
+					// whole point of folding endings in `parse` — comes back
+					// `\n` around its blocks and `\r\n` between the lines
+					// inside them. Saved, that is a file mixing both, which is
+					// worse than either. Raw mode has always folded here:
+					// CodeMirror joins its document with one line break for the
+					// whole document.
+					onUserEdit(toLf(ctx.get(serializerCtx)(doc)));
 				})
 			)
 		);
 
 /** What the editor's document says, as markdown. */
+/**
+ * The editor's document as markdown, exactly as Milkdown writes it.
+ *
+ * Not folded, deliberately: both callers below compare it through
+ * `sameMarkdownStructure`, which parses with `core`'s pipeline and folds line
+ * endings there. Folding here as well would be a second copy of that decision
+ * that no test could tell from its absence — and the fold that *does* matter is
+ * on the edit callback, where the string reaches the user's file.
+ */
 export const currentMarkdown = (ctx: Ctx): string =>
 	ctx.get(serializerCtx)(ctx.get(editorViewCtx).state.doc);
 

@@ -17,6 +17,15 @@ import { normalize, parse } from './pipeline.js';
 /** Source positions differ between a parse of the original and of a re-serialized form. */
 const POSITION = 'position';
 
+/**
+ * Sorted, defensively. `Object.keys` yields insertion order, and remark builds
+ * a given node's keys the same way every time, so today two parses of equal
+ * documents already agree — no test can distinguish the sort from its absence,
+ * and one that claimed to would be asserting nothing. It stays because the
+ * alternative failure is silent and bad: unequal key order would make equal
+ * documents compare unequal, and `adoptBody` would then replace the editor's
+ * document on every keystroke, throwing away the cursor each time.
+ */
 const keysOf = (value: object): string[] =>
 	Object.keys(value)
 		.filter((key) => key !== POSITION)
@@ -34,6 +43,14 @@ const sameStructure = (a: unknown, b: unknown): boolean => {
 
 	const left = keysOf(a);
 	const right = keysOf(b);
+	// Defensive, and unreachable through `parse` alone: `left.every` below walks
+	// only the left node's keys, so without this a right node carrying *extra*
+	// keys would compare equal. remark gives every node of a type the same key
+	// set — a fenced block has `lang` and `meta` whether or not they are used —
+	// so no pair of parsed documents can reach it and no test can distinguish it
+	// from its absence. It guards the direction the comparison is otherwise
+	// blind in, which is worth keeping for the first caller that compares a
+	// hand-built tree.
 	if (left.length !== right.length) return false;
 
 	return left.every(

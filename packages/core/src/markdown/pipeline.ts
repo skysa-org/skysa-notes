@@ -4,6 +4,8 @@ import remarkParse from 'remark-parse';
 import remarkStringify, { type Options as StringifyOptions } from 'remark-stringify';
 import { type Processor, unified } from 'unified';
 
+import { toLf } from './lineEndings.js';
+
 /**
  * The single remark pipeline. Milkdown's transformer is built on `remark` ^15 /
  * `unified` ^11 — the same versions wrapped here — so this module exercises the
@@ -33,8 +35,15 @@ const createProcessor = (): Processor<Root, undefined, undefined, Root, string> 
 
 const processor = createProcessor();
 
-/** Markdown string → mdast. The body only; frontmatter is split off first. */
-export const parse = (markdown: string): Root => processor.parse(markdown);
+/**
+ * Markdown string → mdast. The body only; frontmatter is split off first.
+ *
+ * Line endings are folded to `
+` first, because CommonMark says the three
+ * spellings are one thing and remark leaks the bytes into inline text if they
+ * are not. See `lineEndings.ts` for what that cost.
+ */
+export const parse = (markdown: string): Root => processor.parse(toLf(markdown));
 
 /** mdast → markdown string, in the app's conventional style. */
 export const serialize = (tree: Root): string => processor.stringify(tree);

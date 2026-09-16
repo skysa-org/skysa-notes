@@ -7,6 +7,8 @@ import {
 	stringify as stringifyYaml,
 } from 'yaml';
 
+import { toLf } from './lineEndings.js';
+
 /**
  * Frontmatter is handled as text, outside the remark pipeline: it is split off
  * before the body reaches either editor and re-attached on save, so the editors
@@ -19,7 +21,19 @@ const FENCE = '---';
  * The opening fence must be the very first line, and a closing fence must exist.
  * Without a closing fence a leading `---` is an ordinary thematic break.
  */
-const FRONTMATTER_PATTERN = /^---[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?^---[ \t]*(?:\r?\n|$)/m;
+const EOL = String.raw`(?:\r\n|\n|\r)`;
+/**
+ * All three spellings, not two. A file ending its lines with a bare `\r` is
+ * rare — pre-OS X Mac, and a few export tools — but `parse` reads one as a
+ * document like any other, so a splitter that does not recognise its fences
+ * hands the whole file to the body. The block then reads as a setext heading,
+ * the note's `id` is lost, its title comes out as the YAML, and the next write
+ * puts a second frontmatter block above the first.
+ */
+const FRONTMATTER_PATTERN = new RegExp(
+	String.raw`^---[ \t]*${EOL}([\s\S]*?)(?:${EOL})?^---[ \t]*(?:${EOL}|$)`,
+	'm'
+);
 
 export interface SplitDocument {
 	/** YAML source between the fences, or null when the file has no frontmatter. */
@@ -105,7 +119,7 @@ interface Recovered {
 const recover = (yaml: string | null): Recovered | undefined => {
 	if (yaml === null) return undefined;
 	try {
-		const doc = parseDocument(yaml);
+		const doc = parseDocument(toLf(yaml));
 		const data: unknown = doc.toJS();
 		if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined;
 		const record = data as Record<string, unknown>;
@@ -271,7 +285,7 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
 	if (frontmatter === null || frontmatter.trim() === '') return true;
 	try {
-		const doc = parseDocument(frontmatter);
+		const doc = parseDocument(toLf(frontmatter));
 		// A mapping, and not only error-free. `writeFrontmatter` sets keys on the
 		// document, which a scalar or a sequence cannot take — those throw rather
 		// than drop the patch. `splitFrontmatter` never yields one, so this is a
@@ -302,7 +316,7 @@ export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmat
 		return Object.keys(seed).length === 0 ? '' : stringifyYaml(seed);
 	}
 
-	const doc = parseDocument(frontmatter);
+	const doc = parseDocument(toLf(frontmatter));
 	if (!isDocument(doc) || doc.errors.length > 0) return frontmatter;
 
 	entries.forEach(([key, value]) =>

@@ -1,4 +1,5 @@
 export { parse, serialize, normalize, STRINGIFY_OPTIONS } from './pipeline.js';
+export { toLf, firstLineEnding, withLineEnding, type LineEnding } from './lineEndings.js';
 export { roundTripsLosslessly, sameMarkdownStructure } from './fidelity.js';
 export {
 	splitFrontmatter,
