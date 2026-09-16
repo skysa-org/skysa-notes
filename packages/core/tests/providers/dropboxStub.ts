@@ -228,6 +228,31 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		return json({ metadata: metadataOf(found) });
 	};
 
+	/**
+	 * Dropbox refuses a move whose source and destination are one path; the
+	 * fake underneath treats it as the no-op it is. Delegating straight to the
+	 * fake meant the contract's "accepts a move to where the entry already is"
+	 * never reached the adapter code that has to recognise it — the test passed
+	 * because the stub was kinder than the thing it stands in for.
+	 *
+	 * `duplicated_or_nested_paths` is the error that names the case.
+	 * https://github.com/dropbox/dropbox-api-spec (`files.stone`, RelocationError)
+	 */
+	const moveEntry = async (body: Record<string, unknown>): Promise<Response> => {
+		const ref = refOf(str(body.from_path));
+		const to = fromDropboxPath(str(body.to_path));
+		const found = backing
+			.snapshot()
+			.find((entry) => entry.remoteId === ref.remoteId || entry.path === ref.path);
+
+		if (found?.path === to) {
+			return failure('duplicated_or_nested_paths/...', {
+				'.tag': 'duplicated_or_nested_paths',
+			});
+		}
+		return json({ metadata: metadataOf(await backing.move(ref, to)) });
+	};
+
 	const routes: Record<
 		string,
 		(
@@ -247,15 +272,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 					await backing.createFolder(fromDropboxPath(str(body.path)))
 				),
 			}),
-		'files/move_v2': async (body) =>
-			json({
-				metadata: metadataOf(
-					await backing.move(
-						refOf(str(body.from_path)),
-						fromDropboxPath(str(body.to_path))
-					)
-				),
-			}),
+		'files/move_v2': moveEntry,
 		'files/delete_v2': remove,
 	};
 

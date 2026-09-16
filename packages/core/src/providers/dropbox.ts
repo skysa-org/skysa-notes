@@ -114,6 +114,40 @@ const toEntry = (metadata: Metadata): RemoteEntry => ({
 	...(metadata.size === undefined ? {} : { size: metadata.size }),
 });
 
+/**
+ * Is what is at a path the very entry we were asked to act on?
+ *
+ * By id wherever both sides have one: that is what the request addressed the
+ * entry by, and an `EntryRef`'s path is only as fresh as the caller's last
+ * look. A note that has never been pushed carries no id, and then the path is
+ * all there is to go on.
+ */
+const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
+	entry.remoteId === '' || current.remoteId === ''
+		? normalizePath(entry.path) === current.path
+		: entry.remoteId === current.remoteId;
+
+/**
+ * The metadata for a download, which rides in a header because the body is the
+ * file itself.
+ *
+ * Every way of not having it is refused rather than defaulted. The alternative
+ * is a `version` of `''`: the caller stores that as the note's `remoteVersion`
+ * and sends it straight back as `update: ''` on the next push, which Dropbox
+ * rejects as a malformed rev — so one unreadable header leaves a note that is
+ * otherwise perfectly fine unable to be saved again, for as long as it exists.
+ * A read that cannot say what it read is a failed read, and the engine's
+ * backoff already knows what to do with one.
+ */
+const downloadResult = (header: string | null): Metadata => {
+	if (header === null) throw new Error('dropbox sent a download with no metadata header');
+	try {
+		return JSON.parse(header) as Metadata;
+	} catch {
+		throw new Error('dropbox sent a download whose metadata header is not JSON');
+	}
+};
+
 const toChangeEntry = (metadata: Metadata): ChangeEntry =>
 	metadata['.tag'] === 'deleted'
 		? { path: fromDropboxPath(metadata.path_display), deleted: true }
@@ -209,21 +243,22 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		return { ok: true, value: (await response.json()) as T };
 	};
 
+	/**
+	 * The entry at a path, or `undefined` when there is nothing there.
+	 *
+	 * `undefined` means absent, and nothing else. Answering it for a 503 or a
+	 * 429 as well would have every caller below read "I could not ask" as "it
+	 * is not there" — and `write` turns that into `NotFoundError`, which the
+	 * engine answers by forgetting the remote copy and pushing the note again
+	 * as a new file. A file that was there the whole time then comes back as a
+	 * conflict copy of itself, from nothing worse than a moment of Dropbox
+	 * being unavailable.
+	 */
 	const metadataAt = async (path: string): Promise<RemoteEntry | undefined> => {
 		const result = await tryRpc<Metadata>('files/get_metadata', { path: toDropboxPath(path) });
-		return result.ok ? toEntry(result.value) : undefined;
-	};
-
-	/**
-	 * A conflict has to carry the entry as it is now, so the conflict rule can
-	 * write the local copy aside without a round trip of its own. Dropbox does
-	 * not put it in the error, so the extra call happens here — on the rare path,
-	 * where being right is worth more than the request.
-	 */
-	const conflictAt = async (path: string, failure: DropboxFailure): Promise<never> => {
-		const current = await metadataAt(path);
-		if (current === undefined) return raise(failure);
-		throw new ConflictError(current);
+		if (result.ok) return toEntry(result.value);
+		if (tagged(result.failure, 'not_found')) return undefined;
+		return raise(result.failure, path);
 	};
 
 	/** Dropbox accepts an `id:...` in place of a path, which survives a move elsewhere. */
@@ -318,9 +353,11 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (!response.ok) return raise(await failureOf(response));
 
 		// The body is the file itself, so the metadata rides in a header.
-		const header = response.headers.get('dropbox-api-result') ?? '{}';
-		const metadata = JSON.parse(header) as Metadata;
-		return { content: await response.text(), version: metadata.rev ?? '' };
+		const metadata = downloadResult(response.headers.get('dropbox-api-result'));
+		if (metadata.rev === undefined || metadata.rev === '') {
+			throw new Error('dropbox sent a download with no rev');
+		}
+		return { content: await response.text(), version: metadata.rev };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
@@ -347,8 +384,36 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 			autorename: false,
 		});
 		if (result.ok) return toEntry(result.value.metadata ?? {});
-		if (tagged(result.failure, 'conflict')) return conflictAt(newPath, result.failure);
-		return raise(result.failure, entry.path);
+
+		// Two ways of saying the destination is not free. `to/conflict` is the
+		// one for something in the way; `duplicated_or_nested_paths` is what
+		// Dropbox answers when the two paths it was given are the same, which
+		// a queued `move` naming the path the note is already at will do.
+		// https://github.com/dropbox/dropbox-api-spec (`files.stone`, RelocationError)
+		//
+		// Neither is settled here, because neither says *what* is at the path,
+		// and that is the whole question: a move already done and a move onto
+		// someone else's file arrive as the same error.
+		const inTheWay =
+			tagged(result.failure, 'conflict') ||
+			tagged(result.failure, 'duplicated_or_nested_paths');
+		if (!inTheWay) return raise(result.failure, entry.path);
+
+		// A conflict has to carry the entry as it is now, so the conflict rule
+		// can write the local copy aside without a round trip of its own.
+		// Dropbox does not put it in the error, so the extra call happens here —
+		// on the rare path, where being right is worth more than the request.
+		const current = await metadataAt(newPath);
+		if (current === undefined) return raise(result.failure, newPath);
+
+		// The entry is already where it was being sent, so the move is done and
+		// saying so is both true and idempotent. Reporting it as a failure would
+		// be worse than untidy: the push queue is ordered and stops on a failed
+		// op, so one that can never succeed strands every op behind it, for
+		// every note. Reporting it as a conflict would be worse still — the
+		// conflict rule would write the user's note aside as a copy of itself.
+		if (isSelf(entry, current)) return current;
+		throw new ConflictError(current);
 	};
 
 	const remove = async (entry: EntryRef): Promise<void> => {
