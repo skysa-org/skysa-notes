@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { importSecretKey, openOAuthSecret } from '../src/crypto.js';
 import { createDb, schema } from '../src/db/client.js';
@@ -23,6 +23,18 @@ import {
  */
 
 const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+/** The Worker log, silenced and kept for the test to read. */
+const workerLog = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+const failWith = (error: string, status = 400) =>
+	new Response(JSON.stringify({ error, error_description: 'AADSTS000: echoes the-code' }), {
+		status,
+	});
 
 const secretOf = async (row: { secretCiphertext: string; secretIv: string; secretKeyId: string }) =>
 	openOAuthSecret(await importSecretKey(SECRETS_KEY, 'k1'), {
@@ -57,6 +69,7 @@ describe('start', () => {
 			scope: 'Files.ReadWrite.AppFolder offline_access openid email',
 			code_challenge_method: 'S256',
 			redirect_uri: 'https://notes.example.com/api/auth/connect/onedrive/callback',
+			prompt: 'select_account',
 		});
 		expect(url.searchParams.get('code_challenge')).toBeTruthy();
 		expect(url.searchParams.get('state')).toBeTruthy();
@@ -78,6 +91,16 @@ describe('start', () => {
 	it('is not offered where the operator has not enabled it', async () => {
 		const { request } = buildApp({ config: testConfig() });
 		expect((await request('/api/auth/connect/onedrive/start')).status).toBe(404);
+	});
+
+	it('will not start for a user whose notes sync with another provider', async () => {
+		const app = buildApp({ config: bothProvidersConfig() });
+		const { jar } = await app.connect(createJar(), 'dbid:a', 'dropbox');
+
+		const response = await app.request('/api/auth/connect/onedrive/start?returnTo=/n', {
+			cookies: jar,
+		});
+		expect(response.headers.get('location')).toBe('/n?connect=occupied');
 	});
 
 	it('says so plainly when it is enabled without credentials', async () => {
@@ -174,6 +197,109 @@ describe('callback', () => {
 		expect(row?.displayName).toBe('OneDrive');
 	});
 
+	it('refuses a second provider at the callback, before spending the code', async () => {
+		const app = buildApp({ config: bothProvidersConfig() });
+		const { jar } = await app.connect(createJar(), 'ms-a', 'onedrive');
+		jar.absorb(await app.request('/api/auth/connect/onedrive/start', { cookies: jar }));
+
+		// Dropbox connected in another tab while this consent screen was open.
+		const [mine] = await rows(app.db);
+		await createDb(app.db)
+			.insert(schema.connections)
+			.values({ ...mine!, id: 'other', provider: 'dropbox', accountId: 'dbid:a' });
+		const before = app.stub.calls.length;
+
+		const callback = await app.request(
+			`/api/auth/connect/onedrive/callback?code=c&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+		expect(callback.headers.get('location')).toBe('/?connect=occupied');
+		expect(app.stub.calls).toHaveLength(before);
+	});
+
+	it('does not make a Microsoft account a way into the Dropbox connected beside it', async () => {
+		const app = buildApp({ config: bothProvidersConfig() });
+		// Whatever Microsoft account the victim's browser happened to be signed in to.
+		const { jar: victim } = await app.connect(createJar(), 'dbid:victim', 'dropbox');
+		const start = await app.request('/api/auth/connect/onedrive/start', { cookies: victim });
+		expect(start.headers.get('location')).toBe('/?connect=occupied');
+
+		const [dropbox] = await rows(app.db);
+		const { jar: holder } = await app.connect(createJar(), 'ms-someone', 'onedrive');
+		expect((await tokenFor(app, dropbox?.id ?? '', holder)).status).toBe(404);
+	});
+
+	it('comes back from a cancelled consent screen as denied', async () => {
+		const app = buildApp({ config: bothProvidersConfig() });
+		const jar = createJar();
+		jar.absorb(await app.request('/api/auth/connect/onedrive/start', { cookies: jar }));
+		const callback = await app.request(
+			`/api/auth/connect/onedrive/callback?error=access_denied&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+		expect(callback.headers.get('location')).toBe('/?connect=denied');
+		expect(app.stub.calls).toHaveLength(0);
+	});
+
+	it('refuses a signed-in user a Microsoft account someone else holds', async () => {
+		const app = buildApp({ config: bothProvidersConfig() });
+		await app.connect(createJar(), 'ms-theirs', 'onedrive');
+		const { jar } = await app.connect(createJar(), 'ms-mine', 'onedrive');
+
+		const { callback } = await app.connect(jar, 'ms-theirs', 'onedrive');
+		expect(callback.headers.get('location')).toBe('/?connect=conflict');
+	});
+
+	it('refuses ID tokens that cannot be read', async () => {
+		for (const token of ['', 'x', 'a.b.c', `a.${btoa('[1]')}.c`]) {
+			const app = buildApp({
+				config: bothProvidersConfig(),
+				script: { microsoft: () => microsoftTokenResponse({ id_token: token }) },
+			});
+			const { callback } = await app.connect(createJar(), undefined, 'onedrive');
+			expect(callback.headers.get('location')).toBe('/?connect=failed');
+		}
+	});
+
+	it('leaves one user behind when two signed-out callbacks race for one account', async () => {
+		const app = buildApp({ config: bothProvidersConfig() });
+		const start = async () => {
+			const jar = createJar();
+			jar.absorb(await app.request('/api/auth/connect/onedrive/start', { cookies: jar }));
+			return jar;
+		};
+		const jars = [await start(), await start()];
+		const outcomes = await Promise.all(
+			jars.map(async (jar) =>
+				app.request(
+					`/api/auth/connect/onedrive/callback?code=c&state=${flowStateOf(jar)}`,
+					{
+						cookies: jar,
+					}
+				)
+			)
+		);
+		expect(await rows(app.db)).toHaveLength(1);
+		expect(await createDb(app.db).select().from(schema.users)).toHaveLength(1);
+		const locations = outcomes.map((response) => response.headers.get('location')).sort();
+		expect(locations).toEqual(['/?connect=conflict', '/?connect=ok']);
+	});
+
+	it('logs a failed exchange for the operator, with the code and nothing else', async () => {
+		const log = workerLog();
+		const app = buildApp({
+			config: bothProvidersConfig(),
+			script: { microsoft: () => failWith('invalid_client', 401) },
+		});
+		const { callback } = await app.connect(createJar(), undefined, 'onedrive');
+
+		expect(callback.headers.get('location')).toBe('/?connect=failed');
+		const logged = log.mock.calls.flat().join('\n');
+		expect(logged).toContain('invalid_client');
+		expect(logged).not.toContain('AADSTS');
+		expect(logged).not.toContain('ms-client-secret');
+	});
+
 	it('does not take a Dropbox account id for a Microsoft one', async () => {
 		// Account ids are the provider's own, and two providers can hand out the
 		// same string. A signed-out visitor presenting it through OneDrive is not
@@ -208,6 +334,70 @@ describe('POST /api/token', () => {
 
 		const [after] = await rows(app.db);
 		expect((await secretOf(after!)).refreshToken).toBe('ms-refresh-2');
+	});
+
+	it('sends the rotated refresh token next time, and keeps the one after', async () => {
+		const app = buildApp({
+			config: bothProvidersConfig(),
+			script: {
+				microsoft: (form) => {
+					if (form.grant_type !== 'refresh_token') return microsoftTokenResponse();
+					const next = Number((form.refresh_token ?? '').replace('ms-refresh-', '')) + 1;
+					return microsoftTokenResponse({ refresh_token: `ms-refresh-${String(next)}` });
+				},
+			},
+		});
+		const { jar } = await app.connect(createJar(), undefined, 'onedrive');
+		const [row] = await rows(app.db);
+
+		await tokenFor(app, row?.id ?? '', jar);
+		await tokenFor(app, row?.id ?? '', jar);
+
+		const sent = app.stub.calls
+			.filter((call) => call.form.grant_type === 'refresh_token')
+			.map((call) => call.form.refresh_token);
+		expect(sent).toEqual(['ms-refresh-1', 'ms-refresh-2']);
+		const [after] = await rows(app.db);
+		expect((await secretOf(after!)).refreshToken).toBe('ms-refresh-3');
+	});
+
+	it('asks for a reconnect only when Microsoft refuses the grant itself', async () => {
+		for (const code of ['invalid_grant', 'interaction_required']) {
+			const app = buildApp({
+				config: bothProvidersConfig(),
+				script: {
+					microsoft: (form) =>
+						form.grant_type === 'refresh_token'
+							? failWith(code)
+							: microsoftTokenResponse(),
+				},
+			});
+			const { jar } = await app.connect(createJar(), undefined, 'onedrive');
+			const [row] = await rows(app.db);
+			const response = await tokenFor(app, row?.id ?? '', jar);
+			expect(response.status).toBe(401);
+			expect(await response.json()).toEqual({ error: 'reauthorize_required' });
+		}
+	});
+
+	it('does not send every user to reconnect over an expired client secret', async () => {
+		const log = workerLog();
+		const app = buildApp({
+			config: bothProvidersConfig(),
+			script: {
+				microsoft: (form) =>
+					form.grant_type === 'refresh_token'
+						? failWith('invalid_client', 401)
+						: microsoftTokenResponse(),
+			},
+		});
+		const { jar } = await app.connect(createJar(), undefined, 'onedrive');
+		const [row] = await rows(app.db);
+
+		const response = await tokenFor(app, row?.id ?? '', jar);
+		expect(response.status).toBe(502);
+		expect(await response.json()).toEqual({ error: 'provider_unavailable' });
+		expect(log.mock.calls.flat().join('\n')).toContain('invalid_client');
 	});
 
 	it('will not refresh a connection whose provider the operator has turned off', async () => {

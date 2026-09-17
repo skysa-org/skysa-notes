@@ -58,8 +58,9 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		// Revoke at the provider so the grant does not linger on the user's
 		// account (docs/PLAN.md §9). Best effort: the row goes either way, because
 		// a user who asked to disconnect must not be left connected by a network
-		// error. Microsoft offers no revoke at all, and there `revoked: false`
-		// tells the client to send the user to their account page.
+		// error. `revoked: false` says only that the grant may still be live:
+		// the revoke failed, or — Microsoft — there is no revoke to call, and the
+		// user has to remove the app from their account page.
 		const revoked = await (async (): Promise<boolean> => {
 			const resolved = oauthFor(config, connection.provider);
 			if (!resolved.ok) return false;

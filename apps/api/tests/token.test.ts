@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { importSecretKey, openOAuthSecret, sealOAuthSecret } from '../src/crypto.js';
 import { createDb, schema } from '../src/db/client.js';
@@ -179,6 +179,20 @@ describe('POST /api/token', () => {
 		const response = await post(app.request, { connectionId: await connectionId(app.db) }, jar);
 		expect(response.status).toBe(401);
 		expect(await response.json()).toEqual({ error: 'reauthorize_required' });
+	});
+
+	it('answers a Dropbox outage as one the client retries, not as a lost grant', async () => {
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const app = buildApp({
+			script: { refresh: () => new Response('upstream down', { status: 503 }) },
+		});
+		const { jar } = await app.connect();
+
+		const response = await post(app.request, { connectionId: await connectionId(app.db) }, jar);
+		expect(response.status).toBe(502);
+		expect(await response.json()).toEqual({ error: 'provider_unavailable' });
+		expect(log).toHaveBeenCalledWith(expect.stringContaining('dropbox oauth failed: 503'));
+		log.mockRestore();
 	});
 
 	it('answers 501 when the operator has not configured the provider', async () => {

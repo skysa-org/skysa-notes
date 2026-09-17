@@ -1,5 +1,11 @@
 import { fromBase64Url } from '../crypto.js';
-import type { FetchLike, OAuthCredentials, StorageOAuth, TokenSet } from './types.js';
+import {
+	type FetchLike,
+	type OAuthCredentials,
+	OAuthError,
+	type StorageOAuth,
+	type TokenSet,
+} from './types.js';
 
 /**
  * The storage half of Microsoft OAuth, for OneDrive: Authorization Code + PKCE
@@ -79,7 +85,7 @@ const postForm = async (
 	credentials: OAuthCredentials,
 	form: Record<string, string>,
 	now: number
-): Promise<TokenSet> => {
+): Promise<{ tokens: TokenSet; idToken?: string }> => {
 	const response = await doFetch(endpoint(credentials, 'token'), {
 		method: 'POST',
 		headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -95,23 +101,17 @@ const postForm = async (
 	if (!response.ok || body.access_token === undefined) {
 		// `error_description` quotes the request back and carries trace ids; the
 		// operator gets the code alone.
-		throw new Error(`microsoft oauth failed: ${body.error ?? String(response.status)}`);
+		throw new OAuthError('microsoft', body.error ?? String(response.status));
 	}
 
-	const claims = claimsOf(body.id_token, credentials.clientId);
-	// `sub`, not `oid` or `email`. It is immutable, never reused, and pairwise —
-	// unique to this app registration — which is all an account id here needs
-	// to be. `email` is mutable and may be absent.
-	const accountId = nonEmpty(claims.sub);
-	const displayName = nonEmpty(claims.email);
-
 	return {
-		accessToken: body.access_token,
-		...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
-		// About an hour. A response with none would otherwise expire on arrival.
-		expiresAt: now + (body.expires_in ?? 3600) * 1000,
-		...(accountId === undefined ? {} : { accountId }),
-		...(displayName === undefined ? {} : { displayName }),
+		tokens: {
+			accessToken: body.access_token,
+			...(body.refresh_token === undefined ? {} : { refreshToken: body.refresh_token }),
+			// About an hour. A response with none would otherwise expire on arrival.
+			expiresAt: now + (body.expires_in ?? 3600) * 1000,
+		},
+		...(body.id_token === undefined ? {} : { idToken: body.id_token }),
 	};
 };
 
@@ -128,10 +128,15 @@ export const onedriveOAuth: StorageOAuth = {
 			state: input.state,
 			code_challenge: input.challenge,
 			code_challenge_method: 'S256',
+			// Otherwise Microsoft quietly uses whichever account the browser is
+			// already signed in to — perhaps someone else's, on a shared machine —
+			// and in storage-first that account becomes a way to sign in as the
+			// user it is connected to.
+			prompt: 'select_account',
 		}).toString()}`,
 
-	exchangeCode: (doFetch, credentials, input) =>
-		postForm(
+	exchangeCode: async (doFetch, credentials, input) => {
+		const { tokens, idToken } = await postForm(
 			doFetch,
 			credentials,
 			{
@@ -141,17 +146,35 @@ export const onedriveOAuth: StorageOAuth = {
 				code_verifier: input.verifier,
 			},
 			input.now ?? Date.now()
-		),
+		);
+		const claims = claimsOf(idToken, credentials.clientId);
+		// `sub`, not `oid` or `email`. It is immutable and never reused, and it is
+		// pairwise: derived from this app, the user *and the tenant* the user
+		// signed in through — which is all an account id here needs to be. So an
+		// operator who changes `MICROSOFT_TENANT` to one where their users are
+		// guests makes every returning user look new. `email` is mutable and may
+		// be absent. Read at the exchange only: the ID token a refresh returns is
+		// one Microsoft says not to rely on, and nothing here needs it.
+		const accountId = nonEmpty(claims.sub);
+		const displayName = nonEmpty(claims.email);
+		return {
+			...tokens,
+			...(accountId === undefined ? {} : { accountId }),
+			...(displayName === undefined ? {} : { displayName }),
+		};
+	},
 
 	// Microsoft issues a new refresh token on every refresh and expects the old
 	// one discarded; `/api/token` stores whatever comes back.
-	refreshAccessToken: (doFetch, credentials, input) =>
-		postForm(
-			doFetch,
-			credentials,
-			{ grant_type: 'refresh_token', refresh_token: input.refreshToken },
-			input.now ?? Date.now()
-		),
+	refreshAccessToken: async (doFetch, credentials, input) =>
+		(
+			await postForm(
+				doFetch,
+				credentials,
+				{ grant_type: 'refresh_token', refresh_token: input.refreshToken },
+				input.now ?? Date.now()
+			)
+		).tokens,
 
 	// No `revokeToken`. The identity platform has no endpoint for an app to
 	// withdraw its own grant; the user removes it from their Microsoft account

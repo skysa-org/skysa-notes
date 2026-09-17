@@ -1,9 +1,10 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
+import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
 import type { FetchLike, TokenSet } from '../oauth/types.js';
@@ -43,7 +44,7 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
-type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin';
+type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin' | 'occupied';
 
 const back = (returnTo: string, outcome: Outcome): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
@@ -67,11 +68,19 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		if (!resolved.ok) return refusal(c, resolved.error);
 		const { provider, client, credentials } = resolved;
 
-		const userId = await currentUserId(c, c.get('db'), cookies);
+		const db = c.get('db');
+		const userId = await currentUserId(c, db, cookies);
 		// In account-first mode a connection attaches to an existing user, so
 		// there has to be one already.
 		if (config.authMode === 'account-first' && userId === undefined) {
 			return c.json({ error: 'sign_in_required' }, 401);
+		}
+
+		// Said before the user goes through a consent screen for nothing. The
+		// callback asks again, since a connection can be made meanwhile.
+		const returnTo = safeReturnTo(c.req.query('returnTo'), config.appOrigin);
+		if (await holdsAnotherProvider(db, userId, provider)) {
+			return c.redirect(back(returnTo, 'occupied'));
 		}
 
 		const { verifier, challenge } = await createPkcePair();
@@ -82,7 +91,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			{
 				state,
 				verifier,
-				returnTo: safeReturnTo(c.req.query('returnTo'), config.appOrigin),
+				returnTo,
 				expiresAt: flowExpiry(),
 				...(userId === undefined ? {} : { userId }),
 			},
@@ -132,15 +141,24 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const code = c.req.query('code');
 		if (code === undefined) return c.json({ error: 'missing_code' }, 400);
 
+		if (await holdsAnotherProvider(db, sessionUser, provider)) {
+			return c.redirect(back(flow.returnTo, 'occupied'));
+		}
+
 		// A replayed or expired authorization code is an ordinary event, not a
-		// server fault: send the user back to the app to try again.
+		// server fault: send the user back to the app to try again. Logged all the
+		// same, because an expired client secret looks exactly like this to the
+		// user, and nothing else would tell the operator.
 		const tokens = await client
 			.exchangeCode(doFetch, credentials, {
 				redirectUri: redirectUri(config.appOrigin, provider),
 				code,
 				verifier: flow.verifier,
 			})
-			.catch(() => undefined);
+			.catch((error: unknown) => {
+				logFailure(`${provider} code exchange failed`, error);
+				return undefined;
+			});
 		if (tokens === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
 		// Without a refresh token the connection would stop working in a few
@@ -231,6 +249,34 @@ const isUniqueViolation = (error: unknown): boolean =>
 	error instanceof Error &&
 	(/UNIQUE constraint failed/i.test(error.message) ||
 		isUniqueViolation((error as { cause?: unknown }).cause));
+
+/**
+ * Does this user already have storage connected at a *different* provider?
+ *
+ * One connection per user until Phase 7 (docs/PLAN.md §12.3), and here that is
+ * more than a UI convention. In storage-first, presenting any account a user has
+ * connected signs in as that user — so a user holding a Dropbox and a OneDrive
+ * connection could be signed in to through either, and whoever holds the
+ * OneDrive account gets tokens for the Dropbox one. A second connection at the
+ * *same* provider replaces the first, which is why that is not refused. Two
+ * consent flows run at once by the same user can still both get past this;
+ * the harm needs the user to race themselves, and Phase 7's multi-connection
+ * design has to answer it properly.
+ */
+const holdsAnotherProvider = async (
+	db: Database,
+	userId: string | undefined,
+	provider: OAuthProviderKind
+): Promise<boolean> => {
+	if (userId === undefined) return false;
+	const row = await db.query.connections.findFirst({
+		where: and(
+			eq(schema.connections.userId, userId),
+			ne(schema.connections.provider, provider)
+		),
+	});
+	return row !== undefined;
+};
 
 /**
  * Which user, if any, already holds this provider account.

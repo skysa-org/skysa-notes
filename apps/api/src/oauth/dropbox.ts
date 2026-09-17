@@ -1,4 +1,4 @@
-import type { FetchLike, StorageOAuth, TokenSet } from './types.js';
+import { type FetchLike, OAuthError, type StorageOAuth, type TokenSet } from './types.js';
 
 /**
  * The storage half of Dropbox OAuth: Authorization Code + PKCE, exchanged on
@@ -80,9 +80,8 @@ const postForm = async (
 
 	const body = (await response.json().catch(() => ({}))) as TokenResponse;
 	if (!response.ok || body.access_token === undefined) {
-		// The description can quote back what was sent, so it is not repeated to
-		// the caller; the operator gets it in the Worker log.
-		throw new Error(`dropbox oauth failed: ${body.error ?? String(response.status)}`);
+		// The description can quote back what was sent, so only the code goes on.
+		throw new OAuthError('dropbox', body.error ?? String(response.status));
 	}
 
 	return {

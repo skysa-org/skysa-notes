@@ -93,6 +93,13 @@ describe('the app', () => {
 		expect((await screen.findByRole('alert')).textContent).toMatch(/already connected/);
 	});
 
+	it('says to disconnect first when storage is already connected elsewhere', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=occupied', 'Work');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/Disconnect it first/);
+	});
+
 	it('puts the connect outcome away once the user moves on', async () => {
 		const user = userEvent.setup();
 		await createFolder(db, { name: 'Work' });

@@ -25,6 +25,35 @@ export interface TokenSet {
 	displayName?: string;
 }
 
+/**
+ * A token endpoint said no. `code` is the OAuth `error` — or the HTTP status
+ * where the body had none — and nothing more: the description can quote back
+ * what was sent, so it goes nowhere.
+ */
+export class OAuthError extends Error {
+	override readonly name = 'OAuthError';
+
+	constructor(
+		readonly provider: string,
+		readonly code: string
+	) {
+		super(`${provider} oauth failed: ${code}`);
+	}
+}
+
+/**
+ * The grant itself is refused — revoked, expired, a password changed, a policy
+ * wanting the user present — so only connecting again can help. Anything else
+ * (`invalid_client` once a client secret expires, `temporarily_unavailable`, an
+ * outage, a timeout) is the operator's or the provider's, and telling every user
+ * to reconnect over it would send them all through a flow that fails the same
+ * way. https://datatracker.ietf.org/doc/html/rfc6749#section-5.2 and
+ * https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow#error-codes-for-token-endpoint-errors
+ */
+export const isGrantRefused = (error: unknown): boolean =>
+	error instanceof OAuthError &&
+	(error.code === 'invalid_grant' || error.code === 'interaction_required');
+
 export interface OAuthCredentials {
 	clientId: string;
 	clientSecret: string;
