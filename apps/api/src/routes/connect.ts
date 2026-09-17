@@ -1,18 +1,12 @@
 import { and, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
-import type { AppConfig } from '../env.js';
-import {
-	accountName,
-	authorizeUrl,
-	exchangeCode,
-	type FetchLike,
-	type TokenSet,
-} from '../oauth/dropbox.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
+import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
+import type { FetchLike, TokenSet } from '../oauth/types.js';
 import {
 	clearFlowState,
 	currentUserId,
@@ -36,15 +30,6 @@ export const redirectUri = (origin: string, provider: string): string =>
 	`${origin}/api/auth/connect/${provider}/callback`;
 
 /**
- * Dropbox is the only provider with an adapter so far, and an operator can
- * disable it. Both conditions answer 404: which providers a deployment offers
- * is already public at `/api/config`, and a different answer per reason would
- * say nothing new.
- */
-const enabled = (config: AppConfig, provider: string): provider is 'dropbox' =>
-	provider === 'dropbox' && config.enabledProviders.includes(provider);
-
-/**
  * Only ever send the browser back inside this app. Checked on the path as
  * resolved, not as given: `/.//evil.example` and `/\evil.example` both start
  * with one slash and resolve to `//evil.example`, which a `Location` header
@@ -63,17 +48,24 @@ type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin';
 const back = (returnTo: string, outcome: Outcome): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
 
+/**
+ * A provider with no flow here, or one this deployment does not offer, is a
+ * 404; one it offers without credentials is the operator's to fix, and a 501.
+ */
+const refusal = (
+	c: Context<AppEnv>,
+	error: 'unsupported_provider' | 'provider_not_configured'
+): Response => c.json({ error }, error === 'unsupported_provider' ? 404 : 501);
+
 export const connectRoutes = (doFetch: FetchLike) => {
 	const app = new Hono<AppEnv>();
 
 	app.get('/auth/connect/:provider/start', async (c) => {
 		const config = c.get('config');
 		const cookies = { secure: config.cookiesSecure };
-		const provider = c.req.param('provider');
-		if (!enabled(config, provider)) return c.json({ error: 'unsupported_provider' }, 404);
-
-		const credentials = config.oauth.dropbox;
-		if (credentials === undefined) return c.json({ error: 'provider_not_configured' }, 501);
+		const resolved = oauthFor(config, c.req.param('provider'));
+		if (!resolved.ok) return refusal(c, resolved.error);
+		const { provider, client, credentials } = resolved;
 
 		const userId = await currentUserId(c, c.get('db'), cookies);
 		// In account-first mode a connection attaches to an existing user, so
@@ -98,8 +90,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		);
 
 		return c.redirect(
-			authorizeUrl({
-				clientId: credentials.clientId,
+			client.authorizeUrl(credentials, {
 				redirectUri: redirectUri(config.appOrigin, provider),
 				state,
 				challenge,
@@ -119,11 +110,9 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const flow = await readFlowState(c, c.get('signingKey'), cookies);
 		clearFlowState(c);
 
-		const provider = c.req.param('provider');
-		if (!enabled(config, provider)) return c.json({ error: 'unsupported_provider' }, 404);
-
-		const credentials = config.oauth.dropbox;
-		if (credentials === undefined) return c.json({ error: 'provider_not_configured' }, 501);
+		const resolved = oauthFor(config, c.req.param('provider'));
+		if (!resolved.ok) return refusal(c, resolved.error);
+		const { provider, client, credentials } = resolved;
 
 		// A callback with no flow, or one whose state does not match, did not come
 		// from a flow this browser started.
@@ -145,13 +134,13 @@ export const connectRoutes = (doFetch: FetchLike) => {
 
 		// A replayed or expired authorization code is an ordinary event, not a
 		// server fault: send the user back to the app to try again.
-		const tokens = await exchangeCode(doFetch, {
-			clientId: credentials.clientId,
-			clientSecret: credentials.clientSecret,
-			redirectUri: redirectUri(config.appOrigin, provider),
-			code,
-			verifier: flow.verifier,
-		}).catch(() => undefined);
+		const tokens = await client
+			.exchangeCode(doFetch, credentials, {
+				redirectUri: redirectUri(config.appOrigin, provider),
+				code,
+				verifier: flow.verifier,
+			})
+			.catch(() => undefined);
 		if (tokens === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
 		// Without a refresh token the connection would stop working in a few
@@ -167,13 +156,13 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// paper over, so this is checked whether or not anyone is signed in.
 		if (tokens.accountId === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
-		const displayName = await accountName(doFetch, tokens.accessToken);
+		const displayName = await client.accountName(doFetch, tokens);
 		const now = Date.now();
 
 		// The account is the identity, so an account already connected to somebody
 		// else is not a second claim on it — it is either two people sharing a
 		// login, or an attempt to reach that account's notes.
-		const claimed = await claimedBy(db, tokens.accountId);
+		const claimed = await claimedBy(db, provider, tokens.accountId);
 
 		// A signed-out visitor presenting a claimed account is that account's
 		// owner coming back, and is adopted below. A *signed-in* user presenting
@@ -191,9 +180,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		 * No session is issued here. Signing someone in before the connection is
 		 * actually stored leaves them signed in *and* told the connect failed.
 		 */
-		const resolved = await (async (): Promise<
-			{ userId: string; minted: boolean } | undefined
-		> => {
+		const owner = await (async (): Promise<{ userId: string; minted: boolean } | undefined> => {
 			if (sessionUser !== undefined) return { userId: sessionUser, minted: false };
 			// Neither branch below may run in account-first, where a connection
 			// attaches only to a user who signed in first — issuing a session for a
@@ -202,11 +189,12 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			if (claimed !== undefined) return { userId: claimed, minted: false };
 			return { userId: await createUser(db, displayName, now), minted: true };
 		})();
-		if (resolved === undefined) return c.redirect(back(flow.returnTo, 'signin'));
+		if (owner === undefined) return c.redirect(back(flow.returnTo, 'signin'));
 
 		const stored = await store(
 			db,
-			resolved.userId,
+			provider,
+			owner.userId,
 			tokens,
 			displayName,
 			await sealOAuthSecret(c.get('secretKey'), { refreshToken: tokens.refreshToken }),
@@ -219,14 +207,14 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// nothing else references it yet — rather than leaving a second user
 		// holding a live refresh token.
 		if (!stored) {
-			if (resolved.minted) {
-				await db.delete(schema.users).where(eq(schema.users.id, resolved.userId));
+			if (owner.minted) {
+				await db.delete(schema.users).where(eq(schema.users.id, owner.userId));
 			}
 			return c.redirect(back(flow.returnTo, 'conflict'));
 		}
 
 		if (sessionUser === undefined) {
-			await issueSession(c, db, resolved.userId, cookies, now);
+			await issueSession(c, db, owner.userId, cookies, now);
 		}
 
 		return c.redirect(back(flow.returnTo, 'ok'));
@@ -255,12 +243,13 @@ const isUniqueViolation = (error: unknown): boolean =>
  */
 const claimedBy = async (
 	db: Database,
+	provider: OAuthProviderKind,
 	accountId: string | undefined
 ): Promise<string | undefined> => {
 	if (accountId === undefined) return undefined;
 	const row = await db.query.connections.findFirst({
 		where: and(
-			eq(schema.connections.provider, 'dropbox'),
+			eq(schema.connections.provider, provider),
 			eq(schema.connections.accountId, accountId)
 		),
 	});
@@ -295,6 +284,7 @@ const createUser = async (db: Database, displayName: string, now: number): Promi
  */
 const store = async (
 	db: Database,
+	provider: OAuthProviderKind,
 	userId: string,
 	tokens: TokenSet,
 	displayName: string,
@@ -304,7 +294,7 @@ const store = async (
 	const existing = await db.query.connections.findFirst({
 		where: and(
 			eq(schema.connections.userId, userId),
-			eq(schema.connections.provider, 'dropbox')
+			eq(schema.connections.provider, provider)
 		),
 	});
 
@@ -329,7 +319,7 @@ const store = async (
 			.values({
 				id,
 				userId,
-				provider: 'dropbox',
+				provider,
 				accountId: tokens.accountId ?? null,
 				displayName,
 				...secret,

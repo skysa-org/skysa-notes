@@ -4,7 +4,8 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../app.js';
 import { openOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
-import { type FetchLike, refreshAccessToken, revokeToken } from '../oauth/dropbox.js';
+import { oauthFor } from '../oauth/providers.js';
+import type { FetchLike } from '../oauth/types.js';
 import { clearSession, currentUserId } from '../session.js';
 
 /**
@@ -54,12 +55,16 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			return c.json({ error: 'not_found' }, 404);
 		}
 
-		// Revoke at Dropbox so the grant does not linger on the user's account
-		// (docs/PLAN.md §9). Best effort: the row goes either way, because a user
-		// who asked to disconnect must not be left connected by a network error.
+		// Revoke at the provider so the grant does not linger on the user's
+		// account (docs/PLAN.md §9). Best effort: the row goes either way, because
+		// a user who asked to disconnect must not be left connected by a network
+		// error. Microsoft offers no revoke at all, and there `revoked: false`
+		// tells the client to send the user to their account page.
 		const revoked = await (async (): Promise<boolean> => {
-			const credentials = config.oauth.dropbox;
-			if (credentials === undefined) return false;
+			const resolved = oauthFor(config, connection.provider);
+			if (!resolved.ok) return false;
+			const { client, credentials } = resolved;
+			if (client.revokeToken === undefined) return false;
 
 			const secret = await openOAuthSecret(c.get('secretKey'), {
 				ciphertext: connection.secretCiphertext,
@@ -68,14 +73,12 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			}).catch(() => undefined);
 			if (secret === undefined) return false;
 
-			const tokens = await refreshAccessToken(doFetch, {
-				clientId: credentials.clientId,
-				clientSecret: credentials.clientSecret,
-				refreshToken: secret.refreshToken,
-			}).catch(() => undefined);
+			const tokens = await client
+				.refreshAccessToken(doFetch, credentials, { refreshToken: secret.refreshToken })
+				.catch(() => undefined);
 			if (tokens === undefined) return false;
 
-			return revokeToken(doFetch, tokens.accessToken);
+			return client.revokeToken(doFetch, tokens.accessToken);
 		})();
 
 		await db.delete(schema.connections).where(eq(schema.connections.id, connection.id));

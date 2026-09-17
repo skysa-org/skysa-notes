@@ -7,9 +7,9 @@ APP_ORIGIN="http://localhost:5173"
 # storage-first (default) | account-first  — see docs/PLAN.md §6
 AUTH_MODE="storage-first"
 
-# Any of: gdrive,onedrive,dropbox,webdav. Only `dropbox` is implemented —
-# onedrive is Phase 3, gdrive Phase 4, webdav Phase 5 — and each one listed
-# here must have its credentials below or the app refuses to boot.
+# Any of: gdrive,onedrive,dropbox,webdav. `dropbox` and `onedrive` are
+# implemented — gdrive is Phase 4, webdav Phase 5 — and each one listed here
+# must have its credentials below or the app refuses to boot.
 ENABLED_PROVIDERS="dropbox"
 
 # 32 random bytes, base64. Generate with: openssl rand -base64 32
@@ -29,9 +29,17 @@ GOOGLE_CLIENT_SECRET=""
 
 # Entra app registration — required when ENABLED_PROVIDERS includes onedrive.
 # The registration's display name must be "skysa-notes": OneDrive derives the
-# app folder name from it.
+# app folder name from it. Supported account types: "Accounts in any
+# organizational directory and personal Microsoft accounts". Add a *Web*
+# platform (not SPA — the exchange happens on this server, with the secret)
+# with this redirect URI:
+#   <APP_ORIGIN>/api/auth/connect/onedrive/callback
+# Delegated Microsoft Graph permissions: Files.ReadWrite.AppFolder,
+# offline_access, openid, email. Create a client secret and put its *value*
+# here; it expires, so note when.
 MICROSOFT_CLIENT_ID=""
 MICROSOFT_CLIENT_SECRET=""
+# common (personal and work accounts), consumers, organizations, or a tenant id.
 MICROSOFT_TENANT="common"
 
 # Dropbox App Console — required when ENABLED_PROVIDERS includes dropbox.

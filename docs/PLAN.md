@@ -214,7 +214,9 @@ The in-memory fake in `src/providers/fake.ts` is deliberately the strictest prov
 - Version: `eTag` (or `cTag` for content-only). Use `eTag`.
 - Changes: `GET /me/drive/special/approot/delta`, follow `@odata.nextLink`, persist `@odata.deltaLink` as cursor. Deleted items carry a `deleted` facet.
 - Paths: items include `parentReference.path`; strip the approot prefix.
-- Tokens: refresh tokens issued to the backend; access tokens ~1h.
+- OAuth (`apps/api/src/oauth/onedrive.ts`): Authorization Code + PKCE against `login.microsoftonline.com/{MICROSOFT_TENANT}/oauth2/v2.0/{authorize,token}` as a confidential Web client, `response_mode=query`.
+- Account id: the ID token's **`sub`**, read from the token endpoint's response without a signature check (OIDC Core §3.1.3.7 allows it for a token received directly over TLS), and refused unless its `aud` is this client. Not `oid`, which needs the `profile` scope and is the same across every app a user signs in to; `sub` is pairwise to this registration, which is all a connection needs. Display name: the `email` claim, else "OneDrive". So no Graph call is needed to name the connection.
+- Tokens: refresh tokens issued to the backend and **rotated on every refresh** — `/api/token` stores the new one; access tokens ~1h. Microsoft has no per-app revoke, so disconnecting deletes the row and answers `revoked: false` (§9).
 
 ### 5.3 Dropbox
 - App type: **App folder** access. Scopes: `files.metadata.read files.metadata.write files.content.read files.content.write account_info.read`.
@@ -562,6 +564,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 ### Phase 3 — OneDrive (1 day)
 - [ ] `OneDriveProvider` (approot, delta, If-Match), and its hosts in the CSP's `connect-src` (§9): `graph.microsoft.com`, and wherever a file's `/content` redirects to download it, which is not Graph
 - [ ] Contract tests pass
+- [x] API: Microsoft storage OAuth (connect, callback, `/api/token`, disconnect) behind a provider registry (`apps/api/src/oauth/providers.ts`), so the routes no longer assume Dropbox
 - [ ] Record the bytes a note last synced (a hash on `SyncNote`) so a remote rename is not read as a remote edit. OneDrive is the first provider whose version does not survive a move; until then a rename of a note holding unpushed edits produces a conflict copy the user did not need. See §7, "Known limit".
 
 ### Phase 4 — Google Drive (1–2 days)
