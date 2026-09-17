@@ -265,7 +265,9 @@ export const parseRetryAfter = (
 		const wait = one(part);
 		return wait === undefined ? [] : [wait];
 	});
-	return waits.length === 0 ? undefined : Math.max(...waits);
+	// `reduce`, not `Math.max(...waits)`: the parts come off a header, and
+	// spreading an array of unknown length is a stack the caller does not control.
+	return waits.length === 0 ? undefined : waits.reduce((a, b) => Math.max(a, b));
 };
 
 const hasCode = (error: unknown, code: ProviderErrorCode): boolean =>

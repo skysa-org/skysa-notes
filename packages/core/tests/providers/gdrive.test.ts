@@ -411,6 +411,28 @@ describe('requests', () => {
 		await expect(provider.list('')).rejects.toThrow(RateLimitError);
 	});
 
+	it('reads RESOURCE_EXHAUSTED on a 403 and nowhere else', async () => {
+		// `google.rpc` maps the code to 429, and a 429 is already a rate limit by
+		// status alone, so a 403 is the only status this can earn its keep on. A
+		// 500 that happens to carry it is an outage, and an outage has to count.
+		const answering = (status: number) =>
+			over(() =>
+				Promise.resolve(
+					new Response(
+						JSON.stringify({
+							error: { code: status, message: 'no', status: 'RESOURCE_EXHAUSTED' },
+						}),
+						{ status }
+					)
+				)
+			);
+		await expect(answering(403).list('')).rejects.toThrow(RateLimitError);
+		const outage = await answering(500)
+			.list('')
+			.catch((thrown: unknown) => thrown);
+		expect(isRateLimitError(outage)).toBe(false);
+	});
+
 	it('never reads RESOURCE_EXHAUSTED over a reason Drive actually gave', async () => {
 		// `storageQuotaExceeded` is a full Drive, which no wait fixes, and
 		// `google.rpc.Code` gives `RESOURCE_EXHAUSTED` for "a per-user quota, or

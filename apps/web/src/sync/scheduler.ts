@@ -199,6 +199,13 @@ interface Session {
 	readonly inFlight: Map<'run', Promise<void>>;
 	/** When a sync first came back `blocked`, since it last did not. */
 	readonly blockedSince: Map<'at', number>;
+	/**
+	 * The op this connection's last completed run found out of attempts. Session
+	 * state rather than the scheduler's, so a run or a re-scan that finishes
+	 * after the user has switched accounts cannot clear — or answer for — the
+	 * connection that is bound now.
+	 */
+	readonly stuck: Map<'op', StuckOp>;
 }
 
 /** What one run came to, before it is turned into a status. */
@@ -255,21 +262,19 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		['status', { phase: 'local', conflicts: [] }],
 	]);
 
-	const stuckBox = new Map<'op', StuckOp>();
-
 	const status = (): SchedulerStatus =>
 		statusBox.get('status') ?? { phase: 'local', conflicts: [] };
 
 	/**
-	 * `stuck` comes from here and nowhere else. Every other field is carried
-	 * forward by the `{ ...status() }` most callers publish, and this one must
-	 * not be: it describes a queue that is out of attempts *now*. Carried, it
-	 * would still be showing "couldn't send the rename of Work/Plan.md" while
+	 * `stuck` comes from the bound session and nowhere else. Every other field is
+	 * carried forward by the `{ ...status() }` most callers publish, and this one
+	 * must not be: it describes a queue that is out of attempts *now*. Carried,
+	 * it would still be showing "couldn't send the rename of Work/Plan.md" while
 	 * the app says `syncing`, or after the op went through.
 	 */
 	const publish = (next: SchedulerStatus) => {
 		const { stuck: _carried, ...rest } = next;
-		const stuck = stuckBox.get('op');
+		const stuck = current.get('session')?.stuck.get('op');
 		const full: SchedulerStatus = { ...rest, ...(stuck === undefined ? {} : { stuck }) };
 		statusBox.set('status', full);
 		listeners.forEach((listener) => {
@@ -397,15 +402,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// One transaction, so an op the engine completes meanwhile is not put back.
 		db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
 
-	/**
-	 * Attempts given back: nothing is out of them, so nothing is stuck. Asked of
-	 * the session rather than the connection because the box belongs to whatever
-	 * is bound *now* — a release that finishes after another connection has been
-	 * bound must not clear the new one's answer.
-	 */
+	/** Attempts given back: nothing is out of them, so nothing is stuck. */
 	const released = async (session: Session): Promise<void> => {
 		await releaseOps(session.connectionId);
-		if (isCurrent(session)) stuckBox.delete('op');
+		session.stuck.delete('op');
 	};
 
 	/**
@@ -556,8 +556,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const stuck =
 			outcome.status === 'blocked' ? await stuckOp(session.connectionId) : undefined;
 		if (!isCurrent(session)) return;
-		if (stuck === undefined) stuckBox.delete('op');
-		else stuckBox.set('op', stuck);
+		if (stuck === undefined) session.stuck.delete('op');
+		else session.stuck.set('op', stuck);
 		publish({
 			phase: outcome.status === 'ok' ? 'idle' : 'attention',
 			lastSyncAt: status().lastSyncAt,
@@ -649,7 +649,6 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		sessionUnsubscribers.clear();
 		cancel('next');
 		cancel('debounce');
-		stuckBox.delete('op');
 		current.delete('session');
 	};
 
@@ -716,6 +715,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			lastSeq: new Map(),
 			inFlight: new Map(),
 			blockedSince: new Map(),
+			stuck: new Map(),
 		};
 		current.set('session', session);
 		publish({ phase: 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
@@ -798,15 +798,18 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				})
 			);
 			// The wait for the lock is as long as the round that held it, and the
-			// user can switch accounts inside it. Everything below is about this
-			// session, and `stuckBox` about whatever is bound now.
+			// user can switch accounts inside it. Nothing below would reach the
+			// new connection if it did — the state is this session's own and
+			// `run` checks for itself — so this is an early return for a
+			// question nobody is waiting on the answer to, not a guard holding
+			// anything up.
 			if (!isCurrent(session)) return;
 			// The backoff and the blocked clock start over too: the user asking
 			// is the help `blocked` waits for, and a re-scan that has to sit out
 			// a five-minute backoff first is not one.
 			session.failures.delete('count');
 			session.blockedSince.delete('at');
-			stuckBox.delete('op');
+			session.stuck.delete('op');
 			await run(session);
 		},
 

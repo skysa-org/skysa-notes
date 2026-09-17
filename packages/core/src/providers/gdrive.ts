@@ -169,15 +169,19 @@ const RATE_LIMITED = new Set([
  * both. Read over the reason, a full Drive would retry for ever without ever
  * counting against the op, and the user would never be told.
  *
- * Every error body on Drive's errors page carries `errors[]`, so this fires
- * only for a shape that page does not document. It is there because the shared
+ * Scoped to a 403, which is the only status it can earn its keep on: `google.rpc`
+ * maps `RESOURCE_EXHAUSTED` to 429, and a 429 is already a rate limit by status
+ * alone. Every error body on Drive's errors page carries `errors[]`, so this
+ * fires only for a shape that page does not document. It is there because the shared
  * Google error model puts the condition in `error.status`, and a quota read as
  * an ordinary failure blocks the queue over something that will pass. Whether
  * Drive ever sends it is on the live-check list (docs/PLAN.md, Phase 4).
  */
 const throttled = (failure: DriveFailure): boolean =>
 	failure.status === 429 ||
-	(failure.reasons.length === 0 && failure.condition === 'RESOURCE_EXHAUSTED') ||
+	(failure.status === 403 &&
+		failure.reasons.length === 0 &&
+		failure.condition === 'RESOURCE_EXHAUSTED') ||
 	(failure.status === 403 && failure.reasons.some((reason) => RATE_LIMITED.has(reason)));
 
 /**
