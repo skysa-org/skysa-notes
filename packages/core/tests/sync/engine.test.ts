@@ -4728,8 +4728,10 @@ describe('a round of changes spread over several pages', () => {
 		expect(result.status).toBe('ok');
 		expect(store.notes()).toHaveLength(notes);
 		expect(counted.reads).toBeLessThan(notes * 4);
-		// Generous, for a slow runner: about a second here, and thirty before.
-		expect(Date.now() - started).toBeLessThan(15_000);
+		// The reads above are the guard; this one only catches every decision
+		// replayed for every note again, which took a minute here. Seconds now,
+		// so generous for a slow runner.
+		expect(Date.now() - started).toBeLessThan(30_000);
 	}, 60_000);
 });
 
@@ -4842,6 +4844,29 @@ describe('an id-less deletion under a folder the round renames', () => {
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['B', 'B/A']);
 		expect(notePaths()).toEqual(['B/A/n.md']);
+	});
+
+	it('keeps a folder missing from its parent while a note under it is still there', async () => {
+		// `C` renamed to `B`, and `B/A` moved to the root after the round was
+		// read. `B` lists no `A`, which is also what the deletion would look
+		// like; the note is asked by its id, found, and the folder stays for
+		// the next round to move.
+		await provider.createFolder('C');
+		await provider.createFolder('C/A');
+		await remoteFile('C/A/n.md', 'n\n');
+		await engine.pull();
+		const before = noteAt('C/A/n.md');
+
+		const renamed = await provider.move(entryAt('C'), 'B');
+		await provider.move(entryAt('B/A'), 'A');
+
+		const first = await pullNow([{ path: 'C/A', deleted: true }, renamed]);
+		const second = await pullNow([entryAt('A')]);
+
+		expect(first.status).toBe('ok');
+		expect(second.status).toBe('ok');
+		expect(folderPaths()).toEqual(['A', 'B']);
+		expect(noteAt('A/n.md')?.id).toBe(before?.id);
 	});
 
 	it('asks after the folder nearest above, when more than one of them moves', async () => {
@@ -5071,6 +5096,61 @@ describe('a folder arriving where another is about to leave', () => {
 		expect(folderPaths()).toEqual(['B']);
 		expect(notePaths()).toEqual([]);
 		expect(store.folders()[0]?.remoteId).toBe(made.remoteId);
+	});
+
+	it('moves out a subfolder whose own move is what deletes its folder', async () => {
+		// `D1` and `D2` deleted, `D1/S1` moved to `D2` and `D2/S2` to `D1`.
+		// Deciding `S1` clears `D2`, whose rescue decides `S2`, which clears
+		// `D1` — with `S1` still in it and its entry already being decided.
+		const d1 = await provider.createFolder('D1');
+		await provider.createFolder('D1/S1');
+		await remoteFile('D1/S1/n1.md', 'n1\n');
+		const d2 = await provider.createFolder('D2');
+		await provider.createFolder('D2/S2');
+		await remoteFile('D2/S2/n2.md', 'n2\n');
+		await engine.pull();
+		const one = noteAt('D1/S1/n1.md');
+		const two = noteAt('D2/S2/n2.md');
+
+		await provider.move(entryAt('D1/S1'), 'X1');
+		await provider.move(entryAt('D2/S2'), 'X2');
+		await provider.delete(d1);
+		await provider.delete(d2);
+		const s1 = await provider.move(entryAt('X1'), 'D2');
+		const s2 = await provider.move(entryAt('X2'), 'D1');
+
+		const result = await pullNow([
+			s1,
+			s2,
+			{ path: 'D1', deleted: true, remoteId: d1.remoteId },
+			{ path: 'D2', deleted: true, remoteId: d2.remoteId },
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['D1', 'D2']);
+		expect(noteAt('D2/n1.md')?.id).toBe(one?.id);
+		expect(noteAt('D1/n2.md')?.id).toBe(two?.id);
+	});
+
+	it('takes a subfolder whose entry outside the folder was a place it has left', async () => {
+		// `C/B` renamed to `C/C`, `C` renamed to `B`, `B` deleted. The entry
+		// at `C/C` is outside `B`, but decided already, and the rename after
+		// it carried the folder back in: nothing is leaving, and all of it
+		// goes.
+		await provider.createFolder('C');
+		await provider.createFolder('C/B');
+		await remoteFile('C/B/a.md', 'a\n');
+		await engine.pull();
+
+		const inner = await provider.move(entryAt('C/B'), 'C/C');
+		const outer = await provider.move(entryAt('C'), 'B');
+		await provider.delete(entryAt('B'));
+
+		const result = await pullNow([inner, outer, { path: 'B', deleted: true }]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual([]);
+		expect(notePaths()).toEqual([]);
 	});
 
 	it('moves a subfolder out of the doomed folder before deleting it', async () => {

@@ -26,6 +26,14 @@ describe('normalizePath', () => {
 		expect(normalizePath('work/meetings/../notes')).toBe('work/notes');
 	});
 
+	it('keeps names that only look like . and .. segments', () => {
+		expect(normalizePath('.notesapp.json')).toBe('.notesapp.json');
+		expect(normalizePath('a../...b/.../..c')).toBe('a../...b/.../..c');
+		expect(normalizePath('work/..')).toBe(ROOT);
+		expect(normalizePath('./work')).toBe('work');
+		expect(normalizePath('work/.')).toBe('work');
+	});
+
 	it('never lets a path escape the app folder', () => {
 		expect(normalizePath('../../etc/passwd')).toBe('etc/passwd');
 		expect(normalizePath('work/../../..')).toBe(ROOT);

@@ -13,20 +13,30 @@ export const SEPARATOR = '/';
 export const ROOT = '';
 
 /**
+ * A path with no empty, `.` or `..` segment, which is nearly every path the app
+ * handles, and which `normalizePath` returns as it is. The sync engine asks
+ * `isWithin` of the same few paths for every note in a round, and splitting them
+ * each time was most of what a round of thousands of changes cost.
+ */
+const ALREADY_NORMAL = /^(?!\.\.?(?:\/|$))[^/]+(?:\/(?!\.\.?(?:\/|$))[^/]+)*$|^$/;
+
+/**
  * Collapse repeated separators, drop `.` segments, resolve `..`, and trim the
  * ends. A `..` that would escape the root is dropped rather than honored: no
  * path this app produces may point outside the folder it owns.
  */
 export const normalizePath = (path: string): string =>
-	path
-		.split(SEPARATOR)
-		.filter((segment) => segment !== '' && segment !== '.')
-		.reduce<string[]>(
-			(segments, segment) =>
-				segment === '..' ? segments.slice(0, -1) : [...segments, segment],
-			[]
-		)
-		.join(SEPARATOR);
+	ALREADY_NORMAL.test(path)
+		? path
+		: path
+				.split(SEPARATOR)
+				.filter((segment) => segment !== '' && segment !== '.')
+				.reduce<string[]>(
+					(segments, segment) =>
+						segment === '..' ? segments.slice(0, -1) : [...segments, segment],
+					[]
+				)
+				.join(SEPARATOR);
 
 export const joinPath = (...parts: readonly string[]): string =>
 	normalizePath(parts.join(SEPARATOR));

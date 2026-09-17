@@ -7,6 +7,7 @@ import {
 	basename,
 	isHidden,
 	isWithin,
+	joinPath,
 	normalizePath,
 	parentPath,
 	rebasePath,
@@ -175,11 +176,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	/**
 	 * What the store said when a decision was first asked about, kept with the
-	 * decision. The store does not change while a batch is decided — nothing
-	 * is applied until every decision is in — and a decision lives no longer
-	 * than its batch, so the answer holds for as long as anyone can ask. Asked
-	 * again for every entry after it, a round of a thousand imported notes is a
-	 * million reads of IndexedDB.
+	 * decision, which lives no longer than its batch. Nothing the batch decides
+	 * is applied until every decision is in, and the rest of the batch is
+	 * reached against those same rows. The user can still edit while a pull is
+	 * deciding, which no decision here ever saw either: the store checks
+	 * whether a note is dirty again as it applies. Asked again for every entry
+	 * after it, a round of a thousand imported notes is a million reads of
+	 * IndexedDB.
 	 */
 	const storeReads = new WeakMap<PullChange, Promise<unknown>>();
 
@@ -741,8 +744,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * nobody has; taken, a file the provider never listed again would be lost
 	 * here. So the provider is asked: a note's file by its id, and a folder by
 	 * listing where it would be once the folder above it has moved. Only "not
-	 * found" lets go: of a note's file, or of a folder from a parent that is
-	 * there.
+	 * found" lets go of a note, and a folder goes only with none of the notes
+	 * under it found.
 	 */
 	const decideUnderMoved = async (
 		path: string,
@@ -769,9 +772,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isNotFoundError(error)) return undefined;
 			throw error;
 		});
-		return beside === undefined || beside.some((entry) => entry.remoteId === remoteId)
-			? []
-			: deleteFolderAfterRescue(gone, decided, batch, at);
+		if (beside === undefined || beside.some((entry) => entry.remoteId === remoteId)) return [];
+		// Nor is a listing without it: the folder may have moved out of there
+		// since, too. What would be lost is its notes, so they are what is
+		// asked about, each by its own id. One still there keeps the folder,
+		// which the round that reports where it went moves on; those gone are
+		// let go of. With none left, the folder is gone.
+		const held = await notesUnderNow(gone, decided);
+		const there = await Promise.all(
+			held.map(({ note }) => stillThere(placement(note, decided)))
+		);
+		if (!there.some(Boolean)) return deleteFolderAfterRescue(gone, decided, batch, at);
+		return held.flatMap(({ note }, index) => (there[index] === true ? [] : [forgetNote(note)]));
 	};
 
 	/**
@@ -972,12 +984,38 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			async (pending, { folder }) => {
 				const sofar = await pending;
 				const after = [...decided, ...sofar];
-				const leaving =
-					inside(folder, after) === undefined
-						? undefined
-						: leavesFor(folder.remoteId, gone, batch, at);
-				if (leaving === undefined) return sofar;
-				return [...sofar, ...(await decide(leaving.entry, after, batch, leaving.at))];
+				const path = inside(folder, after);
+				if (path === undefined) return sofar;
+				const leaving = leavesFor(folder.remoteId, gone, batch, at);
+				if (leaving !== undefined) {
+					const nested = { ...batch, deciding: new Set([...batch.deciding, leaving.at]) };
+					return [...sofar, ...(await decide(leaving.entry, after, nested, leaving.at))];
+				}
+				// Leaving by an entry already being decided further up: two
+				// folders deleted, each one's subfolder moved to the other's
+				// name. Deciding `D1/S1` onto `D2` rescues `D2/S2` onto `D1`,
+				// which has to delete `D1` with `S1` still in it. That entry
+				// cannot be decided again from here, so the subfolder is moved
+				// out beside the folder instead, and the decision it is part of
+				// moves it on from there once the way is clear.
+				const stacked = [...batch.deciding].some((index) => {
+					const entry = batch.entries[index];
+					return (
+						entry !== undefined &&
+						entry.deleted !== true &&
+						entry.remoteId === folder.remoteId &&
+						(entry.path === gone || !isWithin(entry.path, gone))
+					);
+				});
+				if (!stacked) return sofar;
+				const chosen = after.flatMap((change) =>
+					change.kind === 'move-folder' ? [basename(change.to)] : []
+				);
+				const aside = await freeFolderPath(
+					joinPath(parentPath(gone), basename(path)),
+					chosen
+				);
+				return [...sofar, { kind: 'move-folder', from: path, to: aside }];
 			},
 			Promise.resolve([])
 		);
@@ -1019,6 +1057,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		scanning: boolean;
 		/** The batch's entries, in order, as the decisions index them. */
 		entries: readonly ChangeEntry[];
+		/**
+		 * The entries whose decisions are under way, by index: the one being
+		 * decided, and those a rescue has decided early on the way to it.
+		 */
+		deciding: ReadonlySet<number>;
 	}
 
 	const doomedIn = (entries: readonly ChangeEntry[]): Doomed => ({
@@ -1782,10 +1825,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			),
 			scanning,
 			entries,
+			deciding: new Set(),
 		};
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
-			return [...sofar, ...(await decide(entry, sofar, batch, at))];
+			return [
+				...sofar,
+				...(await decide(entry, sofar, { ...batch, deciding: new Set([at]) }, at)),
+			];
 		}, Promise.resolve([]));
 		return [...decided, ...(await roofOver(decided))];
 	};
