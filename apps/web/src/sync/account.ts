@@ -4,6 +4,7 @@ import { type ApiClient, type Connection, type Refusal } from '../api/client.js'
 import {
 	accountKey,
 	bindConnection,
+	bindingCount,
 	bindingMode,
 	NOTES_ACCOUNT_KEY,
 	unbindConnection,
@@ -73,6 +74,7 @@ const reconcileOnce = async (
 	client: Pick<ApiClient, 'connections'>,
 	again: boolean
 ): Promise<AccountState> => {
+	const since = await bindingCount(db);
 	const active = await activeConnectionId(db);
 	const result = await client.connections();
 	if (!result.ok) return { kind: 'signed-out' };
@@ -87,21 +89,21 @@ const reconcileOnce = async (
 		usable[0];
 
 	// Nothing to change is a decision too, and as stale as any other.
-	const unchanged = async () => (await activeConnectionId(db)) === active;
+	const unchanged = async () => (await bindingCount(db)) === since;
 	const ask =
 		connection !== undefined && connection.id !== active && (await needsAsking(db, connection));
 	const applied =
 		connection === undefined
 			? active === LOCAL_CONNECTION_ID
 				? await unchanged()
-				: await unbindConnection(db, { ifStillOn: active })
+				: await unbindConnection(db, { ifUnchangedSince: since })
 			: connection.id === active || ask
 				? await unchanged()
 				: await bindConnection(db, {
 						connectionId: connection.id,
 						provider: connection.provider,
 						accountId: connection.accountId,
-						ifStillOn: active,
+						ifUnchangedSince: since,
 					});
 	if (!applied) {
 		if (again) return reconcileOnce(db, client, false);

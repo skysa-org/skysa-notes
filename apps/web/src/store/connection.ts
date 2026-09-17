@@ -1,7 +1,7 @@
 import { basename, joinPath, parentPath, type ProviderKind, ROOT } from '@skysa/core';
+import { type PromiseExtended } from 'dexie';
 
 import {
-	activeConnectionId,
 	type FolderRecord,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
@@ -202,18 +202,36 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode): Promise<Moved>
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
 	db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState, db.prefs], work);
 
+/** Prefs key: how many binds and unbinds this device has seen. */
+export const BINDINGS_KEY = 'sync.bindings';
+
 /**
- * Only if the app's connection is still this one when the transaction runs.
- * For a decision made from a server's answer: the user, or another tab, may
- * have bound or unbound the device while it was on its way, and acting on the
- * answer anyway would bind a connection the server has since deleted.
+ * A count rather than the connection bound, because the connection can come
+ * back to where it was — bound and disconnected again in another tab — while
+ * everything decided from before is stale.
+ */
+export const bindingCount = (db: Pick<NotesDatabase, 'prefs'>): PromiseExtended<number> =>
+	db.prefs.get(BINDINGS_KEY).then((record) => Number(record?.value ?? 0));
+
+const countBinding = (db: Pick<NotesDatabase, 'prefs'>): PromiseExtended<string> =>
+	bindingCount(db).then((count) => db.prefs.put({ key: BINDINGS_KEY, value: String(count + 1) }));
+
+/**
+ * Only if the device has not been bound or unbound since `bindingCount` said
+ * this, checked when the transaction runs. For a decision made from a server's
+ * answer: the user, or another tab, may have changed the device's connection
+ * while it was on its way, and acting on the answer anyway would bind a
+ * connection the server has since deleted.
  */
 export interface Precondition {
-	ifStillOn?: string;
+	ifUnchangedSince?: number;
 }
 
-const stillOn = async (db: NotesDatabase, { ifStillOn }: Precondition): Promise<boolean> =>
-	ifStillOn === undefined || (await activeConnectionId(db)) === ifStillOn;
+const unchangedSince = async (
+	db: NotesDatabase,
+	{ ifUnchangedSince }: Precondition
+): Promise<boolean> =>
+	ifUnchangedSince === undefined || (await bindingCount(db)) === ifUnchangedSince;
 
 export interface BindInput extends Precondition {
 	/** The id `apps/api` gave the connection. */
@@ -241,7 +259,8 @@ export const bindingMode = async (
  */
 export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boolean> =>
 	inTransaction(db, async () => {
-		if (!(await stillOn(db, input))) return false;
+		if (!(await unchangedSince(db, input))) return false;
+		await countBinding(db);
 		const states = await db.syncState.toArray();
 		const current = states.find((state) => state.connectionId === input.connectionId);
 		const { mode } = await bindingMode(db, input);
@@ -293,7 +312,8 @@ export const unbindConnection = (
 	precondition: Precondition = {}
 ): Promise<boolean> =>
 	inTransaction(db, async () => {
-		if (!(await stillOn(db, precondition))) return false;
+		if (!(await unchangedSince(db, precondition))) return false;
+		await countBinding(db);
 		await moveRowsTo(db, LOCAL_CONNECTION_ID, 'resume');
 		await db.syncState.clear();
 		return true;

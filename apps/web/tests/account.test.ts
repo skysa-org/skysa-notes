@@ -162,6 +162,24 @@ describe('reconciling while the device changes under it', () => {
 		expect(await activeConnectionId(db)).toBe('c2');
 	});
 
+	it('does not bind a connection bound and disconnected again while it was asking', async () => {
+		const db = freshDatabase();
+		const client = answeringAfter(
+			async () => {
+				await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+				await unbindConnection(db);
+			},
+			{ ok: true, value: [connection('c1')] },
+			{ ok: false, refusal: 'sign_in_required' }
+		);
+
+		const state = await reconcileAccount(db, client);
+
+		expect(state).toEqual({ kind: 'signed-out' });
+		expect(client.connections).toHaveBeenCalledTimes(2);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
 	it('gives up rather than chase a device that keeps changing', async () => {
 		const db = freshDatabase();
 		const flip = vi.fn(async () => {

@@ -1,7 +1,12 @@
 import { createFakeProvider, createSyncEngine, isHidden } from '@skysa/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { bindConnection, NOTES_ACCOUNT_KEY, unbindConnection } from '../src/store/connection.js';
+import {
+	bindConnection,
+	bindingCount,
+	NOTES_ACCOUNT_KEY,
+	unbindConnection,
+} from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
@@ -270,8 +275,12 @@ describe('binding a connection', () => {
 });
 
 describe('binding or unbinding on a condition', () => {
-	it('does nothing when the device is no longer on the connection named', async () => {
+	it('does nothing once the device has been bound or unbound since', async () => {
 		const { db, plan } = await usedLocally();
+		const before = await bindingCount(db);
+		// And back again: where it is now says nothing about what happened.
+		await bindConnection(db, { connectionId: 'dropbox-9', provider: 'dropbox' });
+		await unbindConnection(db);
 		await bindConnection(db, DROPBOX);
 		const ops = await db.opQueue.toArray();
 
@@ -279,10 +288,10 @@ describe('binding or unbinding on a condition', () => {
 			await bindConnection(db, {
 				connectionId: 'dropbox-2',
 				provider: 'dropbox',
-				ifStillOn: LOCAL_CONNECTION_ID,
+				ifUnchangedSince: before,
 			})
 		).toBe(false);
-		expect(await unbindConnection(db, { ifStillOn: 'dropbox-2' })).toBe(false);
+		expect(await unbindConnection(db, { ifUnchangedSince: before })).toBe(false);
 
 		expect(await activeConnectionId(db)).toBe(DROPBOX.connectionId);
 		expect((await getNote(db, plan.id))?.connectionId).toBe(DROPBOX.connectionId);
@@ -292,8 +301,10 @@ describe('binding or unbinding on a condition', () => {
 	it('does it when the device still is', async () => {
 		const { db } = await usedLocally();
 
-		expect(await bindConnection(db, { ...DROPBOX, ifStillOn: LOCAL_CONNECTION_ID })).toBe(true);
-		expect(await unbindConnection(db, { ifStillOn: DROPBOX.connectionId })).toBe(true);
+		expect(
+			await bindConnection(db, { ...DROPBOX, ifUnchangedSince: await bindingCount(db) })
+		).toBe(true);
+		expect(await unbindConnection(db, { ifUnchangedSince: await bindingCount(db) })).toBe(true);
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
 	});
 });
