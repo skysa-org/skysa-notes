@@ -146,7 +146,11 @@ export interface SyncScheduler {
 	readonly subscribe: (listener: (status: SchedulerStatus) => void) => () => void;
 }
 
-type Flag = 'again';
+/**
+ * `again`: a run was asked for during one. `backingOff`: a retry is waiting on
+ * its timer, and a trigger that is not the user asking leaves it to that.
+ */
+type Flag = 'again' | 'backingOff';
 
 interface Session {
 	readonly generation: number;
@@ -375,10 +379,19 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			return;
 		}
 		publish({ ...status(), phase: 'retrying', error, refusal: undefined, conflicts: seen });
+		// Edits and focus wait for this too. Each failed push is an attempt
+		// against its op, so running on every keystroke's debounce would spend
+		// all of them in seconds and block the queue behind an outage the
+		// backoff exists to wait out.
+		session.flags.add('backingOff');
 		arm('next', backoff(session), () => {
 			void run(session);
 		});
 	};
+
+	/** A trigger that is not the user asking: it defers to a backoff in progress. */
+	const nudge = (session: Session): Promise<void> =>
+		session.flags.has('backingOff') ? Promise.resolve() : run(session);
 
 	/**
 	 * An op out of attempts is left alone, not given up on: after a while it is
@@ -472,6 +485,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		}
 		cancel('next');
 		cancel('debounce');
+		// Whatever started this run, the backoff it was waiting on is over.
+		session.flags.delete('backingOff');
 		publish({ ...status(), phase: 'syncing', error: undefined, refusal: undefined });
 		// One engine at a time per connection, across sessions and tabs: a
 		// session ended mid-run, or another tab, may still be at the network.
@@ -515,7 +530,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				// covers that.
 				if (seen === undefined || highest <= seen || !isCurrent(session)) return;
 				arm('debounce', debounceMs, () => {
-					void run(session);
+					void nudge(session);
 				});
 			},
 		});
@@ -572,9 +587,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		void run(session);
 	};
 
-	const runCurrent = (): Promise<void> => {
+	const nudgeCurrent = (): Promise<void> => {
 		const session = current.get('session');
-		return session === undefined ? Promise.resolve() : run(session);
+		return session === undefined ? Promise.resolve() : nudge(session);
 	};
 
 	return {
@@ -586,10 +601,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			unsubscribers.add(() => {
 				subscription.unsubscribe();
 			});
-			unsubscribers.add(environment.listen('focus', () => void runCurrent()));
+			unsubscribers.add(environment.listen('focus', () => void nudgeCurrent()));
 			unsubscribers.add(
 				environment.listen('visibilitychange', () => {
-					if (environment.isVisible()) void runCurrent();
+					if (environment.isVisible()) void nudgeCurrent();
 				})
 			);
 			// What failed while the network was going is no evidence against an op.

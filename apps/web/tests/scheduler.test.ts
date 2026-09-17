@@ -260,6 +260,16 @@ const focused = async (h: Harness) => {
 	});
 };
 
+/** Whatever the scheduler is waiting on — a backoff, the interval, an edit — comes due. */
+const nextTimer = async (h: Harness) => {
+	// Let an edit's debounce be armed first, rather than come due in the next round.
+	await quiet();
+	h.env.advance(Math.min(...h.env.pending()));
+	await vi.waitFor(() => {
+		expect(h.scheduler.status().phase).not.toBe('syncing');
+	});
+};
+
 /** Long enough for anything a trigger would have started to have shown itself. */
 const quiet = () =>
 	new Promise<void>((resolve) => {
@@ -603,6 +613,52 @@ describe('failures', () => {
 		expect(h.env.pending()).toEqual([BACKOFF]);
 	});
 
+	it('leaves a retry to its backoff when an edit or focus comes first', async () => {
+		const db = await bound();
+		const note = await createNote(db, { title: 'Plan', body: 'one\n' });
+		const h = started(db);
+		await vi.waitFor(() => {
+			expect(h.remote.fake.contentAt(note.path)).toContain('one');
+		});
+		await reaches(h.scheduler, 'idle');
+		h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
+		await saveNoteBody(db, note.id, 'two\n');
+		await quiet();
+		h.env.advance(DEBOUNCE);
+		await reaches(h.scheduler, 'retrying');
+		const pulls = h.remote.pulls();
+
+		// An edit to another note queues an op of its own, so its debounce is armed.
+		const other = await createNote(db, { title: 'Other', body: 'other\n' });
+		await saveNoteBody(db, note.id, 'three\n');
+		await quiet();
+		expect(h.env.pending()).toEqual([DEBOUNCE, BACKOFF]);
+		h.env.advance(DEBOUNCE);
+		h.env.fire('focus');
+		h.env.state.visible = false;
+		h.env.state.visible = true;
+		h.env.fire('visibilitychange');
+		await quiet();
+
+		expect(h.remote.pulls()).toBe(pulls);
+		expect((await db.opQueue.toArray()).map((op) => op.attempts)).toEqual([1, 0]);
+
+		// The backoff's own retry, and the outage is over.
+		h.remote.fake.setFault(undefined);
+		h.env.advance(BACKOFF - DEBOUNCE);
+		await vi.waitFor(() => {
+			expect(h.remote.fake.contentAt(note.path)).toContain('three');
+		});
+		expect(h.remote.fake.contentAt(other.path)).toContain('other');
+		await reaches(h.scheduler, 'idle');
+
+		// And with nothing failing, focus syncs straight away again.
+		h.env.fire('focus');
+		await vi.waitFor(() => {
+			expect(h.remote.pulls()).toBe(pulls + 2);
+		});
+	});
+
 	it('refreshes a token the provider refuses, and carries on', async () => {
 		const db = await bound();
 		const h = started(db);
@@ -696,7 +752,7 @@ describe('failures', () => {
 
 		await [1, 2, 3, 4].reduce(async (prior) => {
 			await prior;
-			await focused(h);
+			await nextTimer(h);
 		}, Promise.resolve());
 
 		expect(h.scheduler.status()).toMatchObject({
@@ -717,7 +773,7 @@ describe('failures', () => {
 		const phases = await [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce<Promise<SyncPhase[]>>(
 			async (prior) => {
 				const seen = await prior;
-				await focused(h);
+				await nextTimer(h);
 				return [...seen, h.scheduler.status().phase];
 			},
 			Promise.resolve([])
@@ -739,7 +795,7 @@ describe('failures', () => {
 			h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
 			await [1, 2, 3].reduce(async (prior) => {
 				await prior;
-				await focused(h);
+				await nextTimer(h);
 			}, Promise.resolve());
 			expect(h.scheduler.status().phase).toBe('attention');
 			// The outage ends.
@@ -787,7 +843,7 @@ describe('failures', () => {
 			h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
 			await [1, 2, 3].reduce(async (prior) => {
 				await prior;
-				await focused(h);
+				await nextTimer(h);
 			}, Promise.resolve());
 			expect(h.scheduler.status().phase).toBe('attention');
 			h.remote.fake.setFault(undefined);
