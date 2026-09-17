@@ -72,7 +72,7 @@ describe('reconciling with the server', () => {
 
 		const state = await reconcileAccount(
 			db,
-			listing({ ok: true, value: [connection('c1', 'gdrive')] })
+			listing({ ok: true, value: [connection('c1', 'webdav')] })
 		);
 
 		expect(state).toEqual({ kind: 'none' });

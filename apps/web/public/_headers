@@ -20,5 +20,9 @@
 #   from the item's pre-authenticated download URL on another host —
 #   *.files.1drv.com or my.microsoftpersonalcontent.com for personal accounts,
 #   *.sharepoint.com for work and school ones (docs/PLAN.md §5.2).
+#   Google Drive: www.googleapis.com, the one host the adapter asks — file
+#   bytes (`alt=media`) and uploads included (docs/PLAN.md §5.1). Whether
+#   Google redirects a download elsewhere waits on the live check; don't add
+#   *.googleusercontent.com ahead of it, as it takes in Apps Script web apps.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.dropboxapi.com https://graph.microsoft.com https://*.files.1drv.com https://my.microsoftpersonalcontent.com https://*.sharepoint.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.dropboxapi.com https://graph.microsoft.com https://*.files.1drv.com https://my.microsoftpersonalcontent.com https://*.sharepoint.com https://www.googleapis.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

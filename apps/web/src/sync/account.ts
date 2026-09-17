@@ -21,7 +21,7 @@ import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../
  */
 
 /** Providers the app can sync with today. The rest arrive with their adapters. */
-export const CONNECTABLE: readonly ProviderKind[] = ['dropbox', 'onedrive'];
+export const CONNECTABLE: readonly ProviderKind[] = ['dropbox', 'onedrive', 'gdrive'];
 
 /** A page at the provider where the user withdraws the app's access. */
 export interface RevokePlace {
