@@ -1,6 +1,6 @@
 # skysa-notes — instructions for Claude Code
 
-Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, OneDrive, Dropbox, or WebDAV. Read `docs/PLAN.md` before any non-trivial task; it is the source of truth for architecture, decisions, and phase order. If a task requires deviating from it, say so and propose the edit to `docs/PLAN.md` in the same PR.
+Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, OneDrive, or Dropbox (WebDAV is deferred indefinitely — `docs/PLAN.md` §5.4). Read `docs/PLAN.md` before any non-trivial task; it is the source of truth for architecture, decisions, and phase order. If a task requires deviating from it, say so and propose the edit to `docs/PLAN.md` in the same PR.
 
 ## Stack (do not substitute)
 - pnpm workspace: `apps/web` (Vite + React + TS, TanStack Router, Dexie, vite-plugin-pwa), `apps/api` (Hono on Cloudflare Workers, D1 via Drizzle), `packages/core` (framework-free TS).

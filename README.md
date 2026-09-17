@@ -1,6 +1,6 @@
 # skysa-notes
 
-**skysa-notes** is a local-first markdown notes PWA that syncs to a dedicated, app-owned folder on your own Google Drive, OneDrive, Dropbox, or WebDAV server. Every note is a plain `.md` file in an ordinary directory tree, so your notes stay readable, portable, and editable by any other tool, and folders are simply notebooks. The app reads and writes entirely from IndexedDB, so it works fully offline and syncs in the background when a connection returns; when you connect an OAuth provider your note content goes straight from the browser to that provider and never passes through the server, which stores only encrypted refresh tokens and connection metadata. It is built as a pnpm workspace — a Vite + React client, a Hono API on Cloudflare Workers backed by D1, and a framework-free core package holding the provider adapters, sync engine, and markdown pipeline — and it is designed to be self-hosted end to end on your own Cloudflare account. The project is in early development; [`docs/PLAN.md`](docs/PLAN.md) is the source of truth for the architecture, decisions, and phase order. Licensed under [AGPL-3.0](LICENSE).
+**skysa-notes** is a local-first markdown notes PWA that syncs to a dedicated, app-owned folder on your own Google Drive, OneDrive, or Dropbox. Every note is a plain `.md` file in an ordinary directory tree, so your notes stay readable, portable, and editable by any other tool, and folders are simply notebooks. The app reads and writes entirely from IndexedDB, so it works fully offline and syncs in the background when a connection returns; when you connect an OAuth provider your note content goes straight from the browser to that provider and never passes through the server, which stores only encrypted refresh tokens and connection metadata. It is built as a pnpm workspace — a Vite + React client, a Hono API on Cloudflare Workers backed by D1, and a framework-free core package holding the provider adapters, sync engine, and markdown pipeline — and it is designed to be self-hosted end to end on your own Cloudflare account. The project is in early development; [`docs/PLAN.md`](docs/PLAN.md) is the source of truth for the architecture, decisions, and phase order. Licensed under [AGPL-3.0](LICENSE).
 
 ## Development
 
@@ -8,7 +8,7 @@ Requires Node 22+ and pnpm 10 (`corepack enable`).
 
 ```bash
 pnpm install
-cp .dev.vars.example apps/api/.dev.vars   # fill in SECRETS_KEY at minimum
+cp .dev.vars.example apps/api/.dev.vars   # fill in SECRETS_KEY and credentials for each provider in ENABLED_PROVIDERS
 pnpm db:migrate                            # apply D1 migrations to the local database
 pnpm dev                                   # Vite on :5173, wrangler dev on :8787
 ```
@@ -16,8 +16,10 @@ pnpm dev                                   # Vite on :5173, wrangler dev on :878
 `pnpm dev` runs both servers; Vite proxies `/api` to the Worker so session cookies
 stay first-party, matching production where one Worker serves the SPA and the API.
 
-A WebDAV-only instance (`ENABLED_PROVIDERS="webdav"`) needs no provider app
-registrations at all, which makes it the quickest way to run this locally.
+Every provider that syncs needs its own app registration (Dropbox, Microsoft
+Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
+`.dev.vars.example`. WebDAV support is deferred indefinitely (`docs/PLAN.md`
+§5.4).
 
 | Command | What it does |
 |---|---|

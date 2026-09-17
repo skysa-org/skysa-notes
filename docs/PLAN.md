@@ -1,6 +1,6 @@
 # skysa-notes — Implementation Plan
 
-Local-first markdown note-taking PWA that syncs to a dedicated, app-owned folder on the user's cloud storage (Google Drive, OneDrive, Dropbox) or to any WebDAV server. Notes are plain `.md` files in a normal directory tree, so the user can open, edit, and back them up with any other tool.
+Local-first markdown note-taking PWA that syncs to a dedicated, app-owned folder on the user's cloud storage (Google Drive, OneDrive, Dropbox). WebDAV was planned too and is deferred indefinitely (§5.4). Notes are plain `.md` files in a normal directory tree, so the user can open, edit, and back them up with any other tool.
 
 This repo is the complete, self-hostable product: one Cloudflare Worker serving the SPA and a small API, plus the operator's own provider app registrations. This document is the source of truth for architecture and sequencing. Update it when decisions change.
 
@@ -29,6 +29,8 @@ This repo is the complete, self-hostable product: one Cloudflare Worker serving 
 | Conflicts | Never lose data. On conflict, keep the remote version at the original path and write local as `<name> (conflict <YYYY-MM-DDTHH-mm>).md` | Simple, predictable, recoverable |
 | Editor | Rich-text (WYSIWYG) by default, raw markdown mode as a toggle; **the markdown string is the only source of truth** — the rich editor is a view over it | Notes are files; the editor must never own state the file can't represent |
 
+Rows above that mention WebDAV describe the deferred design (§5.4); nothing in the repo implements it.
+
 Non-goals for v1: real-time collaboration, sharing, full-drive access, mobile-native wrappers, attachments/images, syntax beyond CommonMark + GFM (tables, task lists, strikethrough).
 
 ---
@@ -53,7 +55,7 @@ Non-goals for v1: real-time collaboration, sharing, full-drive access, mobile-na
 └──────────────────────────────────────┘
 ```
 
-Key property: the backend is only required for (a) connecting/refreshing an account and (b) WebDAV. Once a client holds a valid access token it syncs peer-to-provider. If the backend is down, the app still works offline and can sync to OAuth providers until the access token expires.
+Key property: the backend is only required for (a) connecting/refreshing an account and (b) WebDAV, which is deferred (§5.4). Once a client holds a valid access token it syncs peer-to-provider. If the backend is down, the app still works offline and can sync to OAuth providers until the access token expires.
 
 ---
 
@@ -249,6 +251,8 @@ The in-memory fake in `src/providers/fake.ts` is deliberately the strictest prov
 - Note: production apps need Dropbox "production" approval once past the dev user cap; App-folder apps have a light review.
 
 ### 5.4 WebDAV
+*Deferred indefinitely (2026-09-17).* WebDAV is not being built. What follows is the design as planned, kept so it need not be worked out again if that changes; nothing in this repo implements it.
+
 - Auth: URL + username + password (app password recommended). Stored encrypted on the backend; the client never sees them.
 - Transport: **all WebDAV traffic goes through `/api/webdav/*`** because most servers don't emit CORS headers. The proxy forwards method/headers/body verbatim, injects Basic auth, restricts to the configured base URL, and streams bodies. Supported methods: `PROPFIND`, `GET`, `PUT`, `MKCOL`, `MOVE`, `DELETE`, `REPORT`.
 - Root: the user supplies a base URL that *is* the app folder (e.g. `https://cloud.example.com/remote.php/dav/files/david/Notes/`). ensureRoot does `PROPFIND depth 0`, `MKCOL` if 404, then writes `.notesapp.json`.
@@ -271,7 +275,7 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
 - **Composition root:** `apps/api` exports `createApp({ entitlements, identityProviders, config })` as a library; its own `src/worker.ts` calls it with the defaults. An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking. Nothing in `apps/api` reads env directly except `worker.ts`.
 - Sessions with `hono/cookie`; request validation with `zod`. (`@hono/zod-validator` was declared up front and never used — the routes validate with `zod` directly — so it was removed. Re-add it when a route actually wants the middleware; the removal is not a decision against it.)
 - **Entitlement seam:** every route that mints a token or proxies WebDAV calls `entitlements.check(userId)` from an `EntitlementProvider` interface in `core`. The repo ships `AlwaysAllowed`. Operators of a shared instance can substitute their own (an email allowlist, for example) through `createApp`; no such policy logic lives in the repo.
-- **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each provider listed must have its credentials or the app refuses to boot): the WebDAV routes and proxy are not mounted when `webdav` is absent, and the client hides the option.
+- **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each OAuth provider listed must have its credentials or the app refuses to boot). `webdav` is accepted and needs no credentials, but WebDAV is deferred (§5.4): nothing is mounted for it and the client offers no way to connect one. If it is ever built, its routes and proxy are mounted only when `webdav` is listed.
 - **Identity modes** (`AUTH_MODE` env): `storage-first` (default: user = first connected storage account, as below) or `account-first` (Sign in with Google or Microsoft creates the user; storage is connected in a separate flow afterward). Both write to the same `users` table. `account-first` suits instances shared by several people, and users who want to change storage provider without losing their account.
 - **Two OAuth flows per provider, never combined.** `/auth/login/:provider` requests identity scopes only (`openid email profile`); `/auth/connect/:provider` requests storage scopes only. They share one Google client id / one Entra registration but use distinct redirect URIs and distinct callback routes. Frame the storage request in the UI as "Connect your storage", not as a second login. *Revised in Phase 4:* the storage request does **not** pass `include_granted_scopes` (see "Storage OAuth, as built"). Sharing one Google client also means sharing its revocation, because Google revokes every grant to the project at once. Disconnecting storage revokes, and that would sign the user out of Google sign-in too. Phase 9 has to choose between a separate Cloud project for sign-in and not revoking on disconnect for users who sign in with Google.
 - **Identity providers via Arctic** (`arctic` npm, Workers-compatible): Google and Microsoft Entra at launch. **Open (2026-09-14): `arctic` was deprecated by its author in July 2026 ("no longer supported"); they suggest copying the per-provider client code, which is ~50 lines each.** Nothing depends on it before Phase 9, so the dependency is not installed yet. Decide then between vendoring the two clients into `apps/api/src/identity/` (no runtime dep, and the storage OAuth in `oauth/` is hand-rolled anyway) or a maintained alternative. `IdentityProvider` interface in `apps/api/src/identity/` returns `{ providerId, subject, email, emailVerified, name }`. Adding Facebook or Apple is a new adapter + registration; Facebook would additionally need an email-confirmation fallback (email is not guaranteed from Meta) and Meta App Review with a data-deletion URL, so it is deferred.
@@ -378,11 +382,11 @@ Secrets encrypted with AES-256-GCM using `SECRETS_KEY` from env (rotate by re-en
 | `GET  /api/auth/login/:provider/start?link=1` | `account-first` only. Same flow, but callback attaches the identity to the current session's user |
 | `DELETE /api/identities/:id` | Unlink a provider; refused if it is the user's last identity |
 | `POST /api/auth/logout` | Clear session |
-| `POST /api/connections/webdav` | Validate by `PROPFIND` against the URL, store encrypted creds |
+| `POST /api/connections/webdav` | *(deferred, §5.4)* Validate by `PROPFIND` against the URL, store encrypted creds |
 | `GET  /api/connections` | List user's connections (no secrets) |
 | `DELETE /api/connections/:id` | Revoke at provider where supported, delete row |
 | `POST /api/token` | `{ connectionId }` → `{ accessToken, expiresAt }` using stored refresh token |
-| `ALL  /api/webdav/:connectionId/*` | Authenticated proxy (see 5.4) |
+| `ALL  /api/webdav/:connectionId/*` | *(deferred)* Authenticated proxy (see 5.4) |
 
 User identity for v1: a user *is* their first connected account (email from the OAuth identity claim). Multiple connections per user are supported in the schema; the UI can expose that later.
 
@@ -478,7 +482,7 @@ The branch table is the specification; these are the cases it does not mention, 
 - **A move whose file is gone is finished, not retried.** Nothing will make it succeed, and failing it blocks the ordered queue for ever over a rename — the least of what the user has waiting behind it. The note keeps its contents, and the pull that reports the deletion cuts it loose or takes it away.
 - **A transient failure is a status, not a rejection.** Offline, a 500, a store that could not commit: the batch rolled back and the cursor did not move, so `pull` answers `retry` exactly as `push` does. That covers every store call, not just the batch — reading the cursor and reading the queue are store calls too. Rejecting instead would make every caller wrap `sync()` in a `try` to discover something `status` exists to tell them, and one that forgot would take the app down on a flight.
 - **A locally deleted note keeps its row until the remote copy is gone, and every read sees it.** The queued `delete` carries a note id and nothing else; the `remoteId` it needs lives on the row, so the row *is* the tombstone. A store with a `deleted` flag and filtered indexes is a natural reading of "every live note", and it loses a note the first time one is deleted here and edited on another device: the pull cannot see the row, mints a second note at that path, and the queued delete then removes the file that was just imported. Where both happen in one window the delete wins — the row is written back by the pull and purged by the op behind it. That is a decision, not an accident: the delete is something the user did, and the remote change may be their own from the other device.
-- **A push is addressed by where the note is now.** A pull between queueing an op and running it rebases the note and leaves the op's own `path` behind. Invisible where `remoteId` identifies the file, and the whole address where it does not (WebDAV, Phase 5).
+- **A push is addressed by where the note is now.** A pull between queueing an op and running it rebases the note and leaves the op's own `path` behind. Invisible where `remoteId` identifies the file, and the whole address where it does not (WebDAV, deferred).
 - **A move with no target fails rather than being marked done.** It is a store that lost the column, not a move with nothing to do, and completing it would discard the user's rename with nothing said anywhere.
 - **Nothing is reported that did not happen to the user.** A deletion that matches no note and no folder we hold — a PDF beside the notes, a file never imported — is not news, and counting it puts a number in front of someone for an event that was never about them.
 - **A folder move clears the notes in its way, not just the folder.** A cascade keeps a dirty note and merely cuts it loose, so a deleted folder can leave notes behind at their paths with no folder row above them. Moving another folder onto that path then drops its notes on top of theirs: two rows at one path, which the sidebar shows twice and which the next push has overwrite each other for ever. The local note is displaced to a conflict copy — the remote keeps the path — at whatever depth under the destination it sits.
@@ -543,8 +547,8 @@ Title is derived from frontmatter `title`, else the first `# ` heading, else the
 ## 9. Security checklist
 - PKCE + `state` on every OAuth flow; state bound to the session cookie.
 - `SECRETS_KEY` only in server env; secrets table encrypted at rest.
-- WebDAV proxy: allowlist methods, reject paths that escape the configured base URL after normalization, strip hop-by-hop headers, 30s timeout, 20 MB body cap.
-- WebDAV proxy SSRF hardening (on by default; protects operators who expose their instance to the internet): HTTPS only; resolve the host and reject private/loopback/link-local/cloud-metadata ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16, fc00::/7, ::1); reject IP-literal hosts; re-validate on redirect (or disable redirects); per-user rate limit and daily byte budget. Self-hosters can relax the private-range rule via `WEBDAV_ALLOW_PRIVATE=true` for LAN Nextcloud.
+- *(Only if WebDAV is built, §5.4.)* WebDAV proxy: allowlist methods, reject paths that escape the configured base URL after normalization, strip hop-by-hop headers, 30s timeout, 20 MB body cap.
+- *(Only if WebDAV is built, §5.4.)* WebDAV proxy SSRF hardening (on by default; protects operators who expose their instance to the internet): HTTPS only; resolve the host and reject private/loopback/link-local/cloud-metadata ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16, fc00::/7, ::1); reject IP-literal hosts; re-validate on redirect (or disable redirects); per-user rate limit and daily byte budget. Self-hosters can relax the private-range rule via `WEBDAV_ALLOW_PRIVATE=true` for LAN Nextcloud.
 - CSP: `connect-src` limited to self + `www.googleapis.com` + `*.dropboxapi.com` + OneDrive's `graph.microsoft.com` and its download hosts (`*.files.1drv.com`, `my.microsoftpersonalcontent.com`, `*.sharepoint.com`, §5.2) — each provider's hosts added with its adapter, never ahead of it (WebDAV goes through the proxy, so it adds none). Set for every static response in `apps/web/public/_headers` (Cloudflare applies it to the shell, the assets and `sw.js`, and a response the service worker replays keeps it; `/api/*` is the Worker's and is not a page); `tests/csp.test.ts` holds it, including that every host the adapters request is allowed. `script-src 'self'` with nothing inline or eval'd: zod's `new Function` probe is turned off (`src/jitless.ts`, imported first), since it reports a violation even when refused. `style-src` allows `'unsafe-inline'` because the editors set style attributes and CodeMirror inserts `<style>` elements; `img-src` allows any `https:` image a note links; `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`.
 - Disconnect revokes at the provider (Google `revoke`, Dropbox `auth/token/revoke`; Graph has no per-app revoke, so the disconnect confirmation links to where the user removes it: `LEFT_AT_PROVIDER` in `apps/web/src/sync/account.ts`). Google's revoke reaches every grant the user gave the Cloud project, which is why each deployment wants a project of its own (`docs/google-oauth.md`). Disconnecting does not yet tell the user when a revoke that should have worked failed (`revoked: false` from Dropbox or Google).
 
@@ -561,7 +565,7 @@ Each phase ends with something runnable. Don't start the next phase until the cu
 - [x] `packages/core/src/config.ts` exporting `APP_FOLDER_NAME = 'skysa-notes'`, `MARKER_FILE = '.notesapp.json'`, `MARKER_SCHEMA_VERSION = 1`; `marker.ts` with `buildMarker()` / `parseMarker()` and the read-only-on-newer-version rule
 - [x] `vite-plugin-pwa` wired, manifest generated, PWA installable (manifest, service worker, and 192/512 + maskable icons all present and served; not yet confirmed with a Lighthouse run in a real browser)
 - [x] Vite dev proxy → `wrangler dev` on `:8787`; single `pnpm dev` runs both
-- [ ] Register provider apps (Google Cloud, Entra, Dropbox App Console) with the name `skysa-notes` and the callback URLs for local + prod — **operator task, not done in-repo.** `ENABLED_PROVIDERS` lets an instance run with only the providers it has registered; `webdav` needs no registration at all
+- [ ] Register provider apps (Google Cloud, Entra, Dropbox App Console) with the name `skysa-notes` and the callback URLs for local + prod — **operator task, not done in-repo.** `ENABLED_PROVIDERS` lets an instance run with only the providers it has registered (WebDAV, which would need none, is deferred — §5.4)
 - [x] Env validation (`zod`) for all provider client ids/secrets and `SECRETS_KEY`
 
 ### Phase 1 — Local-only notes (2–3 days)
@@ -602,7 +606,8 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Web: connect Google Drive — the adapter in the scheduler's provider factory (`apps/web/src/sync/providers.ts`) and Google Drive offered wherever the server enables it (`CONNECTABLE`). No `LEFT_AT_PROVIDER` entry: disconnecting revokes at Google
 - [x] API: Google storage OAuth (connect with offline access and fresh consent, an unticked Drive scope answered as `connect=partial`, refresh keeping the stored token, revoke on disconnect) in the provider registry (§6, "Storage OAuth, as built")
 
-### Phase 5 — WebDAV (1–2 days)
+### Phase 5 — WebDAV (deferred indefinitely)
+*Deferred 2026-09-17.* Not scheduled; the items stay as the record of what building it would take (§5.4). Phases 6 onward do not wait on it, and "every provider" in them means the three that exist: Google Drive, OneDrive and Dropbox.
 - [ ] `/api/webdav/*` proxy with allowlisting. It streams bytes a WebDAV server chose under this origin, where `apps/web/public/_headers` does not apply (§9): its responses need their own `X-Content-Type-Options: nosniff` and a `Content-Disposition: attachment` or `Content-Security-Policy: sandbox`, so a file is never rendered as a page of this app
 - [ ] `WebDavProvider` with sync-collection detection and PROPFIND fallback
 - [ ] Decide what `remoteId` means where it *is* the path. A move changes it, so a note cannot be followed across one by id — the engine's fallback is the path, and its `live` check (§7) leans on ids surviving a move. `tests/providers/contract.ts` already has the `stableIds` escape hatch; the engine needs the matching answer, and a rename that duplicates a note is the failure to test for.
@@ -637,7 +642,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 Only needed for instances where sign-in should be separate from storage (shared instances, users who switch providers). `storage-first` remains the default.
 - [ ] `account-first` auth: Sign in with Google and Microsoft via Arctic; `identities` table; automatic merge-by-verified-email; explicit in-session link (`?link=1`) and unlink; Settings page listing linked providers; tests for: verified-email auto-link, unverified email creates new user, identity already attached to another user is refused, last identity cannot be unlinked
 - [ ] Google and Entra registrations updated with `openid email profile` and the `/auth/login/*` redirect URIs (distinct from `/auth/connect/*`); Google sign-in button branding guidelines followed
-- [ ] Verify the `/auth/login/*` routes are not mounted in `storage-first`, and that WebDAV routes are absent from the built Worker when `webdav` is not in `ENABLED_PROVIDERS`
+- [ ] Verify the `/auth/login/*` routes are not mounted in `storage-first`, and — should WebDAV ever be built (§5.4, deferred) — that its routes are absent from the built Worker when `webdav` is not in `ENABLED_PROVIDERS`
 - [ ] Abuse controls for shared instances: per-user rate limits on token minting and connection changes, connection cap
 - [ ] Account deletion: revoke provider tokens and delete all of the user's rows in one action
 
@@ -691,7 +696,7 @@ packages/
       providers/contract.test.ts
       markdown/roundtrip.test.ts
       sync/*.test.ts
-docker/nextcloud-compose.yml  # WebDAV test target
+docker/nextcloud-compose.yml  # WebDAV test target (WebDAV deferred, §5.4)
 ```
 
 Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may import `core`. The WebDAV adapter in `core` takes a `fetch`-like function so it can point at the proxy in the browser and at the server directly in tests.
@@ -717,7 +722,7 @@ Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may impor
 ## 13. Distribution and licensing
 
 ### Repo
-One public repo, `skysa-notes`, containing everything in §11. It is self-hostable and complete: placeholders only in `wrangler.toml`, `.dev.vars.example` listing every key, no operator credentials or deployment-specific configuration in the tree. Defaults are `AlwaysAllowedEntitlementProvider`, `AUTH_MODE=storage-first`, and all four providers enabled. Anyone who needs different behavior composes it through `createApp` (§6) rather than forking.
+One public repo, `skysa-notes`, containing everything in §11. It is self-hostable and complete: placeholders only in `wrangler.toml`, `.dev.vars.example` listing every key, no operator credentials or deployment-specific configuration in the tree. Defaults are `AlwaysAllowedEntitlementProvider`, `AUTH_MODE=storage-first`, and `ENABLED_PROVIDERS` defaulting to what an operator can run without registering several apps (`dropbox`). Anyone who needs different behavior composes it through `createApp` (§6) rather than forking.
 
 ### License: AGPL-3.0 + CLA (decided; confirm final CLA text with a lawyer)
 - **AGPL-3.0** for all code. Anyone may use it, including commercially, but anyone offering a modified version as a network service must publish their modifications, so improvements made to deployed instances flow back. Standard posture for self-hostable web apps (Plausible, Cal.com, Ghost).
@@ -731,7 +736,7 @@ Also:
   - **Build- and test-time dependencies are not all in that set**, and the audit above is about what ships, not about what a contributor installs. Present exceptions, none of which reaches the bundle: `@img/sharp-libvips-*` (**LGPL-3.0-or-later**, via sharp ← miniflare ← wrangler), `lightningcss` and `lightningcss-*` (**MPL-2.0**, via Vite), `axe-core` (**MPL-2.0**, via `eslint-plugin-jsx-a11y`), `caniuse-lite` (**CC-BY-4.0**, via browserslist). Each is used unmodified as a tool, which is what those licenses are written for. Re-run this scan before publishing rather than trusting the list — it is a snapshot, not a rule.
 
 ### Self-hosting model
-A self-hoster needs: a Cloudflare account (Workers Free is sufficient indefinitely for personal use; the daily limits are unreachable by one person), their own Google/Entra/Dropbox app registrations (named `skysa-notes` so folder names match), and ~15 minutes with `docs/self-hosting.md`. Their Google app is in "Testing" (at most 100 test users, refresh tokens expiring after 7 days) until they publish it. With only non-sensitive scopes, publishing needs no verification; brand verification is optional and only shows their name and logo (`docs/google-oauth.md`). WebDAV needs no registration at all, which makes it the easiest self-host path and worth featuring in the docs.
+A self-hoster needs: a Cloudflare account (Workers Free is sufficient indefinitely for personal use; the daily limits are unreachable by one person), their own Google/Entra/Dropbox app registrations (named `skysa-notes` so folder names match), and ~15 minutes with `docs/self-hosting.md`. Their Google app is in "Testing" (at most 100 test users, refresh tokens expiring after 7 days) until they publish it. With only non-sensitive scopes, publishing needs no verification; brand verification is optional and only shows their name and logo (`docs/google-oauth.md`). Every storage provider needs its own app registration; WebDAV, which would not, is deferred (§5.4).
 
 Operators running an instance for many users should know two things, both to be documented in `docs/self-hosting.md`:
 - Workers Free hard-stops at 100k requests/day until 00:00 UTC, which would break token refresh for every user of the instance at once. Workers Paid bills per request instead, lifts the CPU limit (set `limits.cpu_ms = 50` in `wrangler.toml` to cap runaway cost), extends logs to 7 days, and enables Logpush. Capacity is not the concern: Free covers roughly 5k daily actives at ~20 Worker requests/user/day, and static assets are free and unlimited on both plans. Pricing verified 2026-09.
@@ -741,6 +746,7 @@ Operators running an instance for many users should know two things, both to be 
 
 None of these are in any phase. Listed so the reasoning isn't lost if they come up.
 
+- **WebDAV.** Deferred indefinitely (2026-09-17). The design is in §5.4, and the Phase 5 checklist in §10 is kept as a record, not scheduled.
 - **Apple sign-in.** One `IdentityProvider` adapter via Arctic. Specifics: JWT client secret minted from a `.p8` key (rotate ≤6 months), POST callback (`form_post`), user's name delivered only on first authorization, Hide-My-Email relay addresses require the explicit link path, no localhost testing, $99/yr Developer Program. Not required for a browser-installed PWA.
 - **Facebook sign-in.** One adapter via Arctic. Email not guaranteed (phone-only accounts, declined permission), so it would need an email-confirmation step. Meta App Review with privacy policy and data-deletion URL; possible Business Verification. Likely lower demand than Apple for this audience.
 - **Magic link.** An `email` identity type in `identities`, plus transactional email infrastructure (Resend/Postmark, SPF/DKIM/DMARC) and a one-time-code fallback for the PWA link-opens-in-browser problem.

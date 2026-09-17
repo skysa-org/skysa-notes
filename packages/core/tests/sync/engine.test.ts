@@ -2296,7 +2296,7 @@ describe('a push that cannot be resolved by the conflict rule', () => {
 		// A pull between queueing a move and running it rebases the note but
 		// leaves the op's own `path` behind. Invisible where `remoteId`
 		// identifies the file, and the whole address where it does not — WebDAV,
-		// where `remoteId` *is* the path (Phase 5).
+		// where `remoteId` *is* the path (deferred).
 		const entry = await remoteFile('a.md', 'one\n');
 		store.put({
 			id: 'n1',
