@@ -235,7 +235,7 @@ const parseCursor = (cursor: string): DeltaCursor => {
 /**
  * A delta item as the tree takes it, or `undefined` for the app folder itself,
  * which appears in its own feed and is the root, not an entry — and which is
- * dropped before anything else is asked of it, since it names no parent.
+ * dropped before anything else is asked of it, since it need not name a parent.
  *
  * "The same item may appear more than once in a delta feed … use the last
  * occurrence you see", which `applyItem` does. Graph for Business omits a
@@ -646,8 +646,11 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 			if (treeItem !== undefined) applyItem(page, treeItem);
 		});
 		// Graph lists "all parent items in the hierarchy" of a changed item unless
-		// asked not to (`deltaExcludeParent`), so when the round ends every folder
-		// under the app folder is in the tree or was listed in it.
+		// asked not to (`deltaExcludeParent`), so when the round ends every
+		// ancestor of what it listed is in the tree or was listed too — which is
+		// what `settlePage` asks. It does not list what is inside a folder moved
+		// in from elsewhere; `arrivals` could say which, and that waits on the
+		// live check (docs/PLAN.md §5.2).
 		const roundEnds = next === undefined;
 		const settled = settlePage(page, roundEnds);
 		const anchored =

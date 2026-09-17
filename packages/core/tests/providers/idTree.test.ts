@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	applyItem,
+	arrivals,
 	nodesOf,
 	pageFrom,
 	type Settled,
@@ -49,14 +50,16 @@ const run = (
 	from: TreeState,
 	items: readonly TreeItem[],
 	roundEnds = true
-): Settled & { next: TreeState } => {
+): Settled & { next: TreeState; arrived: string[] } => {
 	const page = pageFrom(from);
 	items.forEach((item) => {
 		applyItem(page, item);
 	});
+	const arrived = arrivals(page);
 	const settled = settlePage(page, roundEnds);
 	return {
 		...settled,
+		arrived,
 		next: { root: from.root, nodes: nodesOf(page), pending: settled.pending },
 	};
 };
@@ -120,6 +123,7 @@ describe('an id tree', () => {
 
 		expect(settled.entries).toEqual([{ path: 'Work/a.md', deleted: true, remoteId: 'a' }]);
 		expect(settled.next.nodes.map(([id]) => id)).toEqual(['f']);
+		expect(settled.pruned).toBe(1);
 	});
 
 	it('remembers where a held item was, so it is reported deleted there', () => {
@@ -159,15 +163,112 @@ describe('an id tree', () => {
 		expect(paths(settled)).toEqual(['+Work']);
 	});
 
-	it('says which folders arrived, and not ones merely renamed', () => {
-		const made = run(seeded(), [folder('g', ROOT_ID, 'New'), folder('f', ROOT_ID, 'Renamed')]);
-		expect(made.arrived).toEqual(['g']);
+	it('reports nothing for a held item it never placed, when it is deleted', () => {
+		// Held with no earlier path, then deleted: there is nowhere it was, and
+		// above all not the root.
+		const held = run(EMPTY, [file('a', 'f', 'a.md')], false);
+		const deleted = run(held.next, [gone('a')]);
 
-		// Moved out, pruned, then moved back: the feed names the folder alone, and
-		// only a listing can say what came back inside it.
-		const out = run(made.next, [folder('g', 'elsewhere', 'New')]);
-		expect(out.arrived).toEqual([]);
-		const back = run(out.next, [folder('g', ROOT_ID, 'New')]);
-		expect(back.arrived).toEqual(['g']);
+		expect(deleted.entries).toEqual([]);
+	});
+
+	it('carries a held item’s details through to the entry', () => {
+		const empty: TreeItem = {
+			id: 'a',
+			gone: false,
+			parent: 'f',
+			name: 'a.md',
+			folder: false,
+			version: 'v-a',
+			modifiedAt: 'when',
+			size: 0,
+		};
+		const held = run(EMPTY, [empty], false);
+		const placed = run(held.next, [folder('f', ROOT_ID, 'Work')]);
+
+		expect(placed.entries[0]).toEqual({
+			remoteId: 'a',
+			path: 'Work/a.md',
+			kind: 'file',
+			version: 'v-a',
+			modifiedAt: 'when',
+			size: 0,
+		});
+	});
+
+	it('survives a cycle in the tree rather than overflowing', () => {
+		const settled = run(EMPTY, [folder('x', 'y', 'X'), folder('y', 'x', 'Y')]);
+
+		expect(settled.entries).toEqual([]);
+		expect(settled.next.nodes).toEqual([]);
+
+		// A tree carried in a cursor with a cycle already in it, where asking
+		// where a deleted item *was* walks the loop.
+		const looped: TreeState = {
+			root: ROOT_ID,
+			nodes: [
+				['x', 'y', 'X', true],
+				['y', 'x', 'Y', true],
+			],
+			pending: [],
+		};
+		expect(run(looped, [gone('x')]).entries).toEqual([]);
+	});
+
+	describe('arrivals', () => {
+		it('are folders made in the page, and not files or renamed folders', () => {
+			const made = run(seeded(), [
+				folder('g', ROOT_ID, 'New'),
+				file('n', ROOT_ID, 'new.md'),
+				folder('f', ROOT_ID, 'Renamed'),
+			]);
+
+			expect(made.arrived).toEqual(['g']);
+		});
+
+		it('are only the top-most, since listing one lists what is inside', () => {
+			const made = run(EMPTY, [folder('b', 'a', 'B'), folder('a', ROOT_ID, 'A')]);
+
+			expect(made.arrived).toEqual(['a']);
+		});
+
+		it('include a folder moved back in from outside', () => {
+			// Moved out and pruned, then moved back: the feed names the folder
+			// alone, and only a listing can say what came back inside it.
+			const out = run(seeded(), [folder('f', 'elsewhere', 'Work')]);
+			expect(out.arrived).toEqual([]);
+			const back = run(out.next, [folder('f', ROOT_ID, 'Work')]);
+			expect(back.arrived).toEqual(['f']);
+		});
+
+		it('include a held folder once a later page places it, and not one moved within', () => {
+			const tree = run(EMPTY, [folder('p', ROOT_ID, 'P'), folder('q', ROOT_ID, 'Q')]).next;
+			const first = run(tree, [folder('h', 'later', 'H'), folder('q', 'p', 'Q')], false);
+			expect(first.arrived).toEqual([]);
+
+			const second = run(first.next, [folder('later', ROOT_ID, 'Later')], false);
+			expect(second.arrived).toEqual(['later']);
+			expect(second.entries.map((entry) => entry.path)).toContain('Later/H');
+		});
+
+		it('include a folder rescued from one deleted earlier in the round', () => {
+			// The tree still holds it, under a parent that is gone: nothing says
+			// what it held any more, so it is listed like any other arrival.
+			const nested = run(EMPTY, [
+				folder('a', ROOT_ID, 'A'),
+				folder('b', 'a', 'B'),
+				file('n', 'b', 'n.md'),
+			]).next;
+			const deleted = run(nested, [gone('a')], false);
+			const rescued = run(deleted.next, [folder('b', ROOT_ID, 'B')]);
+
+			expect(rescued.arrived).toEqual(['b']);
+		});
+
+		it('are asked before the round ends as well as at its end', () => {
+			const middle = run(seeded(), [folder('g', ROOT_ID, 'New')], false);
+
+			expect(middle.arrived).toEqual(['g']);
+		});
 	});
 });

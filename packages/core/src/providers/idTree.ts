@@ -40,13 +40,13 @@ export const pendingSchema = z.tuple([
 	z.string().nullable(),
 ]);
 
-export type Node = z.infer<typeof nodeSchema>;
+export type TreeRow = z.infer<typeof nodeSchema>;
 export type Held = z.infer<typeof pendingSchema>;
 
 /** What an adapter carries between pages, besides where its feed resumes. */
 export interface TreeState {
 	root: string;
-	nodes: readonly Node[];
+	nodes: readonly TreeRow[];
 	pending: readonly Held[];
 }
 
@@ -188,8 +188,6 @@ interface Decided {
 	pending?: Held;
 	/** A live item the round ended without placing. */
 	unplaced?: boolean;
-	/** A folder placed by this page that was not placed before it. */
-	arrived?: string;
 }
 
 export interface Settled {
@@ -197,13 +195,6 @@ export interface Settled {
 	pending: Held[];
 	/** Items taken out of the tree because they can no longer be placed. */
 	pruned: number;
-	/**
-	 * Folders this page placed that the tree could not place before it — made
-	 * here, or moved back in from outside. A feed that reports a moved folder
-	 * alone says nothing of what is inside one that arrives from elsewhere; an
-	 * adapter that can list it should.
-	 */
-	arrived: string[];
 }
 
 const gone = (path: string, id: string): ChangeEntry => ({ path, deleted: true, remoteId: id });
@@ -231,12 +222,18 @@ const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry | und
 
 /**
  * Turns an applied page into entries. `roundEnds` is the caller's word that the
- * feed has said everything it will say about this round of changes — its last
- * page — and that every folder under the root is either in the tree already or
- * was listed in the round.
+ * feed has said everything it will say about this round — its last page — and
+ * that every *ancestor* of every item the round listed is in the tree or was
+ * listed too. That is weaker than "every folder under the root is known", which
+ * no feed promises: Graph lists the parents of changed items and nothing else
+ * (a folder moved in from elsewhere arrives without its subfolders), and Google
+ * Drive lists no parents at all, so its adapter has to put the contents of an
+ * arrived folder into the page itself (`arrivals`). An item whose ancestors the
+ * caller has not supplied is read as having left the root.
  *
- * - A deletion is reported at the path the item had before the page — Graph for
- *   Business does not even send the name. An id the tree never placed is
+ * - A deletion is reported at the path the item had before the page, since a
+ *   feed need not name a deleted item (Graph for Business does not; a Drive
+ *   `removed` change has no file at all). An id the tree never placed is
  *   somebody else's history (a cold start meeting a tombstone) and is dropped.
  * - A live item that can be placed is reported where it now is.
  * - One that cannot is held until the round ends: its parent may be on a later
@@ -260,11 +257,7 @@ export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 		const path = pathIn(page.nodes, page.root, change.id);
 		if (path !== undefined) {
 			const entry = toLive(page, change, path);
-			const arrived = entry?.kind === 'folder' && was === undefined ? change.id : undefined;
-			return {
-				...(entry === undefined ? {} : { entry }),
-				...(arrived === undefined ? {} : { arrived }),
-			};
+			return entry === undefined ? {} : { entry };
 		}
 		if (!roundEnds) {
 			const held: Held = [
@@ -289,10 +282,42 @@ export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 		entries: decided.flatMap((item) => (item.entry === undefined ? [] : [item.entry])),
 		pending: decided.flatMap((item) => (item.pending === undefined ? [] : [item.pending])),
 		pruned: unplaced.length + decided.filter((item) => item.unplaced === true).length,
-		arrived: decided.flatMap((item) => (item.arrived === undefined ? [] : [item.arrived])),
 	};
 };
 
+/**
+ * Folders this page places that were not placed before it: made in the round,
+ * moved back in from outside the root, or rescued from a folder deleted earlier
+ * in the round. Asked after every item is applied and before `settlePage`.
+ *
+ * A feed that reports a moved folder alone says nothing of what is inside one
+ * that arrives from elsewhere — its subfolders included, which the tree pruned
+ * when it left — so an adapter whose feed does not list them lists each of
+ * these *recursively* and applies what it finds to the same page. Only the
+ * top-most are returned: one inside another is covered by listing the outer.
+ * On a round from nothing every folder arrives; a scan lists everything anyway,
+ * so an adapter skips this there.
+ */
+export const arrivals = (page: Page): string[] => {
+	const arrived = new Set(
+		[...page.changes.values()]
+			.filter(
+				(change) =>
+					change.kind === 'live' &&
+					page.nodes.get(change.id)?.folder === true &&
+					pathIn(page.nodes, page.root, change.id) !== undefined &&
+					wasOf(page, change.id) === undefined
+			)
+			.map((change) => change.id)
+	);
+	const underAnother = (id: string, depth = 0): boolean => {
+		const parent = page.nodes.get(id)?.parent;
+		if (parent === undefined || depth > page.nodes.size) return false;
+		return arrived.has(parent) || underAnother(parent, depth + 1);
+	};
+	return [...arrived].filter((id) => !underAnother(id));
+};
+
 /** The tree as a page leaves it, in the form a cursor stores. */
-export const nodesOf = (page: Page): Node[] =>
+export const nodesOf = (page: Page): TreeRow[] =>
 	[...page.nodes].map(([id, node]) => [id, node.parent, node.name, node.folder]);
