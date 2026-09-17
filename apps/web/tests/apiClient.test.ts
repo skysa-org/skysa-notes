@@ -75,6 +75,19 @@ describe('the API client', () => {
 		await expect(createApiClient({ fetch }).connections()).rejects.toBeInstanceOf(ApiError);
 	});
 
+	it('gives up on a call that never answers', async () => {
+		const hanging = (_input: string, init?: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				init?.signal?.addEventListener('abort', () => {
+					reject(init.signal?.reason);
+				});
+			});
+
+		await expect(
+			createApiClient({ fetch: hanging, timeoutMs: 10 }).connections()
+		).rejects.toThrow();
+	});
+
 	it('answers a refusal the app handles as a result, not a throw', async () => {
 		const { fetch } = answering(401, { error: 'sign_in_required' });
 

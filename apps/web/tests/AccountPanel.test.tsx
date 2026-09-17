@@ -276,6 +276,36 @@ describe('AccountPanel, with an account connected', () => {
 		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Disconnect…' }));
 	});
 
+	it('leaves focus alone when the user has moved on while a disconnect was answered', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		const answer = new Map<'fail', () => void>();
+		renderPanel(
+			clientWith({
+				connections: () => Promise.resolve({ ok: true, value: [dropbox] }),
+				disconnect: () =>
+					new Promise((_resolve, reject) => {
+						answer.set('fail', () => {
+							reject(new TypeError('offline'));
+						});
+					}),
+			}),
+			db
+		);
+		const elsewhere = document.createElement('textarea');
+		document.body.append(elsewhere);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+		elsewhere.focus();
+		answer.get('fail')?.();
+
+		expect(await screen.findByRole('alert')).toBeTruthy();
+		expect(document.activeElement).toBe(elsewhere);
+		elsewhere.remove();
+	});
+
 	it('tells a server that failed apart from one that cannot be reached', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();

@@ -67,6 +67,13 @@ export interface ApiClientOptions {
 	fetch?: FetchLike;
 	/** Prefix for every route. The Worker serves the app and `/api` from one origin. */
 	base?: string;
+	/**
+	 * How long a call may take before it counts as unreachable. Nothing else
+	 * bounds it: the service worker does not, and a disconnect waiting on a hung
+	 * request would keep the panel's buttons disabled until the browser gives up.
+	 * Long enough for a disconnect, which refreshes and revokes at the provider.
+	 */
+	timeoutMs?: number;
 }
 
 /** The API refused for a reason the app answers in words, not as a fault. */
@@ -106,6 +113,7 @@ export interface ApiClient {
 
 export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 	const base = options.base ?? '/api';
+	const timeoutMs = options.timeoutMs ?? 30_000;
 	const doFetch: FetchLike = (input, init) => (options.fetch ?? globalThis.fetch)(input, init);
 
 	const call = async <T>(
@@ -119,6 +127,7 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 			// because the session cookie is the whole of the authentication.
 			credentials: 'same-origin',
 			headers: { accept: 'application/json', ...init.headers },
+			signal: AbortSignal.timeout(timeoutMs),
 		});
 		const body: unknown = await response.json().catch(() => undefined);
 

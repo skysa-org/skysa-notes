@@ -110,9 +110,18 @@ const Connected = ({ client, database, bound, config, account, returnTo }: Conne
 	const focusNext = useRef<'cancel' | 'open' | null>(null);
 	const cancelButton = useRef<HTMLButtonElement>(null);
 	const openButton = useRef<HTMLButtonElement>(null);
+	const panel = useRef<HTMLElement>(null);
 	useEffect(() => {
 		const target = focusNext.current === 'cancel' ? cancelButton : openButton;
-		if (focusNext.current !== null) target.current?.focus();
+		// Only focus that is still here to move. A disconnect can take seconds
+		// to answer, and a user who went back to a note meanwhile keeps typing
+		// into the note, not into a button.
+		const focused = document.activeElement;
+		const here =
+			focused === null ||
+			focused === document.body ||
+			panel.current?.contains(focused) === true;
+		if (focusNext.current !== null && here) target.current?.focus();
 		focusNext.current = null;
 	}, [confirming]);
 	const confirm = (next: boolean) => {
@@ -146,7 +155,7 @@ const Connected = ({ client, database, bound, config, account, returnTo }: Conne
 	};
 
 	return (
-		<section className="account" aria-label="Storage">
+		<section ref={panel} className="account" aria-label="Storage">
 			<p>
 				Syncing with {label}
 				{displayName !== null && <span className="muted"> · {displayName}</span>}
