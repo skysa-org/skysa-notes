@@ -130,6 +130,8 @@ interface ChangeList {
 interface DriveFailure {
 	status: number;
 	reasons: readonly string[];
+	/** Which parameter an error is about, where Drive says. */
+	locations: readonly string[];
 	message: string;
 }
 
@@ -263,18 +265,31 @@ const parseCursor = (cursor: string): DriveCursor => {
 };
 
 /**
- * On a token we stored, Drive's answer to one it cannot use is not documented;
- * a 400, 404 or 410 there is read as that, since retrying it would never end.
- * On a round from nothing they are failures like any other.
+ * On a token we stored, Drive's answer to one it cannot use is not documented.
+ * A 404 or 410 is read as that, and so is a 400 that names the page token —
+ * any other 400 is a mistake in the request, and resetting over it would rescan
+ * everything on every sync. On a round from nothing they are failures like any
+ * other, since starting again would ask the same thing.
  */
 const isDeadToken = (failure: DriveFailure, stored: boolean): boolean =>
-	stored && [400, 404, 410].includes(failure.status);
+	stored &&
+	([404, 410].includes(failure.status) ||
+		(failure.status === 400 && failure.locations.includes('pageToken')));
+
+/** Placed items sharing a folder and a name. */
+interface Clash {
+	parent: string;
+	name: string;
+	ids: readonly string[];
+}
 
 interface Fetched {
 	items: TreeItem[];
 	roundEnds: boolean;
 	/** The token the next page is fetched with. */
 	next: string;
+	/** The page says the app folder was trashed, or is out of reach. */
+	rootGone: boolean;
 }
 
 export const createGDriveProvider = (options: GDriveProviderOptions): StorageProvider => {
@@ -296,12 +311,15 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const errors = Array.isArray(parsed.error?.errors)
 			? (parsed.error.errors as unknown[])
 			: [];
+		const field = (key: 'reason' | 'location') =>
+			errors.flatMap((error) => {
+				const value = (error as Record<string, unknown> | null)?.[key];
+				return typeof value === 'string' ? [value] : [];
+			});
 		return {
 			status: response.status,
-			reasons: errors.flatMap((error) => {
-				const reason = (error as { reason?: unknown } | null)?.reason;
-				return typeof reason === 'string' ? [reason] : [];
-			}),
+			reasons: field('reason'),
+			locations: field('location'),
 			message: typeof parsed.error?.message === 'string' ? parsed.error.message : text,
 		};
 	};
@@ -387,67 +405,137 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			)
 		).filter((file) => file.name === name);
 
-	const removePermanently = async (id: string): Promise<void> => {
-		const result = await attempt<unknown>('DELETE', `${FILES}/${encodeURIComponent(id)}`);
+	/**
+	 * To the trash rather than gone for good, even for something this adapter
+	 * made a moment ago: a third device may already have found it and written
+	 * into it, and the trash is somewhere the user can get that back from.
+	 */
+	const trash = async (id: string): Promise<void> => {
+		const result = await attempt<unknown>('PATCH', fileUrl(id), json({ trashed: true }));
 		if (result.ok || result.failure.status === 404) return;
 		raise(result.failure);
 	};
 
 	/**
 	 * After a create, the earliest item of that name where it was made: ours, or
-	 * one another device made in the same moment — in which case ours is deleted
-	 * outright (it is new, and nobody else has seen it), so the two devices agree
-	 * on one. Ours is counted even if the search does not list it yet.
+	 * one another device made in the same moment — in which case ours goes to the
+	 * trash, so the two devices agree on one. Ours is counted even if the search
+	 * does not list it yet.
 	 */
 	const settleCreate = async (parentId: string, made: DriveFile): Promise<DriveFile> => {
 		const winner = earliest([...(await named(parentId, made.name ?? '')), made]) ?? made;
 		if (winner.id === made.id) return made;
-		await removePermanently(made.id ?? '');
+		await trash(made.id ?? '');
 		return winner;
 	};
 
-	const findRoot = async (): Promise<DriveFile | undefined> =>
-		earliest(
+	/** Every folder carrying the app's tag and not in the trash, canonical first. */
+	const taggedRoots = async (): Promise<DriveFile[]> =>
+		byAge(
 			await search(
 				`appProperties has { key=${literal(ROOT_KEY)} and value=${literal(ROOT_VALUE)} } and mimeType = ${literal(FOLDER)} and trashed = false`
 			)
 		);
 
+	const idOfRoot = (root: DriveFile): string => {
+		if (root.id === undefined || root.id === '') {
+			throw new Error('gdrive returned an app folder with no id');
+		}
+		rootBox.set('id', root.id);
+		return root.id;
+	};
+
 	/**
-	 * Found by its tag, never its name, so a user who renames or moves the folder
-	 * keeps their notes. Made at the top of My Drive when there is none — the
-	 * first sync, or the user put the folder in the trash.
+	 * The app folder's id, found by its tag — never its name, so a user who
+	 * renames or moves the folder keeps their notes. **Never made here**: this is
+	 * what every read and write walks from, and a search that misses the folder
+	 * for a moment must not leave a second one behind. Only `establishRoot` makes
+	 * one.
 	 */
 	const rootId = async (): Promise<string> => {
 		const cached = rootBox.get('id');
 		if (cached !== undefined) return cached;
-		const found = await findRoot();
-		const made =
-			found ??
-			(await call<DriveFile>(
-				'POST',
-				`${FILES}?fields=${FIELDS}`,
-				json({
-					name: APP_FOLDER_NAME,
-					mimeType: FOLDER,
-					parents: ['root'],
-					appProperties: { [ROOT_KEY]: ROOT_VALUE },
-				})
-			));
-		const winner = found ?? (await settleRoot(made));
-		if (winner.id === undefined || winner.id === '') {
-			throw new Error('gdrive returned an app folder with no id');
-		}
-		rootBox.set('id', winner.id);
-		return winner.id;
+		const [found] = await taggedRoots();
+		if (found === undefined) throw new Error('gdrive app folder not found');
+		return idOfRoot(found);
 	};
 
-	/** Two devices connecting at once each make a folder; both settle on the earliest. */
-	const settleRoot = async (made: DriveFile): Promise<DriveFile> => {
-		const winner =
-			earliest([...(await findRoot().then((root) => (root ? [root] : []))), made]) ?? made;
-		if (winner.id !== made.id) await removePermanently(made.id ?? '');
-		return winner;
+	/**
+	 * Where a connection starts, and where a reset starts again: the canonical
+	 * app folder, made at the top of My Drive when there is none (the first
+	 * connect, or the user put it in the trash).
+	 *
+	 * Any other tagged folder is folded into it — what is inside moved across,
+	 * and the empty folder put in the trash. There can be more than one: two
+	 * devices connecting at once each make one, and a folder the user restores
+	 * from the trash comes back beside the one made while it was gone, holding
+	 * notes nobody would otherwise read again. Names that meet in the move are
+	 * separated by the scan that follows, as any duplicate is.
+	 */
+	const establishRoot = async (): Promise<string> => {
+		rootBox.delete('id');
+		const found = await taggedRoots();
+		const made =
+			found.length > 0
+				? []
+				: [
+						await call<DriveFile>(
+							'POST',
+							`${FILES}?fields=${FIELDS}`,
+							json({
+								name: APP_FOLDER_NAME,
+								mimeType: FOLDER,
+								parents: ['root'],
+								appProperties: { [ROOT_KEY]: ROOT_VALUE },
+							})
+						),
+					];
+		const roots = made.length === 0 ? found : byAge([...(await taggedRoots()), ...made]);
+		const [canonical, ...others] = roots.filter(
+			(root, at) => roots.findIndex((other) => other.id === root.id) === at
+		);
+		if (canonical === undefined) throw new Error('gdrive app folder not found');
+		const id = idOfRoot(canonical);
+		await others.reduce(async (done, other) => {
+			await done;
+			await foldInto(id, other.id ?? '');
+		}, Promise.resolve());
+		return id;
+	};
+
+	const foldInto = async (rootIdNow: string, otherId: string): Promise<void> => {
+		const children = await childrenOf(otherId);
+		await children.reduce(async (done, child) => {
+			await done;
+			await call<DriveFile>(
+				'PATCH',
+				fileUrl(child.id ?? '', { addParents: rootIdNow, removeParents: otherId }),
+				json({})
+			);
+		}, Promise.resolve());
+		await trash(otherId);
+	};
+
+	/**
+	 * A stored cursor names the folder it was read against, and that is still
+	 * the one if nothing earlier carries the tag and it is not gone. Asked by
+	 * search first, then — when the search does not list it, which a lagging
+	 * index can do — of the folder itself.
+	 */
+	const confirmRoot = async (expected: string): Promise<void> => {
+		rootBox.delete('id');
+		const [canonical] = await taggedRoots();
+		if (canonical !== undefined && canonical.id !== expected) {
+			throw new CursorResetError('gdrive app folder is not the one this cursor was for');
+		}
+		if (canonical === undefined) {
+			const result = await attempt<DriveFile>('GET', fileUrl(expected));
+			if (!result.ok && result.failure.status !== 404) raise(result.failure);
+			if (!result.ok || result.value.trashed === true) {
+				throw new CursorResetError('gdrive app folder is gone');
+			}
+		}
+		rootBox.set('id', expected);
 	};
 
 	/**
@@ -554,8 +642,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	};
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
-		rootBox.delete('id');
-		const id = await rootId();
+		const id = await establishRoot();
 		if ((await itemAt(MARKER_FILE)) !== undefined) return { rootId: id };
 
 		const marker = buildMarker({
@@ -676,16 +763,13 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const id = await idOf(entry);
 		// Idempotent: something already gone is the outcome the caller wanted.
 		if (id === undefined) return;
-		const result = await attempt<unknown>('PATCH', fileUrl(id), json({ trashed: true }));
-		if (result.ok || result.failure.status === 404) return;
-		raise(result.failure, entry.path);
+		await trash(id);
 	};
 
 	// ----------------------------------------------------------------- changes
 
 	const freshRound = async (): Promise<DriveCursor> => {
-		rootBox.delete('id');
-		const root = await rootId();
+		const root = await establishRoot();
 		const { startPageToken } = await call<{ startPageToken?: string }>(
 			'GET',
 			`${CHANGES}/startPageToken`
@@ -722,6 +806,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			items: (result.value.files ?? []).map(treeItemOf),
 			roundEnds: next === undefined,
 			next: next ?? from.start,
+			// A scan lists only what is not in the trash; a folder trashed
+			// meanwhile is found by the next round.
+			rootGone: false,
 		};
 	};
 
@@ -742,10 +829,19 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		if (next === undefined || next === '') {
 			throw new Error('gdrive changes sent neither a next nor a new start token');
 		}
+		const changes = result.value.changes ?? [];
 		return {
-			items: (result.value.changes ?? []).flatMap(changeItem),
+			items: changes.flatMap(changeItem),
 			roundEnds: result.value.nextPageToken === undefined,
 			next,
+			// From what Drive sent, not from the tree's reading of it, which also
+			// takes a name no path can hold as gone: the folder is the root
+			// whatever the user calls it.
+			rootGone: changes.some(
+				(change) =>
+					(change.fileId ?? change.file?.id) === from.root &&
+					(change.removed === true || change.file?.trashed === true)
+			),
 		};
 	};
 
@@ -778,8 +874,25 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * aside locally on every pull, alternately, and an edit to the one moved
 	 * aside is written to a path with no file behind it for ever.
 	 */
-	const separate = async (page: Page, parent: string, name: string): Promise<void> => {
-		const present = byAge(await named(parent, name));
+	const separate = async (page: Page, { parent, name, ids }: Clash): Promise<void> => {
+		const found = await named(parent, name);
+		// The feed can announce a file before the search index lists it, and a
+		// clash passed over now is not asked about again until one of them next
+		// changes. So what the search leaves out is asked of each file itself.
+		const confirmed = await Promise.all(
+			ids
+				.filter((id) => !found.some((file) => file.id === id))
+				.map(async (id) => {
+					const result = await attempt<DriveFile>('GET', fileUrl(id));
+					if (!result.ok && result.failure.status === 404) return [];
+					if (!result.ok) return raise(result.failure);
+					const file = result.value;
+					const here =
+						file.trashed !== true && file.name === name && file.parents?.[0] === parent;
+					return here ? [file] : [];
+				})
+		);
+		const present = byAge([...found, ...confirmed.flat()]);
 		if (present.length < 2) return;
 		const taken = (await childrenOf(parent)).map((child) => child.name ?? '');
 		await present.slice(1).reduce<Promise<readonly string[]>>(async (chosen, other) => {
@@ -799,7 +912,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	};
 
 	/** Groups of placed items sharing a folder and a name, where this page touched one. */
-	const clashes = (page: Page): Array<{ parent: string; name: string }> => {
+	const clashes = (page: Page): Clash[] => {
 		const groups = new Map<string, { parent: string; name: string; ids: string[] }>();
 		page.nodes.forEach((node, id) => {
 			const key = `${node.parent}/${node.name}`;
@@ -809,25 +922,23 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		return [...groups.values()]
 			.filter((group) => group.ids.length > 1)
 			.filter((group) => group.ids.some((id) => page.changes.has(id)))
-			.filter((group) => group.ids.filter((id) => pathOf(page, id) !== undefined).length > 1)
-			.map(({ parent, name }) => ({ parent, name }));
+			.map((group) => ({
+				...group,
+				ids: group.ids.filter((id) => pathOf(page, id) !== undefined),
+			}))
+			.filter((group) => group.ids.length > 1);
 	};
 
 	const changes = async (cursor?: string): Promise<ChangeSet> => {
 		const stored = cursor !== undefined && cursor !== '';
 		const from = stored ? parseCursor(cursor) : await freshRound();
-		if (stored) {
-			rootBox.delete('id');
-			if ((await rootId()) !== from.root) {
-				throw new CursorResetError('gdrive app folder is not the one this cursor was for');
-			}
-		}
+		if (stored) await confirmRoot(from.root);
 
 		const fetched =
 			from.phase === 'scan' ? await scanPage(from, stored) : await feedPage(from, stored);
 		// The app folder itself in the trash, or out of reach: nothing under it
 		// can be placed, and the next round has to find or make another.
-		if (fetched.items.some((item) => item.id === from.root && item.gone)) {
+		if (fetched.rootGone) {
 			rootBox.delete('id');
 			throw new CursorResetError('gdrive app folder is gone');
 		}
@@ -843,9 +954,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 				await listInto(page, id, 0);
 			}, Promise.resolve());
 		}
-		await clashes(page).reduce(async (done, { parent, name }) => {
+		await clashes(page).reduce(async (done, clash) => {
 			await done;
-			await separate(page, parent, name);
+			await separate(page, clash);
 		}, Promise.resolve());
 
 		// Drive lists no parents, so a round's end means only what `settlePage`

@@ -116,6 +116,8 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	const trashed = new Map<string, DriveFile>();
 	/** Gone for good, by `DELETE`: the feed says `removed`. */
 	const removed = new Set<string>();
+	/** What was inside a folder put in the trash, which the feed does not name. */
+	const silenced = new Set<string>();
 
 	const tick = () => {
 		counter += 1;
@@ -190,6 +192,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		for (const [id] of [...seen]) {
 			if (live.has(id)) continue;
 			seen.delete(id);
+			if (silenced.delete(id)) continue;
 			changedAt.set(id, next);
 			changed = true;
 		}
@@ -297,6 +300,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 			.filter((each) => each.path === entry.path || each.path.startsWith(`${entry.path}/`))
 			.forEach((each) => {
 				trashed.set(each.remoteId, { ...fileOf(each), trashed: true });
+				if (each.path !== entry.path) silenced.add(each.remoteId);
 			});
 		await backing.delete(entry);
 	};
@@ -364,10 +368,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 					return { changeType: 'file', fileId, removed: false, file: binned };
 				}
 				return { changeType: 'file', fileId, removed: true };
-			})
-			// Drive does not list what was inside a trashed folder; neither does
-			// the fake, which reports only the folder.
-			.filter((change) => change.removed || change.file !== undefined);
+			});
 		const offset = Number(match[3] ?? 0);
 		const slice = changes.slice(offset, offset + pageSize);
 		const next = offset + slice.length;

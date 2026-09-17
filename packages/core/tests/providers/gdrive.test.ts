@@ -12,6 +12,8 @@ import {
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFilename, conflictFolderName } from '../../src/sync/conflicts.js';
+import { createSyncEngine } from '../../src/sync/engine.js';
+import { createMemoryStore } from '../sync/memoryStore.js';
 import { drainChanges } from './contract.js';
 import { createGDriveStub, STUB_ROOT_ID } from './gdriveStub.js';
 
@@ -41,9 +43,15 @@ const stubbed = (options: Parameters<typeof createGDriveStub>[0] = {}) => {
 	return { stub, provider: over(stub.fetch) };
 };
 
-const driveError = (status: number, reason: string) =>
+const driveError = (status: number, reason: string, location?: string) =>
 	new Response(
-		JSON.stringify({ error: { code: status, message: reason, errors: [{ reason }] } }),
+		JSON.stringify({
+			error: {
+				code: status,
+				message: reason,
+				errors: [{ reason, ...(location === undefined ? {} : { location }) }],
+			},
+		}),
 		{
 			status,
 		}
@@ -91,7 +99,11 @@ const driveWorld = () => {
 	const feed: { fileId: string; removed: boolean; file?: WorldFile }[] = [];
 	const seen: Seen[] = [];
 	const clock = { at: 0 };
-	const hooks: { intercept?: (request: Seen) => Response | undefined } = {};
+	const hooks: {
+		intercept?: (request: Seen) => Response | undefined;
+		/** Items per page, for `files.list` and `changes.list` alike. */
+		pageSize?: number;
+	} = {};
 
 	const stamp = () => {
 		clock.at += 1;
@@ -174,14 +186,29 @@ const driveWorld = () => {
 
 	const changeList = (url: URL): Response => {
 		const from = Number(url.searchParams.get('pageToken'));
-		if (!Number.isInteger(from) || from > feed.length) return driveError(400, 'invalid');
+		if (!Number.isInteger(from) || from > feed.length) {
+			return driveError(400, 'invalid', 'pageToken');
+		}
+		const until = Math.min(feed.length, from + (hooks.pageSize ?? feed.length));
 		return json({
 			changes: feed
-				.slice(from)
+				.slice(from, until)
 				.map((change) =>
 					change.file === undefined ? change : { ...change, file: shown(change.file) }
 				),
-			newStartPageToken: String(feed.length),
+			...(until < feed.length
+				? { nextPageToken: String(until) }
+				: { newStartPageToken: String(feed.length) }),
+		});
+	};
+
+	const fileList = (url: URL): Response => {
+		const all = search(url.searchParams.get('q') ?? '').map(shown);
+		const from = Number(url.searchParams.get('pageToken') ?? 0);
+		const until = Math.min(all.length, from + (hooks.pageSize ?? all.length));
+		return json({
+			files: all.slice(from, until),
+			...(until < all.length ? { nextPageToken: String(until) } : {}),
 		});
 	};
 
@@ -231,9 +258,7 @@ const driveWorld = () => {
 			return json({ startPageToken: String(feed.length) });
 		}
 		if (at === 'GET /drive/v3/changes') return changeList(url);
-		if (at === 'GET /drive/v3/files') {
-			return json({ files: search(url.searchParams.get('q') ?? '').map(shown) });
-		}
+		if (at === 'GET /drive/v3/files') return fileList(url);
 		if (at === 'POST /drive/v3/files') return create(body, false);
 		if (at === 'POST /upload/drive/v3/files') return create(body, true);
 		const media = /^PATCH \/upload\/drive\/v3\/files\/(.+)$/.exec(at);
@@ -263,7 +288,19 @@ const driveWorld = () => {
 	});
 	add({ id: 'marker', name: MARKER_FILE, parent: root.id, content: '{}' });
 
-	return { files, feed, seen, hooks, add, patch, destroy, find, root, provider: over(doFetch) };
+	return {
+		files,
+		feed,
+		seen,
+		hooks,
+		add,
+		patch,
+		destroy,
+		find,
+		root,
+		doFetch,
+		provider: over(doFetch),
+	};
 };
 
 describe('requests', () => {
@@ -360,7 +397,7 @@ describe('the app folder', () => {
 		expect(posts[1]?.url).toContain('/upload/drive/v3/files?uploadType=multipart');
 	});
 
-	it('made by two devices at once is settled on the earlier, and ours is deleted', async () => {
+	it('made by two devices at once is settled on the earlier, and ours is trashed', async () => {
 		const world = driveWorld();
 		world.destroy(world.root.id);
 		world.destroy('marker');
@@ -378,11 +415,11 @@ describe('the app folder', () => {
 		};
 
 		expect(await world.provider.ensureRoot()).toEqual({ rootId: 'theirs' });
-		const deletes = world.seen.filter((r) => r.method === 'DELETE');
-		expect(deletes.map((r) => r.url.pathname)).toEqual(['/drive/v3/files/made-2']);
-		expect(world.files.filter((file) => file.appProperties?.notesapp === 'root')).toHaveLength(
-			1
-		);
+		expect(world.seen.some((r) => r.method === 'DELETE')).toBe(false);
+		expect(world.find('made-2')?.trashed).toBe(true);
+		expect(
+			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+		).toHaveLength(1);
 	});
 
 	it('in the trash resets the cursor, and the next round makes another', async () => {
@@ -430,6 +467,90 @@ describe('the app folder', () => {
 	});
 });
 
+describe('the app folder, from one sync to the next', () => {
+	it('keeps its notes under any name the user gives it, one no path could hold included', async () => {
+		const world = driveWorld();
+		world.add({ id: 'a', name: 'a.md', parent: world.root.id });
+		const { cursor } = await drainChanges(world.provider);
+		world.patch(world.root.id, { name: 'Notes 2025/2026' });
+		world.patch('a', { headRevisionId: 'rev-a-2' });
+
+		const { entries } = await drainChanges(world.provider, cursor);
+		expect(
+			entries.map((entry) => [entry.path, entry.deleted === true ? 'gone' : entry.version])
+		).toEqual([['a.md', 'rev-a-2']]);
+		expect(livePaths((await drainChanges(world.provider)).entries).sort()).toEqual([
+			MARKER_FILE,
+			'a.md',
+		]);
+	});
+
+	it('is never made by a pull or a write, however the search answers', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+				? new Response(JSON.stringify({ files: [] }))
+				: undefined;
+
+		await drainChanges(world.provider, cursor);
+		await expect(over(world.doFetch).write('b.md', 'x', {})).rejects.toThrow(/not found/);
+		expect(
+			world.seen.some(
+				(r) => r.method === 'POST' && JSON.stringify(r.body).includes('notesapp')
+			)
+		).toBe(false);
+		expect(world.files.filter((file) => file.mimeType === FOLDER)).toHaveLength(1);
+	});
+
+	it('is found gone before the feed says so, without writing into the trash', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.patch(world.root.id, { trashed: true });
+		world.feed.pop();
+
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+	});
+
+	it('trashed, written around, and restored keeps every note it held', async () => {
+		const world = driveWorld();
+		world.add({ id: 'a', name: 'a.md', parent: world.root.id, content: 'A' });
+		const store = createMemoryStore();
+		const engine = createSyncEngine({ provider: world.provider, store, now: () => AT });
+		expect((await engine.sync()).status).toBe('ok');
+
+		// Into the trash; the next rounds make another folder and write there.
+		world.patch(world.root.id, { trashed: true });
+		expect((await engine.sync()).status).toBe('ok');
+		store.put({ id: 'b', path: 'b.md', content: 'written meanwhile', dirty: true });
+		store.queue({ op: 'write', noteId: 'b', path: 'b.md' });
+		expect((await engine.sync()).status).toBe('ok');
+
+		// Back out of the trash: it is the earlier folder, so it is the one, and
+		// what was written into the other is moved into it.
+		world.patch(world.root.id, { trashed: false });
+		expect((await engine.sync()).status).toBe('ok');
+		expect((await engine.sync()).status).toBe('ok');
+
+		expect(
+			store
+				.notes()
+				.map((note) => [note.path, note.content])
+				.sort()
+		).toEqual([
+			['a.md', 'A'],
+			['b.md', 'written meanwhile'],
+		]);
+		const b = world.files.find((file) => file.name === 'b.md');
+		expect(b?.parents).toEqual([world.root.id]);
+		expect(
+			world.files
+				.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+				.map((file) => file.id)
+		).toEqual([world.root.id]);
+	});
+});
+
 describe('creating', () => {
 	it('uploads the bytes exactly, with no newline added, as markdown in the right folder', async () => {
 		const world = driveWorld();
@@ -461,7 +582,7 @@ describe('creating', () => {
 		expect(world.seen.some((r) => r.method === 'POST')).toBe(false);
 	});
 
-	it('that loses a race to another device deletes its own file and reports theirs', async () => {
+	it('that loses a race to another device trashes its own file and reports theirs', async () => {
 		const world = driveWorld();
 		// Theirs is made first, but only becomes visible after our upload.
 		world.hooks.intercept = (request) => {
@@ -484,9 +605,12 @@ describe('creating', () => {
 			remoteId: 'theirs',
 			path: 'a.md',
 		});
-		expect(world.files.filter((file) => file.name === 'a.md').map((file) => file.id)).toEqual([
-			'theirs',
-		]);
+		expect(
+			world.files
+				.filter((file) => file.name === 'a.md' && !file.trashed)
+				.map((file) => file.id)
+		).toEqual(['theirs']);
+		expect(world.seen.some((r) => r.method === 'DELETE')).toBe(false);
 	});
 
 	it('that wins the race keeps its file, and leaves the later one to be separated', async () => {
@@ -589,6 +713,23 @@ describe('updating', () => {
 });
 
 describe('moving and deleting', () => {
+	it('of a folder is reported as the folder alone, as Drive reports it', async () => {
+		// What the contract suite's stub does, checked here: the feed names the
+		// trashed folder and not what was inside it, and the tree has to cope.
+		const { provider } = stubbed();
+		await provider.ensureRoot();
+		await provider.createFolder('Work');
+		await provider.write('Work/a.md', 'x', {});
+		const { cursor } = await drainChanges(provider);
+
+		await provider.delete({ remoteId: '', path: 'Work' });
+		const { entries } = await drainChanges(provider, cursor);
+
+		expect(entries.map((entry) => [entry.path, entry.deleted === true])).toEqual([
+			['Work', true],
+		]);
+	});
+
 	it('moves by id, changing parents only when the folder changes, and keeps the revision', async () => {
 		const world = driveWorld();
 		world.add({ id: 'work', name: 'Work', parent: world.root.id, mimeType: FOLDER });
@@ -631,6 +772,89 @@ describe('changes', () => {
 		const stale = JSON.stringify({ ...JSON.parse(cursor), token: '999999' });
 
 		await expect(world.provider.changes(stale)).rejects.toThrow(CursorResetError);
+	});
+
+	it('do not reset over a 400 about anything but the page token, or a rate limit', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		const answers = [
+			driveError(400, 'badRequest', 'fields'),
+			driveError(403, 'userRateLimitExceeded'),
+			driveError(429, 'rateLimitExceeded'),
+		];
+		await answers.reduce(async (done, answer) => {
+			await done;
+			world.hooks.intercept = (request) =>
+				request.url.pathname === '/drive/v3/changes' ? answer : undefined;
+			const error = await world.provider.changes(cursor).catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(CursorResetError);
+		}, Promise.resolve());
+	});
+
+	it('are read across pages: duplicates and arrivals split between them come out whole', async () => {
+		const world = driveWorld();
+		world.add({
+			id: 'later',
+			name: 'a.md',
+			parent: world.root.id,
+			createdTime: '2026-02-01T00:00:00Z',
+			content: 'L',
+		});
+		world.add({
+			id: 'earlier',
+			name: 'a.md',
+			parent: world.root.id,
+			createdTime: '2026-01-01T00:00:00Z',
+			content: 'E',
+		});
+		world.add({ id: 'out', name: 'Archive', parent: 'my-drive', mimeType: FOLDER });
+		world.add({ id: 'old', name: 'old.md', parent: 'out', content: 'O' });
+		world.hooks.pageSize = 1;
+		const store = createMemoryStore();
+		const engine = createSyncEngine({ provider: world.provider, store, now: () => AT });
+
+		expect((await engine.sync()).status).toBe('ok');
+		const renamed = conflictFilename('a.md', AT, [MARKER_FILE, 'a.md', 'a.md']);
+		const notes = () =>
+			store
+				.notes()
+				.map((note) => [note.path, note.remoteId, note.content])
+				.sort();
+		expect(notes()).toEqual(
+			[
+				['a.md', 'earlier', 'E'],
+				[renamed, 'later', 'L'],
+			].sort()
+		);
+
+		// A restored duplicate made earlier than the one this device holds, and
+		// a folder moved in, each among other changes one page at a time.
+		world.add({ id: 'x', name: 'x.md', parent: world.root.id, content: 'X' });
+		world.add({
+			id: 'restored',
+			name: 'a.md',
+			parent: world.root.id,
+			createdTime: '2025-12-01T00:00:00Z',
+			content: 'R',
+		});
+		world.patch('out', { parents: [world.root.id] });
+		expect((await engine.sync()).status).toBe('ok');
+		expect((await engine.sync()).status).toBe('ok');
+
+		const paths = store.notes().map((note) => note.path);
+		expect(paths).toEqual([...new Set(paths)]);
+		expect(store.notes().find((note) => note.path === 'a.md')?.remoteId).toBe('restored');
+		expect(
+			notes()
+				.map(([, id]) => id)
+				.sort()
+		).toEqual(['earlier', 'later', 'old', 'restored', 'x']);
+		expect(store.notes().find((note) => note.remoteId === 'old')?.path).toBe('Archive/old.md');
+		const names = world.files
+			.filter((file) => file.parents[0] === world.root.id && !file.trashed)
+			.map((file) => file.name);
+		expect(names).toEqual([...new Set(names)]);
 	});
 
 	it('report a note under a trashed folder as deleted where it was', async () => {
@@ -762,6 +986,35 @@ describe('changes', () => {
 			expect(world.seen.some((r) => r.method === 'PATCH')).toBe(false);
 			expect(entries.map((entry) => [entry.remoteId, entry.path])).toEqual([['new', 'a.md']]);
 			expect(world.find('known')?.name).toBe('b.md');
+		});
+
+		it('are separated even while the search has not caught up with the new one', async () => {
+			const world = driveWorld();
+			world.add({
+				id: 'known',
+				name: 'a.md',
+				parent: world.root.id,
+				createdTime: '2026-01-01T00:00:00Z',
+			});
+			const { cursor } = await drainChanges(world.provider);
+			world.add({
+				id: 'dup',
+				name: 'a.md',
+				parent: world.root.id,
+				createdTime: '2026-05-01T00:00:00Z',
+			});
+			world.hooks.intercept = (request) =>
+				request.url.searchParams.get('q')?.startsWith("name = 'a.md'") === true
+					? new Response(JSON.stringify({ files: [world.find('known')] }))
+					: undefined;
+
+			const { entries } = await drainChanges(world.provider, cursor);
+
+			const renamed = conflictFilename('a.md', AT, [MARKER_FILE, 'a.md', 'a.md']);
+			expect(world.find('dup')?.name).toBe(renamed);
+			expect(entries.map((entry) => [entry.remoteId, entry.path])).toEqual([
+				['dup', renamed],
+			]);
 		});
 
 		it('are separated on a first scan too', async () => {
