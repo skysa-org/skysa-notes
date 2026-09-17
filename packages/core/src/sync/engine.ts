@@ -2750,23 +2750,32 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// The resolution reads the remote and writes to the store, either of
 		// which can fail in its own right — and a failure there must land in the
 		// same place as any other, or the op's `attempts` never moves and it can
-		// never reach `blocked` however long it has been failing.
+		// never reach `blocked` however long it has been failing. What it must
+		// not do is land there under the conflict's name: a rate limit met while
+		// reading the remote is a rate limit, and counting that against the op
+		// would spend its attempts on a throttle nobody looked at. So the
+		// resolution's own error is the reason from here on, and it takes
+		// whichever branch below is its own.
 		const resolved = isConflictError(error)
-			? await resolvePushConflict(op, error.remote).catch(() => undefined)
+			? await resolvePushConflict(op, error.remote).then(
+					(path: string | undefined) => ({ path }),
+					(failure: unknown) => ({ failure })
+				)
 			: undefined;
-		if (resolved !== undefined) {
+		const aside = resolved !== undefined && 'path' in resolved ? resolved.path : undefined;
+		if (aside !== undefined) {
 			return drainOps(
 				ops.slice(1),
 				{
-					pushed: progress.pushed + (resolved === '' ? 1 : 0),
-					conflicts:
-						resolved === '' ? progress.conflicts : [...progress.conflicts, resolved],
+					pushed: progress.pushed + (aside === '' ? 1 : 0),
+					conflicts: aside === '' ? progress.conflicts : [...progress.conflicts, aside],
 				},
 				retriedAuth
 			);
 		}
+		const reason = resolved !== undefined && 'failure' in resolved ? resolved.failure : error;
 
-		if (isAuthError(error)) {
+		if (isAuthError(reason)) {
 			if (retriedAuth || reauthorize === undefined) {
 				return { ...ok(progress), status: 'paused', error: 'authorization required' };
 			}
@@ -2779,12 +2788,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// block a write the provider never even looked at, and the user would be
 		// told their note cannot be sent. So the op keeps its attempts and the
 		// wait the provider asked for goes back to the scheduler.
-		if (isRateLimitError(error)) {
-			return { ...ok(progress), status: 'retry', error: messageOf(error), ...waitFor(error) };
+		if (isRateLimitError(reason)) {
+			return {
+				...ok(progress),
+				status: 'retry',
+				error: messageOf(reason),
+				...waitFor(reason),
+			};
 		}
 
-		await store.failOp(op.seq, messageOf(error));
-		return { ...ok(progress), status: 'retry', error: messageOf(error) };
+		await store.failOp(op.seq, messageOf(reason));
+		return { ...ok(progress), status: 'retry', error: messageOf(reason) };
 	};
 
 	/** One retry after a refresh, for a pull that met an expired token. */

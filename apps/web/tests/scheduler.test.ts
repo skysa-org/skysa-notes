@@ -891,6 +891,37 @@ describe('failures', () => {
 			expect(h.remote.fake.contentAt(note.path)).toContain('one');
 		});
 
+		it('waits for a run already at the network, whose cursor would land on top of ours', async () => {
+			// The held run is mid-round with a cursor of its own, and writes it
+			// back when that round lands. Clearing outside the lock, the clear
+			// happens first and is then undone — and the user is told the sync
+			// succeeded, so the re-scan they asked for never happens and never
+			// says so. Inside it, the held run finishes and ours is the last word.
+			const db = await bound();
+			const h = started(db);
+			await reaches(h.scheduler, 'idle');
+			await h.scheduler.syncNow();
+			expect((await db.syncState.get('c1'))?.cursor).toBeDefined();
+
+			const held = deferred();
+			h.remote.gate.set('changes', held.promise);
+			const arrived = h.remote.gated();
+			const inFlight = h.scheduler.syncNow();
+			await vi.waitFor(() => {
+				expect(h.remote.gated()).toBe(arrived + 1);
+			});
+			const mark = h.remote.cursors.length;
+
+			const rescan = h.scheduler.resync();
+			h.remote.gate.delete('changes');
+			held.resolve();
+			await Promise.all([inFlight, rescan]);
+
+			// A full scan, after the held run's round and whatever it wrote.
+			expect(h.remote.cursors.slice(mark)).toContain(undefined);
+			expect(h.scheduler.status().phase).toBe('idle');
+		});
+
 		it('does nothing at all with no connection', async () => {
 			const { scheduler, remote: theRemote } = started(freshDatabase());
 
@@ -1028,16 +1059,52 @@ describe('failures', () => {
 			expect(h.scheduler.status().stuck).toBeUndefined();
 		});
 
-		it('stays named while the retry waits on its backoff', async () => {
-			// `retrying` carries the stuck op forward: it is still stuck, and the
-			// message would otherwise flicker back to the vague one between tries.
+		it('stays named through a run that failed without releasing anything', async () => {
+			// `retrying` carries the stuck op forward: nothing gave it its
+			// attempts back, it is still out of them, and the message would
+			// otherwise flicker to the vague one and back between tries.
+			const h = await blockedHarness();
+			h.remote.fake.setFault((call) =>
+				call.op === 'changes' ? new Error('503') : undefined
+			);
+
+			// The minute's sync, which never gets as far as the queue.
+			await nextTimer(h);
+
+			expect(h.scheduler.status().phase).toBe('retrying');
+			expect(h.scheduler.status().stuck).toMatchObject({ path: h.note.path });
+		});
+
+		it('is no longer named once the user has given it its attempts back', async () => {
+			// "Sync now" resets every op's attempts, so "after 2 tries" stops
+			// being true the moment it is pressed. The vague message is the
+			// accurate one until a run finds the op out of attempts again.
 			const h = await blockedHarness();
 			h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
 
 			await h.scheduler.syncNow();
 
 			expect(h.scheduler.status().phase).toBe('retrying');
-			expect(h.scheduler.status().stuck).toMatchObject({ path: h.note.path });
+			expect(h.scheduler.status().stuck).toBeUndefined();
+		});
+
+		it('is not still named while the next sync runs, or once it lands', async () => {
+			// `stuck` describes the queue the last run found, and every other
+			// field is carried forward by the publish that follows. Carried with
+			// them it would sit under "Syncing…" and under "Synced".
+			const h = await blockedHarness();
+			const seen: (string | undefined)[] = [];
+			const stop = h.scheduler.subscribe((status) => {
+				if (status.phase === 'syncing') seen.push(status.stuck?.path);
+			});
+
+			await h.scheduler.syncNow();
+			stop();
+
+			expect(seen.length).toBeGreaterThan(0);
+			expect(seen).toEqual(seen.map(() => undefined));
+			expect(h.scheduler.status()).toMatchObject({ phase: 'idle' });
+			expect(h.scheduler.status().stuck).toBeUndefined();
 		});
 
 		it('is given its attempts back by a re-scan', async () => {

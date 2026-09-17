@@ -847,6 +847,63 @@ describe('push', () => {
 		expect(result.retryAfterMs).toBeUndefined();
 	});
 
+	it('does not count a rate limit met while resolving a push conflict', async () => {
+		// The conflict rule reads the remote entry before it can decide
+		// anything, and that read is a request like any other. Counted under the
+		// conflict's name, a provider throttling every read would spend the
+		// write's attempts on a file it never looked at — and the wait it asked
+		// for would be thrown away with it.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		provider.setFault((call) =>
+			call.op === 'read' ? new RateLimitError('slow down', 6000) : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()[0]?.attempts).toBe(0);
+		expect(store.lastError(op.seq)).toBeUndefined();
+		expect(result.retryAfterMs).toBe(6000);
+		expect(result.error).toContain('slow down');
+		// And nothing was decided: no conflict copy over a read that never came.
+		expect(result.conflicts).toEqual([]);
+		expect(store.notes().map((note) => note.path)).toEqual(['a.md']);
+	});
+
+	it('counts an ordinary failure met while resolving a push conflict', async () => {
+		// The other half of the same rule: a resolution that fails for a reason
+		// that is not a rate limit must still move the op's attempts, or it can
+		// never reach `blocked` however long it goes on failing.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		provider.setFault((call) => (call.op === 'read' ? new Error('read failed') : undefined));
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()[0]?.attempts).toBe(1);
+		expect(store.lastError(op.seq)).toContain('read failed');
+	});
+
 	it('still blocks an op that has already failed too often, rate limit or not', async () => {
 		// The attempts rule is about what has happened, not about today's
 		// failure: an op at the limit is surfaced before the provider is asked.

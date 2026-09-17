@@ -255,13 +255,25 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		['status', { phase: 'local', conflicts: [] }],
 	]);
 
+	const stuckBox = new Map<'op', StuckOp>();
+
 	const status = (): SchedulerStatus =>
 		statusBox.get('status') ?? { phase: 'local', conflicts: [] };
 
+	/**
+	 * `stuck` comes from here and nowhere else. Every other field is carried
+	 * forward by the `{ ...status() }` most callers publish, and this one must
+	 * not be: it describes a queue that is out of attempts *now*. Carried, it
+	 * would still be showing "couldn't send the rename of Work/Plan.md" while
+	 * the app says `syncing`, or after the op went through.
+	 */
 	const publish = (next: SchedulerStatus) => {
-		statusBox.set('status', next);
+		const { stuck: _carried, ...rest } = next;
+		const stuck = stuckBox.get('op');
+		const full: SchedulerStatus = { ...rest, ...(stuck === undefined ? {} : { stuck }) };
+		statusBox.set('status', full);
 		listeners.forEach((listener) => {
-			listener(next);
+			listener(full);
 		});
 	};
 
@@ -381,9 +393,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
 	};
 
-	const releaseOps = (connectionId: string): Promise<void> =>
+	const releaseOps = async (connectionId: string): Promise<void> => {
 		// One transaction, so an op the engine completes meanwhile is not put back.
-		db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
+		await db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
+		// Nothing is out of attempts the moment they are all given back.
+		stuckBox.delete('op');
+	};
 
 	/**
 	 * The op a `blocked` sync is about. The queue is ordered, so the first one
@@ -533,12 +548,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const stuck =
 			outcome.status === 'blocked' ? await stuckOp(session.connectionId) : undefined;
 		if (!isCurrent(session)) return;
+		if (stuck === undefined) stuckBox.delete('op');
+		else stuckBox.set('op', stuck);
 		publish({
 			phase: outcome.status === 'ok' ? 'idle' : 'attention',
 			lastSyncAt: status().lastSyncAt,
 			error: outcome.error,
 			conflicts,
-			...(stuck === undefined ? {} : { stuck }),
 		});
 		armInterval(session);
 	};
@@ -625,6 +641,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		sessionUnsubscribers.clear();
 		cancel('next');
 		cancel('debounce');
+		stuckBox.delete('op');
 		current.delete('session');
 	};
 
@@ -752,19 +769,32 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		resync: async () => {
 			const session = current.get('session');
 			if (session === undefined) return;
-			// One transaction: the cursor and the attempts go together, so a
-			// scan that is about to run cannot start against a half-reset queue.
-			await db.transaction('rw', db.syncState, db.opQueue, async () => {
-				const state = await db.syncState.get(session.connectionId);
-				// Let go of meanwhile: there is nothing to re-scan, and a `put`
-				// would bring the row back.
-				if (state === undefined) return;
-				// `rootId` is kept: it is the same folder, and finding it again
-				// costs a search whose answer we already have.
-				const { cursor: _cursor, ...kept } = state;
-				await db.syncState.put(kept);
-				await resetAttempts(session.connectionId);
-			});
+			// Inside the lock every run takes: a run already at the network is
+			// holding a cursor of its own and writes it back when its round
+			// lands. Clearing outside the lock would put that cursor back after
+			// ours went, and the re-scan the user asked for would never happen —
+			// silently, since the run that overwrote it reports success.
+			await environment.withLock(`skysa-notes:sync:${session.connectionId}`, () =>
+				// One transaction: the cursor and the attempts go together, so a
+				// scan that is about to run cannot start against a half-reset queue.
+				db.transaction('rw', db.syncState, db.opQueue, async () => {
+					const state = await db.syncState.get(session.connectionId);
+					// Let go of meanwhile: there is nothing to re-scan, and a `put`
+					// would bring the row back.
+					if (state === undefined) return;
+					// `rootId` is kept: it is the same folder, and finding it again
+					// costs a search whose answer we already have.
+					const { cursor: _cursor, ...kept } = state;
+					await db.syncState.put(kept);
+					await resetAttempts(session.connectionId);
+				})
+			);
+			// The backoff and the blocked clock start over too: the user asking
+			// is the help `blocked` waits for, and a re-scan that has to sit out
+			// a five-minute backoff first is not one.
+			session.failures.delete('count');
+			session.blockedSince.delete('at');
+			stuckBox.delete('op');
 			await run(session);
 		},
 

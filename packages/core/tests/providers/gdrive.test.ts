@@ -388,6 +388,45 @@ describe('requests', () => {
 		await expect(provider.list('')).rejects.toThrow(RateLimitError);
 	});
 
+	it('reads RESOURCE_EXHAUSTED, which is where Drive\u2019s newer errors put the quota', async () => {
+		// No `errors[]` at all: the reason lives in `error.status` as a
+		// `google.rpc.Code` name. A 403, so nothing but that field says quota —
+		// read only from `errors[]`, this is the plain failure that counts
+		// against the op and ends up blocking the queue over a quota.
+		// https://developers.google.com/workspace/drive/api/guides/handle-errors
+		const provider = over(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						error: {
+							code: 403,
+							message: 'Quota exceeded',
+							status: 'RESOURCE_EXHAUSTED',
+						},
+					}),
+					{ status: 403 }
+				)
+			)
+		);
+		await expect(provider.list('')).rejects.toThrow(RateLimitError);
+	});
+
+	it('does not read any error body\u2019s status as a quota', async () => {
+		// `PERMISSION_DENIED` sits in the same field and means the opposite.
+		const provider = over(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						error: { code: 403, message: 'no', status: 'PERMISSION_DENIED' },
+					}),
+					{ status: 403 }
+				)
+			)
+		);
+		const error = await provider.list('').catch((thrown: unknown) => thrown);
+		expect(isRateLimitError(error)).toBe(false);
+	});
+
 	it('does not read a 403 about the file itself as a rate limit', async () => {
 		// `insufficientFilePermissions` is out of reach, not busy: retried for
 		// ever it would never succeed, and the op would never surface.

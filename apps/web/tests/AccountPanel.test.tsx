@@ -716,6 +716,49 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 	});
 
+	it('offers nothing to open outside the message that names the stuck change', async () => {
+		// `stuck` outlives the run that found it — it is not recomputed until a
+		// run reaches the queue again — so the offer has to be tied to the
+		// message it belongs beside, not to the field being set.
+		const sync = fakeSync({ phase: 'idle' });
+		const db = await connected(sync);
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		const stuck = {
+			op: 'write' as const,
+			path: note.path,
+			noteId: note.id,
+			attempts: 5,
+			error: 'nope',
+		};
+
+		sync.say({ phase: 'attention', stuck });
+		expect(await screen.findByRole('link', { name: 'Open the note' })).toBeTruthy();
+
+		sync.say({ phase: 'syncing', stuck });
+		await waitFor(() => {
+			expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
+		});
+
+		sync.say({ phase: 'idle', stuck });
+		expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
+	});
+
+	it('offers no re-scan for a provider this build cannot sync', async () => {
+		// There is nothing to read again: no adapter ever read it in the first
+		// place, and the button would fail silently.
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'webdav' });
+		renderPanel(
+			clientWith({ connections: () => Promise.reject(new TypeError('offline')) }),
+			db,
+			'/',
+			fakeSync({ phase: 'attention' })
+		);
+
+		expect(await screen.findByText('This app cannot sync with WebDAV yet.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Re-scan from scratch' })).toBeNull();
+	});
+
 	it('reads everything again only after saying what that costs', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle' });

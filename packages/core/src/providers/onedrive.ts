@@ -313,9 +313,18 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const detail = failure.codes.join('/') || failure.message;
 		if (failure.status === 401) throw new AuthError(detail);
 		if (failure.status === 404) throw new NotFoundError(path ?? detail);
-		if (failure.status === 429 || failure.status === 503) {
-			// 503 as well as 429: Graph's throttling guidance names both, and a
-			// service that is briefly unavailable is asking for the same thing.
+		// 429 is throttling and says so. 503 is throttling only when it says how
+		// long to wait: Graph's guidance names both, and its throttling
+		// responses carry `Retry-After`, but 503 is also what a resource that is
+		// genuinely wedged answers (`serviceNotAvailable`). Read as a rate
+		// limit, such a 503 would be retried for ever without counting against
+		// the op — never blocked, never surfaced, with every op behind it
+		// waiting. So a bare 503 is the failure to retry that any other 5xx is.
+		// https://learn.microsoft.com/en-us/graph/throttling
+		const throttled =
+			failure.status === 429 ||
+			(failure.status === 503 && failure.retryAfterMs !== undefined);
+		if (throttled) {
 			const wait =
 				failure.retryAfterMs === undefined
 					? ''

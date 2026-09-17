@@ -43,6 +43,22 @@ describe('parseRetryAfter', () => {
 		expect(parseRetryAfter('7 seconds', now)).toBeUndefined();
 	});
 
+	it('reads the first of a header sent twice, which `Headers.get` joins with a comma', () => {
+		// An intermediary adding its own `Retry-After` beside the provider's is
+		// all it takes. Neither `Number` nor `Date.parse` can read the pair, and
+		// falling back to the caller's backoff would throw away the only
+		// informed answer there is. Two waits say the same thing.
+		expect(parseRetryAfter('120, 120', now)).toBe(120_000);
+		expect(parseRetryAfter('7,30', now)).toBe(7000);
+	});
+
+	it('still reads one HTTP date, whose own comma is not a second value', () => {
+		expect(parseRetryAfter('Thu, 17 Sep 2026 12:00:20 GMT', now)).toBe(20_000);
+		expect(
+			parseRetryAfter('Thu, 17 Sep 2026 12:00:20 GMT, Thu, 17 Sep 2026 12:00:45 GMT', now)
+		).toBe(20_000);
+	});
+
 	it('says nothing for a number no wait could be', () => {
 		expect(parseRetryAfter('Infinity', now)).toBeUndefined();
 		expect(parseRetryAfter('NaN', now)).toBeUndefined();

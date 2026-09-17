@@ -190,7 +190,9 @@ export class CursorResetError extends Error {
 
 /**
  * The provider asked us to slow down: Dropbox and Graph answer 429, Graph also
- * 503, and Drive a 403 whose reason names the quota. Distinct from a transient
+ * a 503 that says how long to wait (a 503 that doesn't is an outage, not a
+ * rate limit), and Drive a 403 whose reason names the quota, or a body whose
+ * status is `RESOURCE_EXHAUSTED`. Distinct from a transient
  * failure because it says nothing at all about the request — so the engine does
  * not count it against the op's attempts — and because the provider often says
  * how long to wait, which is better than any backoff we could guess.
@@ -225,10 +227,21 @@ export const parseRetryAfter = (
 	now: number = Date.now()
 ): number | undefined => {
 	if (value === null || value === undefined) return undefined;
-	const text = value.trim();
+	// `Headers.get` joins a header sent twice with ", ", which is what an
+	// intermediary adding its own `Retry-After` beside the provider's produces.
+	// Two waits say the same thing, so the first one is the answer — but which
+	// part that is depends on the form, since an HTTP date carries a comma of
+	// its own after the day name. A value starting with a digit is a count of
+	// seconds and ends at the first comma; anything else is a date, and its
+	// first two parts are one value.
+	const parts = value.split(',');
+	const first = (/^\s*-?\d/.test(value) ? parts[0] : parts.slice(0, 2).join(',')) ?? '';
+	const text = first.trim();
 	if (text === '') return undefined;
-	const seconds = Number(text);
-	if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000;
+	// Read as a number only where it looks like one: `Date.parse` is lenient
+	// enough to make a date out of "7,30", and an unreadable value must answer
+	// `undefined` rather than some day in the first century.
+	if (/^-?\d+(?:\.\d+)?$/.test(text)) return Math.max(0, Number(text)) * 1000;
 	const at = Date.parse(text);
 	return Number.isNaN(at) ? undefined : Math.max(0, at - now);
 };

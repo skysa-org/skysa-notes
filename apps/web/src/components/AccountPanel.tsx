@@ -237,11 +237,16 @@ const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: stri
 		[database, noteId]
 	);
 	const note = found?.note;
+	// The paragraph is part of the answer: rendered outside, it would be an
+	// empty line under the message while the query is out, and for good after
+	// it for a note that is gone.
 	if (note === undefined || note.deletedLocally === 1) return null;
 	return (
-		<Link to="/" search={{ folder: folderToSearch(parentPath(note.path)), note: note.id }}>
-			Open the note
-		</Link>
+		<p className="muted">
+			<Link to="/" search={{ folder: folderToSearch(parentPath(note.path)), note: note.id }}>
+				Open the note
+			</Link>
+		</p>
 	);
 };
 
@@ -297,10 +302,14 @@ const SyncState = ({
 				</p>
 			)}
 			{message !== null && <p className="muted">{message}</p>}
-			{status.stuck?.noteId !== undefined && (
-				<p className="muted">
-					<StuckNote database={database} noteId={status.stuck.noteId} />
-				</p>
+			{/*
+			 * Beside the message that names the op, and only there: `stuck`
+			 * outlives the run that found it, and an offer to open a note under
+			 * "Syncing…" or "Synced" is about a problem the user is not being
+			 * told about.
+			 */}
+			{status.phase === 'attention' && status.stuck?.noteId !== undefined && (
+				<StuckNote database={database} noteId={status.stuck.noteId} />
 			)}
 			{status.conflicts.length > 0 && (
 				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
@@ -322,6 +331,7 @@ const SyncState = ({
 			 * not a repair of nothing: the confirm says what it costs.
 			 */}
 			{status.phase !== 'local' &&
+				syncable &&
 				(rescanning ? (
 					<div className="account-confirm">
 						<p className="muted">
@@ -331,6 +341,7 @@ const SyncState = ({
 						</p>
 						<button
 							type="button"
+							disabled={status.phase === 'syncing'}
 							onClick={() => {
 								setRescanning(false);
 								void sync.resync();

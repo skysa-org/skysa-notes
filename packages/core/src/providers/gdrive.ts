@@ -135,6 +135,12 @@ interface DriveFailure {
 	/** Which parameter an error is about, where Drive says. */
 	locations: readonly string[];
 	message: string;
+	/**
+	 * The `google.rpc.Code` name in `error.status`. Drive's older bodies put the
+	 * reason in `errors[]` and leave this out; the newer ones do the reverse,
+	 * and a quota there reads `RESOURCE_EXHAUSTED` with no `errors[]` at all.
+	 */
+	condition?: string;
 	/** How long Drive asked us to wait. It documents no such header, but reads it if one arrives. */
 	retryAfterMs?: number;
 }
@@ -155,6 +161,7 @@ const RATE_LIMITED = new Set([
 ]);
 const throttled = (failure: DriveFailure): boolean =>
 	failure.status === 429 ||
+	failure.condition === 'RESOURCE_EXHAUSTED' ||
 	(failure.status === 403 && failure.reasons.some((reason) => RATE_LIMITED.has(reason)));
 
 /**
@@ -343,7 +350,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	const failureOf = async (response: Response): Promise<DriveFailure> => {
 		const text = await response.text().catch(() => '');
-		const parsed = ((): { error?: { message?: unknown; errors?: unknown } } => {
+		const parsed = ((): {
+			error?: { message?: unknown; errors?: unknown; status?: unknown };
+		} => {
 			try {
 				const value: unknown = JSON.parse(text);
 				return typeof value === 'object' && value !== null ? value : {};
@@ -365,6 +374,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			reasons: field('reason'),
 			locations: field('location'),
 			message: typeof parsed.error?.message === 'string' ? parsed.error.message : text,
+			...(typeof parsed.error?.status === 'string' ? { condition: parsed.error.status } : {}),
 			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
