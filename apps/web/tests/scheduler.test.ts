@@ -320,10 +320,14 @@ describe('syncing a connection', () => {
 		await vi.waitFor(async () => {
 			expect((await db.syncState.get('c1'))?.lastSyncAt).toBe(env.state.now);
 		});
+		// The row is written inside the run and the status published once the
+		// run returns, so the one can be seen before the other.
+		await vi.waitFor(() => {
+			expect(scheduler.status()).toMatchObject({ phase: 'idle', lastSyncAt: env.state.now });
+		});
 
 		expect(server.token).toHaveBeenCalledWith('c1');
 		expect(new Set(theRemote.tokensUsed)).toEqual(new Set(['t1']));
-		expect(scheduler.status()).toMatchObject({ phase: 'idle', lastSyncAt: env.state.now });
 	});
 
 	it('writes the marker once, not on every sync', async () => {
