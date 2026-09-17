@@ -422,6 +422,25 @@ describe('the app folder', () => {
 		).toHaveLength(1);
 	});
 
+	it('made at a first connect is the one the first pull finds, while the search lags', async () => {
+		// The scheduler's ensureRoot, then a pull from nothing seconds later: the
+		// tag search does not list a folder made a moment ago.
+		const world = driveWorld();
+		world.destroy(world.root.id);
+		world.destroy('marker');
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+				? new Response(JSON.stringify({ files: [] }))
+				: undefined;
+
+		const { rootId } = await world.provider.ensureRoot();
+		const { entries } = await drainChanges(world.provider);
+
+		const roots = world.files.filter((file) => file.appProperties?.notesapp === 'root');
+		expect(roots.map((root) => [root.id, root.trashed === true])).toEqual([[rootId, false]]);
+		expect(livePaths(entries)).toEqual([MARKER_FILE]);
+	});
+
 	it('in the trash resets the cursor, and the next round makes another', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);
@@ -433,6 +452,137 @@ describe('the app folder', () => {
 		expect(
 			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
 		).toHaveLength(1);
+	});
+
+	it('deleted for good, trash emptied, is made again by the round after the reset', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.destroy(world.root.id);
+		world.destroy('marker');
+
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+		await drainChanges(world.provider);
+		expect(
+			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+		).toHaveLength(1);
+	});
+
+	it('confirmed for a stored cursor is found again after a reset, while the search lags', async () => {
+		// A page loaded since the folder was made: it knows the folder only from
+		// the cursor, and the token is dead.
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		const reloaded = over(world.doFetch);
+		const { token } = JSON.parse(cursor) as { token: string };
+		world.hooks.intercept = (request) => {
+			if (request.url.searchParams.get('q')?.startsWith('appProperties has') === true) {
+				return new Response(JSON.stringify({ files: [] }));
+			}
+			return request.url.pathname === '/drive/v3/changes' &&
+				request.url.searchParams.get('pageToken') === token
+				? driveError(400, 'invalid', 'pageToken')
+				: undefined;
+		};
+
+		await expect(reloaded.changes(cursor)).rejects.toThrow(CursorResetError);
+		await drainChanges(reloaded);
+		expect(
+			world.files
+				.filter((file) => file.appProperties?.notesapp === 'root')
+				.map((root) => root.id)
+		).toEqual([world.root.id]);
+	});
+
+	it('is asked for by id only when the search leaves it out', async () => {
+		const world = driveWorld();
+		await drainChanges(world.provider);
+		const from = world.seen.length;
+		await drainChanges(world.provider);
+
+		expect(
+			world.seen
+				.slice(from)
+				.filter(
+					(r) => r.method === 'GET' && r.url.pathname.endsWith(`/files/${world.root.id}`)
+				)
+		).toEqual([]);
+	});
+
+	it('this device knows yields to an earlier one the search lists, and is folded into it', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		const earlier = {
+			id: 'root-0',
+			name: 'skysa-notes',
+			parent: 'my-drive',
+			mimeType: FOLDER,
+			appProperties: { notesapp: 'root' },
+			createdTime: '2025-01-01T00:00:00Z',
+		};
+		world.add(earlier);
+		world.feed.pop();
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+				? new Response(JSON.stringify({ files: [world.find('root-0')] }))
+				: undefined;
+
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+		await drainChanges(world.provider);
+		expect(world.find('marker')?.parents).toEqual(['root-0']);
+		expect(world.find('root-0')?.trashed).not.toBe(true);
+	});
+
+	it.each([
+		{
+			answer: 'out of reach',
+			reply: driveError(403, 'appNotAuthorizedToFile'),
+			is: 'made again',
+		},
+		{
+			answer: 'rate limited',
+			reply: driveError(403, 'userRateLimitExceeded'),
+			is: 'a failure',
+		},
+	])('this device knows, answered $answer, is $is', async ({ reply: answer, is: outcome }) => {
+		const world = driveWorld();
+		await drainChanges(world.provider);
+		const known = world.root.id;
+		world.hooks.intercept = (request) => {
+			if (request.url.searchParams.get('q')?.startsWith('appProperties has') === true) {
+				return new Response(JSON.stringify({ files: [] }));
+			}
+			return request.method === 'GET' && request.url.pathname.endsWith(`/files/${known}`)
+				? answer.clone()
+				: undefined;
+		};
+
+		const round = world.provider.changes();
+		if (outcome === 'a failure') {
+			await expect(round).rejects.toThrow(/userRateLimitExceeded/);
+			return;
+		}
+		await round;
+		expect(
+			world.files.filter(
+				(file) => file.appProperties?.notesapp === 'root' && file.id !== known
+			)
+		).toHaveLength(1);
+	});
+
+	it('out of reach for a stored cursor resets it, rather than failing every pull', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.hooks.intercept = (request) => {
+			if (request.url.searchParams.get('q')?.startsWith('appProperties has') === true) {
+				return new Response(JSON.stringify({ files: [] }));
+			}
+			return request.method === 'GET' &&
+				request.url.pathname.endsWith(`/files/${world.root.id}`)
+				? driveError(403, 'appNotAuthorizedToFile')
+				: undefined;
+		};
+
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
 	});
 
 	it('replaced by an earlier one resets a cursor written for the old one', async () => {
