@@ -100,9 +100,13 @@ const EditorBody = ({ noteId, body, origin, onUserEdit, onUnsupported }: RichEdi
 	// from wiping out what the user has typed since the last save.
 	useEffect(() => {
 		if (loading) return;
+		const editor = get();
+		if (editor === undefined) return;
 		if (!incoming.shouldAdopt(body)) return;
-		get()?.action((ctx) => {
-			adoptBody(ctx, body);
+		editor.action((ctx) => {
+			// Only a body the editor now holds moves what its edits are made
+			// against: one it could not take in is asked about again.
+			if (adoptBody(ctx, body)) incoming.adopted();
 			// The same question the editor was built with, asked again of a body
 			// that arrived from somewhere else. A sync pull can bring in markdown
 			// this editor cannot show, and since the check above runs once, this

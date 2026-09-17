@@ -323,6 +323,41 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 		expect(editor.view().state.doc.toString()).toBe('before\nmine\nmore\n');
 	});
 
+	it('is saved as usual when that note gains a second tag elsewhere', async () => {
+		// After the first tag the row holds the file with its blank line, and
+		// every later pull reads the body from the file the same way.
+		const store = await synced();
+		const editor = await open();
+
+		editor.type('mine\n');
+		flushAutosave();
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.dirty).toBe(1);
+		});
+		const pushed = (await getNote(db, 'n1'))?.source ?? '';
+		await db.notes.update('n1', { dirty: 0 });
+		await db.opQueue.clear();
+		const tagged = (tags: string) => pushed.replace(/\n---\n/, `\ntags:\n${tags}---\n`);
+		await store.applyPull({ changes: [pulled(tagged('  - work\n'), 'v3')] });
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.tags).toEqual(['work']);
+		});
+
+		editor.type('more\n');
+		await store.applyPull({ changes: [pulled(tagged('  - work\n  - home\n'), 'v4')] });
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.tags).toEqual(['work', 'home']);
+		});
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.body).toBe('before\nmine\nmore\n');
+		});
+		expect(await notes()).toHaveLength(1);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(editor.view().state.doc.toString()).toBe('before\nmine\nmore\n');
+	});
+
 	it('is copied under the title its own heading gives it', async () => {
 		const store = await synced('# Before\n');
 		const editor = await open();

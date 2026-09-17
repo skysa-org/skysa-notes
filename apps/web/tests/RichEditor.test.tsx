@@ -23,7 +23,7 @@ vi.mock('../src/editor/rich.js', () => ({
 			destroy: () => Promise.resolve(),
 		};
 	},
-	adoptBody: vi.fn(),
+	adoptBody: vi.fn(() => true),
 	representsFaithfully: vi.fn(() => true),
 }));
 
@@ -118,6 +118,40 @@ describe('RichEditor', () => {
 			setup?.onUserEdit('Pulled!');
 		});
 		expect(onUserEdit).toHaveBeenLastCalledWith('Pulled!', 'o3');
+	});
+
+	it('keeps reporting the old origin while a body from outside could not be taken in', async () => {
+		const onUserEdit = vi.fn();
+		const { rerender } = render(
+			<RichEditor
+				noteId="a"
+				body="Hello"
+				origin="o1"
+				onUserEdit={onUserEdit}
+				onUnsupported={vi.fn()}
+			/>
+		);
+		await mounted();
+		vi.mocked(adoptBody).mockReturnValueOnce(false);
+
+		rerender(
+			<RichEditor
+				noteId="a"
+				body="Unparseable"
+				origin="o2"
+				onUserEdit={onUserEdit}
+				onUnsupported={vi.fn()}
+			/>
+		);
+		await waitFor(() => {
+			expect(adoptBody).toHaveBeenCalledWith(expect.anything(), 'Unparseable');
+		});
+		act(() => {
+			setup?.onUserEdit('Hello!');
+		});
+
+		// Still the text from o1 on screen, so the edit is one against o1.
+		expect(onUserEdit).toHaveBeenLastCalledWith('Hello!', 'o1');
 	});
 
 	it('does not reload the note when it re-renders for some other reason', async () => {

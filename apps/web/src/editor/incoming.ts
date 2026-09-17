@@ -33,8 +33,14 @@ const LIMIT = 64;
 export interface IncomingBody {
 	/** Record a value this editor produced. */
 	emit: (value: string) => void;
-	/** True only for a body that is new and came from somewhere else. */
+	/**
+	 * True only for a body that is new and came from somewhere else. A body
+	 * written from outside is asked about until `adopted` says the editor took
+	 * it in.
+	 */
 	shouldAdopt: (value: string) => boolean;
+	/** The editor now holds the body `shouldAdopt` last said to take. */
+	adopted: () => void;
 	/**
 	 * The `bodyOrigin` of the body the editor's text was built from: the one it
 	 * opened with, or the last one it adopted. An edit carries it, so a save
@@ -78,10 +84,8 @@ export const useIncomingBody = (key: string, body: string, origin = ''): Incomin
 		// was given before (a remote revert), and ignored for that, the editor
 		// would go on showing text the note no longer holds. The editor's own
 		// saves never change the origin, so none of them can be coming back
-		// after this. Asked in the commit that brought `value`, so `latest` is
-		// its origin.
+		// after this. The base moves in `adopted`, once the editor holds it.
 		if (latest.current.origin !== base.current) {
-			base.current = latest.current.origin;
 			emitted.current = [];
 			lastSeen.current = value;
 			return true;
@@ -99,7 +103,15 @@ export const useIncomingBody = (key: string, body: string, origin = ''): Incomin
 		return false;
 	}, []);
 
+	// Called in the commit that brought the body, so `latest` is its origin.
+	const adopted = useCallback(() => {
+		base.current = latest.current.origin;
+	}, []);
+
 	const current = useCallback(() => base.current, []);
 
-	return useMemo(() => ({ emit, shouldAdopt, base: current }), [emit, shouldAdopt, current]);
+	return useMemo(
+		() => ({ emit, shouldAdopt, adopted, base: current }),
+		[emit, shouldAdopt, adopted, current]
+	);
 };

@@ -114,21 +114,22 @@ export const currentMarkdown = (ctx: Ctx): string =>
  * replacing the document with the original text over and over would achieve
  * nothing but throw away the cursor on every keystroke that reaches the store.
  */
-export const adoptBody = (ctx: Ctx, body: string): void => {
+export const adoptBody = (ctx: Ctx, body: string): boolean => {
 	const view = ctx.get(editorViewCtx);
-	if (sameMarkdownStructure(currentMarkdown(ctx), body)) return;
+	if (sameMarkdownStructure(currentMarkdown(ctx), body)) return true;
 
 	// Milkdown types its parser as total, but its own `replaceAll` guards against
 	// a null document — so a parse can evidently fail, and trusting the type here
 	// would crash the editor on the note that proves it.
 	const doc = ctx.get(parserCtx)(body) as ProseNode | null;
-	if (doc === null) return;
+	if (doc === null) return false;
 
 	view.dispatch(
 		view.state.tr
 			.replace(0, view.state.doc.content.size, new Slice(doc.content, 0, 0))
 			.setMeta(PROGRAMMATIC_META, true)
 	);
+	return true;
 };
 
 /**

@@ -77,12 +77,13 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 		if (!incoming.shouldAdopt(body)) return;
 
 		const current = instance.state.doc.toString();
-		if (current === body) return;
-
-		instance.dispatch({
-			changes: { from: 0, to: current.length, insert: body },
-			...programmatic,
-		});
+		if (current !== body) {
+			instance.dispatch({
+				changes: { from: 0, to: current.length, insert: body },
+				...programmatic,
+			});
+		}
+		incoming.adopted();
 	}, [body, origin, incoming]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;

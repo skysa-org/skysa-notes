@@ -625,16 +625,16 @@ export interface NoteFileInput {
 /**
  * Whether a file brings the body a row already holds.
  *
- * A note with no frontmatter that is written with some for the first time
- * gains a blank line after the block (`serializeNoteFile`), and reading the
- * file back puts that line at the start of the body. It is the same body: the
- * app wrote the line itself, and the row never held it.
+ * Asked of the row's file as well as its body, because the two can differ with
+ * nobody having changed anything: a note with no frontmatter that is written
+ * with some for the first time gains a blank line after the block
+ * (`serializeNoteFile`), and reading the file back puts that line at the start
+ * of the body, which the row never held. Every later pull of that file reads
+ * it the same way.
  */
-const sameBody = (existing: NoteRecord, parsed: { frontmatter: string | null; body: string }) =>
+const sameBody = (existing: NoteRecord, parsed: { body: string }): boolean =>
 	existing.body === parsed.body ||
-	(existing.frontmatter === null &&
-		parsed.frontmatter !== null &&
-		(parsed.body === `\n${existing.body}` || parsed.body === `\r\n${existing.body}`));
+	parseNoteFile(noteFile(existing), { filename: basename(existing.path) }).body === parsed.body;
 
 export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });

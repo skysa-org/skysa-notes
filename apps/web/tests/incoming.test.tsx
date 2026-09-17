@@ -104,7 +104,21 @@ describe('useIncomingBody', () => {
 			expect(result.current.base()).toBe('o1');
 
 			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			// Said to take, not yet taken.
+			expect(result.current.base()).toBe('o1');
+			result.current.adopted();
 			expect(result.current.base()).toBe('o2');
+		});
+
+		it('asks again about a body from outside the editor could not take in', () => {
+			const { result, rerender } = withOrigin();
+			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
+
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			// Not adopted, and the same body again on the next render.
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			result.current.adopted();
+			expect(result.current.shouldAdopt('pulled')).toBe(false);
 		});
 
 		it('stays put for the editor’s own save coming back', () => {
@@ -131,6 +145,7 @@ describe('useIncomingBody', () => {
 			rerender({ id: 'note-1', value: 'typed', origin: 'o2' });
 
 			expect(result.current.shouldAdopt('typed')).toBe(true);
+			result.current.adopted();
 			expect(result.current.base()).toBe('o2');
 		});
 
@@ -141,6 +156,7 @@ describe('useIncomingBody', () => {
 			rerender({ id: 'note-1', value: 'start', origin: 'o3' });
 
 			expect(result.current.shouldAdopt('start')).toBe(true);
+			result.current.adopted();
 			expect(result.current.base()).toBe('o3');
 			expect(result.current.shouldAdopt('start')).toBe(false);
 		});
@@ -152,6 +168,7 @@ describe('useIncomingBody', () => {
 			});
 			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
 			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			result.current.adopted();
 
 			// Written by another tab, say: nothing this editor has written since.
 			rerender({ id: 'note-1', value: 'old save', origin: 'o2' });
