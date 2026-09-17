@@ -1,5 +1,5 @@
 import { type ProviderKind } from '@skysa/core';
-import Dexie, { type Table } from 'dexie';
+import Dexie, { type PromiseExtended, type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 
@@ -16,9 +16,9 @@ import { type EditorMode } from '../editor/mode.js';
 export type Flag = 0 | 1;
 
 /**
- * Until a storage account is connected in Phase 2, every row belongs to this
- * stand-in connection. The column exists from the start so attaching a real
- * connection is a data migration rather than a schema change.
+ * Until a storage account is connected, every row belongs to this stand-in
+ * connection. The column exists from the start so attaching a real connection
+ * is a data migration (`store/connection.ts`) rather than a schema change.
  */
 export const LOCAL_CONNECTION_ID = 'local';
 
@@ -177,5 +177,21 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 
 	return db;
 };
+
+/**
+ * The connection the app is showing and writing to: the one storage account
+ * connected, or `LOCAL_CONNECTION_ID` while there is none. One until Phase 7
+ * (docs/PLAN.md §12.3), and `store/connection.ts` keeps it to one row.
+ *
+ * Every reader and writer in `store/` that is not told a connection asks this,
+ * and the writers ask inside their own transaction. Asked outside, a note
+ * created while an account is being connected could be written under the
+ * connection its rows have just been moved off, where nothing shows or syncs it.
+ */
+export const activeConnectionId = (db: Pick<NotesDatabase, 'syncState'>): PromiseExtended<string> =>
+	db.syncState
+		.toCollection()
+		.first()
+		.then((state) => state?.connectionId ?? LOCAL_CONNECTION_ID);
 
 export const db = createDatabase();

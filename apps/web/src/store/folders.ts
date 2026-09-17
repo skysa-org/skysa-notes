@@ -9,8 +9,8 @@ import {
 } from '@skysa/core';
 
 import {
+	activeConnectionId,
 	type FolderRecord,
-	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
@@ -73,7 +73,7 @@ export const ensureFolder = async (
 	path: string,
 	options: FolderScope = {}
 ): Promise<FolderRecord[]> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
+	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const now = Date.now();
 
 	const wanted = ancestorsOf(path);
@@ -118,14 +118,14 @@ export const createFolder = async (
 	db: NotesDatabase,
 	input: CreateFolderInput
 ): Promise<FolderRecord> => {
-	const connectionId = input.connectionId ?? LOCAL_CONNECTION_ID;
 	const name = sanitizeFolderName(input.name);
 
 	// The check and the create are one step. `ensureFolder` is idempotent, so
 	// two concurrent creates of one name did no damage — but both passed the
 	// check and both reported success, and this is the one function whose error
 	// the user is now shown, which makes an advisory check the wrong kind.
-	return db.transaction('rw', db.folders, db.notes, db.opQueue, async () => {
+	return db.transaction('rw', db.folders, db.notes, db.opQueue, db.syncState, async () => {
+		const connectionId = input.connectionId ?? (await activeConnectionId(db));
 		// Folded, and this is the door that matters: `moveFolder` refuses a
 		// notebook whose name folds onto another's, but nothing calls `moveFolder`
 		// yet, while this is wired straight to the new-notebook field. Asked
@@ -178,7 +178,7 @@ export const listFolders = async (
 	db: NotesDatabase,
 	options: FolderScope & { parentPath?: string } = {}
 ): Promise<FolderRecord[]> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
+	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const all = await db.folders.where('connectionId').equals(connectionId).toArray();
 
 	return all
@@ -200,7 +200,6 @@ export const moveFolder = async (
 	to: string,
 	options: FolderScope = {}
 ): Promise<void> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
 	const source = normalizePath(from);
 	const target = normalizePath(to);
 	if (source === '' || target === '') throw new Error('The root folder cannot be moved');
@@ -211,7 +210,8 @@ export const moveFolder = async (
 	if (source === target) return;
 	if (isWithin(target, source)) throw new Error('A folder cannot be moved inside itself');
 
-	await db.transaction('rw', db.folders, db.notes, db.opQueue, async () => {
+	await db.transaction('rw', db.folders, db.notes, db.opQueue, db.syncState, async () => {
+		const connectionId = options.connectionId ?? (await activeConnectionId(db));
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 
 		// A notebook already at the destination is the everyday mistake — renaming
@@ -362,11 +362,11 @@ export const deleteFolder = async (
 	path: string,
 	options: FolderScope = {}
 ): Promise<void> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
 	const target = normalizePath(path);
 	if (target === '') throw new Error('The root folder cannot be deleted');
 
-	await db.transaction('rw', db.folders, db.notes, db.opQueue, async () => {
+	await db.transaction('rw', db.folders, db.notes, db.opQueue, db.syncState, async () => {
+		const connectionId = options.connectionId ?? (await activeConnectionId(db));
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 		await db.folders.bulkDelete(
 			folders
@@ -391,7 +391,7 @@ export const folderTree = async (
 	db: NotesDatabase,
 	options: FolderScope = {}
 ): Promise<string[]> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
+	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 	return folders.map((folder) => folder.path).sort((a, b) => a.localeCompare(b));
 };

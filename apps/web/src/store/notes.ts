@@ -17,7 +17,7 @@ import {
 import Dexie from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
-import { type Flag, LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
+import { activeConnectionId, type Flag, type NoteRecord, type NotesDatabase } from './db.js';
 import { ensureFolder } from './folders.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
@@ -107,7 +107,6 @@ export const createNote = async (
 	db: NotesDatabase,
 	input: CreateNoteInput = {}
 ): Promise<NoteRecord> => {
-	const connectionId = input.connectionId ?? LOCAL_CONNECTION_ID;
 	const folderPath = input.folderPath ?? '';
 	const body = input.body ?? '';
 	const now = Date.now();
@@ -116,7 +115,8 @@ export const createNote = async (
 	// chosen from the names already taken, and the digest between that read and
 	// the `add` is long enough for a second "New note" click to choose the very
 	// same name. Two rows at one path is one file on the remote and a note lost.
-	return db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
+	return db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
+		const connectionId = input.connectionId ?? (await activeConnectionId(db));
 		const title = input.title ?? deriveTitle({ body });
 		const filename = uniqueFilename(title, await takenNamesIn(db, connectionId, folderPath));
 		const path = joinPath(folderPath, filename);
@@ -173,7 +173,7 @@ export const listNotes = async (
 	db: NotesDatabase,
 	options: ListNotesOptions = {}
 ): Promise<NoteRecord[]> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
+	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const all = await db.notes.where('connectionId').equals(connectionId).toArray();
 
 	return all
@@ -225,7 +225,7 @@ const applyEdit = async (
 ): Promise<NoteRecord> =>
 	// `folders` is in scope because a note can move into a folder that does not
 	// exist yet, and creating it belongs to the same all-or-nothing step.
-	db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
 		const existing = await db.notes.get(id);
 		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
@@ -362,7 +362,7 @@ export const setNoteTags = async (
  * already in changes nothing and queues nothing.
  */
 const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void> =>
-	db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
 		const note = await db.notes.get(id);
 		if (note === undefined || note.deletedLocally === deleted) return;
 		const updated: NoteRecord = {
@@ -444,7 +444,6 @@ export const importNoteFile = async (
 	db: NotesDatabase,
 	input: ImportNoteFileInput
 ): Promise<NoteRecord> => {
-	const connectionId = input.connectionId ?? LOCAL_CONNECTION_ID;
 	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
 	const now = Date.now();
 
@@ -458,7 +457,8 @@ export const importNoteFile = async (
 	// these in one transaction of its own — which is what a sync pull batch will
 	// be — has then only one scope to open, instead of a `SubTransactionError`
 	// the first time it reaches the one writer that asked for less.
-	return db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
+	return db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
+		const connectionId = input.connectionId ?? (await activeConnectionId(db));
 		const existing =
 			parsed.id === undefined
 				? await noteAtPath(db, connectionId, input.path)
@@ -550,7 +550,7 @@ export const listDirtyNotes = async (
 	db: NotesDatabase,
 	options: NoteScope = {}
 ): Promise<NoteRecord[]> => {
-	const connectionId = options.connectionId ?? LOCAL_CONNECTION_ID;
+	const connectionId = options.connectionId ?? (await activeConnectionId(db));
 	const dirty = await db.notes.where('dirty').equals(1).toArray();
 	return dirty
 		.filter((note) => note.connectionId === connectionId)

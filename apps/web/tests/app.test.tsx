@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
+import { bindConnection, unbindConnection } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
@@ -22,6 +23,8 @@ afterEach(cleanup);
 beforeEach(async () => {
 	await db.notes.clear();
 	await db.folders.clear();
+	await db.opQueue.clear();
+	await db.syncState.clear();
 });
 
 /** The note list's heading: the second on the page, after "Notebooks". */
@@ -67,6 +70,29 @@ const looseRow = () => screen.queryByRole('button', { name: /Loose notes/ });
 const looseNote = (title: string) => createNote(db, { title });
 
 describe('the app', () => {
+	it('keeps showing the notes when an account is connected, and when it is disconnected', async () => {
+		// The rows move to the new connection in one transaction; the app reads
+		// whichever connection is active, and follows without a reload.
+		await createFolder(db, { name: 'Work' });
+		await createNote(db, { title: 'Standup', folderPath: 'Work' });
+		await open('/', 'Work');
+		await screen.findByText('Standup');
+
+		await act(async () => {
+			await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
+		});
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: /Work/ })).toBeTruthy();
+		});
+		expect(await screen.findByText('Standup')).toBeTruthy();
+
+		await act(async () => {
+			await unbindConnection(db);
+		});
+		expect(await screen.findByText('Standup')).toBeTruthy();
+		expect(paneHeading()).toBe('Work');
+	});
+
 	it('opens the first notebook when the root is empty', async () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/', 'Work');
