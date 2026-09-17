@@ -5,6 +5,7 @@ import {
 	bindConnection,
 	bindingCount,
 	NOTES_ACCOUNT_KEY,
+	RESUME_SAMPLE_COUNT,
 	unbindConnection,
 	verifyResume,
 } from '../src/store/connection.js';
@@ -446,6 +447,66 @@ describe('checking a resumed connection against its remote', () => {
 		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
 
 		expect(await verifyResume(db, 'dropbox-2', fake)).toBe('resumed');
+	});
+
+	it('looks in every notebook, not only the one in use, before deciding it is a new folder', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'dropbox-1', ...ACCOUNT });
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		const engine = createSyncEngine({
+			provider: fake,
+			store: createDexieSyncStore(db, { connectionId: 'dropbox-1' }),
+		});
+		await createFolder(db, { name: 'Old' });
+		await createNote(db, { folderPath: 'Old', title: 'Kept', body: '# Kept\n' });
+		await createFolder(db, { name: 'Project' });
+		await [...Array(RESUME_SAMPLE_COUNT + 1).keys()].reduce<Promise<void>>(
+			async (pending, at) => {
+				await pending;
+				await createNote(db, {
+					folderPath: 'Project',
+					title: `Step ${String(at)}`,
+					body: 'x\n',
+				});
+			},
+			Promise.resolve()
+		);
+		await engine.sync();
+		await engine.sync();
+		await unbindConnection(db);
+		await fake.delete(fake.snapshot().find((entry) => entry.path === 'Project')!);
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		expect(await verifyResume(db, 'dropbox-2', fake)).toBe('resumed');
+	});
+
+	it('passes over a file the provider will not read', async () => {
+		const { db, fake, plan } = await syncedThenDisconnected();
+		await saveNoteBody(db, plan.id, '# Plan\n\nnewest\n');
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+		const restricted = {
+			read: (ref: Parameters<typeof fake.read>[0]) =>
+				ref.remoteId === plan.remoteId
+					? Promise.reject(new Error('dropbox 409: path/restricted_content/'))
+					: fake.read(ref),
+		};
+
+		expect(await verifyResume(db, 'dropbox-2', restricted)).toBe('resumed');
+	});
+
+	it('copies when every file it could read is gone, whatever the rest said', async () => {
+		const { db, fake, plan, entryOf } = await syncedThenDisconnected();
+		await fake.delete(entryOf('Work'));
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+		const restricted = {
+			read: (ref: Parameters<typeof fake.read>[0]) =>
+				ref.remoteId === plan.remoteId
+					? Promise.reject(new Error('dropbox 409: path/restricted_content/'))
+					: fake.read(ref),
+		};
+
+		expect(await verifyResume(db, 'dropbox-2', restricted)).toBe('copied');
 	});
 
 	it('has nothing to check on a connection bound by copying', async () => {

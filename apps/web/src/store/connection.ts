@@ -342,20 +342,48 @@ export const rememberAccount = (
 	});
 
 /** How many of the notes' own files `verifyResume` looks for before giving up on them. */
-const RESUME_SAMPLES = 5;
+export const RESUME_SAMPLE_COUNT = 8;
 
-/** Whether the remote still has this file, by id. Anything but "not found" is not an answer. */
-const stillThere = async (
+type Sighting = 'found' | 'missing' | { failed: unknown };
+
+/** Whether the remote still has this file, by id. */
+const sight = async (
 	provider: Pick<StorageProvider, 'read'>,
 	note: NoteRecord
-): Promise<boolean> => {
+): Promise<Sighting> => {
 	try {
 		await provider.read({ remoteId: note.remoteId ?? '', path: note.path });
-		return true;
+		return 'found';
 	} catch (error) {
-		if (isNotFoundError(error)) return false;
-		throw error;
+		return isNotFoundError(error) ? 'missing' : { failed: error };
 	}
+};
+
+/**
+ * The notes to look for: the most recently edited of each top-level notebook in
+ * turn, so that one notebook deleted elsewhere — often the one in use — cannot
+ * stand for the whole folder.
+ */
+const samplesOf = (notes: readonly NoteRecord[]): NoteRecord[] => {
+	const byNotebook = [...notes]
+		.sort((a, b) => b.updatedAt - a.updatedAt)
+		.reduce(
+			(groups, note) =>
+				groups.set(note.path.split('/')[0] ?? '', [
+					...(groups.get(note.path.split('/')[0] ?? '') ?? []),
+					note,
+				]),
+			new Map<string, NoteRecord[]>()
+		);
+	const deepest = Math.max(0, ...[...byNotebook.values()].map((group) => group.length));
+	return Array.from({ length: deepest }, (_, rank) =>
+		[...byNotebook.values()].flatMap((group) => {
+			const note = group[rank];
+			return note === undefined ? [] : [note];
+		})
+	)
+		.flat()
+		.slice(0, RESUME_SAMPLE_COUNT);
 };
 
 export type ResumeVerdict = 'verified' | 'resumed' | 'copied' | 'superseded';
@@ -368,9 +396,9 @@ export type ResumeVerdict = 'verified' | 'resumed' | 'copied' | 'superseded';
  * was away. If the app folder was emptied, or replaced — the scan cannot tell
  * the two apart — every note it does not see would be deleted here too, and
  * the dialog said the notes stay on this device. So a few of the notes' own
- * files are looked for by id first. One found, and the resume stands. None, and
- * the rows are copied instead: cut loose and written back, so nothing a scan
- * does not see is taken from the device.
+ * files are looked for by id first, across notebooks. One found, and the resume
+ * stands. None, and the rows are copied instead: cut loose and written back, so
+ * nothing a scan does not see is taken from the device.
  *
  * The sync store refuses to write for the connection until this has answered
  * (`resumeUnverified`), so no engine can scan first. Throws when the remote
@@ -384,14 +412,22 @@ export const verifyResume = async (
 	const since = await bindingCount(db);
 	if ((await db.syncState.get(connectionId))?.resumeUnverified !== true) return 'verified';
 
-	const held = (await db.notes.where('connectionId').equals(connectionId).toArray())
-		.filter((note) => note.remoteId !== undefined)
-		.sort((a, b) => b.updatedAt - a.updatedAt)
-		.slice(0, RESUME_SAMPLES);
-	const found = await held.reduce<Promise<boolean>>(
-		async (sofar, note) => (await sofar) || stillThere(provider, note),
-		Promise.resolve(false)
+	const held = samplesOf(
+		(await db.notes.where('connectionId').equals(connectionId).toArray()).filter(
+			(note) => note.remoteId !== undefined
+		)
 	);
+	// One after another, stopping at the first found. A file the provider will
+	// not read — restricted, say — is no answer either way, and is passed over
+	// rather than allowed to hold the resume up for good.
+	const sightings = await held.reduce<Promise<Sighting[]>>(async (sofar, note) => {
+		const seen = await sofar;
+		return seen.includes('found') ? seen : [...seen, await sight(provider, note)];
+	}, Promise.resolve([]));
+	const found = sightings.includes('found');
+	const failures = sightings.flatMap((each) => (typeof each === 'object' ? [each.failed] : []));
+	// Nothing answered at all — offline, most likely. Ask again later.
+	if (held.length > 0 && failures.length === held.length) throw failures[0];
 
 	return inTransaction(db, async (): Promise<ResumeVerdict> => {
 		const state = await db.syncState.get(connectionId);
