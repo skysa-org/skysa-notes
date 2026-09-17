@@ -1,0 +1,19 @@
+# Response headers for the static app (the SPA shell, its assets, and the
+# service worker), applied by Cloudflare's static assets.
+# https://developers.cloudflare.com/workers/static-assets/headers/
+#
+# Not applied to what the Worker answers (/api/*, `run_worker_first` in
+# apps/api/wrangler.toml): those responses are JSON or redirects, never a page.
+# The WebDAV proxy (Phase 5) will set its own headers (docs/PLAN.md).
+#
+# The policy (docs/PLAN.md §9), checked by tests/csp.test.ts:
+# - script-src 'self' only. zod would probe for `new Function` at startup and
+#   report a violation even though it catches the refusal, so src/jitless.ts
+#   turns the probe off before any schema is built.
+# - style-src 'unsafe-inline': the editors set element styles and CodeMirror
+#   inserts <style> elements (style-mod). Neither can run script.
+# - img-src https: a note can show an image from anywhere, as markdown does.
+# - connect-src: this origin (the API) and the provider hosts the browser
+#   syncs with directly. A provider's hosts arrive with its adapter.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.dropboxapi.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

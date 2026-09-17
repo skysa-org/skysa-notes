@@ -1,3 +1,5 @@
+// First: before any module that builds a zod schema (see the module).
+import './jitless.js';
 import './styles.css';
 
 import { createRouter, RouterProvider } from '@tanstack/react-router';
