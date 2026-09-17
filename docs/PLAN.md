@@ -210,10 +210,15 @@ The in-memory fake in `src/providers/fake.ts` is deliberately the strictest prov
 ### 5.2 OneDrive (Microsoft Graph)
 - Scopes: `Files.ReadWrite.AppFolder offline_access openid email`. User consent only.
 - Root: `GET /me/drive/special/approot` — Microsoft creates `/Apps/<AppName>` automatically, where `<AppName>` is the Entra app registration display name. Register it as `skysa-notes` to match `APP_FOLDER_NAME`; no ensureRoot creation logic beyond writing `.notesapp.json`.
-- Files: `PUT /me/drive/items/{parentId}:/{name}:/content` (simple upload, fine for markdown; add resumable session only if a file ever exceeds 4 MB). `If-Match: <eTag>` is honored → real server-side conflict detection.
-- Version: `eTag` (or `cTag` for content-only). Use `eTag`.
-- Changes: `GET /me/drive/special/approot/delta`, follow `@odata.nextLink`, persist `@odata.deltaLink` as cursor. Deleted items carry a `deleted` facet.
-- Paths: items include `parentReference.path`; strip the approot prefix.
+- Files, create: `PUT /me/drive/special/approot:/{path}:/content?@microsoft.graph.conflictBehavior=fail` (simple upload, fine for markdown; add a resumable session only if a file ever exceeds 250 MB). Graph's default for an upload is to **replace**, so the `fail` is what keeps a create from being a blind overwrite; a name in use answers `409`. Graph also documents `409` for a missing parent, so the adapter looks the path and its parent up before choosing between `ConflictError` and `NotFoundError`.
+- Files, update: `PUT /me/drive/items/{id}/content` with `If-Match: <eTag>` → `412` when stale. **By id, never by path**: an upload by path creates a file that is not there, and a file deleted since the caller last saw it is exactly what an expected version is meant to catch. The adapter looks the path up first for the id (and answers a stale or missing file without uploading); `If-Match` covers the moment between.
+- Neither the `conflictBehavior=fail` → `409` nor the `If-Match` → `412` behaviour of an upload is in Graph's reference pages — they come from the OneDrive docs' issue tracker and Microsoft Q&A — so both wait on the live run below.
+- Move: `PATCH /me/drive/items/{id}?@microsoft.graph.conflictBehavior=fail` with `{ name, parentReference: { id } }`. The parent is named by its real id (Graph refuses `root` there), so a move costs a lookup of the destination and its parent. The destination is looked up *first*: a queued move the entry has already made returns without a request, and a rename that changes only the case of a name is still sent.
+- Reading: `/content` answers with a `302`, which a cross-origin request carrying an Authorization header may not follow. The adapter reads the item for its eTag and `@microsoft.graph.downloadUrl`, then fetches that URL **without** the token: it is pre-authenticated, needs no preflight, and is not on Graph — `*.files.1drv.com`, `my.microsoftpersonalcontent.com`, or `*.sharepoint.com` for work accounts. Those are the hosts §9's `connect-src` needs besides `graph.microsoft.com`.
+- Version: `eTag`. It changes on a move, where Dropbox's `rev` does not — which is §7's "Known limit". `cTag` changes only with content, but delta on OneDrive for Business omits it, so it cannot be the version.
+- Changes: `GET /me/drive/special/approot/delta`, following `@odata.nextLink`; the `@odata.deltaLink` is the next start. `410` (or a `400` on a link we stored) is `CursorResetError`. Deleted items carry a `deleted` facet; Business omits their `name`.
+- Paths: **delta never includes `parentReference.path`**, and a renamed folder's descendants are not reported. The adapter therefore keeps the tree — id → parent id, name, kind — **in the cursor**, and resolves every path from it once the whole page is applied, so an edit inside a folder renamed in the same page gets the new path. Consequences: a folder rename is reported as the folder alone (the engine's folder-only path, as for Drive); a deletion takes its path from the tree before the item leaves it, a folder deletion takes its subtree with it and is reported once, and a deletion of an id the tree never held is not reported; an item whose parent has not arrived yet is carried in the cursor and reported when it does. The cursor grows by a few hundred bytes per item in `syncState`, and every link read back from it must be on `graph.microsoft.com` before a token is sent to it. Outside delta, the path an item was asked for plus the name Graph returns gives its path.
+- Graph lists the app folder itself in its delta; the adapter drops it (§7 guards the same in the engine).
 - Tokens: refresh tokens issued to the backend; access tokens ~1h.
 
 ### 5.3 Dropbox
@@ -561,7 +566,8 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 
 ### Phase 3 — OneDrive (1 day)
 - [ ] `OneDriveProvider` (approot, delta, If-Match), and its hosts in the CSP's `connect-src` (§9): `graph.microsoft.com`, and wherever a file's `/content` redirects to download it, which is not Graph
-- [ ] Contract tests pass
+- [x] Contract tests pass — over a transport stub that speaks Graph's wire format, at one entry per page and at full pages (`tests/providers/onedriveStub.ts`)
+- [ ] Verified against OneDrive itself: `PROVIDER_LIVE_TESTS=1 ONEDRIVE_TEST_TOKEN=…` green, which settles the upload semantics §5.2 takes from outside Graph's reference pages and `delta` on `special/approot`. Waits on the Entra app registration (operator task).
 - [ ] Record the bytes a note last synced (a hash on `SyncNote`) so a remote rename is not read as a remote edit. OneDrive is the first provider whose version does not survive a move; until then a rename of a note holding unpushed edits produces a conflict copy the user did not need. See §7, "Known limit".
 
 ### Phase 4 — Google Drive (1–2 days)
