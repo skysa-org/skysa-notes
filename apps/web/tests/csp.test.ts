@@ -84,7 +84,14 @@ describe('Content-Security-Policy', () => {
 	});
 
 	it('connects only to this origin and the providers this build syncs with', () => {
-		expect(policy().get('connect-src')).toEqual(["'self'", 'https://*.dropboxapi.com']);
+		expect(policy().get('connect-src')).toEqual([
+			"'self'",
+			'https://*.dropboxapi.com',
+			'https://graph.microsoft.com',
+			'https://*.files.1drv.com',
+			'https://my.microsoftpersonalcontent.com',
+			'https://*.sharepoint.com',
+		]);
 	});
 
 	it('lets the Dropbox adapter reach every host it asks', async () => {
@@ -108,6 +115,42 @@ describe('Content-Security-Policy', () => {
 		expect(new Set(hosts.map((url) => url.hostname))).toEqual(
 			new Set(['api.dropboxapi.com', 'content.dropboxapi.com'])
 		);
+		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
+	});
+
+	it.each([
+		'https://public.dm.files.1drv.com/y4m/a.md',
+		'https://my.microsoftpersonalcontent.com/personal/abc/_layouts/15/download.aspx?x=1',
+		'https://contoso-my.sharepoint.com/personal/someone/_layouts/15/download.aspx?x=1',
+	])('lets the OneDrive adapter reach Graph and a download at %s', async (download) => {
+		const urls = new Set<string>();
+		const fetch: FetchLike = (url) => {
+			urls.add(url);
+			if (url === download) return Promise.resolve(new Response('body\n'));
+			if (url.startsWith('https://graph.microsoft.com/')) {
+				return Promise.resolve(
+					Response.json({
+						id: 'f1',
+						name: 'a.md',
+						eTag: 'e1',
+						file: {},
+						'@microsoft.graph.downloadUrl': download,
+					})
+				);
+			}
+			return Promise.resolve(new Response('', { status: 500 }));
+		};
+		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+			connectionId: 'c1',
+			provider: 'onedrive',
+			clientId: 'install-1',
+			getAccessToken: () => Promise.resolve('token'),
+		});
+		expect((await provider?.read({ remoteId: 'f1', path: 'a.md' }))?.content).toBe('body\n');
+
+		const connect = policy().get('connect-src') ?? [];
+		const hosts = [...urls].map((url) => new URL(url));
+		expect(hosts.map((url) => url.hostname)).toContain('graph.microsoft.com');
 		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
 	});
 

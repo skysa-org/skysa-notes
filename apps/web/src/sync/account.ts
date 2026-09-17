@@ -21,7 +21,44 @@ import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../
  */
 
 /** Providers the app can sync with today. The rest arrive with their adapters. */
-export const CONNECTABLE: readonly ProviderKind[] = ['dropbox'];
+export const CONNECTABLE: readonly ProviderKind[] = ['dropbox', 'onedrive'];
+
+/** A page at the provider where the user withdraws the app's access. */
+export interface RevokePlace {
+	readonly label: string;
+	readonly href: string;
+	/** Whose accounts it is for, as the end of "… for {accounts}". */
+	readonly accounts: string;
+}
+
+/**
+ * What disconnecting leaves behind at the provider, where it leaves anything.
+ * Dropbox lets the server withdraw the app's access; Microsoft gives an app no
+ * way to withdraw its own, so the user has to (docs/PLAN.md §5.2). A grant an
+ * administrator consented to cannot be removed by the user at all.
+ * https://support.microsoft.com/en-us/account-billing/edit-or-revoke-application-permissions-in-the-my-apps-portal-169be2b4-ee26-4338-aea8-d19bb2f329ee
+ * https://learn.microsoft.com/en-us/answers/questions/4375979/article-managing-apps-and-services-connected-to-ou
+ */
+export const LEFT_AT_PROVIDER: Partial<
+	Record<ProviderKind, Readonly<{ summary: string; places: readonly RevokePlace[] }>>
+> = {
+	onedrive: {
+		summary:
+			'Microsoft keeps this app’s access to its folder after it is disconnected, until it is removed there:',
+		places: [
+			{
+				label: 'microsoft.com/consent',
+				href: 'https://microsoft.com/consent',
+				accounts: 'a personal account',
+			},
+			{
+				label: 'My Apps',
+				href: 'https://myapplications.microsoft.com/',
+				accounts: 'a work or school account, or ask your administrator',
+			},
+		],
+	},
+};
 
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
 	dropbox: 'Dropbox',

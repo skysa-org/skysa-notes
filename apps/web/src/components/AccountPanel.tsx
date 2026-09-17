@@ -1,6 +1,7 @@
+import type { ProviderKind } from '@skysa/core';
 import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 
 import {
 	api,
@@ -17,6 +18,7 @@ import {
 	adoptAccount,
 	CONNECTABLE,
 	disconnectAccount,
+	LEFT_AT_PROVIDER,
 	PROVIDER_LABELS,
 	reconcileAccount,
 } from '../sync/account.js';
@@ -127,6 +129,31 @@ const conflictMessage = (count: number): string =>
 	count === 1
 		? 'A note was edited here and elsewhere at once. Both versions are kept; the copy has "conflict" in its name.'
 		: `${String(count)} notes were edited here and elsewhere at once. Both versions of each are kept; the copies have "conflict" in their names.`;
+
+/**
+ * Where to withdraw the app's access by hand, for a provider that gives the
+ * server no way to. The links open elsewhere, so the confirmation — and the
+ * address — are still here to come back to.
+ */
+const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) => {
+	const left = provider === undefined ? undefined : LEFT_AT_PROVIDER[provider];
+	if (left === undefined) return null;
+	return (
+		<p className="muted">
+			{left.summary}{' '}
+			{left.places.map((place, index) => (
+				<Fragment key={place.href}>
+					{index > 0 && '; '}
+					<a href={place.href} target="_blank" rel="noreferrer">
+						{place.label}
+					</a>{' '}
+					for {place.accounts}
+				</Fragment>
+			))}
+			.
+		</p>
+	);
+};
 
 interface LocalProps {
 	client: Client;
@@ -344,6 +371,7 @@ const Connected = ({
 						Disconnect {label}? Your notes stay on this device, and nothing is deleted
 						from {label}.
 					</p>
+					<LeftAtProvider provider={bound.provider} />
 					<button type="button" onClick={disconnect} disabled={busy}>
 						Disconnect
 					</button>
@@ -424,6 +452,7 @@ const OtherAccount = ({ client, database, connection, onSettled }: OtherAccountP
 				</p>
 			)}
 			<div className="account-confirm">
+				<LeftAtProvider provider={connection.provider} />
 				<button
 					type="button"
 					disabled={busy}
