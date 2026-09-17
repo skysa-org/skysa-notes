@@ -220,21 +220,36 @@ interface Browser {
  * which is why this returns the waiting rather than doing it.
  *
  * A run already in flight counts as begun: `run` hands a second caller the same
- * promise, and no second `syncing` is published for it. `attention` ends the
- * wait whether or not anything began, because it is also what a scheduler that
- * cannot sync at all publishes, and nothing further would come.
+ * promise, and no second `syncing` is published for it.
+ *
+ * The end is confirmed a turn of the loop later, because `runOnce` publishes
+ * the phase a run ended in *before* it asks whether a trigger during that run
+ * wants another one — so the first end can be the middle. Nothing in this file
+ * fires those triggers today, and a run that has really ended stays ended.
+ *
+ * And a deadline, well under the test timeout: a trigger whose run never starts
+ * at all — no session, a `released` that rejects — publishes nothing ever, and
+ * that should read as what it is rather than as a suite that stopped.
  */
-const runEnds = (scheduler: SyncScheduler): Promise<void> => {
+const runEnds = (scheduler: SyncScheduler, within = 2000): Promise<void> => {
 	const state = { began: scheduler.status().phase === 'syncing' };
-	return new Promise<void>((resolve) => {
+	return new Promise<void>((resolve, reject) => {
+		const give = setTimeout(() => {
+			stop();
+			reject(new Error('the trigger never started a run'));
+		}, within);
 		const stop = scheduler.subscribe((status) => {
 			if (status.phase === 'syncing') {
 				state.began = true;
 				return;
 			}
-			if (!state.began && status.phase !== 'attention') return;
-			stop();
-			resolve();
+			if (!state.began) return;
+			setTimeout(() => {
+				if (scheduler.status().phase === 'syncing') return;
+				clearTimeout(give);
+				stop();
+				resolve();
+			});
 		});
 	});
 };

@@ -974,7 +974,7 @@ describe('a note deleted before its write was ever sent, on two devices', () => 
 	 * path it finds occupied, and the worst of it is not what this reproduces.
 	 * Here their note survives under a conflict name: a copy of a file nobody
 	 * conflicted over, for the user to tidy up. In the soak's seed 39 — a
-	 * longer run, where the notes have history — no copy is made, their note
+	 * longer run — no copy is made, their note
 	 * goes with the file, and it is gone from both devices. That seed is the
 	 * loss; this is the guard that holds the mechanism still whatever the
 	 * engine decides afterwards, and fails, deterministically, on a withdrawn
