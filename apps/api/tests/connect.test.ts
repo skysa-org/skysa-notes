@@ -121,7 +121,17 @@ describe('start', () => {
 		const { request } = buildApp();
 		const jar = createJar();
 
-		const cases = ['https://evil.example/steal', '//evil.example/steal', 'javascript:alert(1)'];
+		const cases = [
+			'https://evil.example/steal',
+			'//evil.example/steal',
+			'javascript:alert(1)',
+			// One slash as given, two once resolved.
+			'/.//evil.example/steal',
+			'/..//evil.example',
+			'/a/..//evil.example',
+			'/\\evil.example',
+			'/\\/evil.example',
+		];
 		for (const returnTo of cases) {
 			jar.absorb(
 				await request(

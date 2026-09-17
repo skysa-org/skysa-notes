@@ -98,11 +98,12 @@ describe('the service worker', () => {
 		expect(provider?.handler).toBe('NetworkOnly');
 	});
 
-	it('prefers the network for the API but survives without it', () => {
+	it('never answers for the API from a cache', () => {
 		const api = (workbox.runtimeCaching ?? []).find(
 			(rule) => typeof rule.urlPattern === 'function'
 		);
-		expect(api?.handler).toBe('NetworkFirst');
+		expect(api?.handler).toBe('NetworkOnly');
+		expect(api?.options).toBeUndefined();
 	});
 
 	it('waits to be told before taking over a page', () => {

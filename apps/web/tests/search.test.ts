@@ -26,6 +26,13 @@ describe('parseSearch', () => {
 	it('ignores what it does not know about', () => {
 		expect(parseSearch({ folder: 'work', spurious: 'x' })).toEqual({ folder: 'work' });
 	});
+
+	it('takes the outcome of connecting storage only when it is one the API sends', () => {
+		expect(parseSearch({ connect: 'ok' })).toEqual({ connect: 'ok' });
+		expect(parseSearch({ connect: 'denied' })).toEqual({ connect: 'denied' });
+		expect(parseSearch({ connect: 'pwned' })).toEqual({});
+		expect(parseSearch({ connect: ['ok'] })).toEqual({});
+	});
 });
 
 describe('the root folder through the URL', () => {

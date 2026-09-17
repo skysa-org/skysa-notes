@@ -44,10 +44,17 @@ export const redirectUri = (origin: string, provider: string): string =>
 const enabled = (config: AppConfig, provider: string): provider is 'dropbox' =>
 	provider === 'dropbox' && config.enabledProviders.includes(provider);
 
-/** Only ever send the browser back inside this app. */
+/**
+ * Only ever send the browser back inside this app. Checked on the path as
+ * resolved, not as given: `/.//evil.example` and `/\evil.example` both start
+ * with one slash and resolve to `//evil.example`, which a `Location` header
+ * reads as another host.
+ */
 const safeReturnTo = (value: string | undefined, origin: string): string => {
-	if (value === undefined || !value.startsWith('/') || value.startsWith('//')) return '/';
-	return new URL(value, origin).pathname + new URL(value, origin).search;
+	if (value === undefined || !value.startsWith('/')) return '/';
+	const url = new URL(value, origin);
+	const path = url.pathname + url.search;
+	return url.origin !== new URL(origin).origin || path.startsWith('//') ? '/' : path;
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
