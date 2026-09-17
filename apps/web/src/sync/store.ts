@@ -488,6 +488,13 @@ export const createDexieSyncStore = (
 		// it was applied.
 		const note = await ownNote(scope, id);
 		if (note === undefined) return;
+		// A tombstone is reported clean (`isDirty`), so the engine names it here
+		// rather than as `detach-note` — and it owes the remote its delete and
+		// nothing else (`queueWrite` says so too). Forgetting the remote would
+		// take the `remoteId` that queued delete is addressed by, leaving it to
+		// purge the row with nothing removed and the file to come back on the
+		// next pull as a note the user deleted.
+		if (note.deletedLocally === 1) return;
 		await scope.notes.put({ ...withoutRemote(note), dirty: 1 });
 		await queue(scope, { op: 'write', noteId: note.id, path: note.path });
 	};

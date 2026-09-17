@@ -875,6 +875,28 @@ describe('changes, when things leave the tree', () => {
 				},
 			});
 			expect((inner as CursorResetError).uploadDifferences).toBe(true);
+
+			// Lower-cased, as some endpoints spell it — and not shadowed by an
+			// `innerError` that is there but carries no code of its own.
+			const lower = await resetOver({
+				error: {
+					code: 'resyncRequired',
+					message: 'resync',
+					innerError: { 'request-id': 'abc' },
+					innererror: { code: 'resyncChangesUploadDifferences' },
+				},
+			});
+			expect((lower as CursorResetError).uploadDifferences).toBe(true);
+
+			// And in `details`, the third place the error resource puts a code.
+			const listed = await resetOver({
+				error: {
+					code: 'resyncRequired',
+					message: 'resync',
+					details: [{ code: 'resyncChangesUploadDifferences', message: 'upload' }],
+				},
+			});
+			expect((listed as CursorResetError).uploadDifferences).toBe(true);
 		});
 
 		it.each([
@@ -885,9 +907,9 @@ describe('changes, when things leave the tree', () => {
 		])('trusts the scan for %s, which is what we have always done', async (code) => {
 			const error = await resetOver({ error: { code, message: 'resync' } });
 			expect(error).toBeInstanceOf(CursorResetError);
-			// Absent, not `false`: nothing about the reset says to upload, and an
-			// unrecognised code must never be the one that does.
-			expect((error as CursorResetError).uploadDifferences).toBeUndefined();
+			// Nothing about the reset says to upload, and an unrecognised code
+			// must never be the one that does.
+			expect((error as CursorResetError).uploadDifferences).toBe(false);
 		});
 	});
 

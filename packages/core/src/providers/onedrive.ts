@@ -187,14 +187,28 @@ const graphLink = (link: string): string => {
 	return link;
 };
 
+/**
+ * Every code in a Graph error, wherever it is placed. The error resource nests
+ * a code under `innerError` — spelled `innererror` by some endpoints — and
+ * lists more in `details[]`, and the docs do not promise which one carries a
+ * given code. Missing one is the dangerous direction here: an unread
+ * `resyncChangesUploadDifferences` takes the destructive reset instead.
+ * https://learn.microsoft.com/en-us/graph/errors
+ */
 const codesOf = (error: unknown): string[] => {
 	if (typeof error !== 'object' || error === null) return [];
-	const { code, innerError, innererror } = error as {
+	const { code, innerError, innererror, details } = error as {
 		code?: unknown;
 		innerError?: unknown;
 		innererror?: unknown;
+		details?: unknown;
 	};
-	return [...(typeof code === 'string' ? [code] : []), ...codesOf(innerError ?? innererror)];
+	return [
+		...(typeof code === 'string' ? [code] : []),
+		...codesOf(innerError),
+		...codesOf(innererror),
+		...(Array.isArray(details) ? details.flatMap(codesOf) : []),
+	];
 };
 
 // ---------------------------------------------------------------------------
@@ -667,7 +681,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 			// https://learn.microsoft.com/en-us/graph/api/driveitem-delta
 			throw new CursorResetError(
 				result.failure.codes.join('/') || result.failure.message,
-				result.failure.codes.includes('resyncChangesUploadDifferences') || undefined
+				result.failure.codes.includes('resyncChangesUploadDifferences')
 			);
 		}
 		if (!result.ok) return raise(result.failure);

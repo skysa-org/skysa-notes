@@ -546,10 +546,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					: state;
 			}
 			if (!('id' in change) || change.id !== note.id) return state;
-			// Cut loose from the remote: it points at no file at all now.
-			if (change.kind === 'detach-note') return { ...state, remoteId: undefined };
+			// Cut loose from the remote: it points at no file at all now. Both
+			// kinds that forget it, or the rest of the batch reads a note as
+			// still bound to a file it no longer has. No test reaches the
+			// `reupload-note` half — `reconcile` returns its upload branch
+			// before anything asks where a note is — so it is here for the
+			// invariant, not for a caller that has it today.
+			if (change.kind === 'detach-note' || change.kind === 'reupload-note') {
+				return { ...state, remoteId: undefined };
+			}
 			// `upsert-note`, `move-note` and `displace-note` carry a path;
-			// `adopt-version` and `detach-note` carry an id and move nothing.
+			// `adopt-version`, `detach-note` and `reupload-note` carry an id and
+			// move nothing.
 			// None of them changes `dirty`: the only kind that overwrites a
 			// note's bytes is `upsert-note`, and the engine never emits one
 			// for a note with unpushed edits — that is what `conflict` is.
@@ -2108,7 +2116,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				const at = folderNow(folder.path, changes);
 				return at === undefined ? [] : [{ kind: 'reupload-folder', path: at }];
 			});
-			return [...forgotten, ...remade];
+			// Ahead of the writes, not behind them: the queue is ordered, and a
+			// write that runs before its notebook exists is only rescued by
+			// `runWrite`'s `NotFoundError` recovery — a wasted round trip per
+			// note, and the folder made by a side effect rather than by the op
+			// that exists to make it.
+			return [...remade, ...forgotten];
 		}
 		// The outermost of them only. `delete-folder` cascades over what is
 		// inside it, so naming a nested one as well is a second delete of a

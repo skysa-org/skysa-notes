@@ -3112,15 +3112,42 @@ describe('a dead cursor', () => {
 			// inside is sent back up, not taken away with the folder.
 			expect(store.folders().map((each) => each.path)).toEqual(['Work']);
 			expect(noteAt('Work/a.md')?.content).toBe('one\n');
-			expect(
-				store
-					.ops()
-					.map((op) => op.op)
-					.sort()
-			).toEqual(['mkdir', 'write']);
+			// In that order: the queue is ordered, and the write of a note in a
+			// notebook that is not there yet is only rescued by a round trip.
+			expect(store.ops().map((op) => op.op)).toEqual(['mkdir', 'write']);
 
 			expect((await engine.push()).status).toBe('ok');
 			expect(provider.contentAt('Work/a.md')).toBe('one\n');
+		});
+
+		it('makes every notebook again, not the outermost one only', async () => {
+			// The ordinary reset names the outermost folder alone and lets
+			// `delete-folder` cascade over what is inside it. Nothing cascades
+			// here — each notebook needs its own `mkdir` — so naming only the
+			// outermost leaves every nested one local-only, holding notes whose
+			// writes then have to make their parents by accident.
+			await provider.createFolder('Work');
+			await provider.createFolder('Work/Sub');
+			await remoteFile('Work/Sub/a.md', 'one\n');
+			await engine.pull();
+			killTheCursor(true);
+			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			if (folder === undefined) throw new Error('no folder');
+			await provider.delete(folder);
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			expect(store.folders().map((each) => each.path)).toEqual(['Work', 'Work/Sub']);
+			// Both, outermost first, and only then the note inside.
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'mkdir', path: 'Work' },
+				{ op: 'mkdir', path: 'Work/Sub' },
+				{ op: 'write', path: 'Work/Sub/a.md' },
+			]);
+
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.contentAt('Work/Sub/a.md')).toBe('one\n');
 		});
 
 		it('still takes the remote\u2019s side for a file the scan did return', async () => {
