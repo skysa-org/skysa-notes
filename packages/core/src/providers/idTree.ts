@@ -322,6 +322,10 @@ export const arrivals = (page: Page): string[] => {
 	return [...arrived].filter((id) => !underAnother(id));
 };
 
+/** Where an item is in the tree as the page has it so far, if the root reaches it. */
+export const pathOf = (page: Page, id: string): string | undefined =>
+	pathIn(page.nodes, page.root, id);
+
 /** The tree as a page leaves it, in the form a cursor stores. */
 export const nodesOf = (page: Page): TreeRow[] =>
 	[...page.nodes].map(([id, node]) => [id, node.parent, node.name, node.folder]);
