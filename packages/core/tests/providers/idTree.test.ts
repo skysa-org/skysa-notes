@@ -96,10 +96,15 @@ describe('an id tree', () => {
 		expect(settled.entries[1]).toMatchObject({ remoteId: 'a', version: 'v3' });
 	});
 
-	it('reports a deletion where the item was, and drops one it never knew', () => {
+	it('reports a deletion where the item was, and by id alone one it never placed', () => {
+		// The engine matches the second by id: a note this device pushed after
+		// its cursor, or nothing at all.
 		const settled = run(seeded(), [gone('a'), gone('stranger')]);
 
-		expect(settled.entries).toEqual([{ path: 'Work/a.md', deleted: true, remoteId: 'a' }]);
+		expect(settled.entries).toEqual([
+			{ path: 'Work/a.md', deleted: true, remoteId: 'a' },
+			{ deleted: true, remoteId: 'stranger' },
+		]);
 	});
 
 	it('reports a deletion where the item was even if its folder moved in the same page', () => {
@@ -163,13 +168,13 @@ describe('an id tree', () => {
 		expect(paths(settled)).toEqual(['+Work']);
 	});
 
-	it('reports nothing for a held item it never placed, when it is deleted', () => {
+	it('reports a held item it never placed by id alone, when it is deleted', () => {
 		// Held with no earlier path, then deleted: there is nowhere it was, and
 		// above all not the root.
 		const held = run(EMPTY, [file('a', 'f', 'a.md')], false);
 		const deleted = run(held.next, [gone('a')]);
 
-		expect(deleted.entries).toEqual([]);
+		expect(deleted.entries).toEqual([{ deleted: true, remoteId: 'a' }]);
 	});
 
 	it('carries a held item’s details through to the entry', () => {
@@ -199,7 +204,10 @@ describe('an id tree', () => {
 	it('survives a cycle in the tree rather than overflowing', () => {
 		const settled = run(EMPTY, [folder('x', 'y', 'X'), folder('y', 'x', 'Y')]);
 
-		expect(settled.entries).toEqual([]);
+		expect(settled.entries).toEqual([
+			{ deleted: true, remoteId: 'x' },
+			{ deleted: true, remoteId: 'y' },
+		]);
 		expect(settled.next.nodes).toEqual([]);
 
 		// A tree carried in a cursor with a cycle already in it, where asking
@@ -212,7 +220,7 @@ describe('an id tree', () => {
 			],
 			pending: [],
 		};
-		expect(run(looped, [gone('x')]).entries).toEqual([]);
+		expect(run(looped, [gone('x')]).entries).toEqual([{ deleted: true, remoteId: 'x' }]);
 	});
 
 	describe('arrivals', () => {

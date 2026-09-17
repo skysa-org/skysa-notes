@@ -41,14 +41,18 @@ export type EntryRef = Pick<RemoteEntry, 'remoteId' | 'path'>;
  * A change that removed something. Deliberately not a `RemoteEntry` with a
  * flag: Dropbox's `DeletedMetadata` carries only a path — no id, no rev, no
  * timestamp — so anything richer would have adapters fabricating fields, and
- * the engine trusting them. Deletions are matched by path; `remoteId` is a
- * bonus from providers that do identify them.
+ * the engine trusting them. A deletion is matched by `remoteId` when it has one
+ * and by path when it has not.
+ *
+ * So one of the two is always there, and either may be missing. A feed that
+ * names items by id can be asked about a file it never placed — another
+ * device's push after this device's cursor, deleted before the next pull — and
+ * has no path to give. Dropping that deletion would leave the note here for
+ * ever, since the cursor moves on and nothing mentions the file again.
  */
-export interface DeletedEntry {
-	path: string;
-	deleted: true;
-	remoteId?: string;
-}
+export type DeletedEntry =
+	| { path: string; deleted: true; remoteId?: string }
+	| { path?: undefined; deleted: true; remoteId: string };
 
 export type ChangeEntry = (RemoteEntry & { deleted?: false }) | DeletedEntry;
 

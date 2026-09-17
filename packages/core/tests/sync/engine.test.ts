@@ -13,7 +13,7 @@ import {
 } from '../../src/providers/types.js';
 import { conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
 import { createSyncEngine, type SyncEngine } from '../../src/sync/engine.js';
-import type { SyncStore } from '../../src/sync/store.js';
+import type { SyncNote, SyncStore } from '../../src/sync/store.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
 /**
@@ -1021,6 +1021,79 @@ describe('deletions that are not about a note', () => {
 		await pullNow([{ path: 'a.md', deleted: true }]);
 
 		expect(noteAt('a.md')).toBeUndefined();
+	});
+});
+
+describe('a deletion by id alone', () => {
+	// An id feed never placed a file this device pushed after its cursor, so
+	// when another device deletes it before the next pull, the round says only
+	// that the id is gone (`settlePage`). Every test here pulls once first, so
+	// the batch is read against a stored cursor and not swept up by a scan.
+	const pulled = async (path: string) => {
+		const entry = await remoteFile(path, 'body\n');
+		await engine.pull();
+		expect(store.storedCursor()).toBeDefined();
+		return entry;
+	};
+
+	it('lets go of the note held by that id', async () => {
+		const entry = await pulled('a.md');
+
+		const result = await pullNow([{ deleted: true, remoteId: entry.remoteId }]);
+
+		expect(result.pulled).toBe(1);
+		expect(store.notes()).toEqual([]);
+	});
+
+	it('keeps an edit here, cut loose from the file', async () => {
+		const entry = await pulled('a.md');
+		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+
+		await pullNow([{ deleted: true, remoteId: entry.remoteId }]);
+
+		expect(noteAt('a.md')?.content).toBe('mine\n');
+		expect(noteAt('a.md')?.remoteId).toBeUndefined();
+	});
+
+	it('is not undone by an entry for the file in front of it', async () => {
+		// With no path, an earlier entry cannot be a move away from it: it is
+		// the file as it was before it went.
+		const entry = await pulled('a.md');
+
+		await pullNow([entry, { deleted: true, remoteId: entry.remoteId }]);
+
+		expect(store.notes()).toEqual([]);
+	});
+
+	it('is undone by an entry for the file behind it', async () => {
+		const entry = await pulled('a.md');
+
+		await pullNow([
+			{ deleted: true, remoteId: entry.remoteId },
+			{ ...entry, path: 'b.md' },
+		]);
+
+		expect(store.notes().map((note) => note.path)).toEqual(['b.md']);
+	});
+
+	it('takes the notebook held by that id', async () => {
+		await provider.createFolder('Work');
+		await engine.pull();
+		const [work] = store.folders();
+		if (work?.remoteId === undefined) throw new Error('no folder id');
+
+		await pullNow([{ deleted: true, remoteId: work.remoteId }]);
+
+		expect(store.folders()).toEqual([]);
+	});
+
+	it('does nothing for an id nothing here holds', async () => {
+		await pulled('a.md');
+
+		const result = await pullNow([{ deleted: true, remoteId: 'never-seen' }]);
+
+		expect(result.pulled).toBe(0);
+		expect(noteAt('a.md')).toBeDefined();
 	});
 });
 
@@ -4172,13 +4245,15 @@ describe('a note an earlier decision moved into a folder', () => {
 		store.put({
 			id: 'n1',
 			path: 'X/a.md',
-			content: 'mine\n',
+			content: 'mine, edited\n',
 			remoteId: mine.remoteId,
 			remoteVersion: mine.version,
+			dirty: true,
 		});
 		// On the remote inside one window: ours moves X → Y (a rename moves no
 		// bytes, and Dropbox's `rev` survives one), is deleted, and a different
-		// file takes the name.
+		// file takes the name. Ours holds an edit, so the deletion cuts it loose
+		// rather than taking it, and it is still in the way.
 		const moved = await provider.move(mine, 'Y/a.md');
 		await provider.delete(moved);
 		const theirs = await remoteFile('Y/a.md', 'theirs\n');
@@ -4187,6 +4262,7 @@ describe('a note an earlier decision moved into a folder', () => {
 
 		expect(noteAt('Y/a.md')?.content).toBe('theirs\n');
 		const ours = store.notes().find((note) => note.id === 'n1');
+		expect(ours?.content).toBe('mine, edited\n');
 		expect(ours?.path).toContain('conflict');
 		expect(parentPath(ours?.path ?? '')).toBe('Y');
 	});
@@ -4443,5 +4519,164 @@ describe('a write that finds nothing, with an unrelated rename queued', () => {
 		expect(result.status).toBe('retry');
 		expect(provider.snapshot().map((each) => each.path)).toContain('a.md');
 		expect(provider.snapshot().map((each) => each.path)).not.toContain('c.md');
+	});
+});
+
+/**
+ * Found by two devices syncing at random over each provider
+ * (`overProviders.test.ts`): each one a note one device kept, or a file it took
+ * from the other, and so two devices that no longer agree.
+ */
+describe('two devices at random', () => {
+	/** A note pulled from the remote the ordinary way, with a cursor stored. */
+	const pulledNote = async (path: string, content: string) => {
+		const entry = await remoteFile(path, content);
+		await engine.pull();
+		const note = noteAt(path);
+		if (note === undefined) throw new Error(`no note at ${path}`);
+		return { entry, note };
+	};
+
+	/** What `store/queue.ts` does when the user renames a note that has a file. */
+	const renameHere = (note: SyncNote, to: string): void => {
+		store.put({ ...note, path: to });
+		store.queue({ op: 'move', noteId: note.id, path: note.path, targetPath: to });
+	};
+
+	it('does not let a note deleted here before it was pushed take another device’s file', async () => {
+		// The store reports it clean, so claiming it writes the other device's
+		// bytes into a note the user deleted, and its queued delete then
+		// removes their note from the remote.
+		await engine.pull();
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n' });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		const theirs = await remoteFile('a.md', 'theirs\n');
+
+		await pullNow([theirs]);
+		await engine.push();
+
+		expect(store.notes().find((note) => note.id === 'n1')?.remoteId).toBeUndefined();
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+	});
+
+	it('does not let a note deleted here and there take the file made at its name', async () => {
+		// Written back under the same id, the new file is still a deleted note
+		// here, and the queued delete takes it from the remote.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
+		await provider.delete(entry);
+		const theirs = await remoteFile('a.md', 'theirs\n');
+
+		await pullNow([{ path: 'a.md', deleted: true, remoteId: entry.remoteId }, theirs]);
+		await engine.push();
+
+		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+	});
+
+	it('does not let a note renamed here onto a name take the file made there', async () => {
+		// Not even when the batch says what was there before went, which is what
+		// lets a note whose own file was replaced be claimed. The rename's file
+		// is still at the old name, and claimed, the note forgets it for ever.
+		const { entry, note } = await pulledNote('a.md', 'mine\n');
+		renameHere(note, 'b.md');
+		const theirs = await remoteFile('b.md', 'theirs\n');
+
+		await pullNow([{ path: 'b.md', deleted: true }, theirs]);
+
+		const mine = store.notes().find((each) => each.id === note.id);
+		expect(mine?.remoteId).toBe(entry.remoteId);
+		expect(mine?.content).toBe('mine\n');
+		expect(noteAt('b.md')?.content).toBe('theirs\n');
+	});
+
+	it('does not let a note take a file that arrives at its path while its own is unmentioned', async () => {
+		const { entry, note } = await pulledNote('a.md', 'mine\n');
+		const theirs = await provider.write('b.md', 'theirs\n', {});
+
+		await pullNow([{ ...theirs, path: 'a.md' }]);
+
+		expect(store.notes().find((each) => each.id === note.id)?.remoteId).toBe(entry.remoteId);
+	});
+
+	it('does not let a deletion at a name take the note renamed onto it here', async () => {
+		// Often this device's own delete of the note that had the name, coming
+		// back after the user gave the name to another.
+		const gone = await pulledNote('a.md', 'gone\n');
+		const { note } = await pulledNote('b.md', 'kept\n');
+		store.queue({ op: 'delete', noteId: gone.note.id, path: 'a.md' });
+		await engine.push();
+		renameHere(note, 'a.md');
+
+		await pullNow([{ path: 'a.md', deleted: true }]);
+		await engine.push();
+
+		expect(noteAt('a.md')?.id).toBe(note.id);
+		expect(provider.contentAt('a.md')).toBe('kept\n');
+	});
+
+	it('lets a deletion at the old name of a queued rename take that note', async () => {
+		// Ahead of a note the user made at the name the rename freed, which has
+		// never had a file for it to be about.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		renameHere(note, 'b.md');
+		store.put({ id: 'made', path: 'a.md', content: 'new\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'made', path: 'a.md' });
+		await provider.delete(entry);
+
+		await pullNow([{ path: 'a.md', deleted: true }]);
+
+		expect(store.notes().map((each) => [each.id, each.content])).toEqual([['made', 'new\n']]);
+	});
+
+	it('asks whether a file is there when a rename queued here adopted it and a deletion follows', async () => {
+		// Adopting the version reads nothing, so it says nothing about whether
+		// the file outlived the deletion behind it.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		renameHere(note, 'b.md');
+		await provider.delete(entry);
+
+		await pullNow([entry, { path: 'a.md', deleted: true }]);
+
+		expect(store.notes()).toEqual([]);
+	});
+
+	it('lets go of a note whose file moved and then went', async () => {
+		// The deletion is at the new name, where the note never got to, and
+		// carries no id to find it by.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		store.put({ id: 'made', path: 'c.md', content: 'new\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'made', path: 'c.md' });
+		await provider.delete(entry);
+
+		await pullNow([
+			{ ...entry, path: 'c.md', version: 'after-the-move' },
+			{ path: 'c.md', deleted: true },
+		]);
+
+		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+		expect(noteAt('c.md')?.content).toBe('new\n');
+	});
+
+	it('does not move a note aside onto the old name of a queued rename', async () => {
+		// The file is still there until the rename runs, which is queued behind
+		// the write that would create the copy: that write conflicts for ever.
+		// Here the note in the way was made, and its write queued, before the
+		// rename.
+		const copyName = 'b (conflict 2026-09-15T14-32).md';
+		const { note } = await pulledNote(copyName, 'renamed\n');
+		store.put({ id: 'made', path: 'b.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'made', path: 'b.md' });
+		renameHere(note, 'r.md');
+		const theirs = await remoteFile('b.md', 'theirs\n');
+
+		await pullNow([theirs]);
+		const pushed = await engine.push();
+
+		const mine = store.notes().find((each) => each.content.includes('mine'));
+		expect(mine?.path).not.toBe(copyName);
+		expect(pushed.status).toBe('ok');
+		expect(provider.contentAt('r.md')).toBe('renamed\n');
 	});
 });
