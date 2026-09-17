@@ -28,8 +28,9 @@ const REVOKE = 'https://oauth2.googleapis.com/revoke';
 
 /**
  * The one scope the app cannot work without. `drive.file` reaches only files
- * this app made, and is non-sensitive, so going to production needs brand
- * verification and nothing more (docs/google-oauth.md).
+ * this app made, and is non-sensitive, so going to production needs no
+ * verification; brand verification only puts the app's name and logo on the
+ * consent screen (docs/google-oauth.md).
  */
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
