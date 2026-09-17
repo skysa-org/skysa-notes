@@ -147,10 +147,11 @@ export interface SyncScheduler {
 }
 
 /**
- * `again`: a run was asked for during one. `backingOff`: a retry is waiting on
- * its timer, and a trigger that is not the user asking leaves it to that.
+ * `again`: a run was asked for during one. `nudged`: a trigger that defers to a
+ * backoff asked for one during a run. `backingOff`: a retry is waiting on its
+ * timer, and a trigger that is not the user asking leaves it to that.
  */
-type Flag = 'again' | 'backingOff';
+type Flag = 'again' | 'nudged' | 'backingOff';
 
 interface Session {
 	readonly generation: number;
@@ -389,9 +390,17 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		});
 	};
 
+	/**
+	 * Waiting on a backoff's timer. Asked of the timer as well as the flag: an
+	 * `offline` event cancels the timer, and a flag left standing without one
+	 * would leave every trigger but `online` inert.
+	 */
+	const backingOff = (session: Session): boolean =>
+		session.flags.has('backingOff') && timers.has('next');
+
 	/** A trigger that is not the user asking: it defers to a backoff in progress. */
 	const nudge = (session: Session): Promise<void> =>
-		session.flags.has('backingOff') ? Promise.resolve() : run(session);
+		backingOff(session) ? Promise.resolve() : run(session, 'nudged');
 
 	/**
 	 * An op out of attempts is left alone, not given up on: after a while it is
@@ -458,12 +467,15 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await synced(session, result.outcome);
 	};
 
-	/** One run at a time per connection; a trigger during one asks for another after it. */
-	const run = (session: Session): Promise<void> => {
+	/**
+	 * One run at a time per connection; a trigger during one asks for another
+	 * after it — unless it was only a nudge and that run ended backing off.
+	 */
+	const run = (session: Session, asked: 'again' | 'nudged' = 'again'): Promise<void> => {
 		if (!isCurrent(session)) return Promise.resolve();
 		const inFlight = session.inFlight.get('run');
 		if (inFlight !== undefined) {
-			session.flags.add('again');
+			session.flags.add(asked);
 			return inFlight;
 		}
 		const running = runOnce(session).finally(() => {
@@ -502,7 +514,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				failed(session, messageOf(error));
 			});
 		}
-		if (session.flags.delete('again') && isCurrent(session)) await runOnce(session);
+		const again = session.flags.delete('again');
+		const nudged = session.flags.delete('nudged') && !backingOff(session);
+		if ((again || nudged) && isCurrent(session)) await runOnce(session);
 	};
 
 	// ---------------------------------------------------------- following

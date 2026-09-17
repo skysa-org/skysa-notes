@@ -659,6 +659,77 @@ describe('failures', () => {
 		});
 	});
 
+	it('does not follow a failed sync straight away for a focus that came during it', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const held = deferred();
+		h.remote.gate.set('changes', held.promise);
+		h.remote.fake.setFault((call) => (call.op === 'changes' ? new Error('503') : undefined));
+
+		const arrived = h.remote.gated();
+		const running = h.scheduler.syncNow();
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 1);
+		});
+		h.env.fire('focus');
+		h.remote.gate.delete('changes');
+		held.resolve();
+		await running;
+		await quiet();
+
+		expect(h.remote.gated()).toBe(arrived + 1);
+		expect(h.scheduler.status().phase).toBe('retrying');
+		expect(h.env.pending()).toEqual([BACKOFF]);
+	});
+
+	it('does follow a sync that went well for a focus that came during it', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const held = deferred();
+		h.remote.gate.set('changes', held.promise);
+
+		const arrived = h.remote.gated();
+		const running = h.scheduler.syncNow();
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 1);
+		});
+		h.env.fire('focus');
+		h.remote.gate.delete('changes');
+		held.resolve();
+		await running;
+
+		expect(h.remote.gated()).toBe(arrived + 2);
+	});
+
+	it('is not left deaf when the network drops during a backoff and no online event follows', async () => {
+		const db = await bound();
+		const note = await createNote(db, { title: 'Plan', body: 'one\n' });
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		h.remote.fake.setFault((call) => (call.op === 'changes' ? new Error('503') : undefined));
+		await h.scheduler.syncNow();
+		expect(h.scheduler.status().phase).toBe('retrying');
+		h.remote.fake.setFault(undefined);
+
+		// The network goes, and comes back while the tab is frozen: no `online`.
+		h.env.state.online = false;
+		h.env.fire('offline');
+		expect(h.env.pending()).toEqual([]);
+		h.env.state.online = true;
+		const before = h.remote.pulls();
+
+		h.env.fire('focus');
+		await saveNoteBody(db, note.id, 'two\n');
+
+		await vi.waitFor(() => {
+			expect(h.remote.fake.contentAt(note.path)).toContain('two');
+		});
+		await reaches(h.scheduler, 'idle');
+		expect(h.remote.pulls()).toBeGreaterThan(before);
+	});
+
 	it('refreshes a token the provider refuses, and carries on', async () => {
 		const db = await bound();
 		const h = started(db);
