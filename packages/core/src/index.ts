@@ -50,6 +50,8 @@ export {
 	type FetchLike,
 } from './providers/dropbox.js';
 
+export { createOneDriveProvider, type OneDriveProviderOptions } from './providers/onedrive.js';
+
 export {
 	createFakeProvider,
 	type FakeCall,
