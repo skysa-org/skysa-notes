@@ -1,8 +1,8 @@
 A fence with a language:
 
 ```ts
-const provider: StorageProvider = createDropbox(token);
-await provider.ensureRoot();
+const provider: StorageProvider = createDropbox(token)
+await provider.ensureRoot()
 ```
 
 A fence with no language:
@@ -15,7 +15,7 @@ A fence containing backticks:
 
 ````md
 ```js
-nested();
+nested()
 ```
 ````
 

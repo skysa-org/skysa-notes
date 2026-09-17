@@ -4758,7 +4758,7 @@ describe('two devices at random', () => {
 		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
 	});
 
-	it('leaves a note at its own path to the deletion, not to a read that found nothing', async () => {
+	it('leaves a note at its own path to the deletion that follows, not to the read', async () => {
 		const { entry, note } = await pulledNote('a.md', 'one\n');
 		await provider.delete(entry);
 
