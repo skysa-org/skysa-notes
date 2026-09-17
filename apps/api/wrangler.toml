@@ -22,8 +22,8 @@ migrations_dir = "migrations"
 
 [vars]
 AUTH_MODE = "storage-first"
-# Only what this deployment can actually do. Dropbox is the one storage flow
-# that exists (Phase 2); the rest arrive in Phases 3-5.
+# Only what this deployment can actually do. Dropbox, OneDrive and Google
+# Drive are implemented; WebDAV is deferred (docs/PLAN.md §5.4).
 #
 # Listing a provider commits the deployment to having its credentials —
 # `parseEnv` refuses to boot without them — so a clean clone answers 500 until

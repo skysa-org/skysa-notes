@@ -8,7 +8,7 @@ Requires Node 22+ and pnpm 10 (`corepack enable`).
 
 ```bash
 pnpm install
-cp .dev.vars.example apps/api/.dev.vars   # fill in SECRETS_KEY at minimum
+cp .dev.vars.example apps/api/.dev.vars   # fill in SECRETS_KEY and one provider's credentials
 pnpm db:migrate                            # apply D1 migrations to the local database
 pnpm dev                                   # Vite on :5173, wrangler dev on :8787
 ```

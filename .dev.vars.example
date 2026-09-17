@@ -9,8 +9,8 @@ AUTH_MODE="storage-first"
 
 # Any of: gdrive,onedrive,dropbox,webdav. `dropbox`, `onedrive` and `gdrive`
 # are implemented — webdav is deferred indefinitely, and listing it connects
-# nothing (docs/PLAN.md §5.4) — and each one listed here must have its
-# credentials below or the app refuses to boot.
+# nothing (docs/PLAN.md §5.4) — and each OAuth provider listed here must have
+# its credentials below or the app refuses to boot.
 ENABLED_PROVIDERS="dropbox"
 
 # 32 random bytes, base64. Generate with: openssl rand -base64 32
@@ -20,8 +20,8 @@ SECRETS_KEY=""
 # Names the current key so rows encrypted with an older one stay readable.
 SECRETS_KEY_ID="k1"
 
-# Let the WebDAV proxy reach private/LAN addresses (e.g. a Nextcloud on your
-# network). Leave false on any instance reachable from the internet.
+# Reserved for the deferred WebDAV proxy (docs/PLAN.md §5.4); has no effect
+# today.
 WEBDAV_ALLOW_PRIVATE="false"
 
 # Google Cloud console — required when ENABLED_PROVIDERS includes gdrive.
