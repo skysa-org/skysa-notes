@@ -4687,6 +4687,50 @@ describe('a round of changes spread over several pages', () => {
 		expect(noteAt('a.md')).toBeDefined();
 		expect(store.storedCursor()).toBe(cursor);
 	});
+
+	it('decides a round of two thousand new notes without reading the store for each again', async () => {
+		// Read whole, a round is as big as whatever another device did: an
+		// import of thousands of notes is one round. Each decision asks about
+		// the notes the ones before it made, and asking the store afresh every
+		// time is a million IndexedDB reads; replaying every decision for every
+		// note was half a minute here before anything was stored.
+		const paged = createFakeProvider({
+			startAt: new Date('2026-01-01T00:00:00Z'),
+			pageSize: 100,
+		});
+		await paged.ensureRoot();
+		const counted = { reads: 0 };
+		const counting: SyncStore = {
+			...store,
+			noteById: (id) => {
+				counted.reads += 1;
+				return store.noteById(id);
+			},
+			notesUnder: (path) => {
+				counted.reads += 1;
+				return store.notesUnder(path);
+			},
+		};
+		const big = createSyncEngine({ provider: paged, store: counting, now: () => AT });
+		await big.pull();
+		const notes = 2000;
+		for (let folder = 0; folder < 20; folder += 1) {
+			await paged.createFolder(`F${String(folder)}`);
+		}
+		for (let note = 0; note < notes; note += 1) {
+			await paged.write(`F${String(note % 20)}/n${String(note)}.md`, `${String(note)}\n`, {});
+		}
+		counted.reads = 0;
+
+		const started = Date.now();
+		const result = await big.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.notes()).toHaveLength(notes);
+		expect(counted.reads).toBeLessThan(notes * 4);
+		// Generous, for a slow runner: about a second here, and thirty before.
+		expect(Date.now() - started).toBeLessThan(15_000);
+	}, 60_000);
 });
 
 describe('a folder moved into what it was', () => {
@@ -4781,6 +4825,71 @@ describe('an id-less deletion under a folder the round renames', () => {
 		expect(folderPaths()).toEqual(['B', 'B/K']);
 	});
 
+	it('keeps a folder when the folder above it has moved on since the round', async () => {
+		// `C` renamed to `B`, and then to `Z` after the round was read. Asked
+		// where `A` should be, the provider has no `B` to list: that says
+		// nothing about `A`, and taking it would lose it from this device.
+		await provider.createFolder('C');
+		await provider.createFolder('C/A');
+		await remoteFile('C/A/n.md', 'n\n');
+		await engine.pull();
+
+		const renamed = await provider.move(entryAt('C'), 'B');
+		await provider.move(entryAt('B'), 'Z');
+
+		const result = await pullNow([{ path: 'C/A', deleted: true }, renamed]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['B', 'B/A']);
+		expect(notePaths()).toEqual(['B/A/n.md']);
+	});
+
+	it('asks after the folder nearest above, when more than one of them moves', async () => {
+		// `C/C/B` deleted, `C` renamed to `A`, and `A/C` to `A/B`. Rebased
+		// through `C` alone, `B` is looked for in an `A/C` that is gone, and
+		// "not found" there says nothing; through `C/C`, it is asked of `A/B`.
+		await provider.createFolder('C');
+		await provider.createFolder('C/C');
+		await provider.createFolder('C/C/B');
+		await remoteFile('C/C/B/n.md', 'n\n');
+		await engine.pull();
+
+		await provider.delete(entryAt('C/C/B'));
+		const outer = await provider.move(entryAt('C'), 'A');
+		const inner = await provider.move(entryAt('A/C'), 'A/B');
+
+		const result = await pullNow([
+			{ path: 'C/C/B', deleted: true },
+			{ path: 'C/C/B/n.md', deleted: true },
+			outer,
+			inner,
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['A', 'A/B']);
+		expect(notePaths()).toEqual([]);
+	});
+
+	it('takes a folder the round carried to the path, listed before only where it was', async () => {
+		// `B` moved into `A` as `A/B`, `A` renamed to `B`, and `B/B` deleted.
+		// The folder's one entry is at `A/B`, before its parent's rename took
+		// it to `B/B`: where it was, not somewhere it lives on.
+		await provider.createFolder('A');
+		await provider.createFolder('B');
+		await remoteFile('B/a.md', 'a\n');
+		await engine.pull();
+
+		const nested = await provider.move(entryAt('B'), 'A/B');
+		const renamed = await provider.move(entryAt('A'), 'B');
+		await provider.delete(entryAt('B/B'));
+
+		const result = await pullNow([nested, renamed, { path: 'B/B', deleted: true }]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['B']);
+		expect(notePaths()).toEqual([]);
+	});
+
 	it('takes a folder made and renamed in the round at the name it was deleted at', async () => {
 		await engine.pull();
 		const folder = await provider.createFolder('B');
@@ -4823,6 +4932,28 @@ describe('an id-less deletion of a folder renamed away and back', () => {
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual([]);
+	});
+
+	it('keeps the folder when both deletions are the old names of its renames', async () => {
+		// Dropbox's shape of `C` renamed to `D` and back: each old name deleted
+		// by path before the folder is listed at the new one. Nothing was at
+		// `D` before the round, so the second deletion has to be asked of the
+		// folder the round put there, which is alive at `C` afterwards.
+		const folder = await provider.createFolder('C');
+		await remoteFile('C/x.md', 'x\n');
+		await engine.pull();
+		const before = noteAt('C/x.md');
+
+		const result = await pullNow([
+			{ path: 'C', deleted: true },
+			{ ...folder, path: 'D' },
+			{ path: 'D', deleted: true },
+			folder,
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['C']);
+		expect(noteAt('C/x.md')?.id).toBe(before?.id);
 	});
 });
 
@@ -4940,6 +5071,60 @@ describe('a folder arriving where another is about to leave', () => {
 		expect(folderPaths()).toEqual(['B']);
 		expect(notePaths()).toEqual([]);
 		expect(store.folders()[0]?.remoteId).toBe(made.remoteId);
+	});
+
+	it('moves a subfolder out of the doomed folder before deleting it', async () => {
+		// `B/sub` moved to `Keep`, `B` deleted, a new `B` made — reported new
+		// `B` first, as an id-tree page lists folders. Deleted to make room,
+		// the old `B` would take `B/sub` and its notes with it before the
+		// entry saying where `sub` went is reached.
+		const old = await provider.createFolder('B');
+		await provider.createFolder('B/sub');
+		await remoteFile('B/sub/n.md', 'n\n');
+		await engine.pull();
+		const before = noteAt('B/sub/n.md');
+
+		const moved = await provider.move(entryAt('B/sub'), 'Keep');
+		await provider.delete(old);
+		const made = await provider.createFolder('B');
+
+		const result = await pullNow([
+			made,
+			moved,
+			{ path: 'B', deleted: true, remoteId: old.remoteId },
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['B', 'Keep']);
+		expect(noteAt('Keep/n.md')?.id).toBe(before?.id);
+	});
+
+	it('keeps an edited note in a subfolder moved out of the doomed folder bound to its file', async () => {
+		// The same, with unpushed edits. Cut loose by the cascade, the note
+		// stays behind at `B/sub/n.md` with no file, and its push makes a
+		// second copy beside `Keep/n.md` instead of going to that file.
+		const old = await provider.createFolder('B');
+		await provider.createFolder('B/sub');
+		const file = await remoteFile('B/sub/n.md', 'n\n');
+		await engine.pull();
+		const before = noteAt('B/sub/n.md');
+		if (before === undefined) throw new Error('no note');
+		store.put({ ...before, content: 'mine\n', dirty: true });
+
+		const moved = await provider.move(entryAt('B/sub'), 'Keep');
+		await provider.delete(old);
+		const made = await provider.createFolder('B');
+
+		const result = await pullNow([
+			made,
+			moved,
+			{ path: 'B', deleted: true, remoteId: old.remoteId },
+		]);
+
+		expect(result.status).toBe('ok');
+		expect(
+			store.notes().map((note) => [note.path, note.content, note.remoteId, note.dirty])
+		).toEqual([['Keep/n.md', 'mine\n', file.remoteId, true]]);
 	});
 
 	it('moves a folder out of the one it displaced to make room', async () => {

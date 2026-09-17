@@ -174,6 +174,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 
 	/**
+	 * What the store said when a decision was first asked about, kept with the
+	 * decision. The store does not change while a batch is decided — nothing
+	 * is applied until every decision is in — and a decision lives no longer
+	 * than its batch, so the answer holds for as long as anyone can ask. Asked
+	 * again for every entry after it, a round of a thousand imported notes is a
+	 * million reads of IndexedDB.
+	 */
+	const storeReads = new WeakMap<PullChange, Promise<unknown>>();
+
+	const storeRead = <T>(change: PullChange, read: () => Promise<T>): Promise<T> => {
+		const known = storeReads.get(change) as Promise<T> | undefined;
+		if (known !== undefined) return known;
+		const reading = read();
+		storeReads.set(change, reading);
+		return reading;
+	};
+
+	/**
 	 * Every note that could possibly end up in or under `folder` once this
 	 * batch is applied: the ones the store has there now, the ones under any
 	 * folder this batch is moving (which could be carried in), and the ones the
@@ -185,11 +203,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		decided: readonly PullChange[]
 	): Promise<SyncNote[]> => {
 		const sources = decided.flatMap((change) =>
-			change.kind === 'move-folder' ? [change.from] : []
+			change.kind === 'move-folder'
+				? [storeRead(change, () => store.notesUnder(change.from))]
+				: []
 		);
-		const groups = await Promise.all(
-			[folder, ...sources].map((each) => store.notesUnder(each))
-		);
+		const groups = await Promise.all([store.notesUnder(folder), ...sources]);
 		// And every note an earlier decision has put somewhere by name. A folder
 		// is not the only thing that carries a note into this one: a `move-note`
 		// brings a single file in from anywhere at all, and its row is still at
@@ -198,10 +216,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// name — two rows at one path, which the sidebar shows twice and which
 		// the next push has overwrite each other.
 		const named = decided.flatMap((change) => {
-			if (change.kind === 'conflict') return [change.resolution.noteId];
-			return 'id' in change && 'path' in change ? [change.id] : [];
+			if (change.kind === 'conflict') {
+				const { noteId } = change.resolution;
+				return [storeRead(change, () => store.noteById(noteId))];
+			}
+			if (!('id' in change && 'path' in change)) return [];
+			const { id } = change;
+			return [storeRead(change, () => store.noteById(id))];
 		});
-		const rows = await Promise.all([...new Set(named)].map((id) => store.noteById(id)));
+		const rows = await Promise.all(named);
 		// The batch's own first, so a row the store also holds wins: `whereNow`
 		// replays the decisions from the pre-batch position, which is the one to
 		// start from wherever there is one. The store's two sources overlap with
@@ -221,8 +244,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		decided: readonly PullChange[]
 	): Promise<Placed[]> => {
 		const candidates = await notesTouching(folder, decided);
+		const placed = placements(decided);
 		return candidates.flatMap((note) => {
-			const at = whereNow(note, decided);
+			const { at } = placed(note);
 			return at === undefined || parentPath(at) !== folder ? [] : [{ note, path: at }];
 		});
 	};
@@ -233,8 +257,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		decided: readonly PullChange[]
 	): Promise<Placed[]> => {
 		const candidates = await notesTouching(folder, decided);
+		const placed = placements(decided);
 		return candidates.flatMap((note) => {
-			const at = whereNow(note, decided);
+			const { at } = placed(note);
 			return at === undefined || !isWithin(at, folder) ? [] : [{ note, path: at }];
 		});
 	};
@@ -468,50 +493,88 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		remoteId: string | undefined;
 	}
 
+	const placedBy =
+		(note: SyncNote) =>
+		(state: Placement, change: PullChange): Placement => {
+			if (change.kind === 'delete-note') {
+				return change.id === note.id ? { ...state, at: undefined } : state;
+			}
+			// A folder delete cascades: the clean notes inside it go with it,
+			// while the dirty ones are kept and merely detached. Nothing a
+			// folder does reaches a note that is not anywhere.
+			if (change.kind === 'delete-folder') {
+				if (state.at === undefined || !isWithin(state.at, change.path)) return state;
+				return state.dirty
+					? { ...state, remoteId: undefined }
+					: { ...state, at: undefined };
+			}
+			if (change.kind === 'move-folder') {
+				return state.at !== undefined && isWithin(state.at, change.from)
+					? { ...state, at: rebasePath(state.at, change.from, change.to) }
+					: state;
+			}
+			if (change.kind === 'conflict') {
+				return change.resolution.noteId === note.id
+					? {
+							at: change.resolution.remote.path,
+							dirty: false,
+							remoteId: change.resolution.remote.remoteId,
+						}
+					: state;
+			}
+			if (!('id' in change) || change.id !== note.id) return state;
+			// Cut loose from the remote: it points at no file at all now.
+			if (change.kind === 'detach-note') return { ...state, remoteId: undefined };
+			// `upsert-note`, `move-note` and `displace-note` carry a path;
+			// `adopt-version` and `detach-note` carry an id and move nothing.
+			// None of them changes `dirty`: the only kind that overwrites a
+			// note's bytes is `upsert-note`, and the engine never emits one
+			// for a note with unpushed edits — that is what `conflict` is.
+			const remoteId = 'remote' in change ? change.remote.remoteId : state.remoteId;
+			return 'path' in change
+				? { ...state, at: change.path, remoteId }
+				: { ...state, remoteId };
+		};
+
+	const placedAt = (note: SyncNote): Placement => ({
+		at: note.path,
+		dirty: note.dirty,
+		remoteId: note.remoteId,
+	});
+
 	const placement = (note: SyncNote, decided: readonly PullChange[]): Placement =>
-		decided.reduce<Placement>(
-			(state, change) => {
-				if (change.kind === 'delete-note') {
-					return change.id === note.id ? { ...state, at: undefined } : state;
-				}
-				// A folder delete cascades: the clean notes inside it go with it,
-				// while the dirty ones are kept and merely detached. Nothing a
-				// folder does reaches a note that is not anywhere.
-				if (change.kind === 'delete-folder') {
-					if (state.at === undefined || !isWithin(state.at, change.path)) return state;
-					return state.dirty
-						? { ...state, remoteId: undefined }
-						: { ...state, at: undefined };
-				}
-				if (change.kind === 'move-folder') {
-					return state.at !== undefined && isWithin(state.at, change.from)
-						? { ...state, at: rebasePath(state.at, change.from, change.to) }
-						: state;
-				}
-				if (change.kind === 'conflict') {
-					return change.resolution.noteId === note.id
-						? {
-								at: change.resolution.remote.path,
-								dirty: false,
-								remoteId: change.resolution.remote.remoteId,
-							}
-						: state;
-				}
-				if (!('id' in change) || change.id !== note.id) return state;
-				// Cut loose from the remote: it points at no file at all now.
-				if (change.kind === 'detach-note') return { ...state, remoteId: undefined };
-				// `upsert-note`, `move-note` and `displace-note` carry a path;
-				// `adopt-version` and `detach-note` carry an id and move nothing.
-				// None of them changes `dirty`: the only kind that overwrites a
-				// note's bytes is `upsert-note`, and the engine never emits one
-				// for a note with unpushed edits — that is what `conflict` is.
-				const remoteId = 'remote' in change ? change.remote.remoteId : state.remoteId;
-				return 'path' in change
-					? { ...state, at: change.path, remoteId }
-					: { ...state, remoteId };
-			},
-			{ at: note.path, dirty: note.dirty, remoteId: note.remoteId }
+		decided.reduce<Placement>(placedBy(note), placedAt(note));
+
+	/**
+	 * `placement` for many notes against one set of decisions, as a folder's
+	 * worth of candidates is asked. Only two sorts of change move a note: one
+	 * about a folder, and one naming the note. Replaying every decision for
+	 * every candidate costs the round's size squared per question, and a round
+	 * is read whole — a thousand notes imported on another device took seconds,
+	 * and twice that took half a minute. Indexed once, each note replays its
+	 * own changes and the folders', and gets the same answer.
+	 */
+	const placements = (decided: readonly PullChange[]): ((note: SyncNote) => Placement) => {
+		const folders = decided.flatMap((change, index) =>
+			change.kind === 'move-folder' || change.kind === 'delete-folder' ? [index] : []
 		);
+		const naming = decided.reduce<Map<string, number[]>>((map, change, index) => {
+			const id =
+				change.kind === 'conflict'
+					? change.resolution.noteId
+					: 'id' in change
+						? change.id
+						: undefined;
+			return id === undefined ? map : map.set(id, [...(map.get(id) ?? []), index]);
+		}, new Map());
+		return (note) =>
+			[...folders, ...(naming.get(note.id) ?? [])]
+				.sort((one, two) => one - two)
+				.reduce<Placement>(
+					(state, index) => placedBy(note)(state, decided[index] as PullChange),
+					placedAt(note)
+				);
+	};
 
 	/** Where a note ends up, or `undefined` if the batch takes it away. */
 	const whereNow = (note: SyncNote, decided: readonly PullChange[]): string | undefined =>
@@ -607,11 +670,39 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		decided: readonly PullChange[]
 	): Promise<MovedOver | undefined> => {
 		if (remoteId !== undefined || path === undefined) return undefined;
-		const candidates = [path, ...ancestorPaths(path)];
-		const folders = await Promise.all(candidates.map((each) => store.folderByPath(each)));
+		// Nearest first: the folder closest above the path is the one whose
+		// last place says where the path went. `ancestorPaths` is outermost
+		// first, and rebased through an outer folder alone, `C/C/B` under `C`
+		// renamed to `A` and `C/C` to `A/B` is looked for in an `A/C` no
+		// longer there.
+		const candidates = [
+			path,
+			...ancestorPaths(path).reduceRight<string[]>((all, each) => [...all, each], []),
+		];
+		// The folder the batch has put there, where that is a different one
+		// from the folder there when the batch started: `C` renamed to `D`
+		// and back, with `C` and then `D` deleted by path, is one folder alive
+		// at `C` both times, and nothing was at `D` before the batch. Otherwise
+		// the one there before, which a rename may already have taken away.
+		const folders = await Promise.all(
+			candidates.map(async (each) => {
+				const before = (await store.folderByPath(each))?.remoteId;
+				const now = await folderIdAt(each, decided);
+				return now !== undefined && now !== before
+					? { id: now, placed: true }
+					: { id: before, placed: false };
+			})
+		);
 		const moved = candidates.flatMap((candidate, index) => {
-			const id = folders[index]?.remoteId;
-			if (id === undefined || !aliveElsewhere(live, id, candidate, at)) return [];
+			const { id, placed } = folders[index] ?? { id: undefined, placed: false };
+			if (id === undefined) return [];
+			// One the batch put there has only what comes after to say it lives
+			// on, as for `movedNotDeleted`: `A` renamed to `B` carries `A/B` to
+			// `B/B`, and its entry at `A/B` is where it was, not where it went.
+			const alive = placed
+				? (live.get(id) ?? []).some((entry) => entry.at > at)
+				: aliveElsewhere(live, id, candidate, at);
+			if (!alive) return [];
 			const last = (live.get(id) ?? []).at(-1);
 			return last === undefined ? [] : [{ index, from: candidate, to: last.path }];
 		});
@@ -622,9 +713,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// renamed to `A`, a new `B` made and deleted — which is what a
 		// deletion read in order is about.
 		const there = await folderIdAt(path, decided);
-		return there === undefined || there === folders[0]?.remoteId
-			? { kind: 'itself' }
-			: undefined;
+		return there === undefined || there === folders[0]?.id ? { kind: 'itself' } : undefined;
 	};
 
 	/** The id of the folder at `path` once the decisions so far have run. */
@@ -652,7 +741,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * nobody has; taken, a file the provider never listed again would be lost
 	 * here. So the provider is asked: a note's file by its id, and a folder by
 	 * listing where it would be once the folder above it has moved. Only "not
-	 * found" lets go.
+	 * found" lets go: of a note's file, or of a folder from a parent that is
+	 * there.
 	 */
 	const decideUnderMoved = async (
 		path: string,
@@ -670,11 +760,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const remoteId = gone === undefined ? undefined : await folderIdAt(gone, decided);
 		if (gone === undefined || remoteId === undefined) return [];
 		const expected = isWithin(gone, over.from) ? rebasePath(gone, over.from, over.to) : gone;
+		// Not found there is not proof when it is the parent that is missing:
+		// the provider answers for now, not for where the round ended, and the
+		// folder above may have moved again since the round was read. Kept, a
+		// folder that is gone stays until the next rescan; deleted, one that is
+		// not takes its notes from this device, and nothing lists them again.
 		const beside = await provider.list(parentPath(expected)).catch((error: unknown) => {
-			if (isNotFoundError(error)) return [];
+			if (isNotFoundError(error)) return undefined;
 			throw error;
 		});
-		return beside.some((entry) => entry.remoteId === remoteId)
+		return beside === undefined || beside.some((entry) => entry.remoteId === remoteId)
 			? []
 			: deleteFolderAfterRescue(gone, decided, batch, at);
 	};
@@ -1086,9 +1181,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		to: string,
 		remoteId: string,
 		decided: readonly PullChange[],
-		doomed: Doomed,
+		batch: Batch,
+		at: number,
 		from?: string
 	): Promise<PullChange[]> => {
+		const { doomed } = batch;
 		const occupant = await folderAt(to, decided);
 		// Belt and braces on the second half: our own folder cannot be the thing
 		// in our way, because we only got here with `folderNow` saying it is
@@ -1104,9 +1201,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// Deleted, unless the folder arriving is inside it — `C/A` moved up to
 		// `C` as `C` goes — when the cascade would take the arrival with it.
 		// Then it is moved aside like any other, and the deletion that names
-		// it finds it there.
+		// it finds it there. And deleted as any other deletion is, after what
+		// the round moves out of it: `B/sub` moved to `Keep`, `B` deleted and a
+		// new `B` made, reported new `B` first as an id-tree page puts folders.
 		const inside = from !== undefined && isWithin(from, to);
-		if (named && !inside) return [{ kind: 'delete-folder', path: to }];
+		if (named && !inside) return deleteFolderAfterRescue(to, decided, batch, at);
 
 		// Names this batch has already put a folder at, so two folders displaced
 		// out of one path do not both take the same one.
@@ -1219,7 +1318,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			(later) => later.at > at && later.path !== entry.path
 		);
 		if (!movesOn && !batch.doomed.ids.has(id)) return [];
-		return clearTheWay(entry.path, entry.remoteId, decided, batch.doomed);
+		return clearTheWay(entry.path, entry.remoteId, decided, batch, at);
 	};
 
 	const decideFolder = async (
@@ -1228,7 +1327,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		batch: Batch,
 		at: number
 	): Promise<PullChange[]> => {
-		const { doomed } = batch;
 		// The app folder itself, which several providers report as an entry of
 		// its own — Graph's `delta` returns the root item. There is nothing above
 		// it to hold a row, and a row for it would be reconciled away after the
@@ -1262,7 +1360,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (from !== undefined && from !== entry.path) {
 			// In this order: the folder first, because getting it out of the way
 			// takes the notes inside it with it and leaves nothing to displace.
-			const room = await clearTheWay(entry.path, entry.remoteId, decided, doomed, from);
+			const room = await clearTheWay(entry.path, entry.remoteId, decided, batch, at, from);
 			// And asked again after it, since the folder in the way may be the
 			// one this is moving out of — `Z/X` moved up to `B` while `B` is
 			// renamed to `Z` — and has carried this one aside with it. Never
