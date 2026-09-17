@@ -62,6 +62,22 @@ const tokenSchema = z.object({ accessToken: z.string().min(1), expiresAt: z.numb
 
 export type AccessToken = z.infer<typeof tokenSchema>;
 
+/**
+ * `expiresAt` is by the Worker's clock, and the app compares it with this
+ * device's. A device clock hours out would see every token as expired on
+ * arrival and mint one for every provider request. So it is moved onto this
+ * device's clock by the response's `Date`, which is the Worker's own to the
+ * second — well inside the minute a token is replaced early by
+ * (`sync/tokens.ts`). A response without one is taken as it is.
+ * https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Date
+ */
+const onDeviceClock = (token: AccessToken, response: Response): AccessToken => {
+	const served = Date.parse(response.headers.get('date') ?? '');
+	return Number.isNaN(served)
+		? token
+		: { ...token, expiresAt: token.expiresAt - served + Date.now() };
+};
+
 const errorSchema = z.object({ error: z.string() });
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -123,7 +139,8 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 	const call = async <T>(
 		path: string,
 		schema: z.ZodType<T>,
-		init: RequestInit = {}
+		init: RequestInit = {},
+		adapt: (value: T, response: Response) => T = (value) => value
 	): Promise<Result<T>> => {
 		const response = await doFetch(`${base}${path}`, {
 			...init,
@@ -153,7 +170,7 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 				response.status
 			);
 		}
-		return { ok: true, value: parsed.data };
+		return { ok: true, value: adapt(parsed.data, response) };
 	};
 
 	return {
@@ -188,11 +205,16 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 			),
 
 		token: (connectionId) =>
-			call('/token', tokenSchema, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ connectionId }),
-			}),
+			call(
+				'/token',
+				tokenSchema,
+				{
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ connectionId }),
+				},
+				onDeviceClock
+			),
 
 		connectUrl: (provider, returnTo) =>
 			`${base}/auth/connect/${encodeURIComponent(provider)}/start?returnTo=${encodeURIComponent(returnTo)}`,
