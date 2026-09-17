@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
-import { buildApp, cookieNames, createJar, testConfig } from './harness.js';
+import { buildApp, cookieNames, createJar, secretOf, testConfig } from './harness.js';
 
 /**
  * Listing and removing connections. The rule these tests exist to hold: a
@@ -19,13 +19,30 @@ const namesIn = (value: unknown): string[] => {
 };
 
 /**
- * `iv` is matched as a word rather than a substring — `driveId` holds those two
- * letters and is not a secret — so `iv`, `secretIv` and `iv_hex` are named and
- * `driveId` is not.
+ * `iv` is matched at a word boundary rather than as a substring — `driveId`
+ * holds those two letters and is not a secret — so `iv`, `gcmIv` and `iv_hex`
+ * are named and `driveId` and `archive` are not. (`secretIv` is caught by
+ * `secret`, not by this.)
  */
 const promisesASecret = (key: string): boolean =>
 	/secret|cipher|refresh|token|credential|password/i.test(key) ||
-	/(^|[^a-z])iv([^a-z]|$)/.test(key);
+	/(^|[^a-z])iv([^a-z]|$)/i.test(key);
+
+/**
+ * Every field the list is meant to return, and nothing else. A denylist of
+ * suspicious names only catches a secret that is named like one: a fourth
+ * sealed column surfaced as `authBlob` would pass `promisesASecret` and hold a
+ * refresh token. This fails on sight for anything new, whatever it is called.
+ */
+const PUBLIC_KEYS = [
+	'accountId',
+	'createdAt',
+	'displayName',
+	'id',
+	'lastUsedAt',
+	'provider',
+	'rootId',
+];
 
 describe('GET /api/connections', () => {
 	it('describes the connection without describing its secret', async () => {
@@ -55,13 +72,19 @@ describe('GET /api/connections', () => {
 		const [stored] = await rows(app.db);
 		if (stored === undefined) throw new Error('no connection row');
 		const serialized = JSON.stringify(body);
-		for (const secret of [stored.secretCiphertext, stored.secretIv, 'refresh-1']) {
+		// The plaintext comes out of the row rather than being typed here, so a
+		// renamed stub token cannot quietly stop testing anything.
+		const { refreshToken } = await secretOf(stored);
+		for (const secret of [stored.secretCiphertext, stored.secretIv, refreshToken]) {
 			expect(secret.length).toBeGreaterThan(8);
 			expect(serialized).not.toContain(secret);
 		}
-		// And nothing is offered under a name that promises one, at any depth:
-		// the plain token is not the only way to hand one over, and a nested
-		// `credential: { refreshToken }` would pass every check above.
+		// Exactly these fields, so a column added to the table and passed
+		// through fails here whatever it is called...
+		expect(Object.keys(body.connections[0] ?? {}).sort()).toEqual(PUBLIC_KEYS);
+		// ...and nothing is offered under a name that promises a secret at any
+		// depth, which the key list above cannot reach: a nested
+		// `credential: { refreshToken }` would pass every check before it.
 		expect(namesIn(body).filter(promisesASecret)).toEqual([]);
 	});
 

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { importSecretKey, openOAuthSecret } from '../src/crypto.js';
 import { createDb, schema } from '../src/db/client.js';
 import { challengeFor } from '../src/oauth/pkce.js';
 import {
@@ -13,7 +12,7 @@ import {
 	GOOGLE_ACCOUNT,
 	GOOGLE_DRIVE_SCOPE,
 	googleTokenResponse,
-	SECRETS_KEY,
+	secretOf,
 } from './harness.js';
 
 /**
@@ -34,13 +33,6 @@ const workerLog = () => vi.spyOn(console, 'error').mockImplementation(() => unde
 
 const failWith = (error: string, status = 400) =>
 	new Response(JSON.stringify({ error, error_description: 'echoes the-code' }), { status });
-
-const secretOf = async (row: { secretCiphertext: string; secretIv: string; secretKeyId: string }) =>
-	openOAuthSecret(await importSecretKey(SECRETS_KEY, 'k1'), {
-		ciphertext: row.secretCiphertext,
-		iv: row.secretIv,
-		keyId: row.secretKeyId,
-	});
 
 const tokenFor = (app: ReturnType<typeof buildApp>, connectionId: string, jar = createJar()) =>
 	app.request('/api/token', {
