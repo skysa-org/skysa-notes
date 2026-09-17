@@ -33,27 +33,45 @@ const LIMIT = 64;
 export interface IncomingBody {
 	/** Record a value this editor produced. */
 	emit: (value: string) => void;
-	/** True only for a body that is new and came from somewhere else. */
+	/**
+	 * True only for a body that is new and came from somewhere else. A body
+	 * written from outside is asked about until `adopted` says the editor took
+	 * it in.
+	 */
 	shouldAdopt: (value: string) => boolean;
+	/** The editor now holds the body `shouldAdopt` last said to take. */
+	adopted: () => void;
+	/**
+	 * The `bodyOrigin` of the body the editor's text was built from: the one it
+	 * opened with, or the last one it adopted. An edit carries it, so a save
+	 * typed into a body that has since been replaced is not written over the
+	 * replacement (`saveNoteBody`).
+	 */
+	base: () => string;
 }
 
 /**
- * `key` identifies the note and `body` is what the editor currently holds:
- * switching notes forgets the previous one's writes and starts again from the
- * new note's body.
+ * `key` identifies the note, `body` is the note's body as stored, and `origin`
+ * is its `bodyOrigin`: switching notes forgets the previous one's writes and
+ * starts again from the new note's body.
+ *
+ * Ask `shouldAdopt` whenever `body` or `origin` changes: a body written from
+ * outside can be one the editor has already seen.
  */
-export const useIncomingBody = (key: string, body: string): IncomingBody => {
+export const useIncomingBody = (key: string, body: string, origin = ''): IncomingBody => {
 	const emitted = useRef<string[]>([]);
 	const lastSeen = useRef(body);
-	const latest = useRef(body);
+	const latest = useRef({ body, origin });
+	const base = useRef(origin);
 
 	useEffect(() => {
-		latest.current = body;
+		latest.current = { body, origin };
 	});
 
 	useEffect(() => {
 		emitted.current = [];
-		lastSeen.current = latest.current;
+		lastSeen.current = latest.current.body;
+		base.current = latest.current.origin;
 	}, [key]);
 
 	const emit = useCallback((value: string) => {
@@ -61,6 +79,18 @@ export const useIncomingBody = (key: string, body: string): IncomingBody => {
 	}, []);
 
 	const shouldAdopt = useCallback((value: string) => {
+		// Written from outside since the editor last took a body in. Always
+		// taken, whatever it says: it may repeat something the editor wrote or
+		// was given before (a remote revert), and ignored for that, the editor
+		// would go on showing text the note no longer holds. The editor's own
+		// saves never change the origin, so none of them can be coming back
+		// after this. The base moves in `adopted`, once the editor holds it.
+		if (latest.current.origin !== base.current) {
+			emitted.current = [];
+			lastSeen.current = value;
+			return true;
+		}
+
 		// The same body we were already given: a re-render, not a change.
 		if (lastSeen.current === value) return false;
 		lastSeen.current = value;
@@ -73,5 +103,15 @@ export const useIncomingBody = (key: string, body: string): IncomingBody => {
 		return false;
 	}, []);
 
-	return useMemo(() => ({ emit, shouldAdopt }), [emit, shouldAdopt]);
+	// Called in the commit that brought the body, so `latest` is its origin.
+	const adopted = useCallback(() => {
+		base.current = latest.current.origin;
+	}, []);
+
+	const current = useCallback(() => base.current, []);
+
+	return useMemo(
+		() => ({ emit, shouldAdopt, adopted, base: current }),
+		[emit, shouldAdopt, adopted, current]
+	);
 };

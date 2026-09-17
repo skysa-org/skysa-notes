@@ -20,7 +20,10 @@ export interface RichEditorProps {
 	noteId: string;
 	/** Markdown body, frontmatter already stripped. */
 	body: string;
-	onUserEdit: (body: string) => void;
+	/** The note's `bodyOrigin`. */
+	origin?: string;
+	/** The edited body, and the origin of the body it was typed into. */
+	onUserEdit: (body: string, origin: string) => void;
 	/**
 	 * Called when this note cannot survive the editor's document model — some
 	 * construct in it would be dropped the moment the user typed. The note
@@ -29,7 +32,7 @@ export interface RichEditorProps {
 	onUnsupported: () => void;
 }
 
-const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps) => {
+const EditorBody = ({ noteId, body, origin, onUserEdit, onUnsupported }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
 	useEffect(() => {
@@ -41,7 +44,7 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 		unsupported.current = onUnsupported;
 	}, [onUnsupported]);
 
-	const incoming = useIncomingBody(noteId, body);
+	const incoming = useIncomingBody(noteId, body, origin);
 	const pluginView = usePluginViewFactory();
 
 	// The body the editor was built with. Read once per note: the effect below
@@ -61,7 +64,7 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 				body: initial.current,
 				onUserEdit: (markdown) => {
 					incoming.emit(markdown);
-					notify.current(markdown);
+					notify.current(markdown, incoming.base());
 				},
 				menus: {
 					slash: { view: pluginView({ component: SlashMenu }) },
@@ -97,16 +100,20 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 	// from wiping out what the user has typed since the last save.
 	useEffect(() => {
 		if (loading) return;
+		const editor = get();
+		if (editor === undefined) return;
 		if (!incoming.shouldAdopt(body)) return;
-		get()?.action((ctx) => {
-			adoptBody(ctx, body);
+		editor.action((ctx) => {
+			// Only a body the editor now holds moves what its edits are made
+			// against: one it could not take in is asked about again.
+			if (adoptBody(ctx, body)) incoming.adopted();
 			// The same question the editor was built with, asked again of a body
 			// that arrived from somewhere else. A sync pull can bring in markdown
 			// this editor cannot show, and since the check above runs once, this
 			// is the only place left to notice.
 			if (!representsFaithfully(ctx, body)) unsupported.current();
 		});
-	}, [body, get, incoming, loading]);
+	}, [body, origin, get, incoming, loading]);
 
 	return <Milkdown />;
 };

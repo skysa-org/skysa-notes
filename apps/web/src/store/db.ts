@@ -60,6 +60,20 @@ export interface NoteRecord {
 	source?: string;
 	/** Set only by a real user edit, never by load, mode switch or re-serialize. */
 	dirty: Flag;
+	/**
+	 * Where the body came from: a fresh random token every time the body is
+	 * written in from outside this device's editors — a pull, an import, the
+	 * remote side of a conflict — and left alone by every edit made here.
+	 * Absent reads as `''`.
+	 *
+	 * An editor holds edits for a moment before they are saved, and `dirty` says
+	 * nothing about those, so a pull can replace a clean note's body, or delete
+	 * the note, underneath them. Each edit carries the origin of the body it was
+	 * typed into, and `saveNoteBody` does not write one made against another
+	 * body over it. A token rather than a count, so a row deleted and written
+	 * again can never come back with an origin an editor already holds.
+	 */
+	bodyOrigin?: string;
 	/** Tombstone: kept until the delete has been pushed, so sync can replay it. */
 	deletedLocally: Flag;
 	createdAt: number;

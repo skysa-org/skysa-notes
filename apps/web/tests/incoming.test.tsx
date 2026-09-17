@@ -83,6 +83,105 @@ describe('useIncomingBody', () => {
 		expect(result.current.shouldAdopt('note one body')).toBe(true);
 	});
 
+	describe('origin', () => {
+		const withOrigin = () =>
+			renderHook(
+				({ id, value, origin }: { id: string; value: string; origin: string }) =>
+					useIncomingBody(id, value, origin),
+				{ initialProps: { id: 'note-1', value: 'start', origin: 'o1' } }
+			);
+
+		it('is where the body the editor opened with came from', () => {
+			const { result } = withOrigin();
+			expect(result.current.base()).toBe('o1');
+		});
+
+		it('moves to that of a body the editor adopts, and not before', () => {
+			const { result, rerender } = withOrigin();
+
+			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
+			// Not adopted yet: the editor still holds what it held.
+			expect(result.current.base()).toBe('o1');
+
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			// Said to take, not yet taken.
+			expect(result.current.base()).toBe('o1');
+			result.current.adopted();
+			expect(result.current.base()).toBe('o2');
+		});
+
+		it('asks again about a body from outside the editor could not take in', () => {
+			const { result, rerender } = withOrigin();
+			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
+
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			// Not adopted, and the same body again on the next render.
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			result.current.adopted();
+			expect(result.current.shouldAdopt('pulled')).toBe(false);
+		});
+
+		it('stays put for the editor’s own save coming back', () => {
+			const { result, rerender } = withOrigin();
+			act(() => {
+				result.current.emit('typed');
+			});
+
+			rerender({ id: 'note-1', value: 'typed', origin: 'o1' });
+
+			expect(result.current.shouldAdopt('typed')).toBe(false);
+			expect(result.current.base()).toBe('o1');
+		});
+
+		it('adopts a body from outside that repeats one the editor wrote', () => {
+			// A remote revert: the pull brings back text this editor saved earlier.
+			// Taken for its own save coming back, it would be ignored, and the
+			// editor would go on showing what the note no longer holds.
+			const { result, rerender } = withOrigin();
+			act(() => {
+				result.current.emit('typed');
+			});
+
+			rerender({ id: 'note-1', value: 'typed', origin: 'o2' });
+
+			expect(result.current.shouldAdopt('typed')).toBe(true);
+			result.current.adopted();
+			expect(result.current.base()).toBe('o2');
+		});
+
+		it('adopts a body from outside that repeats the one it was last given', () => {
+			// Two pulls, there and back, seen in one render.
+			const { result, rerender } = withOrigin();
+
+			rerender({ id: 'note-1', value: 'start', origin: 'o3' });
+
+			expect(result.current.shouldAdopt('start')).toBe(true);
+			result.current.adopted();
+			expect(result.current.base()).toBe('o3');
+			expect(result.current.shouldAdopt('start')).toBe(false);
+		});
+
+		it('forgets what the editor wrote before it adopted a body from outside', () => {
+			const { result, rerender } = withOrigin();
+			act(() => {
+				result.current.emit('old save');
+			});
+			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			result.current.adopted();
+
+			// Written by another tab, say: nothing this editor has written since.
+			rerender({ id: 'note-1', value: 'old save', origin: 'o2' });
+			expect(result.current.shouldAdopt('old save')).toBe(true);
+		});
+
+		it('starts again from another note’s', () => {
+			const { result, rerender } = withOrigin();
+			rerender({ id: 'note-2', value: 'other', origin: 'o9' });
+			expect(result.current.base()).toBe('o9');
+		});
+	});
+
 	it('keeps a stable identity, so it can be an effect dependency', () => {
 		const { result, rerender } = guard();
 		const first = result.current;

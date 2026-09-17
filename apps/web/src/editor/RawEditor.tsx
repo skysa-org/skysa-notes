@@ -18,10 +18,13 @@ export interface RawEditorProps {
 	noteId: string;
 	/** Markdown body, frontmatter already stripped. */
 	body: string;
-	onUserEdit: (body: string) => void;
+	/** The note's `bodyOrigin`. */
+	origin?: string;
+	/** The edited body, and the origin of the body it was typed into. */
+	onUserEdit: (body: string, origin: string) => void;
 }
 
-export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
+export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
@@ -30,7 +33,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 	useEffect(() => {
 		notify.current = onUserEdit;
 	}, [onUserEdit]);
-	const incoming = useIncomingBody(noteId, body);
+	const incoming = useIncomingBody(noteId, body, origin);
 
 	useEffect(() => {
 		const parent = host.current;
@@ -50,7 +53,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 						if (!isUserEdit(update)) return;
 						const edited = update.state.doc.toString();
 						incoming.emit(edited);
-						notify.current(edited);
+						notify.current(edited, incoming.base());
 					}),
 				],
 			}),
@@ -74,13 +77,14 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 		if (!incoming.shouldAdopt(body)) return;
 
 		const current = instance.state.doc.toString();
-		if (current === body) return;
-
-		instance.dispatch({
-			changes: { from: 0, to: current.length, insert: body },
-			...programmatic,
-		});
-	}, [body, incoming]);
+		if (current !== body) {
+			instance.dispatch({
+				changes: { from: 0, to: current.length, insert: body },
+				...programmatic,
+			});
+		}
+		incoming.adopted();
+	}, [body, origin, incoming]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;
 };
