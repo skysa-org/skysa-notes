@@ -222,6 +222,27 @@ const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry | und
 	};
 };
 
+const depth = (path: string): number => path.split('/').length;
+
+/**
+ * Every path a page reports is where the item is once the whole page is in, so
+ * the page is a picture of one moment and not a history — and a reader applying
+ * entries in order has to be given them in an order that picture survives.
+ * A file listed at `C/a.md` ahead of the folder that was at `C` moving to `A`
+ * is carried off to `A/a.md` by that move. Folders first, outermost first,
+ * puts every folder where the page has it before anything lands inside it;
+ * everything else keeps the order it happened in.
+ */
+const foldersFirst = (entries: readonly ChangeEntry[]): ChangeEntry[] => {
+	const folders = [
+		...entries.flatMap((entry) =>
+			entry.deleted !== true && entry.kind === 'folder' ? [entry] : []
+		),
+	].sort((one, two) => depth(one.path) - depth(two.path));
+	const rest = entries.filter((entry) => entry.deleted === true || entry.kind !== 'folder');
+	return [...folders, ...rest];
+};
+
 /**
  * Turns an applied page into entries. `roundEnds` is the caller's word that the
  * feed has said everything it will say about this round — its last page — and
@@ -285,8 +306,9 @@ export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 		: [];
 	unplaced.forEach((id) => page.nodes.delete(id));
 
+	const entries = decided.flatMap((item) => (item.entry === undefined ? [] : [item.entry]));
 	return {
-		entries: decided.flatMap((item) => (item.entry === undefined ? [] : [item.entry])),
+		entries: foldersFirst(entries),
 		pending: decided.flatMap((item) => (item.pending === undefined ? [] : [item.pending])),
 		pruned: unplaced.length + decided.filter((item) => item.unplaced === true).length,
 	};

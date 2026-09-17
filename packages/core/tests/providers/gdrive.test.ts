@@ -958,6 +958,29 @@ describe('changes', () => {
 		expect(world.seen).toEqual([]);
 	});
 
+	it('report an edit to a file whose folder was renamed since the last look', async () => {
+		// The stub's own diffing, which every engine test over Drive rests on:
+		// the backing re-versions a moved file, so a rename and an edit between
+		// two looks read as a move alone unless the bytes are compared too.
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		const folder = await stub.backing.createFolder('A');
+		const file = await stub.backing.write('A/b.md', 'one\n', {});
+		const first = await drainChanges(provider);
+		const before = first.entries.find((entry) => entry.remoteId === file.remoteId);
+
+		await stub.backing.move(folder, 'B');
+		const moved = stub.backing.snapshot().find((entry) => entry.path === 'B/b.md');
+		await stub.backing.write('B/b.md', 'two\n', { expectedVersion: moved?.version ?? '' });
+		const { entries } = await drainChanges(provider, first.cursor);
+
+		const edited = entries.find((entry) => entry.remoteId === file.remoteId);
+		expect(edited).toMatchObject({ path: 'B/b.md' });
+		expect(edited).not.toMatchObject({
+			version: before?.deleted === true ? '' : before?.version,
+		});
+	});
+
 	it('reset on a page token Drive will not take', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);

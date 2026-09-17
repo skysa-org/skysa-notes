@@ -74,7 +74,23 @@ describe('an id tree', () => {
 	it('places what a page lists, whatever order it lists it in', () => {
 		const settled = run(EMPTY, [file('a', 'f', 'a.md'), folder('f', ROOT_ID, 'Work')]);
 
-		expect(paths(settled)).toEqual(['+Work/a.md', '+Work']);
+		expect(paths(settled)).toEqual(['+Work', '+Work/a.md']);
+	});
+
+	it('lists every folder before anything else, outermost first', () => {
+		// Every path in a page is where the item is once the page is in, so
+		// the page is one moment and not a history. A reader applying entries
+		// in order would otherwise let a folder listed after a file carry the
+		// file off: `Work/b.md` arriving, then `Work` renamed, puts it in the
+		// renamed folder rather than where the page has it.
+		const settled = run(seeded(), [
+			file('b', 'g', 'b.md'),
+			folder('g', 'f', 'Sub'),
+			gone('a'),
+			folder('f', ROOT_ID, 'Play'),
+		]);
+
+		expect(paths(settled)).toEqual(['+Play', '+Play/Sub', '+Play/Sub/b.md', '-Work/a.md']);
 	});
 
 	it('reports a renamed folder alone, and places its contents under the new name', () => {
@@ -119,7 +135,7 @@ describe('an id tree', () => {
 		expect(first.pending).toHaveLength(1);
 
 		const second = run(first.next, [folder('f', ROOT_ID, 'Work')]);
-		expect(paths(second)).toEqual(['+Work/a.md', '+Work']);
+		expect(paths(second)).toEqual(['+Work', '+Work/a.md']);
 		expect(second.pending).toEqual([]);
 	});
 
@@ -191,7 +207,7 @@ describe('an id tree', () => {
 		const held = run(EMPTY, [empty], false);
 		const placed = run(held.next, [folder('f', ROOT_ID, 'Work')]);
 
-		expect(placed.entries[0]).toEqual({
+		expect(placed.entries.find((entry) => entry.remoteId === 'a')).toEqual({
 			remoteId: 'a',
 			path: 'Work/a.md',
 			kind: 'file',

@@ -438,7 +438,7 @@ describe('changes, from a feed with no paths', () => {
 		expect(first.more).toBe(true);
 
 		const second = await provider.changes(first.cursor);
-		expect(livePaths(second.entries)).toEqual(['Work/a.md', 'Work']);
+		expect(livePaths(second.entries)).toEqual(['Work', 'Work/a.md']);
 	});
 
 	it('reports a folder made and deleted within the first scan by id alone', async () => {
@@ -603,7 +603,7 @@ describe('changes, when things leave the tree', () => {
 		const provider = over(doFetch);
 		const first = await provider.changes();
 		const restored = await provider.changes(first.cursor);
-		expect(livePaths(restored.entries)).toEqual(['Work/a.md', 'Work']);
+		expect(livePaths(restored.entries)).toEqual(['Work', 'Work/a.md']);
 		expect(restored.entries.some((entry) => entry.deleted === true)).toBe(false);
 
 		const later = await provider.changes(restored.cursor);
@@ -663,7 +663,7 @@ describe('changes, when things leave the tree', () => {
 		const two = await provider.changes(one.cursor);
 		expect(two.entries).toEqual([{ path: 'Work/a.md', deleted: true, remoteId: 'f1' }]);
 		const three = await provider.changes(two.cursor);
-		expect(livePaths(three.entries)).toEqual(['Archive/Work', 'Archive']);
+		expect(livePaths(three.entries)).toEqual(['Archive', 'Archive/Work']);
 	});
 
 	it('does not hide a deletion behind another folder that had the same path', async () => {

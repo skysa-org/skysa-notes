@@ -182,6 +182,24 @@ export const createMemoryStore = (): MemoryStore => {
 		notes.set(change.id, rest);
 	};
 
+	const ensureFolder = (change: Extract<PullChange, { kind: 'ensure-folder' }>): void => {
+		// The app folder is not a notebook and holds no row. A store that kept
+		// one would have it reconciled away after the next cursor reset — and
+		// since every path is within the root, that one `delete-folder` is
+		// every note on the device.
+		if (change.path === ROOT) {
+			anomalies.push('ensure-folder for the root');
+			return;
+		}
+		ensureFolderChain(parentPath(change.path));
+		// No id says nothing about the one the row already has.
+		const remoteId = change.remoteId ?? folders.get(change.path)?.remoteId;
+		folders.set(change.path, {
+			path: change.path,
+			...(remoteId === undefined ? {} : { remoteId }),
+		});
+	};
+
 	const applyChange = (change: PullChange): void => {
 		if (change.kind === 'upsert-note') {
 			upsert(change);
@@ -216,19 +234,7 @@ export const createMemoryStore = (): MemoryStore => {
 			return;
 		}
 		if (change.kind === 'ensure-folder') {
-			// The app folder is not a notebook and holds no row. A store that
-			// kept one would have it reconciled away after the next cursor
-			// reset — and since every path is within the root, that one
-			// `delete-folder` is every note on the device.
-			if (change.path === ROOT) {
-				anomalies.push('ensure-folder for the root');
-				return;
-			}
-			ensureFolderChain(parentPath(change.path));
-			folders.set(change.path, {
-				path: change.path,
-				...(change.remoteId === undefined ? {} : { remoteId: change.remoteId }),
-			});
+			ensureFolder(change);
 			return;
 		}
 		if (change.kind === 'move-folder') {

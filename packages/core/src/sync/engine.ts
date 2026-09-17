@@ -328,6 +328,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * about a thing is its current state, so only an entry at a different path,
 	 * or a later one at this path, means it was moved rather than deleted.
 	 *
+	 * And not an entry elsewhere from before the thing was last listed at this
+	 * path. A round is read whole, and a round carries a thing's history: moved
+	 * to `A`, moved on to `C`, deleted at `C`. Only its place at `C` says
+	 * where the deletion found it, and `A` is where it had been.
+	 *
 	 * Getting this wrong is not a delay: a deletion dropped here is dropped for
 	 * ever, because the cursor moves on and nothing mentions it again.
 	 */
@@ -336,12 +341,19 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		remoteId: string,
 		path: string | undefined,
 		at: number
-	): boolean =>
+	): boolean => {
+		const entries = live.get(remoteId) ?? [];
+		const listedHere = entries
+			.filter((entry) => entry.path === path && entry.at < at)
+			.reduce((last, entry) => Math.max(last, entry.at), -1);
 		// A deletion by id alone says nothing of where the thing was, so only a
 		// later entry can say it lives on.
-		(live.get(remoteId) ?? []).some(
-			(entry) => (path !== undefined && entry.path !== path) || entry.at > at
+		return entries.some(
+			(entry) =>
+				(path !== undefined && entry.path !== path && entry.at > listedHere) ||
+				entry.at > at
 		);
+	};
 
 	/**
 	 * Whether a note's file is there now, asked of the provider by id, for the
@@ -539,39 +551,132 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * deletion may carry no id at all — Dropbox's `DeletedMetadata` is a path and
 	 * nothing else. Whatever it carries, a thing that is alive elsewhere in this
 	 * batch has not been deleted.
+	 *
+	 * Where the batch has already put the note at the deleted path, only what
+	 * comes after the deletion can say that. An entry before it at another path
+	 * is a place the note has been carried on from — edited at `B/c.md`, `B`
+	 * renamed to `C`, and `C/c.md` deleted, with no word about the file between
+	 * the rename and the deletion.
 	 */
 	const movedNotDeleted = async (
 		path: string | undefined,
 		remoteId: string | undefined,
 		local: SyncNote | undefined,
-		live: LiveEntries,
-		at: number
+		batch: Batch,
+		at: number,
+		decided: readonly PullChange[]
 	): Promise<boolean> => {
-		if (remoteId !== undefined && aliveElsewhere(live, remoteId, path, at)) return true;
-		if (local?.remoteId !== undefined && aliveElsewhere(live, local.remoteId, path, at)) {
-			return true;
-		}
+		const { live } = batch;
+		// A folder too, by its id: `B` renamed into `A` as `A/B`, `A` renamed
+		// to `B`, and `B/B` deleted.
+		const placedAt =
+			local !== undefined
+				? whereNow(local, decided)
+				: remoteId === undefined
+					? undefined
+					: await doomedFolder(path, remoteId, decided, batch, at);
+		const here = path !== undefined && placedAt === path;
+		const alive = (id: string): boolean =>
+			here
+				? (live.get(id) ?? []).some((entry) => entry.at > at)
+				: aliveElsewhere(live, id, path, at);
+		if (remoteId !== undefined && alive(remoteId)) return true;
+		return local?.remoteId !== undefined && alive(local.remoteId);
+	};
 
-		// Only for a deletion that names nothing but a path, which is the shape
-		// this rule exists for — Dropbox's `DeletedMetadata`. A provider that
-		// renames `Work` and re-lists nothing inside it (the children's bytes did
-		// not change) reports `Work/a.md` that way, and the only thing left
-		// saying the note is alive is that `Work` itself is somewhere in this
-		// batch under its new name.
-		//
-		// A deletion that does carry an id is answered by the rules above, and
-		// must not be second-guessed here: the provider knew the file well enough
-		// to name it, so "some folder above it is in this batch" is not evidence
-		// against it — and a deletion dropped here is dropped for ever, because
-		// the cursor moves on and nothing ever mentions it again.
-		if (remoteId !== undefined || path === undefined) return false;
+	type MovedOver =
+		Readonly<{ kind: 'itself' }> | Readonly<{ kind: 'under'; from: string; to: string }>;
 
+	/**
+	 * A deletion that names nothing but a path — Dropbox's `DeletedMetadata` —
+	 * of a folder this batch also says is alive somewhere else, or of something
+	 * under one. `itself`: the folder at the path is not gone, since Dropbox
+	 * reports a rename as the old path deleted and the new one listed, and the
+	 * entry for the new one moves it. `under`: the nearest such folder above
+	 * the path, and the last place the batch gives it, for `decideUnderMoved`
+	 * to ask the provider about.
+	 *
+	 * A deletion that does carry an id is answered by `movedNotDeleted`, and is
+	 * not second-guessed here: the provider knew the file well enough to name it.
+	 */
+	const movedFolderOver = async (
+		path: string | undefined,
+		remoteId: string | undefined,
+		live: LiveEntries,
+		at: number,
+		decided: readonly PullChange[]
+	): Promise<MovedOver | undefined> => {
+		if (remoteId !== undefined || path === undefined) return undefined;
 		const candidates = [path, ...ancestorPaths(path)];
 		const folders = await Promise.all(candidates.map((each) => store.folderByPath(each)));
-		return folders.some(
-			(folder) =>
-				folder?.remoteId !== undefined && aliveElsewhere(live, folder.remoteId, path, at)
+		const moved = candidates.flatMap((candidate, index) => {
+			const id = folders[index]?.remoteId;
+			if (id === undefined || !aliveElsewhere(live, id, candidate, at)) return [];
+			const last = (live.get(id) ?? []).at(-1);
+			return last === undefined ? [] : [{ index, from: candidate, to: last.path }];
+		});
+		const nearest = moved[0];
+		if (nearest === undefined) return undefined;
+		if (nearest.index !== 0) return { kind: 'under', from: nearest.from, to: nearest.to };
+		// Not if the batch has since put a different folder at the path — `B`
+		// renamed to `A`, a new `B` made and deleted — which is what a
+		// deletion read in order is about.
+		const there = await folderIdAt(path, decided);
+		return there === undefined || there === folders[0]?.remoteId
+			? { kind: 'itself' }
+			: undefined;
+	};
+
+	/** The id of the folder at `path` once the decisions so far have run. */
+	const folderIdAt = async (
+		path: string,
+		decided: readonly PullChange[]
+	): Promise<string | undefined> => {
+		const made = decided.flatMap((change, index) =>
+			change.kind === 'ensure-folder' &&
+			folderNow(change.path, decided.slice(index + 1)) === path
+				? [change.remoteId]
+				: []
 		);
+		if (made.length > 0) return made.at(-1);
+		return (await folderAt(path, decided))?.remoteId;
+	};
+
+	/**
+	 * Something deleted by path under a folder this batch moves. A rename lists
+	 * the children again at their new paths — and then a note's own id is alive
+	 * elsewhere, which `movedNotDeleted` answers, and a folder's is too — but a
+	 * file deleted from the folder before it was renamed reads exactly the
+	 * same: its old path deleted, the folder alive under a new name. Dropped,
+	 * that note is carried along with the folder and held for ever over a file
+	 * nobody has; taken, a file the provider never listed again would be lost
+	 * here. So the provider is asked: a note's file by its id, and a folder by
+	 * listing where it would be once the folder above it has moved. Only "not
+	 * found" lets go.
+	 */
+	const decideUnderMoved = async (
+		path: string,
+		local: SyncNote | undefined,
+		over: Readonly<{ from: string; to: string }>,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): Promise<PullChange[]> => {
+		if (local !== undefined) {
+			if (removedInBatch(local, decided)) return [];
+			return (await stillThere(placement(local, decided))) ? [] : [forgetNote(local)];
+		}
+		const gone = await doomedFolder(path, undefined, decided, batch, at);
+		const remoteId = gone === undefined ? undefined : await folderIdAt(gone, decided);
+		if (gone === undefined || remoteId === undefined) return [];
+		const expected = isWithin(gone, over.from) ? rebasePath(gone, over.from, over.to) : gone;
+		const beside = await provider.list(parentPath(expected)).catch((error: unknown) => {
+			if (isNotFoundError(error)) return [];
+			throw error;
+		});
+		return beside.some((entry) => entry.remoteId === remoteId)
+			? []
+			: deleteFolderAfterRescue(gone, decided, batch, at);
 	};
 
 	/**
@@ -652,7 +757,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// a note that has not been moved is found by it too.
 		const { note: local, byOldName } = await deletedNote(entry, batch, decided);
 
-		if (await movedNotDeleted(path, remoteId, local, live, at)) return [];
+		if (await movedNotDeleted(path, remoteId, local, batch, at, decided)) return [];
+		const moved = await movedFolderOver(path, remoteId, live, at, decided);
+		if (moved?.kind === 'itself') return [];
+		if (moved?.kind === 'under' && path !== undefined) {
+			return decideUnderMoved(path, local, moved, decided, batch, at);
+		}
 		if (local !== undefined) {
 			// Already taken away by an earlier decision, or already re-pointed by
 			// one at a different file — that second case is the file replaced at
@@ -699,8 +809,91 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// including one carried off by the cascade of a `delete-folder` over its
 		// parent — because a second delete of a row that is already gone is an
 		// error the store records.
-		const gone = await doomedFolder(path, remoteId, decided);
-		return gone === undefined ? [] : [{ kind: 'delete-folder', path: gone }];
+		const gone = await doomedFolder(path, remoteId, decided, batch, at);
+		return gone === undefined ? [] : deleteFolderAfterRescue(gone, decided, batch, at);
+	};
+
+	/**
+	 * The last thing this batch says about a remote id after `at`, if that is
+	 * a place outside `folder` — where something the folder's deletion would
+	 * take with it has gone to instead.
+	 */
+	const leavesFor = (
+		remoteId: string | undefined,
+		folder: string,
+		batch: Batch,
+		at: number
+	): { entry: RemoteEntry; at: number } | undefined => {
+		if (remoteId === undefined) return undefined;
+		const last = batch.entries.reduce<{ entry: ChangeEntry; at: number } | undefined>(
+			(found, entry, index) =>
+				index > at && entry.remoteId === remoteId ? { entry, at: index } : found,
+			undefined
+		);
+		if (last === undefined || last.entry.deleted === true) return undefined;
+		// At the folder's own path is outside it too: something moved up to
+		// take the name of the folder it was in.
+		const into = last.entry.path !== folder && isWithin(last.entry.path, folder);
+		return into ? undefined : { entry: last.entry, at: last.at };
+	};
+
+	/**
+	 * A folder deleted in a round that goes on to move a subfolder out of it —
+	 * `C` deleted after `C/A` was moved to `B`. The deletion cascades over
+	 * everything under the folder, clean notes and all, and the entry that says
+	 * where the subfolder went finds nothing left to move: the notebook comes
+	 * back empty and its notes are gone from this device while the remote
+	 * still has them, and only a rescan would bring them back.
+	 *
+	 * So every subfolder the rest of the round places outside the folder is
+	 * decided first, by the last entry about it, and then the folder goes.
+	 * Outermost first, and asked again after each: a folder carried out takes
+	 * what is in it along. Each entry is decided again in its own turn, which
+	 * is a move from wherever the folder is by then — the round's history
+	 * replayed.
+	 *
+	 * Folders only. A note moved out has an entry of its own, which finds the
+	 * note the cascade took by its id and puts it back as the same note; one
+	 * with unpushed edits the cascade keeps anyway. Decided early and again in
+	 * its turn, that edit would be copied aside twice to one name.
+	 */
+	const deleteFolderAfterRescue = async (
+		gone: string,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): Promise<PullChange[]> => {
+		const inside = (folder: SyncFolder, after: readonly PullChange[]): string | undefined => {
+			const path = folderNow(folder.path, after);
+			return path !== undefined && path !== gone && isWithin(path, gone) ? path : undefined;
+		};
+		const candidates = [
+			...(await store.foldersWithRemote()).flatMap((folder) => {
+				const path = inside(folder, decided);
+				return path === undefined ? [] : [{ folder, depth: path.length }];
+			}),
+		].sort((one, two) => one.depth - two.depth);
+		const rescued = await candidates.reduce<Promise<PullChange[]>>(
+			async (pending, { folder }) => {
+				const sofar = await pending;
+				const after = [...decided, ...sofar];
+				const leaving =
+					inside(folder, after) === undefined
+						? undefined
+						: leavesFor(folder.remoteId, gone, batch, at);
+				if (leaving === undefined) return sofar;
+				return [...sofar, ...(await decide(leaving.entry, after, batch, leaving.at))];
+			},
+			Promise.resolve([])
+		);
+		// Where the folder is after the rescue, which may have moved it aside
+		// to make room at its own path for what came out of it. Belt and
+		// braces on `undefined`: nothing rescued out of a folder deletes it,
+		// and deleting `gone` instead would take whatever the rescue put there.
+		const doomedRow = await folderAt(gone, decided);
+		const final =
+			doomedRow === undefined ? gone : folderNow(doomedRow.path, [...decided, ...rescued]);
+		return final === undefined ? rescued : [...rescued, { kind: 'delete-folder', path: final }];
 	};
 
 	/** What this batch says has been deleted, by remote id and by path. */
@@ -729,6 +922,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		deleting: ReadonlySet<string>;
 		/** A full scan, which reports what exists and never what was removed. */
 		scanning: boolean;
+		/** The batch's entries, in order, as the decisions index them. */
+		entries: readonly ChangeEntry[];
 	}
 
 	const doomedIn = (entries: readonly ChangeEntry[]): Doomed => ({
@@ -805,7 +1000,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const origin = decided.reduceRight<string | undefined>((at, change) => {
 			if (at === undefined) return undefined;
 			if (change.kind === 'move-folder') {
-				return isWithin(at, change.to) ? rebasePath(at, change.to, change.from) : at;
+				if (isWithin(at, change.to)) return rebasePath(at, change.to, change.from);
+				// Left behind by the move: whatever was here went with it. Asked
+				// second, because a folder moved into its own old path — `B` to
+				// `B/B` — leaves `B/B` full and `B` empty.
+				return isWithin(at, change.from) ? undefined : at;
 			}
 			if (change.kind === 'delete-folder') return isWithin(at, change.path) ? undefined : at;
 			return at;
@@ -830,20 +1029,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const doomedFolder = async (
 		path: string | undefined,
 		remoteId: string | undefined,
-		decided: readonly PullChange[]
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
 	): Promise<string | undefined> => {
 		// Made inside this cursor window, so there is no row to find it by: a
 		// folder created and removed between two cursors is reported as both,
 		// and asking the store alone leaves a notebook in the sidebar with
 		// nothing behind it until the next cursor reset. Tracked forwards from
 		// the point it was made, so one a later change has moved or taken away
-		// answers with where it ended up.
-		const made = decided.flatMap((change, at) =>
-			change.kind === 'ensure-folder' &&
-			(remoteId === undefined ? change.path === path : change.remoteId === remoteId)
-				? [folderNow(change.path, decided.slice(at + 1))]
-				: []
-		);
+		// answers with where it ended up. With no id, the path is where the
+		// deletion found it — made at `A` and renamed to `B` before `B` was
+		// deleted — so it is matched by where it is now, not where it was made.
+		const made = decided.flatMap((change, at) => {
+			if (change.kind !== 'ensure-folder') return [];
+			const now = folderNow(change.path, decided.slice(at + 1));
+			const same = remoteId === undefined ? now === path : change.remoteId === remoteId;
+			return same ? [now] : [];
+		});
 		if (made.length > 0) return made[made.length - 1];
 
 		if (remoteId !== undefined) {
@@ -858,10 +1061,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// after the deletion was recorded and is not what it is about.
 		if (path === undefined) return undefined;
 		const before = await store.folderByPath(path);
-		if (before !== undefined) return folderNow(path, decided) === path ? path : undefined;
+		// Unless the batch has already said so once. A second deletion of the
+		// path is not about the folder the first one took — a round read whole
+		// carries `C` deleted, `A` renamed to `C`, and `C` deleted again — and
+		// can only be about whatever the batch has put there since.
+		const again = batch.entries.some(
+			(entry, index) =>
+				index < at &&
+				entry.deleted === true &&
+				entry.remoteId === undefined &&
+				entry.path === path
+		);
+		if (before !== undefined && !again) {
+			return folderNow(path, decided) === path ? path : undefined;
+		}
 
-		// Nothing there before, so the only way a deletion can be about
-		// something is if the batch has since moved a folder onto the path.
+		// Nothing there before, or taken already, so the only way a deletion
+		// can be about something is if the batch has since moved a folder onto
+		// the path.
 		return (await folderAt(path, decided)) === undefined ? undefined : path;
 	};
 
@@ -869,7 +1086,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		to: string,
 		remoteId: string,
 		decided: readonly PullChange[],
-		doomed: Doomed
+		doomed: Doomed,
+		from?: string
 	): Promise<PullChange[]> => {
 		const occupant = await folderAt(to, decided);
 		// Belt and braces on the second half: our own folder cannot be the thing
@@ -883,7 +1101,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const named =
 			doomed.paths.has(occupant.path) ||
 			(occupant.remoteId !== undefined && doomed.ids.has(occupant.remoteId));
-		if (named) return [{ kind: 'delete-folder', path: to }];
+		// Deleted, unless the folder arriving is inside it — `C/A` moved up to
+		// `C` as `C` goes — when the cascade would take the arrival with it.
+		// Then it is moved aside like any other, and the deletion that names
+		// it finds it there.
+		const inside = from !== undefined && isWithin(from, to);
+		if (named && !inside) return [{ kind: 'delete-folder', path: to }];
 
 		// Names this batch has already put a folder at, so two folders displaced
 		// out of one path do not both take the same one.
@@ -914,16 +1137,37 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		from: string,
 		to: string,
 		decided: readonly PullChange[],
-		claimed: ReadonlySet<string>
+		batch: Batch,
+		at: number
 	): Promise<PullChange[]> => {
 		const movers = await notesUnderNow(from, decided);
 		const landing = new Map(
-			movers.map((entry) => [rebasePath(entry.path, from, to), entry.note.id])
+			movers.map((entry) => [rebasePath(entry.path, from, to), entry.note])
 		);
+		// Said later in this batch to be somewhere other than `path`: the clash
+		// is not where it ends up, and the entry that says so moves it on. A
+		// page reports `b.md` arriving at `A/c.md` ahead of `C` becoming `A`,
+		// whose `c.md` is renamed to `a.md`; displacing the note already there
+		// leaves a conflict copy of a note that never conflicted. Asked of the
+		// note arriving only: the one sitting there got there by its own entry,
+		// which is the last word about it, or was never in the batch at all.
+		const movesOn = (note: SyncNote, path: string): boolean => {
+			const remoteId = remoteNow(note, decided);
+			return (
+				remoteId !== undefined &&
+				(batch.live.get(remoteId) ?? []).some(
+					(later) => later.at > at && later.path !== path
+				)
+			);
+		};
 		const sitting = await notesUnderNow(to, decided);
 		return sitting.reduce<Promise<PullChange[]>>(async (pending, entry) => {
 			const moves = await pending;
-			const mover = landing.get(entry.path);
+			const arriving = landing.get(entry.path);
+			if (arriving !== undefined && movesOn(arriving, entry.path)) {
+				return moves;
+			}
+			const mover = arriving?.id;
 			// Nothing is landing on it. The second half is belt and braces: a
 			// note cannot be both the thing arriving and the thing in the way
 			// unless `rebasePath` returns the path it was given, which needs
@@ -934,7 +1178,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (mover === undefined || mover === entry.note.id) return moves;
 			// Threaded through, so two notes displaced out of one folder do not
 			// both take the same name.
-			const taken = await takenIn(parentPath(entry.path), claimed, [...decided, ...moves]);
+			const taken = await takenIn(parentPath(entry.path), batch.claimed, [
+				...decided,
+				...moves,
+			]);
 			return [
 				...moves,
 				{
@@ -946,12 +1193,42 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}, Promise.resolve([]));
 	};
 
+	/**
+	 * A folder arriving for the first time at a path another folder of ours is
+	 * still at, which this batch goes on to move somewhere else or delete —
+	 * `B` moved into a new `B` as `B/C`, both halves in one round. Merged, the
+	 * newcomer takes the row, the move that follows carries it off with the
+	 * other's notes, and the new `B` is gone from here. So the one in the way is
+	 * got out of it first, as for a folder moving onto the path, and the entry
+	 * that says where it went moves it on from there.
+	 *
+	 * Only then. A folder with no id is one the user made here, whose `mkdir`
+	 * the arriving one answers; and one the batch says nothing more about has no
+	 * other place to go to, so the two stay one notebook as before.
+	 */
+	const roomForNewFolder = async (
+		entry: RemoteEntry,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): Promise<PullChange[]> => {
+		const occupant = await folderAt(entry.path, decided);
+		const id = occupant?.remoteId;
+		if (id === undefined || id === entry.remoteId) return [];
+		const movesOn = (batch.live.get(id) ?? []).some(
+			(later) => later.at > at && later.path !== entry.path
+		);
+		if (!movesOn && !batch.doomed.ids.has(id)) return [];
+		return clearTheWay(entry.path, entry.remoteId, decided, batch.doomed);
+	};
+
 	const decideFolder = async (
 		entry: RemoteEntry,
 		decided: readonly PullChange[],
-		claimed: ReadonlySet<string>,
-		doomed: Doomed
+		batch: Batch,
+		at: number
 	): Promise<PullChange[]> => {
+		const { doomed } = batch;
 		// The app folder itself, which several providers report as an entry of
 		// its own — Graph's `delta` returns the root item. There is nothing above
 		// it to hold a row, and a row for it would be reconciled away after the
@@ -960,26 +1237,46 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// the device. The root is not a notebook, so it is not a folder row.
 		if (normalizePath(entry.path) === ROOT) return [];
 
+		const made = decided.flatMap((change, index) =>
+			change.kind === 'ensure-folder' && change.remoteId === entry.remoteId ? [index] : []
+		);
 		const existing = await store.folderByRemoteId(entry.remoteId);
 		// Where that folder is *now*, not where the store last saw it. A rename
 		// of `A` and a move of `A/sub` out of it land in one batch all the time
 		// — one drag after another — and the second decision is reached after
 		// the first has already rebased everything under `A`. Naming the old
 		// path moves nothing at all, silently, and the notebook keeps a position
-		// the remote abandoned for as long as the cursor lives.
-		const from = existing === undefined ? undefined : folderNow(existing.path, decided);
+		// the remote abandoned for as long as the cursor lives. One this batch
+		// made is followed from where it was made.
+		const whereAfter = (after: readonly PullChange[]): string | undefined => {
+			const last = made.at(-1);
+			if (last !== undefined) {
+				const change = after[last];
+				return change?.kind === 'ensure-folder'
+					? folderNow(change.path, after.slice(last + 1))
+					: undefined;
+			}
+			return existing === undefined ? undefined : folderNow(existing.path, after);
+		};
+		const from = whereAfter(decided);
 		if (from !== undefined && from !== entry.path) {
 			// In this order: the folder first, because getting it out of the way
 			// takes the notes inside it with it and leaves nothing to displace.
-			const room = await clearTheWay(entry.path, entry.remoteId, decided, doomed);
-			const spare = await clearTheNotes(from, entry.path, [...decided, ...room], claimed);
+			const room = await clearTheWay(entry.path, entry.remoteId, decided, doomed, from);
+			// And asked again after it, since the folder in the way may be the
+			// one this is moving out of — `Z/X` moved up to `B` while `B` is
+			// renamed to `Z` — and has carried this one aside with it. Never
+			// deleted with it: `clearTheWay` moves a folder this one is inside.
+			const moved = whereAfter([...decided, ...room]) ?? from;
+			const spare = await clearTheNotes(moved, entry.path, [...decided, ...room], batch, at);
 			return [
 				...room,
 				...spare,
-				{ kind: 'move-folder', from, to: entry.path, remoteId: entry.remoteId },
+				{ kind: 'move-folder', from: moved, to: entry.path, remoteId: entry.remoteId },
 			];
 		}
-		return [{ kind: 'ensure-folder', path: entry.path, remoteId: entry.remoteId }];
+		const room = from === undefined ? await roomForNewFolder(entry, decided, batch, at) : [];
+		return [...room, { kind: 'ensure-folder', path: entry.path, remoteId: entry.remoteId }];
 	};
 
 	/**
@@ -1267,7 +1564,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		batch: Batch,
 		at: number
 	): Promise<PullChange[]> => {
-		const { claimed, doomed } = batch;
 		// The marker file and any provider bookkeeping. `isHidden` is the same
 		// rule the UI uses, so nothing the user cannot see becomes a note.
 		if (entry.deleted === true) {
@@ -1275,7 +1571,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return decideDeleted(entry, batch, decided, at);
 		}
 		if (isHidden(entry.path)) return [];
-		if (entry.kind === 'folder') return decideFolder(entry, decided, claimed, doomed);
+		if (entry.kind === 'folder') return decideFolder(entry, decided, batch, at);
 
 		// A file that is not a note. The app owns the folder but does not own
 		// everything in it — the user may have dropped a PDF beside their notes,
@@ -1290,30 +1586,38 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
-	 * One entry per thing, keeping the last. Dropbox documents that a path may
-	 * appear more than once in a batch and that the last entry for it is the
+	 * One entry per note file, keeping the last. Dropbox documents that a path
+	 * may appear more than once in a batch and that the last entry for it is the
 	 * current state; a second entry for a note we have edited would otherwise be
 	 * decided against the same pre-batch store as the first and produce a second
 	 * conflict copy at the very same path, which the store has no way to keep
 	 * apart and the push then writes over itself.
 	 *
-	 * Deletions are keyed by path and live entries by id, deliberately: a file
-	 * deleted and another created at that path in one batch is two things
-	 * happening, not one thing said twice.
+	 * Only files. A round is read whole, and a feed that tells it in order
+	 * (Dropbox's, and the fake's) says `B` renamed to `A`, a file moved into
+	 * `A`, `A` renamed to `C`: the file's path only means something once the
+	 * first rename has happened. A folder's entries are each decided in turn
+	 * instead, which costs nothing — a second move of a folder is a move from
+	 * wherever the first put it. And deletions that name only a path are each
+	 * their own: `C` deleted, `A` renamed onto `C`, `C` deleted again is two
+	 * folders gone, not one said twice.
 	 */
 	const deduped = (entries: readonly ChangeEntry[]): ChangeEntry[] => {
-		// By id wherever there is one, on both halves. Two *different* files
-		// deleted at one path inside a cursor window is what a replace-then-
-		// delete looks like, and keying deletions by path alone folds them into
-		// one — keeping the last, so the first file's note is never let go of.
-		// A deletion with no id has only its path to be known by.
-		const keyOf = (entry: ChangeEntry): string =>
-			entry.deleted === true
-				? `deleted:${entry.remoteId ?? entry.path}`
-				: `live:${entry.remoteId}`;
+		// By id wherever there is one. Two *different* files deleted at one
+		// path inside a cursor window is what a replace-then-delete looks
+		// like, and keying deletions by path alone folds them into one —
+		// keeping the last, so the first file's note is never let go of.
+		const keyOf = (entry: ChangeEntry, index: number): string => {
+			if (entry.deleted === true) {
+				return entry.remoteId === undefined
+					? `once:${String(index)}`
+					: `deleted:${entry.remoteId}`;
+			}
+			return entry.kind === 'folder' ? `once:${String(index)}` : `live:${entry.remoteId}`;
+		};
 		const last = new Map<string, number>();
-		entries.forEach((entry, index) => last.set(keyOf(entry), index));
-		return entries.filter((entry, index) => last.get(keyOf(entry)) === index);
+		entries.forEach((entry, index) => last.set(keyOf(entry, index), index));
+		return entries.filter((entry, index) => last.get(keyOf(entry, index)) === index);
 	};
 
 	/**
@@ -1379,6 +1683,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				)
 			),
 			scanning,
+			entries,
 		};
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
@@ -1523,37 +1828,64 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		seen: ReadonlySet<string>;
 	}
 
-	const drainPull = async (
+	/**
+	 * Every page of a round from a stored cursor, read before anything is
+	 * decided. A round is one batch however the provider pages it: Graph asks
+	 * for the whole round to be applied before its state is consistent, and a
+	 * page boundary falls wherever the page size says — between a folder's
+	 * deletion and the move of a subfolder out of it, whose cascade would
+	 * otherwise take the subfolder's clean notes; between a folder's two moves
+	 * in one window, the second of which is decided against a store that never
+	 * saw the first. The decisions already reason about a batch as a whole, so
+	 * one batch gets the answers one page would.
+	 */
+	const readRound = async (
+		cursor: string,
+		entries: readonly ChangeEntry[]
+	): Promise<{ entries: ChangeEntry[]; cursor: string }> => {
+		const set = await provider.changes(cursor);
+		const all = [...entries, ...set.entries];
+		return set.more ? readRound(set.cursor, all) : { entries: all, cursor: set.cursor };
+	};
+
+	const drainRound = async (cursor: string): Promise<SyncOutcome> => {
+		const round = await readRound(cursor, []);
+		const changes = await decideAll(round.entries, false);
+		await store.applyPull({ changes, cursor: round.cursor });
+		return ok({ pulled: changes.length, conflicts: conflictPathsIn(changes) });
+	};
+
+	/**
+	 * A scan, page by page. It reports what exists and never what was removed
+	 * until `reconcile` on its last page, so the cascade a round is read whole
+	 * to avoid cannot happen here, and applying as it goes keeps a first sync of
+	 * many notes visible as it arrives rather than all at the end.
+	 */
+	const drainScan = async (
 		cursor: string | undefined,
-		scanning: boolean,
 		progress: PullProgress
 	): Promise<SyncOutcome> => {
 		const set = await provider.changes(cursor);
-		const changes = await decideAll(set.entries, scanning);
-		const seen = scanning
-			? new Set([
-					...progress.seen,
-					...set.entries.flatMap((entry) =>
-						entry.remoteId === undefined ? [] : [entry.remoteId]
-					),
-				])
-			: progress.seen;
+		const changes = await decideAll(set.entries, true);
+		const seen = new Set([
+			...progress.seen,
+			...set.entries.flatMap((entry) =>
+				entry.remoteId === undefined ? [] : [entry.remoteId]
+			),
+		]);
 
 		// A scan is one logical batch: its pages carry no cursor, and the last
 		// one carries both the cursor and whatever the scan proved was deleted.
-		const tail = set.more || !scanning ? [] : await reconcile(seen, changes);
+		const tail = set.more ? [] : await reconcile(seen, changes);
 		const batch = [...changes, ...tail];
-		await store.applyPull({
-			changes: batch,
-			...(scanning && set.more ? {} : { cursor: set.cursor }),
-		});
+		await store.applyPull({ changes: batch, ...(set.more ? {} : { cursor: set.cursor }) });
 
 		const next: PullProgress = {
 			pulled: progress.pulled + batch.length,
 			conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
 			seen,
 		};
-		if (set.more) return drainPull(set.cursor, scanning, next);
+		if (set.more) return drainScan(set.cursor, next);
 		return ok({ pulled: next.pulled, conflicts: next.conflicts });
 	};
 
@@ -1573,14 +1905,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const runPull = async (): Promise<SyncOutcome> => {
 		const stored = await store.cursor();
 		const empty: PullProgress = { pulled: 0, conflicts: [], seen: new Set() };
-		const attempt = (): Promise<SyncOutcome> => drainPull(stored, stored === undefined, empty);
+		const attempt = (): Promise<SyncOutcome> =>
+			stored === undefined ? drainScan(undefined, empty) : drainRound(stored);
 
 		return attempt().catch(async (error: unknown) => {
 			// The cursor is dead rather than the request. Discarding it and
 			// scanning is the documented recovery, and the stored one is left in
 			// place so an interrupted rescan tries again rather than continuing
 			// from a cursor the provider has already rejected.
-			if (isCursorResetError(error)) return drainPull(undefined, true, empty);
+			if (isCursorResetError(error)) return drainScan(undefined, empty);
 			if (isAuthError(error)) return authRetry(attempt);
 			throw error;
 		});
