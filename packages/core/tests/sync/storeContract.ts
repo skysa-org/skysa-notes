@@ -584,6 +584,13 @@ export const describeSyncStoreContract = (
 			it('takes one whose file was inside the folder under its old name', async () => {
 				// The batch renamed the notebook and then deleted it, so the
 				// path the change names is not the one the file sits under.
+				//
+				// Hand-built: a real batch orders the `move-folder` first, and
+				// applying it rebases the queued op, so the store would see the
+				// origin already spelled `Plans/...`. The engine needs `was`
+				// because the queue it reads is frozen before the batch; this
+				// pins the store's own rule, which does not depend on what else
+				// the batch carries or on the order it arrives in.
 				const { store, seed, seedFolder, seedOp } = await harness();
 				await seedFolder({ path: 'Plans', remoteId: 'f1' });
 				await seed({ id: 'n1', path: 'Plans/b.md', content: 'x\n', remoteId: 'r1' });
@@ -599,6 +606,40 @@ export const describeSyncStoreContract = (
 				});
 
 				expect(await store.noteById('n1')).toBeUndefined();
+			});
+
+			it('points a queued rename’s origin at where a pull says the file is', async () => {
+				// The origin is where the file was when the user renamed it, and
+				// it is what says whether a folder deletion is about that file.
+				// Another device moving the note — here, an `upsert-note` that
+				// edits and moves it at once — makes it stale, and a stale one
+				// spares a note whose file has in fact gone with the folder.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'b.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'a.md',
+					targetPath: 'b.md',
+				});
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'n1',
+							path: 'Work/a.md',
+							content: 'theirs\n',
+							remote: remote('Work/a.md', 'r1', 'v2'),
+							syncedHash: 'h2',
+						},
+					],
+				});
+
+				const op = await store.opBySeq(seq);
+				expect(op?.path).toBe('Work/a.md');
+				// The name the user chose is not what this is about.
+				expect(op?.targetPath).toBe('b.md');
 			});
 
 			it('keeps an edited note when its folder is deleted remotely', async () => {
