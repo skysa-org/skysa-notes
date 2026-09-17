@@ -56,6 +56,7 @@ const queued = async (db: NotesDatabase) =>
 		path: op.path,
 		...(op.noteId === undefined ? {} : { noteId: op.noteId }),
 		...(op.targetPath === undefined ? {} : { targetPath: op.targetPath }),
+		...(op.remoteId === undefined ? {} : { remoteId: op.remoteId }),
 	}));
 
 /** A note the remote already has, so that renaming it has a file to move. */
@@ -177,6 +178,113 @@ describe('the push queue a local change leaves behind', () => {
 			{ op: 'delete', path: 'Work/a.md', noteId: note.id },
 			{ op: 'mkdir', path: 'Play' },
 			{ op: 'move', path: 'Work/a.md', targetPath: 'Play/a.md', noteId: note.id },
+		]);
+	});
+
+	it('queues an rmdir behind the notes when a notebook the remote has is deleted', async () => {
+		// Behind them on purpose: the deletes are what empty the directory, and
+		// the engine refuses to remove one that still holds a file.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		const note = await pushedNote(db, 'Work/a.md');
+		await db.opQueue.clear();
+
+		await deleteFolder(db, 'Work', scope);
+
+		expect(await queued(db)).toEqual([
+			{ op: 'delete', path: 'Work/a.md', noteId: note.id },
+			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+		]);
+	});
+
+	it('queues an rmdir for the name a renamed notebook leaves behind', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await createFolder(db, { ...scope, name: 'Inner', parentPath: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await db.folders.update([CONNECTION, 'Work/Inner'], { remoteId: 'f2' });
+		const note = await pushedNote(db, 'Work/Inner/b.md');
+		await db.opQueue.clear();
+
+		await renameFolder(db, 'Work', 'Play', scope);
+
+		const ops = await queued(db);
+		// One `rmdir`, for the outermost: its subdirectories go with it.
+		expect(ops.filter((op) => op.op === 'rmdir')).toEqual([
+			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+		]);
+		// And last, behind the move that takes the note out of it.
+		expect(ops.at(-1)).toEqual({ op: 'rmdir', path: 'Work', remoteId: 'f1' });
+		expect(ops.some((op) => op.noteId === note.id && op.op === 'move')).toBe(true);
+	});
+
+	it('queues no rmdir for a notebook the remote never had', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.opQueue.clear();
+
+		await deleteFolder(db, 'Work', scope);
+
+		expect(await queued(db)).toEqual([]);
+	});
+
+	it('queues no rmdir for a notebook moved inside what it was in', async () => {
+		// `Work/Sub` moved up to `Work`, whose row the app no longer has: the
+		// directory the move leaves behind is the one it lands in.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await createFolder(db, { ...scope, name: 'Sub', parentPath: 'Work' });
+		await db.folders.update([CONNECTION, 'Work/Sub'], { remoteId: 'f2' });
+		await db.folders.delete([CONNECTION, 'Work']);
+		await db.opQueue.clear();
+
+		await moveFolder(db, 'Work/Sub', 'Work', scope);
+
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([]);
+	});
+
+	it('withdraws an rmdir when the notebook it would remove is made again', async () => {
+		// The user deleted `Work` and made it again before the push ran. Sent,
+		// the `rmdir` would remove the directory the `mkdir` just asked for.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await deleteFolder(db, 'Work', scope);
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toHaveLength(1);
+
+		await createFolder(db, { ...scope, name: 'Work' });
+
+		expect(await queued(db)).toEqual([{ op: 'mkdir', path: 'Work' }]);
+	});
+
+	it('withdraws an rmdir for a notebook above one being made again', async () => {
+		// `Work` deleted, then `Work/Sub` made: the `rmdir` for `Work` would
+		// take the new subfolder with it.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await deleteFolder(db, 'Work', scope);
+
+		await createFolder(db, { ...scope, name: 'Sub', parentPath: 'Work' });
+
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([]);
+		expect((await queued(db)).map((op) => op.path)).toEqual(['Work', 'Work/Sub']);
+	});
+
+	it('queues one rmdir per directory, however many times it is asked', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await deleteFolder(db, 'Work', scope);
+		// Made again and deleted again, at the same name: the directory it is
+		// about is still the one `f1` names, since the new row has no id yet.
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await deleteFolder(db, 'Work', scope);
+
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
+			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
 		]);
 	});
 

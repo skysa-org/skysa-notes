@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isHidden } from '../../src/paths.js';
+import { isHidden, isWithin, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
@@ -210,6 +210,49 @@ const rename = (d: Device, path: string, to: string): void => {
 	}
 };
 
+/** As `store/folders.ts` createFolder: the row, and a `mkdir` that records its id. */
+const addNotebook = (d: Device, path: string): void => {
+	d.store.putFolder({ path });
+	d.store.queue({ op: 'mkdir', path });
+};
+
+/** As `store/folders.ts` deleteFolder: the notes' deletes, then the directory. */
+const removeNotebook = (d: Device, path: string): void => {
+	const id = d.store.folders().find((folder) => folder.path === path)?.remoteId;
+	live(d)
+		.filter((note) => isWithin(note.path, path))
+		.forEach((note) => {
+			remove(d, note.path);
+		});
+	d.store
+		.folders()
+		.filter((folder) => isWithin(folder.path, path))
+		.forEach((folder) => {
+			d.store.removeFolder(folder.path);
+		});
+	if (id !== undefined) d.store.queue({ op: 'rmdir', path, remoteId: id });
+};
+
+/** As `store/folders.ts` moveFolder: mkdir, the notes' moves, then the directory. */
+const renameNotebook = (d: Device, path: string, to: string): void => {
+	const id = d.store.folders().find((folder) => folder.path === path)?.remoteId;
+	const inside = d.store.folders().filter((folder) => isWithin(folder.path, path));
+	inside.forEach((folder) => {
+		d.store.removeFolder(folder.path);
+	});
+	inside.forEach((folder) => {
+		const at = rebasePath(folder.path, path, to);
+		d.store.putFolder({ path: at });
+		d.store.queue({ op: 'mkdir', path: at });
+	});
+	live(d)
+		.filter((note) => isWithin(note.path, path))
+		.forEach((note) => {
+			rename(d, note.path, rebasePath(note.path, path, to));
+		});
+	if (id !== undefined) d.store.queue({ op: 'rmdir', path, remoteId: id });
+};
+
 /** As `deleteNote`: the row stays as a tombstone until its delete has gone. */
 const remove = (d: Device, path: string): void => {
 	const note = liveAt(d, path);
@@ -397,6 +440,61 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			expect(live(b).map((note) => note.path)).toContain(
 				Object.keys(files).find((path) => COPY.test(path))
 			);
+		});
+	});
+
+	describe('a notebook removed here', () => {
+		/** Every folder the remote holds. */
+		const remoteFolders = (remote: Remote): string[] =>
+			remote.backing
+				.snapshot()
+				.filter((entry) => entry.kind === 'folder' && !isHidden(entry.path))
+				.map((entry) => entry.path)
+				.sort();
+
+		it('leaves the provider no directory when a notebook is deleted', async () => {
+			const { remote, a, b } = await setUp(make);
+			addNotebook(a, 'Work');
+			await shared(a, b, 'Work/plan.md', 'base\n');
+			expect(remoteFolders(remote)).toEqual(['Work']);
+
+			removeNotebook(a, 'Work');
+
+			const files = await converged(remote, a, b);
+			expect(files).toEqual({});
+			expect(remoteFolders(remote)).toEqual([]);
+			// And the other device lets the notebook go too, rather than
+			// keeping a row the remote has nothing behind.
+			expect(b.store.folders()).toEqual([]);
+		});
+
+		it('leaves the provider only the new directory when a notebook is renamed', async () => {
+			const { remote, a, b } = await setUp(make);
+			addNotebook(a, 'Work');
+			await shared(a, b, 'Work/plan.md', 'base\n');
+
+			renameNotebook(a, 'Work', 'Plans');
+
+			const files = await converged(remote, a, b);
+			expect(files).toEqual({ 'Plans/plan.md': 'base\n' });
+			expect(remoteFolders(remote)).toEqual(['Plans']);
+			expect(b.store.folders().map((folder) => folder.path)).toEqual(['Plans']);
+		});
+
+		it('keeps the directory when the other device has put a file in it', async () => {
+			// The file is not ours to delete: this device has never pulled it,
+			// and the notebook's delete says nothing about it.
+			const { remote, a, b } = await setUp(make);
+			addNotebook(a, 'Work');
+			await shared(a, b, 'Work/plan.md', 'base\n');
+			create(b, 'Work/theirs.md', 'theirs\n');
+			await synced(b);
+
+			removeNotebook(a, 'Work');
+
+			const files = await converged(remote, a, b);
+			expect(files).toEqual({ 'Work/theirs.md': 'theirs\n' });
+			expect(remoteFolders(remote)).toEqual(['Work']);
 		});
 	});
 

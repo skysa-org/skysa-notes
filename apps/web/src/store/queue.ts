@@ -1,3 +1,4 @@
+import { isWithin } from '@skysa/core';
 import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
@@ -35,8 +36,10 @@ import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js
  *   rename can be restored, when its write needs the file where the note is.
  *
  * Folder renames and deletes go up as the notes inside them moving or being
- * deleted one by one: the engine has no op for a folder beyond `mkdir`, so the
- * old directory stays on the remote, empty, until Phase 6 gives it one.
+ * deleted one by one — the engine has no op that moves a whole folder — and an
+ * `rmdir` queued behind them removes the directory they left. Ordered that way
+ * round because the notes' own ops are what empty it: the engine refuses an
+ * `rmdir` over a directory that still holds any file (`runRmdir`).
  */
 
 type QueueDb = Pick<NotesDatabase, 'opQueue'>;
@@ -59,7 +62,7 @@ const nothing = (): Queued => Dexie.Promise.resolve();
 
 const add = (
 	db: QueueDb,
-	op: Pick<OpQueueRecord, 'connectionId' | 'op' | 'noteId' | 'path' | 'targetPath'>
+	op: Pick<OpQueueRecord, 'connectionId' | 'op' | 'noteId' | 'path' | 'targetPath' | 'remoteId'>
 ): Queued => db.opQueue.add({ attempts: 0, queuedAt: Date.now(), ...op }).then(() => undefined);
 
 /**
@@ -133,14 +136,54 @@ export const queueRestore = (db: QueueDb, note: NoteRecord): Queued =>
 		.then((ops) => db.opQueue.bulkDelete(seqsOf(ops.filter((op) => op.op === 'delete'))))
 		.then(() => queueWrite(db, note));
 
-/** A notebook that has to exist on the remote even with nothing in it yet. */
+/**
+ * A notebook that has to exist on the remote even with nothing in it yet.
+ *
+ * An `rmdir` queued for this path or for one above it is withdrawn: the user
+ * has made the notebook again, and the directory it would remove is the one
+ * this needs — or holds it. The engine checks for a row at the path as well
+ * (`runRmdir`), which covers an `rmdir` already at the network; this keeps one
+ * still queued from being sent at all, since it would otherwise be sent after
+ * this `mkdir` and undo it.
+ */
 export const queueMkdir = (db: QueueDb, connectionId: string, path: string): Queued =>
 	db.opQueue
-		.where('path')
-		.equals(path)
+		.where('connectionId')
+		.equals(connectionId)
 		.toArray()
-		.then((queued) =>
-			queued.some((op) => op.op === 'mkdir' && op.connectionId === connectionId)
-				? undefined
-				: add(db, { connectionId, op: 'mkdir', path })
-		);
+		.then((queued) => {
+			const stale = queued.filter((op) => op.op === 'rmdir' && isWithin(path, op.path));
+			return db.opQueue
+				.bulkDelete(seqsOf(stale))
+				.then(() =>
+					queued.some((op) => op.op === 'mkdir' && op.path === path)
+						? undefined
+						: add(db, { connectionId, op: 'mkdir', path })
+				);
+		});
+
+/**
+ * A notebook removed from this device, whose directory the remote still has —
+ * deleted, or left behind by a rename. Queued after the ops that empty it, and
+ * with the folder's `remoteId` as it was: the row is gone, so nothing else can
+ * say which directory this is about, and the engine does nothing without it.
+ *
+ * Nothing to do for a notebook the remote never had: no id, no directory.
+ */
+export const queueRmdir = (
+	db: QueueDb,
+	connectionId: string,
+	path: string,
+	remoteId: string | undefined
+): Queued =>
+	remoteId === undefined
+		? nothing()
+		: db.opQueue
+				.where('connectionId')
+				.equals(connectionId)
+				.toArray()
+				.then((queued) =>
+					queued.some((op) => op.op === 'rmdir' && op.remoteId === remoteId)
+						? undefined
+						: add(db, { connectionId, op: 'rmdir', path, remoteId })
+				);

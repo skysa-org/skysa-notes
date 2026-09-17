@@ -29,6 +29,8 @@ export interface MemoryStore extends SyncStore {
 	/** Seed a note as though it were already synced, or already edited. */
 	readonly put: (note: Partial<SyncNote> & Pick<SyncNote, 'id' | 'path' | 'content'>) => void;
 	readonly putFolder: (folder: SyncFolder) => void;
+	/** Drop a folder row, as the app does when the user deletes or renames one. */
+	readonly removeFolder: (path: string) => void;
 	readonly queue: (op: Omit<SyncOp, 'seq' | 'attempts'> & { attempts?: number }) => SyncOp;
 	/** Withdraw a queued op, as the web queue does when a second rename replaces a move. */
 	readonly unqueue: (seq: number) => void;
@@ -320,6 +322,16 @@ export const createMemoryStore = (): MemoryStore => {
 
 	const settle = (outcome: OpOutcome): void => {
 		if (outcome.kind === 'done') return;
+		// Only if the row is still at that path: the notebook may have been
+		// renamed or deleted here while the `mkdir` was at the network, and
+		// the id belongs to the folder the provider made at the old name.
+		if (outcome.kind === 'made-folder') {
+			const folder = folders.get(outcome.path);
+			if (folder !== undefined) {
+				folders.set(outcome.path, { ...folder, remoteId: outcome.remote.remoteId });
+			}
+			return;
+		}
 		if (outcome.kind === 'purged') {
 			notes.delete(outcome.noteId);
 			return;
@@ -450,6 +462,9 @@ export const createMemoryStore = (): MemoryStore => {
 		putFolder: (folder) => {
 			ensureFolderChain(parentPath(folder.path));
 			folders.set(folder.path, folder);
+		},
+		removeFolder: (path) => {
+			folders.delete(path);
 		},
 		queue,
 		unqueue: (seq) => {

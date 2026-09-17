@@ -137,7 +137,7 @@ export interface PreferenceRecord {
 	value: string;
 }
 
-export type QueuedOperation = 'write' | 'move' | 'delete' | 'mkdir';
+export type QueuedOperation = 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
 
 export interface OpQueueRecord {
 	seq?: number;
@@ -147,6 +147,12 @@ export interface OpQueueRecord {
 	path: string;
 	/** For `move`, where the entry is going. */
 	targetPath?: string;
+	/**
+	 * For `rmdir`, the folder's `remoteId` when it was queued. The row it came
+	 * from is gone by then — that is what the op is for — and without the id the
+	 * engine will not touch the path.
+	 */
+	remoteId?: string;
 	attempts: number;
 	lastError?: string;
 	queuedAt: number;

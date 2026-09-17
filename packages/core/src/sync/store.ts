@@ -52,17 +52,24 @@ export interface SyncFolder {
 	remoteId?: string;
 }
 
-export type SyncOperation = 'write' | 'move' | 'delete' | 'mkdir';
+export type SyncOperation = 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
 
 /** One queued push. `seq` orders the queue and identifies the row. */
 export interface SyncOp {
 	seq: number;
 	op: SyncOperation;
-	/** Absent for `mkdir`, which is about a folder rather than a note. */
+	/** Absent for `mkdir` and `rmdir`, which are about a folder rather than a note. */
 	noteId?: string;
 	path: string;
 	/** Where a `move` is going. */
 	targetPath?: string;
+	/**
+	 * For `rmdir`, the folder's `remoteId` as the queue recorded it. The op
+	 * removes a folder this device no longer holds, so there is no row left to
+	 * read it from — and without it the engine cannot tell the folder it is
+	 * about from whatever has the name now, so it does nothing at all.
+	 */
+	remoteId?: string;
 	/** How many times this op has already failed. */
 	attempts: number;
 }
@@ -345,6 +352,17 @@ export type OpOutcome =
 	  }>
 	/** A delete reached the remote, so the tombstone can go. */
 	| Readonly<{ kind: 'purged'; noteId: string }>
+	| Readonly<{
+			/**
+			 * A `mkdir` landed. The folder row records the id, so a later
+			 * `rmdir` can say which folder it means and a scan can recognise
+			 * the folder as one we already have — until this, only a pull ever
+			 * set it, so a notebook made here had none until it came back.
+			 */
+			kind: 'made-folder';
+			path: string;
+			remote: RemoteEntry;
+	  }>
 	/** Nothing to record beyond the op being finished. */
 	| Readonly<{ kind: 'done' }>;
 

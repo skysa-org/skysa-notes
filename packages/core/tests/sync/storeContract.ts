@@ -31,10 +31,11 @@ export interface StoreHarness {
 	seedFolder: (folder: { path: string; remoteId?: string }) => void | Promise<void>;
 	/** Queue an op and return the seq it was given. */
 	seedOp: (op: {
-		op: 'write' | 'move' | 'delete' | 'mkdir';
+		op: 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
 		path: string;
 		noteId?: string;
 		targetPath?: string;
+		remoteId?: string;
 	}) => number | Promise<number>;
 }
 
@@ -45,6 +46,14 @@ const remote = (path: string, id = 'r1', version = 'v1'): RemoteEntry => ({
 	version,
 	modifiedAt: '2026-01-01T00:00:00.000Z',
 	size: 1,
+});
+
+const folder = (path: string, id: string): RemoteEntry => ({
+	remoteId: id,
+	path,
+	kind: 'folder',
+	version: 'v1',
+	modifiedAt: '2026-01-01T00:00:00.000Z',
 });
 
 export const describeSyncStoreContract = (
@@ -318,6 +327,56 @@ export const describeSyncStoreContract = (
 				expect((await store.foldersWithRemote()).map((folder) => folder.path)).toEqual([
 					'Work',
 				]);
+			});
+
+			it('records a folder’s id when its mkdir lands', async () => {
+				// Until this, only a pull ever set one, so a notebook made here
+				// had no id until the remote reported it back — and an `rmdir`
+				// queued for it in between could name no folder.
+				const { store, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work' });
+				const seq = await seedOp({ op: 'mkdir', path: 'Work' });
+
+				await store.completeOp(seq, {
+					kind: 'made-folder',
+					path: 'Work',
+					remote: folder('Work', 'f9'),
+				});
+
+				expect((await store.folderByPath('Work'))?.remoteId).toBe('f9');
+				expect(await store.opBySeq(seq)).toBeUndefined();
+			});
+
+			it('leaves a folder the mkdir’s path no longer names alone', async () => {
+				// Renamed here while the `mkdir` was at the network: the id is
+				// the folder at the old name, which the rename's own `mkdir` and
+				// `rmdir` are about. Written onto the row that is there now, the
+				// notebook would point at a directory it is not in.
+				const { store, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Later' });
+				const seq = await seedOp({ op: 'mkdir', path: 'Work' });
+
+				await store.completeOp(seq, {
+					kind: 'made-folder',
+					path: 'Work',
+					remote: folder('Work', 'f9'),
+				});
+
+				expect(await store.folderByPath('Work')).toBeUndefined();
+				expect((await store.folderByPath('Later'))?.remoteId).toBeUndefined();
+			});
+
+			it('hands the engine an rmdir with the id it was queued with', async () => {
+				// The row is gone by the time it runs — that is what it is for —
+				// so the op is the only thing that says which folder it means.
+				const { store, seedOp } = await harness();
+				const seq = await seedOp({ op: 'rmdir', path: 'Work', remoteId: 'f1' });
+
+				const ops = await store.pendingOps();
+				expect(ops.map((op) => [op.op, op.path, op.remoteId])).toEqual([
+					['rmdir', 'Work', 'f1'],
+				]);
+				expect((await store.opBySeq(seq))?.remoteId).toBe('f1');
 			});
 
 			it('has no cursor before the first pull', async () => {

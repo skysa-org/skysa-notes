@@ -1053,6 +1053,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		renaming: ReadonlyMap<string, string>;
 		/** Notes the user has deleted here, whose delete has not reached the remote. */
 		deleting: ReadonlySet<string>;
+		/**
+		 * Folders the user has removed here — deleted, or left behind by a
+		 * rename — whose `rmdir` has not reached the remote: `remoteId` to the
+		 * path it was queued at.
+		 */
+		removing: ReadonlyMap<string, string>;
 		/** A full scan, which reports what exists and never what was removed. */
 		scanning: boolean;
 		/** The batch's entries, in order, as the decisions index them. */
@@ -1377,6 +1383,22 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// path is within the root, that one `delete-folder` means every note on
 		// the device. The root is not a notebook, so it is not a folder row.
 		if (normalizePath(entry.path) === ROOT) return [];
+
+		// A notebook the user has removed here, whose `rmdir` is still queued.
+		// This is that push's own `mkdir` coming back — a sync pulls before it
+		// pushes, so a notebook deleted between the two rounds is reported as a
+		// folder that exists — and making the row again puts the notebook back
+		// in the sidebar and stops the `rmdir`, which refuses to remove a
+		// directory the device still holds. The queue is what says the user has
+		// let it go; a folder the user made again withdrew the `rmdir`
+		// (`store/queue.ts`), and one another device makes at the name has an id
+		// of its own.
+		//
+		// At that path only. Another device may have moved the folder since —
+		// and the `rmdir` then finds something else at the name and leaves it
+		// alone — so the notebook is still there to be had, under its new name,
+		// and dropping it would take it from this device for good.
+		if (batch.removing.get(entry.remoteId) === entry.path) return [];
 
 		const made = decided.flatMap((change, index) =>
 			change.kind === 'ensure-folder' && change.remoteId === entry.remoteId ? [index] : []
@@ -1821,6 +1843,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			deleting: new Set(
 				queue.flatMap((op) =>
 					op.op === 'delete' && op.noteId !== undefined ? [op.noteId] : []
+				)
+			),
+			removing: new Map(
+				queue.flatMap((op): [string, string][] =>
+					op.op === 'rmdir' && op.remoteId !== undefined ? [[op.remoteId, op.path]] : []
 				)
 			),
 			scanning,
@@ -2300,13 +2327,86 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		await store.completeOp(op.seq, { kind: 'purged', noteId: note.id });
 	};
 
+	/**
+	 * Does the remote hold any file at or under this folder? Hidden ones count:
+	 * the point is that nothing of the user's goes with the folder, and a file
+	 * this device has never pulled is exactly what must not.
+	 *
+	 * A folder that cannot be listed is treated as holding nothing — it is not
+	 * there to hold anything — and the delete that follows answers "not found"
+	 * the same way.
+	 */
+	const holdsNoFile = async (path: string): Promise<boolean> => {
+		const entries = await provider.list(path).catch((error: unknown) => {
+			if (isNotFoundError(error)) return [];
+			throw error;
+		});
+		if (entries.some((entry) => entry.kind === 'file')) return false;
+		const inside = await Promise.all(
+			entries.flatMap((entry) => (entry.kind === 'folder' ? [holdsNoFile(entry.path)] : []))
+		);
+		return inside.every(Boolean);
+	};
+
+	/**
+	 * A notebook deleted or renamed here, whose directory is still on the
+	 * remote. The notes inside went up as deletes or moves of their own, ahead
+	 * of this, so what is left is an empty directory — and left alone it comes
+	 * back as a notebook on the next pull that reports it, and stays in every
+	 * other client's folder list.
+	 *
+	 * It **never deletes files this device has not pulled**, which is the whole
+	 * difficulty: the remote may hold anything under that path — a file another
+	 * device wrote a moment ago, or one the user dropped in from outside the
+	 * app. So the op is refused at four gates before it sends anything:
+	 *
+	 * 1. Without the id recorded when it was queued, nothing: a folder cannot be
+	 *    confirmed as the one this op is about by its path alone.
+	 * 2. A folder row or a live note at or under the path: the user has made the
+	 *    notebook again, and it is theirs now.
+	 * 3. Nothing at the name on the remote, or something with another id — it was
+	 *    renamed or replaced elsewhere — and the op is about a folder that is
+	 *    already gone.
+	 * 4. Anything at all under it that is a file.
+	 *
+	 * Known gap (docs/PLAN.md §7): a file written between the walk and the
+	 * delete goes with the folder, into the provider's trash or recycle bin.
+	 */
+	const runRmdir = async (op: SyncOp): Promise<void> => {
+		const { remoteId } = op;
+		const finish = (): Promise<void> => store.completeOp(op.seq, { kind: 'done' });
+		if (remoteId === undefined) return finish();
+		const mine = await store.folderByPath(op.path);
+		const notes = await store.notesUnder(op.path);
+		if (mine !== undefined || notes.length > 0) return finish();
+
+		const beside = await provider.list(parentPath(op.path)).catch((error: unknown) => {
+			if (isNotFoundError(error)) return [];
+			throw error;
+		});
+		const there = beside.find((entry) => entry.remoteId === remoteId);
+		if (there === undefined || normalizePath(there.path) !== normalizePath(op.path)) {
+			return finish();
+		}
+		if (!(await holdsNoFile(op.path))) return finish();
+
+		await provider.delete({ remoteId, path: op.path }).catch((error: unknown) => {
+			if (isNotFoundError(error)) return;
+			throw error;
+		});
+		return finish();
+	};
+
 	/** Runs one op, or throws. A conflict is thrown, and answered by the caller. */
 	const runOp = async (op: SyncOp): Promise<void> => {
 		if (op.op === 'mkdir') {
-			await provider.createFolder(op.path);
-			await store.completeOp(op.seq, { kind: 'done' });
+			const made = await provider.createFolder(op.path);
+			// The id goes onto the folder row, for an `rmdir` queued later to say
+			// which folder it means.
+			await store.completeOp(op.seq, { kind: 'made-folder', path: op.path, remote: made });
 			return;
 		}
+		if (op.op === 'rmdir') return runRmdir(op);
 
 		const note = op.noteId === undefined ? undefined : await store.noteById(op.noteId);
 		if (op.op === 'delete') return runDelete(op, note);

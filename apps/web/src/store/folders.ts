@@ -15,7 +15,7 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { foldPath, freePath } from './naming.js';
-import { queueDelete, queueMkdir, queueMove } from './queue.js';
+import { queueDelete, queueMkdir, queueMove, queueRmdir } from './queue.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -260,6 +260,9 @@ export const moveFolder = async (
 		);
 		if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
+		// Before the rows go: the source directory is left behind by the moves
+		// below, and its id is the only thing that will say which one it was.
+		const left = moving.find((folder) => folder.path === source)?.remoteId;
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		const made = await ensureFolder(db, target, { connectionId });
 		// Without their `remoteId`: the folder that id names is still at the old
@@ -346,6 +349,14 @@ export const moveFolder = async (
 			await pending;
 			await queueMove(db, note, from.get(note.id) ?? note.path);
 		}, Promise.resolve());
+
+		// Last, so the notes are out of it before the engine looks: the moves
+		// above are what leave the old directory empty, and the engine refuses
+		// to remove one that still holds a file. Only the outermost — the
+		// subdirectories inside it go with it on every provider — and only when
+		// it is not inside the destination, where a notebook moved into one of
+		// its own subfolders would otherwise ask for its new home to be removed.
+		if (!isWithin(source, target)) await queueRmdir(db, connectionId, source, left);
 	});
 };
 
@@ -372,6 +383,7 @@ export const deleteFolder = async (
 	await db.transaction('rw', db.folders, db.notes, db.opQueue, db.syncState, async () => {
 		const connectionId = options.connectionId ?? (await activeConnectionId(db));
 		const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+		const gone = folders.find((folder) => folder.path === target)?.remoteId;
 		await db.folders.bulkDelete(
 			folders
 				.filter((folder) => isWithin(folder.path, target))
@@ -387,6 +399,11 @@ export const deleteFolder = async (
 			await pending;
 			await queueDelete(db, note);
 		}, Promise.resolve());
+
+		// Behind the deletes, which are what empty the directory. The engine
+		// refuses to remove one that still holds a file, so a note another
+		// device wrote into the notebook meanwhile keeps it.
+		await queueRmdir(db, connectionId, target, gone);
 	});
 };
 

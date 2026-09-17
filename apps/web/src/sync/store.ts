@@ -104,6 +104,7 @@ const toSyncOp = (record: OpQueueRecord): SyncOp => {
 		...(record.noteId === undefined ? {} : { noteId: record.noteId }),
 		path: record.path,
 		...(record.targetPath === undefined ? {} : { targetPath: record.targetPath }),
+		...(record.remoteId === undefined ? {} : { remoteId: record.remoteId }),
 		attempts: record.attempts,
 	};
 };
@@ -491,6 +492,18 @@ export const createDexieSyncStore = (
 		withdrawn: boolean
 	): Promise<void> => {
 		if (outcome.kind === 'done') return;
+		// The notebook's directory exists now, and the row records which one it
+		// is, so a later `rmdir` can name it. Only if the row is still at that
+		// path: renamed or deleted here while the `mkdir` was at the network,
+		// the id is the old name's folder, and the rename queued its own
+		// `mkdir` and `rmdir` for that.
+		if (outcome.kind === 'made-folder') {
+			const folder = await scope.folders.get([connectionId, outcome.path]);
+			if (folder !== undefined) {
+				await scope.folders.put({ ...folder, remoteId: outcome.remote.remoteId });
+			}
+			return;
+		}
 		if (outcome.kind === 'purged') {
 			const note = await ownNote(scope, outcome.noteId);
 			if (note === undefined) return;
