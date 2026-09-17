@@ -642,6 +642,33 @@ export const describeSyncStoreContract = (
 				expect(op?.targetPath).toBe('b.md');
 			});
 
+			it('points it there for a version the pull only adopts', async () => {
+				// The branch a note with a queued rename actually takes when the
+				// remote moves its file: the row stays where the user put it,
+				// and the file is somewhere else again.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'b.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'a.md',
+					targetPath: 'b.md',
+				});
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'adopt-version',
+							id: 'n1',
+							remote: remote('Work/a.md', 'r1', 'v2'),
+						},
+					],
+				});
+
+				expect((await store.opBySeq(seq))?.path).toBe('Work/a.md');
+				expect((await store.noteById('n1'))?.path).toBe('b.md');
+			});
+
 			it('keeps an edited note when its folder is deleted remotely', async () => {
 				// Never lose user data (CLAUDE.md). The folder is gone, but the
 				// edit in it was never anywhere else, so the note survives as a

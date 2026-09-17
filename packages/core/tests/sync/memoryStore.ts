@@ -232,6 +232,8 @@ export const createMemoryStore = (): MemoryStore => {
 				remoteVersion: change.remote.version,
 				...(change.syncedHash === undefined ? {} : { syncedHash: change.syncedHash }),
 			});
+			// The row stays put; the file's whereabouts are still news.
+			originIsNow(change.id, change.remote.path);
 			return;
 		}
 		if (change.kind === 'move-note') {

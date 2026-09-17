@@ -137,7 +137,9 @@ export type PullChange =
 			 * A queued `move` for this note has its *origin* pointed at `path`
 			 * as well — the remote has just said where the file is, and the
 			 * origin is what says whether a folder's deletion is about that file
-			 * (`delete-folder`'s `keep`). A conflict's remote side does the same.
+			 * (`delete-folder`'s `keep`). A conflict's remote side does the same,
+			 * and so does `adopt-version`, which is the branch a note with a
+			 * queued rename actually takes when the remote moves its file.
 			 * The queued rename's target is the name the user chose, and is left
 			 * alone. `move-note` needs no such rule: the engine never emits one
 			 * for a note whose own rename is queued.

@@ -376,13 +376,15 @@ export const createDexieSyncStore = (
 		// that says where the file is, and a second would name a path the file
 		// has not reached. `queueMove` keeps one, but the contract does not say
 		// so, and disagreeing with the engine here is how the two rules drift.
-		const first = (await opsOf(scope)).reduce<Map<string, string>>(
-			(map, op) =>
-				op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
-					? map
-					: map.set(op.noteId, op.path),
-			new Map()
-		);
+		const first = [...(await opsOf(scope))]
+			.sort((one, two) => (one.seq ?? 0) - (two.seq ?? 0))
+			.reduce<Map<string, string>>(
+				(map, op) =>
+					op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
+						? map
+						: map.set(op.noteId, op.path),
+				new Map()
+			);
 		return [...first]
 			.filter(
 				([, from]) => !isWithin(from, path) && (was === undefined || !isWithin(from, was))
@@ -490,6 +492,11 @@ export const createDexieSyncStore = (
 					remoteVersion: change.remote.version,
 					...syncedHashOf(change.syncedHash),
 				});
+				// The row stays where the user put it — that is what this change
+				// is for — but the remote has still said where the file is, and
+				// this is the branch a note with a queued rename takes when the
+				// remote moves its file.
+				await originIsNow(scope, change.id, change.remote.path);
 				return;
 			}
 			case 'move-note': {
