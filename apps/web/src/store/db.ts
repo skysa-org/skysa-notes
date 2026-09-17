@@ -38,6 +38,14 @@ export interface NoteRecord {
 	remoteId?: string;
 	/** Opaque provider version: etag, rev, cTag, headRevisionId. Compare only. */
 	remoteVersion?: string;
+	/**
+	 * SHA-256 of the file as this note and its remote file last agreed on it —
+	 * pulled or pushed — unlike `contentHash`, which follows every edit. Only the
+	 * sync store writes it; see `SyncNote.syncedHash` in `@skysa/core`. Not
+	 * indexed, so rows from before it need no migration: absent reads as "cannot
+	 * say".
+	 */
+	syncedHash?: string;
 	/** SHA-256 of the serialized file as last written or last seen remotely. */
 	contentHash: string;
 	/**

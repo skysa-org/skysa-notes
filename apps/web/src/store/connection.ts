@@ -75,6 +75,7 @@ type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState'>;
 const withoutRemote = ({
 	remoteId: _remoteId,
 	remoteVersion: _remoteVersion,
+	syncedHash: _syncedHash,
 	...note
 }: NoteRecord): NoteRecord => note;
 

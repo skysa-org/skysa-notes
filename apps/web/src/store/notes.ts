@@ -360,7 +360,13 @@ const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promi
 	const taken = await takenNamesIn(db, connectionId, folderPath, shown.id);
 	const free = freeName(basename(shown.path), taken) === basename(shown.path);
 	const path = free ? shown.path : conflictPath(shown.path, new Date(), taken);
-	const { remoteId: _remoteId, remoteVersion: _remoteVersion, source: _source, ...kept } = shown;
+	const {
+		remoteId: _remoteId,
+		remoteVersion: _remoteVersion,
+		syncedHash: _syncedHash,
+		source: _source,
+		...kept
+	} = shown;
 	return addEdited(db, {
 		...kept,
 		connectionId,

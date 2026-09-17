@@ -29,6 +29,19 @@ export interface SyncNote {
 	/** Absent until the note has been pushed, or after the remote copy is gone. */
 	remoteId?: string;
 	remoteVersion?: string;
+	/**
+	 * `contentHash` of the bytes this note and its remote file last agreed on:
+	 * what a pull brought in, or what a push sent. What lets the engine tell a
+	 * remote *edit* from a remote rename on a provider whose version changes on
+	 * a move (OneDrive's `eTag`, docs/PLAN.md §7): a note with unpushed edits
+	 * whose file comes back under a new version but with these same bytes was
+	 * not edited over there, and needs no conflict copy.
+	 *
+	 * Absent until the note has synced once with it recorded, and whenever the
+	 * remote file is let go of. Absent means "cannot say", which takes the
+	 * conflict branch as before — so rows from before it existed need nothing.
+	 */
+	syncedHash?: string;
 	/** Has local edits that have not reached the remote yet. */
 	dirty: boolean;
 }
@@ -111,12 +124,24 @@ export type PullChange =
 			path: string;
 			content: string;
 			remote: RemoteEntry;
+			/** `contentHash(content)`, recorded as the note's `syncedHash`. */
+			syncedHash: string;
 	  }>
 	| Readonly<{
-			/** Same bytes, new version. Adopt the version and touch nothing else. */
+			/**
+			 * The remote's bytes are the ones the note last synced, under a new
+			 * version. Adopt the version and touch nothing else — the note may
+			 * hold unpushed edits, which stay dirty and go out against it.
+			 */
 			kind: 'adopt-version';
 			id: string;
 			remote: RemoteEntry;
+			/**
+			 * Recorded as the note's `syncedHash` when present. Absent when the
+			 * engine did not read the file, because its version had not moved and
+			 * the hash already stored still describes it.
+			 */
+			syncedHash?: string;
 	  }>
 	| Readonly<{
 			/**
@@ -135,6 +160,8 @@ export type PullChange =
 			id: string;
 			path: string;
 			remote: RemoteEntry;
+			/** As for `adopt-version`. `dirty` and the content are left alone. */
+			syncedHash?: string;
 	  }>
 	| Readonly<{
 			/**
@@ -154,8 +181,9 @@ export type PullChange =
 	| Readonly<{
 			/**
 			 * The remote copy is gone but the local one has unpushed edits. Keep
-			 * the note and forget the remote, so the next push re-creates it
-			 * rather than writing to a file that no longer exists. Tolerates an
+			 * the note and forget the remote — its `syncedHash` too — so the next
+			 * push re-creates it rather than writing to a file that no longer
+			 * exists. Tolerates an
 			 * unknown id for the same reason `delete-note` does.
 			 */
 			kind: 'detach-note';
@@ -265,6 +293,8 @@ export interface ConflictResolution {
 	/** The note that was already there, which becomes the remote's copy. */
 	noteId: string;
 	remoteContent: string;
+	/** `contentHash(remoteContent)`, the note's `syncedHash` from here on. */
+	remoteHash: string;
 	remote: RemoteEntry;
 	/** The note the local edits move into. Fresh id, fresh path, no remote yet. */
 	copyId: string;
@@ -299,6 +329,11 @@ export type OpOutcome =
 			 * edit never left the device is how a save disappears.
 			 */
 			content: string;
+			/**
+			 * `contentHash(content)`. Recorded as `syncedHash` whether or not the
+			 * note is still what was sent: the remote holds these bytes either way.
+			 */
+			syncedHash: string;
 	  }>
 	| Readonly<{
 			/** A move landed. Content was never in question, so `dirty` is not touched. */
