@@ -64,15 +64,17 @@ const metadataOf = (entry: RemoteEntry): Record<string, unknown> =>
 	entry.kind === 'folder' ? folderMetadata(entry) : fileMetadata(entry);
 
 /** `DeletedMetadata` really does carry this little: a name and a path. */
-const changeMetadata = (entry: ChangeEntry): Record<string, unknown> =>
-	entry.deleted === true
-		? {
-				'.tag': 'deleted',
-				name: basename(entry.path),
-				path_lower: toDropboxPath(entry.path).toLowerCase(),
-				path_display: toDropboxPath(entry.path),
-			}
-		: metadataOf(entry);
+const changeMetadata = (entry: ChangeEntry): Record<string, unknown> => {
+	if (entry.deleted !== true) return metadataOf(entry);
+	// The fake logs every deletion with its path, as Dropbox itself would.
+	if (entry.path === undefined) throw new Error('A Dropbox deletion always has a path');
+	return {
+		'.tag': 'deleted',
+		name: basename(entry.path),
+		path_lower: toDropboxPath(entry.path).toLowerCase(),
+		path_display: toDropboxPath(entry.path),
+	};
+};
 
 const json = (body: unknown, status = 200): Response =>
 	new Response(JSON.stringify(body), {

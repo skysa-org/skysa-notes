@@ -441,7 +441,7 @@ describe('changes, from a feed with no paths', () => {
 		expect(livePaths(second.entries)).toEqual(['Work/a.md', 'Work']);
 	});
 
-	it('reports nothing for a folder made and deleted within the first scan', async () => {
+	it('reports a folder made and deleted within the first scan by id alone', async () => {
 		const { doFetch } = scripted((url) =>
 			url.endsWith('/special/approot')
 				? Response.json({ id: 'root' })
@@ -467,8 +467,12 @@ describe('changes, from a feed with no paths', () => {
 					})
 		);
 		const { entries, cursor } = await over(doFetch).changes();
-		// Neither was ever placed, so the engine has nothing to forget.
-		expect(entries).toEqual([]);
+		// Neither was ever placed, so there is no path to give, and the engine
+		// finds nothing held by either id.
+		expect(entries).toEqual([
+			{ deleted: true, remoteId: 'd1' },
+			{ deleted: true, remoteId: 'f1' },
+		]);
 		expect(JSON.parse(cursor)).toMatchObject({ nodes: [], pending: [] });
 	});
 

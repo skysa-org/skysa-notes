@@ -197,7 +197,9 @@ export interface Settled {
 	pruned: number;
 }
 
-const gone = (path: string, id: string): ChangeEntry => ({ path, deleted: true, remoteId: id });
+/** A deletion, by id alone when the tree never placed the item. */
+const gone = (path: string | undefined, id: string): ChangeEntry =>
+	path === undefined ? { deleted: true, remoteId: id } : { path, deleted: true, remoteId: id };
 
 /**
  * A file with no version cannot be an entry: the caller would store `''`, send
@@ -233,13 +235,18 @@ const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry | und
  *
  * - A deletion is reported at the path the item had before the page, since a
  *   feed need not name a deleted item (Graph for Business does not; a Drive
- *   `removed` change has no file at all). An id the tree never placed is
- *   somebody else's history (a cold start meeting a tombstone) and is dropped.
+ *   `removed` change has no file at all). One the tree never placed is still
+ *   reported, by id alone. It may be a file this device pushed after its
+ *   cursor, which another device deleted before this device pulled again: the
+ *   round says only that the id is gone, and the note here is held by the id
+ *   the push returned. Dropped, the note stays on this device for ever. An id
+ *   nothing holds — a cold start meeting a tombstone — the engine finds nothing
+ *   for.
  * - A live item that can be placed is reported where it now is.
  * - One that cannot is held until the round ends: its parent may be on a later
  *   page. When the round has ended, it cannot be: a chain that still does not
  *   reach the root left it — the user can move things out of the app's folder —
- *   and the item is reported deleted where it was.
+ *   and the item is reported deleted where it was, or by id alone.
  * - A deletion inside a folder also reported deleted is still reported. The
  *   engine matches it by id and finds nothing left to do, while a filter by
  *   path cannot tell which folder a path belonged to: within one round two
@@ -253,7 +260,7 @@ const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry | und
 export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 	const decided = [...page.changes.values()].map((change): Decided => {
 		const was = wasOf(page, change.id);
-		if (change.kind === 'gone') return was === undefined ? {} : { entry: gone(was, change.id) };
+		if (change.kind === 'gone') return { entry: gone(was, change.id) };
 		const path = pathIn(page.nodes, page.root, change.id);
 		if (path !== undefined) {
 			const entry = toLive(page, change, path);
@@ -270,7 +277,7 @@ export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 			return { pending: held };
 		}
 		page.nodes.delete(change.id);
-		return { unplaced: true, ...(was === undefined ? {} : { entry: gone(was, change.id) }) };
+		return { unplaced: true, entry: gone(was, change.id) };
 	});
 
 	const unplaced = roundEnds

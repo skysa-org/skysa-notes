@@ -14,6 +14,7 @@ import {
 } from '../paths.js';
 import {
 	type ChangeEntry,
+	type DeletedEntry,
 	type EntryRef,
 	isAuthError,
 	isConflictError,
@@ -333,9 +334,35 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const aliveElsewhere = (
 		live: LiveEntries,
 		remoteId: string,
-		path: string,
+		path: string | undefined,
 		at: number
-	): boolean => (live.get(remoteId) ?? []).some((entry) => entry.path !== path || entry.at > at);
+	): boolean =>
+		// A deletion by id alone says nothing of where the thing was, so only a
+		// later entry can say it lives on.
+		(live.get(remoteId) ?? []).some(
+			(entry) => (path !== undefined && entry.path !== path) || entry.at > at
+		);
+
+	/**
+	 * Whether a note's file is there now, asked of the provider by id, for the
+	 * few decisions a feed cannot settle. Only "not found" says no: with no file
+	 * to ask about the answer is yes, and a read that fails for any other reason
+	 * fails the pull, which is tried again. A whole read, since the port has no
+	 * cheaper question; these cases are rare.
+	 */
+	const stillThere = async ({
+		at,
+		remoteId,
+	}: Pick<Placement, 'at' | 'remoteId'>): Promise<boolean> => {
+		if (at === undefined || remoteId === undefined) return true;
+		return provider.read({ path: at, remoteId }).then(
+			() => true,
+			(error: unknown) => {
+				if (isNotFoundError(error)) return false;
+				throw error;
+			}
+		);
+	};
 
 	/**
 	 * The note an entry is about. `remoteId` is the identity; the path is the
@@ -355,10 +382,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * still has the note sitting at its old path, so a *different* file arriving
 	 * there is matched to it, and the note is written over with somebody else's
 	 * bytes while its own file goes on existing under the new name.
+	 *
+	 * Nor, below: a note the user has deleted here, one they have renamed onto
+	 * the path, or one whose own file is still there.
 	 */
 	const noteForEntry = async (
 		entry: RemoteEntry,
-		live: LiveEntries,
+		batch: Batch,
 		decided: readonly PullChange[]
 	): Promise<SyncNote | undefined> => {
 		const byId = await store.noteByRemoteId(entry.remoteId);
@@ -371,7 +401,32 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// what `removed` in `decideFile` is for.
 		const at = whereNow(byPath, decided);
 		if (at !== undefined && at !== entry.path) return undefined;
-		return byPath.remoteId !== undefined && live.has(byPath.remoteId) ? undefined : byPath;
+		const own = byPath.remoteId;
+		if (own !== undefined && batch.live.has(own)) return undefined;
+		// Except a note the user has deleted. Its file went on another device
+		// too, and this is a new one there that took the name: brought back as
+		// that note, it is still deleted here, and its queued delete removes the
+		// other device's note from the remote.
+		if (at === undefined) return batch.deleting.has(byPath.id) ? undefined : byPath;
+		// The user's own rename, not yet pushed: the note is at this path because
+		// they put it here, and its file is still wherever it was. Claimed, it
+		// takes the arriving file's bytes and forgets its own — which the feed
+		// has no reason ever to mention again — and the queued move then goes
+		// nowhere. It is in the way instead, and moves aside.
+		if (batch.renaming.has(byPath.id)) return undefined;
+		if (own === undefined) return byPath;
+		// A scan says what exists and never what was removed, so a file replaced
+		// at this path while the cursor was dead arrives with nothing about the
+		// old one, and the path is the only thing tying them together. A feed
+		// usually says so, and then the note becomes the file that replaced its
+		// own. When it does not — a provider need not report the deletion of a
+		// file replaced at its path — the provider is asked. Still there, it is
+		// unmentioned because unchanged, and this is a different file that has
+		// taken the name; claimed, the note forgets its own for ever.
+		if (batch.scanning || batch.doomed.ids.has(own) || batch.doomed.paths.has(entry.path)) {
+			return byPath;
+		}
+		return (await stillThere({ at: byPath.path, remoteId: own })) ? undefined : byPath;
 	};
 
 	/**
@@ -486,7 +541,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * batch has not been deleted.
 	 */
 	const movedNotDeleted = async (
-		path: string,
+		path: string | undefined,
 		remoteId: string | undefined,
 		local: SyncNote | undefined,
 		live: LiveEntries,
@@ -509,7 +564,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// to name it, so "some folder above it is in this batch" is not evidence
 		// against it — and a deletion dropped here is dropped for ever, because
 		// the cursor moves on and nothing ever mentions it again.
-		if (remoteId !== undefined) return false;
+		if (remoteId !== undefined || path === undefined) return false;
 
 		const candidates = [path, ...ancestorPaths(path)];
 		const folders = await Promise.all(candidates.map((each) => store.folderByPath(each)));
@@ -519,18 +574,59 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 	};
 
+	/**
+	 * The note a deletion is about: by its id when it has one — a deletion by id
+	 * alone has nothing else — and by where a note ends up in this batch when it
+	 * has only a path (see `decideDeleted`).
+	 */
+	const deletedNote = async (
+		entry: DeletedEntry,
+		batch: Batch,
+		decided: readonly PullChange[]
+	): Promise<{ note?: SyncNote; byOldName?: true }> => {
+		if (entry.remoteId !== undefined) {
+			const { remoteId } = entry;
+			const note =
+				(await store.noteByRemoteId(remoteId)) ??
+				madeInBatch(decided).find((each) => each.remoteId === remoteId);
+			return note === undefined ? {} : { note };
+		}
+		if (entry.path === undefined) return {};
+		const { path } = entry;
+		const found = (await notesEndingIn(parentPath(path), decided)).find(
+			(each) => each.path === path
+		)?.note;
+		// Not a note the user has renamed onto the path and not pushed yet. Its
+		// file is still at the old name, and this is about whatever was here —
+		// often this device's own delete of the note that had the name, coming
+		// back — so letting go of it loses a note whose file nobody deleted.
+		const here = found !== undefined && !batch.renaming.has(found.id) ? found : undefined;
+		if (here?.remoteId !== undefined) return { note: here };
+		// That note is found at the old name instead, which is where its file
+		// was when the rename was queued. Left alone, the note stays here for
+		// ever, and its queued rename has nothing to move. Ahead of a note here
+		// that has never had a file: the user made it at the name the rename
+		// freed. But the file may have moved on since — another device renamed
+		// it, and the queue still names the old path — so the caller asks.
+		const renamed = [...batch.renaming].find(([, from]) => from === path)?.[0];
+		const note = renamed === undefined ? undefined : await store.noteById(renamed);
+		if (note !== undefined) return { note, byOldName: true };
+		return here === undefined ? {} : { note: here };
+	};
+
 	const decideDeleted = async (
-		path: string,
-		remoteId: string | undefined,
-		live: LiveEntries,
+		entry: DeletedEntry,
+		batch: Batch,
 		decided: readonly PullChange[],
 		at: number
 	): Promise<PullChange[]> => {
+		const { path, remoteId } = entry;
+		const { live } = batch;
 		// The app folder itself. An adapter that reports an empty path by mistake
 		// would otherwise wipe every note on the device, and a folder the user
 		// really did delete out from under us is not something to act on
 		// silently either — the connection is what is broken, not the notes.
-		if (normalizePath(path) === ROOT) return [];
+		if (path !== undefined && normalizePath(path) === ROOT) return [];
 
 		// A deletion names a path, so unlike an entry it does have to be matched
 		// by path when it carries no id: that is the only thing it has. When it
@@ -554,13 +650,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// on being held. There is no need to fall back to `store.noteByPath`:
 		// `notesEndingIn` starts from the store's own rows under that folder, so
 		// a note that has not been moved is found by it too.
-		const local =
-			remoteId === undefined
-				? (await notesEndingIn(parentPath(path), decided)).find(
-						(entry) => entry.path === path
-					)?.note
-				: ((await store.noteByRemoteId(remoteId)) ??
-					madeInBatch(decided).find((note) => note.remoteId === remoteId));
+		const { note: local, byOldName } = await deletedNote(entry, batch, decided);
 
 		if (await movedNotDeleted(path, remoteId, local, live, at)) return [];
 		if (local !== undefined) {
@@ -575,14 +665,21 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// alongside the other device's delete — and reading that as settled
 			// drops the deletion for ever, since the cursor moves on and nothing
 			// says it again. A deletion with no id names no file, so there it
-			// stays a question about the note: an id-less deletion after a write
-			// at that path is ambiguous, and keeping the note cannot lose one.
-			const settled =
-				removedInBatch(local, decided) ||
-				(remoteId === undefined
-					? reestablished(decided).notes.has(local.id)
-					: remoteNow(local, decided) !== remoteId);
-			return settled ? [] : [forgetNote(local)];
+			// stays a question about the note: after a decision in this batch
+			// that wrote it back, it may be about the file the note now points
+			// at or about one before it, and the provider is asked. Kept on
+			// suspicion, a note whose file is gone stays on this device for ever,
+			// pointing at nothing — a rename queued here adopts the version
+			// without reading a byte, and says nothing about whether the file
+			// outlived the deletion behind it.
+			if (removedInBatch(local, decided)) return [];
+			if (remoteId !== undefined) {
+				return remoteNow(local, decided) === remoteId ? [forgetNote(local)] : [];
+			}
+			if (byOldName !== true && !reestablished(decided).notes.has(local.id)) {
+				return [forgetNote(local)];
+			}
+			return (await stillThere(placement(local, decided))) ? [] : [forgetNote(local)];
 		}
 
 		// Not a note we hold, so the only thing left it could be about is a
@@ -612,13 +709,39 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		paths: ReadonlySet<string>;
 	}
 
+	/** What every decision in a batch is reached against, worked out once. */
+	interface Batch {
+		live: LiveEntries;
+		/**
+		 * Paths the batch brings a file or folder to, and the old names of
+		 * renames queued here: the file is still there until the rename runs,
+		 * and a note sent to that name conflicts with it and waits behind a
+		 * move that is queued after its own write.
+		 */
+		claimed: ReadonlySet<string>;
+		doomed: Doomed;
+		/**
+		 * Notes whose rename is queued here and has not reached the remote, and
+		 * the path each one's file is still at.
+		 */
+		renaming: ReadonlyMap<string, string>;
+		/** Notes the user has deleted here, whose delete has not reached the remote. */
+		deleting: ReadonlySet<string>;
+		/** A full scan, which reports what exists and never what was removed. */
+		scanning: boolean;
+	}
+
 	const doomedIn = (entries: readonly ChangeEntry[]): Doomed => ({
 		ids: new Set(
 			entries.flatMap((entry) =>
 				entry.deleted === true && entry.remoteId !== undefined ? [entry.remoteId] : []
 			)
 		),
-		paths: new Set(entries.flatMap((entry) => (entry.deleted === true ? [entry.path] : []))),
+		paths: new Set(
+			entries.flatMap((entry) =>
+				entry.deleted === true && entry.path !== undefined ? [entry.path] : []
+			)
+		),
 	});
 
 	/**
@@ -705,7 +828,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * took its place.
 	 */
 	const doomedFolder = async (
-		path: string,
+		path: string | undefined,
 		remoteId: string | undefined,
 		decided: readonly PullChange[]
 	): Promise<string | undefined> => {
@@ -733,6 +856,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// was there when the batch started is what it means. Once that one has
 		// moved on or been taken away, whatever is at the path now arrived
 		// after the deletion was recorded and is not what it is about.
+		if (path === undefined) return undefined;
 		const before = await store.folderByPath(path);
 		if (before !== undefined) return folderNow(path, decided) === path ? path : undefined;
 
@@ -895,7 +1019,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		entry: RemoteEntry,
 		claimed: ReadonlySet<string>,
 		decided: readonly PullChange[],
-		renaming: ReadonlySet<string>
+		renaming: ReadonlyMap<string, string>
 	): Promise<PullChange[]> => {
 		const { content } = found;
 		const syncedHash = await contentHash(content);
@@ -1014,14 +1138,52 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}, Promise.resolve([]));
 	};
 
+	/**
+	 * Nothing to do for a file gone by the time it is read (see `decideFile`),
+	 * except for a note held by that very file and about to follow it to a new
+	 * path. The deletion arriving behind the entry — in this batch or a later
+	 * one — is at that new path, where the note never got to, and one with no
+	 * id, which is all Dropbox's `DeletedMetadata` is, has nothing else to find
+	 * the note by. The file named by its id is gone, so the note is let go of
+	 * here. At its own path the deletion finds it, and nothing is decided on a
+	 * read alone.
+	 */
+	const goneBeforeRead = (
+		local: SyncNote | undefined,
+		removed: boolean,
+		entry: RemoteEntry
+	): PullChange[] =>
+		local !== undefined &&
+		!removed &&
+		local.remoteId === entry.remoteId &&
+		local.path !== entry.path
+			? [forgetNote(local)]
+			: [];
+
+	/**
+	 * A note never pushed has no file to be matched by, only a path, and the
+	 * path proves nothing about whose file this is. It is ours when it is our
+	 * own first push coming back — the write landed and the tab closed before
+	 * the store heard — which the bytes, or the id they carry, show. Anything
+	 * else is another device's note that took the same name. A dirty one is
+	 * safe to claim: it conflicts, and its edit goes to a copy. A clean one is
+	 * not — it is written over — and nor is a note the user deleted before it
+	 * was ever pushed, which the store reports clean: claimed, its queued delete
+	 * has a file to aim at, and removes the other device's note.
+	 */
+	const isStranger = (local: SyncNote, content: string): boolean =>
+		!local.dirty &&
+		local.remoteId === undefined &&
+		content !== local.content &&
+		parseNoteFile(content).id !== local.id;
+
 	const decideFile = async (
 		entry: RemoteEntry,
 		decided: readonly PullChange[],
-		live: LiveEntries,
-		claimed: ReadonlySet<string>,
-		renaming: ReadonlySet<string>
+		batch: Batch
 	): Promise<PullChange[]> => {
-		const local = await noteForEntry(entry, live, decided);
+		const { claimed, renaming } = batch;
+		const local = await noteForEntry(entry, batch, decided);
 		// Taken away by an earlier decision in this batch — the file was deleted
 		// and re-created at the same path, or moved out of a folder that went.
 		// Everything below that needs the row to still be there is off the table;
@@ -1064,15 +1226,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isNotFoundError(error)) return undefined;
 			throw error;
 		});
-		if (found === undefined) return [];
+		if (found === undefined) return goneBeforeRead(local, removed, entry);
 		const { content } = found;
-
-		if (local === undefined) {
+		const stranger = local !== undefined && !removed && isStranger(local, content);
+		if (local === undefined || stranger) {
+			const aside = stranger
+				? await displaceOccupant(entry.path, undefined, decided, claimed)
+				: room;
 			return [
-				...room,
+				...aside,
 				{
 					kind: 'upsert-note',
-					id: await idForNewNote(content, after),
+					id: await idForNewNote(content, [...decided, ...aside]),
 					path: entry.path,
 					content,
 					remote: entry,
@@ -1099,18 +1264,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const decide = async (
 		entry: ChangeEntry,
 		decided: readonly PullChange[],
-		live: LiveEntries,
-		claimed: ReadonlySet<string>,
-		at: number,
-		doomed: Doomed,
-		renaming: ReadonlySet<string>
+		batch: Batch,
+		at: number
 	): Promise<PullChange[]> => {
+		const { claimed, doomed } = batch;
 		// The marker file and any provider bookkeeping. `isHidden` is the same
 		// rule the UI uses, so nothing the user cannot see becomes a note.
-		if (isHidden(entry.path)) return [];
 		if (entry.deleted === true) {
-			return decideDeleted(entry.path, entry.remoteId, live, decided, at);
+			if (entry.path !== undefined && isHidden(entry.path)) return [];
+			return decideDeleted(entry, batch, decided, at);
 		}
+		if (isHidden(entry.path)) return [];
 		if (entry.kind === 'folder') return decideFolder(entry, decided, claimed, doomed);
 
 		// A file that is not a note. The app owns the folder but does not own
@@ -1122,7 +1286,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// the fold in `conflictFilename` below can never be reached by anything
 		// the engine actually pulls.
 		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) return [];
-		return decideFile(entry, decided, live, claimed, renaming);
+		return decideFile(entry, decided, batch);
 	};
 
 	/**
@@ -1185,24 +1349,40 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			.map((path): PullChange => ({ kind: 'ensure-folder', path }));
 	};
 
-	const decideAll = async (reported: readonly ChangeEntry[]): Promise<PullChange[]> => {
+	const decideAll = async (
+		reported: readonly ChangeEntry[],
+		scanning: boolean
+	): Promise<PullChange[]> => {
 		const entries = deduped(reported);
-		// The notes whose rename is queued here and has not reached the remote.
-		// Asked once for the batch: the queue is what tells a rename the remote
-		// made from one the user made, and nothing in this batch changes it.
-		const renaming = new Set(
-			(await store.pendingOps()).flatMap((op) =>
-				op.op === 'move' && op.noteId !== undefined ? [op.noteId] : []
-			)
+		// The queue, asked once for the batch: it is what tells a rename the
+		// remote made from one the user made, and a note the user deleted from
+		// one a sync took away, and nothing in this batch changes it.
+		const queue = await store.pendingOps();
+
+		const renaming = queue.reduce<Map<string, string>>(
+			(map, op) =>
+				op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
+					? map
+					: map.set(op.noteId, op.path),
+			new Map()
 		);
-		// Everything this batch says still exists, and where, so a deletion
-		// elsewhere in it can be recognised as the first half of a move.
-		const live = liveEntries(entries);
-		const claimed = claimedPaths(entries);
-		const doomed = doomedIn(entries);
+		const batch: Batch = {
+			// Everything this batch says still exists, and where, so a deletion
+			// elsewhere in it can be recognised as the first half of a move.
+			live: liveEntries(entries),
+			claimed: new Set([...claimedPaths(entries), ...renaming.values()]),
+			doomed: doomedIn(entries),
+			renaming,
+			deleting: new Set(
+				queue.flatMap((op) =>
+					op.op === 'delete' && op.noteId !== undefined ? [op.noteId] : []
+				)
+			),
+			scanning,
+		};
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
-			return [...sofar, ...(await decide(entry, sofar, live, claimed, at, doomed, renaming))];
+			return [...sofar, ...(await decide(entry, sofar, batch, at))];
 		}, Promise.resolve([]));
 		return [...decided, ...(await roofOver(decided))];
 	};
@@ -1349,7 +1529,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		progress: PullProgress
 	): Promise<SyncOutcome> => {
 		const set = await provider.changes(cursor);
-		const changes = await decideAll(set.entries);
+		const changes = await decideAll(set.entries, scanning);
 		const seen = scanning
 			? new Set([
 					...progress.seen,

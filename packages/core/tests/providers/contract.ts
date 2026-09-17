@@ -62,8 +62,9 @@ export const drainChanges = async (
 	return { entries: all, cursor };
 };
 
-const paths = (entries: readonly { path: string }[]): string[] =>
-	entries.map((entry) => entry.path).sort();
+/** Each entry's path, and a deletion by id alone as `#<id>`. */
+const paths = (entries: readonly ChangeEntry[]): string[] =>
+	entries.map((entry) => entry.path ?? `#${entry.remoteId}`).sort();
 
 const at = (entries: readonly ChangeEntry[], path: string): ChangeEntry | undefined =>
 	entries.filter((entry) => entry.path === path).at(-1);
@@ -443,6 +444,27 @@ export const describeProviderContract = (
 				// A deletion is identified by its path and nothing else: Dropbox's
 				// DeletedMetadata carries no id, no rev and no timestamp.
 				expect(gone?.deleted).toBe(true);
+			});
+
+			it('reports a file written and deleted since the cursor as gone', config, async () => {
+				// The device that wrote it holds the note by the id its write
+				// returned, and the round is the only word it gets that another
+				// device deleted it. An id feed never placed the file, so it may
+				// say so by id alone, a path feed by path alone; saying nothing
+				// leaves the note on that device for ever.
+				const provider = await open();
+				const start = await drainChanges(provider);
+
+				const brief = await seedFile(provider, 'brief.md');
+				await provider.delete(brief);
+				const { entries } = await drainChanges(provider, start.cursor);
+				const last = entries
+					.filter(
+						(entry) => entry.path === 'brief.md' || entry.remoteId === brief.remoteId
+					)
+					.at(-1);
+
+				expect(last?.deleted).toBe(true);
 			});
 
 			it('hands back entries that can be read directly', config, async () => {

@@ -30,6 +30,8 @@ export interface MemoryStore extends SyncStore {
 	readonly put: (note: Partial<SyncNote> & Pick<SyncNote, 'id' | 'path' | 'content'>) => void;
 	readonly putFolder: (folder: SyncFolder) => void;
 	readonly queue: (op: Omit<SyncOp, 'seq' | 'attempts'> & { attempts?: number }) => SyncOp;
+	/** Withdraw a queued op, as the web queue does when a second rename replaces a move. */
+	readonly unqueue: (seq: number) => void;
 	/** Fail the next `applyPull`, to prove the cursor does not move without it. */
 	readonly breakNextApply: () => void;
 	/**
@@ -361,7 +363,16 @@ export const createMemoryStore = (): MemoryStore => {
 	return {
 		cursor: () => Promise.resolve(state.get('cursor')),
 		noteById: (id) => Promise.resolve(notes.get(id)),
-		noteByPath: (path) => Promise.resolve(noteAt(path)),
+		// As the web store: a note created at a name a tombstone still holds is
+		// the answer, not the tombstone.
+		noteByPath: (path) =>
+			Promise.resolve(
+				[...notes.values()].find(
+					(note) =>
+						note.path === path &&
+						![...ops.values()].some((op) => op.op === 'delete' && op.noteId === note.id)
+				) ?? noteAt(path)
+			),
 		noteByRemoteId: (remoteId) =>
 			Promise.resolve([...notes.values()].find((note) => note.remoteId === remoteId)),
 		allNotes: () => Promise.resolve([...notes.values()]),
@@ -435,6 +446,9 @@ export const createMemoryStore = (): MemoryStore => {
 			folders.set(folder.path, folder);
 		},
 		queue,
+		unqueue: (seq) => {
+			ops.delete(seq);
+		},
 		breakNextApply: () => {
 			flags.set('break', true);
 		},
