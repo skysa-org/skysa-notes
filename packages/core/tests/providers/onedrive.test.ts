@@ -7,7 +7,9 @@ import {
 	type ChangeEntry,
 	ConflictError,
 	CursorResetError,
+	isRateLimitError,
 	NotFoundError,
+	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { drainChanges } from './contract.js';
@@ -244,7 +246,7 @@ describe('mapping Graph failures onto typed errors', () => {
 		await expect(over(doFetch).list('')).rejects.toThrow(AuthError);
 	});
 
-	it('leaves throttling untyped, for the engine’s backoff', async () => {
+	it('reads throttling as a rate limit, carrying the wait Graph asked for', async () => {
 		const { doFetch } = scripted(
 			() =>
 				new Response(JSON.stringify({ error: { code: 'activityLimitReached' } }), {
@@ -255,10 +257,52 @@ describe('mapping Graph failures onto typed errors', () => {
 		const error = await over(doFetch)
 			.list('')
 			.catch((e: unknown) => e);
-		expect(error).toBeInstanceOf(Error);
+		expect(error).toBeInstanceOf(RateLimitError);
 		expect(error).not.toBeInstanceOf(AuthError);
 		expect(error).not.toBeInstanceOf(NotFoundError);
+		expect(isRateLimitError(error) && error.retryAfterMs).toBe(7000);
 		expect((error as Error).message).toMatch(/retry after 7s/);
+	});
+
+	it('reads a 503 the same way: a service asking for room', async () => {
+		// Graph's throttling guidance names 503 beside 429.
+		// https://learn.microsoft.com/en-us/graph/throttling
+		const { doFetch } = scripted(() => graphError(503, 'serviceNotAvailable'));
+		await expect(over(doFetch).list('')).rejects.toThrow(RateLimitError);
+	});
+
+	it('reads an HTTP date in Retry-After, which the header is allowed to carry', async () => {
+		const at = new Date(Date.now() + 12_000).toUTCString();
+		const { doFetch } = scripted(
+			() =>
+				new Response(JSON.stringify({ error: { code: 'activityLimitReached' } }), {
+					status: 429,
+					headers: { 'retry-after': at },
+				})
+		);
+		const error = await over(doFetch)
+			.list('')
+			.catch((e: unknown) => e);
+		// A window, not a number: the date carries whole seconds, so it is a
+		// fraction of one short of the twelve by the time it is read back.
+		const wait = isRateLimitError(error) ? (error.retryAfterMs ?? -1) : -1;
+		expect(wait).toBeGreaterThan(10_000);
+		expect(wait).toBeLessThanOrEqual(12_000);
+	});
+
+	it('falls back to the caller’s backoff for a Retry-After it cannot read', async () => {
+		const { doFetch } = scripted(
+			() =>
+				new Response(JSON.stringify({ error: { code: 'activityLimitReached' } }), {
+					status: 429,
+					headers: { 'retry-after': 'soon-ish' },
+				})
+		);
+		const error = await over(doFetch)
+			.list('')
+			.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(RateLimitError);
+		expect(isRateLimitError(error) && error.retryAfterMs).toBeUndefined();
 	});
 
 	it('does not read an outage as a missing file', async () => {
@@ -270,6 +314,17 @@ describe('mapping Graph failures onto typed errors', () => {
 			.catch((e: unknown) => e);
 		expect(error).not.toBeInstanceOf(NotFoundError);
 		expect(error).not.toBeInstanceOf(ConflictError);
+	});
+
+	it('does not read a 500 as anything but a failure to retry', async () => {
+		// The rate-limit branch must not swallow every 5xx: a 500 is a bug or an
+		// outage, and an op that meets one for ever has to reach `blocked`.
+		const { doFetch } = scripted(() => graphError(500, 'internalServerError'));
+		const error = await over(doFetch)
+			.list('')
+			.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(Error);
+		expect(isRateLimitError(error)).toBe(false);
 	});
 
 	it('treats an expired delta token as a cursor reset', async () => {

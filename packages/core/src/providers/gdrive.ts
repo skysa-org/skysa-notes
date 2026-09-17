@@ -25,6 +25,8 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
+	parseRetryAfter,
+	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -133,7 +135,27 @@ interface DriveFailure {
 	/** Which parameter an error is about, where Drive says. */
 	locations: readonly string[];
 	message: string;
+	/** How long Drive asked us to wait. It documents no such header, but reads it if one arrives. */
+	retryAfterMs?: number;
 }
+
+/**
+ * A quota, not a request Drive objects to. Drive answers 429 for a burst and
+ * 403 with one of these reasons for a longer-range limit, and the 403s share
+ * their status with the permission errors in `NO_ACCESS` — so the reason is the
+ * only thing that separates "slow down" from "you cannot have this file".
+ * `sharingRateLimitExceeded` is listed for completeness; this app never shares.
+ * https://developers.google.com/workspace/drive/api/guides/handle-errors
+ */
+const RATE_LIMITED = new Set([
+	'rateLimitExceeded',
+	'userRateLimitExceeded',
+	'dailyLimitExceeded',
+	'sharingRateLimitExceeded',
+]);
+const throttled = (failure: DriveFailure): boolean =>
+	failure.status === 429 ||
+	(failure.status === 403 && failure.reasons.some((reason) => RATE_LIMITED.has(reason)));
 
 /**
  * A file this app cannot reach and will not again by asking: not there (404,
@@ -337,23 +359,31 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 				const value = (error as Record<string, unknown> | null)?.[key];
 				return typeof value === 'string' ? [value] : [];
 			});
+		const retry = parseRetryAfter(response.headers.get('retry-after'));
 		return {
 			status: response.status,
 			reasons: field('reason'),
 			locations: field('location'),
 			message: typeof parsed.error?.message === 'string' ? parsed.error.message : text,
+			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
 
 	/**
 	 * Everything that maps the same way whatever the route. A rate limit is a
-	 * 403 on Drive as often as a 429, and like every other failure here it is
-	 * left untyped: the engine's backoff treats that as transient.
+	 * 403 on Drive as often as a 429, which is why it is matched by reason and
+	 * not by status.
 	 */
 	const raise = (failure: DriveFailure, path?: string): never => {
 		const detail = failure.reasons.join('/') || failure.message;
 		if (failure.status === 401) throw new AuthError(detail);
 		if (failure.status === 404) throw new NotFoundError(path ?? detail);
+		if (throttled(failure)) {
+			throw new RateLimitError(
+				`gdrive rate limit (${String(failure.status)}): ${detail}`,
+				failure.retryAfterMs
+			);
+		}
 		throw new Error(`gdrive ${String(failure.status)}: ${detail}`);
 	};
 

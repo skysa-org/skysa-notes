@@ -8,7 +8,9 @@ import {
 	type ChangeEntry,
 	ConflictError,
 	CursorResetError,
+	isRateLimitError,
 	NotFoundError,
+	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFilename, conflictFolderName } from '../../src/sync/conflicts.js';
@@ -353,22 +355,68 @@ describe('requests', () => {
 		);
 	});
 
-	it('say what failed: 401 is auth, 404 is not found, a rate limit is untyped', async () => {
+	it('say what failed: 401 is auth, 404 is not found, a quota is a rate limit', async () => {
 		const answer = { now: driveError(401, 'authError') };
 		const provider = over(() => Promise.resolve(answer.now));
 		await expect(provider.list('')).rejects.toThrow(AuthError);
 
 		answer.now = driveError(403, 'userRateLimitExceeded');
 		const limited = await provider.list('').catch((error: unknown) => error);
-		expect(limited).toBeInstanceOf(Error);
+		expect(limited).toBeInstanceOf(RateLimitError);
 		expect(limited).not.toBeInstanceOf(AuthError);
 		expect(limited).not.toBeInstanceOf(NotFoundError);
-		expect(String(limited)).toMatch(/403: userRateLimitExceeded/);
+		expect(String(limited)).toMatch(/403.*userRateLimitExceeded/);
 
 		const world = driveWorld();
 		await expect(
 			world.provider.read({ remoteId: 'no-such-file', path: 'a.md' })
 		).rejects.toThrow(NotFoundError);
+	});
+
+	/**
+	 * A quota is a 403 on Drive as often as a 429, and the 403 shares its status
+	 * with "you cannot have this file" — so the reason is the whole difference.
+	 * https://developers.google.com/workspace/drive/api/guides/handle-errors
+	 */
+	it.each([
+		[429, 'rateLimitExceeded'],
+		[403, 'rateLimitExceeded'],
+		[403, 'userRateLimitExceeded'],
+		[403, 'dailyLimitExceeded'],
+	])('reads %i %s as a rate limit', async (status, reason) => {
+		const provider = over(() => Promise.resolve(driveError(status, reason)));
+		await expect(provider.list('')).rejects.toThrow(RateLimitError);
+	});
+
+	it('does not read a 403 about the file itself as a rate limit', async () => {
+		// `insufficientFilePermissions` is out of reach, not busy: retried for
+		// ever it would never succeed, and the op would never surface.
+		const provider = over(() =>
+			Promise.resolve(driveError(403, 'insufficientFilePermissions'))
+		);
+		const error = await provider.list('').catch((thrown: unknown) => thrown);
+		expect(isRateLimitError(error)).toBe(false);
+	});
+
+	it('carries a Retry-After Drive was not asked for, when it sends one', async () => {
+		// Drive documents no such header, so this is belt and braces: if one
+		// arrives it is better than the backoff we would otherwise guess.
+		const provider = over(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						error: {
+							code: 429,
+							message: 'slow',
+							errors: [{ reason: 'rateLimitExceeded' }],
+						},
+					}),
+					{ status: 429, headers: { 'retry-after': '7' } }
+				)
+			)
+		);
+		const error = await provider.list('').catch((thrown: unknown) => thrown);
+		expect(isRateLimitError(error) && error.retryAfterMs).toBe(7000);
 	});
 });
 

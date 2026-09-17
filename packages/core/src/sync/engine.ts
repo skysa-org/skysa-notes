@@ -21,6 +21,7 @@ import {
 	isConflictError,
 	isCursorResetError,
 	isNotFoundError,
+	isRateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
 } from '../providers/types.js';
@@ -76,6 +77,11 @@ export interface SyncOutcome {
 	conflicts: readonly string[];
 	/** Why, when the status is not `ok`. */
 	error?: string;
+	/**
+	 * How long the provider asked us to wait, when it was the one that said to
+	 * stop. The scheduler waits at least this long instead of guessing.
+	 */
+	retryAfterMs?: number;
 }
 
 export interface SyncEngineOptions {
@@ -108,6 +114,16 @@ const ok = (partial: Partial<SyncOutcome> = {}): SyncOutcome => ({
 	conflicts: [],
 	...partial,
 });
+
+/**
+ * The wait to pass on, as a piece of the outcome. Empty unless the provider
+ * asked for one, so `retryAfterMs` is absent rather than `undefined` and the
+ * scheduler's own backoff is what applies.
+ */
+const waitFor = (error: unknown): { retryAfterMs?: number } =>
+	isRateLimitError(error) && error.retryAfterMs !== undefined
+		? { retryAfterMs: error.retryAfterMs }
+		: {};
 
 /** The message of an unknown throw, without letting a non-Error crash the log. */
 const messageOf = (error: unknown): string =>
@@ -2180,6 +2196,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		...ok(),
 		status: 'retry',
 		error: messageOf(error),
+		...waitFor(error),
 	});
 
 	const runPull = async (): Promise<SyncOutcome> => {
@@ -2755,6 +2772,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			}
 			await reauthorize();
 			return drainOps(ops, progress, true);
+		}
+
+		// A rate limit is not the op's fault and says nothing about whether it
+		// would land: counted against `attempts`, five throttles in a row would
+		// block a write the provider never even looked at, and the user would be
+		// told their note cannot be sent. So the op keeps its attempts and the
+		// wait the provider asked for goes back to the scheduler.
+		if (isRateLimitError(error)) {
+			return { ...ok(progress), status: 'retry', error: messageOf(error), ...waitFor(error) };
 		}
 
 		await store.failOp(op.seq, messageOf(error));

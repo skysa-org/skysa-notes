@@ -5,7 +5,9 @@ import {
 	AuthError,
 	ConflictError,
 	CursorResetError,
+	isRateLimitError,
 	NotFoundError,
+	RateLimitError,
 } from '../../src/providers/types.js';
 import { createDropboxStub } from './dropboxStub.js';
 
@@ -81,9 +83,7 @@ describe('mapping Dropbox failures onto typed errors', () => {
 		await expect(provider(doFetch).list('Gone')).rejects.toThrow(NotFoundError);
 	});
 
-	it('leaves a rate limit untyped, so the engine backs off rather than giving up', async () => {
-		// docs/PLAN.md §4: an unknown error is transient to the engine, which is
-		// the right handling for a 429. The wait is carried in the message.
+	it('reads a 429 as a rate limit, carrying the wait Dropbox asked for', async () => {
 		const { doFetch } = canned(
 			() =>
 				new Response(
@@ -99,13 +99,49 @@ describe('mapping Dropbox failures onto typed errors', () => {
 			.list('')
 			.catch((e: unknown) => e);
 
-		expect(error).toBeInstanceOf(Error);
+		expect(error).toBeInstanceOf(RateLimitError);
 		expect(error).not.toBeInstanceOf(AuthError);
 		expect(error).not.toBeInstanceOf(ConflictError);
 		// The branches above this one in `raise` must not have claimed it.
 		expect(error).not.toBeInstanceOf(NotFoundError);
 		expect(error).not.toBeInstanceOf(CursorResetError);
+		expect(isRateLimitError(error) && error.retryAfterMs).toBe(7000);
 		expect(String(error)).toContain('7s');
+	});
+
+	it('takes the wait from the header when the body has none', async () => {
+		// The content routes answer with the header and nothing in the body.
+		const { doFetch } = canned(
+			() =>
+				new Response(errorBody('too_many_requests/...', 'too_many_requests'), {
+					status: 429,
+					headers: { 'retry-after': '3' },
+				})
+		);
+
+		const error = await provider(doFetch)
+			.list('')
+			.catch((e: unknown) => e);
+
+		expect(isRateLimitError(error) && error.retryAfterMs).toBe(3000);
+	});
+
+	it('is a rate limit with no wait at all when Dropbox says nothing', async () => {
+		// Absent rather than zero: the scheduler then uses its own backoff
+		// instead of coming straight back at a provider asking for room.
+		const { doFetch } = canned(
+			() =>
+				new Response(errorBody('too_many_requests/...', 'too_many_requests'), {
+					status: 429,
+				})
+		);
+
+		const error = await provider(doFetch)
+			.list('')
+			.catch((e: unknown) => e);
+
+		expect(error).toBeInstanceOf(RateLimitError);
+		expect(isRateLimitError(error) && error.retryAfterMs).toBeUndefined();
 	});
 
 	it('does not mistake a body it cannot parse for a successful call', async () => {

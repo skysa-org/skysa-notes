@@ -143,7 +143,7 @@ export interface StorageProvider {
  * the code is what keeps the guards below honest if core is ever published and
  * a consumer ends up with two copies of it either side of a sync boundary.
  */
-export type ProviderErrorCode = 'conflict' | 'auth' | 'not-found' | 'cursor-reset';
+export type ProviderErrorCode = 'conflict' | 'auth' | 'not-found' | 'cursor-reset' | 'rate-limit';
 
 /**
  * The remote moved under us. `remote` is the entry as it exists now, so the
@@ -188,6 +188,51 @@ export class CursorResetError extends Error {
 	readonly code: ProviderErrorCode = 'cursor-reset';
 }
 
+/**
+ * The provider asked us to slow down: Dropbox and Graph answer 429, Graph also
+ * 503, and Drive a 403 whose reason names the quota. Distinct from a transient
+ * failure because it says nothing at all about the request — so the engine does
+ * not count it against the op's attempts — and because the provider often says
+ * how long to wait, which is better than any backoff we could guess.
+ *
+ * `retryAfterMs` is absent when the provider said nothing, or said something
+ * unreadable. The caller then uses its own backoff.
+ */
+export class RateLimitError extends Error {
+	override readonly name = 'RateLimitError';
+	readonly code: ProviderErrorCode = 'rate-limit';
+
+	constructor(
+		message: string,
+		readonly retryAfterMs?: number
+	) {
+		super(message);
+	}
+}
+
+/**
+ * `Retry-After` is either a count of seconds or an HTTP date — both are legal
+ * (RFC 9110 §10.2.3), Graph documents seconds and sends a date through some
+ * fronts, and Dropbox puts the seconds in its JSON body instead.
+ * https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
+ *
+ * Answers `undefined` for anything it cannot read, so an unparseable value
+ * falls back to the caller's backoff rather than to zero, which would hammer a
+ * provider that has just asked for room. A date in the past is no wait at all.
+ */
+export const parseRetryAfter = (
+	value: string | null | undefined,
+	now: number = Date.now()
+): number | undefined => {
+	if (value === null || value === undefined) return undefined;
+	const text = value.trim();
+	if (text === '') return undefined;
+	const seconds = Number(text);
+	if (Number.isFinite(seconds)) return Math.max(0, seconds) * 1000;
+	const at = Date.parse(text);
+	return Number.isNaN(at) ? undefined : Math.max(0, at - now);
+};
+
 const hasCode = (error: unknown, code: ProviderErrorCode): boolean =>
 	typeof error === 'object' && error !== null && (error as { code?: unknown }).code === code;
 
@@ -202,3 +247,6 @@ export const isNotFoundError = (error: unknown): error is NotFoundError =>
 
 export const isCursorResetError = (error: unknown): error is CursorResetError =>
 	error instanceof CursorResetError || hasCode(error, 'cursor-reset');
+
+export const isRateLimitError = (error: unknown): error is RateLimitError =>
+	error instanceof RateLimitError || hasCode(error, 'rate-limit');

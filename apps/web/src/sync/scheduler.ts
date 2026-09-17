@@ -2,6 +2,7 @@ import {
 	AuthError,
 	createSyncEngine,
 	isAuthError,
+	isRateLimitError,
 	type ProviderKind,
 	type StorageProvider,
 	type SyncEngine,
@@ -11,7 +12,7 @@ import { liveQuery } from 'dexie';
 
 import { type ApiClient, type Refusal } from '../api/client.js';
 import { bindingCount, verifyResume } from '../store/connection.js';
-import { type NotesDatabase, type SyncStateRecord } from '../store/db.js';
+import { type NotesDatabase, type QueuedOperation, type SyncStateRecord } from '../store/db.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 
@@ -50,6 +51,23 @@ export type SyncPhase =
 	 */
 	| 'attention';
 
+/**
+ * The op a `blocked` sync is about: the first one out of attempts, which is
+ * also the one holding the queue up. Enough for the UI to name it and to link
+ * to the note it is about, without reading the queue itself.
+ */
+export interface StuckOp {
+	readonly op: QueuedOperation;
+	readonly path: string;
+	/** For a `move`, where it was going. */
+	readonly targetPath?: string;
+	/** Absent for an op about a notebook rather than a note. */
+	readonly noteId?: string;
+	readonly attempts: number;
+	/** What the provider said the last time it was tried. */
+	readonly error?: string;
+}
+
 export interface SchedulerStatus {
 	readonly phase: SyncPhase;
 	/** When a sync last reached the end of a pull. Kept across reloads. */
@@ -60,6 +78,8 @@ export interface SchedulerStatus {
 	readonly refusal?: Refusal;
 	/** Conflict copies the last sync wrote, for the banner in §7. */
 	readonly conflicts: readonly string[];
+	/** Which op is stuck, when one is: `attention` without this is about a token. */
+	readonly stuck?: StuckOp;
 }
 
 export type SchedulerEvent = 'focus' | 'visibilitychange' | 'online' | 'offline';
@@ -136,6 +156,16 @@ export interface SyncScheduler {
 	readonly start: () => void;
 	readonly stop: () => void;
 	/**
+	 * Read everything on the remote again: the stored cursor is discarded, so
+	 * the next pull is a full scan, and every op gets its attempts back.
+	 *
+	 * A scan says what exists and never what was removed, so the engine
+	 * reconciles at the end of it: a note the provider no longer has is deleted
+	 * here unless it holds unsent edits (§7). That is what the confirm in the UI
+	 * has to say out loud.
+	 */
+	readonly resync: () => Promise<void>;
+	/**
 	 * Sync now, whatever the timers say, and try again any op that has failed
 	 * too often: the user asking is the help `blocked` waits for. Resolves once
 	 * the run has finished.
@@ -196,6 +226,12 @@ const together = (seen: readonly string[], more: readonly string[]): string[] =>
 
 const messageOf = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
+
+/**
+ * The longest a provider's `Retry-After` is taken at its word. Beyond this the
+ * app comes back anyway and is told again.
+ */
+const RETRY_AFTER_CAP_MS = 15 * 60_000;
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
 	const { db, client, createProvider } = options;
@@ -335,17 +371,42 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		}
 	};
 
-	/** Every op of the connection gets its attempts back. */
+	/** Every op of the connection gets its attempts back. Inside a transaction. */
+	const resetAttempts = async (connectionId: string): Promise<void> => {
+		const tried = await db.opQueue
+			.where('connectionId')
+			.equals(connectionId)
+			.filter((op) => op.attempts > 0)
+			.toArray();
+		await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
+	};
+
 	const releaseOps = (connectionId: string): Promise<void> =>
 		// One transaction, so an op the engine completes meanwhile is not put back.
-		db.transaction('rw', db.opQueue, async () => {
-			const tried = await db.opQueue
-				.where('connectionId')
-				.equals(connectionId)
-				.filter((op) => op.attempts > 0)
-				.toArray();
-			await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
-		});
+		db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
+
+	/**
+	 * The op a `blocked` sync is about. The queue is ordered, so the first one
+	 * out of attempts is both the one that failed and the one holding up
+	 * everything behind it.
+	 */
+	const stuckOp = async (connectionId: string): Promise<StuckOp | undefined> => {
+		const failing = await db.opQueue
+			.where('connectionId')
+			.equals(connectionId)
+			.filter((op) => op.attempts >= maxAttempts)
+			.toArray();
+		const first = [...failing].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).at(0);
+		if (first === undefined) return undefined;
+		return {
+			op: first.op,
+			path: first.path,
+			attempts: first.attempts,
+			...(first.targetPath === undefined ? {} : { targetPath: first.targetPath }),
+			...(first.noteId === undefined ? {} : { noteId: first.noteId }),
+			...(first.lastError === undefined ? {} : { error: first.lastError }),
+		};
+	};
 
 	const backoff = (session: Session): number => {
 		const failures = (session.failures.get('count') ?? 0) + 1;
@@ -360,7 +421,30 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		});
 	};
 
-	const failed = (session: Session, error: string, conflicts: readonly string[] = []) => {
+	/**
+	 * How long before the next attempt. The provider's own answer wins where it
+	 * gave one — it is the only party that knows when it will serve us again —
+	 * but never shortens the backoff, since a `Retry-After` of a second on the
+	 * fifth failure in a row is not an invitation to come straight back.
+	 *
+	 * Capped: a provider asking for a day (Drive's daily quota says exactly
+	 * that) would otherwise leave sync asleep past any horizon the user could
+	 * make sense of. Coming back sooner costs one request that is refused the
+	 * same way, and the wait starts again from what it says then.
+	 */
+	const waitFor = (session: Session, retryAfterMs: number | undefined): number => {
+		const backedOff = backoff(session);
+		return retryAfterMs === undefined
+			? backedOff
+			: Math.max(backedOff, Math.min(retryAfterMs, RETRY_AFTER_CAP_MS));
+	};
+
+	const failed = (
+		session: Session,
+		error: string,
+		conflicts: readonly string[] = [],
+		retryAfterMs?: number
+	) => {
 		const refusal = session.tokens.refusal();
 		const seen = together(status().conflicts, conflicts);
 		if (refusal !== undefined) {
@@ -385,7 +469,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// all of them in seconds and block the queue behind an outage the
 		// backoff exists to wait out.
 		session.flags.add('backingOff');
-		arm('next', backoff(session), () => {
+		arm('next', waitFor(session, retryAfterMs), () => {
 			void run(session);
 		});
 	};
@@ -421,7 +505,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	const synced = async (session: Session, outcome: SyncOutcome) => {
 		if (outcome.status === 'retry') {
-			failed(session, outcome.error ?? 'Sync failed', outcome.conflicts);
+			failed(
+				session,
+				outcome.error ?? 'Sync failed',
+				outcome.conflicts,
+				outcome.retryAfterMs
+			);
 			return;
 		}
 		const conflicts = together(status().conflicts, outcome.conflicts);
@@ -439,12 +528,17 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		session.failures.delete('count');
 		if (outcome.status === 'blocked') await blocked(session);
 		else session.blockedSince.delete('at');
+		// Asked for after `blocked`, which may have just given the queue its
+		// attempts back: nothing is stuck once it is being tried again.
+		const stuck =
+			outcome.status === 'blocked' ? await stuckOp(session.connectionId) : undefined;
 		if (!isCurrent(session)) return;
 		publish({
 			phase: outcome.status === 'ok' ? 'idle' : 'attention',
 			lastSyncAt: status().lastSyncAt,
 			error: outcome.error,
 			conflicts,
+			...(stuck === undefined ? {} : { stuck }),
 		});
 		armInterval(session);
 	};
@@ -460,7 +554,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			return;
 		}
 		if (result.kind === 'failed') {
-			failed(session, messageOf(result.error));
+			// A rate limit met outside the engine — the marker file, the resume
+			// check — asks for the same wait as one met inside it.
+			const wait = isRateLimitError(result.error) ? result.error.retryAfterMs : undefined;
+			failed(session, messageOf(result.error), [], wait);
 			return;
 		}
 		if (result.pulledAt !== undefined) publish({ ...status(), lastSyncAt: result.pulledAt });
@@ -650,6 +747,25 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			});
 			unsubscribers.clear();
 			endSession();
+		},
+
+		resync: async () => {
+			const session = current.get('session');
+			if (session === undefined) return;
+			// One transaction: the cursor and the attempts go together, so a
+			// scan that is about to run cannot start against a half-reset queue.
+			await db.transaction('rw', db.syncState, db.opQueue, async () => {
+				const state = await db.syncState.get(session.connectionId);
+				// Let go of meanwhile: there is nothing to re-scan, and a `put`
+				// would bring the row back.
+				if (state === undefined) return;
+				// `rootId` is kept: it is the same folder, and finding it again
+				// costs a search whose answer we already have.
+				const { cursor: _cursor, ...kept } = state;
+				await db.syncState.put(kept);
+				await resetAttempts(session.connectionId);
+			});
+			await run(session);
 		},
 
 		syncNow: async () => {

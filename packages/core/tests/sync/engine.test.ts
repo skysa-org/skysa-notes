@@ -9,6 +9,7 @@ import {
 	ConflictError,
 	CursorResetError,
 	NotFoundError,
+	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
@@ -806,6 +807,65 @@ describe('push', () => {
 
 		expect(result.status).toBe('retry');
 		expect(store.ops()).toHaveLength(1);
+	});
+
+	/**
+	 * A rate limit is the one failure that says nothing about the op: the
+	 * provider did not look at it. Counted like any other, five throttles in a
+	 * row would block a write the remote never saw, and the user would be told
+	 * their note cannot be sent.
+	 */
+	it('does not count a rate limit against the op', async () => {
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		provider.setFault((call) =>
+			call.op === 'write' ? new RateLimitError('slow down', 4000) : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()[0]?.attempts).toBe(0);
+		expect(store.lastError(op.seq)).toBeUndefined();
+		// And the wait the provider asked for reaches the caller, which is the
+		// only thing that knows when to come back.
+		expect(result.retryAfterMs).toBe(4000);
+		expect(result.error).toContain('slow down');
+	});
+
+	it('says nothing about a wait when the provider named none', async () => {
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		provider.setFault((call) =>
+			call.op === 'write' ? new RateLimitError('slow down') : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		// Absent, not zero: the caller's own backoff is what applies.
+		expect(result.retryAfterMs).toBeUndefined();
+	});
+
+	it('still blocks an op that has already failed too often, rate limit or not', async () => {
+		// The attempts rule is about what has happened, not about today's
+		// failure: an op at the limit is surfaced before the provider is asked.
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
+		provider.setFault(() => new RateLimitError('slow down', 1000));
+
+		expect((await engine.push()).status).toBe('blocked');
+	});
+
+	it('carries the wait out of a pull that was rate limited', async () => {
+		provider.setFault((call) =>
+			call.op === 'changes' ? new RateLimitError('slow down', 9000) : undefined
+		);
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('retry');
+		expect(result.retryAfterMs).toBe(9000);
 	});
 
 	it('records the failure against the op it belongs to', async () => {
