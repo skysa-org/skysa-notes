@@ -77,6 +77,16 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 		},
 	],
 	[
+		'dropbox over its stub, one entry per page',
+		() => {
+			const stub = createDropboxStub({ startAt: START, pageSize: 1 });
+			return {
+				backing: stub.backing,
+				adapter: () => over(createDropboxProvider, stub.fetch),
+			};
+		},
+	],
+	[
 		'onedrive over its stub',
 		() => {
 			const stub = createOneDriveStub({ startAt: START });
@@ -212,8 +222,7 @@ const remove = (d: Device, path: string): void => {
 /**
  * A sync that did not fail. `retry` is allowed: a push that meets a file of
  * ours at a note's path moves the note aside and answers `retry`, to write it
- * where it now is next time. Anything that never succeeds keeps an op queued,
- * which `quiet` does not accept.
+ * where it now is next time. `quiet` accepts only a round of `ok`s.
  */
 const synced = async (d: Device, trace: () => string = () => ''): Promise<SyncOutcome> => {
 	const outcome = await d.engine.sync();
@@ -231,7 +240,10 @@ const quiet = async (a: Device, b: Device, trace: () => string): Promise<void> =
 		const one = await synced(a, trace);
 		const two = await synced(b, trace);
 		const moved = one.pulled + one.pushed + two.pulled + two.pushed;
-		return moved === 0 && a.store.ops().length === 0 && b.store.ops().length === 0;
+		// Only a round that went through: a pull that fails with nothing to do
+		// moves nothing either.
+		const ok = one.status === 'ok' && two.status === 'ok';
+		return ok && moved === 0 && a.store.ops().length === 0 && b.store.ops().length === 0;
 	}, Promise.resolve(false));
 	expect(settled, `the devices never went quiet\n${trace()}`).toBe(true);
 };

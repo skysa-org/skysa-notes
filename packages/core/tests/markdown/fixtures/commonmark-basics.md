@@ -1,6 +1,6 @@
 # Heading one
 
-Paragraph with *emphasis*, **strong**, `inline code`, and a [link](https://example.com).
+Paragraph with _emphasis_, **strong**, `inline code`, and a [link](https://example.com).
 
 ## Heading two
 
@@ -13,6 +13,6 @@ Paragraph with *emphasis*, **strong**, `inline code`, and a [link](https://examp
 Text with a hard break\
 on the next line.
 
-***
+---
 
 Final paragraph.

@@ -344,11 +344,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 
 	/**
-	 * Whether a note's file is there now, asked of the provider by id. For the
-	 * few decisions a feed cannot settle; a whole read, since the port has no
-	 * cheaper question, and rare enough not to matter. Anything short of the provider saying it is not —
-	 * no file to ask about — keeps the note, and a read that fails for any other
-	 * reason fails the pull, which is tried again.
+	 * Whether a note's file is there now, asked of the provider by id, for the
+	 * few decisions a feed cannot settle. Only "not found" says no: with no file
+	 * to ask about the answer is yes, and a read that fails for any other reason
+	 * fails the pull, which is tried again. A whole read, since the port has no
+	 * cheaper question; these cases are rare.
 	 */
 	const stillThere = async ({
 		at,
@@ -1140,24 +1140,23 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	/**
 	 * Nothing to do for a file gone by the time it is read (see `decideFile`),
-	 * except for a note held by that very file when the batch also reports a
-	 * deletion at the entry's path. That deletion may be at a path the note
-	 * never got to — the entry would have moved it there — and one with no id,
-	 * which is all Dropbox's `DeletedMetadata` is, has nothing else to find the
-	 * note by. The file named by its id is gone, so the note is let go of here.
-	 * Without that deletion a read's "not found" is not taken as one: nothing
-	 * would ever bring back a note let go of over a read that answered wrongly.
+	 * except for a note held by that very file and about to follow it to a new
+	 * path. The deletion arriving behind the entry — in this batch or a later
+	 * one — is at that new path, where the note never got to, and one with no
+	 * id, which is all Dropbox's `DeletedMetadata` is, has nothing else to find
+	 * the note by. The file named by its id is gone, so the note is let go of
+	 * here. At its own path the deletion finds it, and nothing is decided on a
+	 * read alone.
 	 */
 	const goneBeforeRead = (
 		local: SyncNote | undefined,
 		removed: boolean,
-		entry: RemoteEntry,
-		batch: Batch
+		entry: RemoteEntry
 	): PullChange[] =>
 		local !== undefined &&
 		!removed &&
 		local.remoteId === entry.remoteId &&
-		batch.doomed.paths.has(entry.path)
+		local.path !== entry.path
 			? [forgetNote(local)]
 			: [];
 
@@ -1227,7 +1226,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isNotFoundError(error)) return undefined;
 			throw error;
 		});
-		if (found === undefined) return goneBeforeRead(local, removed, entry, batch);
+		if (found === undefined) return goneBeforeRead(local, removed, entry);
 		const { content } = found;
 		const stranger = local !== undefined && !removed && isStranger(local, content);
 		if (local === undefined || stranger) {

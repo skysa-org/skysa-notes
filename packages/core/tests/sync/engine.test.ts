@@ -4743,12 +4743,26 @@ describe('two devices at random', () => {
 		]);
 	});
 
-	it('keeps a note whose file a read did not find when the batch reports no deletion', async () => {
-		// Nothing would bring back a note let go of over a read that answered wrong.
+	it('lets go of a note whose file moved and went, when the deletion comes in a later batch', async () => {
+		// A page boundary between the two, or the file deleted between the feed
+		// and the read: nothing at the new path to find the note by afterwards.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
 		await provider.delete(entry);
 
-		await pullNow([{ ...entry, path: 'c.md', version: 'after-the-move' }]);
+		await pullNow([
+			{ path: 'a.md', deleted: true },
+			{ ...entry, path: 'c.md', version: 'after-the-move' },
+		]);
+		await pullNow([{ path: 'c.md', deleted: true }]);
+
+		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+	});
+
+	it('leaves a note at its own path to the deletion, not to a read that found nothing', async () => {
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		await provider.delete(entry);
+
+		await pullNow([{ ...entry, version: 'edited-elsewhere' }]);
 
 		expect(store.notes().map((each) => each.id)).toEqual([note.id]);
 	});
