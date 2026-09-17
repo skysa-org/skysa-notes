@@ -28,12 +28,18 @@ import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js
  *   and the store settles it as the note having moved on.
  * - **A note never pushed is not moved.** There is nothing at the old path; its
  *   write creates the file wherever the note is by then.
- * - **A delete leaves the note's writes and moves queued, and a deleted note is
- *   still moved.** Dropping a write that was in flight creating the file would
- *   leave the store never learning its `remoteId`, the delete then purging the
- *   row with nothing to remove, and the file coming back on the next pull as a
- *   note the user deleted. And a deleted note carried along by a notebook
- *   rename can be restored, when its write needs the file where the note is.
+ * - **A delete withdraws the note's writes and keeps its moves, and a deleted
+ *   note is still moved.** A tombstone owes the remote its delete and nothing
+ *   else, which is the rule `queueWrite` applies from the other end; left
+ *   queued, the write of a note made and deleted before either op was sent
+ *   creates the file for the delete to remove, and another device's note binds
+ *   to that file rather than making one (`queueDelete`). Only the queue row
+ *   goes: a write already at the network still records the `remoteId` on the
+ *   row, which is what the delete needs, and `completeOp`, `failOp` and
+ *   `resolveConflict` all tolerate finding the op withdrawn. The moves stay
+ *   because the file is still at the name it had, and a deleted note carried
+ *   along by a notebook rename can be restored, when its write needs the file
+ *   where the note is.
  *
  * Folder renames and deletes go up as the notes inside them moving or being
  * deleted one by one — the engine has no op that moves a whole folder — and an
@@ -129,14 +135,35 @@ export const queueMove = (db: QueueDb, note: NoteRecord, from: string): Queued =
 /**
  * The note is deleted. Only ever asked once per deletion: `deleteNote` does
  * nothing to a note already deleted, and a notebook's delete passes over them.
+ *
+ * Any write still queued for it is withdrawn first — it owes the remote its
+ * delete and nothing else, which is the same rule `queueWrite` applies to a
+ * tombstone from the other end.
+ *
+ * Without that, a note made and deleted before either op was ever sent still
+ * has its write run: the file is created and then removed again. Harmless on
+ * its own, and not harmless at all when another device has made a note of the
+ * same name meanwhile. The write puts *this* device's file at the path first,
+ * the other device's write then binds its note to that file rather than making
+ * one, and the delete behind it takes the other device's note away with it —
+ * a note nobody deleted, gone from every device. The two-browser soak found it
+ * (`apps/web/tests/soak.test.ts`).
+ *
+ * A write already at the network is withdrawn from the queue only, which is
+ * what `settle` handles: the file it creates is still recorded on the row, so
+ * this delete has the `remoteId` it needs to remove it.
  */
 export const queueDelete = (db: QueueDb, note: NoteRecord): Queued =>
-	add(db, {
-		connectionId: note.connectionId,
-		op: 'delete',
-		noteId: note.id,
-		path: note.path,
-	});
+	opsFor(db, note.id)
+		.then((queued) => db.opQueue.bulkDelete(seqsOf(queued.filter((op) => op.op === 'write'))))
+		.then(() =>
+			add(db, {
+				connectionId: note.connectionId,
+				op: 'delete',
+				noteId: note.id,
+				path: note.path,
+			})
+		);
 
 /**
  * A deleted note is the user's again. A delete still queued is withdrawn — if it

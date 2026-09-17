@@ -523,7 +523,10 @@ export const createMemoryStore = (): MemoryStore => {
 			return Promise.resolve();
 		},
 		resolveConflict: (seq, resolution) => {
-			if (!ops.has(seq)) return Promise.reject(new Error(`no op ${String(seq)}`));
+			// A withdrawn op is allowed: the user can delete the note while its
+			// write is at the network, and a tombstone owes the remote its
+			// delete and nothing else, so the write's queue row goes. The
+			// resolution still lands, and makes no copy for a note that is gone.
 			const before = snapshot();
 			try {
 				applyConflict(resolution);

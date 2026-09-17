@@ -549,6 +549,11 @@ export interface SyncStore {
 	 * the same transaction — the op's content is preserved in the copy, so
 	 * replaying it would overwrite the remote with what the user has already
 	 * been given a copy of.
+	 *
+	 * The op may have been withdrawn while it was at the network, exactly as
+	 * `completeOp` and `failOp` allow: the user deleted the note, and a
+	 * tombstone owes the remote its delete and nothing else. The resolution is
+	 * still applied, and makes no copy for a note that is gone.
 	 */
 	readonly resolveConflict: (seq: number, resolution: ConflictResolution) => Promise<void>;
 }

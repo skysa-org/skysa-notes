@@ -700,12 +700,6 @@ export const createDexieSyncStore = (
 		return op;
 	};
 
-	const requireOp = async (scope: Scope, seq: number): Promise<OpQueueRecord> => {
-		const op = await queuedOp(scope, seq);
-		if (op === undefined) throw new Error(`No queued op ${String(seq)}`);
-		return op;
-	};
-
 	return {
 		cursor: async () => (await db.syncState.get(connectionId))?.cursor,
 
@@ -796,7 +790,15 @@ export const createDexieSyncStore = (
 		resolveConflict: async (seq, resolution) => {
 			const hashes = await digestAll([resolution.remoteContent, resolution.copyContent]);
 			await inTransaction(async () => {
-				await requireOp(db, seq);
+				// Not `requireOp`: the user can delete the note while its write
+				// is at the network, and `queueDelete` withdraws the write —
+				// a tombstone owes the remote its delete and nothing else. The
+				// conflict still lands, and `applyConflict` makes no copy for
+				// one, as `failOp` tolerates the same withdrawal. Another
+				// connection's op is still refused.
+				// Asked for the refusal, not the op: this is the only thing left
+				// that turns away another connection's seq.
+				await queuedOp(db, seq);
 				await applyConflict(db, resolution, hashes);
 				await db.opQueue.delete(seq);
 			});

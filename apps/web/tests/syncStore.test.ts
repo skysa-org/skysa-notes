@@ -95,6 +95,7 @@ describeSyncStoreContract('Dexie', async () => {
 			}
 			return db.opQueue.add({ connectionId: CONNECTION, attempts: 0, queuedAt: 0, ...op });
 		},
+		withdrawOp: (seq) => db.opQueue.delete(seq),
 	};
 });
 
@@ -729,12 +730,16 @@ describe('a note deleted here', () => {
 		// first, finds the file changed, and the conflict lands on a note that
 		// has been deleted since. A copy would be a live note holding the text
 		// the user deleted, queued to be written back to the remote.
+		//
+		// The delete also withdraws every write queued for the note, this one
+		// included — it is at the network, so only its queue row goes. So the
+		// resolution arrives for an op that is no longer queued, which is the
+		// other half of what this pins.
 		const { db, store } = await pulled();
 		await saveNoteBody(db, 'n1', 'edited then deleted\n');
 		const [write] = await store.pendingOps();
 		const read = (await store.noteById('n1'))?.content ?? '';
-		// The write owed to an edit made while the first was in flight, still
-		// queued behind it.
+		// A second write, owed to an edit made while the first was in flight.
 		await db.opQueue.add({
 			connectionId: CONNECTION,
 			op: 'write',

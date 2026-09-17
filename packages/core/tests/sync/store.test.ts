@@ -16,5 +16,8 @@ describeSyncStoreContract('in-memory', () => {
 		seed: store.put,
 		seedFolder: store.putFolder,
 		seedOp: (op) => store.queue(op).seq,
+		withdrawOp: (seq) => {
+			store.unqueue(seq);
+		},
 	};
 });
