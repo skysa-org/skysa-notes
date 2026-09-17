@@ -336,16 +336,26 @@ describe('changes, from a feed with no paths', () => {
 		expect(stub.requests.some((r) => r.url.includes('delta'))).toBe(true);
 	});
 
-	it('reports a deleted folder once, and forgets what was inside it', async () => {
+	it('reports a deleted folder, and forgets what was inside it', async () => {
 		const { stub, provider } = stubbed();
 		await provider.ensureRoot();
 		const folder = await provider.createFolder('Work');
-		await provider.write('Work/a.md', 'one\n', {});
+		const note = await provider.write('Work/a.md', 'one\n', {});
 		const { cursor } = await drainChanges(provider);
 
 		await stub.backing.delete(folder);
 		const after = await drainChanges(provider, cursor);
-		expect(after.entries).toEqual([{ path: 'Work', deleted: true, remoteId: folder.remoteId }]);
+		expect(after.entries).toContainEqual({
+			path: 'Work',
+			deleted: true,
+			remoteId: folder.remoteId,
+		});
+		expect(after.entries.every((entry) => entry.deleted === true)).toBe(true);
+		expect(
+			after.entries.every((entry) =>
+				[folder.remoteId, note.remoteId].includes(entry.remoteId ?? '')
+			)
+		).toBe(true);
 		expect(after.cursor).not.toContain('a.md');
 	});
 
@@ -614,12 +624,56 @@ describe('changes, when things leave the tree', () => {
 		expect(end.entries).toEqual([{ path: 'b.md', deleted: true, remoteId: 'f2' }]);
 	});
 
-	it('names a deleted folder once when Graph lists what was inside it too', async () => {
+	it('reports every deletion Graph lists, by id, even inside a deleted folder', async () => {
 		const { doFetch } = feed({ ...known, '.': { items: [removed('f1'), removed('d1')] } });
 		const provider = over(doFetch);
 		const first = await provider.changes();
 		const after = await provider.changes(first.cursor);
-		expect(after.entries).toEqual([{ path: 'Work', deleted: true, remoteId: 'd1' }]);
+		expect(after.entries).toEqual([
+			{ path: 'Work/a.md', deleted: true, remoteId: 'f1' },
+			{ path: 'Work', deleted: true, remoteId: 'd1' },
+		]);
+	});
+
+	it('knows where a note was when its folder is waiting on a parent that has not arrived', async () => {
+		const { doFetch } = feed({
+			...known,
+			'.': { items: [folder('d1', 'Work', 'd9')], next: 'p2' },
+			p2: { items: [removed('f1')], next: 'p3' },
+			p3: { items: [folder('d9', 'Archive', 'root')] },
+		});
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const one = await provider.changes(first.cursor);
+		expect(one.entries).toEqual([]);
+		const two = await provider.changes(one.cursor);
+		expect(two.entries).toEqual([{ path: 'Work/a.md', deleted: true, remoteId: 'f1' }]);
+		const three = await provider.changes(two.cursor);
+		expect(livePaths(three.entries)).toEqual(['Archive/Work', 'Archive']);
+	});
+
+	it('does not hide a deletion behind another folder that had the same path', async () => {
+		// `Work` renamed to `Notes` on the first page, while the old `Notes` goes
+		// elsewhere and a note in the renamed folder is deleted on the second.
+		const { doFetch } = feed({
+			'': {
+				items: [
+					folder('d1', 'Work', 'root'),
+					file('f1', 'a.md', 'd1'),
+					folder('d2', 'Notes', 'root'),
+				],
+			},
+			'.': { items: [folder('d1', 'Notes', 'root')], next: 'p2' },
+			p2: { items: [folder('d2', 'Notes', 'elsewhere'), removed('f1')] },
+		});
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const one = await provider.changes(first.cursor);
+		const two = await provider.changes(one.cursor);
+		expect(two.entries).toEqual([
+			{ path: 'Notes', deleted: true, remoteId: 'd2' },
+			{ path: 'Notes/a.md', deleted: true, remoteId: 'f1' },
+		]);
 	});
 
 	it('refuses a first scan that places nothing, rather than report an empty folder', async () => {
@@ -650,11 +704,16 @@ describe('changes, when things leave the tree', () => {
 		expect((await over(doFetch).changes()).entries).toEqual([]);
 	});
 
-	it('refuses a file with no eTag in the feed', async () => {
+	it('leaves out a file with no eTag rather than stall every pull', async () => {
 		const { doFetch } = feed({
-			'': { items: [{ ...file('f1', 'a.md', 'root'), eTag: undefined }] },
+			'': {
+				items: [
+					{ ...file('f1', 'a.md', 'root'), eTag: undefined },
+					file('f2', 'b.md', 'root'),
+				],
+			},
 		});
-		await expect(over(doFetch).changes()).rejects.toThrow(/no eTag/);
+		expect(livePaths((await over(doFetch).changes()).entries)).toEqual(['b.md']);
 	});
 
 	it('starts again when a stored link finds its folder gone or cannot be read', async () => {

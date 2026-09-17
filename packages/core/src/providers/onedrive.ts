@@ -2,15 +2,7 @@ import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
 import { buildMarker, serializeMarker } from '../marker.js';
-import {
-	basename,
-	isWithin,
-	joinPath,
-	normalizePath,
-	parentPath,
-	pathSegments,
-	ROOT,
-} from '../paths.js';
+import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import type { FetchLike } from './dropbox.js';
 import {
 	AuthError,
@@ -306,9 +298,20 @@ interface Page {
 	changes: Map<string, Change>;
 }
 
-const wasOf = (page: Page, id: string): string | undefined => {
+/**
+ * Where an item was before this page: up the old tree, and through any pending
+ * item on the way by the path *it* had. A pending folder's node already names
+ * its new parent, which the tree cannot place yet, so walking through it would
+ * lose the path of everything inside — and a deletion of one of those would go
+ * unreported.
+ */
+const wasOf = (page: Page, id: string, depth = 0): string | undefined => {
+	if (id === page.root) return ROOT;
 	if (page.was.has(id)) return page.was.get(id) ?? undefined;
-	return pathIn(page.before, page.root, id);
+	const node = page.before.get(id);
+	if (node === undefined || depth > page.before.size) return undefined;
+	const above = wasOf(page, node.parent, depth + 1);
+	return above === undefined ? undefined : joinPath(above, node.name);
 };
 
 const liveChange = (id: string, item: DriveItem): LiveChange => ({
@@ -412,10 +415,11 @@ const pageFrom = (from: DeltaCursor): Page => {
  *   in the hierarchy" unless asked not to (`deltaExcludeParent`), so a chain
  *   that still does not reach the app folder left it — the user can move things
  *   out of it — and the item is reported deleted where it was.
- * - A deletion inside a folder also reported deleted is left out: the store takes
- *   a notebook with everything in it, so a note inside it is named once, by the
- *   folder. One moved *into* that folder in the same page had another path
- *   before, is not covered, and is named.
+ * - A deletion inside a folder also reported deleted is still reported. The
+ *   engine matches it by id and finds nothing left to do, while a filter by
+ *   path cannot tell which folder a path belonged to: within one round two
+ *   folders can hold the same old path, and a note deleted from one was hidden
+ *   by the other's deletion and stayed on the device.
  * - At the end of a round, anything else the tree can no longer place — the
  *   contents of a folder that was deleted or moved away, which Graph need not
  *   mention — is pruned without a word. Something above it that was placed
@@ -426,7 +430,10 @@ const settlePage = (page: Page, roundEnds: boolean): Settled => {
 		const was = wasOf(page, change.id);
 		if (change.kind === 'gone') return was === undefined ? {} : { entry: gone(was, change.id) };
 		const path = pathIn(page.nodes, page.root, change.id);
-		if (path !== undefined) return { entry: toLive(page, change, path) };
+		if (path !== undefined) {
+			const entry = toLive(page, change, path);
+			return entry === undefined ? {} : { entry };
+		}
 		if (!roundEnds) {
 			const held: Held = [
 				change.id,
@@ -447,23 +454,22 @@ const settlePage = (page: Page, roundEnds: boolean): Settled => {
 	unplaced.forEach((id) => page.nodes.delete(id));
 
 	const entries = decided.flatMap((item) => (item.entry === undefined ? [] : [item.entry]));
-	const deleted = entries.filter((entry) => entry.deleted === true).map((entry) => entry.path);
-	const covered = (entry: ChangeEntry): boolean =>
-		entry.deleted === true &&
-		deleted.some((folder) => folder !== entry.path && isWithin(entry.path, folder));
 	return {
-		entries: entries.filter((entry) => !covered(entry)),
+		entries,
 		pending: decided.flatMap((item) => (item.pending === undefined ? [] : [item.pending])),
 		pruned: unplaced.length + decided.filter((item) => item.unplaced === true).length,
 	};
 };
 
-/** A file with no eTag is refused here for the reason `toEntry` gives. */
-const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry => {
+/**
+ * A file with no eTag cannot be an entry, for the reason `toEntry` gives. Here
+ * it is left out rather than thrown over: the cursor moves only when a page
+ * goes through, so one such item would stop every pull, and push behind it. A
+ * later change to the file that carries an eTag reports it.
+ */
+const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry | undefined => {
 	const folder = page.nodes.get(change.id)?.folder === true;
-	if (!folder && change.version === '') {
-		throw new Error('onedrive delta sent a file with no eTag');
-	}
+	if (!folder && change.version === '') return undefined;
 	return {
 		remoteId: change.id,
 		path,
