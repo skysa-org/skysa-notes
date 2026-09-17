@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../app.js';
 import { openOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
+import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import type { FetchLike } from '../oauth/types.js';
 import { clearSession, currentUserId } from '../session.js';
@@ -74,9 +75,14 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			}).catch(() => undefined);
 			if (secret === undefined) return false;
 
+			// Logged: an expired client secret would otherwise make every
+			// disconnect quietly leave its grant behind.
 			const tokens = await client
 				.refreshAccessToken(doFetch, credentials, { refreshToken: secret.refreshToken })
-				.catch(() => undefined);
+				.catch((error: unknown) => {
+					logFailure('refresh before revoke failed', error);
+					return undefined;
+				});
 			if (tokens === undefined) return false;
 
 			return client.revokeToken(doFetch, tokens.accessToken);
