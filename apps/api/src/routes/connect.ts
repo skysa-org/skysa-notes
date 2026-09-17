@@ -7,7 +7,7 @@ import { type Database, schema } from '../db/client.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
-import type { FetchLike, TokenSet } from '../oauth/types.js';
+import { type FetchLike, ScopeNotGrantedError, type TokenSet } from '../oauth/types.js';
 import {
 	clearFlowState,
 	currentUserId,
@@ -44,7 +44,7 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
-type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin' | 'occupied';
+type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin' | 'occupied' | 'partial';
 
 const back = (returnTo: string, outcome: Outcome): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
@@ -149,17 +149,25 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// server fault: send the user back to the app to try again. Logged all the
 		// same, because an expired client secret looks exactly like this to the
 		// user, and nothing else would tell the operator.
-		const tokens = await client
+		//
+		// A consent screen whose storage box the user unticked (Google lets them)
+		// is neither: the user did it, and can put it right by connecting again.
+		const exchanged = await client
 			.exchangeCode(doFetch, credentials, {
 				redirectUri: redirectUri(config.appOrigin, provider),
 				code,
 				verifier: flow.verifier,
 			})
+			.then((tokens) => ({ tokens }))
 			.catch((error: unknown) => {
+				if (error instanceof ScopeNotGrantedError) {
+					return { outcome: 'partial' as const };
+				}
 				logFailure(`${provider} code exchange failed`, error);
-				return undefined;
+				return { outcome: 'failed' as const };
 			});
-		if (tokens === undefined) return c.redirect(back(flow.returnTo, 'failed'));
+		if (!('tokens' in exchanged)) return c.redirect(back(flow.returnTo, exchanged.outcome));
+		const { tokens } = exchanged;
 
 		// Without a refresh token the connection would stop working in a few
 		// hours with no way to recover, so this is a failure, not a warning.
