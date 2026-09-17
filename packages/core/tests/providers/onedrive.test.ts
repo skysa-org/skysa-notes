@@ -165,7 +165,10 @@ describe('creating and updating', () => {
 		expect((error as ConflictError).remote.version).toBe('e2');
 	});
 
-	it('reports a missing parent folder as not found, not as a conflict', async () => {
+	// Graph's upload page does not say what a missing parent does; it may well
+	// make the folders. The stub refuses, as the engine's own fake does, so this
+	// is the answer if Graph refuses too.
+	it('reports a missing parent folder as not found if Graph refuses one', async () => {
 		const { provider } = stubbed();
 		await provider.ensureRoot();
 		const error = await provider.write('Nowhere/a.md', 'x\n', {}).catch((e: unknown) => e);
@@ -177,12 +180,14 @@ describe('creating and updating', () => {
 		const { stub, provider } = stubbed();
 		await provider.ensureRoot();
 		await provider.createFolder('日本語');
-		const entry = await provider.write("日本語/it's #1?.md", 'x\n', {});
+		// Characters OneDrive allows in a name (it reserves `?`, `:`, and for
+		// work accounts `#` and `%`) that still have to be escaped in a URL.
+		const entry = await provider.write("日本語/it's a+b & c;d.md", 'x\n', {});
 
-		expect(entry.path).toBe("日本語/it's #1?.md");
+		expect(entry.path).toBe("日本語/it's a+b & c;d.md");
 		const put = stub.requests.filter((r) => r.method === 'PUT').at(-1);
 		expect(put?.url).toContain(
-			`approot:/${encodeURIComponent('日本語')}/it%27s%20%231%3F.md:/content`
+			`approot:/${encodeURIComponent('日本語')}/it%27s%20a%2Bb%20%26%20c%3Bd.md:/content`
 		);
 		expect((await provider.read(entry)).content).toBe('x\n');
 	});
@@ -426,7 +431,7 @@ describe('changes, from a feed with no paths', () => {
 		expect(livePaths(second.entries)).toEqual(['Work/a.md', 'Work']);
 	});
 
-	it('drops an item the feed puts inside a folder it has deleted', async () => {
+	it('reports nothing for a folder made and deleted within the first scan', async () => {
 		const { doFetch } = scripted((url) =>
 			url.endsWith('/special/approot')
 				? Response.json({ id: 'root' })
@@ -452,7 +457,8 @@ describe('changes, from a feed with no paths', () => {
 					})
 		);
 		const { entries, cursor } = await over(doFetch).changes();
-		expect(entries).toEqual([{ path: 'Work', deleted: true, remoteId: 'd1' }]);
+		// Neither was ever placed, so the engine has nothing to forget.
+		expect(entries).toEqual([]);
 		expect(JSON.parse(cursor)).toMatchObject({ nodes: [], pending: [] });
 	});
 
@@ -467,5 +473,220 @@ describe('changes, from a feed with no paths', () => {
 		const { provider } = stubbed();
 		await expect(provider.changes('{"v":1}')).rejects.toThrow(CursorResetError);
 		await expect(provider.changes('not json')).rejects.toThrow(CursorResetError);
+	});
+});
+
+describe('changes, when things leave the tree', () => {
+	const link = (token: string) => `${GRAPH}/me/drive/special/approot/delta?token=${token}`;
+	const file = (id: string, name: string, parent: string, eTag = 'e1') => ({
+		id,
+		name,
+		eTag,
+		file: {},
+		parentReference: { id: parent },
+	});
+	const folder = (id: string, name: string, parent: string) => ({
+		id,
+		name,
+		eTag: 'd',
+		folder: {},
+		parentReference: { id: parent },
+	});
+	/** As Business sends one: no name. */
+	const removed = (id: string) => ({ id, deleted: {}, parentReference: { id: 'root' } });
+
+	interface FeedPage {
+		items: object[];
+		/** Another page in this round, fetched with this token. */
+		next?: string;
+	}
+
+	/**
+	 * A delta feed page by page. The first request of all is `''`; every round
+	 * ends with a delta link whose token is the page's own key plus `.`.
+	 */
+	const feed = (pages: Record<string, FeedPage>) =>
+		scripted((url) => {
+			if (url.endsWith('/special/approot')) return Response.json({ id: 'root' });
+			const token = url.endsWith('/special/approot/delta')
+				? ''
+				: new URL(url).searchParams.get('token');
+			const page = token === null ? undefined : pages[token];
+			if (token === null || page === undefined) return undefined;
+			return Response.json({
+				value: page.items,
+				...(page.next === undefined
+					? { '@odata.deltaLink': link(`${token}.`) }
+					: { '@odata.nextLink': link(page.next) }),
+			});
+		});
+
+	/** A Work folder holding `Work/a.md`, and `b.md` loose. */
+	const known = {
+		'': {
+			items: [
+				folder('d1', 'Work', 'root'),
+				file('f1', 'a.md', 'd1'),
+				file('f2', 'b.md', 'root'),
+			],
+		},
+	};
+
+	it('reports a note moved out of the app folder as deleted where it was', async () => {
+		const { doFetch } = feed({ ...known, '.': { items: [file('f2', 'b.md', 'elsewhere')] } });
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const after = await provider.changes(first.cursor);
+		expect(after.entries).toEqual([{ path: 'b.md', deleted: true, remoteId: 'f2' }]);
+		expect(after.cursor).not.toContain('"f2"');
+	});
+
+	it('waits for the end of the round before deciding a note has left', async () => {
+		const { doFetch } = feed({
+			...known,
+			'.': { items: [file('f2', 'b.md', 'elsewhere')], next: 'p2' },
+			p2: { items: [] },
+		});
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const middle = await provider.changes(first.cursor);
+		expect(middle.entries).toEqual([]);
+		const end = await provider.changes(middle.cursor);
+		expect(end.entries).toEqual([{ path: 'b.md', deleted: true, remoteId: 'f2' }]);
+	});
+
+	it('reports a folder moved out once, and not the notes inside it', async () => {
+		const { doFetch } = feed({ ...known, '.': { items: [folder('d1', 'Work', 'elsewhere')] } });
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const after = await provider.changes(first.cursor);
+		expect(after.entries).toEqual([{ path: 'Work', deleted: true, remoteId: 'd1' }]);
+		expect(after.cursor).not.toContain('"f1"');
+	});
+
+	it('keeps a note whose folder is deleted and restored in one page', async () => {
+		const { doFetch } = feed({
+			...known,
+			'.': {
+				items: [
+					removed('d1'),
+					file('f1', 'a.md', 'd1', 'e2'),
+					folder('d1', 'Work', 'root'),
+				],
+			},
+			'..': { items: [removed('f1')] },
+		});
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const restored = await provider.changes(first.cursor);
+		expect(livePaths(restored.entries)).toEqual(['Work/a.md', 'Work']);
+		expect(restored.entries.some((entry) => entry.deleted === true)).toBe(false);
+
+		const later = await provider.changes(restored.cursor);
+		expect(later.entries).toEqual([{ path: 'Work/a.md', deleted: true, remoteId: 'f1' }]);
+	});
+
+	it('names a note moved into a folder the same page deletes', async () => {
+		const { doFetch } = feed({
+			...known,
+			'.': { items: [file('f2', 'b.md', 'd1'), removed('d1')] },
+		});
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const after = await provider.changes(first.cursor);
+		expect(after.entries).toEqual([
+			{ path: 'b.md', deleted: true, remoteId: 'f2' },
+			{ path: 'Work', deleted: true, remoteId: 'd1' },
+		]);
+	});
+
+	it('names a note moved into a folder an earlier page of the round deleted', async () => {
+		const { doFetch } = feed({
+			...known,
+			'.': { items: [removed('d1')], next: 'p2' },
+			p2: { items: [file('f2', 'b.md', 'd1')] },
+		});
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const middle = await provider.changes(first.cursor);
+		expect(middle.entries).toEqual([{ path: 'Work', deleted: true, remoteId: 'd1' }]);
+		const end = await provider.changes(middle.cursor);
+		expect(end.entries).toEqual([{ path: 'b.md', deleted: true, remoteId: 'f2' }]);
+	});
+
+	it('names a deleted folder once when Graph lists what was inside it too', async () => {
+		const { doFetch } = feed({ ...known, '.': { items: [removed('f1'), removed('d1')] } });
+		const provider = over(doFetch);
+		const first = await provider.changes();
+		const after = await provider.changes(first.cursor);
+		expect(after.entries).toEqual([{ path: 'Work', deleted: true, remoteId: 'd1' }]);
+	});
+
+	it('refuses a first scan that places nothing, rather than report an empty folder', async () => {
+		const { doFetch, seen } = feed({
+			'': { items: [folder('d1', 'Work', 'not-the-root'), file('f1', 'a.md', 'd1')] },
+		});
+		const provider = over(doFetch);
+		await expect(provider.changes()).rejects.toThrow(/placed nothing/);
+		await expect(provider.changes()).rejects.toThrow(/placed nothing/);
+		// The app folder's id is asked for again each time, in case it changed.
+		expect(seen.filter((r) => r.url.endsWith('/special/approot'))).toHaveLength(2);
+	});
+
+	it('finds the app folder by its new id when it has been made again', async () => {
+		const ids = ['old', 'new'];
+		const { doFetch } = scripted((url) => {
+			if (url.endsWith('/special/approot')) return Response.json({ id: ids.shift() });
+			const items = ids.length === 0 ? [file('f1', 'a.md', 'new')] : [];
+			return Response.json({ value: items, '@odata.deltaLink': link('t') });
+		});
+		const provider = over(doFetch);
+		expect((await provider.changes()).entries).toEqual([]);
+		expect(livePaths((await provider.changes()).entries)).toEqual(['a.md']);
+	});
+
+	it('scans an empty app folder without complaint', async () => {
+		const { doFetch } = feed({ '': { items: [] } });
+		expect((await over(doFetch).changes()).entries).toEqual([]);
+	});
+
+	it('refuses a file with no eTag in the feed', async () => {
+		const { doFetch } = feed({
+			'': { items: [{ ...file('f1', 'a.md', 'root'), eTag: undefined }] },
+		});
+		await expect(over(doFetch).changes()).rejects.toThrow(/no eTag/);
+	});
+
+	it('starts again when a stored link finds its folder gone or cannot be read', async () => {
+		for (const status of [400, 404, 410]) {
+			const { doFetch } = scripted((url) =>
+				url.includes('token=') ? graphError(status, 'gone') : undefined
+			);
+			const cursor = JSON.stringify({
+				v: 1,
+				link: link('old'),
+				root: 'root',
+				nodes: [],
+				pending: [],
+				scan: false,
+				anchored: false,
+			});
+			await expect(over(doFetch).changes(cursor)).rejects.toThrow(CursorResetError);
+		}
+	});
+
+	it('does not start again over a first request that fails', async () => {
+		for (const status of [400, 404]) {
+			const { doFetch } = scripted((url) =>
+				url.endsWith('/special/approot')
+					? Response.json({ id: 'root' })
+					: graphError(status, 'bad')
+			);
+			const error = await over(doFetch)
+				.changes()
+				.catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(CursorResetError);
+		}
 	});
 });

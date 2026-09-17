@@ -2,7 +2,15 @@ import { z } from 'zod';
 
 import { MARKER_FILE } from '../config.js';
 import { buildMarker, serializeMarker } from '../marker.js';
-import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
+import {
+	basename,
+	isWithin,
+	joinPath,
+	normalizePath,
+	parentPath,
+	pathSegments,
+	ROOT,
+} from '../paths.js';
 import type { FetchLike } from './dropbox.js';
 import {
 	AuthError,
@@ -38,9 +46,13 @@ import {
  * Not in the Graph reference pages, and so still to be confirmed against a live
  * account (docs/PLAN.md, Phase 3): that an upload by path answers
  * `@microsoft.graph.conflictBehavior=fail` with `409 nameAlreadyExists`, that an
- * upload by id answers a stale `If-Match` with `412`, and that `delta` is served
- * on `special/approot` itself. The app-folder page lists the last; the other two
- * are what the OneDrive API docs' issue tracker and Microsoft Q&A report.
+ * upload by id answers a stale `If-Match` with `412`, that a move honours the
+ * same `conflictBehavior` (the move page documents only `if-match`), and that
+ * `delta` is served on `special/approot` itself. The app-folder page lists the
+ * last; the upload behaviour is what the OneDrive API docs' issue tracker and
+ * Microsoft Q&A report. Also to watch on a live account: whether moving a note
+ * out of the app folder, or a folder full of notes into it, reads as `changes`
+ * expects.
  */
 
 const GRAPH_ORIGIN = 'https://graph.microsoft.com';
@@ -93,8 +105,9 @@ interface RequestParts {
 
 /**
  * Path segments go into the URL one by one. `encodeURIComponent` leaves `'`
- * alone, and an apostrophe is what OData uses to quote a string — a note called
- * `it's.md` must not end the path early.
+ * alone, which Graph accepts in a path; escaping it as well costs nothing and
+ * keeps a name clear of OData's string quoting, which Graph's other addressing
+ * forms use.
  */
 const encodeSegment = (segment: string): string => encodeURIComponent(segment).replace(/'/g, '%27');
 
@@ -202,11 +215,19 @@ const nodeSchema = z.tuple([z.string(), z.string(), z.string(), z.boolean()]);
 
 /**
  * A live item not yet reported because its parent chain does not reach the app
- * folder yet: `[id, eTag, modifiedAt, size]`, size `-1` for none. Graph lists
- * parents first in practice, but nothing documents it, and an item dropped here
- * would never be reported again.
+ * folder yet: `[id, eTag, modifiedAt, size, was]` — size `-1` for none, and
+ * `was` the path it had before the round moved it, `null` if it had none. Graph
+ * lists parents first in practice, but nothing documents it, and an item
+ * dropped here would never be reported again. `was` travels with it because the
+ * tree no longer knows it: the item's node already names its new parent.
  */
-const pendingSchema = z.tuple([z.string(), z.string(), z.string(), z.number()]);
+const pendingSchema = z.tuple([
+	z.string(),
+	z.string(),
+	z.string(),
+	z.number(),
+	z.string().nullable(),
+]);
 
 const cursorSchema = z.object({
 	v: z.literal(1),
@@ -214,6 +235,10 @@ const cursorSchema = z.object({
 	root: z.string().min(1),
 	nodes: z.array(nodeSchema),
 	pending: z.array(pendingSchema),
+	/** The round under way started from nothing: a first sync, or a reset. */
+	scan: z.boolean(),
+	/** Some item in this round has named the app folder as its parent. */
+	anchored: z.boolean(),
 });
 
 type DeltaCursor = z.infer<typeof cursorSchema>;
@@ -223,6 +248,8 @@ interface TreeNode {
 	name: string;
 	folder: boolean;
 }
+
+type Tree = ReadonlyMap<string, TreeNode>;
 
 interface LiveChange {
 	kind: 'live';
@@ -235,7 +262,6 @@ interface LiveChange {
 interface GoneChange {
 	kind: 'gone';
 	id: string;
-	path: string;
 }
 
 type Change = LiveChange | GoneChange;
@@ -260,38 +286,30 @@ const parseCursor = (cursor: string): DeltaCursor => {
  * reach the app folder. The depth bound turns a cycle — which a well-formed
  * feed never produces — into "cannot say" rather than a stack overflow.
  */
-const pathIn = (
-	nodes: ReadonlyMap<string, TreeNode>,
-	root: string,
-	id: string,
-	depth = 0
-): string[] | undefined => {
-	if (id === root) return [];
-	const node = nodes.get(id);
-	if (node === undefined || depth > nodes.size) return undefined;
-	const above = pathIn(nodes, root, node.parent, depth + 1);
-	return above === undefined ? undefined : [...above, node.name];
-};
-
-/** Does the chain above `id` pass through `ancestor`? */
-const isUnder = (
-	nodes: ReadonlyMap<string, TreeNode>,
-	id: string,
-	ancestor: string,
-	depth = 0
-): boolean => {
-	const node = nodes.get(id);
-	if (node === undefined || depth > nodes.size) return false;
-	return node.parent === ancestor || isUnder(nodes, node.parent, ancestor, depth + 1);
+const pathIn = (tree: Tree, root: string, id: string, depth = 0): string | undefined => {
+	if (id === root) return ROOT;
+	const node = tree.get(id);
+	if (node === undefined || depth > tree.size) return undefined;
+	const above = pathIn(tree, root, node.parent, depth + 1);
+	return above === undefined ? undefined : joinPath(above, node.name);
 };
 
 interface Page {
+	root: string;
+	/** The tree as the page found it, for where things *were*. */
+	before: Tree;
+	/** Where the pending items were before the round moved them. */
+	was: ReadonlyMap<string, string | null>;
+	/** The tree as the page leaves it. */
 	nodes: Map<string, TreeNode>;
 	/** Keyed by id, in the order of each item's *last* appearance. */
 	changes: Map<string, Change>;
-	/** Taken out of the tree by a deletion in this page. */
-	removed: Set<string>;
 }
+
+const wasOf = (page: Page, id: string): string | undefined => {
+	if (page.was.has(id)) return page.was.get(id) ?? undefined;
+	return pathIn(page.before, page.root, id);
+};
 
 const liveChange = (id: string, item: DriveItem): LiveChange => ({
 	kind: 'live',
@@ -302,36 +320,28 @@ const liveChange = (id: string, item: DriveItem): LiveChange => ({
 });
 
 /**
- * A deletion. Its path comes from the tree as it stood *before* the item left
- * it — Graph for Business does not even send the name. A folder takes its whole
- * subtree out of the tree, but only the folder is reported: the store removes a
- * notebook with everything in it, exactly as it does for Drive's folder-only
- * feed. An id the tree never held is somebody else's history — a cold start
- * that met a tombstone — and is not reported at all.
+ * Applies one item to the tree and nothing else. Where anything is, and what to
+ * report, is worked out only once the whole page is in (`settlePage`): a folder
+ * deleted and restored in one page, or an item moved into a folder the same
+ * page then deletes, reads wrongly one item at a time.
+ *
+ * A deletion takes only the item's own node out. Its children stay in the tree
+ * with a parent that is no longer there, which is what tells `settlePage` they
+ * can no longer be placed.
  */
-const applyDeleted = (page: Page, root: string, id: string): void => {
-	const segments = pathIn(page.nodes, root, id);
-	const descendants = [...page.nodes.keys()].filter((other) => isUnder(page.nodes, other, id));
-	[id, ...descendants].forEach((gone) => {
-		page.nodes.delete(gone);
-		page.removed.add(gone);
-	});
-	if (segments === undefined) return;
-	page.changes.set(id, { kind: 'gone', id, path: segments.join('/') });
-};
-
-const applyItem = (page: Page, root: string, item: DriveItem): void => {
+const applyItem = (page: Page, item: DriveItem): void => {
 	const id = item.id;
 	if (id === undefined || id === '') throw new Error('onedrive delta sent an item with no id');
 	// The app folder itself appears in its own feed. It is the root, not an entry.
-	if (id === root) return;
+	if (id === page.root) return;
 
 	// "The same item may appear more than once in a delta feed … use the last
 	// occurrence you see." Deleting first moves the change to the end, so the
 	// batch keeps the order in which things last happened.
 	page.changes.delete(id);
 	if (item.deleted !== undefined) {
-		applyDeleted(page, root, id);
+		page.nodes.delete(id);
+		page.changes.set(id, { kind: 'gone', id });
 		return;
 	}
 
@@ -339,44 +349,121 @@ const applyItem = (page: Page, root: string, item: DriveItem): void => {
 	if (parent === undefined || parent === '') {
 		throw new Error('onedrive delta sent an item with no parent');
 	}
-	// Inside a folder this page has already deleted: gone with it. Marking it
-	// removed too takes anything the feed puts inside *it* the same way.
-	if (page.removed.has(parent)) {
-		page.removed.add(id);
-		return;
-	}
 	page.nodes.set(id, { parent, name: nameOf(item), folder: item.folder !== undefined });
-	page.removed.delete(id);
 	page.changes.set(id, liveChange(id, item));
 };
 
+type Held = DeltaCursor['pending'][number];
+
+interface Decided {
+	entry?: ChangeEntry;
+	pending?: Held;
+	/** A live item the round ended without placing. */
+	unplaced?: boolean;
+}
+
+interface Settled {
+	entries: ChangeEntry[];
+	pending: Held[];
+	/** Items taken out of the tree because they can no longer be placed. */
+	pruned: number;
+}
+
+const gone = (path: string, id: string): ChangeEntry => ({ path, deleted: true, remoteId: id });
+
 /**
- * Paths are resolved only once the whole page is in the tree, so a folder
- * renamed in the same page as an edit inside it gives the edit its new path —
- * which is the path the file is actually at.
+ * 410 is Graph's "this token is no good any more; start again". On a link we
+ * stored, a 400 means the same in practice — a token Graph cannot parse — and a
+ * 404 is the app folder the link was for having gone. Retrying either would
+ * never end. On a round from nothing they are failures like any other, since
+ * starting again would only ask the same thing.
  */
-const settlePage = (
-	page: Page,
-	root: string
-): { entries: ChangeEntry[]; pending: LiveChange[] } => {
-	const resolved = [...page.changes.values()].map((change) => {
-		if (change.kind === 'gone') {
-			return { entry: { path: change.path, deleted: true, remoteId: change.id } as const };
-		}
-		const segments = pathIn(page.nodes, root, change.id);
-		if (segments !== undefined) return { entry: toLive(page, change, segments.join('/')) };
-		// Taken out of the tree by a deletion later in the page: gone with it.
-		if (!page.nodes.has(change.id)) return {};
-		return { pending: change };
-	});
+const isDeadLink = (failure: GraphFailure, stored: boolean): boolean =>
+	failure.status === 410 || (stored && (failure.status === 400 || failure.status === 404));
+
+const pageFrom = (from: DeltaCursor): Page => {
+	const before = new Map(
+		from.nodes.map(([id, parent, name, folder]) => [id, { parent, name, folder }])
+	);
 	return {
-		entries: resolved.flatMap((item) => (item.entry === undefined ? [] : [item.entry])),
-		pending: resolved.flatMap((item) => (item.pending === undefined ? [] : [item.pending])),
+		root: from.root,
+		before,
+		was: new Map(from.pending.map((held) => [held[0], held[4]])),
+		nodes: new Map(before),
+		// Items carried over from an earlier page go first, as they came first.
+		changes: new Map(
+			from.pending.map(([id, version, modifiedAt, size]) => [
+				id,
+				{ kind: 'live', id, version, modifiedAt, size },
+			])
+		),
 	};
 };
 
+/**
+ * Turns an applied page into entries.
+ *
+ * - A deletion is reported at the path the item had before the page — Graph for
+ *   Business does not even send the name. An id the tree never placed is
+ *   somebody else's history (a cold start meeting a tombstone) and is dropped.
+ * - A live item that can be placed is reported where it now is.
+ * - One that cannot is held until the round ends: its parent may be on a later
+ *   page. When the round has ended, it cannot be: Graph lists "all parent items
+ *   in the hierarchy" unless asked not to (`deltaExcludeParent`), so a chain
+ *   that still does not reach the app folder left it — the user can move things
+ *   out of it — and the item is reported deleted where it was.
+ * - A deletion inside a folder also reported deleted is left out: the store takes
+ *   a notebook with everything in it, so a note inside it is named once, by the
+ *   folder. One moved *into* that folder in the same page had another path
+ *   before, is not covered, and is named.
+ * - At the end of a round, anything else the tree can no longer place — the
+ *   contents of a folder that was deleted or moved away, which Graph need not
+ *   mention — is pruned without a word. Something above it that was placed
+ *   before the page moved or went, and that is reported at a path covering it.
+ */
+const settlePage = (page: Page, roundEnds: boolean): Settled => {
+	const decided = [...page.changes.values()].map((change): Decided => {
+		const was = wasOf(page, change.id);
+		if (change.kind === 'gone') return was === undefined ? {} : { entry: gone(was, change.id) };
+		const path = pathIn(page.nodes, page.root, change.id);
+		if (path !== undefined) return { entry: toLive(page, change, path) };
+		if (!roundEnds) {
+			const held: Held = [
+				change.id,
+				change.version,
+				change.modifiedAt,
+				change.size,
+				was ?? null,
+			];
+			return { pending: held };
+		}
+		page.nodes.delete(change.id);
+		return { unplaced: true, ...(was === undefined ? {} : { entry: gone(was, change.id) }) };
+	});
+
+	const unplaced = roundEnds
+		? [...page.nodes.keys()].filter((id) => pathIn(page.nodes, page.root, id) === undefined)
+		: [];
+	unplaced.forEach((id) => page.nodes.delete(id));
+
+	const entries = decided.flatMap((item) => (item.entry === undefined ? [] : [item.entry]));
+	const deleted = entries.filter((entry) => entry.deleted === true).map((entry) => entry.path);
+	const covered = (entry: ChangeEntry): boolean =>
+		entry.deleted === true &&
+		deleted.some((folder) => folder !== entry.path && isWithin(entry.path, folder));
+	return {
+		entries: entries.filter((entry) => !covered(entry)),
+		pending: decided.flatMap((item) => (item.pending === undefined ? [] : [item.pending])),
+		pruned: unplaced.length + decided.filter((item) => item.unplaced === true).length,
+	};
+};
+
+/** A file with no eTag is refused here for the reason `toEntry` gives. */
 const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry => {
 	const folder = page.nodes.get(change.id)?.folder === true;
+	if (!folder && change.version === '') {
+		throw new Error('onedrive delta sent a file with no eTag');
+	}
 	return {
 		remoteId: change.id,
 		path,
@@ -490,7 +577,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		return raise(result.failure, path);
 	};
 
-	/** Graph created parents or refused; either way, say which folder is missing. */
+	/** Is the folder a path would go in missing? */
 	const missingParent = async (path: string): Promise<boolean> => {
 		const parent = parentPath(path);
 		return parent !== ROOT && (await metadataAt(parent))?.kind !== 'folder';
@@ -516,7 +603,9 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 
 		const current = await metadataAt(path);
 		if (current !== undefined) throw new ConflictError(current);
-		// Graph documents 409 for a missing parent as well as for a name in use.
+		// Nothing there, so not a name in use. Graph's upload page does not say
+		// what a missing parent does — it may make the folders — so if this is
+		// that refusal, say which folder is missing.
 		if (await missingParent(path)) throw new NotFoundError(parentPath(path));
 		return raise(result.failure, path);
 	};
@@ -716,60 +805,80 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		raise(result.failure, entry.path);
 	};
 
+	/**
+	 * A round from nothing asks for the app folder's id afresh: the user can
+	 * delete the folder, Graph makes a new one, and a remembered id would then
+	 * place nothing in it.
+	 */
+	const freshRound = async (): Promise<DeltaCursor> => {
+		rootBox.delete('id');
+		return {
+			v: 1,
+			link: `${APPROOT}/delta`,
+			root: await rootId(),
+			nodes: [],
+			pending: [],
+			scan: true,
+			anchored: false,
+		};
+	};
+
 	const changes = async (cursor?: string): Promise<ChangeSet> => {
-		const from: DeltaCursor =
-			cursor === undefined || cursor === ''
-				? { v: 1, link: `${APPROOT}/delta`, root: await rootId(), nodes: [], pending: [] }
-				: parseCursor(cursor);
+		const stored = cursor !== undefined && cursor !== '';
+		const from = stored ? parseCursor(cursor) : await freshRound();
 
 		const result = await attempt<ItemPage>('GET', from.link);
-		// 410 is Graph's "this token is no good any more; start again". A 400 on a
-		// link we stored means the same thing in practice — a token Graph cannot
-		// parse — and retrying it would never end.
-		if (!result.ok && (result.failure.status === 410 || result.failure.status === 400)) {
+		if (!result.ok && isDeadLink(result.failure, stored)) {
+			rootBox.delete('id');
 			throw new CursorResetError(result.failure.codes.join('/') || result.failure.message);
 		}
 		if (!result.ok) return raise(result.failure);
 
 		const next = result.value['@odata.nextLink'];
 		const link = next ?? result.value['@odata.deltaLink'];
-		if (link === undefined)
+		if (link === undefined) {
 			throw new Error('onedrive delta sent neither a next nor a delta link');
+		}
 
-		const page: Page = {
-			nodes: new Map(
-				from.nodes.map(([id, parent, name, folder]) => [id, { parent, name, folder }])
-			),
-			// Items carried over from an earlier page go first, as they came first.
-			changes: new Map(
-				from.pending.map(([id, version, modifiedAt, size]) => [
-					id,
-					{ kind: 'live', id, version, modifiedAt, size },
-				])
-			),
-			removed: new Set(),
-		};
-		(result.value.value ?? []).forEach((item) => {
-			applyItem(page, from.root, item);
+		const items = result.value.value ?? [];
+		const page = pageFrom(from);
+		items.forEach((item) => {
+			applyItem(page, item);
 		});
-		const settled = settlePage(page, from.root);
+		const roundEnds = next === undefined;
+		const settled = settlePage(page, roundEnds);
+		const anchored =
+			from.anchored ||
+			items.some(
+				(item) =>
+					item.id !== from.root &&
+					item.deleted === undefined &&
+					item.parentReference?.id === from.root
+			);
+
+		// A scan in which nothing names the app folder as its parent, yet there
+		// were items, is not an empty folder: it is an id that does not match
+		// how Graph spells the folder's children's parent. Reported as it
+		// stands it says the folder is empty, and the engine deletes every note
+		// that is not dirty.
+		if (roundEnds && from.scan && !anchored && settled.pruned > 0) {
+			rootBox.delete('id');
+			throw new Error('onedrive delta placed nothing under the app folder');
+		}
 
 		const written: DeltaCursor = {
 			v: 1,
 			link: graphLink(link),
 			root: from.root,
 			nodes: [...page.nodes].map(([id, node]) => [id, node.parent, node.name, node.folder]),
-			pending: settled.pending.map((change) => [
-				change.id,
-				change.version,
-				change.modifiedAt,
-				change.size,
-			]),
+			pending: settled.pending,
+			scan: from.scan && !roundEnds,
+			anchored: anchored && !roundEnds,
 		};
 		return {
 			entries: settled.entries,
 			cursor: JSON.stringify(written),
-			more: next !== undefined,
+			more: !roundEnds,
 		};
 	};
 
