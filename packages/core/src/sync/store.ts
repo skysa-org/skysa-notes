@@ -129,17 +129,19 @@ export type PullChange =
 	  }>
 	| Readonly<{
 			/**
-			 * The remote's bytes are the ones the note last synced, under a new
-			 * version. Adopt the version and touch nothing else — the note may
-			 * hold unpushed edits, which stay dirty and go out against it.
+			 * Take the remote's version and touch nothing else — the note may
+			 * hold unpushed edits, which stay dirty and go out against it. Sent
+			 * when the remote holds nothing the note lacks: bytes equal to the
+			 * note's, or to the ones it last synced, under a new version; or the
+			 * user's own queued rename coming back with its version unchanged.
 			 */
 			kind: 'adopt-version';
 			id: string;
 			remote: RemoteEntry;
 			/**
-			 * Recorded as the note's `syncedHash` when present. Absent when the
-			 * engine did not read the file, because its version had not moved and
-			 * the hash already stored still describes it.
+			 * Recorded as the note's `syncedHash` when present. Absent means keep
+			 * whatever the row holds: the engine sends it whenever it has one,
+			 * so absent is a note that never recorded its bytes.
 			 */
 			syncedHash?: string;
 	  }>

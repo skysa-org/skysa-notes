@@ -2725,6 +2725,57 @@ describe('the bytes a note last synced', () => {
 		expect(noteAt('Archive/b.md')).toMatchObject({ id, content: 'mine\n', dirty: true });
 		expect(store.ops()).toMatchObject([{ op: 'write', path: 'Archive/b.md' }]);
 	});
+
+	it('are not taken from a read that answers with an older version', async () => {
+		// The feed names the version that holds the remote edit; a read served
+		// from somewhere stale answers with the bytes before it. Those bytes
+		// match the hash, but they are not the version being adopted — taking
+		// the shortcut would push the local edit over an edit nobody has seen.
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const id = noteAt('a.md')?.id ?? '';
+		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: id, path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		const stale: StorageProvider = {
+			...provider,
+			read: () => Promise.resolve({ content: 'one\n', version: entry.version }),
+		};
+
+		const pulled = await createSyncEngine({ provider: stale, store, now: () => AT }).pull();
+		await engine.sync();
+
+		expect(pulled.conflicts).toHaveLength(1);
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(store.notes().some((note) => note.content.includes('mine'))).toBe(true);
+	});
+
+	it('are kept when a note is let go of and bound again in one batch', async () => {
+		// A folder deleted with a dirty note moved out of it first, on a
+		// provider whose version survives a move: the deletion detaches the
+		// note, which drops its hash, and the move binds it again without a
+		// read. The bytes it synced have not changed, so neither has the hash.
+		await provider.createFolder('Work');
+		const file = await remoteFile('Work/a.md', 'one\n');
+		await engine.pull();
+		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const note = noteAt('Work/a.md')!;
+		store.put({ ...note, content: 'mine\n', dirty: true });
+		const entries: ChangeEntry[] = [
+			{ path: 'Work', deleted: true, remoteId: folder?.remoteId ?? '' },
+			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
+			{ ...file, path: 'a.md' },
+		];
+
+		await createSyncEngine({
+			provider: reporting(provider, entries),
+			store,
+			now: () => AT,
+		}).pull();
+
+		expect(noteAt('a.md')).toMatchObject({ id: note.id, remoteId: file.remoteId, dirty: true });
+		expect(hashOf(note.id)).toBe(await contentHash('one\n'));
+	});
 });
 
 describe('a dead cursor', () => {

@@ -891,12 +891,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/** A note we already hold, whose remote version has moved. */
 	const decideKnown = async (
 		local: SyncNote,
-		content: string,
+		found: Readonly<{ content: string; version: string }>,
 		entry: RemoteEntry,
 		claimed: ReadonlySet<string>,
 		decided: readonly PullChange[],
 		renaming: ReadonlySet<string>
 	): Promise<PullChange[]> => {
+		const { content } = found;
 		const syncedHash = await contentHash(content);
 		const unchanged = (): PullChange[] =>
 			local.path === entry.path || renaming.has(local.id)
@@ -950,7 +951,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// stay dirty and go out against the new version, and there is no copy
 		// for the user to wonder about (docs/PLAN.md §7). A note that has not
 		// recorded its bytes cannot say, and takes the conflict as before.
-		if (local.syncedHash === syncedHash) return unchanged();
+		//
+		// Only if the bytes are the version the feed named, though: this is the
+		// one branch that lets a push overwrite the remote on the strength of a
+		// read, and a read that answers with an older version (a cache, or a
+		// file written again since) would adopt a version whose bytes nobody
+		// looked at — and the push would replace them without a copy.
+		if (found.version === entry.version && local.syncedHash === syncedHash) return unchanged();
 		const resolution = await resolutionFor(local, content, entry, claimed, decided);
 		return [{ kind: 'conflict', resolution }];
 	};
@@ -1032,10 +1039,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// renamed — a rename alone changes no bytes, so there is nothing to read.
 		if (local !== undefined && !removed && local.remoteVersion === entry.version) {
 			if (local.path === entry.path) return [];
+			// The file's bytes have not moved either, so the hash the note holds
+			// still describes them. Passed rather than left to the store to keep,
+			// because a `detach-note` or deleted folder earlier in this batch has
+			// already dropped it from the row this re-binds.
+			const kept = local.syncedHash === undefined ? {} : { syncedHash: local.syncedHash };
 			if (renaming.has(local.id)) {
-				return [...room, { kind: 'adopt-version', id: local.id, remote: entry }];
+				return [...room, { kind: 'adopt-version', id: local.id, remote: entry, ...kept }];
 			}
-			return [...room, { kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
+			return [
+				...room,
+				{ kind: 'move-note', id: local.id, path: entry.path, remote: entry, ...kept },
+			];
 		}
 
 		// `changes` and `read` are separate round trips on every provider, so the
@@ -1078,7 +1093,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				},
 			];
 		}
-		return [...room, ...(await decideKnown(local, content, entry, claimed, after, renaming))];
+		return [...room, ...(await decideKnown(local, found, entry, claimed, after, renaming))];
 	};
 
 	const decide = async (
