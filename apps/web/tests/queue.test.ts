@@ -219,19 +219,36 @@ describe('the push queue a local change leaves behind', () => {
 		expect(ops.some((op) => op.noteId === note.id && op.op === 'move')).toBe(true);
 	});
 
-	it('queues no rmdir for a notebook the remote never had', async () => {
+	it('withdraws the mkdir of a notebook deleted before it was ever sent', async () => {
+		// No `rmdir` is possible — the row is gone, so nothing can say which
+		// directory to remove — so the `mkdir` must not go either. Sent, it
+		// would make a directory on the remote that this device can never ask
+		// to have removed, and the next pull would report it and make the
+		// notebook again, empty.
 		const db = freshDatabase();
 		await createFolder(db, { ...scope, name: 'Work' });
-		await db.opQueue.clear();
+		await createFolder(db, { ...scope, name: 'Sub', parentPath: 'Work' });
+		expect((await queued(db)).map((op) => op.path)).toEqual(['Work', 'Work/Sub']);
 
 		await deleteFolder(db, 'Work', scope);
 
+		// The one inside it goes too, for the same reason.
 		expect(await queued(db)).toEqual([]);
 	});
 
-	it('queues no rmdir for a notebook moved inside what it was in', async () => {
-		// `Work/Sub` moved up to `Work`, whose row the app no longer has: the
-		// directory the move leaves behind is the one it lands in.
+	it('withdraws the mkdir a renamed notebook leaves behind', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+
+		await renameFolder(db, 'Work', 'Plans', scope);
+
+		expect(await queued(db)).toEqual([{ op: 'mkdir', path: 'Plans' }]);
+	});
+
+	it('queues an rmdir for a notebook moved up into what it was in', async () => {
+		// `Work/Sub` moved up to `Work`. The directory it leaves behind is a
+		// subdirectory of the one it lands in, so removing it cannot touch the
+		// destination — and left there it comes back as an empty notebook.
 		const db = freshDatabase();
 		await createFolder(db, { ...scope, name: 'Work' });
 		await createFolder(db, { ...scope, name: 'Sub', parentPath: 'Work' });
@@ -241,7 +258,9 @@ describe('the push queue a local change leaves behind', () => {
 
 		await moveFolder(db, 'Work/Sub', 'Work', scope);
 
-		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([]);
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
+			{ op: 'rmdir', path: 'Work/Sub', remoteId: 'f2' },
+		]);
 	});
 
 	it('withdraws an rmdir when the notebook it would remove is made again', async () => {
@@ -273,18 +292,55 @@ describe('the push queue a local change leaves behind', () => {
 	});
 
 	it('queues one rmdir per directory, however many times it is asked', async () => {
+		// The row comes back at the same path with the same id — a pull that
+		// re-established it, say — and is deleted again. One directory, one op.
 		const db = freshDatabase();
 		await createFolder(db, { ...scope, name: 'Work' });
 		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
 		await deleteFolder(db, 'Work', scope);
-		// Made again and deleted again, at the same name: the directory it is
-		// about is still the one `f1` names, since the new row has no id yet.
-		await createFolder(db, { ...scope, name: 'Work' });
-		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await db.folders.put({ connectionId: CONNECTION, path: 'Work', remoteId: 'f1', createdAt: 0 });
 		await deleteFolder(db, 'Work', scope);
 
 		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
 			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+		]);
+	});
+
+	it('queues an rmdir for a second directory at a name whose first is still queued', async () => {
+		// `Work` deleted while offline, then another device's own `Work` arrives
+		// at the name by a pull, and the user deletes that too. Two directories,
+		// two ops: told apart by their ids, since the path is the same.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await deleteFolder(db, 'Work', scope);
+		await db.folders.put({ connectionId: CONNECTION, path: 'Work', remoteId: 'f2', createdAt: 0 });
+
+		await deleteFolder(db, 'Work', scope);
+
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
+			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+			{ op: 'rmdir', path: 'Work', remoteId: 'f2' },
+		]);
+	});
+
+	it('queues an rmdir for the second path one directory has been at', async () => {
+		// Deleted at `Work`, and the pull that followed reported the same
+		// directory renamed to `Plans` by another device, which the user then
+		// deleted too. Keyed on the id alone, the second delete would find its
+		// `rmdir` already queued — for a path that directory has left, where
+		// the engine leaves it alone — and neither would be removed.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await deleteFolder(db, 'Work', scope);
+		await db.folders.put({ connectionId: CONNECTION, path: 'Plans', remoteId: 'f1', createdAt: 0 });
+
+		await deleteFolder(db, 'Plans', scope);
+
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
+			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+			{ op: 'rmdir', path: 'Plans', remoteId: 'f1' },
 		]);
 	});
 
@@ -334,17 +390,18 @@ describe('the push queue a local change leaves behind', () => {
 		expect(ops.filter((op) => op.noteId === unpushed.id)).toEqual([]);
 	});
 
-	it('queues a mkdir once for a notebook made twice before it is pushed', async () => {
+	it('queues one mkdir for a notebook renamed twice before it is pushed', async () => {
+		// And for the name it ended at. Each rename withdraws the `mkdir` of
+		// the name it left: the remote never had that directory, so no `rmdir`
+		// could ever be queued for it, and sent it would sit there for good —
+		// and come back as an empty notebook on the next pull that reports it.
 		const db = freshDatabase();
 		await createFolder(db, { ...scope, name: 'Work' });
 
 		await renameFolder(db, 'Work', 'Play', scope);
 		await renameFolder(db, 'Play', 'Work', scope);
 
-		expect(await queued(db)).toEqual([
-			{ op: 'mkdir', path: 'Work' },
-			{ op: 'mkdir', path: 'Play' },
-		]);
+		expect(await queued(db)).toEqual([{ op: 'mkdir', path: 'Work' }]);
 	});
 
 	it('queues a mkdir for each connection a notebook of one name is made under', async () => {

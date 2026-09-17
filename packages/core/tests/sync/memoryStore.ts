@@ -279,7 +279,13 @@ export const createMemoryStore = (): MemoryStore => {
 				isWithin(folder.path, change.path)
 			);
 			for (const folder of gone) folders.delete(folder.path);
-			const inside = [...notes.values()].filter((note) => isWithin(note.path, change.path));
+			// Except the ones the engine has spared: their files are not in the
+			// folder at all, because the rename that puts them there is still
+			// queued here.
+			const keep = new Set(change.keep ?? []);
+			const inside = [...notes.values()].filter(
+				(note) => isWithin(note.path, change.path) && !keep.has(note.id)
+			);
 			for (const note of inside) detachOrDelete(note);
 			return;
 		}

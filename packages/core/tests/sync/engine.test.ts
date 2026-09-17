@@ -4787,21 +4787,130 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		// device's own `mkdir`, coming back. Made again from that, the
 		// notebook is in the sidebar again and the `rmdir` behind it refuses
 		// to remove a directory the device still holds.
-		const made = await provider.createFolder('Work');
+		//
+		// The notebook is made here, and its `mkdir` pushed after the cursor
+		// is stored: that is what puts it in the next round's feed. Created on
+		// the remote before the first pull, it would be behind the cursor and
+		// the feed would be empty, which is no test of anything.
+		store.putFolder({ path: 'Work' });
+		store.queue({ op: 'mkdir', path: 'Work' });
 		await engine.pull();
+		await engine.push();
+		const made = provider.snapshot().find((entry) => entry.path === 'Work');
+		expect(made?.remoteId).toBe(store.folders()[0]?.remoteId);
+		// The user deletes it again before the next round.
 		store.removeFolder('Work');
-		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		store.queue({ op: 'rmdir', path: 'Work', remoteId: made?.remoteId });
 
 		const result = await engine.sync();
 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual([]);
+		expect(remoteFolders()).toEqual([]);
+	});
+
+	it('makes the notebook above one whose directory has gone', async () => {
+		// The row above is still here — nothing here deleted it — so no `mkdir`
+		// was owed for it, and the one for the subfolder finds nothing to make
+		// it in. Left to fail it blocks the queue over a notebook.
+		const made = await provider.createFolder('Work');
+		await engine.pull();
+		store.putFolder({ path: 'Work/Inner' });
+		store.queue({ op: 'mkdir', path: 'Work/Inner' });
+		// Another device removes the directory the notebook is in.
+		await provider.delete(made);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(remoteFolders()).toEqual(['Work', 'Work/Inner']);
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('does nothing where the provider cannot see what it would delete', async () => {
+		// Drive's scope hides files the user added themselves (§5.1), so a
+		// listing that comes back empty proves nothing — and deleting a folder
+		// takes what is under it whether the app can see it or not.
+		const blind = createFakeProvider({ listsEverything: false });
+		const theirs = createMemoryStore();
+		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const made = await blind.createFolder('Work');
+		await theirEngine.pull();
+		theirs.removeFolder('Work');
+		theirs.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+
+		const result = await theirEngine.push();
+
+		expect(result.status).toBe('ok');
+		// Finished rather than retried for ever, and the directory stays.
+		expect(theirs.ops()).toEqual([]);
+		expect(blind.callLog().some((call) => call.op === 'delete')).toBe(false);
 		expect(
-			provider
+			blind
 				.snapshot()
 				.filter((entry) => entry.kind === 'folder')
 				.map((entry) => entry.path)
-		).toEqual([]);
+		).toEqual(['Work']);
+	});
+
+	it('gives up on a directory it cannot remove rather than holding up the queue', async () => {
+		// Housekeeping, and the only op that is not the user's: an empty
+		// directory left on the remote costs them nothing, and every note they
+		// write from here on waiting behind it costs them everything.
+		const made = await provider.createFolder('Work');
+		await engine.pull();
+		store.removeFolder('Work');
+		store.queue({
+			op: 'rmdir',
+			path: 'Work',
+			remoteId: made.remoteId,
+			attempts: 5,
+		});
+		store.put({ id: 'n1', path: 'later.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'later.md' });
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(provider.contentAt('later.md')).toBe('mine\n');
+		expect(store.ops()).toEqual([]);
+		expect(remoteFolders()).toEqual(['Work']);
+	});
+
+	it('does not let a deletion with no id take a notebook made again at the name', async () => {
+		// Dropbox reports a folder deletion as a path and nothing else, this
+		// device's own included. So the round after an `rmdir` lands carries
+		// the deletion of a name the user may have made a notebook at since —
+		// and taken for that row it deletes the notebook they just made, with
+		// everything they have put in it, while the `mkdir` queued behind it
+		// makes the directory again. A row the remote has never heard of
+		// cannot be what a deletion is about.
+		// The notebook alone, with nothing in it yet: a note in it would keep
+		// the row by itself — a cascade leaves the notes it keeps a notebook to
+		// be in — and the empty notebook is the case that needs the rule.
+		store.putFolder({ path: 'Work' });
+		store.queue({ op: 'mkdir', path: 'Work' });
+
+		const result = await pullNow([{ path: 'Work', deleted: true }]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual(['Work']);
+		// And its `mkdir` is still owed: the directory has to be made again.
+		expect(store.ops().map((op) => op.op)).toEqual(['mkdir']);
+	});
+
+	it('still takes a notebook the remote did have at the name', async () => {
+		// The other half: a row with an id is a directory the remote knows, and
+		// a deletion by path alone is about it.
+		const made = await provider.createFolder('Work');
+		await engine.pull();
+		expect(folderPaths()).toEqual(['Work']);
+
+		const result = await pullNow([{ path: 'Work', deleted: true }]);
+
+		expect(result.status).toBe('ok');
+		expect(folderPaths()).toEqual([]);
+		expect(made.remoteId).toBeDefined();
 	});
 
 	it('keeps a notebook another device made at the name it is removing', async () => {
@@ -4845,6 +4954,103 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		expect(result.status).toBe('ok');
 		expect(folderPaths()).toEqual(['Plans']);
 		expect(notePaths()).toEqual(['Plans/a.md']);
+	});
+});
+
+describe('a notebook the user moved a note into, removed by another device', () => {
+	/**
+	 * Found by the two-device soak: one device removes the directory the other
+	 * has just renamed a note into, before that rename was pushed. The
+	 * deletion is right — the directory is gone — but the note's own file is
+	 * still where it always was, and the cascade would take the row with the
+	 * notebook and leave the file behind on the remote with nothing here
+	 * naming it. The cursor has moved past that file, so nothing would mention
+	 * it again: only a re-scan would find the note.
+	 */
+	const setUp = async () => {
+		const made = await provider.createFolder('Plans');
+		await remoteFile('a.md', 'a\n');
+		await engine.pull();
+		const note = noteAt('a.md');
+		if (note === undefined) throw new Error('no note');
+		// The rename, as the app queues it: the row moves now, the file moves
+		// when the op runs.
+		store.put({ ...note, path: 'Plans/a.md' });
+		store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'Plans/a.md' });
+		await provider.delete({ remoteId: made.remoteId, path: 'Plans' });
+		return note;
+	};
+
+	it('keeps the note the rename has not moved yet', async () => {
+		const note = await setUp();
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(notePaths()).toEqual(['Plans/a.md']);
+		const kept = store.notes().find((one) => one.id === note.id);
+		expect(kept?.remoteId).toBe(note.remoteId);
+		expect(kept?.dirty).toBe(false);
+		// And a notebook to be in, from the same `ensure-folder` that roofs
+		// over the notes a cascade keeps.
+		expect(folderPaths()).toEqual(['Plans']);
+		expect(store.ops().map((op) => op.op)).toEqual(['move']);
+	});
+
+	it('and the rename makes the directory again when it runs', async () => {
+		await setUp();
+		await engine.pull();
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(provider.contentAt('Plans/a.md')).toBe('a\n');
+		expect(provider.contentAt('a.md')).toBeUndefined();
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('keeps it on a scan, where the notebook is gone by not being mentioned', async () => {
+		// The other way a folder is found to be gone: a scan reports what
+		// exists, and `reconcile` turns everything it did not mention into a
+		// deletion. The queued rename is the same, and so is the harm.
+		const entry = await remoteFile('a.md', 'a\n');
+		store.putFolder({ path: 'Plans', remoteId: 'folder-the-remote-lost' });
+		store.put({
+			id: 'n1',
+			path: 'Plans/a.md',
+			content: 'a\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('a\n'),
+			dirty: false,
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Plans/a.md' });
+
+		// No cursor, so this is a scan.
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(notePaths()).toEqual(['Plans/a.md']);
+		expect(store.notes()[0]?.remoteId).toBe(entry.remoteId);
+		expect(folderPaths()).toEqual(['Plans']);
+	});
+
+	it('takes the note whose file is inside the directory that has gone', async () => {
+		// The other half of the rule: a rename *within* the notebook says
+		// nothing about a file the deletion really does remove.
+		const made = await provider.createFolder('Plans');
+		await remoteFile('Plans/a.md', 'a\n');
+		await engine.pull();
+		const note = noteAt('Plans/a.md');
+		if (note === undefined) throw new Error('no note');
+		store.put({ ...note, path: 'Plans/b.md' });
+		store.queue({ op: 'move', noteId: note.id, path: 'Plans/a.md', targetPath: 'Plans/b.md' });
+		await provider.delete({ remoteId: made.remoteId, path: 'Plans' });
+
+		await engine.pull();
+
+		expect(notePaths()).toEqual([]);
+		expect(folderPaths()).toEqual([]);
 	});
 });
 

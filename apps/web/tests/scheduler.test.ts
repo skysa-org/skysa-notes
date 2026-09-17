@@ -155,6 +155,7 @@ const remote = (): Remote => {
 		};
 		const provider: StorageProvider = {
 			kind: fake.kind,
+			listsEverything: fake.listsEverything,
 			ensureRoot: async () => {
 				await authorized();
 				return fake.ensureRoot();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isHidden, isWithin, rebasePath } from '../../src/paths.js';
+import { ancestorPaths, isHidden, isWithin, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
@@ -182,8 +182,19 @@ const queueWrite = (d: Device, note: SyncNote): void => {
 
 const counters = { note: 0 };
 
+/**
+ * The notebook a note is going into, as `createNote` and `moveNote` do it: both
+ * call `ensureFolder` for the folder they are putting the note in, so a note
+ * never lands under a path with no row and no `mkdir` owed for it.
+ */
+const intoNotebook = (d: Device, path: string): void => {
+	const folder = parentPath(path);
+	if (folder !== '') addNotebook(d, folder);
+};
+
 const create = (d: Device, path: string, content: string): SyncNote => {
 	counters.note += 1;
+	intoNotebook(d, path);
 	const note = { id: `${d.name}-${String(counters.note)}`, path, content, dirty: true };
 	d.store.put(note);
 	queueWrite(d, { ...note });
@@ -199,6 +210,7 @@ const edit = (d: Device, path: string, content: string): void => {
 /** As `queueMove`: one move per note, from wherever the file still is. */
 const rename = (d: Device, path: string, to: string): void => {
 	const note = liveAt(d, path);
+	intoNotebook(d, to);
 	d.store.put({ ...note, path: to });
 	const moves = d.store.ops().filter((op) => op.op === 'move' && op.noteId === note.id);
 	const origin = moves[0]?.path ?? path;
@@ -210,10 +222,44 @@ const rename = (d: Device, path: string, to: string): void => {
 	}
 };
 
-/** As `store/folders.ts` createFolder: the row, and a `mkdir` that records its id. */
+/**
+ * As `queue.ts` withdrawMkdirs: a notebook gone before its `mkdir` was ever
+ * sent leaves no directory to remove, so the `mkdir` must not go either.
+ */
+const withdrawMkdirs = (d: Device, path: string): void => {
+	d.store
+		.ops()
+		.filter((op) => op.op === 'mkdir' && isWithin(op.path, path))
+		.forEach((op) => {
+			d.store.unqueue(op.seq);
+		});
+};
+
+/** As `queue.ts` queueMkdir: an `rmdir` at this path or above it is withdrawn. */
+const askForNotebook = (d: Device, path: string): void => {
+	d.store
+		.ops()
+		.filter((op) => op.op === 'rmdir' && isWithin(path, op.path))
+		.forEach((op) => {
+			d.store.unqueue(op.seq);
+		});
+	if (!d.store.ops().some((op) => op.op === 'mkdir' && op.path === path)) {
+		d.store.queue({ op: 'mkdir', path });
+	}
+};
+
+/**
+ * As `store/folders.ts` ensureFolder and createFolder: the row, a `mkdir` that
+ * records its id, and the same for every notebook above it that is missing —
+ * without which a `createFolder` would be asked for a directory whose parent is
+ * not there, which some providers refuse.
+ */
 const addNotebook = (d: Device, path: string): void => {
-	d.store.putFolder({ path });
-	d.store.queue({ op: 'mkdir', path });
+	[...ancestorPaths(path), path].forEach((at) => {
+		if (d.store.folders().some((folder) => folder.path === at)) return;
+		d.store.putFolder({ path: at });
+		askForNotebook(d, at);
+	});
 };
 
 /** As `store/folders.ts` deleteFolder: the notes' deletes, then the directory. */
@@ -230,6 +276,7 @@ const removeNotebook = (d: Device, path: string): void => {
 		.forEach((folder) => {
 			d.store.removeFolder(folder.path);
 		});
+	withdrawMkdirs(d, path);
 	if (id !== undefined) d.store.queue({ op: 'rmdir', path, remoteId: id });
 };
 
@@ -240,16 +287,23 @@ const renameNotebook = (d: Device, path: string, to: string): void => {
 	inside.forEach((folder) => {
 		d.store.removeFolder(folder.path);
 	});
+	// The destination's own parents first, as `moveFolder`'s `ensureFolder` does.
+	[...ancestorPaths(to)].forEach((at) => {
+		if (d.store.folders().some((folder) => folder.path === at)) return;
+		d.store.putFolder({ path: at });
+		askForNotebook(d, at);
+	});
 	inside.forEach((folder) => {
 		const at = rebasePath(folder.path, path, to);
 		d.store.putFolder({ path: at });
-		d.store.queue({ op: 'mkdir', path: at });
+		askForNotebook(d, at);
 	});
 	live(d)
 		.filter((note) => isWithin(note.path, path))
 		.forEach((note) => {
 			rename(d, note.path, rebasePath(note.path, path, to));
 		});
+	withdrawMkdirs(d, path);
 	if (id !== undefined) d.store.queue({ op: 'rmdir', path, remoteId: id });
 };
 
@@ -452,6 +506,14 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 				.map((entry) => entry.path)
 				.sort();
 
+		/**
+		 * Whether this provider's listings are the whole truth about a folder.
+		 * Drive's are not — `drive.file` hides what the user put there — so it
+		 * is never asked to remove one, and the empty directory stays. Every
+		 * assertion about what is left has to say which of the two it is.
+		 */
+		const tidies = (remote: Remote): boolean => remote.adapter().listsEverything;
+
 		it('leaves the provider no directory when a notebook is deleted', async () => {
 			const { remote, a, b } = await setUp(make);
 			addNotebook(a, 'Work');
@@ -462,10 +524,13 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 
 			const files = await converged(remote, a, b);
 			expect(files).toEqual({});
-			expect(remoteFolders(remote)).toEqual([]);
+			expect(remoteFolders(remote)).toEqual(tidies(remote) ? [] : ['Work']);
 			// And the other device lets the notebook go too, rather than
-			// keeping a row the remote has nothing behind.
-			expect(b.store.folders()).toEqual([]);
+			// keeping a row the remote has nothing behind. Where the directory
+			// stays, so does the empty notebook, on both devices.
+			expect(b.store.folders().map((folder) => folder.path)).toEqual(
+				tidies(remote) ? [] : ['Work']
+			);
 		});
 
 		it('leaves the provider only the new directory when a notebook is renamed', async () => {
@@ -477,8 +542,30 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 
 			const files = await converged(remote, a, b);
 			expect(files).toEqual({ 'Plans/plan.md': 'base\n' });
-			expect(remoteFolders(remote)).toEqual(['Plans']);
-			expect(b.store.folders().map((folder) => folder.path)).toEqual(['Plans']);
+			expect(remoteFolders(remote)).toEqual(tidies(remote) ? ['Plans'] : ['Plans', 'Work']);
+			expect(b.store.folders().map((folder) => folder.path)).toEqual(
+				tidies(remote) ? ['Plans'] : ['Plans', 'Work']
+			);
+		});
+
+		it('keeps a notebook made again at the name of one just removed', async () => {
+			// The round after the removal carries our own deletion back — on
+			// Dropbox as a path and nothing else — and the user has made a
+			// notebook at that name since. Taken for the new row it deletes the
+			// notebook they just made, and everything they have put in it.
+			const { remote, a, b } = await setUp(make);
+			addNotebook(a, 'Work');
+			await shared(a, b, 'Work/plan.md', 'base\n');
+			removeNotebook(a, 'Work');
+			await synced(a);
+			addNotebook(a, 'Work');
+			create(a, 'Work/fresh.md', 'fresh\n');
+
+			const files = await converged(remote, a, b);
+			expect(files).toEqual({ 'Work/fresh.md': 'fresh\n' });
+			expect(remoteFolders(remote)).toEqual(['Work']);
+			expect(a.store.folders().map((folder) => folder.path)).toEqual(['Work']);
+			expect(b.store.folders().map((folder) => folder.path)).toEqual(['Work']);
 		});
 
 		it('keeps the directory when the other device has put a file in it', async () => {
@@ -514,6 +601,30 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 				lost.filter((token) => !soak.mayBeLost(token)),
 				soak.trace()
 			).toEqual([]);
+
+			// And no device holds a notebook the remote has no directory for.
+			// That is the ghost this whole op exists to prevent: a row with
+			// nothing behind it shows an empty notebook in the sidebar that
+			// nothing the user does here will ever make real.
+			//
+			// Not the other way about — the two devices need not hold the same
+			// notebooks. A device that removes one whose directory outlives the
+			// removal, because another device's file is still in it, is not told
+			// about that directory again until it re-scans, and is right not to
+			// have the notebook meanwhile.
+			const directories = new Set(
+				remote.backing
+					.snapshot()
+					.filter((entry) => entry.kind === 'folder' && !isHidden(entry.path))
+					.map((entry) => entry.path)
+			);
+			[a, b].forEach((d) => {
+				const ghosts = d.store
+					.folders()
+					.map((folder) => folder.path)
+					.filter((path) => !directories.has(path));
+				expect(ghosts, `${d.name}\n${soak.trace()}`).toEqual([]);
+			});
 		};
 
 		// Every seed that has failed is a test in `engine.test.ts` too. A new
@@ -539,6 +650,8 @@ const random = (seed: number): (() => number) => {
 };
 
 const PATHS = ['a.md', 'b.md', 'c.md', 'Work/d.md', 'Work/e.md'];
+/** Notebooks the soak makes, renames and removes. `Work` is where PATHS point. */
+const NOTEBOOKS = ['Work', 'Play', 'Work/Inner'];
 
 /**
  * Random edits, creates, renames, deletes and syncs on two devices. Every
@@ -564,6 +677,29 @@ const createSoak = (seed: number, devices: readonly Device[]) => {
 			(note?.remoteId !== undefined && deletedFiles.has(note.remoteId));
 		if (gone) doomed.add(made);
 		return made;
+	};
+
+	/**
+	 * A note some device is about to delete: §7 lets a delete win over an edit
+	 * made elsewhere that it never saw, so whatever either device holds of that
+	 * file may go with it.
+	 */
+	const willTake = (d: Device, note: SyncNote): void => {
+		deletedNotes.add(`${d.name}:${note.id}`);
+		if (note.remoteId !== undefined) deletedFiles.add(note.remoteId);
+		const held = devices.flatMap((each) =>
+			each.store
+				.notes()
+				.filter((other) =>
+					note.remoteId === undefined
+						? other.id === note.id
+						: other.remoteId === note.remoteId
+				)
+				.map((other) => other.content)
+		);
+		tokens
+			.filter((each) => held.some((content) => content.includes(each)))
+			.forEach((each) => doomed.add(each));
 	};
 
 	const log: string[] = [];
@@ -600,24 +736,48 @@ const createSoak = (seed: number, devices: readonly Device[]) => {
 			return;
 		}
 		if (roll < 0.7) {
-			deletedNotes.add(`${d.name}:${note.id}`);
-			if (note.remoteId !== undefined) deletedFiles.add(note.remoteId);
-			// What either device already holds of that file may go with it.
-			const held = devices.flatMap((each) =>
-				each.store
-					.notes()
-					.filter((other) =>
-						note.remoteId === undefined
-							? other.id === note.id
-							: other.remoteId === note.remoteId
-					)
-					.map((other) => other.content)
-			);
-			tokens
-				.filter((each) => held.some((content) => content.includes(each)))
-				.forEach((each) => doomed.add(each));
+			willTake(d, note);
 			say(d, `delete ${note.path}`);
 			remove(d, note.path);
+			return;
+		}
+		if (roll < 0.75) {
+			const free = NOTEBOOKS.filter(
+				(path) => !d.store.folders().some((folder) => folder.path === path)
+			);
+			if (free.length === 0) return;
+			const at = pick(free);
+			say(d, `notebook ${at}`);
+			addNotebook(d, at);
+			return;
+		}
+		const notebooks = d.store.folders().map((folder) => folder.path);
+		if (notebooks.length === 0) {
+			say(d, 'sync');
+			await synced(d, trace);
+			return;
+		}
+		if (roll < 0.8) {
+			const from = pick(notebooks);
+			const free = NOTEBOOKS.filter(
+				(path) => !isWithin(path, from) && !taken(d, path) && !notebooks.includes(path)
+			);
+			if (free.length === 0) return;
+			const to = pick(free);
+			say(d, `rename notebook ${from} -> ${to}`);
+			renameNotebook(d, from, to);
+			return;
+		}
+		if (roll < 0.85) {
+			const at = pick(notebooks);
+			// Everything inside goes with it, exactly as a note's own delete does.
+			live(d)
+				.filter((note) => isWithin(note.path, at))
+				.forEach((note) => {
+					willTake(d, note);
+				});
+			say(d, `remove notebook ${at}`);
+			removeNotebook(d, at);
 			return;
 		}
 		say(d, 'sync');

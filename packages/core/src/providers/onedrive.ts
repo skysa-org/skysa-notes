@@ -690,6 +690,9 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 
 	return {
 		kind: 'onedrive',
+		// `Files.ReadWrite.AppFolder` sees the whole app folder, whoever put a
+		// file in it.
+		listsEverything: true,
 		ensureRoot,
 		list,
 		read,

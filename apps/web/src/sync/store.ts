@@ -332,7 +332,11 @@ export const createDexieSyncStore = (
 		);
 	};
 
-	const deleteFolder = async (scope: Scope, path: string): Promise<void> => {
+	const deleteFolder = async (
+		scope: Scope,
+		path: string,
+		keep: readonly string[] = []
+	): Promise<void> => {
 		// The app folder is not a notebook, and every path is within it.
 		if (normalizePath(path) === ROOT) return;
 		if ((await scope.folders.get([connectionId, path])) === undefined) return;
@@ -342,7 +346,12 @@ export const createDexieSyncStore = (
 
 		// A clean note goes with its folder. A dirty one is the user's writing and
 		// exists nowhere else, so it stays, cut loose from the file that is gone.
-		const inside = (await notesOf(scope)).filter((note) => isWithin(note.path, path));
+		// A note the engine spared is left exactly as it is, remote and all: its
+		// file is elsewhere, waiting on a rename this device has queued.
+		const spared = new Set(keep);
+		const inside = (await notesOf(scope)).filter(
+			(note) => isWithin(note.path, path) && !spared.has(note.id)
+		);
 		await scope.notes.bulkDelete(
 			inside.filter((note) => !isDirty(note)).map((note) => note.id)
 		);
@@ -467,7 +476,7 @@ export const createDexieSyncStore = (
 				await moveFolder(scope, change.from, change.to, change.remoteId);
 				return;
 			case 'delete-folder':
-				await deleteFolder(scope, change.path);
+				await deleteFolder(scope, change.path, change.keep);
 				return;
 			case 'conflict':
 				await applyConflict(scope, change.resolution, hashes);

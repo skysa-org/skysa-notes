@@ -1,4 +1,4 @@
-import { isWithin } from '@skysa/core';
+import { ancestorPaths, isWithin } from '@skysa/core';
 import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
@@ -57,6 +57,18 @@ const opsFor = (db: QueueDb, noteId: string): PromiseExtended<OpQueueRecord[]> =
 
 const seqsOf = (ops: readonly OpQueueRecord[]): number[] =>
 	ops.flatMap((op) => (op.seq === undefined ? [] : [op.seq]));
+
+/** The connection's ops about one path, by the `path` index. */
+const atPath = (
+	db: QueueDb,
+	connectionId: string,
+	path: string
+): PromiseExtended<OpQueueRecord[]> =>
+	db.opQueue
+		.where('path')
+		.equals(path)
+		.filter((op) => op.connectionId === connectionId)
+		.toArray();
 
 const nothing = (): Queued => Dexie.Promise.resolve();
 
@@ -147,20 +159,44 @@ export const queueRestore = (db: QueueDb, note: NoteRecord): Queued =>
  * this `mkdir` and undo it.
  */
 export const queueMkdir = (db: QueueDb, connectionId: string, path: string): Queued =>
+	// By the `path` index, and only the paths that can hold such an `rmdir`:
+	// this runs once per notebook a create or a move brings into being, and a
+	// device with a long offline backlog would otherwise read the whole queue
+	// each time.
+	db.opQueue
+		.where('path')
+		.anyOf([path, ...ancestorPaths(path)])
+		.filter((op) => op.connectionId === connectionId && op.op === 'rmdir')
+		.toArray()
+		.then((stale) =>
+			db.opQueue
+				.bulkDelete(seqsOf(stale))
+				.then(() => atPath(db, connectionId, path))
+				.then((queued) =>
+					queued.some((op) => op.op === 'mkdir')
+						? undefined
+						: add(db, { connectionId, op: 'mkdir', path })
+				)
+		);
+
+/**
+ * A notebook gone from this device before its `mkdir` was ever sent. Withdrawn
+ * rather than left to go up: sent, it would make a directory on the remote that
+ * nothing here will ever remove — the row is gone, so no `rmdir` can be queued
+ * for it, and the next pull reports the directory and makes the notebook again,
+ * empty. Everything under the path goes with it, for the same reason.
+ *
+ * The notes' own ops stay: a note in there may have been moved out rather than
+ * deleted, and a write that finds no parent makes it (`runOp`).
+ */
+export const withdrawMkdirs = (db: QueueDb, connectionId: string, path: string): Queued =>
 	db.opQueue
 		.where('connectionId')
 		.equals(connectionId)
+		.filter((op) => op.op === 'mkdir' && isWithin(op.path, path))
 		.toArray()
-		.then((queued) => {
-			const stale = queued.filter((op) => op.op === 'rmdir' && isWithin(path, op.path));
-			return db.opQueue
-				.bulkDelete(seqsOf(stale))
-				.then(() =>
-					queued.some((op) => op.op === 'mkdir' && op.path === path)
-						? undefined
-						: add(db, { connectionId, op: 'mkdir', path })
-				);
-		});
+		.then((inside) => db.opQueue.bulkDelete(seqsOf(inside)))
+		.then(() => undefined);
 
 /**
  * A notebook removed from this device, whose directory the remote still has —
@@ -178,12 +214,12 @@ export const queueRmdir = (
 ): Queued =>
 	remoteId === undefined
 		? nothing()
-		: db.opQueue
-				.where('connectionId')
-				.equals(connectionId)
-				.toArray()
-				.then((queued) =>
-					queued.some((op) => op.op === 'rmdir' && op.remoteId === remoteId)
-						? undefined
-						: add(db, { connectionId, op: 'rmdir', path, remoteId })
-				);
+		: atPath(db, connectionId, path).then((queued) =>
+				// By path and id together. By the id alone, a folder another
+				// device renamed — the same directory at a second path — would
+				// find its `rmdir` already queued for a path it has left, where
+				// the engine refuses it, and be removed from neither.
+				queued.some((op) => op.op === 'rmdir' && op.remoteId === remoteId)
+					? undefined
+					: add(db, { connectionId, op: 'rmdir', path, remoteId })
+			);

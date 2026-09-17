@@ -271,6 +271,27 @@ export type PullChange =
 			 */
 			kind: 'delete-folder';
 			path: string;
+			/**
+			 * Notes the cascade must leave exactly as they are, by id. A row is
+			 * under the folder because the user moved the note there, and until
+			 * that rename runs the file is still where it was — so the folder
+			 * going says nothing at all about it. Taking the row would drop a
+			 * note whose file the remote still holds, and nothing would mention
+			 * that file again, since the cursor has moved past it: only a
+			 * re-scan would bring the note back.
+			 *
+			 * The engine names them rather than the store working it out,
+			 * because the queue is read once for the batch and whether the note
+			 * is still under the folder at all is the batch's answer, not the
+			 * store's. A note whose file *is* inside the folder is not here: it
+			 * goes with the folder, and the queued rename finds nothing left to
+			 * move.
+			 *
+			 * An id that is not there, or not under the folder, is ignored. The
+			 * batch is decided before it is applied, and must not be rejected
+			 * for saying more than the store needs.
+			 */
+			keep?: readonly string[];
 	  }>
 	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>;
 

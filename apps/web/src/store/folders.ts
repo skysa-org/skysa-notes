@@ -15,7 +15,7 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { foldPath, freePath } from './naming.js';
-import { queueDelete, queueMkdir, queueMove, queueRmdir } from './queue.js';
+import { queueDelete, queueMkdir, queueMove, queueRmdir, withdrawMkdirs } from './queue.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -350,13 +350,19 @@ export const moveFolder = async (
 			await queueMove(db, note, from.get(note.id) ?? note.path);
 		}, Promise.resolve());
 
+		// A notebook whose `mkdir` never went up leaves no directory to remove,
+		// and its op has to go: sent now, it would make one at a path this
+		// device no longer has a row for, and so can never ask to have removed.
+		// After the `mkdir`s above, which are about the destination.
+		await withdrawMkdirs(db, connectionId, source);
+
 		// Last, so the notes are out of it before the engine looks: the moves
 		// above are what leave the old directory empty, and the engine refuses
 		// to remove one that still holds a file. Only the outermost — the
-		// subdirectories inside it go with it on every provider — and only when
-		// it is not inside the destination, where a notebook moved into one of
-		// its own subfolders would otherwise ask for its new home to be removed.
-		if (!isWithin(source, target)) await queueRmdir(db, connectionId, source, left);
+		// subdirectories inside it go with it on every provider. A notebook
+		// moved up into what it was in leaves a directory too: the source is a
+		// subdirectory of the destination, and removing it cannot touch it.
+		await queueRmdir(db, connectionId, source, left);
 	});
 };
 
@@ -399,6 +405,11 @@ export const deleteFolder = async (
 			await pending;
 			await queueDelete(db, note);
 		}, Promise.resolve());
+
+		// A notebook the remote never heard of: its `mkdir` is withdrawn rather
+		// than sent, or it would make a directory this device can no longer ask
+		// to have removed, and the next pull would make the notebook again.
+		await withdrawMkdirs(db, connectionId, target);
 
 		// Behind the deletes, which are what empty the directory. The engine
 		// refuses to remove one that still holds a file, so a note another

@@ -525,6 +525,28 @@ export const describeSyncStoreContract = (
 				expect(await store.noteById('n3')).toBeDefined();
 			});
 
+			it('leaves the notes a cascade names alone, remote and all', async () => {
+				// The note is in `Work` because the user moved it there, and the
+				// rename has not been pushed: its file is still at `a.md`, which
+				// the folder's deletion says nothing about. Taking the row would
+				// lose a note the remote still holds — nothing mentions that
+				// file again, so only a re-scan would find it.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+				await seed({ id: 'n2', path: 'Work/b.md', content: 'x\n', remoteId: 'r2' });
+
+				await store.applyPull({
+					changes: [{ kind: 'delete-folder', path: 'Work', keep: ['n1', 'nope'] }],
+				});
+
+				const kept = await store.noteById('n1');
+				expect(kept?.path).toBe('Work/a.md');
+				expect(kept?.remoteId).toBe('r1');
+				expect(kept?.dirty).toBe(false);
+				expect(await store.noteById('n2')).toBeUndefined();
+			});
+
 			it('keeps an edited note when its folder is deleted remotely', async () => {
 				// Never lose user data (CLAUDE.md). The folder is gone, but the
 				// edit in it was never anywhere else, so the note survives as a

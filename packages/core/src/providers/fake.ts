@@ -73,6 +73,11 @@ export interface FakeProviderOptions {
 	 * report every affected entry. One knob, both behaviours.
 	 */
 	folderChanges?: 'folder-only' | 'recursive';
+	/**
+	 * Whether a listing is the whole truth about a folder. Set false to stand in
+	 * for Drive, whose scope hides what the user put there (`StorageProvider`).
+	 */
+	listsEverything?: boolean;
 }
 
 export interface FakeProvider extends StorageProvider {
@@ -99,6 +104,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		tickMs = 1000,
 		pageSize = Number.POSITIVE_INFINITY,
 		folderChanges = 'folder-only',
+		listsEverything = true,
 	} = options;
 
 	/** Normalized path → node. The root is not stored; it always exists. */
@@ -402,6 +408,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	return {
 		kind,
+		listsEverything,
 		ensureRoot,
 		list,
 		read,
