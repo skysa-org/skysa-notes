@@ -1,5 +1,5 @@
 import { createApp, type CreateAppOptions } from '../src/app.js';
-import { fromBase64Url, toBase64Url } from '../src/crypto.js';
+import { fromBase64Url, importSecretKey, openOAuthSecret, toBase64Url } from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
 import { flowCookieName, sessionCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
@@ -10,6 +10,24 @@ import { createD1 } from './d1.js';
  */
 
 export const SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+
+/**
+ * The secret a connection row holds, opened. `gdrive.test.ts` and
+ * `onedrive.test.ts` each had their own copy of this, and `connect.test.ts`
+ * and `token.test.ts` open a row inline in three more places; a caller that
+ * needs the plaintext to prove it is *not* in a response is what made one copy
+ * worth having.
+ */
+export const secretOf = async (row: {
+	secretCiphertext: string;
+	secretIv: string;
+	secretKeyId: string;
+}) =>
+	openOAuthSecret(await importSecretKey(SECRETS_KEY, 'k1'), {
+		ciphertext: row.secretCiphertext,
+		iv: row.secretIv,
+		keyId: row.secretKeyId,
+	});
 
 export const testConfig = (
 	overrides: Partial<AppConfig> = {},

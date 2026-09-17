@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
-import { buildApp, cookieNames, createJar, testConfig } from './harness.js';
+import { buildApp, cookieNames, createJar, secretOf, testConfig } from './harness.js';
 
 /**
  * Listing and removing connections. The rule these tests exist to hold: a
@@ -10,6 +10,44 @@ import { buildApp, cookieNames, createJar, testConfig } from './harness.js';
  */
 
 const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
+
+/** Every key in a response, however deep, since a secret can be nested. */
+const namesIn = (value: unknown): string[] => {
+	if (Array.isArray(value)) return value.flatMap(namesIn);
+	if (typeof value !== 'object' || value === null) return [];
+	return Object.entries(value).flatMap(([key, inner]) => [key, ...namesIn(inner)]);
+};
+
+/**
+ * `iv` has to be a word of the key rather than a substring of it: `driveId`,
+ * `archive` and `privilege` all hold those two letters and none is a secret.
+ * Asked as a regex this kept getting the boundary wrong, so the key is split
+ * into words instead — on anything that is not a letter, and at a camel hump —
+ * and each word compared. That names `iv`, `IV`, `iv_hex`, `ivHex`, `gcmIv`
+ * and `aesGcmIV`, and leaves `driveId` alone. (`secretIv` is caught by
+ * `secret`, not by this.)
+ */
+const WORDS = /[^a-zA-Z]+|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/;
+
+const promisesASecret = (key: string): boolean =>
+	/secret|cipher|refresh|token|credential|password/i.test(key) ||
+	key.split(WORDS).some((word) => word.toLowerCase() === 'iv');
+
+/**
+ * Every field the list is meant to return, and nothing else. A denylist of
+ * suspicious names only catches a secret that is named like one: a fourth
+ * sealed column surfaced as `authBlob` would pass `promisesASecret` and hold a
+ * refresh token. This fails on sight for anything new, whatever it is called.
+ */
+const PUBLIC_KEYS = [
+	'accountId',
+	'createdAt',
+	'displayName',
+	'id',
+	'lastUsedAt',
+	'provider',
+	'rootId',
+];
 
 describe('GET /api/connections', () => {
 	it('describes the connection without describing its secret', async () => {
@@ -28,10 +66,31 @@ describe('GET /api/connections', () => {
 			rootId: null,
 		});
 
+		// What this connection's secret actually is, sealed and in the clear,
+		// rather than words that look like a secret. The serialized body used
+		// to be searched for "iv" among others, which failed about one run in
+		// two hundred for no reason: a connection id is `randomBase64Url(16)`,
+		// so two given letters turn up in one now and then. Every needle here
+		// is long enough that a random id cannot produce it — which rules out
+		// the key id (`k1` in these tests), and it is not a secret anyway: it
+		// names which key sealed the row.
+		const [stored] = await rows(app.db);
+		if (stored === undefined) throw new Error('no connection row');
 		const serialized = JSON.stringify(body);
-		for (const leak of ['refresh', 'ciphertext', 'secret', 'iv', 'keyId']) {
-			expect(serialized).not.toContain(leak);
+		// The plaintext comes out of the row rather than being typed here, so a
+		// renamed stub token cannot quietly stop testing anything.
+		const { refreshToken } = await secretOf(stored);
+		for (const secret of [stored.secretCiphertext, stored.secretIv, refreshToken]) {
+			expect(secret.length).toBeGreaterThan(8);
+			expect(serialized).not.toContain(secret);
 		}
+		// Exactly these fields, so a column added to the table and passed
+		// through fails here whatever it is called...
+		expect(Object.keys(body.connections[0] ?? {}).sort()).toEqual(PUBLIC_KEYS);
+		// ...and nothing is offered under a name that promises a secret at any
+		// depth, which the key list above cannot reach: a nested
+		// `credential: { refreshToken }` would pass every check before it.
+		expect(namesIn(body).filter(promisesASecret)).toEqual([]);
 	});
 
 	it('refuses an anonymous caller', async () => {
