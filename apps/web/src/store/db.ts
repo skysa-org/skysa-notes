@@ -90,6 +90,14 @@ export interface SyncStateRecord {
 	/** Random per browser install, reported in the marker file for debugging. */
 	clientId: string;
 	/**
+	 * The provider access token `apps/api` last minted, so a reload does not
+	 * need a round trip (docs/PLAN.md §8). Short-lived; never a refresh token,
+	 * which never leaves the server. Never in localStorage.
+	 */
+	accessToken?: string;
+	/** Epoch milliseconds. */
+	accessTokenExpiresAt?: number;
+	/**
 	 * Resumed with rows that still name remote files, and not yet checked
 	 * against the remote (`verifyResume` in `store/connection.ts`). The sync
 	 * store writes nothing for the connection until it is.
