@@ -344,6 +344,27 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 
 	/**
+	 * Whether a note's file is there now, asked of the provider by id. For the
+	 * few decisions a feed cannot settle; a whole read, since the port has no
+	 * cheaper question, and rare enough not to matter. Anything short of the provider saying it is not —
+	 * no file to ask about — keeps the note, and a read that fails for any other
+	 * reason fails the pull, which is tried again.
+	 */
+	const stillThere = async ({
+		at,
+		remoteId,
+	}: Pick<Placement, 'at' | 'remoteId'>): Promise<boolean> => {
+		if (at === undefined || remoteId === undefined) return true;
+		return provider.read({ path: at, remoteId }).then(
+			() => true,
+			(error: unknown) => {
+				if (isNotFoundError(error)) return false;
+				throw error;
+			}
+		);
+	};
+
+	/**
 	 * The note an entry is about. `remoteId` is the identity; the path is the
 	 * fallback, and it is what lets a note created here be recognised when its
 	 * own first push arrives back, and a file deleted and re-created at the same
@@ -361,6 +382,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * still has the note sitting at its old path, so a *different* file arriving
 	 * there is matched to it, and the note is written over with somebody else's
 	 * bytes while its own file goes on existing under the new name.
+	 *
+	 * Nor, below: a note the user has deleted here, one they have renamed onto
+	 * the path, or one whose own file is still there.
 	 */
 	const noteForEntry = async (
 		entry: RemoteEntry,
@@ -394,13 +418,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// A scan says what exists and never what was removed, so a file replaced
 		// at this path while the cursor was dead arrives with nothing about the
 		// old one, and the path is the only thing tying them together. A feed
-		// does say: the note's own file is only gone if this batch says so.
-		// Otherwise it is still there, unmentioned because unchanged, and this is
-		// a different file that has taken the name — a note renamed here onto a
-		// name another device has just used.
-		return batch.scanning || batch.doomed.ids.has(own) || batch.doomed.paths.has(entry.path)
-			? byPath
-			: undefined;
+		// usually says so, and then the note becomes the file that replaced its
+		// own. When it does not — a provider need not report the deletion of a
+		// file replaced at its path — the provider is asked. Still there, it is
+		// unmentioned because unchanged, and this is a different file that has
+		// taken the name; claimed, the note forgets its own for ever.
+		if (batch.scanning || batch.doomed.ids.has(own) || batch.doomed.paths.has(entry.path)) {
+			return byPath;
+		}
+		return (await stillThere({ at: byPath.path, remoteId: own })) ? undefined : byPath;
 	};
 
 	/**
@@ -557,15 +583,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		entry: DeletedEntry,
 		batch: Batch,
 		decided: readonly PullChange[]
-	): Promise<SyncNote | undefined> => {
+	): Promise<{ note?: SyncNote; byOldName?: true }> => {
 		if (entry.remoteId !== undefined) {
 			const { remoteId } = entry;
-			return (
+			const note =
 				(await store.noteByRemoteId(remoteId)) ??
-				madeInBatch(decided).find((note) => note.remoteId === remoteId)
-			);
+				madeInBatch(decided).find((each) => each.remoteId === remoteId);
+			return note === undefined ? {} : { note };
 		}
-		if (entry.path === undefined) return undefined;
+		if (entry.path === undefined) return {};
 		const { path } = entry;
 		const found = (await notesEndingIn(parentPath(path), decided)).find(
 			(each) => each.path === path
@@ -575,30 +601,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// often this device's own delete of the note that had the name, coming
 		// back — so letting go of it loses a note whose file nobody deleted.
 		const here = found !== undefined && !batch.renaming.has(found.id) ? found : undefined;
-		if (here?.remoteId !== undefined) return here;
-		// That note is found at the old name instead, which is where the file
-		// this is about was. Left alone, the note stays here for ever, and its
-		// queued rename has nothing to move. Ahead of a note here that has never
-		// had a file: the user made it at the name the rename freed.
+		if (here?.remoteId !== undefined) return { note: here };
+		// That note is found at the old name instead, which is where its file
+		// was when the rename was queued. Left alone, the note stays here for
+		// ever, and its queued rename has nothing to move. Ahead of a note here
+		// that has never had a file: the user made it at the name the rename
+		// freed. But the file may have moved on since — another device renamed
+		// it, and the queue still names the old path — so the caller asks.
 		const renamed = [...batch.renaming].find(([, from]) => from === path)?.[0];
-		return renamed === undefined ? here : store.noteById(renamed);
-	};
-
-	/**
-	 * Whether the file a note points at, once this batch's decisions are
-	 * applied, is there now. Anything short of the provider saying it is not —
-	 * no file to ask about — keeps the note, and a read that fails for any other
-	 * reason fails the pull, which is tried again.
-	 */
-	const stillThere = async ({ at, remoteId }: Placement): Promise<boolean> => {
-		if (at === undefined || remoteId === undefined) return true;
-		return provider.read({ path: at, remoteId }).then(
-			() => true,
-			(error: unknown) => {
-				if (isNotFoundError(error)) return false;
-				throw error;
-			}
-		);
+		const note = renamed === undefined ? undefined : await store.noteById(renamed);
+		if (note !== undefined) return { note, byOldName: true };
+		return here === undefined ? {} : { note: here };
 	};
 
 	const decideDeleted = async (
@@ -637,7 +650,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// on being held. There is no need to fall back to `store.noteByPath`:
 		// `notesEndingIn` starts from the store's own rows under that folder, so
 		// a note that has not been moved is found by it too.
-		const local = await deletedNote(entry, batch, decided);
+		const { note: local, byOldName } = await deletedNote(entry, batch, decided);
 
 		if (await movedNotDeleted(path, remoteId, local, live, at)) return [];
 		if (local !== undefined) {
@@ -663,7 +676,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (remoteId !== undefined) {
 				return remoteNow(local, decided) === remoteId ? [forgetNote(local)] : [];
 			}
-			if (!reestablished(decided).notes.has(local.id)) return [forgetNote(local)];
+			if (byOldName !== true && !reestablished(decided).notes.has(local.id)) {
+				return [forgetNote(local)];
+			}
 			return (await stillThere(placement(local, decided))) ? [] : [forgetNote(local)];
 		}
 
@@ -1125,21 +1140,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	/**
 	 * Nothing to do for a file gone by the time it is read (see `decideFile`),
-	 * except for a note held by that very file and about to follow it to a new
-	 * path. The deletion arriving behind the entry is at that new path, where
-	 * the note never got to — and one with no id, which is all Dropbox's
-	 * `DeletedMetadata` is, has nothing else to find the note by. The file named
-	 * by its id is gone, so the note is let go of here.
+	 * except for a note held by that very file when the batch also reports a
+	 * deletion at the entry's path. That deletion may be at a path the note
+	 * never got to — the entry would have moved it there — and one with no id,
+	 * which is all Dropbox's `DeletedMetadata` is, has nothing else to find the
+	 * note by. The file named by its id is gone, so the note is let go of here.
+	 * Without that deletion a read's "not found" is not taken as one: nothing
+	 * would ever bring back a note let go of over a read that answered wrongly.
 	 */
 	const goneBeforeRead = (
 		local: SyncNote | undefined,
 		removed: boolean,
-		entry: RemoteEntry
+		entry: RemoteEntry,
+		batch: Batch
 	): PullChange[] =>
 		local !== undefined &&
 		!removed &&
 		local.remoteId === entry.remoteId &&
-		local.path !== entry.path
+		batch.doomed.paths.has(entry.path)
 			? [forgetNote(local)]
 			: [];
 
@@ -1209,7 +1227,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isNotFoundError(error)) return undefined;
 			throw error;
 		});
-		if (found === undefined) return goneBeforeRead(local, removed, entry);
+		if (found === undefined) return goneBeforeRead(local, removed, entry, batch);
 		const { content } = found;
 		const stranger = local !== undefined && !removed && isStranger(local, content);
 		if (local === undefined || stranger) {
@@ -1342,8 +1360,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// one a sync took away, and nothing in this batch changes it.
 		const queue = await store.pendingOps();
 
-		// Everything this batch says still exists, and where, so a deletion
-		// elsewhere in it can be recognised as the first half of a move.
 		const renaming = queue.reduce<Map<string, string>>(
 			(map, op) =>
 				op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
@@ -1352,6 +1368,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			new Map()
 		);
 		const batch: Batch = {
+			// Everything this batch says still exists, and where, so a deletion
+			// elsewhere in it can be recognised as the first half of a move.
 			live: liveEntries(entries),
 			claimed: new Set([...claimedPaths(entries), ...renaming.values()]),
 			doomed: doomedIn(entries),

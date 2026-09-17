@@ -158,9 +158,12 @@ const liveAt = (d: Device, path: string): SyncNote => {
 	return note;
 };
 
-/** Every row's path, tombstones included: the web app keeps a deleted note's name. */
-const taken = (d: Device, path: string): boolean =>
-	d.store.notes().some((note) => note.path === path);
+/**
+ * A name a live note holds. Not a deleted one's: the web app frees that name
+ * at once (`takenNamesIn`), and a note made there sits beside the tombstone
+ * until its delete has gone.
+ */
+const taken = (d: Device, path: string): boolean => live(d).some((note) => note.path === path);
 
 const queueWrite = (d: Device, note: SyncNote): void => {
 	const queued = d.store.ops().some((op) => op.op === 'write' && op.noteId === note.id);
@@ -206,11 +209,17 @@ const remove = (d: Device, path: string): void => {
 
 // ---------------------------------------------------------------- the checks
 
+/**
+ * A sync that did not fail. `retry` is allowed: a push that meets a file of
+ * ours at a note's path moves the note aside and answers `retry`, to write it
+ * where it now is next time. Anything that never succeeds keeps an op queued,
+ * which `quiet` does not accept.
+ */
 const synced = async (d: Device, trace: () => string = () => ''): Promise<SyncOutcome> => {
 	const outcome = await d.engine.sync();
-	expect(outcome, `${d.name}: ${outcome.error ?? ''}\n${trace()}`).toMatchObject({
-		status: 'ok',
-	});
+	expect(['ok', 'retry'], `${d.name}: ${outcome.error ?? ''}\n${trace()}`).toContain(
+		outcome.status
+	);
 	return outcome;
 };
 
@@ -399,16 +408,10 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 
 		// Every seed that has failed is a test in `engine.test.ts` too. A new
 		// failure prints the steps that led to it.
-		it.each(Array.from({ length: 100 }, (__, seed) => seed + 1))(
+		it.each(Array.from({ length: 120 }, (__, seed) => seed + 1))(
 			'lose nothing and agree, seed %i',
 			run
 		);
-
-		// A known gap (docs/PLAN.md §7): a second rename sends the note's move to
-		// the back of the queue, behind a note the user has since made at the
-		// old name. That note's write finds the file still there and conflicts,
-		// every time, ahead of the move that would free the name.
-		it.fails('lose nothing and agree, seed 115', () => run(115));
 	});
 });
 
