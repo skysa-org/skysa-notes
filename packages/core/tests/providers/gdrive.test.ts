@@ -422,6 +422,25 @@ describe('the app folder', () => {
 		).toHaveLength(1);
 	});
 
+	it('made at a first connect is the one the first pull finds, while the search lags', async () => {
+		// The scheduler's ensureRoot, then a pull from nothing seconds later: the
+		// tag search does not list a folder made a moment ago.
+		const world = driveWorld();
+		world.destroy(world.root.id);
+		world.destroy('marker');
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+				? new Response(JSON.stringify({ files: [] }))
+				: undefined;
+
+		const { rootId } = await world.provider.ensureRoot();
+		const { entries } = await drainChanges(world.provider);
+
+		const roots = world.files.filter((file) => file.appProperties?.notesapp === 'root');
+		expect(roots.map((root) => [root.id, root.trashed === true])).toEqual([[rootId, false]]);
+		expect(livePaths(entries)).toEqual([MARKER_FILE]);
+	});
+
 	it('in the trash resets the cursor, and the next round makes another', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);
@@ -430,6 +449,19 @@ describe('the app folder', () => {
 		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
 		const fresh = await drainChanges(world.provider);
 		expect(livePaths(fresh.entries)).toEqual([]);
+		expect(
+			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
+		).toHaveLength(1);
+	});
+
+	it('deleted for good, trash emptied, is made again by the round after the reset', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.destroy(world.root.id);
+		world.destroy('marker');
+
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+		await drainChanges(world.provider);
 		expect(
 			world.files.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
 		).toHaveLength(1);

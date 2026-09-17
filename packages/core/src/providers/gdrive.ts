@@ -300,8 +300,12 @@ interface Fetched {
 export const createGDriveProvider = (options: GDriveProviderOptions): StorageProvider => {
 	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
 	const now = options.now ?? (() => new Date());
-	/** The app folder's id, found again at the start of every `changes` call. */
-	const rootBox = new Map<'id', string>();
+	/**
+	 * `id`: the app folder's id, found again at the start of every `changes`
+	 * call. `known`: the last one this adapter made or found, kept across that,
+	 * for a search that has not caught up with it yet (`withKnown`).
+	 */
+	const rootBox = new Map<'id' | 'known', string>();
 
 	const failureOf = async (response: Response): Promise<DriveFailure> => {
 		const text = await response.text().catch(() => '');
@@ -447,7 +451,25 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			throw new Error('gdrive returned an app folder with no id');
 		}
 		rootBox.set('id', root.id);
+		rootBox.set('known', root.id);
 		return root.id;
+	};
+
+	/**
+	 * The tagged folders the search lists, and the one this adapter last made or
+	 * found if the search leaves it out and it is not in the trash. A folder
+	 * made a moment ago need not be listed yet: on a first connect the
+	 * scheduler's `ensureRoot` makes one and the first pull looks again seconds
+	 * later, and without this a lagging search would have that pull make a
+	 * second.
+	 */
+	const withKnown = async (listed: DriveFile[]): Promise<DriveFile[]> => {
+		const known = rootBox.get('known');
+		if (known === undefined || listed.some((root) => root.id === known)) return listed;
+		const result = await attempt<DriveFile>('GET', fileUrl(known));
+		if (!result.ok && result.failure.status !== 404) raise(result.failure);
+		if (!result.ok || result.value.trashed === true) return listed;
+		return byAge([...listed, result.value]);
 	};
 
 	/**
@@ -476,10 +498,13 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * from the trash comes back beside the one made while it was gone, holding
 	 * notes nobody would otherwise read again. Names that meet in the move are
 	 * separated by the scan that follows, as any duplicate is.
+	 *
+	 * The folder this adapter last made or found counts even when the search
+	 * does not list it yet (`withKnown`).
 	 */
 	const establishRoot = async (): Promise<string> => {
 		rootBox.delete('id');
-		const found = await taggedRoots();
+		const found = await withKnown(await taggedRoots());
 		const made =
 			found.length > 0
 				? []
