@@ -49,6 +49,17 @@ export class UnboundConnectionError extends Error {
 	}
 }
 
+/** The connection was resumed and the remote not yet checked (`verifyResume`). */
+export class UnverifiedResumeError extends Error {
+	override readonly name = 'UnverifiedResumeError';
+
+	constructor(readonly connectionId: string) {
+		super(
+			`Connection ${connectionId} has not been checked against its remote since it resumed`
+		);
+	}
+}
+
 export interface DexieSyncStoreOptions {
 	connectionId: string;
 	/** For `createdAt` and friends; injectable so tests are deterministic. */
@@ -148,9 +159,11 @@ export const createDexieSyncStore = (
 	 */
 	const inTransaction = <T>(work: () => Promise<T>): Promise<T> =>
 		db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState], async () => {
-			if ((await db.syncState.get(connectionId)) === undefined) {
-				throw new UnboundConnectionError(connectionId);
-			}
+			const state = await db.syncState.get(connectionId);
+			if (state === undefined) throw new UnboundConnectionError(connectionId);
+			// A scan before `verifyResume` has checked the remote could delete
+			// every note an emptied app folder no longer holds.
+			if (state.resumeUnverified === true) throw new UnverifiedResumeError(connectionId);
 			return work();
 		});
 

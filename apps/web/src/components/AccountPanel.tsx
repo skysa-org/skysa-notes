@@ -2,11 +2,19 @@ import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useRef, useState } from 'react';
 
-import { api, type ApiClient, ApiError, type InstanceConfig, type Refusal } from '../api/client.js';
+import {
+	api,
+	type ApiClient,
+	ApiError,
+	type Connection,
+	type InstanceConfig,
+	type Refusal,
+} from '../api/client.js';
 import { unbindConnection } from '../store/connection.js';
 import { db as defaultDb, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import {
 	type AccountState,
+	adoptAccount,
 	CONNECTABLE,
 	disconnectAccount,
 	PROVIDER_LABELS,
@@ -132,7 +140,8 @@ const Connected = ({ client, database, bound, config, account, returnTo }: Conne
 	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
 	const state = answer(account);
 	const displayName =
-		state?.kind === 'connected' && state.connection.id === bound.connectionId
+		(state?.kind === 'connected' || state?.kind === 'other-account') &&
+		state.connection.id === bound.connectionId
 			? state.connection.displayName
 			: null;
 
@@ -225,6 +234,85 @@ const Connected = ({ client, database, bound, config, account, returnTo }: Conne
 	);
 };
 
+interface OtherAccountProps {
+	client: Client;
+	database: NotesDatabase;
+	connection: Connection;
+	onSettled: (state: AccountState) => void;
+}
+
+/**
+ * Signed in with an account the notes here do not belong to. Nothing has been
+ * bound: the user either copies the notes into it or lets it go.
+ */
+const OtherAccount = ({ client, database, connection, onSettled }: OtherAccountProps) => {
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	const label = PROVIDER_LABELS[connection.provider];
+	const name = connection.displayName ?? `this ${label} account`;
+
+	const run = (work: () => Promise<AccountState | string>) => {
+		setBusy(true);
+		setProblem(null);
+		void work()
+			.then((outcome) => {
+				if (typeof outcome === 'string') setProblem(outcome);
+				else onSettled(outcome);
+			})
+			.catch(() => {
+				setProblem('That did not work. Nothing has changed; try again.');
+			})
+			.finally(() => {
+				setBusy(false);
+			});
+	};
+
+	return (
+		<section className="account" aria-label="Storage">
+			<p>
+				You connected {name}, but the notes on this device belong to another {label}{' '}
+				account.
+			</p>
+			<p className="muted">Syncing with {name} copies every note on this device into it.</p>
+			{problem !== null && (
+				<p className="muted" role="alert">
+					{problem}
+				</p>
+			)}
+			<div className="account-confirm">
+				<button
+					type="button"
+					disabled={busy}
+					onClick={() => {
+						run(() => adoptAccount(database, connection));
+					}}
+				>
+					Copy notes into {name}
+				</button>
+				<button
+					type="button"
+					className="ghost"
+					disabled={busy}
+					onClick={() => {
+						run(async () => {
+							const outcome = await disconnectAccount(
+								database,
+								client,
+								connection.id
+							);
+							return outcome.ok
+								? { kind: 'none' }
+								: 'The server would not disconnect it.';
+						});
+					}}
+				>
+					Disconnect {name}
+				</button>
+			</div>
+		</section>
+	);
+};
+
 export const AccountPanel = ({ client = api, database = defaultDb }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
@@ -256,6 +344,21 @@ export const AccountPanel = ({ client = api, database = defaultDb }: AccountPane
 
 	if (bound === undefined) return null;
 	const returnTo = returnPath(href);
+
+	const state = answer(account);
+	// Unless it has been answered already, in another tab.
+	if (state?.kind === 'other-account' && bound.state?.connectionId !== state.connection.id) {
+		return (
+			<OtherAccount
+				client={client}
+				database={database}
+				connection={state.connection}
+				onSettled={(settled) => {
+					setAccount({ kind: 'answered', value: settled });
+				}}
+			/>
+		);
+	}
 
 	return bound.state === undefined ? (
 		<NotConnected client={client} config={config} returnTo={returnTo} />

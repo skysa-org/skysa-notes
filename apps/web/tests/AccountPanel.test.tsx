@@ -15,13 +15,14 @@ import {
 	type InstanceConfig,
 } from '../src/api/client.js';
 import { AccountPanel } from '../src/components/AccountPanel.js';
-import { bindConnection } from '../src/store/connection.js';
+import { bindConnection, unbindConnection } from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
 } from '../src/store/db.js';
+import { createNote, getNote } from '../src/store/notes.js';
 
 const opened: NotesDatabase[] = [];
 
@@ -61,6 +62,7 @@ const dropbox = {
 	id: 'c1',
 	provider: 'dropbox' as const,
 	displayName: 'ada@example.com',
+	accountId: 'dbid:1',
 	createdAt: 1,
 	lastUsedAt: null,
 };
@@ -384,5 +386,111 @@ describe('AccountPanel, with an account connected', () => {
 		expect(link.getAttribute('href')).toBe(
 			'/api/auth/connect/dropbox/start?returnTo=%2F%3Ffolder%3DWork'
 		);
+	});
+});
+
+describe('AccountPanel, signed in with an account the notes do not belong to', () => {
+	const bob = { ...dropbox, id: 'c9', displayName: 'bob@example.com', accountId: 'dbid:2' };
+
+	/** Notes that belong to Ada's account, and a server that has Bob's. */
+	const adasNotes = async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await db.notes.update(note.id, { remoteId: 'id:1' });
+		await unbindConnection(db);
+		return { db, note };
+	};
+
+	it('asks before copying the notes into it, and copies them when told to', async () => {
+		const user = userEvent.setup();
+		const { db, note } = await adasNotes();
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [bob] }) }),
+			db
+		);
+
+		expect(await screen.findByText(/belong to another Dropbox account/)).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+
+		await user.click(screen.getByRole('button', { name: 'Copy notes into bob@example.com' }));
+
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe('c9');
+		expect((await getNote(db, note.id))?.remoteId).toBeUndefined();
+	});
+
+	it('lets it go instead, keeping the notes as they are', async () => {
+		const user = userEvent.setup();
+		const { db, note } = await adasNotes();
+		const disconnect = vi.fn<Client['disconnect']>(() =>
+			Promise.resolve({ ok: true, value: { revoked: true } })
+		);
+		renderPanel(
+			clientWith({
+				connections: () => Promise.resolve({ ok: true, value: [bob] }),
+				disconnect,
+			}),
+			db
+		);
+
+		await user.click(await screen.findByRole('button', { name: 'Disconnect bob@example.com' }));
+
+		expect(await screen.findByRole('link', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(disconnect).toHaveBeenCalledWith('c9');
+		expect((await getNote(db, note.id))?.remoteId).toBe('id:1');
+	});
+
+	it('stops asking once another tab has answered', async () => {
+		const { db } = await adasNotes();
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [bob] }) }),
+			db
+		);
+		expect(await screen.findByText(/belong to another Dropbox account/)).toBeTruthy();
+
+		await bindConnection(db, { connectionId: 'c9', provider: 'dropbox', accountId: 'dbid:2' });
+
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /Disconnect bob@example.com/ })).toBeNull();
+	});
+
+	it('says so when the server will not let it go, and still asks', async () => {
+		const user = userEvent.setup();
+		const { db } = await adasNotes();
+		renderPanel(
+			clientWith({
+				connections: () => Promise.resolve({ ok: true, value: [bob] }),
+				disconnect: () => Promise.resolve({ ok: false, refusal: 'not_entitled' }),
+			}),
+			db
+		);
+
+		await user.click(await screen.findByRole('button', { name: 'Disconnect bob@example.com' }));
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/would not disconnect it/);
+		expect(
+			screen.getByRole('button', { name: 'Copy notes into bob@example.com' })
+		).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('says so when letting it go is refused, and still asks', async () => {
+		const user = userEvent.setup();
+		const { db } = await adasNotes();
+		renderPanel(
+			clientWith({
+				connections: () => Promise.resolve({ ok: true, value: [bob] }),
+				disconnect: () => Promise.reject(new TypeError('offline')),
+			}),
+			db
+		);
+
+		await user.click(await screen.findByRole('button', { name: 'Disconnect bob@example.com' }));
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/Nothing has changed/);
+		expect(
+			screen.getByRole('button', { name: 'Copy notes into bob@example.com' })
+		).toBeTruthy();
 	});
 });

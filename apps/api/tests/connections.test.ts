@@ -24,6 +24,7 @@ describe('GET /api/connections', () => {
 		expect(body.connections[0]).toMatchObject({
 			provider: 'dropbox',
 			displayName: 'user@example.com',
+			accountId: 'dbid:1',
 			rootId: null,
 		});
 

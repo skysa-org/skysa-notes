@@ -29,6 +29,11 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 				id: row.id,
 				provider: row.provider,
 				displayName: row.displayName,
+				// The provider's own id for the account. Not a secret, and the
+				// client needs it: reconnecting the same account after a
+				// disconnect gets a new connection id, and only this says the
+				// notes it holds from before belong to it (docs/PLAN.md, Phase 2).
+				accountId: row.accountId,
 				rootId: row.rootId,
 				createdAt: row.createdAt.getTime(),
 				lastUsedAt: row.lastUsedAt?.getTime() ?? null,

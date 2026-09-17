@@ -89,6 +89,12 @@ export interface SyncStateRecord {
 	lastSyncAt?: number;
 	/** Random per browser install, reported in the marker file for debugging. */
 	clientId: string;
+	/**
+	 * Resumed with rows that still name remote files, and not yet checked
+	 * against the remote (`verifyResume` in `store/connection.ts`). The sync
+	 * store writes nothing for the connection until it is.
+	 */
+	resumeUnverified?: true;
 }
 
 /**

@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, NOTES_ACCOUNT_KEY, unbindConnection } from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
 } from '../src/store/db.js';
-import { createNote, getNote } from '../src/store/notes.js';
-import { disconnectAccount, reconcileAccount } from '../src/sync/account.js';
+import { createFolder } from '../src/store/folders.js';
+import { createNote, deleteNote, getNote } from '../src/store/notes.js';
+import { adoptAccount, disconnectAccount, reconcileAccount } from '../src/sync/account.js';
 
 const opened: NotesDatabase[] = [];
 
@@ -23,10 +24,15 @@ const freshDatabase = (): NotesDatabase => {
 	return db;
 };
 
-const connection = (id: string, provider: Connection['provider'] = 'dropbox'): Connection => ({
+const connection = (
+	id: string,
+	provider: Connection['provider'] = 'dropbox',
+	accountId: string | null = 'dbid:1'
+): Connection => ({
 	id,
 	provider,
 	displayName: 'Ada',
+	accountId,
 	createdAt: 1,
 	lastUsedAt: null,
 });
@@ -156,6 +162,24 @@ describe('reconciling while the device changes under it', () => {
 		expect(await activeConnectionId(db)).toBe('c2');
 	});
 
+	it('does not bind a connection bound and disconnected again while it was asking', async () => {
+		const db = freshDatabase();
+		const client = answeringAfter(
+			async () => {
+				await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+				await unbindConnection(db);
+			},
+			{ ok: true, value: [connection('c1')] },
+			{ ok: false, refusal: 'sign_in_required' }
+		);
+
+		const state = await reconcileAccount(db, client);
+
+		expect(state).toEqual({ kind: 'signed-out' });
+		expect(client.connections).toHaveBeenCalledTimes(2);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
 	it('gives up rather than chase a device that keeps changing', async () => {
 		const db = freshDatabase();
 		const flip = vi.fn(async () => {
@@ -173,6 +197,135 @@ describe('reconciling while the device changes under it', () => {
 
 		await expect(reconcileAccount(db, client)).rejects.toThrow();
 		expect(flip).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('reconciling after the device has belonged to an account', () => {
+	/** Notes synced with account `dbid:1` as connection `c1`, then disconnected. */
+	const disconnectedFrom = async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await unbindConnection(db);
+		return { db, note };
+	};
+
+	it('picks up with the same account, under the new id reconnecting gave it', async () => {
+		const { db, note } = await disconnectedFrom();
+
+		const state = await reconcileAccount(db, listing({ ok: true, value: [connection('c2')] }));
+
+		expect(state).toEqual({ kind: 'connected', connection: connection('c2') });
+		expect(await getNote(db, note.id)).toMatchObject({ connectionId: 'c2', remoteId: 'id:1' });
+	});
+
+	it('asks before copying the notes into a different account', async () => {
+		const { db, note } = await disconnectedFrom();
+		const other = connection('c9', 'dropbox', 'dbid:2');
+
+		const state = await reconcileAccount(db, listing({ ok: true, value: [other] }));
+
+		expect(state).toEqual({ kind: 'other-account', connection: other });
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect((await getNote(db, note.id))?.remoteId).toBe('id:1');
+	});
+
+	it('asks while the device is still bound to the account the notes belong to', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await createFolder(db, { name: 'Work' });
+		const other = connection('c9', 'dropbox', 'dbid:2');
+
+		const state = await reconcileAccount(db, listing({ ok: true, value: [other] }));
+
+		expect(state).toEqual({ kind: 'other-account', connection: other });
+		expect(await activeConnectionId(db)).toBe('c1');
+	});
+
+	it('does not ask when there is nothing on the device to copy', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const gone = await createNote(db, { title: 'Gone' });
+		// Deleted before it ever reached the remote: nothing is owed to a file.
+		await deleteNote(db, gone.id);
+		await unbindConnection(db);
+
+		const state = await reconcileAccount(
+			db,
+			listing({ ok: true, value: [connection('c9', 'dropbox', 'dbid:2')] })
+		);
+
+		expect(state.kind).toBe('connected');
+		expect(await activeConnectionId(db)).toBe('c9');
+	});
+
+	it('takes the notes’ own account when the server has more than one', async () => {
+		const { db } = await disconnectedFrom();
+
+		await reconcileAccount(
+			db,
+			listing({
+				ok: true,
+				value: [connection('c9', 'dropbox', 'dbid:2'), connection('c2')],
+			})
+		);
+
+		expect(await activeConnectionId(db)).toBe('c2');
+	});
+
+	it('copies the notes into the other account once the user says so', async () => {
+		const { db, note } = await disconnectedFrom();
+		const other = connection('c9', 'dropbox', 'dbid:2');
+
+		expect(await adoptAccount(db, other)).toEqual({ kind: 'connected', connection: other });
+
+		const row = await getNote(db, note.id);
+		expect(row?.connectionId).toBe('c9');
+		expect(row?.remoteId).toBeUndefined();
+		// They are its notes now, and come back to it without asking.
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:2');
+	});
+});
+
+describe('what reconciling learns and when it asks', () => {
+	it('learns the account of a connection bound before the API named it', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+
+		await reconcileAccount(db, listing({ ok: true, value: [connection('c1')] }));
+
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:1');
+	});
+
+	it('asks before dropping deletes owed to the account the notes belong to', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Gone' });
+		await db.notes.update(note.id, { remoteId: 'id:1' });
+		await deleteNote(db, note.id);
+		await unbindConnection(db);
+
+		const state = await reconcileAccount(
+			db,
+			listing({ ok: true, value: [connection('c9', 'dropbox', 'dbid:2')] })
+		);
+
+		expect(state.kind).toBe('other-account');
+	});
+
+	it('does not call an account the API does not name another one', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await createFolder(db, { name: 'Work' });
+		await unbindConnection(db);
+
+		const state = await reconcileAccount(
+			db,
+			listing({ ok: true, value: [connection('c2', 'dropbox', null)] })
+		);
+
+		expect(state.kind).toBe('connected');
 	});
 });
 
