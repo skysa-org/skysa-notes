@@ -468,13 +468,12 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	};
 
 	/**
-	 * The tagged folders the search lists, and the one this adapter last made or
-	 * found if the search leaves it out and it is not in the trash or out of
-	 * reach. A folder
-	 * made a moment ago need not be listed yet: on a first connect the
-	 * scheduler's `ensureRoot` makes one and the first pull looks again seconds
-	 * later, and without this a lagging search would have that pull make a
-	 * second.
+	 * The tagged folders the search lists, and the one this adapter last made,
+	 * found or confirmed if the search leaves it out and it is not in the trash
+	 * or out of reach. A folder made a moment ago need not be listed yet: on a
+	 * first connect the scheduler's `ensureRoot` makes one and the first pull
+	 * looks again seconds later, and without this a lagging search would have
+	 * that pull make a second.
 	 */
 	const withKnown = async (listed: DriveFile[]): Promise<DriveFile[]> => {
 		const known = rootBox.get('known');
@@ -592,7 +591,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		}
 		if (canonical === undefined) {
 			const result = await attempt<DriveFile>('GET', fileUrl(expected));
-			if (!result.ok && result.failure.status !== 404) raise(result.failure);
+			if (!result.ok && !outOfReach(result.failure)) raise(result.failure);
 			if (!result.ok || result.value.trashed === true) {
 				throw new CursorResetError('gdrive app folder is gone');
 			}

@@ -569,6 +569,22 @@ describe('the app folder', () => {
 		).toHaveLength(1);
 	});
 
+	it('out of reach for a stored cursor resets it, rather than failing every pull', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.hooks.intercept = (request) => {
+			if (request.url.searchParams.get('q')?.startsWith('appProperties has') === true) {
+				return new Response(JSON.stringify({ files: [] }));
+			}
+			return request.method === 'GET' &&
+				request.url.pathname.endsWith(`/files/${world.root.id}`)
+				? driveError(403, 'appNotAuthorizedToFile')
+				: undefined;
+		};
+
+		await expect(world.provider.changes(cursor)).rejects.toThrow(CursorResetError);
+	});
+
 	it('replaced by an earlier one resets a cursor written for the old one', async () => {
 		// Another device's folder, made first and only now visible: the feed
 		// says nothing about ours, but the search no longer means it.
