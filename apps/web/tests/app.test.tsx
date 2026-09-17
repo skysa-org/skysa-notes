@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
 import { bindConnection, unbindConnection } from '../src/store/connection.js';
@@ -18,9 +18,15 @@ import { createNote } from '../src/store/notes.js';
  * does nothing, or a folder that cannot survive a reload.
  */
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.unstubAllGlobals();
+});
 
 beforeEach(async () => {
+	// The storage panel asks the server on open. There is no server here, and
+	// an app that cannot reach it has to work anyway.
+	vi.stubGlobal('fetch', () => Promise.reject(new TypeError('offline')));
 	await db.notes.clear();
 	await db.folders.clear();
 	await db.opQueue.clear();
@@ -70,6 +76,37 @@ const looseRow = () => screen.queryByRole('button', { name: /Loose notes/ });
 const looseNote = (title: string) => createNote(db, { title });
 
 describe('the app', () => {
+	it('says how connecting storage went, once, and takes it out of the URL', async () => {
+		await createFolder(db, { name: 'Work' });
+		const router = await open('/?folder=Work&connect=ok', 'Work');
+
+		expect((await screen.findByRole('status')).textContent).toMatch(/Storage connected/);
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({ folder: 'Work' });
+		});
+	});
+
+	it('says why connecting storage did not happen', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=conflict', 'Work');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/already connected/);
+	});
+
+	it('puts the connect outcome away once the user moves on', async () => {
+		const user = userEvent.setup();
+		await createFolder(db, { name: 'Work' });
+		await createFolder(db, { name: 'Play' });
+		await open('/?folder=Play&connect=denied', 'Play');
+		expect(await screen.findByText(/was cancelled/)).toBeTruthy();
+
+		await user.click(screen.getByRole('button', { name: 'Work' }));
+
+		await waitFor(() => {
+			expect(screen.queryByText(/was cancelled/)).toBeNull();
+		});
+	});
+
 	it('keeps showing the notes when an account is connected, and when it is disconnected', async () => {
 		// The rows move to the new connection in one transaction; the app reads
 		// whichever connection is active, and follows without a reload.

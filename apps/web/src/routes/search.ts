@@ -13,7 +13,16 @@ export interface AppSearch {
 	/** Absent until the user picks a notebook; the first one is opened instead. */
 	folder?: string;
 	note?: string;
+	/**
+	 * How connecting a storage account went, set by `apps/api` on the way back
+	 * from the provider. Read once and removed.
+	 */
+	connect?: ConnectOutcome;
 }
+
+export const CONNECT_OUTCOMES = ['ok', 'denied', 'failed', 'conflict', 'signin'] as const;
+
+export type ConnectOutcome = (typeof CONNECT_OUTCOMES)[number];
 
 const ROOT_SEARCH = '/';
 
@@ -31,4 +40,7 @@ export const folderToSearch = (path: string): string => (path === ROOT ? ROOT_SE
 export const parseSearch = (search: Record<string, unknown>): AppSearch => ({
 	...(typeof search.folder === 'string' && search.folder !== '' ? { folder: search.folder } : {}),
 	...(typeof search.note === 'string' && search.note !== '' ? { note: search.note } : {}),
+	...(CONNECT_OUTCOMES.some((outcome) => outcome === search.connect)
+		? { connect: search.connect as ConnectOutcome }
+		: {}),
 });

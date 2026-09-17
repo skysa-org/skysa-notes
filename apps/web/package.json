@@ -24,7 +24,8 @@
 		"dexie": "^4.4.6",
 		"dexie-react-hooks": "^4.4.0",
 		"react": "^19.3.0",
-		"react-dom": "^19.3.0"
+		"react-dom": "^19.3.0",
+		"zod": "^4.6.5"
 	},
 	"devDependencies": {
 		"@tanstack/router-plugin": "^1.168.38",

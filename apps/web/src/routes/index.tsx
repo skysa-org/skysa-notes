@@ -1,7 +1,8 @@
 import { ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { AccountPanel } from '../components/AccountPanel.js';
 import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
@@ -10,7 +11,13 @@ import { createFolder, FolderExistsError } from '../store/folders.js';
 import { useFolderTree, useLooseNoteCount, useNote, useNotesInFolder } from '../store/hooks.js';
 import { createNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
-import { type AppSearch, folderFromSearch, folderToSearch, parseSearch } from './search.js';
+import {
+	type AppSearch,
+	type ConnectOutcome,
+	folderFromSearch,
+	folderToSearch,
+	parseSearch,
+} from './search.js';
 
 /**
  * The app. Which folder and note are open lives in the URL rather than in
@@ -18,9 +25,37 @@ import { type AppSearch, folderFromSearch, folderToSearch, parseSearch } from '.
  * where they were.
  */
 
+/** What to tell the user on the way back from connecting a storage account. */
+const connectMessage = (outcome: ConnectOutcome): string => {
+	switch (outcome) {
+		case 'ok':
+			return 'Storage connected. Your notes will sync with it.';
+		case 'denied':
+			return 'Connecting storage was cancelled.';
+		case 'conflict':
+			return 'That storage account is already connected to someone else on this server.';
+		case 'signin':
+			return 'Sign in before connecting storage.';
+		case 'failed':
+			return 'The storage account could not be connected. Try again.';
+	}
+};
+
 const Home = () => {
-	const { folder: requestedFolder, note: noteId } = Route.useSearch();
+	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
+
+	// Read once, as the app opens on the way back from the provider, and taken
+	// out of the URL straight away: left there, a reload or a bookmark would say
+	// "connected" again about a connection that may since have gone.
+	const [connectOutcome, setConnectOutcome] = useState(connect);
+	useEffect(() => {
+		if (connect === undefined) return;
+		void navigate({
+			search: ({ connect: _outcome, ...rest }) => rest,
+			replace: true,
+		});
+	}, [connect, navigate]);
 
 	const tree = useFolderTree();
 	const looseNoteCount = useLooseNoteCount();
@@ -44,6 +79,7 @@ const Home = () => {
 		// just tried, not about the app, and leaving it up means a message about a
 		// notebook they have since moved on from sits there for the session.
 		setProblem(null);
+		setConnectOutcome(undefined);
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
 
@@ -93,6 +129,11 @@ const Home = () => {
 					{problem}
 				</p>
 			)}
+			{connectOutcome !== undefined && (
+				<p className="banner" role={connectOutcome === 'ok' ? 'status' : 'alert'}>
+					{connectMessage(connectOutcome)}
+				</p>
+			)}
 			<div className="app-shell">
 				<Sidebar
 					tree={tree}
@@ -102,6 +143,7 @@ const Home = () => {
 					}}
 					onCreateFolder={onCreateFolder}
 					looseNoteCount={looseNoteCount}
+					footer={<AccountPanel />}
 				/>
 
 				<NoteList

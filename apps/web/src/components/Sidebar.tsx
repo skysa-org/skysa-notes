@@ -1,5 +1,5 @@
 import { ROOT } from '@skysa/core';
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
 
@@ -26,6 +26,8 @@ export interface SidebarProps {
 	 * in the normal case, and then there is no row.
 	 */
 	looseNoteCount: number | undefined;
+	/** Below the tree: where the storage account lives. */
+	footer?: ReactNode;
 }
 
 /**
@@ -121,6 +123,7 @@ export const Sidebar = ({
 	onSelectFolder,
 	onCreateFolder,
 	looseNoteCount,
+	footer,
 }: SidebarProps) => {
 	const [creating, setCreating] = useState(false);
 
@@ -190,6 +193,8 @@ export const Sidebar = ({
 					</li>
 				)}
 			</ul>
+
+			{footer}
 		</nav>
 	);
 };
