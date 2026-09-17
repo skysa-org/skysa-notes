@@ -72,7 +72,7 @@ const rawEnvSchema = z.object({
 	MICROSOFT_CLIENT_ID: z.string().optional(),
 	MICROSOFT_CLIENT_SECRET: z.string().optional(),
 	/** Entra tenant; `common` covers personal and work accounts. */
-	MICROSOFT_TENANT: z.string().default('common'),
+	MICROSOFT_TENANT: z.string().min(1).default('common'),
 	DROPBOX_CLIENT_ID: z.string().optional(),
 	DROPBOX_CLIENT_SECRET: z.string().optional(),
 });

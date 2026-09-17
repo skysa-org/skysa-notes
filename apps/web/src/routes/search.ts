@@ -20,7 +20,14 @@ export interface AppSearch {
 	connect?: ConnectOutcome;
 }
 
-export const CONNECT_OUTCOMES = ['ok', 'denied', 'failed', 'conflict', 'signin'] as const;
+export const CONNECT_OUTCOMES = [
+	'ok',
+	'denied',
+	'failed',
+	'conflict',
+	'signin',
+	'occupied',
+] as const;
 
 export type ConnectOutcome = (typeof CONNECT_OUTCOMES)[number];
 

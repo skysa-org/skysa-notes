@@ -5,7 +5,9 @@ import { z } from 'zod';
 import type { AppEnv } from '../app.js';
 import { openOAuthSecret, sealOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
-import { type FetchLike, refreshAccessToken } from '../oauth/dropbox.js';
+import { logFailure } from '../log.js';
+import { oauthFor } from '../oauth/providers.js';
+import { type FetchLike, isGrantRefused } from '../oauth/types.js';
 import { currentUserId } from '../session.js';
 
 /**
@@ -46,8 +48,11 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 			return c.json({ error: 'not_found' }, 404);
 		}
 
-		const credentials = config.oauth.dropbox;
-		if (credentials === undefined) return c.json({ error: 'provider_not_configured' }, 501);
+		// A connection to a provider the operator has since turned off cannot be
+		// refreshed from here, whatever the reason; the operator has to act.
+		const resolved = oauthFor(config, connection.provider);
+		if (!resolved.ok) return c.json({ error: 'provider_not_configured' }, 501);
+		const { client, credentials } = resolved;
 
 		// A row sealed under a key this deployment no longer holds cannot be
 		// recovered here, and the client can do nothing about it by retrying. It
@@ -59,19 +64,29 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		}).catch(() => undefined);
 		if (secret === undefined) return c.json({ error: 'reauthorize_required' }, 401);
 
-		const tokens = await refreshAccessToken(doFetch, {
-			clientId: credentials.clientId,
-			clientSecret: credentials.clientSecret,
-			refreshToken: secret.refreshToken,
-		}).catch(() => undefined);
+		const refreshed = await client
+			.refreshAccessToken(doFetch, credentials, { refreshToken: secret.refreshToken })
+			.then((tokens) => ({ ok: true as const, tokens }))
+			.catch((error: unknown) => ({ ok: false as const, error }));
 
 		// The user revoked the app, or changed their password. Nothing the client
 		// can retry its way out of, so say so plainly and let the UI ask for a
 		// reconnect rather than looping.
-		if (tokens === undefined) return c.json({ error: 'reauthorize_required' }, 401);
+		if (!refreshed.ok && isGrantRefused(refreshed.error)) {
+			return c.json({ error: 'reauthorize_required' }, 401);
+		}
+		// Anything else is not the user's to fix: an expired client secret, a
+		// provider outage, a timeout. Logged, since otherwise nothing would say
+		// so, and answered as a failure the client retries.
+		if (!refreshed.ok) {
+			logFailure('token refresh failed', refreshed.error);
+			return c.json({ error: 'provider_unavailable' }, 502);
+		}
+		const { tokens } = refreshed;
 
-		// Dropbox does not normally rotate the refresh token, but it is allowed
-		// to; storing the new one keeps the connection alive if it does.
+		// Microsoft rotates the refresh token on every refresh and expects the old
+		// one discarded; Dropbox normally does not, but is allowed to. Storing the
+		// new one keeps the connection alive either way.
 		const rotated =
 			tokens.refreshToken === undefined || tokens.refreshToken === secret.refreshToken
 				? undefined

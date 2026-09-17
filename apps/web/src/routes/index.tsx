@@ -36,6 +36,8 @@ const connectMessage = (outcome: ConnectOutcome): string => {
 			return 'That storage account is already connected to someone else on this server.';
 		case 'signin':
 			return 'Sign in before connecting storage.';
+		case 'occupied':
+			return 'Your notes already sync with another storage provider. Disconnect it first.';
 		case 'failed':
 			return 'The storage account could not be connected. Try again.';
 	}
