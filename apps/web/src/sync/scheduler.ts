@@ -797,16 +797,16 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					await resetAttempts(session.connectionId);
 				})
 			);
-			// The wait for the lock is as long as the round that held it, and the
-			// user can switch accounts inside it. Nothing below would reach the
-			// new connection if it did — the state is this session's own and
-			// `run` checks for itself — so this is an early return for a
-			// question nobody is waiting on the answer to, not a guard holding
-			// anything up.
-			if (!isCurrent(session)) return;
-			// The backoff and the blocked clock start over too: the user asking
-			// is the help `blocked` waits for, and a re-scan that has to sit out
-			// a five-minute backoff first is not one.
+			// Nothing below needs to ask whether the connection is still bound,
+			// though the wait for the lock is as long as the round that held it
+			// and the user can switch accounts inside it: all of it is this
+			// session's own state, and `run` and `publish` answer for the bound
+			// session themselves. `syncNow` below has the same shape for the
+			// same reason.
+			//
+			// The backoff and the blocked clock start over: the user asking is
+			// the help `blocked` waits for, and a re-scan that has to sit out a
+			// five-minute backoff first is not one.
 			session.failures.delete('count');
 			session.blockedSince.delete('at');
 			session.stuck.delete('op');
