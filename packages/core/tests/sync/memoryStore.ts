@@ -88,6 +88,7 @@ export const createMemoryStore = (): MemoryStore => {
 			...note,
 			path: resolution.remote.path,
 			content: resolution.remoteContent,
+			syncedHash: resolution.remoteHash,
 			remoteId: resolution.remote.remoteId,
 			remoteVersion: resolution.remote.version,
 			dirty: false,
@@ -123,7 +124,7 @@ export const createMemoryStore = (): MemoryStore => {
 			notes.delete(note.id);
 			return;
 		}
-		const { remoteId: _id, remoteVersion: _version, ...rest } = note;
+		const { remoteId: _id, remoteVersion: _version, syncedHash: _hash, ...rest } = note;
 		notes.set(note.id, rest);
 	};
 
@@ -154,6 +155,7 @@ export const createMemoryStore = (): MemoryStore => {
 			content: change.content,
 			remoteId: change.remote.remoteId,
 			remoteVersion: change.remote.version,
+			syncedHash: change.syncedHash,
 			dirty: false,
 		});
 	};
@@ -174,7 +176,7 @@ export const createMemoryStore = (): MemoryStore => {
 			notes.delete(note.id);
 			return;
 		}
-		const { remoteId: _id, remoteVersion: _version, ...rest } = note;
+		const { remoteId: _id, remoteVersion: _version, syncedHash: _hash, ...rest } = note;
 		notes.set(change.id, rest);
 	};
 
@@ -189,6 +191,7 @@ export const createMemoryStore = (): MemoryStore => {
 				...note,
 				remoteId: change.remote.remoteId,
 				remoteVersion: change.remote.version,
+				...(change.syncedHash === undefined ? {} : { syncedHash: change.syncedHash }),
 			});
 			return;
 		}
@@ -200,6 +203,7 @@ export const createMemoryStore = (): MemoryStore => {
 				path: change.path,
 				remoteId: change.remote.remoteId,
 				remoteVersion: change.remote.version,
+				...(change.syncedHash === undefined ? {} : { syncedHash: change.syncedHash }),
 			});
 			// And its queued ops, as `move-folder` and `displace-note` do.
 			rebaseOps(note.id, note.path, change.path);
@@ -327,6 +331,8 @@ export const createMemoryStore = (): MemoryStore => {
 			path: outcome.remote.path,
 			remoteId: outcome.remote.remoteId,
 			remoteVersion: outcome.remote.version,
+			// The remote holds these bytes whether or not the note still does.
+			syncedHash: outcome.syncedHash,
 			// Typed again while the request was in flight. The bytes on the
 			// remote are not the bytes here, so the note is still dirty and the
 			// next push has something to do.

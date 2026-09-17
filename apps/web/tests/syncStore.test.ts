@@ -80,6 +80,7 @@ describeSyncStoreContract('Dexie', async () => {
 				}),
 				...(note.remoteId === undefined ? {} : { remoteId: note.remoteId }),
 				...(note.remoteVersion === undefined ? {} : { remoteVersion: note.remoteVersion }),
+				...(note.syncedHash === undefined ? {} : { syncedHash: note.syncedHash }),
 				dirty: note.dirty === true ? 1 : 0,
 			});
 		},
@@ -114,6 +115,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'Shopping.md',
 					content: file,
 					remote: remote('Shopping.md'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -139,6 +141,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'a.md',
 					content: 'before\n',
 					remote: remote('a.md'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -215,6 +218,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'a.md',
 					content: 'x\n',
 					remote: remote('a.md'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -228,6 +232,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'a.md',
 					content: 'y\n',
 					remote: remote('a.md', 'r1', 'v2'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -303,6 +308,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'a.md',
 					content: 'mine\n',
 					remote: remote('a.md'),
+					syncedHash: 'hash',
 				},
 				{
 					kind: 'upsert-note',
@@ -310,6 +316,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'b.md',
 					content: 'other\n',
 					remote: remote('b.md', 'r2'),
+					syncedHash: 'hash',
 				},
 			],
 			cursor: 'c1',
@@ -323,6 +330,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 						resolution: {
 							noteId: 'n1',
 							remoteContent: 'theirs\n',
+							remoteHash: 'hash',
 							remote: remote('a.md', 'r1', 'v2'),
 							copyId: 'n2',
 							copyPath: 'a (conflict).md',
@@ -352,6 +360,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 					path: 'Work/a.md',
 					content: 'x\n',
 					remote: remote('Work/a.md'),
+					syncedHash: 'hash',
 				},
 			],
 			cursor: 'theirs',
@@ -418,7 +427,16 @@ const pulled = async (content = 'x\n') => {
 	const db = freshDatabase();
 	const store = await boundStore(db, { connectionId: CONNECTION });
 	await store.applyPull({
-		changes: [{ kind: 'upsert-note', id: 'n1', path: 'a.md', content, remote: remote('a.md') }],
+		changes: [
+			{
+				kind: 'upsert-note',
+				id: 'n1',
+				path: 'a.md',
+				content,
+				remote: remote('a.md'),
+				syncedHash: 'hash',
+			},
+		],
 		cursor: 'c1',
 	});
 	return { db, store };
@@ -440,6 +458,7 @@ describe('a pull that lands after the user has typed', () => {
 						path: 'a.md',
 						content: 'v2\n',
 						remote: remote('a.md', 'r1', 'v2'),
+						syncedHash: 'hash',
 					},
 				],
 				cursor: 'c2',
@@ -474,6 +493,7 @@ describe('a pull that lands after the user has typed', () => {
 					resolution: {
 						noteId: 'n1',
 						remoteContent: 'theirs\n',
+						remoteHash: 'hash',
 						remote: remote('a.md', 'r1', 'v2'),
 						copyId: 'c1',
 						copyPath: 'a (conflict).md',
@@ -511,6 +531,7 @@ describe('another connection’s note under the same id', () => {
 						path: 'a.md',
 						content: 'remote\n',
 						remote: remote('a.md'),
+						syncedHash: 'hash',
 					},
 				],
 			})
@@ -534,6 +555,7 @@ describe('another connection’s note under the same id', () => {
 					path: 'Work/a.md',
 					content: 'x\n',
 					remote: remote('Work/a.md'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -558,6 +580,7 @@ describe('another connection’s note under the same id', () => {
 			mine.resolveConflict(seq, {
 				noteId: 'n1',
 				remoteContent: 'y\n',
+				remoteHash: 'hash',
 				remote: remote('Work/a.md'),
 				copyId: 'c1',
 				copyPath: 'c.md',
@@ -690,6 +713,7 @@ describe('a note deleted here', () => {
 		await store.resolveConflict(write?.seq ?? -1, {
 			noteId: 'n1',
 			remoteContent: 'theirs\n',
+			remoteHash: 'hash',
 			remote: remote('a.md', 'r1', 'v2'),
 			copyId: 'c1',
 			copyPath: 'a (conflict).md',
@@ -718,6 +742,7 @@ describe('a note deleted here', () => {
 					path: 'Work/a.md',
 					content: 'x\n',
 					remote: remote('Work/a.md'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -741,6 +766,7 @@ describe('a note deleted here', () => {
 					path: 'a.md',
 					content: 'v2\n',
 					remote: remote('a.md', 'r1', 'v2'),
+					syncedHash: 'hash',
 				},
 			],
 		});
@@ -762,6 +788,7 @@ describe('where a change puts a note', () => {
 					path: 'b.md',
 					content: 'b\n',
 					remote: remote('b.md', 'r2'),
+					syncedHash: 'hash',
 				},
 				{
 					kind: 'upsert-note',
@@ -769,6 +796,7 @@ describe('where a change puts a note', () => {
 					path: 'c.md',
 					content: 'c\n',
 					remote: remote('c.md', 'r3'),
+					syncedHash: 'hash',
 				},
 				{ kind: 'move-note', id: 'n1', path: 'Moved/a.md', remote: remote('Moved/a.md') },
 				{ kind: 'displace-note', id: 'n2', path: 'Displaced/b.md' },
@@ -784,6 +812,7 @@ describe('where a change puts a note', () => {
 					resolution: {
 						noteId: 'n3',
 						remoteContent: 'theirs\n',
+						remoteHash: 'hash',
 						remote: remote('Remote/c.md', 'r3', 'v2'),
 						copyId: 'copy',
 						copyPath: 'Copies/c (conflict).md',
@@ -820,6 +849,7 @@ describe('where a change puts a note', () => {
 					resolution: {
 						noteId: 'n1',
 						remoteContent: 'theirs\n',
+						remoteHash: 'hash',
 						remote: remote('a.md', 'r1', 'v2'),
 						copyId: 'copy',
 						copyPath: 'a (conflict).md',
@@ -879,6 +909,7 @@ describe('where a change puts a note', () => {
 						path: 'Work/a.md',
 						content: 'x\n',
 						remote: remote('Work/a.md'),
+						syncedHash: 'hash',
 					},
 				],
 				cursor: 'c2',

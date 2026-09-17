@@ -40,7 +40,14 @@ const synced = async (content = 'before\n') => {
 	const store = await bound();
 	await store.applyPull({
 		changes: [
-			{ kind: 'upsert-note', id: 'n1', path: 'a.md', content, remote: remote('a.md', 'v1') },
+			{
+				kind: 'upsert-note',
+				id: 'n1',
+				path: 'a.md',
+				content,
+				remote: remote('a.md', 'v1'),
+				syncedHash: 'hash',
+			},
 		],
 	});
 	// Raw by default too: a note written again from a file forgets its mode.
@@ -55,6 +62,7 @@ const pulled = (content: string, version = 'v2') =>
 		path: 'a.md',
 		content,
 		remote: remote('a.md', version),
+		syncedHash: 'hash',
 	}) as const;
 
 const Harness = ({ id }: { id: string }) => {
@@ -222,6 +230,7 @@ describe('an edit pending when a pull deletes its note', () => {
 		expect(note?.path).toBe('a.md');
 		expect(note?.remoteId).toBeUndefined();
 		expect(note?.remoteVersion).toBeUndefined();
+		expect(note?.syncedHash).toBeUndefined();
 		expect(await writesFor('n1')).toHaveLength(1);
 		// And open again, with the words in it.
 		await waitFor(() => {
@@ -415,6 +424,7 @@ describe('saveNoteBody with a base', () => {
 					path: 'a.md',
 					content: 'another\n',
 					remote: { ...remote('a.md', 'v1'), remoteId: 'r2' },
+					syncedHash: 'hash',
 				},
 			],
 		});

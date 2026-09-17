@@ -1,4 +1,5 @@
 import { NOTE_EXTENSION } from '../config.js';
+import { contentHash } from '../hash.js';
 import { parseNoteFile } from '../markdown/note.js';
 import { foldName } from '../markdown/slug.js';
 import {
@@ -288,6 +289,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return {
 			noteId: local.id,
 			remoteContent,
+			remoteHash: await contentHash(remoteContent),
 			remote,
 			copyId,
 			copyPath: conflictPath(remote.path, now(), taken),
@@ -887,14 +889,29 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/** A note we already hold, whose remote version has moved. */
-	const decideKnown = (
+	const decideKnown = async (
 		local: SyncNote,
-		content: string,
+		found: Readonly<{ content: string; version: string }>,
 		entry: RemoteEntry,
 		claimed: ReadonlySet<string>,
 		decided: readonly PullChange[],
 		renaming: ReadonlySet<string>
-	): Promise<PullChange[]> | PullChange[] => {
+	): Promise<PullChange[]> => {
+		const { content } = found;
+		const syncedHash = await contentHash(content);
+		const unchanged = (): PullChange[] =>
+			local.path === entry.path || renaming.has(local.id)
+				? [{ kind: 'adopt-version', id: local.id, remote: entry, syncedHash }]
+				: [
+						{
+							kind: 'move-note',
+							id: local.id,
+							path: entry.path,
+							remote: entry,
+							syncedHash,
+						},
+					];
+
 		// Same bytes, new version: our own write coming back, two devices that
 		// saved the same thing, or a move on a provider whose version does not
 		// survive one — Dropbox's `rev` does, OneDrive's `eTag` does not.
@@ -913,19 +930,36 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// queue strands every op behind it. The version is still adopted; only
 		// the path is left where the user put it. This is `followTheRename`'s
 		// question, asked from the pull side.
-		if (content === local.content) {
-			return local.path === entry.path || renaming.has(local.id)
-				? [{ kind: 'adopt-version', id: local.id, remote: entry }]
-				: [{ kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
-		}
+		if (content === local.content) return unchanged();
 		if (!local.dirty) {
 			return [
-				{ kind: 'upsert-note', id: local.id, path: entry.path, content, remote: entry },
+				{
+					kind: 'upsert-note',
+					id: local.id,
+					path: entry.path,
+					content,
+					remote: entry,
+					syncedHash,
+				},
 			];
 		}
-		return resolutionFor(local, content, entry, claimed, decided).then((resolution) => [
-			{ kind: 'conflict' as const, resolution },
-		]);
+		// Different bytes from ours, but ours hold edits the remote has not seen —
+		// so the question is whether the *remote* changed, and the bytes this
+		// note last synced answer it. The same bytes under a new version is a
+		// rename, or a move, on a provider whose version does not survive one
+		// (OneDrive's `eTag`): nothing was written over there, the local edits
+		// stay dirty and go out against the new version, and there is no copy
+		// for the user to wonder about (docs/PLAN.md §7). A note that has not
+		// recorded its bytes cannot say, and takes the conflict as before.
+		//
+		// Only if the bytes are the version the feed named, though: this is the
+		// one branch that lets a push overwrite the remote on the strength of a
+		// read, and a read that answers with an older version (a cache, or a
+		// file written again since) would adopt a version whose bytes nobody
+		// looked at — and the push would replace them without a copy.
+		if (found.version === entry.version && local.syncedHash === syncedHash) return unchanged();
+		const resolution = await resolutionFor(local, content, entry, claimed, decided);
+		return [{ kind: 'conflict', resolution }];
 	};
 
 	/**
@@ -1005,10 +1039,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// renamed — a rename alone changes no bytes, so there is nothing to read.
 		if (local !== undefined && !removed && local.remoteVersion === entry.version) {
 			if (local.path === entry.path) return [];
+			// The file's bytes have not moved either, so the hash the note holds
+			// still describes them. Passed rather than left to the store to keep,
+			// because a `detach-note` or deleted folder earlier in this batch has
+			// already dropped it from the row this re-binds.
+			const kept = local.syncedHash === undefined ? {} : { syncedHash: local.syncedHash };
 			if (renaming.has(local.id)) {
-				return [...room, { kind: 'adopt-version', id: local.id, remote: entry }];
+				return [...room, { kind: 'adopt-version', id: local.id, remote: entry, ...kept }];
 			}
-			return [...room, { kind: 'move-note', id: local.id, path: entry.path, remote: entry }];
+			return [
+				...room,
+				{ kind: 'move-note', id: local.id, path: entry.path, remote: entry, ...kept },
+			];
 		}
 
 		// `changes` and `read` are separate round trips on every provider, so the
@@ -1034,16 +1076,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					path: entry.path,
 					content,
 					remote: entry,
+					syncedHash: await contentHash(content),
 				},
 			];
 		}
 		if (removed) {
 			return [
 				...room,
-				{ kind: 'upsert-note', id: local.id, path: entry.path, content, remote: entry },
+				{
+					kind: 'upsert-note',
+					id: local.id,
+					path: entry.path,
+					content,
+					remote: entry,
+					syncedHash: await contentHash(content),
+				},
 			];
 		}
-		return [...room, ...(await decideKnown(local, content, entry, claimed, after, renaming))];
+		return [...room, ...(await decideKnown(local, found, entry, claimed, after, renaming))];
 	};
 
 	const decide = async (
@@ -1473,6 +1523,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			noteId: note.id,
 			remote: entry,
 			content: note.content,
+			syncedHash: await contentHash(note.content),
 		});
 	};
 
@@ -1657,6 +1708,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				noteId: note.id,
 				remote,
 				content: note.content,
+				syncedHash: await contentHash(note.content),
 			});
 			return '';
 		}

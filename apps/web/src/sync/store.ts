@@ -87,6 +87,7 @@ const toSyncNote = (note: NoteRecord): SyncNote => ({
 	content: noteFile(note),
 	...(note.remoteId === undefined ? {} : { remoteId: note.remoteId }),
 	...(note.remoteVersion === undefined ? {} : { remoteVersion: note.remoteVersion }),
+	...(note.syncedHash === undefined ? {} : { syncedHash: note.syncedHash }),
 	dirty: isDirty(note),
 });
 
@@ -107,11 +108,17 @@ const toSyncOp = (record: OpQueueRecord): SyncOp => {
 	};
 };
 
+/** Cut loose from its file, and so from the bytes it last agreed with it on. */
 const withoutRemote = ({
 	remoteId: _remoteId,
 	remoteVersion: _remoteVersion,
+	syncedHash: _syncedHash,
 	...note
 }: NoteRecord): NoteRecord => note;
+
+/** Absent says the hash already stored still holds (`PullChange`). */
+const syncedHashOf = (syncedHash: string | undefined) =>
+	syncedHash === undefined ? {} : { syncedHash };
 
 /** Every file a batch or a resolution will write, so each is digested once, up front. */
 const contentsOf = (changes: readonly PullChange[]): string[] =>
@@ -237,6 +244,7 @@ export const createDexieSyncStore = (
 			}),
 			remoteId: resolution.remote.remoteId,
 			remoteVersion: resolution.remote.version,
+			syncedHash: resolution.remoteHash,
 		});
 
 		// The edit that lost is in the copy now, and the note holds the remote's
@@ -373,6 +381,7 @@ export const createDexieSyncStore = (
 			}),
 			remoteId: change.remote.remoteId,
 			remoteVersion: change.remote.version,
+			syncedHash: change.syncedHash,
 		});
 	};
 
@@ -401,6 +410,7 @@ export const createDexieSyncStore = (
 					...note,
 					remoteId: change.remote.remoteId,
 					remoteVersion: change.remote.version,
+					...syncedHashOf(change.syncedHash),
 				});
 				return;
 			}
@@ -412,6 +422,7 @@ export const createDexieSyncStore = (
 					path: change.path,
 					remoteId: change.remote.remoteId,
 					remoteVersion: change.remote.version,
+					...syncedHashOf(change.syncedHash),
 				});
 				await rebaseOwnOps(scope, note.id, note.path, change.path);
 				return;
@@ -522,6 +533,8 @@ export const createDexieSyncStore = (
 		const pushed: NoteRecord = {
 			...note,
 			...remote,
+			// The remote holds these bytes whether or not the note still does.
+			syncedHash: outcome.syncedHash,
 			...(same ? { dirty: 0 as const, source: outcome.content } : {}),
 		};
 		await scope.notes.put(pushed);
