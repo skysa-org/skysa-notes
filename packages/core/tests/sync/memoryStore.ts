@@ -281,8 +281,20 @@ export const createMemoryStore = (): MemoryStore => {
 			for (const folder of gone) folders.delete(folder.path);
 			// Except the ones the engine has spared: their files are not in the
 			// folder at all, because the rename that puts them there is still
-			// queued here.
-			const keep = new Set(change.keep ?? []);
+			// queued here. And the same rule applied to the queue as it stands
+			// now, which is the backstop the contract asks of a store that holds
+			// the queue: the engine read it when the batch was decided.
+			const keep = new Set([
+				...(change.keep ?? []),
+				...[...ops.values()].flatMap((op) =>
+					op.op === 'move' &&
+					op.noteId !== undefined &&
+					!isWithin(op.path, change.path) &&
+					(change.was === undefined || !isWithin(op.path, change.was))
+						? [op.noteId]
+						: []
+				),
+			]);
 			const inside = [...notes.values()].filter(
 				(note) => isWithin(note.path, change.path) && !keep.has(note.id)
 			);

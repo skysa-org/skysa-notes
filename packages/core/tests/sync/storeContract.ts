@@ -547,6 +547,60 @@ export const describeSyncStoreContract = (
 				expect(await store.noteById('n2')).toBeUndefined();
 			});
 
+			it('spares a note whose queued rename the batch had not seen', async () => {
+				// The engine reads the queue when it decides the batch; the
+				// batch lands later, here. A note the user moved into the
+				// notebook in between is named by no `keep`, and its file is
+				// still at the path the queued `move` gives — outside the
+				// folder, untouched by its deletion.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+				await seedOp({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				expect((await store.noteById('n1'))?.remoteId).toBe('r1');
+			});
+
+			it('takes one whose queued rename leaves its file inside the folder', async () => {
+				// Renamed within the notebook, or into it from a subfolder: the
+				// file goes with the directory like any other.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/b.md', content: 'x\n', remoteId: 'r1' });
+				await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'Work/a.md',
+					targetPath: 'Work/b.md',
+				});
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				expect(await store.noteById('n1')).toBeUndefined();
+			});
+
+			it('takes one whose file was inside the folder under its old name', async () => {
+				// The batch renamed the notebook and then deleted it, so the
+				// path the change names is not the one the file sits under.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Plans', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Plans/b.md', content: 'x\n', remoteId: 'r1' });
+				await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'Work/a.md',
+					targetPath: 'Plans/b.md',
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'delete-folder', path: 'Plans', was: 'Work' }],
+				});
+
+				expect(await store.noteById('n1')).toBeUndefined();
+			});
+
 			it('keeps an edited note when its folder is deleted remotely', async () => {
 				// Never lose user data (CLAUDE.md). The folder is gone, but the
 				// edit in it was never anywhere else, so the note survives as a

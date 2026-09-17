@@ -332,10 +332,35 @@ export const createDexieSyncStore = (
 		);
 	};
 
+	/**
+	 * The notes under `path` whose queued rename says their file is somewhere
+	 * else entirely. The engine names these on the change (`keep`), from the
+	 * queue as it read it when the batch was decided; this is the same rule
+	 * applied here, where the queue and the rows are in one transaction, so a
+	 * note the user moved in while the batch was at the network is spared too.
+	 *
+	 * `was` is the directory's other spelling where the batch moved it: a file
+	 * inside it under its old name is inside it.
+	 */
+	const renamedOutOf = async (
+		scope: Scope,
+		path: string,
+		was: string | undefined
+	): Promise<string[]> =>
+		(await opsOf(scope)).flatMap((op) =>
+			op.op === 'move' &&
+			op.noteId !== undefined &&
+			!isWithin(op.path, path) &&
+			(was === undefined || !isWithin(op.path, was))
+				? [op.noteId]
+				: []
+		);
+
 	const deleteFolder = async (
 		scope: Scope,
 		path: string,
-		keep: readonly string[] = []
+		keep: readonly string[] = [],
+		was?: string
 	): Promise<void> => {
 		// The app folder is not a notebook, and every path is within it.
 		if (normalizePath(path) === ROOT) return;
@@ -348,7 +373,14 @@ export const createDexieSyncStore = (
 		// exists nowhere else, so it stays, cut loose from the file that is gone.
 		// A note the engine spared is left exactly as it is, remote and all: its
 		// file is elsewhere, waiting on a rename this device has queued.
-		const spared = new Set(keep);
+		//
+		// And any other note whose queued rename says the same. The engine reads
+		// the queue when it decides the batch and the batch is applied later, in
+		// this transaction; a note the user drags in between the two is not in
+		// `keep` and would be deleted here with its file untouched on the remote
+		// — the cursor having moved past it, so nothing would mention it again.
+		// The queue is in this transaction, so asking it here cannot be raced.
+		const spared = new Set([...keep, ...(await renamedOutOf(scope, path, was))]);
 		const inside = (await notesOf(scope)).filter(
 			(note) => isWithin(note.path, path) && !spared.has(note.id)
 		);
@@ -476,7 +508,7 @@ export const createDexieSyncStore = (
 				await moveFolder(scope, change.from, change.to, change.remoteId);
 				return;
 			case 'delete-folder':
-				await deleteFolder(scope, change.path, change.keep);
+				await deleteFolder(scope, change.path, change.keep, change.was);
 				return;
 			case 'conflict':
 				await applyConflict(scope, change.resolution, hashes);

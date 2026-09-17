@@ -272,6 +272,16 @@ export type PullChange =
 			kind: 'delete-folder';
 			path: string;
 			/**
+			 * Where this folder's row stood when the batch was decided, when the
+			 * batch has moved it since — the same directory's other spelling.
+			 * Absent when nothing moved it.
+			 *
+			 * Only the backstop below needs it: a file inside the directory
+			 * under its old name is inside the directory, whatever the path it
+			 * ends at says.
+			 */
+			was?: string;
+			/**
 			 * Notes the cascade must leave exactly as they are, by id. A row is
 			 * under the folder because the user moved the note there, and until
 			 * that rename runs the file is still where it was — so the folder
@@ -286,6 +296,12 @@ export type PullChange =
 			 * store's. A note whose file *is* inside the folder is not here: it
 			 * goes with the folder, and the queued rename finds nothing left to
 			 * move.
+			 *
+			 * A store that holds the queue must still apply the rule itself as a
+			 * backstop — spare any note under the folder whose queued `move`
+			 * says its file is outside both `path` and `was` — because the
+			 * engine reads the queue when it decides the batch and the batch is
+			 * applied later: a note the user moves in between is not named here.
 			 *
 			 * An id that is not there, or not under the folder, is ignored. The
 			 * batch is decided before it is applied, and must not be rejected

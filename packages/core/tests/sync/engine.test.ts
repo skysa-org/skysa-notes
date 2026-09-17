@@ -5035,6 +5035,51 @@ describe('a notebook the user moved a note into, removed by another device', () 
 		expect(folderPaths()).toEqual(['Plans']);
 	});
 
+	it('roofs over the edited note a scan’s cascade keeps', async () => {
+		// Not the queued-rename case: an unsent edit outranks a remote
+		// deletion, so the cascade keeps that note too and merely cuts it
+		// loose. Before, only the rounds `decideAll` decides made roofs, so a
+		// scan left the note at a path with no notebook — holding its name,
+		// invisible in the sidebar.
+		store.putFolder({ path: 'Plans', remoteId: 'folder-the-remote-lost' });
+		store.put({
+			id: 'n1',
+			path: 'Plans/a.md',
+			content: 'mine\n',
+			remoteId: 'gone',
+			dirty: true,
+		});
+
+		await engine.pull();
+
+		expect(notePaths()).toEqual(['Plans/a.md']);
+		expect(store.notes()[0]?.remoteId).toBeUndefined();
+		expect(folderPaths()).toEqual(['Plans']);
+	});
+
+	it('takes the note whose file was inside the directory under its old name', async () => {
+		// The round renames the notebook and then deletes it: `Work` to
+		// `Plans`, and `Plans` gone. A note renamed *within* the notebook has
+		// an origin outside `Plans` — it is `Work/a.md` — and is inside the
+		// directory all the same. Kept, it would be a clean note pointing at a
+		// file in the bin, under a notebook row for a directory the remote
+		// does not have.
+		const made = await provider.createFolder('Work');
+		await remoteFile('Work/a.md', 'a\n');
+		await engine.pull();
+		const note = noteAt('Work/a.md');
+		if (note === undefined) throw new Error('no note');
+		store.put({ ...note, path: 'Work/b.md' });
+		store.queue({ op: 'move', noteId: note.id, path: 'Work/a.md', targetPath: 'Work/b.md' });
+		const moved = await provider.move(made, 'Plans');
+		await provider.delete({ remoteId: moved.remoteId, path: 'Plans' });
+
+		await engine.pull();
+
+		expect(notePaths()).toEqual([]);
+		expect(folderPaths()).toEqual([]);
+	});
+
 	it('takes the note whose file is inside the directory that has gone', async () => {
 		// The other half of the rule: a rename *within* the notebook says
 		// nothing about a file the deletion really does remove.
