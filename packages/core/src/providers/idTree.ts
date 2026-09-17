@@ -297,6 +297,10 @@ export const settlePage = (page: Page, roundEnds: boolean): Settled => {
  * top-most are returned: one inside another is covered by listing the outer.
  * On a round from nothing every folder arrives; a scan lists everything anyway,
  * so an adapter skips this there.
+ *
+ * Asked once per page. Applying what a listing found does not make these
+ * folders stop arriving, so an adapter that asked until the answer was empty
+ * would never stop.
  */
 export const arrivals = (page: Page): string[] => {
 	const arrived = new Set(

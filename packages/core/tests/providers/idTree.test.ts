@@ -251,6 +251,23 @@ describe('an id tree', () => {
 			expect(second.entries.map((entry) => entry.path)).toContain('Later/H');
 		});
 
+		it('include a new folder made inside one that was held, once that is placed', () => {
+			// B moves under a folder not seen yet and is held, remembering where
+			// it was; K is made inside it. When B turns out to be under a folder
+			// already known, B has not arrived — its contents are in the tree —
+			// but K has.
+			const tree = run(EMPTY, [
+				folder('a', ROOT_ID, 'A'),
+				folder('b', 'a', 'B'),
+				folder('c', ROOT_ID, 'C'),
+			]).next;
+			const held = run(tree, [folder('b', 'unseen', 'B'), folder('k', 'b', 'K')], false);
+			expect(held.arrived).toEqual([]);
+
+			const placed = run(held.next, [folder('b', 'c', 'B')]);
+			expect(placed.arrived).toEqual(['k']);
+		});
+
 		it('include a folder rescued from one deleted earlier in the round', () => {
 			// The tree still holds it, under a parent that is gone: nothing says
 			// what it held any more, so it is listed like any other arrival.
