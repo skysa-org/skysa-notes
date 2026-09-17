@@ -141,6 +141,37 @@ describe('provider access tokens', () => {
 		expect(tokens.refusal()).toBe('reauthorize_required');
 	});
 
+	it('forgets a refusal when another tab has minted a token since', async () => {
+		const db = await bound();
+		const token = vi
+			.fn<ApiClient['token']>()
+			.mockResolvedValue({ ok: false, refusal: 'reauthorize_required' });
+		const tokens = createTokenSource({ db, client: { token }, connectionId: 'c1' });
+		await tokens.get().catch(() => undefined);
+
+		await db.syncState.update('c1', {
+			accessToken: 'from-another-tab',
+			accessTokenExpiresAt: Date.now() + HOUR,
+		});
+
+		expect(await tokens.get()).toBe('from-another-tab');
+		expect(tokens.refusal()).toBeUndefined();
+	});
+
+	it('forgets a refusal when the server cannot be asked again', async () => {
+		const db = await bound();
+		const token = vi
+			.fn<ApiClient['token']>()
+			.mockResolvedValueOnce({ ok: false, refusal: 'reauthorize_required' })
+			.mockRejectedValue(new TypeError('Failed to fetch'));
+		const tokens = createTokenSource({ db, client: { token }, connectionId: 'c1' });
+		await tokens.get().catch(() => undefined);
+
+		await expect(tokens.get()).rejects.toThrow('Failed to fetch');
+
+		expect(tokens.refusal()).toBeUndefined();
+	});
+
 	it('forgets a refusal once a token is minted again', async () => {
 		const db = await bound();
 		const clock = { now: 0 };

@@ -28,7 +28,8 @@ export interface TokenSource {
 	/** Mint a new token, whatever the one held says about itself. */
 	readonly refresh: () => Promise<void>;
 	/**
-	 * Why the server last refused a token, until it next mints one. The
+	 * Why the server last refused a token, until a token is had again from
+	 * anywhere, or the server fails to answer at all. The
 	 * engine cannot tell a refusal from any other failed request, so this is
 	 * how the scheduler says "reconnect" rather than "retrying".
 	 */
@@ -44,16 +45,27 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	const usable = (token: AccessToken | undefined): token is AccessToken =>
 		token !== undefined && token.expiresAt - EXPIRY_MARGIN_MS > now();
 
+	/** A token in hand, from wherever: whatever the server said before is no longer so. */
+	const using = (token: AccessToken): string => {
+		refused.delete('refusal');
+		held.set('token', token);
+		return token.accessToken;
+	};
+
 	const mint = async (): Promise<string> => {
-		const result = await client.token(connectionId);
+		const result = await client.token(connectionId).catch((error: unknown) => {
+			// Not an answer: the server may since have changed its mind, and a
+			// refusal kept past this would read as one it gave just now.
+			refused.delete('refusal');
+			throw error;
+		});
 		if (!result.ok) {
 			refused.set('refusal', result.refusal);
 			held.delete('token');
 			// An `AuthError`, so the provider call it was for fails as one.
 			throw new AuthError(`The server would not mint a token: ${result.refusal}`);
 		}
-		refused.delete('refusal');
-		held.set('token', result.value);
+		using(result.value);
 		// `update`, not `put`: a connection unbound while the token was on its
 		// way has no row, and must not get one back (`store/connection.ts`).
 		await db.syncState.update(connectionId, {
@@ -66,17 +78,15 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	return {
 		get: async () => {
 			const inMemory = held.get('token');
-			if (usable(inMemory)) return inMemory.accessToken;
+			if (usable(inMemory)) return using(inMemory);
 
 			const state = await db.syncState.get(connectionId);
 			const stored =
 				state?.accessToken === undefined || state.accessTokenExpiresAt === undefined
 					? undefined
 					: { accessToken: state.accessToken, expiresAt: state.accessTokenExpiresAt };
-			if (usable(stored)) {
-				held.set('token', stored);
-				return stored.accessToken;
-			}
+			// Minted by another tab, perhaps after this one was refused.
+			if (usable(stored)) return using(stored);
 			return mint();
 		},
 

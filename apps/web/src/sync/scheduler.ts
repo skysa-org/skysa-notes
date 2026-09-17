@@ -72,6 +72,11 @@ export interface SchedulerEnvironment {
 	readonly listen: (event: SchedulerEvent, handler: () => void) => () => void;
 	/** Returns the way to cancel. */
 	readonly setTimer: (callback: () => void, ms: number) => () => void;
+	/**
+	 * Run `work` holding the lock `name`, waiting for it if something else
+	 * holds it — another tab included.
+	 */
+	readonly withLock: <T>(name: string, work: () => Promise<T>) => Promise<T>;
 }
 
 export const browserEnvironment = (): SchedulerEnvironment => ({
@@ -91,6 +96,11 @@ export const browserEnvironment = (): SchedulerEnvironment => ({
 			clearTimeout(id);
 		};
 	},
+	// Web Locks are shared by every tab of the origin, which is the point: two
+	// tabs are two schedulers over one database. A browser without them gets
+	// one run at a time per tab, which is what the scheduler promises anyway.
+	// https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API
+	withLock: (name, work) => ('locks' in navigator ? navigator.locks.request(name, work) : work()),
 });
 
 export interface ProviderInput {
@@ -116,12 +126,20 @@ export interface SyncSchedulerOptions {
 	/** The first retry after a failure; each one after doubles, up to `maxBackoffMs`. */
 	backoffMs?: number;
 	maxBackoffMs?: number;
+	/** Failures in a row before an op is left alone (`blocked`), passed to the engine. */
+	maxAttempts?: number;
+	/** How long an op is left `blocked` before it is tried again on its own. */
+	blockedRetryMs?: number;
 }
 
 export interface SyncScheduler {
 	readonly start: () => void;
 	readonly stop: () => void;
-	/** Sync now, whatever the timers say. Resolves once the run has finished. */
+	/**
+	 * Sync now, whatever the timers say, and try again any op that has failed
+	 * too often: the user asking is the help `blocked` waits for. Resolves once
+	 * the run has finished.
+	 */
 	readonly syncNow: () => Promise<void>;
 	readonly status: () => SchedulerStatus;
 	/** Called with every status change. Returns the way to unsubscribe. */
@@ -144,6 +162,8 @@ interface Session {
 	readonly lastSeq: Map<'seq', number>;
 	/** The run in progress, including any it has been asked to follow with. */
 	readonly inFlight: Map<'run', Promise<void>>;
+	/** When a sync first came back `blocked`, since it last did not. */
+	readonly blockedSince: Map<'at', number>;
 }
 
 /** What one run came to, before it is turned into a status. */
@@ -151,8 +171,23 @@ type RunResult =
 	| { kind: 'offline' }
 	/** The device was bound or unbound while it ran: its answer is about nothing. */
 	| { kind: 'superseded' }
-	| { kind: 'synced'; outcome: SyncOutcome }
+	/** `pulledAt`: when the pull reached the end, if it did, whatever the push did. */
+	| { kind: 'synced'; outcome: SyncOutcome; pulledAt?: number }
 	| { kind: 'failed'; error: unknown };
+
+/** What the engine says when a fresh token is refused too. */
+const UNAUTHORIZED: SyncOutcome = {
+	status: 'paused',
+	pulled: 0,
+	pushed: 0,
+	conflicts: [],
+	error: 'authorization required',
+};
+
+/** Seen before, and seen now, once each, in order. */
+const together = (seen: readonly string[], more: readonly string[]): string[] => [
+	...new Set([...seen, ...more]),
+];
 
 const messageOf = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
@@ -164,6 +199,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const intervalMs = options.intervalMs ?? 60_000;
 	const backoffMs = options.backoffMs ?? 5000;
 	const maxBackoffMs = options.maxBackoffMs ?? 5 * 60_000;
+	// Enough that an outage has to outlast the backoff's climb to its cap —
+	// about ten minutes of failures in a row — before an op is given up on.
+	const maxAttempts = options.maxAttempts ?? 8;
+	const blockedRetryMs = options.blockedRetryMs ?? 15 * 60_000;
 
 	const current = new Map<'session', Session>();
 	const generations = new Map<'count', number>([['count', 0]]);
@@ -235,6 +274,27 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await db.syncState.update(session.connectionId, { rootId });
 	};
 
+	/** `engine.sync`, saying whether the pull reached the end whatever the push did. */
+	const syncOnce = async (
+		session: Session,
+		engine: SyncEngine
+	): Promise<{ outcome: SyncOutcome; pulledAt?: number }> => {
+		const pulled = await engine.pull();
+		if (pulled.status !== 'ok') return { outcome: pulled };
+		const pulledAt = environment.now();
+		// `update`: a connection let go of meanwhile does not get its row back.
+		await db.syncState.update(session.connectionId, { lastSyncAt: pulledAt });
+		const pushed = await engine.push();
+		return {
+			outcome: {
+				...pushed,
+				pulled: pulled.pulled,
+				conflicts: [...pulled.conflicts, ...pushed.conflicts],
+			},
+			pulledAt,
+		};
+	};
+
 	const attempt = async (
 		session: Session,
 		provider: StorageProvider,
@@ -252,18 +312,35 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			// A copy re-binds, which is this run's own doing.
 			const since = await bindingCount(db);
 			await ensureRoot(session, provider);
-			const outcome = await engine.sync();
+			const { outcome, pulledAt } = await syncOnce(session, engine);
 			// A store refusing to write for a connection that has just been let go
 			// of, or re-bound, reads to the engine as a transient failure. It is
 			// not one, and is not shown as one.
 			if (outcome.status !== 'ok' && (await bindingCount(db)) !== since) {
 				return { kind: 'superseded' };
 			}
-			return { kind: 'synced', outcome };
+			return { kind: 'synced', outcome, pulledAt };
 		} catch (error) {
-			return (await changed()) ? { kind: 'superseded' } : { kind: 'failed', error };
+			if (await changed()) return { kind: 'superseded' };
+			// A fresh token refused as well, before the engine ever ran: the same
+			// answer the engine gives, and not one a timer will change.
+			return isAuthError(error)
+				? { kind: 'synced', outcome: UNAUTHORIZED }
+				: { kind: 'failed', error };
 		}
 	};
+
+	/** Every op of the connection gets its attempts back. */
+	const releaseOps = (connectionId: string): Promise<void> =>
+		// One transaction, so an op the engine completes meanwhile is not put back.
+		db.transaction('rw', db.opQueue, async () => {
+			const tried = await db.opQueue
+				.where('connectionId')
+				.equals(connectionId)
+				.filter((op) => op.attempts > 0)
+				.toArray();
+			await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
+		});
 
 	const backoff = (session: Session): number => {
 		const failures = (session.failures.get('count') ?? 0) + 1;
@@ -278,49 +355,74 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		});
 	};
 
-	const failed = (session: Session, error: string) => {
+	const failed = (session: Session, error: string, conflicts: readonly string[] = []) => {
 		const refusal = session.tokens.refusal();
+		const seen = together(status().conflicts, conflicts);
 		if (refusal !== undefined) {
 			// Nothing to retry until the account is connected again, which comes
 			// back through a reload; focus and edits still try.
-			publish({ ...status(), phase: 'attention', error, refusal });
+			publish({ ...status(), phase: 'attention', error, refusal, conflicts: seen });
 			return;
 		}
 		if (!environment.isOnline()) {
-			publish({ ...status(), phase: 'offline', error: undefined, refusal: undefined });
+			publish({
+				...status(),
+				phase: 'offline',
+				error: undefined,
+				refusal: undefined,
+				conflicts: seen,
+			});
 			return;
 		}
-		publish({ ...status(), phase: 'retrying', error, refusal: undefined });
+		publish({ ...status(), phase: 'retrying', error, refusal: undefined, conflicts: seen });
 		arm('next', backoff(session), () => {
 			void run(session);
 		});
 	};
 
-	const synced = async (session: Session, outcome: SyncOutcome) => {
-		if (outcome.status === 'retry') {
-			failed(session, outcome.error ?? 'Sync failed');
+	/**
+	 * An op out of attempts is left alone, not given up on: after a while it is
+	 * tried again, since most things that fail that often in a row — an outage,
+	 * a rate limit — end. Pulls go on meanwhile.
+	 */
+	const blocked = async (session: Session) => {
+		const since = session.blockedSince.get('at');
+		if (since === undefined) {
+			session.blockedSince.set('at', environment.now());
 			return;
 		}
+		if (environment.now() - since < blockedRetryMs) return;
+		session.blockedSince.delete('at');
+		await releaseOps(session.connectionId);
+		session.flags.add('again');
+	};
+
+	const synced = async (session: Session, outcome: SyncOutcome) => {
+		if (outcome.status === 'retry') {
+			failed(session, outcome.error ?? 'Sync failed', outcome.conflicts);
+			return;
+		}
+		const conflicts = together(status().conflicts, outcome.conflicts);
 		if (outcome.status === 'paused') {
 			publish({
 				...status(),
 				phase: 'attention',
 				error: outcome.error,
 				refusal: session.tokens.refusal(),
-				conflicts: outcome.conflicts,
+				conflicts,
 			});
 			return;
 		}
-		// `ok`, or `blocked`: either way the pull reached the end.
-		const lastSyncAt = environment.now();
+		// Nothing left failing that time will fix: the backoff starts over.
 		session.failures.delete('count');
-		await db.syncState.update(session.connectionId, { lastSyncAt });
+		if (outcome.status === 'blocked') await blocked(session);
+		else session.blockedSince.delete('at');
 		if (!isCurrent(session)) return;
 		publish({
 			phase: outcome.status === 'ok' ? 'idle' : 'attention',
-			lastSyncAt,
+			lastSyncAt: status().lastSyncAt,
 			error: outcome.error,
-			conflicts: outcome.conflicts,
+			conflicts,
 		});
 		armInterval(session);
 	};
@@ -339,6 +441,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			failed(session, messageOf(result.error));
 			return;
 		}
+		if (result.pulledAt !== undefined) publish({ ...status(), lastSyncAt: result.pulledAt });
 		await synced(session, result.outcome);
 	};
 
@@ -369,12 +472,21 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		}
 		cancel('next');
 		cancel('debounce');
-		publish({ ...status(), phase: 'syncing' });
-		const result = await attempt(session, provider, engine).catch((error: unknown) => ({
-			kind: 'failed' as const,
-			error,
-		}));
-		if (isCurrent(session)) await settle(session, result);
+		publish({ ...status(), phase: 'syncing', error: undefined, refusal: undefined });
+		// One engine at a time per connection, across sessions and tabs: a
+		// session ended mid-run, or another tab, may still be at the network.
+		const result = await environment
+			.withLock(`skysa-notes:sync:${session.connectionId}`, () =>
+				isCurrent(session)
+					? attempt(session, provider, engine)
+					: Promise.resolve<RunResult>({ kind: 'superseded' })
+			)
+			.catch((error: unknown): RunResult => ({ kind: 'failed', error }));
+		if (isCurrent(session)) {
+			await settle(session, result).catch((error: unknown) => {
+				failed(session, messageOf(error));
+			});
+		}
 		if (session.flags.delete('again') && isCurrent(session)) await runOnce(session);
 	};
 
@@ -446,11 +558,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 							provider,
 							store: createDexieSyncStore(db, { connectionId }),
 							reauthorize: () => reauthorize(tokens),
+							maxAttempts,
 						}),
 			flags: new Set(),
 			failures: new Map(),
 			lastSeq: new Map(),
 			inFlight: new Map(),
+			blockedSince: new Map(),
 		};
 		current.set('session', session);
 		publish({ phase: 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
@@ -478,7 +592,14 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					if (environment.isVisible()) void runCurrent();
 				})
 			);
-			unsubscribers.add(environment.listen('online', () => void runCurrent()));
+			// What failed while the network was going is no evidence against an op.
+			unsubscribers.add(
+				environment.listen('online', () => {
+					const session = current.get('session');
+					if (session === undefined) return;
+					void releaseOps(session.connectionId).then(() => run(session));
+				})
+			);
 			unsubscribers.add(
 				environment.listen('offline', () => {
 					const session = current.get('session');
@@ -502,7 +623,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			endSession();
 		},
 
-		syncNow: runCurrent,
+		syncNow: async () => {
+			const session = current.get('session');
+			if (session === undefined) return;
+			await releaseOps(session.connectionId);
+			await run(session);
+		},
 		status,
 
 		subscribe: (listener) => {

@@ -15,6 +15,7 @@ import {
 	type ProviderFactory,
 	type SchedulerEnvironment,
 	type SchedulerEvent,
+	type SchedulerStatus,
 	type SyncPhase,
 	type SyncScheduler,
 	type SyncSchedulerOptions,
@@ -41,6 +42,8 @@ const fakeEnvironment = () => {
 	const state = { now: 1_000_000, online: true, visible: true, nextId: 0 };
 	const handlers = new Map<SchedulerEvent, Set<() => void>>();
 	const timers = new Map<number, { at: number; callback: () => void }>();
+	/** Each lock's tail: the next holder waits for it. */
+	const locks = new Map<string, Promise<void>>();
 
 	const environment: SchedulerEnvironment = {
 		now: () => state.now,
@@ -61,6 +64,17 @@ const fakeEnvironment = () => {
 			return () => {
 				timers.delete(id);
 			};
+		},
+		withLock: <T>(name: string, work: () => Promise<T>): Promise<T> => {
+			const held = (locks.get(name) ?? Promise.resolve()).then(work);
+			locks.set(
+				name,
+				held.then(
+					() => undefined,
+					() => undefined
+				)
+			);
+			return held;
 		},
 	};
 
@@ -235,6 +249,14 @@ const started = (db: NotesDatabase, overrides: Partial<SyncSchedulerOptions> = {
 const reaches = async (scheduler: SyncScheduler, phase: SyncPhase) => {
 	await vi.waitFor(() => {
 		expect(scheduler.status().phase).toBe(phase);
+	});
+};
+
+/** A sync the user did not ask for, which leaves blocked ops blocked. */
+const focused = async (h: Harness) => {
+	h.env.fire('focus');
+	await vi.waitFor(() => {
+		expect(h.scheduler.status().phase).not.toBe('syncing');
 	});
 };
 
@@ -637,11 +659,18 @@ describe('failures', () => {
 			});
 		const h = started(db, { client: { token } });
 		await reaches(h.scheduler, 'attention');
+		const syncing: SchedulerStatus[] = [];
+		h.scheduler.subscribe((status) => {
+			if (status.phase === 'syncing') syncing.push(status);
+		});
 
 		h.env.fire('focus');
 
 		await reaches(h.scheduler, 'idle');
 		expect(h.scheduler.status().refusal).toBeUndefined();
+		// Not even while it tries: what went wrong last time is not news yet.
+		expect(syncing.length).toBeGreaterThan(0);
+		expect(syncing.filter((status) => status.error ?? status.refusal)).toEqual([]);
 	});
 
 	it('retries when the token server cannot be reached', async () => {
@@ -659,20 +688,265 @@ describe('failures', () => {
 	it('asks for attention over an op that keeps failing, and keeps pulling', async () => {
 		const db = await bound();
 		const note = await createNote(db, { title: 'Stuck' });
-		const h = started(db, { intervalMs: INTERVAL });
+		const h = started(db, { maxAttempts: 3 });
 		await reaches(h.scheduler, 'idle');
 		await saveNoteBody(db, note.id, 'more\n');
 		h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('nope') : undefined));
 		h.env.state.now += 1000;
 
-		// One failed attempt per sync, until there have been too many.
-		await vi.waitFor(async () => {
+		await [1, 2, 3, 4].reduce(async (prior) => {
+			await prior;
+			await focused(h);
+		}, Promise.resolve());
+
+		expect(h.scheduler.status()).toMatchObject({
+			phase: 'attention',
+			lastSyncAt: h.env.state.now,
+		});
+		expect(h.env.pending()).toEqual([INTERVAL]);
+	});
+
+	it('gives an op eight tries by default', async () => {
+		const db = await bound();
+		const note = await createNote(db, { title: 'Stuck' });
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		await saveNoteBody(db, note.id, 'more\n');
+		h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('nope') : undefined));
+
+		const phases = await [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce<Promise<SyncPhase[]>>(
+			async (prior) => {
+				const seen = await prior;
+				await focused(h);
+				return [...seen, h.scheduler.status().phase];
+			},
+			Promise.resolve([])
+		);
+
+		expect(phases).toEqual([...Array<SyncPhase>(8).fill('retrying'), 'attention']);
+	});
+
+	describe('an op that has failed too often', () => {
+		const blockedHarness = async (options: Partial<SyncSchedulerOptions> = {}) => {
+			const db = await bound();
+			const note = await createNote(db, { title: 'Stuck', body: 'one\n' });
+			const h = started(db, { maxAttempts: 2, ...options });
+			await vi.waitFor(() => {
+				expect(h.remote.fake.contentAt(note.path)).toContain('one');
+			});
+			await reaches(h.scheduler, 'idle');
+			await saveNoteBody(db, note.id, 'two\n');
+			h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
+			await [1, 2, 3].reduce(async (prior) => {
+				await prior;
+				await focused(h);
+			}, Promise.resolve());
+			expect(h.scheduler.status().phase).toBe('attention');
+			// The outage ends.
+			h.remote.fake.setFault(undefined);
+			return { ...h, note };
+		};
+
+		it('stays blocked for a sync nobody asked for', async () => {
+			const h = await blockedHarness();
+
+			await focused(h);
+
+			expect(h.scheduler.status().phase).toBe('attention');
+			expect(h.remote.fake.contentAt(h.note.path)).toContain('one');
+		});
+
+		it('is tried again when the user asks', async () => {
+			const h = await blockedHarness();
+
 			await h.scheduler.syncNow();
+
+			expect(h.scheduler.status().phase).toBe('idle');
+			expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
+		});
+
+		it('is tried again when the network comes back', async () => {
+			const h = await blockedHarness();
+
+			h.env.fire('online');
+
+			await vi.waitFor(() => {
+				expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
+			});
+			await reaches(h.scheduler, 'idle');
+		});
+
+		it('is given the full while again the next time it blocks', async () => {
+			const h = await blockedHarness({ blockedRetryMs: 3 * INTERVAL });
+			await h.scheduler.syncNow();
+			expect(h.scheduler.status().phase).toBe('idle');
+
+			// Long after, it blocks again.
+			h.env.state.now += 10 * INTERVAL;
+			await saveNoteBody(h.db, h.note.id, 'three\n');
+			h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
+			await [1, 2, 3].reduce(async (prior) => {
+				await prior;
+				await focused(h);
+			}, Promise.resolve());
+			expect(h.scheduler.status().phase).toBe('attention');
+			h.remote.fake.setFault(undefined);
+
+			await focused(h);
+
+			expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
 			expect(h.scheduler.status().phase).toBe('attention');
 		});
 
-		expect(h.scheduler.status().lastSyncAt).toBe(h.env.state.now);
-		expect(h.env.pending()).toEqual([INTERVAL]);
+		it('is not left looking busy when trying it again fails', async () => {
+			const h = await blockedHarness({ blockedRetryMs: 0 });
+			const original = h.db.transaction.bind(h.db);
+			// Only the one that gives the op its attempts back, which is over the
+			// queue alone; the sync store's own span several tables.
+			const transaction = vi
+				.spyOn(h.db, 'transaction')
+				.mockImplementation(((...args: unknown[]) =>
+					args[1] === h.db.opQueue
+						? Promise.reject(new Error('QuotaExceededError'))
+						: (original as (...rest: unknown[]) => unknown)(
+								...args
+							)) as unknown as NotesDatabase['transaction']);
+
+			await focused(h);
+
+			expect(transaction.mock.calls.some((call) => call[1] === h.db.opQueue)).toBe(true);
+			expect(h.scheduler.status()).toMatchObject({
+				phase: 'retrying',
+				error: 'QuotaExceededError',
+			});
+		});
+
+		it('is tried again on its own after a while, pulling meanwhile', async () => {
+			const h = await blockedHarness({ blockedRetryMs: 3 * INTERVAL });
+			const pulls = h.remote.pulls();
+
+			const minute = async () => {
+				h.env.advance(INTERVAL);
+				await vi.waitFor(() => {
+					expect(h.scheduler.status().phase).not.toBe('syncing');
+				});
+				await quiet();
+			};
+			await minute();
+			await minute();
+			expect(h.remote.fake.contentAt(h.note.path)).toContain('one');
+			expect(h.remote.pulls()).toBeGreaterThanOrEqual(pulls + 2);
+
+			await minute();
+
+			await vi.waitFor(() => {
+				expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
+			});
+			await reaches(h.scheduler, 'idle');
+		});
+	});
+
+	it('records a pull that reached the end even when the push after it fails', async () => {
+		const db = await bound();
+		const note = await createNote(db, { title: 'Plan' });
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		await saveNoteBody(db, note.id, 'more\n');
+		h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
+		h.env.state.now += 5000;
+
+		await h.scheduler.syncNow();
+
+		expect(h.scheduler.status()).toMatchObject({
+			phase: 'retrying',
+			lastSyncAt: h.env.state.now,
+		});
+		expect((await db.syncState.get('c1'))?.lastSyncAt).toBe(h.env.state.now);
+	});
+
+	it('keeps reporting conflict copies, including those of a sync whose push failed', async () => {
+		const db = await bound();
+		const note = await createNote(db, { title: 'Plan', body: 'one\n' });
+		const h = started(db);
+		await vi.waitFor(async () => {
+			expect((await db.notes.get(note.id))?.dirty).toBe(0);
+		});
+		await reaches(h.scheduler, 'idle');
+		const version = h.remote.fake.snapshot().find((entry) => entry.path === note.path)?.version;
+
+		// Edited elsewhere, and here, before either syncs.
+		await h.remote.fake.write(note.path, 'remote\n', { expectedVersion: version });
+		await saveNoteBody(db, note.id, 'local\n');
+		h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
+		await h.scheduler.syncNow();
+
+		const copies = (await db.notes.toArray())
+			.filter((row) => row.path.includes('(conflict'))
+			.map((row) => row.path);
+		expect(copies).toHaveLength(1);
+		expect(h.scheduler.status()).toMatchObject({ phase: 'retrying', conflicts: copies });
+
+		h.remote.fake.setFault(undefined);
+		await h.scheduler.syncNow();
+		expect(h.scheduler.status()).toMatchObject({ phase: 'idle', conflicts: copies });
+	});
+
+	it('retries a token server that cannot be reached after it refused', async () => {
+		const db = await bound();
+		const token = vi
+			.fn<ApiClient['token']>()
+			.mockResolvedValueOnce({ ok: false, refusal: 'reauthorize_required' })
+			.mockRejectedValue(new TypeError('Failed to fetch'));
+		const h = started(db, { client: { token } });
+		await reaches(h.scheduler, 'attention');
+
+		await focused(h);
+
+		expect(h.scheduler.status()).toMatchObject({ phase: 'retrying', refusal: undefined });
+		expect(h.env.pending()).toEqual([BACKOFF]);
+	});
+
+	it('goes back to retrying and refreshing once another tab has a token', async () => {
+		const db = await bound();
+		const token = vi
+			.fn<ApiClient['token']>()
+			.mockResolvedValueOnce({ ok: false, refusal: 'reauthorize_required' })
+			.mockResolvedValue({
+				ok: true,
+				value: { accessToken: 'fresh', expiresAt: Date.now() + HOUR },
+			});
+		const h = started(db, { client: { token } });
+		await reaches(h.scheduler, 'attention');
+		await db.syncState.update('c1', {
+			accessToken: 'from-another-tab',
+			accessTokenExpiresAt: Date.now() + 10 * HOUR,
+		});
+		await focused(h);
+		expect(h.scheduler.status().phase).toBe('idle');
+
+		h.remote.fake.setFault((call) => (call.op === 'changes' ? new Error('503') : undefined));
+		await h.scheduler.syncNow();
+		expect(h.scheduler.status()).toMatchObject({ phase: 'retrying', refusal: undefined });
+		expect(h.env.pending()).toEqual([BACKOFF]);
+
+		h.remote.fake.setFault(undefined);
+		h.remote.rejected.add('from-another-tab');
+		await h.scheduler.syncNow();
+		expect(h.scheduler.status().phase).toBe('idle');
+		expect(h.remote.tokensUsed.at(-1)).toBe('fresh');
+	});
+
+	it('asks for attention, once, when a fresh token is refused before the sync starts', async () => {
+		const db = await bound();
+		const h = started(db);
+		['t1', 't2', 't3', 't4'].forEach((token) => h.remote.rejected.add(token));
+
+		await reaches(h.scheduler, 'attention');
+		await quiet();
+
+		expect(h.scheduler.status().error).toBe('authorization required');
+		expect(h.env.pending()).toEqual([]);
+		expect(h.server.token).toHaveBeenCalledTimes(2);
 	});
 
 	it('asks for attention over a provider it has no adapter for', async () => {
@@ -987,6 +1261,63 @@ describe('following the connection', () => {
 		await vi.waitFor(() => {
 			expect(h.remote.pulls()).toBe(before + 2);
 		});
+	});
+
+	it('never has two syncs of one connection at the network at once', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const held = deferred();
+		h.remote.gate.set('changes', held.promise);
+
+		const arrived = h.remote.gated();
+		const running = h.scheduler.syncNow();
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 1);
+		});
+		// A stop and start mid-sync: a React effect running again does this.
+		h.scheduler.stop();
+		h.scheduler.start();
+		await quiet();
+		expect(h.remote.gated()).toBe(arrived + 1);
+
+		h.remote.gate.delete('changes');
+		held.resolve();
+		await running;
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 2);
+		});
+		await reaches(h.scheduler, 'idle');
+	});
+
+	it('drops a sync that waited for the lock past the end of its session', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const held = deferred();
+		h.remote.gate.set('changes', held.promise);
+
+		const arrived = h.remote.gated();
+		const running = h.scheduler.syncNow();
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 1);
+		});
+		// The session started here queues behind the lock, and ends before it
+		// gets it.
+		h.scheduler.stop();
+		h.scheduler.start();
+		await quiet();
+		h.scheduler.stop();
+		h.scheduler.start();
+		await quiet();
+
+		h.remote.gate.delete('changes');
+		held.resolve();
+		await running;
+		await reaches(h.scheduler, 'idle');
+		await quiet();
+
+		expect(h.remote.gated()).toBe(arrived + 2);
 	});
 
 	it('does nothing after it is stopped', async () => {

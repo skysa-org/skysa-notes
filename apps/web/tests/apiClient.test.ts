@@ -151,6 +151,34 @@ describe('the API client', () => {
 		expect(calls[0]?.init?.headers).toMatchObject({ 'content-type': 'application/json' });
 	});
 
+	it("moves a token's expiry onto this device's clock", async () => {
+		vi.useFakeTimers({ now: Date.parse('2026-09-16T12:00:00Z') });
+		try {
+			// The Worker's clock says 08:00, four hours behind this device, and
+			// the token it minted lives for four hours by it.
+			const workerNow = Date.parse('2026-09-16T08:00:00Z');
+			const fetch: FetchLike = () =>
+				Promise.resolve(
+					new Response(
+						JSON.stringify({
+							accessToken: 'sl.abc',
+							expiresAt: workerNow + 4 * 3_600_000,
+						}),
+						{ status: 200, headers: { date: new Date(workerNow).toUTCString() } }
+					)
+				);
+
+			const result = await createApiClient({ fetch }).token('c1');
+
+			expect(result).toEqual({
+				ok: true,
+				value: { accessToken: 'sl.abc', expiresAt: Date.now() + 4 * 3_600_000 },
+			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('disconnects by id, escaped', async () => {
 		const { fetch, calls } = answering(200, { ok: true, revoked: false });
 
