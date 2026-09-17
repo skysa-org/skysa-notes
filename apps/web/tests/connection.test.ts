@@ -212,6 +212,43 @@ describe('binding a connection', () => {
 		]).toEqual(before);
 	});
 
+	it('keeps a notebook spelled two ways one notebook, with every note in it', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { connectionId: 'stale', name: 'Work' });
+		const kept = await createNote(db, {
+			connectionId: 'stale',
+			folderPath: 'Work',
+			title: 'Kept',
+		});
+		await createFolder(db, { name: 'work' });
+		await createFolder(db, { parentPath: 'work', name: 'Inner' });
+		const deep = await createNote(db, { folderPath: 'work/Inner', title: 'Deep' });
+		// Pushed long ago: nothing is owed for what is already there.
+		await db.opQueue.clear();
+
+		await bindConnection(db, { connectionId: 'stale', provider: 'dropbox' });
+
+		expect(await folderTree(db)).toEqual(['Work', 'Work/Inner']);
+		const moved = `Work/Inner/${deep.path.split('/').at(-1) ?? ''}`;
+		expect((await getNote(db, deep.id))?.path).toBe(moved);
+		expect((await getNote(db, kept.id))?.path).toBe(kept.path);
+		expect(await queued(db)).toEqual([
+			['stale', 'mkdir', 'Work/Inner'],
+			['stale', 'write', moved],
+		]);
+	});
+
+	it('does not move a note aside for a note that was deleted', async () => {
+		const db = freshDatabase();
+		const gone = await createNote(db, { connectionId: 'stale', title: 'Plan' });
+		await deleteNote(db, gone.id);
+		const moving = await createNote(db, { title: 'Plan' });
+
+		await bindConnection(db, { connectionId: 'stale', provider: 'dropbox' });
+
+		expect((await getNote(db, moving.id))?.path).toBe(moving.path);
+	});
+
 	it('moves everything or nothing', async () => {
 		const { db } = await usedLocally();
 		const notes = await db.notes.toArray();
@@ -250,6 +287,69 @@ describe('unbinding the connection', () => {
 		expect(await folderTree(db)).toEqual(['Work']);
 		expect(await db.syncState.count()).toBe(0);
 		expect(await db.opQueue.where('connectionId').equals(DROPBOX.connectionId).count()).toBe(0);
+	});
+});
+
+describe('a sync still at the network when the connection changes', () => {
+	/** An engine for `connectionId` whose pull waits until `release` is called. */
+	const heldPull = async (db: NotesDatabase, connectionId: string) => {
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		await fake.createFolder('Arrived');
+		await fake.write('Arrived/new.md', '# New\n', {});
+		const gate = new Map<'release', () => void>();
+		const held = new Promise<void>((resolve) => gate.set('release', resolve));
+		const engine = createSyncEngine({
+			provider: {
+				...fake,
+				changes: async (cursor) => {
+					await held;
+					return fake.changes(cursor);
+				},
+			},
+			store: createDexieSyncStore(db, { connectionId }),
+		});
+		const running = engine.pull().catch(() => undefined);
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		return { release: () => gate.get('release')?.(), running };
+	};
+
+	it('brings nothing back after a disconnect', async () => {
+		const { db, plan, deep } = await usedLocally();
+		await bindConnection(db, DROPBOX);
+		const { release, running } = await heldPull(db, DROPBOX.connectionId);
+
+		await unbindConnection(db);
+		release();
+		await running;
+
+		expect(await db.syncState.count()).toBe(0);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect((await listNotes(db)).map((note) => note.id).sort()).toEqual(
+			[plan.id, deep.id].sort()
+		);
+		expect(await db.notes.where('connectionId').notEqual(LOCAL_CONNECTION_ID).count()).toBe(0);
+		expect(await db.folders.where('connectionId').notEqual(LOCAL_CONNECTION_ID).count()).toBe(
+			0
+		);
+	});
+
+	it('leaves the account connected in its place alone', async () => {
+		const { db, plan, deep } = await usedLocally();
+		await bindConnection(db, DROPBOX);
+		const { release, running } = await heldPull(db, DROPBOX.connectionId);
+
+		await bindConnection(db, { connectionId: 'dropbox-2', provider: 'dropbox' });
+		release();
+		await running;
+
+		expect((await db.syncState.toArray()).map((state) => state.connectionId)).toEqual([
+			'dropbox-2',
+		]);
+		expect((await listNotes(db)).map((note) => note.id).sort()).toEqual(
+			[plan.id, deep.id].sort()
+		);
+		expect(await db.notes.where('connectionId').notEqual('dropbox-2').count()).toBe(0);
 	});
 });
 

@@ -23,10 +23,19 @@ import {
 	setNoteEditorMode,
 } from '../src/store/notes.js';
 import { queueWrite } from '../src/store/queue.js';
-import { createDexieSyncStore } from '../src/sync/store.js';
+import { createDexieSyncStore, type DexieSyncStoreOptions } from '../src/sync/store.js';
 
 const CONNECTION = 'dropbox-1';
 const scope = { connectionId: CONNECTION };
+
+/**
+ * A store for a connection the device is bound to — the only kind the app
+ * makes, and the only kind that writes.
+ */
+const boundStore = async (db: NotesDatabase, options: DexieSyncStoreOptions) => {
+	await db.syncState.put({ connectionId: options.connectionId, clientId: 'this-browser' });
+	return createDexieSyncStore(db, options);
+};
 
 const opened: NotesDatabase[] = [];
 
@@ -277,7 +286,7 @@ describe('the push queue a local change leaves behind', () => {
 /** The app's writers, the Dexie store and the engine, over the fake provider. */
 const connected = async () => {
 	const db = freshDatabase();
-	const store = createDexieSyncStore(db, scope);
+	const store = await boundStore(db, scope);
 	const fake = createFakeProvider();
 	await fake.ensureRoot();
 	const engineOver = (provider: StorageProvider) =>
@@ -562,7 +571,7 @@ describe('local changes made while a push is in flight', () => {
 describe('an op the user has moved on from, settled', () => {
 	it('leaves a queued move where it stands behind the write it follows', async () => {
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, scope);
+		const store = await boundStore(db, scope);
 		const note = await pushedNote(db);
 		await saveNoteBody(db, note.id, '# A\n\nmore\n');
 		const renamed = await renameNote(db, note.id, 'B');
@@ -588,7 +597,7 @@ describe('an op the user has moved on from, settled', () => {
 
 	it('forgets a failure of an op that has been withdrawn', async () => {
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, scope);
+		const store = await boundStore(db, scope);
 		const note = await pushedNote(db);
 		await deleteNote(db, note.id);
 		const [remove] = await store.pendingOps();

@@ -1,4 +1,4 @@
-import { type ProviderKind } from '@skysa/core';
+import { basename, joinPath, parentPath, type ProviderKind, ROOT } from '@skysa/core';
 
 import {
 	type FolderRecord,
@@ -58,27 +58,73 @@ interface Moved {
 	folders: FolderRecord[];
 }
 
+/**
+ * Rows from two connections can disagree about a notebook's spelling — `Work`
+ * and `work` — which is one directory on every provider. Everything moved
+ * takes the spelling already under the target, or the first one moved, so the
+ * notebook stays one notebook, and its notes stay in it.
+ */
+const spellingsOn = (folders: readonly FolderRecord[]) => {
+	const spellings = new Map(folders.map((folder) => [foldPath(folder.path), folder.path]));
+	const spell = (path: string): string => {
+		if (path === ROOT) return path;
+		const known = spellings.get(foldPath(path));
+		if (known !== undefined) return known;
+		const spelled = joinPath(spell(parentPath(path)), basename(path));
+		spellings.set(foldPath(path), spelled);
+		return spelled;
+	};
+	return {
+		/** Whether the target already has this notebook, in some spelling. */
+		has: (path: string): boolean => spellings.has(foldPath(path)),
+		folder: spell,
+		note: (path: string): string => joinPath(spell(parentPath(path)), basename(path)),
+	};
+};
+
 /** Every row not already under `target`, moved under it. */
 const moveRowsTo = async (db: Scope, target: string): Promise<Moved> => {
-	const notes = await db.notes.toArray();
-	const staying = notes.filter((note) => note.connectionId === target);
-	const leaving = notes.filter((note) => note.connectionId !== target);
+	const folders = await db.folders.toArray();
+	const foldersLeaving = folders.filter((folder) => folder.connectionId !== target);
+	const spelling = spellingsOn(folders.filter((folder) => folder.connectionId === target));
+	await db.folders.bulkDelete(
+		foldersLeaving.map((folder): [string, string] => [folder.connectionId, folder.path])
+	);
+	// Outermost first, so a notebook is spelled after its parent is.
+	const foldersMoved = [...foldersLeaving]
+		.sort((a, b) => depth(a.path) - depth(b.path))
+		.flatMap((folder): FolderRecord[] =>
+			spelling.has(folder.path)
+				? []
+				: [
+						{
+							connectionId: target,
+							path: spelling.folder(folder.path),
+							createdAt: folder.createdAt,
+						},
+					]
+		);
+	if (foldersMoved.length > 0) await db.folders.bulkPut(foldersMoved);
 
+	const notes = await db.notes.toArray();
+	const leaving = notes.filter((note) => note.connectionId !== target);
 	await db.notes.bulkDelete(
 		leaving.filter((note) => note.deletedLocally === 1).map((note) => note.id)
 	);
 
-	// Rows from two connections can want one path — which is one file on every
-	// provider, and one of the notes lost on the first push. Only possible when
-	// rows were somehow left under more than one, but cheap to rule out: the
-	// check is by folded path, as the providers compare.
-	const taken = new Set(staying.map((note) => foldPath(note.path)));
+	// Two notes wanting one path is one file on every provider, and one of the
+	// notes lost on the first push. By folded path, as the providers compare.
+	// A tombstone's path is free, as it is to every other writer (`takenNamesIn`).
+	const taken = new Set(
+		notes
+			.filter((note) => note.connectionId === target && note.deletedLocally === 0)
+			.map((note) => foldPath(note.path))
+	);
 	const notesMoved = leaving
 		.filter((note) => note.deletedLocally === 0)
 		.map((note): NoteRecord => {
-			const path = taken.has(foldPath(note.path))
-				? freePath(note.path, [...taken])
-				: note.path;
+			const wanted = spelling.note(note.path);
+			const path = taken.has(foldPath(wanted)) ? freePath(wanted, [...taken]) : wanted;
 			taken.add(foldPath(path));
 			return {
 				...withoutRemote(note),
@@ -90,25 +136,6 @@ const moveRowsTo = async (db: Scope, target: string): Promise<Moved> => {
 			};
 		});
 	if (notesMoved.length > 0) await db.notes.bulkPut(notesMoved);
-
-	const folders = await db.folders.toArray();
-	const kept = new Set(
-		folders
-			.filter((folder) => folder.connectionId === target)
-			.map((folder) => foldPath(folder.path))
-	);
-	const foldersLeaving = folders.filter((folder) => folder.connectionId !== target);
-	await db.folders.bulkDelete(
-		foldersLeaving.map((folder): [string, string] => [folder.connectionId, folder.path])
-	);
-	// One pass, checking and recording together: `Work` and `work` from two
-	// connections are one directory on the remote, and must be one row here.
-	const foldersMoved = foldersLeaving.flatMap((folder): FolderRecord[] => {
-		if (kept.has(foldPath(folder.path))) return [];
-		kept.add(foldPath(folder.path));
-		return [{ connectionId: target, path: folder.path, createdAt: folder.createdAt }];
-	});
-	if (foldersMoved.length > 0) await db.folders.bulkPut(foldersMoved);
 
 	// Queued for a connection nothing will sync again. What the moved rows owe
 	// the new one is queued by the caller, from what they are now.

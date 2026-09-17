@@ -24,9 +24,22 @@ import {
 	restoreNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
-import { createDexieSyncStore } from '../src/sync/store.js';
+import {
+	createDexieSyncStore,
+	type DexieSyncStoreOptions,
+	UnboundConnectionError,
+} from '../src/sync/store.js';
 
 const CONNECTION = 'dropbox-1';
+
+/**
+ * A store for a connection the device is bound to — the only kind the app
+ * makes, and the only kind that writes.
+ */
+const boundStore = async (db: NotesDatabase, options: DexieSyncStoreOptions) => {
+	await db.syncState.put({ connectionId: options.connectionId, clientId: 'this-browser' });
+	return createDexieSyncStore(db, options);
+};
 
 const opened: NotesDatabase[] = [];
 
@@ -50,9 +63,9 @@ const remote = (path: string, id = 'r1', version = 'v1'): RemoteEntry => ({
 	size: 1,
 });
 
-describeSyncStoreContract('Dexie', () => {
+describeSyncStoreContract('Dexie', async () => {
 	const db = freshDatabase();
-	const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+	const store = await boundStore(db, { connectionId: CONNECTION });
 	return {
 		store,
 		seed: async (note) => {
@@ -90,7 +103,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// another device may spell a timestamp differently. Re-serializing either
 		// gives the engine bytes the remote never had — a change nobody made.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		const file = '---\nupdated: 2026-01-01T00:00:00Z\n---\n# Shopping\r\n\r\nmilk\r\n';
 
 		await store.applyPull({
@@ -117,7 +130,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// The other half of the same field. A push that sent the pulled bytes
 		// after the user edited would put the old note back on the remote.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await store.applyPull({
 			changes: [
 				{
@@ -140,7 +153,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 
 	it('answers for notes the app created before anything was pulled', async () => {
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		const created = await createNote(db, { connectionId: CONNECTION, body: 'hello\n' });
 
 		expect((await store.noteById(created.id))?.content).toBe(noteFileContents(created));
@@ -159,7 +172,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 			['b-gone', 'a-live'],
 		] as const) {
 			const db = freshDatabase();
-			const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+			const store = await boundStore(db, { connectionId: CONNECTION });
 			const row = (id: string) =>
 				noteRecordFromFile({
 					id,
@@ -193,7 +206,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// that the user deleted it: §7 has the delete win, and the op behind it
 		// purges the row the pull wrote back.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await store.applyPull({
 			changes: [
 				{
@@ -231,7 +244,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// A clock that moves on every call, so a row written twice cannot keep its
 		// first time by landing in the same millisecond.
 		let clock = 0;
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION, now: () => ++clock });
+		const store = await boundStore(db, { connectionId: CONNECTION, now: () => ++clock });
 		await store.applyPull({
 			changes: [{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' }],
 		});
@@ -248,7 +261,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// A row for the root is reconciled away after the next cursor reset as a
 		// folder the scan did not mention — and every path is within the root.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await store.applyPull({ changes: [{ kind: 'ensure-folder', path: '', remoteId: 'root' }] });
 
 		expect(await db.folders.count()).toBe(0);
@@ -258,7 +271,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// The contract's promise, and the one a store that cascaded anyway would
 		// break: the notes here are not under a notebook this store knows about.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await db.notes.put({
 			...noteRecordFromFile({
 				id: 'n1',
@@ -281,7 +294,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 		// The engine promises a fresh id. Writing the copy over a note that holds
 		// it would be losing one note to save another.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await store.applyPull({
 			changes: [
 				{
@@ -328,8 +341,8 @@ describe('the Dexie sync store, beyond the contract', () => {
 
 	it('sees nothing that belongs to another connection', async () => {
 		const db = freshDatabase();
-		const mine = createDexieSyncStore(db, { connectionId: CONNECTION });
-		const theirs = createDexieSyncStore(db, { connectionId: 'other' });
+		const mine = await boundStore(db, { connectionId: CONNECTION });
+		const theirs = await boundStore(db, { connectionId: 'other' });
 		await theirs.applyPull({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' },
@@ -382,7 +395,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 
 	it('keeps the client id a connection already has when it stores a cursor', async () => {
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await db.syncState.put({
 			connectionId: CONNECTION,
 			clientId: 'this-browser',
@@ -403,7 +416,7 @@ describe('the Dexie sync store, beyond the contract', () => {
 /** A store with one clean note pulled into it, as the engine would leave it. */
 const pulled = async (content = 'x\n') => {
 	const db = freshDatabase();
-	const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+	const store = await boundStore(db, { connectionId: CONNECTION });
 	await store.applyPull({
 		changes: [{ kind: 'upsert-note', id: 'n1', path: 'a.md', content, remote: remote('a.md') }],
 		cursor: 'c1',
@@ -487,7 +500,7 @@ describe('another connection’s note under the same id', () => {
 		// Clean, so what refuses this is whose note it is and not that it was
 		// edited — a pushed note is taken over just the same.
 		await db.notes.update(theirs.id, { dirty: 0 });
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 
 		await expect(
 			store.applyPull({
@@ -510,8 +523,8 @@ describe('another connection’s note under the same id', () => {
 
 	it('is left alone by every other change and outcome that names it', async () => {
 		const db = freshDatabase();
-		const theirs = createDexieSyncStore(db, { connectionId: 'other' });
-		const mine = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const theirs = await boundStore(db, { connectionId: 'other' });
+		const mine = await boundStore(db, { connectionId: CONNECTION });
 		await theirs.applyPull({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' },
@@ -581,7 +594,7 @@ describe('a note deleted here', () => {
 		// remote change is a conflict, and its copy is a new live note holding
 		// the text the user deleted — back in the sidebar and on the remote.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		const provider = createFakeProvider();
 		await provider.ensureRoot();
 		const engine = createSyncEngine({
@@ -695,7 +708,7 @@ describe('a note deleted here', () => {
 		// held unpushed writing, it would be detached and left behind — a live
 		// row for a note the user deleted, with nothing left to purge it.
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
+		const store = await boundStore(db, { connectionId: CONNECTION });
 		await store.applyPull({
 			changes: [
 				{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' },
@@ -849,12 +862,31 @@ describe('where a change puts a note', () => {
 		expect((await store.folderByPath('Archive'))?.remoteId).toBe('f2');
 	});
 
-	it('gives a connection with no sync state yet a client id when it stores a cursor', async () => {
+	it('writes nothing for a connection the device has let go of', async () => {
 		const db = freshDatabase();
-		const store = createDexieSyncStore(db, { connectionId: CONNECTION });
-		await store.applyPull({ changes: [], cursor: 'c1' });
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		await store.applyPull({
+			changes: [{ kind: 'ensure-folder', path: 'Work', remoteId: 'f1' }],
+		});
+		await db.syncState.clear();
 
-		expect(typeof (await db.syncState.get(CONNECTION))?.clientId).toBe('string');
+		await expect(
+			store.applyPull({
+				changes: [
+					{
+						kind: 'upsert-note',
+						id: 'n1',
+						path: 'Work/a.md',
+						content: 'x\n',
+						remote: remote('Work/a.md'),
+					},
+				],
+				cursor: 'c2',
+			})
+		).rejects.toThrow(UnboundConnectionError);
+
+		expect(await db.syncState.count()).toBe(0);
+		expect(await db.notes.count()).toBe(0);
 	});
 });
 

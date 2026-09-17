@@ -40,6 +40,15 @@ import { queueMove, queueWrite } from '../store/queue.js';
  * `remoteId` the delete needs; the UI is what hides them.
  */
 
+/** The store was asked to write for a connection this device has since let go of. */
+export class UnboundConnectionError extends Error {
+	override readonly name = 'UnboundConnectionError';
+
+	constructor(readonly connectionId: string) {
+		super(`This device no longer syncs connection ${connectionId}`);
+	}
+}
+
 export interface DexieSyncStoreOptions {
 	connectionId: string;
 	/** For `createdAt` and friends; injectable so tests are deterministic. */
@@ -127,8 +136,23 @@ export const createDexieSyncStore = (
 		return hash;
 	};
 
+	/**
+	 * Every write, and only while the device is still bound to this connection.
+	 * An engine can be at the network when the user disconnects, or connects
+	 * another account (`store/connection.ts`); what it brings back belongs to a
+	 * connection nothing shows. Written anyway, its cursor would put the old
+	 * `syncState` row back — making that the app's connection again, with every
+	 * note now under another one — and its new files would land under it.
+	 * Checked in the transaction, which binding locks too, so the two cannot
+	 * interleave.
+	 */
 	const inTransaction = <T>(work: () => Promise<T>): Promise<T> =>
-		db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState], work);
+		db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState], async () => {
+			if ((await db.syncState.get(connectionId)) === undefined) {
+				throw new UnboundConnectionError(connectionId);
+			}
+			return work();
+		});
 
 	const notesOf = (scope: Scope): Promise<NoteRecord[]> =>
 		scope.notes.where('connectionId').equals(connectionId).toArray();
@@ -571,13 +595,7 @@ export const createDexieSyncStore = (
 				}, Promise.resolve());
 
 				if (batch.cursor === undefined) return;
-				const state = await db.syncState.get(connectionId);
-				await db.syncState.put({
-					clientId: state?.clientId ?? crypto.randomUUID(),
-					...state,
-					connectionId,
-					cursor: batch.cursor,
-				});
+				await db.syncState.update(connectionId, { cursor: batch.cursor });
 			});
 		},
 
