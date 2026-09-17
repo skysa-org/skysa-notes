@@ -79,7 +79,7 @@ describe('the API client', () => {
 		const hanging = (_input: string, init?: RequestInit) =>
 			new Promise<Response>((_resolve, reject) => {
 				init?.signal?.addEventListener('abort', () => {
-					reject(init.signal?.reason);
+					reject(new DOMException('The call timed out', 'TimeoutError'));
 				});
 			});
 
