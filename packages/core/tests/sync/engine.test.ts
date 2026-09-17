@@ -9,6 +9,7 @@ import {
 	ConflictError,
 	CursorResetError,
 	NotFoundError,
+	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
@@ -808,6 +809,122 @@ describe('push', () => {
 		expect(store.ops()).toHaveLength(1);
 	});
 
+	/**
+	 * A rate limit is the one failure that says nothing about the op: the
+	 * provider did not look at it. Counted like any other, five throttles in a
+	 * row would block a write the remote never saw, and the user would be told
+	 * their note cannot be sent.
+	 */
+	it('does not count a rate limit against the op', async () => {
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		provider.setFault((call) =>
+			call.op === 'write' ? new RateLimitError('slow down', 4000) : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()[0]?.attempts).toBe(0);
+		expect(store.lastError(op.seq)).toBeUndefined();
+		// And the wait the provider asked for reaches the caller, which is the
+		// only thing that knows when to come back.
+		expect(result.retryAfterMs).toBe(4000);
+		expect(result.error).toContain('slow down');
+	});
+
+	it('says nothing about a wait when the provider named none', async () => {
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		provider.setFault((call) =>
+			call.op === 'write' ? new RateLimitError('slow down') : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		// Absent, not zero: the caller's own backoff is what applies.
+		expect(result.retryAfterMs).toBeUndefined();
+	});
+
+	it('does not count a rate limit met while resolving a push conflict', async () => {
+		// The conflict rule reads the remote entry before it can decide
+		// anything, and that read is a request like any other. Counted under the
+		// conflict's name, a provider throttling every read would spend the
+		// write's attempts on a file it never looked at — and the wait it asked
+		// for would be thrown away with it.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		provider.setFault((call) =>
+			call.op === 'read' ? new RateLimitError('slow down', 6000) : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()[0]?.attempts).toBe(0);
+		expect(store.lastError(op.seq)).toBeUndefined();
+		expect(result.retryAfterMs).toBe(6000);
+		expect(result.error).toContain('slow down');
+		// And nothing was decided: no conflict copy over a read that never came.
+		expect(result.conflicts).toEqual([]);
+		expect(store.notes().map((note) => note.path)).toEqual(['a.md']);
+	});
+
+	it('counts an ordinary failure met while resolving a push conflict', async () => {
+		// The other half of the same rule: a resolution that fails for a reason
+		// that is not a rate limit must still move the op's attempts, or it can
+		// never reach `blocked` however long it goes on failing.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		provider.setFault((call) => (call.op === 'read' ? new Error('read failed') : undefined));
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()[0]?.attempts).toBe(1);
+		expect(store.lastError(op.seq)).toContain('read failed');
+	});
+
+	it('still blocks an op that has already failed too often, rate limit or not', async () => {
+		// The attempts rule is about what has happened, not about today's
+		// failure: an op at the limit is surfaced before the provider is asked.
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
+		provider.setFault(() => new RateLimitError('slow down', 1000));
+
+		expect((await engine.push()).status).toBe('blocked');
+	});
+
+	it('carries the wait out of a pull that was rate limited', async () => {
+		provider.setFault((call) =>
+			call.op === 'changes' ? new RateLimitError('slow down', 9000) : undefined
+		);
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('retry');
+		expect(result.retryAfterMs).toBe(9000);
+	});
+
 	it('records the failure against the op it belongs to', async () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
 		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -946,6 +1063,53 @@ describe('authorization', () => {
 		expect(refreshed).toBe(1);
 		expect(result.status).toBe('ok');
 		expect(provider.contentAt('a.md')).toBe('mine\n');
+	});
+
+	it('refreshes for a token that expired while resolving a push conflict', async () => {
+		// The conflict rule reads the remote before it decides anything, and
+		// that read meets an expired token like any other. Under the conflict's
+		// name it was neither refreshed nor retried — just counted, so a token
+		// going stale at exactly the wrong moment spent one of the write's
+		// attempts and left the conflict unresolved.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		let refreshed = 0;
+		provider.setFault((call) =>
+			call.op === 'read' && refreshed === 0 ? new AuthError('expired') : undefined
+		);
+		const withAuth = createSyncEngine({
+			provider,
+			store,
+			now: () => AT,
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.push();
+
+		expect(refreshed).toBe(1);
+		expect(result.status).toBe('ok');
+		// The write is done with — what is left queued is the conflict copy's
+		// own write, which the resolution made.
+		expect(store.ops().map((queued) => queued.seq)).not.toContain(op.seq);
+		expect(store.lastError(op.seq)).toBeUndefined();
+		// And the conflict rule got to run after the fresh token: the remote
+		// keeps the path and the local copy is beside it.
+		expect(result.conflicts).toHaveLength(1);
+		expect([...store.notes()].map((note) => note.path).sort()).toEqual(
+			['a.md', ...result.conflicts].sort()
+		);
 	});
 
 	it('pauses rather than looping when the refresh does not help', async () => {

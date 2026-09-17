@@ -9,6 +9,8 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
+	parseRetryAfter,
+	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -70,7 +72,8 @@ interface DropboxFailure {
 	 * for equality.
 	 */
 	summary: string;
-	retryAfterSeconds?: number;
+	/** How long Dropbox asked us to wait, where it said. */
+	retryAfterMs?: number;
 }
 
 /** Dropbox names the app-folder root `''`, and every other path with a leading slash. */
@@ -185,15 +188,29 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 				return {};
 			}
 		})();
-		const header = response.headers.get('retry-after');
-		const retry = parsed.error?.retry_after ?? (header === null ? undefined : Number(header));
+		// The header is what the error-handling guide documents ("indicating how
+		// long your app should wait (in seconds) before retrying"); the RPC
+		// routes put the same number in the body's `retry_after`, which is read
+		// first because it is the more specific of the two.
+		// https://docs.dropboxapi.com/dropbox-api/docs/error-handling
+		const body = parsed.error?.retry_after;
+		const retry =
+			typeof body === 'number' && Number.isFinite(body)
+				? Math.max(0, body) * 1000
+				: parseRetryAfter(response.headers.get('retry-after'));
 
 		return {
 			status: response.status,
 			summary: parsed.error_summary ?? text,
-			...(retry === undefined || Number.isNaN(retry) ? {} : { retryAfterSeconds: retry }),
+			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
+
+	/** What to put in the message, when Dropbox said how long to wait. */
+	const waitedFor = (failure: DropboxFailure): string =>
+		failure.retryAfterMs === undefined
+			? ''
+			: `, retry after ${String(failure.retryAfterMs / 1000)}s`;
 
 	/**
 	 * Endpoint-specific errors arrive as 409 with a `/`-separated summary. Any
@@ -216,13 +233,10 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (tagged(failure, 'reset')) throw new CursorResetError(failure.summary);
 		if (tagged(failure, 'not_found')) throw new NotFoundError(path ?? failure.summary);
 		if (failure.status === 429) {
-			// Deliberately untyped: the engine's per-op backoff treats an unknown
-			// error as transient, which is exactly right here. See docs/PLAN.md §4.
-			const wait =
-				failure.retryAfterSeconds === undefined
-					? ''
-					: `, retry after ${String(failure.retryAfterSeconds)}s`;
-			throw new Error(`dropbox rate limit${wait}`);
+			throw new RateLimitError(
+				`dropbox rate limit${waitedFor(failure)}`,
+				failure.retryAfterMs
+			);
 		}
 		throw new Error(`dropbox ${String(failure.status)}: ${failure.summary}`);
 	};

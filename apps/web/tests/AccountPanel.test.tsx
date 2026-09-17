@@ -84,6 +84,7 @@ const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 			};
 		},
 		syncNow: vi.fn(() => Promise.resolve()),
+		resync: vi.fn(() => Promise.resolve()),
 		say: (next: Partial<SchedulerStatus>) => {
 			const status: SchedulerStatus = { phase: 'idle', conflicts: [], ...next };
 			box.set('status', status);
@@ -631,6 +632,166 @@ describe('AccountPanel, reporting how syncing is going', () => {
 				'Some changes could not be sent to Dropbox. They will be tried again (write a.md failed 8 times).'
 			)
 		).toBeTruthy();
+	});
+
+	it('says which change is stuck, and by the name the user gave it', async () => {
+		// "Some changes could not be sent" leaves the user with nothing to act
+		// on. The queue is ordered, so this one op is also why everything
+		// behind it is waiting.
+		await connected(
+			fakeSync({
+				phase: 'attention',
+				error: 'move Plan.md failed 5 times',
+				stuck: {
+					op: 'move',
+					path: 'Plan.md',
+					targetPath: 'Work/Plan.md',
+					attempts: 5,
+					error: 'insufficient permissions',
+				},
+			})
+		);
+
+		expect(
+			screen.getByText(
+				'Dropbox would not take the rename of Work/Plan.md after 5 tries (insufficient permissions). Everything queued behind it is waiting. \u201CSync now\u201D tries again.'
+			)
+		).toBeTruthy();
+	});
+
+	it('offers to open the note a stuck change is about', async () => {
+		const sync = fakeSync({ phase: 'idle' });
+		const db = await connected(sync);
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+
+		sync.say({
+			phase: 'attention',
+			stuck: {
+				op: 'write',
+				path: note.path,
+				noteId: note.id,
+				attempts: 5,
+				error: 'nope',
+			},
+		});
+
+		const link = await screen.findByRole('link', { name: 'Open the note' });
+		expect(link.getAttribute('href')).toContain(note.id);
+	});
+
+	it('offers nothing to open for a notebook, or for a note already deleted', async () => {
+		// A stuck `mkdir` is about no note at all, and a stuck `delete` is
+		// about one whose row is a tombstone: opening it would be opening
+		// nothing.
+		const sync = fakeSync({ phase: 'idle' });
+		const db = await connected(sync);
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+
+		sync.say({
+			phase: 'attention',
+			stuck: { op: 'mkdir', path: 'Work', attempts: 5 },
+		});
+		expect(
+			screen.getByText(
+				'Dropbox would not take the new notebook Work after 5 tries (unknown error). Everything queued behind it is waiting. \u201CSync now\u201D tries again.'
+			)
+		).toBeTruthy();
+		expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
+
+		// The note has to be offered first, or its absence proves nothing: the
+		// link is read from the database, and "not yet" looks like "never".
+		sync.say({
+			phase: 'attention',
+			stuck: { op: 'write', path: note.path, noteId: note.id, attempts: 5 },
+		});
+		expect(await screen.findByRole('link', { name: 'Open the note' })).toBeTruthy();
+
+		await db.notes.update(note.id, { deletedLocally: 1 });
+		sync.say({
+			phase: 'attention',
+			stuck: { op: 'delete', path: note.path, noteId: note.id, attempts: 5 },
+		});
+		await waitFor(() => {
+			expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
+		});
+	});
+
+	it('offers nothing to open outside the message that names the stuck change', async () => {
+		// `stuck` outlives the run that found it — it is not recomputed until a
+		// run reaches the queue again — so the offer has to be tied to the
+		// message it belongs beside, not to the field being set.
+		const sync = fakeSync({ phase: 'idle' });
+		const db = await connected(sync);
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		const stuck = {
+			op: 'write' as const,
+			path: note.path,
+			noteId: note.id,
+			attempts: 5,
+			error: 'nope',
+		};
+
+		sync.say({ phase: 'attention', stuck });
+		expect(await screen.findByRole('link', { name: 'Open the note' })).toBeTruthy();
+
+		sync.say({ phase: 'syncing', stuck });
+		await waitFor(() => {
+			expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
+		});
+
+		sync.say({ phase: 'idle', stuck });
+		expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
+	});
+
+	it('offers no re-scan for a provider this build cannot sync', async () => {
+		// There is nothing to read again: no adapter ever read it in the first
+		// place, and the button would fail silently.
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'webdav' });
+		renderPanel(
+			clientWith({ connections: () => Promise.reject(new TypeError('offline')) }),
+			db,
+			'/',
+			fakeSync({ phase: 'attention' })
+		);
+
+		expect(await screen.findByText('This app cannot sync with WebDAV yet.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Re-scan from scratch' })).toBeNull();
+	});
+
+	it('reads everything again only after saying what that costs', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'idle' });
+		await connected(sync);
+
+		await user.click(screen.getByRole('button', { name: 'Re-scan from scratch' }));
+		expect(screen.getByText(/Read everything in Dropbox again\?/)).toBeTruthy();
+		expect(screen.getByText(/are no longer in Dropbox are removed here too/)).toBeTruthy();
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(sync.resync).not.toHaveBeenCalled();
+		expect(screen.getByRole('button', { name: 'Re-scan from scratch' })).toBeTruthy();
+
+		await user.click(screen.getByRole('button', { name: 'Re-scan from scratch' }));
+		await user.click(screen.getByRole('button', { name: 'Re-scan' }));
+
+		expect(sync.resync).toHaveBeenCalledTimes(1);
+		expect(screen.queryByText(/Read everything in Dropbox again\?/)).toBeNull();
+	});
+
+	it('cannot be asked to read everything again while it is syncing', async () => {
+		const sync = fakeSync({ phase: 'syncing' });
+		await connected(sync);
+
+		expect(
+			screen.getByRole('button', { name: 'Re-scan from scratch' }).hasAttribute('disabled')
+		).toBe(true);
+	});
+
+	it('offers no re-scan before the scheduler has picked the connection up', async () => {
+		await connected(fakeSync({ phase: 'local' }));
+
+		expect(screen.queryByRole('button', { name: 'Re-scan from scratch' })).toBeNull();
 	});
 
 	it('says when a note was edited in two places at once', async () => {

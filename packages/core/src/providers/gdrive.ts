@@ -25,6 +25,8 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
+	parseRetryAfter,
+	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -133,7 +135,54 @@ interface DriveFailure {
 	/** Which parameter an error is about, where Drive says. */
 	locations: readonly string[];
 	message: string;
+	/**
+	 * The `google.rpc.Code` name in `error.status`. Drive's older bodies put the
+	 * reason in `errors[]` and leave this out; the newer ones do the reverse,
+	 * and a quota there reads `RESOURCE_EXHAUSTED` with no `errors[]` at all.
+	 */
+	condition?: string;
+	/** How long Drive asked us to wait. It documents no such header, but reads it if one arrives. */
+	retryAfterMs?: number;
 }
+
+/**
+ * A quota, not a request Drive objects to. Drive answers 429 for a burst and
+ * 403 with one of these reasons for a longer-range limit, and the 403s share
+ * their status with the permission errors in `NO_ACCESS` — so the reason is the
+ * only thing that separates "slow down" from "you cannot have this file".
+ * `sharingRateLimitExceeded` is listed for completeness; this app never shares.
+ * https://developers.google.com/workspace/drive/api/guides/handle-errors
+ */
+const RATE_LIMITED = new Set([
+	'rateLimitExceeded',
+	'userRateLimitExceeded',
+	'dailyLimitExceeded',
+	'sharingRateLimitExceeded',
+]);
+/**
+ * `RESOURCE_EXHAUSTED` is read only where Drive gave no reason at all, and
+ * never over one. The reason is the more specific answer and the allow-list
+ * leaves some of them out on purpose: `storageQuotaExceeded` is a 403 meaning
+ * the user's Drive is full, which no wait fixes, and `google.rpc.Code` defines
+ * `RESOURCE_EXHAUSTED` as "some resource has been exhausted, perhaps a per-user
+ * quota, or perhaps the entire file system is out of space" — the same code for
+ * both. Read over the reason, a full Drive would retry for ever without ever
+ * counting against the op, and the user would never be told.
+ *
+ * Scoped to a 403, which is the only status it can earn its keep on: `google.rpc`
+ * maps `RESOURCE_EXHAUSTED` to 429, and a 429 is already a rate limit by status
+ * alone. Every error body on Drive's errors page carries `errors[]`, so this
+ * fires only for a shape that page does not document. It is there because the shared
+ * Google error model puts the condition in `error.status`, and a quota read as
+ * an ordinary failure blocks the queue over something that will pass. Whether
+ * Drive ever sends it is on the live-check list (docs/PLAN.md, Phase 4).
+ */
+const throttled = (failure: DriveFailure): boolean =>
+	failure.status === 429 ||
+	(failure.status === 403 &&
+		failure.reasons.length === 0 &&
+		failure.condition === 'RESOURCE_EXHAUSTED') ||
+	(failure.status === 403 && failure.reasons.some((reason) => RATE_LIMITED.has(reason)));
 
 /**
  * A file this app cannot reach and will not again by asking: not there (404,
@@ -321,7 +370,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	const failureOf = async (response: Response): Promise<DriveFailure> => {
 		const text = await response.text().catch(() => '');
-		const parsed = ((): { error?: { message?: unknown; errors?: unknown } } => {
+		const parsed = ((): {
+			error?: { message?: unknown; errors?: unknown; status?: unknown };
+		} => {
 			try {
 				const value: unknown = JSON.parse(text);
 				return typeof value === 'object' && value !== null ? value : {};
@@ -337,23 +388,32 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 				const value = (error as Record<string, unknown> | null)?.[key];
 				return typeof value === 'string' ? [value] : [];
 			});
+		const retry = parseRetryAfter(response.headers.get('retry-after'));
 		return {
 			status: response.status,
 			reasons: field('reason'),
 			locations: field('location'),
 			message: typeof parsed.error?.message === 'string' ? parsed.error.message : text,
+			...(typeof parsed.error?.status === 'string' ? { condition: parsed.error.status } : {}),
+			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
 
 	/**
 	 * Everything that maps the same way whatever the route. A rate limit is a
-	 * 403 on Drive as often as a 429, and like every other failure here it is
-	 * left untyped: the engine's backoff treats that as transient.
+	 * 403 on Drive as often as a 429, which is why it is matched by reason and
+	 * not by status.
 	 */
 	const raise = (failure: DriveFailure, path?: string): never => {
 		const detail = failure.reasons.join('/') || failure.message;
 		if (failure.status === 401) throw new AuthError(detail);
 		if (failure.status === 404) throw new NotFoundError(path ?? detail);
+		if (throttled(failure)) {
+			throw new RateLimitError(
+				`gdrive rate limit (${String(failure.status)}): ${detail}`,
+				failure.retryAfterMs
+			);
+		}
 		throw new Error(`gdrive ${String(failure.status)}: ${detail}`);
 	};
 

@@ -2,6 +2,7 @@ import {
 	AuthError,
 	createFakeProvider,
 	type FakeProvider,
+	RateLimitError,
 	type StorageProvider,
 } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -133,12 +134,15 @@ interface Remote {
 	gated: (op?: Gated) => number;
 	/** How many times the remote has been asked what changed: one per sync. */
 	pulls: () => number;
+	/** The cursor each `changes` was asked with; `undefined` is a full scan. */
+	cursors: (string | undefined)[];
 	factory: ProviderFactory;
 }
 
 const remote = (): Remote => {
 	const fake = createFakeProvider();
 	const tokensUsed: string[] = [];
+	const cursors: (string | undefined)[] = [];
 	const rejected = new Set<string>();
 	const gate = new Map<Gated, Promise<void>>();
 	const arrivals = new Map<Gated, number>();
@@ -188,6 +192,7 @@ const remote = (): Remote => {
 			changes: async (cursor) => {
 				await arrive('changes');
 				await authorized();
+				cursors.push(cursor);
 				return fake.changes(cursor);
 			},
 		};
@@ -201,6 +206,7 @@ const remote = (): Remote => {
 		gate,
 		gated: (op = 'changes') => arrivals.get(op) ?? 0,
 		pulls: () => fake.callLog().filter((call) => call.op === 'changes').length,
+		cursors,
 		factory,
 	};
 };
@@ -858,6 +864,157 @@ describe('failures', () => {
 		expect(phases).toEqual([...Array<SyncPhase>(8).fill('retrying'), 'attention']);
 	});
 
+	describe('reading everything again', () => {
+		it('discards the cursor, keeps the folder, and scans', async () => {
+			const db = await bound();
+			const note = await createNote(db, { title: 'Plan', body: 'one\n' });
+			const h = started(db);
+			await reaches(h.scheduler, 'idle');
+			// The sync after the first asks with the stored cursor.
+			await h.scheduler.syncNow();
+			const before = await db.syncState.get('c1');
+			expect(before?.cursor).toBeDefined();
+			expect(h.remote.cursors.at(-1)).toBeDefined();
+
+			await h.scheduler.resync();
+
+			// `undefined` is a full scan: everything read again.
+			expect(h.remote.cursors.at(-1)).toBeUndefined();
+			const after = await db.syncState.get('c1');
+			// The app folder is the same folder; finding it again buys nothing.
+			expect(after?.rootId).toBe(before?.rootId);
+			// Defined again, so the next sync is an ordinary one — but not
+			// necessarily a different string: a cursor names the state the scan
+			// ended at, and nothing here changed while it ran.
+			expect(after?.cursor).toBeDefined();
+			expect(h.scheduler.status().phase).toBe('idle');
+			expect(h.remote.fake.contentAt(note.path)).toContain('one');
+		});
+
+		it('waits for a run already at the network, whose cursor would land on top of ours', async () => {
+			// The held run is mid-round with a cursor of its own, and writes it
+			// back when that round lands. Clearing outside the lock, the clear
+			// happens first and is then undone — and the user is told the sync
+			// succeeded, so the re-scan they asked for never happens and never
+			// says so. Inside it, the held run finishes and ours is the last word.
+			const db = await bound();
+			const h = started(db);
+			await reaches(h.scheduler, 'idle');
+			await h.scheduler.syncNow();
+			expect((await db.syncState.get('c1'))?.cursor).toBeDefined();
+
+			const held = deferred();
+			h.remote.gate.set('changes', held.promise);
+			const arrived = h.remote.gated();
+			const inFlight = h.scheduler.syncNow();
+			await vi.waitFor(() => {
+				expect(h.remote.gated()).toBe(arrived + 1);
+			});
+			const mark = h.remote.cursors.length;
+
+			const rescan = h.scheduler.resync();
+			h.remote.gate.delete('changes');
+			held.resolve();
+			await Promise.all([inFlight, rescan]);
+
+			// A full scan, after the held run's round and whatever it wrote.
+			expect(h.remote.cursors.slice(mark)).toContain(undefined);
+			expect(h.scheduler.status().phase).toBe('idle');
+		});
+
+		it('does nothing at all with no connection', async () => {
+			const { scheduler, remote: theRemote } = started(freshDatabase());
+
+			await scheduler.resync();
+
+			expect(theRemote.pulls()).toBe(0);
+			expect(scheduler.status().phase).toBe('local');
+		});
+	});
+
+	describe('a provider asking for room', () => {
+		/** Idle, with the next `changes` answering a rate limit. */
+		const throttled = async (retryAfterMs?: number) => {
+			const db = await bound();
+			const h = started(db);
+			await reaches(h.scheduler, 'idle');
+			h.remote.fake.setFault((call) =>
+				call.op === 'changes' ? new RateLimitError('slow down', retryAfterMs) : undefined
+			);
+			return h;
+		};
+
+		it('waits as long as it was asked to, not only as long as it would have', async () => {
+			const h = await throttled(30_000);
+
+			await h.scheduler.syncNow();
+
+			expect(h.scheduler.status().phase).toBe('retrying');
+			// The provider is the only party that knows when it will serve us.
+			expect(h.env.pending()).toEqual([30_000]);
+		});
+
+		it('does not come back sooner than its own backoff', async () => {
+			// A wait of a second on the umpteenth failure in a row is not an
+			// invitation to come straight back.
+			const h = await throttled(1000);
+
+			await h.scheduler.syncNow();
+
+			expect(h.env.pending()).toEqual([BACKOFF]);
+		});
+
+		it('uses its own backoff when nothing was said', async () => {
+			const h = await throttled();
+
+			await h.scheduler.syncNow();
+
+			expect(h.env.pending()).toEqual([BACKOFF]);
+		});
+
+		it('caps a wait no user could make sense of', async () => {
+			// Drive's daily quota says "tomorrow". Coming back in a quarter of an
+			// hour costs one refused request, and it says so again.
+			const h = await throttled(24 * HOUR);
+
+			await h.scheduler.syncNow();
+
+			expect(h.env.pending()).toEqual([15 * 60_000]);
+		});
+
+		it('never gives up on an op the provider would not look at', async () => {
+			// Counted like any other failure, a throttled write would be blocked
+			// after `maxAttempts` throttles and the user told their note cannot
+			// be sent — about a write the remote never saw.
+			const db = await bound();
+			const note = await createNote(db, { title: 'Plan', body: 'one\n' });
+			const h = started(db, { maxAttempts: 2 });
+			await vi.waitFor(() => {
+				expect(h.remote.fake.contentAt(note.path)).toContain('one');
+			});
+			await reaches(h.scheduler, 'idle');
+			await saveNoteBody(db, note.id, 'two\n');
+			h.remote.fake.setFault((call) =>
+				call.op === 'write' ? new RateLimitError('slow down', 1000) : undefined
+			);
+
+			const phases = await [1, 2, 3, 4].reduce<Promise<SyncPhase[]>>(async (prior) => {
+				const seen = await prior;
+				await nextTimer(h);
+				return [...seen, h.scheduler.status().phase];
+			}, Promise.resolve([]));
+
+			expect(phases).toEqual(Array<SyncPhase>(4).fill('retrying'));
+			expect((await db.opQueue.toArray()).map((op) => op.attempts)).toEqual([0]);
+			expect(h.scheduler.status().stuck).toBeUndefined();
+
+			// And it lands the moment the provider stops saying no.
+			h.remote.fake.setFault(undefined);
+			await nextTimer(h);
+			expect(h.remote.fake.contentAt(note.path)).toContain('two');
+		});
+	});
+
 	describe('an op that has failed too often', () => {
 		const blockedHarness = async (options: Partial<SyncSchedulerOptions> = {}) => {
 			const db = await bound();
@@ -878,6 +1035,90 @@ describe('failures', () => {
 			h.remote.fake.setFault(undefined);
 			return { ...h, note };
 		};
+
+		it('says which op it is, so the UI can name it', async () => {
+			// "Some changes could not be sent" leaves the user nothing to act on,
+			// and the queue is ordered, so this op is why the rest are waiting.
+			const h = await blockedHarness();
+
+			expect(h.scheduler.status().stuck).toEqual({
+				op: 'write',
+				path: h.note.path,
+				noteId: h.note.id,
+				attempts: 2,
+				error: '503',
+			});
+		});
+
+		it('says nothing is stuck once the op is being tried again', async () => {
+			const h = await blockedHarness();
+
+			await h.scheduler.syncNow();
+
+			expect(h.scheduler.status()).toMatchObject({ phase: 'idle' });
+			expect(h.scheduler.status().stuck).toBeUndefined();
+		});
+
+		it('stays named through a run that failed without releasing anything', async () => {
+			// `status().stuck` says what the queue holds, not what the last
+			// publish was about. A run that never got as far as the queue —
+			// this one fails on `changes` — changed nothing about it, so the op
+			// is still out of attempts and still named. (The panel shows the
+			// vague message at `retrying` either way; this is about `status()`,
+			// which is the scheduler's public answer.)
+			const h = await blockedHarness();
+			h.remote.fake.setFault((call) =>
+				call.op === 'changes' ? new Error('503') : undefined
+			);
+
+			// The minute's sync, which never gets as far as the queue.
+			await nextTimer(h);
+
+			expect(h.scheduler.status().phase).toBe('retrying');
+			expect(h.scheduler.status().stuck).toMatchObject({ path: h.note.path });
+		});
+
+		it('is no longer named once the user has given it its attempts back', async () => {
+			// "Sync now" resets every op's attempts, so "after 2 tries" stops
+			// being true the moment it is pressed. The vague message is the
+			// accurate one until a run finds the op out of attempts again.
+			const h = await blockedHarness();
+			h.remote.fake.setFault((call) => (call.op === 'write' ? new Error('503') : undefined));
+
+			await h.scheduler.syncNow();
+
+			expect(h.scheduler.status().phase).toBe('retrying');
+			expect(h.scheduler.status().stuck).toBeUndefined();
+		});
+
+		it('is not still named while the next sync runs, or once it lands', async () => {
+			// `stuck` describes the queue the last run found, and every other
+			// field is carried forward by the publish that follows. Carried with
+			// them it would sit under "Syncing…" and under "Synced".
+			const h = await blockedHarness();
+			const seen: (string | undefined)[] = [];
+			const stop = h.scheduler.subscribe((status) => {
+				if (status.phase === 'syncing') seen.push(status.stuck?.path);
+			});
+
+			await h.scheduler.syncNow();
+			stop();
+
+			expect(seen.length).toBeGreaterThan(0);
+			expect(seen).toEqual(seen.map(() => undefined));
+			expect(h.scheduler.status()).toMatchObject({ phase: 'idle' });
+			expect(h.scheduler.status().stuck).toBeUndefined();
+		});
+
+		it('is given its attempts back by a re-scan', async () => {
+			const h = await blockedHarness();
+
+			await h.scheduler.resync();
+
+			expect(h.scheduler.status().phase).toBe('idle');
+			expect(h.scheduler.status().stuck).toBeUndefined();
+			expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
+		});
 
 		it('stays blocked for a sync nobody asked for', async () => {
 			const h = await blockedHarness();

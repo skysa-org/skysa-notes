@@ -20,6 +20,8 @@ import {
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
+	parseRetryAfter,
+	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
 	type WriteOptions,
@@ -93,7 +95,8 @@ interface GraphFailure {
 	/** Outermost first. Graph nests the more specific codes in `innerError`. */
 	codes: readonly string[];
 	message: string;
-	retryAfterSeconds?: number;
+	/** How long Graph asked us to wait, where it said. */
+	retryAfterMs?: number;
 }
 
 type Attempt<T> = { ok: true; value: T } | { ok: false; failure: GraphFailure };
@@ -288,13 +291,15 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 				return {};
 			}
 		})();
-		const header = response.headers.get('retry-after');
-		const retry = header === null ? undefined : Number(header);
+		// Graph documents seconds, and `parseRetryAfter` also reads the HTTP date
+		// the header is allowed to carry, which some fronts send instead.
+		// https://learn.microsoft.com/en-us/graph/throttling
+		const retry = parseRetryAfter(response.headers.get('retry-after'));
 		return {
 			status: response.status,
 			codes: codesOf(parsed.error),
 			message: typeof parsed.error?.message === 'string' ? parsed.error.message : text,
-			...(retry === undefined || Number.isNaN(retry) ? {} : { retryAfterSeconds: retry }),
+			...(retry === undefined ? {} : { retryAfterMs: retry }),
 		};
 	};
 
@@ -308,14 +313,30 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const detail = failure.codes.join('/') || failure.message;
 		if (failure.status === 401) throw new AuthError(detail);
 		if (failure.status === 404) throw new NotFoundError(path ?? detail);
-		if (failure.status === 429 || failure.status === 503) {
-			// Deliberately untyped: the engine's backoff treats an unknown error as
-			// transient, which is exactly right. See docs/PLAN.md §4.
+		// Throttling is 429, and 509 for the bandwidth cap. Graph's throttling
+		// guidance names one status — "Returns HTTP status code 429 Too Many
+		// Requests", "use the HTTP error code 429 to detect throttling" — and
+		// the error table calls 509 "throttled for exceeding the maximum
+		// bandwidth cap". 503 is not in either list: it is "temporarily
+		// unavailable for maintenance or is overloaded", and the same table
+		// says its delay is "the length of which can be specified in a
+		// Retry-After header". So the header does not tell the two apart —
+		// an outage is documented to carry one — and a 503 read as a rate limit
+		// would be retried for ever without counting against the op: never
+		// blocked, never surfaced, with every op behind it waiting. A 503 is
+		// the failure to retry that any other 5xx is, `Retry-After` or not.
+		// https://learn.microsoft.com/en-us/graph/throttling
+		// https://learn.microsoft.com/en-us/graph/errors
+		const throttled = failure.status === 429 || failure.status === 509;
+		if (throttled) {
 			const wait =
-				failure.retryAfterSeconds === undefined
+				failure.retryAfterMs === undefined
 					? ''
-					: `, retry after ${String(failure.retryAfterSeconds)}s`;
-			throw new Error(`onedrive throttled (${String(failure.status)})${wait}`);
+					: `, retry after ${String(failure.retryAfterMs / 1000)}s`;
+			throw new RateLimitError(
+				`onedrive throttled (${String(failure.status)})${wait}`,
+				failure.retryAfterMs
+			);
 		}
 		throw new Error(`onedrive ${String(failure.status)}: ${detail}`);
 	};

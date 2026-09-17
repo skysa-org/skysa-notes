@@ -1,5 +1,5 @@
-import type { ProviderKind } from '@skysa/core';
-import { useRouterState } from '@tanstack/react-router';
+import { parentPath, type ProviderKind } from '@skysa/core';
+import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Fragment, useEffect, useRef, useState } from 'react';
 
@@ -11,8 +11,14 @@ import {
 	type InstanceConfig,
 	type Refusal,
 } from '../api/client.js';
+import { folderToSearch } from '../routes/search.js';
 import { unbindConnection } from '../store/connection.js';
-import { db as defaultDb, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
+import {
+	db as defaultDb,
+	type NotesDatabase,
+	type QueuedOperation,
+	type SyncStateRecord,
+} from '../store/db.js';
 import {
 	type AccountState,
 	adoptAccount,
@@ -23,7 +29,7 @@ import {
 	reconcileAccount,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
-import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
+import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
 
 /**
  * Where the storage account is connected and disconnected: one account, replace
@@ -41,7 +47,7 @@ import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
 
 type Client = Pick<ApiClient, 'config' | 'connections' | 'disconnect' | 'connectUrl'>;
 
-type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow'>;
+type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow' | 'resync'>;
 
 export interface AccountPanelProps {
 	client?: Client;
@@ -115,8 +121,37 @@ const attentionMessage = (
 	if (!syncable) return `This app cannot sync with ${label} yet.`;
 	if (status.refusal === 'not_entitled') return 'This account cannot sync on this server.';
 	if (status.refusal === 'not_found') return `The server no longer has this ${label} connection.`;
+	if (status.stuck !== undefined) return stuckMessage(status.stuck, label);
 	return `Some changes could not be sent to ${label}. They will be tried again (${status.error ?? 'unknown error'}).`;
 };
+
+/**
+ * What a stuck op was trying to do, in the user's terms. `mkdir` and `rmdir`
+ * are the two that are not about a note, and so the two with no note to open.
+ *
+ * `rmdir` cannot actually be stuck — the engine gives up on one rather than
+ * holding the queue up (§7, "A dead `rmdir` is given up on") — but it is a
+ * queued operation like any other and a label that said nothing would be worse
+ * than one that is never read.
+ */
+const OP_LABELS: Record<QueuedOperation, string> = {
+	write: 'the edit to',
+	move: 'the rename of',
+	delete: 'the deletion of',
+	mkdir: 'the new notebook',
+	rmdir: 'the removal of the notebook',
+};
+
+/**
+ * Which op is stuck, by name and path, because "some changes could not be sent"
+ * leaves the user with nothing to act on — and the queue is ordered, so this
+ * one op is also why everything after it is waiting.
+ *
+ * A `move`'s target, not its source: the name the user gave it is the one they
+ * are looking for.
+ */
+const stuckMessage = (stuck: StuckOp, label: string): string =>
+	`${label} would not take ${OP_LABELS[stuck.op]} ${stuck.targetPath ?? stuck.path} after ${String(stuck.attempts)} tries (${stuck.error ?? 'unknown error'}). Everything queued behind it is waiting. “Sync now” tries again.`;
 
 /** A problem that connecting the account again is the answer to. */
 const needsReconnect = (status: SchedulerStatus): boolean =>
@@ -190,8 +225,34 @@ const NotConnected = ({ client, config, returnTo }: LocalProps) => {
 	);
 };
 
+/**
+ * The note a stuck op is about, when it is still here. A stuck `delete` is
+ * about a note the user has already deleted — its row is a tombstone — and
+ * offering to open that would be offering nothing.
+ */
+const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: string }) => {
+	// Wrapped, so "not read yet" and "no such note" are not the same answer.
+	const found = useLiveQuery(
+		async () => ({ note: await database.notes.get(noteId) }),
+		[database, noteId]
+	);
+	const note = found?.note;
+	// The paragraph is part of the answer: rendered outside, it would be an
+	// empty line under the message while the query is out, and for good after
+	// it for a note that is gone.
+	if (note === undefined || note.deletedLocally === 1) return null;
+	return (
+		<p className="muted">
+			<Link to="/" search={{ folder: folderToSearch(parentPath(note.path)), note: note.id }}>
+				Open the note
+			</Link>
+		</p>
+	);
+};
+
 interface SyncStateProps {
 	client: Client;
+	database: NotesDatabase;
 	sync: Sync;
 	bound: SyncStateRecord;
 	label: string;
@@ -209,6 +270,7 @@ interface SyncStateProps {
  */
 const SyncState = ({
 	client,
+	database,
 	sync,
 	bound,
 	label,
@@ -220,6 +282,7 @@ const SyncState = ({
 	const syncable = bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
 	const message = statusMessage(status, label, syncable);
 	const reconnect = signedOut || needsReconnect(status);
+	const [rescanning, setRescanning] = useState(false);
 
 	return (
 		<>
@@ -239,6 +302,15 @@ const SyncState = ({
 				</p>
 			)}
 			{message !== null && <p className="muted">{message}</p>}
+			{/*
+			 * Beside the message that names the op, and only there: `stuck`
+			 * outlives the run that found it, and an offer to open a note under
+			 * "Syncing…" or "Synced" is about a problem the user is not being
+			 * told about.
+			 */}
+			{status.phase === 'attention' && status.stuck?.noteId !== undefined && (
+				<StuckNote database={database} noteId={status.stuck.noteId} />
+			)}
 			{status.conflicts.length > 0 && (
 				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
 			)}
@@ -253,6 +325,52 @@ const SyncState = ({
 					Sync now
 				</button>
 			)}
+			{/*
+			 * The way out of a cursor the provider has lost track of, or a
+			 * store that disagrees with the remote about what is there. It is
+			 * not a repair of nothing: the confirm says what it costs.
+			 */}
+			{status.phase !== 'local' &&
+				syncable &&
+				(rescanning ? (
+					<div className="account-confirm">
+						<p className="muted">
+							Read everything in {label} again? This device compares every note with
+							the folder from scratch. Notes that are no longer in {label} are removed
+							here too, unless they have edits that have not been sent.
+						</p>
+						<button
+							type="button"
+							disabled={status.phase === 'syncing'}
+							onClick={() => {
+								setRescanning(false);
+								void sync.resync();
+							}}
+						>
+							Re-scan
+						</button>
+						<button
+							type="button"
+							className="ghost"
+							onClick={() => {
+								setRescanning(false);
+							}}
+						>
+							Cancel
+						</button>
+					</div>
+				) : (
+					<button
+						type="button"
+						className="ghost"
+						disabled={status.phase === 'syncing'}
+						onClick={() => {
+							setRescanning(true);
+						}}
+					>
+						Re-scan from scratch
+					</button>
+				))}
 		</>
 	);
 };
@@ -341,6 +459,7 @@ const Connected = ({
 			</p>
 			<SyncState
 				client={client}
+				database={database}
 				sync={sync}
 				bound={bound}
 				label={label}
