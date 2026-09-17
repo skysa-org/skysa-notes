@@ -515,6 +515,22 @@ export const describeSyncStoreContract = (
 				expect(await store.folderByPath('Work/Meetings')).toBeDefined();
 			});
 
+			it('keeps a folder its id over an ensure-folder that names none', async () => {
+				// The engine puts a row back over the notes a cascade kept,
+				// without an id, and a folder moved onto that path in the same
+				// batch already has one. Forgotten, the deletion of that folder
+				// by id finds nothing, and the notebook stays for ever.
+				const { store, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+
+				await store.applyPull({
+					changes: [{ kind: 'ensure-folder', path: 'Work' }],
+					cursor: 'c1',
+				});
+
+				expect((await store.folderByPath('Work'))?.remoteId).toBe('f1');
+			});
+
 			it('moves a displaced note without touching its contents', async () => {
 				// It is only being got out of the way of a remote note landing
 				// on its path. The text is the user's, it has never been

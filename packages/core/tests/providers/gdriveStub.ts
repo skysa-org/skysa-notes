@@ -64,6 +64,7 @@ interface DriveFile {
 interface Seen {
 	path: string;
 	version: string;
+	content: string | undefined;
 	file: DriveFile;
 }
 
@@ -161,7 +162,10 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	/**
 	 * Diff the store against what was last seen, and stamp what changed. A new
 	 * revision only where the bytes were written: the fake re-versions a moved
-	 * file, and Drive keeps its revision through a move.
+	 * file, and Drive keeps its revision through a move. Asked of the bytes as
+	 * well as the version, since a test that changes the backing directly can
+	 * move a file's folder and edit the file between two looks, and the path
+	 * alone would read that as a move.
 	 */
 	const observe = () => {
 		const now = entries();
@@ -170,9 +174,11 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		for (const entry of now) {
 			const before = seen.get(entry.remoteId);
 			if (!createdAt.has(entry.remoteId)) createdAt.set(entry.remoteId, tick());
+			const content = entry.kind === 'file' ? backing.contentAt(entry.path) : undefined;
 			const wrote =
 				before === undefined ||
-				(before.version !== entry.version && before.path === entry.path);
+				(before.version !== entry.version && before.path === entry.path) ||
+				before.content !== content;
 			if (entry.kind === 'file' && wrote) {
 				revisions.set(entry.remoteId, `rev-${entry.remoteId}-${entry.version}`);
 			}
@@ -186,7 +192,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 				changedAt.set(entry.remoteId, next);
 				changed = true;
 			}
-			seen.set(entry.remoteId, { path: entry.path, version: entry.version, file });
+			seen.set(entry.remoteId, { path: entry.path, version: entry.version, content, file });
 		}
 		const live = new Set(now.map((entry) => entry.remoteId));
 		for (const [id] of [...seen]) {
