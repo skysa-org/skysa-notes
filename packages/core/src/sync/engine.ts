@@ -632,6 +632,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		local.dirty ? { kind: 'detach-note', id: local.id } : { kind: 'delete-note', id: local.id };
 
 	/**
+	 * The same note, when the scan that failed to mention it was one the provider
+	 * warned us about (`uploadDifferences`): its own copy may be what lost the
+	 * file, so the note goes back up instead of away. A dirty note already takes
+	 * that path — `detach-note` forgets the remote and its write re-creates the
+	 * file — so only the clean ones need saying differently.
+	 */
+	const keepNote = (local: SyncNote): PullChange =>
+		local.dirty
+			? { kind: 'detach-note', id: local.id }
+			: { kind: 'reupload-note', id: local.id };
+
+	/**
 	 * Is this deletion really the first half of a move? Several providers report
 	 * a move as a deletion of the old path plus an entry at the new one, and the
 	 * deletion may carry no id at all — Dropbox's `DeletedMetadata` is a path and
@@ -2041,7 +2053,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const reconcile = async (
 		seen: ReadonlySet<string>,
 		changes: readonly PullChange[],
-		renaming: ReadonlyMap<string, string>
+		renaming: ReadonlyMap<string, string>,
+		/**
+		 * The provider said the scan may be missing things rather than proving
+		 * them gone. Nothing is deleted: every note and notebook it did not
+		 * return is sent back up instead (§7, "A rescan that uploads").
+		 */
+		upload = false
 	): Promise<PullChange[]> => {
 		const kept = { notes: decidedNotes(changes), folders: reestablished(changes).folders };
 		// Folders the batch has just put a note into. Deleting one cascades over
@@ -2077,9 +2095,21 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					// already gone.
 					!removedInBatch(note, changes)
 			)
-			.map(forgetNote);
+			.map(upload ? keepNote : forgetNote);
 		// Folders too, or a notebook deleted while the cursor was dead stays
 		// in the sidebar for ever with nothing behind it.
+		//
+		// Unless the scan is one that may be missing things, in which case each
+		// of them is made again instead — every one, not the outermost only,
+		// since nothing cascades and each needs its own `mkdir`. The notes
+		// inside are already named one by one above.
+		if (upload) {
+			const remade = doomedFolders.flatMap((folder): PullChange[] => {
+				const at = folderNow(folder.path, changes);
+				return at === undefined ? [] : [{ kind: 'reupload-folder', path: at }];
+			});
+			return [...forgotten, ...remade];
+		}
 		// The outermost of them only. `delete-folder` cascades over what is
 		// inside it, so naming a nested one as well is a second delete of a
 		// row the first has already taken away.
@@ -2158,7 +2188,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const drainScan = async (
 		cursor: string | undefined,
-		progress: PullProgress
+		progress: PullProgress,
+		/**
+		 * This scan is the recovery from a reset the provider said may have lost
+		 * something of its own, so what it does not return is sent back up
+		 * rather than deleted here. Carried through the pages because only the
+		 * last one reconciles.
+		 */
+		upload = false
 	): Promise<SyncOutcome> => {
 		const set = await provider.changes(cursor);
 		const queue = await store.pendingOps();
@@ -2172,7 +2209,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		// A scan is one logical batch: its pages carry no cursor, and the last
 		// one carries both the cursor and whatever the scan proved was deleted.
-		const tail = set.more ? [] : await reconcile(seen, changes, renamesQueued(queue));
+		const tail = set.more ? [] : await reconcile(seen, changes, renamesQueued(queue), upload);
 		const batch = [...changes, ...tail];
 		await store.applyPull({ changes: batch, ...(set.more ? {} : { cursor: set.cursor }) });
 
@@ -2181,7 +2218,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
 			seen,
 		};
-		if (set.more) return drainScan(set.cursor, next);
+		if (set.more) return drainScan(set.cursor, next, upload);
 		return ok({ pulled: next.pulled, conflicts: next.conflicts });
 	};
 
@@ -2209,8 +2246,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// The cursor is dead rather than the request. Discarding it and
 			// scanning is the documented recovery, and the stored one is left in
 			// place so an interrupted rescan tries again rather than continuing
-			// from a cursor the provider has already rejected.
-			if (isCursorResetError(error)) return drainScan(undefined, empty);
+			// from a cursor the provider has already rejected — which is also
+			// what keeps `uploadDifferences` across an interruption, since the
+			// same cursor meets the same refusal and is told the same thing.
+			if (isCursorResetError(error)) {
+				return drainScan(undefined, empty, error.uploadDifferences === true);
+			}
 			if (isAuthError(error)) return authRetry(attempt);
 			throw error;
 		});

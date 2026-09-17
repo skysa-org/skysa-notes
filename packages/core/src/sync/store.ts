@@ -324,6 +324,40 @@ export type PullChange =
 			 */
 			keep?: readonly string[];
 	  }>
+	| Readonly<{
+			/**
+			 * The scan did not return this note's file, but the provider has told us
+			 * its own copy may be the one that lost it (`CursorResetError`'s
+			 * `uploadDifferences` — Graph's "Upload any local items that the service
+			 * didn't return"). So the note stays and goes back up instead of being
+			 * deleted: forget the remote it had — `remoteId`, `remoteVersion` and
+			 * `syncedHash` — mark it dirty, and queue a `write`, which then creates
+			 * the file afresh rather than writing to one that is not there.
+			 *
+			 * `detach-note` is the same forgetting without the dirty flag and the
+			 * op, which is right for a note that is *already* dirty: it has a write
+			 * coming either way. This kind exists for the clean ones, which nothing
+			 * would otherwise send.
+			 *
+			 * Tolerates an unknown id for the same reason `delete-note` does: a batch
+			 * is decided before it is applied, and a rejected batch is retried for
+			 * ever, since the cursor moves only with the batch.
+			 */
+			kind: 'reupload-note';
+			id: string;
+	  }>
+	| Readonly<{
+			/**
+			 * The same, for a notebook the scan did not return: keep the row, forget
+			 * its `remoteId`, and queue a `mkdir` so the directory is made again.
+			 * Never cascades — that is the whole point, since the notes under it are
+			 * being sent back up too, each named by its own `reupload-note`.
+			 *
+			 * Tolerates an unknown path, and a row that already has no `remoteId`.
+			 */
+			kind: 'reupload-folder';
+			path: string;
+	  }>
 	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>;
 
 /**

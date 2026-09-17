@@ -219,6 +219,39 @@ export const createMemoryStore = (): MemoryStore => {
 		});
 	};
 
+	/**
+	 * A note the rescan did not return, where the provider said its own copy may
+	 * be what lost it. Everything the remote gave the row goes — a write against
+	 * a `remoteVersion` for a file that is not there would be refused, and a
+	 * kept `syncedHash` would say these bytes are already up.
+	 */
+	const reuploadNote = (id: string): void => {
+		// Unknown id forgiven, like `delete-note`: the batch was decided before
+		// it was applied.
+		const note = notes.get(id);
+		if (note === undefined) {
+			anomalies.push(`reupload-note for unknown note ${id}`);
+			return;
+		}
+		const { remoteId: _id, remoteVersion: _version, syncedHash: _hash, ...rest } = note;
+		notes.set(id, { ...rest, dirty: true });
+		// A clean note has no op owed to it, so the write has to be made here; a
+		// dirty one arrives as `detach-note` and already has one.
+		queue({ op: 'write', noteId: note.id, path: note.path });
+	};
+
+	/** The same for a notebook, which never cascades: its notes are named too. */
+	const reuploadFolder = (path: string): void => {
+		const folder = folders.get(path);
+		if (folder === undefined) {
+			anomalies.push(`reupload-folder for unknown folder ${path}`);
+			return;
+		}
+		const { remoteId: _id, ...rest } = folder;
+		folders.set(path, rest);
+		queue({ op: 'mkdir', path });
+	};
+
 	const applyChange = (change: PullChange): void => {
 		if (change.kind === 'upsert-note') {
 			upsert(change);
@@ -277,6 +310,14 @@ export const createMemoryStore = (): MemoryStore => {
 			// has just taken: left alone it conflicts for ever, and the ordered
 			// queue strands everything behind it.
 			rebaseOps(note.id, note.path, change.path);
+			return;
+		}
+		if (change.kind === 'reupload-note') {
+			reuploadNote(change.id);
+			return;
+		}
+		if (change.kind === 'reupload-folder') {
+			reuploadFolder(change.path);
 			return;
 		}
 		if (change.kind === 'delete-folder') {

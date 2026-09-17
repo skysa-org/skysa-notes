@@ -831,6 +831,66 @@ describe('changes, when things leave the tree', () => {
 		}
 	});
 
+	/**
+	 * Graph names two recoveries from a dead token and they disagree about whose
+	 * copy may have lost something, so only one of them may be trusted to say
+	 * what was deleted. The page says only "an error response containing one of
+	 * the error codes below", so the code is matched wherever Graph puts it.
+	 * https://learn.microsoft.com/en-us/graph/api/driveitem-delta
+	 */
+	describe('which recovery a 410 asks for', () => {
+		const resetOver = async (body: unknown) => {
+			const { doFetch } = scripted((url) =>
+				url.includes('token=')
+					? new Response(JSON.stringify(body), { status: 410 })
+					: undefined
+			);
+			const cursor = JSON.stringify({
+				v: 1,
+				link: link('old'),
+				root: 'root',
+				nodes: [],
+				pending: [],
+				scan: false,
+				anchored: false,
+			});
+			return over(doFetch)
+				.changes(cursor)
+				.catch((error: unknown) => error);
+		};
+
+		it('says the scan may be missing things for resyncChangesUploadDifferences', async () => {
+			const outer = await resetOver({
+				error: { code: 'resyncChangesUploadDifferences', message: 'resync' },
+			});
+			expect(outer).toBeInstanceOf(CursorResetError);
+			expect((outer as CursorResetError).uploadDifferences).toBe(true);
+
+			// And nested, since the page does not say which it is.
+			const inner = await resetOver({
+				error: {
+					code: 'resyncRequired',
+					message: 'resync',
+					innerError: { code: 'resyncChangesUploadDifferences' },
+				},
+			});
+			expect((inner as CursorResetError).uploadDifferences).toBe(true);
+		});
+
+		it.each([
+			['resyncChangesApplyDifferences'],
+			['resyncRequired'],
+			['somethingGraphHasNotInventedYet'],
+			['gone'],
+		])('trusts the scan for %s, which is what we have always done', async (code) => {
+			const error = await resetOver({ error: { code, message: 'resync' } });
+			expect(error).toBeInstanceOf(CursorResetError);
+			// Absent, not `false`: nothing about the reset says to upload, and an
+			// unrecognised code must never be the one that does.
+			expect((error as CursorResetError).uploadDifferences).toBeUndefined();
+		});
+	});
+
 	it('does not start again over a first request that fails', async () => {
 		for (const status of [400, 404]) {
 			const { doFetch } = scripted((url) =>

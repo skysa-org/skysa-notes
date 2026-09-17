@@ -650,7 +650,25 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const result = await attempt<ItemPage>('GET', from.link);
 		if (!result.ok && isDeadLink(result.failure, stored)) {
 			rootBox.delete('id');
-			throw new CursorResetError(result.failure.codes.join('/') || result.failure.message);
+			// Graph names two ways to recover, and they differ on one thing:
+			// whose copy may have lost something. `resyncChangesApplyDifferences`
+			// says the service is right — "Replace any local items with the
+			// server's version (including deletes)" — which is what a scan does
+			// anyway. `resyncChangesUploadDifferences` says the opposite,
+			// "Upload any local items that the service didn't return", and is
+			// what a server-side restore answers: trusting the scan there would
+			// delete the notes the restore lost, quietly and on every device.
+			//
+			// The code is matched wherever it sits: the page says only "an error
+			// response containing one of the error codes below", and `codes`
+			// already carries Graph's nested `innerError` ones outermost-first.
+			// Anything unrecognised — including a plain `resyncRequired` — falls
+			// back to the reset we have always done, never to uploading.
+			// https://learn.microsoft.com/en-us/graph/api/driveitem-delta
+			throw new CursorResetError(
+				result.failure.codes.join('/') || result.failure.message,
+				result.failure.codes.includes('resyncChangesUploadDifferences') || undefined
+			);
 		}
 		if (!result.ok) return raise(result.failure);
 

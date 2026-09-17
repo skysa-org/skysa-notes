@@ -186,6 +186,21 @@ export class NotFoundError extends Error {
 export class CursorResetError extends Error {
 	override readonly name = 'CursorResetError';
 	readonly code: ProviderErrorCode = 'cursor-reset';
+	constructor(
+		message: string,
+		/**
+		 * The provider says its own copy may be the one that lost something, so
+		 * the scan that follows must not be trusted to say what was deleted.
+		 * Graph's `resyncChangesUploadDifferences`: "Upload any local items that
+		 * the service didn't return". Absent — the ordinary case, and the one an
+		 * unrecognised reset falls back to — the scan is the truth and a note it
+		 * does not return is gone.
+		 * https://learn.microsoft.com/en-us/graph/api/driveitem-delta
+		 */
+		readonly uploadDifferences?: boolean
+	) {
+		super(message);
+	}
 }
 
 /**

@@ -475,6 +475,55 @@ export const createDexieSyncStore = (
 		await scope.notes.delete(id);
 	};
 
+	/**
+	 * A note the rescan did not return, where the provider said its own copy may
+	 * be what lost it. Everything the remote gave the row goes — a write against
+	 * a `remoteVersion` for a file that is not there is refused, and a kept
+	 * `syncedHash` says these bytes are already up — and the write that puts it
+	 * back is queued here, since a clean note is owed no op. A dirty one arrives
+	 * as `detach-note` and already has one.
+	 */
+	const reuploadNote = async (scope: Scope, id: string): Promise<void> => {
+		// Unknown id forgiven, like `delete-note`: the batch was decided before
+		// it was applied.
+		const note = await ownNote(scope, id);
+		if (note === undefined) return;
+		await scope.notes.put({ ...withoutRemote(note), dirty: 1 });
+		await queue(scope, { op: 'write', noteId: note.id, path: note.path });
+	};
+
+	/** The same for a notebook, which never cascades: its notes are named too. */
+	const reuploadFolder = async (scope: Scope, path: string): Promise<void> => {
+		const folder = await scope.folders.get([connectionId, path]);
+		if (folder === undefined) return;
+		const { remoteId: _remoteId, ...rest } = folder;
+		await scope.folders.put(rest);
+		await queue(scope, { op: 'mkdir', path });
+	};
+
+	/** The notebook a pulled file needs, made if this device has not got it. */
+	const ensureFolder = async (
+		scope: Scope,
+		path: string,
+		remoteId: string | undefined
+	): Promise<void> => {
+		if (path === ROOT) return;
+		await ensureFolderChain(scope, parentPath(path));
+		const existing = await scope.folders.get([connectionId, path]);
+		await scope.folders.put({
+			connectionId,
+			path,
+			createdAt: existing?.createdAt ?? now(),
+			// An `ensure-folder` without an id says nothing about the one the row
+			// already has, so it is kept rather than forgotten.
+			...(remoteId === undefined
+				? existing?.remoteId === undefined
+					? {}
+					: { remoteId: existing.remoteId }
+				: { remoteId }),
+		});
+	};
+
 	const applyChange = async (
 		scope: Scope,
 		change: PullChange,
@@ -529,24 +578,15 @@ export const createDexieSyncStore = (
 				await rebaseOwnOps(scope, note.id, note.path, change.path);
 				return;
 			}
-			case 'ensure-folder': {
-				if (change.path === ROOT) return;
-				await ensureFolderChain(scope, parentPath(change.path));
-				const existing = await scope.folders.get([connectionId, change.path]);
-				await scope.folders.put({
-					connectionId,
-					path: change.path,
-					createdAt: existing?.createdAt ?? now(),
-					// An `ensure-folder` without an id says nothing about the one the
-					// row already has, so it is kept rather than forgotten.
-					...(change.remoteId === undefined
-						? existing?.remoteId === undefined
-							? {}
-							: { remoteId: existing.remoteId }
-						: { remoteId: change.remoteId }),
-				});
+			case 'ensure-folder':
+				await ensureFolder(scope, change.path, change.remoteId);
 				return;
-			}
+			case 'reupload-note':
+				await reuploadNote(scope, change.id);
+				return;
+			case 'reupload-folder':
+				await reuploadFolder(scope, change.path);
+				return;
 			case 'move-folder':
 				await moveFolder(scope, change.from, change.to, change.remoteId);
 				return;
