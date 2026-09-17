@@ -298,7 +298,12 @@ describe('the push queue a local change leaves behind', () => {
 		await createFolder(db, { ...scope, name: 'Work' });
 		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
 		await deleteFolder(db, 'Work', scope);
-		await db.folders.put({ connectionId: CONNECTION, path: 'Work', remoteId: 'f1', createdAt: 0 });
+		await db.folders.put({
+			connectionId: CONNECTION,
+			path: 'Work',
+			remoteId: 'f1',
+			createdAt: 0,
+		});
 		await deleteFolder(db, 'Work', scope);
 
 		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
@@ -314,7 +319,12 @@ describe('the push queue a local change leaves behind', () => {
 		await createFolder(db, { ...scope, name: 'Work' });
 		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
 		await deleteFolder(db, 'Work', scope);
-		await db.folders.put({ connectionId: CONNECTION, path: 'Work', remoteId: 'f2', createdAt: 0 });
+		await db.folders.put({
+			connectionId: CONNECTION,
+			path: 'Work',
+			remoteId: 'f2',
+			createdAt: 0,
+		});
 
 		await deleteFolder(db, 'Work', scope);
 
@@ -334,7 +344,12 @@ describe('the push queue a local change leaves behind', () => {
 		await createFolder(db, { ...scope, name: 'Work' });
 		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
 		await deleteFolder(db, 'Work', scope);
-		await db.folders.put({ connectionId: CONNECTION, path: 'Plans', remoteId: 'f1', createdAt: 0 });
+		await db.folders.put({
+			connectionId: CONNECTION,
+			path: 'Plans',
+			remoteId: 'f1',
+			createdAt: 0,
+		});
 
 		await deleteFolder(db, 'Plans', scope);
 
