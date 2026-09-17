@@ -1,11 +1,12 @@
 import { createFakeProvider, createSyncEngine, isHidden } from '@skysa/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	bindConnection,
 	bindingCount,
 	NOTES_ACCOUNT_KEY,
 	unbindConnection,
+	verifyResume,
 } from '../src/store/connection.js';
 import {
 	activeConnectionId,
@@ -13,7 +14,7 @@ import {
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
 } from '../src/store/db.js';
-import { createFolder, folderTree, listFolders } from '../src/store/folders.js';
+import { createFolder, folderTree, listFolders, renameFolder } from '../src/store/folders.js';
 import {
 	createNote,
 	deleteNote,
@@ -383,6 +384,119 @@ describe('connecting an account', () => {
 	});
 });
 
+describe('a notebook renamed while disconnected', () => {
+	it('stays renamed once the same account is connected again', async () => {
+		const { db, fake, plan, reconnect } = await syncedThenDisconnected();
+		await renameFolder(db, 'Work', 'Archive');
+
+		const { outcome } = await reconnect();
+
+		expect(outcome.conflicts).toEqual([]);
+		expect((await getNote(db, plan.id))?.path).toMatch(/^Archive\//);
+		expect(await folderTree(db)).toContain('Archive');
+		expect(filesOn(fake).every((path) => path.startsWith('Archive/'))).toBe(true);
+	});
+});
+
+describe('checking a resumed connection against its remote', () => {
+	it('copies the notes back into an app folder emptied while disconnected', async () => {
+		const { db, fake, entryOf, reconnect } = await syncedThenDisconnected();
+		const notes = (await listNotes(db)).map((note) => [note.id, noteFile(note)]);
+		await fake.delete(entryOf('Work'));
+
+		const { verdict, outcome } = await reconnect();
+
+		expect(verdict).toBe('copied');
+		expect(outcome.conflicts).toEqual([]);
+		expect((await listNotes(db)).map((note) => [note.id, noteFile(note)])).toEqual(notes);
+		expect(filesOn(fake)).toHaveLength(2);
+	});
+
+	it('lets no sync write before it has looked', async () => {
+		const { db, fake } = await syncedThenDisconnected();
+		await fake.delete(fake.snapshot().find((entry) => entry.path === 'Work')!);
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+		const engine = createSyncEngine({
+			provider: fake,
+			store: createDexieSyncStore(db, { connectionId: 'dropbox-2' }),
+		});
+
+		expect((await engine.sync()).status).not.toBe('ok');
+
+		expect(await listNotes(db)).toHaveLength(2);
+		expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBe(true);
+	});
+
+	it('keeps waiting when the remote cannot be asked', async () => {
+		const { db } = await syncedThenDisconnected();
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+		const offline = { read: () => Promise.reject(new TypeError('offline')) };
+
+		await expect(verifyResume(db, 'dropbox-2', offline)).rejects.toThrow('offline');
+
+		expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBe(true);
+		expect((await listNotes(db)).every((note) => note.remoteId !== undefined)).toBe(true);
+	});
+
+	it('looks past a note deleted elsewhere for one that is still there', async () => {
+		const { db, fake, plan, entryOf } = await syncedThenDisconnected();
+		// The most recently written, which is looked for first.
+		await saveNoteBody(db, plan.id, '# Plan\n\nnewest\n');
+		await fake.delete(entryOf(plan.path));
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		expect(await verifyResume(db, 'dropbox-2', fake)).toBe('resumed');
+	});
+
+	it('has nothing to check on a connection bound by copying', async () => {
+		const { db } = await usedLocally();
+		await bindConnection(db, DROPBOX);
+		const read = vi.fn(() => Promise.reject(new Error('not asked')));
+
+		expect((await db.syncState.get(DROPBOX.connectionId))?.resumeUnverified).toBeUndefined();
+		expect(await verifyResume(db, DROPBOX.connectionId, { read })).toBe('verified');
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it('stays unchecked when the same connection is bound again before it looks', async () => {
+		const { db } = await syncedThenDisconnected();
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBe(true);
+	});
+
+	it('answers for nothing when the device was unbound and resumed again while it looked', async () => {
+		const { db, fake } = await syncedThenDisconnected();
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+		const slow = {
+			read: async (ref: Parameters<typeof fake.read>[0]) => {
+				await unbindConnection(db);
+				await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+				return fake.read(ref);
+			},
+		};
+
+		expect(await verifyResume(db, 'dropbox-2', slow)).toBe('superseded');
+		expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBe(true);
+	});
+
+	it('answers for nothing when the device has been bound again while it looked', async () => {
+		const { db, fake } = await syncedThenDisconnected();
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+		const slow = {
+			read: async (ref: Parameters<typeof fake.read>[0]) => {
+				await unbindConnection(db);
+				return fake.read(ref);
+			},
+		};
+
+		expect(await verifyResume(db, 'dropbox-2', slow)).toBe('superseded');
+		expect(await db.syncState.count()).toBe(0);
+	});
+});
+
 describe('resuming onto a connection that already has rows in the way', () => {
 	it('copies a note that has to move, since its file is at the old path', async () => {
 		const db = freshDatabase();
@@ -466,11 +580,12 @@ const syncedThenDisconnected = async () => {
 		entryOf,
 		reconnect: async () => {
 			await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+			const verdict = await verifyResume(db, 'dropbox-2', fake);
 			const calls = fake.callLog().length;
 			const outcome = await engineFor('dropbox-2').sync();
 			// And once more, for the echo of anything it pushed.
 			await engineFor('dropbox-2').sync();
-			return { outcome, calls: fake.callLog().slice(calls) };
+			return { outcome, verdict, calls: fake.callLog().slice(calls) };
 		},
 	};
 };
@@ -480,8 +595,9 @@ describe('connecting the same account again after a disconnect', () => {
 		const { db, fake, reconnect } = await syncedThenDisconnected();
 		const files = filesOn(fake);
 
-		const { outcome, calls } = await reconnect();
+		const { outcome, verdict, calls } = await reconnect();
 
+		expect(verdict).toBe('resumed');
 		expect(outcome.conflicts).toEqual([]);
 		expect(calls.filter((call) => call.op === 'write')).toEqual([]);
 		expect(filesOn(fake)).toEqual(files);

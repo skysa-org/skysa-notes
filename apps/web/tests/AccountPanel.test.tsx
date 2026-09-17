@@ -441,6 +441,20 @@ describe('AccountPanel, signed in with an account the notes do not belong to', (
 		expect((await getNote(db, note.id))?.remoteId).toBe('id:1');
 	});
 
+	it('stops asking once another tab has answered', async () => {
+		const { db } = await adasNotes();
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [bob] }) }),
+			db
+		);
+		expect(await screen.findByText(/belong to another Dropbox account/)).toBeTruthy();
+
+		await bindConnection(db, { connectionId: 'c9', provider: 'dropbox', accountId: 'dbid:2' });
+
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /Disconnect bob@example.com/ })).toBeNull();
+	});
+
 	it('says so when the server will not let it go, and still asks', async () => {
 		const user = userEvent.setup();
 		const { db } = await adasNotes();

@@ -247,8 +247,8 @@ describe('reconciling after the device has belonged to an account', () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		const gone = await createNote(db, { title: 'Gone' });
+		// Deleted before it ever reached the remote: nothing is owed to a file.
 		await deleteNote(db, gone.id);
-		await db.notes.update(gone.id, { remoteId: 'id:1' });
 		await unbindConnection(db);
 
 		const state = await reconcileAccount(
@@ -285,6 +285,47 @@ describe('reconciling after the device has belonged to an account', () => {
 		expect(row?.remoteId).toBeUndefined();
 		// They are its notes now, and come back to it without asking.
 		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:2');
+	});
+});
+
+describe('what reconciling learns and when it asks', () => {
+	it('learns the account of a connection bound before the API named it', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+
+		await reconcileAccount(db, listing({ ok: true, value: [connection('c1')] }));
+
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:1');
+	});
+
+	it('asks before dropping deletes owed to the account the notes belong to', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Gone' });
+		await db.notes.update(note.id, { remoteId: 'id:1' });
+		await deleteNote(db, note.id);
+		await unbindConnection(db);
+
+		const state = await reconcileAccount(
+			db,
+			listing({ ok: true, value: [connection('c9', 'dropbox', 'dbid:2')] })
+		);
+
+		expect(state.kind).toBe('other-account');
+	});
+
+	it('does not call an account the API does not name another one', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await createFolder(db, { name: 'Work' });
+		await unbindConnection(db);
+
+		const state = await reconcileAccount(
+			db,
+			listing({ ok: true, value: [connection('c2', 'dropbox', null)] })
+		);
+
+		expect(state.kind).toBe('connected');
 	});
 });
 

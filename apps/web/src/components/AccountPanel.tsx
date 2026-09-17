@@ -140,7 +140,8 @@ const Connected = ({ client, database, bound, config, account, returnTo }: Conne
 	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
 	const state = answer(account);
 	const displayName =
-		state?.kind === 'connected' && state.connection.id === bound.connectionId
+		(state?.kind === 'connected' || state?.kind === 'other-account') &&
+		state.connection.id === bound.connectionId
 			? state.connection.displayName
 			: null;
 
@@ -345,7 +346,8 @@ export const AccountPanel = ({ client = api, database = defaultDb }: AccountPane
 	const returnTo = returnPath(href);
 
 	const state = answer(account);
-	if (state?.kind === 'other-account') {
+	// Unless it has been answered already, in another tab.
+	if (state?.kind === 'other-account' && bound.state?.connectionId !== state.connection.id) {
 		return (
 			<OtherAccount
 				client={client}

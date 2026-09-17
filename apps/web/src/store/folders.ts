@@ -262,7 +262,11 @@ export const moveFolder = async (
 
 		await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 		const made = await ensureFolder(db, target, { connectionId });
-		const moved = moving.map((folder) => ({
+		// Without their `remoteId`: the folder that id names is still at the old
+		// path until the queued moves run, and a full scan meanwhile — a cursor
+		// reset, or the first after resuming a connection — would read the id at
+		// the old path as a remote rename and put the notebook back.
+		const moved = moving.map(({ remoteId: _remoteId, ...folder }) => ({
 			...folder,
 			path: rebasePath(folder.path, source, target),
 		}));

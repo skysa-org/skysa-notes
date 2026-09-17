@@ -7,6 +7,7 @@ import {
 	bindingCount,
 	bindingMode,
 	NOTES_ACCOUNT_KEY,
+	rememberAccount,
 	unbindConnection,
 } from '../store/connection.js';
 import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
@@ -97,14 +98,20 @@ const reconcileOnce = async (
 			? active === LOCAL_CONNECTION_ID
 				? await unchanged()
 				: await unbindConnection(db, { ifUnchangedSince: since })
-			: connection.id === active || ask
-				? await unchanged()
-				: await bindConnection(db, {
-						connectionId: connection.id,
+			: connection.id === active
+				? await rememberAccount(db, {
 						provider: connection.provider,
 						accountId: connection.accountId,
 						ifUnchangedSince: since,
-					});
+					})
+				: ask
+					? await unchanged()
+					: await bindConnection(db, {
+							connectionId: connection.id,
+							provider: connection.provider,
+							accountId: connection.accountId,
+							ifUnchangedSince: since,
+						});
 	if (!applied) {
 		if (again) return reconcileOnce(db, client, false);
 		throw new Error('The device changed connection while the server was being asked');
@@ -116,13 +123,21 @@ const reconcileOnce = async (
 /** Whether binding `connection` would copy notes that belong to another account into it. */
 const needsAsking = async (db: NotesDatabase, connection: Connection): Promise<boolean> => {
 	const { mode, from } = await bindingMode(db, connection);
-	return mode === 'copy' && from !== undefined && (await holdsAnything(db));
+	// An account the API does not name cannot be said to be another one: a
+	// Worker older than this app, reconnecting the account the notes are from.
+	const named = accountKey(connection.provider, connection.accountId) !== undefined;
+	return mode === 'copy' && named && from !== undefined && (await holdsAnything(db));
 };
 
-/** Whether copying the device's notes anywhere would copy anything. */
+/**
+ * Whether the device holds anything of the account's: a note, a notebook, or a
+ * delete still owed to one of its files — which a copy would drop, and the
+ * note would come back the next time the account is connected.
+ */
 const holdsAnything = async (db: NotesDatabase): Promise<boolean> =>
-	(await db.notes.where('deletedLocally').equals(0).count()) > 0 ||
-	(await db.folders.count()) > 0;
+	(await db.notes
+		.filter((note) => note.deletedLocally === 0 || note.remoteId !== undefined)
+		.count()) > 0 || (await db.folders.count()) > 0;
 
 /**
  * Bind the device to `connection`, whichever account its notes belong to: the

@@ -1,4 +1,12 @@
-import { basename, joinPath, parentPath, type ProviderKind, ROOT } from '@skysa/core';
+import {
+	basename,
+	isNotFoundError,
+	joinPath,
+	parentPath,
+	type ProviderKind,
+	ROOT,
+	type StorageProvider,
+} from '@skysa/core';
 import { type PromiseExtended } from 'dexie';
 
 import {
@@ -73,8 +81,11 @@ const withoutRemote = ({
 const depth = (path: string): number => path.split('/').length;
 
 interface Moved {
+	/** Owed to the new connection as though new. */
 	notes: NoteRecord[];
 	folders: FolderRecord[];
+	/** Whether any row moved still names a file or folder on the remote. */
+	linked: boolean;
 }
 
 /**
@@ -196,7 +207,28 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode): Promise<Moved>
 	return {
 		notes: notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row),
 		folders: foldersPlaced.filter((placed) => placed.owed).map((placed) => placed.row),
+		linked: [...notesPlaced, ...foldersPlaced].some(
+			(placed) => placed.row.remoteId !== undefined
+		),
 	};
+};
+
+/** What moved rows owe their new connection: each notebook, then each note. */
+const queueOwed = async (db: NotesDatabase, connectionId: string, moved: Moved) => {
+	// Outermost first, since `createFolder` is not recursive everywhere.
+	await [...moved.folders]
+		.sort((a, b) => depth(a.path) - depth(b.path))
+		.reduce<Promise<void>>(async (pending, folder) => {
+			await pending;
+			await queueMkdir(db, connectionId, folder.path);
+		}, Promise.resolve());
+	// By path, so the queue reads in an order a person could follow.
+	await [...moved.notes]
+		.sort((a, b) => a.path.localeCompare(b.path))
+		.reduce<Promise<void>>(async (pending, note) => {
+			await pending;
+			await queueWrite(db, note);
+		}, Promise.resolve());
 };
 
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
@@ -271,12 +303,16 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 				.filter((state) => state.connectionId !== input.connectionId)
 				.map((state) => state.connectionId)
 		);
+		const { resumeUnverified: _unverified, ...kept } = current ?? {};
 		const state: SyncStateRecord = {
-			...current,
+			...kept,
 			connectionId: input.connectionId,
 			provider: input.provider,
 			// Per install, not per account: kept from whichever connection had one.
 			clientId: current?.clientId ?? states[0]?.clientId ?? crypto.randomUUID(),
+			...(moved.linked || current?.resumeUnverified === true
+				? { resumeUnverified: true }
+				: {}),
 		};
 		await db.syncState.put(state);
 		const account = accountKey(input.provider, input.accountId);
@@ -284,22 +320,96 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 			? db.prefs.delete(NOTES_ACCOUNT_KEY)
 			: db.prefs.put({ key: NOTES_ACCOUNT_KEY, value: account }));
 
-		// Outermost first, since `createFolder` is not recursive everywhere.
-		await [...moved.folders]
-			.sort((a, b) => depth(a.path) - depth(b.path))
-			.reduce<Promise<void>>(async (pending, folder) => {
-				await pending;
-				await queueMkdir(db, input.connectionId, folder.path);
-			}, Promise.resolve());
-		// By path, so the queue reads in an order a person could follow.
-		await [...moved.notes]
-			.sort((a, b) => a.path.localeCompare(b.path))
-			.reduce<Promise<void>>(async (pending, note) => {
-				await pending;
-				await queueWrite(db, note);
-			}, Promise.resolve());
+		await queueOwed(db, input.connectionId, moved);
 		return true;
 	});
+
+/**
+ * Record which account the device's notes belong to, for a device bound before
+ * the API named accounts: nothing else writes it until the next bind, and a
+ * disconnect in between would have the reconnect copy rather than resume.
+ * Answers whether the device was still as `ifUnchangedSince` says.
+ */
+export const rememberAccount = (
+	db: NotesDatabase,
+	input: Pick<BindInput, 'provider' | 'accountId'> & Precondition
+): Promise<boolean> =>
+	inTransaction(db, async () => {
+		if (!(await unchangedSince(db, input))) return false;
+		const account = accountKey(input.provider, input.accountId);
+		if (account !== undefined) await db.prefs.put({ key: NOTES_ACCOUNT_KEY, value: account });
+		return true;
+	});
+
+/** How many of the notes' own files `verifyResume` looks for before giving up on them. */
+const RESUME_SAMPLES = 5;
+
+/** Whether the remote still has this file, by id. Anything but "not found" is not an answer. */
+const stillThere = async (
+	provider: Pick<StorageProvider, 'read'>,
+	note: NoteRecord
+): Promise<boolean> => {
+	try {
+		await provider.read({ remoteId: note.remoteId ?? '', path: note.path });
+		return true;
+	} catch (error) {
+		if (isNotFoundError(error)) return false;
+		throw error;
+	}
+};
+
+export type ResumeVerdict = 'verified' | 'resumed' | 'copied' | 'superseded';
+
+/**
+ * Before a resumed connection's first sync: is the remote the one the notes'
+ * ids point into?
+ *
+ * A resume trusts the first full scan to say what was deleted while the device
+ * was away. If the app folder was emptied, or replaced — the scan cannot tell
+ * the two apart — every note it does not see would be deleted here too, and
+ * the dialog said the notes stay on this device. So a few of the notes' own
+ * files are looked for by id first. One found, and the resume stands. None, and
+ * the rows are copied instead: cut loose and written back, so nothing a scan
+ * does not see is taken from the device.
+ *
+ * The sync store refuses to write for the connection until this has answered
+ * (`resumeUnverified`), so no engine can scan first. Throws when the remote
+ * cannot be asked; the flag stays, and asking again is safe.
+ */
+export const verifyResume = async (
+	db: NotesDatabase,
+	connectionId: string,
+	provider: Pick<StorageProvider, 'read'>
+): Promise<ResumeVerdict> => {
+	const since = await bindingCount(db);
+	if ((await db.syncState.get(connectionId))?.resumeUnverified !== true) return 'verified';
+
+	const held = (await db.notes.where('connectionId').equals(connectionId).toArray())
+		.filter((note) => note.remoteId !== undefined)
+		.sort((a, b) => b.updatedAt - a.updatedAt)
+		.slice(0, RESUME_SAMPLES);
+	const found = await held.reduce<Promise<boolean>>(
+		async (sofar, note) => (await sofar) || stillThere(provider, note),
+		Promise.resolve(false)
+	);
+
+	return inTransaction(db, async (): Promise<ResumeVerdict> => {
+		const state = await db.syncState.get(connectionId);
+		if (!(await unchangedSince(db, { ifUnchangedSince: since })) || state === undefined) {
+			return 'superseded';
+		}
+		const { resumeUnverified: _unverified, ...verified } = state;
+		if (!found) {
+			await countBinding(db);
+			// Off and back on, as a copy: `moveRowsTo` only moves what is not
+			// already under its target.
+			await moveRowsTo(db, LOCAL_CONNECTION_ID, 'resume');
+			await queueOwed(db, connectionId, await moveRowsTo(db, connectionId, 'copy'));
+		}
+		await db.syncState.put(verified);
+		return found ? 'resumed' : 'copied';
+	});
+};
 
 /**
  * Stop syncing, keeping everything on this device. The notes go back to
