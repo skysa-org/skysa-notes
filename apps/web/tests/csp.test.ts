@@ -91,6 +91,7 @@ describe('Content-Security-Policy', () => {
 			'https://*.files.1drv.com',
 			'https://my.microsoftpersonalcontent.com',
 			'https://*.sharepoint.com',
+			'https://www.googleapis.com',
 		]);
 	});
 
@@ -151,6 +152,40 @@ describe('Content-Security-Policy', () => {
 		const connect = policy().get('connect-src') ?? [];
 		const hosts = [...urls].map((url) => new URL(url));
 		expect(hosts.map((url) => url.hostname)).toContain('graph.microsoft.com');
+		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
+	});
+
+	it('lets the Google Drive adapter read a note, metadata and bytes', async () => {
+		const urls = new Set<string>();
+		const fetch: FetchLike = (url) => {
+			urls.add(url);
+			if (url.includes('alt=media')) return Promise.resolve(new Response('body\n'));
+			return Promise.resolve(
+				Response.json({
+					id: 'f1',
+					name: 'a.md',
+					mimeType: 'text/markdown',
+					parents: ['root-1'],
+					headRevisionId: 'r1',
+					trashed: false,
+				})
+			);
+		};
+		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+			connectionId: 'c1',
+			provider: 'gdrive',
+			clientId: 'install-1',
+			getAccessToken: () => Promise.resolve('token'),
+		});
+		expect(await provider?.read({ remoteId: 'f1', path: 'a.md' })).toEqual({
+			content: 'body\n',
+			version: 'r1',
+		});
+
+		const connect = policy().get('connect-src') ?? [];
+		const hosts = [...urls].map((url) => new URL(url));
+		expect(hosts).toHaveLength(2);
+		expect(new Set(hosts.map((url) => url.hostname))).toEqual(new Set(['www.googleapis.com']));
 		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
 	});
 

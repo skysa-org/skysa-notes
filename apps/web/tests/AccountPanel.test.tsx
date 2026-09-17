@@ -147,7 +147,7 @@ describe('AccountPanel, with nothing connected', () => {
 				config: () =>
 					Promise.resolve({
 						authMode: 'storage-first',
-						providers: ['gdrive', 'webdav'],
+						providers: ['webdav'],
 					}),
 			}),
 			freshDatabase()
@@ -159,7 +159,7 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(screen.queryByRole('link')).toBeNull();
 	});
 
-	it('offers OneDrive alongside Dropbox', async () => {
+	it('offers OneDrive and Google Drive alongside Dropbox', async () => {
 		renderPanel(
 			clientWith({
 				config: () =>
@@ -173,7 +173,9 @@ describe('AccountPanel, with nothing connected', () => {
 
 		const onedrive = await screen.findByRole('link', { name: 'Connect OneDrive' });
 		expect(onedrive.getAttribute('href')).toContain('/api/auth/connect/onedrive/start');
-		expect(screen.getAllByRole('link')).toHaveLength(2);
+		const gdrive = screen.getByRole('link', { name: 'Connect Google Drive' });
+		expect(gdrive.getAttribute('href')).toContain('/api/auth/connect/gdrive/start');
+		expect(screen.getAllByRole('link')).toHaveLength(3);
 	});
 
 	it('says so when the server cannot be reached', async () => {
@@ -597,7 +599,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 	it('does not promise to try again with a provider this build cannot sync', async () => {
 		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'gdrive' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'webdav' });
 		renderPanel(
 			clientWith({ connections: () => Promise.reject(new TypeError('offline')) }),
 			db,
@@ -608,7 +610,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			})
 		);
 
-		expect(await screen.findByText('This app cannot sync with Google Drive yet.')).toBeTruthy();
+		expect(await screen.findByText('This app cannot sync with WebDAV yet.')).toBeTruthy();
 		expect(screen.queryByText(/tried again/)).toBeNull();
 	});
 
