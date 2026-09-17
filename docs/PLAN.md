@@ -746,8 +746,7 @@ Operators running an instance for many users should know two things, both to be 
 
 None of these are in any phase. Listed so the reasoning isn't lost if they come up.
 
-- **WebDAV.** Planned as Phase 5 and deferred indefinitely (2026-09-17); the design is in §5.4 and the work in Phase 5's checklist.
-
+- **WebDAV.** Deferred indefinitely (2026-09-17). The design is in §5.4, and the Phase 5 checklist in §10 is kept as a record, not scheduled.
 - **Apple sign-in.** One `IdentityProvider` adapter via Arctic. Specifics: JWT client secret minted from a `.p8` key (rotate ≤6 months), POST callback (`form_post`), user's name delivered only on first authorization, Hide-My-Email relay addresses require the explicit link path, no localhost testing, $99/yr Developer Program. Not required for a browser-installed PWA.
 - **Facebook sign-in.** One adapter via Arctic. Email not guaranteed (phone-only accounts, declined permission), so it would need an email-confirmation step. Meta App Review with privacy policy and data-deletion URL; possible Business Verification. Likely lower demand than Apple for this audience.
 - **Magic link.** An `email` identity type in `identities`, plus transactional email infrastructure (Resend/Postmark, SPF/DKIM/DMARC) and a one-time-code fallback for the PWA link-opens-in-browser problem.
