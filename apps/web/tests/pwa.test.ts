@@ -89,11 +89,16 @@ describe('the service worker', () => {
 		expect(denied.some((pattern) => pattern.test('/'))).toBe(false);
 	});
 
-	it('never caches a provider response, because note content passes through it', () => {
+	it.each([
+		'https://www.googleapis.com/drive/v3/files',
+		'https://content.dropboxapi.com/2/files/download',
+		'https://graph.microsoft.com/v1.0/me/drive/special/approot',
+		'https://public.dm.files.1drv.com/y4mdownload',
+		'https://my.microsoftpersonalcontent.com/personal/download',
+		'https://contoso-my.sharepoint.com/personal/download',
+	])('never caches a provider response, because note content passes through it: %s', (url) => {
 		const provider = (workbox.runtimeCaching ?? []).find(
-			(rule) =>
-				rule.urlPattern instanceof RegExp &&
-				rule.urlPattern.test('https://www.googleapis.com/drive/v3/files')
+			(rule) => rule.urlPattern instanceof RegExp && rule.urlPattern.test(url)
 		);
 		expect(provider?.handler).toBe('NetworkOnly');
 	});

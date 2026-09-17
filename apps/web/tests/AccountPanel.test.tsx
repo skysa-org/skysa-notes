@@ -159,6 +159,23 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(screen.queryByRole('link')).toBeNull();
 	});
 
+	it('offers OneDrive alongside Dropbox', async () => {
+		renderPanel(
+			clientWith({
+				config: () =>
+					Promise.resolve({
+						authMode: 'storage-first',
+						providers: ['dropbox', 'onedrive', 'gdrive'],
+					}),
+			}),
+			freshDatabase()
+		);
+
+		const onedrive = await screen.findByRole('link', { name: 'Connect OneDrive' });
+		expect(onedrive.getAttribute('href')).toContain('/api/auth/connect/onedrive/start');
+		expect(screen.getAllByRole('link')).toHaveLength(2);
+	});
+
 	it('says so when the server cannot be reached', async () => {
 		renderPanel(
 			clientWith({
@@ -231,8 +248,15 @@ describe('AccountPanel, with an account connected', () => {
 		);
 
 		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+		expect(screen.queryByRole('link', { name: 'microsoft.com/consent' })).toBeNull();
 		await user.click(await enabled('Disconnect…'));
-		expect(screen.getByText(/microsoft\.com\/consent/)).toBeTruthy();
+
+		expect(
+			screen.getByRole('link', { name: 'microsoft.com/consent' }).getAttribute('href')
+		).toBe('https://microsoft.com/consent');
+		expect(screen.getByRole('link', { name: 'My Apps' }).getAttribute('href')).toBe(
+			'https://myapplications.microsoft.com/'
+		);
 	});
 
 	it('does not send a Dropbox user to remove access by hand', async () => {
@@ -244,7 +268,9 @@ describe('AccountPanel, with an account connected', () => {
 		);
 
 		await user.click(await enabled('Disconnect…'));
-		expect(screen.queryByText(/until you remove it/)).toBeNull();
+		expect(screen.getByText(/Your notes stay on this device/)).toBeTruthy();
+		expect(screen.queryByText(/keeps this app’s access/)).toBeNull();
+		expect(screen.queryByRole('link', { name: 'microsoft.com/consent' })).toBeNull();
 	});
 
 	it('can be talked out of disconnecting', async () => {
@@ -791,6 +817,25 @@ describe('AccountPanel, signed in with an account the notes do not belong to', (
 		expect(await screen.findByRole('link', { name: 'Connect Dropbox' })).toBeTruthy();
 		expect(disconnect).toHaveBeenCalledWith('c9');
 		expect((await getNote(db, note.id))?.remoteId).toBe('id:1');
+	});
+
+	it('says where to remove OneDrive’s access before letting a wrong account go', async () => {
+		// Picking the wrong Microsoft account at sign-in is the ordinary way to
+		// get here, and that account keeps the app's access after it is let go.
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'onedrive', accountId: 'ms:1' });
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await unbindConnection(db);
+		const wrong = { ...bob, provider: 'onedrive' as const, accountId: 'ms:2' };
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [wrong] }) }),
+			db
+		);
+
+		expect(
+			await screen.findByRole('button', { name: 'Disconnect bob@example.com' })
+		).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'microsoft.com/consent' })).toBeTruthy();
 	});
 
 	it('stops asking once another tab has answered', async () => {

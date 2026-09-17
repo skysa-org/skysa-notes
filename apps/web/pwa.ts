@@ -8,9 +8,13 @@ import { type ManifestOptions, type VitePWAOptions } from 'vite-plugin-pwa';
  * output to say so. `tests/pwa.test.ts` holds that checklist.
  */
 
-/** Provider API origins. Note content must never sit in the HTTP cache. */
+/**
+ * Every origin note content comes from: the provider APIs, and the hosts a
+ * OneDrive item's download URL points at, which are not Graph (docs/PLAN.md
+ * §5.2). Note content must never sit in the HTTP cache.
+ */
 const PROVIDER_ORIGINS =
-	/^https:\/\/(www\.googleapis\.com|graph\.microsoft\.com|[a-z]+\.dropboxapi\.com)\//;
+	/^https:\/\/(www\.googleapis\.com|graph\.microsoft\.com|[a-z]+\.dropboxapi\.com|(?:[a-z0-9-]+\.)+files\.1drv\.com|my\.microsoftpersonalcontent\.com|(?:[a-z0-9-]+\.)+sharepoint\.com)\//;
 
 export const PWA_MANIFEST: Partial<ManifestOptions> = {
 	name: 'skysa-notes',
