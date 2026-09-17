@@ -126,14 +126,20 @@ const attentionMessage = (
 };
 
 /**
- * What a stuck op was trying to do, in the user's terms. A `mkdir` is the only
- * one that is not about a note, and the only one with no note to open.
+ * What a stuck op was trying to do, in the user's terms. `mkdir` and `rmdir`
+ * are the two that are not about a note, and so the two with no note to open.
+ *
+ * `rmdir` cannot actually be stuck — the engine gives up on one rather than
+ * holding the queue up (§7, "A dead `rmdir` is given up on") — but it is a
+ * queued operation like any other and a label that said nothing would be worse
+ * than one that is never read.
  */
 const OP_LABELS: Record<QueuedOperation, string> = {
 	write: 'the edit to',
 	move: 'the rename of',
 	delete: 'the deletion of',
 	mkdir: 'the new notebook',
+	rmdir: 'the removal of the notebook',
 };
 
 /**
