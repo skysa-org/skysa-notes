@@ -686,7 +686,6 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		const sync = fakeSync({ phase: 'idle' });
 		const db = await connected(sync);
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
-		await db.notes.update(note.id, { deletedLocally: 1 });
 
 		sync.say({
 			phase: 'attention',
@@ -699,6 +698,15 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		).toBeTruthy();
 		expect(screen.queryByRole('link', { name: 'Open the note' })).toBeNull();
 
+		// The note has to be offered first, or its absence proves nothing: the
+		// link is read from the database, and "not yet" looks like "never".
+		sync.say({
+			phase: 'attention',
+			stuck: { op: 'write', path: note.path, noteId: note.id, attempts: 5 },
+		});
+		expect(await screen.findByRole('link', { name: 'Open the note' })).toBeTruthy();
+
+		await db.notes.update(note.id, { deletedLocally: 1 });
 		sync.say({
 			phase: 'attention',
 			stuck: { op: 'delete', path: note.path, noteId: note.id, attempts: 5 },
