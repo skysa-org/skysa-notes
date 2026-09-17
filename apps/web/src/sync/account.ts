@@ -43,7 +43,8 @@ export const LEFT_AT_PROVIDER: Partial<
 	Record<ProviderKind, Readonly<{ summary: string; places: readonly RevokePlace[] }>>
 > = {
 	onedrive: {
-		summary: 'Microsoft keeps this app’s access to its folder until it is removed there:',
+		summary:
+			'Microsoft keeps this app’s access to its folder after it is disconnected, until it is removed there:',
 		places: [
 			{
 				label: 'microsoft.com/consent',
@@ -53,7 +54,7 @@ export const LEFT_AT_PROVIDER: Partial<
 			{
 				label: 'My Apps',
 				href: 'https://myapplications.microsoft.com/',
-				accounts: 'a work or school account, or ask its administrator',
+				accounts: 'a work or school account, or ask your administrator',
 			},
 		],
 	},
