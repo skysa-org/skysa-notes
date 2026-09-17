@@ -48,6 +48,8 @@ import {
 
 const START = new Date('2026-01-01T00:00:00Z');
 const HOUR = 60 * 60 * 1000;
+// The provider named here decides nothing: `createProvider` is what hands the
+// scheduler an adapter, and each row of REMOTES hands it a different one.
 const ACCOUNT = { connectionId: 'c1', provider: 'dropbox', accountId: 'acct' } as const;
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -65,8 +67,8 @@ afterEach(async () => {
 interface Remote {
 	/** The state underneath, whatever the wire says. */
 	readonly backing: FakeProvider;
-	/** An adapter of its own, for one more browser. */
-	readonly adapter: () => StorageProvider;
+	/** An adapter of its own, for one more browser, built for that install. */
+	readonly adapter: (clientId: string) => StorageProvider;
 	/**
 	 * Whether a listing sees everything a delete would remove. False on Google
 	 * Drive, where `drive.file` hides files the user put in the folder
@@ -104,6 +106,8 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 		'the fake',
 		() => {
 			const backing = createFakeProvider({ startAt: START });
+			// The fake is the store itself, so both browsers share one — it has no
+			// wire for a `clientId` to travel over.
 			return { backing, adapter: () => backing, provesEmpty: backing.listsEverything };
 		},
 	],
@@ -113,7 +117,7 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 			const stub = createOneDriveStub({ startAt: START });
 			return {
 				backing: stub.backing,
-				adapter: () => over(createOneDriveProvider, stub.fetch, 'stub-client'),
+				adapter: (clientId) => over(createOneDriveProvider, stub.fetch, clientId),
 				provesEmpty: true,
 			};
 		},
@@ -124,7 +128,7 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 			const stub = createGDriveStub({ startAt: START });
 			return {
 				backing: stub.backing,
-				adapter: () => over(createGDriveProvider, stub.fetch, 'stub-client'),
+				adapter: (clientId) => over(createGDriveProvider, stub.fetch, clientId),
 				provesEmpty: false,
 			};
 		},
@@ -206,12 +210,27 @@ interface Browser {
 }
 
 /**
+ * Long enough for a run a trigger has started to have reached the phase that
+ * says so. Only that: the waiting itself is `vi.waitFor`'s, below.
+ */
+const started = () =>
+	new Promise<void>((resolve) => {
+		setTimeout(resolve, 5);
+	});
+
+/**
  * The scheduler syncs on its own account — `start`, and the `online` event when
  * the network comes back — and those runs are not awaited by whoever caused
  * them. A test that reads the stores while one is in flight is reading a
  * half-applied round.
+ *
+ * The wait comes first, as it does in `scheduler.test.ts`: the `online` handler
+ * starts its run behind an await, so at the moment the event fires the phase is
+ * still the old one, and asking straight away is answered before the run has
+ * begun.
  */
 const idle = async (scheduler: SyncScheduler): Promise<void> => {
+	await started();
 	await vi.waitFor(() => {
 		expect(scheduler.status().phase).not.toBe('syncing');
 	});
@@ -221,14 +240,15 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 	const db = createDatabase(`soak-${name}-${crypto.randomUUID()}`);
 	cleanups.push(() => db.delete());
 	// The same connection on both — one account, two installs. `bindConnection`
-	// mints each database its own `clientId`, which is what the marker file
-	// reports and what tells the two of them apart on the remote.
+	// mints each database its own `clientId`.
 	await bindConnection(db, ACCOUNT);
 	const env = fakeEnvironment();
 	const scheduler = createSyncScheduler({
 		db,
 		client: tokenServer(),
-		createProvider: () => remote.adapter(),
+		// The install's own id, which is what the marker file reports and what
+		// tells the two of them apart on the remote.
+		createProvider: (input) => remote.adapter(input.clientId),
 		environment: env.environment,
 	});
 	cleanups.unshift(() => {
@@ -567,12 +587,19 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 
 	it('does not take the other browser’s note with one deleted before it was sent', async () => {
 		// Found by the seeded runs below, seed 39. Both browsers make a note of
-		// the same name while neither has synced; one of them thinks better of
-		// it and deletes it before anything has gone up. Its write was queued
-		// when the note was made, and — before the fix in `store/queue.ts` — it
-		// still ran: this browser's file arrived at the path first, the other
-		// browser's write bound its note to that file instead of making one,
-		// and the delete behind it took a note nobody deleted.
+		// the same name while neither has synced; B thinks better of its own and
+		// deletes it before anything has gone up. B's write was queued when the
+		// note was made, and — before the fix in `store/queue.ts` — it still
+		// ran: B's file arrived at the path, A's write bound A's note to that
+		// file instead of making one, and B's delete behind it took a note
+		// nobody deleted, from both browsers.
+		//
+		// The harm needs A's *write*, not A's whole run, to land between B's two
+		// ops — pulled first, A makes a copy rather than binding — and two
+		// schedulers let go together cannot be ordered that finely from here.
+		// So this is the scenario, and the guard that reliably fails without
+		// the fix is `queue.test.ts`, "leaves the other device's note where it
+		// is", which drives the two engines in that order itself.
 		const { remote, a, b } = await setUp(make);
 		a.goOffline();
 		b.goOffline();
@@ -584,49 +611,6 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 
 		const files = await converged(remote, a, b);
 		expect(bodies(files)).toEqual(['keep me']);
-	});
-
-	describe('at random', () => {
-		const run = async (seed: number): Promise<void> => {
-			const { remote, a, b } = await setUp(make);
-			const soak = createSoak(seed, remote, [a, b]);
-			await Array.from({ length: 24 }).reduce<Promise<void>>(async (done) => {
-				await done;
-				await soak.step(soak.pick([a, b]));
-			}, Promise.resolve());
-			// Both back on the network before they are asked to agree: a browser
-			// the script left offline has never seen the other's work.
-			await a.comeBack();
-			await b.comeBack();
-
-			const files = await converged(remote, a, b, soak.trace);
-			const everything = Object.values(files).join('');
-			const lost = soak.written().filter((made) => !everything.includes(made));
-			expect(
-				lost.filter((made) => !soak.mayBeLost(made)),
-				soak.trace()
-			).toEqual([]);
-
-			// And neither browser holds a notebook the remote has no directory
-			// for: a row with nothing behind it is an empty notebook in the
-			// sidebar that nothing the user does here will ever make real.
-			const directories = new Set(remoteFolders(remote));
-			await Promise.all(
-				[a, b].map(async (each) => {
-					const ghosts = (await each.db.folders.toArray())
-						.map((folder) => folder.path)
-						.filter((path) => !directories.has(path));
-					expect(ghosts, `${each.name}\n${soak.trace()}`).toEqual([]);
-				})
-			);
-		};
-
-		// A failing seed prints the steps that led to it, and becomes a named
-		// test of its own.
-		it.each(Array.from({ length: 40 }, (__, seed) => seed + 1))(
-			'lose nothing and agree, seed %i',
-			run
-		);
 	});
 
 	it('carries a note moved into a notebook, and the notebook with it', async () => {
@@ -655,6 +639,52 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 
 		const files = await converged(remote, a, b);
 		expect(bodies(files)).toEqual(['from a', 'from b']);
+	});
+
+	describe('at random', () => {
+		const run = async (seed: number): Promise<void> => {
+			const { remote, a, b } = await setUp(make);
+			const soak = createSoak(seed, remote, [a, b]);
+			await Array.from({ length: 24 }).reduce<Promise<void>>(async (done) => {
+				await done;
+				await soak.step(soak.pick([a, b]));
+			}, Promise.resolve());
+			// Both back on the network before they are asked to agree: a browser
+			// the script left offline has never seen the other's work.
+			await a.comeBack();
+			await b.comeBack();
+
+			const files = await converged(remote, a, b, soak.trace);
+			const everything = Object.values(files).join('');
+			// The newline matters: `t7-1` is a prefix of `t7-14`, and without it a
+			// run that minted fourteen tokens could never report the first as
+			// lost.
+			const lost = soak.written().filter((made) => !everything.includes(`${made}\n`));
+			expect(
+				lost.filter((made) => !soak.mayBeLost(made)),
+				soak.trace()
+			).toEqual([]);
+
+			// And neither browser holds a notebook the remote has no directory
+			// for: a row with nothing behind it is an empty notebook in the
+			// sidebar that nothing the user does here will ever make real.
+			const directories = new Set(remoteFolders(remote));
+			await Promise.all(
+				[a, b].map(async (each) => {
+					const ghosts = (await each.db.folders.toArray())
+						.map((folder) => folder.path)
+						.filter((path) => !directories.has(path));
+					expect(ghosts, `${each.name}\n${soak.trace()}`).toEqual([]);
+				})
+			);
+		};
+
+		// A failing seed prints the steps that led to it, and becomes a named
+		// test of its own.
+		it.each(Array.from({ length: 40 }, (__, seed) => seed + 1))(
+			'lose nothing and agree, seed %i',
+			run
+		);
 	});
 });
 
@@ -693,23 +723,29 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		log.push(`${b.name} ${what}`);
 	};
 
-	/** Files some browser has deleted, and notes deleted before they had one. */
+	/** Files some browser has deleted. */
 	const deletedFiles = new Set<string>();
-	const deletedNotes = new Set<string>();
 
 	/**
-	 * A token, doomed from the start if it is going into a note whose file some
-	 * browser has already deleted. §7 lets that delete win over an edit made
-	 * elsewhere that never saw it, and an edit written after the delete is
-	 * exactly such an edit — the browser writing it has not pulled yet.
+	 * A token, doomed from the start only in the one case §7 allows: it is going
+	 * into a **clean** note whose file some browser has already deleted, so this
+	 * browser's copy is only what it last pulled and the delete is entitled to
+	 * take it.
+	 *
+	 * Not a dirty one. A note with unsent edits meeting a file that is gone is
+	 * `detach-note` — kept, cut loose, and re-created by its own write — which
+	 * is what "keeps an edit made here while the note was deleted there" pins
+	 * above. Dooming those too would have let the runs excuse a loss the app is
+	 * required to prevent.
 	 */
-	const token = (b: Browser, note?: NoteRecord): string => {
+	const token = (note?: NoteRecord): string => {
 		const made = `t${String(seed)}-${String(tokens.length)}`;
 		tokens.push(made);
 		const gone =
 			note !== undefined &&
-			(deletedNotes.has(`${b.name}:${note.id}`) ||
-				(note.remoteId !== undefined && deletedFiles.has(note.remoteId)));
+			note.dirty === 0 &&
+			note.remoteId !== undefined &&
+			deletedFiles.has(note.remoteId);
 		if (gone) doomed.add(made);
 		return made;
 	};
@@ -718,8 +754,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 	 * A note about to be deleted, and everything either browser holds of the
 	 * same file: those tokens may not come back, and §7 says they need not.
 	 */
-	const willTake = async (b: Browser, note: NoteRecord): Promise<void> => {
-		deletedNotes.add(`${b.name}:${note.id}`);
+	const willTake = async (note: NoteRecord): Promise<void> => {
 		if (note.remoteId !== undefined) deletedFiles.add(note.remoteId);
 		const held = (
 			await Promise.all(
@@ -744,7 +779,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		if (roll < 0.25 || notes.length === 0) {
 			const folders = await notebooks(b);
 			const into = roll < 0.05 && folders.length > 0 ? pick(folders) : '';
-			const made = token(b);
+			const made = token();
 			const note = await createNote(b.db, {
 				title: pick(TITLES),
 				body: `${made}\n`,
@@ -756,7 +791,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 
 		const note = pick(notes);
 		if (roll < 0.5) {
-			const made = token(b, note);
+			const made = token(note);
 			say(b, `edit ${note.path} ${made}`);
 			await saveNoteBody(b.db, note.id, `${note.body}${made}\n`);
 			return;
@@ -773,7 +808,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 			return;
 		}
 		if (roll < 0.7) {
-			await willTake(b, note);
+			await willTake(note);
 			say(b, `delete ${note.path}`);
 			await deleteNote(b.db, note.id);
 			return;
@@ -801,11 +836,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		if (roll < 0.85 && held.length > 0) {
 			const at = pick(held);
 			// Everything inside goes with it, exactly as a note's own delete does.
-			await Promise.all(
-				notes
-					.filter((each) => each.path.startsWith(`${at}/`))
-					.map((each) => willTake(b, each))
-			);
+			await Promise.all(notes.filter((each) => each.path.startsWith(`${at}/`)).map(willTake));
 			say(b, `remove notebook ${at}`);
 			await deleteFolder(b.db, at);
 			return;

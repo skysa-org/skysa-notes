@@ -37,6 +37,8 @@ export interface StoreHarness {
 		targetPath?: string;
 		remoteId?: string;
 	}) => number | Promise<number>;
+	/** Take a queued op back out, as a later change of the user's does. */
+	withdrawOp: (seq: number) => void | Promise<void>;
 }
 
 const remote = (path: string, id = 'r1', version = 'v1'): RemoteEntry => ({
@@ -1546,6 +1548,39 @@ export const describeSyncStoreContract = (
 				const ops = await store.pendingOps();
 				expect(ops.find((op) => op.seq === seq)).toBeUndefined();
 				expect(ops.map((op) => op.path)).toEqual(['a (conflict).md']);
+				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
+				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
+			});
+
+			it('takes a resolution for an op withdrawn while it was at the network', async () => {
+				// The user can delete the note while its write is out, and a
+				// tombstone owes the remote its delete and nothing else, so the
+				// write's queue row goes (`apps/web/src/store/queue.ts`). The
+				// conflict the write met still has to land — refusing it would
+				// fail the op and retry a write the queue no longer holds — and
+				// `completeOp` and `failOp` already allow the same.
+				const { store, seed, seedOp, withdrawOp } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					remoteVersion: 'v1',
+					dirty: true,
+				});
+				const seq = await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+				await withdrawOp(seq);
+
+				await store.resolveConflict(seq, {
+					noteId: 'n1',
+					remoteContent: 'theirs\n',
+					remoteHash: 'hash',
+					remote: remote('a.md', 'r1', 'v2'),
+					copyId: 'c1',
+					copyPath: 'a (conflict).md',
+					copyContent: conflictContent('mine\n', 'c1'),
+				});
+
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
 				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
 			});

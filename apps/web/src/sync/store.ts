@@ -796,6 +796,8 @@ export const createDexieSyncStore = (
 				// conflict still lands, and `applyConflict` makes no copy for
 				// one, as `failOp` tolerates the same withdrawal. Another
 				// connection's op is still refused.
+				// Asked for the refusal, not the op: this is the only thing left
+				// that turns away another connection's seq.
 				await queuedOp(db, seq);
 				await applyConflict(db, resolution, hashes);
 				await db.opQueue.delete(seq);

@@ -752,6 +752,25 @@ describe('local changes made while a push is in flight', () => {
 		expect(Object.keys(remoteFiles(fake))).toEqual(['Work/plan.md']);
 	});
 
+	it('still removes the file when the write creating it was in flight as the delete came', async () => {
+		// The delicate half of withdrawing the write: it is already at the
+		// network, so only its queue row goes. `settle` still records the
+		// `remoteId` the write earned onto the tombstone, which is the id this
+		// delete is addressed by — without it the delete would purge the row
+		// with nothing removed, and the file would come back on the next pull
+		// as a note the user deleted.
+		const { db, fake, engineOver } = await connected();
+		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
+		const engine = engineOver(inFlight(fake, 'write', () => deleteNote(db, note.id)));
+
+		await engine.sync();
+		expect((await engine.sync()).status).toBe('ok');
+
+		expect(remoteFiles(fake)).toEqual({});
+		expect(await getNote(db, note.id)).toBeUndefined();
+		expect(await db.opQueue.count()).toBe(0);
+	});
+
 	it('sends only the delete for a note edited and then deleted', async () => {
 		// The edit queued a write; the delete withdraws it. Sending it first
 		// would put bytes on the remote that the user has just thrown away, and
@@ -941,5 +960,59 @@ describe('a note deleted before its write was ever sent', () => {
 		const ops = await db.opQueue.toArray();
 		expect(ops.map((op) => op.op)).toEqual(['delete']);
 		expect(ops[0]?.noteId).toBe(note.id);
+	});
+});
+
+describe('a note deleted before its write was ever sent', () => {
+	/**
+	 * The deterministic guard for what the two-browser soak found
+	 * (`soak.test.ts`). Two devices over one remote, and the interleaving set
+	 * here rather than raced for: this device's write creates the file, the
+	 * other device's push lands while it is there, and this device's delete
+	 * follows. Before the fix the other device's note bound to that file
+	 * instead of making one of its own, and went with it — a note nobody
+	 * deleted, gone from both.
+	 */
+	const twoDevices = async () => {
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		const mine = freshDatabase();
+		const theirs = freshDatabase();
+		const mineStore = await boundStore(mine, scope);
+		const theirsStore = await boundStore(theirs, scope);
+		const now = () => new Date('2026-09-16T10:00:00Z');
+		return { fake, mine, theirs, mineStore, theirsStore, now };
+	};
+
+	it('leaves the other device’s note where it is', async () => {
+		const { fake, mine, theirs, mineStore, theirsStore, now } = await twoDevices();
+		await createNote(theirs, { ...scope, title: 'Plans', body: '# Plans\n\nkeep me\n' });
+		const dropped = await createNote(mine, {
+			...scope,
+			title: 'Plans',
+			body: '# Plans\n\nno\n',
+		});
+		await deleteNote(mine, dropped.id);
+
+		const other = createSyncEngine({ provider: fake, store: theirsStore, now });
+		// Their push happens while my file is at the path, if mine ever puts
+		// one there — which is the whole question.
+		const engine = createSyncEngine({
+			provider: inFlight(fake, 'write', () => other.push()),
+			store: mineStore,
+			now,
+		});
+		await engine.push();
+		await other.sync();
+		await engine.sync();
+
+		// Their note, at their name, on the remote and on both devices — mine
+		// having pulled it, since my own note at that name is the one I threw
+		// away.
+		expect(Object.keys(remoteFiles(fake))).toEqual(['plans.md']);
+		expect(fake.contentAt('plans.md')).toContain('keep me');
+		expect(Object.keys(await localFiles(theirs))).toEqual(['plans.md']);
+		expect(Object.keys(await localFiles(mine))).toEqual(['plans.md']);
+		expect(await localFiles(mine)).toEqual(await localFiles(theirs));
 	});
 });

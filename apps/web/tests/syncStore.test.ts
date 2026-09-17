@@ -95,6 +95,7 @@ describeSyncStoreContract('Dexie', async () => {
 			}
 			return db.opQueue.add({ connectionId: CONNECTION, attempts: 0, queuedAt: 0, ...op });
 		},
+		withdrawOp: (seq) => db.opQueue.delete(seq),
 	};
 });
 
