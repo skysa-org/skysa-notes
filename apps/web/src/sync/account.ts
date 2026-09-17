@@ -1,7 +1,13 @@
 import { type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
-import { bindConnection, unbindConnection } from '../store/connection.js';
+import {
+	accountKey,
+	bindConnection,
+	bindingMode,
+	NOTES_ACCOUNT_KEY,
+	unbindConnection,
+} from '../store/connection.js';
 import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
 
 /**
@@ -27,6 +33,13 @@ export type AccountState =
 	| { kind: 'connected'; connection: Connection }
 	/** Signed in, with nothing connected: the device keeps its notes to itself. */
 	| { kind: 'none' }
+	/**
+	 * Signed in with an account other than the one the notes on this device
+	 * belong to — most often the other of two Dropbox accounts the browser is
+	 * logged in to, picked on the consent page. Binding it would copy every
+	 * note into it, so nothing is bound until the user says (`adoptAccount`).
+	 */
+	| { kind: 'other-account'; connection: Connection }
 	/**
 	 * No session. The device keeps whatever connection it had — an expired
 	 * session is not a disconnect, and reconnecting the same account keeps the
@@ -64,30 +77,66 @@ const reconcileOnce = async (
 	const result = await client.connections();
 	if (!result.ok) return { kind: 'signed-out' };
 
+	const notesAccount = (await db.prefs.get(NOTES_ACCOUNT_KEY))?.value;
 	const usable = result.value.filter((connection) => CONNECTABLE.includes(connection.provider));
 	// The one already bound, if the server still has it: a second, newer row
-	// would otherwise take over on every open.
-	const connection = usable.find((each) => each.id === active) ?? usable[0];
+	// would otherwise take over on every open. Then the notes' own account.
+	const connection =
+		usable.find((each) => each.id === active) ??
+		usable.find((each) => accountKey(each.provider, each.accountId) === notesAccount) ??
+		usable[0];
 
 	// Nothing to change is a decision too, and as stale as any other.
 	const unchanged = async () => (await activeConnectionId(db)) === active;
+	const ask =
+		connection !== undefined && connection.id !== active && (await needsAsking(db, connection));
 	const applied =
 		connection === undefined
 			? active === LOCAL_CONNECTION_ID
 				? await unchanged()
 				: await unbindConnection(db, { ifStillOn: active })
-			: connection.id === active
+			: connection.id === active || ask
 				? await unchanged()
 				: await bindConnection(db, {
 						connectionId: connection.id,
 						provider: connection.provider,
+						accountId: connection.accountId,
 						ifStillOn: active,
 					});
 	if (!applied) {
 		if (again) return reconcileOnce(db, client, false);
 		throw new Error('The device changed connection while the server was being asked');
 	}
-	return connection === undefined ? { kind: 'none' } : { kind: 'connected', connection };
+	if (connection === undefined) return { kind: 'none' };
+	return ask ? { kind: 'other-account', connection } : { kind: 'connected', connection };
+};
+
+/** Whether binding `connection` would copy notes that belong to another account into it. */
+const needsAsking = async (db: NotesDatabase, connection: Connection): Promise<boolean> => {
+	const { mode, from } = await bindingMode(db, connection);
+	return mode === 'copy' && from !== undefined && (await holdsAnything(db));
+};
+
+/** Whether copying the device's notes anywhere would copy anything. */
+const holdsAnything = async (db: NotesDatabase): Promise<boolean> =>
+	(await db.notes.where('deletedLocally').equals(0).count()) > 0 ||
+	(await db.folders.count()) > 0;
+
+/**
+ * Bind the device to `connection`, whichever account its notes belong to: the
+ * user's answer to `other-account`, and what reconciling does when there is
+ * nothing to ask.
+ */
+export const adoptAccount = async (
+	db: NotesDatabase,
+	connection: Connection
+): Promise<AccountState> => {
+	await bindConnection(db, {
+		connectionId: connection.id,
+		provider: connection.provider,
+		accountId: connection.accountId,
+	});
+	return { kind: 'connected', connection };
 };
 
 export type DisconnectOutcome = { ok: true } | { ok: false; refusal: Refusal };

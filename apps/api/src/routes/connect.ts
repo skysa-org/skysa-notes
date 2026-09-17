@@ -289,7 +289,9 @@ const createUser = async (db: Database, displayName: string, now: number): Promi
  * Reconnecting to the *same* account keeps the row's id and its discovered
  * `rootId`. Reconnecting to a *different* one takes a fresh id: a client holding
  * notes keyed on the old connection would otherwise sync them into a stranger's
- * folder, and the stale `rootId` would be a path into it.
+ * folder, and the stale `rootId` would be a path into it. Which account a
+ * client's notes belong to is decided on the client, from the `accountId`
+ * `/api/connections` returns: a deleted row's account comes back with a new id.
  */
 const store = async (
 	db: Database,

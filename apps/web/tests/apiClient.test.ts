@@ -31,12 +31,18 @@ describe('the API client', () => {
 			id: 'c1',
 			provider: 'dropbox',
 			displayName: 'Ada',
+			accountId: 'dbid:1',
 			rootId: null,
 			createdAt: 1,
 			lastUsedAt: null,
 		};
 		const { fetch, calls } = answering(200, {
-			connections: [good, { ...good, id: 'c2', provider: 'icloud' }],
+			connections: [
+				good,
+				{ ...good, id: 'c2', provider: 'icloud' },
+				// From a Worker older than this app.
+				{ ...good, id: 'c3', accountId: undefined },
+			],
 		});
 
 		const result = await createApiClient({ fetch }).connections();
@@ -48,6 +54,15 @@ describe('the API client', () => {
 					id: 'c1',
 					provider: 'dropbox',
 					displayName: 'Ada',
+					accountId: 'dbid:1',
+					createdAt: 1,
+					lastUsedAt: null,
+				},
+				{
+					id: 'c3',
+					provider: 'dropbox',
+					displayName: 'Ada',
+					accountId: null,
 					createdAt: 1,
 					lastUsedAt: null,
 				},

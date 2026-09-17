@@ -31,18 +31,36 @@ import { queueMkdir, queueWrite } from './queue.js';
  *   `source` existed re-serializes from its parts, including `updatedAt` and
  *   its path, so its bytes would otherwise change under the engine.
  *
- * A moved note is cut loose from any file it had: that file belongs to the
- * account it came from, not to this one. It is marked dirty — its contents are
- * on no remote this app now talks to — and, on a real connection, owed a write,
- * and each notebook a `mkdir`. The remote may already hold the same notes, from
- * another device or an earlier connection; the first pull then meets them as
- * the engine meets any file whose note holds unpushed writing, and nothing is
- * overwritten.
+ * What a moved row keeps depends on whose files it knows. The device remembers
+ * the provider account its notes were last bound to (`NOTES_ACCOUNT_KEY`), and
+ * a connection id says nothing about that: the same account connected again
+ * after a disconnect gets a new one.
  *
- * A deleted note that has not reached its remote is dropped rather than moved.
- * Its delete was owed to the account it came from, which this app no longer
- * sends anything to, and on a new one there is no file to delete.
+ * - **Resumed**, when the notes go back to the account they came from, or to
+ *   the device on a disconnect: each row keeps its `remoteId`, `remoteVersion`,
+ *   `dirty` and tombstone, and every queued op follows it. The engine then picks
+ *   up where it stopped — its first pull on a connection with no cursor is a
+ *   full scan, which sees what changed and what went while it was away — rather
+ *   than meeting every note as new writing with a file already in the way.
+ * - **Copied**, onto any other account: each row is cut loose from the file it
+ *   had, which belongs to an account this app no longer talks to. It is marked
+ *   dirty and owed a write, each notebook a `mkdir`. A deleted note is dropped:
+ *   its delete was owed to the old account, and on the new one there is no file
+ *   to delete. The remote may already hold the same notes; the first pull meets
+ *   them as it meets any file whose note holds unpushed writing, and nothing is
+ *   overwritten.
+ *
+ * A row that has to move to a new path on the way — only when rows under two
+ * connections want one — is copied either way: the file it knows is at the
+ * old path.
  */
+
+/** Prefs key: `provider:accountId` of the account the device's notes belong to. */
+export const NOTES_ACCOUNT_KEY = 'sync.notesAccount';
+
+/** One provider account, however many connections it has had. */
+export const accountKey = (provider: ProviderKind, accountId: string | null | undefined) =>
+	accountId === null || accountId === undefined ? undefined : `${provider}:${accountId}`;
 
 type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState'>;
 
@@ -83,8 +101,19 @@ const spellingsOn = (folders: readonly FolderRecord[]) => {
 	};
 };
 
-/** Every row not already under `target`, moved under it. */
-const moveRowsTo = async (db: Scope, target: string): Promise<Moved> => {
+type Mode = 'resume' | 'copy';
+
+/** A moved row, and whether it is owed to the new connection as though new. */
+interface Placed<T> {
+	row: T;
+	owed: boolean;
+}
+
+/** Every row not already under `target`, moved under it. What it owes is the caller's. */
+const moveRowsTo = async (db: Scope, target: string, mode: Mode): Promise<Moved> => {
+	const ops = (await db.opQueue.toArray()).filter((op) => op.connectionId !== target);
+	const queuedFor = new Set(ops.flatMap((op) => (op.noteId === undefined ? [] : [op.noteId])));
+
 	const folders = await db.folders.toArray();
 	const foldersLeaving = folders.filter((folder) => folder.connectionId !== target);
 	const spelling = spellingsOn(folders.filter((folder) => folder.connectionId === target));
@@ -92,26 +121,29 @@ const moveRowsTo = async (db: Scope, target: string): Promise<Moved> => {
 		foldersLeaving.map((folder): [string, string] => [folder.connectionId, folder.path])
 	);
 	// Outermost first, so a notebook is spelled after its parent is.
-	const foldersMoved = [...foldersLeaving]
+	const foldersPlaced = [...foldersLeaving]
 		.sort((a, b) => depth(a.path) - depth(b.path))
-		.flatMap((folder): FolderRecord[] =>
-			spelling.has(folder.path)
-				? []
-				: [
-						{
-							connectionId: target,
-							path: spelling.folder(folder.path),
-							createdAt: folder.createdAt,
-						},
-					]
-		);
+		.flatMap((folder): Placed<FolderRecord>[] => {
+			if (spelling.has(folder.path)) return [];
+			const path = spelling.folder(folder.path);
+			if (mode === 'resume' && path === folder.path) {
+				// Never made on the remote is owed a `mkdir` even so; asking
+				// for one that exists changes nothing.
+				return [
+					{
+						row: { ...folder, connectionId: target },
+						owed: folder.remoteId === undefined,
+					},
+				];
+			}
+			const { remoteId: _remoteId, ...unlinked } = folder;
+			return [{ row: { ...unlinked, connectionId: target, path }, owed: true }];
+		});
+	const foldersMoved = foldersPlaced.map((placed) => placed.row);
 	if (foldersMoved.length > 0) await db.folders.bulkPut(foldersMoved);
 
 	const notes = await db.notes.toArray();
 	const leaving = notes.filter((note) => note.connectionId !== target);
-	await db.notes.bulkDelete(
-		leaving.filter((note) => note.deletedLocally === 1).map((note) => note.id)
-	);
 
 	// Two notes wanting one path is one file on every provider, and one of the
 	// notes lost on the first push. By folded path, as the providers compare.
@@ -121,35 +153,54 @@ const moveRowsTo = async (db: Scope, target: string): Promise<Moved> => {
 			.filter((note) => note.connectionId === target && note.deletedLocally === 0)
 			.map((note) => foldPath(note.path))
 	);
-	const notesMoved = leaving
-		.filter((note) => note.deletedLocally === 0)
-		.map((note): NoteRecord => {
-			const wanted = spelling.note(note.path);
-			const path = taken.has(foldPath(wanted)) ? freePath(wanted, [...taken]) : wanted;
-			taken.add(foldPath(path));
-			return {
-				...withoutRemote(note),
-				// Before anything else changes: these are the bytes it had.
-				source: noteFile(note),
-				connectionId: target,
-				path,
-				dirty: 1,
-			};
-		});
-	if (notesMoved.length > 0) await db.notes.bulkPut(notesMoved);
-
-	// Queued for a connection nothing will sync again. What the moved rows owe
-	// the new one is queued by the caller, from what they are now.
-	const ops = await db.opQueue.toArray();
-	await db.opQueue.bulkDelete(
-		ops.flatMap((op) => (op.connectionId !== target && op.seq !== undefined ? [op.seq] : []))
+	const notesPlaced = leaving.flatMap((note): Placed<NoteRecord>[] => {
+		// Before anything else changes: these are the bytes it had.
+		const pinned: NoteRecord = { ...note, source: noteFile(note), connectionId: target };
+		if (note.deletedLocally === 1) {
+			// A delete owed to the account it came from, which the new one
+			// only is when resuming.
+			return mode === 'resume' ? [{ row: pinned, owed: false }] : [];
+		}
+		const wanted = spelling.note(note.path);
+		const path = taken.has(foldPath(wanted)) ? freePath(wanted, [...taken]) : wanted;
+		taken.add(foldPath(path));
+		if (mode === 'resume' && path === note.path) {
+			// Nothing queued and no file: a note nothing would ever push.
+			const stranded = note.remoteId === undefined && !queuedFor.has(note.id);
+			return [{ row: pinned, owed: stranded }];
+		}
+		return [{ row: { ...withoutRemote(pinned), path, dirty: 1 }, owed: true }];
+	});
+	await db.notes.bulkDelete(
+		leaving
+			.filter((note) => !notesPlaced.some((placed) => placed.row.id === note.id))
+			.map((note) => note.id)
 	);
+	if (notesPlaced.length > 0) await db.notes.bulkPut(notesPlaced.map((placed) => placed.row));
 
-	return { notes: notesMoved, folders: foldersMoved };
+	// A row owed to the new connection as though new owes what it is now, which
+	// the caller queues; what was queued for it was owed to its old file. Every
+	// other row takes its queue with it, in the order it was made.
+	const owed = new Set(
+		notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row.id)
+	);
+	const dropped = ops.filter(
+		(op) => mode === 'copy' || (op.noteId !== undefined && owed.has(op.noteId))
+	);
+	await db.opQueue.bulkDelete(dropped.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
+	const carried = ops.filter((op) => !dropped.includes(op));
+	if (carried.length > 0) {
+		await db.opQueue.bulkPut(carried.map((op) => ({ ...op, connectionId: target })));
+	}
+
+	return {
+		notes: notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row),
+		folders: foldersPlaced.filter((placed) => placed.owed).map((placed) => placed.row),
+	};
 };
 
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, work);
+	db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState, db.prefs], work);
 
 /**
  * Only if the app's connection is still this one when the transaction runs.
@@ -168,19 +219,33 @@ export interface BindInput extends Precondition {
 	/** The id `apps/api` gave the connection. */
 	connectionId: string;
 	provider: ProviderKind;
+	/** The provider's id for the account, when the API knows it. */
+	accountId?: string | null;
 }
+
+/** What the device's notes would do on binding `input`: see the top of this module. */
+export const bindingMode = async (
+	db: Pick<NotesDatabase, 'prefs'>,
+	input: Pick<BindInput, 'provider' | 'accountId'>
+): Promise<{ mode: Mode; from: string | undefined }> => {
+	const from = (await db.prefs.get(NOTES_ACCOUNT_KEY))?.value;
+	const to = accountKey(input.provider, input.accountId);
+	return { mode: to !== undefined && to === from ? 'resume' : 'copy', from };
+};
 
 /**
  * Make `connectionId` the app's connection, bringing every note and notebook on
- * this device with it. Safe to call again: rows already under it are left as
- * they are, cursor included, and queue nothing. Answers whether it bound.
+ * this device with it — resumed if they belong to its account, copied into it
+ * if not. Safe to call again: rows already under it are left as they are,
+ * cursor included, and queue nothing. Answers whether it bound.
  */
 export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boolean> =>
 	inTransaction(db, async () => {
 		if (!(await stillOn(db, input))) return false;
 		const states = await db.syncState.toArray();
 		const current = states.find((state) => state.connectionId === input.connectionId);
-		const moved = await moveRowsTo(db, input.connectionId);
+		const { mode } = await bindingMode(db, input);
+		const moved = await moveRowsTo(db, input.connectionId, mode);
 
 		await db.syncState.bulkDelete(
 			states
@@ -195,6 +260,10 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 			clientId: current?.clientId ?? states[0]?.clientId ?? crypto.randomUUID(),
 		};
 		await db.syncState.put(state);
+		const account = accountKey(input.provider, input.accountId);
+		await (account === undefined
+			? db.prefs.delete(NOTES_ACCOUNT_KEY)
+			: db.prefs.put({ key: NOTES_ACCOUNT_KEY, value: account }));
 
 		// Outermost first, since `createFolder` is not recursive everywhere.
 		await [...moved.folders]
@@ -215,8 +284,9 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 
 /**
  * Stop syncing, keeping everything on this device. The notes go back to
- * `LOCAL_CONNECTION_ID`, cut loose from their files, and the connection's
- * cursor and queue go. The remote is not touched: disconnecting is not deleting.
+ * `LOCAL_CONNECTION_ID` still knowing their files, with their queue, so that
+ * connecting the same account again resumes; the cursor goes. The remote is not
+ * touched: disconnecting is not deleting.
  */
 export const unbindConnection = (
 	db: NotesDatabase,
@@ -224,7 +294,7 @@ export const unbindConnection = (
 ): Promise<boolean> =>
 	inTransaction(db, async () => {
 		if (!(await stillOn(db, precondition))) return false;
-		await moveRowsTo(db, LOCAL_CONNECTION_ID);
+		await moveRowsTo(db, LOCAL_CONNECTION_ID, 'resume');
 		await db.syncState.clear();
 		return true;
 	});

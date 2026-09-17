@@ -35,6 +35,10 @@ const connectionSchema = z.object({
 	id: z.string().min(1),
 	provider: z.enum(PROVIDER_KINDS),
 	displayName: z.string().nullable(),
+	// The provider's id for the account: which notes are its, across the new
+	// connection id every reconnect after a disconnect gets. Absent from a Worker
+	// older than this app, which is the same as not knowing.
+	accountId: z.string().nullable().default(null),
 	createdAt: z.number(),
 	lastUsedAt: z.number().nullable(),
 });

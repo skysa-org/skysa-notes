@@ -1,7 +1,7 @@
 import { createFakeProvider, createSyncEngine, isHidden } from '@skysa/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, NOTES_ACCOUNT_KEY, unbindConnection } from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
@@ -16,6 +16,7 @@ import {
 	listNotes,
 	noteFile,
 	noteFileContents,
+	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
@@ -298,24 +299,277 @@ describe('binding or unbinding on a condition', () => {
 });
 
 describe('unbinding the connection', () => {
-	it('keeps everything on the device, cut loose from the remote', async () => {
+	it('keeps everything on the device, still knowing its files', async () => {
 		const db = freshDatabase();
-		await bindConnection(db, DROPBOX);
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
 		await createFolder(db, { name: 'Work' });
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
 		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.syncState.update(DROPBOX.connectionId, { cursor: 'c1' });
 		const before = noteFile((await getNote(db, note.id))!);
+		const ops = (await db.opQueue.toArray()).map((op) => [op.seq, op.op, op.path]);
 
 		await unbindConnection(db);
 
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
 		const row = await getNote(db, note.id);
-		expect(row).toMatchObject({ connectionId: LOCAL_CONNECTION_ID, dirty: 1 });
-		expect(row?.remoteId).toBeUndefined();
+		expect(row).toMatchObject({
+			connectionId: LOCAL_CONNECTION_ID,
+			remoteId: 'id:1',
+			remoteVersion: 'v1',
+			dirty: 0,
+		});
 		expect(noteFile(row!)).toBe(before);
 		expect(await folderTree(db)).toEqual(['Work']);
 		expect(await db.syncState.count()).toBe(0);
-		expect(await db.opQueue.where('connectionId').equals(DROPBOX.connectionId).count()).toBe(0);
+		// Its queue comes too, as it was: still owed to the same files.
+		expect(
+			(await db.opQueue.toArray()).map((op) => [op.seq, op.op, op.path, op.connectionId])
+		).toEqual(ops.map((op) => [...op, LOCAL_CONNECTION_ID]));
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:1');
+	});
+});
+
+describe('connecting an account', () => {
+	it('remembers which account the notes now belong to', async () => {
+		const db = freshDatabase();
+
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:1');
+
+		// An account the API could not name belongs to nobody the device knows.
+		await bindConnection(db, { connectionId: 'dropbox-2', provider: 'dropbox' });
+		expect(await db.prefs.get(NOTES_ACCOUNT_KEY)).toBeUndefined();
+	});
+
+	it('copies notes from one account into another, cut loose and owed a write', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		const gone = await createNote(db, { title: 'Gone', folderPath: 'Work' });
+		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.notes.update(gone.id, { remoteId: 'id:2', remoteVersion: 'v1', dirty: 0 });
+		await db.folders.update([DROPBOX.connectionId, 'Work'], { remoteId: 'folder:1' });
+		await deleteNote(db, gone.id);
+		await unbindConnection(db);
+
+		await bindConnection(db, {
+			connectionId: 'dropbox-3',
+			provider: 'dropbox',
+			accountId: 'dbid:2',
+		});
+
+		const row = await getNote(db, note.id);
+		expect(row).toMatchObject({ connectionId: 'dropbox-3', dirty: 1 });
+		expect(row?.remoteId).toBeUndefined();
+		expect(await getNote(db, gone.id)).toBeUndefined();
+		expect((await db.folders.get(['dropbox-3', 'Work']))?.remoteId).toBeUndefined();
+		expect(await queued(db)).toEqual([
+			['dropbox-3', 'mkdir', 'Work'],
+			['dropbox-3', 'write', note.path],
+		]);
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:2');
+	});
+});
+
+describe('resuming onto a connection that already has rows in the way', () => {
+	it('copies a note that has to move, since its file is at the old path', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		await unbindConnection(db);
+		await saveNoteBody(db, note.id, '# Plan\n\nedited\n');
+		await db.opQueue.clear();
+		await saveNoteBody(db, note.id, '# Plan\n\nedited again\n');
+		const inTheWay = await createNote(db, {
+			connectionId: 'dropbox-2',
+			title: 'Plan',
+			folderPath: 'Work',
+		});
+		await db.opQueue.where('noteId').equals(inTheWay.id).delete();
+
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		const row = await getNote(db, note.id);
+		expect(row?.path).not.toBe(note.path);
+		expect(row?.remoteId).toBeUndefined();
+		expect(row?.dirty).toBe(1);
+		expect(await queued(db)).toEqual([['dropbox-2', 'write', row?.path]]);
+	});
+
+	it('copies a notebook that has to be spelled another way', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		await createFolder(db, { name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Inner' });
+		await db.folders.update([DROPBOX.connectionId, 'Work'], { remoteId: 'folder:1' });
+		await db.folders.update([DROPBOX.connectionId, 'Work/Inner'], { remoteId: 'folder:2' });
+		await db.opQueue.clear();
+		await unbindConnection(db);
+		await db.folders.put({ connectionId: 'dropbox-2', path: 'work', createdAt: 0 });
+
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		expect(await folderTree(db)).toEqual(['work', 'work/Inner']);
+		expect((await db.folders.get(['dropbox-2', 'work/Inner']))?.remoteId).toBeUndefined();
+		expect(await queued(db)).toEqual([['dropbox-2', 'mkdir', 'work/Inner']]);
+	});
+});
+
+/** Remote files a person would see, by path. */
+const filesOn = (fake: ReturnType<typeof createFakeProvider>) =>
+	fake
+		.snapshot()
+		.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+		.map((entry) => entry.path);
+
+const ACCOUNT = { provider: 'dropbox', accountId: 'dbid:1' } as const;
+
+/**
+ * Two notes synced with an account, then disconnected — which deletes the
+ * server's connection, so connecting the same account again gets a new id.
+ */
+const syncedThenDisconnected = async () => {
+	const db = freshDatabase();
+	await bindConnection(db, { connectionId: 'dropbox-1', ...ACCOUNT });
+	const fake = createFakeProvider();
+	await fake.ensureRoot();
+	const engineFor = (connectionId: string) =>
+		createSyncEngine({ provider: fake, store: createDexieSyncStore(db, { connectionId }) });
+	await createFolder(db, { name: 'Work' });
+	const plan = await createNote(db, { folderPath: 'Work', title: 'Plan', body: '# Plan\n' });
+	await createNote(db, { folderPath: 'Work', title: 'Other', body: '# Other\n' });
+	await engineFor('dropbox-1').sync();
+	await engineFor('dropbox-1').sync();
+	expect(await db.opQueue.count()).toBe(0);
+	expect((await listNotes(db)).filter((note) => note.dirty === 1)).toEqual([]);
+	await unbindConnection(db);
+
+	const entryOf = (path: string) => fake.snapshot().find((entry) => entry.path === path)!;
+	return {
+		db,
+		fake,
+		plan: (await getNote(db, plan.id))!,
+		entryOf,
+		reconnect: async () => {
+			await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+			const calls = fake.callLog().length;
+			const outcome = await engineFor('dropbox-2').sync();
+			// And once more, for the echo of anything it pushed.
+			await engineFor('dropbox-2').sync();
+			return { outcome, calls: fake.callLog().slice(calls) };
+		},
+	};
+};
+
+describe('connecting the same account again after a disconnect', () => {
+	it('picks up where it stopped, sending nothing when nothing changed', async () => {
+		const { db, fake, reconnect } = await syncedThenDisconnected();
+		const files = filesOn(fake);
+
+		const { outcome, calls } = await reconnect();
+
+		expect(outcome.conflicts).toEqual([]);
+		expect(calls.filter((call) => call.op === 'write')).toEqual([]);
+		expect(filesOn(fake)).toEqual(files);
+		expect((await listNotes(db)).filter((note) => note.dirty === 1)).toEqual([]);
+	});
+
+	it('sends what was written here while disconnected, with no conflict copy', async () => {
+		const { db, fake, plan, reconnect } = await syncedThenDisconnected();
+		await saveNoteBody(db, plan.id, '# Plan\n\nwritten while away\n');
+
+		const { outcome } = await reconnect();
+
+		expect(outcome.conflicts).toEqual([]);
+		expect(fake.contentAt(plan.path)).toContain('written while away');
+		expect((await getNote(db, plan.id))?.body).toContain('written while away');
+		expect(await listNotes(db)).toHaveLength(2);
+		expect(filesOn(fake)).toHaveLength(2);
+	});
+
+	it('takes what was written elsewhere while disconnected, with no conflict copy', async () => {
+		const { db, fake, plan, entryOf, reconnect } = await syncedThenDisconnected();
+		await fake.write(plan.path, noteFile(plan).replace('# Plan', '# Plan\n\nfrom elsewhere'), {
+			expectedVersion: entryOf(plan.path).version,
+		});
+
+		const { outcome } = await reconnect();
+
+		expect(outcome.conflicts).toEqual([]);
+		expect((await getNote(db, plan.id))?.body).toContain('from elsewhere');
+		expect(await listNotes(db)).toHaveLength(2);
+		expect(filesOn(fake)).toHaveLength(2);
+	});
+
+	it('follows a rename made elsewhere, rather than keeping both', async () => {
+		const { db, fake, plan, entryOf, reconnect } = await syncedThenDisconnected();
+		await fake.move(entryOf(plan.path), 'Work/Renamed.md');
+
+		await reconnect();
+
+		expect((await getNote(db, plan.id))?.path).toBe('Work/Renamed.md');
+		expect(await listNotes(db)).toHaveLength(2);
+		expect(filesOn(fake)).toHaveLength(2);
+	});
+
+	it('lets a note deleted elsewhere go', async () => {
+		const { db, fake, plan, entryOf, reconnect } = await syncedThenDisconnected();
+		await fake.delete(entryOf(plan.path));
+
+		await reconnect();
+
+		expect((await listNotes(db)).map((note) => note.id)).not.toContain(plan.id);
+		expect(filesOn(fake)).toHaveLength(1);
+	});
+
+	it('deletes the file of a note deleted here while disconnected', async () => {
+		const { db, fake, plan, reconnect } = await syncedThenDisconnected();
+		await deleteNote(db, plan.id);
+
+		await reconnect();
+
+		expect(fake.contentAt(plan.path)).toBeUndefined();
+		expect(await getNote(db, plan.id)).toBeUndefined();
+		expect(filesOn(fake)).toHaveLength(1);
+	});
+
+	it('moves the file of a note renamed here while disconnected', async () => {
+		const { db, fake, plan, reconnect } = await syncedThenDisconnected();
+		const renamed = await renameNote(db, plan.id, 'Renamed');
+
+		const { outcome } = await reconnect();
+
+		expect(outcome.conflicts).toEqual([]);
+		expect(filesOn(fake)).toContain(renamed.path);
+		expect(filesOn(fake)).not.toContain(plan.path);
+		expect(await listNotes(db)).toHaveLength(2);
+	});
+
+	it('sends a note and a notebook that never reached the remote, queued or not', async () => {
+		const { db, fake, reconnect } = await syncedThenDisconnected();
+		await createFolder(db, { name: 'Unqueued' });
+		const made = await createNote(db, { folderPath: 'Work', title: 'Unqueued', body: '# U\n' });
+		// Rows from before local writers queued anything have nothing queued.
+		await db.opQueue.clear();
+
+		await reconnect();
+
+		expect(fake.snapshot().map((entry) => entry.path)).toContain('Unqueued');
+		expect(fake.contentAt(made.path)).toBe(noteFile((await getNote(db, made.id))!));
+	});
+
+	it('sends a note and a notebook made while disconnected', async () => {
+		const { db, fake, reconnect } = await syncedThenDisconnected();
+		await createFolder(db, { name: 'Later' });
+		const made = await createNote(db, { folderPath: 'Later', title: 'New', body: '# New\n' });
+
+		await reconnect();
+
+		expect(fake.contentAt(made.path)).toBe(noteFile((await getNote(db, made.id))!));
+		expect(await db.opQueue.count()).toBe(0);
 	});
 });
 
