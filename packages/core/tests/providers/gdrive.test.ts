@@ -494,7 +494,13 @@ describe('the app folder, from one sync to the next', () => {
 				: undefined;
 
 		await drainChanges(world.provider, cursor);
-		await expect(over(world.doFetch).write('b.md', 'x', {})).rejects.toThrow(/not found/);
+		const failed = await over(world.doFetch)
+			.write('b.md', 'x', {})
+			.catch((error: unknown) => error);
+		// Not `NotFoundError`, which the engine answers by making folders.
+		expect(failed).toBeInstanceOf(Error);
+		expect(failed).not.toBeInstanceOf(NotFoundError);
+		expect(String(failed)).toMatch(/app folder not found/);
 		expect(
 			world.seen.some(
 				(r) => r.method === 'POST' && JSON.stringify(r.body).includes('notesapp')
@@ -543,11 +549,47 @@ describe('the app folder, from one sync to the next', () => {
 		]);
 		const b = world.files.find((file) => file.name === 'b.md');
 		expect(b?.parents).toEqual([world.root.id]);
+		// The folder made meanwhile is emptied; it goes once a fold finds it so.
+		const others = world.files.filter(
+			(file) => file.appProperties?.notesapp === 'root' && file.id !== world.root.id
+		);
 		expect(
-			world.files
-				.filter((file) => file.appProperties?.notesapp === 'root' && !file.trashed)
-				.map((file) => file.id)
-		).toEqual([world.root.id]);
+			others.flatMap((other) =>
+				world.files.filter((file) => file.parents[0] === other.id && !file.trashed)
+			)
+		).toEqual([]);
+	});
+
+	it('leaves a folder it has emptied in place until a fold finds it empty', async () => {
+		// Another device may still be writing into the later folder.
+		const world = driveWorld();
+		world.add({
+			id: 'root-2',
+			name: 'skysa-notes',
+			parent: 'my-drive',
+			mimeType: FOLDER,
+			appProperties: { notesapp: 'root' },
+		});
+		world.add({ id: 'marker-2', name: MARKER_FILE, parent: 'root-2', content: '{}' });
+		world.add({ id: 'b', name: 'b.md', parent: 'root-2', content: 'B' });
+
+		await drainChanges(world.provider);
+		expect(world.find('b')?.parents).toEqual([world.root.id]);
+		expect(world.find('marker-2')?.trashed).toBe(true);
+		expect(world.find('root-2')?.trashed).toBe(false);
+		expect(
+			world.files.filter((file) => file.name === MARKER_FILE && !file.trashed)
+		).toHaveLength(1);
+
+		// A note written late, by a device still on the later folder, is folded in next time.
+		world.add({ id: 'late', name: 'late.md', parent: 'root-2', content: 'L' });
+		const again = await drainChanges(world.provider);
+		expect(world.find('late')?.parents).toEqual([world.root.id]);
+		expect(livePaths(again.entries).sort()).toEqual([MARKER_FILE, 'b.md', 'late.md']);
+		expect(world.find('root-2')?.trashed).toBe(false);
+
+		await drainChanges(world.provider);
+		expect(world.find('root-2')?.trashed).toBe(true);
 	});
 });
 
@@ -772,6 +814,16 @@ describe('changes', () => {
 		const stale = JSON.stringify({ ...JSON.parse(cursor), token: '999999' });
 
 		await expect(world.provider.changes(stale)).rejects.toThrow(CursorResetError);
+	});
+
+	it('reset on a dead token however Drive names it', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		const { cursor } = await drainChanges(provider);
+		// The stub's answer names the token in its reason, and has no location.
+		const stale = JSON.stringify({ ...JSON.parse(cursor), token: 'not-a-token' });
+		await expect(provider.changes(stale)).rejects.toThrow(CursorResetError);
+		expect(stub.requests.at(-1)?.url).toContain('/drive/v3/changes');
 	});
 
 	it('do not reset over a 400 about anything but the page token, or a rate limit', async () => {

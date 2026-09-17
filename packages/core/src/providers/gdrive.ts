@@ -266,15 +266,20 @@ const parseCursor = (cursor: string): DriveCursor => {
 
 /**
  * On a token we stored, Drive's answer to one it cannot use is not documented.
- * A 404 or 410 is read as that, and so is a 400 that names the page token —
- * any other 400 is a mistake in the request, and resetting over it would rescan
- * everything on every sync. On a round from nothing they are failures like any
- * other, since starting again would ask the same thing.
+ * A 404 or 410 is read as that, and so is a 400 that names the page token — in
+ * its `location`, its reason or its message, since which of them Drive fills is
+ * not documented either, and a dead token not recognised is a sync that fails
+ * for ever. Any other 400 is a mistake in the request, and resetting over it
+ * would rescan everything on every sync. On a round from nothing they are
+ * failures like any other, since starting again would ask the same thing.
  */
+const namesPageToken = (failure: DriveFailure): boolean =>
+	failure.locations.includes('pageToken') ||
+	[...failure.reasons, failure.message].some((text) => /page ?token/i.test(text));
+
 const isDeadToken = (failure: DriveFailure, stored: boolean): boolean =>
 	stored &&
-	([404, 410].includes(failure.status) ||
-		(failure.status === 400 && failure.locations.includes('pageToken')));
+	([404, 410].includes(failure.status) || (failure.status === 400 && namesPageToken(failure)));
 
 /** Placed items sharing a folder and a name. */
 interface Clash {
@@ -465,8 +470,8 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * app folder, made at the top of My Drive when there is none (the first
 	 * connect, or the user put it in the trash).
 	 *
-	 * Any other tagged folder is folded into it — what is inside moved across,
-	 * and the empty folder put in the trash. There can be more than one: two
+	 * Any other tagged folder is folded into it: what is inside moved across,
+	 * and a folder found empty put in the trash (`foldInto`). There can be more than one: two
 	 * devices connecting at once each make one, and a folder the user restores
 	 * from the trash comes back beside the one made while it was gone, holding
 	 * notes nobody would otherwise read again. Names that meet in the move are
@@ -503,17 +508,36 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		return id;
 	};
 
+	/**
+	 * Only a folder found empty goes to the trash. One with anything in it is
+	 * emptied and left, still tagged: a device whose last pull was against it
+	 * may be writing into it right now, and a note landing between the listing
+	 * and a trash would go with the folder. That device's next pull resets, its
+	 * round from nothing folds the folder again — late writes included — and a
+	 * fold that finds it empty trashes it.
+	 *
+	 * The app's marker is not moved where the folder it would join has one: two
+	 * would be a duplicate, renamed to one more hidden file on every fold.
+	 */
 	const foldInto = async (rootIdNow: string, otherId: string): Promise<void> => {
 		const children = await childrenOf(otherId);
+		if (children.length === 0) {
+			await trash(otherId);
+			return;
+		}
+		const hasMarker = (await named(rootIdNow, MARKER_FILE)).length > 0;
 		await children.reduce(async (done, child) => {
 			await done;
+			if (hasMarker && child.name === MARKER_FILE && !isFolder(child)) {
+				await trash(child.id ?? '');
+				return;
+			}
 			await call<DriveFile>(
 				'PATCH',
 				fileUrl(child.id ?? '', { addParents: rootIdNow, removeParents: otherId }),
 				json({})
 			);
 		}, Promise.resolve());
-		await trash(otherId);
 	};
 
 	/**
