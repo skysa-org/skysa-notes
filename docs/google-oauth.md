@@ -17,7 +17,7 @@ Under `drive.file` the app **cannot see files it did not create**. Notes put int
 
 ## 1. Project and API
 
-1. Create a project in the [Google Cloud console](https://console.cloud.google.com/), or pick one.
+1. Create a **new project for this deployment** in the [Google Cloud console](https://console.cloud.google.com/), not one shared with other apps. Google revokes per project: "Revocation removes all OAuth 2.0 scopes previously granted to a project, invalidating any issued access or refresh tokens for all clients registered under that project" ([Revoking a token](https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke)). Every time a user disconnects here, the app revokes, and that would also sign them out of any other app on the same project.
 2. Enable the **Google Drive API** (APIs & Services → Library).
 
 ## 2. Consent screen (Google Auth Platform)
@@ -40,25 +40,30 @@ Under `drive.file` the app **cannot see files it did not create**. Notes put int
 
 ## Testing: the trap
 
-A new External app starts with the publishing status **Testing**. That status is fine for trying it yourself and not for anyone else:
+A new External app starts with the publishing status **Testing**. That status is fine for trying it yourself and not for anyone else ([Manage app audience](https://support.google.com/cloud/answer/15549945)):
 
-- **Only listed test users can connect**, and there can be at most 100 of them ([Manage app audience](https://support.google.com/cloud/answer/15549945)).
+- **Only listed test users can connect**, and there can be at most 100 of them. A user added counts against the 100 for good: removing them does not give the place back.
+- Test users see a warning that the app is not verified before the consent screen.
 - **Every refresh token expires after 7 days**, because the app asks for more than name, email and profile ([OAuth 2.0 overview, refresh token expiration](https://developers.google.com/identity/protocols/oauth2#expiration)). A week after connecting, `/api/token` gets `invalid_grant` from Google, and the app asks the user to connect again. Nothing is lost: notes stay on the device and in Drive. But everyone reconnects weekly until you publish.
 
 ## Going to production
 
-On the **Audience** page, **Publish app**. With only non-sensitive scopes, Google's [verification requirements](https://support.google.com/cloud/answer/13463073) come down to **brand verification**. That lighter check covers the app name, logo, home page, privacy policy and authorised domains, and is what lets the consent screen show your app's name and logo. Expect Google to ask you to prove you own the domains.
+On the **Audience** page, **Publish app**. The app asks only for non-sensitive scopes, so Google does not require verification before anyone with a Google account can connect ([Verification requirements](https://support.google.com/cloud/answer/13463073)). The warnings and the 100-user cap that go with unverified apps are for sensitive and restricted scopes, which this app does not ask for.
 
-Until verification completes, Google may show an "unverified app" screen, and a user cap may apply ([When verification is not needed](https://support.google.com/cloud/answer/13464323)). Once published, refresh tokens no longer expire after a week. They still stop working when:
+**Brand verification** is optional. Google asks for it only if the consent screen is to show your app's name and logo. It checks the branding details (name, logo, home page, privacy policy, authorised domains) and asks you to prove you own the domains.
+
+Once published, refresh tokens no longer expire after a week. They still stop working when:
 - the user revokes access;
 - the token goes unused for six months;
 - the account holds more than 100 live refresh tokens for this client, in which case the oldest goes;
-- a Workspace admin restricts Drive for their users.
+- the user granted time-based access and the time is up.
 
-Each of these ends up as the same "connect again".
+Each of these reaches the app as `invalid_grant`, and the user is asked to connect again.
+
+There is one exception. A Workspace admin who marks Drive as restricted for their users makes Google answer `admin_policy_enforced`. The app treats that as the provider being unavailable, not as a reason to reconnect, because reconnecting would be refused the same way: sync stops with an error until the admin changes the policy. The Worker log shows the code.
 
 ## What users see
 
-- **Connect:** Google's account chooser, then the consent screen. Google lets the user untick individual permissions. If they untick Drive, the grant is given back to Google and the app says access to their files was not granted and to connect again (`connect=partial`).
-- **Disconnect:** the app revokes the grant at Google, so it disappears from the user's [third-party access](https://myaccount.google.com/connections) page as well.
+- **Connect:** Google's account chooser, then the consent screen. Google lets the user untick individual permissions. If they untick Drive, nothing is stored and the app says access to their files was not granted and to connect again (`connect=partial`). Nothing is revoked either, since a revoke would also end the same user's working connection on another device. What they did grant (name and email) stays listed on their Google account until they remove it.
+- **Disconnect:** the app revokes the grant at Google, so it disappears from the user's [third-party access](https://myaccount.google.com/connections) page as well. The revoke covers the whole project, so the same account connected on another device is disconnected there too, at its next token refresh.
 - **Reconnect weekly** while the app is in Testing (above).

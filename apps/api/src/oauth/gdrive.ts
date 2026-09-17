@@ -3,6 +3,7 @@ import {
 	type FetchLike,
 	type OAuthCredentials,
 	OAuthError,
+	ScopeNotGrantedError,
 	type StorageOAuth,
 	type TokenSet,
 } from './types.js';
@@ -107,8 +108,11 @@ const postForm = async (
 };
 
 /**
- * Withdraws the whole grant: revoking an access token revokes the refresh token
- * that goes with it. Best effort, like Dropbox's.
+ * Withdraws the grant — and not only this connection's: "Revocation removes all
+ * OAuth 2.0 scopes previously granted to a project, invalidating any issued
+ * access or refresh tokens for all clients registered under that project."
+ * That is why a deployment wants a Cloud project of its own
+ * (docs/google-oauth.md). Best effort, like Dropbox's.
  */
 const revokeToken = async (doFetch: FetchLike, accessToken: string): Promise<boolean> => {
 	const response = await doFetch(REVOKE, {
@@ -155,11 +159,11 @@ export const gdriveOAuth: StorageOAuth = {
 
 		// Google's consent screen lets the user untick each scope, and the grant
 		// still succeeds with what is left. Without Drive the connection could do
-		// nothing, so it is refused — and what was granted is given back, rather
-		// than left on the user's account for an app that will never use it.
+		// nothing, so it is refused. What was granted is *not* revoked: Google
+		// revokes every scope granted to the whole Cloud project, which would
+		// also end this user's working connection on another device.
 		if (!(scope ?? '').split(' ').includes(DRIVE_SCOPE)) {
-			await revokeToken(doFetch, tokens.accessToken);
-			throw new OAuthError('google', 'scope_not_granted');
+			throw new ScopeNotGrantedError('google', DRIVE_SCOPE);
 		}
 
 		const claims = claimsOf(idToken, credentials.clientId);

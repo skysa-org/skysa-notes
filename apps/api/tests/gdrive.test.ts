@@ -20,7 +20,8 @@ import {
  * Connecting Google Drive: the same routes again, over Google's OAuth. What
  * these hold is what Google does differently — offline access has to be asked
  * for, the user can untick the Drive scope and the grant still succeeds, a
- * refresh keeps the refresh token, and there is a revoke to call.
+ * refresh keeps the refresh token, and there is a revoke to call — one that
+ * reaches every grant to the Cloud project, so it is called only on disconnect.
  */
 
 const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
@@ -143,7 +144,7 @@ describe('callback', () => {
 		expect(app.stub.calls).toHaveLength(1);
 	});
 
-	it('sends the user back to try again, and gives the grant back, when Drive was unticked', async () => {
+	it('sends the user back to try again when Drive was unticked, revoking nothing', async () => {
 		const log = workerLog();
 		const app = buildApp({
 			config: allProvidersConfig(),
@@ -159,11 +160,57 @@ describe('callback', () => {
 		expect(callback.headers.get('location')).toBe('/?connect=partial');
 		expect(jar.get(cookieNames.session)).toBeUndefined();
 		expect(await rows(app.db)).toHaveLength(0);
-		const revoke = app.stub.calls.find((call) => call.url.endsWith('/revoke'));
-		expect(revoke?.url).toBe('https://oauth2.googleapis.com/revoke');
-		expect(revoke?.form).toEqual({ token: 'google-access-1' });
+		expect(app.stub.calls.some((call) => call.url.endsWith('/revoke'))).toBe(false);
 		// The user's choice, not a fault for the operator.
 		expect(log).not.toHaveBeenCalled();
+	});
+
+	it('leaves a working connection working when a reconnect comes back without Drive', async () => {
+		const scopes = { now: `openid ${GOOGLE_DRIVE_SCOPE}` };
+		const app = buildApp({
+			config: allProvidersConfig(),
+			script: {
+				google: (form) =>
+					form.grant_type === 'refresh_token'
+						? googleTokenResponse({
+								access_token: 'google-access-2',
+								refresh_token: undefined,
+							})
+						: googleTokenResponse({ scope: scopes.now }),
+			},
+		});
+		const { jar } = await app.connect(createJar(), undefined, 'gdrive');
+		scopes.now = 'openid';
+
+		const { callback } = await app.connect(jar, undefined, 'gdrive');
+
+		expect(callback.headers.get('location')).toBe('/?connect=partial');
+		const [row] = await rows(app.db);
+		expect((await tokenFor(app, row?.id ?? '', jar)).status).toBe(200);
+		expect(app.stub.calls.some((call) => call.url.endsWith('/revoke'))).toBe(false);
+	});
+
+	it('takes a token response with no scope at all as Drive not granted', async () => {
+		const app = buildApp({
+			config: allProvidersConfig(),
+			script: { google: () => googleTokenResponse({ scope: undefined }) },
+		});
+		const { callback } = await app.connect(createJar(), undefined, 'gdrive');
+		expect(callback.headers.get('location')).toBe('/?connect=partial');
+	});
+
+	it('is not fooled by another provider sending the same word as an error', async () => {
+		const log = workerLog();
+		const app = buildApp({
+			config: allProvidersConfig(),
+			script: {
+				exchange: () =>
+					new Response(JSON.stringify({ error: 'scope_not_granted' }), { status: 400 }),
+			},
+		});
+		const { callback } = await app.connect(createJar(), undefined, 'dropbox');
+		expect(callback.headers.get('location')).toBe('/?connect=failed');
+		expect(log).toHaveBeenCalled();
 	});
 
 	it('does not take a scope that merely contains the Drive one', async () => {

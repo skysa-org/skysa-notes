@@ -42,6 +42,23 @@ export class OAuthError extends Error {
 }
 
 /**
+ * The user completed the consent screen but left out a scope the connection
+ * cannot work without — Google lets them untick each one. Not a failure of the
+ * provider or the operator, and not a code a token endpoint can send, so it is
+ * its own class rather than an `OAuthError` code any provider could match.
+ */
+export class ScopeNotGrantedError extends Error {
+	override readonly name = 'ScopeNotGrantedError';
+
+	constructor(
+		readonly provider: string,
+		readonly scope: string
+	) {
+		super(`${provider} did not grant ${scope}`);
+	}
+}
+
+/**
  * The grant itself is refused — revoked, expired, a password changed, a policy
  * wanting the user present — so only connecting again can help. Anything else
  * (`invalid_client` once a client secret expires, `temporarily_unavailable`, an

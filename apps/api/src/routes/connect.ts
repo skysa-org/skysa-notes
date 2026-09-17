@@ -7,7 +7,7 @@ import { type Database, schema } from '../db/client.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
-import { type FetchLike, OAuthError, type TokenSet } from '../oauth/types.js';
+import { type FetchLike, ScopeNotGrantedError, type TokenSet } from '../oauth/types.js';
 import {
 	clearFlowState,
 	currentUserId,
@@ -160,7 +160,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			})
 			.then((tokens) => ({ tokens }))
 			.catch((error: unknown) => {
-				if (error instanceof OAuthError && error.code === 'scope_not_granted') {
+				if (error instanceof ScopeNotGrantedError) {
 					return { outcome: 'partial' as const };
 				}
 				logFailure(`${provider} code exchange failed`, error);
