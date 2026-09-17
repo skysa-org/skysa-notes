@@ -1,6 +1,6 @@
 import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
 	api,
@@ -20,22 +20,31 @@ import {
 	PROVIDER_LABELS,
 	reconcileAccount,
 } from '../sync/account.js';
+import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
+import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
 
 /**
  * Where the storage account is connected and disconnected: one account, replace
  * or disconnect only (docs/PLAN.md, Phase 2).
  *
  * What the device is bound to is read from the store, so the panel is right
- * offline and the moment a bind lands. What the server says is asked once, on
- * open — which includes the return from the provider's consent page, since
- * that is a full navigation back into the app.
+ * offline and the moment a bind lands. What the server says is asked on open —
+ * which includes the return from the provider's consent page, since that is a
+ * full navigation back into the app — and again whenever another tab binds the
+ * device to a connection this panel has not been told about.
+ *
+ * How syncing is going comes from the scheduler (`sync/scheduler.ts`), which
+ * runs on its own; the panel only reports it and offers "Sync now".
  */
 
 type Client = Pick<ApiClient, 'config' | 'connections' | 'disconnect' | 'connectUrl'>;
 
+type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow'>;
+
 export interface AccountPanelProps {
 	client?: Client;
 	database?: NotesDatabase;
+	sync?: Sync;
 }
 
 /** A server answer: still being asked, not reachable, or what it said. */
@@ -60,6 +69,54 @@ const failureMessage = (error: unknown): string =>
 	error instanceof ApiError
 		? 'The server could not disconnect the account. Try again.'
 		: 'The server cannot be reached, so the account is still connected.';
+
+/** A time today as a time, and any other as a date. */
+const when = (at: number): string => {
+	const date = new Date(at);
+	return date.toDateString() === new Date().toDateString()
+		? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+		: date.toLocaleDateString();
+};
+
+/**
+ * How syncing is going, in words, or nothing to say. A refusal that connecting
+ * again would fix is not said here: the panel offers to connect again instead.
+ */
+const statusMessage = (status: SchedulerStatus, label: string): string | null => {
+	switch (status.phase) {
+		case 'local':
+			return null;
+		case 'syncing':
+			return 'Syncing…';
+		case 'idle':
+			return status.lastSyncAt === undefined ? 'Synced' : `Synced ${when(status.lastSyncAt)}`;
+		case 'offline':
+			return 'Offline. Changes are kept on this device and sync when the connection is back.';
+		case 'retrying':
+			return `Could not reach ${label}. Trying again shortly.`;
+		case 'attention':
+			return attentionMessage(status, label);
+	}
+};
+
+const attentionMessage = (status: SchedulerStatus, label: string): string | null => {
+	if (needsReconnect(status)) return null;
+	if (status.refusal === 'not_entitled') return 'This account cannot sync on this server.';
+	if (status.refusal === 'not_found') return `The server no longer has this ${label} connection.`;
+	return `Some changes could not be sent to ${label}. They will be tried again (${status.error ?? 'unknown error'}).`;
+};
+
+/** A problem that connecting the account again is the answer to. */
+const needsReconnect = (status: SchedulerStatus): boolean =>
+	status.phase === 'attention' &&
+	(status.refusal === 'sign_in_required' ||
+		status.refusal === 'reauthorize_required' ||
+		(status.refusal === undefined && status.error === 'authorization required'));
+
+const conflictMessage = (count: number): string =>
+	count === 1
+		? 'A note was edited here and elsewhere at once. Both versions are kept; the copy has "conflict" in its name.'
+		: `${String(count)} notes were edited here and elsewhere at once. Both versions of each are kept; the copies have "conflict" in their names.`;
 
 interface LocalProps {
 	client: Client;
@@ -96,16 +153,85 @@ const NotConnected = ({ client, config, returnTo }: LocalProps) => {
 	);
 };
 
+interface SyncStateProps {
+	client: Client;
+	sync: Sync;
+	bound: SyncStateRecord;
+	label: string;
+	/** The server said there is no session. */
+	signedOut: boolean;
+	/** This server lets the user connect storage from here. */
+	reconnectable: boolean;
+	returnTo: string;
+}
+
+/**
+ * How syncing is going, and what to do about it. Not a live region: it changes
+ * on every sync, every minute, and a screen reader announcing each one would
+ * be noise; the panel is where the user looks.
+ */
+const SyncState = ({
+	client,
+	sync,
+	bound,
+	label,
+	signedOut,
+	reconnectable,
+	returnTo,
+}: SyncStateProps) => {
+	const status = useSyncStatus(sync);
+	const message = statusMessage(status, label);
+	const reconnect = (signedOut || needsReconnect(status)) && reconnectable;
+
+	return (
+		<>
+			{reconnect && bound.provider !== undefined && (
+				<p className="muted">
+					{status.refusal === 'reauthorize_required' ||
+					status.error === 'authorization required'
+						? `${label} needs to be connected again.`
+						: 'Your session has ended.'}{' '}
+					<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
+				</p>
+			)}
+			{message !== null && <p className="muted">{message}</p>}
+			{status.conflicts.length > 0 && (
+				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
+			)}
+			{status.phase !== 'local' && (
+				<button
+					type="button"
+					disabled={status.phase === 'syncing'}
+					onClick={() => {
+						void sync.syncNow();
+					}}
+				>
+					Sync now
+				</button>
+			)}
+		</>
+	);
+};
+
 interface ConnectedProps {
 	client: Client;
 	database: NotesDatabase;
+	sync: Sync;
 	bound: SyncStateRecord;
 	config: Asked<InstanceConfig>;
 	account: Asked<AccountState>;
 	returnTo: string;
 }
 
-const Connected = ({ client, database, bound, config, account, returnTo }: ConnectedProps) => {
+const Connected = ({
+	client,
+	database,
+	sync,
+	bound,
+	config,
+	account,
+	returnTo,
+}: ConnectedProps) => {
 	const [confirming, setConfirming] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
@@ -169,14 +295,15 @@ const Connected = ({ client, database, bound, config, account, returnTo }: Conne
 				Syncing with {label}
 				{displayName !== null && <span className="muted"> · {displayName}</span>}
 			</p>
-			{state?.kind === 'signed-out' &&
-				bound.provider !== undefined &&
-				answer(config)?.authMode === 'storage-first' && (
-					<p className="muted">
-						Your session has ended.{' '}
-						<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
-					</p>
-				)}
+			<SyncState
+				client={client}
+				sync={sync}
+				bound={bound}
+				label={label}
+				signedOut={state?.kind === 'signed-out'}
+				reconnectable={answer(config)?.authMode === 'storage-first'}
+				returnTo={returnTo}
+			/>
 			{problem !== null && (
 				<p className="muted" role="alert">
 					{problem}
@@ -313,7 +440,11 @@ const OtherAccount = ({ client, database, connection, onSettled }: OtherAccountP
 	);
 };
 
-export const AccountPanel = ({ client = api, database = defaultDb }: AccountPanelProps) => {
+export const AccountPanel = ({
+	client = api,
+	database = defaultDb,
+	sync = syncScheduler,
+}: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
 	// `useLiveQuery` for "not read yet". Unwrapped, the two look the same.
@@ -324,6 +455,21 @@ export const AccountPanel = ({ client = api, database = defaultDb }: AccountPane
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
 
+	const asking = useRef(false);
+	const ask = useCallback(() => {
+		asking.current = true;
+		void reconcileAccount(database, client)
+			.then((value) => {
+				setAccount({ kind: 'answered', value });
+			})
+			.catch(() => {
+				setAccount({ kind: 'unreachable' });
+			})
+			.finally(() => {
+				asking.current = false;
+			});
+	}, [client, database]);
+
 	useEffect(() => {
 		void client
 			.config()
@@ -333,14 +479,30 @@ export const AccountPanel = ({ client = api, database = defaultDb }: AccountPane
 			.catch(() => {
 				setConfig({ kind: 'unreachable' });
 			});
-		void reconcileAccount(database, client)
-			.then((value) => {
-				setAccount({ kind: 'answered', value });
-			})
-			.catch(() => {
-				setAccount({ kind: 'unreachable' });
-			});
-	}, [client, database]);
+		ask();
+	}, [client, ask]);
+
+	// Another tab connecting an account binds this device too, and what this
+	// panel was told on open — no account, or another one — is no longer so.
+	// Asked again only when the binding changes, never on an answer, so a
+	// server that cannot be reached is not asked in a loop; and not about a
+	// binding the answer in hand already names, which is what the panel's own
+	// asking produces.
+	const boundId = bound === undefined ? null : (bound.state?.connectionId ?? '');
+	const answered = answer(account);
+	const named =
+		answered?.kind === 'connected' || answered?.kind === 'other-account'
+			? answered.connection.id
+			: undefined;
+	const seenBound = useRef<string | null>(null);
+	useEffect(() => {
+		if (boundId === null) return;
+		const seen = seenBound.current;
+		seenBound.current = boundId;
+		if (seen === null || seen === boundId || boundId === '') return;
+		if (asking.current || named === boundId) return;
+		ask();
+	}, [boundId, named, ask]);
 
 	if (bound === undefined) return null;
 	const returnTo = returnPath(href);
@@ -366,6 +528,7 @@ export const AccountPanel = ({ client = api, database = defaultDb }: AccountPane
 		<Connected
 			client={client}
 			database={database}
+			sync={sync}
 			bound={bound.state}
 			config={config}
 			account={account}

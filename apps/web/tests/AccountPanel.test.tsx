@@ -4,7 +4,7 @@ import {
 	createRouter,
 	RouterProvider,
 } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,6 +23,7 @@ import {
 	type NotesDatabase,
 } from '../src/store/db.js';
 import { createNote, getNote } from '../src/store/notes.js';
+import { type SchedulerStatus } from '../src/sync/scheduler.js';
 
 const opened: NotesDatabase[] = [];
 
@@ -67,11 +68,45 @@ const dropbox = {
 	lastUsedAt: null,
 };
 
+/** A scheduler that says what the test tells it to. */
+const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
+	const listeners = new Set<(status: SchedulerStatus) => void>();
+	const box = new Map<'status', SchedulerStatus>([
+		['status', { phase: 'idle', conflicts: [], ...initial }],
+	]);
+	return {
+		status: () => box.get('status') ?? { phase: 'local', conflicts: [] },
+		subscribe: (listener: (status: SchedulerStatus) => void) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+		syncNow: vi.fn(() => Promise.resolve()),
+		say: (next: Partial<SchedulerStatus>) => {
+			const status: SchedulerStatus = { phase: 'idle', conflicts: [], ...next };
+			box.set('status', status);
+			act(() => {
+				listeners.forEach((listener) => {
+					listener(status);
+				});
+			});
+		},
+	};
+};
+
+type FakeSync = ReturnType<typeof fakeSync>;
+
 /** The panel at `url`, inside a router, since it reads where it is. */
-const renderPanel = (client: Client, database: NotesDatabase, url = '/') => {
+const renderPanel = (
+	client: Client,
+	database: NotesDatabase,
+	url = '/',
+	sync: FakeSync = fakeSync({ phase: 'local' })
+) => {
 	const router = createRouter({
 		routeTree: createRootRoute({
-			component: () => <AccountPanel client={client} database={database} />,
+			component: () => <AccountPanel client={client} database={database} sync={sync} />,
 		}),
 		history: createMemoryHistory({ initialEntries: [url] }),
 	});
@@ -386,6 +421,206 @@ describe('AccountPanel, with an account connected', () => {
 		expect(link.getAttribute('href')).toBe(
 			'/api/auth/connect/dropbox/start?returnTo=%2F%3Ffolder%3DWork'
 		);
+	});
+});
+
+describe('AccountPanel, reporting how syncing is going', () => {
+	const connected = async (sync: FakeSync, client: Client = clientWith()) => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(
+			{
+				...client,
+				connections: () => Promise.resolve({ ok: true, value: [dropbox] }),
+			},
+			db,
+			'/',
+			sync
+		);
+		await screen.findByText(/Syncing with Dropbox/);
+		return db;
+	};
+
+	it('says when it last synced, and syncs when asked', async () => {
+		const user = userEvent.setup();
+		const at = new Date();
+		at.setHours(9, 5, 0, 0);
+		const sync = fakeSync({ phase: 'idle', lastSyncAt: at.getTime() });
+		await connected(sync);
+
+		const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+		expect(screen.getByText(`Synced ${time}`)).toBeTruthy();
+
+		await user.click(await enabled('Sync now'));
+		expect(sync.syncNow).toHaveBeenCalledTimes(1);
+	});
+
+	it('gives the date of a sync that was not today', async () => {
+		const at = new Date('2020-02-03T10:00:00');
+		await connected(fakeSync({ phase: 'idle', lastSyncAt: at.getTime() }));
+
+		expect(screen.getByText(`Synced ${at.toLocaleDateString()}`)).toBeTruthy();
+	});
+
+	it('cannot be asked to sync while it is syncing', async () => {
+		const sync = fakeSync({ phase: 'syncing' });
+		await connected(sync);
+
+		expect(screen.getByText('Syncing…')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Sync now' }).hasAttribute('disabled')).toBe(
+			true
+		);
+
+		sync.say({ phase: 'idle' });
+		expect(await screen.findByText('Synced')).toBeTruthy();
+		await enabled('Sync now');
+	});
+
+	it('says nothing, and offers nothing, before the scheduler has picked the connection up', async () => {
+		await connected(fakeSync({ phase: 'local' }));
+
+		expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+		// "Syncing with Dropbox", and nothing about how.
+		expect(screen.getByRole('region', { name: 'Storage' }).querySelectorAll('p')).toHaveLength(
+			1
+		);
+	});
+
+	it('says when it is offline, and when it is trying again', async () => {
+		const sync = fakeSync({ phase: 'offline' });
+		await connected(sync);
+		expect(screen.getByText(/^Offline\. Changes are kept on this device/)).toBeTruthy();
+
+		sync.say({ phase: 'retrying', error: '503' });
+		expect(
+			await screen.findByText('Could not reach Dropbox. Trying again shortly.')
+		).toBeTruthy();
+	});
+
+	it('offers to connect again when the account needs it', async () => {
+		const sync = fakeSync({ phase: 'attention', refusal: 'reauthorize_required' });
+		await connected(sync);
+
+		expect(await screen.findByText(/Dropbox needs to be connected again\./)).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Connect again' })).toBeTruthy();
+		// Said once, as what to do, not again as a failure.
+		expect(screen.queryByText(/could not be sent/)).toBeNull();
+
+		// And when a fresh token was refused as well.
+		sync.say({ phase: 'attention', error: 'authorization required' });
+		expect(await screen.findByText(/Dropbox needs to be connected again\./)).toBeTruthy();
+		expect(screen.queryByText(/could not be sent/)).toBeNull();
+
+		sync.say({ phase: 'attention', refusal: 'sign_in_required' });
+		expect(await screen.findByText(/Your session has ended\./)).toBeTruthy();
+		expect(screen.getAllByRole('link', { name: 'Connect again' })).toHaveLength(1);
+	});
+
+	it('does not offer to connect again where the server does not let it', async () => {
+		await connected(
+			fakeSync({ phase: 'attention', refusal: 'reauthorize_required' }),
+			clientWith({
+				config: () =>
+					Promise.resolve({ authMode: 'account-first', providers: ['dropbox'] }),
+			})
+		);
+		await enabled('Disconnect…');
+
+		expect(screen.queryByRole('link', { name: 'Connect again' })).toBeNull();
+	});
+
+	it.each([
+		['not_entitled', 'This account cannot sync on this server.'],
+		['not_found', 'The server no longer has this Dropbox connection.'],
+	] as const)('explains a %s refusal', async (refusal, text) => {
+		await connected(fakeSync({ phase: 'attention', refusal }));
+
+		expect(screen.getByText(text)).toBeTruthy();
+	});
+
+	it('says when changes could not be sent', async () => {
+		await connected(fakeSync({ phase: 'attention', error: 'write a.md failed 8 times' }));
+
+		expect(
+			screen.getByText(
+				'Some changes could not be sent to Dropbox. They will be tried again (write a.md failed 8 times).'
+			)
+		).toBeTruthy();
+	});
+
+	it('says when a note was edited in two places at once', async () => {
+		const sync = fakeSync({ phase: 'idle', conflicts: ['a (conflict 2026-09-16T10-00).md'] });
+		await connected(sync);
+		expect(screen.getByText(/^A note was edited here and elsewhere at once\./)).toBeTruthy();
+
+		sync.say({ phase: 'idle', conflicts: ['a', 'b'] });
+		expect(await screen.findByText(/^2 notes were edited here and elsewhere/)).toBeTruthy();
+	});
+});
+
+describe('AccountPanel, when another tab changes the connection', () => {
+	it('asks the server again, and names the account now connected', async () => {
+		const db = freshDatabase();
+		const connections = vi
+			.fn<Client['connections']>()
+			.mockResolvedValueOnce({ ok: true, value: [] })
+			.mockResolvedValue({ ok: true, value: [dropbox] });
+		renderPanel(clientWith({ connections }), db);
+		expect(await screen.findByText(/Notes are kept on this device only/)).toBeTruthy();
+
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+
+		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
+		expect(connections).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not ask again about a binding its own answer made', async () => {
+		const db = freshDatabase();
+		const connections = vi.fn<Client['connections']>(() =>
+			Promise.resolve({ ok: true, value: [dropbox] })
+		);
+		renderPanel(clientWith({ connections }), db);
+		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(connections).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not keep asking a server it cannot reach', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		const connections = vi.fn<Client['connections']>(() =>
+			Promise.reject(new TypeError('offline'))
+		);
+		renderPanel(clientWith({ connections }), db);
+		await screen.findByText(/Syncing with Dropbox/);
+		await waitFor(() => {
+			expect(connections).toHaveBeenCalledTimes(1);
+		});
+
+		await unbindConnection(db);
+		await bindConnection(db, { connectionId: 'c2', provider: 'dropbox' });
+		await waitFor(() => {
+			expect(connections).toHaveBeenCalledTimes(2);
+		});
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		expect(connections).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not ask when another tab disconnects', async () => {
+		const db = freshDatabase();
+		const connections = vi.fn<Client['connections']>(() =>
+			Promise.resolve({ ok: true, value: [dropbox] })
+		);
+		renderPanel(clientWith({ connections }), db);
+		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
+
+		await unbindConnection(db);
+
+		expect(await screen.findByText(/Notes are kept on this device only/)).toBeTruthy();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(connections).toHaveBeenCalledTimes(1);
 	});
 });
 
