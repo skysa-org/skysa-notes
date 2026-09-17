@@ -139,7 +139,12 @@ describe('binding a connection', () => {
 		const db = freshDatabase();
 		await bindConnection(db, DROPBOX);
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
-		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.notes.update(note.id, {
+			remoteId: 'id:1',
+			remoteVersion: 'v1',
+			syncedHash: 'h1',
+			dirty: 0,
+		});
 		await db.syncState.update(DROPBOX.connectionId, { cursor: 'old-account-cursor' });
 
 		await bindConnection(db, { connectionId: 'dropbox-2', provider: 'dropbox' });
@@ -148,6 +153,7 @@ describe('binding a connection', () => {
 		expect(row).toMatchObject({ connectionId: 'dropbox-2', dirty: 1 });
 		expect(row?.remoteId).toBeUndefined();
 		expect(row?.remoteVersion).toBeUndefined();
+		expect(row?.syncedHash).toBeUndefined();
 		const states = await db.syncState.toArray();
 		expect(states.map((state) => state.connectionId)).toEqual(['dropbox-2']);
 		expect(states[0]?.cursor).toBeUndefined();

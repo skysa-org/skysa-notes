@@ -25,6 +25,7 @@ export interface StoreHarness {
 		content: string;
 		remoteId?: string;
 		remoteVersion?: string;
+		syncedHash?: string;
 		dirty?: boolean;
 	}) => void | Promise<void>;
 	seedFolder: (folder: { path: string; remoteId?: string }) => void | Promise<void>;
@@ -52,6 +53,179 @@ export const describeSyncStoreContract = (
 ): void => {
 	describe(`SyncStore contract: ${name}`, () => {
 		const harness = create;
+
+		describe('the bytes a note last synced', () => {
+			// What tells a remote rename from a remote edit on a provider whose
+			// version changes on a move. A store that drops it is correct in every
+			// other way and hands the user a conflict copy for every such rename.
+			const hashOf = async (store: SyncStore, id: string) =>
+				(await store.noteById(id))?.syncedHash;
+
+			it('reads back what was seeded', async () => {
+				const { store, seed } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remoteId: 'r1',
+					syncedHash: 'h1',
+				});
+				expect(await hashOf(store, 'n1')).toBe('h1');
+			});
+
+			it('records it with a note a pull brings in', async () => {
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'n1',
+							path: 'a.md',
+							content: 'x\n',
+							remote: remote('a.md'),
+							syncedHash: 'h1',
+						},
+					],
+				});
+				expect(await hashOf(store, 'n1')).toBe('h1');
+			});
+
+			it('replaces it when a version or move names one, and keeps it when not', async () => {
+				const { store, seed } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remoteId: 'r1',
+					syncedHash: 'h1',
+					dirty: true,
+				});
+				await seed({
+					id: 'n2',
+					path: 'b.md',
+					content: 'y\n',
+					remoteId: 'r2',
+					syncedHash: 'h2',
+				});
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'adopt-version', id: 'n1', remote: remote('a.md', 'r1', 'v2') },
+						{
+							kind: 'move-note',
+							id: 'n2',
+							path: 'c.md',
+							remote: remote('c.md', 'r2', 'v2'),
+						},
+					],
+				});
+				expect(await hashOf(store, 'n1')).toBe('h1');
+				expect(await hashOf(store, 'n2')).toBe('h2');
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'adopt-version',
+							id: 'n1',
+							remote: remote('a.md', 'r1', 'v3'),
+							syncedHash: 'h3',
+						},
+						{
+							kind: 'move-note',
+							id: 'n2',
+							path: 'd.md',
+							remote: remote('d.md', 'r2', 'v3'),
+							syncedHash: 'h4',
+						},
+					],
+				});
+				expect(await hashOf(store, 'n1')).toBe('h3');
+				expect(await hashOf(store, 'n2')).toBe('h4');
+				// And an edit waiting to go out is still waiting.
+				expect((await store.noteById('n1'))?.dirty).toBe(true);
+			});
+
+			it('takes the remote\u2019s with the remote\u2019s bytes in a conflict, and gives the copy none', async () => {
+				const { store, seed } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					syncedHash: 'old',
+					dirty: true,
+				});
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'conflict',
+							resolution: {
+								noteId: 'n1',
+								remoteContent: 'theirs\n',
+								remoteHash: 'theirs',
+								remote: remote('a.md', 'r1', 'v2'),
+								copyId: 'c1',
+								copyPath: 'a (conflict).md',
+								copyContent: conflictContent('mine\n', 'c1'),
+							},
+						},
+					],
+				});
+				expect(await hashOf(store, 'n1')).toBe('theirs');
+				expect(await hashOf(store, 'c1')).toBeUndefined();
+			});
+
+			it('records what a push sent, even when the note has moved on since', async () => {
+				const { store, seed, seedOp } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'x and more\n',
+					syncedHash: 'old',
+					dirty: true,
+				});
+				const seq = await seedOp({ op: 'write', noteId: 'n1', path: 'a.md' });
+
+				await store.completeOp(seq, {
+					kind: 'pushed',
+					noteId: 'n1',
+					remote: remote('a.md', 'r1', 'v2'),
+					content: 'x\n',
+					syncedHash: 'sent',
+				});
+				expect(await hashOf(store, 'n1')).toBe('sent');
+			});
+
+			it('forgets it with the remote, when a note is detached or its folder goes', async () => {
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remoteId: 'r1',
+					syncedHash: 'h1',
+					dirty: true,
+				});
+				await seed({
+					id: 'n2',
+					path: 'Work/b.md',
+					content: 'y\n',
+					remoteId: 'r2',
+					syncedHash: 'h2',
+					dirty: true,
+				});
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'detach-note', id: 'n1' },
+						{ kind: 'delete-folder', path: 'Work' },
+					],
+				});
+				expect(await hashOf(store, 'n1')).toBeUndefined();
+				expect(await hashOf(store, 'n2')).toBeUndefined();
+			});
+		});
 
 		describe('reading', () => {
 			it('still answers for a note whose delete is still queued', async () => {
@@ -163,6 +337,7 @@ export const describeSyncStoreContract = (
 							path: 'a.md',
 							content: 'x\n',
 							remote: remote('a.md'),
+							syncedHash: 'hash',
 						},
 					],
 					cursor: 'c1',
@@ -186,6 +361,7 @@ export const describeSyncStoreContract = (
 							path: 'a.md',
 							content: 'x\n',
 							remote: remote('a.md'),
+							syncedHash: 'hash',
 						},
 					],
 				});
@@ -211,6 +387,7 @@ export const describeSyncStoreContract = (
 							path: 'a.md',
 							content: 'new\n',
 							remote: remote('a.md', 'r1', 'v2'),
+							syncedHash: 'hash',
 						},
 					],
 					cursor: 'c1',
@@ -327,6 +504,7 @@ export const describeSyncStoreContract = (
 							path: 'Work/Meetings/b.md',
 							content: 'deep\n',
 							remote: remote('Work/Meetings/b.md', 'r2'),
+							syncedHash: 'hash',
 						},
 					],
 					cursor: 'c1',
@@ -399,6 +577,7 @@ export const describeSyncStoreContract = (
 							path: 'a.md',
 							content: 'theirs\n',
 							remote: remote('a.md', 'r2'),
+							syncedHash: 'hash',
 						},
 						{ kind: 'displace-note', id: 'ours', path: 'a (conflict x).md' },
 					],
@@ -513,6 +692,7 @@ export const describeSyncStoreContract = (
 							path: 'a.md',
 							content: 'new\n',
 							remote: remote('a.md', 'r2'),
+							syncedHash: 'hash',
 						},
 					],
 					cursor: 'c1',
@@ -536,6 +716,7 @@ export const describeSyncStoreContract = (
 							path: 'b.md',
 							content: 'moved\n',
 							remote: remote('b.md', 'r1'),
+							syncedHash: 'hash',
 						},
 					],
 				});
@@ -583,6 +764,7 @@ export const describeSyncStoreContract = (
 									path: 'a.md',
 									content: 'remote\n',
 									remote: remote('a.md', 'r1', 'v2'),
+									syncedHash: 'hash',
 								},
 							],
 							cursor: 'c1',
@@ -622,6 +804,7 @@ export const describeSyncStoreContract = (
 								resolution: {
 									noteId: 'n1',
 									remoteContent: 'theirs\n',
+									remoteHash: 'hash',
 									remote: remote('a.md', 'r1', 'v2'),
 									copyId: 'c1',
 									copyPath: 'a (conflict).md',
@@ -655,6 +838,7 @@ export const describeSyncStoreContract = (
 								path: 'b.md',
 								content: 'y\n',
 								remote: remote('b.md', 'r2'),
+								syncedHash: 'hash',
 							},
 							// Nothing has this id, so a store that checks its
 							// inputs rejects — which is the point.
@@ -770,6 +954,7 @@ export const describeSyncStoreContract = (
 			const resolution = {
 				noteId: 'n1',
 				remoteContent: 'theirs\n',
+				remoteHash: 'hash',
 				remote: remote('a.md', 'r1', 'v2'),
 				copyId: 'c1',
 				copyPath: 'a (conflict 2026-09-15T14-32).md',
@@ -888,6 +1073,7 @@ export const describeSyncStoreContract = (
 					noteId: 'n1',
 					remote: remote('a.md', 'r9', 'v9'),
 					content: 'x\n',
+					syncedHash: 'hash',
 				});
 
 				const note = await store.noteById('n1');
@@ -909,6 +1095,7 @@ export const describeSyncStoreContract = (
 					noteId: 'n1',
 					remote: remote('a.md', 'r9', 'v9'),
 					content: 'x\n',
+					syncedHash: 'hash',
 				});
 
 				const note = await store.noteById('n1');
@@ -1003,6 +1190,7 @@ export const describeSyncStoreContract = (
 					store.resolveConflict(seq, {
 						noteId: 'n1',
 						remoteContent: 'theirs\n',
+						remoteHash: 'hash',
 						remote: remote('a.md', 'r1', 'v2'),
 						copyId: 'c1',
 						copyPath: 'a (conflict).md',
@@ -1030,6 +1218,7 @@ export const describeSyncStoreContract = (
 				await store.resolveConflict(seq, {
 					noteId: 'n1',
 					remoteContent: 'theirs\n',
+					remoteHash: 'hash',
 					remote: remote('Moved/There/a.md', 'r1', 'v2'),
 					copyId: 'c1',
 					copyPath: 'a (conflict).md',
@@ -1057,6 +1246,7 @@ export const describeSyncStoreContract = (
 				await store.resolveConflict(seq, {
 					noteId: 'n1',
 					remoteContent: 'theirs\n',
+					remoteHash: 'hash',
 					remote: remote('a.md', 'r1', 'v2'),
 					copyId: 'c1',
 					copyPath: 'a (conflict).md',

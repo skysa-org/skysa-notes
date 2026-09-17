@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { contentHash } from '../../src/hash.js';
 import { isHidden, parentPath } from '../../src/paths.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import {
@@ -2405,6 +2406,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
@@ -2421,18 +2423,16 @@ describe('a write whose file is not where it was', () => {
 
 		// And the next sync finds out where it went. The fake changes a file's
 		// version on a move, as OneDrive's eTag does and Dropbox's rev does not,
-		// so the engine cannot tell this rename from a remote edit and takes the
-		// safe branch: the remote keeps the path, our edit becomes a copy of its
-		// own. Noisy, but nothing is lost — and on Dropbox, where the version
-		// survives the move, it is recognised as a move and stays one note. See
-		// docs/PLAN.md §7.
+		// but the file still holds the bytes this note last synced — so it was
+		// renamed, not edited, and the note follows it with its edit, which then
+		// goes out to the new name. No copy (docs/PLAN.md §7).
 		const synced = await engine.sync();
 
 		expect(synced.status).toBe('ok');
-		expect(noteAt('renamed.md')?.content).toBe('one\n');
-		expect(store.notes().find((note) => note.content.includes('edited'))?.path).toContain(
-			'conflict'
-		);
+		expect(synced.conflicts).toEqual([]);
+		expect(store.notes()).toHaveLength(1);
+		expect(noteAt('renamed.md')).toMatchObject({ id: 'n1', content: 'edited\n', dirty: false });
+		expect(provider.contentAt('renamed.md')).toBe('edited\n');
 	});
 
 	it('does the rename itself when the move is queued behind it', async () => {
@@ -2631,6 +2631,150 @@ describe('a write whose file is not where it was', () => {
 		expect(store.notes()).toHaveLength(1);
 		expect(noteAt('renamed.md')?.content).toBe('edited\n');
 		expect(noteAt('renamed.md')?.dirty).toBe(true);
+	});
+});
+
+describe('the bytes a note last synced', () => {
+	const hashOf = (id: string) => store.notes().find((note) => note.id === id)?.syncedHash;
+
+	it('are recorded when a pull brings a note in', async () => {
+		await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		expect(noteAt('a.md')?.syncedHash).toBe(await contentHash('one\n'));
+	});
+
+	it('are recorded when a push sends a note out', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const id = noteAt('a.md')?.id ?? '';
+		store.put({ ...noteAt('a.md')!, content: 'two\n', dirty: true });
+		store.queue({ op: 'write', noteId: id, path: 'a.md' });
+
+		await engine.push();
+
+		expect(provider.contentAt('a.md')).toBe('two\n');
+		expect(entry.version).not.toBe(noteAt('a.md')?.remoteVersion);
+		expect(hashOf(id)).toBe(await contentHash('two\n'));
+	});
+
+	it('are the remote\u2019s once a conflict hands the note its bytes', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const id = noteAt('a.md')?.id ?? '';
+		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+
+		const result = await engine.pull();
+
+		expect(result.conflicts).toHaveLength(1);
+		expect(hashOf(id)).toBe(await contentHash('theirs\n'));
+	});
+
+	it('still make a remote edit a conflict, however the version moved', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		const edited = await provider.write('a.md', 'theirs\n', {
+			expectedVersion: entry.version,
+		});
+		await provider.move(edited, 'b.md');
+
+		const result = await engine.pull();
+
+		expect(result.conflicts).toHaveLength(1);
+		expect(noteAt('b.md')?.content).toBe('theirs\n');
+		expect(store.notes().find((note) => note.content.includes('mine'))?.path).toContain(
+			'conflict'
+		);
+	});
+
+	it('let a new version of the same bytes through without a copy', async () => {
+		// Written again with nothing changed — another device saving what it
+		// had, or a provider rewriting metadata. Same path, same bytes, new
+		// version: the local edit goes out against the version that is there.
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const id = noteAt('a.md')?.id ?? '';
+		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: id, path: 'a.md' });
+		const again = await provider.write('a.md', 'one\n', { expectedVersion: entry.version });
+
+		const result = await engine.sync();
+
+		expect(result.conflicts).toEqual([]);
+		expect(store.notes()).toHaveLength(1);
+		expect(noteAt('a.md')?.remoteVersion).not.toBe(again.version);
+		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(noteAt('a.md')?.dirty).toBe(false);
+	});
+
+	it('follow a remote rename that happened while a push was still queued', async () => {
+		await provider.createFolder('Work');
+		await provider.createFolder('Archive');
+		const entry = await remoteFile('Work/a.md', 'one\n');
+		await engine.pull();
+		const id = noteAt('Work/a.md')?.id ?? '';
+		store.put({ ...noteAt('Work/a.md')!, content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: id, path: 'Work/a.md' });
+		await provider.move(entry, 'Archive/b.md');
+
+		const pulled = await engine.pull();
+
+		expect(pulled.conflicts).toEqual([]);
+		expect(store.notes()).toHaveLength(1);
+		expect(noteAt('Archive/b.md')).toMatchObject({ id, content: 'mine\n', dirty: true });
+		expect(store.ops()).toMatchObject([{ op: 'write', path: 'Archive/b.md' }]);
+	});
+
+	it('are not taken from a read that answers with an older version', async () => {
+		// The feed names the version that holds the remote edit; a read served
+		// from somewhere stale answers with the bytes before it. Those bytes
+		// match the hash, but they are not the version being adopted — taking
+		// the shortcut would push the local edit over an edit nobody has seen.
+		const entry = await remoteFile('a.md', 'one\n');
+		await engine.pull();
+		const id = noteAt('a.md')?.id ?? '';
+		store.put({ ...noteAt('a.md')!, content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: id, path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		const stale: StorageProvider = {
+			...provider,
+			read: () => Promise.resolve({ content: 'one\n', version: entry.version }),
+		};
+
+		const pulled = await createSyncEngine({ provider: stale, store, now: () => AT }).pull();
+		await engine.sync();
+
+		expect(pulled.conflicts).toHaveLength(1);
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(store.notes().some((note) => note.content.includes('mine'))).toBe(true);
+	});
+
+	it('are kept when a note is let go of and bound again in one batch', async () => {
+		// A folder deleted with a dirty note moved out of it first, on a
+		// provider whose version survives a move: the deletion detaches the
+		// note, which drops its hash, and the move binds it again without a
+		// read. The bytes it synced have not changed, so neither has the hash.
+		await provider.createFolder('Work');
+		const file = await remoteFile('Work/a.md', 'one\n');
+		await engine.pull();
+		const folder = provider.snapshot().find((node) => node.path === 'Work');
+		const note = noteAt('Work/a.md')!;
+		store.put({ ...note, content: 'mine\n', dirty: true });
+		const entries: ChangeEntry[] = [
+			{ path: 'Work', deleted: true, remoteId: folder?.remoteId ?? '' },
+			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
+			{ ...file, path: 'a.md' },
+		];
+
+		await createSyncEngine({
+			provider: reporting(provider, entries),
+			store,
+			now: () => AT,
+		}).pull();
+
+		expect(noteAt('a.md')).toMatchObject({ id: note.id, remoteId: file.remoteId, dirty: true });
+		expect(hashOf(note.id)).toBe(await contentHash('one\n'));
 	});
 });
 
@@ -2996,14 +3140,12 @@ describe('a provider that reports a folder recursively', () => {
 		expect(noteAt('Archive/a.md')?.dirty).toBe(true);
 	});
 
-	it('keeps an edit on a note that moved out of a folder that was deleted', async () => {
-		// The folder really is gone and the note really did survive it, with an
-		// edit that was never anywhere else. Treating the note as gone with the
-		// folder would write the remote's bytes over it.
+	const moveOutOfDeletedFolder = async (recorded: boolean) => {
 		const { file, folder } = await setUpWork();
 		const note = noteAt('Work/a.md');
 		if (note === undefined) throw new Error('no note');
-		store.put({ ...note, content: 'mine\n', dirty: true });
+		const { syncedHash: _hash, ...unrecorded } = note;
+		store.put({ ...(recorded ? note : unrecorded), content: 'mine\n', dirty: true });
 		await provider.move(file, 'a.md');
 		await provider.delete(folder);
 		const out = provider.snapshot().find((each) => each.path === 'a.md');
@@ -3014,9 +3156,28 @@ describe('a provider that reports a folder recursively', () => {
 			{ path: 'Work/a.md', deleted: true, remoteId: file.remoteId },
 			out,
 		]);
+		return note.id;
+	};
 
-		// Kept as a copy of its own, beside where the note ended up — not in
-		// `Work/`, which this batch deleted.
+	it('keeps an edit on a note that moved out of a folder that was deleted', async () => {
+		// The folder really is gone and the note really did survive it, with an
+		// edit that was never anywhere else. Treating the note as gone with the
+		// folder would write the remote's bytes over it. The remote's bytes are
+		// the ones the note last synced, so the move is only a move: the note
+		// follows it, still holding the edit, and there is nothing to copy.
+		const id = await moveOutOfDeletedFolder(true);
+
+		expect(store.notes()).toHaveLength(1);
+		expect(noteAt('a.md')).toMatchObject({ id, content: 'mine\n', dirty: true });
+		expect(store.folders()).toEqual([]);
+	});
+
+	it('keeps it as a copy when the note cannot say what it last synced', async () => {
+		// A row from before the hash was recorded. Kept as a copy of its own,
+		// beside where the note ended up — not in `Work/`, which this batch
+		// deleted.
+		await moveOutOfDeletedFolder(false);
+
 		const copy = store.notes().find((each) => each.content.includes('mine'));
 		expect(copy?.path).toBe(conflictPath('a.md', AT));
 		expect(noteAt('a.md')?.content).toBe('one\n');

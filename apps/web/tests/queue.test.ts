@@ -590,6 +590,7 @@ describe('an op the user has moved on from, settled', () => {
 				size: 1,
 			},
 			content: noteFile(renamed),
+			syncedHash: 'hash',
 		});
 
 		expect((await store.pendingOps()).map((op) => op.seq)).toEqual([move!.seq]);
