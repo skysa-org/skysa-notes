@@ -1,8 +1,10 @@
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
 import { createFakeProvider } from '../../src/providers/fake.js';
+import { createGDriveProvider } from '../../src/providers/gdrive.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import { describeProviderContract } from './contract.js';
 import { createDropboxStub } from './dropboxStub.js';
+import { createGDriveStub } from './gdriveStub.js';
 import { createOneDriveStub } from './onedriveStub.js';
 
 /**
@@ -77,6 +79,33 @@ describeProviderContract('onedrive over a stubbed transport', () => {
 	};
 });
 
+// Drive's feed names no paths and lists no parents, and nothing on Drive is
+// conditional, so the adapter walks names, checks before and after it writes,
+// and lists what arrives. One entry per page splits the scan and the feed.
+describeProviderContract('gdrive over a stubbed transport, one entry per page', () => {
+	const stub = createGDriveStub({ pageSize: 1 });
+	return {
+		provider: createGDriveProvider({
+			fetch: stub.fetch,
+			getAccessToken: () => Promise.resolve('stub-token'),
+			appVersion: '0.1.0',
+			clientId: 'stub-client',
+		}),
+	};
+});
+
+describeProviderContract('gdrive over a stubbed transport', () => {
+	const stub = createGDriveStub();
+	return {
+		provider: createGDriveProvider({
+			fetch: stub.fetch,
+			getAccessToken: () => Promise.resolve('stub-token'),
+			appVersion: '0.1.0',
+			clientId: 'stub-client',
+		}),
+	};
+});
+
 /**
  * The same scenarios against a real Dropbox account. Skipped unless asked for,
  * because it needs an app registration and a throwaway account — it empties the
@@ -138,5 +167,37 @@ if (liveGraphToken !== '') {
 			};
 		},
 		{ timeout: 30_000 }
+	);
+}
+
+/**
+ * The same scenarios against a real Google Drive account, with an access token
+ * carrying `drive.file`. Empties the app folder between scenarios, so use a
+ * throwaway account. See docs/PLAN.md §5.1.
+ *
+ *   PROVIDER_LIVE_TESTS=1 GDRIVE_TEST_TOKEN=... pnpm test
+ */
+const liveGoogleToken =
+	process.env.PROVIDER_LIVE_TESTS === '1' ? (process.env.GDRIVE_TEST_TOKEN ?? '') : '';
+
+if (liveGoogleToken !== '') {
+	describeProviderContract(
+		'gdrive (live account)',
+		() => {
+			const provider = createGDriveProvider({
+				fetch: globalThis.fetch.bind(globalThis),
+				getAccessToken: () => Promise.resolve(liveGoogleToken),
+				appVersion: '0.1.0',
+				clientId: 'live-test',
+			});
+			return {
+				provider,
+				cleanup: async () => {
+					const entries = await provider.list('');
+					await Promise.all(entries.map((entry) => provider.delete(entry)));
+				},
+			};
+		},
+		{ timeout: 60_000 }
 	);
 }
