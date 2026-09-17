@@ -359,7 +359,7 @@ export default tseslint.config(
 		// Workers has no logger binding and no stdout: `console` is the only sink
 		// Cloudflare's observability and `wrangler tail` read. Scoped to the two
 		// places that report an error, not opened up across the API.
-		files: ['apps/api/src/worker.ts', 'apps/api/src/app.ts'],
+		files: ['apps/api/src/worker.ts', 'apps/api/src/app.ts', 'apps/api/src/log.ts'],
 		rules: { 'no-console': 'off' },
 	},
 	{

@@ -6,7 +6,7 @@ import { HTTPException } from 'hono/http-exception';
 import { importSecretKey, type SecretKey, signingKey } from './crypto.js';
 import { createDb, type Database } from './db/client.js';
 import type { AppConfig } from './env.js';
-import type { FetchLike } from './oauth/dropbox.js';
+import type { FetchLike } from './oauth/types.js';
 import { connectRoutes } from './routes/connect.js';
 import { connectionRoutes } from './routes/connections.js';
 import { tokenRoutes } from './routes/token.js';

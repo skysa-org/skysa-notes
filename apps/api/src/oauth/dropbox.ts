@@ -1,3 +1,5 @@
+import { type FetchLike, OAuthError, type StorageOAuth, type TokenSet } from './types.js';
+
 /**
  * The storage half of Dropbox OAuth: Authorization Code + PKCE, exchanged on
  * the server so no client secret ever reaches the browser, and so the refresh
@@ -55,14 +57,6 @@ export const authorizeUrl = (input: AuthorizeInput): string =>
 		token_access_type: 'offline',
 	}).toString()}`;
 
-export interface TokenSet {
-	accessToken: string;
-	/** Absent on refresh: Dropbox only issues one at the initial exchange. */
-	refreshToken?: string;
-	expiresAt: number;
-	accountId?: string;
-}
-
 interface TokenResponse {
 	access_token?: string;
 	refresh_token?: string;
@@ -71,12 +65,6 @@ interface TokenResponse {
 	error_description?: string;
 	error?: string;
 }
-
-/**
- * The deadline lives in the caller: `createApp` wraps whatever fetch it is given
- * so every provider call has one, rather than each call site remembering.
- */
-export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
 const postForm = async (
 	doFetch: FetchLike,
@@ -92,9 +80,8 @@ const postForm = async (
 
 	const body = (await response.json().catch(() => ({}))) as TokenResponse;
 	if (!response.ok || body.access_token === undefined) {
-		// The description can quote back what was sent, so it is not repeated to
-		// the caller; the operator gets it in the Worker log.
-		throw new Error(`dropbox oauth failed: ${body.error ?? String(response.status)}`);
+		// The description can quote back what was sent, so only the code goes on.
+		throw new OAuthError('dropbox', body.error ?? String(response.status));
 	}
 
 	return {
@@ -185,4 +172,24 @@ export const accountName = async (doFetch: FetchLike, accessToken: string): Prom
 	if (response === undefined || !response.ok) return 'Dropbox';
 	const body = (await response.json().catch(() => ({}))) as AccountResponse;
 	return body.email ?? body.name?.display_name ?? 'Dropbox';
+};
+
+/** The shape the routes use, over the functions above. */
+export const dropboxOAuth: StorageOAuth = {
+	authorizeUrl: (credentials, input) =>
+		authorizeUrl({ clientId: credentials.clientId, ...input }),
+	exchangeCode: (doFetch, credentials, input) =>
+		exchangeCode(doFetch, {
+			clientId: credentials.clientId,
+			clientSecret: credentials.clientSecret,
+			...input,
+		}),
+	refreshAccessToken: (doFetch, credentials, input) =>
+		refreshAccessToken(doFetch, {
+			clientId: credentials.clientId,
+			clientSecret: credentials.clientSecret,
+			...input,
+		}),
+	revokeToken,
+	accountName: (doFetch, tokens) => accountName(doFetch, tokens.accessToken),
 };

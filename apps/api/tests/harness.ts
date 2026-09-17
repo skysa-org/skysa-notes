@@ -1,5 +1,5 @@
 import { createApp, type CreateAppOptions } from '../src/app.js';
-import { fromBase64Url } from '../src/crypto.js';
+import { fromBase64Url, toBase64Url } from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
 import { flowCookieName, sessionCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
@@ -11,18 +11,65 @@ import { createD1 } from './d1.js';
 
 export const SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
-export const testConfig = (overrides: Partial<AppConfig> = {}): AppConfig => ({
+export const testConfig = (
+	overrides: Partial<AppConfig> = {},
+	env: Record<string, string> = {}
+): AppConfig => ({
 	...parseEnv({
 		APP_ORIGIN: 'https://notes.example.com',
 		SECRETS_KEY,
 		ENABLED_PROVIDERS: 'dropbox',
 		DROPBOX_CLIENT_ID: 'client-id',
 		DROPBOX_CLIENT_SECRET: 'client-secret',
+		...env,
 	}),
 	...overrides,
 });
 
+export const MICROSOFT_CLIENT_ID = 'ms-client-id';
+
+/** Both OAuth providers enabled and configured. */
+export const bothProvidersConfig = (
+	overrides: Partial<AppConfig> = {},
+	env: Record<string, string> = {}
+): AppConfig =>
+	testConfig(overrides, {
+		ENABLED_PROVIDERS: 'dropbox,onedrive',
+		MICROSOFT_CLIENT_ID,
+		MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+		...env,
+	});
+
+/** An ID token as the Microsoft token endpoint returns one. The signature is never checked. */
+export const idToken = (claims: Record<string, unknown>): string => {
+	const part = (value: unknown) => toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
+	return `${part({ typ: 'JWT', alg: 'RS256' })}.${part(claims)}.c2lnbmF0dXJl`;
+};
+
+export const MICROSOFT_ACCOUNT = 'AAAAAAAAAAAAAAAAAAAAAIkzqFVrSaSaFHy782bbtaQ';
+
+export const microsoftTokenResponse = (
+	over: Record<string, unknown> = {},
+	claims: Record<string, unknown> = {}
+): Response =>
+	json({
+		token_type: 'Bearer',
+		access_token: 'ms-access-1',
+		refresh_token: 'ms-refresh-1',
+		expires_in: 3600,
+		id_token: idToken({
+			aud: MICROSOFT_CLIENT_ID,
+			sub: MICROSOFT_ACCOUNT,
+			tid: '9188040d-6c67-4c5b-b112-36a304b66dad',
+			email: 'person@outlook.com',
+			...claims,
+		}),
+		...over,
+	});
+
 export interface DropboxScript {
+	/** Microsoft's token endpoint, which is one URL for the exchange and the refresh. */
+	microsoft?: (form: Record<string, string>, url: string) => Response;
 	/** Code → the token response Dropbox would give for it. */
 	exchange?: (code: string, verifier: string) => Response;
 	refresh?: (refreshToken: string) => Response;
@@ -36,6 +83,16 @@ const answer = (
 	form: Record<string, string>,
 	account: string
 ): Response => {
+	if (url.startsWith('https://login.microsoftonline.com/')) {
+		if (script.microsoft !== undefined) return script.microsoft(form, url);
+		// Microsoft rotates the refresh token on every refresh.
+		return form.grant_type === 'refresh_token'
+			? microsoftTokenResponse({ access_token: 'ms-access-2', refresh_token: 'ms-refresh-2' })
+			: microsoftTokenResponse(
+					{},
+					{ sub: account === DEFAULT_ACCOUNT ? MICROSOFT_ACCOUNT : account }
+				);
+	}
 	if (url.endsWith('/oauth2/token')) {
 		if (form.grant_type === 'refresh_token') {
 			// Dropbox normally returns no new refresh token on a refresh.
@@ -139,13 +196,17 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 	 * The whole connect flow, which is also how a test gets a signed-in user:
 	 * in storage-first the first connected account *is* the account.
 	 */
-	const connect = async (jar = createJar(), account = DEFAULT_ACCOUNT) => {
+	const connect = async (
+		jar = createJar(),
+		account = DEFAULT_ACCOUNT,
+		provider: 'dropbox' | 'onedrive' = 'dropbox'
+	) => {
 		stub.as(account);
-		jar.absorb(await request('/api/auth/connect/dropbox/start', { cookies: jar }));
+		jar.absorb(await request(`/api/auth/connect/${provider}/start`, { cookies: jar }));
 
 		const state = flowStateOf(jar);
 		const callback = jar.absorb(
-			await request(`/api/auth/connect/dropbox/callback?code=the-code&state=${state}`, {
+			await request(`/api/auth/connect/${provider}/callback?code=the-code&state=${state}`, {
 				cookies: jar,
 			})
 		);
