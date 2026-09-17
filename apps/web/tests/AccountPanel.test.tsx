@@ -147,7 +147,7 @@ describe('AccountPanel, with nothing connected', () => {
 				config: () =>
 					Promise.resolve({
 						authMode: 'storage-first',
-						providers: ['gdrive', 'onedrive'],
+						providers: ['gdrive', 'webdav'],
 					}),
 			}),
 			freshDatabase()
@@ -219,6 +219,32 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await screen.findByRole('link', { name: 'Connect Dropbox' })).toBeTruthy();
 		expect(disconnect).toHaveBeenCalledWith('c1');
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('says where to remove OneDrive’s access, which disconnecting cannot', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		const onedrive = { ...dropbox, provider: 'onedrive' as const, accountId: 'ms-sub' };
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [onedrive] }) }),
+			db
+		);
+
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+		await user.click(await enabled('Disconnect…'));
+		expect(screen.getByText(/microsoft\.com\/consent/)).toBeTruthy();
+	});
+
+	it('does not send a Dropbox user to remove access by hand', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [dropbox] }) }),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		expect(screen.queryByText(/until you remove it/)).toBeNull();
 	});
 
 	it('can be talked out of disconnecting', async () => {
@@ -545,7 +571,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 	it('does not promise to try again with a provider this build cannot sync', async () => {
 		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'onedrive' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'gdrive' });
 		renderPanel(
 			clientWith({ connections: () => Promise.reject(new TypeError('offline')) }),
 			db,
@@ -556,7 +582,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			})
 		);
 
-		expect(await screen.findByText('This app cannot sync with OneDrive yet.')).toBeTruthy();
+		expect(await screen.findByText('This app cannot sync with Google Drive yet.')).toBeTruthy();
 		expect(screen.queryByText(/tried again/)).toBeNull();
 	});
 

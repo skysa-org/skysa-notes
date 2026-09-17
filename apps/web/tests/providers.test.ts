@@ -60,7 +60,24 @@ describe('provider requests', () => {
 		expect(init?.signal).toBeInstanceOf(AbortSignal);
 	});
 
-	it.each(['gdrive', 'onedrive', 'webdav'] as const)('have no adapter for %s yet', (provider) => {
+	it('go to Graph for OneDrive, with the token', async () => {
+		const fetch = vi.fn<FetchLike>(() =>
+			Promise.resolve(Response.json({ value: [] }, { status: 200 }))
+		);
+		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
+			...input,
+			provider: 'onedrive',
+		});
+
+		await provider?.list('');
+
+		const [url, init] = fetch.mock.calls[0] ?? [];
+		expect(url).toMatch(/^https:\/\/graph\.microsoft\.com\/v1\.0\/me\/drive\/special\/approot/);
+		expect(new Headers(init?.headers).get('authorization')).toBe('Bearer token');
+		expect(init?.signal).toBeInstanceOf(AbortSignal);
+	});
+
+	it.each(['gdrive', 'webdav'] as const)('have no adapter for %s yet', (provider) => {
 		expect(
 			createProviderFactory({ appVersion: '1.2.3' })({ ...input, provider })
 		).toBeUndefined();

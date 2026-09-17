@@ -15,5 +15,10 @@
 # - img-src https: a note can show an image from anywhere, as markdown does.
 # - connect-src: this origin (the API) and the provider hosts the browser
 #   syncs with directly. A provider's hosts arrive with its adapter.
+#   Dropbox: *.dropboxapi.com (api. for metadata, content. for bytes).
+#   OneDrive: graph.microsoft.com for everything but file bytes, which come
+#   from the item's pre-authenticated download URL on another host —
+#   *.files.1drv.com or my.microsoftpersonalcontent.com for personal accounts,
+#   *.sharepoint.com for work and school ones (docs/PLAN.md §5.2).
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.dropboxapi.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.dropboxapi.com https://graph.microsoft.com https://*.files.1drv.com https://my.microsoftpersonalcontent.com https://*.sharepoint.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

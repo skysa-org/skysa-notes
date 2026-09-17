@@ -21,7 +21,18 @@ import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../
  */
 
 /** Providers the app can sync with today. The rest arrive with their adapters. */
-export const CONNECTABLE: readonly ProviderKind[] = ['dropbox'];
+export const CONNECTABLE: readonly ProviderKind[] = ['dropbox', 'onedrive'];
+
+/**
+ * What disconnecting leaves behind at the provider, where it leaves anything.
+ * Dropbox lets the server withdraw the app's access; Microsoft gives an app no
+ * way to withdraw its own, so the user has to (docs/PLAN.md §5.2).
+ * https://support.microsoft.com/en-us/account-billing/edit-or-revoke-application-permissions-in-the-my-apps-portal-169be2b4-ee26-4338-aea8-d19bb2f329ee
+ */
+export const LEFT_AT_PROVIDER: Partial<Record<ProviderKind, string>> = {
+	onedrive:
+		'Microsoft keeps this app’s access to its folder until you remove it: at microsoft.com/consent for a personal account, or in My Apps (myapps.microsoft.com) for a work or school account.',
+};
 
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
 	dropbox: 'Dropbox',

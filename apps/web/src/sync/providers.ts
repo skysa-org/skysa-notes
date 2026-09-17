@@ -1,4 +1,4 @@
-import { createDropboxProvider, type FetchLike } from '@skysa/core';
+import { createDropboxProvider, createOneDriveProvider, type FetchLike } from '@skysa/core';
 
 import { type ProviderFactory } from './scheduler.js';
 
@@ -39,13 +39,10 @@ export const createProviderFactory = (options: ProviderFactoryOptions): Provider
 		options.fetch ?? ((url, init) => globalThis.fetch(url, init)),
 		options.timeoutMs ?? PROVIDER_TIMEOUT_MS
 	);
-	return ({ provider, clientId, getAccessToken }) =>
-		provider === 'dropbox'
-			? createDropboxProvider({
-					fetch,
-					getAccessToken,
-					appVersion: options.appVersion,
-					clientId,
-				})
-			: undefined;
+	return ({ provider, clientId, getAccessToken }) => {
+		const adapter = { fetch, getAccessToken, appVersion: options.appVersion, clientId };
+		if (provider === 'dropbox') return createDropboxProvider(adapter);
+		if (provider === 'onedrive') return createOneDriveProvider(adapter);
+		return undefined;
+	};
 };

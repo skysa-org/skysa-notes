@@ -17,6 +17,7 @@ import {
 	adoptAccount,
 	CONNECTABLE,
 	disconnectAccount,
+	LEFT_AT_PROVIDER,
 	PROVIDER_LABELS,
 	reconcileAccount,
 } from '../sync/account.js';
@@ -344,6 +345,10 @@ const Connected = ({
 						Disconnect {label}? Your notes stay on this device, and nothing is deleted
 						from {label}.
 					</p>
+					{bound.provider !== undefined &&
+						LEFT_AT_PROVIDER[bound.provider] !== undefined && (
+							<p className="muted">{LEFT_AT_PROVIDER[bound.provider]}</p>
+						)}
 					<button type="button" onClick={disconnect} disabled={busy}>
 						Disconnect
 					</button>
