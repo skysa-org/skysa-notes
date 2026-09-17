@@ -360,17 +360,17 @@ const sight = async (
 };
 
 /**
- * The notes to look for: the most recently edited of each top-level notebook in
- * turn, so that one notebook deleted elsewhere — often the one in use — cannot
- * stand for the whole folder.
+ * The notes to look for: the most recently edited of each notebook in turn, at
+ * any depth and the loose notes as one, so that one notebook deleted elsewhere
+ * — often the one in use — cannot stand for the whole folder.
  */
 const samplesOf = (notes: readonly NoteRecord[]): NoteRecord[] => {
 	const byNotebook = [...notes]
 		.sort((a, b) => b.updatedAt - a.updatedAt)
 		.reduce(
 			(groups, note) =>
-				groups.set(note.path.split('/')[0] ?? '', [
-					...(groups.get(note.path.split('/')[0] ?? '') ?? []),
+				groups.set(parentPath(note.path), [
+					...(groups.get(parentPath(note.path)) ?? []),
 					note,
 				]),
 			new Map<string, NoteRecord[]>()
@@ -426,8 +426,10 @@ export const verifyResume = async (
 	}, Promise.resolve([]));
 	const found = sightings.includes('found');
 	const failures = sightings.flatMap((each) => (typeof each === 'object' ? [each.failed] : []));
-	// Nothing answered at all — offline, most likely. Ask again later.
-	if (held.length > 0 && failures.length === held.length) throw failures[0];
+	// Nothing found, and not everything asked answered: a connection that went
+	// down partway, or a rate limit, says nothing about the files it did not
+	// reach. Ask again later rather than copy on half an answer.
+	if (!found && failures.length > 0) throw failures[0];
 
 	return inTransaction(db, async (): Promise<ResumeVerdict> => {
 		const state = await db.syncState.get(connectionId);
