@@ -111,4 +111,9 @@ describe('the service worker', () => {
 		// under a note that has not been written yet.
 		expect(PWA_OPTIONS.registerType).toBe('prompt');
 	});
+
+	it('is registered by the app, not by a script written into the page', () => {
+		// `'inline'` would be refused by the Content-Security-Policy.
+		expect(PWA_OPTIONS.injectRegister).toBe(false);
+	});
 });

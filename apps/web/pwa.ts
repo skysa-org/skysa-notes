@@ -61,6 +61,10 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 export const PWA_OPTIONS: Partial<VitePWAOptions> = {
 	// A new build never swaps itself in underneath a half-written note.
 	registerType: 'prompt',
+	// Registered by `UpdatePrompt` through `virtual:pwa-register/react`, never
+	// by a script the plugin writes into the page: an inline one would be
+	// refused by the Content-Security-Policy (`public/_headers`).
+	injectRegister: false,
 	// The service worker runs in dev too: this app boots from IndexedDB and is
 	// meant to be exercised offline while it is being built.
 	devOptions: { enabled: true, type: 'module' },

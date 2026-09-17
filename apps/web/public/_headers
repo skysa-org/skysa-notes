@@ -4,6 +4,7 @@
 #
 # Not applied to what the Worker answers (/api/*, `run_worker_first` in
 # apps/api/wrangler.toml): those responses are JSON or redirects, never a page.
+# The WebDAV proxy (Phase 5) will set its own headers (docs/PLAN.md).
 #
 # The policy (docs/PLAN.md §9), checked by tests/csp.test.ts:
 # - script-src 'self' only. zod would probe for `new Function` at startup and

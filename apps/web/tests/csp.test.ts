@@ -48,12 +48,15 @@ const policy = (): ReadonlyMap<string, readonly string[]> => {
 	);
 };
 
-/** Whether a CSP host source (`https://host`, `https://*.host`) allows a URL. */
+/**
+ * Whether a CSP host source (`https://host`, `https://*.host`) allows a URL.
+ * With no port in the source, only the scheme's default port is allowed.
+ */
 const allows = (source: string, url: URL): boolean => {
 	const match = /^(https?):\/\/(\*\.)?([^/:]+)$/.exec(source);
 	if (match === null) return false;
 	const [, scheme, wildcard, host = ''] = match;
-	if (url.protocol !== `${scheme}:`) return false;
+	if (url.protocol !== `${scheme}:` || url.port !== '') return false;
 	return wildcard === undefined ? url.hostname === host : url.hostname.endsWith(`.${host}`);
 };
 
@@ -61,8 +64,8 @@ describe('Content-Security-Policy', () => {
 	it('is set once for every path, as one header', () => {
 		const text = read('public/_headers');
 		expect(text.match(/^\s*Content-Security-Policy:/gim)).toHaveLength(1);
-		// Cloudflare limits a header value to 2,000 characters.
-		expect(headersFor(text, '/*').get('content-security-policy')?.length).toBeLessThan(2000);
+		// Cloudflare ignores a line of `_headers` over 2,000 characters.
+		expect(Math.max(...text.split('\n').map((line) => line.length))).toBeLessThanOrEqual(2000);
 	});
 
 	it('runs only this origin’s scripts', () => {
