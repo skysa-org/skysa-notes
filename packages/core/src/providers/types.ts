@@ -227,23 +227,45 @@ export const parseRetryAfter = (
 	now: number = Date.now()
 ): number | undefined => {
 	if (value === null || value === undefined) return undefined;
+	// Read as a number only where it looks like one, and as a date only
+	// otherwise. `Date.parse` is lenient enough to make a day in the first
+	// century out of "7,30" or ", 120", and an unreadable value must answer
+	// `undefined` rather than a wait of nothing, which would hammer a provider
+	// that has just asked for room. A finite number, too: enough digits and
+	// `Number` says `Infinity`.
+	const one = (text: string): number | undefined => {
+		if (/^-?\d+(?:\.\d+)?$/.test(text)) {
+			const seconds = Number(text);
+			return Number.isFinite(seconds) ? Math.max(0, seconds) * 1000 : undefined;
+		}
+		// Every legal date form carries a month or day name, and the ISO-8601
+		// one a `T` and a `Z`. Without a letter it is not a date, whatever
+		// `Date.parse` makes of it — ".5" is otherwise a day in the first
+		// century, which clamps to a wait of nothing.
+		if (!/[a-z]/i.test(text)) return undefined;
+		const at = Date.parse(text);
+		return Number.isNaN(at) ? undefined : Math.max(0, at - now);
+	};
 	// `Headers.get` joins a header sent twice with ", ", which is what an
 	// intermediary adding its own `Retry-After` beside the provider's produces.
-	// Two waits say the same thing, so the first one is the answer — but which
-	// part that is depends on the form, since an HTTP date carries a comma of
-	// its own after the day name. A value starting with a digit is a count of
-	// seconds and ends at the first comma; anything else is a date, and its
-	// first two parts are one value.
-	const parts = value.split(',');
-	const first = (/^\s*-?\d/.test(value) ? parts[0] : parts.slice(0, 2).join(',')) ?? '';
-	const text = first.trim();
-	if (text === '') return undefined;
-	// Read as a number only where it looks like one: `Date.parse` is lenient
-	// enough to make a date out of "7,30", and an unreadable value must answer
-	// `undefined` rather than some day in the first century.
-	if (/^-?\d+(?:\.\d+)?$/.test(text)) return Math.max(0, Number(text)) * 1000;
-	const at = Date.parse(text);
-	return Number.isNaN(at) ? undefined : Math.max(0, at - now);
+	// Which part is one value depends on the form, since an HTTP date carries a
+	// comma of its own after the day name: a value starting with a digit is a
+	// list of counts of seconds, and anything else is a date, whose first two
+	// parts are one value. Of two counts the *longer* is taken — they are two
+	// parties' answers to the same question, and coming back too early gets us
+	// refused again, where coming back late costs only the wait.
+	const parts = value
+		.split(',')
+		.map((part) => part.trim())
+		.filter((part) => part !== '');
+	const [head] = parts;
+	if (head === undefined) return undefined;
+	if (!/^-?\d/.test(head)) return one(parts.slice(0, 2).join(', '));
+	const waits = parts.flatMap((part) => {
+		const wait = one(part);
+		return wait === undefined ? [] : [wait];
+	});
+	return waits.length === 0 ? undefined : Math.max(...waits);
 };
 
 const hasCode = (error: unknown, code: ProviderErrorCode): boolean =>

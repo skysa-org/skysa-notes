@@ -313,17 +313,21 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const detail = failure.codes.join('/') || failure.message;
 		if (failure.status === 401) throw new AuthError(detail);
 		if (failure.status === 404) throw new NotFoundError(path ?? detail);
-		// 429 is throttling and says so. 503 is throttling only when it says how
-		// long to wait: Graph's guidance names both, and its throttling
-		// responses carry `Retry-After`, but 503 is also what a resource that is
-		// genuinely wedged answers (`serviceNotAvailable`). Read as a rate
-		// limit, such a 503 would be retried for ever without counting against
-		// the op — never blocked, never surfaced, with every op behind it
-		// waiting. So a bare 503 is the failure to retry that any other 5xx is.
+		// Throttling is 429, and 509 for the bandwidth cap. Graph's throttling
+		// guidance names one status — "Returns HTTP status code 429 Too Many
+		// Requests", "use the HTTP error code 429 to detect throttling" — and
+		// the error table calls 509 "throttled for exceeding the maximum
+		// bandwidth cap". 503 is not in either list: it is "temporarily
+		// unavailable for maintenance or is overloaded", and the same table
+		// says its delay is "the length of which can be specified in a
+		// Retry-After header". So the header does not tell the two apart —
+		// an outage is documented to carry one — and a 503 read as a rate limit
+		// would be retried for ever without counting against the op: never
+		// blocked, never surfaced, with every op behind it waiting. A 503 is
+		// the failure to retry that any other 5xx is, `Retry-After` or not.
 		// https://learn.microsoft.com/en-us/graph/throttling
-		const throttled =
-			failure.status === 429 ||
-			(failure.status === 503 && failure.retryAfterMs !== undefined);
+		// https://learn.microsoft.com/en-us/graph/errors
+		const throttled = failure.status === 429 || failure.status === 509;
 		if (throttled) {
 			const wait =
 				failure.retryAfterMs === undefined

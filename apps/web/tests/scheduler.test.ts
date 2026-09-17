@@ -1060,9 +1060,12 @@ describe('failures', () => {
 		});
 
 		it('stays named through a run that failed without releasing anything', async () => {
-			// `retrying` carries the stuck op forward: nothing gave it its
-			// attempts back, it is still out of them, and the message would
-			// otherwise flicker to the vague one and back between tries.
+			// `status().stuck` says what the queue holds, not what the last
+			// publish was about. A run that never got as far as the queue —
+			// this one fails on `changes` — changed nothing about it, so the op
+			// is still out of attempts and still named. (The panel shows the
+			// vague message at `retrying` either way; this is about `status()`,
+			// which is the scheduler's public answer.)
 			const h = await blockedHarness();
 			h.remote.fake.setFault((call) =>
 				call.op === 'changes' ? new Error('503') : undefined

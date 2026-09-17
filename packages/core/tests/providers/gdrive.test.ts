@@ -411,6 +411,31 @@ describe('requests', () => {
 		await expect(provider.list('')).rejects.toThrow(RateLimitError);
 	});
 
+	it('never reads RESOURCE_EXHAUSTED over a reason Drive actually gave', async () => {
+		// `storageQuotaExceeded` is a full Drive, which no wait fixes, and
+		// `google.rpc.Code` gives `RESOURCE_EXHAUSTED` for "a per-user quota, or
+		// perhaps the entire file system is out of space" — one code for both.
+		// Read over the reason, a full Drive would retry for ever and never be
+		// counted, and the user would never be told why nothing is syncing.
+		const provider = over(() =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify({
+						error: {
+							code: 403,
+							message: 'storage quota exceeded',
+							status: 'RESOURCE_EXHAUSTED',
+							errors: [{ reason: 'storageQuotaExceeded' }],
+						},
+					}),
+					{ status: 403 }
+				)
+			)
+		);
+		const error = await provider.list('').catch((thrown: unknown) => thrown);
+		expect(isRateLimitError(error)).toBe(false);
+	});
+
 	it('does not read any error body\u2019s status as a quota', async () => {
 		// `PERMISSION_DENIED` sits in the same field and means the opposite.
 		const provider = over(() =>

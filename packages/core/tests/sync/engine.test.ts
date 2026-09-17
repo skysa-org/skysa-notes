@@ -1065,6 +1065,53 @@ describe('authorization', () => {
 		expect(provider.contentAt('a.md')).toBe('mine\n');
 	});
 
+	it('refreshes for a token that expired while resolving a push conflict', async () => {
+		// The conflict rule reads the remote before it decides anything, and
+		// that read meets an expired token like any other. Under the conflict's
+		// name it was neither refreshed nor retried — just counted, so a token
+		// going stale at exactly the wrong moment spent one of the write's
+		// attempts and left the conflict unresolved.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: 'mine\n',
+			dirty: true,
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+		});
+		const op = store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+		let refreshed = 0;
+		provider.setFault((call) =>
+			call.op === 'read' && refreshed === 0 ? new AuthError('expired') : undefined
+		);
+		const withAuth = createSyncEngine({
+			provider,
+			store,
+			now: () => AT,
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+
+		const result = await withAuth.push();
+
+		expect(refreshed).toBe(1);
+		expect(result.status).toBe('ok');
+		// The write is done with — what is left queued is the conflict copy's
+		// own write, which the resolution made.
+		expect(store.ops().map((queued) => queued.seq)).not.toContain(op.seq);
+		expect(store.lastError(op.seq)).toBeUndefined();
+		// And the conflict rule got to run after the fresh token: the remote
+		// keeps the path and the local copy is beside it.
+		expect(result.conflicts).toHaveLength(1);
+		expect([...store.notes()].map((note) => note.path).sort()).toEqual(
+			['a.md', ...result.conflicts].sort()
+		);
+	});
+
 	it('pauses rather than looping when the refresh does not help', async () => {
 		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });

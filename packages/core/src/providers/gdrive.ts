@@ -159,9 +159,25 @@ const RATE_LIMITED = new Set([
 	'dailyLimitExceeded',
 	'sharingRateLimitExceeded',
 ]);
+/**
+ * `RESOURCE_EXHAUSTED` is read only where Drive gave no reason at all, and
+ * never over one. The reason is the more specific answer and the allow-list
+ * leaves some of them out on purpose: `storageQuotaExceeded` is a 403 meaning
+ * the user's Drive is full, which no wait fixes, and `google.rpc.Code` defines
+ * `RESOURCE_EXHAUSTED` as "some resource has been exhausted, perhaps a per-user
+ * quota, or perhaps the entire file system is out of space" — the same code for
+ * both. Read over the reason, a full Drive would retry for ever without ever
+ * counting against the op, and the user would never be told.
+ *
+ * Every error body on Drive's errors page carries `errors[]`, so this fires
+ * only for a shape that page does not document. It is there because the shared
+ * Google error model puts the condition in `error.status`, and a quota read as
+ * an ordinary failure blocks the queue over something that will pass. Whether
+ * Drive ever sends it is on the live-check list (docs/PLAN.md, Phase 4).
+ */
 const throttled = (failure: DriveFailure): boolean =>
 	failure.status === 429 ||
-	failure.condition === 'RESOURCE_EXHAUSTED' ||
+	(failure.reasons.length === 0 && failure.condition === 'RESOURCE_EXHAUSTED') ||
 	(failure.status === 403 && failure.reasons.some((reason) => RATE_LIMITED.has(reason)));
 
 /**

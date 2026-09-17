@@ -393,11 +393,19 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await db.opQueue.bulkPut(tried.map((op) => ({ ...op, attempts: 0 })));
 	};
 
-	const releaseOps = async (connectionId: string): Promise<void> => {
+	const releaseOps = (connectionId: string): Promise<void> =>
 		// One transaction, so an op the engine completes meanwhile is not put back.
-		await db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
-		// Nothing is out of attempts the moment they are all given back.
-		stuckBox.delete('op');
+		db.transaction('rw', db.opQueue, () => resetAttempts(connectionId));
+
+	/**
+	 * Attempts given back: nothing is out of them, so nothing is stuck. Asked of
+	 * the session rather than the connection because the box belongs to whatever
+	 * is bound *now* — a release that finishes after another connection has been
+	 * bound must not clear the new one's answer.
+	 */
+	const released = async (session: Session): Promise<void> => {
+		await releaseOps(session.connectionId);
+		if (isCurrent(session)) stuckBox.delete('op');
 	};
 
 	/**
@@ -514,7 +522,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		}
 		if (environment.now() - since < blockedRetryMs) return;
 		session.blockedSince.delete('at');
-		await releaseOps(session.connectionId);
+		await released(session);
 		session.flags.add('again');
 	};
 
@@ -740,7 +748,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				environment.listen('online', () => {
 					const session = current.get('session');
 					if (session === undefined) return;
-					void releaseOps(session.connectionId).then(() => run(session));
+					void released(session).then(() => run(session));
 				})
 			);
 			unsubscribers.add(
@@ -789,6 +797,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					await resetAttempts(session.connectionId);
 				})
 			);
+			// The wait for the lock is as long as the round that held it, and the
+			// user can switch accounts inside it. Everything below is about this
+			// session, and `stuckBox` about whatever is bound now.
+			if (!isCurrent(session)) return;
 			// The backoff and the blocked clock start over too: the user asking
 			// is the help `blocked` waits for, and a re-scan that has to sit out
 			// a five-minute backoff first is not one.
@@ -801,7 +813,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		syncNow: async () => {
 			const session = current.get('session');
 			if (session === undefined) return;
-			await releaseOps(session.connectionId);
+			await released(session);
 			await run(session);
 		},
 		status,

@@ -264,36 +264,40 @@ describe('mapping Graph failures onto typed errors', () => {
 		expect((error as Error).message).toMatch(/retry after 7s/);
 	});
 
-	it('reads a 503 that says how long to wait as a service asking for room', async () => {
-		// Graph's throttling guidance names 503 beside 429, and its throttled
-		// responses carry the wait. https://learn.microsoft.com/en-us/graph/throttling
-		const { doFetch } = scripted(
-			() =>
-				new Response(JSON.stringify({ error: { code: 'serviceNotAvailable' } }), {
-					status: 503,
-					headers: { 'retry-after': '4' },
-				})
-		);
-		const error = await over(doFetch)
-			.list('')
-			.catch((e: unknown) => e);
-		expect(error).toBeInstanceOf(RateLimitError);
-		expect(isRateLimitError(error) && error.retryAfterMs).toBe(4000);
+	it('reads 509, the bandwidth cap, as a rate limit too', async () => {
+		// The error table calls it "throttled for exceeding the maximum
+		// bandwidth cap". https://learn.microsoft.com/en-us/graph/errors
+		const { doFetch } = scripted(() => graphError(509, 'bandwidthLimitExceeded'));
+		await expect(over(doFetch).list('')).rejects.toThrow(RateLimitError);
 	});
 
-	it('does not read a bare 503 as a rate limit: a wedged service has to reach blocked', async () => {
-		// Nothing separates "please wait" from "this is broken" but the header.
-		// A rate limit is not counted against the op, so a 503 that never stops
-		// coming would be retried for ever, never blocked, never surfaced, with
-		// every op behind it waiting.
-		const { doFetch } = scripted(() => graphError(503, 'serviceNotAvailable'));
-		const error = await over(doFetch)
-			.list('')
-			.catch((e: unknown) => e);
-		expect(error).toBeInstanceOf(Error);
-		expect(error).not.toBeInstanceOf(RateLimitError);
-		expect((error as Error).message).toMatch(/503/);
-	});
+	it.each([[undefined], ['4']])(
+		'does not read a 503 as a rate limit, Retry-After %s or not',
+		async (retryAfter) => {
+			// A 503 is "temporarily unavailable for maintenance or is
+			// overloaded", and the same table says its delay is "the length of
+			// which can be specified in a Retry-After header" — so the header
+			// cannot tell an outage from throttling. A rate limit is not counted
+			// against the op, so a 503 read as one would be retried for ever:
+			// never blocked, never surfaced, every op behind it waiting.
+			// https://learn.microsoft.com/en-us/graph/errors
+			const { doFetch } = scripted(
+				() =>
+					new Response(JSON.stringify({ error: { code: 'serviceNotAvailable' } }), {
+						status: 503,
+						...(retryAfter === undefined
+							? {}
+							: { headers: { 'retry-after': retryAfter } }),
+					})
+			);
+			const error = await over(doFetch)
+				.list('')
+				.catch((e: unknown) => e);
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(RateLimitError);
+			expect((error as Error).message).toMatch(/503/);
+		}
+	);
 
 	it('reads an HTTP date in Retry-After, which the header is allowed to carry', async () => {
 		const at = new Date(Date.now() + 12_000).toUTCString();

@@ -43,13 +43,19 @@ describe('parseRetryAfter', () => {
 		expect(parseRetryAfter('7 seconds', now)).toBeUndefined();
 	});
 
-	it('reads the first of a header sent twice, which `Headers.get` joins with a comma', () => {
+	it('reads a header sent twice, which `Headers.get` joins with a comma', () => {
 		// An intermediary adding its own `Retry-After` beside the provider's is
 		// all it takes. Neither `Number` nor `Date.parse` can read the pair, and
 		// falling back to the caller's backoff would throw away the only
-		// informed answer there is. Two waits say the same thing.
+		// informed answer there is. The longer of two answers to one question
+		// wins: coming back early gets us refused again, coming back late costs
+		// only the wait.
 		expect(parseRetryAfter('120, 120', now)).toBe(120_000);
-		expect(parseRetryAfter('7,30', now)).toBe(7000);
+		expect(parseRetryAfter('7,30', now)).toBe(30_000);
+		expect(parseRetryAfter('30,7', now)).toBe(30_000);
+		// And an empty one joined with a real one is the real one, not the
+		// nothing `Date.parse` makes of ", 120".
+		expect(parseRetryAfter(', 120', now)).toBe(120_000);
 	});
 
 	it('still reads one HTTP date, whose own comma is not a second value', () => {
@@ -62,5 +68,17 @@ describe('parseRetryAfter', () => {
 	it('says nothing for a number no wait could be', () => {
 		expect(parseRetryAfter('Infinity', now)).toBeUndefined();
 		expect(parseRetryAfter('NaN', now)).toBeUndefined();
+		// `Number` says `Infinity` for enough digits, and a wait of for ever is
+		// not a wait.
+		expect(parseRetryAfter('1'.repeat(400), now)).toBeUndefined();
+	});
+
+	it('says nothing rather than nothing-at-all for what only looks like a date', () => {
+		// `Date.parse` makes a day in the first century out of these, which
+		// clamps to a wait of zero — the one answer this must never invent,
+		// since it sends the caller straight back at a provider asking for room.
+		expect(parseRetryAfter('.5', now)).toBeUndefined();
+		expect(parseRetryAfter('0x10', now)).toBeUndefined();
+		expect(parseRetryAfter('+30', now)).toBeUndefined();
 	});
 });
