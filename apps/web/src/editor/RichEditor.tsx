@@ -20,7 +20,10 @@ export interface RichEditorProps {
 	noteId: string;
 	/** Markdown body, frontmatter already stripped. */
 	body: string;
-	onUserEdit: (body: string) => void;
+	/** The note's `outsideRevision`. */
+	revision?: number;
+	/** The edited body, and the revision of the body it was typed into. */
+	onUserEdit: (body: string, revision: number) => void;
 	/**
 	 * Called when this note cannot survive the editor's document model — some
 	 * construct in it would be dropped the moment the user typed. The note
@@ -29,7 +32,7 @@ export interface RichEditorProps {
 	onUnsupported: () => void;
 }
 
-const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps) => {
+const EditorBody = ({ noteId, body, revision, onUserEdit, onUnsupported }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
 	useEffect(() => {
@@ -41,7 +44,7 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 		unsupported.current = onUnsupported;
 	}, [onUnsupported]);
 
-	const incoming = useIncomingBody(noteId, body);
+	const incoming = useIncomingBody(noteId, body, revision);
 	const pluginView = usePluginViewFactory();
 
 	// The body the editor was built with. Read once per note: the effect below
@@ -61,7 +64,7 @@ const EditorBody = ({ noteId, body, onUserEdit, onUnsupported }: RichEditorProps
 				body: initial.current,
 				onUserEdit: (markdown) => {
 					incoming.emit(markdown);
-					notify.current(markdown);
+					notify.current(markdown, incoming.base());
 				},
 				menus: {
 					slash: { view: pluginView({ component: SlashMenu }) },

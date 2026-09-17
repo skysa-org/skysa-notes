@@ -84,6 +84,42 @@ describe('RichEditor', () => {
 		});
 	});
 
+	it('reports an edit with the revision of the body it was typed into', async () => {
+		const onUserEdit = vi.fn();
+		const { rerender } = render(
+			<RichEditor
+				noteId="a"
+				body="Hello"
+				revision={2}
+				onUserEdit={onUserEdit}
+				onUnsupported={vi.fn()}
+			/>
+		);
+		await mounted();
+
+		act(() => {
+			setup?.onUserEdit('Hello world');
+		});
+		expect(onUserEdit).toHaveBeenLastCalledWith('Hello world', 2);
+
+		rerender(
+			<RichEditor
+				noteId="a"
+				body="Pulled"
+				revision={3}
+				onUserEdit={onUserEdit}
+				onUnsupported={vi.fn()}
+			/>
+		);
+		await waitFor(() => {
+			expect(adoptBody).toHaveBeenCalledWith(expect.anything(), 'Pulled');
+		});
+		act(() => {
+			setup?.onUserEdit('Pulled!');
+		});
+		expect(onUserEdit).toHaveBeenLastCalledWith('Pulled!', 3);
+	});
+
 	it('does not reload the note when it re-renders for some other reason', async () => {
 		// The trap: the body prop is still the value from before the user started
 		// typing, because the save has not landed yet. Loading it again would

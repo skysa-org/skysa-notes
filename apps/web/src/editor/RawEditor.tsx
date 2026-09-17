@@ -18,10 +18,13 @@ export interface RawEditorProps {
 	noteId: string;
 	/** Markdown body, frontmatter already stripped. */
 	body: string;
-	onUserEdit: (body: string) => void;
+	/** The note's `outsideRevision`. */
+	revision?: number;
+	/** The edited body, and the revision of the body it was typed into. */
+	onUserEdit: (body: string, revision: number) => void;
 }
 
-export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
+export const RawEditor = ({ noteId, body, revision, onUserEdit }: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
@@ -30,7 +33,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 	useEffect(() => {
 		notify.current = onUserEdit;
 	}, [onUserEdit]);
-	const incoming = useIncomingBody(noteId, body);
+	const incoming = useIncomingBody(noteId, body, revision);
 
 	useEffect(() => {
 		const parent = host.current;
@@ -50,7 +53,7 @@ export const RawEditor = ({ noteId, body, onUserEdit }: RawEditorProps) => {
 						if (!isUserEdit(update)) return;
 						const edited = update.state.doc.toString();
 						incoming.emit(edited);
-						notify.current(edited);
+						notify.current(edited, incoming.base());
 					}),
 				],
 			}),

@@ -35,25 +35,34 @@ export interface IncomingBody {
 	emit: (value: string) => void;
 	/** True only for a body that is new and came from somewhere else. */
 	shouldAdopt: (value: string) => boolean;
+	/**
+	 * The `outsideRevision` of the body the editor's text was built from: the
+	 * one it opened with, or the last one it adopted. An edit carries it, so a
+	 * save typed into a body that has since been replaced is not written over
+	 * the replacement (`saveNoteBody`).
+	 */
+	base: () => number;
 }
 
 /**
- * `key` identifies the note and `body` is what the editor currently holds:
- * switching notes forgets the previous one's writes and starts again from the
- * new note's body.
+ * `key` identifies the note, `body` is the note's body as stored, and
+ * `revision` is its `outsideRevision`: switching notes forgets the previous
+ * one's writes and starts again from the new note's body.
  */
-export const useIncomingBody = (key: string, body: string): IncomingBody => {
+export const useIncomingBody = (key: string, body: string, revision = 0): IncomingBody => {
 	const emitted = useRef<string[]>([]);
 	const lastSeen = useRef(body);
-	const latest = useRef(body);
+	const latest = useRef({ body, revision });
+	const base = useRef(revision);
 
 	useEffect(() => {
-		latest.current = body;
+		latest.current = { body, revision };
 	});
 
 	useEffect(() => {
 		emitted.current = [];
-		lastSeen.current = latest.current;
+		lastSeen.current = latest.current.body;
+		base.current = latest.current.revision;
 	}, [key]);
 
 	const emit = useCallback((value: string) => {
@@ -66,12 +75,18 @@ export const useIncomingBody = (key: string, body: string): IncomingBody => {
 		lastSeen.current = value;
 
 		const index = emitted.current.indexOf(value);
-		if (index === -1) return true;
+		if (index === -1) {
+			// Asked in the commit that brought `value`, so this is its revision.
+			base.current = latest.current.revision;
+			return true;
+		}
 
 		// Ours. Everything before it was superseded and can never echo.
 		emitted.current = emitted.current.slice(index + 1);
 		return false;
 	}, []);
 
-	return useMemo(() => ({ emit, shouldAdopt }), [emit, shouldAdopt]);
+	const current = useCallback(() => base.current, []);
+
+	return useMemo(() => ({ emit, shouldAdopt, base: current }), [emit, shouldAdopt, current]);
 };

@@ -60,6 +60,14 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 	);
 };
 
+interface Edit {
+	body: string;
+	/** See `NoteRecord.outsideRevision`. */
+	revision: number;
+}
+
+const sameBase = (next: Edit, pending: Edit): boolean => next.revision === pending.revision;
+
 export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
@@ -71,16 +79,37 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const [unsupportedId, setUnsupportedId] = useState<string | null>(null);
 	const unsupported = noteId !== undefined && unsupportedId === noteId;
 
+	// The note as last shown. An edit still on its way when a sync deletes the
+	// note is flushed as the editor goes, before this hears the note has gone,
+	// and brings it back from this.
+	const shown = useRef(note);
+	useEffect(() => {
+		shown.current = note;
+	}, [note]);
+
 	const save = useCallback(
-		(body: string) => {
-			if (noteId === undefined) return;
-			void saveNoteBody(db, noteId, body);
+		({ body, revision }: Edit) => {
+			const last = shown.current;
+			if (noteId === undefined || last?.id !== noteId) return;
+			void saveNoteBody(db, noteId, body, { revision, note: last });
 		},
 		[noteId]
 	);
 
-	const autosave = useAutosave({ key: noteId ?? 'none', save });
-	const { flush } = autosave;
+	const autosave = useAutosave<Edit>({
+		key: noteId ?? 'none',
+		save,
+		// An edit typed into a body a sync has since replaced is saved on its own,
+		// before the next one — made from the new body — can stand for it.
+		supersedes: sameBase,
+	});
+	const { change, flush } = autosave;
+	const onUserEdit = useCallback(
+		(body: string, revision: number) => {
+			change({ body, revision });
+		},
+		[change]
+	);
 
 	const mode: EditorMode | undefined = unsupported ? 'raw' : (note?.editorMode ?? defaultMode);
 
@@ -177,13 +206,19 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 			)}
 
 			{mode === 'raw' && (
-				<RawEditor noteId={note.id} body={note.body} onUserEdit={autosave.change} />
+				<RawEditor
+					noteId={note.id}
+					body={note.body}
+					revision={note.outsideRevision ?? 0}
+					onUserEdit={onUserEdit}
+				/>
 			)}
 			{mode === 'rich' && (
 				<RichEditor
 					noteId={note.id}
 					body={note.body}
-					onUserEdit={autosave.change}
+					revision={note.outsideRevision ?? 0}
+					onUserEdit={onUserEdit}
 					onUnsupported={() => {
 						setUnsupportedId(note.id);
 					}}

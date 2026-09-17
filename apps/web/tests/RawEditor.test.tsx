@@ -39,7 +39,7 @@ describe('RawEditor', () => {
 		editorView(container).dispatch({ changes: { from: 5, insert: ' world' } });
 
 		expect(onUserEdit).toHaveBeenCalledTimes(1);
-		expect(onUserEdit).toHaveBeenCalledWith('Hello world');
+		expect(onUserEdit).toHaveBeenCalledWith('Hello world', 0);
 	});
 
 	it('does not report an edit when the body changes underneath it', () => {

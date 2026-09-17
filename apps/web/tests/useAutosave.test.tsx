@@ -151,4 +151,33 @@ describe('useAutosave', () => {
 		expect(first).not.toHaveBeenCalled();
 		expect(second).toHaveBeenCalledExactlyOnceWith('value');
 	});
+
+	it('saves the pending value first when the next one does not stand for it', () => {
+		const save = vi.fn();
+		const { result } = renderHook(() =>
+			useAutosave<{ body: string; base: number }>({
+				key: 'a',
+				save,
+				delayMs: 2000,
+				supersedes: (next, pending) => next.base === pending.base,
+			})
+		);
+
+		act(() => {
+			result.current.change({ body: 'a', base: 1 });
+			result.current.change({ body: 'ab', base: 1 });
+		});
+		expect(save).not.toHaveBeenCalled();
+
+		act(() => {
+			result.current.change({ body: 'x', base: 2 });
+		});
+		expect(save).toHaveBeenCalledExactlyOnceWith({ body: 'ab', base: 1 });
+
+		act(() => {
+			vi.advanceTimersByTime(2000);
+		});
+		expect(save).toHaveBeenLastCalledWith({ body: 'x', base: 2 });
+		expect(save).toHaveBeenCalledTimes(2);
+	});
 });

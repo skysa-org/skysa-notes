@@ -10,47 +10,61 @@ import { useCallback, useEffect, useRef } from 'react';
 
 export const AUTOSAVE_DELAY_MS = 2000;
 
-export interface UseAutosaveOptions {
+export interface UseAutosaveOptions<T> {
 	/** Changing this flushes the pending save before the new note takes over. */
 	key: string;
-	save: (value: string) => void | Promise<void>;
+	save: (value: T) => void | Promise<void>;
 	delayMs?: number;
+	/**
+	 * Whether a new value may replace the pending one. When it may not, the
+	 * pending one is saved first: a value only ever stands for everything
+	 * before it when it was made from it. Defaults to always.
+	 */
+	supersedes?: (next: T, pending: T) => boolean;
 }
 
-export interface Autosave {
+export interface Autosave<T> {
 	/** Record a user edit. The write happens after the debounce window. */
-	change: (value: string) => void;
+	change: (value: T) => void;
 	/** Write immediately, if anything is pending. */
 	flush: () => void;
 }
 
-export const useAutosave = ({
+export const useAutosave = <T>({
 	key,
 	save,
 	delayMs = AUTOSAVE_DELAY_MS,
-}: UseAutosaveOptions): Autosave => {
-	const pending = useRef<string>(null);
+	supersedes,
+}: UseAutosaveOptions<T>): Autosave<T> => {
+	const pending = useRef<{ value: T }>(null);
 	const timer = useRef<ReturnType<typeof setTimeout>>(null);
 	const saveRef = useRef(save);
 	useEffect(() => {
 		saveRef.current = save;
 	}, [save]);
+	const supersedesRef = useRef(supersedes);
+	useEffect(() => {
+		supersedesRef.current = supersedes;
+	}, [supersedes]);
 
 	const flush = useCallback(() => {
 		if (timer.current !== null) {
 			clearTimeout(timer.current);
 			timer.current = null;
 		}
-		const value = pending.current;
-		if (value === null) return;
+		const held = pending.current;
+		if (held === null) return;
 
 		pending.current = null;
-		void saveRef.current(value);
+		void saveRef.current(held.value);
 	}, []);
 
 	const change = useCallback(
-		(value: string) => {
-			pending.current = value;
+		(value: T) => {
+			const held = pending.current;
+			const replaces = supersedesRef.current;
+			if (held !== null && replaces !== undefined && !replaces(value, held.value)) flush();
+			pending.current = { value };
 			if (timer.current !== null) clearTimeout(timer.current);
 			timer.current = setTimeout(flush, delayMs);
 		},

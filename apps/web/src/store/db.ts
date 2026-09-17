@@ -60,6 +60,18 @@ export interface NoteRecord {
 	source?: string;
 	/** Set only by a real user edit, never by load, mode switch or re-serialize. */
 	dirty: Flag;
+	/**
+	 * How many times the body has been replaced from outside this device's
+	 * editors — a pull, an import, the remote side of a conflict — while the row
+	 * stayed the same note. Absent reads as 0.
+	 *
+	 * An editor holds edits for a moment before they are saved, and `dirty` says
+	 * nothing about those, so a pull can replace a clean note's body, or delete
+	 * the note, underneath them. Each edit carries the revision of the body it
+	 * was typed into, and `saveNoteBody` does not write one made against an
+	 * older body over the newer one.
+	 */
+	outsideRevision?: number;
 	/** Tombstone: kept until the delete has been pushed, so sync can replay it. */
 	deletedLocally: Flag;
 	createdAt: number;

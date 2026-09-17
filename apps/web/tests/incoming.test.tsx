@@ -83,6 +83,49 @@ describe('useIncomingBody', () => {
 		expect(result.current.shouldAdopt('note one body')).toBe(true);
 	});
 
+	describe('base', () => {
+		const withRevision = () =>
+			renderHook(
+				({ id, value, revision }: { id: string; value: string; revision: number }) =>
+					useIncomingBody(id, value, revision),
+				{ initialProps: { id: 'note-1', value: 'start', revision: 3 } }
+			);
+
+		it('is the revision the editor opened with', () => {
+			const { result } = withRevision();
+			expect(result.current.base()).toBe(3);
+		});
+
+		it('moves to the revision of a body the editor adopts, and not before', () => {
+			const { result, rerender } = withRevision();
+
+			rerender({ id: 'note-1', value: 'pulled', revision: 4 });
+			// Not adopted yet: the editor still holds what it held.
+			expect(result.current.base()).toBe(3);
+
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+			expect(result.current.base()).toBe(4);
+		});
+
+		it('stays put for the editor’s own save coming back', () => {
+			const { result, rerender } = withRevision();
+			act(() => {
+				result.current.emit('typed');
+			});
+
+			rerender({ id: 'note-1', value: 'typed', revision: 5 });
+
+			expect(result.current.shouldAdopt('typed')).toBe(false);
+			expect(result.current.base()).toBe(3);
+		});
+
+		it('starts again from the revision of another note', () => {
+			const { result, rerender } = withRevision();
+			rerender({ id: 'note-2', value: 'other', revision: 9 });
+			expect(result.current.base()).toBe(9);
+		});
+	});
+
 	it('keeps a stable identity, so it can be an effect dependency', () => {
 		const { result, rerender } = guard();
 		const first = result.current;

@@ -1,5 +1,7 @@
 import {
 	basename,
+	conflictContent,
+	conflictPath,
 	contentHash,
 	deriveTitle,
 	joinPath,
@@ -255,6 +257,14 @@ const applyEdit = async (
 		return withHash;
 	});
 
+/** What an edit was typed into: see `NoteRecord.outsideRevision`. */
+export interface EditBase {
+	/** The `outsideRevision` of the body the editor held when this was typed. */
+	revision: number;
+	/** The note as the editor last showed it, to bring back if it has gone. */
+	note: NoteRecord;
+}
+
 /**
  * Record a user edit to the body.
  *
@@ -264,12 +274,36 @@ const applyEdit = async (
  * `untitled.md` no matter what the user typed. Once a note has a name, editing a
  * heading never renames the file: a note imported from another tool must not be
  * renamed on disk just because someone edited it.
+ *
+ * An editor passes `base`, because what it saves was typed before it was saved
+ * and a sync may have landed in between. A clean note is sync's to replace or
+ * delete, and the edit on its way is not in the row to stop it. So, never
+ * losing either side (§7):
+ * - the body was replaced since: the edit is written beside it as a conflict
+ *   copy, and the note keeps what replaced it;
+ * - the note is gone (deleted elsewhere): it is brought back as it was shown,
+ *   holding the edit, cut loose from the file that was deleted — what a dirty
+ *   note deleted remotely gets too.
  */
 export const saveNoteBody = async (
 	db: NotesDatabase,
 	id: string,
-	body: string
+	body: string,
+	base?: EditBase
 ): Promise<NoteRecord> =>
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
+		if (base === undefined) return applyBody(db, id, body);
+		const current = await db.notes.get(id);
+		if (current === undefined) return bringBack(db, base, body);
+		// A tombstone keeps the edit and stays deleted, as it always has: the
+		// delete wins (§7), and restoring it brings the edit back with it.
+		if (current.deletedLocally === 1) return applyBody(db, id, body);
+		if ((current.outsideRevision ?? 0) === base.revision) return applyBody(db, id, body);
+		if (current.body === body) return current;
+		return copyBeside(db, current, base.note, body);
+	});
+
+const applyBody = (db: NotesDatabase, id: string, body: string): Promise<NoteRecord> =>
 	// Every one of these questions — is the note still unnamed, what is it called
 	// now, which filenames are taken — is asked inside the transaction. Asked
 	// outside it, an autosave that fires on its own two seconds after the user
@@ -295,6 +329,71 @@ export const saveNoteBody = async (
 			path: replaceBasename(note.path, uniqueFilename(heading, taken)),
 		};
 	});
+
+/** Write a new dirty note and owe the remote its file. Inside the caller's transaction. */
+const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRecord> => {
+	const source = record.source ?? noteFileContents(record);
+	const withHash: NoteRecord = {
+		...record,
+		source,
+		contentHash: await Dexie.waitFor(contentHash(source)),
+	};
+	const folderPath = parentPath(withHash.path);
+	if (folderPath !== '') {
+		await ensureFolder(db, folderPath, { connectionId: withHash.connectionId });
+	}
+	await db.notes.put(withHash);
+	await queueWrite(db, withHash);
+	return withHash;
+};
+
+const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
+	const shown = base.note;
+	const connectionId = await activeConnectionId(db);
+	const folderPath = parentPath(shown.path);
+	// The path may have been taken since, by a file the same pull brought in.
+	const taken = await takenNamesIn(db, connectionId, folderPath, shown.id);
+	const path = joinPath(folderPath, freeName(basename(shown.path), taken));
+	const { remoteId: _remoteId, remoteVersion: _remoteVersion, source: _source, ...kept } = shown;
+	return addEdited(db, {
+		...kept,
+		connectionId,
+		path,
+		body,
+		title: titleFor(shown.frontmatter, body, path),
+		dirty: 1,
+		deletedLocally: 0,
+		updatedAt: Date.now(),
+		// The body it holds now is the editor's, so the editor's next edit is
+		// made against it.
+		outsideRevision: base.revision,
+	});
+};
+
+const copyBeside = async (
+	db: NotesDatabase,
+	current: NoteRecord,
+	shown: NoteRecord,
+	body: string
+): Promise<NoteRecord> => {
+	const now = Date.now();
+	const copyId = crypto.randomUUID();
+	const taken = await takenNamesIn(db, current.connectionId, parentPath(current.path));
+	const path = conflictPath(current.path, new Date(now), taken);
+	// The file as the user was writing it: their frontmatter, their words.
+	const source = conflictContent(noteFileContents({ ...shown, body, updatedAt: now }), copyId);
+	return addEdited(db, {
+		...noteRecordFromFile({
+			id: copyId,
+			connectionId: current.connectionId,
+			path,
+			source,
+			hash: '',
+			now,
+		}),
+		dirty: 1,
+	});
+};
 
 /**
  * Rename a note. The title is the identity the user sees; the filename follows
@@ -527,6 +626,15 @@ export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 		createdAt: existing?.createdAt ?? timeFrom(parsed.created, input.now),
 		updatedAt: timeFrom(parsed.updated, input.now),
 		...(existing?.editorMode === undefined ? {} : { editorMode: existing.editorMode }),
+		// Only a new body counts: a file that changed only its frontmatter
+		// leaves what an editor holds as it was, and an edit to it lands on the
+		// new frontmatter as usual.
+		...(existing === undefined
+			? {}
+			: {
+					outsideRevision:
+						(existing.outsideRevision ?? 0) + (existing.body === parsed.body ? 0 : 1),
+				}),
 	};
 };
 
