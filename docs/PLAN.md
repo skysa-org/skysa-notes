@@ -1,6 +1,6 @@
 # skysa-notes — Implementation Plan
 
-Local-first markdown note-taking PWA that syncs to a dedicated, app-owned folder on the user's cloud storage (Google Drive, OneDrive, Dropbox) or to any WebDAV server. Notes are plain `.md` files in a normal directory tree, so the user can open, edit, and back them up with any other tool.
+Local-first markdown note-taking PWA that syncs to a dedicated, app-owned folder on the user's cloud storage (Google Drive, OneDrive, Dropbox). WebDAV was planned too and is deferred indefinitely (§5.4). Notes are plain `.md` files in a normal directory tree, so the user can open, edit, and back them up with any other tool.
 
 This repo is the complete, self-hostable product: one Cloudflare Worker serving the SPA and a small API, plus the operator's own provider app registrations. This document is the source of truth for architecture and sequencing. Update it when decisions change.
 
@@ -249,6 +249,8 @@ The in-memory fake in `src/providers/fake.ts` is deliberately the strictest prov
 - Note: production apps need Dropbox "production" approval once past the dev user cap; App-folder apps have a light review.
 
 ### 5.4 WebDAV
+*Deferred indefinitely (2026-09-17).* WebDAV is not being built. What follows is the design as planned, kept so it need not be worked out again if that changes; nothing in this repo implements it.
+
 - Auth: URL + username + password (app password recommended). Stored encrypted on the backend; the client never sees them.
 - Transport: **all WebDAV traffic goes through `/api/webdav/*`** because most servers don't emit CORS headers. The proxy forwards method/headers/body verbatim, injects Basic auth, restricts to the configured base URL, and streams bodies. Supported methods: `PROPFIND`, `GET`, `PUT`, `MKCOL`, `MOVE`, `DELETE`, `REPORT`.
 - Root: the user supplies a base URL that *is* the app folder (e.g. `https://cloud.example.com/remote.php/dav/files/david/Notes/`). ensureRoot does `PROPFIND depth 0`, `MKCOL` if 404, then writes `.notesapp.json`.
@@ -271,7 +273,7 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
 - **Composition root:** `apps/api` exports `createApp({ entitlements, identityProviders, config })` as a library; its own `src/worker.ts` calls it with the defaults. An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking. Nothing in `apps/api` reads env directly except `worker.ts`.
 - Sessions with `hono/cookie`; request validation with `zod`. (`@hono/zod-validator` was declared up front and never used — the routes validate with `zod` directly — so it was removed. Re-add it when a route actually wants the middleware; the removal is not a decision against it.)
 - **Entitlement seam:** every route that mints a token or proxies WebDAV calls `entitlements.check(userId)` from an `EntitlementProvider` interface in `core`. The repo ships `AlwaysAllowed`. Operators of a shared instance can substitute their own (an email allowlist, for example) through `createApp`; no such policy logic lives in the repo.
-- **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each provider listed must have its credentials or the app refuses to boot): the WebDAV routes and proxy are not mounted when `webdav` is absent, and the client hides the option.
+- **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each provider listed must have its credentials or the app refuses to boot): the WebDAV routes and proxy are not mounted when `webdav` is absent, and the client hides the option. With WebDAV deferred (§5.4), `webdav` is still accepted there and needs no credentials, but nothing is mounted for it and the client offers no way to connect one.
 - **Identity modes** (`AUTH_MODE` env): `storage-first` (default: user = first connected storage account, as below) or `account-first` (Sign in with Google or Microsoft creates the user; storage is connected in a separate flow afterward). Both write to the same `users` table. `account-first` suits instances shared by several people, and users who want to change storage provider without losing their account.
 - **Two OAuth flows per provider, never combined.** `/auth/login/:provider` requests identity scopes only (`openid email profile`); `/auth/connect/:provider` requests storage scopes only. They share one Google client id / one Entra registration but use distinct redirect URIs and distinct callback routes. Frame the storage request in the UI as "Connect your storage", not as a second login. *Revised in Phase 4:* the storage request does **not** pass `include_granted_scopes` (see "Storage OAuth, as built"). Sharing one Google client also means sharing its revocation, because Google revokes every grant to the project at once. Disconnecting storage revokes, and that would sign the user out of Google sign-in too. Phase 9 has to choose between a separate Cloud project for sign-in and not revoking on disconnect for users who sign in with Google.
 - **Identity providers via Arctic** (`arctic` npm, Workers-compatible): Google and Microsoft Entra at launch. **Open (2026-09-14): `arctic` was deprecated by its author in July 2026 ("no longer supported"); they suggest copying the per-provider client code, which is ~50 lines each.** Nothing depends on it before Phase 9, so the dependency is not installed yet. Decide then between vendoring the two clients into `apps/api/src/identity/` (no runtime dep, and the storage OAuth in `oauth/` is hand-rolled anyway) or a maintained alternative. `IdentityProvider` interface in `apps/api/src/identity/` returns `{ providerId, subject, email, emailVerified, name }`. Adding Facebook or Apple is a new adapter + registration; Facebook would additionally need an email-confirmation fallback (email is not guaranteed from Meta) and Meta App Review with a data-deletion URL, so it is deferred.
@@ -602,7 +604,8 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 - [x] Web: connect Google Drive — the adapter in the scheduler's provider factory (`apps/web/src/sync/providers.ts`) and Google Drive offered wherever the server enables it (`CONNECTABLE`). No `LEFT_AT_PROVIDER` entry: disconnecting revokes at Google
 - [x] API: Google storage OAuth (connect with offline access and fresh consent, an unticked Drive scope answered as `connect=partial`, refresh keeping the stored token, revoke on disconnect) in the provider registry (§6, "Storage OAuth, as built")
 
-### Phase 5 — WebDAV (1–2 days)
+### Phase 5 — WebDAV (deferred indefinitely)
+*Deferred 2026-09-17.* Not scheduled; the items stay as the record of what building it would take (§5.4). Phases 6 onward do not wait on it, and "every provider" in them means the three that exist: Google Drive, OneDrive and Dropbox.
 - [ ] `/api/webdav/*` proxy with allowlisting. It streams bytes a WebDAV server chose under this origin, where `apps/web/public/_headers` does not apply (§9): its responses need their own `X-Content-Type-Options: nosniff` and a `Content-Disposition: attachment` or `Content-Security-Policy: sandbox`, so a file is never rendered as a page of this app
 - [ ] `WebDavProvider` with sync-collection detection and PROPFIND fallback
 - [ ] Decide what `remoteId` means where it *is* the path. A move changes it, so a note cannot be followed across one by id — the engine's fallback is the path, and its `live` check (§7) leans on ids surviving a move. `tests/providers/contract.ts` already has the `stableIds` escape hatch; the engine needs the matching answer, and a rename that duplicates a note is the failure to test for.
@@ -637,7 +640,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 Only needed for instances where sign-in should be separate from storage (shared instances, users who switch providers). `storage-first` remains the default.
 - [ ] `account-first` auth: Sign in with Google and Microsoft via Arctic; `identities` table; automatic merge-by-verified-email; explicit in-session link (`?link=1`) and unlink; Settings page listing linked providers; tests for: verified-email auto-link, unverified email creates new user, identity already attached to another user is refused, last identity cannot be unlinked
 - [ ] Google and Entra registrations updated with `openid email profile` and the `/auth/login/*` redirect URIs (distinct from `/auth/connect/*`); Google sign-in button branding guidelines followed
-- [ ] Verify the `/auth/login/*` routes are not mounted in `storage-first`, and that WebDAV routes are absent from the built Worker when `webdav` is not in `ENABLED_PROVIDERS`
+- [ ] Verify the `/auth/login/*` routes are not mounted in `storage-first`, and — should WebDAV ever be built (§5.4, deferred) — that its routes are absent from the built Worker when `webdav` is not in `ENABLED_PROVIDERS`
 - [ ] Abuse controls for shared instances: per-user rate limits on token minting and connection changes, connection cap
 - [ ] Account deletion: revoke provider tokens and delete all of the user's rows in one action
 
@@ -691,7 +694,7 @@ packages/
       providers/contract.test.ts
       markdown/roundtrip.test.ts
       sync/*.test.ts
-docker/nextcloud-compose.yml  # WebDAV test target
+docker/nextcloud-compose.yml  # WebDAV test target (WebDAV deferred, §5.4)
 ```
 
 Dependency rule: `core` imports nothing from `apps/*`. `web` and `api` may import `core`. The WebDAV adapter in `core` takes a `fetch`-like function so it can point at the proxy in the browser and at the server directly in tests.

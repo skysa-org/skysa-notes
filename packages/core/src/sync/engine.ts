@@ -1572,7 +1572,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// Addressed by where the note is now, not where it was when the op was
 		// queued: a pull in between rebases the note and leaves the op's own
 		// `path` behind. Invisible where `remoteId` identifies the file, and the
-		// whole address where it does not (WebDAV, Phase 5).
+		// whole address where it does not (WebDAV, deferred).
 		const from = { remoteId: note.remoteId, path: note.path };
 		const target = op.targetPath;
 		const entry = await provider.move(from, target).catch(async (error: unknown) => {

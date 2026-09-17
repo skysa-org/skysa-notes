@@ -8,7 +8,8 @@ APP_ORIGIN="http://localhost:5173"
 AUTH_MODE="storage-first"
 
 # Any of: gdrive,onedrive,dropbox,webdav. `dropbox`, `onedrive` and `gdrive`
-# are implemented — webdav is Phase 5 — and each one listed here must have its
+# are implemented — webdav is deferred indefinitely, and listing it connects
+# nothing (docs/PLAN.md §5.4) — and each one listed here must have its
 # credentials below or the app refuses to boot.
 ENABLED_PROVIDERS="dropbox"
 

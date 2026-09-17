@@ -21,8 +21,8 @@ export const MARKER_FILE = '.notesapp.json';
  */
 export const MARKER_SCHEMA_VERSION = 1;
 
-/** Storage providers this codebase plans adapters for. Only `dropbox` has one
- * today; onedrive is Phase 3, gdrive Phase 4, webdav Phase 5. */
+/** Storage providers this codebase knows. `dropbox`, `onedrive` and `gdrive`
+ * have adapters; `webdav` is deferred indefinitely (docs/PLAN.md §5.4). */
 export const PROVIDER_KINDS = ['gdrive', 'onedrive', 'dropbox', 'webdav'] as const;
 
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
