@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
-import { bindConnection } from '../src/store/connection.js';
+import { bindConnection, unbindConnection } from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
@@ -106,6 +106,73 @@ describe('reconciling with the server', () => {
 		).rejects.toThrow('offline');
 
 		expect(await activeConnectionId(db)).toBe('c1');
+	});
+});
+
+describe('reconciling while the device changes under it', () => {
+	/** A server whose first answer arrives only after `meanwhile` has run. */
+	const answeringAfter = (
+		meanwhile: () => Promise<unknown>,
+		first: Result<Connection[]>,
+		later: Result<Connection[]>
+	) => {
+		const asked = vi.fn<ApiClient['connections']>();
+		asked
+			.mockImplementationOnce(async () => {
+				await meanwhile();
+				return first;
+			})
+			.mockImplementation(() => Promise.resolve(later));
+		return { connections: asked };
+	};
+
+	it('does not bind again to a connection disconnected while it was asking', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		const client = answeringAfter(
+			() => unbindConnection(db),
+			{ ok: true, value: [connection('c1')] },
+			{ ok: false, refusal: 'sign_in_required' }
+		);
+
+		const state = await reconcileAccount(db, client);
+
+		expect(state).toEqual({ kind: 'signed-out' });
+		expect(client.connections).toHaveBeenCalledTimes(2);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('does not unbind a connection made while it was asking', async () => {
+		const db = freshDatabase();
+		const client = answeringAfter(
+			() => bindConnection(db, { connectionId: 'c2', provider: 'dropbox' }),
+			{ ok: true, value: [] },
+			{ ok: true, value: [connection('c2')] }
+		);
+
+		const state = await reconcileAccount(db, client);
+
+		expect(state).toEqual({ kind: 'connected', connection: connection('c2') });
+		expect(await activeConnectionId(db)).toBe('c2');
+	});
+
+	it('gives up rather than chase a device that keeps changing', async () => {
+		const db = freshDatabase();
+		const flip = vi.fn(async () => {
+			const bound = await activeConnectionId(db);
+			await (bound === LOCAL_CONNECTION_ID
+				? bindConnection(db, { connectionId: 'c2', provider: 'dropbox' })
+				: unbindConnection(db));
+		});
+		const client = {
+			connections: async (): Promise<Result<Connection[]>> => {
+				await flip();
+				return { ok: true, value: [connection('c1')] };
+			},
+		};
+
+		await expect(reconcileAccount(db, client)).rejects.toThrow();
+		expect(flip).toHaveBeenCalledTimes(2);
 	});
 });
 

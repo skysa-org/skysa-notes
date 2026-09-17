@@ -8,7 +8,12 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, createApiClient, type InstanceConfig } from '../src/api/client.js';
+import {
+	type ApiClient,
+	ApiError,
+	createApiClient,
+	type InstanceConfig,
+} from '../src/api/client.js';
 import { AccountPanel } from '../src/components/AccountPanel.js';
 import { bindConnection } from '../src/store/connection.js';
 import {
@@ -42,6 +47,15 @@ const clientWith = (overrides: Partial<Client> = {}): Client => ({
 	connectUrl: createApiClient().connectUrl,
 	...overrides,
 });
+
+/** A button once the user can press it. */
+const enabled = async (name: string): Promise<HTMLElement> => {
+	const button = await screen.findByRole('button', { name });
+	await waitFor(() => {
+		expect(button.hasAttribute('disabled')).toBe(false);
+	});
+	return button;
+};
 
 const dropbox = {
 	id: 'c1',
@@ -159,7 +173,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect…' }));
+		await user.click(await enabled('Disconnect…'));
 		expect(disconnect).not.toHaveBeenCalled();
 		expect(screen.getByText(/Your notes stay on this device/)).toBeTruthy();
 		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
@@ -182,7 +196,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect…' }));
+		await user.click(await enabled('Disconnect…'));
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(screen.getByRole('button', { name: 'Disconnect…' })).toBeTruthy();
@@ -201,7 +215,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect…' }));
+		await user.click(await enabled('Disconnect…'));
 		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/session has ended/);
@@ -229,11 +243,100 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect…' }));
+		await user.click(await enabled('Disconnect…'));
 		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
 		expect(await activeConnectionId(db)).toBe('c1');
+	});
+
+	it('cannot be disconnected while the server is still being asked on open', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(clientWith({ connections: () => new Promise(() => undefined) }), db);
+
+		const button = await screen.findByRole('button', { name: 'Disconnect…' });
+
+		expect(button.hasAttribute('disabled')).toBe(true);
+	});
+
+	it('moves focus to the step the user is on', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(
+			clientWith({ connections: () => Promise.resolve({ ok: true, value: [dropbox] }) }),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Disconnect…' }));
+	});
+
+	it('tells a server that failed apart from one that cannot be reached', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(
+			clientWith({
+				connections: () => Promise.resolve({ ok: true, value: [dropbox] }),
+				disconnect: () => Promise.reject(new ApiError('DELETE failed with 500', 500)),
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/could not disconnect/);
+		expect(await activeConnectionId(db)).toBe('c1');
+	});
+
+	it('can stop syncing on this device alone when the server cannot be asked', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		const disconnect = vi.fn<Client['disconnect']>(() =>
+			Promise.resolve({ ok: false, refusal: 'sign_in_required' })
+		);
+		renderPanel(
+			clientWith({
+				connections: () => Promise.resolve({ ok: false, refusal: 'sign_in_required' }),
+				disconnect,
+			}),
+			db
+		);
+		expect(screen.queryByRole('button', { name: 'Stop syncing on this device' })).toBeNull();
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+		await user.click(
+			await screen.findByRole('button', { name: 'Stop syncing on this device' })
+		);
+
+		expect(await screen.findByRole('link', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect(disconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it('offers to connect again only where the server lets it', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(
+			clientWith({
+				config: () =>
+					Promise.resolve({ authMode: 'account-first', providers: ['dropbox'] }),
+				connections: () => Promise.resolve({ ok: false, refusal: 'sign_in_required' }),
+			}),
+			db
+		);
+
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		await enabled('Disconnect…');
+		expect(screen.queryByRole('link', { name: 'Connect again' })).toBeNull();
 	});
 
 	it('offers to connect again when the session has ended', async () => {

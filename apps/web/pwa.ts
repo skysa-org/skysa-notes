@@ -41,13 +41,13 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 	navigateFallbackDenylist: [/^\/api\//],
 	runtimeCaching: [
 		{
+			// Never from a cache. The app decides what to bind and unbind from
+			// what the API says, and an hour-old list of connections, replayed
+			// on a slow link after a disconnect, would bind the device again to
+			// one that no longer exists. Offline, the app works from IndexedDB
+			// and says the server cannot be reached.
 			urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/api/'),
-			handler: 'NetworkFirst',
-			options: {
-				cacheName: 'api',
-				networkTimeoutSeconds: 10,
-				expiration: { maxEntries: 32, maxAgeSeconds: 60 * 60 },
-			},
+			handler: 'NetworkOnly',
 		},
 		{
 			// Provider responses go to IndexedDB through the sync engine or not at

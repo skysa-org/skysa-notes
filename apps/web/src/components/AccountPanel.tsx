@@ -1,8 +1,9 @@
 import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { api, type ApiClient, type InstanceConfig, type Refusal } from '../api/client.js';
+import { api, type ApiClient, ApiError, type InstanceConfig, type Refusal } from '../api/client.js';
+import { unbindConnection } from '../store/connection.js';
 import { db as defaultDb, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import {
 	type AccountState,
@@ -44,8 +45,13 @@ const returnPath = (href: string): string => {
 
 const refusalMessage = (refusal: Refusal): string =>
 	refusal === 'sign_in_required'
-		? 'Your session has ended. Connect again, then disconnect.'
+		? 'Your session has ended, so the server cannot be asked to disconnect. Connect again, then disconnect — or stop syncing on this device only.'
 		: 'The server would not disconnect this account.';
+
+const failureMessage = (error: unknown): string =>
+	error instanceof ApiError
+		? 'The server could not disconnect the account. Try again.'
+		: 'The server cannot be reached, so the account is still connected.';
 
 interface LocalProps {
 	client: Client;
@@ -86,14 +92,33 @@ interface ConnectedProps {
 	client: Client;
 	database: NotesDatabase;
 	bound: SyncStateRecord;
+	config: Asked<InstanceConfig>;
 	account: Asked<AccountState>;
 	returnTo: string;
 }
 
-const Connected = ({ client, database, bound, account, returnTo }: ConnectedProps) => {
+const Connected = ({ client, database, bound, config, account, returnTo }: ConnectedProps) => {
 	const [confirming, setConfirming] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
+	// Refused for want of a session: the server cannot be asked, and may even
+	// have let go already, its answer lost on the way back.
+	const [sessionless, setSessionless] = useState(false);
+
+	// Focus follows the step the user is on, rather than falling to the page
+	// when the button they pressed goes away. Not on first render.
+	const focusNext = useRef<'cancel' | 'open' | null>(null);
+	const cancelButton = useRef<HTMLButtonElement>(null);
+	const openButton = useRef<HTMLButtonElement>(null);
+	useEffect(() => {
+		const target = focusNext.current === 'cancel' ? cancelButton : openButton;
+		if (focusNext.current !== null) target.current?.focus();
+		focusNext.current = null;
+	}, [confirming]);
+	const confirm = (next: boolean) => {
+		focusNext.current = next ? 'cancel' : 'open';
+		setConfirming(next);
+	};
 
 	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
 	const state = answer(account);
@@ -107,14 +132,16 @@ const Connected = ({ client, database, bound, account, returnTo }: ConnectedProp
 		setProblem(null);
 		void disconnectAccount(database, client, bound.connectionId)
 			.then((outcome) => {
-				if (!outcome.ok) setProblem(refusalMessage(outcome.refusal));
+				if (outcome.ok) return;
+				setProblem(refusalMessage(outcome.refusal));
+				setSessionless(outcome.refusal === 'sign_in_required');
 			})
-			.catch(() => {
-				setProblem('The server cannot be reached, so the account is still connected.');
+			.catch((error: unknown) => {
+				setProblem(failureMessage(error));
 			})
 			.finally(() => {
 				setBusy(false);
-				setConfirming(false);
+				confirm(false);
 			});
 	};
 
@@ -124,16 +151,30 @@ const Connected = ({ client, database, bound, account, returnTo }: ConnectedProp
 				Syncing with {label}
 				{displayName !== null && <span className="muted"> · {displayName}</span>}
 			</p>
-			{state?.kind === 'signed-out' && bound.provider !== undefined && (
-				<p className="muted">
-					Your session has ended.{' '}
-					<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
-				</p>
-			)}
+			{state?.kind === 'signed-out' &&
+				bound.provider !== undefined &&
+				answer(config)?.authMode === 'storage-first' && (
+					<p className="muted">
+						Your session has ended.{' '}
+						<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
+					</p>
+				)}
 			{problem !== null && (
 				<p className="muted" role="alert">
 					{problem}
 				</p>
+			)}
+			{sessionless && (
+				<button
+					type="button"
+					className="ghost"
+					onClick={() => {
+						// Nothing is asked of the server, and nothing on it is touched.
+						void unbindConnection(database);
+					}}
+				>
+					Stop syncing on this device
+				</button>
 			)}
 			{confirming ? (
 				<div className="account-confirm">
@@ -145,10 +186,11 @@ const Connected = ({ client, database, bound, account, returnTo }: ConnectedProp
 						Disconnect
 					</button>
 					<button
+						ref={cancelButton}
 						type="button"
 						className="ghost"
 						onClick={() => {
-							setConfirming(false);
+							confirm(false);
 						}}
 						disabled={busy}
 					>
@@ -157,10 +199,14 @@ const Connected = ({ client, database, bound, account, returnTo }: ConnectedProp
 				</div>
 			) : (
 				<button
+					ref={openButton}
 					type="button"
 					className="ghost"
+					// Not while the server is still being asked on open: its
+					// answer could bind the device again right after.
+					disabled={account.kind === 'asking'}
 					onClick={() => {
-						setConfirming(true);
+						confirm(true);
 					}}
 				>
 					Disconnect…
@@ -209,6 +255,7 @@ export const AccountPanel = ({ client = api, database = defaultDb }: AccountPane
 			client={client}
 			database={database}
 			bound={bound.state}
+			config={config}
 			account={account}
 			returnTo={returnTo}
 		/>

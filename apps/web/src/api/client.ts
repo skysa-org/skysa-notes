@@ -41,16 +41,18 @@ const connectionSchema = z.object({
 
 export type Connection = z.infer<typeof connectionSchema>;
 
-const connectionsSchema = z.object({
-	// Parsed one at a time, so one row of a provider this build does not know
-	// does not hide the rows it does.
-	connections: z.array(z.unknown()).transform((rows) =>
-		rows.flatMap((row) => {
-			const parsed = connectionSchema.safeParse(row);
-			return parsed.success ? [parsed.data] : [];
-		})
-	),
-});
+const connectionsSchema = z.object({ connections: z.array(z.unknown()) });
+
+/**
+ * A row for a provider this build has no adapter for — a newer Worker's — is
+ * left out, so it does not hide the rows this build can use. Any other row it
+ * cannot read fails the whole list: dropped, a changed field would read as "no
+ * connections", and the app unbinds on that.
+ */
+const unknownProvider = (row: unknown): boolean => {
+	const tagged = z.object({ provider: z.string() }).safeParse(row);
+	return tagged.success && !(PROVIDER_KINDS as readonly string[]).includes(tagged.data.provider);
+};
 
 const tokenSchema = z.object({ accessToken: z.string().min(1), expiresAt: z.number() });
 
@@ -152,7 +154,17 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 
 		connections: async () => {
 			const result = await call('/connections', connectionsSchema);
-			return result.ok ? { ok: true, value: result.value.connections } : result;
+			if (!result.ok) return result;
+			const rows = z
+				.array(connectionSchema)
+				.safeParse(result.value.connections.filter((row) => !unknownProvider(row)));
+			if (!rows.success) {
+				throw new ApiError(
+					'/connections answered with a connection this app cannot read',
+					200
+				);
+			}
+			return { ok: true, value: rows.data };
 		},
 
 		disconnect: (connectionId) =>

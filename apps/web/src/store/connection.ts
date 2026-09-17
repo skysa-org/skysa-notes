@@ -1,6 +1,7 @@
 import { basename, joinPath, parentPath, type ProviderKind, ROOT } from '@skysa/core';
 
 import {
+	activeConnectionId,
 	type FolderRecord,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
@@ -150,7 +151,20 @@ const moveRowsTo = async (db: Scope, target: string): Promise<Moved> => {
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, work);
 
-export interface BindInput {
+/**
+ * Only if the app's connection is still this one when the transaction runs.
+ * For a decision made from a server's answer: the user, or another tab, may
+ * have bound or unbound the device while it was on its way, and acting on the
+ * answer anyway would bind a connection the server has since deleted.
+ */
+export interface Precondition {
+	ifStillOn?: string;
+}
+
+const stillOn = async (db: NotesDatabase, { ifStillOn }: Precondition): Promise<boolean> =>
+	ifStillOn === undefined || (await activeConnectionId(db)) === ifStillOn;
+
+export interface BindInput extends Precondition {
 	/** The id `apps/api` gave the connection. */
 	connectionId: string;
 	provider: ProviderKind;
@@ -159,10 +173,11 @@ export interface BindInput {
 /**
  * Make `connectionId` the app's connection, bringing every note and notebook on
  * this device with it. Safe to call again: rows already under it are left as
- * they are, cursor included, and queue nothing.
+ * they are, cursor included, and queue nothing. Answers whether it bound.
  */
-export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<void> =>
+export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boolean> =>
 	inTransaction(db, async () => {
+		if (!(await stillOn(db, input))) return false;
 		const states = await db.syncState.toArray();
 		const current = states.find((state) => state.connectionId === input.connectionId);
 		const moved = await moveRowsTo(db, input.connectionId);
@@ -195,6 +210,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<voi
 				await pending;
 				await queueWrite(db, note);
 			}, Promise.resolve());
+		return true;
 	});
 
 /**
@@ -202,8 +218,13 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<voi
  * `LOCAL_CONNECTION_ID`, cut loose from their files, and the connection's
  * cursor and queue go. The remote is not touched: disconnecting is not deleting.
  */
-export const unbindConnection = (db: NotesDatabase): Promise<void> =>
+export const unbindConnection = (
+	db: NotesDatabase,
+	precondition: Precondition = {}
+): Promise<boolean> =>
 	inTransaction(db, async () => {
+		if (!(await stillOn(db, precondition))) return false;
 		await moveRowsTo(db, LOCAL_CONNECTION_ID);
 		await db.syncState.clear();
+		return true;
 	});

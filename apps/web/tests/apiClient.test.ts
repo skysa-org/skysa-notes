@@ -26,7 +26,7 @@ describe('the API client', () => {
 		});
 	});
 
-	it('lists connections, leaving out a row it cannot read rather than all of them', async () => {
+	it('lists connections, leaving out a provider this build does not know', async () => {
 		const good = {
 			id: 'c1',
 			provider: 'dropbox',
@@ -36,7 +36,7 @@ describe('the API client', () => {
 			lastUsedAt: null,
 		};
 		const { fetch, calls } = answering(200, {
-			connections: [good, { ...good, id: 'c2', provider: 'icloud' }, { id: 7 }],
+			connections: [good, { ...good, id: 'c2', provider: 'icloud' }],
 		});
 
 		const result = await createApiClient({ fetch }).connections();
@@ -55,6 +55,24 @@ describe('the API client', () => {
 		});
 		expect(calls[0]?.url).toBe('/api/connections');
 		expect(calls[0]?.init?.credentials).toBe('same-origin');
+	});
+
+	it('throws, rather than reading as fewer connections, for any other row it cannot read', async () => {
+		// A field a newer Worker changed. Dropped, the only connection would read
+		// as none — and none, from a signed-in server, unbinds the device.
+		const { fetch } = answering(200, {
+			connections: [
+				{
+					id: 'c1',
+					provider: 'dropbox',
+					displayName: 'Ada',
+					createdAt: '2026-09-16T10:00:00Z',
+					lastUsedAt: null,
+				},
+			],
+		});
+
+		await expect(createApiClient({ fetch }).connections()).rejects.toBeInstanceOf(ApiError);
 	});
 
 	it('answers a refusal the app handles as a result, not a throw', async () => {

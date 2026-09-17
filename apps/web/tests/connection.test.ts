@@ -268,6 +268,35 @@ describe('binding a connection', () => {
 	});
 });
 
+describe('binding or unbinding on a condition', () => {
+	it('does nothing when the device is no longer on the connection named', async () => {
+		const { db, plan } = await usedLocally();
+		await bindConnection(db, DROPBOX);
+		const ops = await db.opQueue.toArray();
+
+		expect(
+			await bindConnection(db, {
+				connectionId: 'dropbox-2',
+				provider: 'dropbox',
+				ifStillOn: LOCAL_CONNECTION_ID,
+			})
+		).toBe(false);
+		expect(await unbindConnection(db, { ifStillOn: 'dropbox-2' })).toBe(false);
+
+		expect(await activeConnectionId(db)).toBe(DROPBOX.connectionId);
+		expect((await getNote(db, plan.id))?.connectionId).toBe(DROPBOX.connectionId);
+		expect(await db.opQueue.toArray()).toEqual(ops);
+	});
+
+	it('does it when the device still is', async () => {
+		const { db } = await usedLocally();
+
+		expect(await bindConnection(db, { ...DROPBOX, ifStillOn: LOCAL_CONNECTION_ID })).toBe(true);
+		expect(await unbindConnection(db, { ifStillOn: DROPBOX.connectionId })).toBe(true);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+});
+
 describe('unbinding the connection', () => {
 	it('keeps everything on the device, cut loose from the remote', async () => {
 		const db = freshDatabase();

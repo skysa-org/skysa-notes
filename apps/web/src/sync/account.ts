@@ -44,28 +44,50 @@ export type AccountState =
  * Without a session nothing changes.
  *
  * Throws when the server cannot be asked at all: offline is not an answer.
+ *
+ * The answer is acted on only if the device is still bound where it was when
+ * the question went out. If not — a disconnect, or another tab, got there first
+ * — the server is asked again, once: what it said is about a device that no
+ * longer exists.
  */
-export const reconcileAccount = async (
+export const reconcileAccount = (
 	db: NotesDatabase,
 	client: Pick<ApiClient, 'connections'>
+): Promise<AccountState> => reconcileOnce(db, client, true);
+
+const reconcileOnce = async (
+	db: NotesDatabase,
+	client: Pick<ApiClient, 'connections'>,
+	again: boolean
 ): Promise<AccountState> => {
+	const active = await activeConnectionId(db);
 	const result = await client.connections();
 	if (!result.ok) return { kind: 'signed-out' };
 
-	const active = await activeConnectionId(db);
 	const usable = result.value.filter((connection) => CONNECTABLE.includes(connection.provider));
 	// The one already bound, if the server still has it: a second, newer row
 	// would otherwise take over on every open.
 	const connection = usable.find((each) => each.id === active) ?? usable[0];
 
-	if (connection === undefined) {
-		if (active !== LOCAL_CONNECTION_ID) await unbindConnection(db);
-		return { kind: 'none' };
+	// Nothing to change is a decision too, and as stale as any other.
+	const unchanged = async () => (await activeConnectionId(db)) === active;
+	const applied =
+		connection === undefined
+			? active === LOCAL_CONNECTION_ID
+				? await unchanged()
+				: await unbindConnection(db, { ifStillOn: active })
+			: connection.id === active
+				? await unchanged()
+				: await bindConnection(db, {
+						connectionId: connection.id,
+						provider: connection.provider,
+						ifStillOn: active,
+					});
+	if (!applied) {
+		if (again) return reconcileOnce(db, client, false);
+		throw new Error('The device changed connection while the server was being asked');
 	}
-	if (connection.id !== active) {
-		await bindConnection(db, { connectionId: connection.id, provider: connection.provider });
-	}
-	return { kind: 'connected', connection };
+	return connection === undefined ? { kind: 'none' } : { kind: 'connected', connection };
 };
 
 export type DisconnectOutcome = { ok: true } | { ok: false; refusal: Refusal };
