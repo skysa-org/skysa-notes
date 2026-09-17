@@ -28,10 +28,24 @@ describe('GET /api/connections', () => {
 			rootId: null,
 		});
 
+		// The row as stored, so this asks about the secret this connection
+		// actually has rather than about words that look like one. Searching
+		// the serialized body for "iv" was flaky, and for the wrong reason: a
+		// connection id is `randomBase64Url(16)`, and roughly one in two
+		// hundred of them contains those two letters.
+		const [stored] = await rows(app.db);
+		if (stored === undefined) throw new Error('no connection row');
 		const serialized = JSON.stringify(body);
-		for (const leak of ['refresh', 'ciphertext', 'secret', 'iv', 'keyId']) {
-			expect(serialized).not.toContain(leak);
+		for (const secret of [stored.secretCiphertext, stored.secretIv, stored.secretKeyId]) {
+			expect(secret).toBeTruthy();
+			expect(serialized).not.toContain(secret);
 		}
+		// And no field is offered under a name that promises one.
+		expect(
+			Object.keys(body.connections[0] ?? {}).filter((key) =>
+				/secret|cipher|refresh|token|iv$/i.test(key)
+			)
+		).toEqual([]);
 	});
 
 	it('refuses an anonymous caller', async () => {
