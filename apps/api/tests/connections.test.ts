@@ -11,6 +11,22 @@ import { buildApp, cookieNames, createJar, testConfig } from './harness.js';
 
 const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
 
+/** Every key in a response, however deep, since a secret can be nested. */
+const namesIn = (value: unknown): string[] => {
+	if (Array.isArray(value)) return value.flatMap(namesIn);
+	if (typeof value !== 'object' || value === null) return [];
+	return Object.entries(value).flatMap(([key, inner]) => [key, ...namesIn(inner)]);
+};
+
+/**
+ * `iv` is matched as a word rather than a substring — `driveId` holds those two
+ * letters and is not a secret — so `iv`, `secretIv` and `iv_hex` are named and
+ * `driveId` is not.
+ */
+const promisesASecret = (key: string): boolean =>
+	/secret|cipher|refresh|token|credential|password/i.test(key) ||
+	/(^|[^a-z])iv([^a-z]|$)/.test(key);
+
 describe('GET /api/connections', () => {
 	it('describes the connection without describing its secret', async () => {
 		const app = buildApp();
@@ -28,24 +44,25 @@ describe('GET /api/connections', () => {
 			rootId: null,
 		});
 
-		// The row as stored, so this asks about the secret this connection
-		// actually has rather than about words that look like one. Searching
-		// the serialized body for "iv" was flaky, and for the wrong reason: a
-		// connection id is `randomBase64Url(16)`, and roughly one in two
-		// hundred of them contains those two letters.
+		// What this connection's secret actually is, sealed and in the clear,
+		// rather than words that look like a secret. The serialized body used
+		// to be searched for "iv" among others, which failed about one run in
+		// two hundred for no reason: a connection id is `randomBase64Url(16)`,
+		// so two given letters turn up in one now and then. Every needle here
+		// is long enough that a random id cannot produce it — which rules out
+		// the key id (`k1` in these tests), and it is not a secret anyway: it
+		// names which key sealed the row.
 		const [stored] = await rows(app.db);
 		if (stored === undefined) throw new Error('no connection row');
 		const serialized = JSON.stringify(body);
-		for (const secret of [stored.secretCiphertext, stored.secretIv, stored.secretKeyId]) {
-			expect(secret).toBeTruthy();
+		for (const secret of [stored.secretCiphertext, stored.secretIv, 'refresh-1']) {
+			expect(secret.length).toBeGreaterThan(8);
 			expect(serialized).not.toContain(secret);
 		}
-		// And no field is offered under a name that promises one.
-		expect(
-			Object.keys(body.connections[0] ?? {}).filter((key) =>
-				/secret|cipher|refresh|token|iv$/i.test(key)
-			)
-		).toEqual([]);
+		// And nothing is offered under a name that promises one, at any depth:
+		// the plain token is not the only way to hand one over, and a nested
+		// `credential: { refreshToken }` would pass every check above.
+		expect(namesIn(body).filter(promisesASecret)).toEqual([]);
 	});
 
 	it('refuses an anonymous caller', async () => {
