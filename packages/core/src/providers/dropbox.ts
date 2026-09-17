@@ -499,6 +499,8 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 
 	return {
 		kind: 'dropbox',
+		// The app folder is the app's: every file in it is listed.
+		listsEverything: true,
 		ensureRoot,
 		list,
 		read,

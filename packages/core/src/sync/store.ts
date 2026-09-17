@@ -52,17 +52,24 @@ export interface SyncFolder {
 	remoteId?: string;
 }
 
-export type SyncOperation = 'write' | 'move' | 'delete' | 'mkdir';
+export type SyncOperation = 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
 
 /** One queued push. `seq` orders the queue and identifies the row. */
 export interface SyncOp {
 	seq: number;
 	op: SyncOperation;
-	/** Absent for `mkdir`, which is about a folder rather than a note. */
+	/** Absent for `mkdir` and `rmdir`, which are about a folder rather than a note. */
 	noteId?: string;
 	path: string;
 	/** Where a `move` is going. */
 	targetPath?: string;
+	/**
+	 * For `rmdir`, the folder's `remoteId` as the queue recorded it. The op
+	 * removes a folder this device no longer holds, so there is no row left to
+	 * read it from — and without it the engine cannot tell the folder it is
+	 * about from whatever has the name now, so it does nothing at all.
+	 */
+	remoteId?: string;
 	/** How many times this op has already failed. */
 	attempts: number;
 }
@@ -126,6 +133,17 @@ export type PullChange =
 			remote: RemoteEntry;
 			/** `contentHash(content)`, recorded as the note's `syncedHash`. */
 			syncedHash: string;
+			/**
+			 * A queued `move` for this note has its *origin* pointed at `path`
+			 * as well — the remote has just said where the file is, and the
+			 * origin is what says whether a folder's deletion is about that file
+			 * (`delete-folder`'s `keep`). A conflict's remote side does the same,
+			 * and so does `adopt-version`, which is the branch a note with a
+			 * queued rename actually takes when the remote moves its file.
+			 * The queued rename's target is the name the user chose, and is left
+			 * alone. `move-note` needs no such rule: the engine never emits one
+			 * for a note whose own rename is queued.
+			 */
 	  }>
 	| Readonly<{
 			/**
@@ -264,6 +282,47 @@ export type PullChange =
 			 */
 			kind: 'delete-folder';
 			path: string;
+			/**
+			 * Where this folder's row stood when the batch was decided, when the
+			 * batch has moved it since — the same directory's other spelling.
+			 * Absent when nothing moved it.
+			 *
+			 * The engine is what needs it: the queue it reads is frozen before
+			 * the batch, so a queued rename's origin is spelled with the row's
+			 * old path. A store applying the rule itself does not — a
+			 * `move-folder` is always applied before the `delete-folder` that
+			 * follows it, and rebases every queued op on the way — but it costs
+			 * nothing to honour, and a rule that does not depend on the order
+			 * two changes happen to arrive in is the one worth writing down.
+			 */
+			was?: string;
+			/**
+			 * Notes the cascade must leave exactly as they are, by id. A row is
+			 * under the folder because the user moved the note there, and until
+			 * that rename runs the file is still where it was — so the folder
+			 * going says nothing at all about it. Taking the row would drop a
+			 * note whose file the remote still holds, and nothing would mention
+			 * that file again, since the cursor has moved past it: only a
+			 * re-scan would bring the note back.
+			 *
+			 * The engine names them rather than the store working it out,
+			 * because the queue is read once for the batch and whether the note
+			 * is still under the folder at all is the batch's answer, not the
+			 * store's. A note whose file *is* inside the folder is not here: it
+			 * goes with the folder, and the queued rename finds nothing left to
+			 * move.
+			 *
+			 * A store that holds the queue must still apply the rule itself as a
+			 * backstop — spare any note under the folder whose queued `move`
+			 * says its file is outside both `path` and `was` — because the
+			 * engine reads the queue when it decides the batch and the batch is
+			 * applied later: a note the user moves in between is not named here.
+			 *
+			 * An id that is not there, or not under the folder, is ignored. The
+			 * batch is decided before it is applied, and must not be rejected
+			 * for saying more than the store needs.
+			 */
+			keep?: readonly string[];
 	  }>
 	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>;
 
@@ -345,6 +404,17 @@ export type OpOutcome =
 	  }>
 	/** A delete reached the remote, so the tombstone can go. */
 	| Readonly<{ kind: 'purged'; noteId: string }>
+	| Readonly<{
+			/**
+			 * A `mkdir` landed. The folder row records the id, so a later
+			 * `rmdir` can say which folder it means and a scan can recognise
+			 * the folder as one we already have — until this, only a pull ever
+			 * set it, so a notebook made here had none until it came back.
+			 */
+			kind: 'made-folder';
+			path: string;
+			remote: RemoteEntry;
+	  }>
 	/** Nothing to record beyond the op being finished. */
 	| Readonly<{ kind: 'done' }>;
 

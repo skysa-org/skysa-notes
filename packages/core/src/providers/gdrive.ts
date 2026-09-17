@@ -1043,6 +1043,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	return {
 		kind: 'gdrive',
+		// `drive.file` hides what the app did not make (§5.1), so a listing
+		// cannot say a folder is empty.
+		listsEverything: false,
 		ensureRoot,
 		list,
 		read,

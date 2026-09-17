@@ -31,10 +31,11 @@ export interface StoreHarness {
 	seedFolder: (folder: { path: string; remoteId?: string }) => void | Promise<void>;
 	/** Queue an op and return the seq it was given. */
 	seedOp: (op: {
-		op: 'write' | 'move' | 'delete' | 'mkdir';
+		op: 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
 		path: string;
 		noteId?: string;
 		targetPath?: string;
+		remoteId?: string;
 	}) => number | Promise<number>;
 }
 
@@ -45,6 +46,14 @@ const remote = (path: string, id = 'r1', version = 'v1'): RemoteEntry => ({
 	version,
 	modifiedAt: '2026-01-01T00:00:00.000Z',
 	size: 1,
+});
+
+const folder = (path: string, id: string): RemoteEntry => ({
+	remoteId: id,
+	path,
+	kind: 'folder',
+	version: 'v1',
+	modifiedAt: '2026-01-01T00:00:00.000Z',
 });
 
 export const describeSyncStoreContract = (
@@ -320,6 +329,56 @@ export const describeSyncStoreContract = (
 				]);
 			});
 
+			it('records a folder’s id when its mkdir lands', async () => {
+				// Until this, only a pull ever set one, so a notebook made here
+				// had no id until the remote reported it back — and an `rmdir`
+				// queued for it in between could name no folder.
+				const { store, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work' });
+				const seq = await seedOp({ op: 'mkdir', path: 'Work' });
+
+				await store.completeOp(seq, {
+					kind: 'made-folder',
+					path: 'Work',
+					remote: folder('Work', 'f9'),
+				});
+
+				expect((await store.folderByPath('Work'))?.remoteId).toBe('f9');
+				expect(await store.opBySeq(seq)).toBeUndefined();
+			});
+
+			it('leaves a folder the mkdir’s path no longer names alone', async () => {
+				// Renamed here while the `mkdir` was at the network: the id is
+				// the folder at the old name, which the rename's own `mkdir` and
+				// `rmdir` are about. Written onto the row that is there now, the
+				// notebook would point at a directory it is not in.
+				const { store, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Later' });
+				const seq = await seedOp({ op: 'mkdir', path: 'Work' });
+
+				await store.completeOp(seq, {
+					kind: 'made-folder',
+					path: 'Work',
+					remote: folder('Work', 'f9'),
+				});
+
+				expect(await store.folderByPath('Work')).toBeUndefined();
+				expect((await store.folderByPath('Later'))?.remoteId).toBeUndefined();
+			});
+
+			it('hands the engine an rmdir with the id it was queued with', async () => {
+				// The row is gone by the time it runs — that is what it is for —
+				// so the op is the only thing that says which folder it means.
+				const { store, seedOp } = await harness();
+				const seq = await seedOp({ op: 'rmdir', path: 'Work', remoteId: 'f1' });
+
+				const ops = await store.pendingOps();
+				expect(ops.map((op) => [op.op, op.path, op.remoteId])).toEqual([
+					['rmdir', 'Work', 'f1'],
+				]);
+				expect((await store.opBySeq(seq))?.remoteId).toBe('f1');
+			});
+
 			it('has no cursor before the first pull', async () => {
 				const { store } = await harness();
 				expect(await store.cursor()).toBeUndefined();
@@ -464,6 +523,150 @@ export const describeSyncStoreContract = (
 				expect(await store.noteById('n1')).toBeUndefined();
 				expect(await store.noteById('n2')).toBeUndefined();
 				expect(await store.noteById('n3')).toBeDefined();
+			});
+
+			it('leaves the notes a cascade names alone, remote and all', async () => {
+				// The note is in `Work` because the user moved it there, and the
+				// rename has not been pushed: its file is still at `a.md`, which
+				// the folder's deletion says nothing about. Taking the row would
+				// lose a note the remote still holds — nothing mentions that
+				// file again, so only a re-scan would find it.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+				await seed({ id: 'n2', path: 'Work/b.md', content: 'x\n', remoteId: 'r2' });
+
+				await store.applyPull({
+					changes: [{ kind: 'delete-folder', path: 'Work', keep: ['n1', 'nope'] }],
+				});
+
+				const kept = await store.noteById('n1');
+				expect(kept?.path).toBe('Work/a.md');
+				expect(kept?.remoteId).toBe('r1');
+				expect(kept?.dirty).toBe(false);
+				expect(await store.noteById('n2')).toBeUndefined();
+			});
+
+			it('spares a note whose queued rename the batch had not seen', async () => {
+				// The engine reads the queue when it decides the batch; the
+				// batch lands later, here. A note the user moved into the
+				// notebook in between is named by no `keep`, and its file is
+				// still at the path the queued `move` gives — outside the
+				// folder, untouched by its deletion.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+				await seedOp({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'Work/a.md' });
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				expect((await store.noteById('n1'))?.remoteId).toBe('r1');
+			});
+
+			it('takes one whose queued rename leaves its file inside the folder', async () => {
+				// Renamed within the notebook, or into it from a subfolder: the
+				// file goes with the directory like any other.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/b.md', content: 'x\n', remoteId: 'r1' });
+				await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'Work/a.md',
+					targetPath: 'Work/b.md',
+				});
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				expect(await store.noteById('n1')).toBeUndefined();
+			});
+
+			it('takes one whose file was inside the folder under its old name', async () => {
+				// The batch renamed the notebook and then deleted it, so the
+				// path the change names is not the one the file sits under.
+				//
+				// Hand-built: a real batch orders the `move-folder` first, and
+				// applying it rebases the queued op, so the store would see the
+				// origin already spelled `Plans/...`. The engine needs `was`
+				// because the queue it reads is frozen before the batch; this
+				// pins the store's own rule, which does not depend on what else
+				// the batch carries or on the order it arrives in.
+				const { store, seed, seedFolder, seedOp } = await harness();
+				await seedFolder({ path: 'Plans', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Plans/b.md', content: 'x\n', remoteId: 'r1' });
+				await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'Work/a.md',
+					targetPath: 'Plans/b.md',
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'delete-folder', path: 'Plans', was: 'Work' }],
+				});
+
+				expect(await store.noteById('n1')).toBeUndefined();
+			});
+
+			it('points a queued rename’s origin at where a pull says the file is', async () => {
+				// The origin is where the file was when the user renamed it, and
+				// it is what says whether a folder deletion is about that file.
+				// Another device moving the note — here, an `upsert-note` that
+				// edits and moves it at once — makes it stale, and a stale one
+				// spares a note whose file has in fact gone with the folder.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'b.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'a.md',
+					targetPath: 'b.md',
+				});
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'n1',
+							path: 'Work/a.md',
+							content: 'theirs\n',
+							remote: remote('Work/a.md', 'r1', 'v2'),
+							syncedHash: 'h2',
+						},
+					],
+				});
+
+				const op = await store.opBySeq(seq);
+				expect(op?.path).toBe('Work/a.md');
+				// The name the user chose is not what this is about.
+				expect(op?.targetPath).toBe('b.md');
+			});
+
+			it('points it there for a version the pull only adopts', async () => {
+				// The branch a note with a queued rename actually takes when the
+				// remote moves its file: the row stays where the user put it,
+				// and the file is somewhere else again.
+				const { store, seed, seedOp } = await harness();
+				await seed({ id: 'n1', path: 'b.md', content: 'x\n', remoteId: 'r1' });
+				const seq = await seedOp({
+					op: 'move',
+					noteId: 'n1',
+					path: 'a.md',
+					targetPath: 'b.md',
+				});
+
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'adopt-version',
+							id: 'n1',
+							remote: remote('Work/a.md', 'r1', 'v2'),
+						},
+					],
+				});
+
+				expect((await store.opBySeq(seq))?.path).toBe('Work/a.md');
+				expect((await store.noteById('n1'))?.path).toBe('b.md');
 			});
 
 			it('keeps an edited note when its folder is deleted remotely', async () => {

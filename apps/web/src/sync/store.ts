@@ -104,6 +104,7 @@ const toSyncOp = (record: OpQueueRecord): SyncOp => {
 		...(record.noteId === undefined ? {} : { noteId: record.noteId }),
 		path: record.path,
 		...(record.targetPath === undefined ? {} : { targetPath: record.targetPath }),
+		...(record.remoteId === undefined ? {} : { remoteId: record.remoteId }),
 		attempts: record.attempts,
 	};
 };
@@ -209,6 +210,28 @@ export const createDexieSyncStore = (
 		await scope.opQueue.add({ connectionId, attempts: 0, queuedAt: now(), ...op });
 	};
 
+	/**
+	 * Point a queued rename's *origin* at where the pull says the note's file
+	 * is. The origin is where the file was when the user renamed it, and a pull
+	 * that carries the remote's own path for the note — an `upsert-note` for a
+	 * note another device edited and moved, a conflict's remote side — has just
+	 * said it is somewhere else. Left behind, it says the file is at a path
+	 * nothing is at, and a folder deletion reads that as "the file is not in
+	 * here" and spares a note whose file has in fact gone with the folder
+	 * (`delete-folder`'s `keep`).
+	 *
+	 * The target is left exactly as it is: it is the name the user chose, and
+	 * this is not about that.
+	 */
+	const originIsNow = async (scope: Scope, noteId: string, at: string): Promise<void> => {
+		const ops = await scope.opQueue.where('noteId').equals(noteId).toArray();
+		await scope.opQueue.bulkPut(
+			ops
+				.filter((op) => op.connectionId === connectionId && op.op === 'move')
+				.map((op) => ({ ...op, path: at }))
+		);
+	};
+
 	/** Point one note's queued ops at where it has just been moved to. */
 	const rebaseOwnOps = async (scope: Scope, noteId: string, from: string, to: string) => {
 		const ops = await scope.opQueue.where('noteId').equals(noteId).toArray();
@@ -257,6 +280,9 @@ export const createDexieSyncStore = (
 				.filter((op) => op.connectionId === connectionId && op.op === 'write')
 				.flatMap((op) => (op.seq === undefined ? [] : [op.seq]))
 		);
+		// And its origin is where the remote says the file is, whatever it was
+		// when the rename was queued.
+		await originIsNow(scope, resolution.noteId, resolution.remote.path);
 
 		// Deleted by the time the conflict lands — a write that was queued before
 		// the delete, meeting a remote change on the way out. The delete wins
@@ -331,7 +357,47 @@ export const createDexieSyncStore = (
 		);
 	};
 
-	const deleteFolder = async (scope: Scope, path: string): Promise<void> => {
+	/**
+	 * The notes under `path` whose queued rename says their file is somewhere
+	 * else entirely. The engine names these on the change (`keep`), from the
+	 * queue as it read it when the batch was decided; this is the same rule
+	 * applied here, where the queue and the rows are in one transaction, so a
+	 * note the user moved in while the batch was at the network is spared too.
+	 *
+	 * `was` is the directory's other spelling where the batch moved it: a file
+	 * inside it under its old name is inside it.
+	 */
+	const renamedOutOf = async (
+		scope: Scope,
+		path: string,
+		was: string | undefined
+	): Promise<string[]> => {
+		// The first `move` for a note, as the engine reads it: that is the one
+		// that says where the file is, and a second would name a path the file
+		// has not reached. `queueMove` keeps one, but the contract does not say
+		// so, and disagreeing with the engine here is how the two rules drift.
+		const first = [...(await opsOf(scope))]
+			.sort((one, two) => (one.seq ?? 0) - (two.seq ?? 0))
+			.reduce<Map<string, string>>(
+				(map, op) =>
+					op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
+						? map
+						: map.set(op.noteId, op.path),
+				new Map()
+			);
+		return [...first]
+			.filter(
+				([, from]) => !isWithin(from, path) && (was === undefined || !isWithin(from, was))
+			)
+			.map(([noteId]) => noteId);
+	};
+
+	const deleteFolder = async (
+		scope: Scope,
+		path: string,
+		keep: readonly string[] = [],
+		was?: string
+	): Promise<void> => {
 		// The app folder is not a notebook, and every path is within it.
 		if (normalizePath(path) === ROOT) return;
 		if ((await scope.folders.get([connectionId, path])) === undefined) return;
@@ -341,7 +407,19 @@ export const createDexieSyncStore = (
 
 		// A clean note goes with its folder. A dirty one is the user's writing and
 		// exists nowhere else, so it stays, cut loose from the file that is gone.
-		const inside = (await notesOf(scope)).filter((note) => isWithin(note.path, path));
+		// A note the engine spared is left exactly as it is, remote and all: its
+		// file is elsewhere, waiting on a rename this device has queued.
+		//
+		// And any other note whose queued rename says the same. The engine reads
+		// the queue when it decides the batch and the batch is applied later, in
+		// this transaction; a note the user drags in between the two is not in
+		// `keep` and would be deleted here with its file untouched on the remote
+		// — the cursor having moved past it, so nothing would mention it again.
+		// The queue is in this transaction, so asking it here cannot be raced.
+		const spared = new Set([...keep, ...(await renamedOutOf(scope, path, was))]);
+		const inside = (await notesOf(scope)).filter(
+			(note) => isWithin(note.path, path) && !spared.has(note.id)
+		);
 		await scope.notes.bulkDelete(
 			inside.filter((note) => !isDirty(note)).map((note) => note.id)
 		);
@@ -383,6 +461,8 @@ export const createDexieSyncStore = (
 			remoteVersion: change.remote.version,
 			syncedHash: change.syncedHash,
 		});
+		// The remote has just said where this note's file is.
+		await originIsNow(scope, change.id, change.path);
 	};
 
 	const deleteNote = async (scope: Scope, id: string): Promise<void> => {
@@ -412,6 +492,11 @@ export const createDexieSyncStore = (
 					remoteVersion: change.remote.version,
 					...syncedHashOf(change.syncedHash),
 				});
+				// The row stays where the user put it — that is what this change
+				// is for — but the remote has still said where the file is, and
+				// this is the branch a note with a queued rename takes when the
+				// remote moves its file.
+				await originIsNow(scope, change.id, change.remote.path);
 				return;
 			}
 			case 'move-note': {
@@ -466,7 +551,7 @@ export const createDexieSyncStore = (
 				await moveFolder(scope, change.from, change.to, change.remoteId);
 				return;
 			case 'delete-folder':
-				await deleteFolder(scope, change.path);
+				await deleteFolder(scope, change.path, change.keep, change.was);
 				return;
 			case 'conflict':
 				await applyConflict(scope, change.resolution, hashes);
@@ -491,6 +576,18 @@ export const createDexieSyncStore = (
 		withdrawn: boolean
 	): Promise<void> => {
 		if (outcome.kind === 'done') return;
+		// The notebook's directory exists now, and the row records which one it
+		// is, so a later `rmdir` can name it. Only if the row is still at that
+		// path: renamed or deleted here while the `mkdir` was at the network,
+		// the id is the old name's folder, and the rename queued its own
+		// `mkdir` and `rmdir` for that.
+		if (outcome.kind === 'made-folder') {
+			const folder = await scope.folders.get([connectionId, outcome.path]);
+			if (folder !== undefined) {
+				await scope.folders.put({ ...folder, remoteId: outcome.remote.remoteId });
+			}
+			return;
+		}
 		if (outcome.kind === 'purged') {
 			const note = await ownNote(scope, outcome.noteId);
 			if (note === undefined) return;

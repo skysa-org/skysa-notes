@@ -29,6 +29,8 @@ export interface MemoryStore extends SyncStore {
 	/** Seed a note as though it were already synced, or already edited. */
 	readonly put: (note: Partial<SyncNote> & Pick<SyncNote, 'id' | 'path' | 'content'>) => void;
 	readonly putFolder: (folder: SyncFolder) => void;
+	/** Drop a folder row, as the app does when the user deletes or renames one. */
+	readonly removeFolder: (path: string) => void;
 	readonly queue: (op: Omit<SyncOp, 'seq' | 'attempts'> & { attempts?: number }) => SyncOp;
 	/** Withdraw a queued op, as the web queue does when a second rename replaces a move. */
 	readonly unqueue: (seq: number) => void;
@@ -109,6 +111,8 @@ export const createMemoryStore = (): MemoryStore => {
 		for (const op of [...ops.values()]) {
 			if (op.op === 'write' && op.noteId === resolution.noteId) ops.delete(op.seq);
 		}
+		// And a queued rename's origin is where the remote says the file is.
+		originIsNow(resolution.noteId, resolution.remote.path);
 		// The copy only exists locally, so it needs a push of its own.
 		queue({ op: 'write', noteId: resolution.copyId, path: resolution.copyPath });
 	};
@@ -128,6 +132,19 @@ export const createMemoryStore = (): MemoryStore => {
 		}
 		const { remoteId: _id, remoteVersion: _version, syncedHash: _hash, ...rest } = note;
 		notes.set(note.id, rest);
+	};
+
+	/**
+	 * Point a queued rename's origin at where the pull says the note's file is.
+	 * See `originIsNow` in `apps/web/src/sync/store.ts`: the origin is what a
+	 * folder deletion reads as "where the file is", and a pull that carries the
+	 * remote's own path for the note has just said it is somewhere else. The
+	 * target is the name the user chose, and is left alone.
+	 */
+	const originIsNow = (noteId: string, at: string): void => {
+		for (const op of [...ops.values()]) {
+			if (op.op === 'move' && op.noteId === noteId) ops.set(op.seq, { ...op, path: at });
+		}
 	};
 
 	/** Point one note's queued ops at where it has just been moved to. */
@@ -160,6 +177,8 @@ export const createMemoryStore = (): MemoryStore => {
 			syncedHash: change.syncedHash,
 			dirty: false,
 		});
+		// The remote has just said where this note's file is.
+		originIsNow(change.id, change.path);
 	};
 
 	const deleteOrDetach = (
@@ -213,6 +232,8 @@ export const createMemoryStore = (): MemoryStore => {
 				remoteVersion: change.remote.version,
 				...(change.syncedHash === undefined ? {} : { syncedHash: change.syncedHash }),
 			});
+			// The row stays put; the file's whereabouts are still news.
+			originIsNow(change.id, change.remote.path);
 			return;
 		}
 		if (change.kind === 'move-note') {
@@ -277,7 +298,33 @@ export const createMemoryStore = (): MemoryStore => {
 				isWithin(folder.path, change.path)
 			);
 			for (const folder of gone) folders.delete(folder.path);
-			const inside = [...notes.values()].filter((note) => isWithin(note.path, change.path));
+			// Except the ones the engine has spared: their files are not in the
+			// folder at all, because the rename that puts them there is still
+			// queued here. And the same rule applied to the queue as it stands
+			// now, which is the backstop the contract asks of a store that holds
+			// the queue: the engine read it when the batch was decided.
+			const keep = new Set([
+				...(change.keep ?? []),
+				...[
+					...[...ops.values()]
+						.sort((one, two) => one.seq - two.seq)
+						.reduce<Map<string, string>>(
+							(map, op) =>
+								op.op !== 'move' || op.noteId === undefined || map.has(op.noteId)
+									? map
+									: map.set(op.noteId, op.path),
+							new Map()
+						),
+				].flatMap(([noteId, from]) =>
+					!isWithin(from, change.path) &&
+					(change.was === undefined || !isWithin(from, change.was))
+						? [noteId]
+						: []
+				),
+			]);
+			const inside = [...notes.values()].filter(
+				(note) => isWithin(note.path, change.path) && !keep.has(note.id)
+			);
 			for (const note of inside) detachOrDelete(note);
 			return;
 		}
@@ -320,6 +367,16 @@ export const createMemoryStore = (): MemoryStore => {
 
 	const settle = (outcome: OpOutcome): void => {
 		if (outcome.kind === 'done') return;
+		// Only if the row is still at that path: the notebook may have been
+		// renamed or deleted here while the `mkdir` was at the network, and
+		// the id belongs to the folder the provider made at the old name.
+		if (outcome.kind === 'made-folder') {
+			const folder = folders.get(outcome.path);
+			if (folder !== undefined) {
+				folders.set(outcome.path, { ...folder, remoteId: outcome.remote.remoteId });
+			}
+			return;
+		}
 		if (outcome.kind === 'purged') {
 			notes.delete(outcome.noteId);
 			return;
@@ -450,6 +507,9 @@ export const createMemoryStore = (): MemoryStore => {
 		putFolder: (folder) => {
 			ensureFolderChain(parentPath(folder.path));
 			folders.set(folder.path, folder);
+		},
+		removeFolder: (path) => {
+			folders.delete(path);
 		},
 		queue,
 		unqueue: (seq) => {

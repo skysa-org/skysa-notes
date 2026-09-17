@@ -111,6 +111,20 @@ export interface WriteOptions {
  */
 export interface StorageProvider {
 	readonly kind: ProviderKind;
+	/**
+	 * Whether `list` reports everything a folder holds.
+	 *
+	 * False on Google Drive: `drive.file` shows the app only the files it made
+	 * itself, so a file the user dropped into a notebook through drive.google.com
+	 * is invisible here (docs/PLAN.md §5.1), and a listing that comes back empty
+	 * is no evidence the folder is. The engine removes a folder on the strength
+	 * of a listing (`rmdir`), and will not where this is false, because deleting
+	 * a folder takes everything under it — seen or not.
+	 *
+	 * True on Dropbox and OneDrive, which give the app its own folder and
+	 * everything in it.
+	 */
+	readonly listsEverything: boolean;
 	/** Create the app folder if missing; write the marker only if absent. */
 	readonly ensureRoot: () => Promise<{ rootId: string }>;
 	readonly list: (folderPath: string) => Promise<RemoteEntry[]>;
