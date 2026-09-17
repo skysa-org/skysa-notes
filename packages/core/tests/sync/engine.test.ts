@@ -3150,6 +3150,34 @@ describe('a dead cursor', () => {
 			expect(provider.contentAt('Work/Sub/a.md')).toBe('one\n');
 		});
 
+		it('makes the notebooks outermost first whatever order the store lists them in', async () => {
+			// `foldersWithRemote` promises no order, and both stores answer
+			// parent-first only by accident — one by its primary key, one by
+			// insertion. So the test above cannot tell an engine that sorts
+			// from a fixture that happened to be sorted. This one can.
+			await provider.createFolder('Work');
+			await provider.createFolder('Work/Sub');
+			await remoteFile('Work/Sub/a.md', 'one\n');
+			const backwards = {
+				...store,
+				foldersWithRemote: async () => [...(await store.foldersWithRemote())].reverse(),
+			};
+			const engineOver = createSyncEngine({ provider, store: backwards, now: () => AT });
+			await engineOver.pull();
+			killTheCursor(true);
+			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			if (folder === undefined) throw new Error('no folder');
+			await provider.delete(folder);
+
+			expect((await engineOver.pull()).status).toBe('ok');
+
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'mkdir', path: 'Work' },
+				{ op: 'mkdir', path: 'Work/Sub' },
+				{ op: 'write', path: 'Work/Sub/a.md' },
+			]);
+		});
+
 		it('still takes the remote\u2019s side for a file the scan did return', async () => {
 			// "Upload any local items that the service *didn't* return" — this one
 			// it did, with different bytes. The note here is clean, so its bytes

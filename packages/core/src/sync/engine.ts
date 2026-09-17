@@ -2112,10 +2112,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// since nothing cascades and each needs its own `mkdir`. The notes
 		// inside are already named one by one above.
 		if (upload) {
-			const remade = doomedFolders.flatMap((folder): PullChange[] => {
-				const at = folderNow(folder.path, changes);
-				return at === undefined ? [] : [{ kind: 'reupload-folder', path: at }];
-			});
+			const remade = [
+				...doomedFolders.flatMap((folder): string[] => {
+					const at = folderNow(folder.path, changes);
+					return at === undefined ? [] : [at];
+				}),
+			]
+				// Outermost first, as `roofsFor` orders the folders it makes.
+				// `foldersWithRemote` promises no order — both stores happen to
+				// answer parent-first, one by its primary key and one by
+				// insertion, and neither is the port's to rely on.
+				.sort((one, two) => one.length - two.length)
+				.map((path): PullChange => ({ kind: 'reupload-folder', path }));
 			// Ahead of the writes, not behind them: the queue is ordered, and a
 			// write that runs before its notebook exists is only rescued by
 			// `runWrite`'s `NotFoundError` recovery — a wasted round trip per
