@@ -503,6 +503,77 @@ export const describeSyncStoreContract = (
 				expect(note?.dirty).toBe(true);
 			});
 
+			it('sends a clean note back up rather than losing it, when the scan may have', async () => {
+				// `reupload-note`, for the rescan the provider warns about. The
+				// note has to end up owed a write and bound to nothing: a write
+				// against a `remoteVersion` for a file that is not there is
+				// refused, and a kept `syncedHash` says these bytes are already
+				// up, so nothing would ever send them.
+				const { store, seed } = await harness();
+				await seed({
+					id: 'n1',
+					path: 'a.md',
+					content: 'mine\n',
+					remoteId: 'r1',
+					remoteVersion: 'v1',
+					syncedHash: 'h1',
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'reupload-note', id: 'n1' }],
+					cursor: 'c1',
+				});
+
+				const note = await store.noteById('n1');
+				expect(note?.content).toBe('mine\n');
+				expect(note?.dirty).toBe(true);
+				expect(note?.remoteId).toBeUndefined();
+				expect(note?.remoteVersion).toBeUndefined();
+				expect(note?.syncedHash).toBeUndefined();
+				expect(
+					(await store.pendingOps()).map((op) => ({ op: op.op, path: op.path }))
+				).toEqual([{ op: 'write', path: 'a.md' }]);
+			});
+
+			it('makes a notebook the scan may have lost again, taking nothing with it', async () => {
+				// `reupload-folder` never cascades — that is the whole point.
+				// The notes under it are each named by their own change.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'x\n', remoteId: 'r1' });
+
+				await store.applyPull({
+					changes: [{ kind: 'reupload-folder', path: 'Work' }],
+					cursor: 'c1',
+				});
+
+				// The row stays; only its file is forgotten. And it drops out of
+				// `foldersWithRemote`, which is what stops the *next* scan
+				// reconciling it away as a notebook the remote no longer has.
+				expect((await store.folderByPath('Work'))?.remoteId).toBeUndefined();
+				expect(await store.foldersWithRemote()).toEqual([]);
+				// Untouched: it was not named, so it keeps the file it has.
+				expect((await store.noteById('n1'))?.remoteId).toBe('r1');
+				expect(
+					(await store.pendingOps()).map((op) => ({ op: op.op, path: op.path }))
+				).toEqual([{ op: 'mkdir', path: 'Work' }]);
+			});
+
+			it('forgives a reupload for something it does not have', async () => {
+				// A batch is decided before it is applied, and one the store
+				// rejects is retried for ever, since the cursor moves with it.
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{ kind: 'reupload-note', id: 'nope' },
+						{ kind: 'reupload-folder', path: 'Gone' },
+					],
+					cursor: 'c1',
+				});
+				expect(await store.cursor()).toBe('c1');
+				expect(await store.pendingOps()).toEqual([]);
+			});
+
 			it('takes the contents of a folder with it when the folder is deleted', async () => {
 				// The engine sends one `delete-folder` and nothing else, because a
 				// provider that reports only the folder gives it nothing else to

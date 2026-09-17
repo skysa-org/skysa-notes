@@ -244,6 +244,42 @@ describe('the Dexie sync store, beyond the contract', () => {
 		expect(row?.deletedLocally).toBe(1);
 	});
 
+	it('leaves a note the user deleted to its delete, when a rescan asks for a reupload', async () => {
+		// A tombstone is reported clean — `isDirty` says so, because reported
+		// dirty it would meet a remote change as a conflict and come back in the
+		// sidebar holding text the user deleted. So the engine names it for
+		// reupload rather than `detach-note`, and forgetting the remote here
+		// would take the `remoteId` its queued delete is addressed by: the
+		// delete would purge the row with nothing removed, and the file would
+		// come back on the next pull. It owes the remote its delete and nothing
+		// else. There is no tombstone in the memory store, so this cannot live
+		// in the shared contract.
+		const db = freshDatabase();
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		await store.applyPull({
+			changes: [
+				{
+					kind: 'upsert-note',
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remote: remote('a.md'),
+					syncedHash: 'hash',
+				},
+			],
+		});
+		await deleteNote(db, 'n1');
+		const queued = await store.pendingOps();
+
+		await store.applyPull({ changes: [{ kind: 'reupload-note', id: 'n1' }] });
+
+		const row = await getNote(db, 'n1');
+		expect(row?.deletedLocally).toBe(1);
+		expect(row?.remoteId).toBe('r1');
+		// And no write behind the delete: the ops are the ones the delete left.
+		expect(await store.pendingOps()).toEqual(queued);
+	});
+
 	it('keeps a folder’s remote id when an ensure-folder does not carry one', async () => {
 		const db = freshDatabase();
 		// A clock that moves on every call, so a row written twice cannot keep its

@@ -187,14 +187,28 @@ const graphLink = (link: string): string => {
 	return link;
 };
 
+/**
+ * Every code in a Graph error, wherever it is placed. The error resource nests
+ * a code under `innerError` — spelled `innererror` by some endpoints — and
+ * lists more in `details[]`, and the docs do not promise which one carries a
+ * given code. Missing one is the dangerous direction here: an unread
+ * `resyncChangesUploadDifferences` takes the destructive reset instead.
+ * https://learn.microsoft.com/en-us/graph/errors
+ */
 const codesOf = (error: unknown): string[] => {
 	if (typeof error !== 'object' || error === null) return [];
-	const { code, innerError, innererror } = error as {
+	const { code, innerError, innererror, details } = error as {
 		code?: unknown;
 		innerError?: unknown;
 		innererror?: unknown;
+		details?: unknown;
 	};
-	return [...(typeof code === 'string' ? [code] : []), ...codesOf(innerError ?? innererror)];
+	return [
+		...(typeof code === 'string' ? [code] : []),
+		...codesOf(innerError),
+		...codesOf(innererror),
+		...(Array.isArray(details) ? details.flatMap(codesOf) : []),
+	];
 };
 
 // ---------------------------------------------------------------------------
@@ -650,7 +664,25 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const result = await attempt<ItemPage>('GET', from.link);
 		if (!result.ok && isDeadLink(result.failure, stored)) {
 			rootBox.delete('id');
-			throw new CursorResetError(result.failure.codes.join('/') || result.failure.message);
+			// Graph names two ways to recover, and they differ on one thing:
+			// whose copy may have lost something. `resyncChangesApplyDifferences`
+			// says the service is right — "Replace any local items with the
+			// server's version (including deletes)" — which is what a scan does
+			// anyway. `resyncChangesUploadDifferences` says the opposite,
+			// "Upload any local items that the service didn't return", and is
+			// what a server-side restore answers: trusting the scan there would
+			// delete the notes the restore lost, quietly and on every device.
+			//
+			// The code is matched wherever it sits: the page says only "an error
+			// response containing one of the error codes below", and `codes`
+			// already carries Graph's nested `innerError` ones outermost-first.
+			// Anything unrecognised — including a plain `resyncRequired` — falls
+			// back to the reset we have always done, never to uploading.
+			// https://learn.microsoft.com/en-us/graph/api/driveitem-delta
+			throw new CursorResetError(
+				result.failure.codes.join('/') || result.failure.message,
+				result.failure.codes.includes('resyncChangesUploadDifferences')
+			);
 		}
 		if (!result.ok) return raise(result.failure);
 

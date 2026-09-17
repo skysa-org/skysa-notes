@@ -95,13 +95,13 @@ const remoteFile = async (path: string, content: string) => provider.write(path,
  * first sync, which takes the same path by accident and would stay green with
  * the reset handling deleted entirely.
  */
-const killTheCursor = (): void => {
+const killTheCursor = (uploadDifferences?: boolean): void => {
 	expect(store.storedCursor()).toBeDefined();
 	let thrown = false;
 	provider.setFault((call) => {
 		if (call.op !== 'changes' || thrown) return undefined;
 		thrown = true;
-		return new CursorResetError('reset');
+		return new CursorResetError('reset', uploadDifferences);
 	});
 };
 
@@ -3059,6 +3059,215 @@ describe('a dead cursor', () => {
 		await engine.pull();
 
 		expect(store.folders().map((folder) => folder.path)).toEqual(['Work']);
+	});
+
+	describe('when the provider says its own copy may have lost something', () => {
+		// Graph's `resyncChangesUploadDifferences`: "Upload any local items that
+		// the service didn't return". A server-side restore is what answers it,
+		// and the scan that follows looks exactly like one where the user
+		// deleted everything — so trusting it deletes every clean note here too,
+		// on every device, quietly. https://learn.microsoft.com/en-us/graph/api/driveitem-delta
+		it('sends a clean note back up instead of deleting it', async () => {
+			await remoteFile('a.md', 'one\n');
+			await engine.pull();
+			const kept = noteAt('a.md');
+			expect(kept?.dirty).toBeFalsy();
+			killTheCursor(true);
+			// The remote lost it; the store still points at the file it had.
+			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			if (file === undefined) throw new Error('no file');
+			await provider.delete(file);
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			// Still here, with its words, and owed a write.
+			const note = noteAt('a.md');
+			expect(note?.id).toBe(kept?.id);
+			expect(note?.content).toBe('one\n');
+			expect(note?.dirty).toBe(true);
+			expect(note?.remoteId).toBeUndefined();
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'write', path: 'a.md' },
+			]);
+
+			// And the push puts it back where it was.
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.contentAt('a.md')).toBe('one\n');
+		});
+
+		it('makes a notebook the scan did not return again, keeping what is in it', async () => {
+			await provider.createFolder('Work');
+			await remoteFile('Work/a.md', 'one\n');
+			await engine.pull();
+			killTheCursor(true);
+			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			if (folder === undefined) throw new Error('no folder');
+			await provider.delete(folder);
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			// The notebook is not deleted, and it does not cascade: the note
+			// inside is sent back up, not taken away with the folder.
+			expect(store.folders().map((each) => each.path)).toEqual(['Work']);
+			expect(noteAt('Work/a.md')?.content).toBe('one\n');
+			// In that order: the queue is ordered, and the write of a note in a
+			// notebook that is not there yet is only rescued by a round trip.
+			expect(store.ops().map((op) => op.op)).toEqual(['mkdir', 'write']);
+
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.contentAt('Work/a.md')).toBe('one\n');
+		});
+
+		it('makes every notebook again, not the outermost one only', async () => {
+			// The ordinary reset names the outermost folder alone and lets
+			// `delete-folder` cascade over what is inside it. Nothing cascades
+			// here — each notebook needs its own `mkdir` — so naming only the
+			// outermost leaves every nested one local-only, holding notes whose
+			// writes then have to make their parents by accident.
+			await provider.createFolder('Work');
+			await provider.createFolder('Work/Sub');
+			await remoteFile('Work/Sub/a.md', 'one\n');
+			await engine.pull();
+			killTheCursor(true);
+			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			if (folder === undefined) throw new Error('no folder');
+			await provider.delete(folder);
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			expect(store.folders().map((each) => each.path)).toEqual(['Work', 'Work/Sub']);
+			// Both, outermost first, and only then the note inside.
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'mkdir', path: 'Work' },
+				{ op: 'mkdir', path: 'Work/Sub' },
+				{ op: 'write', path: 'Work/Sub/a.md' },
+			]);
+
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.contentAt('Work/Sub/a.md')).toBe('one\n');
+		});
+
+		it('makes the notebooks outermost first whatever order the store lists them in', async () => {
+			// `foldersWithRemote` promises no order, and both stores answer
+			// parent-first only by accident — one by its primary key, one by
+			// insertion. So the test above cannot tell an engine that sorts
+			// from a fixture that happened to be sorted. This one can.
+			await provider.createFolder('Work');
+			await provider.createFolder('Work/Sub');
+			await remoteFile('Work/Sub/a.md', 'one\n');
+			const backwards = {
+				...store,
+				foldersWithRemote: async () => [...(await store.foldersWithRemote())].reverse(),
+			};
+			const engineOver = createSyncEngine({ provider, store: backwards, now: () => AT });
+			await engineOver.pull();
+			killTheCursor(true);
+			const folder = provider.snapshot().find((node) => node.path === 'Work');
+			if (folder === undefined) throw new Error('no folder');
+			await provider.delete(folder);
+
+			expect((await engineOver.pull()).status).toBe('ok');
+
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'mkdir', path: 'Work' },
+				{ op: 'mkdir', path: 'Work/Sub' },
+				{ op: 'write', path: 'Work/Sub/a.md' },
+			]);
+		});
+
+		it('still takes the remote\u2019s side for a file the scan did return', async () => {
+			// "Upload any local items that the service *didn't* return" — this one
+			// it did, with different bytes. The note here is clean, so its bytes
+			// are what it last synced and the remote's are the newer ones; a
+			// dirty note takes the conflict rule instead, as it always does.
+			const file = await remoteFile('a.md', 'one\n');
+			await engine.pull();
+			killTheCursor(true);
+			await provider.write('a.md', 'theirs\n', { expectedVersion: file.version });
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			expect(noteAt('a.md')?.content).toBe('theirs\n');
+			expect(noteAt('a.md')?.dirty).toBeFalsy();
+			expect(result.conflicts).toEqual([]);
+			expect(store.ops()).toEqual([]);
+		});
+
+		it('does not ask a second time for a note that is already owed a write', async () => {
+			// A dirty note takes `detach-note`, which forgets the remote and
+			// leaves the write it already has to re-create the file. Naming it
+			// for reupload as well would queue a second write of the same bytes
+			// to the same path: the first makes the file, the second is a blind
+			// write over a file the store has no version for.
+			await engine.pull();
+			killTheCursor(true);
+			store.put({
+				id: 'n2',
+				path: 'mine.md',
+				content: 'unsent\n',
+				remoteId: 'no-such-id',
+				remoteVersion: 'v1',
+				dirty: true,
+			});
+			// As the real store has it: a dirty note is dirty because an edit
+			// queued the write.
+			store.queue({ op: 'write', noteId: 'n2', path: 'mine.md' });
+
+			await engine.pull();
+
+			expect(noteAt('mine.md')?.content).toBe('unsent\n');
+			expect(noteAt('mine.md')?.remoteId).toBeUndefined();
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'write', path: 'mine.md' },
+			]);
+		});
+
+		it('remembers what the reset asked for across the pages of the rescan', async () => {
+			// Only the last page reconciles, and the flag is read there. Carried
+			// no further than the first page, every page after it scans as an
+			// ordinary reset and the notes the remote lost are deleted — the
+			// whole point of the flag, undone by paging alone.
+			provider = createFakeProvider({ pageSize: 1 });
+			await provider.ensureRoot();
+			store = createMemoryStore();
+			engine = createSyncEngine({ provider, store, now: () => AT });
+			await provider.write('a.md', 'one\n', {});
+			await provider.write('b.md', 'two\n', {});
+			await provider.write('c.md', 'three\n', {});
+			await engine.pull();
+			killTheCursor(true);
+			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			if (file === undefined) throw new Error('no file');
+			await provider.delete(file);
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			expect(noteAt('a.md')?.content).toBe('one\n');
+			expect(store.ops().map((op) => ({ op: op.op, path: op.path }))).toEqual([
+				{ op: 'write', path: 'a.md' },
+			]);
+		});
+
+		it('deletes as usual when the reset does not ask for it', async () => {
+			// The other half of the rule, and the one an unrecognised reset code
+			// falls back to: without the flag a scan is still the truth.
+			await remoteFile('a.md', 'one\n');
+			await engine.pull();
+			killTheCursor();
+			const file = provider.snapshot().find((node) => node.path === 'a.md');
+			if (file === undefined) throw new Error('no file');
+			await provider.delete(file);
+
+			await engine.pull();
+
+			expect(noteAt('a.md')).toBeUndefined();
+			expect(store.ops()).toEqual([]);
+		});
 	});
 
 	it('keeps a dirty note the re-scan did not mention', async () => {
