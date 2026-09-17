@@ -135,6 +135,17 @@ interface DriveFailure {
 	message: string;
 }
 
+/**
+ * A file this app cannot reach and will not again by asking: not there (404,
+ * which Drive also answers for no read access), or a 403 naming the access
+ * itself — unlike a 403 rate limit, which passes.
+ * https://developers.google.com/workspace/drive/api/guides/handle-errors
+ */
+const NO_ACCESS = new Set(['appNotAuthorizedToFile', 'insufficientFilePermissions']);
+const outOfReach = (failure: DriveFailure): boolean =>
+	failure.status === 404 ||
+	(failure.status === 403 && failure.reasons.some((reason) => NO_ACCESS.has(reason)));
+
 type Attempt<T> = { ok: true; value: T } | { ok: false; failure: DriveFailure };
 
 interface RequestParts {
@@ -302,8 +313,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	const now = options.now ?? (() => new Date());
 	/**
 	 * `id`: the app folder's id, found again at the start of every `changes`
-	 * call. `known`: the last one this adapter made or found, kept across that,
-	 * for a search that has not caught up with it yet (`withKnown`).
+	 * call. `known`: the last one this adapter — this page, in the app — made,
+	 * found or confirmed for a stored cursor, kept across that, for a search
+	 * that has not caught up with it yet (`withKnown`).
 	 */
 	const rootBox = new Map<'id' | 'known', string>();
 
@@ -457,7 +469,8 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	/**
 	 * The tagged folders the search lists, and the one this adapter last made or
-	 * found if the search leaves it out and it is not in the trash. A folder
+	 * found if the search leaves it out and it is not in the trash or out of
+	 * reach. A folder
 	 * made a moment ago need not be listed yet: on a first connect the
 	 * scheduler's `ensureRoot` makes one and the first pull looks again seconds
 	 * later, and without this a lagging search would have that pull make a
@@ -467,7 +480,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const known = rootBox.get('known');
 		if (known === undefined || listed.some((root) => root.id === known)) return listed;
 		const result = await attempt<DriveFile>('GET', fileUrl(known));
-		if (!result.ok && result.failure.status !== 404) raise(result.failure);
+		if (!result.ok && !outOfReach(result.failure)) raise(result.failure);
 		if (!result.ok || result.value.trashed === true) return listed;
 		return byAge([...listed, result.value]);
 	};
@@ -585,6 +598,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			}
 		}
 		rootBox.set('id', expected);
+		rootBox.set('known', expected);
 	};
 
 	/**
