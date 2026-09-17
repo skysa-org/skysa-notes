@@ -5,8 +5,16 @@ import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
 import type { FetchLike } from './dropbox.js';
 import {
+	applyItem,
+	nodeSchema,
+	nodesOf,
+	pageFrom,
+	pendingSchema,
+	settlePage,
+	type TreeItem,
+} from './idTree.js';
+import {
 	AuthError,
-	type ChangeEntry,
 	type ChangeSet,
 	ConflictError,
 	CursorResetError,
@@ -189,37 +197,11 @@ const codesOf = (error: unknown): string[] => {
 // ---------------------------------------------------------------------------
 // The delta cursor.
 //
-// Graph's delta feed names items by id and parent id and never by path — "the
-// parentReference property on items won't include a value for path … renaming a
-// folder doesn't result in any descendants of the folder being returned". So the
-// adapter has to know the tree to say where anything is, and that knowledge has
-// to outlive the page it was learnt from: a note edited today sits in a folder
-// the feed last mentioned a month ago.
-//
-// It travels in the cursor, which the engine already persists per connection
-// and only after the batch commits. That keeps `core` stateless, keeps the tree
-// exactly as current as the cursor that goes with it, and costs a few hundred
-// bytes a note in IndexedDB.
+// Graph's delta feed names items by id and parent id and never by path, so the
+// adapter reads it against a tree kept in the cursor (`idTree.ts`). What is
+// Graph's own is below: where the feed resumes, and the refusal of a scan that
+// places nothing.
 // ---------------------------------------------------------------------------
-
-/** One item of the tree: `[id, parentId, name, isFolder]`. */
-const nodeSchema = z.tuple([z.string(), z.string(), z.string(), z.boolean()]);
-
-/**
- * A live item not yet reported because its parent chain does not reach the app
- * folder yet: `[id, eTag, modifiedAt, size, was]` — size `-1` for none, and
- * `was` the path it had before the round moved it, `null` if it had none. Graph
- * lists parents first in practice, but nothing documents it, and an item
- * dropped here would never be reported again. `was` travels with it because the
- * tree no longer knows it: the item's node already names its new parent.
- */
-const pendingSchema = z.tuple([
-	z.string(),
-	z.string(),
-	z.string(),
-	z.number(),
-	z.string().nullable(),
-]);
 
 const cursorSchema = z.object({
 	v: z.literal(1),
@@ -234,29 +216,6 @@ const cursorSchema = z.object({
 });
 
 type DeltaCursor = z.infer<typeof cursorSchema>;
-
-interface TreeNode {
-	parent: string;
-	name: string;
-	folder: boolean;
-}
-
-type Tree = ReadonlyMap<string, TreeNode>;
-
-interface LiveChange {
-	kind: 'live';
-	id: string;
-	version: string;
-	modifiedAt: string;
-	size: number;
-}
-
-interface GoneChange {
-	kind: 'gone';
-	id: string;
-}
-
-type Change = LiveChange | GoneChange;
 
 const parseCursor = (cursor: string): DeltaCursor => {
 	const parsed = ((): unknown => {
@@ -274,105 +233,35 @@ const parseCursor = (cursor: string): DeltaCursor => {
 };
 
 /**
- * The path of an item from the tree, or `undefined` when its chain does not
- * reach the app folder. The depth bound turns a cycle — which a well-formed
- * feed never produces — into "cannot say" rather than a stack overflow.
- */
-const pathIn = (tree: Tree, root: string, id: string, depth = 0): string | undefined => {
-	if (id === root) return ROOT;
-	const node = tree.get(id);
-	if (node === undefined || depth > tree.size) return undefined;
-	const above = pathIn(tree, root, node.parent, depth + 1);
-	return above === undefined ? undefined : joinPath(above, node.name);
-};
-
-interface Page {
-	root: string;
-	/** The tree as the page found it, for where things *were*. */
-	before: Tree;
-	/** Where the pending items were before the round moved them. */
-	was: ReadonlyMap<string, string | null>;
-	/** The tree as the page leaves it. */
-	nodes: Map<string, TreeNode>;
-	/** Keyed by id, in the order of each item's *last* appearance. */
-	changes: Map<string, Change>;
-}
-
-/**
- * Where an item was before this page: up the old tree, and through any pending
- * item on the way by the path *it* had. A pending folder's node already names
- * its new parent, which the tree cannot place yet, so walking through it would
- * lose the path of everything inside — and a deletion of one of those would go
- * unreported.
- */
-const wasOf = (page: Page, id: string, depth = 0): string | undefined => {
-	if (id === page.root) return ROOT;
-	if (page.was.has(id)) return page.was.get(id) ?? undefined;
-	const node = page.before.get(id);
-	if (node === undefined || depth > page.before.size) return undefined;
-	const above = wasOf(page, node.parent, depth + 1);
-	return above === undefined ? undefined : joinPath(above, node.name);
-};
-
-const liveChange = (id: string, item: DriveItem): LiveChange => ({
-	kind: 'live',
-	id,
-	version: item.eTag ?? '',
-	modifiedAt: item.lastModifiedDateTime ?? '',
-	size: item.size ?? -1,
-});
-
-/**
- * Applies one item to the tree and nothing else. Where anything is, and what to
- * report, is worked out only once the whole page is in (`settlePage`): a folder
- * deleted and restored in one page, or an item moved into a folder the same
- * page then deletes, reads wrongly one item at a time.
+ * A delta item as the tree takes it, or `undefined` for the app folder itself,
+ * which appears in its own feed and is the root, not an entry — and which is
+ * dropped before anything else is asked of it, since it need not name a parent.
  *
- * A deletion takes only the item's own node out. Its children stay in the tree
- * with a parent that is no longer there, which is what tells `settlePage` they
- * can no longer be placed.
+ * "The same item may appear more than once in a delta feed … use the last
+ * occurrence you see", which `applyItem` does. Graph for Business omits a
+ * deleted item's `name`, so a deletion is not asked for one.
  */
-const applyItem = (page: Page, item: DriveItem): void => {
+const treeItemOf = (item: DriveItem, root: string): TreeItem | undefined => {
 	const id = item.id;
 	if (id === undefined || id === '') throw new Error('onedrive delta sent an item with no id');
-	// The app folder itself appears in its own feed. It is the root, not an entry.
-	if (id === page.root) return;
-
-	// "The same item may appear more than once in a delta feed … use the last
-	// occurrence you see." Deleting first moves the change to the end, so the
-	// batch keeps the order in which things last happened.
-	page.changes.delete(id);
-	if (item.deleted !== undefined) {
-		page.nodes.delete(id);
-		page.changes.set(id, { kind: 'gone', id });
-		return;
-	}
+	if (id === root) return undefined;
+	if (item.deleted !== undefined) return { id, gone: true };
 
 	const parent = item.parentReference?.id;
 	if (parent === undefined || parent === '') {
 		throw new Error('onedrive delta sent an item with no parent');
 	}
-	page.nodes.set(id, { parent, name: nameOf(item), folder: item.folder !== undefined });
-	page.changes.set(id, liveChange(id, item));
+	return {
+		id,
+		gone: false,
+		parent,
+		name: nameOf(item),
+		folder: item.folder !== undefined,
+		version: item.eTag ?? '',
+		modifiedAt: item.lastModifiedDateTime ?? '',
+		size: item.size ?? -1,
+	};
 };
-
-type Held = DeltaCursor['pending'][number];
-
-interface Decided {
-	entry?: ChangeEntry;
-	pending?: Held;
-	/** A live item the round ended without placing. */
-	unplaced?: boolean;
-}
-
-interface Settled {
-	entries: ChangeEntry[];
-	pending: Held[];
-	/** Items taken out of the tree because they can no longer be placed. */
-	pruned: number;
-}
-
-const gone = (path: string, id: string): ChangeEntry => ({ path, deleted: true, remoteId: id });
 
 /**
  * 410 is Graph's "this token is no good any more; start again". On a link we
@@ -383,102 +272,6 @@ const gone = (path: string, id: string): ChangeEntry => ({ path, deleted: true, 
  */
 const isDeadLink = (failure: GraphFailure, stored: boolean): boolean =>
 	failure.status === 410 || (stored && (failure.status === 400 || failure.status === 404));
-
-const pageFrom = (from: DeltaCursor): Page => {
-	const before = new Map(
-		from.nodes.map(([id, parent, name, folder]) => [id, { parent, name, folder }])
-	);
-	return {
-		root: from.root,
-		before,
-		was: new Map(from.pending.map((held) => [held[0], held[4]])),
-		nodes: new Map(before),
-		// Items carried over from an earlier page go first, as they came first.
-		changes: new Map(
-			from.pending.map(([id, version, modifiedAt, size]) => [
-				id,
-				{ kind: 'live', id, version, modifiedAt, size },
-			])
-		),
-	};
-};
-
-/**
- * Turns an applied page into entries.
- *
- * - A deletion is reported at the path the item had before the page — Graph for
- *   Business does not even send the name. An id the tree never placed is
- *   somebody else's history (a cold start meeting a tombstone) and is dropped.
- * - A live item that can be placed is reported where it now is.
- * - One that cannot is held until the round ends: its parent may be on a later
- *   page. When the round has ended, it cannot be: Graph lists "all parent items
- *   in the hierarchy" unless asked not to (`deltaExcludeParent`), so a chain
- *   that still does not reach the app folder left it — the user can move things
- *   out of it — and the item is reported deleted where it was.
- * - A deletion inside a folder also reported deleted is still reported. The
- *   engine matches it by id and finds nothing left to do, while a filter by
- *   path cannot tell which folder a path belonged to: within one round two
- *   folders can hold the same old path, and a note deleted from one was hidden
- *   by the other's deletion and stayed on the device.
- * - At the end of a round, anything else the tree can no longer place — the
- *   contents of a folder that was deleted or moved away, which Graph need not
- *   mention — is pruned without a word. Something above it that was placed
- *   before the page moved or went, and that is reported at a path covering it.
- */
-const settlePage = (page: Page, roundEnds: boolean): Settled => {
-	const decided = [...page.changes.values()].map((change): Decided => {
-		const was = wasOf(page, change.id);
-		if (change.kind === 'gone') return was === undefined ? {} : { entry: gone(was, change.id) };
-		const path = pathIn(page.nodes, page.root, change.id);
-		if (path !== undefined) {
-			const entry = toLive(page, change, path);
-			return entry === undefined ? {} : { entry };
-		}
-		if (!roundEnds) {
-			const held: Held = [
-				change.id,
-				change.version,
-				change.modifiedAt,
-				change.size,
-				was ?? null,
-			];
-			return { pending: held };
-		}
-		page.nodes.delete(change.id);
-		return { unplaced: true, ...(was === undefined ? {} : { entry: gone(was, change.id) }) };
-	});
-
-	const unplaced = roundEnds
-		? [...page.nodes.keys()].filter((id) => pathIn(page.nodes, page.root, id) === undefined)
-		: [];
-	unplaced.forEach((id) => page.nodes.delete(id));
-
-	const entries = decided.flatMap((item) => (item.entry === undefined ? [] : [item.entry]));
-	return {
-		entries,
-		pending: decided.flatMap((item) => (item.pending === undefined ? [] : [item.pending])),
-		pruned: unplaced.length + decided.filter((item) => item.unplaced === true).length,
-	};
-};
-
-/**
- * A file with no eTag cannot be an entry, for the reason `toEntry` gives. Here
- * it is left out rather than thrown over: the cursor moves only when a page
- * goes through, so one such item would stop every pull, and push behind it. A
- * later change to the file that carries an eTag reports it.
- */
-const toLive = (page: Page, change: LiveChange, path: string): RemoteEntry | undefined => {
-	const folder = page.nodes.get(change.id)?.folder === true;
-	if (!folder && change.version === '') return undefined;
-	return {
-		remoteId: change.id,
-		path,
-		kind: folder ? 'folder' : 'file',
-		version: change.version,
-		modifiedAt: change.modifiedAt,
-		...(folder || change.size < 0 ? {} : { size: change.size }),
-	};
-};
 
 export const createOneDriveProvider = (options: OneDriveProviderOptions): StorageProvider => {
 	const { fetch: doFetch, getAccessToken, appVersion, clientId, userAgent } = options;
@@ -849,8 +642,15 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const items = result.value.value ?? [];
 		const page = pageFrom(from);
 		items.forEach((item) => {
-			applyItem(page, item);
+			const treeItem = treeItemOf(item, page.root);
+			if (treeItem !== undefined) applyItem(page, treeItem);
 		});
+		// Graph lists "all parent items in the hierarchy" of a changed item unless
+		// asked not to (`deltaExcludeParent`), so when the round ends every
+		// ancestor of what it listed is in the tree or was listed too — which is
+		// what `settlePage` asks. It does not list what is inside a folder moved
+		// in from elsewhere; `arrivals` could say which, and that waits on the
+		// live check (docs/PLAN.md §5.2).
 		const roundEnds = next === undefined;
 		const settled = settlePage(page, roundEnds);
 		const anchored =
@@ -876,7 +676,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 			v: 1,
 			link: graphLink(link),
 			root: from.root,
-			nodes: [...page.nodes].map(([id, node]) => [id, node.parent, node.name, node.folder]),
+			nodes: nodesOf(page),
 			pending: settled.pending,
 			scan: from.scan && !roundEnds,
 			anchored: anchored && !roundEnds,

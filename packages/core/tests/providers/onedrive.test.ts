@@ -551,6 +551,16 @@ describe('changes, when things leave the tree', () => {
 		expect(after.cursor).not.toContain('"f2"');
 	});
 
+	it('takes the app folder in its own feed as the root, parent or no parent', async () => {
+		// The app folder is listed like any item, and nothing promises it names a
+		// parent or has a usable name; asking either of it would stop every pull.
+		const { doFetch } = feed({
+			'': { items: [{ id: 'root', folder: {} }, file('f2', 'b.md', 'root')] },
+		});
+		const result = await over(doFetch).changes();
+		expect(result.entries).toMatchObject([{ path: 'b.md', remoteId: 'f2' }]);
+	});
+
 	it('waits for the end of the round before deciding a note has left', async () => {
 		const { doFetch } = feed({
 			...known,
