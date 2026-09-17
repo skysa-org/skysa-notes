@@ -78,18 +78,22 @@ describe('provider requests', () => {
 	});
 
 	it('go to www.googleapis.com for Google Drive, with the token', async () => {
-		const fetch = vi.fn<FetchLike>(() =>
-			Promise.resolve(Response.json({ files: [] }, { status: 200 }))
+		const fetch = vi.fn<FetchLike>((url) =>
+			Promise.resolve(
+				url.includes('alt=media')
+					? new Response('body\n')
+					: Response.json({ id: 'f1', name: 'a.md', headRevisionId: 'r1' })
+			)
 		);
 		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
 			...input,
 			provider: 'gdrive',
 		});
 
-		await provider?.list('').catch(() => undefined);
+		await provider?.read({ remoteId: 'f1', path: 'a.md' });
 
 		const [url, init] = fetch.mock.calls[0] ?? [];
-		expect(url).toMatch(/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\?/);
+		expect(url).toMatch(/^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/f1\?/);
 		expect(new Headers(init?.headers).get('authorization')).toBe('Bearer token');
 		expect(init?.signal).toBeInstanceOf(AbortSignal);
 	});

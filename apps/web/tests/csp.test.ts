@@ -155,21 +155,23 @@ describe('Content-Security-Policy', () => {
 		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
 	});
 
-	it('lets the Google Drive adapter read a note, metadata and bytes', async () => {
+	it('lets the Google Drive adapter read and update a note, metadata, bytes and upload', async () => {
 		const urls = new Set<string>();
+		const note = {
+			id: 'f1',
+			name: 'a.md',
+			mimeType: 'text/markdown',
+			parents: ['root-1'],
+			headRevisionId: 'r1',
+			createdTime: '2026-01-01T00:00:00.000Z',
+			trashed: false,
+		};
 		const fetch: FetchLike = (url) => {
 			urls.add(url);
 			if (url.includes('alt=media')) return Promise.resolve(new Response('body\n'));
-			return Promise.resolve(
-				Response.json({
-					id: 'f1',
-					name: 'a.md',
-					mimeType: 'text/markdown',
-					parents: ['root-1'],
-					headRevisionId: 'r1',
-					trashed: false,
-				})
-			);
+			// A search — for the app folder, then for the note in it.
+			if (url.includes('q=')) return Promise.resolve(Response.json({ files: [note] }));
+			return Promise.resolve(Response.json(note));
 		};
 		const provider = createProviderFactory({ appVersion: '1.2.3', fetch })({
 			connectionId: 'c1',
@@ -181,10 +183,11 @@ describe('Content-Security-Policy', () => {
 			content: 'body\n',
 			version: 'r1',
 		});
+		await provider?.write('a.md', 'edited\n', { expectedVersion: 'r1' });
 
 		const connect = policy().get('connect-src') ?? [];
 		const hosts = [...urls].map((url) => new URL(url));
-		expect(hosts).toHaveLength(2);
+		expect(hosts.some((url) => url.pathname.startsWith('/upload/'))).toBe(true);
 		expect(new Set(hosts.map((url) => url.hostname))).toEqual(new Set(['www.googleapis.com']));
 		expect(hosts.filter((url) => !connect.some((source) => allows(source, url)))).toEqual([]);
 	});
