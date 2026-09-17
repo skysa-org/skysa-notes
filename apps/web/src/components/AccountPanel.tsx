@@ -1,6 +1,6 @@
 import { useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
 	api,
@@ -82,7 +82,11 @@ const when = (at: number): string => {
  * How syncing is going, in words, or nothing to say. A refusal that connecting
  * again would fix is not said here: the panel offers to connect again instead.
  */
-const statusMessage = (status: SchedulerStatus, label: string): string | null => {
+const statusMessage = (
+	status: SchedulerStatus,
+	label: string,
+	syncable: boolean
+): string | null => {
 	switch (status.phase) {
 		case 'local':
 			return null;
@@ -93,14 +97,20 @@ const statusMessage = (status: SchedulerStatus, label: string): string | null =>
 		case 'offline':
 			return 'Offline. Changes are kept on this device and sync when the connection is back.';
 		case 'retrying':
-			return `Could not reach ${label}. Trying again shortly.`;
+			return `Could not sync with ${label}. Trying again shortly (${status.error ?? 'unknown error'}).`;
 		case 'attention':
-			return attentionMessage(status, label);
+			return attentionMessage(status, label, syncable);
 	}
 };
 
-const attentionMessage = (status: SchedulerStatus, label: string): string | null => {
+const attentionMessage = (
+	status: SchedulerStatus,
+	label: string,
+	syncable: boolean
+): string | null => {
+	// Said as what to do, with the link, instead.
 	if (needsReconnect(status)) return null;
+	if (!syncable) return `This app cannot sync with ${label} yet.`;
 	if (status.refusal === 'not_entitled') return 'This account cannot sync on this server.';
 	if (status.refusal === 'not_found') return `The server no longer has this ${label} connection.`;
 	return `Some changes could not be sent to ${label}. They will be tried again (${status.error ?? 'unknown error'}).`;
@@ -180,18 +190,25 @@ const SyncState = ({
 	returnTo,
 }: SyncStateProps) => {
 	const status = useSyncStatus(sync);
-	const message = statusMessage(status, label);
-	const reconnect = (signedOut || needsReconnect(status)) && reconnectable;
+	const syncable = bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
+	const message = statusMessage(status, label, syncable);
+	const reconnect = signedOut || needsReconnect(status);
 
 	return (
 		<>
-			{reconnect && bound.provider !== undefined && (
+			{/* Said even where there is no link to offer: sync has stopped. */}
+			{reconnect && (
 				<p className="muted">
 					{status.refusal === 'reauthorize_required' ||
 					status.error === 'authorization required'
 						? `${label} needs to be connected again.`
-						: 'Your session has ended.'}{' '}
-					<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
+						: 'Your session has ended.'}
+					{reconnectable && bound.provider !== undefined && (
+						<>
+							{' '}
+							<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
+						</>
+					)}
 				</p>
 			)}
 			{message !== null && <p className="muted">{message}</p>}
@@ -455,21 +472,6 @@ export const AccountPanel = ({
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
 
-	const asking = useRef(false);
-	const ask = useCallback(() => {
-		asking.current = true;
-		void reconcileAccount(database, client)
-			.then((value) => {
-				setAccount({ kind: 'answered', value });
-			})
-			.catch(() => {
-				setAccount({ kind: 'unreachable' });
-			})
-			.finally(() => {
-				asking.current = false;
-			});
-	}, [client, database]);
-
 	useEffect(() => {
 		void client
 			.config()
@@ -479,30 +481,43 @@ export const AccountPanel = ({
 			.catch(() => {
 				setConfig({ kind: 'unreachable' });
 			});
-		ask();
-	}, [client, ask]);
+	}, [client]);
 
-	// Another tab connecting an account binds this device too, and what this
-	// panel was told on open — no account, or another one — is no longer so.
-	// Asked again only when the binding changes, never on an answer, so a
-	// server that cannot be reached is not asked in a loop; and not about a
-	// binding the answer in hand already names, which is what the panel's own
-	// asking produces.
+	// What the server is asked about: on open, and again whenever the binding
+	// has moved to a connection the answer in hand does not name — another tab
+	// connecting an account binds this device too. Never because of an answer
+	// alone, so a server that cannot be reached is not asked in a loop, and
+	// never while a question is out: a change that lands meanwhile is weighed
+	// once the answer is in, against the binding the question was about.
 	const boundId = bound === undefined ? null : (bound.state?.connectionId ?? '');
 	const answered = answer(account);
 	const named =
 		answered?.kind === 'connected' || answered?.kind === 'other-account'
 			? answered.connection.id
 			: undefined;
-	const seenBound = useRef<string | null>(null);
+	const asking = useRef(false);
+	const askedAbout = useRef<string | null>(null);
 	useEffect(() => {
-		if (boundId === null) return;
-		const seen = seenBound.current;
-		seenBound.current = boundId;
-		if (seen === null || seen === boundId || boundId === '') return;
-		if (asking.current || named === boundId) return;
-		ask();
-	}, [boundId, named, ask]);
+		if (boundId === null || asking.current) return;
+		const before = askedAbout.current;
+		if (before === boundId) return;
+		askedAbout.current = boundId;
+		// Gone, or bound by the panel's own answer: nothing to ask.
+		if (before !== null && (boundId === '' || named === boundId)) return;
+		asking.current = true;
+		const settle = (next: Asked<AccountState>) => {
+			// Before the state changes, so the render it causes can ask again.
+			asking.current = false;
+			setAccount(next);
+		};
+		void reconcileAccount(database, client)
+			.then((value) => {
+				settle({ kind: 'answered', value });
+			})
+			.catch(() => {
+				settle({ kind: 'unreachable' });
+			});
+	}, [boundId, named, account, client, database]);
 
 	if (bound === undefined) return null;
 	const returnTo = returnPath(href);

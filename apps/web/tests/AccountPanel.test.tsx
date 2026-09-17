@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-router';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -491,9 +492,11 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		await connected(sync);
 		expect(screen.getByText(/^Offline\. Changes are kept on this device/)).toBeTruthy();
 
-		sync.say({ phase: 'retrying', error: '503' });
+		sync.say({ phase: 'retrying', error: 'dropbox 503: unavailable' });
 		expect(
-			await screen.findByText('Could not reach Dropbox. Trying again shortly.')
+			await screen.findByText(
+				'Could not sync with Dropbox. Trying again shortly (dropbox 503: unavailable).'
+			)
 		).toBeTruthy();
 	});
 
@@ -516,17 +519,45 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(screen.getAllByRole('link', { name: 'Connect again' })).toHaveLength(1);
 	});
 
-	it('does not offer to connect again where the server does not let it', async () => {
-		await connected(
-			fakeSync({ phase: 'attention', refusal: 'reauthorize_required' }),
-			clientWith({
-				config: () =>
-					Promise.resolve({ authMode: 'account-first', providers: ['dropbox'] }),
+	it.each([
+		[
+			'does not let it',
+			() =>
+				Promise.resolve<InstanceConfig>({
+					authMode: 'account-first',
+					providers: ['dropbox'],
+				}),
+		],
+		['cannot be reached to say', () => Promise.reject(new TypeError('offline'))],
+	])(
+		'says the account needs connecting again where the server %s, without the link',
+		async (_, config) => {
+			await connected(
+				fakeSync({ phase: 'attention', refusal: 'reauthorize_required' }),
+				clientWith({ config })
+			);
+			await enabled('Disconnect…');
+
+			expect(screen.getByText('Dropbox needs to be connected again.')).toBeTruthy();
+			expect(screen.queryByRole('link', { name: 'Connect again' })).toBeNull();
+		}
+	);
+
+	it('does not promise to try again with a provider this build cannot sync', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'onedrive' });
+		renderPanel(
+			clientWith({ connections: () => Promise.reject(new TypeError('offline')) }),
+			db,
+			'/',
+			fakeSync({
+				phase: 'attention',
+				error: 'This app cannot sync with this storage provider yet.',
 			})
 		);
-		await enabled('Disconnect…');
 
-		expect(screen.queryByRole('link', { name: 'Connect again' })).toBeNull();
+		expect(await screen.findByText('This app cannot sync with OneDrive yet.')).toBeTruthy();
+		expect(screen.queryByText(/tried again/)).toBeNull();
 	});
 
 	it.each([
@@ -583,6 +614,66 @@ describe('AccountPanel, when another tab changes the connection', () => {
 		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
 		await new Promise((resolve) => setTimeout(resolve, 50));
 
+		expect(connections).toHaveBeenCalledTimes(1);
+	});
+
+	it('asks about a bind that landed while its question on open was still out', async () => {
+		const db = freshDatabase();
+		const first = new Map<
+			'answer',
+			(result: Awaited<ReturnType<Client['connections']>>) => void
+		>();
+		const connections = vi
+			.fn<Client['connections']>()
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						first.set('answer', resolve);
+					})
+			)
+			.mockResolvedValue({ ok: true, value: [dropbox] });
+		renderPanel(clientWith({ connections }), db);
+		await screen.findByText(/Notes are kept on this device only/);
+		await waitFor(() => {
+			expect(connections).toHaveBeenCalledTimes(1);
+		});
+
+		// Another tab comes back from the consent page with a new session and
+		// binds, while this tab's question, sent with the old cookie, is out.
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await screen.findByText(/Syncing with Dropbox/);
+		first.get('answer')?.({ ok: false, refusal: 'sign_in_required' });
+
+		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
+		expect(screen.queryByText(/Your session has ended/)).toBeNull();
+		expect(connections).toHaveBeenCalledTimes(2);
+	});
+
+	it('asks once on open, even when React runs its effects twice', async () => {
+		const db = freshDatabase();
+		const connections = vi.fn<Client['connections']>(() =>
+			Promise.resolve({ ok: true, value: [dropbox] })
+		);
+		const router = createRouter({
+			routeTree: createRootRoute({
+				component: () => (
+					<AccountPanel
+						client={clientWith({ connections })}
+						database={db}
+						sync={fakeSync({ phase: 'local' })}
+					/>
+				),
+			}),
+			history: createMemoryHistory({ initialEntries: ['/'] }),
+		});
+		render(
+			<StrictMode>
+				<RouterProvider router={router} />
+			</StrictMode>
+		);
+
+		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
+		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(connections).toHaveBeenCalledTimes(1);
 	});
 
