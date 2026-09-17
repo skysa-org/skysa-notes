@@ -62,11 +62,13 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 
 interface Edit {
 	body: string;
-	/** See `NoteRecord.outsideRevision`. */
-	revision: number;
+	/** See `NoteRecord.bodyOrigin`. */
+	origin: string;
+	/** The note as it was shown when this was typed. */
+	note: NoteRecord | undefined;
 }
 
-const sameBase = (next: Edit, pending: Edit): boolean => next.revision === pending.revision;
+const sameBase = (next: Edit, pending: Edit): boolean => next.origin === pending.origin;
 
 export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const noteId = note?.id;
@@ -79,19 +81,22 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const [unsupportedId, setUnsupportedId] = useState<string | null>(null);
 	const unsupported = noteId !== undefined && unsupportedId === noteId;
 
-	// The note as last shown. An edit still on its way when a sync deletes the
-	// note is flushed as the editor goes, before this hears the note has gone,
-	// and brings it back from this.
+	// The note as last shown. An edit carries it: a copy of the edit is written
+	// from it, and a note a sync deleted is brought back as it.
 	const shown = useRef(note);
 	useEffect(() => {
 		shown.current = note;
 	}, [note]);
 
 	const save = useCallback(
-		({ body, revision }: Edit) => {
-			const last = shown.current;
-			if (noteId === undefined || last?.id !== noteId) return;
-			void saveNoteBody(db, noteId, body, { revision, note: last });
+		({ body, origin, note: typedInto }: Edit) => {
+			if (noteId === undefined) return;
+			void saveNoteBody(
+				db,
+				noteId,
+				body,
+				typedInto?.id === noteId ? { origin, note: typedInto } : undefined
+			);
 		},
 		[noteId]
 	);
@@ -105,8 +110,8 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	});
 	const { change, flush } = autosave;
 	const onUserEdit = useCallback(
-		(body: string, revision: number) => {
-			change({ body, revision });
+		(body: string, origin: string) => {
+			change({ body, origin, note: shown.current });
 		},
 		[change]
 	);
@@ -209,7 +214,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				<RawEditor
 					noteId={note.id}
 					body={note.body}
-					revision={note.outsideRevision ?? 0}
+					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
 				/>
 			)}
@@ -217,7 +222,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				<RichEditor
 					noteId={note.id}
 					body={note.body}
-					revision={note.outsideRevision ?? 0}
+					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
 					onUnsupported={() => {
 						setUnsupportedId(note.id);

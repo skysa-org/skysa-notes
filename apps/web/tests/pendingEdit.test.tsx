@@ -7,6 +7,7 @@ import { NoteView } from '../src/components/NoteView.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { deleteNote, getNote, saveNoteBody } from '../src/store/notes.js';
+import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 
 /**
@@ -42,7 +43,8 @@ const synced = async (content = 'before\n') => {
 			{ kind: 'upsert-note', id: 'n1', path: 'a.md', content, remote: remote('a.md', 'v1') },
 		],
 	});
-	await db.notes.update('n1', { editorMode: 'raw' });
+	// Raw by default too: a note written again from a file forgets its mode.
+	await setDefaultEditorMode(db, 'raw');
 	return store;
 };
 
@@ -105,6 +107,7 @@ afterEach(async () => {
 		db.opQueue.clear(),
 		db.syncState.clear(),
 		db.folders.clear(),
+		db.prefs.clear(),
 	]);
 });
 
@@ -227,27 +230,147 @@ describe('an edit pending when a pull deletes its note', () => {
 	});
 });
 
+describe('an edit pending when pulls land in ways that repeat themselves', () => {
+	it('is not written over a note deleted and written again in one batch', async () => {
+		const store = await synced();
+		const editor = await open();
+
+		editor.type('mine\n');
+		// A file deleted and made again at the same id: the row is new, and must
+		// not look like the one the edit was typed into.
+		await store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }, pulled('theirs\n')] });
+		await waitFor(() => {
+			expect(editor.view().state.doc.toString()).toBe('theirs\n');
+		});
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await copyOf())?.body).toBe('\nbefore\nmine\n');
+		});
+		expect((await getNote(db, 'n1'))?.body).toBe('theirs\n');
+		expect((await getNote(db, 'n1'))?.dirty).toBe(0);
+	});
+
+	it('shows a remote revert to text the editor wrote, and saves edits into it', async () => {
+		const store = await synced();
+		const editor = await open();
+
+		// Typed and taken back, so the editor has written 'before\n' itself.
+		editor.type('x');
+		act(() => {
+			const view = editor.view();
+			view.dispatch({
+				changes: { from: view.state.doc.length - 1, to: view.state.doc.length },
+				userEvent: 'delete.backward',
+			});
+		});
+		flushAutosave();
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.dirty).toBe(1);
+		});
+		// Pushed, then changed elsewhere, then changed back.
+		await db.notes.update('n1', { dirty: 0 });
+		await db.opQueue.clear();
+		await store.applyPull({ changes: [pulled('theirs\n', 'v2')] });
+		await waitFor(() => {
+			expect(editor.view().state.doc.toString()).toBe('theirs\n');
+		});
+		await store.applyPull({ changes: [pulled('before\n', 'v3')] });
+
+		await waitFor(() => {
+			expect(editor.view().state.doc.toString()).toBe('before\n');
+		});
+		editor.type('1');
+		flushAutosave();
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.body).toBe('before\n1');
+		});
+		expect(await notes()).toHaveLength(1);
+	});
+
+	it('is saved as usual when a note written here without frontmatter gains a tag elsewhere', async () => {
+		// The first save gives the file a block and a blank line after it, which
+		// reads back as the start of the body. The body is the same.
+		const store = await synced();
+		const editor = await open();
+
+		editor.type('mine\n');
+		flushAutosave();
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.dirty).toBe(1);
+		});
+		const saved = await getNote(db, 'n1');
+		const pushed = saved?.source ?? '';
+		expect(pushed).toMatch(/^---\n[\s\S]*\n---\n\nbefore\nmine\n$/);
+		await db.notes.update('n1', { dirty: 0 });
+		await db.opQueue.clear();
+
+		editor.type('more\n');
+		await store.applyPull({
+			changes: [pulled(pushed.replace(/\n---\n/, '\ntags:\n  - work\n---\n'), 'v3')],
+		});
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.tags).toEqual(['work']);
+		});
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.body).toBe('before\nmine\nmore\n');
+		});
+		expect(await notes()).toHaveLength(1);
+		// And the editor still shows it: nothing was taken in over the edit.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(editor.view().state.doc.toString()).toBe('before\nmine\nmore\n');
+	});
+
+	it('is copied under the title its own heading gives it', async () => {
+		const store = await synced('# Before\n');
+		const editor = await open();
+
+		act(() => {
+			const view = editor.view();
+			view.dispatch({
+				changes: { from: 0, to: view.state.doc.length, insert: '# Mine\n' },
+				userEvent: 'input.type',
+			});
+		});
+		await store.applyPull({ changes: [pulled('# Theirs\n')] });
+		await waitFor(() => {
+			expect(editor.view().state.doc.toString()).toBe('# Theirs\n');
+		});
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await copyOf())?.title).toBe('Mine');
+		});
+		expect((await getNote(db, 'n1'))?.title).toBe('Theirs');
+	});
+});
+
 describe('saveNoteBody with a base', () => {
 	const shown = async () => {
 		const note = await getNote(db, 'n1');
 		if (note === undefined) throw new Error('no note');
 		return note;
 	};
+	const originOf = async () => (await shown()).bodyOrigin ?? '';
 
 	it('writes nothing new when the body it would copy is the one pulled', async () => {
 		const store = await synced();
 		const note = await shown();
+		const origin = await originOf();
 		await store.applyPull({ changes: [pulled('same\n')] });
 
-		await saveNoteBody(db, 'n1', 'same\n', { revision: 0, note });
+		await saveNoteBody(db, 'n1', 'same\n', { origin, note });
 
 		expect(await notes()).toHaveLength(1);
 		expect((await getNote(db, 'n1'))?.dirty).toBe(0);
 	});
 
-	it('brings a note back at a free name when a pulled file has its path', async () => {
+	it('brings a note back under a conflict name when a pulled file has its path', async () => {
 		const store = await synced();
 		const note = await shown();
+		const origin = await originOf();
 		await store.applyPull({
 			changes: [
 				{ kind: 'delete-note', id: 'n1' },
@@ -261,10 +384,10 @@ describe('saveNoteBody with a base', () => {
 			],
 		});
 
-		const back = await saveNoteBody(db, 'n1', 'mine\n', { revision: 0, note });
+		const back = await saveNoteBody(db, 'n1', 'mine\n', { origin, note });
 
 		expect(back.id).toBe('n1');
-		expect(back.path).not.toBe('a.md');
+		expect(back.path).toMatch(/^a \(conflict \d{4}-\d{2}-\d{2}T\d{2}-\d{2}\)\.md$/);
 		expect((await getNote(db, 'n2'))?.body).toBe('another\n');
 	});
 
@@ -272,13 +395,12 @@ describe('saveNoteBody with a base', () => {
 		const store = await synced();
 		await store.applyPull({ changes: [pulled('theirs\n')] });
 		const note = await shown();
+		const origin = await originOf();
 		await store.applyPull({ changes: [{ kind: 'delete-note', id: 'n1' }] });
 
-		await saveNoteBody(db, 'n1', 'mine\n', {
-			revision: 1,
-			note: { ...note, outsideRevision: 0 },
-		});
-		await saveNoteBody(db, 'n1', 'mine, more\n', { revision: 1, note });
+		// Shown as it was before the pull the editor has since adopted.
+		await saveNoteBody(db, 'n1', 'mine\n', { origin, note: { ...note, bodyOrigin: 'older' } });
+		await saveNoteBody(db, 'n1', 'mine, more\n', { origin, note });
 
 		expect((await getNote(db, 'n1'))?.body).toBe('mine, more\n');
 		expect(await notes()).toHaveLength(1);
@@ -289,10 +411,11 @@ describe('saveNoteBody with a base', () => {
 		// new live note holding text the user deleted.
 		const store = await synced();
 		const note = await shown();
+		const origin = await originOf();
 		await deleteNote(db, 'n1');
 		await store.applyPull({ changes: [pulled('theirs\n')] });
 
-		await saveNoteBody(db, 'n1', 'mine\n', { revision: 0, note });
+		await saveNoteBody(db, 'n1', 'mine\n', { origin, note });
 
 		expect((await getNote(db, 'n1'))?.deletedLocally).toBe(1);
 		expect(await notes()).toHaveLength(1);
@@ -301,26 +424,29 @@ describe('saveNoteBody with a base', () => {
 	it('writes into a note deleted here, which stays deleted', async () => {
 		await synced();
 		const note = await shown();
+		const origin = await originOf();
 		await deleteNote(db, 'n1');
 
-		await saveNoteBody(db, 'n1', 'mine\n', { revision: 0, note });
+		await saveNoteBody(db, 'n1', 'mine\n', { origin, note });
 
 		expect((await getNote(db, 'n1'))?.body).toBe('mine\n');
 		expect((await getNote(db, 'n1'))?.deletedLocally).toBe(1);
 		expect(await notes()).toHaveLength(1);
 	});
 
-	it('counts a replaced body, and nothing else, as a new revision', async () => {
+	it('gives a body from outside a new origin, and nothing else one', async () => {
 		const store = await synced();
-		expect((await shown()).outsideRevision ?? 0).toBe(0);
+		const first = await originOf();
+		expect(first).not.toBe('');
 
 		await store.applyPull({ changes: [pulled('---\ntags: [x]\n---\nbefore\n')] });
-		expect((await shown()).outsideRevision).toBe(0);
+		expect(await originOf()).toBe(first);
 
 		await store.applyPull({ changes: [pulled('after\n', 'v3')] });
-		expect((await shown()).outsideRevision).toBe(1);
+		const second = await originOf();
+		expect(second).not.toBe(first);
 
 		await saveNoteBody(db, 'n1', 'edited\n');
-		expect((await shown()).outsideRevision).toBe(1);
+		expect(await originOf()).toBe(second);
 	});
 });

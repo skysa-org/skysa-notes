@@ -39,7 +39,21 @@ describe('RawEditor', () => {
 		editorView(container).dispatch({ changes: { from: 5, insert: ' world' } });
 
 		expect(onUserEdit).toHaveBeenCalledTimes(1);
-		expect(onUserEdit).toHaveBeenCalledWith('Hello world', 0);
+		expect(onUserEdit).toHaveBeenCalledWith('Hello world', '');
+	});
+
+	it('reports edits against a body written from outside, even one it already shows', () => {
+		const onUserEdit = vi.fn();
+		const { container, rerender } = render(
+			<RawEditor noteId="a" body="Hello" origin="o1" onUserEdit={onUserEdit} />
+		);
+
+		// Two pulls, there and back, seen in one render: the same text, from
+		// somewhere new.
+		rerender(<RawEditor noteId="a" body="Hello" origin="o2" onUserEdit={onUserEdit} />);
+		editorView(container).dispatch({ changes: { from: 5, insert: '!' } });
+
+		expect(onUserEdit).toHaveBeenCalledExactlyOnceWith('Hello!', 'o2');
 	});
 
 	it('does not report an edit when the body changes underneath it', () => {

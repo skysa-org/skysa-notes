@@ -84,13 +84,13 @@ describe('RichEditor', () => {
 		});
 	});
 
-	it('reports an edit with the revision of the body it was typed into', async () => {
+	it('reports an edit with the origin of the body it was typed into', async () => {
 		const onUserEdit = vi.fn();
 		const { rerender } = render(
 			<RichEditor
 				noteId="a"
 				body="Hello"
-				revision={2}
+				origin="o2"
 				onUserEdit={onUserEdit}
 				onUnsupported={vi.fn()}
 			/>
@@ -100,13 +100,13 @@ describe('RichEditor', () => {
 		act(() => {
 			setup?.onUserEdit('Hello world');
 		});
-		expect(onUserEdit).toHaveBeenLastCalledWith('Hello world', 2);
+		expect(onUserEdit).toHaveBeenLastCalledWith('Hello world', 'o2');
 
 		rerender(
 			<RichEditor
 				noteId="a"
 				body="Pulled"
-				revision={3}
+				origin="o3"
 				onUserEdit={onUserEdit}
 				onUnsupported={vi.fn()}
 			/>
@@ -117,7 +117,7 @@ describe('RichEditor', () => {
 		act(() => {
 			setup?.onUserEdit('Pulled!');
 		});
-		expect(onUserEdit).toHaveBeenLastCalledWith('Pulled!', 3);
+		expect(onUserEdit).toHaveBeenLastCalledWith('Pulled!', 'o3');
 	});
 
 	it('does not reload the note when it re-renders for some other reason', async () => {

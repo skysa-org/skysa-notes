@@ -83,46 +83,85 @@ describe('useIncomingBody', () => {
 		expect(result.current.shouldAdopt('note one body')).toBe(true);
 	});
 
-	describe('base', () => {
-		const withRevision = () =>
+	describe('origin', () => {
+		const withOrigin = () =>
 			renderHook(
-				({ id, value, revision }: { id: string; value: string; revision: number }) =>
-					useIncomingBody(id, value, revision),
-				{ initialProps: { id: 'note-1', value: 'start', revision: 3 } }
+				({ id, value, origin }: { id: string; value: string; origin: string }) =>
+					useIncomingBody(id, value, origin),
+				{ initialProps: { id: 'note-1', value: 'start', origin: 'o1' } }
 			);
 
-		it('is the revision the editor opened with', () => {
-			const { result } = withRevision();
-			expect(result.current.base()).toBe(3);
+		it('is where the body the editor opened with came from', () => {
+			const { result } = withOrigin();
+			expect(result.current.base()).toBe('o1');
 		});
 
-		it('moves to the revision of a body the editor adopts, and not before', () => {
-			const { result, rerender } = withRevision();
+		it('moves to that of a body the editor adopts, and not before', () => {
+			const { result, rerender } = withOrigin();
 
-			rerender({ id: 'note-1', value: 'pulled', revision: 4 });
+			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
 			// Not adopted yet: the editor still holds what it held.
-			expect(result.current.base()).toBe(3);
+			expect(result.current.base()).toBe('o1');
 
 			expect(result.current.shouldAdopt('pulled')).toBe(true);
-			expect(result.current.base()).toBe(4);
+			expect(result.current.base()).toBe('o2');
 		});
 
 		it('stays put for the editor’s own save coming back', () => {
-			const { result, rerender } = withRevision();
+			const { result, rerender } = withOrigin();
 			act(() => {
 				result.current.emit('typed');
 			});
 
-			rerender({ id: 'note-1', value: 'typed', revision: 5 });
+			rerender({ id: 'note-1', value: 'typed', origin: 'o1' });
 
 			expect(result.current.shouldAdopt('typed')).toBe(false);
-			expect(result.current.base()).toBe(3);
+			expect(result.current.base()).toBe('o1');
 		});
 
-		it('starts again from the revision of another note', () => {
-			const { result, rerender } = withRevision();
-			rerender({ id: 'note-2', value: 'other', revision: 9 });
-			expect(result.current.base()).toBe(9);
+		it('adopts a body from outside that repeats one the editor wrote', () => {
+			// A remote revert: the pull brings back text this editor saved earlier.
+			// Taken for its own save coming back, it would be ignored, and the
+			// editor would go on showing what the note no longer holds.
+			const { result, rerender } = withOrigin();
+			act(() => {
+				result.current.emit('typed');
+			});
+
+			rerender({ id: 'note-1', value: 'typed', origin: 'o2' });
+
+			expect(result.current.shouldAdopt('typed')).toBe(true);
+			expect(result.current.base()).toBe('o2');
+		});
+
+		it('adopts a body from outside that repeats the one it was last given', () => {
+			// Two pulls, there and back, seen in one render.
+			const { result, rerender } = withOrigin();
+
+			rerender({ id: 'note-1', value: 'start', origin: 'o3' });
+
+			expect(result.current.shouldAdopt('start')).toBe(true);
+			expect(result.current.base()).toBe('o3');
+			expect(result.current.shouldAdopt('start')).toBe(false);
+		});
+
+		it('forgets what the editor wrote before it adopted a body from outside', () => {
+			const { result, rerender } = withOrigin();
+			act(() => {
+				result.current.emit('old save');
+			});
+			rerender({ id: 'note-1', value: 'pulled', origin: 'o2' });
+			expect(result.current.shouldAdopt('pulled')).toBe(true);
+
+			// Written by another tab, say: nothing this editor has written since.
+			rerender({ id: 'note-1', value: 'old save', origin: 'o2' });
+			expect(result.current.shouldAdopt('old save')).toBe(true);
+		});
+
+		it('starts again from another note’s', () => {
+			const { result, rerender } = withOrigin();
+			rerender({ id: 'note-2', value: 'other', origin: 'o9' });
+			expect(result.current.base()).toBe('o9');
 		});
 	});
 

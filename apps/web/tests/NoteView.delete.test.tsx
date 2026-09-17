@@ -17,17 +17,17 @@ import { createNote, deleteNote, getNote } from '../src/store/notes.js';
  */
 vi.mock('../src/editor/RichEditor.js', () => ({
 	RichEditor: ({
-		revision = 0,
+		origin = '',
 		onUserEdit,
 	}: {
-		revision?: number;
-		onUserEdit: (body: string, revision: number) => void;
+		origin?: string;
+		onUserEdit: (body: string, origin: string) => void;
 	}) => (
 		<button
 			type="button"
 			data-testid="rich-editor"
 			onClick={() => {
-				onUserEdit('the last thing typed\n', revision);
+				onUserEdit('the last thing typed\n', origin);
 			}}
 		>
 			type

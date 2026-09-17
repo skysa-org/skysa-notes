@@ -257,11 +257,14 @@ const applyEdit = async (
 		return withHash;
 	});
 
-/** What an edit was typed into: see `NoteRecord.outsideRevision`. */
+/** What an edit was typed into: see `NoteRecord.bodyOrigin`. */
 export interface EditBase {
-	/** The `outsideRevision` of the body the editor held when this was typed. */
-	revision: number;
-	/** The note as the editor last showed it, to bring back if it has gone. */
+	/** The `bodyOrigin` of the body the editor held when this was typed. */
+	origin: string;
+	/**
+	 * The note as it was shown when this was typed: what a copy of the edit is
+	 * written from, and what a note deleted meanwhile is brought back as.
+	 */
 	note: NoteRecord;
 }
 
@@ -298,7 +301,7 @@ export const saveNoteBody = async (
 		// A tombstone keeps the edit and stays deleted, as it always has: the
 		// delete wins (§7), and restoring it brings the edit back with it.
 		if (current.deletedLocally === 1) return applyBody(db, id, body);
-		if ((current.outsideRevision ?? 0) === base.revision) return applyBody(db, id, body);
+		if ((current.bodyOrigin ?? '') === base.origin) return applyBody(db, id, body);
 		if (current.body === body) return current;
 		return copyBeside(db, current, base.note, body);
 	});
@@ -351,9 +354,12 @@ const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promi
 	const shown = base.note;
 	const connectionId = await activeConnectionId(db);
 	const folderPath = parentPath(shown.path);
-	// The path may have been taken since, by a file the same pull brought in.
+	// The path may have been taken since, by a file the same pull brought in:
+	// a local note meeting a remote file at its path, which is a conflict, and
+	// named like one (§7).
 	const taken = await takenNamesIn(db, connectionId, folderPath, shown.id);
-	const path = joinPath(folderPath, freeName(basename(shown.path), taken));
+	const free = freeName(basename(shown.path), taken) === basename(shown.path);
+	const path = free ? shown.path : conflictPath(shown.path, new Date(), taken);
 	const { remoteId: _remoteId, remoteVersion: _remoteVersion, source: _source, ...kept } = shown;
 	return addEdited(db, {
 		...kept,
@@ -366,7 +372,7 @@ const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promi
 		updatedAt: Date.now(),
 		// The body it holds now is the editor's, so the editor's next edit is
 		// made against it.
-		outsideRevision: base.revision,
+		bodyOrigin: base.origin,
 	});
 };
 
@@ -381,7 +387,15 @@ const copyBeside = async (
 	const taken = await takenNamesIn(db, current.connectionId, parentPath(current.path));
 	const path = conflictPath(current.path, new Date(now), taken);
 	// The file as the user was writing it: their frontmatter, their words.
-	const source = conflictContent(noteFileContents({ ...shown, body, updatedAt: now }), copyId);
+	const source = conflictContent(
+		noteFileContents({
+			...shown,
+			body,
+			title: titleFor(shown.frontmatter, body, shown.path),
+			updatedAt: now,
+		}),
+		copyId
+	);
 	return addEdited(db, {
 		...noteRecordFromFile({
 			id: copyId,
@@ -608,6 +622,20 @@ export interface NoteFileInput {
  * when it was first seen here, which editor it was last open in, and whether
  * the user has deleted it — a delete here outranks a change there (§7).
  */
+/**
+ * Whether a file brings the body a row already holds.
+ *
+ * A note with no frontmatter that is written with some for the first time
+ * gains a blank line after the block (`serializeNoteFile`), and reading the
+ * file back puts that line at the start of the body. It is the same body: the
+ * app wrote the line itself, and the row never held it.
+ */
+const sameBody = (existing: NoteRecord, parsed: { frontmatter: string | null; body: string }) =>
+	existing.body === parsed.body ||
+	(existing.frontmatter === null &&
+		parsed.frontmatter !== null &&
+		(parsed.body === `\n${existing.body}` || parsed.body === `\r\n${existing.body}`));
+
 export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
 	const { existing } = input;
@@ -626,15 +654,12 @@ export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 		createdAt: existing?.createdAt ?? timeFrom(parsed.created, input.now),
 		updatedAt: timeFrom(parsed.updated, input.now),
 		...(existing?.editorMode === undefined ? {} : { editorMode: existing.editorMode }),
-		// Only a new body counts: a file that changed only its frontmatter
-		// leaves what an editor holds as it was, and an edit to it lands on the
-		// new frontmatter as usual.
-		...(existing === undefined
-			? {}
-			: {
-					outsideRevision:
-						(existing.outsideRevision ?? 0) + (existing.body === parsed.body ? 0 : 1),
-				}),
+		...(existing !== undefined && sameBody(existing, parsed)
+			? // A file that changed only its frontmatter leaves what an editor
+				// holds as it was, and an edit to it lands on the new frontmatter
+				// as usual.
+				{ body: existing.body, bodyOrigin: existing.bodyOrigin ?? '' }
+			: { bodyOrigin: crypto.randomUUID() }),
 	};
 };
 
