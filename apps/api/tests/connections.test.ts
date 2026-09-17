@@ -19,14 +19,19 @@ const namesIn = (value: unknown): string[] => {
 };
 
 /**
- * `iv` is matched at a word boundary rather than as a substring — `driveId`
- * holds those two letters and is not a secret — so `iv`, `gcmIv` and `iv_hex`
- * are named and `driveId` and `archive` are not. (`secretIv` is caught by
+ * `iv` has to be a word of the key rather than a substring of it: `driveId`,
+ * `archive` and `privilege` all hold those two letters and none is a secret.
+ * Asked as a regex this kept getting the boundary wrong, so the key is split
+ * into words instead — on anything that is not a letter, and at a camel hump —
+ * and each word compared. That names `iv`, `IV`, `iv_hex`, `ivHex`, `gcmIv`
+ * and `aesGcmIV`, and leaves `driveId` alone. (`secretIv` is caught by
  * `secret`, not by this.)
  */
+const WORDS = /[^a-zA-Z]+|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/;
+
 const promisesASecret = (key: string): boolean =>
 	/secret|cipher|refresh|token|credential|password/i.test(key) ||
-	/(^|[^a-z])iv([^a-z]|$)/i.test(key);
+	key.split(WORDS).some((word) => word.toLowerCase() === 'iv');
 
 /**
  * Every field the list is meant to return, and nothing else. A denylist of

@@ -12,9 +12,11 @@ import { createD1 } from './d1.js';
 export const SECRETS_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
 /**
- * The secret a connection row holds, opened. Three test files had their own
- * copy of this; a fourth caller that needs the plaintext to prove it is not in
- * a response is the argument for one.
+ * The secret a connection row holds, opened. `gdrive.test.ts` and
+ * `onedrive.test.ts` each had their own copy of this, and `connect.test.ts`
+ * and `token.test.ts` open a row inline in three more places; a caller that
+ * needs the plaintext to prove it is *not* in a response is what made one copy
+ * worth having.
  */
 export const secretOf = async (row: {
 	secretCiphertext: string;
