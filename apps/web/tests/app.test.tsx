@@ -100,6 +100,15 @@ describe('the app', () => {
 		expect((await screen.findByRole('alert')).textContent).toMatch(/Disconnect it first/);
 	});
 
+	it('says to leave the files permission ticked when the user took it away', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=partial', 'Work');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(
+			/leave that permission ticked/
+		);
+	});
+
 	it('puts the connect outcome away once the user moves on', async () => {
 		const user = userEvent.setup();
 		await createFolder(db, { name: 'Work' });

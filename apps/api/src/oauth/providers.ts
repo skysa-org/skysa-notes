@@ -2,15 +2,17 @@ import type { ProviderKind } from '@skysa/core';
 
 import type { AppConfig } from '../env.js';
 import { dropboxOAuth } from './dropbox.js';
+import { gdriveOAuth } from './gdrive.js';
 import { onedriveOAuth } from './onedrive.js';
 import type { OAuthCredentials, StorageOAuth } from './types.js';
 
 /**
- * The storage providers that connect through OAuth and have a flow here. Google
- * Drive joins in Phase 4; WebDAV never does — it has credentials, not a grant.
+ * The storage providers that connect through OAuth and have a flow here. WebDAV
+ * never does — it has credentials, not a grant.
  */
 const CLIENTS = {
 	dropbox: dropboxOAuth,
+	gdrive: gdriveOAuth,
 	onedrive: onedriveOAuth,
 } as const satisfies Partial<Record<ProviderKind, StorageOAuth>>;
 

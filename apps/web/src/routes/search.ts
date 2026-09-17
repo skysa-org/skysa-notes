@@ -27,6 +27,7 @@ export const CONNECT_OUTCOMES = [
 	'conflict',
 	'signin',
 	'occupied',
+	'partial',
 ] as const;
 
 export type ConnectOutcome = (typeof CONNECT_OUTCOMES)[number];

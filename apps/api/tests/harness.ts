@@ -40,7 +40,21 @@ export const bothProvidersConfig = (
 		...env,
 	});
 
-/** An ID token as the Microsoft token endpoint returns one. The signature is never checked. */
+export const GOOGLE_CLIENT_ID = 'google-client-id.apps.googleusercontent.com';
+
+/** Every OAuth provider enabled and configured. */
+export const allProvidersConfig = (
+	overrides: Partial<AppConfig> = {},
+	env: Record<string, string> = {}
+): AppConfig =>
+	bothProvidersConfig(overrides, {
+		ENABLED_PROVIDERS: 'dropbox,onedrive,gdrive',
+		GOOGLE_CLIENT_ID,
+		GOOGLE_CLIENT_SECRET: 'google-client-secret',
+		...env,
+	});
+
+/** An ID token as a token endpoint returns one. The signature is never checked. */
 export const idToken = (claims: Record<string, unknown>): string => {
 	const part = (value: unknown) => toBase64Url(new TextEncoder().encode(JSON.stringify(value)));
 	return `${part({ typ: 'JWT', alg: 'RS256' })}.${part(claims)}.c2lnbmF0dXJl`;
@@ -67,9 +81,39 @@ export const microsoftTokenResponse = (
 		...over,
 	});
 
+export const GOOGLE_ACCOUNT = '110169484474386276334';
+
+export const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+export const googleTokenResponse = (
+	over: Record<string, unknown> = {},
+	claims: Record<string, unknown> = {}
+): Response =>
+	json({
+		token_type: 'Bearer',
+		access_token: 'google-access-1',
+		refresh_token: 'google-refresh-1',
+		expires_in: 3599,
+		// Google names `email` by its long form in the granted scopes.
+		scope: `https://www.googleapis.com/auth/userinfo.email openid ${GOOGLE_DRIVE_SCOPE}`,
+		id_token: idToken({
+			iss: 'https://accounts.google.com',
+			aud: GOOGLE_CLIENT_ID,
+			sub: GOOGLE_ACCOUNT,
+			email: 'person@gmail.com',
+			email_verified: true,
+			...claims,
+		}),
+		...over,
+	});
+
 export interface DropboxScript {
 	/** Microsoft's token endpoint, which is one URL for the exchange and the refresh. */
 	microsoft?: (form: Record<string, string>, url: string) => Response;
+	/** Google's token endpoint, one URL for the exchange and the refresh. */
+	google?: (form: Record<string, string>) => Response;
+	/** Google's revoke endpoint. */
+	googleRevoke?: (form: Record<string, string>) => Response;
 	/** Code → the token response Dropbox would give for it. */
 	exchange?: (code: string, verifier: string) => Response;
 	refresh?: (refreshToken: string) => Response;
@@ -77,22 +121,52 @@ export interface DropboxScript {
 	revoke?: () => Response;
 }
 
+/** Microsoft's token endpoint, or `undefined` for any other URL. */
+const answerMicrosoft = (
+	script: DropboxScript,
+	url: string,
+	form: Record<string, string>,
+	account: string
+): Response | undefined => {
+	if (!url.startsWith('https://login.microsoftonline.com/')) return undefined;
+	if (script.microsoft !== undefined) return script.microsoft(form, url);
+	// Microsoft rotates the refresh token on every refresh.
+	return form.grant_type === 'refresh_token'
+		? microsoftTokenResponse({ access_token: 'ms-access-2', refresh_token: 'ms-refresh-2' })
+		: microsoftTokenResponse(
+				{},
+				{ sub: account === DEFAULT_ACCOUNT ? MICROSOFT_ACCOUNT : account }
+			);
+};
+
+/** Google's two endpoints, or `undefined` for any other URL. */
+const answerGoogle = (
+	script: DropboxScript,
+	url: string,
+	form: Record<string, string>,
+	account: string
+): Response | undefined => {
+	if (url === 'https://oauth2.googleapis.com/revoke') {
+		return script.googleRevoke?.(form) ?? json({});
+	}
+	if (url !== 'https://oauth2.googleapis.com/token') return undefined;
+	if (script.google !== undefined) return script.google(form);
+	// Google sends no new refresh token on a refresh.
+	return form.grant_type === 'refresh_token'
+		? googleTokenResponse({ access_token: 'google-access-2', refresh_token: undefined })
+		: googleTokenResponse({}, { sub: account === DEFAULT_ACCOUNT ? GOOGLE_ACCOUNT : account });
+};
+
 const answer = (
 	script: DropboxScript,
 	url: string,
 	form: Record<string, string>,
 	account: string
 ): Response => {
-	if (url.startsWith('https://login.microsoftonline.com/')) {
-		if (script.microsoft !== undefined) return script.microsoft(form, url);
-		// Microsoft rotates the refresh token on every refresh.
-		return form.grant_type === 'refresh_token'
-			? microsoftTokenResponse({ access_token: 'ms-access-2', refresh_token: 'ms-refresh-2' })
-			: microsoftTokenResponse(
-					{},
-					{ sub: account === DEFAULT_ACCOUNT ? MICROSOFT_ACCOUNT : account }
-				);
-	}
+	const microsoft = answerMicrosoft(script, url, form, account);
+	if (microsoft !== undefined) return microsoft;
+	const google = answerGoogle(script, url, form, account);
+	if (google !== undefined) return google;
 	if (url.endsWith('/oauth2/token')) {
 		if (form.grant_type === 'refresh_token') {
 			// Dropbox normally returns no new refresh token on a refresh.
@@ -199,7 +273,7 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 	const connect = async (
 		jar = createJar(),
 		account = DEFAULT_ACCOUNT,
-		provider: 'dropbox' | 'onedrive' = 'dropbox'
+		provider: 'dropbox' | 'onedrive' | 'gdrive' = 'dropbox'
 	) => {
 		stub.as(account);
 		jar.absorb(await request(`/api/auth/connect/${provider}/start`, { cookies: jar }));

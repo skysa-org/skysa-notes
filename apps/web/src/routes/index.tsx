@@ -40,6 +40,8 @@ const connectMessage = (outcome: ConnectOutcome): string => {
 			return 'Your notes already sync with another storage provider. Disconnect it first.';
 		case 'failed':
 			return 'The storage account could not be connected. Try again.';
+		case 'partial':
+			return 'Access to your files was not granted, so storage was not connected. Connect again and leave that permission ticked.';
 	}
 };
 
