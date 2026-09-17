@@ -210,13 +210,34 @@ interface Browser {
 }
 
 /**
- * Long enough for a run a trigger has started to have reached the phase that
- * says so. Only that: the waiting itself is `vi.waitFor`'s, below.
+ * The run a trigger is about to start, seen through to its end.
+ *
+ * Asking for the phase instead would be answered too early: the `online`
+ * handler starts its run behind an await, so at the moment the event fires the
+ * phase is still the old one and "not syncing" is the answer to the wrong
+ * question. So the transitions are taken as they are published — into
+ * `syncing`, and out of it again — and the watch is set up before the trigger,
+ * which is why this returns the waiting rather than doing it.
+ *
+ * A run already in flight counts as begun: `run` hands a second caller the same
+ * promise, and no second `syncing` is published for it. `attention` ends the
+ * wait whether or not anything began, because it is also what a scheduler that
+ * cannot sync at all publishes, and nothing further would come.
  */
-const started = () =>
-	new Promise<void>((resolve) => {
-		setTimeout(resolve, 5);
+const runEnds = (scheduler: SyncScheduler): Promise<void> => {
+	const state = { began: scheduler.status().phase === 'syncing' };
+	return new Promise<void>((resolve) => {
+		const stop = scheduler.subscribe((status) => {
+			if (status.phase === 'syncing') {
+				state.began = true;
+				return;
+			}
+			if (!state.began && status.phase !== 'attention') return;
+			stop();
+			resolve();
+		});
 	});
+};
 
 /**
  * The scheduler syncs on its own account — `start`, and the `online` event when
@@ -224,13 +245,10 @@ const started = () =>
  * them. A test that reads the stores while one is in flight is reading a
  * half-applied round.
  *
- * The wait comes first, as it does in `scheduler.test.ts`: the `online` handler
- * starts its run behind an await, so at the moment the event fires the phase is
- * still the old one, and asking straight away is answered before the run has
- * begun.
+ * This is the sample: it answers for a browser that is not in the middle of
+ * being triggered. A run that has just been asked for is `runEnds`' business.
  */
 const idle = async (scheduler: SyncScheduler): Promise<void> => {
-	await started();
 	await vi.waitFor(() => {
 		expect(scheduler.status().phase).not.toBe('syncing');
 	});
@@ -265,7 +283,11 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 		},
 		comeBack: async () => {
 			env.state.online = true;
+			// Watching before the event, or the run is away before anyone is
+			// listening for it.
+			const ran = runEnds(scheduler);
 			env.fire('online');
+			await ran;
 			await idle(scheduler);
 		},
 		idle: () => idle(scheduler),
@@ -595,10 +617,10 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		// nobody deleted, from both browsers.
 		//
 		// The harm needs A's *write*, not A's whole run, to land between B's two
-		// ops — pulled first, A makes a copy rather than binding — and two
-		// schedulers let go together cannot be ordered that finely from here.
-		// So this is the scenario, and the guard that reliably fails without
-		// the fix is `queue.test.ts`, "leaves the other device's note where it
+		// ops, and two schedulers let go together cannot be ordered that finely
+		// from here: this scenario alone, at this length, does not produce it.
+		// Seed 39 below does, on every remote. The guard that does not depend on
+		// either is `queue.test.ts`, "leaves the other device's note where it
 		// is", which drives the two engines in that order itself.
 		const { remote, a, b } = await setUp(make);
 		a.goOffline();
@@ -651,8 +673,14 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 			}, Promise.resolve());
 			// Both back on the network before they are asked to agree: a browser
 			// the script left offline has never seen the other's work.
-			await a.comeBack();
-			await b.comeBack();
+			//
+			// Together, not one after the other. Reconnecting them in turn lets
+			// each run finish alone, and the two schedulers never meet — which
+			// leaves the runs able to say that the stores end up equal, and
+			// unable to find anything that lives in an interleaving. That is what
+			// they are for: this is the moment the two devices' work collides,
+			// and seed 39 below is a bug that only appears when it does.
+			await Promise.all([a.comeBack(), b.comeBack()]);
 
 			const files = await converged(remote, a, b, soak.trace);
 			const everything = Object.values(files).join('');
@@ -727,25 +755,30 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 	const deletedFiles = new Set<string>();
 
 	/**
-	 * A token, doomed from the start only in the one case §7 allows: it is going
-	 * into a **clean** note whose file some browser has already deleted, so this
-	 * browser's copy is only what it last pulled and the delete is entitled to
-	 * take it.
+	 * A token, doomed from the start if it is going into a note whose file some
+	 * browser has already deleted. §7 lets that delete win over an edit made
+	 * elsewhere that never saw it, and an edit written after the delete is
+	 * exactly such an edit — the browser writing it has not pulled yet.
 	 *
-	 * Not a dirty one. A note with unsent edits meeting a file that is gone is
-	 * `detach-note` — kept, cut loose, and re-created by its own write — which
-	 * is what "keeps an edit made here while the note was deleted there" pins
-	 * above. Dooming those too would have let the runs excuse a loss the app is
-	 * required to prevent.
+	 * Note what this does *not* ask: whether the note is dirty. It is tempting,
+	 * since §7 keeps a note that still has unsent edits when the delete reaches
+	 * it (`detach-note`) and only lets a clean one go. But the state that
+	 * decides is the note's state *when the delete lands*, and nothing here can
+	 * see that moment: an edit written dirty and pushed a step later is clean by
+	 * the time the delete arrives, and losing it is then allowed. Asking at the
+	 * time of writing instead reported those as losses — a run where one note
+	 * took two edits in a row would excuse the first and fail on the second,
+	 * over the same delete.
+	 *
+	 * So the runs excuse everything a delete could reach, and `detach-note` is
+	 * pinned by the scripted tests above ("keeps an edit made here while the
+	 * note was deleted there"), where the timing is set rather than rolled for.
 	 */
 	const token = (note?: NoteRecord): string => {
 		const made = `t${String(seed)}-${String(tokens.length)}`;
 		tokens.push(made);
 		const gone =
-			note !== undefined &&
-			note.dirty === 0 &&
-			note.remoteId !== undefined &&
-			deletedFiles.has(note.remoteId);
+			note !== undefined && note.remoteId !== undefined && deletedFiles.has(note.remoteId);
 		if (gone) doomed.add(made);
 		return made;
 	};

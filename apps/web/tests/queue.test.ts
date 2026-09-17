@@ -963,15 +963,22 @@ describe('a note deleted before its write was ever sent', () => {
 	});
 });
 
-describe('a note deleted before its write was ever sent', () => {
+describe('a note deleted before its write was ever sent, on two devices', () => {
 	/**
-	 * The deterministic guard for what the two-browser soak found
-	 * (`soak.test.ts`). Two devices over one remote, and the interleaving set
-	 * here rather than raced for: this device's write creates the file, the
-	 * other device's push lands while it is there, and this device's delete
-	 * follows. Before the fix the other device's note bound to that file
-	 * instead of making one of its own, and went with it — a note nobody
-	 * deleted, gone from both.
+	 * The same defect as above, reaching the other device: the interleaving is
+	 * set here rather than raced for, so this device's write creates the file,
+	 * the other device's push lands while it is there, and this device's delete
+	 * follows.
+	 *
+	 * What that costs the other device depends on what the engine makes of a
+	 * path it finds occupied, and the worst of it is not what this reproduces.
+	 * Here their note survives under a conflict name: a copy of a file nobody
+	 * conflicted over, for the user to tidy up. In the soak's seed 39 — a
+	 * longer run, where the notes have history — no copy is made, their note
+	 * goes with the file, and it is gone from both devices. That seed is the
+	 * loss; this is the guard that holds the mechanism still whatever the
+	 * engine decides afterwards, and fails, deterministically, on a withdrawn
+	 * write that runs anyway.
 	 */
 	const twoDevices = async () => {
 		const fake = createFakeProvider();
