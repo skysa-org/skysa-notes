@@ -68,13 +68,39 @@ describe('Content-Security-Policy', () => {
 		expect(Math.max(...text.split('\n').map((line) => line.length))).toBeLessThanOrEqual(2000);
 	});
 
-	it('runs only this origin’s scripts', () => {
+	it('runs only this origin’s scripts, which is now load-bearing', () => {
 		const directives = policy();
 		expect(directives.get('default-src')).toEqual(["'self'"]);
+		// Not a good default any more: a hard requirement. This shell holds a
+		// long-lived per-connection credential in IndexedDB (docs/PLAN.md §6),
+		// which `httpOnly` used to protect and no longer can. Script that this
+		// policy lets run can read it, post it anywhere, and use it until someone
+		// revokes the device. Nothing may be added to this list.
 		expect(directives.get('script-src')).toEqual(["'self'"]);
 		expect(directives.get('worker-src')).toEqual(["'self'"]);
 		expect(directives.get('object-src')).toEqual(["'none'"]);
 		expect(directives.get('base-uri')).toEqual(["'self'"]);
+	});
+
+	it('refuses to be reached over plain http again', () => {
+		const value = headersFor(read('public/_headers'), '/*').get('strict-transport-security');
+		const directives = new Map(
+			(value ?? '').split(';').map((part) => {
+				const [name = '', argument] = part.trim().split('=');
+				return [name.toLowerCase(), argument];
+			})
+		);
+
+		// An origin an attacker can answer for once is an origin they can read
+		// the device's credentials out of. Two years is the usual floor for a
+		// policy meant to be relied on.
+		expect(Number(directives.get('max-age'))).toBeGreaterThanOrEqual(63072000);
+		// Without this a sibling subdomain served over plain HTTP is the way
+		// around the `__Host-` flow cookie.
+		expect(directives.has('includesubdomains')).toBe(true);
+		// `preload` is a commitment on behalf of whoever self-hosts this, and it
+		// is theirs to make, not this repo's.
+		expect(directives.has('preload')).toBe(false);
 	});
 
 	it('is not framed and posts forms only here', () => {

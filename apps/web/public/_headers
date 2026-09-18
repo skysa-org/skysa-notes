@@ -25,5 +25,16 @@
 #   bytes (`alt=media`) and uploads included (docs/PLAN.md §5.1). Whether
 #   Google redirects a download elsewhere waits on the live check; don't add
 #   *.googleusercontent.com ahead of it, as it takes in Apps Script web apps.
+# Strict-Transport-Security: the shell holds the device's per-connection
+# credentials in IndexedDB (docs/PLAN.md §6), so an origin an attacker can
+# answer for once is an origin they can read them from. Two years, subdomains
+# included — the `__Host-` flow cookie already refuses every insecure origin,
+# and a sibling subdomain served over plain HTTP is the way around that.
+# `preload` is deliberately absent: it is a commitment on behalf of whoever
+# self-hosts this, and it is theirs to make.
+# A plain-HTTP local deployment is unaffected — browsers ignore the header off
+# https, and these rules are Cloudflare's static-asset headers, which local dev
+# does not serve through.
 /*
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.dropboxapi.com https://graph.microsoft.com https://*.files.1drv.com https://my.microsoftpersonalcontent.com https://*.sharepoint.com https://www.googleapis.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'

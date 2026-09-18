@@ -1,8 +1,15 @@
-import { alwaysAllowed, type EntitlementProvider } from '@skysa/core';
+import {
+	alwaysAllowed,
+	type EntitlementProvider,
+	neverLimited,
+	type RateLimiter,
+} from '@skysa/core';
 import { Hono } from 'hono';
 import { csrf } from 'hono/csrf';
+import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 
+import { type Bearer, bearerFrom, grantHolder } from './credentials.js';
 import { importSecretKey, type SecretKey, signingKey } from './crypto.js';
 import { createDb, type Database } from './db/client.js';
 import type { AppConfig } from './env.js';
@@ -19,6 +26,14 @@ export type Variables = {
 	db: Database;
 	config: AppConfig;
 	entitlements: EntitlementProvider;
+	rateLimiter: RateLimiter;
+	/**
+	 * The connection the caller's credential reaches, on the routes that require
+	 * one. `requireBearer` is the only writer, and it answers 401 rather than
+	 * calling `next()` when there is nothing to put here — so a handler behind it
+	 * always finds one.
+	 */
+	bearer: Bearer;
 	/** AES-256-GCM key for the `connections` secret columns. */
 	secretKey: SecretKey;
 	/** HMAC key for the short-lived OAuth flow cookie. Derived, not the same key. */
@@ -34,6 +49,13 @@ export interface CreateAppOptions {
 	 * operators of a shared instance substitute their own here instead of forking.
 	 */
 	entitlements?: EntitlementProvider;
+	/**
+	 * How the endpoints that spend an outbound provider call are throttled.
+	 * Defaults to `neverLimited`. A seam rather than a Cloudflare binding,
+	 * because a binding would be deployment-specific code in a repo that forbids
+	 * it (CLAUDE.md).
+	 */
+	rateLimiter?: RateLimiter;
 	/**
 	 * How the app reaches the provider's OAuth endpoints. Injected so tests can
 	 * drive the whole flow without a network, and so an operator could route
@@ -56,7 +78,12 @@ export interface CreateAppOptions {
  * deployment-specific value arrives here. `src/worker.ts` is the default caller.
  */
 export const createApp = (options: CreateAppOptions) => {
-	const { config, entitlements = alwaysAllowed, providerTimeoutMs = 10_000 } = options;
+	const {
+		config,
+		entitlements = alwaysAllowed,
+		rateLimiter = neverLimited,
+		providerTimeoutMs = 10_000,
+	} = options;
 
 	/** Every provider call gets a deadline, so no call site has to remember one. */
 	const doFetch: FetchLike = (url, init) =>
@@ -96,6 +123,7 @@ export const createApp = (options: CreateAppOptions) => {
 		c.set('db', createDb(c.env.DB));
 		c.set('config', config);
 		c.set('entitlements', entitlements);
+		c.set('rateLimiter', rateLimiter);
 		c.set('secretKey', secretKey);
 		c.set('signingKey', hmacKey);
 		await next();
@@ -105,7 +133,7 @@ export const createApp = (options: CreateAppOptions) => {
 	 * Nothing here may be stored by anything between the Worker and the tab.
 	 *
 	 * `POST /api/token` answers with a provider access token, and `GET
-	 * /api/connections` is the answer the device binds and *unbinds* itself on:
+	 * /api/connection` is the answer the device binds and *unbinds* itself on:
 	 * a reply kept and replayed after the world moved would hand out a token the
 	 * user has revoked, or unbind a connection that is alive. Neither response
 	 * carried any freshness information before this, which leaves them to
@@ -132,12 +160,16 @@ export const createApp = (options: CreateAppOptions) => {
 	});
 
 	/**
-	 * `sameSite=Lax` already stops a cross-*site* POST from carrying the session
-	 * cookie. What it does not stop is a same-site, cross-origin one — a sibling
-	 * subdomain — and `POST /api/token` mints an access token. Checking `Origin`
-	 * against this deployment's own closes that; it applies only to
-	 * state-changing methods, so the OAuth callback (a GET navigation from
-	 * Dropbox) is unaffected.
+	 * Defence in depth, not the defence. Nothing is authorized by a cookie any
+	 * more — a bearer is never sent ambiently, so cross-origin requests arrive
+	 * unauthenticated — which is most of why the credential redesign happened
+	 * (docs/PLAN.md §6). What is left to protect is `POST /api/auth/connect/…/start`,
+	 * which writes a caller-supplied value into a cookie; it checks `Origin` and
+	 * `Sec-Fetch-Site` itself, because `csrf()` inspects only form and text
+	 * content types and leans on CORS preflight for JSON.
+	 *
+	 * It applies only to state-changing methods, so the OAuth callback (a GET
+	 * navigation from Dropbox) is unaffected.
 	 */
 	app.use('*', csrf({ origin: config.appOrigin }));
 
@@ -153,6 +185,32 @@ export const createApp = (options: CreateAppOptions) => {
 			providers: config.enabledProviders,
 		})
 	);
+
+	/**
+	 * Everything that acts on a connection needs the device's credential, and
+	 * gets it here rather than in each handler — a route that forgot the check
+	 * would otherwise be one that serves anybody.
+	 *
+	 * The two refusals differ on purpose. `credential_required` means the device
+	 * never had one and has to connect; `credential_revoked` means the one it
+	 * holds is not known here any more — revoked, expired for idleness, or from
+	 * a deployment that has since been reset — and it should throw the
+	 * credential away before offering to connect, or it will present it forever.
+	 */
+	const requireBearer = createMiddleware<AppEnv>(async (c, next) => {
+		const credential = bearerFrom(c.req.header('authorization'));
+		if (credential === undefined) return c.json({ error: 'credential_required' }, 401);
+
+		const bearer = await grantHolder(c.get('db'), credential);
+		if (bearer === undefined) return c.json({ error: 'credential_revoked' }, 401);
+
+		c.set('bearer', bearer);
+		await next();
+	});
+
+	app.use('/token', requireBearer);
+	app.use('/connection', requireBearer);
+	app.use('/connection/*', requireBearer);
 
 	app.route('/', connectRoutes(doFetch));
 	app.route('/', tokenRoutes(doFetch));

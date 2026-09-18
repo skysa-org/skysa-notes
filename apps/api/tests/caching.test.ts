@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildApp } from './harness.js';
+import { buildApp, newCredential } from './harness.js';
 
 /**
  * Nothing this Worker says may be written down between it and the tab.
  *
  * Two answers make it matter. `POST /api/token` hands back a provider access
- * token, and `GET /api/connections` is the answer the device binds *and
+ * token, and `GET /api/connection` is the answer the device binds *and
  * unbinds* itself on (`apps/web/src/sync/account.ts`): a reply kept and
  * replayed after the world moved would hand out a token the user has revoked,
  * or unbind a connection that is alive on the server.
@@ -20,32 +20,19 @@ import { buildApp } from './harness.js';
 describe('what may be cached', () => {
 	it('says no-store on every answer, whatever it answered', async () => {
 		const app = buildApp();
-		const { jar } = await app.connect();
-		// The real id, so the token below is a token and not a `not_found`: the
-		// one response whose body is a provider access token is the one most
-		// worth proving, and a made-up id never reaches the minting at all.
-		const listed: { connections: { id: string }[] } = await (
-			await app.request('/api/connections', { cookies: jar })
-		).json();
-		const connectionId = listed.connections[0]?.id;
-		if (connectionId === undefined) throw new Error('no connection to mint for');
+		const { credential } = await app.connect();
 
 		const answers = [
 			[200, await app.request('/api/health')],
 			[200, await app.request('/api/config')],
-			[200, await app.request('/api/connections', { cookies: jar })],
-			[
-				200,
-				await app.request('/api/token', {
-					method: 'POST',
-					cookies: jar,
-					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ connectionId }),
-				}),
-			],
+			[200, await app.request('/api/connection', { credential })],
+			// The one response whose body is a provider access token is the one
+			// most worth proving.
+			[200, await app.request('/api/token', { method: 'POST', credential })],
 			// A refusal is as cacheable as a success unless it says otherwise,
-			// and a stored 401 outlives the session that caused it.
-			[401, await app.request('/api/connections')],
+			// and a stored 401 outlives the credential that caused it.
+			[401, await app.request('/api/connection')],
+			[401, await app.request('/api/connection', { credential: newCredential() })],
 			// Not found is the one a cache is most willing to keep.
 			[404, await app.request('/api/nothing-here')],
 			// A rejection is a response too, and this one is made by throwing —
@@ -53,9 +40,9 @@ describe('what may be cached', () => {
 			// after `csrf`. Ordering, not wording, is what keeps it covered.
 			[
 				403,
-				await app.request('/api/connections/whatever', {
+				await app.request('/api/connection', {
 					method: 'DELETE',
-					cookies: jar,
+					credential,
 					headers: {
 						'content-type': 'application/x-www-form-urlencoded',
 						origin: 'https://evil.example',
@@ -74,13 +61,14 @@ describe('what may be cached', () => {
 
 	it('says it on a redirect too, which is what the consent page comes back to', async () => {
 		const app = buildApp();
+		const { callback, start } = await app.connect();
 
-		// The OAuth start is a redirect carrying `state`, and the callback is
-		// the one navigation a browser is most likely to repeat: back button,
-		// session restore, a reopened tab.
-		const start = await app.request('/api/auth/connect/dropbox/start?returnTo=%2F');
-
-		expect(start.status).toBe(302);
+		// The start's body carries an authorize URL with a live `state` in it, and
+		// the callback is the one navigation a browser is most likely to repeat:
+		// back button, session restore, a reopened tab.
+		expect(start.status).toBe(200);
 		expect(start.headers.get('cache-control')).toBe('no-store');
+		expect(callback.status).toBe(302);
+		expect(callback.headers.get('cache-control')).toBe('no-store');
 	});
 });

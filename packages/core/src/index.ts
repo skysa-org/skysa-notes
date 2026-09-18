@@ -23,6 +23,10 @@ export {
 	alwaysAllowed,
 	type EntitlementDecision,
 	type EntitlementProvider,
+	type EntitlementSubject,
+	neverLimited,
+	type RateLimitDecision,
+	type RateLimiter,
 } from './entitlements.js';
 
 export {

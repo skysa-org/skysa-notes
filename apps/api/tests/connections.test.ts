@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
-import { buildApp, cookieNames, createJar, secretOf, testConfig } from './harness.js';
+import { buildApp, newCredential, secretOf } from './harness.js';
 
 /**
- * Listing and removing connections. The rule these tests exist to hold: a
- * secret never appears in a response, and a user who asks to disconnect always
- * ends up disconnected — even when Dropbox is unreachable.
+ * Describing and removing the one connection the caller's credential reaches.
+ *
+ * The rules these tests exist to hold: a secret never appears in a response, a
+ * user who asks to disconnect always ends up disconnected — even when Dropbox
+ * is unreachable — and one device's credential is the whole of what it reaches.
  */
 
 const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
@@ -34,32 +36,35 @@ const promisesASecret = (key: string): boolean =>
 	key.split(WORDS).some((word) => word.toLowerCase() === 'iv');
 
 /**
- * Every field the list is meant to return, and nothing else. A denylist of
+ * Every field the answer is meant to carry, and nothing else. A denylist of
  * suspicious names only catches a secret that is named like one: a fourth
  * sealed column surfaced as `authBlob` would pass `promisesASecret` and hold a
  * refresh token. This fails on sight for anything new, whatever it is called.
+ *
+ * `grantId` is here and is not a secret: it names which of the devices below is
+ * this one, and naming a grant is not the same as holding its credential.
  */
 const PUBLIC_KEYS = [
 	'accountId',
 	'createdAt',
 	'displayName',
+	'grantId',
 	'id',
 	'lastUsedAt',
 	'provider',
 	'rootId',
 ];
 
-describe('GET /api/connections', () => {
+describe('GET /api/connection', () => {
 	it('describes the connection without describing its secret', async () => {
 		const app = buildApp();
-		const { jar } = await app.connect();
+		const { credential } = await app.connect();
 
-		const response = await app.request('/api/connections', { cookies: jar });
-		const body: { connections: Record<string, unknown>[] } = await response.json();
+		const response = await app.request('/api/connection', { credential });
+		const body: Record<string, unknown> = await response.json();
 
 		expect(response.status).toBe(200);
-		expect(body.connections).toHaveLength(1);
-		expect(body.connections[0]).toMatchObject({
+		expect(body).toMatchObject({
 			provider: 'dropbox',
 			displayName: 'user@example.com',
 			accountId: 'dbid:1',
@@ -67,13 +72,7 @@ describe('GET /api/connections', () => {
 		});
 
 		// What this connection's secret actually is, sealed and in the clear,
-		// rather than words that look like a secret. The serialized body used
-		// to be searched for "iv" among others, which failed about one run in
-		// two hundred for no reason: a connection id is `randomBase64Url(16)`,
-		// so two given letters turn up in one now and then. Every needle here
-		// is long enough that a random id cannot produce it — which rules out
-		// the key id (`k1` in these tests), and it is not a secret anyway: it
-		// names which key sealed the row.
+		// rather than words that look like a secret.
 		const [stored] = await rows(app.db);
 		if (stored === undefined) throw new Error('no connection row');
 		const serialized = JSON.stringify(body);
@@ -84,46 +83,192 @@ describe('GET /api/connections', () => {
 			expect(secret.length).toBeGreaterThan(8);
 			expect(serialized).not.toContain(secret);
 		}
+		// The credential and its hash are both absent: the hash is the lookup key,
+		// and whoever holds one can re-point that device at storage of their own.
+		const [grant] = await createDb(app.db).select().from(schema.grants);
+		expect(serialized).not.toContain(grant?.secretHash ?? 'unreachable');
+		expect(serialized).not.toContain(credential);
+
 		// Exactly these fields, so a column added to the table and passed
 		// through fails here whatever it is called...
-		expect(Object.keys(body.connections[0] ?? {}).sort()).toEqual(PUBLIC_KEYS);
+		expect(Object.keys(body).sort()).toEqual(PUBLIC_KEYS);
 		// ...and nothing is offered under a name that promises a secret at any
 		// depth, which the key list above cannot reach: a nested
 		// `credential: { refreshToken }` would pass every check before it.
 		expect(namesIn(body).filter(promisesASecret)).toEqual([]);
 	});
 
-	it('refuses an anonymous caller', async () => {
+	it('refuses a caller with no credential', async () => {
 		const app = buildApp();
-		expect((await app.request('/api/connections')).status).toBe(401);
+		const response = await app.request('/api/connection');
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'credential_required' });
 	});
 
-	it('shows a user only their own connections', async () => {
+	it('is singular: it never answers with somebody else in it', async () => {
 		const app = buildApp();
-		const { jar } = await app.connect();
-		// A different Dropbox account, which is what makes it a different user.
-		await app.connect(createJar(), 'dbid:2');
+		const mine = await app.connect({ account: 'dbid:1' });
+		await app.connect({ account: 'dbid:2' });
 
-		const body: { connections: unknown[] } = await (
-			await app.request('/api/connections', { cookies: jar })
+		const body: Record<string, unknown> = await (
+			await app.request('/api/connection', { credential: mine.credential })
 		).json();
-		expect(body.connections).toHaveLength(1);
+
+		// A one-element array would invite the aggregation model straight back, and
+		// the device that unbinds on an empty list would keep "working" with the
+		// wrong meaning.
+		expect(Array.isArray(body)).toBe(false);
+		expect(body.accountId).toBe('dbid:1');
 		expect(await rows(app.db)).toHaveLength(2);
+	});
+
+	it('answers 401, not 404, once the connection is gone', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+
+		await app.request('/api/connection', { method: 'DELETE', credential });
+
+		// The cascade took the grant with the row, so what the device is told is
+		// that its credential reaches nothing — which is the truth, and the thing
+		// it should act on by throwing the credential away.
+		const response = await app.request('/api/connection', { credential });
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({ error: 'credential_revoked' });
 	});
 });
 
-describe('DELETE /api/connections/:id', () => {
+describe('GET /api/connection/grants', () => {
+	it('lists the devices holding this connection, and says which one is asking', async () => {
+		const app = buildApp();
+		const mine = await app.connect();
+		const other = await app.connect();
+
+		const body: { grants: Record<string, unknown>[] } = await (
+			await app.request('/api/connection/grants', { credential: mine.credential })
+		).json();
+
+		expect(body.grants).toHaveLength(2);
+		expect(body.grants.filter((grant) => grant.current === true)).toHaveLength(1);
+		expect(Object.keys(body.grants[0] ?? {}).sort()).toEqual([
+			'createdAt',
+			'current',
+			'expired',
+			'id',
+			'lastUsedAt',
+		]);
+
+		// This is what makes a stolen credential visible. It must not also make it
+		// usable: no hash, and nothing derived from one.
+		const serialized = JSON.stringify(body);
+		for (const credential of [mine.credential, other.credential]) {
+			expect(serialized).not.toContain(credential);
+		}
+		const grants = await createDb(app.db).select().from(schema.grants);
+		for (const grant of grants) expect(serialized).not.toContain(grant.secretHash);
+	});
+
+	it('shows only the devices on the caller’s own connection', async () => {
+		const app = buildApp();
+		const mine = await app.connect({ account: 'dbid:1' });
+		await app.connect({ account: 'dbid:2' });
+		await app.connect({ account: 'dbid:2' });
+
+		const body: { grants: unknown[] } = await (
+			await app.request('/api/connection/grants', { credential: mine.credential })
+		).json();
+		expect(body.grants).toHaveLength(1);
+	});
+});
+
+describe('DELETE /api/connection/grants/:id', () => {
+	it('revokes another device without disconnecting the account', async () => {
+		const app = buildApp();
+		const mine = await app.connect();
+		const thief = await app.connect();
+
+		const body: { grants: { id: string; current: boolean }[] } = await (
+			await app.request('/api/connection/grants', { credential: mine.credential })
+		).json();
+		const theirs = body.grants.find((grant) => !grant.current)?.id ?? '';
+
+		const response = await app.request(`/api/connection/grants/${theirs}`, {
+			method: 'DELETE',
+			credential: mine.credential,
+		});
+
+		expect(response.status).toBe(200);
+		expect(
+			(await app.request('/api/connection', { credential: thief.credential })).status
+		).toBe(401);
+		// Mine still works, and the account is still connected.
+		expect((await app.request('/api/connection', { credential: mine.credential })).status).toBe(
+			200
+		);
+		expect(await rows(app.db)).toHaveLength(1);
+	});
+
+	it('lets a device sign itself out', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+
+		const body: { grantId: string } = await (
+			await app.request('/api/connection', { credential })
+		).json();
+
+		expect(
+			(
+				await app.request(`/api/connection/grants/${body.grantId}`, {
+					method: 'DELETE',
+					credential,
+				})
+			).status
+		).toBe(200);
+		expect((await app.request('/api/connection', { credential })).status).toBe(401);
+		// Signing out is not disconnecting: the connection survives for the other
+		// devices, and for this one when it connects again.
+		expect(await rows(app.db)).toHaveLength(1);
+	});
+
+	it("will not revoke a grant on somebody else's connection", async () => {
+		const app = buildApp();
+		const mine = await app.connect({ account: 'dbid:1' });
+		const theirs = await app.connect({ account: 'dbid:2' });
+
+		const body: { grantId: string } = await (
+			await app.request('/api/connection', { credential: theirs.credential })
+		).json();
+
+		const response = await app.request(`/api/connection/grants/${body.grantId}`, {
+			method: 'DELETE',
+			credential: mine.credential,
+		});
+
+		// Not 403: answering differently for "exists but is not yours" would turn
+		// this route into a way to discover which ids exist.
+		expect(response.status).toBe(404);
+		expect(
+			(await app.request('/api/connection', { credential: theirs.credential })).status
+		).toBe(200);
+	});
+
+	it('answers 404 for an id that does not exist', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+
+		const response = await app.request('/api/connection/grants/nope', {
+			method: 'DELETE',
+			credential,
+		});
+		expect(response.status).toBe(404);
+	});
+});
+
+describe('DELETE /api/connection', () => {
 	it('revokes the grant at Dropbox and deletes the row', async () => {
 		const app = buildApp();
-		const { jar } = await app.connect();
-		const [connection] = await rows(app.db);
+		const { credential } = await app.connect();
 
-		const response = jar.absorb(
-			await app.request(`/api/connections/${connection?.id ?? ''}`, {
-				method: 'DELETE',
-				cookies: jar,
-			})
-		);
+		const response = await app.request('/api/connection', { method: 'DELETE', credential });
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ ok: true, revoked: true });
@@ -133,112 +278,62 @@ describe('DELETE /api/connections/:id', () => {
 		expect(revoke?.authorization).toBe('Bearer access-1');
 	});
 
+	it('takes every device with it', async () => {
+		const app = buildApp();
+		const mine = await app.connect();
+		const other = await app.connect();
+
+		await app.request('/api/connection', { method: 'DELETE', credential: mine.credential });
+
+		// This is the button for a credential the user believes is stolen, so the
+		// thief's has to stop working too.
+		expect(
+			(await app.request('/api/connection', { credential: other.credential })).status
+		).toBe(401);
+
+		// Unreachable, but still on record. Deleting the rows would free both
+		// hashes, and the thief holds the plaintext behind one of them: they could
+		// connect storage of their own under that very hash and be handed a live
+		// grant by the flow the user just used to lock them out.
+		const rows = await createDb(app.db).select().from(schema.grants);
+		expect(rows.map((row) => row.connectionId)).toEqual([null, null]);
+	});
+
 	it('disconnects anyway when the revoke fails', async () => {
 		// A user who asked to disconnect must not be left connected because
 		// Dropbox happened to be down.
 		const app = buildApp({ script: { revoke: () => new Response('', { status: 503 }) } });
-		const { jar } = await app.connect();
-		const [connection] = await rows(app.db);
+		const { credential } = await app.connect();
 
-		const response = await app.request(`/api/connections/${connection?.id ?? ''}`, {
-			method: 'DELETE',
-			cookies: jar,
-		});
+		const response = await app.request('/api/connection', { method: 'DELETE', credential });
 
 		expect(await response.json()).toEqual({ ok: true, revoked: false });
 		expect(await rows(app.db)).toHaveLength(0);
 	});
 
-	it('ends the session in storage-first, where the account was the connection', async () => {
+	it('leaves the other connections alone', async () => {
 		const app = buildApp();
-		const { jar } = await app.connect();
-		const [connection] = await rows(app.db);
+		const mine = await app.connect({ account: 'dbid:1' });
+		const theirs = await app.connect({ account: 'dbid:2' });
 
-		jar.absorb(
-			await app.request(`/api/connections/${connection?.id ?? ''}`, {
-				method: 'DELETE',
-				cookies: jar,
-			})
-		);
+		await app.request('/api/connection', { method: 'DELETE', credential: mine.credential });
 
-		expect(jar.get(cookieNames.session)).toBeUndefined();
-		expect((await app.request('/api/connections', { cookies: jar })).status).toBe(401);
-	});
-
-	it('keeps the session in account-first, where the user exists without it', async () => {
-		const app = buildApp({ config: testConfig({ authMode: 'account-first' }) });
-		// account-first refuses to start a flow without a session, so the session
-		// comes first, from a storage-first app sharing the same database.
-		const bootstrap = buildApp();
-		const { jar } = await bootstrap.connect();
-		const [connection] = await rows(bootstrap.db);
-
-		const response = jar.absorb(
-			await app.app.fetch(
-				new Request(`https://notes.example.com/api/connections/${connection?.id ?? ''}`, {
-					method: 'DELETE',
-					headers: { cookie: jar.header() ?? '', origin: 'https://notes.example.com' },
-				}),
-				{ DB: bootstrap.db }
-			)
-		);
-
-		expect(response.status).toBe(200);
-		expect(jar.get(cookieNames.session)).toBeDefined();
-	});
-
-	it("will not delete someone else's connection", async () => {
-		const app = buildApp();
-		const { jar } = await app.connect();
-		const { jar: otherJar } = await app.connect(createJar(), 'dbid:2');
-
-		const listed: { connections: { id: string }[] } = await (
-			await app.request('/api/connections', { cookies: otherJar })
-		).json();
-		const theirs = listed.connections[0]?.id ?? '';
-
-		const response = await app.request(`/api/connections/${theirs}`, {
-			method: 'DELETE',
-			cookies: jar,
-		});
-
-		// Not 403: answering differently for "exists but is not yours" would turn
-		// this route into a way to discover which ids exist.
-		expect(response.status).toBe(404);
-		expect(await rows(app.db)).toHaveLength(2);
-	});
-
-	it('answers 404 for an id that does not exist', async () => {
-		const app = buildApp();
-		const { jar } = await app.connect();
-
-		const response = await app.request('/api/connections/nope', {
-			method: 'DELETE',
-			cookies: jar,
-		});
-		expect(response.status).toBe(404);
-	});
-});
-
-describe('POST /api/auth/logout', () => {
-	it('drops the session row as well as the cookie', async () => {
-		const app = buildApp();
-		const { jar } = await app.connect();
-
-		const response = jar.absorb(
-			await app.request('/api/auth/logout', { method: 'POST', cookies: jar })
-		);
-
-		expect(response.status).toBe(200);
-		expect(jar.get(cookieNames.session)).toBeUndefined();
-		expect(await createDb(app.db).select().from(schema.sessions)).toHaveLength(0);
-		// The connection itself survives: signing out is not disconnecting.
 		expect(await rows(app.db)).toHaveLength(1);
+		expect(
+			(await app.request('/api/connection', { credential: theirs.credential })).status
+		).toBe(200);
 	});
 
-	it('is harmless without a session', async () => {
+	it('refuses a credential this deployment never issued', async () => {
 		const app = buildApp();
-		expect((await app.request('/api/auth/logout', { method: 'POST' })).status).toBe(200);
+		await app.connect();
+
+		const response = await app.request('/api/connection', {
+			method: 'DELETE',
+			credential: newCredential(),
+		});
+		expect(response.status).toBe(401);
+		expect(await rows(app.db)).toHaveLength(1);
 	});
 });
 
@@ -247,8 +342,7 @@ describe('what the first draft got wrong', () => {
 		// The route promises the row goes either way. That only holds if the
 		// revoke can actually give up, which needs a deadline, not just a catch.
 		const app = buildApp();
-		const { jar } = await app.connect();
-		const [connection] = await rows(app.db);
+		const { credential } = await app.connect();
 
 		const signals: (AbortSignal | undefined)[] = [];
 		const stalling = buildApp({
@@ -263,9 +357,12 @@ describe('what the first draft got wrong', () => {
 		});
 
 		const response = await stalling.app.fetch(
-			new Request(`https://notes.example.com/api/connections/${connection?.id ?? ''}`, {
+			new Request('https://notes.example.com/api/connection', {
 				method: 'DELETE',
-				headers: { cookie: jar.header() ?? '', origin: 'https://notes.example.com' },
+				headers: {
+					authorization: `Bearer ${credential}`,
+					origin: 'https://notes.example.com',
+				},
 			}),
 			{ DB: app.db }
 		);
@@ -277,16 +374,76 @@ describe('what the first draft got wrong', () => {
 
 	it('does not accept a disconnect from another origin', async () => {
 		const app = buildApp();
-		const { jar } = await app.connect();
-		const [connection] = await rows(app.db);
+		const { credential } = await app.connect();
 
-		const response = await app.request(`/api/connections/${connection?.id ?? ''}`, {
+		const response = await app.request('/api/connection', {
 			method: 'DELETE',
 			headers: { origin: 'https://evil.notes.example.com' },
-			cookies: jar,
+			credential,
 		});
 
 		expect(response.status).toBe(403);
 		expect(await rows(app.db)).toHaveLength(1);
+	});
+});
+
+/**
+ * `lastUsedAt` is not decoration. Idle expiry reads it, the cap evicts on it,
+ * and the device list is how a user spots a credential that is not theirs — all
+ * three are wrong if nothing writes it.
+ */
+describe('recording that a device is still in use', () => {
+	const day = 24 * 60 * 60 * 1000;
+
+	const lastUsed = async (app: ReturnType<typeof buildApp>) => {
+		const [row] = await createDb(app.db).select().from(schema.grants);
+		return row?.lastUsedAt.getTime() ?? 0;
+	};
+
+	const backdate = async (app: ReturnType<typeof buildApp>, by: number) => {
+		const at = Date.now() - by;
+		await createDb(app.db)
+			.update(schema.grants)
+			.set({ lastUsedAt: new Date(at) });
+		return at;
+	};
+
+	it('moves the timestamp forward on a request made a day later', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+		const before = await backdate(app, 2 * day);
+
+		await app.request('/api/connection', { credential });
+
+		// Without this a grant expires 180 days after it was *created*, however
+		// much the device was used, and the cap evicts the device in daily use
+		// alongside the one nobody has touched since.
+		expect(await lastUsed(app)).toBeGreaterThan(before);
+		expect(await lastUsed(app)).toBeGreaterThan(Date.now() - day);
+	});
+
+	it('leaves it alone for a request made the same day', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+		const before = await backdate(app, 60 * 60 * 1000);
+
+		await app.request('/api/connection', { credential });
+
+		// A write per request would be a D1 write per request, and once a day is
+		// indistinguishable to everything that reads it.
+		expect(await lastUsed(app)).toBe(before);
+	});
+
+	it('keeps a device alive indefinitely as long as it keeps asking', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+
+		// Two months short of the idle limit, twice over: a credential in use does
+		// not expire on a schedule set when it was issued.
+		for (let i = 0; i < 2; i += 1) {
+			await backdate(app, 120 * day);
+			expect((await app.request('/api/connection', { credential })).status).toBe(200);
+		}
+		expect((await app.request('/api/connection', { credential })).status).toBe(200);
 	});
 });

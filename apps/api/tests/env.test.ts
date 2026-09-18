@@ -73,25 +73,25 @@ describe('parseEnv', () => {
 		expect(() => parseEnv({ ...base, ENABLED_PROVIDERS: '' })).toThrow(/at least one provider/);
 	});
 
-	it('requires a sign-in provider in account-first mode', () => {
-		expect(() =>
-			parseEnv({
-				...base,
-				AUTH_MODE: 'account-first',
-				ENABLED_PROVIDERS: 'webdav',
-			})
-		).toThrow(/account-first requires a sign-in provider/);
-	});
-
-	it('accepts account-first when Microsoft credentials are present', () => {
-		const config = parseEnv({
-			...base,
-			AUTH_MODE: 'account-first',
-			ENABLED_PROVIDERS: 'webdav',
-			MICROSOFT_CLIENT_ID: 'm',
-			MICROSOFT_CLIENT_SECRET: 'ms',
-		});
-		expect(config.authMode).toBe('account-first');
+	it('refuses to boot in account-first, which is not built', () => {
+		// It used to be accepted and then behave exactly like storage-first, which
+		// is the worst of the three possibilities: an operator who set it believed
+		// connections were gated behind a sign-in they had configured, and they
+		// were not. Configuring a sign-in provider does not make it true either.
+		for (const extra of [
+			{},
+			{ MICROSOFT_CLIENT_ID: 'm', MICROSOFT_CLIENT_SECRET: 'ms' },
+			{ GOOGLE_CLIENT_ID: 'g', GOOGLE_CLIENT_SECRET: 'gs' },
+		]) {
+			expect(() =>
+				parseEnv({
+					...base,
+					AUTH_MODE: 'account-first',
+					ENABLED_PROVIDERS: 'webdav',
+					...extra,
+				})
+			).toThrow(/account-first is not implemented yet/);
+		}
 	});
 
 	it('reads WEBDAV_ALLOW_PRIVATE as a string flag', () => {

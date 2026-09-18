@@ -4,9 +4,9 @@ import { createDb, schema } from '../src/db/client.js';
 import { challengeFor } from '../src/oauth/pkce.js';
 import {
 	allProvidersConfig,
+	authorizeUrlOf,
 	bothProvidersConfig,
 	buildApp,
-	cookieNames,
 	createJar,
 	flowStateOf,
 	GOOGLE_ACCOUNT,
@@ -34,22 +34,17 @@ const workerLog = () => vi.spyOn(console, 'error').mockImplementation(() => unde
 const failWith = (error: string, status = 400) =>
 	new Response(JSON.stringify({ error, error_description: 'echoes the-code' }), { status });
 
-const tokenFor = (app: ReturnType<typeof buildApp>, connectionId: string, jar = createJar()) =>
-	app.request('/api/token', {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ connectionId }),
-		cookies: jar,
-	});
+const tokenFor = (app: ReturnType<typeof buildApp>, credential: string) =>
+	app.request('/api/token', { method: 'POST', credential });
 
 describe('start', () => {
 	it('sends the browser to Google for offline access, with PKCE and fresh consent', async () => {
-		const { request } = buildApp({ config: allProvidersConfig() });
+		const app = buildApp({ config: allProvidersConfig() });
 
-		const response = await request('/api/auth/connect/gdrive/start');
-		const url = new URL(response.headers.get('location') ?? '');
+		const response = await app.startConnect('gdrive');
+		const url = await authorizeUrlOf(response);
 
-		expect(response.status).toBe(302);
+		expect(response.status).toBe(200);
 		expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
 		expect(Object.fromEntries(url.searchParams)).toMatchObject({
 			client_id: 'google-client-id.apps.googleusercontent.com',
@@ -63,30 +58,33 @@ describe('start', () => {
 		expect(url.searchParams.has('include_granted_scopes')).toBe(false);
 		expect(url.searchParams.get('code_challenge')).toBeTruthy();
 		expect(url.searchParams.get('state')).toBeTruthy();
-		expect(response.headers.get('location')).not.toContain('google-client-secret');
+		expect(url.toString()).not.toContain('google-client-secret');
 	});
 
 	it('is not offered where the operator has not enabled it', async () => {
-		const { request } = buildApp({ config: bothProvidersConfig() });
-		expect((await request('/api/auth/connect/gdrive/start')).status).toBe(404);
+		const app = buildApp({ config: bothProvidersConfig() });
+		expect((await app.startConnect('gdrive')).status).toBe(404);
 	});
 
 	it('says so plainly when it is enabled without credentials', async () => {
 		const config = allProvidersConfig();
-		const { request } = buildApp({
+		const app = buildApp({
 			config: { ...config, oauth: { ...config.oauth, gdrive: undefined } },
 		});
-		expect((await request('/api/auth/connect/gdrive/start')).status).toBe(501);
+		expect((await app.startConnect('gdrive')).status).toBe(501);
 	});
 
-	it('will not start for a user whose notes sync with another provider', async () => {
+	it('starts for a device that already holds another provider', async () => {
+		// Inverted: this used to be refused, because in the old model any
+		// connected account signed you in as its user, so holding two crossed the
+		// authorisation between them. Each connection is now its own silo, and a
+		// device may hold as many as the person has accounts.
 		const app = buildApp({ config: allProvidersConfig() });
-		const { jar } = await app.connect(createJar(), 'ms-a', 'onedrive');
+		const { jar } = await app.connect({ account: 'ms-a', provider: 'onedrive' });
 
-		const response = await app.request('/api/auth/connect/gdrive/start?returnTo=/n', {
-			cookies: jar,
-		});
-		expect(response.headers.get('location')).toBe('/n?connect=occupied');
+		const response = await app.startConnect('gdrive', { jar, returnTo: '/n' });
+		expect(response.status).toBe(200);
+		expect((await authorizeUrlOf(response)).hostname).toBe('accounts.google.com');
 	});
 });
 
@@ -95,12 +93,8 @@ describe('callback', () => {
 		const app = buildApp({ config: allProvidersConfig() });
 		const jar = createJar();
 
-		const start = jar.absorb(
-			await app.request('/api/auth/connect/gdrive/start', { cookies: jar })
-		);
-		const challenge = new URL(start.headers.get('location') ?? '').searchParams.get(
-			'code_challenge'
-		);
+		const start = jar.absorb(await app.startConnect('gdrive', { jar }));
+		const challenge = (await authorizeUrlOf(start)).searchParams.get('code_challenge');
 		const callback = jar.absorb(
 			await app.request(
 				`/api/auth/connect/gdrive/callback?code=the-code&state=${flowStateOf(jar)}`,
@@ -109,7 +103,8 @@ describe('callback', () => {
 		);
 
 		expect(callback.headers.get('location')).toBe('/?connect=ok');
-		expect(jar.get(cookieNames.session)).toBeDefined();
+		// A grant for this device, not a session for a user.
+		expect(await createDb(app.db).select().from(schema.grants)).toHaveLength(1);
 
 		const [row] = await rows(app.db);
 		expect(row?.provider).toBe('gdrive');
@@ -117,10 +112,6 @@ describe('callback', () => {
 		expect(row?.displayName).toBe('person@gmail.com');
 		expect((await secretOf(row!)).refreshToken).toBe('google-refresh-1');
 		expect(JSON.stringify(row)).not.toContain('google-refresh-1');
-
-		const [user] = await createDb(app.db).select().from(schema.users);
-		// Google says the address is verified; it is still not what links accounts.
-		expect(user?.emailVerified).toBe(false);
 
 		const exchange = app.stub.calls.find(
 			(call) => call.form.grant_type === 'authorization_code'
@@ -147,10 +138,10 @@ describe('callback', () => {
 					}),
 			},
 		});
-		const { callback, jar } = await app.connect(createJar(), undefined, 'gdrive');
+		const { callback } = await app.connect({ provider: 'gdrive' });
 
 		expect(callback.headers.get('location')).toBe('/?connect=partial');
-		expect(jar.get(cookieNames.session)).toBeUndefined();
+		expect(await createDb(app.db).select().from(schema.grants)).toHaveLength(0);
 		expect(await rows(app.db)).toHaveLength(0);
 		expect(app.stub.calls.some((call) => call.url.endsWith('/revoke'))).toBe(false);
 		// The user's choice, not a fault for the operator.
@@ -171,14 +162,13 @@ describe('callback', () => {
 						: googleTokenResponse({ scope: scopes.now }),
 			},
 		});
-		const { jar } = await app.connect(createJar(), undefined, 'gdrive');
+		const { jar, credential } = await app.connect({ provider: 'gdrive' });
 		scopes.now = 'openid';
 
-		const { callback } = await app.connect(jar, undefined, 'gdrive');
+		const { callback } = await app.connect({ jar, provider: 'gdrive' });
 
 		expect(callback.headers.get('location')).toBe('/?connect=partial');
-		const [row] = await rows(app.db);
-		expect((await tokenFor(app, row?.id ?? '', jar)).status).toBe(200);
+		expect((await tokenFor(app, credential)).status).toBe(200);
 		expect(app.stub.calls.some((call) => call.url.endsWith('/revoke'))).toBe(false);
 	});
 
@@ -187,7 +177,7 @@ describe('callback', () => {
 			config: allProvidersConfig(),
 			script: { google: () => googleTokenResponse({ scope: undefined }) },
 		});
-		const { callback } = await app.connect(createJar(), undefined, 'gdrive');
+		const { callback } = await app.connect({ provider: 'gdrive' });
 		expect(callback.headers.get('location')).toBe('/?connect=partial');
 	});
 
@@ -200,7 +190,7 @@ describe('callback', () => {
 					new Response(JSON.stringify({ error: 'scope_not_granted' }), { status: 400 }),
 			},
 		});
-		const { callback } = await app.connect(createJar(), undefined, 'dropbox');
+		const { callback } = await app.connect({ provider: 'dropbox' });
 		expect(callback.headers.get('location')).toBe('/?connect=failed');
 		expect(log).toHaveBeenCalled();
 	});
@@ -213,7 +203,7 @@ describe('callback', () => {
 					googleTokenResponse({ scope: `openid ${GOOGLE_DRIVE_SCOPE}.readonly` }),
 			},
 		});
-		const { callback } = await app.connect(createJar(), undefined, 'gdrive');
+		const { callback } = await app.connect({ provider: 'gdrive' });
 		expect(callback.headers.get('location')).toBe('/?connect=partial');
 	});
 
@@ -222,7 +212,7 @@ describe('callback', () => {
 			config: allProvidersConfig(),
 			script: { google: () => googleTokenResponse({}, { aud: 'another-app' }) },
 		});
-		const { callback } = await app.connect(createJar(), undefined, 'gdrive');
+		const { callback } = await app.connect({ provider: 'gdrive' });
 
 		expect(callback.headers.get('location')).toBe('/?connect=failed');
 		expect(await rows(app.db)).toHaveLength(0);
@@ -233,7 +223,7 @@ describe('callback', () => {
 			config: allProvidersConfig(),
 			script: { google: () => googleTokenResponse({ refresh_token: undefined }) },
 		});
-		const { callback } = await app.connect(createJar(), undefined, 'gdrive');
+		const { callback } = await app.connect({ provider: 'gdrive' });
 		expect(callback.headers.get('location')).toBe('/?connect=failed');
 	});
 
@@ -242,7 +232,7 @@ describe('callback', () => {
 			config: allProvidersConfig(),
 			script: { google: () => googleTokenResponse({}, { email: undefined }) },
 		});
-		await app.connect(createJar(), undefined, 'gdrive');
+		await app.connect({ provider: 'gdrive' });
 		const [row] = await rows(app.db);
 		expect(row?.displayName).toBe('Google Drive');
 	});
@@ -253,7 +243,7 @@ describe('callback', () => {
 			config: allProvidersConfig(),
 			script: { google: () => failWith('invalid_client', 401) },
 		});
-		const { callback } = await app.connect(createJar(), undefined, 'gdrive');
+		const { callback } = await app.connect({ provider: 'gdrive' });
 
 		expect(callback.headers.get('location')).toBe('/?connect=failed');
 		const logged = log.mock.calls.flat().join('\n');
@@ -266,10 +256,9 @@ describe('callback', () => {
 describe('POST /api/token', () => {
 	it('refreshes at Google and keeps the refresh token it already had', async () => {
 		const app = buildApp({ config: allProvidersConfig() });
-		const { jar } = await app.connect(createJar(), undefined, 'gdrive');
-		const [before] = await rows(app.db);
+		const { credential } = await app.connect({ provider: 'gdrive' });
 
-		const response = await tokenFor(app, before?.id ?? '', jar);
+		const response = await tokenFor(app, credential);
 		expect(response.status).toBe(200);
 		expect(await response.json()).toMatchObject({ accessToken: 'google-access-2' });
 
@@ -296,25 +285,20 @@ describe('POST /api/token', () => {
 						: googleTokenResponse(),
 			},
 		});
-		const { jar } = await app.connect(createJar(), undefined, 'gdrive');
-		const [row] = await rows(app.db);
+		const { credential } = await app.connect({ provider: 'gdrive' });
 
-		const response = await tokenFor(app, row?.id ?? '', jar);
+		const response = await tokenFor(app, credential);
 		expect(response.status).toBe(401);
 		expect(await response.json()).toEqual({ error: 'reauthorize_required' });
 	});
 });
 
-describe('DELETE /api/connections/:id', () => {
+describe('DELETE /api/connection', () => {
 	it('revokes the grant at Google and deletes the row', async () => {
 		const app = buildApp({ config: allProvidersConfig() });
-		const { jar } = await app.connect(createJar(), undefined, 'gdrive');
-		const [row] = await rows(app.db);
+		const { credential } = await app.connect({ provider: 'gdrive' });
 
-		const response = await app.request(`/api/connections/${row?.id ?? ''}`, {
-			method: 'DELETE',
-			cookies: jar,
-		});
+		const response = await app.request('/api/connection', { method: 'DELETE', credential });
 
 		expect(await response.json()).toEqual({ ok: true, revoked: true });
 		expect(await rows(app.db)).toHaveLength(0);
@@ -327,13 +311,9 @@ describe('DELETE /api/connections/:id', () => {
 			config: allProvidersConfig(),
 			script: { googleRevoke: () => failWith('invalid_token') },
 		});
-		const { jar } = await app.connect(createJar(), undefined, 'gdrive');
-		const [row] = await rows(app.db);
+		const { credential } = await app.connect({ provider: 'gdrive' });
 
-		const response = await app.request(`/api/connections/${row?.id ?? ''}`, {
-			method: 'DELETE',
-			cookies: jar,
-		});
+		const response = await app.request('/api/connection', { method: 'DELETE', credential });
 
 		expect(await response.json()).toEqual({ ok: true, revoked: false });
 		expect(await rows(app.db)).toHaveLength(0);

@@ -120,21 +120,24 @@ const missingCredentialIssues = (raw: Record<string, unknown>): string[] => {
 		);
 };
 
-const missingSignInIssues = (raw: Record<string, unknown>): string[] => {
-	if (raw.AUTH_MODE !== 'account-first') return [];
-
-	const hasGoogle = raw.GOOGLE_CLIENT_ID && raw.GOOGLE_CLIENT_SECRET;
-	const hasMicrosoft = raw.MICROSOFT_CLIENT_ID && raw.MICROSOFT_CLIENT_SECRET;
-	if (hasGoogle || hasMicrosoft) return [];
-
-	return [
-		'AUTH_MODE: account-first requires a sign-in provider: set Google or Microsoft client credentials',
-	];
-};
+/**
+ * `account-first` is Phase 9 (docs/PLAN.md §10) and is not built. It used to be
+ * accepted and then behave exactly like `storage-first`, which is the worst of
+ * the three possibilities: an operator who set it believed connections were
+ * gated behind a sign-in they had configured, and they were not. Refusing at
+ * boot is the only answer that cannot be misread.
+ */
+const unbuiltAuthModeIssues = (raw: Record<string, unknown>): string[] =>
+	raw.AUTH_MODE === 'account-first'
+		? [
+				'AUTH_MODE: account-first is not implemented yet (docs/PLAN.md §10). ' +
+					'Use storage-first, where each connected account is its own silo.',
+			]
+		: [];
 
 const crossFieldIssues = (raw: Record<string, unknown>): string[] => [
 	...missingCredentialIssues(raw),
-	...missingSignInIssues(raw),
+	...unbuiltAuthModeIssues(raw),
 ];
 
 export const parseEnv = (raw: unknown): AppConfig => {
