@@ -1,5 +1,5 @@
 import { parentPath, previewLines, ROOT } from '@skysa/core';
-import { type ReactNode } from 'react';
+import { type ReactNode, type RefObject } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
 import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
@@ -37,6 +37,8 @@ export interface NoteListProps {
 	onQuery: (query: string) => void;
 	/** Matches for `query`, or undefined while the first one is being answered. */
 	results: readonly NoteHit[] | undefined;
+	/** So a command can put the cursor in the field without hunting the DOM. */
+	queryRef?: RefObject<HTMLInputElement | null>;
 }
 
 /**
@@ -184,6 +186,7 @@ export const NoteList = ({
 	query,
 	onQuery,
 	results,
+	queryRef,
 }: NoteListProps) => {
 	const searching = query.trim() !== '';
 	const placeholder = placeholderFor({ notes, folderPath, storeLoaded, query, results });
@@ -220,6 +223,7 @@ export const NoteList = ({
 			    rather than walk the pane to find it. */}
 			<div role="search">
 				<input
+					ref={queryRef}
 					// `search` rather than `text`: it is what the field is, and the
 					// browser offers its own way to empty one.
 					type="search"

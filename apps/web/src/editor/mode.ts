@@ -20,20 +20,3 @@ export const MODE_LABELS: Record<EditorMode, string> = {
 	rich: 'Rich text',
 	raw: 'Markdown',
 };
-
-/**
- * `Cmd+E` on macOS, `Ctrl+E` elsewhere. Checking both rather than sniffing the
- * platform: on either one the other chord is free, and a browser that reports an
- * unexpected platform still gets a working shortcut.
- */
-export const isModeToggleShortcut = (event: {
-	key: string;
-	metaKey: boolean;
-	ctrlKey: boolean;
-	altKey: boolean;
-	shiftKey: boolean;
-}): boolean =>
-	event.key.toLowerCase() === 'e' &&
-	(event.metaKey || event.ctrlKey) &&
-	!event.altKey &&
-	!event.shiftKey;

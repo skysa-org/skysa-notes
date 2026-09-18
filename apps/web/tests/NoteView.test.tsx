@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
 import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
@@ -14,15 +15,33 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * having unsaved changes.
  */
 
-/** Mirrors the route: the note comes from a live query, not from local state. */
+/**
+ * Mirrors the route: the note comes from a live query, not from local state,
+ * and the shell is what listens for chords. `NoteView` declares the mode toggle
+ * as a command rather than listening for the key itself, so the provider and
+ * `useShortcuts` have to be around it — which is the real arrangement, not a
+ * convenience for the test.
+ */
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
-	return <NoteView note={note} onDeleted={() => undefined} />;
+	useShortcuts();
+	return (
+		<>
+			<NoteView note={note} onDeleted={() => undefined} />
+		</>
+	);
 };
+
+const show = (id: string) =>
+	render(
+		<CommandsProvider>
+			<Harness id={id} />
+		</CommandsProvider>
+	);
 
 const openNote = async (body = '# A note\n\nWith a body.\n') => {
 	const note = await createNote(db, { title: 'A note', body });
-	render(<Harness id={note.id} />);
+	show(note.id);
 	await screen.findByDisplayValue('A note');
 	return note;
 };
@@ -115,7 +134,7 @@ describe('NoteView mode toggle', () => {
 		const note = await createNote(db, { title: 'Pinned to rich', body: 'x\n' });
 		await db.notes.update(note.id, { editorMode: 'rich' });
 
-		render(<Harness id={note.id} />);
+		show(note.id);
 
 		await waitFor(() => {
 			expect(richSurface()).not.toBeNull();
@@ -135,7 +154,7 @@ describe('a note whose frontmatter has a YAML error', () => {
 			path: 'broken.md',
 			source: '---\nid: abc\ntitle: Real\ntitle: Real\n---\n\n# Real\n',
 		});
-		render(<Harness id={note.id} />);
+		show(note.id);
 
 		const banner = await screen.findByRole('note');
 		expect(banner.textContent).toContain('frontmatter');
@@ -149,7 +168,7 @@ describe('a note whose frontmatter has a YAML error', () => {
 			path: 'fine.md',
 			source: '---\nid: abc\ntitle: Real\n---\n\n# Real\n',
 		});
-		render(<Harness id={note.id} />);
+		show(note.id);
 		await screen.findByDisplayValue('Real');
 
 		expect(screen.queryByRole('note')).toBeNull();
@@ -165,7 +184,7 @@ describe('abandoning a rename', () => {
 		// user was throwing away.
 		const user = userEvent.setup();
 		const note = await createNote(db, { title: 'Original', body: 'body\n' });
-		render(<Harness id={note.id} />);
+		show(note.id);
 
 		const field = await screen.findByLabelText('Note title');
 		await user.clear(field);

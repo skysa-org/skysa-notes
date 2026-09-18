@@ -1,7 +1,9 @@
 import { frontmatterIsEditable } from '@skysa/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { type EditorMode, isModeToggleShortcut, MODE_LABELS, otherMode } from '../editor/mode.js';
+import { parseChord } from '../commands/chord.js';
+import { useCommand } from '../commands/context.js';
+import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor } from '../editor/RichEditor.js';
 import { useAutosave } from '../editor/useAutosave.js';
@@ -10,6 +12,9 @@ import { useDefaultEditorMode } from '../store/hooks.js';
 import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
+
+/** `Cmd+E` on a Mac, `Ctrl+E` elsewhere — see `commands/chord.ts`. */
+const MODE_TOGGLE = parseChord('Mod+E');
 
 export interface NoteViewProps {
 	note: NoteRecord | undefined;
@@ -127,17 +132,17 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		void setNoteEditorMode(db, noteId, otherMode(mode));
 	}, [flush, mode, noteId, unsupported]);
 
-	useEffect(() => {
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (!isModeToggleShortcut(event)) return;
-			event.preventDefault();
-			toggleMode();
-		};
-		window.addEventListener('keydown', onKeyDown);
-		return () => {
-			window.removeEventListener('keydown', onKeyDown);
-		};
-	}, [toggleMode]);
+	// Registered rather than listened for. The chord the app watches and the
+	// chord the palette prints are then the same one by construction, and a
+	// second window listener cannot race this one for the same keystroke.
+	useCommand({
+		id: 'note.toggleMode',
+		label: `Edit as ${MODE_LABELS[otherMode(mode ?? 'rich')].toLowerCase()}`,
+		group: 'Note',
+		chord: MODE_TOGGLE,
+		enabled: noteId !== undefined && mode !== undefined && !unsupported,
+		run: toggleMode,
+	});
 
 	if (note === undefined) {
 		return (

@@ -1,8 +1,11 @@
 import { parentPath, ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import { parseChord } from '../commands/chord.js';
+import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel } from '../components/AccountPanel.js';
+import { CommandPalette } from '../components/CommandPalette.js';
 import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
@@ -51,6 +54,24 @@ const connectMessage = (outcome: ConnectOutcome): string => {
 	}
 };
 
+/**
+ * The shell's chords. `Mod` is Cmd or Ctrl, whichever the keyboard has, and
+ * every one of these is printed in the palette from this same value — the
+ * shortcut and its label cannot drift apart because there is only one of them.
+ */
+const PALETTE = parseChord('Mod+K');
+/**
+ * A bare key, because in a browser there is nothing else left. `Mod+N` opens a
+ * window and `Mod+Shift+N` a private one, in Chrome, Edge and Safari alike, and
+ * the page is never asked: printing either in the palette would advertise a
+ * shortcut that cannot fire, which is the drift this registry exists to stop.
+ *
+ * Bare keys are the reason `reachable` is there: this one is ignored while the
+ * user is in a field or an editor, which is where an `n` means the letter.
+ */
+const NEW_NOTE = parseChord('n');
+const FIND = parseChord('Mod+Shift+F');
+
 const Home = () => {
 	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
@@ -85,6 +106,14 @@ const Home = () => {
 	 */
 	const [query, setQuery] = useState('');
 	const results = useNoteSearch(query);
+
+	const [paletteOpen, setPaletteOpen] = useState(false);
+	/**
+	 * The search field, so a command can put the cursor in it. A command that
+	 * only *said* "search" and left the user to find the box would be a slower
+	 * way of doing nothing.
+	 */
+	const searchField = useRef<HTMLInputElement>(null);
 
 	/**
 	 * Why the last thing the user asked for did not happen. Creating a notebook
@@ -142,6 +171,43 @@ const Home = () => {
 			});
 	};
 
+	useCommand({
+		id: 'app.palette',
+		label: 'Show all commands',
+		group: 'App',
+		chord: PALETTE,
+		enabled: true,
+		run: () => {
+			setPaletteOpen(true);
+		},
+	});
+
+	useCommand({
+		id: 'note.new',
+		label: 'New note',
+		group: 'Note',
+		chord: NEW_NOTE,
+		// The root holds loose notes that came from the remote folder and the app
+		// does not add to them, so there is nowhere to put a note until a notebook
+		// is open (docs/PLAN.md §12.6).
+		enabled: folder !== undefined && folder !== ROOT,
+		run: onCreateNote,
+	});
+
+	useCommand({
+		id: 'app.search',
+		label: 'Search notes',
+		group: 'App',
+		chord: FIND,
+		enabled: true,
+		run: () => {
+			searchField.current?.focus();
+			searchField.current?.select();
+		},
+	});
+
+	useShortcuts();
+
 	return (
 		// `app-shell` is a three-column grid with exactly three children. A banner
 		// put inside it becomes a fourth grid item, takes the sidebar's column and
@@ -158,6 +224,14 @@ const Home = () => {
 					{connectMessage(connectOutcome)}
 				</p>
 			)}
+			{paletteOpen && (
+				<CommandPalette
+					onClose={() => {
+						setPaletteOpen(false);
+					}}
+				/>
+			)}
+
 			<div className="app-shell">
 				<Sidebar
 					tree={tree}
@@ -191,6 +265,7 @@ const Home = () => {
 					}}
 					query={query}
 					onQuery={setQuery}
+					queryRef={searchField}
 					results={results}
 					onCreateNote={onCreateNote}
 					folderPath={folder}
@@ -210,7 +285,18 @@ const Home = () => {
 	);
 };
 
+/**
+ * The provider wraps the shell rather than the app: every command belongs to a
+ * mounted screen, so a registry with the same lifetime as the screen is one
+ * that cannot hold a command whose `run` closes over a component that has gone.
+ */
+const HomeWithCommands = () => (
+	<CommandsProvider>
+		<Home />
+	</CommandsProvider>
+);
+
 export const Route = createFileRoute('/')({
 	validateSearch: parseSearch,
-	component: Home,
+	component: HomeWithCommands,
 });
