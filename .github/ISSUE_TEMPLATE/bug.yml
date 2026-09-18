@@ -1,0 +1,85 @@
+name: Bug report
+description: Something does not work the way it should.
+labels: [bug]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              **Not for security problems.** [`SECURITY.md`](https://github.com/skysa-org/skysa-notes/blob/main/SECURITY.md)
+              says how to report one privately.
+
+              Notes live in your browser's IndexedDB and sync to your own
+              storage. Nothing you paste here should contain note content — and
+              if reproducing it needs a specific note, describe its shape rather
+              than its text.
+
+    - type: textarea
+      id: what
+      attributes:
+          label: What happened
+          description: What you did, what you expected, and what happened instead.
+      validations:
+          required: true
+
+    - type: textarea
+      id: steps
+      attributes:
+          label: Steps to reproduce
+          placeholder: |
+              1. Connect a Dropbox account
+              2. Create a notebook called…
+              3. …
+      validations:
+          required: true
+
+    - type: input
+      id: commit
+      attributes:
+          label: Which commit
+          description: >-
+              There are no releases yet, so this is the commit you deployed or
+              checked out. `git rev-parse --short HEAD`.
+      validations:
+          required: true
+
+    - type: dropdown
+      id: provider
+      attributes:
+          label: Storage provider
+          description: Which account was connected, if any.
+          options:
+              - None — nothing connected
+              - Dropbox
+              - OneDrive
+              - Google Drive
+              - More than one at once
+      validations:
+          required: true
+
+    - type: input
+      id: browser
+      attributes:
+          label: Browser and OS
+          placeholder: Chrome 141 on macOS 15, installed as a PWA
+
+    - type: textarea
+      id: console
+      attributes:
+          label: Anything in the console
+          description: >-
+              Errors from the browser console, or from `wrangler tail` if you
+              host it yourself. Redact anything that looks like a token or a
+              credential — `sk1_…` strings especially: one of those is a live
+              key to the storage account it was issued for.
+          render: text
+
+    - type: checkboxes
+      id: offline
+      attributes:
+          label: Does it still happen offline?
+          description: >-
+              Optional, but it is the single most useful thing you can tell us:
+              it separates a sync problem from an app problem.
+          options:
+              - label: I tried it offline
+              - label: It still happens offline

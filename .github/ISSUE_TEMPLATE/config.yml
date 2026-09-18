@@ -1,0 +1,13 @@
+blank_issues_enabled: true
+contact_links:
+    # SECURITY.md rather than the "report a vulnerability" form directly.
+    # Private reporting is not enabled on this repository yet, and that form is
+    # not reachable for anyone who is not a maintainer — so linking it would
+    # send someone holding a live vulnerability to a page that does nothing,
+    # having just been told not to open an issue. SECURITY.md says what to do
+    # either way, and stays correct once reporting is turned on.
+    - name: Security vulnerability
+      url: https://github.com/skysa-org/skysa-notes/blob/main/SECURITY.md
+      about: Report privately — never in a public issue. SECURITY.md says how.
+    # A Discussions link belongs here once Discussions is enabled on the
+    # repository; it is not, and a contact link that 404s is worse than none.

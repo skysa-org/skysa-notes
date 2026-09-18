@@ -1,0 +1,40 @@
+name: Idea or feature request
+description: Something the app should do that it does not.
+labels: [enhancement]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Two things worth reading first, because they will answer a lot of
+              these faster than we can:
+
+              - **`docs/PLAN.md` §10** is the phase order — what is coming and
+                roughly when.
+              - **`docs/PLAN.md` §14** is "not planned", and it gives the
+                reasoning for each. If your idea is there, the useful thing is
+                to argue with the reasoning rather than to re-request it.
+
+    - type: textarea
+      id: problem
+      attributes:
+          label: What are you trying to do?
+          description: >-
+              The problem, not the solution. What are you doing when you hit
+              this, and what do you do instead today?
+      validations:
+          required: true
+
+    - type: textarea
+      id: idea
+      attributes:
+          label: What would help
+          description: If you have a shape in mind, describe it. It is fine not to.
+
+    - type: textarea
+      id: alternatives
+      attributes:
+          label: What else you considered
+          description: >-
+              Including doing it outside the app. The notes are plain markdown
+              files in a folder you own, so a lot of things are already possible
+              with other tools — say if you have tried and it did not work.
