@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +29,10 @@ import { describe, expect, it } from 'vitest';
  * a guard with nothing to iterate passes — silently, and for good. The canary
  * below is what makes that impossible here: the walk has to find this file.
  *
+ * Git is still asked, but only to *narrow*: see `trackedOrNothing`. The walk is
+ * what decides the guard is looking at anything; git's answer, when it is
+ * trustworthy, is what keeps an untracked local file out of the results.
+ *
  * This lives in `apps/web` rather than `packages/core` because core must run in
  * the browser and in Workers, and nothing under it may reach for `node:fs` even
  * in a test. The cost is that a repo-wide invariant is checked by one package's
@@ -53,6 +58,16 @@ const SKIP = new Set([
 ]);
 
 /**
+ * The mirror image of the bug this walk was written to fix: asking git could
+ * look at nothing, and walking the tree looks at things nobody committed.
+ * `.DS_Store` is the one that bites — it is in `.gitignore`, it begins with a
+ * NUL, and it appears the first time anyone opens a folder in Finder, which on
+ * this project's platform is the first day. `BINARY` cannot catch it: it has no
+ * extension to match on.
+ */
+const SKIP_FILES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
+
+/**
  * Binaries are exempt by extension rather than by sniffing: the point is to
  * catch a control byte in something meant to be read as text, and a PNG is not
  * that. The list fails open — anything unlisted is checked — so a new kind of
@@ -69,21 +84,61 @@ const filesUnder = (dir: string): string[] =>
 		if (entry.isSymbolicLink()) return [];
 		const path = join(dir, entry.name);
 		if (entry.isDirectory()) return SKIP.has(entry.name) ? [] : filesUnder(path);
-		return entry.isFile() ? [path] : [];
+		return entry.isFile() && !SKIP_FILES.has(entry.name) ? [path] : [];
 	});
+
+/**
+ * What git tracks, or nothing when it cannot say.
+ *
+ * This only ever *narrows* the walk below, and that asymmetry is the whole
+ * design. Asking git as the source of truth is what made the first version of
+ * this guard able to pass while checking nothing: inside a tree an outer
+ * repository ignores, `git ls-files` returns no paths at all. So the walk is the
+ * floor — no git, no checkout, a tarball, a Docker build that copies source
+ * without `.git`, and every file is still read — and git's answer is used only
+ * to drop files nobody committed. A `.DS_Store` that `SKIP_FILES` does not name,
+ * a scratch file someone left in `docs/`: ignored by git, so not this test's
+ * business.
+ *
+ * The condition to trust it is that it named this file. An empty answer, an
+ * answer from an outer repository that does not know this tree, or no git at
+ * all, and nothing is narrowed.
+ */
+const trackedOrNothing = (): ReadonlySet<string> => {
+	try {
+		const paths = execFileSync('git', ['ls-files', '-z'], {
+			cwd: repo,
+			encoding: 'utf8',
+			maxBuffer: 32 << 20,
+			stdio: ['ignore', 'pipe', 'ignore'],
+		})
+			.split('\0')
+			.filter((path) => path !== '')
+			.map((path) => join(repo, path));
+		return new Set(paths.includes(here) ? paths : []);
+	} catch {
+		return new Set();
+	}
+};
 
 const sources = (): string[] => [
 	// The root's own files — `package.json`, the workspace and lockfiles, the
 	// dotfiles — but not the directories beside them, which are named next.
 	...readdirSync(repo, { withFileTypes: true })
-		.filter((entry) => entry.isFile())
+		.filter((entry) => entry.isFile() && !SKIP_FILES.has(entry.name))
 		.map((entry) => join(repo, entry.name)),
-	...['apps', 'packages', 'docs'].flatMap((dir) => filesUnder(join(repo, dir))),
+	// Named rather than "everything but SKIP", which is what would let the
+	// ignored and the untracked back in. `.github` is here because a workflow
+	// file breaks blame and review exactly as a source file does; `.changeset`
+	// joins the list in Phase 8.
+	...['apps', 'packages', 'docs', '.github'].flatMap((dir) => filesUnder(join(repo, dir))),
 ];
 
 describe('every source file', () => {
 	it('is free of control bytes that would make git call it binary', () => {
-		const files = sources();
+		const walked = sources();
+		const tracked = trackedOrNothing();
+		const files = tracked.size === 0 ? walked : walked.filter((path) => tracked.has(path));
 
 		// The canary. A walk that found nothing would pass the assertion below
 		// while checking nothing at all, which is the failure mode worth guarding
@@ -111,8 +166,9 @@ describe('every source file', () => {
 							`${relative(repo, path)}: 0x${offender
 								.toString(16)
 								.padStart(2, '0')} at byte ${String(bytes.indexOf(offender))} — ` +
-								'escape it (\\u0000 and friends), or add the extension to BINARY ' +
-								'if this file is not text',
+								'escape it (\\u0000 and friends); or, if this file is not text, ' +
+								'add its extension to BINARY, or its name to SKIP_FILES when it ' +
+								'is a local file nobody commits',
 						];
 			});
 
