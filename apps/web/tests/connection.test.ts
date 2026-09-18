@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	bindConnection,
 	bindingCount,
+	bindingMode,
 	NOTES_ACCOUNT_KEY,
 	RESUME_SAMPLE_COUNT,
+	showConnection,
 	unbindConnection,
 	verifyResume,
 } from '../src/store/connection.js';
@@ -135,7 +137,7 @@ describe('binding a connection', () => {
 		expect((await getNote(db, plan.id))?.dirty).toBe(1);
 	});
 
-	it('cuts notes loose from the files of the account they came from', async () => {
+	it('leaves another source’s notes exactly where they are', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, DROPBOX);
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
@@ -149,14 +151,31 @@ describe('binding a connection', () => {
 
 		await bindConnection(db, { connectionId: 'dropbox-2', provider: 'dropbox' });
 
+		// This used to take the note with it, cut loose from its file and marked
+		// as writing no remote had — which, connecting a second account, meant
+		// copying one account's notes into another's storage on the strength of a
+		// consent screen. Each connected source is its own silo now: the note
+		// stays where it is, still knowing its file, and the new source starts
+		// empty (docs/PLAN.md §6).
 		const row = await getNote(db, note.id);
-		expect(row).toMatchObject({ connectionId: 'dropbox-2', dirty: 1 });
-		expect(row?.remoteId).toBeUndefined();
-		expect(row?.remoteVersion).toBeUndefined();
-		expect(row?.syncedHash).toBeUndefined();
+		expect(row).toMatchObject({ connectionId: DROPBOX.connectionId, dirty: 0 });
+		expect(row?.remoteId).toBe('id:1');
+		expect(row?.remoteVersion).toBe('v1');
+		expect(row?.syncedHash).toBe('h1');
+
+		// And the source it came from is still a source, with its place in the
+		// remote's history intact. Deleting its row would have stranded the note.
 		const states = await db.syncState.toArray();
-		expect(states.map((state) => state.connectionId)).toEqual(['dropbox-2']);
-		expect(states[0]?.cursor).toBeUndefined();
+		expect(states.map((state) => state.connectionId).sort()).toEqual([
+			DROPBOX.connectionId,
+			'dropbox-2',
+		]);
+		expect(states.find((state) => state.connectionId === DROPBOX.connectionId)?.cursor).toBe(
+			'old-account-cursor'
+		);
+		// The one just connected is the one shown, and it holds nothing yet.
+		expect(await activeConnectionId(db)).toBe('dropbox-2');
+		expect(await db.notes.where('connectionId').equals('dropbox-2').count()).toBe(0);
 	});
 
 	it('drops the queue of the connection it replaces', async () => {
@@ -207,8 +226,10 @@ describe('binding a connection', () => {
 	it('gives way when rows from two connections want one path', async () => {
 		const db = freshDatabase();
 		const local = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		// On the device too, not on a connection of its own: rows under another
+		// connection stay there now, so the only collision binding can meet is
+		// between two spellings of a path the device itself holds.
 		const stray = await createNote(db, {
-			connectionId: 'stale',
 			title: 'plan',
 			folderPath: 'work',
 		});
@@ -350,15 +371,88 @@ describe('unbinding the connection', () => {
 });
 
 describe('connecting an account', () => {
-	it('remembers which account the notes now belong to', async () => {
+	it('remembers which account a source is to, on the source', async () => {
 		const db = freshDatabase();
 
 		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
-		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:1');
+		expect((await db.syncState.get(DROPBOX.connectionId))?.accountId).toBe('dbid:1');
+		// Whose the *device's* notes are is not settled by connecting: nothing
+		// has come back to the device, and another source may be connected whose
+		// notes this bind did not touch.
+		expect(await db.prefs.get(NOTES_ACCOUNT_KEY)).toBeUndefined();
 
 		// An account the API could not name belongs to nobody the device knows.
 		await bindConnection(db, { connectionId: 'dropbox-2', provider: 'dropbox' });
-		expect(await db.prefs.get(NOTES_ACCOUNT_KEY)).toBeUndefined();
+		expect((await db.syncState.get('dropbox-2'))?.accountId).toBeUndefined();
+	});
+
+	it('does nothing when there was nothing bound to let go', async () => {
+		// Reached whenever a disconnect is asked for with nothing bound — an
+		// account the device declined to bind to, let go from the panel. The rows
+		// would otherwise be found both leaving and already in place, collide
+		// with themselves over their own paths, and be cut loose from the files
+		// they name.
+		const db = freshDatabase();
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await unbindConnection(db);
+		const before = await getNote(db, note.id);
+		const owed = await queued(db);
+
+		await unbindConnection(db);
+
+		expect(await getNote(db, note.id)).toEqual(before);
+		expect(await queued(db)).toEqual(owed);
+	});
+
+	it('hands the notes back to the account they came from when a source is let go', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		await createNote(db, { title: 'Plan' });
+
+		await unbindConnection(db);
+
+		// The one moment the local pile changes hands, and so the one place that
+		// records whose it is — which is what makes connecting the same account
+		// again a resume rather than a copy of every file.
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:1');
+		expect(await bindingMode(db, { provider: 'dropbox', accountId: 'dbid:1' })).toMatchObject({
+			mode: 'resume',
+		});
+		expect(await bindingMode(db, { provider: 'dropbox', accountId: 'dbid:2' })).toMatchObject({
+			mode: 'copy',
+		});
+	});
+
+	it('leaves the device’s notes with the account they came from when another source is connected', async () => {
+		const db = freshDatabase();
+		// Ada's source, let go, so her notes are the ones on the device.
+		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		await createNote(db, { title: 'Plan' });
+		await unbindConnection(db);
+		// Bob's, connected alongside, taking Ada's notes with it — as the user
+		// was asked and agreed (`needsAsking` in `sync/account.ts`).
+		await bindConnection(db, {
+			connectionId: 'c-bob',
+			provider: 'dropbox',
+			accountId: 'dbid:2',
+		});
+		// And a third, which moves nothing: the device holds nothing of its own.
+		await bindConnection(db, {
+			connectionId: 'c-cy',
+			provider: 'dropbox',
+			accountId: 'dbid:3',
+		});
+
+		// Cy's connection did not relabel a pile it never touched: it is Bob who
+		// has Ada's notes, and letting Bob's source go is what hands them back.
+		expect((await db.syncState.get('c-cy'))?.accountId).toBe('dbid:3');
+		await showConnection(db, 'c-bob');
+		await unbindConnection(db);
+		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:2');
+		// And Cy's source is untouched by any of it.
+		expect((await db.syncState.get('c-cy'))?.accountId).toBe('dbid:3');
 	});
 
 	it('copies notes from one account into another, cut loose and owed a write', async () => {
@@ -383,10 +477,15 @@ describe('connecting an account', () => {
 		expect(row?.remoteId).toBeUndefined();
 		expect(await getNote(db, gone.id)).toBeUndefined();
 		expect((await db.folders.get(['dropbox-3', 'Work']))?.remoteId).toBeUndefined();
+		expect((await db.syncState.get('dropbox-3'))?.accountId).toBe('dbid:2');
 		expect(await queued(db)).toEqual([
 			['dropbox-3', 'mkdir', 'Work'],
 			['dropbox-3', 'write', note.path],
 		]);
+		// The device's own pile is empty now, and what it last said is about a
+		// pile that has gone — stale but harmless, and corrected the moment
+		// anything comes back. Letting this source go is that moment.
+		await unbindConnection(db);
 		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:2');
 	});
 });
@@ -816,7 +915,7 @@ describe('a sync still at the network when the connection changes', () => {
 		);
 	});
 
-	it('leaves the account connected in its place alone', async () => {
+	it('lands on the source it was for when another is connected meanwhile', async () => {
 		const { db, plan, deep } = await usedLocally();
 		await bindConnection(db, DROPBOX);
 		const { release, running } = await heldPull(db, DROPBOX.connectionId);
@@ -825,13 +924,22 @@ describe('a sync still at the network when the connection changes', () => {
 		release();
 		await running;
 
-		expect((await db.syncState.toArray()).map((state) => state.connectionId)).toEqual([
+		// This used to be about damage control: the rows had been dragged onto the
+		// new connection underneath the pull, so the pull's own writes had to be
+		// refused or they would have landed in the wrong account. Sources are
+		// independent now, so there is nothing to refuse — the pull finishes into
+		// the source it was started for, which is still connected, and the source
+		// the user has switched to is untouched by it.
+		expect((await db.syncState.toArray()).map((state) => state.connectionId).sort()).toEqual([
+			DROPBOX.connectionId,
 			'dropbox-2',
 		]);
-		expect((await listNotes(db)).map((note) => note.id).sort()).toEqual(
-			[plan.id, deep.id].sort()
-		);
-		expect(await db.notes.where('connectionId').notEqual('dropbox-2').count()).toBe(0);
+		const onFirst = await db.notes.where('connectionId').equals(DROPBOX.connectionId).toArray();
+		expect(onFirst.map((note) => note.id)).toEqual(expect.arrayContaining([plan.id, deep.id]));
+		// And what the pull was for actually arrived, rather than being thrown
+		// away because the user looked at something else while it was in flight.
+		expect(onFirst.map((note) => note.path)).toContain('Arrived/new.md');
+		expect(await db.notes.where('connectionId').equals('dropbox-2').count()).toBe(0);
 	});
 });
 

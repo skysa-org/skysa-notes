@@ -117,48 +117,59 @@ export const createNote = async (
 	// chosen from the names already taken, and the digest between that read and
 	// the `add` is long enough for a second "New note" click to choose the very
 	// same name. Two rows at one path is one file on the remote and a note lost.
-	return db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
-		const connectionId = input.connectionId ?? (await activeConnectionId(db));
-		const title = input.title ?? deriveTitle({ body });
-		const filename = uniqueFilename(title, await takenNamesIn(db, connectionId, folderPath));
-		const path = joinPath(folderPath, filename);
-		const id = crypto.randomUUID();
+	return db.transaction(
+		'rw',
+		db.notes,
+		db.folders,
+		db.opQueue,
+		db.syncState,
+		db.prefs,
+		async () => {
+			const connectionId = input.connectionId ?? (await activeConnectionId(db));
+			const title = input.title ?? deriveTitle({ body });
+			const filename = uniqueFilename(
+				title,
+				await takenNamesIn(db, connectionId, folderPath)
+			);
+			const path = joinPath(folderPath, filename);
+			const id = crypto.randomUUID();
 
-		const record: NoteRecord = {
-			id,
-			connectionId,
-			path,
-			title,
-			body,
-			frontmatter: writeFrontmatter(null, {
+			const record: NoteRecord = {
 				id,
-				// Only pin a title in frontmatter when the user actually chose one.
-				// Writing "Untitled" here would stop the first heading from ever
-				// naming the note.
-				...(input.title === undefined ? {} : { title }),
-				created: new Date(now).toISOString(),
-				updated: new Date(now).toISOString(),
-			}),
-			tags: [],
-			contentHash: '',
-			dirty: 1,
-			deletedLocally: 0,
-			createdAt: now,
-			updatedAt: now,
-		};
+				connectionId,
+				path,
+				title,
+				body,
+				frontmatter: writeFrontmatter(null, {
+					id,
+					// Only pin a title in frontmatter when the user actually chose one.
+					// Writing "Untitled" here would stop the first heading from ever
+					// naming the note.
+					...(input.title === undefined ? {} : { title }),
+					created: new Date(now).toISOString(),
+					updated: new Date(now).toISOString(),
+				}),
+				tags: [],
+				contentHash: '',
+				dirty: 1,
+				deletedLocally: 0,
+				createdAt: now,
+				updatedAt: now,
+			};
 
-		const source = noteFileContents(record);
-		const withHash: NoteRecord = {
-			...record,
-			source,
-			contentHash: await Dexie.waitFor(contentHash(source)),
-		};
+			const source = noteFileContents(record);
+			const withHash: NoteRecord = {
+				...record,
+				source,
+				contentHash: await Dexie.waitFor(contentHash(source)),
+			};
 
-		if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
-		await db.notes.add(withHash);
-		await queueWrite(db, withHash);
-		return withHash;
-	});
+			if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
+			await db.notes.add(withHash);
+			await queueWrite(db, withHash);
+			return withHash;
+		}
+	);
 };
 
 export const getNote = async (db: NotesDatabase, id: string): Promise<NoteRecord | undefined> =>
@@ -227,7 +238,7 @@ const applyEdit = async (
 ): Promise<NoteRecord> =>
 	// `folders` is in scope because a note can move into a folder that does not
 	// exist yet, and creating it belongs to the same all-or-nothing step.
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 		const existing = await db.notes.get(id);
 		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
@@ -294,7 +305,7 @@ export const saveNoteBody = async (
 	body: string,
 	base?: EditBase
 ): Promise<NoteRecord> =>
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 		if (base === undefined) return applyBody(db, id, body);
 		const current = await db.notes.get(id);
 		if (current === undefined) return bringBack(db, base, body);
@@ -481,7 +492,7 @@ export const setNoteTags = async (
  * already in changes nothing and queues nothing.
  */
 const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void> =>
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 		const note = await db.notes.get(id);
 		if (note === undefined || note.deletedLocally === deleted) return;
 		const updated: NoteRecord = {
@@ -576,31 +587,41 @@ export const importNoteFile = async (
 	// these in one transaction of its own — which is what a sync pull batch will
 	// be — has then only one scope to open, instead of a `SubTransactionError`
 	// the first time it reaches the one writer that asked for less.
-	return db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, async () => {
-		const connectionId = input.connectionId ?? (await activeConnectionId(db));
-		const existing =
-			parsed.id === undefined
-				? await noteAtPath(db, connectionId, input.path)
-				: await db.notes.get(parsed.id);
+	return db.transaction(
+		'rw',
+		db.notes,
+		db.folders,
+		db.opQueue,
+		db.syncState,
+		db.prefs,
+		async () => {
+			const connectionId = input.connectionId ?? (await activeConnectionId(db));
+			const existing =
+				parsed.id === undefined
+					? await noteAtPath(db, connectionId, input.path)
+					: await db.notes.get(parsed.id);
 
-		const record: NoteRecord = {
-			...noteRecordFromFile({
-				id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
-				connectionId,
-				path: input.path,
-				source: input.source,
-				hash: await Dexie.waitFor(contentHash(input.source)),
-				existing,
-				now,
-			}),
-			...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
-			...(input.remoteVersion === undefined ? {} : { remoteVersion: input.remoteVersion }),
-			deletedLocally: 0,
-		};
+			const record: NoteRecord = {
+				...noteRecordFromFile({
+					id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
+					connectionId,
+					path: input.path,
+					source: input.source,
+					hash: await Dexie.waitFor(contentHash(input.source)),
+					existing,
+					now,
+				}),
+				...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
+				...(input.remoteVersion === undefined
+					? {}
+					: { remoteVersion: input.remoteVersion }),
+				deletedLocally: 0,
+			};
 
-		await db.notes.put(record);
-		return record;
-	});
+			await db.notes.put(record);
+			return record;
+		}
+	);
 };
 
 export interface NoteFileInput {

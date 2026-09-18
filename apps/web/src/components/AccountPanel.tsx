@@ -1,19 +1,27 @@
 import { parentPath, type ProviderKind } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 
 import {
 	api,
 	type ApiClient,
 	ApiError,
 	type Connection,
+	type Grant,
 	type InstanceConfig,
 	type Refusal,
 } from '../api/client.js';
 import { folderToSearch } from '../routes/search.js';
-import { unbindConnection } from '../store/connection.js';
 import {
+	type ConnectedSource,
+	connectedSources,
+	showConnection,
+	unbindConnection,
+} from '../store/connection.js';
+import { credentialFor } from '../store/credentials.js';
+import {
+	activeConnectionId,
 	db as defaultDb,
 	type NotesDatabase,
 	type QueuedOperation,
@@ -22,14 +30,15 @@ import {
 import {
 	type AccountState,
 	adoptAccount,
+	claimConnection,
 	CONNECTABLE,
 	disconnectAccount,
 	LEFT_AT_PROVIDER,
 	PROVIDER_LABELS,
-	reconcileAccount,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
+import { ConnectButton } from './ConnectButton.js';
 
 /**
  * Where the storage account is connected and disconnected: one account, replace
@@ -45,7 +54,7 @@ import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/
  * runs on its own; the panel only reports it and offers "Sync now".
  */
 
-type Client = Pick<ApiClient, 'config' | 'connections' | 'disconnect' | 'connectUrl'>;
+type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
 
 type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow' | 'resync'>;
 
@@ -53,6 +62,12 @@ export interface AccountPanelProps {
 	client?: Client;
 	database?: NotesDatabase;
 	sync?: Sync;
+	/**
+	 * How to leave for the provider's consent page. Injected like the rest, and
+	 * for the same reason: jsdom has no navigation, so a test that could not
+	 * supply this could only ever prove the button renders.
+	 */
+	navigate?: (url: string) => void;
 }
 
 /** A server answer: still being asked, not reachable, or what it said. */
@@ -68,9 +83,15 @@ const returnPath = (href: string): string => {
 	return url.pathname + url.search;
 };
 
+/**
+ * Why a disconnect did not happen. `credential_revoked` and `not_found` never
+ * arrive here — `disconnectAccount` counts those as the disconnect having
+ * already happened — so what is left is a server that declined a live
+ * credential, which the user can do nothing about except stop syncing here.
+ */
 const refusalMessage = (refusal: Refusal): string =>
-	refusal === 'sign_in_required'
-		? 'Your session has ended, so the server cannot be asked to disconnect. Connect again, then disconnect — or stop syncing on this device only.'
+	refusal === 'not_entitled'
+		? 'This account cannot sync on this server, and it would not disconnect it either.'
 		: 'The server would not disconnect this account.';
 
 const failureMessage = (error: unknown): string =>
@@ -156,7 +177,8 @@ const stuckMessage = (stuck: StuckOp, label: string): string =>
 /** A problem that connecting the account again is the answer to. */
 const needsReconnect = (status: SchedulerStatus): boolean =>
 	status.phase === 'attention' &&
-	(status.refusal === 'sign_in_required' ||
+	(status.refusal === 'credential_required' ||
+		status.refusal === 'credential_revoked' ||
 		status.refusal === 'reauthorize_required' ||
 		(status.refusal === undefined && status.error === 'authorization required'));
 
@@ -192,11 +214,13 @@ const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) =>
 
 interface LocalProps {
 	client: Client;
+	database: NotesDatabase;
 	config: Asked<InstanceConfig>;
 	returnTo: string;
+	navigate?: (url: string) => void;
 }
 
-const NotConnected = ({ client, config, returnTo }: LocalProps) => {
+const NotConnected = ({ client, database, config, returnTo, navigate }: LocalProps) => {
 	const settings = answer(config);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -207,9 +231,16 @@ const NotConnected = ({ client, config, returnTo }: LocalProps) => {
 		<section className="account" aria-label="Storage">
 			<p className="muted">Notes are kept on this device only.</p>
 			{offerable.map((provider) => (
-				<a key={provider} className="button" href={client.connectUrl(provider, returnTo)}>
+				<ConnectButton
+					key={provider}
+					db={database}
+					client={client}
+					provider={provider}
+					returnTo={returnTo}
+					{...(navigate === undefined ? {} : { navigate })}
+				>
 					Connect {PROVIDER_LABELS[provider]}
-				</a>
+				</ConnectButton>
 			))}
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">
@@ -256,11 +287,10 @@ interface SyncStateProps {
 	sync: Sync;
 	bound: SyncStateRecord;
 	label: string;
-	/** The server said there is no session. */
-	signedOut: boolean;
 	/** This server lets the user connect storage from here. */
 	reconnectable: boolean;
 	returnTo: string;
+	navigate?: (url: string) => void;
 }
 
 /**
@@ -274,14 +304,14 @@ const SyncState = ({
 	sync,
 	bound,
 	label,
-	signedOut,
 	reconnectable,
 	returnTo,
+	navigate,
 }: SyncStateProps) => {
 	const status = useSyncStatus(sync);
 	const syncable = bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
 	const message = statusMessage(status, label, syncable);
-	const reconnect = signedOut || needsReconnect(status);
+	const reconnect = needsReconnect(status);
 	const [rescanning, setRescanning] = useState(false);
 
 	return (
@@ -289,14 +319,23 @@ const SyncState = ({
 			{/* Said even where there is no link to offer: sync has stopped. */}
 			{reconnect && (
 				<p className="muted">
-					{status.refusal === 'reauthorize_required' ||
-					status.error === 'authorization required'
-						? `${label} needs to be connected again.`
-						: 'Your session has ended.'}
+					{status.refusal === 'credential_revoked' ||
+					status.refusal === 'credential_required'
+						? `This device can no longer reach ${label}.`
+						: `${label} needs to be connected again.`}
 					{reconnectable && bound.provider !== undefined && (
 						<>
 							{' '}
-							<a href={client.connectUrl(bound.provider, returnTo)}>Connect again</a>
+							<ConnectButton
+								db={database}
+								client={client}
+								provider={bound.provider}
+								returnTo={returnTo}
+								className="link"
+								{...(navigate === undefined ? {} : { navigate })}
+							>
+								Connect again
+							</ConnectButton>
 						</>
 					)}
 				</p>
@@ -375,6 +414,174 @@ const SyncState = ({
 	);
 };
 
+/**
+ * The sources this device holds, and which one the app is showing.
+ *
+ * Shown only once there are two: with one connected source a list of one is
+ * noise, and the panel already names it. Switching moves nothing — each source
+ * keeps its own notes, notebooks, queue and cursor (docs/PLAN.md §6) — so this
+ * is a change of view, and the wording says so rather than implying a transfer.
+ */
+const Sources = ({
+	client,
+	database,
+	config,
+	returnTo,
+	navigate,
+}: LocalProps & { config: Asked<InstanceConfig> }) => {
+	const sources = useLiveQuery(() => connectedSources(database), [database]);
+	const settings = answer(config);
+	const offerable =
+		settings?.authMode === 'storage-first'
+			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
+			: [];
+	if (sources === undefined) return null;
+
+	return (
+		<div className="account-sources">
+			{sources.length > 1 && (
+				<ul aria-label="Connected sources">
+					{sources.map((source: ConnectedSource) => (
+						<li key={source.connectionId}>
+							{source.active ? (
+								<span className="muted">{sourceLabel(source)} · showing</span>
+							) : (
+								<button
+									type="button"
+									className="link"
+									onClick={() => {
+										void showConnection(database, source.connectionId);
+									}}
+								>
+									Show {sourceLabel(source)}
+								</button>
+							)}
+						</li>
+					))}
+				</ul>
+			)}
+			{offerable.map((provider) => (
+				<ConnectButton
+					key={provider}
+					db={database}
+					client={client}
+					provider={provider}
+					returnTo={returnTo}
+					className="link"
+					{...(navigate === undefined ? {} : { navigate })}
+				>
+					Connect another {PROVIDER_LABELS[provider]} account
+				</ConnectButton>
+			))}
+		</div>
+	);
+};
+
+/** A source in as few words as the device can say it without asking the server. */
+const sourceLabel = (source: ConnectedSource): string =>
+	source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
+
+/**
+ * The devices holding this connection, and the way to take one away.
+ *
+ * The point of it is that a stolen credential is visible and revocable. It is
+ * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
+ * cannot protect it (docs/PLAN.md §6), so it is asked for on open rather than
+ * hidden behind a disclosure the user would never press.
+ *
+ * Revoking is permanent in a way worth saying: the server spends a credential's
+ * hash for ever, so the device that held it cannot be talked back into this
+ * connection — it has to be connected again from scratch.
+ */
+const Devices = ({ client, database }: { client: Client; database: NotesDatabase }) => {
+	const [grants, setGrants] = useState<Asked<Grant[]>>({ kind: 'asking' });
+	const [busy, setBusy] = useState<string | null>(null);
+	const [problem, setProblem] = useState<string | null>(null);
+
+	const ask = useCallback(() => {
+		void withHeld(database, client)
+			.then((authed) => (authed === undefined ? undefined : authed.grants()))
+			.then((result) => {
+				setGrants(
+					result === undefined || !result.ok
+						? { kind: 'unreachable' }
+						: { kind: 'answered', value: result.value }
+				);
+			})
+			.catch(() => {
+				setGrants({ kind: 'unreachable' });
+			});
+	}, [client, database]);
+	useEffect(ask, [ask]);
+
+	const listed = answer(grants);
+	if (listed === undefined || listed.length < 2) return null;
+
+	const revoke = (grantId: string) => {
+		setBusy(grantId);
+		setProblem(null);
+		void withHeld(database, client)
+			.then((authed) => (authed === undefined ? undefined : authed.revokeGrant(grantId)))
+			.then((result) => {
+				if (result?.ok === true) {
+					ask();
+					return;
+				}
+				setProblem('That device is still signed in: the server would not remove it.');
+			})
+			.catch(() => {
+				setProblem('The server cannot be reached, so nothing was removed.');
+			})
+			.finally(() => {
+				setBusy(null);
+			});
+	};
+
+	return (
+		<div className="account-devices">
+			<p className="muted">Devices signed in to this account:</p>
+			<ul aria-label="Devices">
+				{listed.map((grant) => (
+					<li key={grant.id}>
+						<span className="muted">
+							{grant.current
+								? 'This device'
+								: `A device, last used ${when(grant.lastUsedAt)}`}
+							{grant.expired && ' · signed out for being idle'}
+						</span>
+						{!grant.current && (
+							<button
+								type="button"
+								className="link"
+								disabled={busy !== null}
+								onClick={() => {
+									revoke(grant.id);
+								}}
+							>
+								Remove
+							</button>
+						)}
+					</li>
+				))}
+			</ul>
+			{problem !== null && (
+				<p className="muted" role="alert">
+					{problem}
+				</p>
+			)}
+		</div>
+	);
+};
+
+/** The client, presenting the credential for the source in front of the user. */
+const withHeld = async (
+	database: NotesDatabase,
+	client: Client
+): Promise<ApiClient | undefined> => {
+	const held = await credentialFor(database, await activeConnectionId(database));
+	return held === undefined ? undefined : client.withCredential(held.credential);
+};
+
 interface ConnectedProps {
 	client: Client;
 	database: NotesDatabase;
@@ -383,6 +590,7 @@ interface ConnectedProps {
 	config: Asked<InstanceConfig>;
 	account: Asked<AccountState>;
 	returnTo: string;
+	navigate?: (url: string) => void;
 }
 
 const Connected = ({
@@ -393,13 +601,22 @@ const Connected = ({
 	config,
 	account,
 	returnTo,
+	navigate,
 }: ConnectedProps) => {
 	const [confirming, setConfirming] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	// Refused for want of a session: the server cannot be asked, and may even
 	// have let go already, its answer lost on the way back.
-	const [sessionless, setSessionless] = useState(false);
+	/**
+	 * A disconnect the server would not or could not do, leaving the device
+	 * bound to a connection it cannot get rid of by asking. Any failure counts:
+	 * a refusal and an unreachable server strand the user the same way, and the
+	 * old rule — only where the credential had stopped working — now names a
+	 * case that cannot happen, because a credential the server no longer
+	 * honours *is* the disconnect and `disconnectAccount` finishes the job.
+	 */
+	const [stranded, setStranded] = useState(false);
 
 	// Focus follows the step the user is on, rather than falling to the page
 	// when the button they pressed goes away. Not on first render.
@@ -436,14 +653,16 @@ const Connected = ({
 	const disconnect = () => {
 		setBusy(true);
 		setProblem(null);
+		setStranded(false);
 		void disconnectAccount(database, client, bound.connectionId)
 			.then((outcome) => {
 				if (outcome.ok) return;
 				setProblem(refusalMessage(outcome.refusal));
-				setSessionless(outcome.refusal === 'sign_in_required');
+				setStranded(true);
 			})
 			.catch((error: unknown) => {
 				setProblem(failureMessage(error));
+				setStranded(true);
 			})
 			.finally(() => {
 				setBusy(false);
@@ -463,16 +682,24 @@ const Connected = ({
 				sync={sync}
 				bound={bound}
 				label={label}
-				signedOut={state?.kind === 'signed-out'}
 				reconnectable={answer(config)?.authMode === 'storage-first'}
 				returnTo={returnTo}
+				{...(navigate === undefined ? {} : { navigate })}
 			/>
+			<Sources
+				client={client}
+				database={database}
+				config={config}
+				returnTo={returnTo}
+				{...(navigate === undefined ? {} : { navigate })}
+			/>
+			<Devices client={client} database={database} />
 			{problem !== null && (
 				<p className="muted" role="alert">
 					{problem}
 				</p>
 			)}
-			{sessionless && (
+			{stranded && (
 				<button
 					type="button"
 					className="ghost"
@@ -609,12 +836,19 @@ export const AccountPanel = ({
 	client = api,
 	database = defaultDb,
 	sync = syncScheduler,
+	navigate,
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
 	// `useLiveQuery` for "not read yet". Unwrapped, the two look the same.
+	// The source the app is showing, not whichever `syncState` row IndexedDB
+	// hands back first. A device may hold several connected sources at once
+	// (docs/PLAN.md §6) and the first row is then a coin toss: the panel would
+	// name one account while the notes on screen belong to another, and
+	// switching sources would change nothing here. The live query reads `prefs`
+	// as well as `syncState`, so a switch in another tab re-renders this one.
 	const bound = useLiveQuery(
-		async () => ({ state: await database.syncState.toCollection().first() }),
+		async () => ({ state: await database.syncState.get(await activeConnectionId(database)) }),
 		[database]
 	);
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
@@ -658,7 +892,12 @@ export const AccountPanel = ({
 			asking.current = false;
 			setAccount(next);
 		};
-		void reconcileAccount(database, client)
+		// `claimConnection`, not `reconcileAccount`: this effect also runs on the
+		// return from the consent page, which is a full navigation back into the
+		// app, and that is where a pending credential has to be taken up. With no
+		// pending credential it reconciles, so there is no URL to read and a
+		// reload in the middle of a flow lands in the same place.
+		void claimConnection(database, client)
 			.then((value) => {
 				settle({ kind: 'answered', value });
 			})
@@ -686,7 +925,13 @@ export const AccountPanel = ({
 	}
 
 	return bound.state === undefined ? (
-		<NotConnected client={client} config={config} returnTo={returnTo} />
+		<NotConnected
+			client={client}
+			database={database}
+			config={config}
+			returnTo={returnTo}
+			{...(navigate === undefined ? {} : { navigate })}
+		/>
 	) : (
 		<Connected
 			client={client}
@@ -696,6 +941,7 @@ export const AccountPanel = ({
 			config={config}
 			account={account}
 			returnTo={returnTo}
+			{...(navigate === undefined ? {} : { navigate })}
 		/>
 	);
 };

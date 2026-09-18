@@ -166,14 +166,18 @@ export const createDexieSyncStore = (
 	 * interleave.
 	 */
 	const inTransaction = <T>(work: () => Promise<T>): Promise<T> =>
-		db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState], async () => {
-			const state = await db.syncState.get(connectionId);
-			if (state === undefined) throw new UnboundConnectionError(connectionId);
-			// A scan before `verifyResume` has checked the remote could delete
-			// every note an emptied app folder no longer holds.
-			if (state.resumeUnverified === true) throw new UnverifiedResumeError(connectionId);
-			return work();
-		});
+		db.transaction(
+			'rw',
+			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs],
+			async () => {
+				const state = await db.syncState.get(connectionId);
+				if (state === undefined) throw new UnboundConnectionError(connectionId);
+				// A scan before `verifyResume` has checked the remote could delete
+				// every note an emptied app folder no longer holds.
+				if (state.resumeUnverified === true) throw new UnverifiedResumeError(connectionId);
+				return work();
+			}
+		);
 
 	const notesOf = (scope: Scope): Promise<NoteRecord[]> =>
 		scope.notes.where('connectionId').equals(connectionId).toArray();

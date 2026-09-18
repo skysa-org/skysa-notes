@@ -13,8 +13,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGDriveStub } from '../../../packages/core/tests/providers/gdriveStub.js';
 import { createOneDriveStub } from '../../../packages/core/tests/providers/onedriveStub.js';
 import { type ApiClient } from '../src/api/client.js';
-import { bindConnection } from '../src/store/connection.js';
-import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import { bindConnection, showConnection, unbindConnection } from '../src/store/connection.js';
+import {
+	activeConnectionId,
+	createDatabase,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	type NotesDatabase,
+} from '../src/store/db.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -24,6 +30,7 @@ import {
 import {
 	createNote,
 	deleteNote,
+	getNote,
 	moveNote,
 	noteFile,
 	renameNote,
@@ -194,14 +201,31 @@ const fakeEnvironment = () => {
 	};
 };
 
-/** A server minting an access token that never expires within a test. */
-const tokenServer = (): Pick<ApiClient, 'token'> => ({
-	token: () =>
-		Promise.resolve({
-			ok: true,
-			value: { accessToken: 'token', expiresAt: Date.now() + 10 * HOUR },
-		}),
-});
+/**
+ * A server minting an access token that never expires within a test, for
+ * whichever credential it is shown. The scheduler reaches it through
+ * `withCredential`, so a source with no credential on the device never gets
+ * here at all.
+ */
+const tokenServer = (): Pick<ApiClient, 'withCredential'> => {
+	const answering = {
+		token: () =>
+			Promise.resolve({
+				ok: true as const,
+				value: { accessToken: 'token', expiresAt: Date.now() + 10 * HOUR },
+			}),
+	} as unknown as ApiClient;
+	return { withCredential: () => answering };
+};
+
+/** The credential a device holds for a source, as connecting leaves behind. */
+const holdCredential = (db: NotesDatabase, connectionId: string): Promise<unknown> =>
+	db.credentials.put({
+		id: connectionId,
+		credential: `sk1_${connectionId}`,
+		provider: 'dropbox',
+		createdAt: Date.now(),
+	});
 
 interface Browser {
 	readonly name: string;
@@ -280,6 +304,7 @@ const browser = async (remote: Remote, name: string): Promise<Browser> => {
 	cleanups.push(() => db.delete());
 	// The same connection on both — one account, two installs. `bindConnection`
 	// mints each database its own `clientId`.
+	await holdCredential(db, ACCOUNT.connectionId);
 	await bindConnection(db, ACCOUNT);
 	const env = fakeEnvironment();
 	const scheduler = createSyncScheduler({
@@ -1023,3 +1048,135 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		remote,
 	};
 };
+
+/**
+ * Two sources connected on one device, which is the other half of Phase 7's
+ * "multiple connections": not two browsers over one account, but one browser
+ * over two accounts at once.
+ *
+ * The property is that they are silos. Each source has its own notes, its own
+ * queue and its own cursor, switching between them moves nothing, and nothing
+ * one source holds can reach the other's storage — which is the whole of what
+ * makes holding several safe, since the two remotes may belong to different
+ * people (docs/PLAN.md §6).
+ */
+describe('one browser over two sources', () => {
+	/** A device holding both, with the first one in front. */
+	const twoSources = async () => {
+		const first = createFakeProvider({ startAt: START });
+		const second = createFakeProvider({ startAt: START });
+		const db = createDatabase(`soak-two-${crypto.randomUUID()}`);
+		cleanups.push(() => db.delete());
+		for (const [connectionId, provider] of [
+			['c-second', 'onedrive'],
+			['c-first', 'dropbox'],
+		] as const) {
+			await holdCredential(db, connectionId);
+			await bindConnection(db, { connectionId, provider, accountId: connectionId });
+		}
+		const env = fakeEnvironment();
+		const scheduler = createSyncScheduler({
+			db,
+			client: tokenServer(),
+			// Which storage a run reaches is decided by the connection it is for,
+			// and by nothing else. A source that could be handed the other's
+			// adapter is the bug this whole arrangement is here to rule out.
+			createProvider: (input) => (input.connectionId === 'c-first' ? first : second),
+			environment: env.environment,
+		});
+		cleanups.unshift(() => {
+			scheduler.stop();
+		});
+		scheduler.start();
+		return { db, scheduler, first, second };
+	};
+
+	/**
+	 * The files on a remote, by name, ignoring the marker the engine writes.
+	 * The fake folds paths as the providers do, so these are lower case.
+	 */
+	const files = (remote: ReturnType<typeof createFakeProvider>): string[] =>
+		remote
+			.snapshot()
+			.map((entry) => entry.path)
+			.filter((path) => path.endsWith('.md'))
+			.sort();
+
+	/** Sync whichever source is in front, and let the run finish. */
+	const syncing = async (scheduler: SyncScheduler): Promise<void> => {
+		await idle(scheduler);
+		await scheduler.syncNow();
+		await idle(scheduler);
+	};
+
+	/** The scheduler has picked the source up and is syncing it, not the other. */
+	const following = async (scheduler: SyncScheduler, db: NotesDatabase, id: string) => {
+		await vi.waitFor(async () => {
+			expect(await activeConnectionId(db)).toBe(id);
+			expect(scheduler.status().phase).not.toBe('local');
+		});
+	};
+
+	it('keeps each source’s notes to itself across a switch', async () => {
+		const { db, scheduler, first, second } = await twoSources();
+		await following(scheduler, db, 'c-first');
+
+		const mine = await createNote(db, { title: 'Mine', body: 'on the first' });
+		await syncing(scheduler);
+
+		// Written under the source in front, and pushed to that source's storage.
+		expect(mine.connectionId).toBe('c-first');
+		expect(files(first)).toEqual(['mine.md']);
+		expect(files(second)).toEqual([]);
+
+		expect(await showConnection(db, 'c-second')).toBe(true);
+		await following(scheduler, db, 'c-second');
+		const theirs = await createNote(db, { title: 'Theirs', body: 'on the second' });
+		await syncing(scheduler);
+
+		// The switch moved nothing: the first source's note is still its own, and
+		// still names the file it has there.
+		expect(theirs.connectionId).toBe('c-second');
+		expect(files(second)).toEqual(['theirs.md']);
+		expect(files(first)).toEqual(['mine.md']);
+		const kept = await getNote(db, mine.id);
+		expect(kept?.connectionId).toBe('c-first');
+		expect(kept?.remoteId).toBeDefined();
+		expect(await db.notes.where('connectionId').equals('c-first').count()).toBe(1);
+		expect(await db.notes.where('connectionId').equals('c-second').count()).toBe(1);
+
+		// And back, with everything where it was left.
+		expect(await showConnection(db, 'c-first')).toBe(true);
+		await following(scheduler, db, 'c-first');
+		await syncing(scheduler);
+
+		expect(files(first)).toEqual(['mine.md']);
+		expect(files(second)).toEqual(['theirs.md']);
+		expect((await getNote(db, mine.id))?.body).toBe('on the first');
+		expect((await getNote(db, theirs.id))?.body).toBe('on the second');
+	});
+
+	it('takes only the source in front with it when one is let go', async () => {
+		const { db, scheduler, first, second } = await twoSources();
+		await following(scheduler, db, 'c-first');
+		const mine = await createNote(db, { title: 'Mine' });
+		await syncing(scheduler);
+		expect(await showConnection(db, 'c-second')).toBe(true);
+		await following(scheduler, db, 'c-second');
+		const theirs = await createNote(db, { title: 'Theirs' });
+		await syncing(scheduler);
+
+		await unbindConnection(db);
+
+		// The second source's notes come back to the device; the first's stay
+		// where they are, with its cursor and its credential intact.
+		expect((await getNote(db, theirs.id))?.connectionId).toBe(LOCAL_CONNECTION_ID);
+		expect((await getNote(db, mine.id))?.connectionId).toBe('c-first');
+		expect(await db.syncState.get('c-first')).toBeDefined();
+		expect(await db.syncState.get('c-second')).toBeUndefined();
+		expect(await db.credentials.get('c-first')).toBeDefined();
+		// Nothing was asked of either storage on the way out.
+		expect(files(first)).toEqual(['mine.md']);
+		expect(files(second)).toEqual(['theirs.md']);
+	});
+});
