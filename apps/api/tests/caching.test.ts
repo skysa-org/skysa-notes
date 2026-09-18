@@ -21,26 +21,53 @@ describe('what may be cached', () => {
 	it('says no-store on every answer, whatever it answered', async () => {
 		const app = buildApp();
 		const { jar } = await app.connect();
+		// The real id, so the token below is a token and not a `not_found`: the
+		// one response whose body is a provider access token is the one most
+		// worth proving, and a made-up id never reaches the minting at all.
+		const listed: { connections: { id: string }[] } = await (
+			await app.request('/api/connections', { cookies: jar })
+		).json();
+		const connectionId = listed.connections[0]?.id;
+		if (connectionId === undefined) throw new Error('no connection to mint for');
 
 		const answers = [
-			// Public, and the two that carry something worth replaying.
-			await app.request('/api/health'),
-			await app.request('/api/config'),
-			await app.request('/api/connections', { cookies: jar }),
-			await app.request('/api/token', {
-				method: 'POST',
-				cookies: jar,
-				headers: { 'content-type': 'application/json', origin: 'https://notes.test' },
-				body: JSON.stringify({ connectionId: 'nope' }),
-			}),
+			[200, await app.request('/api/health')],
+			[200, await app.request('/api/config')],
+			[200, await app.request('/api/connections', { cookies: jar })],
+			[
+				200,
+				await app.request('/api/token', {
+					method: 'POST',
+					cookies: jar,
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ connectionId }),
+				}),
+			],
 			// A refusal is as cacheable as a success unless it says otherwise,
 			// and a stored 401 outlives the session that caused it.
-			await app.request('/api/connections'),
+			[401, await app.request('/api/connections')],
 			// Not found is the one a cache is most willing to keep.
-			await app.request('/api/nothing-here'),
-		];
+			[404, await app.request('/api/nothing-here')],
+			// A rejection is a response too, and this one is made by throwing —
+			// which ends the request at a level above any middleware registered
+			// after `csrf`. Ordering, not wording, is what keeps it covered.
+			[
+				403,
+				await app.request('/api/connections/whatever', {
+					method: 'DELETE',
+					cookies: jar,
+					headers: {
+						'content-type': 'application/x-www-form-urlencoded',
+						origin: 'https://evil.example',
+					},
+				}),
+			],
+		] as const;
 
-		for (const response of answers) {
+		for (const [status, response] of answers) {
+			// The status too: a request that 404s for an unrelated reason would
+			// otherwise pass this test while proving nothing about its endpoint.
+			expect([response.url, response.status]).toEqual([response.url, status]);
 			expect(response.headers.get('cache-control')).toBe('no-store');
 		}
 	});

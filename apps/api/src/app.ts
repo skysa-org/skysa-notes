@@ -102,16 +102,6 @@ export const createApp = (options: CreateAppOptions) => {
 	});
 
 	/**
-	 * `sameSite=Lax` already stops a cross-*site* POST from carrying the session
-	 * cookie. What it does not stop is a same-site, cross-origin one — a sibling
-	 * subdomain — and `POST /api/token` mints an access token. Checking `Origin`
-	 * against this deployment's own closes that; it applies only to
-	 * state-changing methods, so the OAuth callback (a GET navigation from
-	 * Dropbox) is unaffected.
-	 */
-	app.use('*', csrf({ origin: config.appOrigin }));
-
-	/**
 	 * Nothing here may be stored by anything between the Worker and the tab.
 	 *
 	 * `POST /api/token` answers with a provider access token, and `GET
@@ -120,7 +110,16 @@ export const createApp = (options: CreateAppOptions) => {
 	 * user has revoked, or unbind a connection that is alive. Neither response
 	 * carried any freshness information before this, which leaves them to
 	 * heuristic freshness — and `no-store` is the only header that also forbids
-	 * writing the response down in the first place.
+	 * writing the response down in the first place. `no-cache` would not: it
+	 * means "store it, but ask first".
+	 *
+	 * It goes *above* `csrf` because a refusal is a response too. `csrf` rejects
+	 * by throwing, which Hono turns into a response at the level above whoever
+	 * threw — so a middleware registered after it never gets its `next()` back
+	 * for that request, and the 403 would go out bare.
+	 *
+	 * Set after `next()`, so it is the last word: a route cannot opt out by
+	 * setting its own, and none should want to.
 	 *
 	 * The service worker is already `NetworkOnly` for `/api/*` (`apps/web/pwa.ts`);
 	 * this is the same rule for the caches it does not control, and the client
@@ -131,6 +130,16 @@ export const createApp = (options: CreateAppOptions) => {
 		await next();
 		c.header('Cache-Control', 'no-store');
 	});
+
+	/**
+	 * `sameSite=Lax` already stops a cross-*site* POST from carrying the session
+	 * cookie. What it does not stop is a same-site, cross-origin one — a sibling
+	 * subdomain — and `POST /api/token` mints an access token. Checking `Origin`
+	 * against this deployment's own closes that; it applies only to
+	 * state-changing methods, so the OAuth callback (a GET navigation from
+	 * Dropbox) is unaffected.
+	 */
+	app.use('*', csrf({ origin: config.appOrigin }));
 
 	app.get('/health', (c) => c.json({ ok: true }));
 
