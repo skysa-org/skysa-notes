@@ -15,12 +15,7 @@ import {
 	keepCredential,
 	pendingCredential,
 } from '../store/credentials.js';
-import {
-	activeConnectionId,
-	LOCAL_CONNECTION_ID,
-	type NotesDatabase,
-	PENDING_CREDENTIAL_ID,
-} from '../store/db.js';
+import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
 
 /**
  * The storage account, as the server knows it, reconciled with the device.
@@ -108,13 +103,14 @@ export type AccountState =
  * and the row it is filed under is that connection. So the only outcomes are
  * "still there", "gone for good", and "could not ask".
  *
- * Unbinding happens on `credential_revoked` and on nothing else. That is the
- * definite answer *about this connection* — revoked from another device, or the
- * account disconnected — and it is permanent: the server spends a credential's
- * hash for ever, so there is no state in which it starts working again. Every
- * other failure throws and the device keeps what it has, which is the whole of
- * the old reconcile race: an absence from a list was never evidence, and a
- * cached or replayed answer could unbind a live connection.
+ * Unbinding happens on the two answers that are definite *about this
+ * connection* — `credential_revoked` (revoked from another device, or the
+ * account disconnected) and `not_found` (the connection is gone) — and on
+ * nothing else. Both are permanent: the server spends a credential's hash for
+ * ever, so there is no state in which it starts working again. Every other
+ * failure throws and the device keeps what it has, which is the whole of the
+ * old reconcile race: an absence from a list was never evidence, and a cached
+ * or replayed answer could unbind a live connection.
  *
  * Throws when the server cannot be asked at all: offline is not an answer.
  */
@@ -212,9 +208,14 @@ export const claimConnection = async (
 
 	const result = await client.withCredential(pending.credential).connection();
 	if (!result.ok) {
-		// The flow did not finish, or finished for a credential this is not.
-		// Nothing was reachable by it, so there is nothing to strand.
-		await forgetCredential(db, PENDING_CREDENTIAL_ID);
+		// Not an answer about the flow. A credential the server has never seen
+		// and one whose flow is still out — consent page open in another tab —
+		// are the same refusal, and throwing it away on the second is the worst
+		// outcome the design has: the user consents, the server commits the
+		// connection and spends the hash for ever, and this device holds no
+		// plaintext for it. Unreachable, unrevokable, and holding a live refresh
+		// token. A flow the user really did abandon is swept by `PENDING_TTL_MS`
+		// instead, which cannot be wrong about it.
 		return reconcileAccount(db, client);
 	}
 
@@ -310,6 +311,11 @@ export const disconnectAccount = async (
 		if (!done) return result;
 	}
 	await forgetCredential(db, connectionId);
-	await unbindConnection(db);
+	// By name, not "whichever is in front". This is reached for a connection the
+	// device claimed and declined to bind to, while some other source is the one
+	// being shown — and unbinding that one would delete a connection the user
+	// never asked about, leaving it live on the server with nothing here able to
+	// name it.
+	await unbindConnection(db, { connectionId });
 	return { ok: true };
 };

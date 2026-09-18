@@ -142,14 +142,15 @@ describe('claiming a connection the user has just consented to', () => {
 		expect(await db.folders.where('connectionId').equals('c9').count()).toBe(0);
 	});
 
-	it('drops a credential the server will not answer for, and reconciles instead', async () => {
+	it('keeps a credential the server will not answer for, and reconciles instead', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
 		await beginConnect(db, 'dropbox');
 
-		// A flow the user abandoned, or one whose callback never committed.
-		// Nothing was ever reachable by it, so there is nothing to strand.
+		// A flow the user abandoned, one whose callback never committed — or one
+		// still out, with the consent page open in another tab. The server's
+		// answer is the same refusal for all three, so it cannot decide.
 		const state = await claimConnection(db, {
 			withCredential: (credential: string) =>
 				({
@@ -163,7 +164,11 @@ describe('claiming a connection the user has just consented to', () => {
 		});
 
 		expect(state).toEqual({ kind: 'connected', connection: connection('c1') });
-		expect(await db.credentials.get(PENDING_CREDENTIAL_ID)).toBeUndefined();
+		// Kept. Consent given after this would spend the hash for ever, and a
+		// device that had thrown the plaintext away could neither reach the
+		// connection nor revoke it. `PENDING_TTL_MS` sweeps a flow that really
+		// was abandoned; nothing here has to guess.
+		expect(await db.credentials.get(PENDING_CREDENTIAL_ID)).toBeDefined();
 		expect(await activeConnectionId(db)).toBe('c1');
 	});
 

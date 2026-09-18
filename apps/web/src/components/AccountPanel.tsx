@@ -477,9 +477,20 @@ const Sources = ({
 	);
 };
 
-/** A source in as few words as the device can say it without asking the server. */
-const sourceLabel = (source: ConnectedSource): string =>
-	source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
+/**
+ * A source in as few words as the device can say it without asking the server.
+ *
+ * The account id when there is one, because the case this list exists for is
+ * two accounts at the same provider — "Dropbox" twice, one of them "showing",
+ * is not a choice anyone can make. It is the provider's own id rather than a
+ * display name: the panel only ever asks the server about the source in front,
+ * so a name for the others would mean holding answers this device has no
+ * reason to keep.
+ */
+const sourceLabel = (source: ConnectedSource): string => {
+	const provider = source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
+	return source.accountId === undefined ? provider : `${provider} · ${source.accountId}`;
+};
 
 /**
  * The devices holding this connection, and the way to take one away.
@@ -493,13 +504,30 @@ const sourceLabel = (source: ConnectedSource): string =>
  * hash for ever, so the device that held it cannot be talked back into this
  * connection — it has to be connected again from scratch.
  */
-const Devices = ({ client, database }: { client: Client; database: NotesDatabase }) => {
+const Devices = ({
+	client,
+	database,
+	connectionId,
+}: {
+	client: Client;
+	database: NotesDatabase;
+	/**
+	 * Which source these are the devices of. Named rather than looked up, for
+	 * two reasons: it is what makes the effect re-run on a switch — without it
+	 * the list stays on the previous source's devices while the panel above
+	 * names the new one, and pressing Remove sends a grant id the new
+	 * connection has never heard of — and it pins every call in this component
+	 * to one source, rather than re-reading "whichever is in front" between
+	 * asking and revoking.
+	 */
+	connectionId: string;
+}) => {
 	const [grants, setGrants] = useState<Asked<Grant[]>>({ kind: 'asking' });
 	const [busy, setBusy] = useState<string | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
 
 	const ask = useCallback(() => {
-		void withHeld(database, client)
+		void withHeld(database, client, connectionId)
 			.then((authed) => (authed === undefined ? undefined : authed.grants()))
 			.then((result) => {
 				setGrants(
@@ -511,7 +539,7 @@ const Devices = ({ client, database }: { client: Client; database: NotesDatabase
 			.catch(() => {
 				setGrants({ kind: 'unreachable' });
 			});
-	}, [client, database]);
+	}, [client, database, connectionId]);
 	useEffect(ask, [ask]);
 
 	const listed = answer(grants);
@@ -520,7 +548,7 @@ const Devices = ({ client, database }: { client: Client; database: NotesDatabase
 	const revoke = (grantId: string) => {
 		setBusy(grantId);
 		setProblem(null);
-		void withHeld(database, client)
+		void withHeld(database, client, connectionId)
 			.then((authed) => (authed === undefined ? undefined : authed.revokeGrant(grantId)))
 			.then((result) => {
 				if (result?.ok === true) {
@@ -573,12 +601,13 @@ const Devices = ({ client, database }: { client: Client; database: NotesDatabase
 	);
 };
 
-/** The client, presenting the credential for the source in front of the user. */
+/** The client, presenting the credential this device holds for one source. */
 const withHeld = async (
 	database: NotesDatabase,
-	client: Client
+	client: Client,
+	connectionId: string
 ): Promise<ApiClient | undefined> => {
-	const held = await credentialFor(database, await activeConnectionId(database));
+	const held = await credentialFor(database, connectionId);
 	return held === undefined ? undefined : client.withCredential(held.credential);
 };
 
@@ -693,7 +722,7 @@ const Connected = ({
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
 			/>
-			<Devices client={client} database={database} />
+			<Devices client={client} database={database} connectionId={bound.connectionId} />
 			{problem !== null && (
 				<p className="muted" role="alert">
 					{problem}

@@ -1254,7 +1254,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		renderPanel(client, db);
 		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
 
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive' }));
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
 
 		expect(await screen.findByText(/ada@work\.example/)).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe('c2');
@@ -1262,6 +1262,36 @@ describe('AccountPanel, with more than one source connected', () => {
 		// and the credential it is synced with stays with it.
 		expect((await getNote(db, here.id))?.connectionId).toBe('c1');
 		expect((await db.credentials.get('c1'))?.credential).toBe('sk1_dropbox');
+	});
+
+	it('tells two accounts at one provider apart', async () => {
+		const db = freshDatabase();
+		await holding(db, 'c1', 'sk1_one');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c3', 'sk1_two');
+		await bindConnection(db, { connectionId: 'c3', provider: 'dropbox', accountId: 'dbid:2' });
+		// Answering for the source in front: `rememberAccount` writes what the
+		// server says onto that source's row, so a stub that always named the
+		// same account would relabel the one being shown.
+		renderPanel(
+			clientWith({
+				connection: () =>
+					Promise.resolve({
+						ok: true,
+						value: { ...dropbox, id: 'c3', accountId: 'dbid:2' },
+					}),
+			}),
+			db
+		);
+
+		// The case the list exists for. "Dropbox", twice, one of them "showing",
+		// is not a choice anyone can act on.
+		expect(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' })).toBeTruthy();
+		await waitFor(() => {
+			expect(screen.getByRole('list', { name: 'Connected sources' }).textContent).toContain(
+				'Dropbox · dbid:2 · showing'
+			);
+		});
 	});
 
 	it('offers to connect another account without letting the first go', async () => {
@@ -1363,6 +1393,42 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/would not remove it/);
 		expect(screen.getByRole('list', { name: 'Devices' }).querySelectorAll('li').length).toBe(2);
+	});
+
+	it('asks again when the user switches source, so the list is that source’s', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await holding(db, 'c2', 'sk1_second');
+		await bindConnection(db, { connectionId: 'c2', provider: 'onedrive', accountId: 'ms:1' });
+		await holding(db, 'c1', 'sk1_first');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const second = { id: 'g9', createdAt: 3, lastUsedAt: 3, expired: false, current: false };
+		const client = clientWith({
+			connection: async () => ({
+				ok: true as const,
+				value:
+					(await activeConnectionId(db)) === 'c1'
+						? dropbox
+						: { ...dropbox, id: 'c2', provider: 'onedrive' as const },
+			}),
+			grants: async () => ({
+				ok: true as const,
+				value: (await activeConnectionId(db)) === 'c1' ? GRANTS : [...GRANTS, second],
+			}),
+		});
+		renderPanel(client, db);
+		await waitFor(async () => {
+			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(2);
+		});
+
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+
+		// Left alone, the list would still be Dropbox's, under a panel naming
+		// OneDrive — and pressing Remove would send a grant id this connection
+		// has never heard of.
+		await waitFor(async () => {
+			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(3);
+		});
 	});
 
 	it('says nothing where this is the only device, or the server cannot be asked', async () => {
