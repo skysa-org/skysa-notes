@@ -1,0 +1,8 @@
+# Every pull request gets the maintainer's review. One entry, because there is
+# one maintainer; this file is here so that stays true automatically as more
+# paths are added, and so the list can grow per-area rather than being
+# retrofitted later.
+#
+# CODEOWNERS only *requests* review. What makes it required is the branch
+# protection ruleset, which is repository configuration and not in this tree.
+* @rans0r

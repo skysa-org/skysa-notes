@@ -118,13 +118,9 @@ other projects, or commercially.
 
 ## How to sign
 
-The CLA gate is **not wired up yet** — that is the next change. Until it is,
-say on your pull request that you have read and agree to this document, and a
-maintainer will record it.
-
-Once it is wired up: open a pull request, and a bot comments with a link and
-the exact sentence to post. Signing is once per person, not once per pull
-request.
+Open a pull request. A bot comments with a link to this document and the exact
+sentence to post as a comment. Signing is once per person, not once per pull
+request — later pull requests are recognised without asking again.
 
 Signatures are recorded in the `cla-signatures` branch of this repository, and
 hold your GitHub username, the commit that prompted the signature, and the

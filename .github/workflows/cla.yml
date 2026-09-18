@@ -1,0 +1,77 @@
+name: CLA
+
+# The gate: a pull request cannot merge until its author has signed
+# `CLA-individual.md` once. Signatures are recorded as a JSON file in the
+# `cla-signatures` branch of this repository, which is created by the first
+# signature and needs no setup.
+#
+# `pull_request_target`, not `pull_request`, because the job has to write that
+# branch and a fork's `pull_request` token is read-only. That choice is the one
+# thing to be careful about here: `pull_request_target` runs the workflow file
+# **from the base branch** with a writable token, in the context of the base
+# repository. So this workflow must never check out or execute the pull
+# request's code — it does neither, and the `steps` below are the whole of it.
+# Anything added here that runs the contributor's code would hand a writable
+# token to whoever opened the pull request.
+# https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+
+on:
+    issue_comment:
+        types: [created]
+    pull_request_target:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: write # the signature file on `cla-signatures`
+    pull-requests: write # the comment asking for a signature, and its status
+    statuses: write
+
+# One at a time per pull request: two runs writing the signature file at once
+# is a lost update, and the thing lost is someone's signature.
+concurrency:
+    group: cla-${{ github.event.issue.number || github.event.pull_request.number }}
+    cancel-in-progress: false
+
+jobs:
+    cla:
+        runs-on: ubuntu-latest
+        # Every pull request event, but only comments that are the signature
+        # itself — otherwise every comment on every issue in the repository
+        # starts a run.
+        if: >-
+            github.event_name == 'pull_request_target' ||
+            (github.event.issue.pull_request != null &&
+             contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
+        steps:
+            - uses: contributor-assistant/github-action@v2.6.1
+              env:
+                  # The action's own token, used to write the signature file.
+                  # The default `GITHUB_TOKEN` is fine: the branch it writes is
+                  # in this repository.
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  path-to-document: https://github.com/skysa-org/skysa-notes/blob/main/CLA-individual.md
+                  path-to-signatures: signatures/version1/cla.json
+                  branch: cla-signatures
+                  # The sentence a contributor posts to sign. Fixed by the
+                  # action; repeated here so the workflow says what it expects.
+                  custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+                  custom-notsigned-prcomment: >-
+                      Thanks for the pull request. Before it can be merged, this
+                      project asks every contributor to sign its
+                      [Contributor License Agreement](https://github.com/skysa-org/skysa-notes/blob/main/CLA-individual.md)
+                      once — not once per pull request.
+
+                      **It is a licence grant, not an assignment.** You keep
+                      ownership of everything you write and every right to use
+                      it elsewhere; in exchange the project is bound to keep
+                      your contribution available under AGPL-3.0 or a licence
+                      one-way compatible with it.
+                      [CONTRIBUTING.md](https://github.com/skysa-org/skysa-notes/blob/main/CONTRIBUTING.md#the-cla)
+                      explains why.
+
+                      To sign, post exactly this as a new comment:
+                  custom-allsigned-prcomment: >-
+                      All contributors have signed the CLA. Thank you.
+                  # Bots do not have copyright to grant.
+                  allowlist: dependabot[bot],github-actions[bot]

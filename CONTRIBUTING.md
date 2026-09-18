@@ -81,9 +81,10 @@ and why, not what the diff already says.
 
 Every contributor signs the
 [Individual Contributor License Agreement](CLA-individual.md) once — once per
-person, not once per pull request. The bot that asks for it is **not wired up
-yet**; until it is, say on your pull request that you have read and agree to it.
-Signatures live in the `cla-signatures` branch of this repository.
+person, not once per pull request. A bot comments on your first pull request
+with a link and the sentence to post; signatures live in the `cla-signatures`
+branch of this repository, and hold your GitHub username, the commit that
+prompted the signature, and the date. Nothing else.
 
 **It is a licence grant, not an assignment.** You keep ownership of everything
 you write, and you keep the right to use your own work anywhere else, under any
