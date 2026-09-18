@@ -290,8 +290,12 @@ export interface ConnectOptions {
 	start?: (jar: Jar, credentialHash: string) => Promise<Response>;
 }
 
-export const buildApp = (options: Partial<CreateAppOptions> & { script?: DropboxScript } = {}) => {
-	const db = createD1();
+export const buildApp = (
+	options: Partial<CreateAppOptions> & { script?: DropboxScript; db?: D1Database } = {}
+) => {
+	// Supplied by the one test that needs a database which answers a read the way
+	// a concurrent transaction would, rather than the way this one wrote it.
+	const db = options.db ?? createD1();
 	const stub = dropboxStub(options.script);
 	const app = createApp({
 		config: options.config ?? testConfig(),

@@ -5,11 +5,13 @@ import { hashCredential, MAX_GRANTS_PER_CONNECTION } from '../src/credentials.js
 import { importSecretKey, openOAuthSecret, sign, signingKey } from '../src/crypto.js';
 import { createDb, schema } from '../src/db/client.js';
 import { challengeFor } from '../src/oauth/pkce.js';
+import { blindable, createD1 } from './d1.js';
 import {
 	bothProvidersConfig,
 	buildApp,
 	cookieNames,
 	createJar,
+	DEFAULT_ACCOUNT,
 	flowStateOf,
 	type Jar,
 	newCredential,
@@ -671,38 +673,105 @@ describe('one row per account, many devices per row', () => {
 		expect(await drizzle.select().from(schema.grants)).toHaveLength(1);
 	});
 
-	it('caps the devices one connection can accumulate, oldest first', async () => {
+	it('caps the devices one connection can accumulate, least recently used first', async () => {
 		const app = buildApp();
 		const drizzle = createDb(app.db);
 
-		// An old device, aged deliberately: `connect` is fast enough that a whole
-		// run lands inside one millisecond, and "oldest" would then be decided by
-		// the tie-break rather than by age.
-		const old = await app.connect();
+		// A device not used in a year, aged deliberately: `connect` is fast enough
+		// that a whole run lands inside one millisecond, and "least recently used"
+		// would then be decided by the tie-break rather than by use.
+		const stale = await app.connect();
 		await drizzle
 			.update(schema.grants)
-			.set({ createdAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) });
+			.set({ lastUsedAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) });
 
 		const fresh: string[] = [];
 		for (let i = 0; i < MAX_GRANTS_PER_CONNECTION; i += 1) {
 			fresh.push((await app.connect()).credential);
 		}
 
-		// Every grant is a live key to the same storage, so they cannot accumulate
-		// without limit.
-		expect(await drizzle.select().from(schema.grants)).toHaveLength(MAX_GRANTS_PER_CONNECTION);
-
-		// The oldest lost its place; the newest kept one.
-		expect((await app.request('/api/connection', { credential: old.credential })).status).toBe(
-			401
+		// Every live grant is a key to the same storage, so they cannot accumulate
+		// without limit. The pruned rows stay — that is what keeps their hashes
+		// spent — so it is the non-null ones that are capped.
+		const rows = await drizzle.select().from(schema.grants);
+		expect(rows).toHaveLength(MAX_GRANTS_PER_CONNECTION + 1);
+		expect(rows.filter((row) => row.connectionId !== null)).toHaveLength(
+			MAX_GRANTS_PER_CONNECTION
 		);
+
+		// The one nobody had used lost its place; the newest kept one.
+		expect(
+			(await app.request('/api/connection', { credential: stale.credential })).status
+		).toBe(401);
 		expect(
 			(await app.request('/api/connection', { credential: fresh.at(-1) ?? '' })).status
 		).toBe(200);
 	});
 
-	it('leaves one row behind when two callbacks race for one new account', async () => {
+	it('evicts by use rather than by age, so a long-lived device is not dropped', async () => {
 		const app = buildApp();
+		const drizzle = createDb(app.db);
+
+		// Oldest by `createdAt`, and still the most recently used. An earlier draft
+		// pruned on `createdAt`, which logged out precisely the device someone
+		// actually relies on and kept the ones they had stopped using.
+		const daily = await app.connect();
+		const [first] = await drizzle.select().from(schema.grants);
+		const day = 24 * 60 * 60 * 1000;
+		await drizzle
+			.update(schema.grants)
+			.set({ createdAt: new Date(Date.now() - 365 * day) })
+			.where(eq(schema.grants.id, first?.id ?? ''));
+
+		// Each of the others is left a day less recently used than the last, so
+		// there is a total order over `lastUsedAt` and the `id` tie-break never
+		// decides anything. Found by its own hash: the row it just made.
+		for (let i = 0; i < MAX_GRANTS_PER_CONNECTION; i += 1) {
+			const { credential } = await app.connect();
+			await drizzle
+				.update(schema.grants)
+				.set({ lastUsedAt: new Date(Date.now() - (i + 1) * day) })
+				.where(eq(schema.grants.secretHash, await hashCredential(credential)));
+		}
+
+		expect(
+			(await app.request('/api/connection', { credential: daily.credential })).status
+		).toBe(200);
+	});
+
+	it('reconnects a device that still holds its own credential', async () => {
+		const app = buildApp();
+		const credential = newCredential();
+
+		const first = await app.connect({ credential });
+		const second = await app.connect({ credential });
+
+		// A credential is a device's to keep, and nothing tells it to mint a fresh
+		// one before connecting again. An earlier draft plain-inserted the grant,
+		// so the repeat hash failed the unique index, rolled back the whole batch
+		// — new refresh token included — and failed identically on the retry: the
+		// device was wedged out of its own account for good.
+		expect(second.callback.headers.get('location')).toBe('/?connect=ok');
+		expect((await app.request('/api/connection', { credential })).status).toBe(200);
+
+		const drizzle = createDb(app.db);
+		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
+		const rows = await drizzle.select().from(schema.grants);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.lastUsedAt.getTime()).toBeGreaterThanOrEqual(
+			rows[0]?.createdAt.getTime() ?? 0
+		);
+		expect(first.credential).toBe(credential);
+	});
+
+	it('leaves one row behind when two callbacks race for one new account', async () => {
+		// The race, forced rather than hoped for. `node:sqlite` is synchronous, so
+		// two callbacks issued together still run one after the other and the
+		// second always sees what the first committed — which is the one ordering
+		// where nothing goes wrong. Blinding a single read reproduces the ordering
+		// that matters: a callback that read before the other committed.
+		const blind = blindable(createD1());
+		const app = buildApp({ db: blind.db });
 
 		const begin = async () => {
 			const jar = createJar();
@@ -718,21 +787,26 @@ describe('one row per account, many devices per row', () => {
 		};
 		const [one, two] = [await begin(), await begin()];
 
+		const callback = ({ jar }: { jar: Jar }) =>
+			app.request(`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`, {
+				cookies: jar,
+			});
+
+		const first = await callback(one);
+
 		// Both flows find the account unconnected and each computes its own row
-		// id. The unique index lets one insert win; the loser's grant would point
-		// at an id that does not exist, which rolls its batch back — and the retry
-		// finds the winner's row.
-		const outcomes = await Promise.all(
-			[one, two].map(async ({ jar }) =>
-				app.request(`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`, {
-					cookies: jar,
-				})
-			)
-		);
+		// id. The unique index lets the insert above win; this one's `onConflict`
+		// updates that row instead, so its grant points at an id that does not
+		// exist — a foreign key violation, which rolls its whole batch back rather
+		// than leaving a connection nothing can reach. The retry reads honestly
+		// and attaches to the winner's row.
+		blind.once();
+		const second = await callback(two);
+		expect(blind.blinded).toBe(1);
 
 		const drizzle = createDb(app.db);
 		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
-		expect(outcomes.map((response) => response.headers.get('location'))).toEqual([
+		expect([first, second].map((response) => response.headers.get('location'))).toEqual([
 			'/?connect=ok',
 			'/?connect=ok',
 		]);
@@ -741,6 +815,35 @@ describe('one row per account, many devices per row', () => {
 		for (const { credential } of [one, two]) {
 			expect((await app.request('/api/connection', { credential })).status).toBe(200);
 		}
+		expect(await drizzle.select().from(schema.grants)).toHaveLength(2);
+	});
+
+	it('gives up rather than looping when the second attempt fails too', async () => {
+		const blind = blindable(createD1());
+		const app = buildApp({ db: blind.db });
+		const credential = newCredential();
+		const jar = createJar();
+		jar.absorb(
+			await start(app.request, { credentialHash: await hashCredential(credential) }, { jar })
+		);
+		await app.connect({ account: DEFAULT_ACCOUNT });
+
+		// Blinded for both attempts: a database that keeps answering staleness is
+		// not a race, and retrying it forever would be an outbound provider call
+		// per iteration.
+		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		blind.once();
+		blind.once();
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+
+		expect(response.headers.get('location')).toBe('/?connect=failed');
+		expect(log).toHaveBeenCalledWith(
+			expect.stringContaining('storing the connection failed on retry: Error: FOREIGN KEY')
+		);
+		log.mockRestore();
 	});
 });
 
@@ -904,5 +1007,89 @@ describe('when the database misbehaves', () => {
 		// refresh token nobody can revoke.
 		expect(response.headers.get('location')).toBe('/?connect=failed');
 		expect(await createDb(app.db).select().from(schema.connections)).toHaveLength(0);
+	});
+});
+
+/**
+ * The property the whole design rests on, and the one an earlier draft claimed
+ * without having: a credential hash can be claimed once and never again.
+ *
+ * The attack it is missing without. The hash is the only thing about a
+ * credential the server stores, so it is what leaks — a D1 dump, an operator's
+ * log, a backup. On its own it mints nothing. But if the grant row holding it
+ * can go away, the hash becomes claimable again, and the attacker does not need
+ * the user's account for anything: they start a flow with the victim's hash,
+ * consent with storage of *their own*, and the row is re-pointed. The victim's
+ * device — offline the whole time, holding the plaintext, told nothing — comes
+ * back, is answered 200, and syncs the user's notes into a stranger's Drive.
+ *
+ * Three things free a hash, and each is tested here rather than argued about,
+ * because each is a different code path and only one of them is user-initiated.
+ */
+describe('a hash is spent once, however its grant stopped being live', () => {
+	const grantIdOf = async (app: ReturnType<typeof buildApp>, credential: string) => {
+		const body: { grants: { id: string; current: boolean }[] } = await (
+			await app.request('/api/connection/grants', { credential })
+		).json();
+		return body.grants.find((grant) => grant.current)?.id ?? '';
+	};
+
+	/** The attacker's half: a flow started with someone else's hash. */
+	const takeOver = async (app: ReturnType<typeof buildApp>, credential: string) => {
+		const attacker = await app.connect({ credential, account: 'dbid:attacker' });
+		expect(attacker.callback.headers.get('location')).toBe('/?connect=failed');
+
+		// Nothing was written. Not a connection for the attacker's account, and
+		// not a re-pointed grant — a partial commit here would be the whole bug
+		// arriving by another route.
+		const drizzle = createDb(app.db);
+		const connections = await drizzle.select().from(schema.connections);
+		expect(connections.map((row) => row.accountId)).not.toContain('dbid:attacker');
+
+		// And the victim's device is no better off than it was: still revoked,
+		// rather than quietly pointed somewhere new.
+		expect((await app.request('/api/connection', { credential })).status).toBe(401);
+	};
+
+	it('after the user revoked that device', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect({ account: 'dbid:victim' });
+
+		await app.request(`/api/connection/grants/${await grantIdOf(app, credential)}`, {
+			method: 'DELETE',
+			credential,
+		});
+
+		await takeOver(app, credential);
+	});
+
+	it('after the user disconnected the account and connected it again', async () => {
+		const app = buildApp();
+		// The tablet is offline from here on. It never learns any of this.
+		const tablet = await app.connect({ account: 'dbid:victim' });
+		const laptop = await app.connect({ account: 'dbid:victim' });
+
+		// Disconnect and reconnect: the first thing anyone tries when sync
+		// misbehaves, and it is what frees every hash on the connection at once.
+		await app.request('/api/connection', { method: 'DELETE', credential: laptop.credential });
+		await app.connect({ account: 'dbid:victim' });
+
+		await takeOver(app, tablet.credential);
+	});
+
+	it('after the cap pruned that device out', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect({ account: 'dbid:victim' });
+		const drizzle = createDb(app.db);
+		await drizzle
+			.update(schema.grants)
+			.set({ lastUsedAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) });
+
+		// Not user-initiated, which is what makes it the worst of the three: the
+		// device is simply crowded out, and neither end is told.
+		for (let i = 0; i < MAX_GRANTS_PER_CONNECTION; i += 1) await app.connect();
+		expect((await app.request('/api/connection', { credential })).status).toBe(401);
+
+		await takeOver(app, credential);
 	});
 });

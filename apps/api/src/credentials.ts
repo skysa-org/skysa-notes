@@ -1,4 +1,4 @@
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, isNotNull } from 'drizzle-orm';
 
 import { toBase64Url } from './crypto.js';
 import { type Database, schema } from './db/client.js';
@@ -78,6 +78,7 @@ export const bearerFrom = (header: string | undefined | null): string | undefine
 };
 
 export interface Bearer {
+	/** Its `connectionId` is known non-null: `grantHolder` only returns live ones. */
 	grant: typeof schema.grants.$inferSelect;
 	connection: typeof schema.connections.$inferSelect;
 }
@@ -102,22 +103,31 @@ export const grantHolder = async (
 ): Promise<Bearer | undefined> => {
 	const hash = await hashCredential(credential);
 
-	// Idle expiry is part of the lookup rather than a check afterwards, so an
-	// expired grant is indistinguishable from an unknown one — including in how
-	// long the answer takes.
+	// Revocation and idle expiry are both part of the lookup rather than checks
+	// afterwards, so a revoked or expired grant is indistinguishable from an
+	// unknown one — including in how long the answer takes.
+	//
+	// A row existing says nothing about whether it may still be used. Revoked,
+	// disconnected and pruned grants keep their rows, with `connection_id` set to
+	// null, so that their hashes can never be claimed a second time (see
+	// apps/api/src/db/schema.ts). `IS NOT NULL` is what tells those apart from
+	// live ones. It is belt and braces rather than the only thing standing in the
+	// way — a null would not match a connection id below either — but the
+	// distinction is worth keeping where the rest of the condition is.
 	const grant = await db.query.grants.findFirst({
 		where: and(
 			eq(schema.grants.secretHash, hash),
+			isNotNull(schema.grants.connectionId),
 			gt(schema.grants.lastUsedAt, new Date(now - GRANT_IDLE_DAYS * DAY_MS))
 		),
 	});
-	if (grant === undefined) return undefined;
+	if (grant?.connectionId === undefined || grant.connectionId === null) return undefined;
 
 	const connection = await db.query.connections.findFirst({
 		where: eq(schema.connections.id, grant.connectionId),
 	});
-	// The cascade makes this unreachable; treating it as "not authorized" rather
-	// than throwing keeps a torn write from being a 500.
+	// The foreign key makes this unreachable; treating it as "not authorized"
+	// rather than throwing keeps a torn write from being a 500.
 	if (connection === undefined) return undefined;
 
 	await touch(db, grant, now);

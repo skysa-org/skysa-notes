@@ -152,6 +152,7 @@ describe('GET /api/connection/grants', () => {
 		expect(Object.keys(body.grants[0] ?? {}).sort()).toEqual([
 			'createdAt',
 			'current',
+			'expired',
 			'id',
 			'lastUsedAt',
 		]);
@@ -289,7 +290,13 @@ describe('DELETE /api/connection', () => {
 		expect(
 			(await app.request('/api/connection', { credential: other.credential })).status
 		).toBe(401);
-		expect(await createDb(app.db).select().from(schema.grants)).toHaveLength(0);
+
+		// Unreachable, but still on record. Deleting the rows would free both
+		// hashes, and the thief holds the plaintext behind one of them: they could
+		// connect storage of their own under that very hash and be handed a live
+		// grant by the flow the user just used to lock them out.
+		const rows = await createDb(app.db).select().from(schema.grants);
+		expect(rows.map((row) => row.connectionId)).toEqual([null, null]);
 	});
 
 	it('disconnects anyway when the revoke fails', async () => {
@@ -377,5 +384,66 @@ describe('what the first draft got wrong', () => {
 
 		expect(response.status).toBe(403);
 		expect(await rows(app.db)).toHaveLength(1);
+	});
+});
+
+/**
+ * `lastUsedAt` is not decoration. Idle expiry reads it, the cap evicts on it,
+ * and the device list is how a user spots a credential that is not theirs — all
+ * three are wrong if nothing writes it.
+ */
+describe('recording that a device is still in use', () => {
+	const day = 24 * 60 * 60 * 1000;
+
+	const lastUsed = async (app: ReturnType<typeof buildApp>) => {
+		const [row] = await createDb(app.db).select().from(schema.grants);
+		return row?.lastUsedAt.getTime() ?? 0;
+	};
+
+	const backdate = async (app: ReturnType<typeof buildApp>, by: number) => {
+		const at = Date.now() - by;
+		await createDb(app.db)
+			.update(schema.grants)
+			.set({ lastUsedAt: new Date(at) });
+		return at;
+	};
+
+	it('moves the timestamp forward on a request made a day later', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+		const before = await backdate(app, 2 * day);
+
+		await app.request('/api/connection', { credential });
+
+		// Without this a grant expires 180 days after it was *created*, however
+		// much the device was used, and the cap evicts the device in daily use
+		// alongside the one nobody has touched since.
+		expect(await lastUsed(app)).toBeGreaterThan(before);
+		expect(await lastUsed(app)).toBeGreaterThan(Date.now() - day);
+	});
+
+	it('leaves it alone for a request made the same day', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+		const before = await backdate(app, 60 * 60 * 1000);
+
+		await app.request('/api/connection', { credential });
+
+		// A write per request would be a D1 write per request, and once a day is
+		// indistinguishable to everything that reads it.
+		expect(await lastUsed(app)).toBe(before);
+	});
+
+	it('keeps a device alive indefinitely as long as it keeps asking', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+
+		// Two months short of the idle limit, twice over: a credential in use does
+		// not expire on a schedule set when it was issued.
+		for (let i = 0; i < 2; i += 1) {
+			await backdate(app, 120 * day);
+			expect((await app.request('/api/connection', { credential })).status).toBe(200);
+		}
+		expect((await app.request('/api/connection', { credential })).status).toBe(200);
 	});
 });

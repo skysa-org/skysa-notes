@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
+import { GRANT_IDLE_DAYS } from '../credentials.js';
 import { openOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
 import { logFailure } from '../log.js';
@@ -56,11 +57,19 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			.get('db')
 			.query.grants.findMany({ where: eq(schema.grants.connectionId, connection.id) });
 
+		// Revoked devices are not here at all — their `connectionId` is null, which
+		// is what revocation means. Idle-expired ones are, flagged: the row is
+		// still attached, the credential no longer works, and a device list that
+		// showed it as live would be telling the user something untrue about who
+		// can reach their notes.
+		const idleBefore = Date.now() - GRANT_IDLE_DAYS * 24 * 60 * 60 * 1000;
+
 		return c.json({
 			grants: rows.map((row) => ({
 				id: row.id,
 				createdAt: row.createdAt.getTime(),
 				lastUsedAt: row.lastUsedAt.getTime(),
+				expired: row.lastUsedAt.getTime() <= idleBefore,
 				current: row.id === grant.id,
 			})),
 		});
@@ -81,13 +90,23 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		});
 		if (target === undefined) return c.json({ error: 'not_found' }, 404);
 
-		await db.delete(schema.grants).where(eq(schema.grants.id, target.id));
+		// Nulled, not deleted. Deleting would free the hash, and a freed hash is
+		// re-claimable: whoever holds the credential this row was for — which is
+		// exactly the thief the user is revoking — could start a fresh flow with
+		// it, consent with storage of their own, and be handed a working grant.
+		// The row stays so the hash stays spent (see apps/api/src/db/schema.ts).
+		await db
+			.update(schema.grants)
+			.set({ connectionId: null })
+			.where(eq(schema.grants.id, target.id));
 		return c.json({ ok: true });
 	});
 
 	/**
-	 * Disconnect the account. The row goes, and the cascade takes every grant on
-	 * it: this is the button for a credential the user believes is stolen.
+	 * Disconnect the account. The connection row goes; its grants stay as
+	 * tombstones with a null `connectionId`, which is both what makes them
+	 * unusable and what keeps their hashes from ever being claimed again. This is
+	 * the button for a credential the user believes is stolen.
 	 */
 	app.delete('/connection', async (c) => {
 		const { connection } = c.get('bearer');

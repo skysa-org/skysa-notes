@@ -114,9 +114,27 @@ export const grants = sqliteTable(
 	'grants',
 	{
 		id: text('id').primaryKey(),
-		connectionId: text('connection_id')
-			.notNull()
-			.references(() => connections.id, { onDelete: 'cascade' }),
+		/**
+		 * Which connection this device may act on, or null once it may not.
+		 *
+		 * Revoking a device nulls this rather than deleting the row, and the
+		 * foreign key is `set null` rather than `cascade` so disconnecting the
+		 * account does the same. The row that stays behind is a tombstone, and it
+		 * is load-bearing: `secret_hash` is unique, so a hash that has ever been
+		 * used can never be claimed again.
+		 *
+		 * Without that, a hash leaked from a database dump is not merely useless —
+		 * it is a claim waiting for its grant row to go away. The user disconnects
+		 * and reconnects (the first thing anyone tries when sync misbehaves); a
+		 * device that was offline at the time still holds its plaintext
+		 * credential; the attacker starts a flow with that device's hash, consents
+		 * with storage of their own, and the device comes back, is answered 200,
+		 * and syncs the user's notes into it. Nothing would ever tell it
+		 * otherwise.
+		 */
+		connectionId: text('connection_id').references(() => connections.id, {
+			onDelete: 'set null',
+		}),
 		/** base64url SHA-256 of the credential string. Never the credential. */
 		secretHash: text('secret_hash').notNull(),
 		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
@@ -129,9 +147,9 @@ export const grants = sqliteTable(
 		lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }).notNull(),
 	},
 	(t) => [
-		// Unique so the hash can be the lookup key. A collision here would be a
-		// SHA-256 collision, but the index also makes a replayed `/start` hash
-		// fail loudly instead of quietly pointing two connections at one secret.
+		// Unique, and over every row including the tombstones: it is what makes a
+		// hash claimable exactly once, ever. A collision here would be a SHA-256
+		// collision.
 		uniqueIndex('grants_secret_hash_idx').on(t.secretHash),
 		index('grants_connection_id_idx').on(t.connectionId),
 	]

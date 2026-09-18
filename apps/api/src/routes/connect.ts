@@ -57,7 +57,9 @@ const refusal = (
 const startBody = z.object({
 	/** base64url SHA-256 of the credential the device has already written down. */
 	credentialHash: z.string().refine(isCredentialHash, 'not a base64url SHA-256 digest'),
-	returnTo: z.string().optional(),
+	// Bounded: it goes into a cookie, and a cookie a browser refuses to store is
+	// a flow that cannot complete. Far longer than any route this app has.
+	returnTo: z.string().max(512).optional(),
 });
 
 /**
@@ -245,17 +247,25 @@ interface CommitInput {
 const commit = async (db: Database, input: CommitInput): Promise<boolean> => {
 	const first = await attempt(db, input).catch((error: unknown) => {
 		logFailure('storing the connection failed', error);
-		return false;
+		return 'retry' as const;
 	});
-	if (first) return true;
+	if (first !== 'retry') return first === 'ok';
 
-	return attempt(db, input).catch((error: unknown) => {
+	const second = await attempt(db, input).catch((error: unknown) => {
 		logFailure('storing the connection failed on retry', error);
-		return false;
+		return 'retry' as const;
 	});
+	return second === 'ok';
 };
 
-const attempt = async (db: Database, input: CommitInput): Promise<boolean> => {
+/**
+ * `ok` stored it. `claimed` means the hash belongs to someone else and no retry
+ * will change that. A throw is the racing-callback case, and only that is
+ * retried.
+ */
+type Attempt = 'ok' | 'claimed';
+
+const attempt = async (db: Database, input: CommitInput): Promise<Attempt> => {
 	const { provider, accountId, displayName, sealed, credentialHash, now } = input;
 
 	const existing = await db.query.connections.findFirst({
@@ -268,6 +278,26 @@ const attempt = async (db: Database, input: CommitInput): Promise<boolean> => {
 	// One id, decided once: the insert and the conflict update must agree, or the
 	// grant would be attached to a row under an id neither returned.
 	const connectionId = existing?.id ?? randomBase64Url(16);
+
+	// A hash is claimable exactly once, ever. `grants` rows are never deleted —
+	// revoking, disconnecting and pruning all null `connection_id` and leave the
+	// row behind — so a hash that has been used is either still this device's or
+	// permanently spent.
+	//
+	// Both halves of that matter. Letting a spent hash be re-claimed is the hole
+	// an earlier draft had: an attacker holding a hash from a database dump waits
+	// for the grant to go (a disconnect-and-reconnect, a revoke, a prune), starts
+	// a flow with it, consents with storage of their own, and the victim's
+	// offline device comes back to a 200 and syncs its notes into a stranger's
+	// Drive, with nothing anywhere to tell it otherwise. Refusing *every* repeat
+	// was the opposite bug: a device that reconnects with the credential it
+	// already holds — which no rule forbids — failed the batch, so it never got a
+	// working connection and no retry could ever give it one.
+	const held = await db.query.grants.findFirst({
+		where: eq(schema.grants.secretHash, credentialHash),
+	});
+	if (held !== undefined && held.connectionId !== connectionId) return 'claimed';
+
 	const secret = {
 		secretCiphertext: sealed.ciphertext,
 		secretIv: sealed.iv,
@@ -294,30 +324,41 @@ const attempt = async (db: Database, input: CommitInput): Promise<boolean> => {
 				set: { displayName, ...secret, lastUsedAt: new Date(now) },
 			}),
 
-		// A plain insert, deliberately. An upsert on `secret_hash` would let
-		// anyone holding a hash — from a database dump, say — point that device's
-		// credential at a connection of their own, and the device would
-		// cheerfully sync the user's notes into a stranger's storage. A duplicate
-		// hash instead fails the whole connect, and the device tries again with a
-		// credential it has just generated.
-		db.insert(schema.grants).values({
-			id: randomBase64Url(16),
-			connectionId,
-			secretHash: credentialHash,
-			createdAt: new Date(now),
-			lastUsedAt: new Date(now),
-		}),
+		// A plain insert for a hash nobody holds, deliberately — never an upsert on
+		// `secret_hash`, which would hand the row to whoever presented the hash
+		// last. Between the read above and this line another flow can claim it, and
+		// then the unique index rolls the whole batch back; the retry re-reads and
+		// answers `claimed` instead of looping.
+		held === undefined
+			? db.insert(schema.grants).values({
+					id: randomBase64Url(16),
+					connectionId,
+					secretHash: credentialHash,
+					createdAt: new Date(now),
+					lastUsedAt: new Date(now),
+				})
+			: // This device reconnecting with the credential it already holds. Its
+				// row is already pointed at this connection; all that changes is that
+				// it counts as recently used, so the prune below keeps it.
+				db
+					.update(schema.grants)
+					.set({ lastUsedAt: new Date(now) })
+					.where(eq(schema.grants.id, held.id)),
 
 		// A cap, so a connection cannot accumulate grants without limit — every
-		// one of them a live key to the same storage. The oldest lose their place,
-		// which is the device least likely to still exist.
+		// one of them a live key to the same storage. The least recently used lose
+		// their place: that is the device least likely to still exist, and it means
+		// a grant already past its idle expiry is evicted before a live one rather
+		// than sitting in the cap holding a slot it can no longer use.
 		//
-		// In the same batch as the insert, so the subquery sees the new row and
-		// the connection is never briefly over its cap. `id` breaks a tie on
-		// `createdAt`, because two devices can connect inside one millisecond and
-		// a prune that is not a total order would drop an arbitrary one of them.
+		// An update, not a delete — the row stays as the tombstone that keeps its
+		// hash spent. In the same batch as the insert, so the subquery sees the new
+		// row and the connection is never briefly over its cap. `id` breaks a tie
+		// on `lastUsedAt`, because two devices can connect inside one millisecond
+		// and a prune that is not a total order would drop an arbitrary one.
 		db
-			.delete(schema.grants)
+			.update(schema.grants)
+			.set({ connectionId: null })
 			.where(
 				and(
 					eq(schema.grants.connectionId, connectionId),
@@ -327,12 +368,12 @@ const attempt = async (db: Database, input: CommitInput): Promise<boolean> => {
 							.select({ id: schema.grants.id })
 							.from(schema.grants)
 							.where(eq(schema.grants.connectionId, connectionId))
-							.orderBy(desc(schema.grants.createdAt), desc(schema.grants.id))
+							.orderBy(desc(schema.grants.lastUsedAt), desc(schema.grants.id))
 							.limit(MAX_GRANTS_PER_CONNECTION)
 					)
 				)
 			),
 	]);
 
-	return true;
+	return 'ok';
 };

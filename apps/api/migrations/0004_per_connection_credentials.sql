@@ -50,11 +50,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS `storage_connections_provider_account_idx` ON 
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `grants` (
 	`id` text PRIMARY KEY NOT NULL,
-	`connection_id` text NOT NULL,
+	`connection_id` text,
 	`secret_hash` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`last_used_at` integer NOT NULL,
-	FOREIGN KEY (`connection_id`) REFERENCES `storage_connections`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`connection_id`) REFERENCES `storage_connections`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `grants_secret_hash_idx` ON `grants` (`secret_hash`);

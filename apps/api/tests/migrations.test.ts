@@ -231,7 +231,7 @@ describe('0004_per_connection_credentials', () => {
 		expect(connectionIds(db)).toEqual(['c-one', 'c-two']);
 	});
 
-	it('leaves a grant unreachable once its connection is deleted', () => {
+	it('leaves a grant unreachable, but still there, once its connection goes', () => {
 		const db = open('9999');
 		db.prepare(
 			'INSERT INTO storage_connections (id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
@@ -242,6 +242,11 @@ describe('0004_per_connection_credentials', () => {
 
 		db.prepare('DELETE FROM storage_connections WHERE id = ?').run('c');
 
-		expect(db.prepare('SELECT id FROM grants').all()).toHaveLength(0);
+		// The DDL the migration writes has to be `ON DELETE set null`: a cascade
+		// would delete the row and free its hash for anyone holding a copy of the
+		// credential to claim again.
+		expect(db.prepare('SELECT id, connection_id FROM grants').all()).toEqual([
+			{ id: 'g', connection_id: null },
+		]);
 	});
 });

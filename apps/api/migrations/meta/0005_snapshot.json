@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "00000000-0000-4000-8000-000000000005",
+  "id": "b1f0c4c7-3c8a-4c5e-9d2a-7e5b2f0a9c14",
   "prevId": "94aa6450-40d9-4fda-9703-aaa9e632156b",
   "tables": {
     "storage_connections": {
@@ -107,7 +107,7 @@
           "name": "connection_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "secret_hash": {
@@ -159,7 +159,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

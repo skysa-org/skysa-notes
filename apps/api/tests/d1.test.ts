@@ -78,7 +78,7 @@ describe('the node:sqlite D1 shim', () => {
 		).rejects.toThrow();
 	});
 
-	it('cascades a deleted connection onto its grants', async () => {
+	it('nulls a deleted connection out of its grants, keeping the rows', async () => {
 		const db = createD1();
 		await db
 			.prepare(
@@ -95,11 +95,12 @@ describe('the node:sqlite D1 shim', () => {
 
 		await db.prepare('DELETE FROM storage_connections WHERE id = ?').bind('c').run();
 
-		// Disconnecting is the button for a credential the user believes is
-		// stolen; a grant that outlived its connection would be one that still
-		// points at whatever takes that id next.
-		const { results } = await db.prepare('SELECT id FROM grants').all();
-		expect(results).toHaveLength(0);
+		// `set null`, not `cascade`. The grant must stop working — a grant that
+		// outlived its connection would point at whatever takes that id next — but
+		// the row has to stay, because `secret_hash` is unique and the row is what
+		// stops that hash from ever being claimed a second time.
+		const { results } = await db.prepare('SELECT id, connection_id FROM grants').all();
+		expect(results).toEqual([{ id: 'g', connection_id: null }]);
 	});
 
 	it('refuses to answer a join rather than answering it wrongly', async () => {

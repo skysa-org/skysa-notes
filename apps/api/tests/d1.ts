@@ -198,3 +198,55 @@ const applyMigrations = (db: DatabaseSync): void => {
 			});
 	}
 };
+
+/**
+ * The same database, able to answer one read the way a concurrent transaction
+ * would: as though nothing had been written yet.
+ *
+ * `node:sqlite` is synchronous, so two requests issued together in a test still
+ * run one after the other, and the second always sees what the first committed.
+ * That is the ordering in which nothing goes wrong, which makes it the wrong
+ * one to build confidence on — the connect callback's retry existed for a long
+ * time without a single test that could tell whether it worked.
+ *
+ * Narrow on purpose: only `storage_connections`, only reads, and only when the
+ * test says so.
+ */
+export const blindable = (real: D1Database & { close: () => void }) => {
+	const pending = { count: 0, blinded: 0 };
+
+	const blindStatement = (stmt: D1PreparedStatement): D1PreparedStatement =>
+		({
+			bind: (...args: unknown[]) => blindStatement(stmt.bind(...args)),
+			all: () => Promise.resolve({ success: true, results: [], meta: {} }),
+			raw: () => Promise.resolve([]),
+			first: () => Promise.resolve(null),
+			run: () => Promise.resolve({ success: true, results: [], meta: {} }),
+		}) as unknown as D1PreparedStatement;
+
+	const db = new Proxy(real, {
+		get: (target, property, receiver: unknown) => {
+			if (property !== 'prepare') return Reflect.get(target, property, receiver) as unknown;
+			return (sql: string): D1PreparedStatement => {
+				const stmt = target.prepare(sql);
+				const reads = /^\s*select\b/i.test(sql) && /\bstorage_connections\b/i.test(sql);
+				if (!reads || pending.count === 0) return stmt;
+				pending.count -= 1;
+				pending.blinded += 1;
+				return blindStatement(stmt);
+			};
+		},
+	});
+
+	return {
+		db,
+		/** Answer the next read of `storage_connections` as empty. */
+		once: () => {
+			pending.count += 1;
+		},
+		/** How many reads were actually blinded — a test that blinded none is not testing anything. */
+		get blinded() {
+			return pending.blinded;
+		},
+	};
+};
