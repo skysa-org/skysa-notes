@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AUTOSAVE_RETRY_MS, useAutosave } from '../src/editor/useAutosave.js';
+import { AUTOSAVE_RETRY_MS, type SaveContext, useAutosave } from '../src/editor/useAutosave.js';
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -190,13 +190,30 @@ const pass = (ms: number) =>
 
 /** A `save` the test settles by hand, recording what it was given, in order. */
 const manualSave = <T,>() => {
-	const calls: { value: T; resolve: () => void; reject: (error: Error) => void }[] = [];
-	const save = (value: T) =>
+	const calls: {
+		value: T;
+		context: SaveContext | undefined;
+		resolve: () => void;
+		reject: (error: Error) => void;
+	}[] = [];
+	const save = (value: T, context?: SaveContext) =>
 		new Promise<void>((resolve, reject) => {
-			calls.push({ value, resolve, reject });
+			calls.push({ value, context, resolve, reject });
 		});
-	return { calls, save };
+	return { calls, save, values: () => calls.map((call) => call.value) };
 };
+
+const settleCall = (end: (() => void) | undefined) =>
+	act(async () => {
+		end?.();
+		await Promise.resolve();
+	});
+
+interface Based {
+	body: string;
+	base: number;
+}
+const sameBase = (next: Based, pending: Based) => next.base === pending.base;
 
 describe('useAutosave, when a write fails', () => {
 	it('keeps the edit, says so, and writes the newest text once when a write next works', async () => {
@@ -250,6 +267,7 @@ describe('useAutosave, when a write fails', () => {
 		expect(result.current.failing).toBe(true);
 
 		await pass(AUTOSAVE_RETRY_MS);
+		// Nothing newer was ever issued for it, so it goes as the note's body.
 		expect(save.mock.calls).toEqual([['only'], ['only'], ['only']]);
 		expect(result.current.failing).toBe(false);
 
@@ -257,27 +275,8 @@ describe('useAutosave, when a write fails', () => {
 		expect(save).toHaveBeenCalledTimes(3);
 	});
 
-	it('tries a held edit again on the next flush, without waiting', async () => {
-		const save = vi
-			.fn<(value: string) => Promise<void>>()
-			.mockRejectedValueOnce(new Error('no'))
-			.mockResolvedValue(undefined);
-		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
-
-		act(() => {
-			result.current.change('held');
-		});
-		await pass(2000);
-		await act(async () => {
-			await result.current.settle();
-		});
-
-		expect(save.mock.calls).toEqual([['held'], ['held']]);
-		expect(result.current.failing).toBe(false);
-	});
-
-	it('never writes an older text after a newer one, however the first write ends', async () => {
-		const { calls, save } = manualSave<string>();
+	it('calls save there and then on a flush, even with a write still out', () => {
+		const { save, values } = manualSave<string>();
 		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
 
 		act(() => {
@@ -285,29 +284,40 @@ describe('useAutosave, when a write fails', () => {
 			result.current.flush();
 			result.current.change('ab');
 			result.current.flush();
+			// Still inside the same tick: what `pagehide`, a mode switch and a
+			// delete all rely on. The store orders the two; the hook does not.
+			expect(values()).toEqual(['a', 'ab']);
 		});
-		// One at a time: the newer write is not out while the older one is.
-		expect(calls.map((call) => call.value)).toEqual(['a']);
+	});
 
-		await act(async () => {
-			calls[0]?.reject(new Error('no'));
-			await Promise.resolve();
-		});
-		// The older text failed and the newer stands for it, so it is let go.
-		expect(calls.map((call) => call.value)).toEqual(['a', 'ab']);
+	it('writes what is pending before it retries, and never the older text after it', async () => {
+		const { calls, save, values } = manualSave<string>();
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 60_000 }));
 
-		await act(async () => {
-			calls[1]?.resolve();
-			await Promise.resolve();
+		act(() => {
+			result.current.change('v1');
+			result.current.flush();
 		});
+		await settleCall(() => calls[0]?.reject(new Error('no')));
+		expect(result.current.failing).toBe(true);
+
+		// Typing on with no pause long enough for the debounce, as the retry
+		// comes due.
+		act(() => {
+			result.current.change('v1 and more');
+		});
+		await pass(AUTOSAVE_RETRY_MS);
+		expect(values()).toEqual(['v1', 'v1 and more']);
+
+		await settleCall(calls[1]?.resolve);
 		await pass(AUTOSAVE_RETRY_MS * 3);
 
-		expect(calls.map((call) => call.value)).toEqual(['a', 'ab']);
+		expect(values()).toEqual(['v1', 'v1 and more']);
 		expect(result.current.failing).toBe(false);
 	});
 
-	it('does not fold an edit into the write that is already out', async () => {
-		const { calls, save } = manualSave<string>();
+	it('lets an older write that fails late go, when a newer one is already stored', async () => {
+		const { calls, save, values } = manualSave<string>();
 		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
 
 		act(() => {
@@ -316,26 +326,20 @@ describe('useAutosave, when a write fails', () => {
 			result.current.change('ab');
 			result.current.flush();
 		});
-		await act(async () => {
-			calls[0]?.resolve();
-			await Promise.resolve();
-		});
+		await settleCall(calls[1]?.resolve);
+		await settleCall(() => calls[0]?.reject(new Error('no')));
+		await pass(AUTOSAVE_RETRY_MS * 3);
 
-		expect(calls.map((call) => call.value)).toEqual(['a', 'ab']);
+		expect(values()).toEqual(['a', 'ab']);
+		expect(result.current.failing).toBe(false);
 	});
 
-	it('still saves edits of different origins separately, oldest first', async () => {
-		const save = vi
-			.fn<(value: { body: string; base: number }) => Promise<void>>()
-			.mockRejectedValueOnce(new Error('no'))
-			.mockResolvedValue(undefined);
+	it('attempts every held edit in one settle, whatever becomes of the ones before', async () => {
+		const save = vi.fn<(value: Based, context?: SaveContext) => Promise<void>>((value) =>
+			value.base === 1 ? Promise.reject(new Error('no')) : Promise.resolve()
+		);
 		const { result } = renderHook(() =>
-			useAutosave<{ body: string; base: number }>({
-				key: 'a',
-				save,
-				delayMs: 2000,
-				supersedes: (next, pending) => next.base === pending.base,
-			})
+			useAutosave<Based>({ key: 'a', save, delayMs: 2000, supersedes: sameBase })
 		);
 
 		act(() => {
@@ -345,43 +349,46 @@ describe('useAutosave, when a write fails', () => {
 		expect(result.current.failing).toBe(true);
 
 		// Typed into a body a pull brought in. It does not stand for the edit
-		// that failed, so that one is not dropped for it, nor written after it.
+		// that failed, which is kept — and its failing again does not stop this
+		// one being written before `settle` says it is done.
 		act(() => {
 			result.current.change({ body: 'x', base: 2 });
 		});
-		await pass(2000);
+		await act(async () => {
+			await result.current.settle();
+		});
 
-		expect(save.mock.calls).toEqual([
-			[{ body: 'a', base: 1 }],
-			[{ body: 'a', base: 1 }],
-			[{ body: 'x', base: 2 }],
+		expect(save.mock.calls.map(([value]) => value)).toEqual([
+			{ body: 'a', base: 1 },
+			{ body: 'x', base: 2 },
+			{ body: 'a', base: 1 },
 		]);
-		expect(result.current.failing).toBe(false);
+		// The older one is handed over as displaced: the store keeps it beside
+		// the note, as it would anyway for a body that has been replaced.
+		expect(save.mock.calls.map(([, context]) => context)).toEqual([
+			undefined,
+			undefined,
+			{ displaced: true },
+		]);
+		expect(result.current.failing).toBe(true);
 	});
 
-	it('holds back a later edit of another origin while the earlier one cannot be written', async () => {
-		const save = vi.fn<(value: { body: string; base: number }) => Promise<void>>(() =>
-			Promise.reject(new Error('no'))
-		);
-		const { result } = renderHook(() =>
-			useAutosave<{ body: string; base: number }>({
-				key: 'a',
-				save,
-				delayMs: 2000,
-				supersedes: (next, pending) => next.base === pending.base,
-			})
-		);
+	it('resolves settle only once what it started has come back', async () => {
+		const { calls, save } = manualSave<string>();
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+		const settled = vi.fn();
 
 		act(() => {
-			result.current.change({ body: 'a', base: 1 });
+			result.current.change('a');
+			void result.current.settle().then(settled);
 		});
-		await pass(2000);
-		act(() => {
-			result.current.change({ body: 'x', base: 2 });
-		});
-		await pass(2000);
+		await pass(0);
+		expect(calls.map((call) => call.value)).toEqual(['a']);
+		expect(settled).not.toHaveBeenCalled();
 
-		expect(save.mock.calls.map(([value]) => value.base)).toEqual([1, 1]);
+		await settleCall(() => calls[0]?.reject(new Error('no')));
+		await pass(0);
+		expect(settled).toHaveBeenCalledTimes(1);
 	});
 
 	it('retries an edit with the save it was made for, not the one for the note now open', async () => {
@@ -471,25 +478,149 @@ describe('useAutosave, when a write fails', () => {
 		await pass(AUTOSAVE_RETRY_MS * 3);
 		expect(save).toHaveBeenCalledTimes(2);
 	});
+});
 
-	it('settles once what is held has been tried, whatever came of it', async () => {
-		const { calls, save } = manualSave<string>();
+describe('useAutosave, asked to forget a note', () => {
+	it('drops what is pending and what failed, and never tries either again', async () => {
+		const save = vi.fn<(value: string) => Promise<void>>(() => Promise.reject(new Error('no')));
 		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
-		const settled = vi.fn();
 
 		act(() => {
-			result.current.change('a');
-			void result.current.settle().then(settled);
+			result.current.change('failed');
 		});
-		await pass(0);
-		expect(calls.map((call) => call.value)).toEqual(['a']);
-		expect(settled).not.toHaveBeenCalled();
+		await pass(2000);
+		act(() => {
+			result.current.change('pending');
+			result.current.forget('a');
+		});
+		expect(result.current.failing).toBe(false);
 
-		await act(async () => {
-			calls[0]?.reject(new Error('no'));
-			await Promise.resolve();
+		await pass(AUTOSAVE_RETRY_MS * 3);
+		expect(save.mock.calls).toEqual([['failed']]);
+	});
+
+	it('does not retry a write that was out when it was asked, if that then fails', async () => {
+		const { calls, save, values } = manualSave<string>();
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+
+		act(() => {
+			result.current.change('last words');
+			result.current.flush();
+			result.current.forget();
+		});
+		await settleCall(() => calls[0]?.reject(new Error('no')));
+		await pass(AUTOSAVE_RETRY_MS * 3);
+
+		expect(values()).toEqual(['last words']);
+		expect(result.current.failing).toBe(false);
+	});
+
+	it('leaves another note’s held edit alone', async () => {
+		const forA = vi
+			.fn<(value: string) => Promise<void>>()
+			.mockRejectedValueOnce(new Error('no'))
+			.mockResolvedValue(undefined);
+		const forB = vi.fn<(value: string) => Promise<void>>(() => Promise.resolve());
+		const { result, rerender } = renderHook(
+			({ key, save }: { key: string; save: (value: string) => Promise<void> }) =>
+				useAutosave({ key, save, delayMs: 2000 }),
+			{ initialProps: { key: 'note-a', save: forA } }
+		);
+
+		act(() => {
+			result.current.change('text of a');
+		});
+		await pass(2000);
+		rerender({ key: 'note-b', save: forB });
+		act(() => {
+			result.current.forget();
+		});
+		await pass(AUTOSAVE_RETRY_MS);
+
+		expect(forA.mock.calls).toEqual([['text of a'], ['text of a']]);
+	});
+});
+
+describe('useAutosave, across sittings', () => {
+	/** A store that refuses everything until it is told to stop. */
+	const fickle = () => {
+		const store = { refusing: true };
+		const save = vi.fn<(value: string, context?: SaveContext) => Promise<void>>(() =>
+			store.refusing ? Promise.reject(new Error('no')) : Promise.resolve()
+		);
+		return { store, save };
+	};
+
+	it('does not let text typed after the editor was rebuilt stand for an edit it never held', async () => {
+		const { store, save } = fickle();
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+
+		act(() => {
+			result.current.change('stored + one');
+		});
+		await pass(2000);
+		// A mode switch: the next editor is built from what the store holds,
+		// which is not this.
+		act(() => {
+			result.current.rebased();
 		});
 		await pass(0);
-		expect(settled).toHaveBeenCalledTimes(1);
+		store.refusing = false;
+		act(() => {
+			result.current.change('stored + two');
+		});
+		await pass(2000);
+
+		// Kept, and handed over as displaced — for the store to keep beside the
+		// note — rather than dropped, or written over "stored + two".
+		expect(save.mock.calls).toEqual([
+			['stored + one'],
+			['stored + one'],
+			['stored + two'],
+			['stored + one', { displaced: true }],
+		]);
+		expect(result.current.failing).toBe(false);
+	});
+
+	it('lets it stand for that edit within one sitting, as it always has', async () => {
+		const { store, save } = fickle();
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+
+		act(() => {
+			result.current.change('stored + one');
+		});
+		await pass(2000);
+		store.refusing = false;
+		act(() => {
+			result.current.change('stored + one + two');
+		});
+		await pass(2000);
+		await pass(AUTOSAVE_RETRY_MS * 3);
+
+		expect(save.mock.calls).toEqual([['stored + one'], ['stored + one + two']]);
+	});
+
+	it('starts a new sitting when it comes back to a note', async () => {
+		const { store, save } = fickle();
+		const { result, rerender } = renderHook(
+			({ key }: { key: string }) => useAutosave({ key, save, delayMs: 2000 }),
+			{ initialProps: { key: 'note-a' } }
+		);
+
+		act(() => {
+			result.current.change('a + one');
+		});
+		await pass(2000);
+		rerender({ key: 'note-b' });
+		rerender({ key: 'note-a' });
+		await pass(0);
+		store.refusing = false;
+		act(() => {
+			result.current.change('a + two');
+		});
+		await pass(2000);
+
+		expect(save.mock.calls.slice(-2)).toEqual([['a + two'], ['a + one', { displaced: true }]]);
+		expect(result.current.failing).toBe(false);
 	});
 });

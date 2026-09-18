@@ -47,19 +47,28 @@ export const UNTITLED_SLUG = 'untitled';
  * Bytes, because that is what a filesystem counts. ext4 and APFS allow a name
  * 255 bytes of UTF-8, and the folder does reach one: the provider's own desktop
  * client syncs it to a local disk. 120 characters says nothing about that —
- * 120 CJK characters are 360 bytes. What has to fit in the 255 beside the stem:
+ * 120 CJK characters are 360 bytes.
+ *
+ * The byte cap is what lets a name this app chose take one conflict suffix
+ * whole. Beside the stem, in the 255:
  *
  *   ` (conflict 2026-09-15T14-32)`   28   `conflictFilename` in sync/conflicts.ts
  *   `.md`                             3
  *   `-999`                            4   `uniqueFilename`, telling two titles apart
  *   `-999`                            4   the same, for two conflicts in one minute
  *
- * 255 - 39 = 216.
+ * 255 - 39 = 216. It promises nothing past that: a copy of a copy carries two
+ * suffixes, and a name another tool chose was never capped at all. The 255 is
+ * kept where those names are made — `conflictName` cuts the stem to fit, with
+ * `fitBytes` below — and this cap is only why it seldom has to.
  */
 const MAX_SLUG_CODE_POINTS = 120;
 const MAX_SLUG_BYTES = 216;
 
-const utf8Length = (text: string): number =>
+/** What ext4 and APFS allow one name, in bytes of UTF-8. */
+export const MAX_NAME_BYTES = 255;
+
+export const utf8Length = (text: string): number =>
 	[...text].reduce((bytes, char) => {
 		const point = char.codePointAt(0) ?? 0;
 		if (point < 0x80) return bytes + 1;
@@ -98,8 +107,12 @@ interface Fit {
 	readonly full: boolean;
 }
 
-const fits = (points: number, bytes: number): boolean =>
-	points <= MAX_SLUG_CODE_POINTS && bytes <= MAX_SLUG_BYTES;
+interface Caps {
+	readonly points: number;
+	readonly bytes: number;
+}
+
+const SLUG_CAPS: Caps = { points: MAX_SLUG_CODE_POINTS, bytes: MAX_SLUG_BYTES };
 
 /**
  * Cut to both caps without cutting a character in half.
@@ -114,8 +127,11 @@ const fits = (points: number, bytes: number): boolean =>
  * one letter by the hundred — is cut between code points instead, or the whole
  * name would be dropped for it.
  */
-const truncate = (text: string): string =>
-	clusters(text)
+const cut = (text: string, caps: Caps): string => {
+	const fits = (points: number, bytes: number): boolean =>
+		points <= caps.points && bytes <= caps.bytes;
+
+	return clusters(text)
 		.flatMap((cluster) =>
 			fits([...cluster].length, utf8Length(cluster)) ? [cluster] : [...cluster]
 		)
@@ -130,6 +146,16 @@ const truncate = (text: string): string =>
 			},
 			{ text: '', points: 0, bytes: 0, full: false }
 		).text;
+};
+
+const truncate = (text: string): string => cut(text, SLUG_CAPS);
+
+/**
+ * As much of the start of `text` as fits in `bytes` of UTF-8, cut the same way.
+ * Text that fits comes back untouched, which is nearly always.
+ */
+export const fitBytes = (text: string, bytes: number): string =>
+	utf8Length(text) <= bytes ? text : cut(text, { points: Infinity, bytes });
 
 /**
  * Lowercase, hyphen-separated, safe on every provider. Non-Latin scripts are

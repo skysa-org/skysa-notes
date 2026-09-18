@@ -281,6 +281,14 @@ export interface EditBase {
 	 * written from, and what a note deleted meanwhile is brought back as.
 	 */
 	note: NoteRecord;
+	/**
+	 * A later edit to this note has been saved since this one was typed, and was
+	 * not typed on top of it: this one's save failed, the editor was rebuilt from
+	 * the stored body, and the user carried on from there (`useAutosave`). Its
+	 * origin still matches, so written as the body it would undo that later edit.
+	 * It is kept the way an edit to a replaced body is — beside the note.
+	 */
+	displaced?: true;
 }
 
 /**
@@ -315,8 +323,14 @@ export const saveNoteBody = async (
 		if (current === undefined) return bringBack(db, base, body);
 		// A tombstone keeps the edit and stays deleted, as it always has: the
 		// delete wins (§7), and restoring it brings the edit back with it.
-		if (current.deletedLocally === 1) return applyBody(db, id, body);
-		if ((current.bodyOrigin ?? '') === base.origin) return applyBody(db, id, body);
+		// A displaced one is not: the tombstone holds the later text, which is
+		// what restoring it should bring back.
+		if (current.deletedLocally === 1) {
+			return base.displaced === true ? current : applyBody(db, id, body);
+		}
+		if (base.displaced !== true && (current.bodyOrigin ?? '') === base.origin) {
+			return applyBody(db, id, body);
+		}
 		if (current.body === body) return current;
 		return copyBeside(db, current, base.note, body);
 	});
@@ -513,6 +527,51 @@ const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void>
 export const deleteNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 1);
 
 export const restoreNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 0);
+
+/**
+ * A restored note whose path a live note has taken since moves to a free name
+ * beside it. A deleted note's name is free at once (`takenNamesIn`), so deleting
+ * `untitled.md`, making a new note and undoing is all it takes — and lifted where
+ * it stood, the tombstone leaves two live notes at one path, which the list
+ * shows twice and the next push has overwrite each other. The newcomer keeps
+ * the name: it is the one the user has been looking at since.
+ */
+const makeRoomFor = async (
+	db: NotesDatabase,
+	restored: NoteRecord | undefined
+): Promise<NoteRecord | undefined> => {
+	if (restored === undefined || restored.deletedLocally === 1) return restored;
+	const sharing = await db.notes
+		.where('[connectionId+path]')
+		.equals([restored.connectionId, restored.path])
+		.filter((note) => note.id !== restored.id && note.deletedLocally === 0)
+		.count();
+	return sharing === 0 ? restored : moveNote(db, restored.id, parentPath(restored.path));
+};
+
+/**
+ * Undo a delete, for as long as the UI offers to — which is longer than the
+ * tombstone may last: sync pushes the delete within seconds and purges the row.
+ *
+ * `deleted` is the note as it was when the user deleted it, holding the text
+ * the editor held. While the tombstone is there it is restored, which withdraws
+ * a delete still queued and owes the remote a write either way. Once it has
+ * gone the note is made again as an edit to a note deleted elsewhere is — same
+ * id, cut loose from the file that was removed, dirty, a write queued, and
+ * under a conflict name if its path has been taken meanwhile (`bringBack`).
+ *
+ * The text goes in through `saveNoteBody`, so whatever it would not write over
+ * — a body a pull put into the tombstone meanwhile — it is kept beside instead.
+ */
+export const undeleteNote = async (db: NotesDatabase, deleted: NoteRecord): Promise<NoteRecord> => {
+	await restoreNote(db, deleted.id);
+	const current = await makeRoomFor(db, await db.notes.get(deleted.id));
+	if (current?.body === deleted.body) return current;
+	return saveNoteBody(db, deleted.id, deleted.body, {
+		origin: deleted.bodyOrigin ?? '',
+		note: deleted,
+	});
+};
 
 /** Drop a tombstoned note for good, once the provider has confirmed the delete. */
 export const purgeNote = async (db: NotesDatabase, id: string): Promise<void> => {

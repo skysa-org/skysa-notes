@@ -5,6 +5,7 @@ import {
 	readFrontmatter,
 	splitFrontmatter,
 } from '../../src/markdown/frontmatter.js';
+import { noteFilename } from '../../src/markdown/slug.js';
 import {
 	conflictContent,
 	conflictFilename,
@@ -98,6 +99,79 @@ describe('conflictFilename', () => {
 		// `Report.MD` comes from a Windows tool, and it is a markdown file: the
 		// name has one extension, not a stem ending in `.MD` waiting for one.
 		expect(conflictFilename('Report.MD', AT)).toBe('Report (conflict 2026-09-15T14-32).md');
+	});
+});
+
+describe('a conflict name that would not fit in a filename', () => {
+	const bytes = (name: string): number => new TextEncoder().encode(name).length;
+	const SUFFIX = ' (conflict 2026-09-15T14-32)';
+
+	const expectStorable = (name: string): void => {
+		expect(bytes(name)).toBeLessThanOrEqual(255);
+		expect(() => encodeURIComponent(name)).not.toThrow();
+	};
+
+	it('leaves a name with room for the suffix exactly as it was', () => {
+		const slug = noteFilename('\u6f22'.repeat(200));
+		expect(bytes(slug)).toBe(219);
+		const copy = conflictFilename(slug, AT);
+		expect(copy).toBe(`${slug.slice(0, -3)}${SUFFIX}.md`);
+		expect(bytes(copy)).toBe(247);
+	});
+
+	it('cuts the stem of a copy of a copy, from its end, and keeps both suffixes whole', () => {
+		const copy = conflictFilename(noteFilename('\u6f22'.repeat(200)), AT);
+		const later = new Date('2026-09-16T09:05:00Z');
+		const again = conflictFilename(copy, later);
+		expectStorable(again);
+		expect(again.startsWith('\u6f22'.repeat(60))).toBe(true);
+		expect(again.endsWith(' (conflict 2026-09-16T09-05).md')).toBe(true);
+		// 275 bytes uncut. What went is the end of the stem, which here is the
+		// first suffix: nothing is stripped on purpose, and nothing is spared.
+		expect(bytes(again)).toBeGreaterThan(255 - 3);
+	});
+
+	it('cuts a long name from another tool', () => {
+		const theirs = `${'n'.repeat(237)}.md`;
+		expect(bytes(theirs)).toBe(240);
+		const copy = conflictFilename(theirs, AT);
+		expectStorable(copy);
+		expect(copy).toBe(`${'n'.repeat(255 - 28 - 3)}${SUFFIX}.md`);
+	});
+
+	it('does not cut a character in half to do it', () => {
+		// Four bytes each, and a joined family of five code points at the cut.
+		const family = '\u{1f468}\u200d\u{1f469}\u200d\u{1f467}';
+		[`${'\u{1f389}'.repeat(70)}.md`, `${'a'.repeat(215)}${family}.md`].forEach((name) => {
+			const copy = conflictFilename(name, AT);
+			expectStorable(copy);
+			expect(copy.endsWith(`${SUFFIX}.md`)).toBe(true);
+		});
+		expect(conflictFilename(`${'a'.repeat(215)}${family}.md`, AT)).toBe(
+			`${'a'.repeat(215)}${SUFFIX}.md`
+		);
+	});
+
+	it('asks whether the name is taken of the name as cut', () => {
+		// Two names that differ only past the cut are one name once cut.
+		const first = conflictFilename(`${'n'.repeat(236)}A.md`, AT);
+		const second = conflictFilename(`${'n'.repeat(236)}B.md`, AT, [first]);
+		expectStorable(second);
+		expect(second).not.toBe(first);
+		expect(second.endsWith(`${SUFFIX}-2.md`)).toBe(true);
+		// And the counter is paid for out of the stem, not added on top.
+		expect(bytes(second)).toBe(255);
+	});
+
+	it('fits a folder name the same way', () => {
+		const folder = '\u6f22'.repeat(84);
+		const copy = conflictFolderName(folder, AT);
+		expectStorable(copy);
+		expect(copy.endsWith(SUFFIX)).toBe(true);
+
+		const second = conflictFolderName(folder, AT, [copy]);
+		expectStorable(second);
+		expect(second.endsWith(`${SUFFIX}-2`)).toBe(true);
 	});
 });
 

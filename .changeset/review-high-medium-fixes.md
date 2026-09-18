@@ -1,6 +1,6 @@
 ---
 '@skysa/core': patch
-'@skysa/web': patch
+'@skysa/web': minor
 ---
 
 Fixes from a whole-codebase review. Nothing here changes the file format or the
@@ -20,8 +20,12 @@ body (heading ids, table repair) were being counted as the user's. Undo after a
 pull no longer puts the pre-pull text back and pushes it over someone else's
 edit; an adopted body empties the undo history in both editors.
 
-Saving. A save that fails is said, in the note, and retried, where it used to
-be dropped silently. A tab left open across a schema upgrade made by a newer
+Deleting a note can be undone for about ten seconds, from a notice or the
+palette, whether or not the delete has already synced.
+
+Saving. A save that fails is said, in the note, and retried — newest text
+first, never an older body over a newer one — where it used to be dropped
+silently. A tab left open across a schema upgrade made by a newer
 build in another tab now finishes its writes, closes, and asks to be reloaded,
 rather than carrying on writing with old code into the migrated database.
 
@@ -30,7 +34,7 @@ left as written instead of being replaced by a UUID on first save, in the note
 and in a conflict copy of it. A frontmatter block closed by `...` is read as
 one, and an unclosed block no longer swallows prose up to the next `---`. File
 names are cut between grapheme clusters and capped at 216 bytes as well as 120
-code points, so an emoji at the boundary cannot produce a name OneDrive's
+code points, and a conflict copy's name is fitted to 255 bytes, so an emoji at the boundary cannot produce a name OneDrive's
 adapter throws on; existing files are not renamed.
 
 Shell. A crafted `?note=` link can no longer crash the app — search params a

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseDocument } from 'yaml';
 
 import {
 	joinFrontmatter,
@@ -6,6 +7,7 @@ import {
 	splitFrontmatter,
 	writeFrontmatter,
 } from '../../src/markdown/frontmatter.js';
+import { type LineEnding, withLineEnding } from '../../src/markdown/lineEndings.js';
 
 describe('splitFrontmatter', () => {
 	it('splits a fenced YAML mapping from the body', () => {
@@ -439,5 +441,198 @@ describe('line and paragraph separators', () => {
 	it('do not open or close a block either', () => {
 		const source = '---\u2028title: X\n---\nbody\n';
 		expect(splitFrontmatter(source).frontmatter).toBeNull();
+	});
+});
+
+/** Every input below in the three spellings of a line ending the splitter reads. */
+const inEachEnding = (source: string): readonly string[] =>
+	['\n', '\r\n', '\r'].map((eol) => source.replaceAll('\n', eol));
+
+describe('a repaired block with a blank line in it', () => {
+	it('is still frontmatter when what follows is a key with a space in it', () => {
+		// Obsidian's `date created:`, under a duplicate key the parser repairs.
+		inEachEnding(
+			'---\nid: abc\ntags: a\ntags: b\n\ndate created: 2024-01-01\n---\nbody\n'
+		).forEach((source) => {
+			const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+			expect(splitFrontmatter(source)).toEqual({
+				frontmatter: ['id: abc', 'tags: a', 'tags: b', '', 'date created: 2024-01-01'].join(
+					eol
+				),
+				body: `body${eol}`,
+			});
+			expect(readFrontmatter(splitFrontmatter(source).frontmatter).id).toBe('abc');
+		});
+	});
+});
+
+describe('`...` where `---` never closed the block', () => {
+	it('is an ellipsis when the lines above it are not clean YAML', () => {
+		[
+			'---\ntitle: Poem\nAnd then it rained\n...\nthe end\n',
+			'---\ntitle: Trip\n\nTodo: pack bags\nand so on\n...\nlater\n',
+			// An error the parser would repair is not repaired here.
+			'---\ntitle: X\ntitle: Y\n...\nbody\n',
+		]
+			.flatMap(inEachEnding)
+			.forEach((source) => {
+				expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+			});
+	});
+});
+
+describe('`...` inside a block that `---` closes', () => {
+	it('closes nothing: the block ends where it always ended', () => {
+		inEachEnding('---\ntitle: a\n...\n---\nbody\n').forEach((source) => {
+			const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+			expect(splitFrontmatter(source)).toEqual({
+				frontmatter: `title: a${eol}...`,
+				body: `body${eol}`,
+			});
+		});
+
+		inEachEnding('---\ntitle: x\nnote: |\n  a\n...\nstill: yaml\n---\nbody\n').forEach(
+			(source) => {
+				const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+				expect(splitFrontmatter(source)).toEqual({
+					frontmatter: ['title: x', 'note: |', '  a', '...', 'still: yaml'].join(eol),
+					body: `body${eol}`,
+				});
+			}
+		);
+	});
+
+	it('gets its `---` back when the block is rewritten, `...` above it or not', () => {
+		const { frontmatter, body } = splitFrontmatter('---\ntitle: a\n...\n---\nbody\n');
+		expect(joinFrontmatter(frontmatter, body)).toBe('---\ntitle: a\n...\n---\nbody\n');
+		expect(joinFrontmatter(writeFrontmatter(frontmatter, { id: 'abc' }), body)).toBe(
+			'---\ntitle: a\nid: abc\n...\n---\nbody\n'
+		);
+	});
+});
+
+describe('a pandoc block run together with the paragraph under it', () => {
+	it('ends at `...` even when the paragraph could pass for YAML', () => {
+		inEachEnding('---\ntitle: X\n...\n\nNote: remember this\n\n---\n\nmore\n').forEach(
+			(source) => {
+				const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+				const { frontmatter, body } = splitFrontmatter(source);
+				expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+				expect(body).toBe(['', 'Note: remember this', '', '---', '', 'more', ''].join(eol));
+				expect(
+					withLineEnding(joinFrontmatter(frontmatter, ''), eol as LineEnding) + body
+				).toBe(source);
+			}
+		);
+	});
+});
+
+/**
+ * `splitFrontmatter` as it stood before `...` closed anything, kept to say
+ * exactly what changed: every input below splits the way it did, except the
+ * ones that name why not.
+ */
+const LEGACY_EOL = String.raw`(?:\r\n|\n|\r)`;
+const LEGACY_PATTERN = new RegExp(
+	String.raw`^---[ \t]*${LEGACY_EOL}([\s\S]*?)(?:${LEGACY_EOL})?^---[ \t]*(?:${LEGACY_EOL}|$)`,
+	'm'
+);
+const LEGACY_KEYS = [
+	...['id', 'title', 'created', 'updated', 'tags', 'aliases', 'bibliography', 'cssclass'],
+	...['cssclasses', 'jupyter', 'layout', 'marp', 'permalink', 'pubDate', 'publish'],
+	...['sidebar_position', 'slug', 'taxonomies', 'weight'],
+];
+
+const legacyIsBlock = (yaml: string): boolean => {
+	if (yaml.trim() === '') return true;
+	try {
+		const doc = parseDocument(yaml.replace(/\r\n|\r/g, '\n'));
+		const data: unknown = doc.toJS();
+		if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+		return doc.errors.length === 0 || LEGACY_KEYS.some((key) => Object.hasOwn(data, key));
+	} catch {
+		return false;
+	}
+};
+
+const legacySplit = (source: string): { frontmatter: string | null; body: string } => {
+	const match = source.startsWith('---') ? LEGACY_PATTERN.exec(source) : null;
+	if (match === null || match.index !== 0 || !legacyIsBlock(match[1] ?? '')) {
+		return { frontmatter: null, body: source };
+	}
+	return { frontmatter: match[1] ?? '', body: source.slice(match[0].length) };
+};
+
+describe('splitFrontmatter, against what it did before', () => {
+	const UNCHANGED = [
+		'',
+		'body\n',
+		'---\n',
+		'---',
+		'---\n---\n',
+		'---\n---',
+		'---\n\n---\nbody\n',
+		'---\n---\nbody\n---\nmore\n',
+		'---\ntitle: a\n---\nbody\n',
+		'---  \ntitle: a\n---\t\nbody\n',
+		'---\ntitle: a\n----\nbody\n---\nx\n',
+		'----\ntitle: a\n---\nbody\n',
+		'---\ntitle: a\n---',
+		'---\njust prose\n---\nbody\n',
+		'---\n- a\n- b\n---\nbody\n',
+		'---\nNext steps: see below\n- do the thing\n---\nbody\n',
+		'---\ntitle: "unterminated\nid: abc\n---\nbody\n',
+		'---\nid: abc\ntags: a\ntags: b\n---\nbody\n',
+		'---\nid: abc\ntags: a\ntags: b\n\ndate created: 2024-01-01\n---\nbody\n',
+		'---\nid: abc\ntags:\n\t- a\n\n"quoted key": 1\n---\nbody\n',
+		'---\ntitle: X\nsummary: |\n  One.\n\n  Two, with prose: in it.\n---\nbody\n',
+		'---\ntitle: X\ntitle: Y\nsummary: |\n  One.\n\n  Two.\n---\nbody\n',
+		'---\ntitle: X\n\n# only a comment\n\nid: abc\n---\nbody\n',
+		'---\ntitle: Poem\nAnd then it rained\n...\nthe end\n',
+		'---\ntitle: Trip\n\nTodo: pack bags\nand so on\n...\nlater\n',
+		'---\nNote to self: call the bank\n...\nand then the rest\n',
+		'---\ntitle: a\n...\n---\nbody\n',
+		'---\nfoo: bar\n...\n---\nbody\n',
+		'---\ntitle: x\nnote: |\n  a\n...\nstill: yaml\n---\nbody\n',
+		'---\ntitle: x\n...\nstill: yaml\n\nmore: yaml\n---\nbody\n',
+		'---\n...\nbody\n',
+		'---\ntext\n...\nbody\n',
+	];
+
+	it('splits these exactly as it did, in every line ending', () => {
+		UNCHANGED.flatMap(inEachEnding).forEach((source) => {
+			expect(splitFrontmatter(source), JSON.stringify(source)).toEqual(legacySplit(source));
+		});
+	});
+
+	const CHANGED: readonly (readonly [why: string, source: string])[] = [
+		[
+			'`...` closes a clean block that `---` never closed; it was all body',
+			'---\ntitle: X\n...\nbody\n',
+		],
+		[
+			'a pandoc block no longer runs on to the first thematic break of the note',
+			'---\ntitle: X\n...\n\nBody text the user wrote.\n\n---\n\nmore\n',
+		],
+		[
+			'the same, where the paragraph has a colon in it and so passes for YAML',
+			'---\ntitle: X\n...\n\nNote: remember this\n\n---\n\nmore\n',
+		],
+		[
+			'a fence nobody closed no longer takes the prose under it; it is all body',
+			'---\ntitle: X\n\nSome prose the user wrote, locally.\n\n---\n\nrest\n',
+		],
+		[
+			'U+2028 is not a line ending, so a fence after one closes nothing',
+			'---\ntitle: "a\u2028---\u2028b"\nid: abc\n---\nbody\n',
+		],
+	];
+
+	it('and differs on these, each for a reason', () => {
+		CHANGED.flatMap(([why, source]) => inEachEnding(source).map((each) => [why, each])).forEach(
+			([why, source]) => {
+				expect(splitFrontmatter(source ?? ''), why).not.toEqual(legacySplit(source ?? ''));
+			}
+		);
 	});
 });

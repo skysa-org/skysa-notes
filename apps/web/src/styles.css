@@ -1095,3 +1095,12 @@ button.row.selected {
 	color: var(--fg);
 	cursor: pointer;
 }
+
+/* ---- A delete that can still be taken back ------------------------------ */
+
+/* The same corner as the "new version" prompt, which can be up at the same
+   time: this one sits above it rather than on it. */
+.deleted-notice {
+	inset-block-end: 5rem;
+	z-index: 30;
+}

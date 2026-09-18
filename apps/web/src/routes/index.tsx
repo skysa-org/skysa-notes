@@ -1,16 +1,17 @@
 import { parentPath, ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { db } from '../store/db.js';
+import { db, type NoteRecord } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
 	useFolderTree,
@@ -19,7 +20,7 @@ import {
 	useNoteSearch,
 	useNotesInFolder,
 } from '../store/hooks.js';
-import { createNote } from '../store/notes.js';
+import { createNote, undeleteNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
 import {
 	type AppSearch,
@@ -144,6 +145,35 @@ const Home = () => {
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
 
+	/**
+	 * The note just deleted, as it was, for as long as the delete can be taken
+	 * back. Here rather than in `NoteView`, which stops showing a note the moment
+	 * it is a tombstone. One at a time: a second delete takes the notice over and
+	 * the first note simply stays deleted.
+	 */
+	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
+	const dismissDeleted = useCallback(() => {
+		setDeleted(null);
+	}, []);
+
+	const undoDelete = () => {
+		if (deleted === null) return;
+		void undeleteNote(db, deleted)
+			.then((restored) => {
+				setDeleted((current) => (current?.id === deleted.id ? null : current));
+				// Back where it was, open: by the row's own path, which is a
+				// conflict name if something took the old one meanwhile.
+				select({
+					note: restored.id,
+					folder: folderToSearch(parentPath(restored.path)),
+				});
+			})
+			// The notice stays: the note is still deleted, and still offered.
+			.catch(() => {
+				setProblem('That note could not be brought back. Try again.');
+			});
+	};
+
 	const onCreateNote = () => {
 		// The root holds loose notes that arrived from the remote folder; the app
 		// does not add to them (docs/PLAN.md §12.6).
@@ -218,6 +248,14 @@ const Home = () => {
 		},
 	});
 
+	useCommand({
+		id: 'note.undoDelete',
+		label: 'Undo delete',
+		group: 'Note',
+		enabled: deleted !== null,
+		run: undoDelete,
+	});
+
 	useShortcuts();
 
 	return (
@@ -288,11 +326,23 @@ const Home = () => {
 
 				<NoteView
 					note={openNote}
-					onDeleted={() => {
+					onDeleted={(note) => {
+						setDeleted(note);
 						select({ note: undefined });
 					}}
 				/>
 			</div>
+
+			{deleted !== null && (
+				<DeletedNotice
+					// A second delete is a new notice with a new clock, not the
+					// first one's time running on under another note's name.
+					key={deleted.id}
+					title={deleted.title}
+					onUndo={undoDelete}
+					onDismiss={dismissDeleted}
+				/>
+			)}
 		</div>
 	);
 };

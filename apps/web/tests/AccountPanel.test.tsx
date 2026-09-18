@@ -1352,6 +1352,62 @@ describe('AccountPanel, with more than one source connected', () => {
 		expect(await db.syncState.get('c1')).toBeDefined();
 	});
 
+	it('keeps the answer to a disconnect for its source, even when it arrives under another', async () => {
+		const user = userEvent.setup();
+		const db = await twoSources();
+		const out: { fail: (error: Error) => void } = { fail: () => undefined };
+		const disconnect = vi.fn<ApiClient['disconnect']>(
+			() =>
+				new Promise((_resolve, reject) => {
+					out.fail = reject;
+				})
+		);
+		renderPanel(
+			clientWith({
+				connection: async () => ({
+					ok: true as const,
+					value: (await activeConnectionId(db)) === 'c1' ? dropbox : onedrive,
+				}),
+				disconnect,
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+
+		// Back on Dropbox with its disconnect still out: not one to start again.
+		await user.click(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' }));
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Disconnect…' }).hasAttribute('disabled')).toBe(
+			true
+		);
+
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+		await act(async () => {
+			out.fail(new TypeError('offline'));
+			await Promise.resolve();
+		});
+		// Not OneDrive's failure, and not said under its name.
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Stop syncing on this device' })).toBeNull();
+
+		// But not lost either: it is there when the user comes back to Dropbox.
+		await user.click(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' }));
+		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
+		expect(screen.getByRole('button', { name: 'Stop syncing on this device' })).toBeTruthy();
+		expect(disconnect).toHaveBeenCalledTimes(1);
+
+		await user.click(screen.getByRole('button', { name: 'Stop syncing on this device' }));
+		await waitFor(async () => {
+			expect(await db.syncState.get('c1')).toBeUndefined();
+		});
+		expect(await db.syncState.get('c2')).toBeDefined();
+	});
+
 	it('says nothing about sources when only one is connected', async () => {
 		const db = freshDatabase();
 		await holding(db, 'c1');

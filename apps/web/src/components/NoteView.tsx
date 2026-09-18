@@ -7,10 +7,16 @@ import { FindTargetProvider } from '../editor/findTarget.js';
 import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor } from '../editor/RichEditor.js';
-import { useAutosave } from '../editor/useAutosave.js';
+import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
-import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
+import {
+	deleteNote,
+	getNote,
+	renameNote,
+	saveNoteBody,
+	setNoteEditorMode,
+} from '../store/notes.js';
 import { beforeClosing } from '../store/staleTab.js';
 import { FindBar } from './FindBar.js';
 import { Outline } from './Outline.js';
@@ -35,7 +41,12 @@ const FIND = parseChord('Mod+F');
 
 export interface NoteViewProps {
 	note: NoteRecord | undefined;
-	onDeleted: () => void;
+	/**
+	 * With the note as it was deleted, holding the text the editor held — which
+	 * is not always what the row holds: a save the store refused never got there.
+	 * It is what an undo puts back.
+	 */
+	onDeleted: (deleted: NoteRecord) => void;
 }
 
 /**
@@ -164,17 +175,30 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		shown.current = note;
 	}, [note]);
 
+	// The last thing typed that the store has not confirmed it holds. A delete
+	// takes it along, so that undoing the delete cannot bring back less than the
+	// user had written.
+	const unconfirmed = useRef<{ id: string; body: string; origin: string }>(null);
+
 	const save = useCallback(
-		({ body, origin, note: typedInto }: Edit) => {
+		({ body, origin, note: typedInto }: Edit, context?: SaveContext) => {
 			if (noteId === undefined) return undefined;
+			const base = typedInto?.id === noteId ? { origin, note: typedInto } : undefined;
 			// Returned, not dropped: autosave holds the edit until this settles,
 			// and a rejection nobody hears is a user typing into nothing.
 			return saveNoteBody(
 				db,
 				noteId,
 				body,
-				typedInto?.id === noteId ? { origin, note: typedInto } : undefined
-			).then(() => undefined);
+				// Displaced with nothing to write a copy from cannot happen — every
+				// edit carries the note — and would be written as the body if it did.
+				base !== undefined && context?.displaced === true
+					? { ...base, displaced: true }
+					: base
+			).then(() => {
+				const last = unconfirmed.current;
+				if (last?.id === noteId && last.body === body) unconfirmed.current = null;
+			});
 		},
 		[noteId]
 	);
@@ -186,16 +210,39 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// before the next one — made from the new body — can stand for it.
 		supersedes: sameBase,
 	});
-	const { change, flush, settle } = autosave;
+	const { change, flush, settle, rebased, forget } = autosave;
 	// A newer build in another tab closes this one's database; what is held
 	// here goes in first.
 	useEffect(() => beforeClosing(settle), [settle]);
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
+			if (noteId !== undefined) unconfirmed.current = { id: noteId, body, origin };
 			change({ body, origin, note: shown.current });
 		},
-		[change]
+		[change, noteId]
 	);
+
+	const onDelete = useCallback(() => {
+		if (note === undefined) return;
+		// Written first, so the last words are in the row before it is a
+		// tombstone: restoring it brings them back with it.
+		flush();
+		const typed = unconfirmed.current?.id === note.id ? unconfirmed.current : null;
+		void deleteNote(db, note.id)
+			.then(() => getNote(db, note.id))
+			.then((row) => {
+				// Only now that it is deleted, and nothing before: a held edit
+				// retried after sync has purged the row would bring the note back
+				// (`saveNoteBody`), here and on the provider.
+				forget(note.id);
+				const deleted = row ?? note;
+				onDeleted(
+					typed === null
+						? deleted
+						: { ...deleted, body: typed.body, bodyOrigin: typed.origin }
+				);
+			});
+	}, [flush, forget, note, onDeleted]);
 
 	const mode: EditorMode | undefined = unsupported ? 'raw' : (note?.editorMode ?? defaultMode);
 
@@ -203,10 +250,11 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		if (noteId === undefined || mode === undefined || unsupported) return;
 		// Write the pending edit first: the incoming editor loads from the note
 		// record, and the mode switch itself must never be what saves — or lose —
-		// what the user typed.
-		flush();
+		// what the user typed. `rebased` flushes, and says the editor that comes
+		// next starts from the stored body rather than from what this one held.
+		rebased();
 		void setNoteEditorMode(db, noteId, otherMode(mode));
-	}, [flush, mode, noteId, unsupported]);
+	}, [rebased, mode, noteId, unsupported]);
 
 	// Shown by default, and unmounted rather than hidden when it is not: the
 	// headings are re-read when it comes back, which is one parse of one note,
@@ -272,12 +320,11 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				onClose={() => {
 					setFinding(0);
 				}}
-				onDelete={() => {
-					autosave.flush();
-					void deleteNote(db, note.id).then(onDeleted);
-				}}
+				onDelete={onDelete}
 				onUserEdit={onUserEdit}
 				onUnsupported={() => {
+					// The raw editor takes over, built from the stored body.
+					rebased();
 					setUnsupportedId(note.id);
 				}}
 			/>

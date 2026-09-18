@@ -49,25 +49,30 @@ const DOCUMENT_END = '...';
  * that, the block ends at the first closing line and no later one.
  */
 const blockClosedBy = (closer: string): RegExp =>
-	new RegExp(String.raw`^---[ \t]*${EOL}(?:([\s\S]*?)(${EOL}))??(${closer})[ \t]*(?:${EOL}|$)`);
+	new RegExp(String.raw`^---[ \t]*${EOL}(?:([\s\S]*?)(${EOL}))??${closer}[ \t]*(${EOL}|$)`);
 
 const FENCED = blockClosedBy('---');
-const FENCED_OR_ENDED = blockClosedBy(String.raw`---|\.\.\.`);
+const ENDED = blockClosedBy(String.raw`\.\.\.`);
 
 /**
- * A block that `...` closed carries that line as its last, so the file's own
- * closer is what goes back into the file: `joinFrontmatter` adds no `---` under
- * it, and nothing between the two has to remember which it was.
+ * A block that `...` closed is carried as the YAML document it is, `---` above
+ * and `...` below, so the closer its file had is the one that goes back into
+ * the file and nothing in between has to remember which it was.
+ *
+ * The opening line is what makes that unmistakable. YAML that `---` closed can
+ * end in a `...` line of its own — `...` and then `---` is legal — and it must
+ * still get its `---` back; but it can never *begin* with a `---` line, because
+ * that line would have been its closer.
  */
-const ENDS_DOCUMENT = new RegExp(String.raw`(?:^|${EOL})\.\.\.(?:${EOL})?$`);
+const EXPLICIT_DOCUMENT = new RegExp(String.raw`^---${EOL}([\s\S]*?)(?:${EOL})?\.\.\.(?:${EOL})?$`);
 
 /**
- * The YAML, without the `...` a block may end in. The parser is never shown
- * it: on reading, an unterminated quote above would take it into the value;
- * on writing, `yaml` moves a trailing comment onto it (`... # note`), and that
- * line no longer closes anything.
+ * The YAML of a block, without the markers an explicit document carries. The
+ * parser is never shown those: `yaml` writes a trailing comment back onto the
+ * closer (`... # note`), and that line no longer closes anything.
  */
-const withoutDocumentEnd = (frontmatter: string): string => frontmatter.replace(ENDS_DOCUMENT, '');
+const yamlOf = (frontmatter: string): string =>
+	EXPLICIT_DOCUMENT.exec(frontmatter)?.[1] ?? frontmatter;
 
 export interface SplitDocument {
 	/** YAML source between the fences, or null when the file has no frontmatter. */
@@ -153,9 +158,17 @@ interface Recovered {
 	readonly doc: Document;
 }
 
-/** A line YAML could have meant: a key, a list item, a comment, or a continuation of one. */
-const YAML_LINE =
-	/^(?:[ \t]|#|-(?:[ \t]|$)|[\]}]|[\p{L}\p{N}_.$-]+:(?:[ \t]|$)|(["'])[^"']*\1:(?:[ \t]|$))/u;
+/**
+ * A line YAML could have meant: a continuation, a comment, a list item, the
+ * end of a flow collection — or anything at all of the shape `key:`.
+ *
+ * Spaces in the key included. Obsidian writes `date created:`, and turning a
+ * repaired block away costs far more than keeping one: the note loses its `id`,
+ * its YAML turns up in the editor as text, and the next write puts a second
+ * block above it. So this errs towards frontmatter, and the only line it calls
+ * prose is one with no `key:` in it anywhere.
+ */
+const YAML_LINE = /^(?:[ \t]|#|-(?:[ \t]|$)|[\]}]|[^:]+:(?:[ \t]|$))/;
 
 /**
  * Does prose begin inside this block? Asked only of a block the parser had to
@@ -186,7 +199,7 @@ const holdsProse = (yaml: string): boolean =>
 const recover = (frontmatter: string | null): Recovered | undefined => {
 	if (frontmatter === null) return undefined;
 	try {
-		const yaml = toLf(withoutDocumentEnd(frontmatter));
+		const yaml = toLf(yamlOf(frontmatter));
 		const doc = parseDocument(yaml);
 		const data: unknown = doc.toJS();
 		if (typeof data !== 'object' || data === null || Array.isArray(data)) return undefined;
@@ -205,57 +218,87 @@ const recover = (frontmatter: string | null): Recovered | undefined => {
 	}
 };
 
-const readMapping = (yaml: string | null): Record<string, unknown> | undefined =>
-	recover(yaml)?.record;
+const NO_FRONTMATTER = (source: string): SplitDocument => ({ frontmatter: null, body: source });
+
+interface Reading extends SplitDocument {
+	/** Whether the parser had to repair the YAML to read it. */
+	readonly repaired: boolean;
+}
 
 /**
- * A fenced block only counts as frontmatter if it is a YAML mapping (or empty).
- * Otherwise a body that happens to open with two thematic breaks would have its
- * first section silently swallowed.
+ * The block up to the first `---` line, if that is frontmatter: a YAML mapping,
+ * or empty. Otherwise a body that happens to open with two thematic breaks
+ * would have its first section silently swallowed.
  */
-const isFrontmatterBlock = (yaml: string): boolean =>
-	yaml.trim() === '' || readMapping(yaml) !== undefined;
+const fencedReading = (source: string): Reading | undefined => {
+	const match = FENCED.exec(source);
+	if (match === null) return undefined;
+
+	const yaml = match[1] ?? '';
+	const body = source.slice(match[0].length);
+	if (yaml.trim() === '') return { frontmatter: yaml, body, repaired: false };
+
+	const recovered = recover(yaml);
+	return recovered && { frontmatter: yaml, body, repaired: recovered.doc.errors.length > 0 };
+};
+
+interface EndedReading extends SplitDocument {
+	/** Whether the line under the `...` is blank, or there is none. */
+	readonly thenBlank: boolean;
+}
 
 /**
- * Is this block closed by its own last line, a `...`?
+ * The block up to the first `...` line, if that is frontmatter.
  *
- * `...` is also what people type for an ellipsis, and a note opening with a
- * thematic break, a line with a colon in it and then `...` is not metadata. So
- * this closer is held to what a repaired block is held to: the block has to
- * name something metadata is named. One that does not is read the way it always
- * was, to the closing `---` if there is one, and written back with it.
- *
- * Asked by the reader and the writer both, of the same text, so that they
- * cannot disagree about where a block ends.
+ * `...` is also what people type for an ellipsis, and a note that opens with a
+ * thematic break and trails off a few lines later is not metadata. So nothing
+ * is recovered here: the YAML has to parse without a single error, as a
+ * mapping, and name something metadata is named. A clean parse is the evidence
+ * that the line was a document end — prose above it is an error at column 0.
  */
-const endsItself = (frontmatter: string): boolean => {
-	if (!ENDS_DOCUMENT.test(frontmatter)) return false;
-	const record = readMapping(frontmatter);
-	return record !== undefined && namesMetadata(record);
+const endedReading = (source: string): EndedReading | undefined => {
+	const match = ENDED.exec(source);
+	if (match === null) return undefined;
+
+	const recovered = recover(match[1] ?? '');
+	if (recovered === undefined || recovered.doc.errors.length > 0) return undefined;
+	if (!namesMetadata(recovered.record)) return undefined;
+
+	const eol = match[2] ?? '\n';
+	const body = source.slice(match[0].length);
+	return {
+		frontmatter: `${FENCE}${eol}${match[1] ?? ''}${eol}${DOCUMENT_END}`,
+		body,
+		thenBlank: /^[ \t]*(?:\r\n|\n|\r|$)/.test(body),
+	};
 };
 
 /**
  * Frontmatter is optional on read: a `.md` file written by any other tool is a
  * valid note.
+ *
+ * A block closed by `---` is read first and, read cleanly, is the answer —
+ * whatever `...` lines it holds. `...` closes a block only where that reading
+ * found none, with one exception: the `---` reading needed repair, and the
+ * `...` reading is clean and has a blank line under it. That is a pandoc block
+ * and the note's first paragraph, run together as far as the note's first
+ * thematic break; the repair is the parser tripping over the paragraph.
  */
 export const splitFrontmatter = (source: string): SplitDocument => {
-	if (!source.startsWith(FENCE)) return { frontmatter: null, body: source };
+	if (!source.startsWith(FENCE)) return NO_FRONTMATTER(source);
 
-	const first = FENCED_OR_ENDED.exec(source);
-	if (first === null) return { frontmatter: null, body: source };
-
-	if (first[3] === DOCUMENT_END) {
-		const ended = `${first[1] ?? ''}${first[2] ?? ''}${DOCUMENT_END}`;
-		if (endsItself(ended)) return { frontmatter: ended, body: source.slice(first[0].length) };
+	const fenced = fencedReading(source);
+	if (fenced !== undefined && !fenced.repaired) {
+		return { frontmatter: fenced.frontmatter, body: fenced.body };
 	}
 
-	const match = first[3] === FENCE ? first : FENCED.exec(source);
-	if (match === null) return { frontmatter: null, body: source };
+	const ended = endedReading(source);
+	if (fenced !== undefined && !(ended?.thenBlank ?? false)) {
+		return { frontmatter: fenced.frontmatter, body: fenced.body };
+	}
 
-	const yaml = match[1] ?? '';
-	if (!isFrontmatterBlock(yaml)) return { frontmatter: null, body: source };
-
-	return { frontmatter: yaml, body: source.slice(match[0].length) };
+	if (ended === undefined) return NO_FRONTMATTER(source);
+	return { frontmatter: ended.frontmatter, body: ended.body };
 };
 
 /** Inverse of `splitFrontmatter`. */
@@ -263,8 +306,8 @@ export const joinFrontmatter = (frontmatter: string | null, body: string): strin
 	if (frontmatter === null) return body;
 	if (frontmatter === '') return `${FENCE}\n${FENCE}\n${body}`;
 	const yaml = frontmatter.endsWith('\n') ? frontmatter : `${frontmatter}\n`;
-	// Already closed, by the line its file closed it with.
-	if (endsItself(yaml)) return `${FENCE}\n${yaml}${body}`;
+	// Opened and closed already, by the lines its file did that with.
+	if (EXPLICIT_DOCUMENT.test(frontmatter)) return `${yaml}${body}`;
 	return `${FENCE}\n${yaml}${FENCE}\n${body}`;
 };
 
@@ -401,7 +444,7 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
 	if (frontmatter === null || frontmatter.trim() === '') return true;
 	try {
-		const doc = parseDocument(toLf(withoutDocumentEnd(frontmatter)));
+		const doc = parseDocument(toLf(yamlOf(frontmatter)));
 		// A mapping, and not only error-free. `writeFrontmatter` sets keys on the
 		// document, which a scalar or a sequence cannot take — those throw rather
 		// than drop the patch. `splitFrontmatter` never yields one, so this is a
@@ -432,11 +475,13 @@ export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmat
 		return Object.keys(seed).length === 0 ? '' : stringifyYaml(seed);
 	}
 
-	const doc = parseDocument(toLf(withoutDocumentEnd(frontmatter)));
+	const doc = parseDocument(toLf(yamlOf(frontmatter)));
 	if (!isDocument(doc) || doc.errors.length > 0) return frontmatter;
 
 	entries.forEach(([key, value]) =>
 		value === undefined ? doc.delete(key) : doc.set(key, value)
 	);
-	return ENDS_DOCUMENT.test(frontmatter) ? `${String(doc)}${DOCUMENT_END}\n` : String(doc);
+	return EXPLICIT_DOCUMENT.test(frontmatter)
+		? `${FENCE}\n${String(doc)}${DOCUMENT_END}\n`
+		: String(doc);
 };

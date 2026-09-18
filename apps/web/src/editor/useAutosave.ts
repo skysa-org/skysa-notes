@@ -13,12 +13,28 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * page that is going away. What was typed inside the debounce window before a
  * hard close may not be there afterwards.
  *
- * An edit stays held until its write has succeeded. A write that rejects is
- * said (`failing`) and tried again — by the next flush, or on a slow timer —
- * and writes go out one at a time, oldest first, so a retried body can never
- * land on top of a newer one. A newer edit replaces a held older one only where
- * it stands for it (`supersedes`), which is what keeps edits typed into
- * different bodies from being merged by a retry (docs/PLAN.md §7).
+ * `flush` calls `save` there and then, every time, whatever else is still being
+ * written: a mode switch or a delete that follows it has to find the write
+ * already begun, and on `pagehide` there is no later. Nothing is put in order
+ * here. IndexedDB runs overlapping transactions in the order they were opened,
+ * which is the order `save` was called in.
+ *
+ * A write that rejects is said (`failing`) and its edit held, to be tried again
+ * by the next flush or on a slow timer. What a retry may never do is put an
+ * older body over a newer one, so:
+ * - a retry round writes what is pending first, and an edit is let go the
+ *   moment a newer one that stands for it has been issued — so an old body is
+ *   only ever retried when nothing newer exists for its note;
+ * - one edit stands for another only when it was typed after it, into the same
+ *   note, in the same sitting, and `supersedes` agrees. A sitting ends whenever
+ *   the editor is rebuilt from the stored body (another note, another mode):
+ *   text typed after that was not typed on top of an edit that never reached
+ *   the store, and does not contain it;
+ * - an edit that is still held when something newer has been issued for its
+ *   note is handed to `save` as `displaced`, to be kept beside the note rather
+ *   than written over it.
+ * Edits of different origins are never merged by any of this (docs/PLAN.md §7):
+ * neither stands for the other, and each is attempted on its own.
  */
 
 export const AUTOSAVE_DELAY_MS = 2000;
@@ -30,10 +46,22 @@ export const AUTOSAVE_DELAY_MS = 2000;
  */
 export const AUTOSAVE_RETRY_MS = 10_000;
 
+/** What `save` is told about an edit that is not simply the note's next body. */
+export interface SaveContext {
+	/**
+	 * A write for this note was issued after this edit and does not contain it.
+	 * Written as the note's body, this one would undo that one.
+	 */
+	displaced: true;
+}
+
+type Save<T> = (value: T, context?: SaveContext) => void | Promise<void>;
+
 export interface UseAutosaveOptions<T> {
 	/** Changing this flushes the pending save before the new note takes over. */
 	key: string;
-	save: (value: T) => void | Promise<void>;
+	/** Called with `context` only for an edit that has been displaced. */
+	save: Save<T>;
 	delayMs?: number;
 	/**
 	 * Whether a new value may replace the pending one. When it may not, the
@@ -46,41 +74,59 @@ export interface UseAutosaveOptions<T> {
 export interface Autosave<T> {
 	/** Record a user edit. The write happens after the debounce window. */
 	change: (value: T) => void;
-	/** Write immediately, if anything is pending. */
+	/** Write now what is pending, and try again whatever failed before. */
 	flush: () => void;
-	/** Flush, and resolve once every held write has been tried, whatever came of it. */
+	/**
+	 * Flush, and resolve once every edit held at that point has been attempted
+	 * and nothing is still being written — whatever came of it.
+	 */
 	settle: () => Promise<void>;
+	/**
+	 * The editor has been rebuilt from the stored body — a mode switch. Flushes,
+	 * and ends the sitting. A change of `key` does this by itself.
+	 */
+	rebased: () => void;
+	/**
+	 * Let go of everything held for `key` (the current one by default), written
+	 * or not. For a note the user has deleted: a retry after its row has been
+	 * purged would bring it back.
+	 */
+	forget: (key?: string) => void;
 	/** A write was rejected and what it held is still not stored. */
 	failing: boolean;
 }
 
 /**
- * An edit on its way to the store.
- *
- * It keeps the `key` and the `save` it was first flushed with. A retry happens
- * later, and by then the hook may be on another note: `save` as it is *now*
- * would write this body into that one.
+ * An edit that has been handed to `save`. It keeps the `key` and the `save` it
+ * was issued with: a retry happens later, and by then the hook may be on
+ * another note, whose `save` would write this body into that one.
  */
-interface Held<T> {
+interface Attempt<T> {
+	/** Issue order, which is the order the store sees. */
+	readonly seq: number;
 	readonly value: T;
 	readonly key: string;
-	readonly save: (value: T) => void | Promise<void>;
+	readonly save: Save<T>;
+	readonly sitting: number;
 }
 
-/** Whether `next` may be written in place of `before`, which never was. */
-const stands = <T>(
-	supersedes: ((next: T, pending: T) => boolean) | undefined,
-	next: Held<T>,
-	before: Held<T>
-): boolean => next.key === before.key && (supersedes?.(next.value, before.value) ?? true);
+interface HeldOptions<T> {
+	readonly supersedes: () => ((next: T, pending: T) => boolean) | undefined;
+	readonly failing: (now: boolean) => void;
+	readonly mounted: () => boolean;
+	/** What the retry timer runs: the hook's `flush`, so pending goes first. */
+	readonly again: () => void;
+}
 
 const isThenable = (value: unknown): value is PromiseLike<unknown> =>
 	typeof (value as { then?: unknown } | undefined)?.then === 'function';
 
 /** Whether the write happened: at once for a synchronous `save`, else in time. */
-const attempt = <T>(entry: Held<T>): boolean | Promise<boolean> => {
+const call = <T>(entry: Attempt<T>, displaced: boolean): boolean | Promise<boolean> => {
 	try {
-		const written: unknown = entry.save(entry.value);
+		const written: unknown = displaced
+			? entry.save(entry.value, { displaced: true })
+			: entry.save(entry.value);
 		if (!isThenable(written)) return true;
 		return Promise.resolve(written).then(
 			() => true,
@@ -89,6 +135,142 @@ const attempt = <T>(entry: Held<T>): boolean | Promise<boolean> => {
 	} catch {
 		return false;
 	}
+};
+
+/** The edits issued and not yet known to be stored. No React in here. */
+const createHeld = <T>(options: HeldOptions<T>) => {
+	const issued = { current: 0 };
+	/** In issue order. */
+	const held = { current: [] as readonly Attempt<T>[] };
+	/**
+	 * Written, and newer than something still held for the same note — kept only
+	 * so that one failing *after* this succeeded can be told it is covered.
+	 */
+	const written = { current: [] as readonly Attempt<T>[] };
+	const flying = new Map<Attempt<T>, Promise<void>>();
+	const failed = new Set<Attempt<T>>();
+	const forgotten = new Set<Attempt<T>>();
+	const timer: { current: ReturnType<typeof setTimeout> | null } = { current: null };
+
+	const stands = (next: Attempt<T>, before: Attempt<T>): boolean =>
+		next.key === before.key &&
+		next.sitting === before.sitting &&
+		next.seq > before.seq &&
+		(options.supersedes()?.(next.value, before.value) ?? true);
+
+	const known = () => [...held.current, ...written.current];
+
+	const release = (entry: Attempt<T>) => {
+		held.current = held.current.filter((each) => each !== entry);
+		failed.delete(entry);
+		forgotten.delete(entry);
+		written.current = written.current.filter((done) =>
+			held.current.some((each) => each.key === done.key && each.seq < done.seq)
+		);
+	};
+
+	const stop = () => {
+		if (timer.current !== null) clearTimeout(timer.current);
+		timer.current = null;
+	};
+
+	const report = () => {
+		options.failing(failed.size > 0);
+		// Not once the editor has gone. A retry from a hook nobody holds could
+		// land after a newer edit made through the next one.
+		if (failed.size === 0 || !options.mounted()) {
+			stop();
+			return;
+		}
+		timer.current ??= setTimeout(() => {
+			timer.current = null;
+			options.again();
+			report();
+		}, AUTOSAVE_RETRY_MS);
+	};
+
+	const settled = (entry: Attempt<T>, ok: boolean) => {
+		flying.delete(entry);
+		// Newest text wins: a failed edit is let go where something issued after
+		// it stands for it, and is either stored or held in its turn.
+		const covered = forgotten.has(entry) || known().some((other) => stands(other, entry));
+		if (ok) written.current = [...written.current, entry];
+		if (ok || covered) release(entry);
+		else failed.add(entry);
+		report();
+	};
+
+	const attempt = (entry: Attempt<T>, tried: Set<Attempt<T>>) => {
+		tried.add(entry);
+		const displaced = known().some((other) => other.key === entry.key && other.seq > entry.seq);
+		const outcome = call(entry, displaced);
+		if (typeof outcome === 'boolean') {
+			settled(entry, outcome);
+			return;
+		}
+		flying.set(
+			entry,
+			outcome.then((ok) => {
+				settled(entry, ok);
+			})
+		);
+	};
+
+	const busy = (key: string) => [...flying.keys()].some((each) => each.key === key);
+
+	const issue = (
+		edit: Pick<Attempt<T>, 'value' | 'key' | 'save' | 'sitting'>,
+		tried: Set<Attempt<T>>
+	) => {
+		issued.current += 1;
+		const entry: Attempt<T> = { ...edit, seq: issued.current };
+		// Let go now rather than when this one lands: it is held from here until
+		// it is stored, so what it stands for is never without cover. One still
+		// being written is left to find that out when it settles.
+		held.current.filter((each) => !flying.has(each) && stands(entry, each)).forEach(release);
+		held.current = [...held.current, entry];
+		attempt(entry, tried);
+	};
+
+	/**
+	 * Try again what has failed, oldest first, once each per `tried`. Not an
+	 * edit whose note has a write out: which of the two the store would see
+	 * first is then the one thing not known.
+	 */
+	const retry = (tried: Set<Attempt<T>>) => {
+		held.current
+			.filter((each) => failed.has(each) && !tried.has(each))
+			.forEach((each) => {
+				if (held.current.includes(each) && !busy(each.key)) attempt(each, tried);
+			});
+	};
+
+	/**
+	 * Carry a round on as writes come back, until every failed edit has had its
+	 * turn — and, for `all`, until nothing is being written.
+	 */
+	const follow = (tried: Set<Attempt<T>>, all: boolean): Promise<void> => {
+		const waiting = held.current.some((each) => failed.has(each) && !tried.has(each));
+		if (flying.size === 0 || (!all && !waiting)) return Promise.resolve();
+		return Promise.race(flying.values()).then(() => {
+			retry(tried);
+			return follow(tried, all);
+		});
+	};
+
+	const forget = (key: string) => {
+		held.current
+			.filter((each) => each.key === key)
+			.forEach((each) => {
+				// One that is out cannot be called back; it can be kept from ever
+				// being tried again.
+				if (flying.has(each)) forgotten.add(each);
+				else release(each);
+			});
+		report();
+	};
+
+	return { issue, retry, follow, forget, stop };
 };
 
 export const useAutosave = <T>({
@@ -115,116 +297,71 @@ export const useAutosave = <T>({
 		keyRef.current = key;
 	}, [key]);
 
-	/** Flushed and not yet stored, oldest first. */
-	const held = useRef<Held<T>[]>([]);
-	/** The one being written, which a newer edit must not be folded into. */
-	const writing = useRef<Held<T>>(null);
-	const draining = useRef<Promise<void>>(null);
-	const retry = useRef<ReturnType<typeof setTimeout>>(null);
+	const sitting = useRef(0);
 	const gone = useRef(false);
+	const again = useRef<() => void>(() => undefined);
 	const [failing, setFailing] = useState(false);
+	const [held] = useState(() =>
+		createHeld<T>({
+			supersedes: () => supersedesRef.current,
+			failing: setFailing,
+			mounted: () => !gone.current,
+			again: () => {
+				again.current();
+			},
+		})
+	);
 
-	/**
-	 * Try everything held, in order. One note's failure holds back that note's
-	 * later edits — they were typed after it — and nobody else's.
-	 *
-	 * Promises only where `save` returns one: a `save` that is synchronous is
-	 * called synchronously, because on unmount and `pagehide` there may be no
-	 * later.
-	 */
-	const drain = useCallback((): Promise<void> => {
-		if (draining.current !== null) return draining.current;
-		if (retry.current !== null) clearTimeout(retry.current);
-		retry.current = null;
-		const stuck = new Set<string>();
-
-		const after = (entry: Held<T>, written: boolean): Promise<void> | undefined => {
-			writing.current = null;
-			const at = held.current.indexOf(entry);
-			if (written) {
-				held.current.splice(at, 1);
-				return step();
+	/** One round: what is pending first, then whatever failed before. */
+	const round = useCallback(
+		(all: boolean): Promise<void> => {
+			if (timer.current !== null) clearTimeout(timer.current);
+			timer.current = null;
+			const tried = new Set<Attempt<T>>();
+			const edit = pending.current;
+			pending.current = null;
+			if (edit !== null) {
+				held.issue(
+					{
+						value: edit.value,
+						key: keyRef.current,
+						save: saveRef.current,
+						sitting: sitting.current,
+					},
+					tried
+				);
 			}
-			// Newest text wins: an edit that failed is let go once a later one
-			// stands for it, rather than kept to be written after it. Otherwise
-			// it stays, and so does everything typed into that note after it,
-			// until the next run — each edit is tried once a run, which is what
-			// keeps a store that refuses everything from being asked in a loop.
-			const next = held.current.slice(at + 1).find((later) => later.key === entry.key);
-			if (next !== undefined && stands(supersedesRef.current, next, entry)) {
-				held.current.splice(at, 1);
-			} else {
-				stuck.add(entry.key);
-			}
-			return step();
-		};
-
-		const step = (): Promise<void> | undefined => {
-			const entry = held.current.find((candidate) => !stuck.has(candidate.key));
-			if (entry === undefined) return undefined;
-			writing.current = entry;
-			const outcome = attempt(entry);
-			return typeof outcome === 'boolean'
-				? after(entry, outcome)
-				: outcome.then((written) => after(entry, written));
-		};
-
-		const finish = (): Promise<void> | undefined => {
-			// Flushed in the moment between the last write settling and this
-			// running: not tried yet, which is not the same as failed.
-			if (held.current.some((entry) => !stuck.has(entry.key))) {
-				return step()?.then(finish) ?? finish();
-			}
-			draining.current = null;
-			const left = held.current.length > 0;
-			setFailing(left);
-			// Not once the editor has gone. A retry from a hook nobody holds could
-			// land after a newer edit made through the next one, and would be the
-			// older body written over the newer.
-			if (left && !gone.current) {
-				retry.current = setTimeout(() => void drain(), AUTOSAVE_RETRY_MS);
-			}
-			return undefined;
-		};
-
-		const rest = step();
-		if (rest === undefined) {
-			void finish();
-			return Promise.resolve();
-		}
-		draining.current = rest.then(finish);
-		return draining.current;
-	}, []);
+			held.retry(tried);
+			return held.follow(tried, all);
+		},
+		[held]
+	);
 
 	const flush = useCallback(() => {
-		if (timer.current !== null) {
-			clearTimeout(timer.current);
-			timer.current = null;
-		}
-		const edit = pending.current;
-		pending.current = null;
-		if (edit !== null) {
-			const next: Held<T> = { value: edit.value, key: keyRef.current, save: saveRef.current };
-			const last = held.current.at(-1);
-			// A held edit that never got written — it failed — is replaced by the
-			// newer one that stands for it. Never the one being written: that
-			// write is already out, holding the older text.
-			if (
-				last !== undefined &&
-				last !== writing.current &&
-				stands(supersedesRef.current, next, last)
-			) {
-				held.current.pop();
-			}
-			held.current.push(next);
-		}
-		if (held.current.length > 0) void drain();
-	}, [drain]);
-
-	const settle = useCallback((): Promise<void> => {
-		flush();
-		return draining.current ?? Promise.resolve();
+		void round(false);
+	}, [round]);
+	useEffect(() => {
+		again.current = flush;
 	}, [flush]);
+
+	const settle = useCallback(() => round(true), [round]);
+
+	const rebased = useCallback(() => {
+		flush();
+		sitting.current += 1;
+	}, [flush]);
+
+	const forget = useCallback(
+		(forgotten: string = keyRef.current) => {
+			if (forgotten === keyRef.current) {
+				if (timer.current !== null) clearTimeout(timer.current);
+				timer.current = null;
+				pending.current = null;
+			}
+			held.forget(forgotten);
+		},
+		[held]
+	);
 
 	const change = useCallback(
 		(value: T) => {
@@ -242,7 +379,8 @@ export const useAutosave = <T>({
 
 	// Flush when the note changes or the editor goes away. The cleanup runs
 	// before the next effect, so the pending edit belongs to the outgoing note.
-	useEffect(() => flush, [key, flush]);
+	// The editor that comes next is built from the stored body: a new sitting.
+	useEffect(() => rebased, [key, rebased]);
 
 	// After the flush above, so the last attempt is made and only the retries
 	// after it are not.
@@ -250,10 +388,9 @@ export const useAutosave = <T>({
 		gone.current = false;
 		return () => {
 			gone.current = true;
-			if (retry.current !== null) clearTimeout(retry.current);
-			retry.current = null;
+			held.stop();
 		};
-	}, []);
+	}, [held]);
 
 	// A closing tab or a backgrounded PWA gets no unmount, so try those too.
 	useEffect(() => {
@@ -269,5 +406,5 @@ export const useAutosave = <T>({
 		};
 	}, [flush]);
 
-	return { change, flush, settle, failing };
+	return { change, flush, settle, rebased, forget, failing };
 };
