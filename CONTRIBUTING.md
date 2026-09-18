@@ -83,8 +83,9 @@ Every contributor signs the
 [Individual Contributor License Agreement](CLA-individual.md) once — once per
 person, not once per pull request. A bot comments on your first pull request
 with a link and the sentence to post; signatures live in the `cla-signatures`
-branch of this repository, and hold your GitHub username, the commit that
-prompted the signature, and the date. Nothing else.
+branch of this repository, and hold your GitHub username, your numeric GitHub
+user id, the id and timestamp of the comment you signed with, and the number of
+the pull request it was on. No email address, and no part of your contribution.
 
 **It is a licence grant, not an assignment.** You keep ownership of everything
 you write, and you keep the right to use your own work anywhere else, under any

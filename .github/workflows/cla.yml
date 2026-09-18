@@ -14,6 +14,15 @@ name: CLA
 # Anything added here that runs the contributor's code would hand a writable
 # token to whoever opened the pull request.
 # https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
+#
+# The action is **archived and read-only** upstream, which is a real cost and
+# is recorded here rather than left to be discovered: no fix will ever ship for
+# it, and the `github-actions` Dependabot group will never find it an update.
+# It is used anyway because it is self-contained — it needs no third-party
+# service, no account and no token beyond `GITHUB_TOKEN` — and because what it
+# does is small enough to read in full. If it breaks, it gets replaced rather
+# than patched; the signature file in `cla-signatures` is the record, and is
+# plain JSON that any replacement can read.
 
 on:
     issue_comment:
@@ -21,10 +30,17 @@ on:
     pull_request_target:
         types: [opened, synchronize, reopened]
 
+# An explicit block sets every scope it does not name to `none`, so each of
+# these is here because the action fails without it.
 permissions:
     contents: write # the signature file on `cla-signatures`
-    pull-requests: write # the comment asking for a signature, and its status
-    statuses: write
+    pull-requests: write # the comment asking for a signature
+    # Once everyone has signed, the action re-runs the workflow that was
+    # blocked, which means listing and re-running workflow runs. Without this
+    # it throws `Resource not accessible by integration` *after* recording the
+    # signature — so the gate would fail red on every pull request by an
+    # already-signed contributor, which is every pull request, forever.
+    actions: write
 
 # One at a time per pull request: two runs writing the signature file at once
 # is a lost update, and the thing lost is someone's signature.
@@ -35,13 +51,16 @@ concurrency:
 jobs:
     cla:
         runs-on: ubuntu-latest
-        # Every pull request event, but only comments that are the signature
-        # itself — otherwise every comment on every issue in the repository
-        # starts a run.
+        # Every pull request event, but only the two comments that mean
+        # something here — otherwise every comment on every issue in the
+        # repository starts a run. `recheck` is the second because the bot's
+        # own comment tells people to post it, and a condition that ignored it
+        # would advertise a button that does nothing.
         if: >-
             github.event_name == 'pull_request_target' ||
             (github.event.issue.pull_request != null &&
-             contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
+             (contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA') ||
+              github.event.comment.body == 'recheck'))
         steps:
             - uses: contributor-assistant/github-action@v2.6.1
               env:
@@ -53,25 +72,28 @@ jobs:
                   path-to-document: https://github.com/skysa-org/skysa-notes/blob/main/CLA-individual.md
                   path-to-signatures: signatures/version1/cla.json
                   branch: cla-signatures
-                  # The sentence a contributor posts to sign. Fixed by the
-                  # action; repeated here so the workflow says what it expects.
-                  custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
-                  custom-notsigned-prcomment: >-
-                      Thanks for the pull request. Before it can be merged, this
-                      project asks every contributor to sign its
-                      [Contributor License Agreement](https://github.com/skysa-org/skysa-notes/blob/main/CLA-individual.md)
-                      once — not once per pull request.
+                  # `custom-pr-sign-comment` is deliberately not set. Setting
+                  # it swaps the action's forgiving substring match for exact
+                  # equality on the whole comment, so a trailing full stop or a
+                  # "thanks!" would leave someone unsigned with no new feedback.
+                  # The sentence the action looks for by default is the one
+                  # quoted below and in CLA-individual.md.
+                  #
+                  # Locking the pull request after merge is off for the same
+                  # kind of reason: the signature file is the record, not the
+                  # comment, and locking the conversation on a merged pull
+                  # request stops people asking about their own work.
+                  lock-pullrequest-aftermerge: false
+                  # A literal block, not a folded one: folding turns every
+                  # wrapped line into a newline, which GitHub renders as a hard
+                  # break. One line per paragraph is what reads as paragraphs.
+                  custom-notsigned-prcomment: |-
+                      Thanks for the pull request. Before it can be merged, this project asks every contributor to sign its [Contributor License Agreement](https://github.com/skysa-org/skysa-notes/blob/main/CLA-individual.md) once — not once per pull request.
 
-                      **It is a licence grant, not an assignment.** You keep
-                      ownership of everything you write and every right to use
-                      it elsewhere; in exchange the project is bound to keep
-                      your contribution available under AGPL-3.0 or a licence
-                      one-way compatible with it.
-                      [CONTRIBUTING.md](https://github.com/skysa-org/skysa-notes/blob/main/CONTRIBUTING.md#the-cla)
-                      explains why.
+                      **It is a licence grant, not an assignment.** You keep ownership of everything you write and every right to use it elsewhere; in exchange the project is bound to keep your contribution available under AGPL-3.0 or a licence one-way compatible with it. [CONTRIBUTING.md](https://github.com/skysa-org/skysa-notes/blob/main/CONTRIBUTING.md#the-cla) explains why.
 
                       To sign, post exactly this as a new comment:
-                  custom-allsigned-prcomment: >-
+                  custom-allsigned-prcomment: |-
                       All contributors have signed the CLA. Thank you.
                   # Bots do not have copyright to grant.
                   allowlist: dependabot[bot],github-actions[bot]

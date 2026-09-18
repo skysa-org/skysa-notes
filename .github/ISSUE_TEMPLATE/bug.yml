@@ -5,9 +5,8 @@ body:
     - type: markdown
       attributes:
           value: |
-              **Not for security problems.** Those go through
-              [private reporting](https://github.com/skysa-org/skysa-notes/security/advisories/new);
-              see `SECURITY.md`.
+              **Not for security problems.** [`SECURITY.md`](https://github.com/skysa-org/skysa-notes/blob/main/SECURITY.md)
+              says how to report one privately.
 
               Notes live in your browser's IndexedDB and sync to your own
               storage. Nothing you paste here should contain note content — and

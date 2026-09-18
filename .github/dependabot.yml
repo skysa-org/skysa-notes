@@ -5,9 +5,16 @@
 # one per package, for the same reason — a lockfile bump that touches nine
 # transitive dependencies is one review, not nine.
 #
-# Everything is grouped except **major** updates, which are separated
-# deliberately: a major is a decision, and bundling one with a pile of patches
-# means the decision gets merged without being made.
+# Everything is grouped except **major** updates, which are left out of the
+# group deliberately: a major is a decision, and bundling one with a pile of
+# patches means the decision gets merged without being made. Dependabot opens
+# a pull request of its own for each one, because a dependency whose only
+# available bump is excluded from every group is raised on its own.
+#
+# Note what is *not* here: an `ignore` entry for majors. `ignore` means "never
+# raise this at all", and it is applied before grouping — so it would not
+# separate majors, it would hide them, and the repository would sit on an
+# unmaintained major line with this file claiming the opposite.
 version: 2
 
 updates:
@@ -24,12 +31,6 @@ updates:
               update-types:
                   - minor
                   - patch
-      # A major of any of these changes how the app is written, not just what it
-      # depends on. Each gets its own pull request and its own read.
-      ignore:
-          - dependency-name: '*'
-            update-types:
-                - version-update:semver-major
       labels:
           - dependencies
 
@@ -44,4 +45,3 @@ updates:
                   - '*'
       labels:
           - dependencies
-          - ci

@@ -123,5 +123,7 @@ sentence to post as a comment. Signing is once per person, not once per pull
 request — later pull requests are recognised without asking again.
 
 Signatures are recorded in the `cla-signatures` branch of this repository, and
-hold your GitHub username, the commit that prompted the signature, and the
-date. Nothing else.
+hold your GitHub username, your numeric GitHub user id, the id and timestamp of
+the comment you signed with, and the number of the pull request it was on. No
+email address, and no part of your contribution. All of it is already public
+about anyone who has commented on a pull request here.
