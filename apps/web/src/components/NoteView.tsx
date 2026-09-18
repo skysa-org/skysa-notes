@@ -10,6 +10,7 @@ import { useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
 import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
+import { Outline } from './Outline.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
 
@@ -75,6 +76,60 @@ interface Edit {
 
 const sameBase = (next: Edit, pending: Edit): boolean => next.origin === pending.origin;
 
+/**
+ * Whichever editor is open, with the outline beside it.
+ *
+ * Its own component so that `NoteView` stays inside the complexity limit, and
+ * because the rail needs an element to look inside: `body` is the one both the
+ * editor and the outline are under, and only this part of the tree cares.
+ */
+const NoteBody = ({
+	note,
+	mode,
+	showOutline,
+	onUserEdit,
+	onUnsupported,
+}: {
+	note: NoteRecord;
+	mode: EditorMode | undefined;
+	showOutline: boolean;
+	onUserEdit: (body: string, origin: string) => void;
+	onUnsupported: () => void;
+}) => {
+	const body = useRef<HTMLDivElement>(null);
+	return (
+		<div className="note-body" ref={body}>
+			{mode === 'raw' && (
+				<RawEditor
+					noteId={note.id}
+					body={note.body}
+					origin={note.bodyOrigin ?? ''}
+					onUserEdit={onUserEdit}
+				/>
+			)}
+			{mode === 'rich' && (
+				<RichEditor
+					noteId={note.id}
+					body={note.body}
+					origin={note.bodyOrigin ?? ''}
+					onUserEdit={onUserEdit}
+					onUnsupported={onUnsupported}
+				/>
+			)}
+			{showOutline && (
+				<Outline
+					body={note.body}
+					// Read when a row is clicked, not when it is drawn: the
+					// editor is a sibling that mounts and unmounts with the mode,
+					// so a reference taken at render time is stale the moment the
+					// mode changes.
+					editor={() => body.current?.querySelector('.editor') ?? null}
+				/>
+			)}
+		</div>
+	);
+};
+
 export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
@@ -131,6 +186,20 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		flush();
 		void setNoteEditorMode(db, noteId, otherMode(mode));
 	}, [flush, mode, noteId, unsupported]);
+
+	// The rail is hidden, not unmounted, so the note's headings are not re-read
+	// every time it is shown — and it costs nothing when a note has none, since
+	// `Outline` renders nothing without them.
+	const [showOutline, setShowOutline] = useState(true);
+	useCommand({
+		id: 'note.outline',
+		label: showOutline ? 'Hide outline' : 'Show outline',
+		group: 'Note',
+		enabled: noteId !== undefined,
+		run: () => {
+			setShowOutline((shown) => !shown);
+		},
+	});
 
 	// Registered rather than listened for. The chord the app watches and the
 	// chord the palette prints are then the same one by construction, and a
@@ -215,25 +284,15 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				</p>
 			)}
 
-			{mode === 'raw' && (
-				<RawEditor
-					noteId={note.id}
-					body={note.body}
-					origin={note.bodyOrigin ?? ''}
-					onUserEdit={onUserEdit}
-				/>
-			)}
-			{mode === 'rich' && (
-				<RichEditor
-					noteId={note.id}
-					body={note.body}
-					origin={note.bodyOrigin ?? ''}
-					onUserEdit={onUserEdit}
-					onUnsupported={() => {
-						setUnsupportedId(note.id);
-					}}
-				/>
-			)}
+			<NoteBody
+				note={note}
+				mode={mode}
+				showOutline={showOutline}
+				onUserEdit={onUserEdit}
+				onUnsupported={() => {
+					setUnsupportedId(note.id);
+				}}
+			/>
 		</section>
 	);
 };

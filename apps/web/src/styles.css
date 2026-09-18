@@ -854,3 +854,83 @@ button.row.selected {
 	border-radius: 0.25rem;
 	color: var(--muted);
 }
+
+/* ---- Outline ---------------------------------------------------------- */
+
+/*
+ * A row inside the note view, not a fourth column of `.app-shell` — see the
+ * comment on `.app-frame`. The editor keeps the space it had; the rail takes
+ * its own, and disappears with the note that has no headings in it.
+ */
+.note-body {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	min-width: 0;
+}
+
+.outline {
+	flex: 0 0 13rem;
+	overflow: auto;
+	border-left: 1px solid var(--border);
+	padding: 0.75rem 0.5rem;
+}
+
+.outline ol {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.outline button {
+	display: block;
+	width: 100%;
+	border: 0;
+	background: none;
+	padding: 0.2rem 0.35rem;
+	text-align: left;
+	font: inherit;
+	font-size: 0.85rem;
+	color: var(--muted);
+	border-radius: 0.25rem;
+	cursor: pointer;
+	/* One line each: a rail of wrapped headings stops being scannable, which is
+	 * the only thing it is for. */
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.outline button:hover,
+.outline button:focus-visible {
+	background: var(--surface);
+	color: var(--fg);
+}
+
+/* Depth as indentation, which is the whole of the structure a rail can show. */
+.outline-h1 button {
+	font-weight: 600;
+	color: var(--fg);
+}
+.outline-h2 button {
+	padding-left: 1rem;
+}
+.outline-h3 button {
+	padding-left: 1.75rem;
+}
+.outline-h4 button {
+	padding-left: 2.5rem;
+}
+.outline-h5 button {
+	padding-left: 3.25rem;
+}
+.outline-h6 button {
+	padding-left: 4rem;
+}
+
+/* Narrow enough and the rail is most of the screen, so it goes. */
+@media (max-width: 60rem) {
+	.outline {
+		display: none;
+	}
+}
