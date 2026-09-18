@@ -45,18 +45,51 @@ jobs:
             # the two cannot drift: format:check + lint + typecheck + test.
             - run: pnpm verify
 
-            # A pull request that changes what ships has to say what it does to
-            # the version. `--empty` is the answer for one that changes nothing
-            # observable, and is a real answer rather than a way round this.
+            # A pull request that changes what ships has to say what it does
+            # to the version. `pnpm run changeset --empty` is the answer for
+            # one that changes nothing observable, and is a real answer rather
+            # than a way round this.
             #
             # Only on a pull request: `--since` needs something to compare to,
             # and on `main` that would be the commit itself. It passes when no
             # package changed, so a documentation or workflow change needs
             # nothing.
-            - if: github.event_name == 'pull_request'
+            - name: A changeset, for a change that ships
+              if: github.event_name == 'pull_request'
               env:
                   BASE: ${{ github.base_ref }}
-              run: pnpm exec changeset status --since="origin/$BASE"
+              run: |
+                  set -eu
+                  changed=$(git diff --name-only "origin/$BASE...HEAD" -- apps packages)
+
+                  # The release pull request is the one shape that cannot
+                  # satisfy this and must not be asked to. `changeset version`
+                  # bumps the three `package.json` files, writes the changelogs
+                  # and **deletes** every changeset it consumed — so the diff is
+                  # three changed packages and no changesets, which is exactly
+                  # what this step exists to reject. Left in, no release could
+                  # ever be merged once `verify` is required: the same gridlock
+                  # the Changesets bot was turned down for, arriving from the
+                  # other side.
+                  #
+                  # Recognised by shape rather than by branch name, which anyone
+                  # could adopt: a version pull request touches nothing in a
+                  # package but its `package.json` and its `CHANGELOG.md`. A
+                  # source file alongside them is not a release and is asked for
+                  # a changeset like anything else.
+                  #
+                  # A dependency bump — Dependabot's, or one by hand — has the
+                  # same shape and is let through for a reason of its own: the
+                  # bot cannot write a changeset, and a rule that turns every
+                  # dependency pull request red is one people learn to ignore.
+                  # Where a bump is worth a line in the changelog, add one.
+                  rest=$(printf '%s\n' "$changed" | grep -vE '(^|/)(package\.json|CHANGELOG\.md)$' || true)
+                  if [ -n "$changed" ] && [ -z "$rest" ]; then
+                    echo "Only versions, changelogs and dependency ranges changed. No changeset needed."
+                    exit 0
+                  fi
+
+                  pnpm exec changeset status --since="origin/$BASE"
 
             # Separate, and not merged into `verify`, because it is the only thing
             # that checks two claims nothing else does: `packages/core` compiles

@@ -1,7 +1,8 @@
 # Changesets
 
 A changeset is a note, written with the change and merged with it, saying what
-moved and how much. `pnpm run changeset` asks two questions and writes one here.
+moved and how much. `pnpm run changeset` asks which packages moved, how big the
+change is and for a summary, then writes one here.
 
 ```
 pnpm run changeset            # write one
@@ -30,10 +31,21 @@ Changesets "Version Packages" bot is deliberately not used: a pull request
 opened with `GITHUB_TOKEN` starts no workflows, so its own CI would never run,
 and once `verify` is a required check such a pull request could never merge.
 
+That pull request needs no changeset of its own, and could not have one:
+`changeset version` **deletes** every changeset it consumes, so its diff is
+three bumped packages and nothing explaining them — the exact shape the CI
+check rejects. CI recognises it by that shape (nothing changed in a package but
+its `package.json` and its `CHANGELOG.md`) and does not ask. A source file
+alongside them is not a release, and is asked like anything else.
+
 ## When to write one
 
 Whenever a pull request changes anything under `apps/` or `packages/`. CI asks
-for it and will fail the pull request without one.
+for it and will fail the pull request without one. Two shapes are exempt,
+because neither can answer: the release pull request above, and a dependency
+bump — Dependabot cannot write a changeset, and a rule that turns every
+dependency pull request red is one people learn to ignore. Where a bump is
+worth a line in the changelog, write one anyway.
 
 When the change genuinely does not move the version — a test, a comment, a
 refactor nobody outside the repository can observe — say that rather than

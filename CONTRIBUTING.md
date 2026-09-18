@@ -58,8 +58,8 @@ What is expected of a change:
   if the thing you fixed comes back.
 - **Tick the checklist item** in `docs/PLAN.md` if the change completes one.
 - **A changeset**, if the change touches `apps/` or `packages/`:
-  `pnpm run changeset` asks two questions and writes a small file to commit
-  alongside it. CI fails a pull request that changes a package without one. If
+  `pnpm run changeset` asks which packages moved, how big the change is and for
+  a summary, then writes a small file to commit alongside it. CI fails a pull request that changes a package without one. If
   the change moves nothing anyone outside the repository can observe — a test,
   a comment, a refactor — `pnpm run changeset --empty` says so, which is an
   answer rather than a way round the question. `.changeset/README.md` explains

@@ -4,8 +4,13 @@ name: Release
 #
 # It does not decide anything. `pnpm run changeset:version` is run by hand and
 # merged like any other change; this only notices that the version in the tree
-# is one that has never been tagged, and marks the commit that carries it.
+# is one that has never been released, and marks the commit that carries it.
 # Re-running it, or pushing anything else to `main`, does nothing.
+#
+# It does not gate anything either: it runs beside `ci.yml` rather than after
+# it, so a tag says "this commit is what 0.2.0 is", not "this commit passed".
+# What keeps `main` green is the pull request's own checks, which is where a
+# failure can still be fixed without a tag already pointing at it.
 #
 # Deliberately not the Changesets "Version Packages" bot. A pull request opened
 # with `GITHUB_TOKEN` starts no workflows, so its own CI would never run — and
@@ -21,11 +26,14 @@ on:
 permissions:
     contents: write
 
-# Two pushes to `main` in quick succession must not both try to create the same
-# tag. Not cancelled in flight: the loser here would be a release that had
-# already been pushed.
+# Per commit, so nothing is ever cancelled. A single `release` group would
+# serialize these — which sounds right and is not: GitHub keeps one *pending*
+# run per group and cancels the previous pending one, so two version bumps
+# merged in quick succession would drop the first one's tag for ever. Two runs
+# racing for one tag is the harmless failure by comparison, and the step below
+# is written to survive it.
 concurrency:
-    group: release
+    group: ${{ github.workflow }}-${{ github.sha }}
     cancel-in-progress: false
 
 jobs:
@@ -39,11 +47,24 @@ jobs:
                   # answered without asking the API.
                   fetch-depth: 0
 
-            # Any of the three would do — `.changeset/config.json` fixes them
-            # to one number — and `packages/core` is the one every other
-            # package depends on.
-            - id: version
-              run: printf 'value=%s\n' "$(node -p "require('./packages/core/package.json').version")" >> "$GITHUB_OUTPUT"
+            - name: Read the version
+              id: version
+              run: |
+                  set -eu
+                  # The three are `fixed` in .changeset/config.json, so any of
+                  # them answers — but only while that holds, and a hand-edited
+                  # `package.json` is exactly how it would stop holding without
+                  # anyone noticing. Checked rather than assumed.
+                  core=$(node -p "require('./packages/core/package.json').version")
+                  for package in apps/web apps/api; do
+                    other=$(node -p "require('./$package/package.json').version")
+                    if [ "$other" != "$core" ]; then
+                      echo "::error::$package is $other but packages/core is $core." \
+                           "The three are fixed to one version; nothing is tagged until they agree."
+                      exit 1
+                    fi
+                  done
+                  printf 'value=%s\n' "$core" >> "$GITHUB_OUTPUT"
 
             - name: Tag and release, if this version is new
               env:
@@ -55,40 +76,65 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   set -eu
-                  if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
-                    echo "v$VERSION is already tagged. Nothing to release."
+                  tag="v$VERSION"
+
+                  # The release, not the tag, is what says this version is out.
+                  # Asking about the tag instead would make a run that pushed
+                  # the tag and then failed to create the release unrepeatable:
+                  # every later run would short-circuit on the tag and the
+                  # release would never appear. Every step below is safe to run
+                  # again.
+                  if gh release view "$tag" >/dev/null 2>&1; then
+                    echo "$tag is already released. Nothing to do."
                     exit 0
                   fi
 
+                  if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+                    git -c user.name='github-actions[bot]' \
+                        -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                        tag -a "$tag" -m "$tag"
+                    # Another run for another commit may have pushed the same
+                    # tag between the check above and here. That is a race this
+                    # one lost, not a failure: the tag exists, which is what it
+                    # wanted, and the release below is created against it.
+                    if ! git push origin "$tag"; then
+                      git ls-remote --exit-code --tags origin "$tag" >/dev/null
+                      echo "$tag was pushed by another run first."
+                    fi
+                  fi
+
                   # The changelog entries Changesets wrote for this version, one
-                  # section per package that has one. A package that moved only
-                  # because the others did gets the literal "No changes in this
-                  # release.", which is worth nothing in a release note and is
-                  # dropped — as is a section that is only whitespace.
-                  : > notes.md
+                  # section per package with something of its own to say. Two
+                  # kinds of section are dropped: the literal "No changes in
+                  # this release." a package gets when it moved only because the
+                  # others did, and one whose every bullet is an internal
+                  # dependency bump — `- @skysa/core@0.2.0` is the same fact
+                  # told three times, and is not a release note.
+                  notes="$RUNNER_TEMP/notes.md"
+                  : > "$notes"
                   for package in packages/core apps/web apps/api; do
                     log="$package/CHANGELOG.md"
                     [ -f "$log" ] || continue
+                    # `^## ` alone would end the section at a level-2 heading
+                    # inside somebody's summary. Only a heading that starts
+                    # with a digit is another version.
                     section=$(awk -v want="## $VERSION" '
                       $0 == want { inside = 1; next }
-                      inside && /^## / { exit }
+                      inside && /^## [0-9]/ { exit }
                       inside && $0 != "No changes in this release." { print }
                     ' "$log")
-                    case $section in
+                    own=$(printf '%s\n' "$section" | grep -E '^- ' | grep -vE '^- @skysa/[a-z]+@' || true)
+                    case $own in
                       *[![:space:]]*)
                         name=$(node -p "require('./$package/package.json').name")
                         # `##`, so the `###` headings Changesets writes nest
                         # underneath rather than beside.
-                        printf '## %s\n%s\n\n' "$name" "$section" >> notes.md
+                        printf '## %s\n%s\n\n' "$name" "$section" >> "$notes"
                         ;;
                     esac
                   done
-                  if [ ! -s notes.md ]; then
-                    printf 'No changelog entries for this version.\n' > notes.md
+                  if [ ! -s "$notes" ]; then
+                    printf 'No changelog entries for this version.\n' > "$notes"
                   fi
 
-                  git -c user.name='github-actions[bot]' \
-                      -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                      tag -a "v$VERSION" -m "v$VERSION"
-                  git push origin "v$VERSION"
-                  gh release create "v$VERSION" --title "v$VERSION" --notes-file notes.md
+                  gh release create "$tag" --title "$tag" --notes-file "$notes"
