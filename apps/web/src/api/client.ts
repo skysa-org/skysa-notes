@@ -147,6 +147,11 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 			// Same origin in production and through the dev proxy; said anyway,
 			// because the session cookie is the whole of the authentication.
 			credentials: 'same-origin',
+			// Binding follows what the server says, so a stored answer replayed
+			// after the world moved would unbind a live connection or hand back
+			// a revoked token. The API says `no-store` too; this is the half the
+			// browser's own HTTP cache obeys without being asked.
+			cache: 'no-store',
 			headers: { accept: 'application/json', ...init.headers },
 			signal: AbortSignal.timeout(timeoutMs),
 		});

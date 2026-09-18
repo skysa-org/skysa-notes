@@ -102,6 +102,36 @@ export const createApp = (options: CreateAppOptions) => {
 	});
 
 	/**
+	 * Nothing here may be stored by anything between the Worker and the tab.
+	 *
+	 * `POST /api/token` answers with a provider access token, and `GET
+	 * /api/connections` is the answer the device binds and *unbinds* itself on:
+	 * a reply kept and replayed after the world moved would hand out a token the
+	 * user has revoked, or unbind a connection that is alive. Neither response
+	 * carried any freshness information before this, which leaves them to
+	 * heuristic freshness — and `no-store` is the only header that also forbids
+	 * writing the response down in the first place. `no-cache` would not: it
+	 * means "store it, but ask first".
+	 *
+	 * It goes *above* `csrf` because a refusal is a response too. `csrf` rejects
+	 * by throwing, which Hono turns into a response at the level above whoever
+	 * threw — so a middleware registered after it never gets its `next()` back
+	 * for that request, and the 403 would go out bare.
+	 *
+	 * Set after `next()`, so it is the last word: a route cannot opt out by
+	 * setting its own, and none should want to.
+	 *
+	 * The service worker is already `NetworkOnly` for `/api/*` (`apps/web/pwa.ts`);
+	 * this is the same rule for the caches it does not control, and the client
+	 * asks with `cache: 'no-store'` from its side (`apps/web/src/api/client.ts`).
+	 * https://www.rfc-editor.org/rfc/rfc9111#name-no-store
+	 */
+	app.use('*', async (c, next) => {
+		await next();
+		c.header('Cache-Control', 'no-store');
+	});
+
+	/**
 	 * `sameSite=Lax` already stops a cross-*site* POST from carrying the session
 	 * cookie. What it does not stop is a same-site, cross-origin one — a sibling
 	 * subdomain — and `POST /api/token` mints an access token. Checking `Origin`
