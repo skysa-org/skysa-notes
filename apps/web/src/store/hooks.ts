@@ -109,13 +109,10 @@ export const useNoteSearch = (query: string): NoteHit[] | undefined => {
 	//
 	// Every live note, not the open notebook's: a search the user has to be
 	// standing in the right notebook for cannot answer "where did I write that".
-	const read = useLiveQuery(async () => {
-		const notes = searching ? await listNotes(db) : [];
-		// Making the index agree with the rows belongs with reading them: once
-		// per read, and not once per letter. An empty search empties the index.
-		search.refresh(notes);
-		return { searching, notes };
-	}, [searching, search]);
+	const read = useLiveQuery(
+		async () => ({ searching, notes: searching ? await listNotes(db) : [] }),
+		[searching, search]
+	);
 
 	// `useLiveQuery` keeps its last value across a change of dependencies, so
 	// without this the empty read held while nobody was searching answers the
@@ -123,10 +120,19 @@ export const useNoteSearch = (query: string): NoteHit[] | undefined => {
 	// matches arrive.
 	const indexed = read?.searching === searching ? read : undefined;
 
-	return useMemo(
-		() => (indexed === undefined ? undefined : searching ? search.find(query) : []),
-		[indexed, query, searching, search]
-	);
+	return useMemo(() => {
+		if (indexed === undefined) return undefined;
+		// The index is made to agree with the read React is *holding*, not with
+		// whichever read finished last. Dexie aborts a superseded query but
+		// cannot un-run it: its callback still completes, so refreshing where the
+		// rows are read lets an overtaken read write the index after the winner —
+		// and since the winner's value is what the memo is keyed on, nothing
+		// would ever recompute over it. Two writes in quick succession, which is
+		// what a sync round under an open search looks like, is enough. Here it
+		// is keyed to the value it agrees with, and `refresh` is idempotent.
+		search.refresh(indexed.notes);
+		return searching ? search.find(query) : [];
+	}, [indexed, query, searching, search]);
 };
 
 /** Count of notes with unpushed edits, for the sync indicator in Phase 2. */

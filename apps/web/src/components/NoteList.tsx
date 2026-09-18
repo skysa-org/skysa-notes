@@ -2,7 +2,7 @@ import { parentPath, ROOT } from '@skysa/core';
 import { type ReactNode } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
-import { type NoteHit } from '../store/search.js';
+import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
 import { folderLabel } from '../store/tree.js';
 
 /**
@@ -52,9 +52,14 @@ const placeholderFor = ({
 	results,
 }: Pick<NoteListProps, 'notes' | 'folderPath' | 'storeLoaded' | 'query' | 'results'>):
 	string | undefined => {
-	if (query !== '') {
+	if (query.trim() !== '') {
 		if (results === undefined) return 'Searching…';
-		return results.length === 0 ? `Nothing matches “${query}”.` : undefined;
+		if (results.length === 0) return `Nothing matches “${query}”.`;
+		// Cut at the limit, so say so: the note they want may be the one not
+		// shown, and the way to it is another word rather than a scrollbar.
+		return results.length < SEARCH_LIMIT
+			? undefined
+			: `Showing the first ${String(SEARCH_LIMIT)}. Add a word to narrow the search.`;
 	}
 	if (folderPath === undefined) {
 		return storeLoaded ? 'Create a notebook to start writing.' : 'Loading…';
@@ -114,12 +119,15 @@ const NoteRow = ({ note, selected, onSelect, meta, detail }: NoteRowProps) => (
 );
 
 /**
- * The matched words are marked in place. `<mark>` rather than a colour of our
- * own: it is what the element is for, it survives a high-contrast mode, and a
- * screen reader can be told the run is marked.
+ * The matched words are marked in place. `<mark>` rather than a span of our own
+ * colour: it is the element for exactly this, and it survives a forced-colours
+ * mode where a background of ours would be thrown away. It is not *announced* —
+ * no screen reader in common use says anything about a bare `mark` — so nothing
+ * here depends on the user hearing it: the excerpt reads the same without the
+ * marks, and what the pane says about the search it says in words.
  */
 const Excerpt = ({ hit }: { hit: NoteHit }) => (
-	<span className="note-preview">
+	<span className="note-excerpt">
 		{/* The runs of one excerpt have no identity of their own: they are one
 		    string decomposed, in order, and decomposed again whenever the query
 		    changes. Where they sit in it is the only key there is. */}
@@ -144,12 +152,14 @@ export const NoteList = ({
 	onQuery,
 	results,
 }: NoteListProps) => {
-	const searching = query !== '';
+	const searching = query.trim() !== '';
 	const placeholder = placeholderFor({ notes, folderPath, storeLoaded, query, results });
 	const heading = folderPath === undefined ? 'Notes' : folderLabel(folderPath);
 
 	return (
-		<section className="note-list" aria-label="Notes">
+		// Named for what it is listing: a screen reader announcing "Notes" over
+		// a list of search results describes the pane the user left.
+		<section className="note-list" aria-label={searching ? 'Search results' : 'Notes'}>
 			<div className="pane-header">
 				<h2>{searching ? 'Search' : heading}</h2>
 				<button
@@ -167,26 +177,41 @@ export const NoteList = ({
 				</button>
 			</div>
 
-			<input
-				// `search` rather than `text`: it is what the field is, and the
-				// browser offers its own way to empty one.
-				type="search"
-				className="note-search"
-				aria-label="Search notes"
-				placeholder="Search notes"
-				value={query}
-				onChange={(event) => {
-					onQuery(event.target.value);
-				}}
-				onKeyDown={(event) => {
-					// Escape puts the user back in the notebook they were in, which
-					// is where they were before they typed. Without it the only way
-					// out is to delete what they wrote, character by character.
-					if (event.key === 'Escape') onQuery('');
-				}}
-			/>
+			{/* The landmark is what lets a screen-reader user jump to the field
+			    rather than walk the pane to find it. */}
+			<div role="search">
+				<input
+					// `search` rather than `text`: it is what the field is, and the
+					// browser offers its own way to empty one.
+					type="search"
+					className="note-search"
+					aria-label="Search notes"
+					placeholder="Search notes"
+					value={query}
+					onChange={(event) => {
+						onQuery(event.target.value);
+					}}
+					onKeyDown={(event) => {
+						// Escape puts the user back in the notebook they were in,
+						// which is where they were before they typed. Without it the
+						// only way out is to delete what they wrote, one character at
+						// a time.
+						if (event.key === 'Escape') onQuery('');
+					}}
+				/>
+			</div>
 
-			{placeholder !== undefined && <p className="muted placeholder">{placeholder}</p>}
+			{placeholder !== undefined && (
+				// A search's answer is spoken when it changes: it arrives under a
+				// field the user is still typing into, and "nothing matches" is the
+				// thing a screen-reader user most needs told. The notebook's own
+				// empty states are not: they follow a deliberate move to another
+				// notebook, which is announced already, and a live region for them
+				// reads the pane out on every click.
+				<p className="muted placeholder" role={searching ? 'status' : undefined}>
+					{placeholder}
+				</p>
+			)}
 
 			{searching && results !== undefined && results.length > 0 && (
 				<ul>

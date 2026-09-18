@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteList } from '../src/components/NoteList.js';
 import { type NoteRecord } from '../src/store/db.js';
-import { type NoteHit } from '../src/store/search.js';
+import { type NoteHit, SEARCH_LIMIT } from '../src/store/search.js';
 
 /**
  * The note list has three ways of being empty — still loading, no notebook to
@@ -130,6 +130,7 @@ describe('searching', () => {
 		note: note(title),
 		excerpt,
 	});
+
 	const plain = (title: string, text: string) => hit(title, [{ text, hit: false }]);
 
 	it('shows the matches instead of the notebook while there is a query', () => {
@@ -163,6 +164,30 @@ describe('searching', () => {
 
 		expect(screen.getByText('heron').tagName).toBe('MARK');
 		expect(screen.getByText('stood still', { exact: false })).toBeDefined();
+	});
+
+	it('says when the list is cut short, rather than letting the rest go unmentioned', () => {
+		const many = Array.from({ length: SEARCH_LIMIT }, (__, at) =>
+			plain(`Note ${String(at)}`, 'a heron')
+		);
+		renderList({ query: 'heron', results: many });
+
+		expect(screen.getByText(/Showing the first 50/)).toBeDefined();
+	});
+
+	it('says nothing of the sort for a list that is all of them', () => {
+		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
+		expect(screen.queryByText(/Showing the first/)).toBeNull();
+	});
+
+	it('speaks its answer, rather than changing the list in silence', () => {
+		renderList({ query: 'heron', results: [] });
+		expect(screen.getByRole('status').textContent).toBe('Nothing matches “heron”.');
+	});
+
+	it('offers the field as a landmark to jump to', () => {
+		renderList();
+		expect(screen.getByRole('search')).toBeDefined();
 	});
 
 	it('says when nothing matches, and names what was looked for', () => {

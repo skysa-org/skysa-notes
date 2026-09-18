@@ -335,6 +335,21 @@ describe('searching', () => {
 		expect(await screen.findByText('Standup')).toBeDefined();
 	});
 
+	it('leaves the search when a note is created, so the new note is in the list', async () => {
+		// The `+` button stays live while a search is open. Without leaving the
+		// search, the note is created, opened in the editor — and shown in no
+		// list at all, because the pane is still answering a query it does not
+		// match.
+		await open('/?folder=Work', 'Work');
+		await type('heap');
+		expect(await screen.findByText('Compost')).toBeDefined();
+
+		await userEvent.click(screen.getByRole('button', { name: 'New note' }));
+
+		expect(await screen.findByText('Untitled')).toBeDefined();
+		expect(field()).toHaveProperty('value', '');
+	});
+
 	it('says plainly when nothing matches', async () => {
 		await open('/?folder=Work', 'Work');
 

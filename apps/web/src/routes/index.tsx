@@ -110,6 +110,10 @@ const Home = () => {
 		setProblem(null);
 		void createNote(db, { folderPath: folder })
 			.then((created) => {
+				// And out of the search: the new note is in the open notebook, and
+				// the pane is showing matches for a query it does not answer. Left
+				// there, the user has just made a note that appears in no list.
+				setQuery('');
 				select({ note: created.id });
 			})
 			// Rarer than a duplicate notebook name — this one needs the store

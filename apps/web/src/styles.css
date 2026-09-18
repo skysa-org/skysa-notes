@@ -292,13 +292,32 @@ button.row.selected {
 	color: var(--fg);
 }
 
+/* A search excerpt is not a preview. A preview is the note's opening, and one
+   clipped line of it is a fair sample; an excerpt exists to show the match, and
+   the match is rarely in the first forty characters. So it wraps, to a few lines
+   and no further. Without this the highlight is reliably just past where the
+   column clips — the one thing the row is for, and the one thing not on screen. */
+.note-excerpt {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	font-size: 0.8rem;
+	font-weight: 400;
+	line-height: 1.35;
+	color: var(--muted);
+}
+
 /* The user's own words, marked where the query found them. The default is a
    yellow that ignores the theme and turns unreadable in the dark one. */
-.note-preview mark {
+.note-excerpt mark {
 	padding: 0 0.1em;
 	border-radius: 0.2em;
 	background: var(--mark);
-	color: inherit;
+	/* Not `inherit`: the run sits in muted text, and muted on the highlight is
+	   under 4.5:1 either way round. The marked words are the ones worth
+	   reading. */
+	color: var(--fg);
 }
 
 .note-view {

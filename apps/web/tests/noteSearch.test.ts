@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { type NoteRecord } from '../src/store/db.js';
-import { createNoteSearch, type NoteHit } from '../src/store/search.js';
+import { createNoteSearch, type NoteHit, SEARCH_LIMIT } from '../src/store/search.js';
 
 /**
  * Search is the one place the app answers a question about *every* note rather
@@ -89,6 +89,35 @@ describe('finding a note', () => {
 		expect(found(ranked.find('compost'))[0]).toBe('inTheTitle');
 	});
 
+	it('ranks a tag above a word buried in a body', () => {
+		// The weights: a tag was put on the note deliberately, and a body that
+		// happens to say the word twice should not outrank it.
+		const ranked = createNoteSearch();
+		ranked.refresh([
+			note({
+				id: 'inTheBody',
+				title: 'Elsewhere',
+				body: 'A long note about compost, which mentions compost twice.',
+			}),
+			note({ id: 'onTheTag', title: 'Roof', body: 'Nothing about it.', tags: ['compost'] }),
+		]);
+
+		expect(found(ranked.find('compost'))[0]).toBe('onTheTag');
+	});
+
+	it('hands back the first fifty and no more', () => {
+		// A short query can match everything there is, and every hit costs an
+		// excerpt walked over a whole body and a row rendered, per keystroke.
+		const many = createNoteSearch();
+		many.refresh(
+			Array.from({ length: 60 }, (__, at) =>
+				note({ id: `n${String(at)}`, body: 'compost heap' })
+			)
+		);
+
+		expect(many.find('compost')).toHaveLength(SEARCH_LIMIT);
+	});
+
 	it('puts the most recently edited first where the query cannot tell them apart', () => {
 		const tied = createNoteSearch();
 		tied.refresh([
@@ -163,7 +192,11 @@ describe('the excerpt', () => {
 
 	it('is one line, whatever the markdown did', () => {
 		const hit = around('# Heading\n\n- one\n- two\n\nthe heron stood still', 'heron');
-		expect(text(hit)).toContain('Heading one two the heron stood still');
+
+		expect(text(hit)).toContain('one two the heron stood still');
+		// The hashes and bullets are gone: they are line markers, and this is
+		// one line.
+		expect(text(hit)).not.toMatch(/[#-]/);
 	});
 
 	it('marks the word that matched', () => {
@@ -182,6 +215,26 @@ describe('the excerpt', () => {
 
 	it('marks a match whatever its case', () => {
 		expect(marked(around('The Heron stood still', 'heron'))).toEqual(['Heron']);
+	});
+
+	it('keeps the match near the front, where the column has not clipped yet', () => {
+		// The excerpt is read in a column a little over forty characters wide.
+		// Forty characters of run-up put the highlight at or past where that
+		// clips — every test green, and the one thing the row is for off screen.
+		// So the run-up is short, and this is the assertion that says so.
+		const filler = 'padding words before it. '.repeat(20);
+		const hit = around(`${filler}the heron stood still`, 'heron');
+		const runs = hit?.excerpt ?? [];
+		const leading = runs
+			.slice(
+				0,
+				runs.findIndex((run) => run.hit)
+			)
+			.map((run) => run.text)
+			.join('');
+
+		expect(marked(hit)).toEqual(['heron']);
+		expect(leading.length).toBeLessThanOrEqual(25);
 	});
 
 	it('centres the line on the match rather than starting at the note', () => {
@@ -223,7 +276,44 @@ describe('the excerpt', () => {
 	});
 
 	it('takes a note whose text reads as a regular expression literally', () => {
+		// Escaping: unescaped, `a+b` and `(a lot)` are syntax, and the excerpt is
+		// either wrong or the regex throws.
 		const hit = around('costs $9 (a lot) [see: a+b]', 'a+b');
-		expect(text(hit)).toBe('costs $9 (a lot) [see: a+b]');
+		expect(text(hit)).toContain('$9 (a lot) [see: a+b]');
+	});
+
+	it('marks the whole word, not the shorter match inside it', () => {
+		// The alternation takes the first branch that matches, so `meet|meeting`
+		// against "meeting" marks `meet` and leaves the rest of the word plain —
+		// the very thing marking MiniSearch's terms is meant to avoid.
+		expect(marked(around('meet the meeting about meetings', 'meet'))).toEqual([
+			'meet',
+			'meeting',
+			'meetings',
+		]);
+	});
+
+	it('marks words, not runs of letters inside them', () => {
+		// `he` is in "the" and in "there". A box around those is noise the user
+		// has to read past to find the match.
+		expect(marked(around('he said the heron was there', 'he'))).toEqual(['he', 'heron']);
+	});
+
+	it('does not mark the letters a punctuated word is tokenized into', () => {
+		// MiniSearch splits on punctuation, so "don't" arrives as `don` and a
+		// bare `t`, and marking the `t` paints a box round half the line.
+		const hit = around("don't touch the thermostat at all", "don't");
+
+		expect(marked(hit)).toEqual(['don']);
+	});
+
+	it('does not cut a character in half at the end of the window', () => {
+		// The window is measured in UTF-16 units and an emoji takes two of them.
+		// This one is placed to straddle the cut exactly: without the guard the
+		// excerpt ends in a lone high surrogate, which renders as `\uFFFD`.
+		const hit = around(`heron ${'y'.repeat(173)}\u{1F426} and more`, 'heron');
+
+		expect(text(hit)).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+		expect(text(hit)).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
 	});
 });
