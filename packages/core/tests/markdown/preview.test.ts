@@ -117,3 +117,55 @@ describe('a list is still a list', () => {
 		]);
 	});
 });
+
+describe('a fenced code block is not markdown', () => {
+	it('keeps what is inside it exactly as written', () => {
+		expect(
+			previewLines('notes\n\n```sh\n# install it first\nrun --now\n```\n\nafter\n')
+		).toEqual(['notes', '# install it first', 'run --now', 'after']);
+	});
+
+	it('keeps a rule and a break that are part of the example', () => {
+		// A `---` in a YAML sample is a document separator and a `<br />` in an
+		// HTML one is the thing being written about. Stripping either is the same
+		// failure as deleting a `<br>` from a sentence.
+		expect(previewLines('```yaml\n---\nkey: value\n```\n')).toEqual(['---', 'key: value']);
+		expect(previewLines('```html\n<p>one</p>\n<br />\n<p>two</p>\n```\n')).toEqual([
+			'<p>one</p>',
+			'<br />',
+			'<p>two</p>',
+		]);
+	});
+
+	it('drops the fence lines themselves', () => {
+		expect(previewLines('```\ncode\n```\n')).toEqual(['code']);
+		expect(previewLines('~~~js\ncode\n~~~\n')).toEqual(['code']);
+	});
+
+	it('tells inside from outside across more than one fence', () => {
+		expect(
+			previewLines('# One\n\n```\n# kept\n```\n\n# Two\n\n```\n- kept too\n```\n\n# Three\n')
+		).toEqual(['One', '# kept', 'Two', '- kept too', 'Three']);
+	});
+
+	it('shows the rest of the note as written when a fence is never closed', () => {
+		// The wrong way to fail would be to strip it; showing a character is
+		// always the smaller wrong.
+		expect(previewLines('intro\n\n```\n# still open\n- and so is this\n')).toEqual([
+			'intro',
+			'# still open',
+			'- and so is this',
+		]);
+	});
+});
+
+describe('markers that belong to something else', () => {
+	it('leaves a checkbox that is not in a list item', () => {
+		expect(previewLines('# [x] done already\n')).toEqual(['[x] done already']);
+		expect(previewLines('> [ ] quoted task\n')).toEqual(['[ ] quoted task']);
+	});
+
+	it('leaves a line holding two breaks, which nothing but a person writes', () => {
+		expect(previewLines('<br /><br />\n')).toEqual(['<br /><br />']);
+	});
+});

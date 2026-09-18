@@ -77,9 +77,16 @@ const placeholderFor = ({
  * heading, so `# **Alpha**` gives a title of "Alpha" while the line still reads
  * `**Alpha**` — the same heading, spelled two ways, and comparing them
  * character for character would print it twice.
+ *
+ * Both sides, because the parse removes only the characters that *were*
+ * emphasis and leaves the rest: a title of `setup_guide` keeps its underscore,
+ * so stripping the line alone left "setupguide" against "setup_guide" and the
+ * heading was printed twice after all.
  */
+const bare = (text: string): string => text.replaceAll(/[*_`]/g, '').trim();
+
 const isTitle = (line: string | undefined, title: string): boolean =>
-	line !== undefined && line.replaceAll(/[*_`]/g, '').trim() === title.trim();
+	line !== undefined && bare(line) === bare(title);
 
 /**
  * The note's opening, after its title. `previewLines` decides what a readable

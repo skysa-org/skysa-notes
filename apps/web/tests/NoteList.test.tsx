@@ -84,6 +84,18 @@ describe('NoteList', () => {
 		expect(screen.getByText(/then the body/).textContent).toBe('then the body');
 	});
 
+	it('does not print a heading twice when its own text contains an underscore', () => {
+		// `mdast-util-to-string` removes the characters that *were* emphasis and
+		// leaves the rest, so a title of `setup_guide` keeps its underscore.
+		// Ignoring emphasis on the line but not on the title left "setupguide"
+		// against "setup_guide", and the heading was printed twice after all.
+		renderList({
+			notes: [note('setup_guide', '# setup_guide\n\nrun the installer\n')],
+		});
+
+		expect(screen.getByText(/run the installer/).textContent).toBe('run the installer');
+	});
+
 	it('keeps an introduction that comes before the heading', () => {
 		renderList({ notes: [note('Alpha', 'a word first\n\n# Alpha\n\nthen the body\n')] });
 
