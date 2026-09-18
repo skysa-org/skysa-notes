@@ -23,7 +23,8 @@ import { describe, expect, it } from 'vitest';
  *
  * The tree is walked rather than `git ls-files` asked. The property is about the
  * files, and the files are right here: a walk still works from a tarball, a
- * `pnpm deploy` output or a Docker build that copies source without `.git`,
+ * `pnpm deploy` output (pnpm's own built-in, which copies a package's source
+ * elsewhere) or a Docker build that copies source without `.git`,
  * where asking git fails the whole suite. More to the point, `git ls-files` run
  * inside a tree that some *outer* repository ignores returns nothing at all, and
  * a guard with nothing to iterate passes — silently, and for good. The canary

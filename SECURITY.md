@@ -65,8 +65,9 @@ interesting properties live:
 
 - **Self-inflicted deployment problems**: a missing `SECRETS_KEY`, an
   `APP_ORIGIN` that does not match, secrets committed to your own fork,
-  provider app registrations with over-broad scopes. `.dev.vars.example` covers
-  the setup; a misconfiguration is not a vulnerability in the code.
+  provider app registrations with over-broad scopes.
+  [`docs/self-hosting.md`](docs/self-hosting.md) covers the setup; a
+  misconfiguration is not a vulnerability in the code.
 - **Anything requiring an attacker to already have the user's device unlocked**,
   or their storage provider account. Notes are in IndexedDB by design, in plain
   text, because the app works offline; that is the product, not a bug.

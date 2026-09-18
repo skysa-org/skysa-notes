@@ -9,6 +9,7 @@
 		"node": ">=22"
 	},
 	"scripts": {
+		"setup": "sh scripts/setup.sh",
 		"dev": "pnpm -r --parallel run dev",
 		"build": "pnpm --filter @skysa/core run build && pnpm --filter @skysa/web run build && pnpm --filter @skysa/api run build",
 		"test": "pnpm -r run test",
@@ -20,7 +21,8 @@
 		"db:migrate": "pnpm --filter @skysa/api run db:migrate",
 		"db:migrate:remote": "pnpm --filter @skysa/api run db:migrate:remote",
 		"lint:fix": "eslint . --fix",
-		"verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+		"verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+		"deploy": "pnpm build && pnpm --filter @skysa/api run deploy"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
