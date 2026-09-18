@@ -14,21 +14,24 @@ Node 22+ and pnpm 10 (`corepack enable`).
 
 ```bash
 pnpm install
-cp .dev.vars.example apps/api/.dev.vars   # SECRETS_KEY, and credentials per provider
+pnpm run setup                            # writes apps/api/.dev.vars
 pnpm db:migrate                            # local D1
 pnpm dev                                   # Vite on :5173, wrangler dev on :8787
 ```
 
-A straight copy of `.dev.vars.example` will not boot: `ENABLED_PROVIDERS`
-defaults to `dropbox`, and the Worker refuses to start without that provider's
-credentials rather than starting up and failing at the first connect. Either
-fill them in, or set `ENABLED_PROVIDERS=""` — everything that is not syncing
-works without any of it.
+`pnpm run setup` asks which providers you want and only asks for those
+credentials — the `run` matters, since `pnpm setup` is pnpm's own built-in
+command. A straight copy of `.dev.vars.example` will not boot:
+`ENABLED_PROVIDERS` defaults to `dropbox`, and the Worker refuses to start
+without that provider's credentials rather than starting up and failing at the
+first connect. Either fill them in, or set `ENABLED_PROVIDERS=""` — everything
+that is not syncing works without any of it.
 
 Syncing needs your own app registration at whichever provider you are testing
-(Dropbox, Microsoft Entra or Google Cloud). `.dev.vars.example` lists every key
-and says where each one comes from; [`docs/google-oauth.md`](docs/google-oauth.md)
-walks through Google's, which is the fiddliest.
+(Dropbox, Microsoft Entra or Google Cloud). `pnpm run setup` asks for what it
+needs and writes the file; `.dev.vars.example` documents every key if you would
+rather write it by hand, and [`docs/self-hosting.md`](docs/self-hosting.md) has
+the registrations in full.
 Everything that does not sync runs without any of that: the app stores notes
 locally and talks to nobody until a provider is connected.
 
