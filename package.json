@@ -1,6 +1,5 @@
 {
 	"name": "skysa-notes",
-	"version": "0.1.0",
 	"private": true,
 	"license": "AGPL-3.0-or-later",
 	"type": "module",
@@ -22,9 +21,13 @@
 		"db:migrate:remote": "pnpm --filter @skysa/api run db:migrate:remote",
 		"lint:fix": "eslint . --fix",
 		"verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
-		"deploy": "pnpm build && pnpm --filter @skysa/api run deploy"
+		"deploy": "pnpm build && pnpm --filter @skysa/api run deploy",
+		"changeset": "changeset",
+		"changeset:status": "changeset status",
+		"changeset:version": "changeset version"
 	},
 	"devDependencies": {
+		"@changesets/cli": "^3.0.3",
 		"@eslint/js": "^10.0.1",
 		"eslint": "^10.10.0",
 		"eslint-config-prettier": "^10.1.8",

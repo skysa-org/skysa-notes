@@ -130,9 +130,12 @@ const sources = (): string[] => [
 		.map((entry) => join(repo, entry.name)),
 	// Named rather than "everything but SKIP", which is what would let the
 	// ignored and the untracked back in. `.github` is here because a workflow
-	// file breaks blame and review exactly as a source file does; `.changeset`
-	// joins the list in Phase 8.
-	...['apps', 'packages', 'docs', '.github'].flatMap((dir) => filesUnder(join(repo, dir))),
+	// file breaks blame and review exactly as a source file does, and
+	// `.changeset` because its files are hand-written prose that ends up in a
+	// changelog — which is this guard's own case, not an extension of it.
+	...['apps', 'packages', 'docs', '.github', '.changeset'].flatMap((dir) =>
+		filesUnder(join(repo, dir))
+	),
 ];
 
 describe('every source file', () => {

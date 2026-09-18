@@ -57,6 +57,13 @@ What is expected of a change:
 - **Tests for new behaviour.** Not coverage for its own sake — a test that fails
   if the thing you fixed comes back.
 - **Tick the checklist item** in `docs/PLAN.md` if the change completes one.
+- **A changeset**, if the change touches `apps/` or `packages/`:
+  `pnpm run changeset` asks which packages moved, how big the change is and for
+  a summary, then writes a small file to commit alongside it. CI fails a pull request that changes a package without one. If
+  the change moves nothing anyone outside the repository can observe — a test,
+  a comment, a refactor — `pnpm run changeset --empty` says so, which is an
+  answer rather than a way round the question. `.changeset/README.md` explains
+  how a release is cut and why the three packages share one version.
 - **Say why** for a new dependency, in the pull request description, and check
   the licence. Anything that reaches the shipped bundle must be MIT, Apache-2.0
   or ISC. Build- and test-time tools are held to a looser line — `docs/PLAN.md`
