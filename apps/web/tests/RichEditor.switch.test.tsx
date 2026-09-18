@@ -1,5 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
@@ -23,6 +24,28 @@ import {
  * document against the incoming note's text.
  */
 
+/**
+ * jsdom has no layout and its `Range` has no `getClientRects` at all, so
+ * ProseMirror's scroll-into-view of a selection throws inside `coordsAtPos` and
+ * abandons the observer's flush half done — which then lets its own 20ms
+ * `selectionToDOM` put the caret back where it was. A selection set from outside
+ * is real in jsdom; only measuring it is not, so the measurement is what gets
+ * filled in rather than any part of the editor being mocked out. Left in place:
+ * it adds to jsdom what a browser has, and takes nothing away.
+ */
+const measurable = (): void => {
+	const rect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
+	const rects = Object.assign([rect], { item: () => rect }) as unknown as DOMRectList;
+	Object.defineProperty(Range.prototype, 'getClientRects', {
+		configurable: true,
+		value: () => rects,
+	});
+	Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+		configurable: true,
+		value: () => rect,
+	});
+};
+
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
 	return <NoteView note={note} onDeleted={() => undefined} />;
@@ -41,6 +64,7 @@ const showing = async (title: string): Promise<void> => {
 
 afterEach(async () => {
 	cleanup();
+	vi.restoreAllMocks();
 	await db.notes.clear();
 	await db.folders.clear();
 });
@@ -133,5 +157,47 @@ describe('a note whose body changes while it is open', () => {
 		expect(screen.queryByRole('status')).toBeNull();
 		expect(screen.queryByTestId('raw-editor')).toBeNull();
 		expect(document.querySelector('.ProseMirror')?.textContent).toBe('what it says now');
+	});
+});
+
+/**
+ * The outline rail's jump, against the real editor.
+ *
+ * `outline.test.tsx` stands a plain `<div class="ProseMirror">` in for the
+ * document, which is enough to pin which heading is chosen but not what
+ * ProseMirror does about it: the rich jump moves the *browser's* selection and
+ * lets `DOMObserver` read it back, so the only thing that can say whether that
+ * turns into a transaction — and whether that transaction counts as an edit — is
+ * a real editor with a real observer.
+ *
+ * The assertion leans on `useAutosave` flushing on unmount. A pending save is
+ * two seconds away, so a note read straight after the click would look untouched
+ * whether or not an edit was reported; unmounting first forces the question.
+ */
+describe('jumping from the outline', () => {
+	it('moves the caret into the heading and reports no edit', async () => {
+		const user = userEvent.setup();
+		const note = await importNoteFile(db, {
+			path: 'garden.md',
+			source: '# Garden\n\nwords\n\n## Beds\n\nmore\n\n### Soil\n\nlast\n',
+		});
+
+		const view = render(<Harness id={note.id} />);
+		await showing('Garden');
+
+		measurable();
+
+		await user.click(screen.getByRole('button', { name: 'Beds' }));
+
+		await waitFor(() => {
+			expect(document.activeElement?.className).toContain('ProseMirror');
+		});
+		expect(window.getSelection()?.anchorNode?.textContent).toBe('Beds');
+
+		view.unmount();
+		const after = await getNote(db, note.id);
+		expect(after?.dirty).toBe(0);
+		expect(after?.body).toBe(note.body);
+		expect(after?.updatedAt).toBe(note.updatedAt);
 	});
 });

@@ -116,11 +116,26 @@ describe('the outline', () => {
 	});
 
 	describe('jumping into the rich editor', () => {
+		// `cleanup` only unmounts what React rendered, and these fixtures have to
+		// be in the document: jsdom's `Selection.addRange` ignores a range whose
+		// root is not.
+		const mounted: Element[] = [];
+		afterEach(() => {
+			mounted.forEach((editor) => {
+				editor.remove();
+			});
+			mounted.length = 0;
+		});
+
 		const richEditor = (html: string) => {
 			const editor = document.createElement('div');
 			editor.className = 'editor editor-rich';
-			editor.innerHTML = `<div class="ProseMirror">${html}</div>`;
+			// `contenteditable` because focus is half of what a jump does and a
+			// plain div cannot take it — without this, deleting the `focus` call
+			// would fail nothing.
+			editor.innerHTML = `<div class="ProseMirror" contenteditable="true">${html}</div>`;
 			document.body.append(editor);
+			mounted.push(editor);
 			const scrolled: string[] = [];
 			editor.querySelectorAll('h1, h2, h3').forEach((heading) => {
 				vi.spyOn(heading, 'scrollIntoView').mockImplementation(() => {
@@ -197,14 +212,21 @@ describe('the outline', () => {
 			embedded.destroy();
 		});
 
-		it('leaves the caret in the heading, so reading can carry on by keyboard', async () => {
+		it('focuses the editor and leaves the caret in the heading', async () => {
 			const user = userEvent.setup();
 			const { editor } = richEditor('<h1>Top</h1><h2>Middle</h2><h3>Deep</h3>');
 			render(<Outline body={BODY} editor={() => editor} />);
 
 			await user.click(screen.getByRole('button', { name: 'Deep' }));
 
-			expect(window.getSelection()?.anchorNode?.textContent).toBe('Deep');
+			// Focus so that reading carries on by keyboard instead of the arrow
+			// keys scrolling the rail; the caret so that it carries on from the
+			// heading rather than from wherever it was.
+			expect(document.activeElement).toBe(editor.querySelector('.ProseMirror'));
+			const selection = window.getSelection();
+			expect(selection?.anchorNode).toBe(screen.getByRole('heading', { name: 'Deep' }));
+			expect(selection?.anchorOffset).toBe(0);
+			expect(selection?.isCollapsed).toBe(true);
 		});
 	});
 

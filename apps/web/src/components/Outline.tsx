@@ -20,10 +20,24 @@ import { useMemo } from 'react';
  *   CodeMirror only renders the lines near the viewport — the heading being
  *   jumped to is usually the one that is not there yet.
  * - **Rich.** ProseMirror renders a top-level heading as a direct child of
- *   `.ProseMirror`, so the *n*th such child is the heading with `ordinal` *n* —
- *   both are top-level-only, and that is the whole of the agreement between
- *   them. There is no markdown-offset-to-ProseMirror-position bridge in this
- *   app, and an outline is not a good reason to build one.
+ *   `.ProseMirror`, so the *n*th such child is the heading with `ordinal` *n*.
+ *   There is no markdown-offset-to-ProseMirror-position bridge in this app, and
+ *   an outline is not a good reason to build one.
+ *
+ * What makes that counting sound is not merely that both walks are top-level
+ * only. It is that Milkdown builds its document from the same remark parse, one
+ * top-level node per top-level mdast child, *and* that a note whose markdown the
+ * schema cannot represent is sent to raw mode entirely (`representsFaithfully`,
+ * `NoteView`). So `jumpRich` only ever runs on a body whose top level maps onto
+ * ProseMirror's one for one. That assumption lives in another file: relaxing the
+ * unsupported rule — showing such a note read-only in rich mode, say — would
+ * break this quietly.
+ *
+ * One disagreement is inherent and left alone: the rail reads the *saved* body
+ * and the editor holds the live one, so for the couple of seconds before an
+ * autosave a heading just typed or deleted is in one and not the other, and the
+ * rows after it point at their neighbours. It corrects itself, and the
+ * alternative is handing this component a live document.
  *
  * The class is checked rather than simply trying `findFromDOM` first, which
  * would be the same thing today and quietly stop being it: Milkdown's code-block
@@ -63,7 +77,7 @@ const jumpRaw = (editor: Element, heading: Heading): void => {
 };
 
 const jumpRich = (editor: Element, heading: Heading): void => {
-	const prose = editor.querySelector('.ProseMirror');
+	const prose = editor.querySelector<HTMLElement>('.ProseMirror');
 	const target = prose?.querySelectorAll(HEADING_CHILD)[heading.ordinal];
 	if (prose === null || target === undefined) return;
 
@@ -73,14 +87,25 @@ const jumpRich = (editor: Element, heading: Heading): void => {
 	// who arrived by keyboard carries on reading with the arrow keys instead of
 	// scrolling the rail. ProseMirror reads its selection back from the DOM, so
 	// this is the whole of it — and a selection is not a document change, which
-	// is what makes it safe to do to a note that is not being edited.
+	// is what makes it safe to do to a note that is not being edited: both rules
+	// in `editor/dirty.ts` begin at `docChanged`.
+	//
+	// Focus first, and the order is load-bearing. ProseMirror ignores a
+	// selection that changes while its view is unfocused, but its DOM observer
+	// still records it as the selection it last saw; the focus that followed
+	// would then find its own state and the DOM in agreement about a caret it
+	// never adopted, and put its own back. Focused first, the same change is
+	// read, applied, and left alone.
+	//
+	// `preventScroll` because the line above has already scrolled, to the top of
+	// the heading rather than to wherever the browser would put the caret.
+	prose.focus({ preventScroll: true });
 	const selection = window.getSelection();
 	const range = document.createRange();
 	range.setStart(target, 0);
 	range.collapse(true);
 	selection?.removeAllRanges();
 	selection?.addRange(range);
-	(prose as HTMLElement).focus({ preventScroll: true });
 };
 
 const jump = (editor: Element | null, heading: Heading): void => {
