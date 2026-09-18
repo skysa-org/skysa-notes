@@ -1527,13 +1527,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const holder = await store.noteById(claimed);
 		const held = holder !== undefined && !removedInBatch(holder, decided);
 		if (held || reestablished(decided).notes.has(claimed)) return newId();
-		// Or by a note that is not this connection's, which `noteById` does not
-		// show. Ids are the device's, the store is one connection's, and the id
-		// here is whatever the remote file says — the same folder in two
-		// accounts is enough. Adopted, the store refuses the write on every
-		// retry and the cursor never moves again. Nothing this batch does can
-		// free that id, so there is no batch to ask.
-		return (await store.idHeldElsewhere(claimed)) ? newId() : claimed;
+		// Another connection on the device may hold a note of this id too — the
+		// same folder in two accounts is enough. It is not asked about: an id
+		// names a note within its connection, and a store keys its rows that
+		// way, so the two never meet.
+		return claimed;
 	};
 
 	/** A note we already hold, whose remote version has moved. */

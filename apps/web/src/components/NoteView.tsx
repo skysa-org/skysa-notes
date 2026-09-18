@@ -76,7 +76,7 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 		setDraft(null);
 		if (abandoned) return;
 		if (trimmed === undefined || trimmed === '' || trimmed === note.title) return;
-		void renameNote(db, note.id, trimmed);
+		void renameNote(db, note.id, trimmed, { connectionId: note.connectionId });
 	};
 
 	return (
@@ -235,12 +235,15 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// Written first, so the last words are in the row before it is a
 		// tombstone: restoring it brings them back with it.
 		flush();
-		void deleteNote(db, note.id)
+		// By the note's own source throughout: an id names a note only there, and
+		// the one showing may have changed by the time a continuation runs.
+		const home = { connectionId: note.connectionId };
+		void deleteNote(db, note.id, home)
 			// Everything out has come back, and what had failed has had one more
 			// try — into the tombstone, which keeps an edit and stays deleted.
 			.then(settle)
 			// Deleted either way; a row that cannot be read is the note as shown.
-			.then(() => getNote(db, note.id).catch(() => undefined))
+			.then(() => getNote(db, note.id, home).catch(() => undefined))
 			.then((row) => {
 				// Only now that it is deleted, and nothing before: a held edit
 				// retried after sync has purged the row would bring the note back
@@ -274,8 +277,8 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// what the user typed. `rebased` flushes, and says the editor that comes
 		// next starts from the stored body rather than from what this one held.
 		rebased();
-		void setNoteEditorMode(db, noteId, otherMode(mode));
-	}, [rebased, mode, noteId, unsupported]);
+		void setNoteEditorMode(db, noteId, otherMode(mode), { connectionId: note?.connectionId });
+	}, [rebased, mode, noteId, note?.connectionId, unsupported]);
 
 	// Shown by default, and unmounted rather than hidden when it is not: the
 	// headings are re-read when it comes back, which is one parse of one note,

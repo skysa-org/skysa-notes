@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import { type EditorMode } from '../editor/mode.js';
 import { db, type NoteRecord } from './db.js';
 import { folderTree } from './folders.js';
-import { listNotes } from './notes.js';
+import { getNote, listNotes } from './notes.js';
 import { getDefaultEditorMode } from './prefs.js';
 import { createNoteSearch, type NoteHit } from './search.js';
 import { buildFolderTree, type FolderNode } from './tree.js';
@@ -63,7 +63,8 @@ export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] |
 export const useNote = (id: string | undefined): NoteRecord | undefined =>
 	useLiveQuery(async () => {
 		if (id === undefined) return undefined;
-		const note = await db.notes.get(id);
+		// In the source showing: an id names a note only inside its source.
+		const note = await getNote(db, id);
 		return note?.deletedLocally === 1 ? undefined : note;
 	}, [id]);
 

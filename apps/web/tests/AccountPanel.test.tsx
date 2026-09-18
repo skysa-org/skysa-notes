@@ -20,8 +20,9 @@ import {
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
-import { createNote, getNote } from '../src/store/notes.js';
+import { createNote } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
+import { noteById, updateNote } from './noteRows.js';
 
 const opened: NotesDatabase[] = [];
 
@@ -854,7 +855,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 		expect(await screen.findByRole('link', { name: 'Open the note' })).toBeTruthy();
 
-		await db.notes.update(note.id, { deletedLocally: 1 });
+		await updateNote(db, note.id, { deletedLocally: 1 });
 		sync.say({
 			phase: 'attention',
 			stuck: { op: 'delete', path: note.path, noteId: note.id, attempts: 5 },
@@ -1100,7 +1101,7 @@ describe('AccountPanel, signed in with an account the notes do not belong to', (
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		await holding(db, 'c1');
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
-		await db.notes.update(note.id, { remoteId: 'id:1' });
+		await updateNote(db, note.id, { remoteId: 'id:1' });
 		await unbindConnection(db);
 		await db.credentials.delete('c1');
 		await backFromConsent(db);
@@ -1122,7 +1123,7 @@ describe('AccountPanel, signed in with an account the notes do not belong to', (
 
 		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe('c9');
-		expect((await getNote(db, note.id))?.remoteId).toBeUndefined();
+		expect((await noteById(db, note.id))?.remoteId).toBeUndefined();
 	});
 
 	it('lets it go instead, keeping the notes as they are', async () => {
@@ -1144,7 +1145,7 @@ describe('AccountPanel, signed in with an account the notes do not belong to', (
 		// device kept when it claimed Bob's connection is what says so.
 		expect(disconnect).toHaveBeenCalledTimes(1);
 		expect(await db.credentials.get('c9')).toBeUndefined();
-		expect((await getNote(db, note.id))?.remoteId).toBe('id:1');
+		expect((await noteById(db, note.id))?.remoteId).toBe('id:1');
 	});
 
 	it('says where to remove OneDrive’s access before letting a wrong account go', async () => {
@@ -1260,7 +1261,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		expect(await activeConnectionId(db)).toBe('c2');
 		// Switching is a change of view. The note stays where it was written,
 		// and the credential it is synced with stays with it.
-		expect((await getNote(db, here.id))?.connectionId).toBe('c1');
+		expect((await noteById(db, here.id))?.connectionId).toBe('c1');
 		expect((await db.credentials.get('c1'))?.credential).toBe('sk1_dropbox');
 	});
 
@@ -1348,7 +1349,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		expect(screen.queryByRole('alert')).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Stop syncing on this device' })).toBeNull();
 		expect((await db.syncState.get('c2'))?.cursor).toBe('cursor-2');
-		expect((await getNote(db, there.id))?.connectionId).toBe('c2');
+		expect((await noteById(db, there.id))?.connectionId).toBe('c2');
 		expect(await db.syncState.get('c1')).toBeDefined();
 	});
 

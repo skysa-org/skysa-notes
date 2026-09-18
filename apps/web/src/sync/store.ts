@@ -19,6 +19,7 @@ import Dexie from 'dexie';
 
 import {
 	type FolderRecord,
+	noteKey,
 	type NoteRecord,
 	type NotesDatabase,
 	type OpQueueRecord,
@@ -189,11 +190,13 @@ export const createDexieSyncStore = (
 	const opsOf = (scope: Scope): Promise<OpQueueRecord[]> =>
 		scope.opQueue.where('connectionId').equals(connectionId).toArray();
 
-	/** A row with this id that belongs to this connection, or nothing. */
-	const ownNote = async (scope: Scope, id: string): Promise<NoteRecord | undefined> => {
-		const note = await scope.notes.get(id);
-		return note?.connectionId === connectionId ? note : undefined;
-	};
+	/**
+	 * This connection's row with this id, or nothing. Another connection's note
+	 * of the same id is another row under another key, and cannot be reached
+	 * from here at all.
+	 */
+	const ownNote = (scope: Scope, id: string): Promise<NoteRecord | undefined> =>
+		scope.notes.get([connectionId, id]);
 
 	const requireNote = async (scope: Scope, id: string): Promise<NoteRecord> => {
 		const note = await ownNote(scope, id);
@@ -305,7 +308,7 @@ export const createDexieSyncStore = (
 
 		// A fresh id is the engine's promise. Writing over whatever held it would
 		// be losing a note to save one.
-		if ((await scope.notes.get(resolution.copyId)) !== undefined) {
+		if ((await ownNote(scope, resolution.copyId)) !== undefined) {
 			throw new Error(`The conflict copy's id ${resolution.copyId} is taken`);
 		}
 		await ensureFolderChain(scope, parentPath(resolution.copyPath));
@@ -425,9 +428,7 @@ export const createDexieSyncStore = (
 		const inside = (await notesOf(scope)).filter(
 			(note) => isWithin(note.path, path) && !spared.has(note.id)
 		);
-		await scope.notes.bulkDelete(
-			inside.filter((note) => !isDirty(note)).map((note) => note.id)
-		);
+		await scope.notes.bulkDelete(inside.filter((note) => !isDirty(note)).map(noteKey));
 		await scope.notes.bulkPut(inside.filter(isDirty).map(withoutRemote));
 	};
 
@@ -440,17 +441,7 @@ export const createDexieSyncStore = (
 		// the last one of that id (`store/deletedHere.ts`).
 		deletedHere.delete(change.id);
 		// The engine names the note; the store never guesses by path.
-		const existing = await scope.notes.get(change.id);
-		// Ids are unique across every connection, and the id comes from the
-		// file's frontmatter. The engine asks `idHeldElsewhere` before adopting
-		// one and names a new note instead, so this is the last line rather than
-		// the first: a row that arrived under the other connection between the
-		// decision and this transaction. Writing over it would take that
-		// account's unpushed edits with it; refused, the batch is decided again,
-		// and this time the engine is told.
-		if (existing !== undefined && existing.connectionId !== connectionId) {
-			throw new Error(`Note ${change.id} belongs to another connection`);
-		}
+		const existing = await ownNote(scope, change.id);
 		// Decided against a clean note that has been edited since.
 		if (existing !== undefined && isDirty(existing)) {
 			throw new Error(`Note ${change.id} changed after its upsert was decided`);
@@ -481,7 +472,7 @@ export const createDexieSyncStore = (
 		if (note === undefined) return;
 		// Decided against a clean note that has been edited since.
 		if (isDirty(note)) throw new Error(`Note ${id} changed after its delete was decided`);
-		await scope.notes.delete(id);
+		await scope.notes.delete(noteKey(note));
 	};
 
 	/**
@@ -648,7 +639,7 @@ export const createDexieSyncStore = (
 			const note = await ownNote(scope, outcome.noteId);
 			if (note === undefined) return;
 			if (note.deletedLocally === 1) {
-				await scope.notes.delete(note.id);
+				await scope.notes.delete(noteKey(note));
 				return;
 			}
 			// Restored while its delete was on the way. The remote copy is gone,
@@ -715,13 +706,6 @@ export const createDexieSyncStore = (
 		noteById: async (id) => {
 			const note = await ownNote(db, id);
 			return note === undefined ? undefined : toSyncNote(note);
-		},
-
-		// `notes.id` is the table's key, so it is unique across every connection
-		// on the device, tombstones included — and the engine sees this one only.
-		idHeldElsewhere: async (id) => {
-			const note = await db.notes.get(id);
-			return note !== undefined && note.connectionId !== connectionId;
 		},
 
 		noteByPath: async (path) => {

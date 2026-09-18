@@ -18,6 +18,7 @@ import {
 	disconnectAccount,
 	reconcileAccount,
 } from '../src/sync/account.js';
+import { updateNote } from './noteRows.js';
 
 /**
  * Reconciling a device with the server, now that what it presents is a
@@ -364,7 +365,7 @@ describe('the account the notes belong to', () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
-		await db.notes.update(note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await updateNote(db, note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
 		await unbindConnection(db);
 		return { db, note };
 	};
@@ -413,7 +414,7 @@ describe('the account the notes belong to', () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		const note = await createNote(db, { title: 'Gone' });
-		await db.notes.update(note.id, { remoteId: 'id:1' });
+		await updateNote(db, note.id, { remoteId: 'id:1' });
 		await deleteNote(db, note.id);
 		await unbindConnection(db);
 		await beginConnect(db, 'dropbox');

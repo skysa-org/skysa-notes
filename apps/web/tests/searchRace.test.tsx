@@ -17,6 +17,7 @@ import { db } from '../src/store/db.js';
 import { useNoteSearch } from '../src/store/hooks.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { noteById } from './noteRows.js';
 
 const reads = { count: 0, slowly: 2, delay: 60 };
 
@@ -72,7 +73,7 @@ describe('a read overtaken by a later one', () => {
 			await saveNoteBody(db, note.id, 'nothing at all now\n');
 		});
 		await settle(200);
-		expect((await db.notes.get(note.id))?.body).toContain('nothing at all now');
+		expect((await noteById(db, note.id))?.body).toContain('nothing at all now');
 		expect(result.current).toEqual([]);
 
 		// And the next letter is answered from the index, so this is where an

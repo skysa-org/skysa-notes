@@ -21,6 +21,7 @@ import {
 	type SyncScheduler,
 	type SyncSchedulerOptions,
 } from '../src/sync/scheduler.js';
+import { noteById, updateNote } from './noteRows.js';
 
 const HOUR = 60 * 60 * 1000;
 const ACCOUNT = { connectionId: 'c1', provider: 'dropbox', accountId: 'acct' } as const;
@@ -1266,7 +1267,7 @@ describe('failures', () => {
 		const note = await createNote(db, { title: 'Plan', body: 'one\n' });
 		const h = started(db);
 		await vi.waitFor(async () => {
-			expect((await db.notes.get(note.id))?.dirty).toBe(0);
+			expect((await noteById(db, note.id))?.dirty).toBe(0);
 		});
 		await reaches(h.scheduler, 'idle');
 		const version = h.remote.fake.snapshot().find((entry) => entry.path === note.path)?.version;
@@ -1388,13 +1389,13 @@ describe('following the connection', () => {
 		const state = await db.syncState.get('c1');
 		expect(state?.resumeUnverified).toBeUndefined();
 		expect(state?.lastSyncAt).toBe(env.state.now);
-		expect((await db.notes.get(note.id))?.connectionId).toBe('c1');
+		expect((await noteById(db, note.id))?.connectionId).toBe('c1');
 	});
 
 	it('retries a resume check the remote could not answer', async () => {
 		const db = await bound();
 		const note = await createNote(db, { title: 'Kept' });
-		await db.notes.update(note.id, { remoteId: 'id:gone' });
+		await updateNote(db, note.id, { remoteId: 'id:gone' });
 		await unbindConnection(db);
 		await bindConnection(db, ACCOUNT);
 		const env = fakeEnvironment();
@@ -1422,7 +1423,7 @@ describe('following the connection', () => {
 	it('refreshes the token for a resume check that met an expired one', async () => {
 		const db = await bound();
 		const note = await createNote(db, { title: 'Kept' });
-		await db.notes.update(note.id, { remoteId: 'id:gone' });
+		await updateNote(db, note.id, { remoteId: 'id:gone' });
 		await unbindConnection(db);
 		await bindConnection(db, ACCOUNT);
 		const h = started(db);
@@ -1484,7 +1485,7 @@ describe('following the connection', () => {
 		const note = await createNote(db, { title: 'Linked', body: 'linked\n' });
 		const h = started(db);
 		await vi.waitFor(async () => {
-			expect((await db.notes.get(note.id))?.remoteId).toBeDefined();
+			expect((await noteById(db, note.id))?.remoteId).toBeDefined();
 		});
 		await reaches(h.scheduler, 'idle');
 		const held = deferred();
@@ -1520,7 +1521,7 @@ describe('following the connection', () => {
 		expect(statuses).not.toContain('attention');
 		expect(h.remote.pulls()).toBe(before + 2);
 		expect((await db.syncState.get('c1'))?.resumeUnverified).toBeUndefined();
-		expect((await db.notes.get(note.id))?.connectionId).toBe('c1');
+		expect((await noteById(db, note.id))?.connectionId).toBe('c1');
 	});
 
 	it('picks up a new connection with a provider of its own', async () => {
@@ -1546,7 +1547,7 @@ describe('following the connection', () => {
 		const note = await createNote(db, { title: 'Kept' });
 		const first = started(db);
 		await vi.waitFor(async () => {
-			expect((await db.notes.get(note.id))?.remoteId).toBeDefined();
+			expect((await noteById(db, note.id))?.remoteId).toBeDefined();
 		});
 		await reaches(first.scheduler, 'idle');
 		first.scheduler.stop();

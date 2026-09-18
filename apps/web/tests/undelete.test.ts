@@ -16,6 +16,7 @@ import {
 	saveNoteBody,
 	undeleteNote,
 } from '../src/store/notes.js';
+import { updateNote } from './noteRows.js';
 
 /**
  * Taking a delete back, for as long as the UI offers to — which is longer than
@@ -40,7 +41,7 @@ const opsFor = async (id: string) =>
 const deletedNote = async (body = 'the words\n'): Promise<NoteRecord> => {
 	const { db } = box;
 	const made = await createNote(db, { title: 'Kept', body });
-	await db.notes.update(made.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+	await updateNote(db, made.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
 	await db.opQueue.clear();
 	await deleteNote(db, made.id);
 	const row = await getNote(db, made.id);
@@ -133,7 +134,7 @@ describe('undeleteNote', () => {
 		const made = await deletedNote();
 		const spelled = made.path.replace(/kept\.md$/u, 'Kept.md');
 		expect(spelled).not.toBe(made.path);
-		await db.notes.update(made.id, { path: spelled });
+		await updateNote(db, made.id, { path: spelled });
 		const usurper = await createNote(db, { title: 'Kept' });
 		expect(usurper.path.toLowerCase()).toBe(spelled.toLowerCase());
 

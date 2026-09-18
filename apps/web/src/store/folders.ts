@@ -437,7 +437,7 @@ export const deleteFolder = async (
 				.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
 			if (tombstoned.length > 0) await db.notes.bulkPut(tombstoned);
 			tombstoned.forEach((note) => {
-				deletedHere.add(note.id);
+				deletedHere.add(note);
 			});
 			await tombstoned.reduce<Promise<void>>(async (pending, note) => {
 				await pending;

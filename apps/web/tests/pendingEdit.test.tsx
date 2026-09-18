@@ -9,6 +9,7 @@ import { useNote } from '../src/store/hooks.js';
 import { deleteNote, getNote, saveNoteBody } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
+import { updateNote } from './noteRows.js';
 
 /**
  * An edit still in the autosave window when a sync lands on its note.
@@ -278,7 +279,7 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 			expect((await getNote(db, 'n1'))?.dirty).toBe(1);
 		});
 		// Pushed, then changed elsewhere, then changed back.
-		await db.notes.update('n1', { dirty: 0 });
+		await updateNote(db, 'n1', { dirty: 0 });
 		await db.opQueue.clear();
 		await store.applyPull({ changes: [pulled('theirs\n', 'v2')] });
 		await waitFor(() => {
@@ -311,7 +312,7 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 		const saved = await getNote(db, 'n1');
 		const pushed = saved?.source ?? '';
 		expect(pushed).toMatch(/^---\n[\s\S]*\n---\n\nbefore\nmine\n$/);
-		await db.notes.update('n1', { dirty: 0 });
+		await updateNote(db, 'n1', { dirty: 0 });
 		await db.opQueue.clear();
 
 		editor.type('more\n');
@@ -344,7 +345,7 @@ describe('an edit pending when pulls land in ways that repeat themselves', () =>
 			expect((await getNote(db, 'n1'))?.dirty).toBe(1);
 		});
 		const pushed = (await getNote(db, 'n1'))?.source ?? '';
-		await db.notes.update('n1', { dirty: 0 });
+		await updateNote(db, 'n1', { dirty: 0 });
 		await db.opQueue.clear();
 		const tagged = (tags: string) => pushed.replace(/\n---\n/, `\ntags:\n${tags}---\n`);
 		await store.applyPull({ changes: [pulled(tagged('  - work\n'), 'v3')] });

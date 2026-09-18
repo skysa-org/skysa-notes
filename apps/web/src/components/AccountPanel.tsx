@@ -27,6 +27,7 @@ import {
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { getNote } from '../store/notes.js';
 import {
 	type AccountState,
 	adoptAccount,
@@ -264,7 +265,8 @@ const NotConnected = ({ client, database, config, returnTo, navigate }: LocalPro
 const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: string }) => {
 	// Wrapped, so "not read yet" and "no such note" are not the same answer.
 	const found = useLiveQuery(
-		async () => ({ note: await database.notes.get(noteId) }),
+		// The source being synced is the one showing, and so is this.
+		async () => ({ note: await getNote(database, noteId) }),
 		[database, noteId]
 	);
 	const note = found?.note;

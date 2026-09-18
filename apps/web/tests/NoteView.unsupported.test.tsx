@@ -7,6 +7,7 @@ import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
+import { noteById } from './noteRows.js';
 
 /**
  * What happens to a note the rich editor would damage.
@@ -48,6 +49,6 @@ describe('a note the rich editor cannot represent', () => {
 		await user.keyboard('{Control>}e{/Control}');
 
 		expect(screen.getByTestId('raw-editor')).toBeDefined();
-		expect(await db.notes.get(note.id)).toMatchObject({ body: 'something unrepresentable\n' });
+		expect(await noteById(db, note.id)).toMatchObject({ body: 'something unrepresentable\n' });
 	});
 });
