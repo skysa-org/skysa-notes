@@ -358,3 +358,74 @@ describe('searching', () => {
 		expect(await screen.findByText('Nothing matches “bicycle”.')).toBeDefined();
 	});
 });
+
+describe('the command palette', () => {
+	const openPalette = async () => {
+		await userEvent.keyboard('{Meta>}k{/Meta}');
+		return screen.findByRole('dialog', { name: 'Commands' });
+	};
+
+	it('opens on the chord and lists what the app can do', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		await openPalette();
+
+		expect(screen.getByRole('option', { name: /New note/ })).toBeDefined();
+		expect(screen.getByRole('option', { name: /Search notes/ })).toBeDefined();
+		// Declared by `NoteView`, not by the shell: the point of the registry is
+		// that a screen can offer a command without the shell knowing about it.
+		expect(screen.getByRole('option', { name: /Edit as/ })).toBeDefined();
+	});
+
+	it('makes a note when the command is run, and opens it', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		await openPalette();
+		await userEvent.keyboard('new note{Enter}');
+
+		expect(await screen.findByDisplayValue('Untitled')).toBeDefined();
+		expect(screen.queryByRole('dialog', { name: 'Commands' })).toBeNull();
+	});
+
+	it('puts the cursor in the search field when asked to search', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		await openPalette();
+		await userEvent.keyboard('search{Enter}');
+
+		await waitFor(() => {
+			expect(document.activeElement).toBe(
+				screen.getByRole('searchbox', { name: 'Search notes' })
+			);
+		});
+	});
+
+	it('closes on Escape without doing anything', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		await openPalette();
+		await userEvent.keyboard('{Escape}');
+
+		await waitFor(() => {
+			expect(screen.queryByRole('dialog', { name: 'Commands' })).toBeNull();
+		});
+		expect(screen.queryByDisplayValue('Untitled')).toBeNull();
+	});
+
+	it('offers the note commands as unavailable when there is no note open', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		await openPalette();
+
+		// Shown, not hidden: a palette whose contents move about as the user does
+		// cannot be learned.
+		expect(screen.getByRole('option', { name: /Edit as/ }).getAttribute('aria-disabled')).toBe(
+			'true'
+		);
+	});
+});
