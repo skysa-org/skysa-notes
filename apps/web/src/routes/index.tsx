@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { parentPath, ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
@@ -8,7 +8,13 @@ import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { db } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
-import { useFolderTree, useLooseNoteCount, useNote, useNotesInFolder } from '../store/hooks.js';
+import {
+	useFolderTree,
+	useLooseNoteCount,
+	useNote,
+	useNoteSearch,
+	useNotesInFolder,
+} from '../store/hooks.js';
 import { createNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
 import {
@@ -71,6 +77,16 @@ const Home = () => {
 	const openNote = useNote(noteId);
 
 	/**
+	 * What is in the search field. Component state and not the URL, unlike the
+	 * open folder and note: those are where the user *is*, and a reload should
+	 * land there. A half-typed query is not a place — reopening the app into
+	 * somebody's last search, with the notebooks hidden behind its results, is
+	 * not where they left off.
+	 */
+	const [query, setQuery] = useState('');
+	const results = useNoteSearch(query);
+
+	/**
 	 * Why the last thing the user asked for did not happen. Creating a notebook
 	 * or a note can reject — a duplicate name is the everyday case — and by then
 	 * the name field has closed and the click is over, so without somewhere to
@@ -94,6 +110,10 @@ const Home = () => {
 		setProblem(null);
 		void createNote(db, { folderPath: folder })
 			.then((created) => {
+				// And out of the search: the new note is in the open notebook, and
+				// the pane is showing matches for a query it does not answer. Left
+				// there, the user has just made a note that appears in no list.
+				setQuery('');
 				select({ note: created.id });
 			})
 			// Rarer than a duplicate notebook name — this one needs the store
@@ -154,8 +174,24 @@ const Home = () => {
 					notes={notes}
 					selectedNoteId={noteId}
 					onSelectNote={(id) => {
-						select({ note: id });
+						// A result can be in any notebook, and opening one has to
+						// take the user there: left in the notebook they were in,
+						// the sidebar would highlight one notebook while the note
+						// beside it came from another, and clearing the search would
+						// leave the open note nowhere in the list.
+						const hit = results?.find((each) => each.note.id === id);
+						select(
+							hit === undefined
+								? { note: id }
+								: {
+										note: id,
+										folder: folderToSearch(parentPath(hit.note.path)),
+									}
+						);
 					}}
+					query={query}
+					onQuery={setQuery}
+					results={results}
 					onCreateNote={onCreateNote}
 					folderPath={folder}
 					// Both queries, not just the tree: the notebooks alone cannot tell

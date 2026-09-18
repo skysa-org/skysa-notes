@@ -7,7 +7,7 @@ import { routeTree } from '../src/routeTree.gen';
 import { bindConnection, unbindConnection } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
-import { createNote } from '../src/store/notes.js';
+import { createNote, saveNoteBody } from '../src/store/notes.js';
 
 /**
  * The whole app, through the real router, because the pieces below it are each
@@ -237,5 +237,124 @@ describe('the app', () => {
 			expect(router.state.location.search).toEqual({ folder: 'Work' });
 		});
 		expect((await db.folders.toArray()).map((folder) => folder.path)).toEqual(['Work']);
+	});
+});
+
+/**
+ * Search is the one thing in the app that answers across notebooks, so the
+ * wiring it needs is wiring nothing else has: the query has to reach a read of
+ * every note rather than the open folder's, the field has to survive the list
+ * under it changing, and opening a match has to take the user to where that note
+ * actually lives. Each of those can be disconnected in `routes/index.tsx`
+ * without a single unit test noticing.
+ */
+describe('searching', () => {
+	const field = () => screen.getByRole('searchbox', { name: 'Search notes' });
+
+	const type = async (what: string) => {
+		await userEvent.type(field(), what);
+		// The results are a live query: a turn of the loop, then the list.
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		});
+	};
+
+	beforeEach(async () => {
+		await createFolder(db, { name: 'Work' });
+		await createFolder(db, { name: 'Garden' });
+		await createNote(db, { title: 'Standup', body: 'agenda for Monday\n', folderPath: 'Work' });
+		await createNote(db, {
+			title: 'Compost',
+			body: 'turn the heap every second week\n',
+			folderPath: 'Garden',
+		});
+	});
+
+	it('finds a note in a notebook the user is not in, and says which one', async () => {
+		await open('/?folder=Work', 'Work');
+
+		await type('heap');
+
+		expect(await screen.findByText('Compost')).toBeDefined();
+		expect(screen.getByText(/^Garden ·/)).toBeDefined();
+		// The notebook the user is standing in is not what is listed.
+		expect(screen.queryByText('Standup')).toBeNull();
+	});
+
+	it('marks the word it matched inside the note', async () => {
+		await open('/?folder=Work', 'Work');
+
+		await type('heap');
+
+		await waitFor(() => {
+			expect(screen.getByText('heap').tagName).toBe('MARK');
+		});
+	});
+
+	it('opens a match in its own notebook, not in the one behind the search', async () => {
+		// Without this the sidebar highlights Work while a note from Garden is
+		// open beside it, and emptying the field leaves that note in no list.
+		const router = await open('/?folder=Work', 'Work');
+		await type('heap');
+		const match = await screen.findByText('Compost');
+
+		await userEvent.click(match);
+
+		await waitFor(() => {
+			expect(router.state.location.search).toMatchObject({ folder: 'Garden' });
+		});
+		const compost = (await db.notes.toArray()).find((note) => note.title === 'Compost');
+		expect(router.state.location.search).toMatchObject({ note: compost?.id });
+	});
+
+	it('gives the notebook back when the field is emptied', async () => {
+		await open('/?folder=Work', 'Work');
+		await type('heap');
+		expect(await screen.findByText('Compost')).toBeDefined();
+
+		await userEvent.clear(field());
+
+		expect(await screen.findByText('Standup')).toBeDefined();
+		await waitFor(() => {
+			expect(screen.queryByText('Compost')).toBeNull();
+		});
+	});
+
+	it('follows an edit made while the search is open', async () => {
+		// The results are a live query over the notes table, not a snapshot
+		// taken when the user stopped typing.
+		await open('/?folder=Work', 'Work');
+		await type('kingfisher');
+		expect(await screen.findByText(/Nothing matches/)).toBeDefined();
+
+		const standup = (await db.notes.toArray()).find((note) => note.title === 'Standup');
+		await act(async () => {
+			await saveNoteBody(db, standup?.id ?? '', 'a kingfisher on the wire\n');
+		});
+
+		expect(await screen.findByText('Standup')).toBeDefined();
+	});
+
+	it('leaves the search when a note is created, so the new note is in the list', async () => {
+		// The `+` button stays live while a search is open. Without leaving the
+		// search, the note is created, opened in the editor — and shown in no
+		// list at all, because the pane is still answering a query it does not
+		// match.
+		await open('/?folder=Work', 'Work');
+		await type('heap');
+		expect(await screen.findByText('Compost')).toBeDefined();
+
+		await userEvent.click(screen.getByRole('button', { name: 'New note' }));
+
+		expect(await screen.findByText('Untitled')).toBeDefined();
+		expect(field()).toHaveProperty('value', '');
+	});
+
+	it('says plainly when nothing matches', async () => {
+		await open('/?folder=Work', 'Work');
+
+		await type('bicycle');
+
+		expect(await screen.findByText('Nothing matches “bicycle”.')).toBeDefined();
 	});
 });
