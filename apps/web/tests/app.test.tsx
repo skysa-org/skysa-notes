@@ -173,7 +173,9 @@ describe('the app', () => {
 		await waitFor(() => {
 			expect(paneHeading()).toBe('Loose notes');
 		});
-		expect(screen.getByText('Scratch')).toBeDefined();
+		// The heading and the list are separate live queries: the pane can be
+		// renamed a tick before its notes arrive.
+		expect(await screen.findByText('Scratch')).toBeDefined();
 		expect(router.state.location.search).toEqual({ folder: '/' });
 	});
 

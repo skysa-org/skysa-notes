@@ -1,6 +1,7 @@
 import { AuthError } from '@skysa/core';
 
 import { type AccessToken, type ApiClient, type Refusal } from '../api/client.js';
+import { credentialFor } from '../store/credentials.js';
 import { type NotesDatabase } from '../store/db.js';
 
 /**
@@ -18,7 +19,7 @@ const EXPIRY_MARGIN_MS = 60_000;
 
 export interface TokenSourceOptions {
 	db: NotesDatabase;
-	client: Pick<ApiClient, 'token'>;
+	client: Pick<ApiClient, 'withCredential'>;
 	connectionId: string;
 	now?: () => number;
 }
@@ -39,7 +40,7 @@ export interface TokenSource {
 export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	const { db, client, connectionId } = options;
 	const now = options.now ?? Date.now;
-	const held = new Map<'token', AccessToken>();
+	const cached = new Map<'token', AccessToken>();
 	const refused = new Map<'refusal', Refusal>();
 
 	const usable = (token: AccessToken | undefined): token is AccessToken =>
@@ -48,20 +49,33 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	/** A token in hand, from wherever: whatever the server said before is no longer so. */
 	const using = (token: AccessToken): string => {
 		refused.delete('refusal');
-		held.set('token', token);
+		cached.set('token', token);
 		return token.accessToken;
 	};
 
 	const mint = async (): Promise<string> => {
-		const result = await client.token(connectionId).catch((error: unknown) => {
-			// Not an answer: the server may since have changed its mind, and a
-			// refusal kept past this would read as one it gave just now.
-			refused.delete('refusal');
-			throw error;
-		});
+		// Read fresh on every mint rather than held: a device revoked from
+		// somewhere else, or a source the user disconnected in another tab, must
+		// stop minting rather than go on presenting a credential that is gone.
+		const held = await credentialFor(db, connectionId);
+		if (held === undefined) {
+			refused.set('refusal', 'credential_required');
+			cached.delete('token');
+			throw new AuthError('This device holds no credential for that connection');
+		}
+
+		const result = await client
+			.withCredential(held.credential)
+			.token()
+			.catch((error: unknown) => {
+				// Not an answer: the server may since have changed its mind, and a
+				// refusal kept past this would read as one it gave just now.
+				refused.delete('refusal');
+				throw error;
+			});
 		if (!result.ok) {
 			refused.set('refusal', result.refusal);
-			held.delete('token');
+			cached.delete('token');
 			// An `AuthError`, so the provider call it was for fails as one.
 			throw new AuthError(`The server would not mint a token: ${result.refusal}`);
 		}
@@ -77,7 +91,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 
 	return {
 		get: async () => {
-			const inMemory = held.get('token');
+			const inMemory = cached.get('token');
 			if (usable(inMemory)) return using(inMemory);
 
 			const state = await db.syncState.get(connectionId);
@@ -93,7 +107,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 		refresh: async () => {
 			// Forgotten before the new one is asked for, row included: if it
 			// cannot be had, the refused one must not be handed out again.
-			held.delete('token');
+			cached.delete('token');
 			await db.syncState.update(connectionId, {
 				accessToken: undefined,
 				accessTokenExpiresAt: undefined,

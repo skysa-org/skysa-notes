@@ -12,7 +12,12 @@ import { liveQuery } from 'dexie';
 
 import { type ApiClient, type Refusal } from '../api/client.js';
 import { bindingCount, verifyResume } from '../store/connection.js';
-import { type NotesDatabase, type QueuedOperation, type SyncStateRecord } from '../store/db.js';
+import {
+	activeConnectionId,
+	type NotesDatabase,
+	type QueuedOperation,
+	type SyncStateRecord,
+} from '../store/db.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 
@@ -136,7 +141,7 @@ export type ProviderFactory = (input: ProviderInput) => StorageProvider | undefi
 
 export interface SyncSchedulerOptions {
 	db: NotesDatabase;
-	client: Pick<ApiClient, 'token'>;
+	client: Pick<ApiClient, 'withCredential'>;
 	createProvider: ProviderFactory;
 	environment?: SchedulerEnvironment;
 	/** How long after the last local edit to sync. */
@@ -731,7 +736,15 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	return {
 		start: () => {
 			if (unsubscribers.size > 0) return;
-			const subscription = liveQuery(() => db.syncState.toCollection().first()).subscribe({
+			// The source the app is showing, not whichever row comes back first.
+			// A device may hold several connected sources (docs/PLAN.md §6), each
+			// with its own queue and cursor, and the scheduler syncs the one in
+			// front of the user — otherwise the notes on screen and the notes
+			// being synced belong to different accounts. `activeConnectionId`
+			// reads `prefs` as well, so switching sources moves the session.
+			const subscription = liveQuery(async () =>
+				db.syncState.get(await activeConnectionId(db))
+			).subscribe({
 				next: follow,
 			});
 			unsubscribers.add(() => {

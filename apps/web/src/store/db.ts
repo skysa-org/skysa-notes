@@ -1,5 +1,5 @@
 import { type ProviderKind } from '@skysa/core';
-import Dexie, { type PromiseExtended, type Table } from 'dexie';
+import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 
@@ -105,6 +105,15 @@ export interface FolderRecord {
 export interface SyncStateRecord {
 	connectionId: string;
 	provider?: ProviderKind;
+	/**
+	 * The provider's id for the account this connection is to, once the API has
+	 * named it. Kept per connection rather than per device since Phase 7: with
+	 * several sources connected at once there is no single "the account", and
+	 * this is what says whose files a source's notes are when it is let go
+	 * (`NOTES_ACCOUNT_KEY` in `store/connection.ts`). Absent on rows written
+	 * before it, and by an API too old to name accounts.
+	 */
+	accountId?: string;
 	/** Opaque provider cursor; persisted only after a batch commits. */
 	cursor?: string;
 	rootId?: string;
@@ -132,6 +141,26 @@ export interface SyncStateRecord {
  * already here, it is the same place everything else lives, and it works the
  * same in a test as in the browser.
  */
+/**
+ * A credential this device holds, keyed by the connection it reaches — or by
+ * `PENDING_CREDENTIAL_ID` while a flow is out and there is no connection yet.
+ *
+ * The plaintext lives here and nowhere else on this device. See
+ * `store/credentials.ts` for what that buys and what it costs.
+ */
+export interface CredentialRecord {
+	/** A connection id, or `PENDING_CREDENTIAL_ID`. */
+	id: string;
+	/** `sk1_…`. Never logged, never rendered, never put in a URL. */
+	credential: string;
+	/** Which provider the flow was for, so a pending row can be shown for what it is. */
+	provider: ProviderKind;
+	createdAt: number;
+}
+
+/** The one flow that may be out at a time, matching the server's one flow cookie. */
+export const PENDING_CREDENTIAL_ID = 'pending';
+
 export interface PreferenceRecord {
 	key: string;
 	value: string;
@@ -164,6 +193,7 @@ export type NotesDatabase = Dexie & {
 	syncState: Table<SyncStateRecord, string>;
 	opQueue: Table<OpQueueRecord, number>;
 	prefs: Table<PreferenceRecord, string>;
+	credentials: Table<CredentialRecord, string>;
 };
 
 export const DATABASE_NAME = 'skysa-notes';
@@ -217,23 +247,54 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		prefs: 'key',
 	});
 
+	// Phase 7: the device proves its right to a connection with a credential it
+	// generated, in place of the session cookie that used to do it. Keyed by
+	// connection id, so holding several is a matter of holding several rows.
+	db.version(3).stores({
+		credentials: 'id',
+	});
+
 	return db;
 };
 
 /**
- * The connection the app is showing and writing to: the one storage account
- * connected, or `LOCAL_CONNECTION_ID` while there is none. One until Phase 7
- * (docs/PLAN.md §12.3), and `store/connection.ts` keeps it to one row.
+ * Which connected source the app is showing and writing to, or
+ * `LOCAL_CONNECTION_ID` while there is none.
+ *
+ * An explicit, persisted choice since Phase 7. A device may hold several
+ * connected sources at once, each its own silo — its own notes, its own queue,
+ * its own credential — and the app shows one at a time (docs/PLAN.md §6). Until
+ * Phase 7 this was `syncState.first()`, which is a coin toss once there are two
+ * rows, and would have shown a different source depending on IndexedDB's
+ * ordering.
+ *
+ * The fallbacks matter as much as the preference. A device bound before this
+ * existed has a `syncState` row and no preference, and must not be told it has
+ * nothing connected; and a preference naming a source that has since been
+ * disconnected must not strand the app on a connection with no rows.
  *
  * Every reader and writer in `store/` that is not told a connection asks this,
  * and the writers ask inside their own transaction. Asked outside, a note
  * created while an account is being connected could be written under the
  * connection its rows have just been moved off, where nothing shows or syncs it.
  */
-export const activeConnectionId = (db: Pick<NotesDatabase, 'syncState'>): PromiseExtended<string> =>
-	db.syncState
-		.toCollection()
-		.first()
-		.then((state) => state?.connectionId ?? LOCAL_CONNECTION_ID);
+export const ACTIVE_CONNECTION_KEY = 'sync.activeConnection';
+
+export const activeConnectionId = async (
+	db: Pick<NotesDatabase, 'syncState' | 'prefs'>
+): Promise<string> => {
+	// Two keyed reads on the ordinary path, and the whole table only where there
+	// is no usable preference. It is called by every reader and writer in
+	// `store/`, and a `syncState.toArray()` here would put every live query over
+	// notes into that table's observability set — so each sync run, which writes
+	// a cursor to it, would re-run every query on the screen.
+	const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
+	if (chosen !== undefined && (await db.syncState.get(chosen)) !== undefined) return chosen;
+	// No choice recorded, or one that names a source this device no longer has.
+	// One row is not a choice at all; several with no valid preference is a
+	// device mid-migration, and the first is as good an answer as any until
+	// something records one.
+	return (await db.syncState.toCollection().first())?.connectionId ?? LOCAL_CONNECTION_ID;
+};
 
 export const db = createDatabase();

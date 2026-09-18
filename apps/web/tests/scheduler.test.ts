@@ -117,7 +117,19 @@ const tokenServer = () => {
 			value: { accessToken: `t${String(count)}`, expiresAt: Date.now() + 10 * HOUR },
 		});
 	});
-	return { token };
+	// The credential is what says which connection, so the client is asked for
+	// one bound to it rather than handed an id.
+	return presenting(token);
+};
+
+/** A client that answers with `token` whichever credential it is handed. */
+const presenting = (token: ApiClient['token']) => {
+	// The credential is what says which connection, so the client is asked for
+	// one bound to it rather than handed an id.
+	const withCredential = vi.fn(
+		(credential: string) => ({ token, credential }) as unknown as ApiClient
+	);
+	return { token, withCredential };
 };
 
 type Gated = 'changes' | 'read';
@@ -217,9 +229,19 @@ const freshDatabase = (): NotesDatabase => {
 	return db;
 };
 
+/** The credential a bound device holds. Without one nothing can mint. */
+const holdCredential = (db: NotesDatabase, connectionId: string) =>
+	db.credentials.put({
+		id: connectionId,
+		credential: `sk1_${connectionId}`,
+		provider: ACCOUNT.provider,
+		createdAt: 0,
+	});
+
 const bound = async (connectionId = 'c1') => {
 	const db = freshDatabase();
 	await bindConnection(db, { ...ACCOUNT, connectionId });
+	await holdCredential(db, connectionId);
 	return db;
 };
 
@@ -333,7 +355,9 @@ describe('syncing a connection', () => {
 			expect(scheduler.status()).toMatchObject({ phase: 'idle', lastSyncAt: env.state.now });
 		});
 
-		expect(server.token).toHaveBeenCalledWith('c1');
+		// The credential is what names the connection now; there is no id in the
+		// request to get wrong.
+		expect(server.withCredential).toHaveBeenCalledWith('sk1_c1');
 		expect(new Set(theRemote.tokensUsed)).toEqual(new Set(['t1']));
 	});
 
@@ -760,7 +784,7 @@ describe('failures', () => {
 		const token = vi.fn<ApiClient['token']>(() =>
 			Promise.resolve({ ok: false, refusal: 'reauthorize_required' })
 		);
-		const h = started(db, { client: { token } });
+		const h = started(db, { client: presenting(token) });
 
 		await reaches(h.scheduler, 'attention');
 
@@ -790,12 +814,12 @@ describe('failures', () => {
 		const db = await bound();
 		const token = vi
 			.fn<ApiClient['token']>()
-			.mockResolvedValueOnce({ ok: false, refusal: 'sign_in_required' })
+			.mockResolvedValueOnce({ ok: false, refusal: 'credential_revoked' })
 			.mockResolvedValue({
 				ok: true,
 				value: { accessToken: 'ok', expiresAt: Date.now() + HOUR },
 			});
-		const h = started(db, { client: { token } });
+		const h = started(db, { client: presenting(token) });
 		await reaches(h.scheduler, 'attention');
 		const syncing: SchedulerStatus[] = [];
 		h.scheduler.subscribe((status) => {
@@ -816,7 +840,7 @@ describe('failures', () => {
 		const token = vi.fn<ApiClient['token']>(() =>
 			Promise.reject(new TypeError('Failed to fetch'))
 		);
-		const h = started(db, { client: { token } });
+		const h = started(db, { client: presenting(token) });
 
 		await reaches(h.scheduler, 'retrying');
 
@@ -1270,7 +1294,7 @@ describe('failures', () => {
 			.fn<ApiClient['token']>()
 			.mockResolvedValueOnce({ ok: false, refusal: 'reauthorize_required' })
 			.mockRejectedValue(new TypeError('Failed to fetch'));
-		const h = started(db, { client: { token } });
+		const h = started(db, { client: presenting(token) });
 		await reaches(h.scheduler, 'attention');
 
 		await focused(h);
@@ -1288,7 +1312,7 @@ describe('failures', () => {
 				ok: true,
 				value: { accessToken: 'fresh', expiresAt: Date.now() + HOUR },
 			});
-		const h = started(db, { client: { token } });
+		const h = started(db, { client: presenting(token) });
 		await reaches(h.scheduler, 'attention');
 		await db.syncState.update('c1', {
 			accessToken: 'from-another-tab',
@@ -1506,6 +1530,7 @@ describe('following the connection', () => {
 		await reaches(h.scheduler, 'idle');
 
 		await bindConnection(db, { ...ACCOUNT, connectionId: 'c2' });
+		await holdCredential(db, 'c2');
 
 		await vi.waitFor(() => {
 			expect(factory).toHaveBeenLastCalledWith(
@@ -1513,7 +1538,7 @@ describe('following the connection', () => {
 			);
 		});
 		await reaches(h.scheduler, 'idle');
-		expect(h.server.token).toHaveBeenLastCalledWith('c2');
+		expect(h.server.withCredential).toHaveBeenLastCalledWith('sk1_c2');
 	});
 
 	it('is not held up by a resume check a re-bind interrupted', async () => {

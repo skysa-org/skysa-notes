@@ -12,11 +12,31 @@ afterEach(async () => {
 	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
+const CREDENTIAL = 'sk1_the-credential-this-device-holds';
+
 const bound = async () => {
 	const db = createDatabase(`tokens-${crypto.randomUUID()}`);
 	opened.push(db);
 	await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+	await db.credentials.put({
+		id: 'c1',
+		credential: CREDENTIAL,
+		provider: 'dropbox',
+		createdAt: 0,
+	});
 	return db;
+};
+
+/**
+ * A client that records which credential each call is made with. There is no
+ * connection id in a token request any more — the credential says which — so
+ * "the right connection" is now a claim about what was presented.
+ */
+const presenting = (token: ApiClient['token']) => {
+	const withCredential = vi.fn(
+		(credential: string) => ({ token, credential }) as unknown as ApiClient
+	);
+	return { token, withCredential };
 };
 
 const HOUR = 60 * 60 * 1000;
@@ -32,7 +52,7 @@ const minting = (clock: { now: number }) => {
 			value: { accessToken: `t${String(count)}`, expiresAt: clock.now + HOUR },
 		});
 	});
-	return { token };
+	return presenting(token);
 };
 
 describe('provider access tokens', () => {
@@ -47,7 +67,7 @@ describe('provider access tokens', () => {
 		expect(await tokens.get()).toBe('t1');
 
 		expect(client.token).toHaveBeenCalledTimes(1);
-		expect(client.token).toHaveBeenCalledWith('c1');
+		expect(client.withCredential).toHaveBeenCalledWith(CREDENTIAL);
 	});
 
 	it('replaces one about to expire before using it', async () => {
@@ -102,13 +122,23 @@ describe('provider access tokens', () => {
 			.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 			.mockImplementation(ok.token);
 		const now = () => clock.now;
-		const tokens = createTokenSource({ db, client: { token }, connectionId: 'c1', now });
+		const tokens = createTokenSource({
+			db,
+			client: presenting(token),
+			connectionId: 'c1',
+			now,
+		});
 		expect(await tokens.get()).toBe('t1');
 
 		await expect(tokens.refresh()).rejects.toThrow('Failed to fetch');
 
 		// Not from memory, and not from the row after a reload either.
-		const reloaded = createTokenSource({ db, client: { token }, connectionId: 'c1', now });
+		const reloaded = createTokenSource({
+			db,
+			client: presenting(token),
+			connectionId: 'c1',
+			now,
+		});
 		expect(await reloaded.get()).toBe('t2');
 		expect(await tokens.get()).toBe('t2');
 	});
@@ -128,11 +158,11 @@ describe('provider access tokens', () => {
 
 	it('fails as an authorization failure when the server refuses, and says why', async () => {
 		const db = await bound();
-		const client = {
-			token: vi.fn<ApiClient['token']>(() =>
+		const client = presenting(
+			vi.fn<ApiClient['token']>(() =>
 				Promise.resolve({ ok: false, refusal: 'reauthorize_required' })
-			),
-		};
+			)
+		);
 		const tokens = createTokenSource({ db, client, connectionId: 'c1' });
 
 		const failure = await tokens.get().catch((error: unknown) => error);
@@ -146,7 +176,7 @@ describe('provider access tokens', () => {
 		const token = vi
 			.fn<ApiClient['token']>()
 			.mockResolvedValue({ ok: false, refusal: 'reauthorize_required' });
-		const tokens = createTokenSource({ db, client: { token }, connectionId: 'c1' });
+		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
 		await tokens.get().catch(() => undefined);
 
 		await db.syncState.update('c1', {
@@ -164,7 +194,7 @@ describe('provider access tokens', () => {
 			.fn<ApiClient['token']>()
 			.mockResolvedValueOnce({ ok: false, refusal: 'reauthorize_required' })
 			.mockRejectedValue(new TypeError('Failed to fetch'));
-		const tokens = createTokenSource({ db, client: { token }, connectionId: 'c1' });
+		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
 		await tokens.get().catch(() => undefined);
 
 		await expect(tokens.get()).rejects.toThrow('Failed to fetch');
@@ -178,9 +208,9 @@ describe('provider access tokens', () => {
 		const ok = minting(clock);
 		const token = vi
 			.fn<ApiClient['token']>()
-			.mockResolvedValueOnce({ ok: false, refusal: 'sign_in_required' })
+			.mockResolvedValueOnce({ ok: false, refusal: 'credential_revoked' })
 			.mockImplementation(ok.token);
-		const tokens = createTokenSource({ db, client: { token }, connectionId: 'c1' });
+		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
 		await tokens.get().catch(() => undefined);
 
 		await tokens.get();
@@ -190,15 +220,30 @@ describe('provider access tokens', () => {
 
 	it('does not bring back the row of a connection unbound while minting', async () => {
 		const db = await bound();
-		const client = {
-			token: async (): ReturnType<ApiClient['token']> => {
-				await unbindConnection(db);
-				return { ok: true, value: { accessToken: 't1', expiresAt: Date.now() + HOUR } };
-			},
-		};
+		const client = presenting(async (): ReturnType<ApiClient['token']> => {
+			await unbindConnection(db);
+			return { ok: true, value: { accessToken: 't1', expiresAt: Date.now() + HOUR } };
+		});
 
 		await createTokenSource({ db, client, connectionId: 'c1' }).get();
 
 		expect(await db.syncState.count()).toBe(0);
+	});
+
+	it('will not mint once this device holds no credential for the connection', async () => {
+		const db = await bound();
+		const client = minting({ now: 0 });
+		const tokens = createTokenSource({ db, client, connectionId: 'c1' });
+		expect(await tokens.get()).toBe('t1');
+
+		// Revoked from another device, or the source disconnected in another tab.
+		// The credential is read on every mint rather than held, so this is where
+		// it stops — not at the next reload.
+		await db.credentials.delete('c1');
+
+		const failure = await tokens.refresh().catch((error: unknown) => error);
+		expect(isAuthError(failure)).toBe(true);
+		expect(tokens.refusal()).toBe('credential_required');
+		expect(client.withCredential).toHaveBeenCalledTimes(1);
 	});
 });
