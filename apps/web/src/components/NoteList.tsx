@@ -161,7 +161,13 @@ export const NoteList = ({
 	return (
 		// Named for what it is listing: a screen reader announcing "Notes" over
 		// a list of search results describes the pane the user left.
-		<section className="note-list" aria-label={searching ? 'Search results' : 'Notes'}>
+		<section
+			// `searching` is on the element as well as in the label because the
+			// narrow layout gives an open search more of the screen than a list
+			// read beside a note needs (see `.note-list.searching`).
+			className={searching ? 'note-list searching' : 'note-list'}
+			aria-label={searching ? 'Search results' : 'Notes'}
+		>
 			<div className="pane-header">
 				<h2>{searching ? 'Search' : heading}</h2>
 				<button

@@ -242,6 +242,15 @@ button.row.selected {
 	font-size: 0.85rem;
 }
 
+/* The live region while a search has nothing to say. Not `display: none`, which
+   takes it out of the accessibility tree — the point of it is to be there
+   before there is anything to announce. The padding is what has to go: the
+   margin is already zero above, so zeroing that again left the empty region
+   holding 24px of the pane, which on a phone is a quarter of a result. */
+.placeholder:empty {
+	padding: 0;
+}
+
 .note-title {
 	display: flex;
 	align-items: center;
@@ -297,13 +306,6 @@ button.row.selected {
    the match is rarely in the first forty characters. So it wraps, to a few lines
    and no further. Without this the highlight is reliably just past where the
    column clips — the one thing the row is for, and the one thing not on screen. */
-.placeholder:empty {
-	/* The live region while a search has nothing to say. Not `display: none`,
-	   which takes it out of the accessibility tree — the point of it is to be
-	   there before there is anything to announce. */
-	margin: 0;
-}
-
 .note-excerpt {
 	display: -webkit-box;
 	-webkit-line-clamp: 3;
@@ -725,9 +727,19 @@ button.row.selected {
 		max-height: 14rem;
 	}
 
-	/* The pane is fourteen rems tall here, and a three-line excerpt makes a row
-	   so tall that a search shows one and a half answers. Two lines still carry
-	   the match, which is what the excerpt is for. */
+	/* Fourteen rems is the right size for a list you glance at beside the note
+	   you are writing. A search is not that: it is the thing being read, and at
+	   fourteen rems the header, the field and the live region leave room for a
+	   single answer — a result list you cannot compare anything in. While one is
+	   open the list takes most of the screen and the note keeps the rest. */
+	.note-list.searching {
+		max-height: 60vh;
+	}
+
+	/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
+	   push the next answer off. Two lines still carry the match, which is what
+	   the excerpt is for. Below about 430px is where this earns its keep: it
+	   takes a row from 107px to 89px. */
 	.note-excerpt {
 		-webkit-line-clamp: 2;
 	}
