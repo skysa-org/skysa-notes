@@ -146,6 +146,24 @@ describe('createFolder and a name another notebook already folds onto', () => {
 		await expect(createFolder(db, { name: 'Work' })).rejects.toThrow(FolderExistsError);
 	});
 
+	/**
+	 * The other half of the rule above. A note the user has deleted draws no
+	 * notebook — `listNotes` leaves it out, and the sidebar with it — so a
+	 * tombstone must not keep the name reserved. Counted, removing a notebook
+	 * and making one of the same name again was refused with "already exists"
+	 * while the sidebar showed nothing there, and offline that lasts as long as
+	 * the device is away. Found by the two-device soak, seed 443 of 600.
+	 */
+	it('lets a notebook be made again at the name a deleted note still spells', async () => {
+		const note = await createNote(db, { title: 'A', folderPath: 'Work' });
+		await deleteNote(db, note.id);
+		await db.folders.clear();
+
+		const made = await createFolder(db, { name: 'Work' });
+
+		expect(made.path).toBe('Work');
+	});
+
 	it('still allows a name that is genuinely different', async () => {
 		await createFolder(db, { name: 'Archive' });
 		await createFolder(db, { name: 'Archived' });
