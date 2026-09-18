@@ -1,10 +1,13 @@
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import '@milkdown/kit/prose/tables/style/tables.css';
 
+import { editorViewCtx } from '@milkdown/kit/core';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
 import { useEffect, useRef } from 'react';
 
+import { richFindTarget } from './findRich.js';
+import { useOfferFindTarget } from './findTarget.js';
 import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import { adoptBody, createRichEditor, representsFaithfully } from './rich.js';
@@ -73,6 +76,17 @@ const EditorBody = ({ noteId, body, origin, onUserEdit, onUnsupported }: RichEdi
 			}),
 		[noteId]
 	);
+
+	// The find bar acts on whichever editor is open, and this is the one that
+	// knows when there is one. Built once per editor for the same reason the
+	// fidelity check is: `get` is a fresh closure every render.
+	const offer = useOfferFindTarget();
+	useEffect(() => {
+		if (loading) return;
+		return get()?.action((ctx) => offer(richFindTarget(ctx.get(editorViewCtx))));
+		// `get` is intentionally absent; see below.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [loading, noteId, offer]);
 
 	// Can this note be shown at all? Checked once the editor exists, because only
 	// then do its parser and serializer exist. This runs before the user has any

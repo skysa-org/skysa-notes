@@ -21,6 +21,7 @@ import { $prose } from '@milkdown/kit/utils';
 import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 
 import { PROGRAMMATIC_META, userEditPlugin } from './dirty.js';
+import { findPlugin } from './findRich.js';
 
 /**
  * The rich editor itself, with no React in it.
@@ -73,6 +74,9 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
 		.use(history)
 		.use(clipboard)
 		.use(menus === undefined ? [] : [slash, tooltip].flat())
+		// Always, since a plugin cannot be added to a running editor and one with
+		// no query costs a string search per block of a note.
+		.use($prose(findPlugin))
 		.use(
 			$prose((ctx) =>
 				userEditPlugin((doc) => {

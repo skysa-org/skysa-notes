@@ -2,7 +2,11 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
+import { FindBar } from '../src/components/FindBar.js';
 import { NoteView } from '../src/components/NoteView.js';
+import { FindTargetProvider } from '../src/editor/findTarget.js';
+import { RichEditor } from '../src/editor/RichEditor.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import {
@@ -24,28 +28,6 @@ import {
  * document against the incoming note's text.
  */
 
-/**
- * jsdom has no layout and its `Range` has no `getClientRects` at all, so
- * ProseMirror's scroll-into-view of a selection throws inside `coordsAtPos` and
- * abandons the observer's flush half done — which then lets its own 20ms
- * `selectionToDOM` put the caret back where it was. A selection set from outside
- * is real in jsdom; only measuring it is not, so the measurement is what gets
- * filled in rather than any part of the editor being mocked out. Left in place:
- * it adds to jsdom what a browser has, and takes nothing away.
- */
-const measurable = (): void => {
-	const rect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
-	const rects = Object.assign([rect], { item: () => rect }) as unknown as DOMRectList;
-	Object.defineProperty(Range.prototype, 'getClientRects', {
-		configurable: true,
-		value: () => rects,
-	});
-	Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
-		configurable: true,
-		value: () => rect,
-	});
-};
-
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
 	return <NoteView note={note} onDeleted={() => undefined} />;
@@ -64,7 +46,6 @@ const showing = async (title: string): Promise<void> => {
 
 afterEach(async () => {
 	cleanup();
-	vi.restoreAllMocks();
 	await db.notes.clear();
 	await db.folders.clear();
 });
@@ -185,8 +166,6 @@ describe('jumping from the outline', () => {
 		const view = render(<Harness id={note.id} />);
 		await showing('Garden');
 
-		measurable();
-
 		await user.click(screen.getByRole('button', { name: 'Beds' }));
 
 		await waitFor(() => {
@@ -195,6 +174,144 @@ describe('jumping from the outline', () => {
 		expect(window.getSelection()?.anchorNode?.textContent).toBe('Beds');
 
 		view.unmount();
+		const after = await getNote(db, note.id);
+		expect(after?.dirty).toBe(0);
+		expect(after?.body).toBe(note.body);
+		expect(after?.updatedAt).toBe(note.updatedAt);
+	});
+});
+
+/**
+ * The find bar over the real rich editor.
+ *
+ * `findBar.test.tsx` drives the bar over CodeMirror and `findRich.test.ts`
+ * drives the rich target with no React around it, so between them the rich
+ * editor's React integration — the editor offering itself, the bar dispatching
+ * into a ProseMirror that has React-backed plugin views inside it — was the one
+ * arrangement nothing exercised. It is also the one where a regular expression
+ * matching nothing used to be a crash, so it is worth a real editor saying so.
+ */
+describe('finding in the rich editor', () => {
+	// `Mod+F` is a registered command, not a listener of this component's own, so
+	// the provider and the shortcut listener have to be around it — which is the
+	// real arrangement (`routes/index.tsx`), not a convenience for the test.
+	const Finding = ({ id }: { id: string }) => {
+		useShortcuts();
+		return <Harness id={id} />;
+	};
+
+	const openBar = async (user: ReturnType<typeof userEvent.setup>, source: string) => {
+		const note = await importNoteFile(db, { path: 'note.md', source });
+		const view = render(
+			<CommandsProvider>
+				<Finding id={note.id} />
+			</CommandsProvider>
+		);
+		await showing(note.title);
+		await user.keyboard('{Control>}f{/Control}');
+		return { note, view };
+	};
+
+	it('draws the matches in the document', async () => {
+		const user = userEvent.setup();
+		await openBar(user, '# Garden\n\nthe seed and the seedling\n');
+
+		await user.type(screen.getByLabelText('Find'), 'seed');
+
+		expect(document.querySelectorAll('.ProseMirror .find-match')).toHaveLength(2);
+		expect(screen.getByRole('search')).toBeDefined();
+	});
+
+	/** The crash: an empty mark decoration, thrown from inside the update cycle. */
+	it('survives a regular expression that matches nothing at all', async () => {
+		const user = userEvent.setup();
+		await openBar(user, '# Garden\n\nbanana bread\n');
+
+		await user.click(screen.getByLabelText('Regular expression'));
+		await user.type(screen.getByLabelText('Find'), 'a*');
+
+		expect(document.querySelector('.ProseMirror')?.textContent).toContain('banana bread');
+	});
+
+	/**
+	 * The bar appearing over an editor that is already settled — a re-render
+	 * rather than a keystroke. That is the path the microtask in `FindBar` is
+	 * for: ProseMirror's React-backed plugin views call `flushSync` from their
+	 * `update`, and React refuses that while it is still rendering, which is
+	 * exactly where a passive effect runs. Opening the bar with the chord does
+	 * not show it, because a discrete event is not mid-render — so the way in
+	 * here is deliberately the other one.
+	 */
+	it('does not make React complain when it appears over a settled editor', async () => {
+		const note = await importNoteFile(db, {
+			path: 'note.md',
+			source: '# Garden\n\nthe seed and the seedling\n',
+		});
+		const Bar = ({ showing }: { showing: boolean }) => (
+			<FindTargetProvider>
+				<RichEditor
+					noteId={note.id}
+					body={note.body}
+					origin={note.body}
+					onUserEdit={() => undefined}
+					onUnsupported={() => undefined}
+				/>
+				{showing && <FindBar focusToken={1} onClose={() => undefined} />}
+			</FindTargetProvider>
+		);
+		const view = render(<Bar showing={false} />);
+		await waitFor(() => {
+			expect(document.querySelector('.ProseMirror')?.textContent).toContain('the seed');
+		});
+		const complaints: string[] = [];
+		const spy = vi.spyOn(console, 'error').mockImplementation((...args) => {
+			complaints.push(args.map(String).join(' '));
+		});
+
+		view.rerender(<Bar showing />);
+		await waitFor(() => {
+			expect(screen.getByRole('search')).toBeDefined();
+		});
+		await new Promise((resolve) => {
+			setTimeout(resolve, 50);
+		});
+		spy.mockRestore();
+
+		expect(complaints).toEqual([]);
+	});
+
+	it('replaces, and saves the note that results', async () => {
+		const user = userEvent.setup();
+		const { note, view } = await openBar(user, '# Garden\n\nthe seed and the seedling\n');
+		await user.type(screen.getByLabelText('Find'), 'seed');
+		await user.click(screen.getByLabelText('Show replace'));
+		await user.type(screen.getByLabelText('Replace with'), 'bulb');
+
+		await user.click(screen.getByRole('button', { name: 'All' }));
+		expect(document.querySelector('.ProseMirror')?.textContent).toContain('the bulb and the');
+		// The save is two seconds out; unmounting flushes it, as a mode switch or
+		// moving to another note would.
+		view.unmount();
+
+		// The flush starts the write; it does not wait for it.
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.body).toBe(
+				'# Garden\n\nthe bulb and the bulbling\n'
+			);
+		});
+		expect((await getNote(db, note.id))?.dirty).toBe(1);
+	});
+
+	/** Reading a note is not editing it, whichever editor is doing the reading. */
+	it('does not touch the note for finding or moving', async () => {
+		const user = userEvent.setup();
+		const { note, view } = await openBar(user, '# Garden\n\nthe seed and the seedling\n');
+
+		await user.type(screen.getByLabelText('Find'), 'seed');
+		await user.keyboard('{Enter}{Enter}');
+		await user.click(screen.getByLabelText('Previous match'));
+		view.unmount();
+
 		const after = await getNote(db, note.id);
 		expect(after?.dirty).toBe(0);
 		expect(after?.body).toBe(note.body);
