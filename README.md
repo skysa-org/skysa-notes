@@ -59,6 +59,6 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 
 Current status: **Phase 7 — it syncs.** Notes and notebooks live in IndexedDB and work fully offline; connecting a Dropbox, OneDrive or Google Drive account syncs them to an app-owned folder, two-way, with conflicts resolved by keeping both copies. Both editors are in — rich text with a slash menu and formatting toolbar, and raw markdown — with full-text search, a command palette, a document outline, and find-and-replace across both. A device can hold several connected accounts at once and switch between them; each is its own silo, with its own notes, its own queue and its own credential.
 
-What is not done: Phase 8's release plumbing (versioning and tags), and Phase 9's account-first sign-in, which the Worker refuses to boot with rather than pretending to support. WebDAV is deferred indefinitely (`docs/PLAN.md` §5.4).
+What is not done, all of it in Phase 8 and 9: the CLA gate and the repo hygiene around it, versioning and release tags, and the one thing that cannot be checked from inside the repository — that a clean clone deploys end to end on a fresh Cloudflare account. Then Phase 9's account-first sign-in, which the Worker refuses to boot with rather than pretending to support. WebDAV is deferred indefinitely (`docs/PLAN.md` §5.4).
 
 Self-hosting it on your own Cloudflare account is [`docs/self-hosting.md`](docs/self-hosting.md). The architecture, the decisions and the phase order are in [`docs/PLAN.md`](docs/PLAN.md).

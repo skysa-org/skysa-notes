@@ -24,8 +24,15 @@ credentials — the `run` matters, since `pnpm setup` is pnpm's own built-in
 command. A straight copy of `.dev.vars.example` will not boot:
 `ENABLED_PROVIDERS` defaults to `dropbox`, and the Worker refuses to start
 without that provider's credentials rather than starting up and failing at the
-first connect. Either fill them in, or set `ENABLED_PROVIDERS=""` — everything
-that is not syncing works without any of it.
+first connect. Emptying `ENABLED_PROVIDERS` is not a way round it — that is a
+boot failure of its own, since an API that can connect nothing is not a state
+worth starting in — so the Worker needs one provider's credentials to run at
+all.
+
+You do not need it to work on most of the app. Everything that is not syncing
+is in `apps/web` and runs against Vite alone (`pnpm --filter @skysa/web run
+dev`): notes, notebooks, both editors, search, the palette. The Worker is only
+in the picture once an account is connected.
 
 Syncing needs your own app registration at whichever provider you are testing
 (Dropbox, Microsoft Entra or Google Cloud). `pnpm run setup` asks for what it
