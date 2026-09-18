@@ -297,6 +297,13 @@ button.row.selected {
    the match is rarely in the first forty characters. So it wraps, to a few lines
    and no further. Without this the highlight is reliably just past where the
    column clips — the one thing the row is for, and the one thing not on screen. */
+.placeholder:empty {
+	/* The live region while a search has nothing to say. Not `display: none`,
+	   which takes it out of the accessibility tree — the point of it is to be
+	   there before there is anything to announce. */
+	margin: 0;
+}
+
 .note-excerpt {
 	display: -webkit-box;
 	-webkit-line-clamp: 3;
@@ -716,6 +723,13 @@ button.row.selected {
 		border-inline-end: 0;
 		border-block-end: 1px solid var(--border);
 		max-height: 14rem;
+	}
+
+	/* The pane is fourteen rems tall here, and a three-line excerpt makes a row
+	   so tall that a search shows one and a half answers. Two lines still carry
+	   the match, which is what the excerpt is for. */
+	.note-excerpt {
+		-webkit-line-clamp: 2;
 	}
 }
 

@@ -66,6 +66,44 @@ describe('finding a note', () => {
 		expect(found(search.find('heap week'))).toEqual(['compost']);
 	});
 
+	it('narrows on a second word of one letter, like any other second word', () => {
+		// The one-letter rule is about pieces of a word the tokenizer broke up,
+		// not about short words: "plan b" is two words, and dropping the `b`
+		// made it return exactly what "plan" returns.
+		const plans = createNoteSearch();
+		plans.refresh([
+			note({ id: 'planB', title: 'Plan B', body: 'the other one' }),
+			note({ id: 'planA', title: 'Plan A', body: 'the first one' }),
+			note({ id: 'planning', title: 'Planning', body: 'how it is done' }),
+		]);
+
+		expect(found(plans.find('plan b'))).toEqual(['planB']);
+	});
+
+	it('searches for a word of one character beside another word', () => {
+		// The same rule, where a single character is a whole word: dropping it
+		// puts every note with the other word back in the answer.
+		const cjk = createNoteSearch();
+		cjk.refresh([
+			note({ id: 'both', title: '\u6c34 tea', body: 'about water and tea' }),
+			note({ id: 'teaOnly', title: 'tea only', body: 'about tea' }),
+		]);
+
+		expect(found(cjk.find('\u6c34 tea'))).toEqual(['both']);
+	});
+
+	it('asks a chunk that is nothing but single letters as it was written', () => {
+		// "a-b" is two one-letter pieces and nothing else. Dropping both asks
+		// for nothing at all, which is worse than asking for what was typed.
+		const dashes = createNoteSearch();
+		dashes.refresh([
+			note({ id: 'hasIt', title: 'Sizes', body: 'the a-b comparison' }),
+			note({ id: 'not', title: 'Other', body: 'nothing of the sort' }),
+		]);
+
+		expect(found(dashes.find('a-b'))).toEqual(['hasIt']);
+	});
+
 	it('finds nothing for a query that is not there', () => {
 		expect(found(search.find('bicycle'))).toEqual([]);
 	});
@@ -105,9 +143,11 @@ describe('finding a note', () => {
 		expect(found(ranked.find('compost'))[0]).toBe('onTheTag');
 	});
 
-	it('hands back the first fifty and no more', () => {
+	it('hands back what the pane shows, and one more to say there are more', () => {
 		// A short query can match everything there is, and every hit costs an
 		// excerpt walked over a whole body and a row rendered, per keystroke.
+		// The extra one is how the pane tells a list it cut short from a list
+		// that is exactly full.
 		const many = createNoteSearch();
 		many.refresh(
 			Array.from({ length: 60 }, (__, at) =>
@@ -115,7 +155,18 @@ describe('finding a note', () => {
 			)
 		);
 
-		expect(many.find('compost')).toHaveLength(SEARCH_LIMIT);
+		expect(many.find('compost')).toHaveLength(SEARCH_LIMIT + 1);
+	});
+
+	it('hands back exactly what there is when there are no more than that', () => {
+		const exactly = createNoteSearch();
+		exactly.refresh(
+			Array.from({ length: SEARCH_LIMIT }, (__, at) =>
+				note({ id: `n${String(at)}`, body: 'compost heap' })
+			)
+		);
+
+		expect(exactly.find('compost')).toHaveLength(SEARCH_LIMIT);
 	});
 
 	it('puts the most recently edited first where the query cannot tell them apart', () => {

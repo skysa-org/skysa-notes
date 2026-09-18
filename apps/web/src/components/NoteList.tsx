@@ -55,9 +55,11 @@ const placeholderFor = ({
 	if (query.trim() !== '') {
 		if (results === undefined) return 'Searching…';
 		if (results.length === 0) return `Nothing matches “${query}”.`;
-		// Cut at the limit, so say so: the note they want may be the one not
-		// shown, and the way to it is another word rather than a scrollbar.
-		return results.length < SEARCH_LIMIT
+		// Cut short, so say so: the note they want may be the one not shown, and
+		// the way to it is another word rather than a scrollbar. `find` hands
+		// back one more than is shown for exactly this, so a search that matched
+		// fifty notes exactly is not told that some were left out.
+		return results.length <= SEARCH_LIMIT
 			? undefined
 			: `Showing the first ${String(SEARCH_LIMIT)}. Add a word to narrow the search.`;
 	}
@@ -201,21 +203,25 @@ export const NoteList = ({
 				/>
 			</div>
 
-			{placeholder !== undefined && (
-				// A search's answer is spoken when it changes: it arrives under a
-				// field the user is still typing into, and "nothing matches" is the
-				// thing a screen-reader user most needs told. The notebook's own
-				// empty states are not: they follow a deliberate move to another
-				// notebook, which is announced already, and a live region for them
-				// reads the pane out on every click.
-				<p className="muted placeholder" role={searching ? 'status' : undefined}>
-					{placeholder}
+			{/* A search's answer is spoken when it changes: it arrives under a
+			    field the user is still typing into, and "nothing matches" is the
+			    thing a screen-reader user most needs told. While a search is open
+			    the region is always here, empty when there is nothing to say —
+			    VoiceOver often stays silent about one that appears with its words
+			    already in it. The notebook's own empty states get no region: they
+			    follow a deliberate move to another notebook, which is announced
+			    already, and one here would read the pane out on every click. */}
+			{searching ? (
+				<p className="muted placeholder" role="status">
+					{placeholder ?? ''}
 				</p>
+			) : (
+				placeholder !== undefined && <p className="muted placeholder">{placeholder}</p>
 			)}
 
 			{searching && results !== undefined && results.length > 0 && (
 				<ul>
-					{results.map((hit) => (
+					{results.slice(0, SEARCH_LIMIT).map((hit) => (
 						<NoteRow
 							key={hit.note.id}
 							note={hit.note}

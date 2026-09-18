@@ -166,18 +166,35 @@ describe('searching', () => {
 		expect(screen.getByText('stood still', { exact: false })).toBeDefined();
 	});
 
+	const manyHits = (count: number) =>
+		Array.from({ length: count }, (__, at) => plain(`Note ${String(at)}`, 'a heron'));
+
 	it('says when the list is cut short, rather than letting the rest go unmentioned', () => {
-		const many = Array.from({ length: SEARCH_LIMIT }, (__, at) =>
-			plain(`Note ${String(at)}`, 'a heron')
-		);
-		renderList({ query: 'heron', results: many });
+		// One more than it shows is what `find` hands back when there are more.
+		renderList({ query: 'heron', results: manyHits(SEARCH_LIMIT + 1) });
 
 		expect(screen.getByText(/Showing the first 50/)).toBeDefined();
+		expect(screen.getAllByRole('listitem')).toHaveLength(SEARCH_LIMIT);
+	});
+
+	it('does not claim it left something out of a list that is exactly full', () => {
+		renderList({ query: 'heron', results: manyHits(SEARCH_LIMIT) });
+
+		expect(screen.queryByText(/Showing the first/)).toBeNull();
+		expect(screen.getAllByRole('listitem')).toHaveLength(SEARCH_LIMIT);
 	});
 
 	it('says nothing of the sort for a list that is all of them', () => {
 		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
 		expect(screen.queryByText(/Showing the first/)).toBeNull();
+	});
+
+	it('keeps somewhere to speak from while a search has nothing to say', () => {
+		// A region that arrives with its words already in it is often not
+		// announced at all, so it is here from the moment the search is.
+		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
+
+		expect(screen.getByRole('status').textContent).toBe('');
 	});
 
 	it('speaks its answer, rather than changing the list in silence', () => {
