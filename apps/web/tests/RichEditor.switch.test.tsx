@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { NoteView } from '../src/components/NoteView.js';
 import { db } from '../src/store/db.js';
@@ -24,28 +24,6 @@ import {
  * document against the incoming note's text.
  */
 
-/**
- * jsdom has no layout and its `Range` has no `getClientRects` at all, so
- * ProseMirror's scroll-into-view of a selection throws inside `coordsAtPos` and
- * abandons the observer's flush half done — which then lets its own 20ms
- * `selectionToDOM` put the caret back where it was. A selection set from outside
- * is real in jsdom; only measuring it is not, so the measurement is what gets
- * filled in rather than any part of the editor being mocked out. Left in place:
- * it adds to jsdom what a browser has, and takes nothing away.
- */
-const measurable = (): void => {
-	const rect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
-	const rects = Object.assign([rect], { item: () => rect }) as unknown as DOMRectList;
-	Object.defineProperty(Range.prototype, 'getClientRects', {
-		configurable: true,
-		value: () => rects,
-	});
-	Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
-		configurable: true,
-		value: () => rect,
-	});
-};
-
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
 	return <NoteView note={note} onDeleted={() => undefined} />;
@@ -64,7 +42,6 @@ const showing = async (title: string): Promise<void> => {
 
 afterEach(async () => {
 	cleanup();
-	vi.restoreAllMocks();
 	await db.notes.clear();
 	await db.folders.clear();
 });
@@ -184,8 +161,6 @@ describe('jumping from the outline', () => {
 
 		const view = render(<Harness id={note.id} />);
 		await showing('Garden');
-
-		measurable();
 
 		await user.click(screen.getByRole('button', { name: 'Beds' }));
 

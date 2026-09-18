@@ -5,6 +5,8 @@ import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 
 import { isUserEdit, programmatic } from './dirty.js';
+import { findExtension, rawFindTarget } from './findRaw.js';
+import { useOfferFindTarget } from './findTarget.js';
 import { useIncomingBody } from './incoming.js';
 
 /**
@@ -34,6 +36,9 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 		notify.current = onUserEdit;
 	}, [onUserEdit]);
 	const incoming = useIncomingBody(noteId, body, origin);
+	// Offered from inside the effect that builds the editor, so the bar has one
+	// exactly as long as there is an editor to act on.
+	const offer = useOfferFindTarget();
 
 	useEffect(() => {
 		const parent = host.current;
@@ -48,6 +53,7 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 					history(),
 					keymap.of([...defaultKeymap, ...historyKeymap]),
 					markdown(),
+					findExtension(),
 					EditorView.lineWrapping,
 					EditorView.updateListener.of((update) => {
 						if (!isUserEdit(update)) return;
@@ -59,8 +65,10 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 			}),
 		});
 		view.current = instance;
+		const withdraw = offer(rawFindTarget(instance));
 
 		return () => {
+			withdraw();
 			instance.destroy();
 			view.current = null;
 		};

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseChord } from '../commands/chord.js';
 import { useCommand } from '../commands/context.js';
+import { FindTargetProvider } from '../editor/findTarget.js';
 import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor } from '../editor/RichEditor.js';
@@ -10,12 +11,19 @@ import { useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
 import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
+import { FindBar } from './FindBar.js';
 import { Outline } from './Outline.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
 
 /** `Cmd+E` on a Mac, `Ctrl+E` elsewhere — see `commands/chord.ts`. */
 const MODE_TOGGLE = parseChord('Mod+E');
+
+/**
+ * `Mod+F`. `Mod+Shift+F` is already searching every note, which is a different
+ * question — this one is about the note that is open.
+ */
+const FIND = parseChord('Mod+F');
 
 export interface NoteViewProps {
 	note: NoteRecord | undefined;
@@ -202,6 +210,22 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		},
 	});
 
+	// A count of askings rather than a boolean: asking again with the bar already
+	// open re-focuses and selects its field, which is what `Mod+F` does
+	// everywhere else, and the bar needs to be able to tell one asking from the
+	// next to do it.
+	const [finding, setFinding] = useState(0);
+	useCommand({
+		id: 'note.find',
+		label: 'Find in note',
+		group: 'Note',
+		chord: FIND,
+		enabled: noteId !== undefined,
+		run: () => {
+			setFinding((times) => times + 1);
+		},
+	});
+
 	// Registered rather than listened for. The chord the app watches and the
 	// chord the palette prints are then the same one by construction, and a
 	// second window listener cannot race this one for the same keystroke.
@@ -223,77 +247,124 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	}
 
 	return (
-		<section className="note-view" aria-label="Note">
-			<header className="note-header">
-				<TitleField key={note.id} note={note} />
-				<div className="note-actions">
-					<span className="muted path" title={note.path}>
-						{note.path}
-					</span>
-					{mode !== undefined && (
-						<button
-							type="button"
-							onClick={toggleMode}
-							disabled={unsupported}
-							aria-pressed={mode === 'raw'}
-							title={
-								unsupported
-									? 'This note has to stay in markdown mode'
-									: `Switch to ${MODE_LABELS[otherMode(mode)].toLowerCase()} (Ctrl/Cmd+E)`
-							}
-						>
-							{MODE_LABELS[mode]}
-						</button>
-					)}
-					<button
-						type="button"
-						onClick={() => {
-							autosave.flush();
-							void deleteNote(db, note.id).then(onDeleted);
-						}}
-					>
-						Delete
-					</button>
-				</div>
-			</header>
-
-			{unsupported && (
-				<p className="banner" role="status">
-					This note uses markdown the rich editor has no way to show, so it stays in
-					markdown mode. Nothing in it has been changed.
-				</p>
-			)}
-
-			{/*
-			 * A rename or a tag edit cannot reach a file whose frontmatter has a
-			 * YAML error in it: the app will not rewrite a block it had to guess
-			 * at, so the change lands in the app and not in the file, and the next
-			 * sync reads the old values back over it. Saying so is the difference
-			 * between a limitation and a note that quietly refuses to be renamed.
-			 */}
-			{/*
-			 * `role="note"`, not `status`: this is true of the note from the moment
-			 * it opens, so it is a standing remark rather than something that has
-			 * just happened — and two live regions announcing at once is one too
-			 * many when a note is also in the rich editor's unsupported state.
-			 */}
-			{!frontmatterIsEditable(note.frontmatter) && (
-				<p className="banner" role="note">
-					There is a YAML error in this note’s frontmatter, so its title and tags cannot
-					be saved back to the file — the text is left exactly as it is rather than
-					guessed at. Everything else about the note works as usual.
-				</p>
-			)}
-
-			<NoteBody
+		<FindTargetProvider>
+			<NoteScreen
 				note={note}
 				mode={mode}
+				unsupported={unsupported}
+				finding={finding}
 				showOutline={showOutline}
+				toggleMode={toggleMode}
+				onClose={() => {
+					setFinding(0);
+				}}
+				onDelete={() => {
+					autosave.flush();
+					void deleteNote(db, note.id).then(onDeleted);
+				}}
 				onUserEdit={onUserEdit}
 				onUnsupported={() => {
 					setUnsupportedId(note.id);
 				}}
 			/>
-		</section>
+		</FindTargetProvider>
 	);
 };
+
+/**
+ * Everything below the provider.
+ *
+ * Split out because the bar and the editors have to be inside the same
+ * `FindTargetProvider` — the editor offers itself to it and the bar reads it —
+ * and because `NoteView` is at the complexity limit without it.
+ */
+const NoteScreen = ({
+	note,
+	mode,
+	unsupported,
+	finding,
+	showOutline,
+	toggleMode,
+	onClose,
+	onDelete,
+	onUserEdit,
+	onUnsupported,
+}: {
+	note: NoteRecord;
+	mode: EditorMode | undefined;
+	unsupported: boolean;
+	finding: number;
+	showOutline: boolean;
+	toggleMode: () => void;
+	onClose: () => void;
+	onDelete: () => void;
+	onUserEdit: (body: string, origin: string) => void;
+	onUnsupported: () => void;
+}) => (
+	<section className="note-view" aria-label="Note">
+		<header className="note-header">
+			<TitleField key={note.id} note={note} />
+			<div className="note-actions">
+				<span className="muted path" title={note.path}>
+					{note.path}
+				</span>
+				{mode !== undefined && (
+					<button
+						type="button"
+						onClick={toggleMode}
+						disabled={unsupported}
+						aria-pressed={mode === 'raw'}
+						title={
+							unsupported
+								? 'This note has to stay in markdown mode'
+								: `Switch to ${MODE_LABELS[otherMode(mode)].toLowerCase()} (Ctrl/Cmd+E)`
+						}
+					>
+						{MODE_LABELS[mode]}
+					</button>
+				)}
+				<button type="button" onClick={onDelete}>
+					Delete
+				</button>
+			</div>
+		</header>
+
+		{unsupported && (
+			<p className="banner" role="status">
+				This note uses markdown the rich editor has no way to show, so it stays in markdown
+				mode. Nothing in it has been changed.
+			</p>
+		)}
+
+		{/*
+		 * A rename or a tag edit cannot reach a file whose frontmatter has a
+		 * YAML error in it: the app will not rewrite a block it had to guess
+		 * at, so the change lands in the app and not in the file, and the next
+		 * sync reads the old values back over it. Saying so is the difference
+		 * between a limitation and a note that quietly refuses to be renamed.
+		 */}
+		{/*
+		 * `role="note"`, not `status`: this is true of the note from the moment
+		 * it opens, so it is a standing remark rather than something that has
+		 * just happened — and two live regions announcing at once is one too
+		 * many when a note is also in the rich editor's unsupported state.
+		 */}
+		{!frontmatterIsEditable(note.frontmatter) && (
+			<p className="banner" role="note">
+				There is a YAML error in this note’s frontmatter, so its title and tags cannot be
+				saved back to the file — the text is left exactly as it is rather than guessed at.
+				Everything else about the note works as usual.
+			</p>
+		)}
+
+		{finding > 0 && <FindBar focusToken={finding} onClose={onClose} />}
+
+		<NoteBody
+			note={note}
+			mode={mode}
+			showOutline={showOutline}
+			onUserEdit={onUserEdit}
+			onUnsupported={onUnsupported}
+		/>
+	</section>
+);

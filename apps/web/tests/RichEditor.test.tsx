@@ -17,7 +17,15 @@ vi.mock('../src/editor/rich.js', () => ({
 	createRichEditor: (options: RichEditorSetup) => {
 		setup = options;
 		return {
-			create: () => Promise.resolve({ action: (fn: (ctx: unknown) => unknown) => fn({}) }),
+			create: () =>
+				Promise.resolve({
+					// The ctx answers `get` because the component asks it for the
+					// ProseMirror view, to offer the find bar something to act on.
+					// Nothing here exercises finding, so what comes back only has
+					// to be an object.
+					action: (fn: (ctx: { get: () => unknown }) => unknown) =>
+						fn({ get: () => ({}) }),
+				}),
 			// Milkdown's React binding destroys the editor it was handed, not the
 			// one `create` resolved to.
 			destroy: () => Promise.resolve(),
