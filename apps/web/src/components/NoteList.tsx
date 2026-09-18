@@ -1,4 +1,4 @@
-import { parentPath, ROOT } from '@skysa/core';
+import { parentPath, previewLines, ROOT } from '@skysa/core';
 import { type ReactNode } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
@@ -70,17 +70,48 @@ const placeholderFor = ({
 	return notes.length === 0 ? 'No notes here yet.' : undefined;
 };
 
-const preview = (body: string): string => {
-	const text = body
-		// All three spellings: a note written on a pre-OS X Mac has no `\n` in it
-		// at all, and splitting on one yields a single line the `.slice(1)` below
-		// then drops, leaving every such note with an empty excerpt.
-		.split(/\r\n|\n|\r/)
-		.map((line) => line.replace(/^#{1,6}\s+/, '').trim())
-		.filter((line) => line !== '')
-		.slice(1)
-		.join(' ');
+/**
+ * Whether a line is the note's title written out again.
+ *
+ * Emphasis is ignored on both sides. The title is derived from the *parsed*
+ * heading, so `# **Alpha**` gives a title of "Alpha" while the line still reads
+ * `**Alpha**` — the same heading, spelled two ways, and comparing them
+ * character for character would print it twice.
+ *
+ * Both sides, because the parse removes only the characters that *were*
+ * emphasis and leaves the rest: a title of `setup_guide` keeps its underscore,
+ * so stripping the line alone left "setupguide" against "setup_guide" and the
+ * heading was printed twice after all.
+ */
+const bare = (text: string): string => text.replaceAll(/[*_`]/g, '').trim();
+
+const isTitle = (line: string | undefined, title: string): boolean =>
+	line !== undefined && bare(line) === bare(title);
+
+/**
+ * The note's opening, after its title. `previewLines` decides what a readable
+ * line is — the same rule the search excerpt is cut by — and the title is
+ * dropped from the front of them so the row does not say it twice.
+ *
+ * Dropped by *identity*, not by position. Taking the first line on the
+ * assumption that it is the heading was wrong in both directions: a note
+ * beginning with the `<br />` the editor writes for an empty paragraph has no
+ * heading on line one, and lost a line of the user's own writing instead — and
+ * a note whose heading comes after an introduction had the introduction eaten
+ * and the heading shown. Comparing against the title the row is already
+ * displaying is the question actually being asked.
+ */
+const preview = (body: string, title: string): string => {
+	const lines = previewLines(body);
+	const opening = isTitle(lines[0], title) ? lines.slice(1) : lines;
+	const text = opening.join(' ');
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+};
+
+/** The opening of a note, or nothing at all when it has none to show. */
+const Preview = ({ note }: { note: NoteRecord }) => {
+	const text = preview(note.body, note.title);
+	return text === '' ? null : <span className="note-preview">{text}</span>;
 };
 
 const editedAt = (timestamp: number): string =>
@@ -255,11 +286,7 @@ export const NoteList = ({
 								onSelectNote(note.id);
 							}}
 							meta={editedAt(note.updatedAt)}
-							detail={
-								preview(note.body) === '' ? null : (
-									<span className="note-preview">{preview(note.body)}</span>
-								)
-							}
+							detail={<Preview note={note} />}
 						/>
 					))}
 				</ul>

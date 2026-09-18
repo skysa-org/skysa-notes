@@ -563,6 +563,20 @@ Two modes over one markdown string. Default is rich text; a toolbar/shortcut tog
 
 **Empty paragraphs become `<br />`.** Markdown has no way to say "a blank paragraph here" — blank lines are separators, not content — so Milkdown writes an HTML break for one and reads it back as an empty paragraph. It is the one place the editor puts something in a file the user did not type. It stays because it is a bijection and loses nothing in either direction: stripping it instead would delete a `<br />` that came from the user's own file, which is the worse failure. Pinned by a test in `apps/web/tests/rich.test.ts`.
 
+It is removed where it is *read*, not where it is stored. `previewLines` in `packages/core/src/markdown/preview.ts` is the one rule for turning a body into the lines a list can show — line-leading markers, task checkboxes, thematic breaks and setext underlines, a line that is only a `<br />`, whitespace collapsed, blanks dropped, and and a line inside a fenced code block keeping its markers — and both the note list's preview and the search excerpt are cut from it, so neither can find a different set of words in a note than the other. A preview is the worst place to meet the one thing in the file the user did not type: it sits in grey text beside their own words, looking like a mistake they made.
+
+Only a *whole line* of it, which is the only shape Milkdown writes. A `<br>` inside a sentence is the user's own text — in prose, or in `` `<br>` `` in a note about HTML — and the first version of this removed the tag wherever it appeared, turning "She wrote `<br>` in her HTML lesson" into "She wrote in her HTML lesson". A rule for hiding what the editor added must not delete what the author wrote.
+
+The note list drops the title from the front of those lines so the row does not print it twice, and it does so by comparing against the title rather than by taking line one. Position was wrong in both directions: a note beginning with the editor's `<br />` has no heading on its first line and lost a line of real writing, and a note whose heading follows an introduction had the introduction eaten instead.
+
+It is a pass over a string rather than a parse, and that was measured rather than assumed. Running the real pipeline — `parse` plus `mdast-util-to-string` over the top-level nodes, which is the same markdown the editor reads and gets every case right — costs about a millisecond for a 300-word note, so about 52 ms for the fifty-one excerpts a search can ask for. That is the cost on the first keystroke of a search and again whenever a note changes under it; a cache keyed on `contentHash` would make the later keystrokes free, so the honest figure is 52 ms of jank at the moment a search opens rather than 52 ms per letter. It is still the wrong price for a line of grey text, and it grows with the note: a 3000-word note parses in 10.6 ms, so fifty-one of those is over half a second. The cheap pass costs 0.016 ms a note.
+
+What that buys is paid for in syntax left on screen. Inline markup survives — `**bold**` keeps its asterisks, a link keeps its brackets and its URL, a table keeps its pipes — because removing it without a parser means guessing at the user's own punctuation. Two smaller things go the same way: a marker is stripped once, so `> > deep` reads as `> deep`, and a lone `=` line is read as a setext underline wherever it sits.
+
+Fenced code is the exception, and it is kept rather than stripped. Inside a fence none of these markers is markdown: a `# comment` in a shell example is a comment, a `---` in a YAML sample is a document separator, and a `<br />` in an HTML example is the thing being written about. Stripping those is the same failure as deleting a `<br>` from a sentence. It needs no parser either — the body is split on fence lines, and the pieces alternate, so a piece's position says whether it is inside one. What a fence line is has to be exact: a backtick fence's info string cannot itself hold a backtick, and without that rule a paragraph opening with an inline code span is read as a fence, which loses the line *and* flips the parity so the rest of the note is read as code. A fence that is never closed leaves the rest of the note shown with its syntax intact, which is the right way for it to fail. Indentation inside a fence does not survive: whitespace is collapsed there as everywhere else, this being one line of grey text and not a listing.
+
+The bias is deliberate and runs one way throughout: when in doubt, show the characters. A preview with a little syntax in it is a smaller wrong than one that has quietly deleted a word. If this ever needs to be better, the fix is that cached parse, not a longer regular expression.
+
 **Not `@milkdown/plugin-listener`.** Its `markdownUpdated` is the obvious way to hear about changes, but it debounces on a timer of its own and, more importantly, hands over a markdown string with no way to tell whether a person or the app caused it. That is exactly the distinction the dirty rule is made of. A small ProseMirror plugin — the one in `editor/dirty.ts`, which reads transaction metadata — answers it directly, and the serialization happens where the answer is already known.
 
 **Source-of-truth rules (these matter more than the editor choice):**
@@ -670,7 +684,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 
 ### Phase 7 — Polish
 - [x] Search (local full-text over IndexedDB; MiniSearch). The middle pane's field searches every notebook, not the open one, and shows what matched: the notebook each note is in, and a line of its body with the matched words marked. `store/search.ts` holds the index and never touches the database — it is handed rows and told to agree with them, which is what lets `useNoteSearch` decide when, and keeps the matching and the excerpting testable as the pure things they are (§7, "Search is a question, not a place"). Opening a match takes the user to the notebook it is in, so the sidebar, the list and the open note never disagree; Escape empties the field and gives the notebook back, and so does creating a note, which would otherwise land in a notebook the open search is not showing.
-- [ ] Rich-editor polish: image paste (once attachments are in scope), find/replace, outline panel. Also here: the `<br />` Milkdown writes for an empty paragraph (§7) is a real part of the file and so reads out in the note list's preview and in a search excerpt, where it is the one thing on screen the user did not type.
+- [ ] Rich-editor polish: image paste (once attachments are in scope), find/replace, outline panel. (The `<br />` Milkdown writes for an empty paragraph is done: one rule, `previewLines` in core, now decides what a readable line is, and the note list's preview and the search excerpt are both cut from it — §7.)
 - [ ] Keyboard shortcuts, command palette
 - [ ] Multiple connections per user (schema already supports it)
 - [ ] Share target, export/import zip
@@ -739,6 +753,7 @@ packages/
         frontmatter.ts slug.ts
         pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
         lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
+        preview.ts            # a body as the lines a list can show; the one rule the note preview and the search excerpt share
     tests/
       providers/contract.test.ts
       markdown/roundtrip.test.ts

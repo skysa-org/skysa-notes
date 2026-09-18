@@ -1,3 +1,4 @@
+import { previewText } from '@skysa/core';
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord } from './db.js';
@@ -135,33 +136,6 @@ const wordsOf = (query: string): string[] =>
 const literally = (term: string): string => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * An excerpt is one line, so the body's line breaks collapse to single spaces
- * and the markers that only mean something at the start of a line — heading
- * hashes, bullets, quote carets, the numbers of an ordered list — go, as they do
- * in the note list's preview. What is left is the note's words, which is what
- * was searched.
- *
- * All three line endings, like the preview: a file written on a pre-OS X Mac
- * has no `\n` anywhere in it, and splitting on one would leave the whole note as
- * a single line with its markers still in place.
- *
- * The collapse happens before anything is measured, so every offset the window
- * is cut at is an offset into what the user will actually see.
- */
-const oneLine = (body: string): string =>
-	body
-		.split(/\r\n|\n|\r/)
-		.map((line) =>
-			line
-				// `1.` and `1)` are both ordered lists, to CommonMark.
-				.replace(/^\s*(?:#{1,6}|>+|[-*+]|\d+[.)])\s+/, '')
-				.replace(/\s+/g, ' ')
-				.trim()
-		)
-		.filter((line) => line !== '')
-		.join(' ');
-
-/**
  * Characters of context before the match, and the length of the whole excerpt.
  *
  * `BEFORE` is small on purpose. The excerpt is read in a column a little over
@@ -236,7 +210,11 @@ const wordStart = (line: string, at: number, before: number): number => {
  * typed would leave the actual match unmarked.
  */
 const excerptOf = (body: string, terms: readonly string[]): Excerpt[] => {
-	const line = oneLine(body);
+	// One line of readable text, by the same rule the note list's preview uses,
+	// so the two never disagree about what a note says. It happens before
+	// anything is measured, so every offset the window is cut at is an offset
+	// into what the user will actually see.
+	const line = previewText(body);
 	if (line === '') return [];
 
 	const found = matchesIn(line, terms);

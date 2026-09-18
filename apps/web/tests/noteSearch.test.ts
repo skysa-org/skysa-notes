@@ -367,4 +367,35 @@ describe('the excerpt', () => {
 		expect(text(hit)).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
 		expect(text(hit)).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
 	});
+	it('does not read out the break the editor writes for an empty paragraph', () => {
+		// Milkdown has no other way to say "a blank paragraph here", so a note
+		// with one in it carries a literal `<br />`. It is the one thing in the
+		// file the user did not type, and an excerpt is the worst place to meet
+		// it: it sits in grey text beside their own words looking like a mistake
+		// they made (docs/PLAN.md §7).
+		const hit = around('the heron stood still\n\n<br />\n\nand then it went', 'heron');
+
+		expect(text(hit)).toContain('the heron stood still and then it went');
+		expect(text(hit)).not.toContain('br');
+	});
+	it('still has the word in it when the tokenizer read the markup as part of one', () => {
+		// The index is built from the raw body and the excerpt from a readable
+		// version of it, so anything the excerpt removes that the tokenizer did
+		// not split on leaves a hit with nothing marked. MiniSearch does not
+		// split on `<` or `>`, so the term here is `>bravo`, and it survives only
+		// because a `<br />` inside a line is left where it is.
+		const hit = around('alpha<br />bravo charlie', 'bravo');
+
+		expect(text(hit)).toContain('bravo');
+		expect(marked(hit).join('')).toContain('bravo');
+	});
+
+	it('is empty for a note that is nothing but markup', () => {
+		const search = createNoteSearch();
+		search.refresh([note({ id: 'n', title: 'Heron', body: '---\n\n<br />\n' })]);
+
+		// The title is what matched; there is no body text to show under it, and
+		// an excerpt of `---` would be worse than none.
+		expect(search.find('heron')[0]?.excerpt).toEqual([]);
+	});
 });

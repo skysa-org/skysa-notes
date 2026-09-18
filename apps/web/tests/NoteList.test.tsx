@@ -49,6 +49,61 @@ describe('NoteList', () => {
 		expect(screen.getByText('Alpha')).toBeDefined();
 	});
 
+	it("shows the note's opening under its title, without the markdown", () => {
+		renderList({
+			notes: [note('Alpha', '# Alpha\n\n- turn the heap\n\n<br />\n\nevery second week\n')],
+		});
+
+		// The heading is the title, already the line above, so the preview starts
+		// after it; the bullet and the break the editor writes for an empty
+		// paragraph are not the user's words and are not shown (docs/PLAN.md §7).
+		const preview = screen.getByText(/turn the heap/);
+		expect(preview.textContent).toBe('turn the heap every second week');
+	});
+
+	it('keeps the first line when the note does not open with its title', () => {
+		// This body is what Milkdown writes when the user presses Enter at the
+		// very start of a note (pinned in tests/rich.test.ts). Dropping the first
+		// readable line on the assumption that it is the heading lost "turn the
+		// heap" — a line the user wrote — from the row.
+		renderList({
+			notes: [note('Alpha', '<br />\n\nturn the heap\n\nevery second week\n')],
+		});
+
+		expect(screen.getByText(/turn the heap/).textContent).toBe(
+			'turn the heap every second week'
+		);
+	});
+
+	it('does not print a heading twice when it was written with emphasis', () => {
+		// The title comes from the parsed heading, so `# **Alpha**` derives
+		// "Alpha" while the line still reads `**Alpha**`. Same heading, two
+		// spellings.
+		renderList({ notes: [note('Alpha', '# **Alpha**\n\nthen the body\n')] });
+
+		expect(screen.getByText(/then the body/).textContent).toBe('then the body');
+	});
+
+	it('does not print a heading twice when its own text contains an underscore', () => {
+		// `mdast-util-to-string` removes the characters that *were* emphasis and
+		// leaves the rest, so a title of `setup_guide` keeps its underscore.
+		// Ignoring emphasis on the line but not on the title left "setupguide"
+		// against "setup_guide", and the heading was printed twice after all.
+		renderList({
+			notes: [note('setup_guide', '# setup_guide\n\nrun the installer\n')],
+		});
+
+		expect(screen.getByText(/run the installer/).textContent).toBe('run the installer');
+	});
+
+	it('keeps an introduction that comes before the heading', () => {
+		renderList({ notes: [note('Alpha', 'a word first\n\n# Alpha\n\nthen the body\n')] });
+
+		expect(screen.getByText(/a word first/).textContent).toBe(
+			'a word first Alpha then the body'
+		);
+	});
+
 	it('says an open notebook is empty', () => {
 		renderList({ notes: [] });
 		expect(screen.getByText('No notes here yet.')).toBeDefined();
