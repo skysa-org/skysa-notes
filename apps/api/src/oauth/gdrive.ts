@@ -141,8 +141,11 @@ export const gdriveOAuth: StorageOAuth = {
 			// `select_account` for the reason `onedrive.ts` gives: without it the
 			// browser's signed-in Google account is used, perhaps someone else's.
 			prompt: 'consent select_account',
-			// Deliberately no `include_granted_scopes`: a storage grant stays its
-			// own, apart from any sign-in grant a later phase asks for.
+			// Deliberately no `include_granted_scopes`: a storage grant asks for
+			// what it needs and inherits nothing. It was written when a sign-in
+			// grant was planned beside it; that was dropped (docs/PLAN.md §6),
+			// and the reason outlived it — an authorization that silently widens
+			// to whatever the user granted before is one nobody reviewed.
 		}).toString()}`,
 
 	exchangeCode: async (doFetch, credentials, input) => {

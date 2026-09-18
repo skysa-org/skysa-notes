@@ -6,14 +6,17 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
  */
 
 /**
- * Phase 9's tables, and nobody else's.
+ * Two tables with no caller, waiting on a migration to remove them.
  *
- * `storage-first` — the only mode this build runs — has no users: a connection
- * is reached by the credential the device that made it holds, and nothing
- * aggregates connections under a subject. These two stay because `account-first`
- * (docs/PLAN.md §10) is still planned and dropping them would be a migration to
- * write twice. Nothing in `src/` reads them today, and `parseEnv` refuses to
- * boot in `account-first` rather than pretend they are wired up.
+ * There are no users here: a connection is reached by the credential the device
+ * that made it holds, and nothing aggregates connections under a subject. These
+ * two were kept for `account-first`, which was **dropped** on 2026-09-18 —
+ * identity and storage are coupled deliberately (docs/PLAN.md §6, "No sign-in
+ * separate from storage"). So they are now dead rather than early, and §10
+ * tracks dropping them: a hand-written migration, `identities` before `users`
+ * because of the foreign key.
+ *
+ * Nothing in `src/` reads either one. Do not start.
  */
 export const users = sqliteTable(
 	'users',
@@ -28,7 +31,7 @@ export const users = sqliteTable(
 	(t) => [index('users_email_idx').on(t.email)]
 );
 
-/** Phase 9 only: one row per external sign-in attached to a user. */
+/** No caller: one row per external sign-in attached to a user. See above. */
 export const identities = sqliteTable(
 	'identities',
 	{

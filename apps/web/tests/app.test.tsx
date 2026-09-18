@@ -88,16 +88,25 @@ describe('the app', () => {
 
 	it('says why connecting storage did not happen', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?connect=conflict', 'Work');
+		await open('/?connect=denied', 'Work');
 
-		expect((await screen.findByRole('alert')).textContent).toMatch(/already connected/);
+		expect((await screen.findByRole('alert')).textContent).toMatch(/cancelled/);
 	});
 
-	it('says to disconnect first when storage is already connected elsewhere', async () => {
+	it('ignores an outcome the server cannot send', async () => {
+		// `conflict`, `signin` and `occupied` were real until Phase 7 retired
+		// them server-side, and `signin` outlived its own product — there is no
+		// sign-in to send anyone to (docs/PLAN.md §6). A stale bookmark, or a
+		// hand-typed query, must not resurrect the message.
 		await createFolder(db, { name: 'Work' });
-		await open('/?connect=occupied', 'Work');
+		await open('/?connect=signin', 'Work');
 
-		expect((await screen.findByRole('alert')).textContent).toMatch(/Disconnect it first/);
+		// Not a theoretical input: `validateSearch` is meant to drop anything
+		// outside `CONNECT_OUTCOMES` and at runtime does not, so the value
+		// reaches the component. Before this was handled it rendered an empty
+		// red banner — a bar saying nothing.
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByText(/Sign in/)).toBeNull();
 	});
 
 	it('says to leave the files permission ticked when the user took it away', async () => {
