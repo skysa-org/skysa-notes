@@ -562,6 +562,22 @@ describe('noteFileContents', () => {
 		expect(noteFileContents(edited)).toContain('obsidian_banner: cover.png');
 	});
 
+	it('leaves an id the user wrote, and the app could not use, exactly as written', async () => {
+		const source = '---\nid: 202409141302\ntitle: Zettel\n---\n\nBody.\n';
+		const note = await importNoteFile(db, { path: 'zettel.md', source });
+		// Declined, not coerced (YAML reads it as a number), so the row has its own.
+		expect(note.id).not.toBe('202409141302');
+
+		const edited = await saveNoteBody(db, note.id, '\nBody, edited.\n');
+		const file = noteFileContents(edited);
+		expect(file).toContain('\nid: 202409141302\n');
+		expect(file).not.toContain(edited.id);
+
+		// And the file it wrote is still this note when it comes back: by path.
+		const again = await importNoteFile(db, { path: 'zettel.md', source: file });
+		expect(again.id).toBe(edited.id);
+	});
+
 	it('creates a folder note with no frontmatter when there is nothing to write', async () => {
 		const note = await importNoteFile(db, { path: 'a.md', source: '# A\n' });
 		expect(note.frontmatter).toBeNull();

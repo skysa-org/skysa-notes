@@ -33,6 +33,18 @@ describe('parseSearch', () => {
 		expect(parseSearch({ connect: 'pwned' })).toEqual({});
 		expect(parseSearch({ connect: ['ok'] })).toEqual({});
 	});
+
+	/**
+	 * `toEqual` cannot see this, which is why the tests above passed while the
+	 * app was handed raw values: the router spreads this result over the raw
+	 * query, so a refused key has to be present and `undefined` to override it.
+	 * `tests/routes.search.test.tsx` holds the same line through the real router.
+	 */
+	it('overrides what it refuses instead of leaving it out', () => {
+		const refused = parseSearch({ folder: [1], note: { a: 1 }, connect: 'signin' });
+		expect(refused).toStrictEqual({ folder: undefined, note: undefined, connect: undefined });
+		expect({ note: { a: 1 }, ...refused }.note).toBeUndefined();
+	});
 });
 
 describe('the root folder through the URL', () => {

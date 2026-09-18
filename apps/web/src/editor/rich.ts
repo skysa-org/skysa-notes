@@ -3,6 +3,7 @@ import {
 	Editor,
 	editorViewCtx,
 	editorViewOptionsCtx,
+	EditorViewReady,
 	parserCtx,
 	remarkStringifyOptionsCtx,
 	rootCtx,
@@ -17,10 +18,11 @@ import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import type { PluginSpec } from '@milkdown/kit/prose/state';
+import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 
-import { PROGRAMMATIC_META, userEditPlugin } from './dirty.js';
+import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 
 /**
@@ -78,8 +80,8 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
 		// no query costs a string search per block of a note.
 		.use($prose(findPlugin))
 		.use(
-			$prose((ctx) =>
-				userEditPlugin((doc) => {
+			$prose((ctx) => {
+				const plugin = userEditPlugin((doc) => {
 					// Folded, because Milkdown's serializer is not `core`'s: it
 					// writes block structure with `\n` but copies a fenced code
 					// block's and an HTML block's contents out verbatim, so a
@@ -91,8 +93,15 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
 					// CodeMirror joins its document with one line break for the
 					// whole document.
 					onUserEdit(toLf(ctx.get(serializerCtx)(doc)));
-				})
-			)
+				});
+				// Opening a note is not an edit, and the heading-id plugin makes one
+				// from inside the view's constructor. That it goes unreported must
+				// not rest on which plugin's view happens to be built first. Let go
+				// either way: a view that never gets built has no edits to report.
+				const built = holdUserEdits(plugin);
+				void ctx.wait(EditorViewReady).then(built, built);
+				return plugin;
+			})
 		);
 
 /** What the editor's document says, as markdown. */
@@ -107,6 +116,39 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
  */
 export const currentMarkdown = (ctx: Ctx): string =>
 	ctx.get(serializerCtx)(ctx.get(editorViewCtx).state.doc);
+
+/**
+ * Empty the undo history, because the editor now shows a different document.
+ *
+ * Undo after a pull would otherwise put the old text back as a *user* edit made
+ * against the new body, and autosave would push it — quietly reverting whatever
+ * someone else wrote. Keeping the adoption out of the history is not enough on
+ * its own: the older entries stay, mapped through a replacement of the whole
+ * document, and no longer describe anything the user can see.
+ *
+ * `prosemirror-history` has no public way to clear itself, and rebuilding the
+ * state to get one would rebuild every plugin view with it — the menus, and
+ * Milkdown's own container around the editor. What it does have is the meta its
+ * own undo uses to install a history state, so it is handed the one it starts
+ * with. If that ever stops being how it works, this does nothing, the adoption
+ * is still not undoable, and the test that counts the undo depth says so.
+ * https://github.com/ProseMirror/prosemirror-history/blob/master/src/history.ts
+ */
+const forgetHistory = (view: EditorView): void => {
+	// Found by the shape of what it keeps, since its key is not exported.
+	const plugin = view.state.plugins.find((candidate) => {
+		const held: unknown = candidate.getState(view.state);
+		return typeof held === 'object' && held !== null && 'done' in held && 'undone' in held;
+	});
+	const init = plugin?.spec.state?.init;
+	if (plugin === undefined || init === undefined) return;
+
+	view.dispatch(
+		view.state.tr
+			.setMeta(plugin, { historyState: init({}, view.state) as unknown })
+			.setMeta(PROGRAMMATIC_META, true)
+	);
+};
 
 /**
  * Put a body into the editor without it counting as an edit — a sync pull, or a
@@ -128,11 +170,21 @@ export const adoptBody = (ctx: Ctx, body: string): boolean => {
 	const doc = ctx.get(parserCtx)(body) as ProseNode | null;
 	if (doc === null) return false;
 
-	view.dispatch(
-		view.state.tr
-			.replace(0, view.state.doc.content.size, new Slice(doc.content, 0, 0))
-			.setMeta(PROGRAMMATIC_META, true)
-	);
+	// Held for the length of the dispatch, because the marker only reaches
+	// transactions appended to this one, and the heading-id plugin answers with a
+	// dispatch of its own (`holdUserEdits`).
+	const release = holdUserEdits(userEditKey.get(view.state));
+	try {
+		view.dispatch(
+			view.state.tr
+				.replace(0, view.state.doc.content.size, new Slice(doc.content, 0, 0))
+				.setMeta(PROGRAMMATIC_META, true)
+				.setMeta('addToHistory', false)
+		);
+		forgetHistory(view);
+	} finally {
+		release();
+	}
 	return true;
 };
 

@@ -239,6 +239,105 @@ describe('an id tree', () => {
 		expect(run(looped, [gone('x')]).entries).toEqual([{ deleted: true, remoteId: 'x' }]);
 	});
 
+	describe('in a tree of thousands', () => {
+		// A guard that counts steps up to the size of the tree is no guard in a
+		// large one: the stack runs out first, the page throws, the cursor stays
+		// where it was, and every pull after it fetches the same page again.
+		const crowd: TreeState['nodes'] = Array.from({ length: 12_000 }, (_, index) => [
+			`n${String(index)}`,
+			ROOT_ID,
+			`n${String(index)}.md`,
+			false,
+		]);
+		const crowded = (nodes: TreeState['nodes']): TreeState => ({
+			root: ROOT_ID,
+			nodes: [...crowd, ...nodes],
+			pending: [],
+		});
+
+		it('reads a cycle as it does in a small one, asking where things are', () => {
+			const held = run(crowded([]), [folder('x', 'y', 'X'), folder('y', 'x', 'Y')], false);
+			expect(held.entries).toEqual([]);
+			expect(held.arrived).toEqual([]);
+			expect(held.pending.map(([id]) => id)).toEqual(['x', 'y']);
+
+			const settled = run(crowded([]), [folder('x', 'y', 'X'), folder('y', 'x', 'Y')]);
+			expect(settled.entries).toEqual([
+				{ deleted: true, remoteId: 'x' },
+				{ deleted: true, remoteId: 'y' },
+			]);
+			expect(settled.next.nodes).toHaveLength(crowd.length);
+		});
+
+		it('reads a cycle as it does in a small one, asking where things were', () => {
+			const looped = crowded([
+				['x', 'y', 'X', true],
+				['y', 'x', 'Y', true],
+				['z', 'y', 'z.md', false],
+			]);
+
+			const settled = run(looped, [gone('z'), gone('x')]);
+			expect(settled.entries).toEqual([
+				{ deleted: true, remoteId: 'z' },
+				{ deleted: true, remoteId: 'x' },
+			]);
+			// `y` went with the round's end: nothing reaches it from the root.
+			expect(settled.next.nodes).toHaveLength(crowd.length);
+		});
+
+		it('comes right when a later page undoes a cycle an earlier one made', () => {
+			// `A/B`, then B moved to the root and A moved into it. A feed promises
+			// no order, so A can be listed a page ahead of B — and between the two
+			// pages the tree holds A under B under A.
+			const tree = crowded([
+				['a', ROOT_ID, 'A', true],
+				['b', 'a', 'B', true],
+				['in-a', 'a', 'a.md', false],
+				['in-b', 'b', 'b.md', false],
+			]);
+
+			const first = run(
+				tree,
+				[folder('a', 'b', 'A'), file('in-a', 'a', 'a.md', 'v2')],
+				false
+			);
+			expect(first.entries).toEqual([]);
+			expect(first.arrived).toEqual([]);
+			expect(first.pending.map(([id, , , , was]) => [id, was])).toEqual([
+				['a', 'A'],
+				['in-a', 'A/a.md'],
+			]);
+
+			const second = run(first.next, [folder('b', ROOT_ID, 'B'), gone('in-b')]);
+			expect(paths(second)).toEqual(['+B', '+B/A', '+B/A/a.md', '-A/B/b.md']);
+			expect(second.arrived).toEqual([]);
+			expect(second.pending).toEqual([]);
+			expect(second.pruned).toBe(0);
+		});
+	});
+
+	it('places a chain far deeper than any provider allows', () => {
+		const DEPTH = 2000;
+		const id = (level: number) => `d${String(level)}`;
+		const chain = Array.from({ length: DEPTH }, (_, level) =>
+			folder(id(level), level === 0 ? ROOT_ID : id(level - 1), String(level))
+		);
+		const whole = Array.from({ length: DEPTH }, (_, level) => String(level)).join('/');
+
+		// Deepest first, so nothing is placed until the last item is in.
+		const made = run(EMPTY, [file('leaf', id(DEPTH - 1), 'leaf.md'), ...[...chain].reverse()]);
+		expect(made.entries).toHaveLength(DEPTH + 1);
+		expect(made.entries.at(-1)).toMatchObject({ remoteId: 'leaf', path: `${whole}/leaf.md` });
+		// Every folder arrived, and every one but the top is under another.
+		expect(made.arrived).toEqual([id(0)]);
+
+		// And where it *was*, from the tree a cursor carried.
+		const deleted = run(made.next, [gone('leaf')]);
+		expect(deleted.entries).toEqual([
+			{ path: `${whole}/leaf.md`, deleted: true, remoteId: 'leaf' },
+		]);
+	});
+
 	describe('arrivals', () => {
 		it('are folders made in the page, and not files or renamed folders', () => {
 			const made = run(seeded(), [

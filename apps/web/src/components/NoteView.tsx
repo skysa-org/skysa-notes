@@ -11,6 +11,7 @@ import { useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
 import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
+import { beforeClosing } from '../store/staleTab.js';
 import { FindBar } from './FindBar.js';
 import { Outline } from './Outline.js';
 
@@ -165,13 +166,15 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 
 	const save = useCallback(
 		({ body, origin, note: typedInto }: Edit) => {
-			if (noteId === undefined) return;
-			void saveNoteBody(
+			if (noteId === undefined) return undefined;
+			// Returned, not dropped: autosave holds the edit until this settles,
+			// and a rejection nobody hears is a user typing into nothing.
+			return saveNoteBody(
 				db,
 				noteId,
 				body,
 				typedInto?.id === noteId ? { origin, note: typedInto } : undefined
-			);
+			).then(() => undefined);
 		},
 		[noteId]
 	);
@@ -183,7 +186,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// before the next one — made from the new body — can stand for it.
 		supersedes: sameBase,
 	});
-	const { change, flush } = autosave;
+	const { change, flush, settle } = autosave;
+	// A newer build in another tab closes this one's database; what is held
+	// here goes in first.
+	useEffect(() => beforeClosing(settle), [settle]);
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
 			change({ body, origin, note: shown.current });
@@ -259,6 +265,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				note={note}
 				mode={mode}
 				unsupported={unsupported}
+				unsaved={autosave.failing}
 				finding={finding}
 				showOutline={showOutline}
 				toggleMode={toggleMode}
@@ -289,6 +296,7 @@ const NoteScreen = ({
 	note,
 	mode,
 	unsupported,
+	unsaved,
 	finding,
 	showOutline,
 	toggleMode,
@@ -300,6 +308,8 @@ const NoteScreen = ({
 	note: NoteRecord;
 	mode: EditorMode | undefined;
 	unsupported: boolean;
+	/** A save was rejected, and what it held is still only in this tab. */
+	unsaved: boolean;
 	finding: number;
 	showOutline: boolean;
 	toggleMode: () => void;
@@ -335,6 +345,19 @@ const NoteScreen = ({
 				</button>
 			</div>
 		</header>
+
+		{/*
+		 * An alert, and it stays for as long as it is true. It does not say "this
+		 * note": a held edit may be to the note that was open before this one.
+		 * Nor what went wrong, which the app cannot tell — only what is safe to
+		 * do about it.
+		 */}
+		{unsaved && (
+			<p className="banner banner-alert" role="alert">
+				Changes are not being saved on this device. Copy your text somewhere safe, then
+				reload.
+			</p>
+		)}
 
 		{unsupported && (
 			<p className="banner" role="status">

@@ -47,11 +47,19 @@ export const folderToSearch = (path: string): string => (path === ROOT ? ROOT_SE
 /**
  * Anything at all can arrive in the query string — a hand-edited URL, a stale
  * bookmark — so each field is taken only when it is a non-empty string.
+ *
+ * Every key is returned every time, `undefined` when refused, and that is what
+ * makes this a validator rather than a suggestion. The router builds what
+ * `Route.useSearch()` returns as `{ ...parentSearch, ...validated }`
+ * (router-core `matchRoutesInternal`), and the root route's share of that is
+ * the raw query, each value already through `JSON.parse`. A key merely left
+ * out here is therefore still there: `?connect=signin` reached the component,
+ * and `?note={"a":1}` reached `db.notes.get` as an object and took the app
+ * down from a link. An explicit `undefined` overrides the raw value in the
+ * spread, and `stringifySearch` drops it again on the way back to the URL.
  */
 export const parseSearch = (search: Record<string, unknown>): AppSearch => ({
-	...(typeof search.folder === 'string' && search.folder !== '' ? { folder: search.folder } : {}),
-	...(typeof search.note === 'string' && search.note !== '' ? { note: search.note } : {}),
-	...(CONNECT_OUTCOMES.some((outcome) => outcome === search.connect)
-		? { connect: search.connect as ConnectOutcome }
-		: {}),
+	folder: typeof search.folder === 'string' && search.folder !== '' ? search.folder : undefined,
+	note: typeof search.note === 'string' && search.note !== '' ? search.note : undefined,
+	connect: CONNECT_OUTCOMES.find((outcome) => outcome === search.connect),
 });

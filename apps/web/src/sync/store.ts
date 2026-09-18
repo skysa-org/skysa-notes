@@ -437,12 +437,13 @@ export const createDexieSyncStore = (
 	): Promise<void> => {
 		// The engine names the note; the store never guesses by path.
 		const existing = await scope.notes.get(change.id);
-		// Ids are unique across every connection, and the engine only asked this
-		// one whether the id was free. Writing over another account's note would
-		// take its unpushed edits with it — and the id comes from the file's
-		// frontmatter, so reconnecting a folder whose notes are still here under
-		// an old connection does exactly that. Refused until something decides
-		// what those rows are.
+		// Ids are unique across every connection, and the id comes from the
+		// file's frontmatter. The engine asks `idHeldElsewhere` before adopting
+		// one and names a new note instead, so this is the last line rather than
+		// the first: a row that arrived under the other connection between the
+		// decision and this transaction. Writing over it would take that
+		// account's unpushed edits with it; refused, the batch is decided again,
+		// and this time the engine is told.
 		if (existing !== undefined && existing.connectionId !== connectionId) {
 			throw new Error(`Note ${change.id} belongs to another connection`);
 		}
@@ -710,6 +711,13 @@ export const createDexieSyncStore = (
 		noteById: async (id) => {
 			const note = await ownNote(db, id);
 			return note === undefined ? undefined : toSyncNote(note);
+		},
+
+		// `notes.id` is the table's key, so it is unique across every connection
+		// on the device, tombstones included — and the engine sees this one only.
+		idHeldElsewhere: async (id) => {
+			const note = await db.notes.get(id);
+			return note !== undefined && note.connectionId !== connectionId;
 		},
 
 		noteByPath: async (path) => {

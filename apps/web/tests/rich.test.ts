@@ -1,5 +1,6 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
+import { redo, undo, undoDepth } from '@milkdown/kit/prose/history';
 import { Selection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -94,6 +95,121 @@ describe('createRichEditor', () => {
 
 		expect(onUserEdit).toHaveBeenCalledTimes(1);
 		expect(onUserEdit.mock.calls[0]?.[0]).toBe('Pulled from sync!\n');
+	});
+});
+
+/**
+ * A plugin that tidies the document answers every change to it, the app's
+ * included, and its transaction carries no marker of ours. Counted as the
+ * user's, it is an edit nobody typed, made against the body that was just
+ * replaced — which two seconds later saves as a conflict copy of a note the
+ * user was only reading.
+ */
+describe('what other plugins do to a body the app put in', () => {
+	it('does not report the ids Milkdown gives the headings of a pulled body', async () => {
+		// Its own `view.dispatch`, from a plugin view, inside ours.
+		const onUserEdit = vi.fn();
+		const { withCtx } = await mount('Hello\n', onUserEdit);
+
+		withCtx((ctx) => {
+			adoptBody(ctx, '# Pulled\n\n* one\n* two\n');
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('# Pulled\n\n- one\n- two\n');
+		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('does not report a ragged table of a pulled body being squared up', async () => {
+		// `prosemirror-tables` appends its fix to the transaction it follows.
+		const onUserEdit = vi.fn();
+		const { withCtx } = await mount('Hello\n', onUserEdit);
+
+		withCtx((ctx) => {
+			adoptBody(ctx, '| a | b |\n| - | - |\n| 1 |\n');
+		});
+
+		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('does not report them for the note it was opened with either', async () => {
+		const onUserEdit = vi.fn();
+		await mount('# Title\n\n| a | b |\n| - | - |\n| 1 |\n', onUserEdit);
+		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('still reports the user making a heading, ids and all', async () => {
+		// The same follow-up, after the user's own change: theirs.
+		const onUserEdit = vi.fn();
+		const { withCtx } = await mount('Hello\n', onUserEdit);
+
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			const heading = view.state.schema.nodes['heading'];
+			if (heading === undefined) throw new Error('no heading node');
+			view.dispatch(view.state.tr.setBlockType(1, 1, heading, { level: 1 }));
+		});
+
+		expect(onUserEdit).toHaveBeenCalled();
+		expect(onUserEdit).toHaveBeenLastCalledWith('# Hello\n');
+		expect(
+			withCtx<unknown>((ctx) => ctx.get(editorViewCtx).state.doc.firstChild?.attrs['id'])
+		).toBe('hello');
+	});
+
+	it('still reports the first edit to a body whose headings were given ids', async () => {
+		const onUserEdit = vi.fn();
+		const { withCtx, type } = await mount('Hello\n', onUserEdit);
+
+		withCtx((ctx) => {
+			adoptBody(ctx, '# Pulled\n');
+		});
+		type('!');
+
+		expect(onUserEdit).toHaveBeenLastCalledWith('# Pulled!\n');
+	});
+});
+
+/**
+ * Undo after a pull is not "take back my typing": the text it would restore
+ * belongs to a body that has been replaced, and restoring it is a user edit
+ * against the *new* origin, which saves cleanly and is pushed — reverting
+ * someone else's change without anyone having asked to.
+ */
+describe('undo across a body the app put in', () => {
+	it('cannot get back to the text a pull replaced', async () => {
+		const onUserEdit = vi.fn();
+		const { withCtx, type } = await mount('Hello\n', onUserEdit);
+
+		type('a');
+		withCtx((ctx) => {
+			adoptBody(ctx, 'REMOTE\n');
+			const view = ctx.get(editorViewCtx);
+			undo(view.state, view.dispatch);
+			redo(view.state, view.dispatch);
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('REMOTE\n');
+		expect(onUserEdit).toHaveBeenCalledExactlyOnceWith('Helloa\n');
+		// Emptied, not merely skipped: the older entries would otherwise stay,
+		// mapped through a replacement of everything they were about.
+		expect(withCtx<unknown>((ctx) => undoDepth(ctx.get(editorViewCtx).state))).toBe(0);
+	});
+
+	it('still undoes what is typed after a pull', async () => {
+		const onUserEdit = vi.fn();
+		const { withCtx, type } = await mount('Hello\n', onUserEdit);
+
+		withCtx((ctx) => {
+			adoptBody(ctx, 'REMOTE\n');
+		});
+		type('!');
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			undo(view.state, view.dispatch);
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('REMOTE\n');
+		expect(onUserEdit).toHaveBeenLastCalledWith('REMOTE\n');
 	});
 });
 

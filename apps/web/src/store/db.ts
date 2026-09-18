@@ -2,6 +2,7 @@ import { type ProviderKind } from '@skysa/core';
 import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
+import { watchForNewerTab } from './staleTab.js';
 
 /**
  * The local store. The app boots and renders from here before any network call,
@@ -253,6 +254,11 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	db.version(3).stores({
 		credentials: 'id',
 	});
+
+	// A build with a later version than the last one above, opening this database
+	// in another tab, must find this tab stopped rather than still writing —
+	// `store/staleTab.ts` says why Dexie's default is not that.
+	watchForNewerTab(db);
 
 	return db;
 };

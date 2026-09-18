@@ -1,5 +1,9 @@
 import { NOTE_EXTENSION } from '../config.js';
-import { readFrontmatter, splitFrontmatter } from '../markdown/frontmatter.js';
+import {
+	frontmatterHasDeclinedId,
+	readFrontmatter,
+	splitFrontmatter,
+} from '../markdown/frontmatter.js';
 import { serializeNoteFile } from '../markdown/note.js';
 import { foldName } from '../markdown/slug.js';
 import { basename, replaceBasename } from '../paths.js';
@@ -100,6 +104,13 @@ export const conflictPath = (path: string, at: Date, taken: Iterable<string> = [
  */
 export const conflictContent = (localContent: string, id: string): string => {
 	const { frontmatter, body } = splitFrontmatter(localContent);
+
+	// An `id` the app declined to read — `id: 202409141302`, which YAML makes a
+	// number — is the user's own, and one no device reads as an identity. The
+	// copy claims nobody's note by keeping it, and writing ours over it would
+	// take the user's id out of the half of the pair they may well keep.
+	if (frontmatterHasDeclinedId(frontmatter)) return localContent;
+
 	const written = serializeNoteFile({ frontmatter, body, metadata: { id } });
 	if (readFrontmatter(splitFrontmatter(written).frontmatter).id === id) return written;
 

@@ -526,21 +526,36 @@ const Devices = ({
 	const [busy, setBusy] = useState<string | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
 
+	// Only the newest question's answer is kept, and none once the source has
+	// changed or the panel has gone. A slow answer about one source landing under
+	// another's name is a list of grant ids the source on screen has never heard
+	// of, each with a Remove button.
+	const question = useRef(0);
 	const ask = useCallback(() => {
+		question.current += 1;
+		const mine = question.current;
+		const settle = (next: Asked<Grant[]>) => {
+			if (question.current === mine) setGrants(next);
+		};
 		void withHeld(database, client, connectionId)
 			.then((authed) => (authed === undefined ? undefined : authed.grants()))
 			.then((result) => {
-				setGrants(
+				settle(
 					result === undefined || !result.ok
 						? { kind: 'unreachable' }
 						: { kind: 'answered', value: result.value }
 				);
 			})
 			.catch(() => {
-				setGrants({ kind: 'unreachable' });
+				settle({ kind: 'unreachable' });
 			});
 	}, [client, database, connectionId]);
-	useEffect(ask, [ask]);
+	useEffect(() => {
+		ask();
+		return () => {
+			question.current += 1;
+		};
+	}, [ask]);
 
 	const listed = answer(grants);
 	if (listed === undefined || listed.length < 2) return null;
@@ -644,8 +659,11 @@ const Connected = ({
 	 * old rule — only where the credential had stopped working — now names a
 	 * case that cannot happen, because a credential the server no longer
 	 * honours *is* the disconnect and `disconnectAccount` finishes the job.
+	 *
+	 * Held as the source it happened to, not as a flag: the button below lets
+	 * go of exactly that one, whatever is in front by the time it is pressed.
 	 */
-	const [stranded, setStranded] = useState(false);
+	const [stranded, setStranded] = useState<string | null>(null);
 
 	// Focus follows the step the user is on, rather than falling to the page
 	// when the button they pressed goes away. Not on first render.
@@ -680,18 +698,21 @@ const Connected = ({
 			: null;
 
 	const disconnect = () => {
+		// Named once, when the user asked. The answer can take seconds, and it is
+		// about this source whatever the panel is showing by then.
+		const letting = bound.connectionId;
 		setBusy(true);
 		setProblem(null);
-		setStranded(false);
-		void disconnectAccount(database, client, bound.connectionId)
+		setStranded(null);
+		void disconnectAccount(database, client, letting)
 			.then((outcome) => {
 				if (outcome.ok) return;
 				setProblem(refusalMessage(outcome.refusal));
-				setStranded(true);
+				setStranded(letting);
 			})
 			.catch((error: unknown) => {
 				setProblem(failureMessage(error));
-				setStranded(true);
+				setStranded(letting);
 			})
 			.finally(() => {
 				setBusy(false);
@@ -728,13 +749,16 @@ const Connected = ({
 					{problem}
 				</p>
 			)}
-			{stranded && (
+			{stranded === bound.connectionId && (
 				<button
 					type="button"
 					className="ghost"
 					onClick={() => {
 						// Nothing is asked of the server, and nothing on it is touched.
-						void unbindConnection(database);
+						// By name: with none, this lets go of whichever source is in
+						// front — another one's rows and cursor, while the one that
+						// failed stays live on the server.
+						void unbindConnection(database, { connectionId: stranded });
 					}}
 				>
 					Stop syncing on this device
@@ -943,6 +967,7 @@ export const AccountPanel = ({
 	if (state?.kind === 'other-account' && bound.state?.connectionId !== state.connection.id) {
 		return (
 			<OtherAccount
+				key={state.connection.id}
 				client={client}
 				database={database}
 				connection={state.connection}
@@ -962,7 +987,12 @@ export const AccountPanel = ({
 			{...(navigate === undefined ? {} : { navigate })}
 		/>
 	) : (
+		// Keyed by source. Everything under here holds state about one source — a
+		// disconnect that failed, a confirm half way through, a list of devices —
+		// and unkeyed it survives "Show other source" and is rendered, and acted
+		// on, under the other one's name.
 		<Connected
+			key={bound.state.connectionId}
 			client={client}
 			database={database}
 			sync={sync}

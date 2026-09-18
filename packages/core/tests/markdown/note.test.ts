@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../src/hash.js';
+import { frontmatterHasDeclinedId } from '../../src/markdown/frontmatter.js';
 import { parseNoteFile, serializeNoteFile } from '../../src/markdown/note.js';
+import { conflictContent } from '../../src/sync/conflicts.js';
 
 describe('parseNoteFile', () => {
 	it('reads a note the app wrote', () => {
@@ -158,5 +160,64 @@ describe('a note whose frontmatter the parser had to repair', () => {
 		// guess at would destroy whatever the user meant by it.
 		expect(written).toBe(source);
 		expect(written.split('\n').filter((line) => line === '---')).toHaveLength(2);
+	});
+});
+
+describe('an id the user wrote that the app cannot use', () => {
+	const zettel = '---\nid: 202409141302\ntitle: Zettel\n---\nbody\n';
+
+	it('is declined, and the parse says so', () => {
+		const parsed = parseNoteFile(zettel);
+		expect(parsed.id).toBeUndefined();
+		expect(frontmatterHasDeclinedId(parsed.frontmatter)).toBe(true);
+	});
+
+	it('is every value that is not a usable string', () => {
+		['0123', '1e5', 'true', '[a, b]', '{ a: 1 }', '2024-09-14'].forEach((value) => {
+			const declined = frontmatterHasDeclinedId(`id: ${value}\ntitle: X`);
+			// A bare date is a string to YAML 1.2, and a string is an id.
+			expect(declined).toBe(value !== '2024-09-14');
+		});
+	});
+
+	it('is not an id the app reads, a missing one, or a key with nothing after it', () => {
+		expect(frontmatterHasDeclinedId('id: 018f3c4e-aaaa\ntitle: X')).toBe(false);
+		expect(frontmatterHasDeclinedId('id: "202409141302"')).toBe(false);
+		expect(frontmatterHasDeclinedId('title: X')).toBe(false);
+		expect(frontmatterHasDeclinedId('id:\ntitle: X')).toBe(false);
+		expect(frontmatterHasDeclinedId('id: ""\ntitle: X')).toBe(false);
+		expect(frontmatterHasDeclinedId(null)).toBe(false);
+	});
+
+	it('comes back byte for byte from a writer that asked first', () => {
+		const parsed = parseNoteFile(zettel);
+		const id = frontmatterHasDeclinedId(parsed.frontmatter) ? {} : { id: 'a-fresh-uuid' };
+		const written = serializeNoteFile({
+			frontmatter: parsed.frontmatter,
+			body: parsed.body,
+			metadata: { ...id, title: 'Zettel' },
+		});
+		expect(written).toBe(zettel);
+	});
+});
+
+describe('a note file whose block ends in `...`', () => {
+	it('gains an id without losing its closer or a byte of its body', () => {
+		const body = '\r\nBody text the user wrote.\r\n\r\n---\r\n\r\nmore\r\n';
+		const parsed = parseNoteFile(`---\r\ntitle: X\r\n...\r\n${body}`);
+		expect(parsed.body).toBe(body);
+		expect(
+			serializeNoteFile({ frontmatter: parsed.frontmatter, body, metadata: { id: 'abc' } })
+		).toBe(`---\r\ntitle: X\r\nid: abc\r\n...\r\n${body}`);
+	});
+
+	it('keeps the prose in a conflict copy, which exists to save it', () => {
+		const pandoc = '---\ntitle: X\n...\n\nWritten locally.\n\n---\n\nmore\n';
+		expect(conflictContent(pandoc, 'copy-id')).toBe(
+			'---\ntitle: X\nid: copy-id\n...\n\nWritten locally.\n\n---\n\nmore\n'
+		);
+
+		const unclosed = '---\ntitle: X\n\nWritten locally.\n\n---\n\nmore\n';
+		expect(conflictContent(unclosed, 'copy-id')).toContain(unclosed);
 	});
 });

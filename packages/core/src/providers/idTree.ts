@@ -92,16 +92,48 @@ interface GoneChange {
 type Change = LiveChange | GoneChange;
 
 /**
- * The path of an item from the tree, or `undefined` when its chain does not
- * reach the root. The depth bound turns a cycle — which a well-formed feed never
- * produces — into "cannot say" rather than a stack overflow.
+ * The ids from `from` upwards, each the `up` of the one before, ending at the
+ * first that has none — or `undefined` when the way up comes back on itself.
+ *
+ * A cycle is not a malformed feed. `A/B`, then B moved to the root and A moved
+ * into it: a feed that promises no order can list A a page ahead of B, and
+ * between the two pages the tree holds A under B under A. It has to read as
+ * "cannot say yet", and at the cost of the loop rather than of the tree: a walk
+ * that recursed until it had counted every node ran out of stack in a tree of
+ * thousands, the page threw, the cursor stayed put, and every pull after it
+ * fetched the same page again. Hence the one loop in this package. The set is
+ * the chain itself, in order, so noticing a cycle costs nothing beside it.
  */
-const pathIn = (tree: Tree, root: string, id: string, depth = 0): string | undefined => {
-	if (id === root) return ROOT;
-	const node = tree.get(id);
-	if (node === undefined || depth > tree.size) return undefined;
-	const above = pathIn(tree, root, node.parent, depth + 1);
-	return above === undefined ? undefined : joinPath(above, node.name);
+const chain = (from: string, up: (id: string) => string | undefined): string[] | undefined => {
+	const seen = new Set([from]);
+	// eslint-disable-next-line functional/no-loop-statements, functional/no-let -- see above: recursion here is the bug
+	for (let at = up(from); at !== undefined; at = up(at)) {
+		if (seen.has(at)) return undefined;
+		seen.add(at);
+	}
+	return [...seen];
+};
+
+/**
+ * The path `names` lead to — innermost first, as a walk up finds them — under
+ * `base`. Joined once: a join per level reads the whole path so far again at
+ * each, which is nothing at the depths providers allow and everything in a
+ * chain of thousands.
+ */
+const below = (base: string, names: readonly string[]): string =>
+	joinPath(...(base === ROOT ? [] : [base]), ...[...names].reverse());
+
+/**
+ * The path of an item from the tree, or `undefined` when its chain does not
+ * reach the root: it ends at an item the tree does not hold, or never ends.
+ */
+const pathIn = (tree: Tree, root: string, id: string): string | undefined => {
+	const ids = chain(id, (at) => (at === root ? undefined : tree.get(at)?.parent));
+	if (ids?.at(-1) !== root) return undefined;
+	return below(
+		ROOT,
+		ids.slice(0, -1).map((at) => tree.get(at)?.name ?? '')
+	);
 };
 
 export interface Page {
@@ -123,13 +155,18 @@ export interface Page {
  * lose the path of everything inside — and a deletion of one of those would go
  * unreported.
  */
-const wasOf = (page: Page, id: string, depth = 0): string | undefined => {
-	if (id === page.root) return ROOT;
-	if (page.was.has(id)) return page.was.get(id) ?? undefined;
-	const node = page.before.get(id);
-	if (node === undefined || depth > page.before.size) return undefined;
-	const above = wasOf(page, node.parent, depth + 1);
-	return above === undefined ? undefined : joinPath(above, node.name);
+const wasOf = (page: Page, id: string): string | undefined => {
+	const ids = chain(id, (at) =>
+		at === page.root || page.was.has(at) ? undefined : page.before.get(at)?.parent
+	);
+	const top = ids?.at(-1);
+	if (ids === undefined || top === undefined) return undefined;
+	const base = top === page.root ? ROOT : page.was.get(top);
+	if (base === undefined || base === null) return undefined;
+	return below(
+		base,
+		ids.slice(0, -1).map((at) => page.before.get(at)?.name ?? '')
+	);
 };
 
 export const pageFrom = (from: TreeState): Page => {
@@ -343,11 +380,10 @@ export const arrivals = (page: Page): string[] => {
 			)
 			.map((change) => change.id)
 	);
-	const underAnother = (id: string, depth = 0): boolean => {
-		const parent = page.nodes.get(id)?.parent;
-		if (parent === undefined || depth > page.nodes.size) return false;
-		return arrived.has(parent) || underAnother(parent, depth + 1);
-	};
+	const underAnother = (id: string): boolean =>
+		chain(id, (at) => page.nodes.get(at)?.parent)
+			?.slice(1)
+			.some((above) => arrived.has(above)) ?? false;
 	return [...arrived].filter((id) => !underAnother(id));
 };
 

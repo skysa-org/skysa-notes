@@ -7,6 +7,7 @@ export {
 	readFrontmatter,
 	writeFrontmatter,
 	frontmatterIsEditable,
+	frontmatterHasDeclinedId,
 	type SplitDocument,
 	type NoteFrontmatter,
 } from './frontmatter.js';

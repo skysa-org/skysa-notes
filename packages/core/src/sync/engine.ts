@@ -1526,7 +1526,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// the file is the only thing tying the two halves together.
 		const holder = await store.noteById(claimed);
 		const held = holder !== undefined && !removedInBatch(holder, decided);
-		return held || reestablished(decided).notes.has(claimed) ? newId() : claimed;
+		if (held || reestablished(decided).notes.has(claimed)) return newId();
+		// Or by a note that is not this connection's, which `noteById` does not
+		// show. Ids are the device's, the store is one connection's, and the id
+		// here is whatever the remote file says — the same folder in two
+		// accounts is enough. Adopted, the store refuses the write on every
+		// retry and the cursor never moves again. Nothing this batch does can
+		// free that id, so there is no batch to ask.
+		return (await store.idHeldElsewhere(claimed)) ? newId() : claimed;
 	};
 
 	/** A note we already hold, whose remote version has moved. */
@@ -1540,8 +1547,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<PullChange[]> => {
 		const { content } = found;
 		const syncedHash = await contentHash(content);
+		// Where the batch has the note by now, not the row's own path: a folder
+		// rename decided in front of this carries the note off without a word
+		// about the file, and a file then moved back onto the old name reads as
+		// one that never left — the note stays under the folder's new name over
+		// a file that is not there, and its next write blocks the queue.
 		const unchanged = (): PullChange[] =>
-			local.path === entry.path || renaming.has(local.id)
+			whereNow(local, decided) === entry.path || renaming.has(local.id)
 				? [{ kind: 'adopt-version', id: local.id, remote: entry, syncedHash }]
 				: [
 						{
@@ -1667,15 +1679,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const goneBeforeRead = (
 		local: SyncNote | undefined,
-		removed: boolean,
-		entry: RemoteEntry
-	): PullChange[] =>
-		local !== undefined &&
-		!removed &&
-		local.remoteId === entry.remoteId &&
-		local.path !== entry.path
-			? [forgetNote(local)]
-			: [];
+		entry: RemoteEntry,
+		decided: readonly PullChange[]
+	): PullChange[] => {
+		if (local === undefined || local.remoteId !== entry.remoteId) return [];
+		// Its own path is where the batch has carried it, as in `decideFile`.
+		const at = whereNow(local, decided);
+		return at === undefined || at === entry.path ? [] : [forgetNote(local)];
+	};
 
 	/**
 	 * A note never pushed has no file to be matched by, only a path, and the
@@ -1717,7 +1728,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// The version we already hold. Either nothing happened, or the file was
 		// renamed — a rename alone changes no bytes, so there is nothing to read.
 		if (local !== undefined && !removed && local.remoteVersion === entry.version) {
-			if (local.path === entry.path) return [];
+			// Asked of the batch, as everything here is. A folder rename in front
+			// of this entry has carried the note away, and the store still shows
+			// it at its old path — which is exactly where a file moved back onto
+			// that name says it is. Read off the row, that is "nothing happened",
+			// and the note ends up under the folder's new name with its file here.
+			if (whereNow(local, decided) === entry.path) return [];
 			// The file's bytes have not moved either, so the hash the note holds
 			// still describes them. Passed rather than left to the store to keep,
 			// because a `detach-note` or deleted folder earlier in this batch has
@@ -1743,7 +1759,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isNotFoundError(error)) return undefined;
 			throw error;
 		});
-		if (found === undefined) return goneBeforeRead(local, removed, entry);
+		if (found === undefined) return goneBeforeRead(local, entry, decided);
 		const { content } = found;
 		const stranger = local !== undefined && !removed && isStranger(local, content);
 		if (local === undefined || stranger) {

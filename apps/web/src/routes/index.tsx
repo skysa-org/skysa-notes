@@ -6,6 +6,7 @@ import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
@@ -38,13 +39,13 @@ import {
  * What to tell the user on the way back from connecting a storage account, or
  * `undefined` for a value this build has no message for.
  *
- * The `default` is not dead code, which is the whole reason it is written out.
- * `validateSearch` is supposed to have dropped anything not in
- * `CONNECT_OUTCOMES` before this is reached, and at runtime it does not — a
- * hand-typed or bookmarked `?connect=signin` arrives here intact. Without the
- * default this returned `undefined` through a `string` signature and the app
- * rendered an **empty** alert banner: a red bar saying nothing, which is worse
- * than either showing the message or showing nothing at all.
+ * The `default` is what stopped an **empty** alert banner — a red bar saying
+ * nothing — when a hand-typed or bookmarked `?connect=signin` arrived here
+ * intact, returning `undefined` through a `string` signature. It arrived
+ * because `parseSearch` left a refused key out instead of overriding it, and
+ * the router's spread put the raw one back (see `parseSearch`). That is fixed
+ * there; this stays, because a build older than the API it talks to can still
+ * be sent an outcome it has no words for.
  *
  * Found on 2026-09-18 by removing `signin`, `conflict` and `occupied` — the
  * three outcomes Phase 7 retired server-side — which is when a value outside
@@ -310,4 +311,8 @@ const HomeWithCommands = () => (
 export const Route = createFileRoute('/')({
 	validateSearch: parseSearch,
 	component: HomeWithCommands,
+	// Here as well as on the root so that the root's layout survives this screen
+	// failing: the "new version" prompt lives there, and a build that throws on
+	// render is exactly the one the user needs to be able to reload out of.
+	errorComponent: ErrorScreen,
 });

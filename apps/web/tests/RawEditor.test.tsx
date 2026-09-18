@@ -1,3 +1,4 @@
+import { redo, undo, undoDepth } from '@codemirror/commands';
 import { EditorView } from '@codemirror/view';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -145,5 +146,44 @@ describe('RawEditor', () => {
 
 		expect(editorView(container)).toBe(before);
 		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * Undo after a pull is not "take back my typing": the text it would restore
+	 * belongs to a body that has been replaced, and restoring it is a user edit
+	 * against the *new* origin, which saves cleanly and is pushed — reverting
+	 * someone else's change without anyone having asked to.
+	 */
+	it('cannot undo its way back to the text a pull replaced', () => {
+		const onUserEdit = vi.fn();
+		const { container, rerender } = render(
+			<RawEditor noteId="a" body="Hello" origin="o1" onUserEdit={onUserEdit} />
+		);
+		const view = editorView(container);
+
+		view.dispatch({ changes: { from: 5, insert: 'a' }, userEvent: 'input.type' });
+		rerender(<RawEditor noteId="a" body="REMOTE" origin="o2" onUserEdit={onUserEdit} />);
+		undo(view);
+		redo(view);
+
+		expect(view.state.doc.toString()).toBe('REMOTE');
+		// Nothing left to map onto a document it was never about.
+		expect(undoDepth(view.state)).toBe(0);
+		expect(onUserEdit).toHaveBeenCalledExactlyOnceWith('Helloa', 'o1');
+	});
+
+	it('still undoes what is typed after a pull', () => {
+		const onUserEdit = vi.fn();
+		const { container, rerender } = render(
+			<RawEditor noteId="a" body="Hello" origin="o1" onUserEdit={onUserEdit} />
+		);
+		const view = editorView(container);
+
+		rerender(<RawEditor noteId="a" body="REMOTE" origin="o2" onUserEdit={onUserEdit} />);
+		view.dispatch({ changes: { from: 6, insert: '!' }, userEvent: 'input.type' });
+		undo(view);
+
+		expect(view.state.doc.toString()).toBe('REMOTE');
+		expect(onUserEdit).toHaveBeenLastCalledWith('REMOTE', 'o2');
 	});
 });

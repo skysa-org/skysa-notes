@@ -341,3 +341,103 @@ describe('writeFrontmatter', () => {
 		expect(reread.body).toBe(body);
 	});
 });
+
+describe('a block closed by the YAML document-end marker', () => {
+	const pandoc = '---\ntitle: X\n...\n\nBody text the user wrote.\n\n---\n\nmore\n';
+
+	it('ends at `...`, not at the first thematic break after it', () => {
+		const { frontmatter, body } = splitFrontmatter(pandoc);
+		expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+		expect(body).toBe('\nBody text the user wrote.\n\n---\n\nmore\n');
+	});
+
+	it('goes back into the file closed the way the file closed it', () => {
+		const { frontmatter, body } = splitFrontmatter(pandoc);
+		expect(joinFrontmatter(frontmatter, body)).toBe(pandoc);
+
+		const written = writeFrontmatter(frontmatter, { id: 'abc' });
+		expect(joinFrontmatter(written, body)).toBe(
+			'---\ntitle: X\nid: abc\n...\n\nBody text the user wrote.\n\n---\n\nmore\n'
+		);
+		// And is still the same block to the next reader.
+		expect(splitFrontmatter(joinFrontmatter(written, body)).body).toBe(body);
+	});
+
+	it('keeps the closer a line of its own when the block ends in a comment', () => {
+		// `yaml` would write this as `... # reviewed`, which closes nothing.
+		const { frontmatter, body } = splitFrontmatter('---\ntitle: X\n# reviewed\n...\nbody\n');
+		const file = joinFrontmatter(writeFrontmatter(frontmatter, { id: 'abc' }), body);
+		expect(file).toMatch(/\n\.\.\.\nbody\n$/);
+		expect(readFrontmatter(splitFrontmatter(file).frontmatter)).toEqual({
+			id: 'abc',
+			title: 'X',
+		});
+		expect(splitFrontmatter(file).body).toBe('body\n');
+	});
+
+	it('reads CRLF and CR files the same way', () => {
+		['\r\n', '\r'].forEach((eol) => {
+			const { frontmatter, body } = splitFrontmatter(pandoc.replaceAll('\n', eol));
+			expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+			expect(body.startsWith(`${eol}Body text`)).toBe(true);
+		});
+	});
+
+	it('does not take an ellipsis under a thematic break for one', () => {
+		const source = '---\nNote to self: call the bank\n...\nand then the rest\n';
+		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	it('still reads a block that holds `...` and is closed by `---`, as it always did', () => {
+		const source = '---\nfoo: bar\n...\n---\nbody\n';
+		const { frontmatter, body } = splitFrontmatter(source);
+		expect(frontmatter).toBe('foo: bar\n...');
+		expect(body).toBe('body\n');
+		expect(joinFrontmatter(frontmatter, body)).toBe(source);
+	});
+});
+
+describe('a fence that was never closed', () => {
+	it('does not take the prose above the first thematic break as frontmatter', () => {
+		const source = '---\ntitle: X\n\nSome prose the user wrote, locally.\n\n---\n\nrest\n';
+		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	it('still recovers a malformed block whose blank lines are followed by YAML', () => {
+		const source =
+			'---\ntitle: X\ntitle: Y\n\nid: abc\n\n# a comment\ntags:\n\n  - a\n---\nbody\n';
+		const { frontmatter, body } = splitFrontmatter(source);
+		expect(readFrontmatter(frontmatter).id).toBe('abc');
+		expect(body).toBe('body\n');
+	});
+
+	it('leaves a well-formed block scalar alone, blank lines, prose and all', () => {
+		const source =
+			'---\ntitle: X\nsummary: |\n  First paragraph.\n\n  Second paragraph, with prose: in it.\nnotes: >\n\n  Folded.\n---\nbody\n';
+		const { frontmatter, body } = splitFrontmatter(source);
+		expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+		expect(frontmatter).toContain('Second paragraph');
+		expect(body).toBe('body\n');
+	});
+
+	it('recovers a block scalar with blank lines in a block that has an error elsewhere', () => {
+		const source = '---\ntitle: X\ntitle: Y\nsummary: |\n  One.\n\n  Two.\n---\nbody\n';
+		expect(splitFrontmatter(source).body).toBe('body\n');
+	});
+});
+
+describe('line and paragraph separators', () => {
+	it('are not line endings, so a fence after one inside a value closes nothing', () => {
+		['\u2028', '\u2029'].forEach((separator) => {
+			const source = `---\ntitle: "a${separator}---${separator}b"\nid: abc\n---\nbody\n`;
+			const { frontmatter, body } = splitFrontmatter(source);
+			expect(readFrontmatter(frontmatter).id).toBe('abc');
+			expect(body).toBe('body\n');
+		});
+	});
+
+	it('do not open or close a block either', () => {
+		const source = '---\u2028title: X\n---\nbody\n';
+		expect(splitFrontmatter(source).frontmatter).toBeNull();
+	});
+});

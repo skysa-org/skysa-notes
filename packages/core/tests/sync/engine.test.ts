@@ -1329,6 +1329,46 @@ describe('a file the user duplicated', () => {
 	});
 });
 
+describe('a file whose id another connection on the device holds', () => {
+	const noteFile = (id: string, body: string) => `---\nid: ${id}\n---\n\n${body}\n`;
+
+	it('is a new note, rather than a batch the store refuses for ever', async () => {
+		// Ids are unique on the device, not within a connection, and the store
+		// shows the engine one connection. A folder copied into a second account,
+		// or one account connected twice, brings files naming notes the other
+		// connection holds: `noteById` says nothing is there, the id is adopted,
+		// and the store refuses the write — identically on every retry, so the
+		// cursor never moves and this connection never syncs again.
+		store.holdElsewhere('theirs');
+		const entry = await remoteFile('a.md', noteFile('theirs', 'body'));
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.storedCursor()).toBeDefined();
+		expect(noteAt('a.md')?.id).toBe('copy-1');
+		expect(noteAt('a.md')?.remoteId).toBe(entry.remoteId);
+	});
+
+	it('is that same note from then on, whatever the file goes on calling itself', async () => {
+		// The file still names the other connection's note until something here
+		// writes it, so the note is known by its `remoteId` and nothing else.
+		store.holdElsewhere('theirs');
+		const entry = await remoteFile('a.md', noteFile('theirs', 'body'));
+		await engine.pull();
+
+		expect((await engine.pull()).status).toBe('ok');
+		await provider.write('a.md', noteFile('theirs', 'edited there'), {
+			expectedVersion: entry.version,
+		});
+		expect((await engine.pull()).status).toBe('ok');
+
+		expect(store.notes()).toHaveLength(1);
+		expect(noteAt('a.md')?.id).toBe('copy-1');
+		expect(noteAt('a.md')?.content).toContain('edited there');
+	});
+});
+
 describe('a rescan of a remote that changed while the cursor was dead', () => {
 	it('does not delete the note it has just imported', async () => {
 		// The file was replaced at the same path, so the row still carries the
@@ -4383,6 +4423,124 @@ describe('an entry matched by path to a note that has moved', () => {
 		expect(noteAt('Z/x.md')?.content).toBe('mine\n');
 		expect(noteAt('Z/x.md')?.id).toBe(before?.id);
 		expect(noteAt('A/x.md')?.content).toBe('theirs\n');
+	});
+});
+
+describe('a file moved back onto the path a folder rename carried its note off', () => {
+	// One round on the other device: `A` renamed to `B`, a new `A` made, and
+	// `B/x.md` moved back to `A/x.md`. The folder's rename carries the note to
+	// `B/x.md`, and the file's entry names the very path the store still shows
+	// it at — so compared with the row rather than with where the batch has the
+	// note, the entry reads as "nothing happened". The note then sits at
+	// `B/x.md` over a file at `A/x.md`, and the next edit finds nothing at its
+	// path, finds the file by id, finds no rename of its own to follow, and
+	// blocks the ordered queue.
+	const edited = (local: MemoryStore, id: string, content: string): void => {
+		const note = local.notes().find((each) => each.id === id);
+		if (note === undefined) throw new Error('no note');
+		local.put({ ...note, content, dirty: true });
+		local.queue({ op: 'write', noteId: id, path: note.path });
+	};
+
+	it('follows the file when the version survived the move', async () => {
+		// Dropbox's `rev` survives a move, so this is decided without a read.
+		const folder = await provider.createFolder('A');
+		const file = await remoteFile('A/x.md', 'one\n');
+		await engine.pull();
+		const before = noteAt('A/x.md');
+
+		const renamed = await provider.move(folder, 'B');
+		const made = await provider.createFolder('A');
+		const back = await provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
+
+		for (const entries of [
+			[renamed, made, { ...back, version: file.version }],
+			[made, renamed, { ...back, version: file.version }],
+		]) {
+			store.put({ ...(before as SyncNote) });
+			const result = await pullNow(entries);
+
+			expect(result.status).toBe('ok');
+			expect(store.notes().map((note) => note.path)).toEqual(['A/x.md']);
+			expect(noteAt('A/x.md')?.id).toBe(before?.id);
+		}
+
+		// The version the feed was made to keep is not the fake's own.
+		store.put({ ...(noteAt('A/x.md') as SyncNote), remoteVersion: back.version });
+		edited(store, (before as SyncNote).id, 'edited\n');
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.contentAt('A/x.md')).toBe('edited\n');
+		expect(store.ops()).toEqual([]);
+	});
+
+	for (const folderChanges of ['folder-only', 'recursive'] as const) {
+		it(`follows the file when the move changed its version (${folderChanges})`, async () => {
+			// OneDrive's `eTag` does not survive a move, and nor does the fake's
+			// version: same bytes, new version, read and found unchanged.
+			const remote = createFakeProvider({ folderChanges });
+			await remote.ensureRoot();
+			const local = createMemoryStore();
+			const solo = createSyncEngine({ provider: remote, store: local, now: () => AT });
+			const folder = await remote.createFolder('A');
+			const file = await remote.write('A/x.md', 'one\n', {});
+			await solo.pull();
+			const before = local.notes()[0];
+
+			await remote.move(folder, 'B');
+			await remote.createFolder('A');
+			const back = await remote.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
+			expect(back.version).not.toBe(file.version);
+
+			expect((await solo.pull()).status).toBe('ok');
+			expect(local.notes().map((note) => note.path)).toEqual(['A/x.md']);
+			expect(local.notes()[0]?.id).toBe(before?.id);
+
+			edited(local, (before as SyncNote).id, 'edited\n');
+			expect((await solo.push()).status).toBe('ok');
+			expect(remote.contentAt('A/x.md')).toBe('edited\n');
+			expect(local.ops()).toEqual([]);
+			expect(local.anomalies()).toEqual([]);
+		});
+	}
+
+	it('follows the file under unpushed edits, which stay dirty', async () => {
+		// The `syncedHash` route to the same answer: the remote's bytes are the
+		// ones this note last synced, so it was moved and not edited.
+		const folder = await provider.createFolder('A');
+		const file = await remoteFile('A/x.md', 'one\n');
+		await engine.pull();
+		const before = noteAt('A/x.md') as SyncNote;
+		edited(store, before.id, 'edited\n');
+
+		await provider.move(folder, 'B');
+		await provider.createFolder('A');
+		await provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
+
+		const result = await engine.sync();
+
+		expect(result.status).toBe('ok');
+		expect(result.conflicts).toEqual([]);
+		expect(store.notes().map((note) => note.path)).toEqual(['A/x.md']);
+		expect(provider.contentAt('A/x.md')).toBe('edited\n');
+	});
+
+	it('lets go of the note when that file is gone by the time it is read', async () => {
+		// The deletion behind this entry is at `A/x.md`, and from Dropbox it has
+		// no id — so it finds nothing once the note has been carried to
+		// `B/x.md`, and the note is held there over no file for ever.
+		const folder = await provider.createFolder('A');
+		const file = await remoteFile('A/x.md', 'one\n');
+		await engine.pull();
+
+		const renamed = await provider.move(folder, 'B');
+		const made = await provider.createFolder('A');
+		const back = await provider.move({ remoteId: file.remoteId, path: 'B/x.md' }, 'A/x.md');
+		await provider.delete(back);
+
+		const result = await pullNow([renamed, made, back]);
+
+		expect(result.status).toBe('ok');
+		expect(store.notes()).toEqual([]);
 	});
 });
 

@@ -4,6 +4,7 @@ import {
 	conflictPath,
 	contentHash,
 	deriveTitle,
+	frontmatterHasDeclinedId,
 	joinPath,
 	normalizeTag,
 	NOTE_EXTENSION,
@@ -51,7 +52,10 @@ export const noteFileContents = (note: NoteRecord): string =>
 		frontmatter: note.frontmatter,
 		body: note.body,
 		metadata: {
-			id: note.id,
+			// An `id` the user wrote and the app could not use stays theirs: the
+			// row's id is this device's name for the note, not something to put
+			// over `id: 202409141302` in their file.
+			...(frontmatterHasDeclinedId(note.frontmatter) ? {} : { id: note.id }),
 			// An unnamed note has no title worth recording; writing "Untitled"
 			// would pin it and stop the first heading from ever naming the note.
 			...(isUnnamed(note) ? {} : { title: note.title }),

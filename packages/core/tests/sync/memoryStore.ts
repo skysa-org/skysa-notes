@@ -29,6 +29,13 @@ export interface MemoryStore extends SyncStore {
 	/** Seed a note as though it were already synced, or already edited. */
 	readonly put: (note: Partial<SyncNote> & Pick<SyncNote, 'id' | 'path' | 'content'>) => void;
 	readonly putFolder: (folder: SyncFolder) => void;
+	/**
+	 * Say another connection on the device holds a note under this id. This
+	 * store is one connection and has nowhere to keep such a row, so it keeps
+	 * the fact alone: the id is hidden from every read and refused by a write,
+	 * which is all the Dexie store lets the engine see of one either.
+	 */
+	readonly holdElsewhere: (id: string) => void;
 	/** Drop a folder row, as the app does when the user deletes or renames one. */
 	readonly removeFolder: (path: string) => void;
 	readonly queue: (op: Omit<SyncOp, 'seq' | 'attempts'> & { attempts?: number }) => SyncOp;
@@ -49,6 +56,7 @@ export interface MemoryStore extends SyncStore {
 
 export const createMemoryStore = (): MemoryStore => {
 	const notes = new Map<string, SyncNote>();
+	const elsewhere = new Set<string>();
 	const folders = new Map<string, SyncFolder>();
 	const ops = new Map<number, SyncOp & { lastError?: string }>();
 	const state = new Map<'cursor', string>();
@@ -97,7 +105,9 @@ export const createMemoryStore = (): MemoryStore => {
 			remoteVersion: resolution.remote.version,
 			dirty: false,
 		});
-		if (notes.has(resolution.copyId)) throw new Error(`copy id ${resolution.copyId} is taken`);
+		if (notes.has(resolution.copyId) || elsewhere.has(resolution.copyId)) {
+			throw new Error(`copy id ${resolution.copyId} is taken`);
+		}
 		ensureFolderChain(parentPath(resolution.copyPath));
 		notes.set(resolution.copyId, {
 			id: resolution.copyId,
@@ -160,6 +170,11 @@ export const createMemoryStore = (): MemoryStore => {
 	};
 
 	const upsert = (change: Extract<PullChange, { kind: 'upsert-note' }>): void => {
+		// As the Dexie store: written over, another account's note loses its
+		// unpushed edits, and the engine was given `idHeldElsewhere` to ask.
+		if (elsewhere.has(change.id)) {
+			throw new Error(`note ${change.id} belongs to another connection`);
+		}
 		// Decided against a clean note that has been edited since.
 		if (notes.get(change.id)?.dirty === true) {
 			throw new Error(`note ${change.id} changed since the upsert was decided`);
@@ -467,6 +482,7 @@ export const createMemoryStore = (): MemoryStore => {
 	return {
 		cursor: () => Promise.resolve(state.get('cursor')),
 		noteById: (id) => Promise.resolve(notes.get(id)),
+		idHeldElsewhere: (id) => Promise.resolve(elsewhere.has(id)),
 		// As the web store: a note created at a name a tombstone still holds is
 		// the answer, not the tombstone.
 		noteByPath: (path) =>
@@ -558,6 +574,9 @@ export const createMemoryStore = (): MemoryStore => {
 		queue,
 		unqueue: (seq) => {
 			ops.delete(seq);
+		},
+		holdElsewhere: (id) => {
+			elsewhere.add(id);
 		},
 		breakNextApply: () => {
 			flags.set('break', true);

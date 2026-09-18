@@ -167,6 +167,15 @@ describe('conflictContent', () => {
 		expect(conflictContent(original, 'fresh-id')).not.toContain('original-id');
 	});
 
+	it('leaves an id the app cannot read exactly as the user wrote it', () => {
+		// YAML reads this as a number, so no device takes it for an identity and
+		// the copy competes with nothing by keeping it.
+		const zettel = ['---', 'id: 202409141302', 'title: Zettel', '---', '', 'Body', ''].join(
+			'\n'
+		);
+		expect(conflictContent(zettel, 'fresh-id')).toBe(zettel);
+	});
+
 	it('keeps every other key, including ones we know nothing about', () => {
 		const copy = conflictContent(original, 'fresh-id');
 		expect(copy).toContain('mood: hopeful');
