@@ -69,8 +69,6 @@ export interface CreateAppOptions {
 	 * same of the WebDAV proxy.
 	 */
 	providerTimeoutMs?: number;
-	// `identityProviders` joins this signature with the account-first login routes
-	// in Phase 9 (docs/PLAN.md §10).
 }
 
 /**

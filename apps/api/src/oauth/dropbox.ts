@@ -7,7 +7,8 @@ import { type FetchLike, OAuthError, type StorageOAuth, type TokenSet } from './
  *
  * Deliberately hand-rolled rather than taken from a library — docs/PLAN.md §6
  * notes the storage flows are small enough that a dependency would carry more
- * risk than it removes. Identity sign-in in Phase 9 is a separate question.
+ * risk than it removes. There is no identity sign-in to be a second question:
+ * it was dropped on 2026-09-18 (docs/PLAN.md §6).
  *
  * Docs consulted (2026-09-14):
  * https://www.dropbox.com/developers/documentation/http/documentation#oauth2-authorize

@@ -121,16 +121,20 @@ const missingCredentialIssues = (raw: Record<string, unknown>): string[] => {
 };
 
 /**
- * `account-first` is Phase 9 (docs/PLAN.md §10) and is not built. It used to be
- * accepted and then behave exactly like `storage-first`, which is the worst of
- * the three possibilities: an operator who set it believed connections were
- * gated behind a sign-in they had configured, and they were not. Refusing at
- * boot is the only answer that cannot be misread.
+ * `account-first` is not built and is **not going to be** (docs/PLAN.md §6, "No
+ * sign-in separate from storage"). It used to be accepted and then behave
+ * exactly like `storage-first`, which is the worst of the three possibilities:
+ * an operator who set it believed connections were gated behind a sign-in they
+ * had configured, and they were not. Refusing at boot is the only answer that
+ * cannot be misread.
+ *
+ * The whole variable goes when the tables do; until then this refusal is what
+ * keeps the setting from meaning anything.
  */
 const unbuiltAuthModeIssues = (raw: Record<string, unknown>): string[] =>
 	raw.AUTH_MODE === 'account-first'
 		? [
-				'AUTH_MODE: account-first is not implemented yet (docs/PLAN.md §10). ' +
+				'AUTH_MODE: account-first is not implemented and will not be (docs/PLAN.md §6). ' +
 					'Use storage-first, where each connected account is its own silo.',
 			]
 		: [];

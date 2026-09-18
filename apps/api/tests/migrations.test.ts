@@ -168,7 +168,7 @@ describe('0004_per_connection_credentials', () => {
 		});
 	});
 
-	it('takes sessions away and leaves Phase 9 its tables', () => {
+	it('takes sessions away and leaves the two unused tables standing', () => {
 		const db = before();
 		apply(db, '0004_per_connection_credentials.sql');
 		apply(db, '0005_drop_user_connections.sql');
@@ -180,7 +180,10 @@ describe('0004_per_connection_credentials', () => {
 		// both: `connections` goes in 0005 and `sessions` in 0004.
 		expect(names).not.toContain('connections');
 		expect(names).not.toContain('sessions');
-		// `users` and `identities` stay: account-first is still planned.
+		// `users` and `identities` are still here. They were kept for account-first,
+		// which was dropped on 2026-09-18, so they are now owed a migration of
+		// their own (docs/PLAN.md §10) — but 0005 is a record of what it did, and
+		// what it did was leave them.
 		expect(names).toContain('users');
 		expect(names).toContain('identities');
 	});

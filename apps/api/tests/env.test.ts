@@ -73,11 +73,15 @@ describe('parseEnv', () => {
 		expect(() => parseEnv({ ...base, ENABLED_PROVIDERS: '' })).toThrow(/at least one provider/);
 	});
 
-	it('refuses to boot in account-first, which is not built', () => {
+	it('refuses to boot in account-first, which is not built and will not be', () => {
 		// It used to be accepted and then behave exactly like storage-first, which
 		// is the worst of the three possibilities: an operator who set it believed
 		// connections were gated behind a sign-in they had configured, and they
 		// were not. Configuring a sign-in provider does not make it true either.
+		//
+		// Since 2026-09-18 the refusal is permanent rather than an interim: there
+		// is no sign-in layer coming (docs/PLAN.md §6). The variable outlives the
+		// decision only until the `users`/`identities` tables are dropped.
 		for (const extra of [
 			{},
 			{ MICROSOFT_CLIENT_ID: 'm', MICROSOFT_CLIENT_SECRET: 'ms' },
@@ -90,7 +94,7 @@ describe('parseEnv', () => {
 					ENABLED_PROVIDERS: 'webdav',
 					...extra,
 				})
-			).toThrow(/account-first is not implemented yet/);
+			).toThrow(/account-first is not implemented and will not be/);
 		}
 	});
 

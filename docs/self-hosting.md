@@ -216,5 +216,8 @@ them, not just the first. The three that catch people:
 | `DROPBOX_CLIENT_SECRET: required because ENABLED_PROVIDERS includes "dropbox"` | Register that provider's app, or drop it from `ENABLED_PROVIDERS` |
 
 `AUTH_MODE=account-first` is refused the same way — *"account-first is not
-implemented yet"*. It is Phase 9 and is not built; accepting it would leave you
-believing connections were gated behind a sign-in when they were not.
+implemented and will not be"*. Sign-in separate from storage was dropped in
+September 2026: on this instance a person **is** their storage account, and
+accepting the setting would leave you believing connections were gated behind a
+sign-in when they were not. `storage-first` is the only value, and the variable
+itself will go (`docs/PLAN.md` §10).
