@@ -33,6 +33,10 @@ const MATCH = Decoration.mark({ class: 'cm-find-match' });
 const CURRENT = Decoration.mark({ class: 'cm-find-match cm-find-current' });
 
 const decorate = (view: EditorView, query: FindQuery): DecorationSet => {
+	// Before `doc.toString()`, which copies the whole note: this runs on every
+	// update of every raw editor, and the extension is installed whether or not
+	// the bar has ever been opened.
+	if (query.search === '') return Decoration.none;
 	const selection = view.state.selection.main;
 	return Decoration.set(
 		matchesIn(view.state.doc.toString(), query).map((match) =>

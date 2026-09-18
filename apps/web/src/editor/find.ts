@@ -75,6 +75,17 @@ export interface Match {
  * An invalid regular expression matches nothing rather than throwing. The user
  * types a regular expression one character at a time, and most of those
  * characters are not yet a valid expression; the bar says so instead.
+ *
+ * A match of *nothing* is dropped, which a regular expression can produce in
+ * quantity: `a*`, `\d*`, `^`, `$` and `x?` all match the empty string between
+ * characters. A find bar has nothing to do with one. It cannot be drawn —
+ * CodeMirror refuses an empty mark decoration outright, and it throws from
+ * inside the update cycle, after the new state is committed, so every later
+ * update of that editor throws too and typing in the note stops working
+ * altogether. It cannot be stepped through either: the selection after landing
+ * on one is a cursor exactly where the next search starts, so `next` finds the
+ * same one again and Enter is pinned on it forever. So the honest answer to
+ * `a*` is the same as the answer to a pattern that matches nothing.
  */
 export const matchesIn = (text: string, query: FindQuery): readonly Match[] => {
 	if (query.search === '') return [];
@@ -86,7 +97,9 @@ export const matchesIn = (text: string, query: FindQuery): readonly Match[] => {
 	// return also defines `[Symbol.iterator]`. Wrapping rather than asserting:
 	// the wrapper is an `Iterable` by construction, so nothing here is claimed
 	// about the cursor that is not true of any iterator.
-	return Array.from({ [Symbol.iterator]: () => cursor }).map(({ from, to }) => ({ from, to }));
+	return Array.from({ [Symbol.iterator]: () => cursor })
+		.filter(({ from, to }) => to > from)
+		.map(({ from, to }) => ({ from, to }));
 };
 
 /**

@@ -22,6 +22,13 @@ const MODE_TOGGLE = parseChord('Mod+E');
 /**
  * `Mod+F`. `Mod+Shift+F` is already searching every note, which is a different
  * question — this one is about the note that is open.
+ *
+ * On a Mac that means Cmd+F. Ctrl+F there reaches the raw editor first, where
+ * CodeMirror's `standardKeymap` binds the emacs `Ctrl-f` to move the cursor one
+ * character right and calls `preventDefault`, and `useShortcuts` stands aside
+ * for a keystroke somebody nearer has already acted on. The same is true of
+ * Ctrl+E and Ctrl+K, which `commands/context.ts` describes; Cmd is the modifier
+ * a Mac user reaches for anyway.
  */
 const FIND = parseChord('Mod+F');
 

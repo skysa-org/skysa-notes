@@ -51,15 +51,36 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 	const [, redraw] = useState(0);
 	const field = useRef<HTMLInputElement>(null);
 
-	// The bar has just appeared, or the editor underneath it has been rebuilt by
-	// a mode switch: show the matches for whatever is already typed.
+	// Only when the editor underneath changes — the bar has just appeared, or a
+	// mode switch rebuilt it — and deliberately not on every change of `query`.
+	// A query the *user* changed is sent from the handler that changed it, which
+	// is an event, and an event is where dispatching into an editor belongs.
+	//
+	// Dispatching into the rich editor from an effect at all is the awkward case:
+	// its React-backed plugin views (the slash menu, the toolbar) call
+	// `flushSync` from their `update`, and React refuses that while it is still
+	// rendering — four warnings per keystroke, and the menus render a frame late.
+	// A microtask puts the transaction after the commit, which is what React's
+	// own message asks for, and is safe because a target that has gone away in
+	// the meantime says so (`findRich.ts`) rather than throwing.
+	//
+	// `query` is read, not depended on: the effect below wants whatever is typed
+	// at the moment the editor appears. Declared first, so it is already in step
+	// on a render that changes both.
+	const typed = useRef(query);
+	useEffect(() => {
+		typed.current = query;
+	}, [query]);
+
 	useEffect(() => {
 		if (target === null) return;
-		target.highlight(query);
+		queueMicrotask(() => {
+			target.highlight(typed.current);
+		});
 		return () => {
 			target.clear();
 		};
-	}, [target, query]);
+	}, [target]);
 
 	useEffect(() => {
 		field.current?.focus();
@@ -73,6 +94,13 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 	const close = () => {
 		target?.focus();
 		onClose();
+	};
+
+	// Every control goes through here, so there is one place that says what
+	// changing the query means: the bar remembers it and the editor redraws.
+	const change = (next: FindQuery) => {
+		setQuery(next);
+		target?.highlight(next);
 	};
 
 	const act = (run: (editor: FindTarget) => void) => {
@@ -91,7 +119,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 					placeholder="Find"
 					value={query.search}
 					onChange={(event) => {
-						setQuery({ ...query, search: event.target.value });
+						change({ ...query, search: event.target.value });
 					}}
 					onKeyDown={(event) => {
 						if (event.key === 'Escape') close();
@@ -130,7 +158,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 					aria-label="Match case"
 					title="Match case"
 					onClick={() => {
-						setQuery({ ...query, caseSensitive: !query.caseSensitive });
+						change({ ...query, caseSensitive: !query.caseSensitive });
 					}}
 				>
 					Aa
@@ -141,7 +169,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 					aria-label="Whole word"
 					title="Whole word"
 					onClick={() => {
-						setQuery({ ...query, wholeWord: !query.wholeWord });
+						change({ ...query, wholeWord: !query.wholeWord });
 					}}
 				>
 					ab
@@ -152,7 +180,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 					aria-label="Regular expression"
 					title="Regular expression"
 					onClick={() => {
-						setQuery({ ...query, regexp: !query.regexp });
+						change({ ...query, regexp: !query.regexp });
 					}}
 				>
 					.*
@@ -180,7 +208,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 						placeholder="Replace with"
 						value={query.replace}
 						onChange={(event) => {
-							setQuery({ ...query, replace: event.target.value });
+							change({ ...query, replace: event.target.value });
 						}}
 						onKeyDown={(event) => {
 							if (event.key === 'Escape') close();

@@ -46,6 +46,24 @@ describe('matchesIn', () => {
 		expect(matchesIn('anything', query('(unclosed', { regexp: true }))).toEqual([]);
 	});
 
+	/**
+	 * The case that took the raw editor down. CodeMirror refuses an empty mark
+	 * decoration by throwing, and it throws from inside the update cycle *after*
+	 * the new state is committed — so every later update threw too and typing in
+	 * the note stopped working, until the component was remounted. `a*`, `\d*`,
+	 * `^` and `x?` are all ordinary things to type into a regular-expression
+	 * find box.
+	 */
+	it('drops a match of nothing', () => {
+		expect(matchesIn('banana', query('a*', { regexp: true }))).toEqual([
+			{ from: 1, to: 2 },
+			{ from: 3, to: 4 },
+			{ from: 5, to: 6 },
+		]);
+		expect(matchesIn('one\ntwo', query('$', { regexp: true }))).toEqual([]);
+		expect(matchesIn('anything', query('x?', { regexp: true }))).toEqual([]);
+	});
+
 	it('has nothing to find for an empty search', () => {
 		expect(matchesIn('some text', query(''))).toEqual([]);
 	});

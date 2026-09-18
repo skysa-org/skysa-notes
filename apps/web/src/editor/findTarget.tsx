@@ -45,9 +45,11 @@ const createTargetStore = (): TargetStore => {
 			held.current = target;
 			changed();
 			return () => {
-				// Only if it is still ours. A mode switch mounts the incoming
-				// editor before the outgoing one's cleanup runs, and clearing
-				// unconditionally would leave the bar pointed at nothing.
+				// Only if it is still ours, which is the same guard
+				// `commands/registry.ts` keeps and for the same reason: under
+				// React's strict-mode double mount the new offer lands before
+				// the old cleanup runs, and clearing unconditionally would take
+				// the live one away.
 				if (held.current !== target) return;
 				held.current = null;
 				changed();

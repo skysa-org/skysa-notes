@@ -170,12 +170,14 @@ describe('the rich find target', () => {
 		expect(onUserEdit).toHaveBeenCalledWith('single two one\n');
 	});
 
-	it('replaces every match at once', async () => {
-		const { editor, target } = await mount('one two one\n\nand one more\n');
+	it('replaces every match at once, and reports that as an edit', async () => {
+		const onUserEdit = vi.fn();
+		const { editor, target } = await mount('one two one\n\nand one more\n', onUserEdit);
 
 		target.replaceAll(query('one', { replace: 'X' }));
 
 		expect(editor.action(currentMarkdown)).toBe('X two X\n\nand X more\n');
+		expect(onUserEdit).toHaveBeenCalledWith('X two X\n\nand X more\n');
 	});
 
 	/**

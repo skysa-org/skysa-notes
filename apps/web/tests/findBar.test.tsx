@@ -35,7 +35,7 @@ const open = (body = BODY) => {
 	);
 	const editor = EditorView.findFromDOM(view.container);
 	if (editor === null) throw new Error('CodeMirror did not mount');
-	return { editor, onUserEdit, onClose };
+	return { editor, onUserEdit, onClose, view, body };
 };
 
 const find = () => screen.getByLabelText('Find');
@@ -179,9 +179,9 @@ describe('the find bar', () => {
 			expect(onUserEdit).toHaveBeenCalledWith('single two one\nthree one four\n', BODY);
 		});
 
-		it('replaces every match at once', async () => {
+		it('replaces every match at once, and reports that as an edit', async () => {
 			const user = userEvent.setup();
-			const { editor } = await replacing(user);
+			const { editor, onUserEdit } = await replacing(user);
 			await user.type(find(), 'one');
 			await user.type(screen.getByLabelText('Replace with'), 'X');
 
@@ -189,6 +189,7 @@ describe('the find bar', () => {
 
 			expect(doc(editor)).toBe('X two X\nthree X four\n');
 			expect(count()).toBe('No results');
+			expect(onUserEdit).toHaveBeenCalledWith('X two X\nthree X four\n', BODY);
 		});
 
 		/** One transaction, so one press of undo takes the whole thing back. */
@@ -238,13 +239,56 @@ describe('the find bar', () => {
 
 	it('takes the highlighting away when it closes', async () => {
 		const user = userEvent.setup();
-		const { editor, onClose } = open();
+		const { editor, onClose, view, body } = open();
 		await user.type(find(), 'one');
 		expect(marks(editor)).toBe(3);
 
 		await user.click(screen.getByLabelText('Close find'));
-
 		expect(onClose).toHaveBeenCalled();
+
+		// The bar going away is the caller's business; taking the marks with it
+		// is this component's, and asserting only the callback left `clear` free
+		// to do nothing at all. Re-rendered without the bar rather than cleaned
+		// up, so the editor it was clearing is still there to be looked at.
+		view.rerender(
+			<FindTargetProvider>
+				<RawEditor noteId="a" body={body} origin={body} onUserEdit={vi.fn()} />
+			</FindTargetProvider>
+		);
+
+		expect(marks(editor)).toBe(0);
+	});
+
+	it('hands the caret back to the note when it closes', async () => {
+		const user = userEvent.setup();
+		const { editor } = open();
+		await user.type(find(), 'one');
+		await user.keyboard('{Enter}');
+
+		await user.click(screen.getByLabelText('Close find'));
+
+		expect(document.activeElement).toBe(editor.contentDOM);
+	});
+
+	/**
+	 * A regular expression that can match nothing — `a*`, `\d*`, `^` — used to
+	 * take the editor down with it: an empty mark decoration is a throw from
+	 * inside CodeMirror's update cycle, after the state is committed, so every
+	 * later update threw too and the note could not be typed in.
+	 */
+	it('survives a regular expression that matches nothing at all', async () => {
+		const user = userEvent.setup();
+		const { editor } = open('banana bread\n');
+
+		await user.click(screen.getByLabelText('Regular expression'));
+		await user.type(find(), 'a*');
+
+		// Four `a`s in "banana bread", and the empty matches between the other
+		// letters are not offered as matches at all.
+		expect(count()).toBe('1 of 4');
+		await user.click(editor.contentDOM);
+		await user.keyboard('!');
+		expect(doc(editor)).toContain('!');
 	});
 
 	it('closes on Escape', async () => {
