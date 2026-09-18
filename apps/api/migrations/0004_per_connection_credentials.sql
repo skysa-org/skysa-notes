@@ -13,8 +13,22 @@
 -- re-run after the last one drops the live table. So the new shape gets a new
 -- name instead, and nothing here destroys the table it reads from: every
 -- statement is individually idempotent and the file converges from any partial
--- state. `connections` itself goes in 0005, which is a single statement and has
--- no partial state to recover from.
+-- state of its own run. `connections` itself goes in 0005, which is a single
+-- statement and has no partial state to recover from.
+--
+-- That convergence is over 0004's own statements, not over the whole directory:
+-- once 0005 has dropped `connections`, the `INSERT ... SELECT` below has no
+-- source table and this file will not run again. Unreachable through wrangler,
+-- which records 0004 as applied before 0005 is ever attempted, and there is no
+-- `SELECT` guard that would help — SQLite resolves the table when it prepares
+-- the statement, not when it runs it.
+--
+-- This file was revised once before it was ever merged (the grants foreign key
+-- became `ON DELETE set null`; see below). That is only safe because nothing
+-- had applied it: `wrangler` records a migration by file name and never runs it
+-- twice, so editing a released migration changes what new databases get and
+-- leaves every existing one on the old shape, with nothing to detect the
+-- divergence. After this lands, a change here means a new numbered file.
 --
 -- Rows with no `account_id` are left behind deliberately: the account id is the
 -- new identity, and a row without one cannot be addressed. Only rows written

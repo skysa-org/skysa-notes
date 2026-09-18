@@ -111,9 +111,12 @@ export const grantHolder = async (
 	// disconnected and pruned grants keep their rows, with `connection_id` set to
 	// null, so that their hashes can never be claimed a second time (see
 	// apps/api/src/db/schema.ts). `IS NOT NULL` is what tells those apart from
-	// live ones. It is belt and braces rather than the only thing standing in the
-	// way — a null would not match a connection id below either — but the
-	// distinction is worth keeping where the rest of the condition is.
+	// live ones. No mutation of it can be made to fail a test, because there are
+	// three guards and not one: this clause, the null branch below, and the fact
+	// that a null would not match a connection id in the second query either.
+	// Keeping all three is deliberate — the middle one is the cheapest to delete
+	// by accident, and the only one that would be load-bearing if this were ever
+	// rewritten to a query that coerces rather than one that returns nothing.
 	const grant = await db.query.grants.findFirst({
 		where: and(
 			eq(schema.grants.secretHash, hash),

@@ -242,30 +242,38 @@ interface CommitInput {
  * into an update of the winner's row, leaving its grant pointing at an id that
  * does not exist — a foreign key violation, which rolls the whole batch back
  * rather than leaving half of it. The retry then finds the winner's row and
- * attaches to it. Bounded at one: a second failure is not a race.
+ * attaches to it.
+ *
+ * Everything that is not `ok` is retried once, `claimed` included. An earlier
+ * draft retried only the throw, on the reasoning that a spent hash is spent
+ * however often you ask — true of the hash, false of the comparison: the
+ * connection id it is compared against comes from a read, and a read that is
+ * stale invents a fresh id, so a device reconnecting with its own live
+ * credential is told `claimed` and its new refresh token is thrown away. One
+ * more indexed read is a small price for not answering a transient read with a
+ * permanent-looking refusal. Bounded at one all the same: a second disagreement
+ * is not a race.
  */
 const commit = async (db: Database, input: CommitInput): Promise<boolean> => {
-	const first = await attempt(db, input).catch((error: unknown) => {
-		logFailure('storing the connection failed', error);
-		return 'retry' as const;
-	});
-	if (first !== 'retry') return first === 'ok';
+	const first = await attempt(db, input, 'storing the connection failed');
+	if (first === 'ok') return true;
 
-	const second = await attempt(db, input).catch((error: unknown) => {
-		logFailure('storing the connection failed on retry', error);
-		return 'retry' as const;
-	});
-	return second === 'ok';
+	return (await attempt(db, input, 'storing the connection failed on retry')) === 'ok';
 };
 
 /**
- * `ok` stored it. `claimed` means the hash belongs to someone else and no retry
- * will change that. A throw is the racing-callback case, and only that is
- * retried.
+ * `ok` stored it. `claimed` means the hash is bound somewhere else — spent, or
+ * read against a connection id this attempt could not see. `failed` is a throw.
  */
-type Attempt = 'ok' | 'claimed';
+type Attempt = 'ok' | 'claimed' | 'failed';
 
-const attempt = async (db: Database, input: CommitInput): Promise<Attempt> => {
+const attempt = async (db: Database, input: CommitInput, whenItFails: string): Promise<Attempt> =>
+	store(db, input).catch((error: unknown) => {
+		logFailure(whenItFails, error);
+		return 'failed' as const;
+	});
+
+const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
 	const { provider, accountId, displayName, sealed, credentialHash, now } = input;
 
 	const existing = await db.query.connections.findFirst({

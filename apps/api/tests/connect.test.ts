@@ -764,6 +764,28 @@ describe('one row per account, many devices per row', () => {
 		expect(first.credential).toBe(credential);
 	});
 
+	it('recovers a reconnect whose read of the connection came back stale', async () => {
+		const blind = blindable(createD1());
+		const app = buildApp({ db: blind.db });
+		const credential = newCredential();
+		await app.connect({ credential });
+
+		// The hash is this device's own and perfectly live. But the connection id
+		// it gets compared against comes from a read, and a stale read invents a
+		// fresh id — so the comparison says "bound elsewhere" about the one device
+		// it is not. Refusing that outright discards the new refresh token and
+		// tells a user whose credential is fine that connecting failed.
+		blind.once();
+		const { callback } = await app.connect({ credential });
+		expect(blind.blinded).toBe(1);
+
+		expect(callback.headers.get('location')).toBe('/?connect=ok');
+		expect((await app.request('/api/connection', { credential })).status).toBe(200);
+		const rows = await createDb(app.db).select().from(schema.grants);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.connectionId).not.toBeNull();
+	});
+
 	it('leaves one row behind when two callbacks race for one new account', async () => {
 		// The race, forced rather than hoped for. `node:sqlite` is synchronous, so
 		// two callbacks issued together still run one after the other and the
@@ -1087,7 +1109,20 @@ describe('a hash is spent once, however its grant stopped being live', () => {
 
 		// Not user-initiated, which is what makes it the worst of the three: the
 		// device is simply crowded out, and neither end is told.
-		for (let i = 0; i < MAX_GRANTS_PER_CONNECTION; i += 1) await app.connect();
+		//
+		// On `dbid:victim`, and the assertion below is why: the prune is scoped to
+		// one connection, so a loop on the default account would crowd out a
+		// different connection entirely and leave the victim's row untouched. The
+		// 401 would still arrive — from the idle expiry above — and the test would
+		// pass while testing nothing.
+		for (let i = 0; i < MAX_GRANTS_PER_CONNECTION; i += 1) {
+			await app.connect({ account: 'dbid:victim' });
+		}
+		const [pruned] = await drizzle
+			.select()
+			.from(schema.grants)
+			.where(eq(schema.grants.secretHash, await hashCredential(credential)));
+		expect(pruned?.connectionId).toBeNull();
 		expect((await app.request('/api/connection', { credential })).status).toBe(401);
 
 		await takeOver(app, credential);
