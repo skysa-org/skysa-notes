@@ -71,14 +71,40 @@ const placeholderFor = ({
 };
 
 /**
- * The note's opening, after its title. `previewLines` is what decides what a
- * readable line is — the same rule the search excerpt is cut by, so the two
- * never disagree about what a note says — and the first of them is dropped
- * because it is the title, already the line above.
+ * Whether a line is the note's title written out again.
+ *
+ * Emphasis is ignored on both sides. The title is derived from the *parsed*
+ * heading, so `# **Alpha**` gives a title of "Alpha" while the line still reads
+ * `**Alpha**` — the same heading, spelled two ways, and comparing them
+ * character for character would print it twice.
  */
-const preview = (body: string): string => {
-	const text = previewLines(body).slice(1).join(' ');
+const isTitle = (line: string | undefined, title: string): boolean =>
+	line !== undefined && line.replaceAll(/[*_`]/g, '').trim() === title.trim();
+
+/**
+ * The note's opening, after its title. `previewLines` decides what a readable
+ * line is — the same rule the search excerpt is cut by — and the title is
+ * dropped from the front of them so the row does not say it twice.
+ *
+ * Dropped by *identity*, not by position. Taking the first line on the
+ * assumption that it is the heading was wrong in both directions: a note
+ * beginning with the `<br />` the editor writes for an empty paragraph has no
+ * heading on line one, and lost a line of the user's own writing instead — and
+ * a note whose heading comes after an introduction had the introduction eaten
+ * and the heading shown. Comparing against the title the row is already
+ * displaying is the question actually being asked.
+ */
+const preview = (body: string, title: string): string => {
+	const lines = previewLines(body);
+	const opening = isTitle(lines[0], title) ? lines.slice(1) : lines;
+	const text = opening.join(' ');
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+};
+
+/** The opening of a note, or nothing at all when it has none to show. */
+const Preview = ({ note }: { note: NoteRecord }) => {
+	const text = preview(note.body, note.title);
+	return text === '' ? null : <span className="note-preview">{text}</span>;
 };
 
 const editedAt = (timestamp: number): string =>
@@ -253,11 +279,7 @@ export const NoteList = ({
 								onSelectNote(note.id);
 							}}
 							meta={editedAt(note.updatedAt)}
-							detail={
-								preview(note.body) === '' ? null : (
-									<span className="note-preview">{preview(note.body)}</span>
-								)
-							}
+							detail={<Preview note={note} />}
 						/>
 					))}
 				</ul>

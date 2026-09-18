@@ -1,6 +1,14 @@
 /**
- * A note's body as the lines a list can show: no markdown syntax, no blank
- * lines, and nothing the user did not type.
+ * A note's body as the lines a list can show: no line-leading markdown, no blank
+ * lines, and not the break the editor writes for an empty paragraph.
+ *
+ * What it removes is what a *line* is made of and not what a sentence is:
+ * heading hashes, quote carets, bullets and list numbers, task checkboxes,
+ * thematic breaks and setext underlines, and a line that is only a `<br />`.
+ * Everything else survives — emphasis keeps its asterisks, a link keeps its
+ * brackets and its URL, a table keeps its pipes, a fenced block keeps its
+ * backticks, and markers inside a fence are stripped as though they were prose.
+ * Those are the known limits, and they are limits rather than bugs: see below.
  *
  * This is not a renderer and must not become one. It is what the note list's
  * preview and the search excerpt are built from, and both run over every note
@@ -14,11 +22,13 @@
  * for a line of grey text under a title, so the cheap pass stays and its limits
  * are written down here (docs/PLAN.md §7).
  *
- * What it is lossy about, deliberately: inline syntax is left alone. `**bold**`
- * keeps its asterisks, a link keeps its brackets and its URL. Stripping those
- * needs a parser to do without eating the user's own punctuation — and a
- * preview that shows a little syntax is a smaller wrong than a preview that
- * quietly deletes a word.
+ * What it is lossy about, deliberately: inline syntax is left alone, and a line
+ * is read the same way whether or not it is inside a fenced code block — so a
+ * `# comment` in a shell example loses its hash, and a `---` in a YAML sample
+ * disappears. Both need a parser to get right, and a parser is what the
+ * measurement above rules out. The bias runs one way throughout: when in doubt,
+ * *show* the characters. A preview with a little syntax in it is a smaller wrong
+ * than one that has quietly deleted a word the user wrote.
  */
 
 /**
@@ -26,7 +36,7 @@
  * carets, bullets, and the numbers of an ordered list. `1.` and `1)` are both
  * ordered lists to CommonMark.
  */
-const BLOCK_MARKER = /^\s*(?:#{1,6}|>+|[-*+]|\d+[.)])\s+/;
+const BLOCK_MARKER = /^\s*(?:#{1,6}|>+|[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
 
 /**
  * A line that is only a thematic break, or the underline of a setext heading:
@@ -36,16 +46,24 @@ const BLOCK_MARKER = /^\s*(?:#{1,6}|>+|[-*+]|\d+[.)])\s+/;
 const RULE = /^\s*(?:(?:[-*_]\s*){3,}|=+)\s*$/;
 
 /**
- * The break Milkdown writes for an empty paragraph, in the spellings markdown
- * files carry it in. Markdown cannot say "a blank paragraph here" — blank lines
- * are separators, not content — so the editor writes an HTML break and reads it
- * back (docs/PLAN.md §7). It is the one thing in a note the user did not type,
- * which is exactly why it must not be the thing they read in a list.
+ * A line that is nothing but the break Milkdown writes for an empty paragraph.
+ * Markdown cannot say "a blank paragraph here" — blank lines are separators, not
+ * content — so the editor writes an HTML break and reads it back (docs/PLAN.md
+ * §7). It is the one thing in a note the user did not type, which is exactly why
+ * it must not be the thing they read in a list.
+ *
+ * A *whole line*, and not the tag wherever it appears, because the two are not
+ * the same thing at all. Milkdown only ever writes it alone on its line, while a
+ * `<br>` in the middle of a sentence is the user's own text — in prose, in
+ * `` `<br>` `` in a note about HTML — and deleting that is the failure this
+ * module exists to avoid. Matching the tag anywhere turned "She wrote `<br>` in
+ * her HTML lesson" into "She wrote in her HTML lesson", which is precisely the
+ * quiet deletion the comment below promises not to do.
  *
  * Removed here and nowhere else: the file keeps it, because stripping it on
  * save would delete a `<br />` that came from the user's own document.
  */
-const BREAK = /<br\s*\/?>/gi;
+const BREAK_LINE = /^\s*(?:<br\s*\/?>\s*)+$/i;
 
 /**
  * The readable lines of a body, in order: markers gone, whitespace collapsed,
@@ -58,13 +76,12 @@ const BREAK = /<br\s*\/?>/gi;
 export const previewLines = (body: string): string[] =>
 	body
 		.split(/\r\n|\n|\r/)
-		// A rule is recognised before the markers are stripped, not after: `* * *`
-		// and `- - -` are thematic breaks whose first two characters are also a
-		// bullet, and stripping the bullet first leaves too little to recognise.
-		.map((line) => (RULE.test(line) ? '' : line))
-		.map((line) =>
-			line.replace(BREAK, ' ').replace(BLOCK_MARKER, '').replace(/\s+/g, ' ').trim()
-		)
+		// Whole-line shapes are recognised before the markers are stripped, not
+		// after: `* * *` and `- - -` are thematic breaks whose first two
+		// characters are also a bullet, and stripping the bullet first leaves too
+		// little to recognise.
+		.map((line) => (RULE.test(line) || BREAK_LINE.test(line) ? '' : line))
+		.map((line) => line.replace(BLOCK_MARKER, '').replace(/\s+/g, ' ').trim())
 		.filter((line) => line !== '');
 
 /**

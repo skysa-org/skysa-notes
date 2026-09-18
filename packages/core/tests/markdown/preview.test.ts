@@ -58,14 +58,22 @@ describe('the break the editor writes for an empty paragraph', () => {
 		]);
 	});
 
-	it('leaves the words either side of it when it shares their line', () => {
-		expect(previewText('before<br />after\n')).toBe('before after');
+	it('is left alone in the middle of a line, where it is the user writing', () => {
+		// Milkdown only ever writes it alone on its own line. A `<br>` inside a
+		// sentence came from the person, and removing it is the quiet deletion
+		// this module exists to avoid: "She wrote <br> in her HTML lesson"
+		// became "She wrote in her HTML lesson".
+		expect(previewText('She wrote <br> in her HTML lesson\n')).toBe(
+			'She wrote <br> in her HTML lesson'
+		);
+		expect(previewText('Use `<br>` for a line break\n')).toBe('Use `<br>` for a line break');
 	});
 
 	it('does not touch a word that merely contains the letters', () => {
 		expect(previewText('the abrupt brink of a library\n')).toBe(
 			'the abrupt brink of a library'
 		);
+		expect(previewText('a <brand> and a <break/>\n')).toBe('a <brand> and a <break/>');
 	});
 });
 
@@ -92,5 +100,20 @@ describe('the whole body as one line', () => {
 	it('is empty for a body that is only syntax, and for no body at all', () => {
 		expect(previewText('')).toBe('');
 		expect(previewText('\n\n---\n\n<br />\n')).toBe('');
+	});
+});
+
+describe('a list is still a list', () => {
+	it('drops a task checkbox with the bullet that carries it', () => {
+		expect(previewLines('- [ ] buy apples\n- [x] and pears\n')).toEqual([
+			'buy apples',
+			'and pears',
+		]);
+	});
+
+	it('leaves brackets that are not a checkbox', () => {
+		expect(previewLines('- [a link](https://example.com) to follow\n')).toEqual([
+			'[a link](https://example.com) to follow',
+		]);
 	});
 });

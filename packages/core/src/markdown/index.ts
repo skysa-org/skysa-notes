@@ -10,6 +10,7 @@ export {
 	type SplitDocument,
 	type NoteFrontmatter,
 } from './frontmatter.js';
+export { previewLines, previewText } from './preview.js';
 export {
 	foldName,
 	noteFilename,
@@ -19,7 +20,6 @@ export {
 	uniqueFilename,
 	UNTITLED_SLUG,
 } from './slug.js';
-export { previewLines, previewText } from './preview.js';
 export { deriveTitle, titleFromFilename, type DeriveTitleInput } from './title.js';
 export {
 	parseNoteFile,

@@ -61,6 +61,37 @@ describe('NoteList', () => {
 		expect(preview.textContent).toBe('turn the heap every second week');
 	});
 
+	it('keeps the first line when the note does not open with its title', () => {
+		// This body is what Milkdown writes when the user presses Enter at the
+		// very start of a note (pinned in tests/rich.test.ts). Dropping the first
+		// readable line on the assumption that it is the heading lost "turn the
+		// heap" — a line the user wrote — from the row.
+		renderList({
+			notes: [note('Alpha', '<br />\n\nturn the heap\n\nevery second week\n')],
+		});
+
+		expect(screen.getByText(/turn the heap/).textContent).toBe(
+			'turn the heap every second week'
+		);
+	});
+
+	it('does not print a heading twice when it was written with emphasis', () => {
+		// The title comes from the parsed heading, so `# **Alpha**` derives
+		// "Alpha" while the line still reads `**Alpha**`. Same heading, two
+		// spellings.
+		renderList({ notes: [note('Alpha', '# **Alpha**\n\nthen the body\n')] });
+
+		expect(screen.getByText(/then the body/).textContent).toBe('then the body');
+	});
+
+	it('keeps an introduction that comes before the heading', () => {
+		renderList({ notes: [note('Alpha', 'a word first\n\n# Alpha\n\nthen the body\n')] });
+
+		expect(screen.getByText(/a word first/).textContent).toBe(
+			'a word first Alpha then the body'
+		);
+	});
+
 	it('says an open notebook is empty', () => {
 		renderList({ notes: [] });
 		expect(screen.getByText('No notes here yet.')).toBeDefined();
