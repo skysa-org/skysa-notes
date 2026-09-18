@@ -25,7 +25,7 @@ Local-first markdown notes PWA syncing to an app-owned folder on Google Drive, O
 
 ## Working style
 - Work one phase (or one checklist item) at a time from `docs/PLAN.md`. Start in plan mode for anything touching more than one package.
-- Prefer small PRs against `main`. Each PR: tests for new behavior, and tick the checklist item in `docs/PLAN.md`. (Changesets are Phase 8 — there is no `.changeset/` directory or tooling yet, so do not write one.)
+- Prefer small PRs against `main`. Each PR: tests for new behavior, tick the checklist item in `docs/PLAN.md`, and — if it changes anything under `apps/` or `packages/` — a changeset (`pnpm run changeset`, or `--empty` when nothing observable moved). CI fails a PR that changes a package without one. The three workspace packages share one version and one `vX.Y.Z` tag; `.changeset/README.md` says why and how a release is cut.
 - Commands: `pnpm dev` (web + wrangler dev), `pnpm test`, `pnpm lint`, `pnpm typecheck`, `pnpm db:migrate`, `pnpm build`.
 - When unsure about a provider API detail (scopes, endpoints, conflict semantics), check the current vendor docs rather than assuming; note the URL in a code comment.
 - Do not add dependencies without stating why in the PR description. Check license (MIT/Apache/ISC only).

@@ -25,6 +25,10 @@ jobs:
         timeout-minutes: 15
         steps:
             - uses: actions/checkout@v4
+              with:
+                  # The changeset check below compares against the base branch,
+                  # which a shallow clone does not have.
+                  fetch-depth: 0
 
             # Before setup-node, which needs the package manager on PATH to resolve
             # its cache. The version comes from `packageManager` in package.json.
@@ -40,6 +44,19 @@ jobs:
             # The same gate the README tells humans to run before every commit, so
             # the two cannot drift: format:check + lint + typecheck + test.
             - run: pnpm verify
+
+            # A pull request that changes what ships has to say what it does to
+            # the version. `--empty` is the answer for one that changes nothing
+            # observable, and is a real answer rather than a way round this.
+            #
+            # Only on a pull request: `--since` needs something to compare to,
+            # and on `main` that would be the commit itself. It passes when no
+            # package changed, so a documentation or workflow change needs
+            # nothing.
+            - if: github.event_name == 'pull_request'
+              env:
+                  BASE: ${{ github.base_ref }}
+              run: pnpm exec changeset status --since="origin/$BASE"
 
             # Separate, and not merged into `verify`, because it is the only thing
             # that checks two claims nothing else does: `packages/core` compiles
