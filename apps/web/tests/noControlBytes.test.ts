@@ -1,12 +1,11 @@
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
 /**
- * No tracked text file holds a raw control byte.
+ * No source file holds a raw control byte.
  *
  * A single NUL in a `.ts` file makes git call it binary, and from then on the
  * file is absent from every diff, every blame and every three-way merge —
@@ -15,58 +14,105 @@ import { describe, expect, it } from 'vitest';
  * for two rounds because of it, and in a slug test that was asserting about
  * control characters in the first place.
  *
- * Nothing else in the gate looks at bytes. Prettier reformats the file,
- * ESLint parses it and `tsc` types it, all without complaint, because a NUL is
- * a perfectly legal character inside a string literal. Only the escape spelling
- * (as `\u0000`) keeps the file readable by the tools people review with, and
- * the two are identical once parsed.
+ * Nothing else in the gate looks at bytes. Prettier reformats the file, ESLint
+ * parses it and `tsc` types it, all without complaint, because a NUL is a
+ * perfectly legal character inside a string literal. Only the escape spelling
+ * (as `\u0000`) keeps the file readable by the tools people review with, and the
+ * two are identical once parsed.
  *
- * This lives here rather than in `packages/core` because it is about the
- * repository, not about any package, and `apps/web` is where the file that
- * prompted it lives.
+ * The tree is walked rather than `git ls-files` asked. The property is about the
+ * files, and the files are right here: a walk still works from a tarball, a
+ * `pnpm deploy` output or a Docker build that copies source without `.git`,
+ * where asking git fails the whole suite. More to the point, `git ls-files` run
+ * inside a tree that some *outer* repository ignores returns nothing at all, and
+ * a guard with nothing to iterate passes — silently, and for good. The canary
+ * below is what makes that impossible here: the walk has to find this file.
+ *
+ * This lives in `apps/web` rather than `packages/core` because core must run in
+ * the browser and in Workers, and nothing under it may reach for `node:fs` even
+ * in a test. The cost is that a repo-wide invariant is checked by one package's
+ * suite; `pnpm test` runs them all (docs/PLAN.md §11).
  */
 
-const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const here = fileURLToPath(import.meta.url);
+const repo = join(dirname(here), '..', '..', '..');
 
 /** Tab, newline and carriage return are the control bytes that belong in text. */
 const ALLOWED = new Set([0x09, 0x0a, 0x0d]);
 
-/**
- * Tracked files, from git rather than a directory walk: it is git's own opinion
- * of what is in the repository, so `node_modules`, `dist` and anything else
- * ignored is already excluded, and nothing tracked is missed.
- */
-const tracked = (): string[] =>
-	execFileSync('git', ['ls-files', '-z'], { cwd: repo, encoding: 'utf8', maxBuffer: 32 << 20 })
-		.split('\0')
-		.filter((path) => path !== '');
+/** Not source: build output, dependencies, and the caches tools keep. */
+const SKIP = new Set([
+	'node_modules',
+	'.git',
+	'dist',
+	'build',
+	'coverage',
+	'.wrangler',
+	'.turbo',
+	'.vite',
+]);
 
 /**
  * Binaries are exempt by extension rather than by sniffing: the point is to
  * catch a control byte in something meant to be read as text, and a PNG is not
- * that. Anything not listed is checked, so a new kind of text file is covered
- * the day it is added.
+ * that. The list fails open — anything unlisted is checked — so a new kind of
+ * text file is covered the day it is added, at the price of one loud failure
+ * the day a new kind of binary is. The message says which of the two it is.
  */
-const BINARY = /\.(?:png|jpg|jpeg|gif|webp|avif|ico|woff2?|ttf|otf|eot|pdf|zip|gz|wasm)$/i;
+const BINARY =
+	/\.(?:png|jpg|jpeg|gif|webp|avif|ico|svgz|woff2?|ttf|otf|eot|pdf|zip|gz|br|zst|tar|7z|mp3|mp4|m4a|mov|webm|wasm|node|docx|xlsx|pptx)$/i;
 
-describe('every tracked text file', () => {
+const filesUnder = (dir: string): string[] =>
+	readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+		// A symlink is followed nowhere: the file it points at is either inside
+		// the walk already or outside the repository, and neither is ours.
+		if (entry.isSymbolicLink()) return [];
+		const path = join(dir, entry.name);
+		if (entry.isDirectory()) return SKIP.has(entry.name) ? [] : filesUnder(path);
+		return entry.isFile() ? [path] : [];
+	});
+
+const sources = (): string[] => [
+	// The root's own files — `package.json`, the workspace and lockfiles, the
+	// dotfiles — but not the directories beside them, which are named next.
+	...readdirSync(repo, { withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => join(repo, entry.name)),
+	...['apps', 'packages', 'docs'].flatMap((dir) => filesUnder(join(repo, dir))),
+];
+
+describe('every source file', () => {
 	it('is free of control bytes that would make git call it binary', () => {
-		const offenders = tracked()
+		const files = sources();
+
+		// The canary. A walk that found nothing would pass the assertion below
+		// while checking nothing at all, which is the failure mode worth guarding
+		// against: a guard that has quietly stopped looking is worse than none,
+		// because it is the one you stop thinking about.
+		expect(files).toContain(here);
+
+		const offenders = files
 			.filter((path) => !BINARY.test(path))
 			.flatMap((path) => {
-				const bytes = readFileSync(join(repo, path));
-				// The value, not the index: it is what the message has to name, and
-				// asking for it directly is what makes it a `number` rather than a
-				// `number | undefined` that only the search proves is there.
+				const bytes = readFileSync(path);
+				// The value, not the index: asking for it directly is what makes it
+				// a `number` rather than a `number | undefined` that only the search
+				// proves is there. `indexOf` then agrees with `find` — nothing
+				// before the first match satisfies the predicate, so nothing before
+				// it holds this value either.
 				const offender = bytes.find((byte) => byte < 0x20 && !ALLOWED.has(byte));
 				// The byte in hex and where it is, because the one thing an editor
-				// will not show is the character the message is about.
+				// will not show is the character the message is about. And what to
+				// do about it, because the right action depends on which kind of
+				// file this is, and only the person who added it knows.
 				return offender === undefined
 					? []
 					: [
-							`${path}: 0x${offender.toString(16).padStart(2, '0')} at byte ${String(
-								bytes.indexOf(offender)
-							)}`,
+							`${relative(repo, path)}: 0x${offender
+								.toString(16)
+								.padStart(2, '0')} at byte ${String(bytes.indexOf(offender))} — ` +
+								'escape it (\\u0000 and friends), or add the extension to BINARY ' +
+								'if this file is not text',
 						];
 			});
 

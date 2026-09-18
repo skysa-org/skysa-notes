@@ -731,9 +731,17 @@ button.row.selected {
 	   you are writing. A search is not that: it is the thing being read, and at
 	   fourteen rems the header, the field and the live region leave room for a
 	   single answer — a result list you cannot compare anything in. While one is
-	   open the list takes most of the screen and the note keeps the rest. */
+	   open the list takes most of the screen and the note keeps the rest. It is
+	   not taken from the note, which is not compressed here but pushed down: the
+	   panes are stacked at this width and the page scrolls, so the editor stays
+	   whole, one scroll away.
+
+	   `dvh`, like everything else in this file: `vh` resolves against the large
+	   viewport, so on a phone with its toolbar showing 60vh is nearer 70% of
+	   what the user can see. Desktop Chrome measures the two identically, which
+	   is exactly why the difference would never show up in a check here. */
 	.note-list.searching {
-		max-height: 60vh;
+		max-height: 60dvh;
 	}
 
 	/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
