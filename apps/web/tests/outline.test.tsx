@@ -1,14 +1,21 @@
+import { EditorView } from '@codemirror/view';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Outline } from '../src/components/Outline.js';
+import { RawEditor } from '../src/editor/RawEditor.js';
 
 /**
- * The rail itself. Where a click *lands* is the half jsdom cannot answer — a
- * CodeMirror view needs layout to scroll and ProseMirror needs a real editor —
- * so that is checked in a browser instead (docs/PLAN.md §7). What is checked
- * here is what the rail shows, and that a click reaches the right heading.
+ * The rail, and where a click lands.
+ *
+ * The raw half is reachable here — jsdom carries CodeMirror as far as dispatch,
+ * which is what `RawEditor.test.tsx` already relies on — so the two things that
+ * matter most are pinned here: that a jump selects the line `headings` named,
+ * and that it does not report an edit. What jsdom cannot answer is whether the
+ * viewport actually moved, since scrolling needs layout, and the rich editor
+ * cannot be typed into at all; both are checked in a browser instead
+ * (docs/PLAN.md §7).
  */
 
 afterEach(cleanup);
@@ -30,7 +37,7 @@ describe('the outline', () => {
 	});
 
 	it('shows nothing at all for a note with no headings', () => {
-		const { container } = render(<Outline body="just words\n" editor={() => null} />);
+		const { container } = render(<Outline body={'just words\n'} editor={() => null} />);
 
 		expect(container.querySelector('.outline')).toBeNull();
 	});
@@ -52,32 +59,153 @@ describe('the outline', () => {
 		]);
 	});
 
-	/**
-	 * The rich-mode half of `jump`, which is the one jsdom can reach: a top-level
-	 * heading is a direct child of `.ProseMirror`, so the nth such child is the
-	 * nth heading `headings` found. Nothing else about the two orders is agreed,
-	 * which is why both are top-level only.
-	 */
-	it('scrolls to the nth top-level heading of a rich editor', async () => {
-		const user = userEvent.setup();
-		const editor = document.createElement('div');
-		editor.innerHTML =
-			'<div class="ProseMirror"><h1>Top</h1><p>words</p>' +
-			'<blockquote><h2>Quoted</h2></blockquote>' +
-			'<h2>Middle</h2><h3>Deep</h3></div>';
-		const scrolled: string[] = [];
-		editor.querySelectorAll('h1, h2, h3').forEach((heading) => {
-			vi.spyOn(heading, 'scrollIntoView').mockImplementation(() => {
-				scrolled.push(heading.textContent);
-			});
+	describe('jumping into the raw editor', () => {
+		const rawEditor = (body: string) => {
+			const onUserEdit = vi.fn();
+			const view = render(
+				<>
+					<RawEditor noteId="a" body={body} origin={body} onUserEdit={onUserEdit} />
+					<Outline body={body} editor={() => view.container.querySelector('.editor')} />
+				</>
+			);
+			const editor = EditorView.findFromDOM(view.container);
+			if (editor === null) throw new Error('CodeMirror did not mount');
+			return { editor, onUserEdit };
+		};
+
+		it('puts the cursor at the start of the heading’s line', async () => {
+			const user = userEvent.setup();
+			const { editor } = rawEditor(BODY);
+
+			await user.click(screen.getByRole('button', { name: 'Middle' }));
+
+			// `## Middle` is line 5, which is the whole reason `headings` reports
+			// a line: this is `doc.line(n)` with nothing in between.
+			expect(editor.state.selection.main.head).toBe(editor.state.doc.line(5).from);
 		});
-		render(<Outline body={BODY} editor={() => editor} />);
 
-		await user.click(screen.getByRole('button', { name: 'Middle' }));
+		/**
+		 * The hard rule (`editor/dirty.ts`, docs/PLAN.md §7): a note becomes dirty
+		 * only on a user editing transaction. An outline reads a note; adding a
+		 * `changes` to that dispatch would rewrite files the user only looked at.
+		 */
+		it('does not report an edit', async () => {
+			const user = userEvent.setup();
+			const { onUserEdit } = rawEditor(BODY);
 
-		// Not "Quoted": it is inside a blockquote, so it is neither a row in the
-		// rail nor a child of `.ProseMirror`, and the counting stays in step.
-		expect(scrolled).toEqual(['Middle']);
+			await user.click(screen.getByRole('button', { name: 'Deep' }));
+
+			expect(onUserEdit).not.toHaveBeenCalled();
+		});
+
+		/**
+		 * The body in the editor and the body the rail was read from are the same
+		 * string a moment apart, and a sync can land between them.
+		 */
+		it('clamps to the last line when the document has shrunk underneath it', async () => {
+			const user = userEvent.setup();
+			const { editor } = rawEditor(BODY);
+			editor.dispatch({
+				changes: { from: 0, to: editor.state.doc.length, insert: '# Top\n' },
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Deep' }));
+
+			expect(editor.state.selection.main.head).toBe(editor.state.doc.line(2).from);
+		});
+	});
+
+	describe('jumping into the rich editor', () => {
+		const richEditor = (html: string) => {
+			const editor = document.createElement('div');
+			editor.className = 'editor editor-rich';
+			editor.innerHTML = `<div class="ProseMirror">${html}</div>`;
+			document.body.append(editor);
+			const scrolled: string[] = [];
+			editor.querySelectorAll('h1, h2, h3').forEach((heading) => {
+				vi.spyOn(heading, 'scrollIntoView').mockImplementation(() => {
+					scrolled.push(heading.textContent);
+				});
+			});
+			return { editor, scrolled };
+		};
+
+		/**
+		 * A top-level heading is a direct child of `.ProseMirror`, so the nth such
+		 * child is the heading with `ordinal` n. Nothing else about the two orders
+		 * is agreed, which is why both walks are top-level only.
+		 */
+		it('scrolls to the nth top-level heading', async () => {
+			const user = userEvent.setup();
+			const { editor, scrolled } = richEditor(
+				'<h1>Top</h1><p>words</p><blockquote><h2>Quoted</h2></blockquote>' +
+					'<h2>Middle</h2><h3>Deep</h3>'
+			);
+			render(<Outline body={BODY} editor={() => editor} />);
+
+			await user.click(screen.getByRole('button', { name: 'Middle' }));
+
+			// Not "Quoted": it is inside a blockquote, so it is neither a row in
+			// the rail nor a child of `.ProseMirror`, and the counting stays in
+			// step.
+			expect(scrolled).toEqual(['Middle']);
+		});
+
+		/**
+		 * The rail drops a heading with no text; ProseMirror still draws it. So the
+		 * rail's *third* row is the document's *fifth* heading, and matching by row
+		 * position instead of `ordinal` sends every row after the first empty
+		 * heading to its neighbour.
+		 */
+		it('counts the empty headings the rail does not show', async () => {
+			const user = userEvent.setup();
+			const { editor, scrolled } = richEditor(
+				'<h1>One</h1><h2></h2><h2>Two</h2><h2><img alt="" src="x.png"></h2><h3>Three</h3>'
+			);
+			render(
+				<Outline
+					body={'# One\n\n##\n\n## Two\n\n## ![](x.png)\n\n### Three\n'}
+					editor={() => editor}
+				/>
+			);
+
+			await user.click(screen.getByRole('button', { name: 'Three' }));
+
+			expect(scrolled).toEqual(['Three']);
+		});
+
+		/**
+		 * The reason the open editor is identified by its class rather than by
+		 * trying `EditorView.findFromDOM` first, which is the same thing today and
+		 * quietly stops being it. Milkdown's code-block component renders a fenced
+		 * block as an embedded CodeMirror, so `findFromDOM` on a *rich* editor
+		 * holding one hands back a real view — and the jump would put the cursor
+		 * in somebody's shell script instead of scrolling the note.
+		 */
+		it('does not mistake a code block’s editor for the raw one', async () => {
+			const user = userEvent.setup();
+			const { editor, scrolled } = richEditor('<h1>Top</h1><h2>Middle</h2><h3>Deep</h3>');
+			const block = document.createElement('div');
+			editor.querySelector('.ProseMirror')?.append(block);
+			const embedded = new EditorView({ doc: 'a\nb\nc\nd\ne\nf\n', parent: block });
+			render(<Outline body={BODY} editor={() => editor} />);
+
+			await user.click(screen.getByRole('button', { name: 'Middle' }));
+
+			expect(scrolled).toEqual(['Middle']);
+			expect(embedded.state.selection.main.head).toBe(0);
+			embedded.destroy();
+		});
+
+		it('leaves the caret in the heading, so reading can carry on by keyboard', async () => {
+			const user = userEvent.setup();
+			const { editor } = richEditor('<h1>Top</h1><h2>Middle</h2><h3>Deep</h3>');
+			render(<Outline body={BODY} editor={() => editor} />);
+
+			await user.click(screen.getByRole('button', { name: 'Deep' }));
+
+			expect(window.getSelection()?.anchorNode?.textContent).toBe('Deep');
+		});
 	});
 
 	it('does nothing when there is no editor to jump into', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { headings } from '../../src/markdown/outline.js';
+import { parse } from '../../src/markdown/pipeline.js';
 
 /**
  * What an outline is drawn from. The rules worth holding are all about what is
@@ -19,8 +20,8 @@ describe('headings', () => {
 
 	it('says which line each starts on, counting from 1', () => {
 		expect(headings('intro\n\n## Second\n\nmore\n\n## Later\n')).toEqual([
-			{ depth: 2, text: 'Second', line: 3 },
-			{ depth: 2, text: 'Later', line: 7 },
+			{ depth: 2, text: 'Second', line: 3, ordinal: 0 },
+			{ depth: 2, text: 'Later', line: 7, ordinal: 1 },
 		]);
 	});
 
@@ -31,14 +32,14 @@ describe('headings', () => {
 	 */
 	it('is not fooled by a hash inside a fenced code block', () => {
 		expect(headings('# Real\n\n```sh\n# Install\nnpm i\n```\n')).toEqual([
-			{ depth: 1, text: 'Real', line: 1 },
+			{ depth: 1, text: 'Real', line: 1, ordinal: 0 },
 		]);
 	});
 
 	it('takes setext headings, whose marker is on the line after', () => {
 		expect(headings('Title\n=====\n\nSub\n---\n')).toEqual([
-			{ depth: 1, text: 'Title', line: 1 },
-			{ depth: 2, text: 'Sub', line: 4 },
+			{ depth: 1, text: 'Title', line: 1, ordinal: 0 },
+			{ depth: 2, text: 'Sub', line: 4, ordinal: 1 },
 		]);
 	});
 
@@ -49,7 +50,7 @@ describe('headings', () => {
 	 */
 	it('leaves out a heading inside a quote or a list', () => {
 		expect(headings('> # Quoted\n\n- # Listed\n\n# Mine\n')).toEqual([
-			{ depth: 1, text: 'Mine', line: 5 },
+			{ depth: 1, text: 'Mine', line: 5, ordinal: 0 },
 		]);
 	});
 
@@ -59,7 +60,23 @@ describe('headings', () => {
 
 	/** What a heading looks like while it is being typed. */
 	it('leaves out a heading with nothing in it', () => {
-		expect(headings('##\n\n## \n\n## Real\n')).toEqual([{ depth: 2, text: 'Real', line: 5 }]);
+		expect(headings('##\n\n## \n\n## Real\n').map((heading) => heading.text)).toEqual(['Real']);
+	});
+
+	/**
+	 * The one thing a caller cannot work out for itself. A renderer draws the
+	 * empty headings this function drops, so a caller pairing its own rendered
+	 * headings with these rows by position needs to know how many were skipped
+	 * before each one — otherwise every row after the first empty heading points
+	 * at its neighbour. `line` cannot stand in: a renderer with no markdown
+	 * offsets has no lines either.
+	 */
+	it('counts the headings it leaves out, so a renderer’s nth still lines up', () => {
+		expect(headings('# One\n\n##\n\n## Two\n\n## ![](x.png)\n\n### Three\n')).toEqual([
+			{ depth: 1, text: 'One', line: 1, ordinal: 0 },
+			{ depth: 2, text: 'Two', line: 5, ordinal: 2 },
+			{ depth: 3, text: 'Three', line: 9, ordinal: 4 },
+		]);
 	});
 
 	/**
@@ -73,6 +90,16 @@ describe('headings', () => {
 		expect(headings(lf.replaceAll('\n', '\r\n'))).toEqual(headings(lf));
 		expect(headings(lf.replaceAll('\n', '\r'))).toEqual(headings(lf));
 		expect(headings(lf).at(-1)?.line).toBe(9);
+	});
+
+	/** And the hazard itself, so the reason above is a fact and not a story. */
+	it('would have handed out offsets into a string the caller does not hold', () => {
+		const crlf = '# One\r\n\r\ntext\r\n\r\n## Two\r\n';
+		const heading = parse(crlf).children.at(-1);
+
+		// Four CRLF line endings precede it, so the tree's offset is four
+		// characters short of where `## Two` actually begins.
+		expect(heading?.position?.start.offset).toBe(crlf.indexOf('## Two') - 4);
 	});
 
 	it('has nothing to say about a note with no headings', () => {

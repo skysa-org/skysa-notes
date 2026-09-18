@@ -872,7 +872,7 @@ button.row.selected {
 .outline {
 	flex: 0 0 13rem;
 	overflow: auto;
-	border-left: 1px solid var(--border);
+	border-inline-start: 1px solid var(--border);
 	padding: 0.75rem 0.5rem;
 }
 
@@ -913,19 +913,19 @@ button.row.selected {
 	color: var(--fg);
 }
 .outline-h2 button {
-	padding-left: 1rem;
+	padding-inline-start: 1rem;
 }
 .outline-h3 button {
-	padding-left: 1.75rem;
+	padding-inline-start: 1.75rem;
 }
 .outline-h4 button {
-	padding-left: 2.5rem;
+	padding-inline-start: 2.5rem;
 }
 .outline-h5 button {
-	padding-left: 3.25rem;
+	padding-inline-start: 3.25rem;
 }
 .outline-h6 button {
-	padding-left: 4rem;
+	padding-inline-start: 4rem;
 }
 
 /* Narrow enough and the rail is most of the screen, so it goes. */

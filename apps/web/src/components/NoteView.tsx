@@ -187,9 +187,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		void setNoteEditorMode(db, noteId, otherMode(mode));
 	}, [flush, mode, noteId, unsupported]);
 
-	// The rail is hidden, not unmounted, so the note's headings are not re-read
-	// every time it is shown — and it costs nothing when a note has none, since
-	// `Outline` renders nothing without them.
+	// Shown by default, and unmounted rather than hidden when it is not: the
+	// headings are re-read when it comes back, which is one parse of one note,
+	// and a rail that is not there cannot be tabbed through. It costs nothing
+	// when a note has no headings either, since `Outline` renders nothing then.
 	const [showOutline, setShowOutline] = useState(true);
 	useCommand({
 		id: 'note.outline',

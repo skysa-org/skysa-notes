@@ -37,6 +37,18 @@ export interface Heading {
 	 * wants to be told — CodeMirror's `doc.line(n)` takes exactly this.
 	 */
 	readonly line: number;
+	/**
+	 * Which top-level heading this is, counting from 0 — **including the ones
+	 * this function does not return**.
+	 *
+	 * It is here because a renderer draws a heading this function drops. An empty
+	 * `##` has no row in an outline but is still an `<h2>` in the document, so a
+	 * caller matching its own list of rendered headings by position has to count
+	 * the ones that were skipped or every row after the first empty heading
+	 * points at its neighbour. `line` cannot do that job: a renderer that has no
+	 * markdown offsets has no lines either.
+	 */
+	readonly ordinal: number;
 }
 
 /**
@@ -51,18 +63,21 @@ export interface Heading {
  * everywhere else in this module.
  *
  * A heading with no text — a bare `##`, which is what a heading looks like while
- * it is being typed — is left out. It has nothing to show in a row, and a row
- * that appears the moment a `#` is typed and renames itself on every keystroke
- * after is noise rather than structure.
+ * it is being typed, or one holding nothing but an image with no alt text — is
+ * left out. It has nothing to show in a row, and a row that appears the moment a
+ * `#` is typed and renames itself on every keystroke after is noise rather than
+ * structure. What is left out is still counted: see `ordinal`.
  */
 export const headings = (body: string): readonly Heading[] =>
 	parse(body)
 		.children.filter((node) => node.type === 'heading')
-		.flatMap((node) => {
+		.flatMap((node, ordinal) => {
 			const text = nodeToString(node).trim();
 			// `position` is optional on every mdast node because a tree can be
 			// built by hand, but remark sets it on everything it parses. A node
 			// without one cannot be pointed at, so it is not offered.
 			const line = node.position?.start.line;
-			return text === '' || line === undefined ? [] : [{ depth: node.depth, text, line }];
+			return text === '' || line === undefined
+				? []
+				: [{ depth: node.depth, text, line, ordinal }];
 		});
