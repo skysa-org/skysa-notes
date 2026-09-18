@@ -29,6 +29,20 @@
       "when": 1789432699003,
       "tag": "0003_one_user_per_account",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789432699004,
+      "tag": "0004_per_connection_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789432699005,
+      "tag": "0005_drop_user_connections",
+      "breakpoints": true
     }
   ]
 }

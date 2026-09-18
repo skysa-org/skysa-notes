@@ -1,7 +1,14 @@
 import { createApp, type CreateAppOptions } from '../src/app.js';
-import { fromBase64Url, importSecretKey, openOAuthSecret, toBase64Url } from '../src/crypto.js';
+import { CREDENTIAL_PREFIX, hashCredential } from '../src/credentials.js';
+import {
+	fromBase64Url,
+	importSecretKey,
+	openOAuthSecret,
+	randomBase64Url,
+	toBase64Url,
+} from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
-import { flowCookieName, sessionCookieName } from '../src/session.js';
+import { flowCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
 
 /**
@@ -252,6 +259,37 @@ export const dropboxStub = (script: DropboxScript = {}) => {
 	};
 };
 
+/**
+ * A credential exactly as the PWA makes one: 32 random bytes the browser keeps,
+ * behind a version prefix. The server is only ever told its hash.
+ */
+export const newCredential = (): string => `${CREDENTIAL_PREFIX}${randomBase64Url(32)}`;
+
+/**
+ * A well-formed hash for a test that does not care which credential it stands
+ * for — the shape is all `/start` checks.
+ */
+export const ANY_HASH = 'A'.repeat(43);
+
+/** What `/start` hands back, for a test that only wants to read the URL. */
+export const authorizeUrlOf = async (response: Response): Promise<URL> => {
+	const body: { authorizeUrl: string } = await response.json();
+	return new URL(body.authorizeUrl);
+};
+
+export interface ConnectOptions {
+	/** Which provider account the scripted provider reports for this flow. */
+	account?: string;
+	provider?: 'dropbox' | 'onedrive' | 'gdrive';
+	/** Reuse a jar to reconnect from the same browser. */
+	jar?: Jar;
+	/** Reuse a credential to test what happens when a hash repeats. */
+	credential?: string;
+	returnTo?: string;
+	/** Skip the POST and forge a flow cookie some other way. */
+	start?: (jar: Jar, credentialHash: string) => Promise<Response>;
+}
+
 export const buildApp = (options: Partial<CreateAppOptions> & { script?: DropboxScript } = {}) => {
 	const db = createD1();
 	const stub = dropboxStub(options.script);
@@ -261,13 +299,23 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 		// Short enough that a test for the deadline is a test, not a wait.
 		providerTimeoutMs: options.providerTimeoutMs ?? 50,
 		...(options.entitlements === undefined ? {} : { entitlements: options.entitlements }),
+		...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
 	});
 
-	/** A request against this app, carrying whatever cookies the caller holds. */
-	const request = (path: string, init: RequestInit & { cookies?: Jar } = {}) => {
+	/**
+	 * A request against this app, carrying whatever cookies and credential the
+	 * caller holds.
+	 */
+	const request = async (
+		path: string,
+		init: RequestInit & { cookies?: Jar; credential?: string } = {}
+	): Promise<Response> => {
 		const headers = new Headers(init.headers);
 		const cookie = init.cookies?.header();
 		if (cookie !== undefined) headers.set('cookie', cookie);
+		if (init.credential !== undefined) {
+			headers.set('authorization', `Bearer ${init.credential}`);
+		}
 		// The app checks `Origin` on state-changing methods, so send what a
 		// browser on this origin would send.
 		if (!headers.has('origin')) headers.set('origin', 'https://notes.example.com');
@@ -284,17 +332,43 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 		);
 	};
 
+	/** Start a flow the way the PWA does: a same-origin POST carrying the hash. */
+	const startConnect = (
+		provider: string,
+		options: { jar?: Jar; credentialHash?: string; returnTo?: string } = {}
+	): Promise<Response> => {
+		const { credentialHash = ANY_HASH, returnTo } = options;
+		return request(`/api/auth/connect/${provider}/start`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				credentialHash,
+				...(returnTo === undefined ? {} : { returnTo }),
+			}),
+			...(options.jar === undefined ? {} : { cookies: options.jar }),
+		});
+	};
+
 	/**
-	 * The whole connect flow, which is also how a test gets a signed-in user:
-	 * in storage-first the first connected account *is* the account.
+	 * The whole connect flow, ending with a credential the device holds. The
+	 * plaintext is generated here and only its hash is ever sent, which is what
+	 * lets a test grep every response for a secret it knows.
 	 */
-	const connect = async (
-		jar = createJar(),
-		account = DEFAULT_ACCOUNT,
-		provider: 'dropbox' | 'onedrive' | 'gdrive' = 'dropbox'
-	) => {
+	const connect = async (options: ConnectOptions = {}) => {
+		const {
+			account = DEFAULT_ACCOUNT,
+			provider = 'dropbox',
+			jar = createJar(),
+			credential = newCredential(),
+			returnTo,
+		} = options;
 		stub.as(account);
-		jar.absorb(await request(`/api/auth/connect/${provider}/start`, { cookies: jar }));
+
+		const hash = await hashCredential(credential);
+		const start = jar.absorb(
+			await (options.start?.(jar, hash) ??
+				startConnect(provider, { jar, credentialHash: hash, returnTo }))
+		);
 
 		const state = flowStateOf(jar);
 		const callback = jar.absorb(
@@ -303,10 +377,10 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
 			})
 		);
 
-		return { jar, callback, state };
+		return { jar, credential, start, callback, state };
 	};
 
-	return { app, db, stub, request, connect };
+	return { app, db, stub, request, connect, startConnect };
 };
 
 /**
@@ -314,9 +388,8 @@ export const buildApp = (options: Partial<CreateAppOptions> & { script?: Dropbox
  * so a test that hard-coded the bare name would silently stop finding them.
  */
 export const cookieNames = {
-	session: sessionCookieName(true),
 	flow: flowCookieName(true),
-	insecure: { session: sessionCookieName(false), flow: flowCookieName(false) },
+	insecure: { flow: flowCookieName(false) },
 };
 
 /** The flow cookie's payload, decoded the way `readFlowState` decodes it. */

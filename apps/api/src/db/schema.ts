@@ -5,6 +5,16 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
  * here — see docs/PLAN.md §6.
  */
 
+/**
+ * Phase 9's tables, and nobody else's.
+ *
+ * `storage-first` — the only mode this build runs — has no users: a connection
+ * is reached by the credential the device that made it holds, and nothing
+ * aggregates connections under a subject. These two stay because `account-first`
+ * (docs/PLAN.md §10) is still planned and dropping them would be a migration to
+ * write twice. Nothing in `src/` reads them today, and `parseEnv` refuses to
+ * boot in `account-first` rather than pretend they are wired up.
+ */
 export const users = sqliteTable(
 	'users',
 	{
@@ -18,10 +28,7 @@ export const users = sqliteTable(
 	(t) => [index('users_email_idx').on(t.email)]
 );
 
-/**
- * `account-first` mode only: one row per external sign-in attached to a user.
- * `storage-first` instances leave this table empty.
- */
+/** Phase 9 only: one row per external sign-in attached to a user. */
 export const identities = sqliteTable(
 	'identities',
 	{
@@ -43,34 +50,31 @@ export const identities = sqliteTable(
 	]
 );
 
-export const sessions = sqliteTable(
-	'sessions',
-	{
-		id: text('id').primaryKey(),
-		userId: text('user_id')
-			.notNull()
-			.references(() => users.id, { onDelete: 'cascade' }),
-		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-	},
-	(t) => [index('sessions_user_id_idx').on(t.userId)]
-);
-
+/**
+ * One connected storage account. Auth and data are coupled: a connection is its
+ * own silo, and the device switches between them (docs/PLAN.md §6).
+ *
+ * The SQL name is `storage_connections`, not `connections`. The old table
+ * carried a `NOT NULL` foreign key to `users`, and SQLite can neither drop a
+ * column named in a foreign key nor relax `NOT NULL` without rebuilding the
+ * table — a rebuild `drizzle-kit` writes with `PRAGMA foreign_keys=OFF`, which
+ * D1 rejects. A rebuild done by hand can avoid the pragma but not the
+ * drop-then-rename in the middle, which leaves a partial state no re-run of the
+ * migration can recover from. A new table under a new name has neither problem:
+ * see `migrations/0004_per_connection_credentials.sql`.
+ */
 export const connections = sqliteTable(
-	'connections',
+	'storage_connections',
 	{
 		id: text('id').primaryKey(),
-		userId: text('user_id')
-			.notNull()
-			.references(() => users.id, { onDelete: 'cascade' }),
 		provider: text('provider', { enum: ['gdrive', 'onedrive', 'dropbox', 'webdav'] }).notNull(),
 		/**
-		 * The provider's own id for the account this connection points at. In
-		 * `storage-first` it is what lets a returning user be recognised as the
-		 * same user instead of a new one, and it is how a reconnect tells "the
-		 * same account again" from "a different account in the same slot".
+		 * The provider's own id for the account this connection points at, and the
+		 * only identity a connection has. `NOT NULL`, because it is the upsert
+		 * target: SQLite NULLs do not conflict, so a nullable one would insert a
+		 * duplicate row on every reconnect instead of updating the existing one.
 		 */
-		accountId: text('account_id'),
+		accountId: text('account_id').notNull(),
 		displayName: text('display_name').notNull(),
 		/** Provider id of the app-owned root folder, once `ensureRoot()` has run. */
 		rootId: text('root_id'),
@@ -86,21 +90,54 @@ export const connections = sqliteTable(
 		lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }),
 	},
 	(t) => [
-		index('connections_user_id_idx').on(t.userId),
-		// One connection per provider per user until Phase 7 (docs/PLAN.md §12.3).
-		// Enforced here rather than by convention so reconnecting is an atomic
-		// upsert instead of a read-then-write race between two tabs.
-		uniqueIndex('connections_user_provider_idx').on(t.userId, t.provider),
-		// Unique, because in `storage-first` the account *is* the identity: two
-		// user rows claiming one account is an ambiguity nothing can resolve, and
-		// leaving it to a read-then-write left the answer up to row order. NULLs
-		// do not conflict in SQLite, which is only relevant to rows written before
-		// the id became mandatory.
-		uniqueIndex('connections_provider_account_idx').on(t.provider, t.accountId),
+		// One row per account, so reconnecting is an atomic upsert rather than a
+		// read-then-write race between two tabs. Two devices connecting the same
+		// account share the row and hold a grant each.
+		uniqueIndex('storage_connections_provider_account_idx').on(t.provider, t.accountId),
+	]
+);
+
+/**
+ * A device's right to act on one connection.
+ *
+ * The device generates 32 random bytes, keeps them, and sends only their
+ * SHA-256 — so the plaintext credential never reaches the server at all, not
+ * even in transit, and a copy of this table mints nothing. Lookup is by hash
+ * through a unique index rather than id-then-compare, which would need a
+ * constant-time comparison: `crypto.subtle.timingSafeEqual` is a Workers
+ * extension that Node's webcrypto lacks, and the test suite runs on Node.
+ *
+ * See docs/PLAN.md §6, and CLAUDE.md on what holding a bearer in IndexedDB
+ * costs.
+ */
+export const grants = sqliteTable(
+	'grants',
+	{
+		id: text('id').primaryKey(),
+		connectionId: text('connection_id')
+			.notNull()
+			.references(() => connections.id, { onDelete: 'cascade' }),
+		/** base64url SHA-256 of the credential string. Never the credential. */
+		secretHash: text('secret_hash').notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+		/**
+		 * Touched at most once a day, so idle expiry has something to read. Set to
+		 * `createdAt` on insert and never null: a NULL would fail the `>` the idle
+		 * check is written as, and a grant nothing can find is a device that can
+		 * never sync again.
+		 */
+		lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }).notNull(),
+	},
+	(t) => [
+		// Unique so the hash can be the lookup key. A collision here would be a
+		// SHA-256 collision, but the index also makes a replayed `/start` hash
+		// fail loudly instead of quietly pointing two connections at one secret.
+		uniqueIndex('grants_secret_hash_idx').on(t.secretHash),
+		index('grants_connection_id_idx').on(t.connectionId),
 	]
 );
 
 export type User = typeof users.$inferSelect;
 export type Identity = typeof identities.$inferSelect;
-export type Session = typeof sessions.$inferSelect;
 export type Connection = typeof connections.$inferSelect;
+export type Grant = typeof grants.$inferSelect;

@@ -18,13 +18,15 @@ const files = (): string[] =>
 		.filter((name) => name.endsWith('.sql'))
 		.sort();
 
-const apply = (db: DatabaseSync, name: string): void => {
-	for (const statement of readFileSync(join(DIR, name), 'utf8').split(
-		'--> statement-breakpoint'
-	)) {
-		const trimmed = statement.trim();
-		if (trimmed !== '') db.exec(trimmed);
-	}
+const statements = (name: string): string[] =>
+	readFileSync(join(DIR, name), 'utf8')
+		.split('--> statement-breakpoint')
+		.map((statement) => statement.trim())
+		.filter((statement) => statement !== '');
+
+/** `upTo` statements, or all of them. `wrangler` stops at the first failure. */
+const apply = (db: DatabaseSync, name: string, upTo = Number.POSITIVE_INFINITY): void => {
+	for (const statement of statements(name).slice(0, upTo)) db.exec(statement);
 };
 
 const open = (upTo: string): DatabaseSync => {
@@ -115,5 +117,131 @@ describe('0003_one_user_per_account', () => {
 
 	it('applies cleanly from empty, in order', () => {
 		expect(() => open('9999')).not.toThrow();
+	});
+});
+
+describe('0004_per_connection_credentials', () => {
+	/** A pre-0004 database with one connection per user, as 0003 leaves it. */
+	const before = (): DatabaseSync => {
+		const db = open('0003_one_user_per_account.sql');
+		addUser(db, 'first');
+		addUser(db, 'second');
+		addConnection(db, 'c-one', 'first', 'dbid:one');
+		addConnection(db, 'c-two', 'second', 'dbid:two');
+		// A row from before 0002, when the account id was still optional. It
+		// cannot be addressed in the new model, so it does not come across.
+		db.prepare(
+			'INSERT INTO connections (id, user_id, provider, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+		).run('c-old', 'first', 'webdav', 'x', 'c', 'i', 'k1');
+		return db;
+	};
+
+	const connectionIds = (db: DatabaseSync): string[] =>
+		(
+			db.prepare('SELECT id FROM storage_connections ORDER BY id').all() as { id: string }[]
+		).map((row) => row.id);
+
+	const tables = (db: DatabaseSync): string[] =>
+		(
+			db
+				.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+				.all() as { name: string }[]
+		).map((row) => row.name);
+
+	it('carries every addressable connection across, and its secret with it', () => {
+		const db = before();
+		apply(db, '0004_per_connection_credentials.sql');
+
+		expect(connectionIds(db)).toEqual(['c-one', 'c-two']);
+		const [row] = db
+			.prepare('SELECT * FROM storage_connections WHERE id = ?')
+			.all('c-one') as Record<string, unknown>[];
+		// The sealed columns move verbatim: re-encrypting is not this migration's
+		// job, and a connection whose secret did not come across is an account
+		// that has to be connected again for no reason.
+		expect(row).toMatchObject({
+			provider: 'dropbox',
+			account_id: 'dbid:one',
+			secret_ciphertext: 'c',
+			secret_iv: 'i',
+			secret_key_id: 'k1',
+		});
+	});
+
+	it('takes sessions away and leaves Phase 9 its tables', () => {
+		const db = before();
+		apply(db, '0004_per_connection_credentials.sql');
+		apply(db, '0005_drop_user_connections.sql');
+
+		const names = tables(db);
+		expect(names).toContain('storage_connections');
+		expect(names).toContain('grants');
+		// A table nothing reads, holding live refresh tokens, is the worst of
+		// both: `connections` goes in 0005 and `sessions` in 0004.
+		expect(names).not.toContain('connections');
+		expect(names).not.toContain('sessions');
+		// `users` and `identities` stay: account-first is still planned.
+		expect(names).toContain('users');
+		expect(names).toContain('identities');
+	});
+
+	it('can be re-run from a failure at every one of its statements', () => {
+		// `wrangler d1 migrations apply` records a migration only once it has
+		// finished, so a failure anywhere means the whole file runs again from the
+		// top. Every prefix has to converge on the same database.
+		const count = statements('0004_per_connection_credentials.sql').length;
+		expect(count).toBeGreaterThan(1);
+
+		const complete = before();
+		apply(complete, '0004_per_connection_credentials.sql');
+		const expected = connectionIds(complete);
+
+		for (const stopAfter of Array.from({ length: count + 1 }, (_value, index) => index)) {
+			const db = before();
+			apply(db, '0004_per_connection_credentials.sql', stopAfter);
+
+			expect(
+				() => {
+					apply(db, '0004_per_connection_credentials.sql');
+				},
+				`re-run after ${String(stopAfter)} statement(s)`
+			).not.toThrow();
+
+			expect(connectionIds(db), `data after ${String(stopAfter)} statement(s)`).toEqual(
+				expected
+			);
+			expect(tables(db)).not.toContain('sessions');
+		}
+	});
+
+	it('is why 0005 is a file of its own', () => {
+		// 0004 never drops the table it reads from. If it did, a re-run after the
+		// drop would die on `no such table: connections` with the data only half
+		// moved — which is exactly what a hand-written rebuild's drop-then-rename
+		// does, and why this is a new table rather than a renamed one.
+		const db = before();
+		apply(db, '0004_per_connection_credentials.sql');
+		apply(db, '0005_drop_user_connections.sql');
+
+		// 0005 is one statement, so it has no partial state of its own, and it is
+		// idempotent besides.
+		expect(() => {
+			apply(db, '0005_drop_user_connections.sql');
+		}).not.toThrow();
+		expect(connectionIds(db)).toEqual(['c-one', 'c-two']);
+	});
+
+	it('leaves a grant unreachable once its connection is deleted', () => {
+		const db = open('9999');
+		db.prepare(
+			'INSERT INTO storage_connections (id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+		).run('c', 'dropbox', 'dbid:1', 'x', 'c', 'i', 'k1');
+		db.prepare(
+			'INSERT INTO grants (id, connection_id, secret_hash, created_at, last_used_at) VALUES (?, ?, ?, 0, 0)'
+		).run('g', 'c', 'h');
+
+		db.prepare('DELETE FROM storage_connections WHERE id = ?').run('c');
+
+		expect(db.prepare('SELECT id FROM grants').all()).toHaveLength(0);
 	});
 });

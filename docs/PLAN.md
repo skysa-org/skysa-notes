@@ -279,11 +279,12 @@ Hono app in `apps/api`, deployed to Cloudflare Workers with `wrangler`. Keep it 
 - Database: D1 via `drizzle-orm/d1`, migrations with `drizzle-kit generate` + `wrangler d1 migrations apply`. Same SQLite dialect locally and in prod.
 - Secrets: provider client ids/secrets and `SECRETS_KEY` via `wrangler secret put`; never in `wrangler.toml`.
 - Static SPA served from the same Worker via `[assets]` in `wrangler.toml` (SPA fallback to `index.html`), so `/api/*` and the app share an origin and cookies are first-party.
-- **Composition root:** `apps/api` exports `createApp({ entitlements, identityProviders, config })` as a library; its own `src/worker.ts` calls it with the defaults. An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking. Nothing in `apps/api` reads env directly except `worker.ts`.
-- Sessions with `hono/cookie`; request validation with `zod`. (`@hono/zod-validator` was declared up front and never used — the routes validate with `zod` directly — so it was removed. Re-add it when a route actually wants the middleware; the removal is not a decision against it.)
-- **Entitlement seam:** every route that mints a token or proxies WebDAV calls `entitlements.check(userId)` from an `EntitlementProvider` interface in `core`. The repo ships `AlwaysAllowed`. Operators of a shared instance can substitute their own (an email allowlist, for example) through `createApp`; no such policy logic lives in the repo.
+- **Composition root:** `apps/api` exports `createApp({ entitlements, rateLimiter, identityProviders, config })` as a library; its own `src/worker.ts` calls it with the defaults. An operator who needs different behavior writes their own Worker entry that imports `createApp` and passes their own implementations, instead of forking. Nothing in `apps/api` reads env directly except `worker.ts`.
+- Cookies with `hono/cookie` — one, the short-lived OAuth flow cookie; there are no sessions (see "Per-connection credentials"). Request validation with `zod`. (`@hono/zod-validator` was declared up front and never used — the routes validate with `zod` directly — so it was removed. Re-add it when a route actually wants the middleware; the removal is not a decision against it.)
+- **Entitlement seam:** every route that mints a token or proxies WebDAV calls `entitlements.check({ connectionId, provider, accountId, displayName })` from an `EntitlementProvider` interface in `core`. The repo ships `AlwaysAllowed`. Operators of a shared instance can substitute their own (an allowlist of accounts, for example) through `createApp`; no such policy logic lives in the repo. *Revised in Phase 7:* it took a `userId` until connections stopped aggregating under a user, and an account is what an operator's rule can actually be written about.
+- **Rate-limit seam:** `createApp({ rateLimiter })`, defaulting to `neverLimited`, consulted by `POST /api/auth/connect/:provider/start`, the callback, and `POST /api/token` — the three endpoints that spend an outbound provider call. A seam and not a Cloudflare binding, for the same reason as the entitlement one: a binding would be deployment-specific code in a repo that forbids it.
 - **Provider enablement** (`ENABLED_PROVIDERS` env, default `dropbox` — only what is implemented; each OAuth provider listed must have its credentials or the app refuses to boot). `webdav` is accepted and needs no credentials, but WebDAV is deferred (§5.4): nothing is mounted for it and the client offers no way to connect one. If it is ever built, its routes and proxy are mounted only when `webdav` is listed.
-- **Identity modes** (`AUTH_MODE` env): `storage-first` (default: user = first connected storage account, as below) or `account-first` (Sign in with Google or Microsoft creates the user; storage is connected in a separate flow afterward). Both write to the same `users` table. `account-first` suits instances shared by several people, and users who want to change storage provider without losing their account.
+- **Identity modes** (`AUTH_MODE` env): `storage-first` (the default, and the only one built) or `account-first` (Phase 9: Sign in with Google or Microsoft creates the user; storage is connected in a separate flow afterward). `account-first` suits instances shared by several people, and users who want to change storage provider without losing their account. *Revised in Phase 7:* `storage-first` no longer creates users at all — each connected account is its own silo — and `parseEnv` **refuses to boot** on `AUTH_MODE=account-first` rather than accepting it and behaving like `storage-first`, which left an operator believing connections were gated behind a sign-in they had configured when they were not.
 - **Two OAuth flows per provider, never combined.** `/auth/login/:provider` requests identity scopes only (`openid email profile`); `/auth/connect/:provider` requests storage scopes only. They share one Google client id / one Entra registration but use distinct redirect URIs and distinct callback routes. Frame the storage request in the UI as "Connect your storage", not as a second login. *Revised in Phase 4:* the storage request does **not** pass `include_granted_scopes` (see "Storage OAuth, as built"). Sharing one Google client also means sharing its revocation, because Google revokes every grant to the project at once. Disconnecting storage revokes, and that would sign the user out of Google sign-in too. Phase 9 has to choose between a separate Cloud project for sign-in and not revoking on disconnect for users who sign in with Google.
 - **Identity providers via Arctic** (`arctic` npm, Workers-compatible): Google and Microsoft Entra at launch. **Open (2026-09-14): `arctic` was deprecated by its author in July 2026 ("no longer supported"); they suggest copying the per-provider client code, which is ~50 lines each.** Nothing depends on it before Phase 9, so the dependency is not installed yet. Decide then between vendoring the two clients into `apps/api/src/identity/` (no runtime dep, and the storage OAuth in `oauth/` is hand-rolled anyway) or a maintained alternative. `IdentityProvider` interface in `apps/api/src/identity/` returns `{ providerId, subject, email, emailVerified, name }`. Adding Facebook or Apple is a new adapter + registration; Facebook would additionally need an email-confirmation fallback (email is not guaranteed from Meta) and Meta App Review with a data-deletion URL, so it is deferred.
 - **Account linking (`account-first` mode):** `identities` table (`user_id, provider, subject, email, email_verified`). Two paths:
@@ -368,34 +369,67 @@ A fourth round confirmed the identity model is coherent — every reachable comb
 
 **Still open at the end of this PR:** the Dropbox app is not registered, so the OAuth round trip is proven against a scripted `fetch` and against `wrangler dev`, not against Dropbox.
 
+### Per-connection credentials (Phase 7)
+
+Until Phase 7 a user held **at most one connection**, because in `storage-first` any connected account signed you in as that user: two connections under one user would cross-authorise, and whoever held the OneDrive account would get tokens for the Dropbox one. Phase 7 removes the premise rather than the guard. **There is no shared user.** Each connected storage account is its own silo — auth and data coupled — and the device switches between the ones it holds.
+
+What proves a device's right to a connection is a credential it generated, not a session cookie:
+
+1. The PWA generates 32 random bytes, **awaits** an IndexedDB write of them, and sends `SHA-256` of `sk1_<bytes>` to `POST /api/auth/connect/:provider/start` with `returnTo`. The hash rides in the existing signed `__Host-skysa_flow` cookie beside `state` and the PKCE verifier.
+2. The callback commits the connection **and** its grant in one `db.batch`, then redirects as before.
+3. The PWA presents `Authorization: Bearer sk1_…` from then on.
+
+The plaintext credential never enters a URL, a fragment, history, a `Set-Cookie`, a response body, a Worker log, or the database. "The API never holds the plaintext" is literally true rather than true-except-in-transit — which is what deleted the exchange endpoint, the pending-code table, its TTL and sweep, the double-claim race, and the window where a connection was committed but its credential was never collected.
+
+Each decision, with the reason it would otherwise be got wrong later:
+
+- **`/start` is a same-origin `POST`.** The hash is caller-supplied, so a `GET` would be a session-fixation hole: a link carrying the attacker's hash, consented to by the victim, hands the attacker a live credential to the victim's storage. `hono/csrf` does not cover JSON bodies (it matches only form and text content types, leaning on CORS preflight), so the route checks `Origin === appOrigin || Sec-Fetch-Site: same-origin` itself and keeps `csrf()` as defence in depth.
+- **Lookup is by hash, not `<id>.<secret>`.** An id-then-compare needs a constant-time comparison, and `crypto.subtle.timingSafeEqual` is a Workers extension **Node's webcrypto lacks** — and the suite runs on Node against a `node:sqlite` D1 shim. A unique index on the hash sidesteps a hand-rolled comparison tested under the wrong crypto. Idle expiry is part of the same query, so an expired grant is indistinguishable from an unknown one.
+- **The grant insert is a plain insert, never an upsert on the hash.** An upsert would let anyone holding a hash — from a database dump — re-point that device's credential at a connection of their own, and the device would sync the user's notes into a stranger's storage. A repeated hash fails the whole connect instead.
+- **`GET /connections` is gone, replaced by singular `GET /api/connection`.** A one-element array invites the aggregation model straight back, and the client that unbinds on an empty list would keep "working" with the wrong meaning. 404 (or 401 for a revoked credential) means *this connection is gone*; a 5xx or a network failure means nothing.
+- **`connections.account_id` is `NOT NULL`** so `(provider, account_id)` can be the upsert target: SQLite NULLs do not conflict, and a nullable target would insert a duplicate on every reconnect forever.
+- **A grant cap per connection** (20, oldest evicted, pruned inside the same batch), because every grant is a live key to the same storage.
+- **Migrations `0004`/`0005` are hand-written.** `drizzle-kit`'s SQLite table rebuild emits `PRAGMA foreign_keys=OFF`, which D1 rejects and the test shim silently tolerates — green in tests, wedged on `wrangler d1 migrations apply`. A rebuild written by hand avoids the pragma but not the `DROP TABLE` + `RENAME` pair in the middle, whose partial state no re-run can recover from; so the new shape gets a new table name (`storage_connections`), `0004` never drops the table it reads, and dropping the old one is `0005`'s single statement. Every device reconnects after this: sessions carried that right before, and a grant can only be created by the OAuth callback.
+- **`sessions` goes; `users` and `identities` stay**, annotated as Phase 9's only callers.
+- This retires `holdsAnotherProvider`, `session_mismatch`, `claimedBy`, the compensating delete, and the `conflict`/`signin`/`occupied` outcomes — not by relocating them but by removing what made them necessary.
+
+**The security trade, stated rather than buried.** CSRF disappears as a class (a bearer is never sent ambiently) and the blast radius of a theft drops from *every* connection to one. But `httpOnly` was real protection against exfiltration and IndexedDB is not: an XSS today can mint tokens only while the page lives; tomorrow it can post the credential anywhere and use it until someone revokes the device. What holds the line is `script-src 'self'` with nothing inline (`apps/web/public/_headers`, pinned by `tests/csp.test.ts`), which stops being a good policy and becomes a hard requirement, plus HSTS on the shell, a device list that makes theft visible and revocable, and lazy idle expiry (180 days). The `sk1_` prefix reserves a non-extractable-ECDSA proof-of-possession variant that buys the property back; this ships the bearer and keeps the seam. It is written into CLAUDE.md in words, because a hard-rules list implying IndexedDB is safe for a long-lived bearer is exactly the kind of rule that quietly stops being honest.
+
+**Deliberately not done:** no server-side revocation list, no per-device names, and no proof of possession. The device list plus `DELETE` is enough to act on a theft the user knows about; anything more waits for Phase 9's account model to say who is asking.
+
 ### Data model (Drizzle, D1)
 ```
-users          id, email, email_verified, created_at
-identities     id, user_id, provider ('google'|'microsoft'), subject, email, created_at   (account-first only)
-sessions       id, user_id, expires_at                      (httpOnly cookie, sameSite=lax, 90-day sliding)
-connections    id, user_id, provider, display_name, root_id,
-               secret_ciphertext, secret_iv, created_at, last_used_at
-               -- secret = { refresh_token } for OAuth, { url, username, password } for WebDAV
+users               id, email, email_verified, created_at              (Phase 9 only; unused today)
+identities          id, user_id, provider ('google'|'microsoft'), subject, email, created_at   (Phase 9 only)
+storage_connections id, provider, account_id, display_name, root_id,
+                    secret_ciphertext, secret_iv, secret_key_id, created_at, last_used_at
+                    -- unique on (provider, account_id); no user
+                    -- secret = { refresh_token } for OAuth, { url, username, password } for WebDAV
+grants              id, connection_id, secret_hash, created_at, last_used_at
+                    -- secret_hash = base64url SHA-256 of the device's `sk1_…` credential, unique
 ```
-Secrets encrypted with AES-256-GCM using `SECRETS_KEY` from env (rotate by re-encrypting; key id stored alongside ciphertext). Never log secrets. Never return them to the client.
+Secrets encrypted with AES-256-GCM using `SECRETS_KEY` from env (rotate by re-encrypting; key id stored alongside ciphertext). Never log secrets. Never return them to the client. The credential behind `secret_hash` is never stored at all.
 
 ### Endpoints
 | Route | Purpose |
 |---|---|
 | `GET  /api/auth/login/:provider/start` | `account-first` only. Identity scopes; PKCE + state; redirect to Google/Microsoft |
 | `GET  /api/auth/login/:provider/callback` | `account-first` only. Exchange code, read id token/userinfo, link or create user, start session |
-| `GET  /api/auth/connect/:provider/start` | Storage scopes; PKCE + state; requires session in `account-first`, creates user in `storage-first` |
-| `GET  /api/auth/connect/:provider/callback` | Exchange code, upsert connection with encrypted refresh token, redirect to app |
+| `POST /api/auth/connect/:provider/start` | `{ credentialHash, returnTo? }` → `{ authorizeUrl }`. Storage scopes; PKCE + state + the hash in the flow cookie. Same-origin only |
+| `GET  /api/auth/connect/:provider/callback` | Exchange code, upsert connection with encrypted refresh token **and** its grant in one batch, redirect to app |
 | `GET  /api/auth/login/:provider/start?link=1` | `account-first` only. Same flow, but callback attaches the identity to the current session's user |
 | `DELETE /api/identities/:id` | Unlink a provider; refused if it is the user's last identity |
-| `POST /api/auth/logout` | Clear session |
 | `POST /api/connections/webdav` | *(deferred, §5.4)* Validate by `PROPFIND` against the URL, store encrypted creds |
-| `GET  /api/connections` | List user's connections (no secrets) |
-| `DELETE /api/connections/:id` | Revoke at provider where supported, delete row |
-| `POST /api/token` | `{ connectionId }` → `{ accessToken, expiresAt }` using stored refresh token |
+| `GET  /api/connection` | The one connection this credential reaches (no secrets), and this device's `grantId` |
+| `GET  /api/connection/grants` | The devices holding this connection, and which one is asking. No hashes |
+| `DELETE /api/connection/grants/:id` | Revoke one device, this one included ("sign out"). The connection survives |
+| `DELETE /api/connection` | Revoke at provider where supported, delete row; the cascade takes every grant |
+| `POST /api/token` | No body → `{ accessToken, expiresAt }` using stored refresh token |
 | `ALL  /api/webdav/:connectionId/*` | *(deferred)* Authenticated proxy (see 5.4) |
 
-User identity for v1: a user *is* their first connected account (email from the OAuth identity claim). Multiple connections per user are supported in the schema; the UI can expose that later.
+Everything under `/api/connection*` and `POST /api/token` requires `Authorization: Bearer sk1_…`. Two refusals, and the difference is actionable: `credential_required` (401) means the device never had one and should connect; `credential_revoked` (401) means the one it holds is not known here any more and should be thrown away first.
+
+The `account-first` login routes above are Phase 9's and are not mounted; `AUTH_MODE=account-first` refuses to boot.
 
 ---
 
@@ -626,8 +660,11 @@ Title is derived from frontmatter `title`, else the first `# ` heading, else the
 ---
 
 ## 9. Security checklist
-- PKCE + `state` on every OAuth flow; state bound to the session cookie.
-- `SECRETS_KEY` only in server env; secrets table encrypted at rest.
+- PKCE + `state` on every OAuth flow; `state` bound to the browser that started it by the signed `__Host-skysa_flow` cookie, which also carries the device's credential hash (§6, "Per-connection credentials"). `/start` is a same-origin POST, so neither the hash nor `state` can be planted by a link.
+- `SECRETS_KEY` only in server env; secrets table encrypted at rest. A device's credential is never stored at all — only its SHA-256.
+- Authorization is a per-connection bearer, never a cookie, so nothing is sent ambiently and CSRF stops being a class of bug here. The cost is that IndexedDB has no `httpOnly`: a stolen credential works until the device is revoked. `script-src 'self'` is therefore a hard requirement rather than a good default, HSTS is set on the shell, `GET /api/connection/grants` makes a theft visible, `DELETE` makes it revocable, and a grant unused for 180 days expires on the next read.
+- HSTS on the static shell: `max-age=63072000; includeSubDomains`, no `preload` — preloading is a commitment for whoever self-hosts, and theirs to make. Held by `tests/csp.test.ts`.
+- A rate-limit seam (`createApp({ rateLimiter })`, no-op by default) on the two connect routes and `/api/token`, which are the endpoints that spend an outbound provider call per attempt.
 - *(Only if WebDAV is built, §5.4.)* WebDAV proxy: allowlist methods, reject paths that escape the configured base URL after normalization, strip hop-by-hop headers, 30s timeout, 20 MB body cap.
 - *(Only if WebDAV is built, §5.4.)* WebDAV proxy SSRF hardening (on by default; protects operators who expose their instance to the internet): HTTPS only; resolve the host and reject private/loopback/link-local/cloud-metadata ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16, fc00::/7, ::1); reject IP-literal hosts; re-validate on redirect (or disable redirects); per-user rate limit and daily byte budget. Self-hosters can relax the private-range rule via `WEBDAV_ALLOW_PRIVATE=true` for LAN Nextcloud.
 - CSP: `connect-src` limited to self + `www.googleapis.com` + `*.dropboxapi.com` + OneDrive's `graph.microsoft.com` and its download hosts (`*.files.1drv.com`, `my.microsoftpersonalcontent.com`, `*.sharepoint.com`, §5.2) — each provider's hosts added with its adapter, never ahead of it (WebDAV goes through the proxy, so it adds none). Set for every static response in `apps/web/public/_headers` (Cloudflare applies it to the shell, the assets and `sw.js`, and a response the service worker replays keeps it; `/api/*` is the Worker's and is not a page); `tests/csp.test.ts` holds it, including that every host the adapters request is allowed. `script-src 'self'` with nothing inline or eval'd: zod's `new Function` probe is turned off (`src/jitless.ts`, imported first), since it reports a violation even when refused. `style-src` allows `'unsafe-inline'` because the editors set style attributes and CodeMirror inserts `<style>` elements; `img-src` allows any `https:` image a note links; `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`.
@@ -710,7 +747,7 @@ The traces also carry where a rename or move went
 - [x] Search (local full-text over IndexedDB; MiniSearch). The middle pane's field searches every notebook, not the open one, and shows what matched: the notebook each note is in, and a line of its body with the matched words marked. `store/search.ts` holds the index and never touches the database — it is handed rows and told to agree with them, which is what lets `useNoteSearch` decide when, and keeps the matching and the excerpting testable as the pure things they are (§7, "Search is a question, not a place"). Opening a match takes the user to the notebook it is in, so the sidebar, the list and the open note never disagree; Escape empties the field and gives the notebook back, and so does creating a note, which would otherwise land in a notebook the open search is not showing.
 - [x] Rich-editor polish: find/replace, outline panel. (Find and replace is one bar over both editors, and one engine under them: `@codemirror/search`'s `SearchQuery` decides what matches in *both*, because a shared bar whose two halves disagree about the count is worse than two separate bars. The package is used for that and nothing else — its own highlighter draws only while its panel is open (`if (!panel || !query.spec.valid)`), and its panel is the thing being replaced — so the decorations are ours on both sides. The rich half maps text offsets to document positions with a one-character stand-in for every inline leaf, since an image takes a position and no text. Stepping between matches never takes focus: an editor that took it would swallow the next keystroke, turning Enter-for-next into Enter-typed-into-the-note. Scrolling in rich mode is done by asking the match's element, not `tr.scrollIntoView()`, which walks up from the DOM selection — in the bar — and scrolls the bar. A replace is a user edit and marks the note dirty; finding and moving are not. Verified in Chrome in both modes, including the bar keeping its query across a mode switch.) (The outline panel is done: `headings` in core reads the note's markdown with the same parse the editor does, so a `#` in a fenced code block is not a section, and it reports a **line** rather than an offset because `parse` folds CRLF and offsets move with it. The rail lives inside `.note-view`, not as a fourth child of `.app-shell`'s grid. A click is sent by the class the open editor puts on its own root — not by trying `findFromDOM` first, which is the same thing today only because no Milkdown code-block component is installed, and would otherwise hand back the CodeMirror *inside* a fenced block. Raw goes through `findFromDOM` and `doc.line`, since a heading below the viewport has no element yet; rich goes to the *n*th top-level heading child, both walks being top-level-only and that being the whole agreement between them — and a heading carries its `ordinal` among **all** top-level headings, because an empty `##` has no row in the rail but is still an `<h2>` in the document. `note.outline` in the registry makes it a palette command.) (Image paste is in §14: it needs attachments, and attachments are in no phase, so it was sitting in a checklist as though it were scheduled.) (The `<br />` Milkdown writes for an empty paragraph is done: one rule, `previewLines` in core, now decides what a readable line is, and the note list's preview and the search excerpt are both cut from it — §7.)
 - [x] Keyboard shortcuts, command palette. One registry behind both (§7, "Commands are declared, not collected"): `Mod+K` opens the palette, a bare `n` makes a note, `Mod+Shift+F` puts the cursor in the search field, and `Mod+E` — which `NoteView` used to listen for itself — is now a registration like any other, so it appears in the palette with its chord printed from the same value the listener matches.
-- [ ] Multiple connections per user (schema already supports it)
+- [x] Several connected sources on one device, each its own silo. Not the relaxation this line used to describe ("multiple connections per user"): there is no user to hold them. The device generates a credential per connection, keeps it, and sends the server only its hash; `storage_connections` is keyed on `(provider, account_id)` and `grants` on that hash; `sessions`, `holdsAnotherProvider`, `session_mismatch` and the `conflict`/`signin`/`occupied` outcomes are gone. §6, "Per-connection credentials", records what was decided and what was deliberately not done — including the XSS trade that `script-src 'self'` now has to carry.
 
 ### Phase 8 — Public repo + self-hosting (1–2 days, after Phase 6)
 - [ ] `LICENSE` (AGPL-3.0), `TRADEMARK.md`, `CLA-individual.md` (adapted Apache ICLA + Harmony reciprocity clauses), `CLA-entity.md` (adapted Apache CCLA, held until needed), `CONTRIBUTING.md` explaining the CLA and why it's a grant not an assignment, `CODE_OF_CONDUCT.md`
@@ -727,8 +764,9 @@ Only needed for instances where sign-in should be separate from storage (shared 
 - [ ] `account-first` auth: Sign in with Google and Microsoft via Arctic; `identities` table; automatic merge-by-verified-email; explicit in-session link (`?link=1`) and unlink; Settings page listing linked providers; tests for: verified-email auto-link, unverified email creates new user, identity already attached to another user is refused, last identity cannot be unlinked
 - [ ] Google and Entra registrations updated with `openid email profile` and the `/auth/login/*` redirect URIs (distinct from `/auth/connect/*`); Google sign-in button branding guidelines followed
 - [ ] Verify the `/auth/login/*` routes are not mounted in `storage-first`, and — should WebDAV ever be built (§5.4, deferred) — that its routes are absent from the built Worker when `webdav` is not in `ENABLED_PROVIDERS`
-- [ ] Abuse controls for shared instances: per-user rate limits on token minting and connection changes, connection cap
-- [ ] Account deletion: revoke provider tokens and delete all of the user's rows in one action
+- [ ] Abuse controls for shared instances: an implementation behind the Phase 7 rate-limit seam (`createApp({ rateLimiter })`) for token minting and connection changes. The per-connection grant cap is done (§6)
+- [ ] Account deletion: revoke provider tokens and delete all of the user's rows in one action. (`DELETE /api/connection` already does this for one silo; Phase 9 is the version that spans a user's several.)
+- [ ] Decide what `users`/`identities` mean beside per-connection credentials: a Phase 9 user owns connections that already have their own credentials, so the two authorization paths have to be reconciled rather than stacked
 
 ---
 
@@ -754,10 +792,12 @@ apps/
       routes/
         login.ts              # /auth/login/:provider/* (identity, account-first mode)
         connect.ts            # /auth/connect/:provider/* (storage)
-        connections.ts        # /connections, /connections/webdav
+        connections.ts        # /connection, /connection/grants[/:id]
         token.ts              # /token
         webdav.ts             # /webdav/:connectionId/*
       db/                     # drizzle schema, client, migrations
+      credentials.ts          # per-connection credentials: hash, bearer parsing, grant lookup
+      session.ts              # the signed OAuth flow cookie (there are no sessions)
       crypto.ts               # AES-GCM helpers
       identity/               # IdentityProvider interface, google.ts, microsoft.ts (Arctic)
       oauth/                  # storage OAuth: gdrive.ts onedrive.ts dropbox.ts pkce.ts

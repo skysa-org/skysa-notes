@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
@@ -7,54 +7,92 @@ import { schema } from '../db/client.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import type { FetchLike } from '../oauth/types.js';
-import { clearSession, currentUserId } from '../session.js';
 
 /**
- * Listing and removing storage connections. Secrets never appear in a response
- * — not the ciphertext, not the iv, not the key id (docs/PLAN.md §6).
+ * The connection the caller's credential reaches, and the devices that hold it.
+ *
+ * Singular, and deliberately so. A list endpoint would be the aggregation model
+ * arriving through the back door — and the device unbinds itself on this
+ * answer, so "not in the list" and "gone" must not be the same shape. A 404
+ * means *this connection is gone*; a 5xx or a network failure means nothing at
+ * all, and the device keeps what it has (docs/PLAN.md §6).
+ *
+ * Secrets never appear in a response — not the ciphertext, not the iv, not the
+ * key id, and not another device's credential hash.
  */
 
 export const connectionRoutes = (doFetch: FetchLike) => {
 	const app = new Hono<AppEnv>();
 
-	app.get('/connections', async (c) => {
-		const db = c.get('db');
-		const userId = await currentUserId(c, db, { secure: c.get('config').cookiesSecure });
-		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
-
-		const rows = await db.query.connections.findMany({
-			where: eq(schema.connections.userId, userId),
+	app.get('/connection', (c) => {
+		const { connection, grant } = c.get('bearer');
+		return c.json({
+			id: connection.id,
+			provider: connection.provider,
+			displayName: connection.displayName,
+			// The provider's own id for the account. Not a secret, and the client
+			// needs it: reconnecting the same account after a disconnect gets a new
+			// connection id, and only this says the notes it holds from before
+			// belong to it (docs/PLAN.md, Phase 2).
+			accountId: connection.accountId,
+			rootId: connection.rootId,
+			createdAt: connection.createdAt.getTime(),
+			lastUsedAt: connection.lastUsedAt?.getTime() ?? null,
+			// Which of the devices below is this one, so a client can offer to sign
+			// itself out without having to guess.
+			grantId: grant.id,
 		});
+	});
+
+	/**
+	 * The devices holding this connection. What makes a stolen credential
+	 * visible: it is one more row here, with a `lastUsedAt` its owner did not
+	 * cause. The hashes are not returned — they are the lookup key, and a leaked
+	 * one lets its holder re-point that device at storage of their own.
+	 */
+	app.get('/connection/grants', async (c) => {
+		const { connection, grant } = c.get('bearer');
+		const rows = await c
+			.get('db')
+			.query.grants.findMany({ where: eq(schema.grants.connectionId, connection.id) });
 
 		return c.json({
-			connections: rows.map((row) => ({
+			grants: rows.map((row) => ({
 				id: row.id,
-				provider: row.provider,
-				displayName: row.displayName,
-				// The provider's own id for the account. Not a secret, and the
-				// client needs it: reconnecting the same account after a
-				// disconnect gets a new connection id, and only this says the
-				// notes it holds from before belong to it (docs/PLAN.md, Phase 2).
-				accountId: row.accountId,
-				rootId: row.rootId,
 				createdAt: row.createdAt.getTime(),
-				lastUsedAt: row.lastUsedAt?.getTime() ?? null,
+				lastUsedAt: row.lastUsedAt.getTime(),
+				current: row.id === grant.id,
 			})),
 		});
 	});
 
-	app.delete('/connections/:id', async (c) => {
+	/**
+	 * Revoke one device, this one included. Scoped to the caller's own connection
+	 * — a grant id from somewhere else answers `not_found`, so the endpoint
+	 * cannot be used to discover which ids exist.
+	 */
+	app.delete('/connection/grants/:id', async (c) => {
+		const { connection } = c.get('bearer');
+		const db = c.get('db');
+		const id = c.req.param('id');
+
+		const target = await db.query.grants.findFirst({
+			where: and(eq(schema.grants.id, id), eq(schema.grants.connectionId, connection.id)),
+		});
+		if (target === undefined) return c.json({ error: 'not_found' }, 404);
+
+		await db.delete(schema.grants).where(eq(schema.grants.id, target.id));
+		return c.json({ ok: true });
+	});
+
+	/**
+	 * Disconnect the account. The row goes, and the cascade takes every grant on
+	 * it: this is the button for a credential the user believes is stolen.
+	 */
+	app.delete('/connection', async (c) => {
+		const { connection } = c.get('bearer');
 		const db = c.get('db');
 		const config = c.get('config');
-		const userId = await currentUserId(c, db, { secure: config.cookiesSecure });
-		if (userId === undefined) return c.json({ error: 'sign_in_required' }, 401);
-
-		const connection = await db.query.connections.findFirst({
-			where: eq(schema.connections.id, c.req.param('id')),
-		});
-		if (connection === undefined || connection.userId !== userId) {
-			return c.json({ error: 'not_found' }, 404);
-		}
 
 		// Revoke at the provider so the grant does not linger on the user's
 		// account (docs/PLAN.md §9). Best effort: the row goes either way, because
@@ -90,21 +128,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 
 		await db.delete(schema.connections).where(eq(schema.connections.id, connection.id));
 
-		// In storage-first the user *is* their storage account, so removing the
-		// last connection leaves nothing to be signed in as.
-		const remaining = await db.query.connections.findMany({
-			where: eq(schema.connections.userId, userId),
-		});
-		if (config.authMode === 'storage-first' && remaining.length === 0) {
-			await clearSession(c, db);
-		}
-
 		return c.json({ ok: true, revoked });
-	});
-
-	app.post('/auth/logout', async (c) => {
-		await clearSession(c, c.get('db'));
-		return c.json({ ok: true });
 	});
 
 	return app;

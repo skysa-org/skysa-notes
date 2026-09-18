@@ -15,60 +15,55 @@ describe('the node:sqlite D1 shim', () => {
 			.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
 			.all<{ name: string }>();
 
-		expect(results.map((row) => row.name)).toEqual(
-			expect.arrayContaining(['connections', 'identities', 'sessions', 'users'])
+		const names = results.map((row) => row.name);
+		expect(names).toEqual(
+			expect.arrayContaining(['grants', 'identities', 'storage_connections', 'users'])
 		);
+		// 0004 and 0005 take these away. A migration that left either behind would
+		// leave a table nothing reads holding live refresh tokens.
+		expect(names).not.toContain('sessions');
+		expect(names).not.toContain('connections');
 	});
 
-	it('enforces the unique index the reconnect upsert depends on', async () => {
+	it('enforces one connection per provider account', async () => {
+		const db = createD1();
+		const connect = (id: string, accountId: string) =>
+			db
+				.prepare(
+					'INSERT INTO storage_connections (id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+				)
+				.bind(id, 'dropbox', accountId, 'x', 'c', 'i', 'k1')
+				.run();
+
+		await connect('ca', 'dbid:shared');
+
+		// The upsert target. Without the constraint two racing callbacks would
+		// each leave a row behind, and a device's credential would reach whichever
+		// one the query planner happened to return.
+		await expect(connect('cb', 'dbid:shared')).rejects.toThrow();
+	});
+
+	it('enforces one grant per credential hash', async () => {
 		const db = createD1();
 		await db
 			.prepare(
-				'INSERT INTO users (id, email, email_verified, created_at) VALUES (?, ?, 0, 0)'
+				'INSERT INTO storage_connections (id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
 			)
-			.bind('u', 'u@example.com')
+			.bind('c', 'dropbox', 'dbid:1', 'x', 'c', 'i', 'k1')
 			.run();
 
-		const insert = (id: string) =>
+		const grant = (id: string) =>
 			db
 				.prepare(
-					'INSERT INTO connections (id, user_id, provider, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+					'INSERT INTO grants (id, connection_id, secret_hash, created_at, last_used_at) VALUES (?, ?, ?, 0, 0)'
 				)
-				.bind(id, 'u', 'dropbox', 'x', 'c', 'i', 'k1')
+				.bind(id, 'c', 'the-hash')
 				.run();
 
-		await insert('a');
-		// Without this the upsert in the connect callback would be a no-op and
-		// two tabs could each leave a connection behind.
-		await expect(insert('b')).rejects.toThrow();
-	});
-
-	it('enforces one user per provider account', async () => {
-		const db = createD1();
-		const user = (id: string) =>
-			db
-				.prepare(
-					'INSERT INTO users (id, email, email_verified, created_at) VALUES (?, ?, 0, 0)'
-				)
-				.bind(id, `${id}@example.com`)
-				.run();
-		const connect = (id: string, userId: string, accountId: string) =>
-			db
-				.prepare(
-					'INSERT INTO connections (id, user_id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)'
-				)
-				.bind(id, userId, 'dropbox', accountId, 'x', 'c', 'i', 'k1')
-				.run();
-
-		await user('a');
-		await user('b');
-		await connect('ca', 'a', 'dbid:shared');
-
-		// Two user rows claiming one account is an ambiguity nothing can resolve,
-		// and it is what let a signed-out connect land in the wrong user. The
-		// constraint is what makes the callback's own check belt-and-braces
-		// rather than the only thing standing between two racing requests.
-		await expect(connect('cb', 'b', 'dbid:shared')).rejects.toThrow();
+		await grant('g1');
+		// The hash is the lookup key, so a second row under it is a credential
+		// that reaches two connections depending on row order.
+		await expect(grant('g2')).rejects.toThrow();
 	});
 
 	it('enforces foreign keys, which SQLite does not do by default', async () => {
@@ -76,11 +71,35 @@ describe('the node:sqlite D1 shim', () => {
 		await expect(
 			db
 				.prepare(
-					'INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)'
+					'INSERT INTO grants (id, connection_id, secret_hash, created_at, last_used_at) VALUES (?, ?, ?, 0, 0)'
 				)
-				.bind('s', 'no-such-user', 1, 1)
+				.bind('g', 'no-such-connection', 'h')
 				.run()
 		).rejects.toThrow();
+	});
+
+	it('cascades a deleted connection onto its grants', async () => {
+		const db = createD1();
+		await db
+			.prepare(
+				'INSERT INTO storage_connections (id, provider, account_id, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+			)
+			.bind('c', 'dropbox', 'dbid:1', 'x', 'c', 'i', 'k1')
+			.run();
+		await db
+			.prepare(
+				'INSERT INTO grants (id, connection_id, secret_hash, created_at, last_used_at) VALUES (?, ?, ?, 0, 0)'
+			)
+			.bind('g', 'c', 'h')
+			.run();
+
+		await db.prepare('DELETE FROM storage_connections WHERE id = ?').bind('c').run();
+
+		// Disconnecting is the button for a credential the user believes is
+		// stolen; a grant that outlived its connection would be one that still
+		// points at whatever takes that id next.
+		const { results } = await db.prepare('SELECT id FROM grants').all();
+		expect(results).toHaveLength(0);
 	});
 
 	it('refuses to answer a join rather than answering it wrongly', async () => {
@@ -93,9 +112,9 @@ describe('the node:sqlite D1 shim', () => {
 			.run();
 		await db
 			.prepare(
-				'INSERT INTO connections (id, user_id, provider, display_name, secret_ciphertext, secret_iv, secret_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+				'INSERT INTO identities (id, user_id, provider, subject, email, email_verified, created_at) VALUES (?, ?, ?, ?, ?, 0, 0)'
 			)
-			.bind('connection-1', 'user-1', 'dropbox', 'x', 'c', 'i', 'k1')
+			.bind('identity-1', 'user-1', 'google', 's', 'u@example.com')
 			.run();
 
 		// Node 22 has no `StatementSync.columns()`, so duplicate column names in a
@@ -103,7 +122,7 @@ describe('the node:sqlite D1 shim', () => {
 		// this throws or answers depends on the Node version; what must never
 		// happen is a quiet wrong answer.
 		const attempt = db
-			.prepare('SELECT u.id, c.id FROM users u JOIN connections c ON c.user_id = u.id')
+			.prepare('SELECT u.id, i.id FROM users u JOIN identities i ON i.user_id = u.id')
 			.bind()
 			.raw();
 
@@ -114,7 +133,7 @@ describe('the node:sqlite D1 shim', () => {
 
 		// Two columns both named `id`. Against empty tables this test would pass
 		// whether or not they collapsed, which is why there is a row in them.
-		if (outcome.ok) expect(outcome.rows).toEqual([['user-1', 'connection-1']]);
+		if (outcome.ok) expect(outcome.rows).toEqual([['user-1', 'identity-1']]);
 		else expect(String(outcome.error)).toContain('duplicate column names');
 	});
 });

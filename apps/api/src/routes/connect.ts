@@ -1,30 +1,26 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, desc, eq, notInArray } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
+import { z } from 'zod';
 
 import type { AppEnv } from '../app.js';
+import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
-import { type FetchLike, ScopeNotGrantedError, type TokenSet } from '../oauth/types.js';
-import {
-	clearFlowState,
-	currentUserId,
-	flowExpiry,
-	issueSession,
-	readFlowState,
-	setFlowState,
-} from '../session.js';
+import { type FetchLike, ScopeNotGrantedError } from '../oauth/types.js';
+import { clearFlowState, flowExpiry, readFlowState, setFlowState } from '../session.js';
 
 /**
- * Connecting a storage account. Two routes: one that sends the browser to the
- * provider, one the provider sends it back to.
+ * Connecting a storage account. Two routes: one the device asks for an
+ * authorize URL, one the provider sends the browser back to.
  *
- * In `storage-first` — the default — the user *is* their connected account, so
- * the callback finds or creates the user and starts the session. In
- * `account-first` a session must already exist, at both ends of the flow. See
- * docs/PLAN.md §6.
+ * There is no user and no session. A connection is the account, and the right
+ * to act on it is the credential the device generated before it started —
+ * committed here as a grant, in the same transaction as the connection itself,
+ * so there is no window where consent has been given and nothing can use it.
+ * See docs/PLAN.md §6.
  */
 
 export const redirectUri = (origin: string, provider: string): string =>
@@ -44,7 +40,7 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
-type Outcome = 'ok' | 'denied' | 'failed' | 'conflict' | 'signin' | 'occupied' | 'partial';
+type Outcome = 'ok' | 'denied' | 'failed' | 'partial';
 
 const back = (returnTo: string, outcome: Outcome): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
@@ -58,30 +54,52 @@ const refusal = (
 	error: 'unsupported_provider' | 'provider_not_configured'
 ): Response => c.json({ error }, error === 'unsupported_provider' ? 404 : 501);
 
+const startBody = z.object({
+	/** base64url SHA-256 of the credential the device has already written down. */
+	credentialHash: z.string().refine(isCredentialHash, 'not a base64url SHA-256 digest'),
+	returnTo: z.string().optional(),
+});
+
+/**
+ * Was this request made by a page on this deployment's own origin?
+ *
+ * `hono/csrf` is mounted too, but it only inspects form and text content types
+ * — it leans on CORS preflight for JSON, which is sound for a fetch a browser
+ * makes and says nothing about one it does not. `/start` writes a
+ * caller-supplied value into a cookie that decides where a live credential ends
+ * up, so it checks for itself.
+ *
+ * Either signal is enough. `Sec-Fetch-Site` is sent by current browsers and
+ * cannot be set by script; `Origin` is sent on every POST and is what older
+ * ones have. A request with neither is not a browser on this origin.
+ */
+const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
+	c.req.header('sec-fetch-site') === 'same-origin' || c.req.header('origin') === appOrigin;
+
+/** Who to throttle. The address, never anything derived from the credential. */
+const callerKey = (c: Context<AppEnv>, what: string): string =>
+	`${what}:${c.req.header('cf-connecting-ip') ?? 'unknown'}`;
+
 export const connectRoutes = (doFetch: FetchLike) => {
 	const app = new Hono<AppEnv>();
 
-	app.get('/auth/connect/:provider/start', async (c) => {
+	app.post('/auth/connect/:provider/start', async (c) => {
 		const config = c.get('config');
 		const cookies = { secure: config.cookiesSecure };
+		if (!sameOrigin(c, config.appOrigin)) return c.json({ error: 'forbidden_origin' }, 403);
+
 		const resolved = oauthFor(config, c.req.param('provider'));
 		if (!resolved.ok) return refusal(c, resolved.error);
 		const { provider, client, credentials } = resolved;
 
-		const db = c.get('db');
-		const userId = await currentUserId(c, db, cookies);
-		// In account-first mode a connection attaches to an existing user, so
-		// there has to be one already.
-		if (config.authMode === 'account-first' && userId === undefined) {
-			return c.json({ error: 'sign_in_required' }, 401);
-		}
+		// Before anything is minted or written: an attacker who can start flows
+		// freely makes this deployment pay for a provider round trip per attempt
+		// at the callback, and fills the cookie jar in the meantime.
+		const limit = await c.get('rateLimiter').check(callerKey(c, 'connect'));
+		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
-		// Said before the user goes through a consent screen for nothing. The
-		// callback asks again, since a connection can be made meanwhile.
-		const returnTo = safeReturnTo(c.req.query('returnTo'), config.appOrigin);
-		if (await holdsAnotherProvider(db, userId, provider)) {
-			return c.redirect(back(returnTo, 'occupied'));
-		}
+		const parsed = startBody.safeParse(await c.req.json().catch(() => undefined));
+		if (!parsed.success) return c.json({ error: 'invalid_request' }, 400);
 
 		const { verifier, challenge } = await createPkcePair();
 		const state = createState();
@@ -91,20 +109,22 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			{
 				state,
 				verifier,
-				returnTo,
+				returnTo: safeReturnTo(parsed.data.returnTo, config.appOrigin),
 				expiresAt: flowExpiry(),
-				...(userId === undefined ? {} : { userId }),
+				credentialHash: parsed.data.credentialHash,
 			},
 			cookies
 		);
 
-		return c.redirect(
-			client.authorizeUrl(credentials, {
+		// JSON, not a redirect: the caller is `fetch`, because a navigation cannot
+		// carry a body, and the body is what keeps the hash out of the URL.
+		return c.json({
+			authorizeUrl: client.authorizeUrl(credentials, {
 				redirectUri: redirectUri(config.appOrigin, provider),
 				state,
 				challenge,
-			})
-		);
+			}),
+		});
 	});
 
 	app.get('/auth/connect/:provider/callback', async (c) => {
@@ -128,22 +148,18 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		if (flow === undefined) return c.json({ error: 'flow_expired' }, 400);
 		if (c.req.query('state') !== flow.state) return c.json({ error: 'state_mismatch' }, 400);
 
-		// docs/PLAN.md §9 binds the state to the *session*, not merely to the
-		// browser. Without this a callback carrying one person's flow cookie and
-		// another's session cookie would attach the grant to whoever the session
-		// names — overwriting their connection, and their refresh token with it.
-		const sessionUser = await currentUserId(c, db, cookies);
-		if (flow.userId !== sessionUser) return c.json({ error: 'session_mismatch' }, 400);
-
 		const denied = c.req.query('error');
 		if (denied !== undefined) return c.redirect(back(flow.returnTo, 'denied'));
 
 		const code = c.req.query('code');
 		if (code === undefined) return c.json({ error: 'missing_code' }, 400);
 
-		if (await holdsAnotherProvider(db, sessionUser, provider)) {
-			return c.redirect(back(flow.returnTo, 'occupied'));
-		}
+		// The flow cookie got past the signature check, so this is a browser that
+		// started a flow here — but a code exchange is still an outbound call the
+		// deployment pays for, and a replayed callback is the cheapest way to ask
+		// for one.
+		const limit = await c.get('rateLimiter').check(callerKey(c, 'callback'));
+		if (!limit.allowed) return tooMany(c, limit.retryAfter);
 
 		// A replayed or expired authorization code is an ordinary event, not a
 		// server fault: send the user back to the app to try again. Logged all the
@@ -173,231 +189,150 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// hours with no way to recover, so this is a failure, not a warning.
 		if (tokens.refreshToken === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
-		// The account id *is* the identity in storage-first, and in both modes it
-		// is what tells a reconnect to the same account from a reconnect to a
-		// different one. Without it a signed-out connect cannot recognise a
-		// returning user, and a signed-in one would write a null over the id it
-		// already had — which sets up the same failure a connect later. Dropbox
-		// always sends it; a response without one is a failure, not something to
-		// paper over, so this is checked whether or not anyone is signed in.
+		// The account id *is* the connection's identity: it is the upsert target,
+		// and it is what tells a reconnect to the same account from a reconnect to
+		// a different one. Dropbox always sends it; a response without one is a
+		// failure, not something to paper over.
 		if (tokens.accountId === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
 		const displayName = await client.accountName(doFetch, tokens);
-		const now = Date.now();
 
-		// The account is the identity, so an account already connected to somebody
-		// else is not a second claim on it — it is either two people sharing a
-		// login, or an attempt to reach that account's notes.
-		const claimed = await claimedBy(db, provider, tokens.accountId);
-
-		// A signed-out visitor presenting a claimed account is that account's
-		// owner coming back, and is adopted below. A *signed-in* user presenting
-		// somebody else's is the case to refuse — in either mode, since the unique
-		// index would refuse it anyway and a constraint violation is a 500.
-		if (claimed !== undefined && sessionUser !== undefined && claimed !== sessionUser) {
-			return c.redirect(back(flow.returnTo, 'conflict'));
-		}
-
-		/**
-		 * Whose connection this is. Signed in: theirs. Signed out and the account
-		 * is already known: its owner, coming back. Signed out and it is not: a
-		 * new user — but only where creating one is allowed.
-		 *
-		 * No session is issued here. Signing someone in before the connection is
-		 * actually stored leaves them signed in *and* told the connect failed.
-		 */
-		const owner = await (async (): Promise<{ userId: string; minted: boolean } | undefined> => {
-			if (sessionUser !== undefined) return { userId: sessionUser, minted: false };
-			// Neither branch below may run in account-first, where a connection
-			// attaches only to a user who signed in first — issuing a session for a
-			// recognised account would be a second door into signing in.
-			if (config.authMode !== 'storage-first') return undefined;
-			if (claimed !== undefined) return { userId: claimed, minted: false };
-			return { userId: await createUser(db, displayName, now), minted: true };
-		})();
-		if (owner === undefined) return c.redirect(back(flow.returnTo, 'signin'));
-
-		const stored = await store(
-			db,
+		const committed = await commit(db, {
 			provider,
-			owner.userId,
-			tokens,
+			accountId: tokens.accountId,
 			displayName,
-			await sealOAuthSecret(c.get('secretKey'), { refreshToken: tokens.refreshToken }),
-			now
-		);
+			sealed: await sealOAuthSecret(c.get('secretKey'), {
+				refreshToken: tokens.refreshToken,
+			}),
+			credentialHash: flow.credentialHash,
+			now: Date.now(),
+		});
 
-		// Two signed-out callbacks for the same account, racing: both found it
-		// unclaimed, and the unique index let exactly one of them win. The loser
-		// undoes the user it just created — the cascade takes nothing else, since
-		// nothing else references it yet — rather than leaving a second user
-		// holding a live refresh token.
-		if (!stored) {
-			if (owner.minted) {
-				await db.delete(schema.users).where(eq(schema.users.id, owner.userId));
-			}
-			return c.redirect(back(flow.returnTo, 'conflict'));
-		}
-
-		if (sessionUser === undefined) {
-			await issueSession(c, db, owner.userId, cookies, now);
-		}
-
-		return c.redirect(back(flow.returnTo, 'ok'));
+		return c.redirect(back(flow.returnTo, committed ? 'ok' : 'failed'));
 	});
 
 	return app;
 };
 
-/**
- * Drizzle wraps the driver's error, so the constraint is named somewhere down
- * the `cause` chain rather than on the error itself.
- */
-const isUniqueViolation = (error: unknown): boolean =>
-	error instanceof Error &&
-	(/UNIQUE constraint failed/i.test(error.message) ||
-		isUniqueViolation((error as { cause?: unknown }).cause));
-
-/**
- * Does this user already have storage connected at a *different* provider?
- *
- * One connection per user until Phase 7 (docs/PLAN.md §12.3), and here that is
- * more than a UI convention. In storage-first, presenting any account a user has
- * connected signs in as that user — so a user holding a Dropbox and a OneDrive
- * connection could be signed in to through either, and whoever holds the
- * OneDrive account gets tokens for the Dropbox one. A second connection at the
- * *same* provider replaces the first, which is why that is not refused. Two
- * consent flows run at once by the same user can still both get past this;
- * the harm needs the user to race themselves, and Phase 7's multi-connection
- * design has to answer it properly.
- */
-const holdsAnotherProvider = async (
-	db: Database,
-	userId: string | undefined,
-	provider: OAuthProviderKind
-): Promise<boolean> => {
-	if (userId === undefined) return false;
-	const row = await db.query.connections.findFirst({
-		where: and(
-			eq(schema.connections.userId, userId),
-			ne(schema.connections.provider, provider)
-		),
-	});
-	return row !== undefined;
+const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Response => {
+	if (retryAfter !== undefined) c.header('Retry-After', String(Math.ceil(retryAfter)));
+	return c.json({ error: 'rate_limited' }, 429);
 };
 
+interface CommitInput {
+	provider: OAuthProviderKind;
+	accountId: string;
+	displayName: string;
+	sealed: SealedSecret;
+	credentialHash: string;
+	now: number;
+}
+
 /**
- * Which user, if any, already holds this provider account.
+ * The connection and the grant, or neither.
  *
- * At most one can: `connections_provider_account_idx` is unique. Matching on the
- * provider's account id rather than on the session is what stops every
- * sign-out-then-reconnect from minting a second user whose connection no session
- * can ever reach again — an orphaned row holding a live, unrevokable refresh
- * token.
+ * One `db.batch`, which D1 runs as a single transaction: a connection stored
+ * without the grant that reaches it would be an account connected and
+ * unreachable, holding a live refresh token nothing can revoke.
+ *
+ * Two callbacks racing for the same *new* account each compute their own row
+ * id. The unique index on `(provider, account_id)` turns the loser's insert
+ * into an update of the winner's row, leaving its grant pointing at an id that
+ * does not exist — a foreign key violation, which rolls the whole batch back
+ * rather than leaving half of it. The retry then finds the winner's row and
+ * attaches to it. Bounded at one: a second failure is not a race.
  */
-const claimedBy = async (
-	db: Database,
-	provider: OAuthProviderKind,
-	accountId: string | undefined
-): Promise<string | undefined> => {
-	if (accountId === undefined) return undefined;
-	const row = await db.query.connections.findFirst({
+const commit = async (db: Database, input: CommitInput): Promise<boolean> => {
+	const first = await attempt(db, input).catch((error: unknown) => {
+		logFailure('storing the connection failed', error);
+		return false;
+	});
+	if (first) return true;
+
+	return attempt(db, input).catch((error: unknown) => {
+		logFailure('storing the connection failed on retry', error);
+		return false;
+	});
+};
+
+const attempt = async (db: Database, input: CommitInput): Promise<boolean> => {
+	const { provider, accountId, displayName, sealed, credentialHash, now } = input;
+
+	const existing = await db.query.connections.findFirst({
 		where: and(
 			eq(schema.connections.provider, provider),
 			eq(schema.connections.accountId, accountId)
 		),
 	});
-	return row?.userId;
-};
 
-/**
- * A brand new user for a brand new account. `storage-first` only — the caller
- * enforces that; this just writes the row.
- */
-const createUser = async (db: Database, displayName: string, now: number): Promise<string> => {
-	const id = randomBase64Url(16);
-	await db.insert(schema.users).values({
-		id,
-		email: displayName,
-		emailVerified: false,
-		createdAt: new Date(now),
-	});
-	return id;
-};
-
-/**
- * One connection per provider per user until Phase 7, so reconnecting replaces
- * rather than accumulates. The unique index makes that atomic.
- *
- * Reconnecting to the *same* account keeps the row's id and its discovered
- * `rootId`. Reconnecting to a *different* one takes a fresh id: a client holding
- * notes keyed on the old connection would otherwise sync them into a stranger's
- * folder, and the stale `rootId` would be a path into it. Which account a
- * client's notes belong to is decided on the client, from the `accountId`
- * `/api/connections` returns: a deleted row's account comes back with a new id.
- */
-const store = async (
-	db: Database,
-	provider: OAuthProviderKind,
-	userId: string,
-	tokens: TokenSet,
-	displayName: string,
-	sealed: SealedSecret,
-	now: number
-): Promise<boolean> => {
-	const existing = await db.query.connections.findFirst({
-		where: and(
-			eq(schema.connections.userId, userId),
-			eq(schema.connections.provider, provider)
-		),
-	});
-
-	const sameAccount =
-		existing !== undefined &&
-		tokens.accountId !== undefined &&
-		existing.accountId === tokens.accountId;
-
+	// One id, decided once: the insert and the conflict update must agree, or the
+	// grant would be attached to a row under an id neither returned.
+	const connectionId = existing?.id ?? randomBase64Url(16);
 	const secret = {
 		secretCiphertext: sealed.ciphertext,
 		secretIv: sealed.iv,
 		secretKeyId: sealed.keyId,
 	};
 
-	// One id, decided once: the insert and the conflict update must agree, or a
-	// race between two tabs would leave the row under an id neither returned.
-	const id = sameAccount ? existing.id : randomBase64Url(16);
-
-	return (
+	await db.batch([
 		db
 			.insert(schema.connections)
 			.values({
-				id,
-				userId,
+				id: connectionId,
 				provider,
-				accountId: tokens.accountId ?? null,
+				accountId,
 				displayName,
 				...secret,
 				createdAt: new Date(now),
 				lastUsedAt: new Date(now),
 			})
 			.onConflictDoUpdate({
-				target: [schema.connections.userId, schema.connections.provider],
-				set: {
-					...(sameAccount ? {} : { id, rootId: null }),
-					accountId: tokens.accountId ?? null,
-					displayName,
-					...secret,
-					lastUsedAt: new Date(now),
-				},
-			})
-			.then(() => true)
-			// Only the unique account index means "somebody else claimed this
-			// account between the lookup and the write". Swallowing everything else
-			// would report a database outage to the user as a conflict with a
-			// stranger, and log nothing at all.
-			.catch((error: unknown) => {
-				if (isUniqueViolation(error)) return false;
-				throw error;
-			})
-	);
+				target: [schema.connections.provider, schema.connections.accountId],
+				// Not `id`, and not `rootId`: the row is the account, so the folder it
+				// discovered is still that account's folder, and devices already
+				// holding grants still have to find it under the same id.
+				set: { displayName, ...secret, lastUsedAt: new Date(now) },
+			}),
+
+		// A plain insert, deliberately. An upsert on `secret_hash` would let
+		// anyone holding a hash — from a database dump, say — point that device's
+		// credential at a connection of their own, and the device would
+		// cheerfully sync the user's notes into a stranger's storage. A duplicate
+		// hash instead fails the whole connect, and the device tries again with a
+		// credential it has just generated.
+		db.insert(schema.grants).values({
+			id: randomBase64Url(16),
+			connectionId,
+			secretHash: credentialHash,
+			createdAt: new Date(now),
+			lastUsedAt: new Date(now),
+		}),
+
+		// A cap, so a connection cannot accumulate grants without limit — every
+		// one of them a live key to the same storage. The oldest lose their place,
+		// which is the device least likely to still exist.
+		//
+		// In the same batch as the insert, so the subquery sees the new row and
+		// the connection is never briefly over its cap. `id` breaks a tie on
+		// `createdAt`, because two devices can connect inside one millisecond and
+		// a prune that is not a total order would drop an arbitrary one of them.
+		db
+			.delete(schema.grants)
+			.where(
+				and(
+					eq(schema.grants.connectionId, connectionId),
+					notInArray(
+						schema.grants.id,
+						db
+							.select({ id: schema.grants.id })
+							.from(schema.grants)
+							.where(eq(schema.grants.connectionId, connectionId))
+							.orderBy(desc(schema.grants.createdAt), desc(schema.grants.id))
+							.limit(MAX_GRANTS_PER_CONNECTION)
+					)
+				)
+			),
+	]);
+
+	return true;
 };
