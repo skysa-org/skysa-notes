@@ -1096,6 +1096,18 @@ button.row.selected {
 	cursor: pointer;
 }
 
+.tab-notice-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+/* Above the other corner notices: it is the one that says nothing here saves. */
+.tab-stale-bar {
+	inset-block-end: 9rem;
+	z-index: 40;
+}
+
 /* ---- A delete that can still be taken back ------------------------------ */
 
 /* The same corner as the "new version" prompt, which can be up at the same

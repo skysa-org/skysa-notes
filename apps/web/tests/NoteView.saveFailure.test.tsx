@@ -173,3 +173,58 @@ describe('NoteView, deleting a note whose last save was refused', () => {
 		expect(restored.body).toBe('before\ntyped and never stored\n');
 	});
 });
+
+describe('NoteView, when a body from outside replaces what is on screen', () => {
+	const editorText = () => EditorView.findFromDOM(document.body)?.state.doc.toString();
+
+	it('keeps an edit held from before it, which the next edit was not typed over', async () => {
+		const { note, type } = await open();
+		store.refusing = true;
+		type('held\n');
+		flushAutosave();
+		await screen.findByRole('alert');
+
+		// Another tab saves the note: a local edit, so the origin does not move,
+		// and this editor takes the new body in. The held text leaves the screen.
+		await db.notes.update(note.id, { body: 'from the other tab\n' });
+		await waitFor(() => {
+			expect(editorText()).toBe('from the other tab\n');
+		});
+
+		store.refusing = false;
+		type('typed after\n');
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.body).toBe('from the other tab\ntyped after\n');
+			const others = (await db.notes.toArray()).filter((each) => each.id !== note.id);
+			expect(others.map((each) => each.body)).toEqual(['before\nheld\n']);
+		});
+	});
+
+	it('does not offer an undo text that a save already kept beside the note', async () => {
+		const user = userEvent.setup();
+		const { note, type } = await open();
+		type('typed into the old body\n');
+		// A sync pull lands before the autosave does.
+		await db.notes.update(note.id, { body: 'pulled\n', bodyOrigin: 'pull-2' });
+		await waitFor(() => {
+			expect(editorText()).toBe('pulled\n');
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		await waitFor(() => {
+			expect(deletions.length).toBe(1);
+		});
+		const [deleted] = deletions;
+		if (deleted === undefined) throw new Error('nothing was deleted');
+		expect(deleted.body).toBe('pulled\n');
+
+		const restored = await undeleteNote(db, deleted);
+
+		// The note itself, not a second copy of words already kept once.
+		expect(restored.id).toBe(note.id);
+		const copies = (await db.notes.toArray()).filter((each) => each.id !== note.id);
+		expect(copies.map((each) => each.body)).toEqual(['before\ntyped into the old body\n']);
+	});
+});

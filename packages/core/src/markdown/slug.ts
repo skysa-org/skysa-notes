@@ -89,8 +89,8 @@ const APPROXIMATE_CLUSTER = /\p{M}+|\P{M}\p{M}*(?:\u200d\P{M}\p{M}*)*/gu;
  * points is one, and so is a letter with the accents stacked on it.
  */
 const clusters = (text: string): readonly string[] => {
-	// Asked on every call rather than once, and of the value rather than the
-	// type: the lib says it is always there, and it is not.
+	// Asked of the value rather than the type: the lib says it is always there,
+	// and it is not.
 	const segmenter = (Intl as Partial<typeof Intl>).Segmenter;
 	return segmenter === undefined
 		? (text.match(APPROXIMATE_CLUSTER) ?? [])
@@ -130,6 +130,11 @@ const SLUG_CAPS: Caps = { points: MAX_SLUG_CODE_POINTS, bytes: MAX_SLUG_BYTES };
 const cut = (text: string, caps: Caps): string => {
 	const fits = (points: number, bytes: number): boolean =>
 		points <= caps.points && bytes <= caps.bytes;
+
+	// Nearly every title, and every one slugged on each keystroke of a rename:
+	// no UTF-16 unit is more than three bytes or more than one code point, so
+	// text this short fits whatever is in it, and nothing need be segmented.
+	if (fits(text.length, text.length * 3)) return text;
 
 	return clusters(text)
 		.flatMap((cluster) =>

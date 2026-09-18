@@ -506,13 +506,47 @@ describe('useAutosave, asked to forget a note', () => {
 		act(() => {
 			result.current.change('last words');
 			result.current.flush();
-			result.current.forget();
+			result.current.forget('a');
 		});
 		await settleCall(() => calls[0]?.reject(new Error('no')));
 		await pass(AUTOSAVE_RETRY_MS * 3);
 
 		expect(values()).toEqual(['last words']);
 		expect(result.current.failing).toBe(false);
+	});
+
+	it('answers with the newest text the store never took, and with nothing when it took it all', async () => {
+		const save = vi
+			.fn<(value: string) => Promise<void>>()
+			.mockRejectedValueOnce(new Error('no'))
+			.mockResolvedValue(undefined);
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+
+		act(() => {
+			result.current.change('refused');
+		});
+		await pass(2000);
+		expect(result.current.failing).toBe(true);
+		act(() => {
+			result.current.change('refused, and more not yet sent');
+		});
+		const taken: (string | undefined)[] = [];
+		act(() => {
+			taken.push(result.current.forget('a'));
+		});
+
+		act(() => {
+			result.current.change('stored');
+			result.current.flush();
+		});
+		await act(async () => {
+			await result.current.settle();
+		});
+		act(() => {
+			taken.push(result.current.forget('a'));
+		});
+
+		expect(taken).toEqual(['refused, and more not yet sent', undefined]);
 	});
 
 	it('leaves another note’s held edit alone', async () => {
@@ -533,7 +567,7 @@ describe('useAutosave, asked to forget a note', () => {
 		await pass(2000);
 		rerender({ key: 'note-b', save: forB });
 		act(() => {
-			result.current.forget();
+			result.current.forget('note-b');
 		});
 		await pass(AUTOSAVE_RETRY_MS);
 

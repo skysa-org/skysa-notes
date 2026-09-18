@@ -33,9 +33,21 @@ export interface RichEditorProps {
 	 * belongs in raw mode instead.
 	 */
 	onUnsupported: () => void;
+	/**
+	 * The editor's text has been replaced by a body from outside — a sync pull,
+	 * another tab. What was typed before is no longer under what is typed next.
+	 */
+	onAdopted?: () => void;
 }
 
-const EditorBody = ({ noteId, body, origin, onUserEdit, onUnsupported }: RichEditorProps) => {
+const EditorBody = ({
+	noteId,
+	body,
+	origin,
+	onUserEdit,
+	onUnsupported,
+	onAdopted,
+}: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
 	useEffect(() => {
@@ -46,6 +58,11 @@ const EditorBody = ({ noteId, body, origin, onUserEdit, onUnsupported }: RichEdi
 	useEffect(() => {
 		unsupported.current = onUnsupported;
 	}, [onUnsupported]);
+
+	const replaced = useRef(onAdopted);
+	useEffect(() => {
+		replaced.current = onAdopted;
+	}, [onAdopted]);
 
 	const incoming = useIncomingBody(noteId, body, origin);
 	const pluginView = usePluginViewFactory();
@@ -120,7 +137,10 @@ const EditorBody = ({ noteId, body, origin, onUserEdit, onUnsupported }: RichEdi
 		editor.action((ctx) => {
 			// Only a body the editor now holds moves what its edits are made
 			// against: one it could not take in is asked about again.
-			if (adoptBody(ctx, body)) incoming.adopted();
+			if (adoptBody(ctx, body)) {
+				incoming.adopted();
+				replaced.current?.();
+			}
 			// The same question the editor was built with, asked again of a body
 			// that arrived from somewhere else. A sync pull can bring in markdown
 			// this editor cannot show, and since the check above runs once, this

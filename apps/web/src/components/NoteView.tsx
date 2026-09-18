@@ -116,12 +116,14 @@ const NoteBody = ({
 	showOutline,
 	onUserEdit,
 	onUnsupported,
+	onAdopted,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
 	showOutline: boolean;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
+	onAdopted: () => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
 	return (
@@ -132,6 +134,7 @@ const NoteBody = ({
 					body={note.body}
 					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
+					onAdopted={onAdopted}
 				/>
 			)}
 			{mode === 'rich' && (
@@ -141,6 +144,7 @@ const NoteBody = ({
 					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
 					onUnsupported={onUnsupported}
+					onAdopted={onAdopted}
 				/>
 			)}
 			{showOutline && (
@@ -175,11 +179,6 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		shown.current = note;
 	}, [note]);
 
-	// The last thing typed that the store has not confirmed it holds. A delete
-	// takes it along, so that undoing the delete cannot bring back less than the
-	// user had written.
-	const unconfirmed = useRef<{ id: string; body: string; origin: string }>(null);
-
 	const save = useCallback(
 		({ body, origin, note: typedInto }: Edit, context?: SaveContext) => {
 			if (noteId === undefined) return undefined;
@@ -195,10 +194,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				base !== undefined && context?.displaced === true
 					? { ...base, displaced: true }
 					: base
-			).then(() => {
-				const last = unconfirmed.current;
-				if (last?.id === noteId && last.body === body) unconfirmed.current = null;
-			});
+			);
 		},
 		[noteId]
 	);
@@ -216,10 +212,9 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	useEffect(() => beforeClosing(settle), [settle]);
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
-			if (noteId !== undefined) unconfirmed.current = { id: noteId, body, origin };
 			change({ body, origin, note: shown.current });
 		},
-		[change, noteId]
+		[change]
 	);
 
 	const onDelete = useCallback(() => {
@@ -227,22 +222,30 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// Written first, so the last words are in the row before it is a
 		// tombstone: restoring it brings them back with it.
 		flush();
-		const typed = unconfirmed.current?.id === note.id ? unconfirmed.current : null;
 		void deleteNote(db, note.id)
-			.then(() => getNote(db, note.id))
+			// Everything out has come back, and what had failed has had one more
+			// try — into the tombstone, which keeps an edit and stays deleted.
+			.then(settle)
+			// Deleted either way; a row that cannot be read is the note as shown.
+			.then(() => getNote(db, note.id).catch(() => undefined))
 			.then((row) => {
 				// Only now that it is deleted, and nothing before: a held edit
 				// retried after sync has purged the row would bring the note back
-				// (`saveNoteBody`), here and on the provider.
-				forget(note.id);
+				// (`saveNoteBody`), here and on the provider. What is let go is
+				// what the store never took, and undo cannot bring back less than
+				// the user had written — so it goes along. Asked of autosave, by
+				// note, rather than remembered here: a save that went into a
+				// conflict copy is stored, and offered again it would be copied
+				// again.
+				const unstored = forget(note.id);
 				const deleted = row ?? note;
 				onDeleted(
-					typed === null
+					unstored === undefined
 						? deleted
-						: { ...deleted, body: typed.body, bodyOrigin: typed.origin }
+						: { ...deleted, body: unstored.body, bodyOrigin: unstored.origin }
 				);
 			});
-	}, [flush, forget, note, onDeleted]);
+	}, [flush, forget, note, onDeleted, settle]);
 
 	const mode: EditorMode | undefined = unsupported ? 'raw' : (note?.editorMode ?? defaultMode);
 
@@ -327,6 +330,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 					rebased();
 					setUnsupportedId(note.id);
 				}}
+				// A body from outside is on screen now, and the held edit typed
+				// before it is not under whatever is typed next: a new sitting,
+				// so the next edit cannot stand for it.
+				onAdopted={rebased}
 			/>
 		</FindTargetProvider>
 	);
@@ -351,6 +358,7 @@ const NoteScreen = ({
 	onDelete,
 	onUserEdit,
 	onUnsupported,
+	onAdopted,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -364,6 +372,7 @@ const NoteScreen = ({
 	onDelete: () => void;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
+	onAdopted: () => void;
 }) => (
 	<section className="note-view" aria-label="Note">
 		<header className="note-header">
@@ -442,6 +451,7 @@ const NoteScreen = ({
 			showOutline={showOutline}
 			onUserEdit={onUserEdit}
 			onUnsupported={onUnsupported}
+			onAdopted={onAdopted}
 		/>
 	</section>
 );

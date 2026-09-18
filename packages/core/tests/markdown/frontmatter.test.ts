@@ -491,15 +491,11 @@ describe('`...` inside a block that `---` closes', () => {
 			});
 		});
 
-		inEachEnding('---\ntitle: x\nnote: |\n  a\n...\nstill: yaml\n---\nbody\n').forEach(
-			(source) => {
-				const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
-				expect(splitFrontmatter(source)).toEqual({
-					frontmatter: ['title: x', 'note: |', '  a', '...', 'still: yaml'].join(eol),
-					body: `body${eol}`,
-				});
-			}
-		);
+		// Blank lines between the two closers are still nothing between them.
+		expect(splitFrontmatter('---\ntitle: a\n...\n\n---\nbody\n')).toEqual({
+			frontmatter: 'title: a\n...\n',
+			body: 'body\n',
+		});
 	});
 
 	it('gets its `---` back when the block is rewritten, `...` above it or not', () => {
@@ -508,6 +504,64 @@ describe('`...` inside a block that `---` closes', () => {
 		expect(joinFrontmatter(writeFrontmatter(frontmatter, { id: 'abc' }), body)).toBe(
 			'---\ntitle: a\nid: abc\n...\n---\nbody\n'
 		);
+	});
+});
+
+describe('a pandoc block with anything under it before the first `---`', () => {
+	const bodyOf = (source: string): string => splitFrontmatter(source).body;
+
+	it('ends at `...`, blank line under it or not', () => {
+		// A setext heading straight under the block.
+		expect(bodyOf('---\ntitle: Trip\n...\nDay one\n---\nWe left early.\n')).toBe(
+			'Day one\n---\nWe left early.\n'
+		);
+		// A slide deck: `# Slide 1` is a comment to YAML, so the `---` reading of
+		// this parses without an error and used to take the heading with it.
+		expect(bodyOf('---\ntitle: Deck\n...\n\n# Slide 1\n\n---\n\n# Slide 2\n')).toBe(
+			'\n# Slide 1\n\n---\n\n# Slide 2\n'
+		);
+		expect(
+			bodyOf('---\ntitle: Foo\n...\n# Heading right under\n\nText: more\n\n---\n\nrest\n')
+		).toBe('# Heading right under\n\nText: more\n\n---\n\nrest\n');
+	});
+
+	it('reads the same after the app has written to the block', () => {
+		// The write tidies the blank line above `...` away; a rule that counted
+		// blank lines read this one way before the first save and another after,
+		// and "Day one" left the editor.
+		const source = '---\ntitle: Trip\n\n...\nDay one\n---\nWe left early.\n';
+		const first = splitFrontmatter(source);
+		expect(first.body).toBe('Day one\n---\nWe left early.\n');
+
+		const written = joinFrontmatter(
+			writeFrontmatter(first.frontmatter, { id: 'abc' }),
+			first.body
+		);
+		const second = splitFrontmatter(written);
+		expect(second.body).toBe(first.body);
+		expect(readFrontmatter(second.frontmatter)).toEqual({ id: 'abc', title: 'Trip' });
+	});
+
+	it('survives the blank line under it being deleted', () => {
+		const written = '---\ntitle: a\nid: abc\n...\nIntro line\n\n---\n\nrest\n';
+		expect(bodyOf(written)).toBe('Intro line\n\n---\n\nrest\n');
+	});
+});
+
+describe('a repaired block with a slip under a blank line', () => {
+	it('is still frontmatter: one word, or a template tag, is not a sentence', () => {
+		[
+			'---\nid: abc\ntitle: Trip\n\nurl:http://example.com\n---\nbody\n',
+			'---\nid: abc\ntitle: a\ntitle: b\n\n<% tp.file.cursor() %>\n---\nbody\n',
+			'---\nid: abc\ntitle: Trip: two\n\ndescription\n---\nbody\n',
+			'---\nid: abc\ntitle: a\ntitle: b\ntags: [a,\n\nb]\n---\nbody\n',
+		]
+			.flatMap(inEachEnding)
+			.forEach((source) => {
+				const { frontmatter, body } = splitFrontmatter(source);
+				expect(readFrontmatter(frontmatter).id, JSON.stringify(source)).toBe('abc');
+				expect(body.trim()).toBe('body');
+			});
 	});
 });
 
@@ -593,8 +647,9 @@ describe('splitFrontmatter, against what it did before', () => {
 		'---\nNote to self: call the bank\n...\nand then the rest\n',
 		'---\ntitle: a\n...\n---\nbody\n',
 		'---\nfoo: bar\n...\n---\nbody\n',
-		'---\ntitle: x\nnote: |\n  a\n...\nstill: yaml\n---\nbody\n',
-		'---\ntitle: x\n...\nstill: yaml\n\nmore: yaml\n---\nbody\n',
+		'---\ntitle: a\n...\n\n---\nbody\n',
+		'---\nid: abc\ntitle: Trip\n\nurl:http://example.com\n---\nbody\n',
+		'---\nid: abc\ntitle: a\ntitle: b\n\n<% tp.file.cursor() %>\n---\nbody\n',
 		'---\n...\nbody\n',
 		'---\ntext\n...\nbody\n',
 	];
@@ -619,6 +674,18 @@ describe('splitFrontmatter, against what it did before', () => {
 			'---\ntitle: X\n...\n\nNote: remember this\n\n---\n\nmore\n',
 		],
 		[
+			'YAML ends its document at `...`: what follows was never read as metadata, only hidden',
+			'---\ntitle: x\nnote: |\n  a\n...\nstill: yaml\n---\nbody\n',
+		],
+		[
+			'a setext heading straight under a pandoc block is the note, not the block',
+			'---\ntitle: Trip\n...\nDay one\n---\nWe left early.\n',
+		],
+		[
+			'a slide deck keeps its first slide, which YAML reads as a comment',
+			'---\ntitle: Deck\n...\n\n# Slide 1\n\n---\n\n# Slide 2\n',
+		],
+		[
 			'a fence nobody closed no longer takes the prose under it; it is all body',
 			'---\ntitle: X\n\nSome prose the user wrote, locally.\n\n---\n\nrest\n',
 		],
@@ -634,5 +701,37 @@ describe('splitFrontmatter, against what it did before', () => {
 				expect(splitFrontmatter(source ?? ''), why).not.toEqual(legacySplit(source ?? ''));
 			}
 		);
+	});
+});
+
+describe('writeFrontmatter, over an `id` the app declined', () => {
+	it('neither replaces it nor respells it, whatever else the patch sets', () => {
+		expect(writeFrontmatter('title: a\nid: 0123', { title: 'T', id: 'uuid' })).toBe(
+			'title: T\nid: 0123\n'
+		);
+		expect(writeFrontmatter('title: a\nid: +12 # mine\nx: 1', { title: 'T' })).toBe(
+			'title: T\nid: +12 # mine\nx: 1\n'
+		);
+		expect(writeFrontmatter('id: 0x1F\ntitle: a', { tags: ['a'] })).toBe(
+			'id: 0x1F\ntitle: a\ntags:\n  - a\n'
+		);
+		expect(writeFrontmatter('id: [1, 2]\ntitle: a', { id: 'uuid' })).toBe(
+			'id: [ 1, 2 ]\ntitle: a\n'
+		);
+	});
+
+	it('still fills in an `id:` nobody gave a value, and still removes one when asked', () => {
+		expect(writeFrontmatter('id:\ntitle: a', { id: 'uuid' })).toBe('id: uuid\ntitle: a\n');
+		expect(writeFrontmatter('id: 0123\ntitle: a', { id: undefined })).toBe('title: a\n');
+	});
+});
+
+describe('writeFrontmatter, emptying a block that `...` closed', () => {
+	it('writes one that is still read as a block', () => {
+		const written = writeFrontmatter('---\ntitle: a\n...', { title: undefined });
+		expect(splitFrontmatter(joinFrontmatter(written, 'body\n'))).toEqual({
+			frontmatter: '{}',
+			body: 'body\n',
+		});
 	});
 });

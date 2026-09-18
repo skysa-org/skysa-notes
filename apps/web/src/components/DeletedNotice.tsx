@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * How long a delete can be taken back from here. Long enough to notice the note
@@ -11,6 +11,11 @@ export interface DeletedNoticeProps {
 	title: string;
 	onUndo: () => void;
 	onDismiss: () => void;
+	/**
+	 * Stay until dismissed. For an undo that failed: the notice may hold the only
+	 * copy of text the store never took, and a clock must not be what loses it.
+	 */
+	keep?: boolean;
 }
 
 /**
@@ -21,9 +26,17 @@ export interface DeletedNoticeProps {
  * purpose and is already doing the next thing. It is in the tab order for
  * whoever wants it, and the clock stops while it holds the pointer or the
  * focus — a button that vanishes as it is reached for is worse than none.
+ *
+ * The two are kept apart, since either can end while the other goes on: focus
+ * tabbing out must not start the clock under a pointer still resting there. And
+ * a touch is not a pointer resting anywhere — it sends a `mouseenter` and never
+ * the `mouseleave`, which held the notice up for good.
  */
-export const DeletedNotice = ({ title, onUndo, onDismiss }: DeletedNoticeProps) => {
-	const [held, setHeld] = useState(false);
+export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: DeletedNoticeProps) => {
+	const [hovered, setHovered] = useState(false);
+	const [focused, setFocused] = useState(false);
+	const touched = useRef(false);
+	const held = keep || hovered || focused;
 	useEffect(() => {
 		if (held) return undefined;
 		const timer = setTimeout(onDismiss, UNDO_WINDOW_MS);
@@ -32,21 +45,25 @@ export const DeletedNotice = ({ title, onUndo, onDismiss }: DeletedNoticeProps) 
 		};
 	}, [held, onDismiss]);
 
-	const hold = () => {
-		setHeld(true);
-	};
-	const release = () => {
-		setHeld(false);
-	};
-
 	return (
 		<div
 			className="update-prompt deleted-notice"
 			role="status"
-			onMouseEnter={hold}
-			onMouseLeave={release}
-			onFocus={hold}
-			onBlur={release}
+			onTouchStart={() => {
+				touched.current = true;
+			}}
+			onMouseEnter={() => {
+				if (!touched.current) setHovered(true);
+			}}
+			onMouseLeave={() => {
+				setHovered(false);
+			}}
+			onFocus={() => {
+				setFocused(true);
+			}}
+			onBlur={() => {
+				setFocused(false);
+			}}
 		>
 			<span>Deleted “{title}”.</span>
 			<button type="button" onClick={onUndo}>

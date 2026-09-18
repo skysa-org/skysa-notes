@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { subscribeTabState, tabState } from '../store/staleTab.js';
 
@@ -11,10 +11,14 @@ import { subscribeTabState, tabState } from '../store/staleTab.js';
  * Out of date blocks rather than asks. The connection is closed for good, so
  * every save from here on fails, and an editor that still took typing would be
  * taking words it cannot keep. The app underneath is made inert rather than
- * unmounted, so what was on screen can still be read behind the notice. Held
- * edits were flushed before the connection closed (`beforeClosing`); inert also
- * stops selection in most browsers, so anything that flush missed can be read
- * off the page but not copied from it.
+ * unmounted, so what was on screen can still be read behind the notice.
+ *
+ * Inert also stops selection, and that is the one thing the block must not cost.
+ * Held edits were flushed before the connection closed (`beforeClosing`), but a
+ * flush can fail — and a tab whose saves were already failing has been telling
+ * its user to copy their text somewhere safe. So the notice can be put aside
+ * for that: the app comes back, selectable, under a bar that goes on saying it
+ * cannot save. Typing there is refused by the store and said by the note view.
  */
 export const StaleTabGate = ({
 	children,
@@ -27,17 +31,29 @@ export const StaleTabGate = ({
 	reload?: () => void;
 }) => {
 	const state = useSyncExternalStore(subscribeTabState, tabState);
+	const [copying, setCopying] = useState(false);
+	const blocked = state === 'stale' && !copying;
 	const button = useRef<HTMLButtonElement>(null);
 	useEffect(() => {
-		if (state === 'stale') button.current?.focus();
-	}, [state]);
+		if (blocked) button.current?.focus();
+	}, [blocked]);
 
 	return (
 		<>
-			<div className="tab-gate" inert={state === 'stale'}>
+			<div className="tab-gate" inert={blocked}>
 				{children}
 			</div>
-			{state === 'stale' && (
+			{state === 'stale' && copying && (
+				<div className="update-prompt tab-stale-bar" role="alert">
+					<span>
+						This tab is out of date and cannot save. Copy what you need, then reload.
+					</span>
+					<button type="button" onClick={reload}>
+						Reload
+					</button>
+				</div>
+			)}
+			{blocked && (
 				<div className="tab-notice-backdrop">
 					<div
 						className="tab-notice"
@@ -51,9 +67,19 @@ export const StaleTabGate = ({
 							A newer version of the app is open in another tab, and this one can no
 							longer save. Reload to carry on here.
 						</p>
-						<button ref={button} type="button" onClick={reload}>
-							Reload
-						</button>
+						<div className="tab-notice-actions">
+							<button ref={button} type="button" onClick={reload}>
+								Reload
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									setCopying(true);
+								}}
+							>
+								Copy my text first
+							</button>
+						</div>
 					</div>
 				</div>
 			)}

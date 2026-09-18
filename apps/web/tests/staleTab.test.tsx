@@ -49,6 +49,17 @@ describe('a tab whose database a newer build has asked for', () => {
 		expect(screen.getByText('the app').closest('[inert]')).toBeNull();
 	});
 
+	it('is not out of date because the database was deleted', async () => {
+		const db = await thisTab();
+
+		await (createDatabase(db.name) as Dexie).delete();
+
+		expect(tabState()).toBe('current');
+		// And carries on, in a database that is empty again.
+		await db.prefs.put({ key: 'after', value: 'a fresh start' });
+		expect(await db.prefs.get('before')).toBeUndefined();
+	});
+
 	it('finishes the writes that are under way before it lets go, and only then', async () => {
 		const db = await thisTab();
 		const held: { release: () => void } = { release: () => undefined };
@@ -113,6 +124,28 @@ describe('a tab whose database a newer build has asked for', () => {
 		expect(Date.now() - began).toBeGreaterThanOrEqual(CLOSE_GRACE_MS - 50);
 	}, 10_000);
 
+	it('is out of date when it opens on a database already upgraded, with no event to say so', async () => {
+		// Back from the back-forward cache, or an old build out of a stale cache:
+		// nothing was open to hear `versionchange`, and Dexie opens an older
+		// declaration against a newer database without complaint.
+		const name = `stale-${crypto.randomUUID()}`;
+		const newer = newerBuild(name);
+		await newer.open();
+		newer.close();
+
+		const old = createDatabase(name);
+		opened.push(old);
+		await old.open().catch(() => undefined);
+
+		await vi.waitFor(() => {
+			expect(old.isOpen()).toBe(false);
+		});
+		expect(tabState()).toBe('stale');
+		await expect(old.prefs.put({ key: 'after', value: 'lost?' })).rejects.toMatchObject({
+			name: 'DatabaseClosedError',
+		});
+	});
+
 	it('blocks the app behind a notice that offers the one thing left to do', async () => {
 		const user = userEvent.setup();
 		const reload = vi.fn();
@@ -133,6 +166,30 @@ describe('a tab whose database a newer build has asked for', () => {
 		expect(document.activeElement).toBe(button);
 
 		await user.click(button);
+		expect(reload).toHaveBeenCalledTimes(1);
+	});
+
+	it('can be put aside to copy text out, and goes on saying it cannot save', async () => {
+		// Inert stops selection. A tab whose saves were already failing has been
+		// telling its user to copy their text, and the block must not take that away.
+		const user = userEvent.setup();
+		const reload = vi.fn();
+		const db = await thisTab();
+		render(
+			<StaleTabGate reload={reload}>
+				<p>the app</p>
+			</StaleTabGate>
+		);
+		await act(async () => {
+			await newerBuild(db.name).open();
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Copy my text first' }));
+
+		expect(screen.queryByRole('alertdialog')).toBeNull();
+		expect(screen.getByText('the app').closest('[inert]')).toBeNull();
+		expect(screen.getByRole('alert').textContent).toMatch(/cannot save/);
+		await user.click(screen.getByRole('button', { name: 'Reload' }));
 		expect(reload).toHaveBeenCalledTimes(1);
 	});
 });

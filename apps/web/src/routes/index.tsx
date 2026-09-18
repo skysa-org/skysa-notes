@@ -11,7 +11,7 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { db, type NoteRecord } from '../store/db.js';
+import { activeConnectionId, db, type NoteRecord } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
 	useFolderTree,
@@ -152,6 +152,8 @@ const Home = () => {
 	 * the first note simply stays deleted.
 	 */
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
+	/** The id of a note whose undo failed: its notice waits to be dismissed. */
+	const [undoFailed, setUndoFailed] = useState<string | null>(null);
 	const dismissDeleted = useCallback(() => {
 		setDeleted(null);
 	}, []);
@@ -159,17 +161,26 @@ const Home = () => {
 	const undoDelete = () => {
 		if (deleted === null) return;
 		void undeleteNote(db, deleted)
-			.then((restored) => {
+			.then(async (restored) => {
 				setDeleted((current) => (current?.id === deleted.id ? null : current));
-				// Back where it was, open: by the row's own path, which is a
-				// conflict name if something took the old one meanwhile.
+				// It goes back to the source it was deleted from, which need not be
+				// the one showing by now: the notice outlives a change of source.
+				if (restored.connectionId !== (await activeConnectionId(db))) {
+					setProblem(`“${restored.title}” is back, in the source it was deleted from.`);
+					return;
+				}
+				// Back where it was, open. By the row's own path, not the one it
+				// was deleted at: once sync has purged the row the note is made
+				// again, under a conflict name if something took the old one.
 				select({
 					note: restored.id,
 					folder: folderToSearch(parentPath(restored.path)),
 				});
 			})
-			// The notice stays: the note is still deleted, and still offered.
+			// The notice stays, and for as long as it takes: the note is still
+			// deleted, still offered, and what it holds may be in no other place.
 			.catch(() => {
+				setUndoFailed(deleted.id);
 				setProblem('That note could not be brought back. Try again.');
 			});
 	};
@@ -341,6 +352,7 @@ const Home = () => {
 					title={deleted.title}
 					onUndo={undoDelete}
 					onDismiss={dismissDeleted}
+					keep={undoFailed === deleted.id}
 				/>
 			)}
 		</div>

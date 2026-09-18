@@ -92,8 +92,21 @@ const retire = (db: Dexie) => {
 	});
 };
 
+/**
+ * Is the database on disk a later build's? Dexie numbers the native database
+ * ten to a version, and takes one of the ten for itself when it patches a
+ * schema, so only a whole version more is somebody else's.
+ */
+const upgradedElsewhere = (db: Dexie): boolean =>
+	// Typed as always there; it is null on a database that is not open.
+	((db.backendDB() as IDBDatabase | null)?.version ?? 0) >= (db.verno + 1) * 10;
+
 export const watchForNewerTab = (db: Dexie): void => {
-	db.on('versionchange', () => {
+	db.on('versionchange', (event) => {
+		// A delete — "clear site data", devtools — is not a newer build, and says
+		// so by having no new version. Dexie's own handler is left to it: closed,
+		// and opened again, empty, when next asked.
+		if (event.newVersion === null) return undefined;
 		retire(db);
 		// Stops the chain before Dexie's own handler, which closes with auto-open
 		// left on.
@@ -111,6 +124,16 @@ export const watchForNewerTab = (db: Dexie): void => {
 		() => {
 			if (notice.current !== null) clearTimeout(notice.current);
 			notice.current = null;
+			// The event above reaches a tab that is open when the upgrade is made.
+			// One that was not — in the back-forward cache, its connection dropped
+			// by the browser, or simply an old build loaded from a stale cache —
+			// hears nothing, and Dexie opens it against the newer database without
+			// an error (it retries a `VersionError` with no version at all). Every
+			// route back in comes through here, so here is where it is asked.
+			if (upgradedElsewhere(db)) {
+				retire(db);
+				return;
+			}
 			publish('current');
 		},
 		true

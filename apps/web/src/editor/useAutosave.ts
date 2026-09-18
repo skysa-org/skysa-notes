@@ -55,7 +55,7 @@ export interface SaveContext {
 	displaced: true;
 }
 
-type Save<T> = (value: T, context?: SaveContext) => void | Promise<void>;
+type Save<T> = (value: T, context?: SaveContext) => void | Promise<unknown>;
 
 export interface UseAutosaveOptions<T> {
 	/** Changing this flushes the pending save before the new note takes over. */
@@ -87,11 +87,17 @@ export interface Autosave<T> {
 	 */
 	rebased: () => void;
 	/**
-	 * Let go of everything held for `key` (the current one by default), written
-	 * or not. For a note the user has deleted: a retry after its row has been
-	 * purged would bring it back.
+	 * Let go of everything held for `key`, written or not. For a note the user
+	 * has deleted: a retry after its row has been purged would bring it back.
+	 * The key is always named: "the current one" asked from a continuation is
+	 * whichever note the user has opened since.
+	 *
+	 * Answers with the newest of what it let go — the last thing typed into that
+	 * note that the store never confirmed — so that whoever deletes the note can
+	 * keep it for an undo. Asked after `settle`, that is an edit whose save
+	 * failed, and nothing where every save went through, wherever it went.
 	 */
-	forget: (key?: string) => void;
+	forget: (key: string) => T | undefined;
 	/** A write was rejected and what it held is still not stored. */
 	failing: boolean;
 }
@@ -144,7 +150,10 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 	const held = { current: [] as readonly Attempt<T>[] };
 	/**
 	 * Written, and newer than something still held for the same note — kept only
-	 * so that one failing *after* this succeeded can be told it is covered.
+	 * so that one failing *after* this succeeded can be told it is covered. A
+	 * write lets go of the earlier ones it stands for, or an edit that goes on
+	 * failing would have every later save of that note, body and all, kept behind
+	 * it for as long as the tab is open.
 	 */
 	const written = { current: [] as readonly Attempt<T>[] };
 	const flying = new Map<Attempt<T>, Promise<void>>();
@@ -194,7 +203,8 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 		// Newest text wins: a failed edit is let go where something issued after
 		// it stands for it, and is either stored or held in its turn.
 		const covered = forgotten.has(entry) || known().some((other) => stands(other, entry));
-		if (ok) written.current = [...written.current, entry];
+		if (ok)
+			written.current = [...written.current.filter((done) => !stands(entry, done)), entry];
 		if (ok || covered) release(entry);
 		else failed.add(entry);
 		report();
@@ -258,16 +268,17 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 		});
 	};
 
-	const forget = (key: string) => {
-		held.current
-			.filter((each) => each.key === key)
-			.forEach((each) => {
-				// One that is out cannot be called back; it can be kept from ever
-				// being tried again.
-				if (flying.has(each)) forgotten.add(each);
-				else release(each);
-			});
+	const forget = (key: string): T | undefined => {
+		const mine = held.current.filter((each) => each.key === key);
+		mine.forEach((each) => {
+			// One that is out cannot be called back; it can be kept from ever
+			// being tried again.
+			if (flying.has(each)) forgotten.add(each);
+			else release(each);
+		});
 		report();
+		// In issue order, so the last is the newest.
+		return mine.at(-1)?.value;
 	};
 
 	return { issue, retry, follow, forget, stop };
@@ -352,13 +363,16 @@ export const useAutosave = <T>({
 	}, [flush]);
 
 	const forget = useCallback(
-		(forgotten: string = keyRef.current) => {
+		(forgotten: string) => {
+			const waiting = forgotten === keyRef.current ? pending.current : null;
 			if (forgotten === keyRef.current) {
 				if (timer.current !== null) clearTimeout(timer.current);
 				timer.current = null;
 				pending.current = null;
 			}
-			held.forget(forgotten);
+			const unstored = held.forget(forgotten);
+			// Not yet issued is newer than anything that was.
+			return waiting === null ? unstored : waiting.value;
 		},
 		[held]
 	);

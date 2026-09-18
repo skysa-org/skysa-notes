@@ -21,18 +21,23 @@ pull no longer puts the pre-pull text back and pushes it over someone else's
 edit; an adopted body empties the undo history in both editors.
 
 Deleting a note can be undone for about ten seconds, from a notice or the
-palette, whether or not the delete has already synced.
+palette, whether or not the delete has already synced. The note goes back to
+the source it was deleted from, keeps its path, and anything that took the name
+meanwhile moves aside.
 
 Saving. A save that fails is said, in the note, and retried — newest text
 first, never an older body over a newer one — where it used to be dropped
 silently. A tab left open across a schema upgrade made by a newer
 build in another tab now finishes its writes, closes, and asks to be reloaded,
-rather than carrying on writing with old code into the migrated database.
+rather than carrying on writing with old code into the migrated database. The
+same holds for a tab that opens after the upgrade was made. The notice can be
+put aside to copy text out.
 
 Files. An `id:` the user wrote that the app cannot use (`id: 202409141302`) is
 left as written instead of being replaced by a UUID on first save, in the note
-and in a conflict copy of it. A frontmatter block closed by `...` is read as
-one, and an unclosed block no longer swallows prose up to the next `---`. File
+and in a conflict copy of it, and is not respelled (`0123` stayed `0123`) when
+the title or tags are written. A frontmatter block closed by `...` is read as
+one, the same way before and after the app's own save, and an unclosed block no longer swallows prose up to the next `---`. File
 names are cut between grapheme clusters and capped at 216 bytes as well as 120
 code points, and a conflict copy's name is fitted to 255 bytes, so an emoji at the boundary cannot produce a name OneDrive's
 adapter throws on; existing files are not renamed.

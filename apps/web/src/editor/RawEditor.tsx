@@ -24,6 +24,11 @@ export interface RawEditorProps {
 	origin?: string;
 	/** The edited body, and the origin of the body it was typed into. */
 	onUserEdit: (body: string, origin: string) => void;
+	/**
+	 * The editor's text has been replaced by a body from outside — a sync pull,
+	 * another tab. What was typed before is no longer under what is typed next.
+	 */
+	onAdopted?: () => void;
 }
 
 /**
@@ -33,7 +38,7 @@ export interface RawEditorProps {
  */
 const undoHistory = new Compartment();
 
-export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) => {
+export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
@@ -42,6 +47,10 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 	useEffect(() => {
 		notify.current = onUserEdit;
 	}, [onUserEdit]);
+	const replaced = useRef(onAdopted);
+	useEffect(() => {
+		replaced.current = onAdopted;
+	}, [onAdopted]);
 	const incoming = useIncomingBody(noteId, body, origin);
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
@@ -107,6 +116,7 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 			instance.dispatch({ effects: undoHistory.reconfigure(history()) });
 		}
 		incoming.adopted();
+		if (current !== body) replaced.current?.();
 	}, [body, origin, incoming]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;

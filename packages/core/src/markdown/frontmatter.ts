@@ -52,6 +52,7 @@ const blockClosedBy = (closer: string): RegExp =>
 	new RegExp(String.raw`^---[ \t]*${EOL}(?:([\s\S]*?)(${EOL}))??${closer}[ \t]*(${EOL}|$)`);
 
 const FENCED = blockClosedBy('---');
+const CLOSING_FENCE = new RegExp(String.raw`---[ \t]*(?:${EOL})?$`);
 const ENDED = blockClosedBy(String.raw`\.\.\.`);
 
 /**
@@ -171,15 +172,27 @@ interface Recovered {
 const YAML_LINE = /^(?:[ \t]|#|-(?:[ \t]|$)|[\]}]|[^:]+:(?:[ \t]|$))/;
 
 /**
+ * A sentence, as far as one line can show it: more than one word, and not a
+ * template tag (`<% tp.file.cursor() %>`, `{{date}}`), which is a tool's line
+ * however many words are in it.
+ *
+ * A single word is what a slip in real frontmatter looks like —
+ * `url:http://example.com` with the space left out, a bare `description` under
+ * a blank line — and calling those prose turned away blocks that had always
+ * been read, `id` and all.
+ */
+const SENTENCE = /^(?!<%|\{\{)\S+[ \t]+\S/;
+
+/**
  * Does prose begin inside this block? Asked only of a block the parser had to
  * repair.
  *
  * The usual way to get one is a fence that was never closed: the block then
  * runs to the first thematic break in the note, and the paragraphs on the way
  * are what the parser trips over. Naming `title` is no defence — the real
- * frontmatter above the prose names it. A blank line and then a line that is
- * not YAML is what that looks like, and it is answered the safe way round: the
- * whole file is body, where the user can see it and fix the fence.
+ * frontmatter above the prose names it. A blank line and then a sentence that
+ * is not YAML is what that looks like, and it is answered the safe way round:
+ * the whole file is body, where the user can see it and fix the fence.
  *
  * A block scalar holds blank lines and prose too, and is not caught: its lines
  * are indented, and a block that is only that parses without errors and never
@@ -192,7 +205,7 @@ const holdsProse = (yaml: string): boolean =>
 			(line, index, lines) =>
 				index > 0 &&
 				lines[index - 1]?.trim() === '' &&
-				line.trim() !== '' &&
+				SENTENCE.test(line) &&
 				!YAML_LINE.test(line)
 		);
 
@@ -211,7 +224,6 @@ const recover = (frontmatter: string | null): Recovered | undefined => {
 		// where they can no longer see or delete it. A document the parser had
 		// to repair therefore has to name something metadata is named.
 		if (doc.errors.length > 0 && !namesMetadata(record)) return undefined;
-		if (doc.errors.length > 0 && holdsProse(yaml)) return undefined;
 		return { record, doc };
 	} catch {
 		return undefined;
@@ -221,8 +233,8 @@ const recover = (frontmatter: string | null): Recovered | undefined => {
 const NO_FRONTMATTER = (source: string): SplitDocument => ({ frontmatter: null, body: source });
 
 interface Reading extends SplitDocument {
-	/** Whether the parser had to repair the YAML to read it. */
-	readonly repaired: boolean;
+	/** How much of the source the block takes, closing line included. */
+	readonly length: number;
 }
 
 /**
@@ -236,16 +248,16 @@ const fencedReading = (source: string): Reading | undefined => {
 
 	const yaml = match[1] ?? '';
 	const body = source.slice(match[0].length);
-	if (yaml.trim() === '') return { frontmatter: yaml, body, repaired: false };
+	const reading = { frontmatter: yaml, body, length: match[0].length };
+	if (yaml.trim() === '') return reading;
 
 	const recovered = recover(yaml);
-	return recovered && { frontmatter: yaml, body, repaired: recovered.doc.errors.length > 0 };
+	if (recovered === undefined) return undefined;
+	// Asked here and not in `recover`: it is a question about where a block
+	// ends, and a block split off before it was asked — one already in a stored
+	// note — must go on being read for the title and tags it was read for.
+	return recovered.doc.errors.length > 0 && holdsProse(yaml) ? undefined : reading;
 };
-
-interface EndedReading extends SplitDocument {
-	/** Whether the line under the `...` is blank, or there is none. */
-	readonly thenBlank: boolean;
-}
 
 /**
  * The block up to the first `...` line, if that is frontmatter.
@@ -256,7 +268,7 @@ interface EndedReading extends SplitDocument {
  * mapping, and name something metadata is named. A clean parse is the evidence
  * that the line was a document end — prose above it is an error at column 0.
  */
-const endedReading = (source: string): EndedReading | undefined => {
+const endedReading = (source: string): Reading | undefined => {
 	const match = ENDED.exec(source);
 	if (match === null) return undefined;
 
@@ -265,11 +277,10 @@ const endedReading = (source: string): EndedReading | undefined => {
 	if (!namesMetadata(recovered.record)) return undefined;
 
 	const eol = match[2] ?? '\n';
-	const body = source.slice(match[0].length);
 	return {
 		frontmatter: `${FENCE}${eol}${match[1] ?? ''}${eol}${DOCUMENT_END}`,
-		body,
-		thenBlank: /^[ \t]*(?:\r\n|\n|\r|$)/.test(body),
+		body: source.slice(match[0].length),
+		length: match[0].length,
 	};
 };
 
@@ -277,28 +288,35 @@ const endedReading = (source: string): EndedReading | undefined => {
  * Frontmatter is optional on read: a `.md` file written by any other tool is a
  * valid note.
  *
- * A block closed by `---` is read first and, read cleanly, is the answer —
- * whatever `...` lines it holds. `...` closes a block only where that reading
- * found none, with one exception: the `---` reading needed repair, and the
- * `...` reading is clean and has a blank line under it. That is a pandoc block
- * and the note's first paragraph, run together as far as the note's first
- * thematic break; the repair is the parser tripping over the paragraph.
+ * A block closed by `---` is the answer unless a `...` line closed one first
+ * and something other than blank lines stands between the two. YAML ends its
+ * document at `...`, so what follows is not metadata under any reading: it is
+ * a pandoc block and the top of the note, run together as far as the note's
+ * first thematic break — `# Slide 1` above a slide rule, which the parser takes
+ * for a comment and raises no error over, or a paragraph above a setext
+ * underline. Nothing but blank lines between them is YAML that closed itself
+ * with `...` and then the fence, which is legal, and stays the `---` block.
+ *
+ * The rule looks only at the text and never at how well it parsed beyond what
+ * each reading already demands, so it answers the same before and after the
+ * app's own write — which tidies blank lines and would otherwise tip a rule
+ * that counted them.
  */
+/** Did `...` close a block above the `---`, with more than blank lines between? */
+const closedEarlier = (source: string, ended: Reading, fenced: Reading): boolean =>
+	source.slice(ended.length, fenced.length).replace(CLOSING_FENCE, '').trim() !== '';
+
 export const splitFrontmatter = (source: string): SplitDocument => {
 	if (!source.startsWith(FENCE)) return NO_FRONTMATTER(source);
 
 	const fenced = fencedReading(source);
-	if (fenced !== undefined && !fenced.repaired) {
-		return { frontmatter: fenced.frontmatter, body: fenced.body };
-	}
-
 	const ended = endedReading(source);
-	if (fenced !== undefined && !(ended?.thenBlank ?? false)) {
-		return { frontmatter: fenced.frontmatter, body: fenced.body };
-	}
+	const chosen =
+		fenced !== undefined && !(ended && closedEarlier(source, ended, fenced)) ? fenced : ended;
 
-	if (ended === undefined) return NO_FRONTMATTER(source);
-	return { frontmatter: ended.frontmatter, body: ended.body };
+	return chosen === undefined
+		? NO_FRONTMATTER(source)
+		: { frontmatter: chosen.frontmatter, body: chosen.body };
 };
 
 /** Inverse of `splitFrontmatter`. */
@@ -376,10 +394,10 @@ const asId = (value: unknown, doc: Document): string | undefined => {
  *
  * Declining is only half of leaving it alone. A note read with no id is given
  * one, and a writer that then sets `id` puts a UUID over `id: 202409141302` —
- * a Zettelkasten id, in the user's own file, gone on the first edit. So a
- * writer asks this first and leaves the key out of its patch: the line stays
- * exactly as written, and the note is what any note without an id is — known
- * to this device by an id the file never sees, and matched by its path.
+ * a Zettelkasten id, in the user's own file, gone on the first edit. So
+ * `writeFrontmatter` asks this and leaves the key out of what it sets: the line
+ * stays exactly as written, and the note is what any note without an id is —
+ * known to this device by an id the file never sees, and matched by its path.
  *
  * An `id:` with nothing after it is not a value anyone wrote, and is filled in.
  */
@@ -464,7 +482,29 @@ export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
  * document is re-stringified; no key or value is lost. Unparseable YAML is never
  * rewritten — doing so would destroy whatever the user meant by it — so the
  * patch is dropped and the raw text kept.
+ *
+ * An `id` the user wrote and the app declined to read (`frontmatterHasDeclinedId`)
+ * is neither set over nor respelled: `yaml` writes `id: 0123` back as `id: 123`,
+ * which is a different Zettelkasten id, so the characters the file had are put
+ * back after the rest has been stringified. That is held here, once, rather
+ * than by each caller remembering to ask. Only a clean document gets this far,
+ * and in one of those a declined id is simply one that is not a string.
  */
+const declinedId = (yaml: string, doc: Document): Readonly<{ source?: string }> | undefined => {
+	const node = doc.get('id', true);
+	if (node === undefined) return undefined;
+	// A list or a mapping is declined too, and is not respelled by the writer.
+	if (!isScalar(node)) return {};
+	if (node.value === null || typeof node.value === 'string') return undefined;
+	return node.range ? { source: yaml.slice(node.range[0], node.range[1]) } : {};
+};
+
+const withIdSpelled = (written: string, source: string): string => {
+	const node = parseDocument(written).get('id', true);
+	if (!isScalar(node) || !node.range) return written;
+	return `${written.slice(0, node.range[0])}${source}${written.slice(node.range[1])}`;
+};
+
 export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmatter): string => {
 	const entries = KNOWN_KEYS.filter((key) => key in patch).map(
 		(key) => [key, patch[key]] as const
@@ -475,13 +515,26 @@ export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmat
 		return Object.keys(seed).length === 0 ? '' : stringifyYaml(seed);
 	}
 
-	const doc = parseDocument(toLf(yamlOf(frontmatter)));
+	const yaml = toLf(yamlOf(frontmatter));
+	const doc = parseDocument(yaml);
 	if (!isDocument(doc) || doc.errors.length > 0) return frontmatter;
 
-	entries.forEach(([key, value]) =>
-		value === undefined ? doc.delete(key) : doc.set(key, value)
-	);
-	return EXPLICIT_DOCUMENT.test(frontmatter)
-		? `${FENCE}\n${String(doc)}${DOCUMENT_END}\n`
-		: String(doc);
+	const own = declinedId(yaml, doc);
+	const keepsOwnId = own !== undefined && patch.id !== undefined;
+	entries
+		.filter(([key]) => !(key === 'id' && keepsOwnId))
+		.forEach(([key, value]) => (value === undefined ? doc.delete(key) : doc.set(key, value)));
+
+	const stillThere = keepsOwnId || !('id' in patch);
+	const written =
+		own?.source !== undefined && stillThere
+			? withIdSpelled(String(doc), own.source)
+			: String(doc);
+	// An explicit document with nothing left in it is `{}`, which names no
+	// metadata and so would not be read back as a block closed by `...`. Fenced,
+	// it is.
+	const emptied = isMap(doc.contents) && doc.contents.items.length === 0;
+	return EXPLICIT_DOCUMENT.test(frontmatter) && !emptied
+		? `${FENCE}\n${written}${DOCUMENT_END}\n`
+		: written;
 };

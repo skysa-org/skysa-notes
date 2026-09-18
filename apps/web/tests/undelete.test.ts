@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import {
+	ACTIVE_CONNECTION_KEY,
+	createDatabase,
+	type NoteRecord,
+	type NotesDatabase,
+} from '../src/store/db.js';
+import { createFolder, deleteFolder } from '../src/store/folders.js';
 import {
 	createNote,
 	deleteNote,
@@ -100,11 +106,11 @@ describe('undeleteNote', () => {
 		expect((await getNote(db, usurper.id))?.path).toBe(deleted.path);
 	});
 
-	it('moves aside while the tombstone is still there, too, rather than sharing a path', async () => {
+	it('keeps its path while the tombstone is still there, and moves the newcomer aside', async () => {
 		// Delete a note, make another of the same name — a deleted note's name is
-		// free at once — and undo: restoring blindly leaves two live notes at one
-		// path, which the list shows twice and the next push has overwrite each
-		// other.
+		// free at once — and undo: restoring with nothing moved leaves two live
+		// notes at one path. The restored note's file is still at that path on
+		// the provider, so it keeps it, as the remote does in a conflict.
 		const { db } = box;
 		const deleted = await deletedNote();
 		const usurper = await createNote(db, { title: 'Kept' });
@@ -113,11 +119,76 @@ describe('undeleteNote', () => {
 		const restored = await undeleteNote(db, deleted);
 
 		expect(restored.deletedLocally).toBe(0);
-		expect(restored.path).not.toBe(deleted.path);
+		expect(restored.path).toBe(deleted.path);
+		expect(restored.remoteId).toBe('id:1');
 		expect(restored.body).toBe('the words\n');
-		expect((await getNote(db, usurper.id))?.path).toBe(deleted.path);
-		const live = (await listNotes(db)).map((note) => note.path);
+		expect((await getNote(db, usurper.id))?.path).not.toBe(deleted.path);
+		const live = (await listNotes(db)).map((note) => note.path.toLowerCase());
 		expect(new Set(live).size).toBe(live.length);
+	});
+
+	it('counts a name that differs only in case as taken', async () => {
+		// One file to Dropbox and OneDrive, whatever the two rows call it.
+		const { db } = box;
+		const made = await deletedNote();
+		const spelled = made.path.replace(/kept\.md$/u, 'Kept.md');
+		expect(spelled).not.toBe(made.path);
+		await db.notes.update(made.id, { path: spelled });
+		const usurper = await createNote(db, { title: 'Kept' });
+		expect(usurper.path.toLowerCase()).toBe(spelled.toLowerCase());
+
+		const restored = await undeleteNote(db, { ...made, path: spelled });
+
+		expect(restored.path).toBe(spelled);
+		expect((await getNote(db, usurper.id))?.path.toLowerCase()).not.toBe(spelled.toLowerCase());
+	});
+
+	it('makes it again in the source it was deleted from, whichever is showing by then', async () => {
+		const { db } = box;
+		await db.syncState.bulkPut([
+			{ connectionId: 'source-a', clientId: 'client' },
+			{ connectionId: 'source-b', clientId: 'client' },
+		]);
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'source-a' });
+		const deleted = await deletedNote();
+		expect(deleted.connectionId).toBe('source-a');
+		await pushed(deleted.id);
+
+		// "Show other source", inside the undo window.
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'source-b' });
+		const restored = await undeleteNote(db, deleted);
+
+		// Not one account's note uploaded into another account's folder.
+		expect(restored.connectionId).toBe('source-a');
+		expect((await db.opQueue.toArray()).map((op) => op.connectionId)).toEqual(['source-a']);
+	});
+
+	it('falls back to the source showing when its own has been disconnected', async () => {
+		const { db } = box;
+		await db.syncState.bulkPut([
+			{ connectionId: 'source-a', clientId: 'client' },
+			{ connectionId: 'source-b', clientId: 'client' },
+		]);
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'source-a' });
+		const deleted = await deletedNote();
+		await pushed(deleted.id);
+		await db.syncState.delete('source-a');
+
+		expect((await undeleteNote(db, deleted)).connectionId).toBe('source-b');
+	});
+
+	it('is all or nothing: a failure leaves the note deleted, not back without its text', async () => {
+		const { db } = box;
+		const deleted = await deletedNote('saved\n');
+		const snapshot = { ...deleted, body: 'saved\nand typed after\n' };
+		const put = vi.spyOn(db.opQueue, 'add').mockRejectedValueOnce(new Error('quota'));
+
+		await expect(undeleteNote(db, snapshot)).rejects.toThrow();
+		put.mockRestore();
+
+		expect((await getNote(db, deleted.id))?.deletedLocally).toBe(1);
+		// And offered again, it works.
+		expect((await undeleteNote(db, snapshot)).body).toBe('saved\nand typed after\n');
 	});
 
 	it('puts back the text the editor held, where the row never got it', async () => {
@@ -145,6 +216,58 @@ describe('undeleteNote', () => {
 
 		expect(same.updatedAt).toBe(note.updatedAt);
 		expect(await opsFor(note.id)).toEqual([]);
+	});
+});
+
+describe('saveNoteBody, for a note whose row has gone', () => {
+	it('brings back one a sync deleted, holding the edit', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Note', body: 'stored\n' });
+		await purgeNote(db, note.id);
+
+		const back = await saveNoteBody(db, note.id, 'stored\nmore\n', { origin: '', note });
+
+		expect((await getNote(db, note.id))?.body).toBe('stored\nmore\n');
+		expect(back.deletedLocally).toBe(0);
+	});
+
+	it('does not bring back one deleted from this tab, for an edit held from before', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Note', body: 'stored\n' });
+		await deleteNote(db, note.id);
+		await pushed(note.id);
+
+		// The retry of a save that had been failing, ten seconds on.
+		await saveNoteBody(db, note.id, 'stored\nheld\n', { origin: '', note });
+
+		expect(await getNote(db, note.id)).toBeUndefined();
+		expect(await opsFor(note.id)).toEqual([]);
+	});
+
+	it('nor one whose notebook was deleted from under it', async () => {
+		const { db } = box;
+		const folder = await createFolder(db, { name: 'Work' });
+		const note = await createNote(db, {
+			title: 'Note',
+			body: 'stored\n',
+			folderPath: folder.path,
+		});
+		await deleteFolder(db, folder.path);
+		await pushed(note.id);
+
+		await saveNoteBody(db, note.id, 'stored\nheld\n', { origin: '', note });
+
+		expect(await getNote(db, note.id)).toBeUndefined();
+	});
+
+	it('nor for a displaced edit: the later one was stored, and went with the note', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Note', body: 'stored\ntwo\n' });
+		await purgeNote(db, note.id);
+
+		await saveNoteBody(db, note.id, 'stored\none\n', { origin: '', note, displaced: true });
+
+		expect(await getNote(db, note.id)).toBeUndefined();
 	});
 });
 
