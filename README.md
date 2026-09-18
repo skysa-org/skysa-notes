@@ -26,13 +26,17 @@ Requires Node 22+ and pnpm 10 (`corepack enable`).
 
 ```bash
 pnpm install
-cp .dev.vars.example apps/api/.dev.vars   # fill in SECRETS_KEY and credentials for each provider in ENABLED_PROVIDERS
-pnpm db:migrate                            # apply D1 migrations to the local database
-pnpm dev                                   # Vite on :5173, wrangler dev on :8787
+pnpm run setup      # asks what it needs and writes apps/api/.dev.vars
+pnpm db:migrate     # apply D1 migrations to the local database
+pnpm dev            # Vite on :5173, wrangler dev on :8787
 ```
 
-`pnpm dev` runs both servers; Vite proxies `/api` to the Worker so session cookies
-stay first-party, matching production where one Worker serves the SPA and the API.
+`pnpm run setup` only asks for the providers you say you want; `.dev.vars.example`
+documents every key if you would rather write the file by hand. The `run` is not
+optional — `pnpm setup` is pnpm's own built-in command, as is `pnpm deploy`.
+
+`pnpm dev` runs both servers; Vite proxies `/api` to the Worker so the app and the
+API share an origin, matching production where one Worker serves both.
 
 Every provider that syncs needs its own app registration (Dropbox, Microsoft
 Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
@@ -50,9 +54,11 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 | `pnpm verify` | format:check + lint + typecheck + test — run before every commit |
 | `pnpm db:generate` | Generate a Drizzle migration from the schema |
 | `pnpm db:migrate` / `pnpm db:migrate:remote` | Apply migrations locally / to Cloudflare |
+| `pnpm run setup` | Prompt for credentials and write `apps/api/.dev.vars` |
+| `pnpm run deploy` | Build core, SPA and Worker, then `wrangler deploy` |
 
-Current status: **Phase 2 in progress — the engine and the backend are done, the client wiring is not.** Phase 1 shipped the app that runs locally and offline: notebooks, notes, and both editors — rich text with a slash menu and a formatting toolbar, and raw markdown — over IndexedDB, with the mode remembered per note, installable as a PWA.
+Current status: **Phase 7 — it syncs.** Notes and notebooks live in IndexedDB and work fully offline; connecting a Dropbox, OneDrive or Google Drive account syncs them to an app-owned folder, two-way, with conflicts resolved by keeping both copies. Both editors are in — rich text with a slash menu and formatting toolbar, and raw markdown — with full-text search, a command palette, a document outline, and find-and-replace across both. A device can hold several connected accounts at once and switch between them; each is its own silo, with its own notes, its own queue and its own credential.
 
-Since then: a provider contract suite and an in-memory fake, a `DropboxProvider` against it, the backend that holds only encrypted refresh tokens and mints short-lived access tokens (OAuth start/callback, sessions, `/api/token`), and the sync engine — pull, push, cursor persistence and the op queue — behind a `SyncStore` port.
+What is not done: Phase 8's release plumbing (versioning and tags), and Phase 9's account-first sign-in, which the Worker refuses to boot with rather than pretending to support. WebDAV is deferred indefinitely (`docs/PLAN.md` §5.4).
 
-What is left before anything actually syncs is the client half: the typed API client, the scheduler, the connect and status UI, and the Dexie implementation of `SyncStore`. Until that lands the app still stores everything locally and talks to nobody. The Dropbox app is also not registered yet, so the OAuth round trip is proven against stubs rather than against Dropbox. See [`docs/PLAN.md`](docs/PLAN.md).
+Self-hosting it on your own Cloudflare account is [`docs/self-hosting.md`](docs/self-hosting.md). The architecture, the decisions and the phase order are in [`docs/PLAN.md`](docs/PLAN.md).
