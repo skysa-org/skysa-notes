@@ -72,6 +72,25 @@ describe('the registry', () => {
 		expect(registry.list()).toBe(registry.list());
 	});
 
+	it('counts the holds on its chords, so one release does not free another', () => {
+		// Two dialogs open at once is not a thing today, but a flag would make the
+		// first one to close speak for both — and the second would be left up with
+		// the keyboard live behind it.
+		const registry = createCommandRegistry();
+		const one = registry.suspend();
+		const two = registry.suspend();
+		one();
+		expect(registry.suspended()).toBe(true);
+
+		// Releasing the same hold again must not count for the other one.
+		one();
+		one();
+		expect(registry.suspended()).toBe(true);
+
+		two();
+		expect(registry.suspended()).toBe(false);
+	});
+
 	it('does not let a stale cleanup remove a live registration', () => {
 		// React's strict mode mounts twice: the second registration lands before
 		// the first one's cleanup runs, and an unconditional delete would take
@@ -159,7 +178,11 @@ describe('a chord', () => {
 		const field = document.createElement('textarea');
 
 		expect(reachable(parseChord('/'), field)).toBe(false);
+		expect(reachable(parseChord('/'), document.createElement('select'))).toBe(false);
 		expect(reachable(parseChord('/'), document.createElement('div'))).toBe(true);
+		// Alt is not a way around it: on macOS `Option+<letter>` types a
+		// character, so an Alt chord in a field is the user writing.
+		expect(reachable(parseChord('Alt+N'), field)).toBe(false);
 	});
 });
 
@@ -488,6 +511,60 @@ describe('the palette as a dialog', () => {
 		unmount();
 
 		expect(document.activeElement).toBe(opener);
+	});
+
+	it('gives focus back after a command that does not touch focus', async () => {
+		// The majority case, and the one that asking "did a command run?" got
+		// wrong: only one of the app's commands moves focus, so for every other
+		// one running it from the palette dropped the user on `document.body` —
+		// which is the exact loss the restore was added to prevent.
+		const opener = focused();
+		const ran = vi.fn();
+		const { unmount } = openOver(opener, vi.fn(), ran);
+
+		await userEvent.keyboard('{Enter}');
+		unmount();
+
+		expect(ran).toHaveBeenCalledTimes(1);
+		expect(document.activeElement).toBe(opener);
+	});
+
+	it('keeps the cursor in the field when a row is pressed with the pointer', async () => {
+		// The rows take no focus, so the press must not move it either — the
+		// keyboard has to keep working after a click.
+		openOver(focused());
+		const field = screen.getByRole('combobox');
+
+		await userEvent.click(screen.getAllByRole('option')[0] as HTMLElement);
+
+		expect(document.activeElement).toBe(field);
+	});
+
+	it('keeps the active row in view as the cursor moves', async () => {
+		// The highlight is an `aria-activedescendant`, not focus, so nothing
+		// scrolls it into view on its own: arrowing past the fold would leave the
+		// user driving a selection they cannot see.
+		const scrolled = vi.spyOn(Element.prototype, 'scrollIntoView');
+		// Two rows, or the arrow wraps onto the row it is already on and the
+		// effect has nothing to react to.
+		app(
+			<>
+				<Declares id="a" label="Alpha" run={vi.fn()} />
+				<Declares id="b" label="Bravo" chord={null} run={vi.fn()} />
+				<CommandPalette onClose={() => undefined} />
+			</>
+		);
+		scrolled.mockClear();
+
+		await userEvent.keyboard('{ArrowDown}');
+
+		expect(scrolled).toHaveBeenCalled();
+		expect(scrolled.mock.instances[0]).toBe(
+			document.getElementById(
+				screen.getByRole('combobox').getAttribute('aria-activedescendant') ?? ''
+			)
+		);
+		scrolled.mockRestore();
 	});
 
 	it('leaves focus where a command put it', async () => {

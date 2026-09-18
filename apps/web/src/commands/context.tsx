@@ -3,6 +3,7 @@ import {
 	type ReactNode,
 	useContext,
 	useEffect,
+	useLayoutEffect,
 	useState,
 	useSyncExternalStore,
 } from 'react';
@@ -84,7 +85,11 @@ export const useCommand = (command: Command): void => {
  */
 export const useSuspendShortcuts = (): void => {
 	const registry = useOptionalRegistry();
-	useEffect(() => registry?.suspend(), [registry]);
+	// Layout, not passive: a passive effect is flushed after the commit, leaving a
+	// gap in which a keystroke could be handled unsuspended. Near-unreachable —
+	// React flushes pending passive effects when a discrete event reaches its root
+	// listener — but closing it costs nothing.
+	useLayoutEffect(() => registry?.suspend(), [registry]);
 };
 
 export const useCommands = (): readonly Command[] => {

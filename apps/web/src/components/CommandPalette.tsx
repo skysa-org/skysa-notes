@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { chordLabel } from '../commands/chord.js';
 import { useCommands, useSuspendShortcuts } from '../commands/context.js';
@@ -82,12 +82,23 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	// lost their place in the app.
 	const [opener] = useState(() => document.activeElement);
 	// Unless a command took focus somewhere deliberately — `app.search` puts the
-	// cursor in the search field — in which case putting it back is undoing what
-	// the user just asked for.
-	const moved = useRef(false);
+	// cursor in the search field — in which case putting it back undoes the only
+	// thing the command does.
+	//
+	// The question is where focus actually *is* when this closes, not whether a
+	// command ran. Asking the second gave the right answer for `app.search` and
+	// the wrong one for every command that does not touch focus, which is most of
+	// them: running "Edit as markdown" from the palette dropped the user on
+	// `document.body` exactly as Escape used to.
+	//
+	// Body — or nothing — is the whole test, and it is not an approximation. This
+	// runs after the commit that removed the dialog, so focus that was inside it
+	// has already fallen to the body: landing there means nobody claimed it.
+	// Anywhere else is somewhere a command deliberately put it.
 	useEffect(
 		() => () => {
-			if (moved.current) return;
+			const now = document.activeElement;
+			if (now !== null && now !== document.body) return;
 			if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
 		},
 		[opener]
@@ -109,7 +120,6 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 
 	const choose = (command: Command) => {
 		if (!command.enabled) return;
-		moved.current = true;
 		// Closed first: the command may move focus — opening a note, or putting
 		// the cursor in the search field — and a dialog closing afterwards would
 		// take it straight back.

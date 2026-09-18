@@ -111,13 +111,15 @@ export const createCommandRegistry = (): CommandRegistry => {
  * Whether a keystroke should be allowed to reach a chord, given where it
  * landed.
  *
- * A chord with a modifier always may: `Mod+K` is not something anybody types
- * into a field. A bare key never may while the user is in a text box, or every
- * shortcut without a modifier would be unreachable from the one place people
- * spend their time — writing.
+ * `Mod+K` always may: it is not something anybody types into a field. A bare key
+ * never may while the user is in a text box, or every shortcut without a
+ * modifier would be unreachable from the one place people spend their time —
+ * writing. Alt is asked the same question as a bare key rather than waved
+ * through: on macOS `Option+<letter>` types a character, so an Alt chord in a
+ * field is the user writing.
  */
 export const reachable = (chord: Chord, target: EventTarget | null): boolean => {
-	if (chord.mod || chord.alt) return true;
+	if (chord.mod) return true;
 	if (!(target instanceof HTMLElement)) return true;
 	const name = target.tagName.toLowerCase();
 	return !(
