@@ -559,12 +559,40 @@ describe('the palette as a dialog', () => {
 		await userEvent.keyboard('{ArrowDown}');
 
 		expect(scrolled).toHaveBeenCalled();
+		// `nearest`, not `center`: re-centring the list under the cursor on every
+		// arrow press moves everything the user is reading.
+		expect(scrolled.mock.calls[0]?.[0]).toEqual({ block: 'nearest' });
 		expect(scrolled.mock.instances[0]).toBe(
 			document.getElementById(
 				screen.getByRole('combobox').getAttribute('aria-activedescendant') ?? ''
 			)
 		);
 		scrolled.mockRestore();
+	});
+
+	it('pulls the highlight back when a screen takes its commands away', async () => {
+		// Not the typing case — that resets the cursor. A screen unmounting while
+		// the palette is open shortens the list underneath an index nothing has
+		// touched, and Enter on an index past the end runs nothing at all.
+		const stays = vi.fn();
+		// The palette keeps its place in the tree, or React remounts it and the
+		// cursor this test is about is reset rather than clamped.
+		const screens = (both: boolean) => (
+			<>
+				<CommandPalette onClose={() => undefined} />
+				<Declares id="a" label="Alpha" run={stays} />
+				{both && <Declares id="b" label="Bravo" chord={null} run={vi.fn()} />}
+			</>
+		);
+		const { rerender } = app(screens(true));
+		await userEvent.keyboard('{ArrowDown}');
+		expect(screen.getAllByRole('option')).toHaveLength(2);
+
+		rerender(<CommandsProvider>{screens(false)}</CommandsProvider>);
+		expect(screen.getAllByRole('option')).toHaveLength(1);
+		await userEvent.keyboard('{Enter}');
+
+		expect(stays).toHaveBeenCalledTimes(1);
 	});
 
 	it('leaves focus where a command put it', async () => {
@@ -602,6 +630,9 @@ describe('the palette as a dialog', () => {
 		const first = screen.getAllByRole('option')[0];
 
 		expect(field.getAttribute('aria-activedescendant')).toBe(first?.id);
+		// The listbox's half of the same contract: the row the field names is the
+		// row the list marks.
+		expect(first?.getAttribute('aria-selected')).toBe('true');
 
 		await userEvent.keyboard('kingfisher');
 		// Nothing matches, so there is no list to point into and no row to name.

@@ -91,10 +91,17 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	// them: running "Edit as markdown" from the palette dropped the user on
 	// `document.body` exactly as Escape used to.
 	//
-	// Body — or nothing — is the whole test, and it is not an approximation. This
-	// runs after the commit that removed the dialog, so focus that was inside it
-	// has already fallen to the body: landing there means nobody claimed it.
-	// Anywhere else is somewhere a command deliberately put it.
+	// Body is the whole test, and it is not an approximation: when the focused
+	// element is removed, HTML's focus fixup rule puts focus on the body, so
+	// landing there means nobody claimed it. Anywhere else is somewhere a command
+	// deliberately put it. (`null` alongside it is belt-and-braces —
+	// `document.activeElement` is typed nullable and there is no document here
+	// without a body.)
+	//
+	// That this is a *passive* effect is load-bearing and invisible: React runs a
+	// deleted component's layout cleanups before it removes that component's DOM,
+	// so as a `useLayoutEffect` this would see its own field still focused,
+	// decline every time, and silently stop restoring anything.
 	useEffect(
 		() => () => {
 			const now = document.activeElement;
@@ -106,7 +113,10 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 
 	const shown = useMemo(() => matching(commands, query), [commands, query]);
 	// The highlight is an index, so it has to be pulled back when the list under
-	// it shrinks — otherwise Enter on a narrowed list runs nothing at all.
+	// it shrinks. Not for typing — `onChange` resets it, and the arrows are taken
+	// modulo the current length — but for the registry changing underneath: a
+	// screen unmounting while the palette is open takes its commands with it, and
+	// an index left past the end is an Enter that runs nothing at all.
 	const cursor = shown.length === 0 ? 0 : Math.min(at ?? firstUsable(shown), shown.length - 1);
 	const active = shown[cursor];
 
@@ -120,9 +130,10 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 
 	const choose = (command: Command) => {
 		if (!command.enabled) return;
-		// Closed first: the command may move focus — opening a note, or putting
-		// the cursor in the search field — and a dialog closing afterwards would
-		// take it straight back.
+		// Both are synchronous and in one handler, so the unmount follows either
+		// way and the order does not decide who ends up with focus — that is
+		// settled above, by where focus actually is once this has gone. Closing
+		// first is simply the truthful order: the palette is finished.
 		onClose();
 		command.run();
 	};
