@@ -111,6 +111,27 @@ export const createApp = (options: CreateAppOptions) => {
 	 */
 	app.use('*', csrf({ origin: config.appOrigin }));
 
+	/**
+	 * Nothing here may be stored by anything between the Worker and the tab.
+	 *
+	 * `POST /api/token` answers with a provider access token, and `GET
+	 * /api/connections` is the answer the device binds and *unbinds* itself on:
+	 * a reply kept and replayed after the world moved would hand out a token the
+	 * user has revoked, or unbind a connection that is alive. Neither response
+	 * carried any freshness information before this, which leaves them to
+	 * heuristic freshness — and `no-store` is the only header that also forbids
+	 * writing the response down in the first place.
+	 *
+	 * The service worker is already `NetworkOnly` for `/api/*` (`apps/web/pwa.ts`);
+	 * this is the same rule for the caches it does not control, and the client
+	 * asks with `cache: 'no-store'` from its side (`apps/web/src/api/client.ts`).
+	 * https://www.rfc-editor.org/rfc/rfc9111#name-no-store
+	 */
+	app.use('*', async (c, next) => {
+		await next();
+		c.header('Cache-Control', 'no-store');
+	});
+
 	app.get('/health', (c) => c.json({ ok: true }));
 
 	/**

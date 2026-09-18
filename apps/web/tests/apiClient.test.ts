@@ -70,6 +70,10 @@ describe('the API client', () => {
 		});
 		expect(calls[0]?.url).toBe('/api/connections');
 		expect(calls[0]?.init?.credentials).toBe('same-origin');
+		// The device binds and unbinds on this answer, so a stored one replayed
+		// after the world moved would unbind a connection that is alive. The API
+		// says `no-store` as well; this is the half the browser obeys on its own.
+		expect(calls[0]?.init?.cache).toBe('no-store');
 	});
 
 	it('throws, rather than reading as fewer connections, for any other row it cannot read', async () => {
