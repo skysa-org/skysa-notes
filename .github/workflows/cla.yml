@@ -2,8 +2,14 @@ name: CLA
 
 # The gate: a pull request cannot merge until its author has signed
 # `CLA-individual.md` once. Signatures are recorded as a JSON file in the
-# `cla-signatures` branch of this repository, which is created by the first
-# signature and needs no setup.
+# `cla-signatures` branch of this repository.
+#
+# **That branch has to exist already.** The action does not create it — it
+# answers `Branch cla-signatures not found` and fails the check for everyone,
+# which is what it did on the first real pull request after this workflow was
+# merged. It also must not be protected, since the action commits to it
+# directly. This comment used to say the branch needed no setup, which was
+# wrong in the one way a gate cannot afford: it read as working and was not.
 #
 # `pull_request_target`, not `pull_request`, because the job has to write that
 # branch and a fork's `pull_request` token is read-only. That choice is the one
