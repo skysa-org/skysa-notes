@@ -23,6 +23,7 @@
 		"@tanstack/react-router": "^1.170.36",
 		"dexie": "^4.4.6",
 		"dexie-react-hooks": "^4.4.0",
+		"minisearch": "^7.2.0",
 		"react": "^19.3.0",
 		"react-dom": "^19.3.0",
 		"zod": "^4.6.5"

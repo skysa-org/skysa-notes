@@ -1,11 +1,13 @@
 import { ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useMemo } from 'react';
 
 import { type EditorMode } from '../editor/mode.js';
 import { db, type NoteRecord } from './db.js';
 import { folderTree } from './folders.js';
 import { listNotes } from './notes.js';
 import { getDefaultEditorMode } from './prefs.js';
+import { createNoteSearch, type NoteHit } from './search.js';
 import { buildFolderTree, type FolderNode } from './tree.js';
 
 /**
@@ -77,6 +79,55 @@ export const useDefaultEditorMode = (): EditorMode | undefined =>
  */
 export const useLooseNoteCount = (): number | undefined =>
 	useLiveQuery(async () => (await listNotes(db, { folderPath: ROOT })).length, []);
+
+/**
+ * Notes matching what the user has typed, across every notebook. `undefined`
+ * only before the first query has resolved; an empty array means nothing
+ * matched.
+ *
+ * The index belongs to the component that is searching, so it is built when a
+ * search begins and collected when that component goes — the app does not carry
+ * an index for a feature nobody is using. An empty query empties it again rather
+ * than merely skipping the search: the words of every note are a copy of the
+ * corpus, and holding one because a search happened once is the kind of cost
+ * nobody goes looking for.
+ *
+ * A keystroke is answered from the index already in hand rather than waited for:
+ * a query is pure, the notes behind it have not moved, and reporting "still
+ * loading" between letters would blank the list at typing speed. Only the read
+ * itself is ever waited for, and only when it is a read for a different question
+ * than the one being asked.
+ */
+export const useNoteSearch = (query: string): NoteHit[] | undefined => {
+	const search = useMemo(createNoteSearch, []);
+	const searching = query.trim() !== '';
+
+	// The notes are read for the search, not for the query: the database is
+	// asked when a search opens and whenever a note changes under it, and never
+	// because another letter was typed. Reading every row again per keystroke
+	// would pull the whole corpus out of IndexedDB at typing speed.
+	//
+	// Every live note, not the open notebook's: a search the user has to be
+	// standing in the right notebook for cannot answer "where did I write that".
+	const read = useLiveQuery(async () => {
+		const notes = searching ? await listNotes(db) : [];
+		// Making the index agree with the rows belongs with reading them: once
+		// per read, and not once per letter. An empty search empties the index.
+		search.refresh(notes);
+		return { searching, notes };
+	}, [searching, search]);
+
+	// `useLiveQuery` keeps its last value across a change of dependencies, so
+	// without this the empty read held while nobody was searching answers the
+	// first keystroke, and the pane says nothing matches a frame before the
+	// matches arrive.
+	const indexed = read?.searching === searching ? read : undefined;
+
+	return useMemo(
+		() => (indexed === undefined ? undefined : searching ? search.find(query) : []),
+		[indexed, query, searching, search]
+	);
+};
 
 /** Count of notes with unpushed edits, for the sync indicator in Phase 2. */
 export const useDirtyCount = (): number | undefined =>

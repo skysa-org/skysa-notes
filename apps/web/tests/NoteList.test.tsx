@@ -1,8 +1,10 @@
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteList } from '../src/components/NoteList.js';
 import { type NoteRecord } from '../src/store/db.js';
+import { type NoteHit } from '../src/store/search.js';
 
 /**
  * The note list has three ways of being empty — still loading, no notebook to
@@ -31,6 +33,9 @@ const renderList = (props: Partial<Parameters<typeof NoteList>[0]> = {}) =>
 			onCreateNote={() => undefined}
 			folderPath="work"
 			storeLoaded
+			query=""
+			onQuery={() => undefined}
+			results={[]}
 			{...props}
 		/>
 	);
@@ -112,5 +117,88 @@ describe('the excerpt', () => {
 		renderList({ notes: [note('Alpha', '# Alpha\rthe first line of prose\r')] });
 
 		expect(screen.getByText('the first line of prose')).toBeDefined();
+	});
+});
+
+/**
+ * Searching happens in this pane too: the same rows, answering a different
+ * question. What the pane owes the user is that the two are never confused —
+ * the notebook's notes while the field is empty, the matches while it is not.
+ */
+describe('searching', () => {
+	const hit = (title: string, excerpt: NoteHit['excerpt']): NoteHit => ({
+		note: note(title),
+		excerpt,
+	});
+	const plain = (title: string, text: string) => hit(title, [{ text, hit: false }]);
+
+	it('shows the matches instead of the notebook while there is a query', () => {
+		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
+
+		expect(screen.getByText('Birds')).toBeDefined();
+		expect(screen.queryByText('Alpha')).toBeNull();
+	});
+
+	it('names the pane for the search rather than for the notebook behind it', () => {
+		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
+		expect(screen.getByRole('heading', { name: 'Search' })).toBeDefined();
+	});
+
+	it('says which notebook a match is in, because a search crosses all of them', () => {
+		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
+		expect(screen.getByText(/^work ·/)).toBeDefined();
+	});
+
+	it('marks the words that matched, and leaves the rest of the excerpt alone', () => {
+		renderList({
+			query: 'heron',
+			results: [
+				hit('Birds', [
+					{ text: 'a ', hit: false },
+					{ text: 'heron', hit: true },
+					{ text: ' stood still', hit: false },
+				]),
+			],
+		});
+
+		expect(screen.getByText('heron').tagName).toBe('MARK');
+		expect(screen.getByText('stood still', { exact: false })).toBeDefined();
+	});
+
+	it('says when nothing matches, and names what was looked for', () => {
+		renderList({ query: 'heron', results: [] });
+		expect(screen.getByText('Nothing matches “heron”.')).toBeDefined();
+	});
+
+	it('waits rather than saying nothing matches before the first answer', () => {
+		renderList({ query: 'heron', results: undefined });
+
+		expect(screen.getByText('Searching…')).toBeDefined();
+		expect(screen.queryByText(/Nothing matches/)).toBeNull();
+	});
+
+	it('gives the notebook back when the field is emptied', () => {
+		renderList({ query: '', results: [plain('Birds', 'a heron')] });
+
+		expect(screen.getByText('Alpha')).toBeDefined();
+		expect(screen.queryByText('Birds')).toBeNull();
+	});
+
+	it('empties the field on Escape, which is the way out', async () => {
+		const onQuery = vi.fn();
+		renderList({ query: 'heron', results: [], onQuery });
+
+		await userEvent.type(screen.getByRole('searchbox', { name: 'Search notes' }), '{Escape}');
+
+		expect(onQuery).toHaveBeenCalledWith('');
+	});
+
+	it('is still possible to type in while a notebook is open', async () => {
+		const onQuery = vi.fn();
+		renderList({ onQuery });
+
+		await userEvent.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'h');
+
+		expect(onQuery).toHaveBeenCalledWith('h');
 	});
 });
