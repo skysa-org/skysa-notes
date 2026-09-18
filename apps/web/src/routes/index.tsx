@@ -11,7 +11,7 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { activeConnectionId, db, type NoteRecord } from '../store/db.js';
+import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
 	useFolderTree,
@@ -157,7 +157,7 @@ const Home = () => {
 	 * the first note simply stays deleted.
 	 */
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
-	/** The id of a note whose undo failed: its notice waits to be dismissed. */
+	/** The note (`noteRef`) whose undo failed: its notice waits to be dismissed. */
 	const [undoFailed, setUndoFailed] = useState<string | null>(null);
 	/** Text that goes back beside the deleted note, not into it (`NoteView`). */
 	const [beside, setBeside] = useState<DisplacedText | null>(null);
@@ -173,11 +173,13 @@ const Home = () => {
 				if (beside !== null) {
 					await saveNoteBody(db, restored.id, beside.body, {
 						origin: beside.origin,
-						note: deleted,
+						note: restored,
 						displaced: true,
 					});
 				}
-				setDeleted((current) => (current?.id === deleted.id ? null : current));
+				setDeleted((current) =>
+					current !== null && noteRef(current) === noteRef(deleted) ? null : current
+				);
 				// It goes back to the source it was deleted from, which need not be
 				// the one showing by now: the notice outlives a change of source.
 				if (restored.connectionId !== (await activeConnectionId(db))) {
@@ -195,7 +197,7 @@ const Home = () => {
 			// The notice stays, and for as long as it takes: the note is still
 			// deleted, still offered, and what it holds may be in no other place.
 			.catch(() => {
-				setUndoFailed(deleted.id);
+				setUndoFailed(noteRef(deleted));
 				setProblem('That note could not be brought back. Try again.');
 			});
 	};
@@ -366,11 +368,11 @@ const Home = () => {
 				<DeletedNotice
 					// A second delete is a new notice with a new clock, not the
 					// first one's time running on under another note's name.
-					key={deleted.id}
+					key={noteRef(deleted)}
 					title={deleted.title}
 					onUndo={undoDelete}
 					onDismiss={dismissDeleted}
-					keep={undoFailed === deleted.id}
+					keep={undoFailed === noteRef(deleted)}
 				/>
 			)}
 		</div>

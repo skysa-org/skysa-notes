@@ -19,6 +19,7 @@ import {
 	type NotesDatabase,
 	type SyncStateRecord,
 } from './db.js';
+import { movedRows } from './movedRows.js';
 import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
 import { queueMkdir, queueWrite } from './queue.js';
@@ -35,9 +36,10 @@ import { queueMkdir, queueWrite } from './queue.js';
  * Two things the sync store relies on, and so are guaranteed here
  * (docs/PLAN.md, Phase 2 UI item):
  *
- * - **No row is left under any other connection.** The store refuses to pull a
- *   file over another connection's row with the same frontmatter `id`, and it
- *   refuses the same way on every retry.
+ * - **A row's key is its connection and its id**, so a row that moves is
+ *   deleted and added, two notes of one id can meet where they land, and an
+ *   editor holding the note as it was has to be able to find it again
+ *   (`moveRowsTo`, `store/movedRows.ts`).
  * - **A moved row's `source` is pinned before it moves.** A row written before
  *   `source` existed re-serializes from its parts, including `updatedAt` and
  *   its path, so its bytes would otherwise change under the engine.
@@ -236,6 +238,7 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	const renamed = new Map(
 		leaving.filter((note) => held.has(note.id)).map((note) => [note.id, crypto.randomUUID()])
 	);
+	const idNow = (id: string): string => renamed.get(id) ?? id;
 	const notesPlaced = leaving.flatMap((note): Placed<NoteRecord>[] => {
 		// Before anything else changes: these are the bytes it had.
 		const pinned: NoteRecord = {
@@ -263,6 +266,10 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	// row that moves is a row deleted and a row added.
 	await db.notes.bulkDelete(leaving.map(noteKey));
 	if (notesPlaced.length > 0) await db.notes.bulkAdd(notesPlaced.map((placed) => placed.row));
+	// For an editor open on one of them, whose next save names the old key.
+	leaving.forEach((note) => {
+		movedRows.record(note, { connectionId: target, id: idNow(note.id) });
+	});
 
 	// A row owed to the new connection as though new owes what it is now, which
 	// the caller queues; what was queued for it was owed to its old file. Every
@@ -270,7 +277,6 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	const owed = new Set(
 		notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row.id)
 	);
-	const idNow = (id: string): string => renamed.get(id) ?? id;
 	const dropped = ops.filter(
 		(op) => mode === 'copy' || (op.noteId !== undefined && owed.has(idNow(op.noteId)))
 	);

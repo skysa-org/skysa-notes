@@ -1,8 +1,21 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
-import { createNote, deleteNote, getNote, listNotes, saveNoteBody } from '../src/store/notes.js';
+import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import {
+	createDatabase,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	type NotesDatabase,
+} from '../src/store/db.js';
+import {
+	createNote,
+	deleteNote,
+	getNote,
+	listNotes,
+	saveNoteBody,
+	undeleteNote,
+} from '../src/store/notes.js';
 
 /**
  * Notes keyed by connection and id (schema versions 4 and 5): the upgrade from
@@ -181,5 +194,72 @@ describe('two sources each holding a note of one id', () => {
 			['c-x', 'delete'],
 		]);
 		expect((await db.notes.get(['c-y', id]))?.deletedLocally).toBe(0);
+	});
+});
+
+describe('a note whose source is let go under an open editor', () => {
+	/** Two sources bound, A showing, with a synced note in A as an editor holds it. */
+	const open = async (alsoInB: boolean) => {
+		const db = createDatabase(fresh());
+		await bindConnection(db, { connectionId: 'c-a', provider: 'dropbox', accountId: 'a' });
+		const shown = await createNote(db, { title: 'Plan', body: 'as shown\n' });
+		await db.opQueue.clear();
+		await bindConnection(db, { connectionId: 'c-b', provider: 'dropbox', accountId: 'b' });
+		if (alsoInB) await db.notes.add({ ...shown, connectionId: 'c-b', body: 'b’s own\n' });
+		return { db, shown };
+	};
+	const inB = (db: NotesDatabase) => db.notes.where('connectionId').equals('c-b').toArray();
+
+	it('saves the edit into the row the note became, not into the other account', async () => {
+		const { db, shown } = await open(false);
+		await unbindConnection(db, { connectionId: 'c-a' });
+
+		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
+
+		expect((await db.notes.get([LOCAL_CONNECTION_ID, shown.id]))?.body).toBe(
+			'as shown\nand edited\n'
+		);
+		expect(await inB(db)).toEqual([]);
+		expect((await db.opQueue.toArray()).filter((op) => op.connectionId === 'c-b')).toEqual([]);
+	});
+
+	it('nor beside the other account’s note of the same id', async () => {
+		const { db, shown } = await open(true);
+		await unbindConnection(db, { connectionId: 'c-a' });
+
+		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
+
+		expect((await inB(db)).map((note) => note.body)).toEqual(['b’s own\n']);
+		expect((await db.notes.get([LOCAL_CONNECTION_ID, shown.id]))?.body).toBe(
+			'as shown\nand edited\n'
+		);
+	});
+
+	it('follows the note through a new id, where the pile already held that one', async () => {
+		const { db, shown } = await open(true);
+		// B goes first, so its note of this id is in the pile when A's arrives.
+		await unbindConnection(db, { connectionId: 'c-b' });
+		await unbindConnection(db, { connectionId: 'c-a' });
+
+		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
+
+		const pile = await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray();
+		expect(pile.map((note) => note.body).sort()).toEqual([
+			'as shown\nand edited\n',
+			'b’s own\n',
+		]);
+	});
+
+	it('undoes a delete made before the source was let go', async () => {
+		const { db, shown } = await open(false);
+		await deleteNote(db, shown.id, { connectionId: 'c-a' });
+		const deleted = (await db.notes.get(['c-a', shown.id]))!;
+		await unbindConnection(db, { connectionId: 'c-a' });
+
+		const restored = await undeleteNote(db, deleted);
+
+		expect(restored).toMatchObject({ connectionId: LOCAL_CONNECTION_ID, deletedLocally: 0 });
+		expect(await listNotes(db, { connectionId: LOCAL_CONNECTION_ID })).toHaveLength(1);
+		expect(await inB(db)).toEqual([]);
 	});
 });

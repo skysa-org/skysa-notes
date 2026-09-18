@@ -8,7 +8,7 @@ import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor } from '../editor/RichEditor.js';
 import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
-import { db, type NoteRecord } from '../store/db.js';
+import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
 import {
 	deleteNote,
@@ -183,7 +183,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	 * than as a boolean so moving to another note clears it without an effect.
 	 */
 	const [unsupportedId, setUnsupportedId] = useState<string | null>(null);
-	const unsupported = noteId !== undefined && unsupportedId === noteId;
+	// By source as well as id, like everything else held here across renders:
+	// another source's note of the same id is another note.
+	const ref = note === undefined ? undefined : noteRef(note);
+	const unsupported = ref !== undefined && unsupportedId === ref;
 
 	// The note as last shown. An edit carries it: a copy of the edit is written
 	// from it, and a note a sync deleted is brought back as it.
@@ -195,7 +198,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	const save = useCallback(
 		({ body, origin, note: typedInto }: Edit, context?: SaveContext) => {
 			if (noteId === undefined) return undefined;
-			const base = typedInto?.id === noteId ? { origin, note: typedInto } : undefined;
+			const base =
+				typedInto !== undefined && noteRef(typedInto) === ref
+					? { origin, note: typedInto }
+					: undefined;
 			// Returned, not dropped: autosave holds the edit until this settles,
 			// and a rejection nobody hears is a user typing into nothing.
 			return saveNoteBody(
@@ -209,11 +215,11 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 					: base
 			);
 		},
-		[noteId]
+		[noteId, ref]
 	);
 
 	const autosave = useAutosave<Edit>({
-		key: noteId ?? 'none',
+		key: ref ?? 'none',
 		save,
 		// An edit typed into a body a sync has since replaced is saved on its own,
 		// before the next one — made from the new body — can stand for it.
@@ -253,7 +259,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				// note, rather than remembered here: a save that went into a
 				// conflict copy is stored, and offered again it would be copied
 				// again.
-				const unstored = forget(note.id);
+				const unstored = forget(noteRef(note));
 				const deleted = row ?? note;
 				if (unstored === undefined) {
 					onDeleted(deleted);
@@ -349,7 +355,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				onUnsupported={() => {
 					// The raw editor takes over, built from the stored body.
 					rebased();
-					setUnsupportedId(note.id);
+					setUnsupportedId(noteRef(note));
 				}}
 				// A body from outside is on screen now. What was typed before it
 				// is not under whatever is typed next — a new sitting, so the next
@@ -399,7 +405,7 @@ const NoteScreen = ({
 }) => (
 	<section className="note-view" aria-label="Note">
 		<header className="note-header">
-			<TitleField key={note.id} note={note} />
+			<TitleField key={noteRef(note)} note={note} />
 			<div className="note-actions">
 				<span className="muted path" title={note.path}>
 					{note.path}

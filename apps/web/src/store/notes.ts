@@ -22,12 +22,15 @@ import { type EditorMode } from '../editor/mode.js';
 import {
 	activeConnectionId,
 	type Flag,
+	LOCAL_CONNECTION_ID,
 	type NoteKey,
+	noteKey,
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
 import { deletedHere } from './deletedHere.js';
 import { ensureFolder } from './folders.js';
+import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
 
@@ -367,23 +370,42 @@ export const saveNoteBody = async (
 		// A displaced one is not: the tombstone holds the later text, which is
 		// what restoring it should bring back.
 		if (current.deletedLocally === 1) {
-			return base.displaced === true ? current : applyBody(db, id, body, there);
+			return base.displaced === true ? current : applyBody(db, current.id, body, there);
 		}
 		if (base.displaced !== true && (current.bodyOrigin ?? '') === base.origin) {
-			return applyBody(db, id, body, there);
+			return applyBody(db, current.id, body, there);
 		}
 		if (current.body === body) return current;
 		return copyBeside(db, current, base.note, body);
 	});
 
 /**
- * The row of a note an editor is showing: in the source it was shown from, or —
- * where that source has been let go since, and its rows moved under another —
- * in the one showing now.
+ * The row of a note as an editor, or an undo, last saw it.
+ *
+ * Under its own key, normally. A source let go since had its rows moved to the
+ * device's own pile, and the key went with the connection: this tab's moves are
+ * remembered (`movedRows`), and one made from another tab is followed to the
+ * pile by id, which is where it went unless it met a note of the same id there
+ * and was named again — then the edit is kept as a copy beside that note, or
+ * the note brought back in the pile, and nothing is lost either way.
+ *
+ * Never "the source showing". With two sources connected that is another
+ * account, and an id found there is another note: the edit would be uploaded
+ * into storage it has nothing to do with.
  */
-const whereShown = async (db: NotesDatabase, shown: NoteRecord): Promise<NoteRecord | undefined> =>
-	(await db.notes.get([shown.connectionId, shown.id])) ??
-	(await db.notes.get(await keyFor(db, shown.id)));
+const whereShown = async (
+	db: NotesDatabase,
+	shown: NoteRecord
+): Promise<NoteRecord | undefined> => {
+	const own = await db.notes.get(noteKey(shown));
+	if (own !== undefined) return own;
+	const forwarded = movedRows.whereNow(shown);
+	const moved = forwarded === undefined ? undefined : await db.notes.get(forwarded);
+	if (moved !== undefined) return moved;
+	return (await homeOf(db, shown)) === shown.connectionId
+		? undefined
+		: db.notes.get([LOCAL_CONNECTION_ID, shown.id]);
+};
 
 const applyBody = (
 	db: NotesDatabase,
@@ -443,13 +465,13 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
  * The source a note that has gone is made again in: its own, while this device
  * still has it. Not "whichever is showing" — undo outlives the view, and the
  * user may have turned to another source since, where this would put one
- * account's note into another account's folder. A source disconnected
- * meanwhile has nothing to go back to, and the one showing is where the user
- * will find it.
+ * account's note into another account's folder. A source let go meanwhile has
+ * nothing to go back to: its rows went to the device's own pile, and so does
+ * this, for the same reason it is never the source showing.
  */
 const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> =>
 	(await db.syncState.get(note.connectionId)) === undefined
-		? activeConnectionId(db)
+		? LOCAL_CONNECTION_ID
 		: note.connectionId;
 
 const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
@@ -689,8 +711,13 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 		.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 			// Before the save below, which would otherwise let the text go.
 			deletedHere.delete(deleted);
-			await restoreNote(db, deleted.id, { connectionId: deleted.connectionId });
-			const current = await db.notes.get([deleted.connectionId, deleted.id]);
+			// Wherever the tombstone is by now: its source may have been let go
+			// inside the undo window, and the row moved with it.
+			const tombstone = await whereShown(db, deleted);
+			if (tombstone !== undefined) {
+				await restoreNote(db, tombstone.id, { connectionId: tombstone.connectionId });
+			}
+			const current = tombstone && (await db.notes.get(noteKey(tombstone)));
 			await makeRoomFor(db, current);
 			if (current?.body === deleted.body) return current;
 			return saveNoteBody(db, deleted.id, deleted.body, {

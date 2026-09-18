@@ -1,3 +1,5 @@
+import { noteRef } from './db.js';
+
 /**
  * The notes deleted from this tab, by id, for as long as the tab lives.
  *
@@ -17,8 +19,7 @@ const keys = new Set<string>();
 
 type Named = Readonly<{ connectionId: string; id: string }>;
 
-/** An id names a note only inside its source. */
-const keyOf = (note: Named): string => JSON.stringify([note.connectionId, note.id]);
+const keyOf = noteRef;
 
 export const deletedHere = {
 	add: (note: Named): void => {

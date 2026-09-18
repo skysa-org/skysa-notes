@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo } from 'react';
 
 import { type EditorMode } from '../editor/mode.js';
-import { db, type NoteRecord } from './db.js';
+import { activeConnectionId, db, type NoteRecord } from './db.js';
 import { folderTree } from './folders.js';
 import { getNote, listNotes } from './notes.js';
 import { getDefaultEditorMode } from './prefs.js';
@@ -60,13 +60,25 @@ export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] |
  * purged once the delete reaches the provider. Reachable today with two tabs:
  * delete a note in one while it is open in the other.
  */
-export const useNote = (id: string | undefined): NoteRecord | undefined =>
-	useLiveQuery(async () => {
+/**
+ * The source showing. A query of its own, so that what it reads — `prefs`, and
+ * the `syncState` row every sync run writes its cursor to — is not in the
+ * observed set of a query over notes: the answer is a string, which is the same
+ * string after a sync, and nothing downstream runs again.
+ */
+export const useActiveConnectionId = (): string | undefined =>
+	useLiveQuery(() => activeConnectionId(db), []);
+
+export const useNote = (id: string | undefined): NoteRecord | undefined => {
+	// In the source showing: an id names a note only inside its source.
+	const connectionId = useActiveConnectionId();
+	return useLiveQuery(async () => {
 		if (id === undefined) return undefined;
-		// In the source showing: an id names a note only inside its source.
-		const note = await getNote(db, id);
+		if (connectionId === undefined) return undefined;
+		const note = await getNote(db, id, { connectionId });
 		return note?.deletedLocally === 1 ? undefined : note;
-	}, [id]);
+	}, [id, connectionId]);
+};
 
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>

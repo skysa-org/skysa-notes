@@ -211,6 +211,14 @@ export const noteKey = (note: Pick<NoteRecord, 'connectionId' | 'id'>): NoteKey 
 ];
 
 /**
+ * The same, as a string: for a `Map`, a `Set`, a React `key`. An id on its own
+ * names a note only inside its source, so state held by bare id is state two
+ * sources' notes can share by accident.
+ */
+export const noteRef = (note: Pick<NoteRecord, 'connectionId' | 'id'>): string =>
+	JSON.stringify(noteKey(note));
+
+/**
  * Built without subclassing Dexie: the table properties are declared through the
  * cast instead, which keeps this module free of `this` and classes.
  */
@@ -282,13 +290,16 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		.stores({ notes: null, [NOTES_REKEYING]: '[connectionId+id]' })
 		.upgrade(async (tx) => {
 			const rows = (await tx.table('notes').toArray()) as NoteRecord[];
-			// Every row has had a `connectionId` since version 1. One without would
-			// have no key here, and a failed add fails the upgrade on every open —
+			// Every row has had a `connectionId` since version 1. One without, or
+			// with one that is no string, would have no key here, and a failed add fails the upgrade on every open —
 			// so it is given the device's own rather than trusted to be there.
 			await tx.table(NOTES_REKEYING).bulkAdd(
 				rows.map((row) => ({
 					...row,
-					connectionId: (row.connectionId as string | undefined) ?? LOCAL_CONNECTION_ID,
+					connectionId:
+						typeof (row.connectionId as unknown) === 'string'
+							? row.connectionId
+							: LOCAL_CONNECTION_ID,
 				}))
 			);
 		});

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	ACTIVE_CONNECTION_KEY,
 	createDatabase,
+	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
 } from '../src/store/db.js';
@@ -164,7 +165,7 @@ describe('undeleteNote', () => {
 		expect((await db.opQueue.toArray()).map((op) => op.connectionId)).toEqual(['source-a']);
 	});
 
-	it('falls back to the source showing when its own has been disconnected', async () => {
+	it('goes to the device’s own pile when its source has been let go, never to another account', async () => {
 		const { db } = box;
 		await db.syncState.bulkPut([
 			{ connectionId: 'source-a', clientId: 'client' },
@@ -175,7 +176,7 @@ describe('undeleteNote', () => {
 		await pushed(deleted.id);
 		await db.syncState.delete('source-a');
 
-		expect((await undeleteNote(db, deleted)).connectionId).toBe('source-b');
+		expect((await undeleteNote(db, deleted)).connectionId).toBe(LOCAL_CONNECTION_ID);
 	});
 
 	it('is all or nothing: a failure leaves the note deleted, not back without its text', async () => {
