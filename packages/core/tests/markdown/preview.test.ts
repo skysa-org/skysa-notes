@@ -142,6 +142,24 @@ describe('a fenced code block is not markdown', () => {
 		expect(previewLines('~~~js\ncode\n~~~\n')).toEqual(['code']);
 	});
 
+	it('does not read a paragraph opening with an inline code span as a fence', () => {
+		// A backtick fence's info string cannot contain a backtick, so this is a
+		// paragraph. Reading it as a fence lost the line *and* flipped the
+		// parity, so the rest of the note was read as code.
+		expect(previewLines('```code``` is inline here\n\n# heading\n')).toEqual([
+			'```code``` is inline here',
+			'heading',
+		]);
+	});
+
+	it('collapses whitespace inside a fence, keeping the markers but not the shape', () => {
+		// One line of grey text, not a listing.
+		expect(previewLines('```py\ndef f():\n    return 1\n```\n')).toEqual([
+			'def f():',
+			'return 1',
+		]);
+	});
+
 	it('tells inside from outside across more than one fence', () => {
 		expect(
 			previewLines('# One\n\n```\n# kept\n```\n\n# Two\n\n```\n- kept too\n```\n\n# Three\n')

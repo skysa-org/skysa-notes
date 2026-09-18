@@ -6,9 +6,10 @@
  * heading hashes, quote carets, bullets and list numbers, task checkboxes,
  * thematic breaks and setext underlines, and a line that is only a `<br />`.
  * Everything else survives — emphasis keeps its asterisks, a link keeps its
- * brackets and its URL, a table keeps its pipes, and everything inside a fenced
- * code block is kept exactly as written, because inside a fence none of those
- * markers is markdown.
+ * brackets and its URL, a table keeps its pipes, and a line inside a fenced code
+ * block keeps every marker it has, because inside a fence none of them is
+ * markdown. Its indentation does not survive — whitespace is collapsed there as
+ * everywhere else, this being one line of grey text and not a listing.
  *
  * This is not a renderer and must not become one. It is what the note list's
  * preview and the search excerpt are built from, and both run over every note
@@ -84,8 +85,15 @@ const BREAK_LINE = /^\s*<br\s*\/?>\s*$/i;
  * which it is. A fence that is never closed leaves its piece "inside", and the
  * rest of the note is then shown with its syntax intact — which is the right way
  * for this to fail, since showing a character is always the smaller wrong.
+ *
+ * A backtick fence's info string cannot itself contain a backtick, which is what
+ * `[^`\r\n]` is for: without it a paragraph opening with an inline code span —
+ * "``` ``` is inline here" — reads as a fence, so the line is dropped *and* the
+ * parity flips and the rest of the note is read as code. And the newlines in
+ * that class are load-bearing: `[^`]` matches them, and the regular expression
+ * then swallows the whole document as a single fence line.
  */
-const FENCE_LINE = /^[ \t]*(?:```|~~~).*$/m;
+const FENCE_LINE = /^[ \t]*(?:`{3,}[^`\r\n]*|~{3,}.*)$/m;
 
 /** All three line endings, with the ones holding nothing dropped. */
 const linesOf = (text: string): string[] =>
@@ -104,7 +112,8 @@ const readable = (line: string): string =>
  * The readable lines of a body, in order: markers gone, whitespace collapsed,
  * blank lines dropped.
  *
- * Code inside a fence is the one thing kept verbatim. Every rule here is about
+ * A line inside a fence keeps its markers — though not its indentation, which
+ * is collapsed like all other whitespace. Every rule here is about
  * markdown, and inside a fence there is no markdown: a `# comment` in a shell
  * example is a comment, a `---` in a YAML sample is a document separator, and a
  * `<br />` in an HTML example is the thing being written about. Stripping those
