@@ -49,7 +49,17 @@ const folderPaths = async (db: NotesDatabase, connectionId: string): Promise<str
 		db.folders.where('connectionId').equals(connectionId).toArray(),
 		db.notes.where('connectionId').equals(connectionId).toArray(),
 	]);
-	const implied = notes.flatMap((note) => ancestorsOf(parentPath(note.path)));
+	const implied = notes
+		// A note the user has deleted draws no notebook, because `listNotes`
+		// leaves it out and the sidebar is what this function claims to answer
+		// for. Counted, a tombstone keeps its notebook's name reserved until the
+		// delete reaches the remote — so removing a notebook and making one of
+		// the same name again, which §7 says withdraws the `rmdir`, was refused
+		// with "already exists" while the sidebar showed nothing there. Offline,
+		// that lasts as long as the device is away. Found by the two-device
+		// soak, seed 443 of 600.
+		.filter((note) => note.deletedLocally === 0)
+		.flatMap((note) => ancestorsOf(parentPath(note.path)));
 	return [...new Set([...folders.map((folder) => folder.path), ...implied])];
 };
 

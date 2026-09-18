@@ -5,6 +5,7 @@ import {
 	type FakeProvider,
 	type FetchLike,
 	isHidden,
+	parentPath,
 	type StorageProvider,
 } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,7 +15,12 @@ import { createOneDriveStub } from '../../../packages/core/tests/providers/onedr
 import { type ApiClient } from '../src/api/client.js';
 import { bindConnection } from '../src/store/connection.js';
 import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
-import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
+import {
+	createFolder,
+	deleteFolder,
+	FolderExistsError,
+	renameFolder,
+} from '../src/store/folders.js';
 import {
 	createNote,
 	deleteNote,
@@ -724,7 +730,19 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 
 		// A failing seed prints the steps that led to it, and becomes a named
 		// test of its own.
-		it.each(Array.from({ length: 40 }, (__, seed) => seed + 1))(
+		//
+		// Forty in CI, because CI has to be believed: a suite that goes red on
+		// its own now and then teaches people to press the button again. The
+		// search is still worth running wider, so `SOAK_SEEDS` widens it —
+		// `SOAK_SEEDS=600 pnpm --filter @skysa/web exec vitest run tests/soak`
+		// — and what a wider run has already found is written down in
+		// docs/PLAN.md §7 rather than left for the next person to rediscover:
+		// seeds 318 and 578 fail every time, and 253, 302, 461 and 597 fail
+		// sometimes. None of them is a lost note: all are one browser left
+		// holding a conflict copy whose `updated:` line differs from the copy
+		// the remote and the other browser agree on.
+		const SEEDS = Number(process.env.SOAK_SEEDS ?? '40');
+		it.each(Array.from({ length: SEEDS }, (__, seed) => seed + 1))(
 			'lose nothing and agree, seed %i',
 			run
 		);
@@ -766,8 +784,43 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		log.push(`${b.name} ${what}`);
 	};
 
+	/** The last step, now that the rest of it is known. */
+	const amend = (what: string): void => {
+		const last = log.pop();
+		log.push(last === undefined ? what : `${last.split(' ')[0] ?? ''} ${what}`);
+	};
+
+	/** Which note, and which file: two notes can share a path, and do. */
+	const idOf = (note: NoteRecord): string =>
+		`[${note.id.slice(0, 4)}${note.remoteId === undefined ? '' : ` ${note.remoteId}`}]`;
+
 	/** Files some browser has deleted. */
 	const deletedFiles = new Set<string>();
+
+	/**
+	 * Notes deleted before they had a file, by the id in their frontmatter —
+	 * which is what makes two rows in two browsers the same note.
+	 *
+	 * `deletedFiles` cannot stand in for this one case. A note deleted before
+	 * its create was ever pushed has no `remoteId` to record, and yet the other
+	 * browser may already hold the same note *with* one, pulled before the
+	 * delete was made; edits written there afterwards go the same way.
+	 *
+	 * Only that case. A note deleted while it *did* have a file is left to
+	 * `deletedFiles`, deliberately, because §7's `detach-note` gives a note's
+	 * id a second life: a delete that meets a dirty note elsewhere detaches it
+	 * instead of taking it, the note is pushed again as a new file, and the
+	 * pull re-adopts the same frontmatter id. Excusing by id there would excuse
+	 * every later edit of a note §7 promises to keep — the very rule the
+	 * scripted "keeps an edit made here while the note was deleted there" test
+	 * exists to hold — for the rest of the run.
+	 *
+	 * Like `deletedFiles` this is an over-approximation and never cleared: it
+	 * cannot see whether the row was clean when the delete landed, which is
+	 * what actually decides (see `token`). It is bounded to the window before a
+	 * note's first push rather than licensed by §7.
+	 */
+	const deletedNotes = new Set<string>();
 
 	/**
 	 * A token, doomed from the start if it is going into a note whose file some
@@ -793,7 +846,9 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		const made = `t${String(seed)}-${String(tokens.length)}`;
 		tokens.push(made);
 		const gone =
-			note !== undefined && note.remoteId !== undefined && deletedFiles.has(note.remoteId);
+			note !== undefined &&
+			(deletedNotes.has(note.id) ||
+				(note.remoteId !== undefined && deletedFiles.has(note.remoteId)));
 		if (gone) doomed.add(made);
 		return made;
 	};
@@ -804,6 +859,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 	 */
 	const willTake = async (note: NoteRecord): Promise<void> => {
 		if (note.remoteId !== undefined) deletedFiles.add(note.remoteId);
+		else deletedNotes.add(note.id);
 		const held = (
 			await Promise.all(
 				browsers.map(async (each) =>
@@ -818,6 +874,58 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		tokens
 			.filter((made) => held.some((other) => other.body.includes(made)))
 			.forEach((made) => doomed.add(made));
+	};
+
+	/**
+	 * The scheduler is running, so a pull can land a notebook between the list
+	 * that said the name was free and the write that takes it — and the store is
+	 * right to refuse a second one at that name. A user meets the same refusal
+	 * when a name is taken while they are typing it, so the script takes it too
+	 * rather than reporting the store's own rule as a failure.
+	 */
+	const taken = (b: Browser, what: string) => async (error: unknown) => {
+		if (!(error instanceof FolderExistsError)) throw error;
+		// And it really was taken. Without this a store that refused every
+		// notebook would be invisible to the seeded runs: the refusal is only
+		// allowed because something else made the name first.
+		//
+		// "Something else" is not only a folder row. `createFolder` refuses
+		// against every notebook the *sidebar* shows, which includes the folder
+		// part of a note's path — a note pulled into `Work/` makes `Work` a
+		// notebook with no row of its own, and a second `Work` would then draw
+		// twice. So the check here has to be the one the store makes, or it
+		// fails on a refusal that is correct.
+		const rows = await notebooks(b);
+		const implied = (await live(b))
+			.map((note) => parentPath(note.path))
+			.filter((path) => path !== '');
+		expect(
+			[...rows, ...implied].some((path) => path.toLowerCase() === error.path.toLowerCase()),
+			`${what} was refused, but nothing holds that name\n${log.join('\n')}`
+		).toBe(true);
+		say(b, `${what} found the name taken`);
+	};
+
+	const makeNotebook = async (b: Browser): Promise<void> => {
+		const held = await notebooks(b);
+		const free = NOTEBOOKS.filter((path) => !held.includes(path));
+		if (free.length === 0) return;
+		const name = pick(free);
+		say(b, `notebook ${name}`);
+		await createFolder(b.db, { name }).catch(taken(b, `notebook ${name}`));
+	};
+
+	const renameNotebook = async (b: Browser, held: readonly string[]): Promise<void> => {
+		// Drawn before the early return, as it always was. Every run is one
+		// stream from one seed, so a draw that stops happening shifts every
+		// draw after it and quietly changes what each seed means — including
+		// the seeds written down in docs/PLAN.md as having found something.
+		const from = pick(held);
+		const free = NOTEBOOKS.filter((path) => !held.includes(path));
+		if (free.length === 0) return;
+		const to = pick(free);
+		say(b, `rename notebook ${from} -> ${to}`);
+		await renameFolder(b.db, from, to).catch(taken(b, `rename notebook ${from} -> ${to}`));
 	};
 
 	const step = async (b: Browser): Promise<void> => {
@@ -840,45 +948,46 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		const note = pick(notes);
 		if (roll < 0.5) {
 			const made = token(note);
-			say(b, `edit ${note.path} ${made}`);
+			say(b, `edit ${note.path} ${made} ${idOf(note)}`);
 			await saveNoteBody(b.db, note.id, `${note.body}${made}\n`);
 			return;
 		}
 		if (roll < 0.58) {
-			say(b, `rename ${note.path}`);
-			await renameNote(b.db, note.id, pick(TITLES));
+			// Said before the writer runs, so a writer that throws still leaves
+			// the step that caused it in the trace — and amended after, because
+			// where it went is the half that matters: a rename onto a path the
+			// other browser is also using is how two notes come to share a name,
+			// and a trace that stops at the old path cannot show it.
+			say(b, `rename ${note.path} ${idOf(note)}`);
+			const renamed = await renameNote(b.db, note.id, pick(TITLES));
+			amend(`rename ${note.path} -> ${renamed.path} ${idOf(note)}`);
 			return;
 		}
 		if (roll < 0.64) {
 			const folders = await notebooks(b);
-			say(b, `move ${note.path}`);
-			await moveNote(b.db, note.id, folders.length === 0 ? '' : pick(['', ...folders]));
+			say(b, `move ${note.path} ${idOf(note)}`);
+			const moved = await moveNote(
+				b.db,
+				note.id,
+				folders.length === 0 ? '' : pick(['', ...folders])
+			);
+			amend(`move ${note.path} -> ${moved.path} ${idOf(note)}`);
 			return;
 		}
 		if (roll < 0.7) {
 			await willTake(note);
-			say(b, `delete ${note.path}`);
+			say(b, `delete ${note.path} ${idOf(note)}`);
 			await deleteNote(b.db, note.id);
 			return;
 		}
 		if (roll < 0.75) {
-			const held = await notebooks(b);
-			const free = NOTEBOOKS.filter((path) => !held.includes(path));
-			if (free.length === 0) return;
-			const name = pick(free);
-			say(b, `notebook ${name}`);
-			await createFolder(b.db, { name });
+			await makeNotebook(b);
 			return;
 		}
 
 		const held = await notebooks(b);
 		if (roll < 0.8 && held.length > 0) {
-			const from = pick(held);
-			const free = NOTEBOOKS.filter((path) => !held.includes(path));
-			if (free.length === 0) return;
-			const to = pick(free);
-			say(b, `rename notebook ${from} -> ${to}`);
-			await renameFolder(b.db, from, to);
+			await renameNotebook(b, held);
 			return;
 		}
 		if (roll < 0.85 && held.length > 0) {
