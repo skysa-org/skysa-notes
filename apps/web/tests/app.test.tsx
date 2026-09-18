@@ -416,6 +416,28 @@ describe('the command palette', () => {
 		expect(screen.queryByDisplayValue('Untitled')).toBeNull();
 	});
 
+	it('makes a note on the bare key, and only where that key is not a letter', async () => {
+		// `Mod+N` opens a browser window and `Mod+Shift+N` a private one, in
+		// Chrome, Edge and Safari alike, and the page is never asked — so a bare
+		// key is what is left. That is what `reachable` is for: in the search
+		// field the same key is the letter the user typed.
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		const search = screen.getByRole('searchbox', { name: 'Search notes' });
+		await userEvent.type(search, 'n');
+		expect(screen.queryByDisplayValue('Untitled')).toBeNull();
+		expect((search as HTMLInputElement).value).toBe('n');
+
+		await userEvent.clear(search);
+		act(() => {
+			search.blur();
+		});
+		await userEvent.keyboard('n');
+
+		expect(await screen.findByDisplayValue('Untitled')).toBeDefined();
+	});
+
 	it('offers the note commands as unavailable when there is no note open', async () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work', 'Work');

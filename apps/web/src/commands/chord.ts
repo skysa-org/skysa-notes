@@ -24,9 +24,20 @@ export interface Chord {
  * platform we did not expect still gets a working shortcut instead of none.
  * The *label* does care which platform it is on; that is `chordLabel`.
  */
+const MODIFIERS = new Set(['mod', 'shift', 'alt']);
+
 export const parseChord = (spec: string): Chord => {
 	const parts = spec.split('+').map((part) => part.trim().toLowerCase());
 	const key = parts[parts.length - 1] ?? '';
+	// `Ctrl+K` and `Cmd+K` are the obvious things to write, and quietly reading
+	// either as the bare key `k` is the worst answer available: the shortcut then
+	// fires on every `k` typed outside a field, and the palette prints it as `K`,
+	// so both halves agree and both are wrong. Specs are written by us, in
+	// source, so a throw is seen the first time the app is opened.
+	const unknown = parts.slice(0, -1).filter((part) => !MODIFIERS.has(part));
+	if (unknown.length > 0) {
+		throw new Error(`${spec}: unknown modifier ${unknown.join(', ')} — use Mod, Shift or Alt`);
+	}
 	return {
 		key,
 		mod: parts.includes('mod'),

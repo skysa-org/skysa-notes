@@ -85,21 +85,31 @@ describe('the registry', () => {
 		expect(registry.list().map((command) => command.label)).toEqual(['second']);
 	});
 
-	it('takes a command away with the component that declared it', () => {
+	it('takes a command away with the component that declared it', async () => {
+		// Through the palette, which is the only thing that can tell the
+		// difference: `Declares` renders nothing, so asserting on its label
+		// without a palette on screen passes whether the command is gone or not.
 		const run = vi.fn();
 		const { rerender } = app(
 			<>
 				<Shortcuts />
 				<Declares id="a" run={run} />
+				<CommandPalette onClose={() => undefined} />
 			</>
 		);
+		expect(screen.getByText('Do the thing')).toBeDefined();
+
 		rerender(
 			<CommandsProvider>
 				<Shortcuts />
+				<CommandPalette onClose={() => undefined} />
 			</CommandsProvider>
 		);
 
 		expect(screen.queryByText('Do the thing')).toBeNull();
+		// And the chord it held goes with it.
+		await userEvent.keyboard('{Meta>}k{/Meta}');
+		expect(run).not.toHaveBeenCalled();
 	});
 });
 
@@ -302,5 +312,242 @@ describe('where the cursor rests', () => {
 		expect(
 			screen.getAllByRole('option').map((row) => row.textContent.replace(/(App|Note)$/, ''))
 		).toEqual(['Bravo', 'Alpha', 'Zulu']);
+	});
+});
+
+/**
+ * When a chord may *not* fire. Every one of these was found by a reviewer
+ * mutating the source and watching the suite stay green: the guards existed and
+ * nothing held them in place.
+ */
+describe('a keystroke the app must not take', () => {
+	/** A keydown as the browser delivers it, from a chosen element. */
+	const press = (key: string, from: Element, held: Partial<KeyboardEventInit> = {}) => {
+		const event = new KeyboardEvent('keydown', {
+			key,
+			bubbles: true,
+			cancelable: true,
+			...held,
+		});
+		act(() => {
+			from.dispatchEvent(event);
+		});
+		return event;
+	};
+
+	const listening = (run: () => void, chord: ReturnType<typeof parseChord>) => {
+		app(
+			<>
+				<Shortcuts />
+				<Declares id="a" chord={chord} run={run} />
+			</>
+		);
+	};
+
+	it('leaves a bare key to the field the user is typing into', () => {
+		// The guard is `reachable`, and until this test it could be deleted
+		// outright with the whole suite still green.
+		const run = vi.fn();
+		listening(run, parseChord('n'));
+		const field = document.createElement('input');
+		document.body.append(field);
+
+		press('n', field);
+		expect(run).not.toHaveBeenCalled();
+
+		press('n', document.body);
+		expect(run).toHaveBeenCalledTimes(1);
+	});
+
+	it('leaves a bare key to an editor, which is not an input at all', () => {
+		// Both of this app's editors are contentEditable hosts: Milkdown over
+		// ProseMirror and CodeMirror 6. Neither is an `input`, a `textarea` or a
+		// `select`, so the tag-name cases say nothing about the one place the
+		// user actually writes.
+		const run = vi.fn();
+		listening(run, parseChord('n'));
+		const editor = document.createElement('div');
+		editor.contentEditable = 'true';
+		// jsdom computes `isContentEditable` from nothing, so it is set directly.
+		Object.defineProperty(editor, 'isContentEditable', { value: true });
+		document.body.append(editor);
+
+		press('n', editor);
+
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it('leaves alone a keystroke something nearer has already handled', () => {
+		// CodeMirror's default keymap binds Ctrl+K to "kill to end of line" on a
+		// Mac. A handled binding calls `preventDefault` and lets the event bubble,
+		// so without this the raw editor deletes the rest of the line *and* the
+		// app opens the palette over it.
+		const run = vi.fn();
+		listening(run, parseChord('Mod+K'));
+		const editor = document.createElement('div');
+		document.body.append(editor);
+		editor.addEventListener('keydown', (event) => {
+			event.preventDefault();
+		});
+
+		press('k', editor, { ctrlKey: true });
+
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it('fires once for a key held down, not once per repeat', () => {
+		const run = vi.fn();
+		listening(run, parseChord('Mod+E'));
+
+		press('e', document.body, { metaKey: true });
+		press('e', document.body, { metaKey: true, repeat: true });
+		press('e', document.body, { metaKey: true, repeat: true });
+
+		expect(run).toHaveBeenCalledTimes(1);
+	});
+
+	it('holds every chord while the palette is open', () => {
+		// Otherwise Mod+E pressed over the palette flips the note underneath
+		// between editors — flushing a pending edit into an editor the user
+		// cannot see — and the Enter that follows runs a second command on top.
+		const behind = vi.fn();
+		app(
+			<>
+				<Shortcuts />
+				<Declares id="a" chord={parseChord('Mod+E')} run={behind} />
+				<CommandPalette onClose={() => undefined} />
+			</>
+		);
+
+		press('e', screen.getByRole('combobox'), { metaKey: true });
+
+		expect(behind).not.toHaveBeenCalled();
+	});
+
+	it('takes them back when the palette closes', () => {
+		const behind = vi.fn();
+		const { rerender } = app(
+			<>
+				<Shortcuts />
+				<Declares id="a" chord={parseChord('Mod+E')} run={behind} />
+				<CommandPalette onClose={() => undefined} />
+			</>
+		);
+		rerender(
+			<CommandsProvider>
+				<Shortcuts />
+				<Declares id="a" chord={parseChord('Mod+E')} run={behind} />
+			</CommandsProvider>
+		);
+
+		press('e', document.body, { metaKey: true });
+
+		expect(behind).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the palette as a dialog', () => {
+	const press = (key: string, from: Element) => {
+		const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+		act(() => {
+			from.dispatchEvent(event);
+		});
+		return event;
+	};
+
+	const openOver = (
+		opener: HTMLElement,
+		onClose: () => void = vi.fn(),
+		run: () => void = vi.fn()
+	) => {
+		const result = app(
+			<>
+				<Declares id="a" label="Do the thing" run={run} />
+				<CommandPalette onClose={onClose} />
+			</>
+		);
+		return { ...result, onClose, run, opener };
+	};
+
+	/** Something with focus before the palette opens, as a button in the app has. */
+	const focused = () => {
+		const button = document.createElement('button');
+		document.body.append(button);
+		button.focus();
+		return button;
+	};
+
+	it('gives focus back to whatever had it, when it closes having done nothing', () => {
+		// Removing the focused element does not return focus where it came from:
+		// the browser drops it on `document.body`, and a keyboard user who opens
+		// the palette and changes their mind has lost their place in the app.
+		const opener = focused();
+		const { unmount } = openOver(opener);
+		expect(document.activeElement).toBe(screen.getByRole('combobox'));
+
+		unmount();
+
+		expect(document.activeElement).toBe(opener);
+	});
+
+	it('leaves focus where a command put it', async () => {
+		// `app.search` exists to put the cursor in the search field. Taking focus
+		// back afterwards would undo the only thing the command does.
+		const opener = focused();
+		const elsewhere = document.createElement('input');
+		document.body.append(elsewhere);
+		const { unmount } = openOver(opener, vi.fn(), () => {
+			elsewhere.focus();
+		});
+
+		await userEvent.keyboard('{Enter}');
+		unmount();
+
+		expect(document.activeElement).toBe(elsewhere);
+	});
+
+	it('keeps Tab inside itself', () => {
+		// `aria-modal` says the rest of the page is inert. Focus has to agree:
+		// the field is the only thing in here that takes it, so Tab is refused
+		// rather than allowed to walk out into the page behind.
+		openOver(focused());
+		const field = screen.getByRole('combobox');
+
+		const event = press('Tab', field);
+
+		expect(event.defaultPrevented).toBe(true);
+		expect(document.activeElement).toBe(field);
+	});
+
+	it('names the row Enter would run, for a reader that cannot see the highlight', async () => {
+		openOver(focused());
+		const field = screen.getByRole('combobox');
+		const first = screen.getAllByRole('option')[0];
+
+		expect(field.getAttribute('aria-activedescendant')).toBe(first?.id);
+
+		await userEvent.keyboard('kingfisher');
+		// Nothing matches, so there is no list to point into and no row to name.
+		expect(field.getAttribute('aria-activedescendant')).toBeNull();
+		expect(field.getAttribute('aria-controls')).toBeNull();
+		expect(field.getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('puts nothing focusable inside a row', () => {
+		// ARIA gives `option` presentational children: a button in there is
+		// announced as plain text while still sitting in the tab order, which is
+		// how focus used to escape the dialog.
+		openOver(focused());
+
+		// Within the dialog: the opener this test focuses is a button of its own,
+		// and it is outside.
+		const dialog = screen.getByRole('dialog');
+		const focusable = dialog.querySelectorAll(
+			'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+		);
+
+		// Exactly one, and it is the field — which is also what makes refusing
+		// Tab a complete trap rather than half of one.
+		expect([...focusable]).toEqual([screen.getByRole('combobox')]);
 	});
 });

@@ -72,6 +72,21 @@ export const useCommand = (command: Command): void => {
 	}, [registry, id, label, group, chord, enabled, run]);
 };
 
+/**
+ * Hold every chord for as long as this component is mounted.
+ *
+ * Mounted-for-the-duration rather than opened-and-closed by hand: the hold is
+ * released by the same unmount that takes the dialog off the screen, so there
+ * is no path on which the dialog goes away and the keyboard stays deaf.
+ *
+ * A no-op without a provider, for the same reason `useCommand` is: a dialog
+ * rendered on its own is not wrong for having nobody to ask.
+ */
+export const useSuspendShortcuts = (): void => {
+	const registry = useOptionalRegistry();
+	useEffect(() => registry?.suspend(), [registry]);
+};
+
 export const useCommands = (): readonly Command[] => {
 	const registry = useRegistry();
 	return useSyncExternalStore(registry.subscribe, registry.list, registry.list);
@@ -98,6 +113,20 @@ export const useShortcuts = (): void => {
 	const registry = useRegistry();
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
+			// Somebody nearer the keystroke has already acted on it. CodeMirror's
+			// default keymap is the case that matters: on a Mac its emacs bindings
+			// take `Ctrl+K` to kill to end of line and `Ctrl+E` to end of line, and
+			// a handled binding calls `preventDefault` but lets the event bubble.
+			// Without this the raw editor deletes the rest of the line *and* opens
+			// the palette over it, and the undo that would put it back is no longer
+			// reachable from where focus has gone.
+			if (event.defaultPrevented) return;
+			// Held down, not pressed again. Auto-repeat on `Mod+E` would remount the
+			// editor several times a second, each remount flushing a pending edit.
+			if (event.repeat) return;
+			// A dialog is up: it is the app asking for an answer, and a chord that
+			// fires behind it acts on a screen the user cannot see.
+			if (registry.suspended()) return;
 			const hit = registry
 				.list()
 				.find(

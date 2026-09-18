@@ -41,6 +41,20 @@ export interface CommandRegistry {
 	readonly register: (command: Command) => () => void;
 	readonly list: () => readonly Command[];
 	readonly subscribe: (listener: () => void) => () => void;
+	/**
+	 * Hold every chord until the returned release is called.
+	 *
+	 * For whoever is in front of the user: a modal dialog is the app saying "this
+	 * first", and a shortcut that fires behind it acts on a screen the user
+	 * cannot see. `Mod+E` pressed out of habit over an open palette would flip
+	 * the note underneath between editors, and the palette would then run
+	 * whatever row Enter was resting on, on top of that.
+	 *
+	 * Counted rather than a flag, so two overlapping holders cannot release each
+	 * other's.
+	 */
+	readonly suspend: () => () => void;
+	readonly suspended: () => boolean;
 }
 
 export const createCommandRegistry = (): CommandRegistry => {
@@ -48,6 +62,9 @@ export const createCommandRegistry = (): CommandRegistry => {
 	// closures change replaces rather than duplicates.
 	const commands = new Map<string, Command>();
 	const listeners = new Set<() => void>();
+	// Each holder is its own object, so releasing one twice is not releasing
+	// somebody else's.
+	const holds = new Set<object>();
 	// `list` must return the *same* array until something actually changes:
 	// `useSyncExternalStore` compares snapshots by identity and would otherwise
 	// re-render forever.
@@ -79,6 +96,14 @@ export const createCommandRegistry = (): CommandRegistry => {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		},
+		suspend: () => {
+			const hold = {};
+			holds.add(hold);
+			return () => {
+				holds.delete(hold);
+			};
+		},
+		suspended: () => holds.size > 0,
 	};
 };
 

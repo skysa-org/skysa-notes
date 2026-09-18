@@ -25,6 +25,16 @@ describe('reading a chord', () => {
 	it('is a bare key when nothing is held', () => {
 		expect(parseChord('/')).toEqual({ key: '/', mod: false, shift: false, alt: false });
 	});
+
+	it('refuses a modifier it does not know', () => {
+		// `Ctrl+K` and `Cmd+K` are the obvious things to write instead of `Mod+K`,
+		// and reading either as the bare key `k` is the worst available answer:
+		// the shortcut fires on every `k` typed outside a field, and the palette
+		// prints it as `K` — so both halves agree with each other and both are
+		// wrong. Specs are written in source, so this is seen at once.
+		expect(() => parseChord('Ctrl+K')).toThrow(/unknown modifier/);
+		expect(() => parseChord('Cmd+Shift+P')).toThrow(/cmd/);
+	});
 });
 
 describe('matching a keystroke', () => {

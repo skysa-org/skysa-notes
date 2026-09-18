@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { chordLabel } from '../commands/chord.js';
-import { useCommands } from '../commands/context.js';
+import { useCommands, useSuspendShortcuts } from '../commands/context.js';
 import { type Command } from '../commands/registry.js';
 
 /**
@@ -59,8 +59,7 @@ const firstUsable = (commands: readonly Command[]): number => {
 /**
  * Mounted only while it is open, which is what empties the field: a palette
  * that remembers last time's query shows a filtered list to somebody who has
- * just asked to see everything. Unmounting is also what gives the focus back,
- * since the browser returns it where it was.
+ * just asked to see everything.
  */
 export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	const commands = useCommands();
@@ -68,17 +67,49 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 	// `null` until the user moves: the resting place depends on the list, which
 	// is not known until it has been filtered.
 	const [at, setAt] = useState<number | null>(null);
+	// Every chord is held while this is up. Otherwise `Mod+E` pressed over an
+	// open palette flips the note underneath between editors, and the Enter that
+	// follows runs a second command on top of it.
+	useSuspendShortcuts();
 	const takeFocus = useCallback((field: HTMLInputElement | null) => {
 		field?.focus();
 	}, []);
+
+	// Where focus was when this opened, captured on the first render — before
+	// `takeFocus` has taken it. Removing the focused element does *not* put focus
+	// back where it came from: the browser drops it on `document.body`, which is
+	// nowhere, and a keyboard user who opens the palette and presses Escape has
+	// lost their place in the app.
+	const [opener] = useState(() => document.activeElement);
+	// Unless a command took focus somewhere deliberately — `app.search` puts the
+	// cursor in the search field — in which case putting it back is undoing what
+	// the user just asked for.
+	const moved = useRef(false);
+	useEffect(
+		() => () => {
+			if (moved.current) return;
+			if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+		},
+		[opener]
+	);
 
 	const shown = useMemo(() => matching(commands, query), [commands, query]);
 	// The highlight is an index, so it has to be pulled back when the list under
 	// it shrinks — otherwise Enter on a narrowed list runs nothing at all.
 	const cursor = shown.length === 0 ? 0 : Math.min(at ?? firstUsable(shown), shown.length - 1);
+	const active = shown[cursor];
+
+	// The list scrolls, and the highlight is an `aria-activedescendant` rather
+	// than focus — so nothing moves it into view on its own, and arrowing past
+	// the fold leaves the user driving a selection they cannot see.
+	useEffect(() => {
+		if (active === undefined) return;
+		document.getElementById(`palette-${active.id}`)?.scrollIntoView({ block: 'nearest' });
+	}, [active]);
 
 	const choose = (command: Command) => {
 		if (!command.enabled) return;
+		moved.current = true;
 		// Closed first: the command may move focus — opening a note, or putting
 		// the cursor in the search field — and a dialog closing afterwards would
 		// take it straight back.
@@ -115,6 +146,14 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 							onClose();
 							return;
 						}
+						// The field is the only thing in here that takes focus, so
+						// refusing Tab is the whole trap: focus cannot leave a
+						// dialog that claims the rest of the page is inert, and
+						// Escape stays reachable because it is bound here.
+						if (event.key === 'Tab') {
+							event.preventDefault();
+							return;
+						}
 						if (event.key === 'ArrowDown') {
 							event.preventDefault();
 							setAt(shown.length === 0 ? 0 : (cursor + 1) % shown.length);
@@ -129,8 +168,7 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 						}
 						if (event.key === 'Enter') {
 							event.preventDefault();
-							const command = shown[cursor];
-							if (command !== undefined) choose(command);
+							if (active !== undefined) choose(active);
 						}
 					}}
 					className="palette-field"
@@ -147,10 +185,13 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 					// says which row is active — without this a screen reader
 					// announces nothing as the arrows move.
 					role="combobox"
-					aria-expanded
-					aria-controls="palette-list"
+					// Only while there is a list: with nothing matching, the `ul`
+					// is not rendered, and pointing at an element that is not there
+					// is worse than saying the box is closed.
+					aria-expanded={shown.length > 0}
+					aria-controls={shown.length > 0 ? 'palette-list' : undefined}
 					aria-activedescendant={
-						shown[cursor] === undefined ? undefined : `palette-${shown[cursor].id}`
+						active === undefined ? undefined : `palette-${active.id}`
 					}
 				/>
 
@@ -161,6 +202,16 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 				) : (
 					<ul id="palette-list" role="listbox" aria-label="Commands">
 						{shown.map((command, index) => (
+							// The row is the option, with nothing focusable inside
+							// it: ARIA gives `option` presentational children, so a
+							// `button` in here is announced as plain text while
+							// still sitting in the tab order — which is exactly how
+							// focus used to escape the dialog.
+							//
+							// `onMouseDown` rather than `onClick`, to match the
+							// backdrop: the pointer acts where the press began, and
+							// a press that does not move focus leaves the field
+							// holding it, so the keyboard still works afterwards.
 							<li
 								key={command.id}
 								id={`palette-${command.id}`}
@@ -168,28 +219,16 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 								aria-selected={index === cursor}
 								aria-disabled={command.enabled ? undefined : true}
 								className={index === cursor ? 'palette-row active' : 'palette-row'}
+								onMouseDown={(event) => {
+									event.preventDefault();
+									choose(command);
+								}}
 							>
-								{/* A button, so a pointer can use it and so the
-								    disabled ones refuse a click for the same reason
-								    they refuse Enter. */}
-								<button
-									type="button"
-									disabled={!command.enabled}
-									onMouseEnter={() => {
-										setAt(index);
-									}}
-									onClick={() => {
-										choose(command);
-									}}
-								>
-									<span className="palette-label">{command.label}</span>
-									<span className="palette-group">{command.group}</span>
-									{command.chord !== undefined && (
-										<kbd className="palette-chord">
-											{chordLabel(command.chord)}
-										</kbd>
-									)}
-								</button>
+								<span className="palette-label">{command.label}</span>
+								<span className="palette-group">{command.group}</span>
+								{command.chord !== undefined && (
+									<kbd className="palette-chord">{chordLabel(command.chord)}</kbd>
+								)}
 							</li>
 						))}
 					</ul>

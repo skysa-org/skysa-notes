@@ -60,7 +60,16 @@ const connectMessage = (outcome: ConnectOutcome): string => {
  * shortcut and its label cannot drift apart because there is only one of them.
  */
 const PALETTE = parseChord('Mod+K');
-const NEW_NOTE = parseChord('Mod+Shift+N');
+/**
+ * A bare key, because in a browser there is nothing else left. `Mod+N` opens a
+ * window and `Mod+Shift+N` a private one, in Chrome, Edge and Safari alike, and
+ * the page is never asked: printing either in the palette would advertise a
+ * shortcut that cannot fire, which is the drift this registry exists to stop.
+ *
+ * Bare keys are the reason `reachable` is there: this one is ignored while the
+ * user is in a field or an editor, which is where an `n` means the letter.
+ */
+const NEW_NOTE = parseChord('n');
 const FIND = parseChord('Mod+Shift+F');
 
 const Home = () => {
