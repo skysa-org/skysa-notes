@@ -20,15 +20,18 @@ export interface AppSearch {
 	connect?: ConnectOutcome;
 }
 
-export const CONNECT_OUTCOMES = [
-	'ok',
-	'denied',
-	'failed',
-	'conflict',
-	'signin',
-	'occupied',
-	'partial',
-] as const;
+/**
+ * Exactly what the callback can redirect with — `Outcome` in
+ * `apps/api/src/routes/connect.ts`, and nothing beside it.
+ *
+ * `conflict`, `signin` and `occupied` were here until 2026-09-18. Phase 7
+ * retired all three on the server when connections stopped aggregating under a
+ * user, and the last of them cannot come back: `signin` rendered "Sign in
+ * before connecting storage", and there is no sign-in (docs/PLAN.md §6). A
+ * message the server has no way to ask for is one nobody can be shown and
+ * nobody can test, and this one described a product that does not exist.
+ */
+export const CONNECT_OUTCOMES = ['ok', 'denied', 'failed', 'partial'] as const;
 
 export type ConnectOutcome = (typeof CONNECT_OUTCOMES)[number];
 

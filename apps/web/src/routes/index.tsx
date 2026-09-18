@@ -34,23 +34,34 @@ import {
  * where they were.
  */
 
-/** What to tell the user on the way back from connecting a storage account. */
-const connectMessage = (outcome: ConnectOutcome): string => {
+/**
+ * What to tell the user on the way back from connecting a storage account, or
+ * `undefined` for a value this build has no message for.
+ *
+ * The `default` is not dead code, which is the whole reason it is written out.
+ * `validateSearch` is supposed to have dropped anything not in
+ * `CONNECT_OUTCOMES` before this is reached, and at runtime it does not — a
+ * hand-typed or bookmarked `?connect=signin` arrives here intact. Without the
+ * default this returned `undefined` through a `string` signature and the app
+ * rendered an **empty** alert banner: a red bar saying nothing, which is worse
+ * than either showing the message or showing nothing at all.
+ *
+ * Found on 2026-09-18 by removing `signin`, `conflict` and `occupied` — the
+ * three outcomes Phase 7 retired server-side — which is when a value outside
+ * the union first became reachable.
+ */
+const connectMessage = (outcome: ConnectOutcome): string | undefined => {
 	switch (outcome) {
 		case 'ok':
 			return 'Storage connected. Your notes will sync with it.';
 		case 'denied':
 			return 'Connecting storage was cancelled.';
-		case 'conflict':
-			return 'That storage account is already connected to someone else on this server.';
-		case 'signin':
-			return 'Sign in before connecting storage.';
-		case 'occupied':
-			return 'Your notes already sync with another storage provider. Disconnect it first.';
 		case 'failed':
 			return 'The storage account could not be connected. Try again.';
 		case 'partial':
 			return 'Access to your files was not granted, so storage was not connected. Connect again and leave that permission ticked.';
+		default:
+			return undefined;
 	}
 };
 
@@ -219,7 +230,7 @@ const Home = () => {
 					{problem}
 				</p>
 			)}
-			{connectOutcome !== undefined && (
+			{connectOutcome !== undefined && connectMessage(connectOutcome) !== undefined && (
 				<p className="banner" role={connectOutcome === 'ok' ? 'status' : 'alert'}>
 					{connectMessage(connectOutcome)}
 				</p>

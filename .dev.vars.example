@@ -4,7 +4,9 @@
 # Public origin of this deployment. OAuth redirect URIs are derived from it.
 APP_ORIGIN="http://localhost:5173"
 
-# storage-first (default) | account-first  — see docs/PLAN.md §6
+# storage-first — the only value. `account-first` refuses to boot: sign-in
+# separate from storage was dropped, and here a person *is* their storage
+# account (docs/PLAN.md §6). The variable itself goes next (§10).
 AUTH_MODE="storage-first"
 
 # Any of: gdrive,onedrive,dropbox,webdav. `dropbox`, `onedrive` and `gdrive`

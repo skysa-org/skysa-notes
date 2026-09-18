@@ -4,7 +4,8 @@
 -- copies from: a failure anywhere in 0004 has to leave a state 0004 can be run
 -- against again. Here there is nothing to half-do.
 --
--- `users` and `identities` stay. They are Phase 9's (docs/PLAN.md §10) and
+-- `users` and `identities` stay. They were account-first's (dropped 2026-09-18,
+-- docs/PLAN.md §6, and now owed a migration of their own) and
 -- nothing reads them today; `connections` was their only other referent, and
 -- with it gone the cascade from `users` reaches nothing.
 DROP TABLE IF EXISTS `connections`;

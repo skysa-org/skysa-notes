@@ -128,8 +128,9 @@ const missingCredentialIssues = (raw: Record<string, unknown>): string[] => {
  * had configured, and they were not. Refusing at boot is the only answer that
  * cannot be misread.
  *
- * The whole variable goes when the tables do; until then this refusal is what
- * keeps the setting from meaning anything.
+ * The whole variable goes in a change of its own — removing it is breaking for
+ * anyone with it in a `wrangler.toml` (docs/PLAN.md §10 lists every site).
+ * Until then this refusal is what keeps the setting from meaning anything.
  */
 const unbuiltAuthModeIssues = (raw: Record<string, unknown>): string[] =>
 	raw.AUTH_MODE === 'account-first'

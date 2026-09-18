@@ -44,14 +44,14 @@ Non-goals for v1: real-time collaboration, sharing, full-drive access, mobile-na
 │                                              │                         │
 │  Service worker (Workbox via vite-plugin-pwa): app-shell cache, bg sync │
 └──────────┬───────────────────────────────────┼─────────────────────────┘
-           │ session cookie                    │ provider access token (bearer)
+           │ sk1_ credential (bearer)          │ provider access token (bearer)
            ▼                                   ▼
 ┌── Backend (Hono on CF Workers) ──────┐   ┌── Provider APIs ──────────────┐
 │  /api/auth/*      OAuth start/callback│   │  Google Drive v3 (CORS ok)    │
-│  /api/connections CRUD               │   │  Microsoft Graph (CORS ok)    │
+│  /api/connection  one silo's state   │   │  Microsoft Graph (CORS ok)    │
 │  /api/token       mint access token  │   │  Dropbox v2 (CORS ok)         │
 │  /api/webdav/*    proxy (CORS shim)  │──▶│  WebDAV server (via proxy)    │
-│  D1: users, sessions, connections    │   └───────────────────────────────┘
+│  D1: storage_connections, grants     │   └───────────────────────────────┘
 └──────────────────────────────────────┘
 ```
 
@@ -781,8 +781,11 @@ The traces also carry where a rename or move went
 ### Cleaning up after account-first (2026-09-18)
 Sign-in separate from storage was Phase 9 and is **not being built** (§6, "No sign-in separate from storage"; §14 keeps the reasoning). Removing the plan leaves scaffolding in the tree that now has no caller, and it is listed rather than left to be found:
 - [ ] Drop the `users` and `identities` tables. A hand-written migration, for the reason `0004`/`0005` were: `drizzle-kit`'s table rebuild emits `PRAGMA foreign_keys=OFF`, which D1 rejects and the test shim tolerates. `identities` has a foreign key to `users`, so the order is `identities` first
-- [ ] Drop `AUTH_MODE`. It has one legal value, and the other one exists only to be refused at boot. Removing it touches `apps/api/src/env.ts`, `wrangler.toml`, `.dev.vars.example`, `docs/self-hosting.md` and the client's `GET /api/settings` shape — a breaking change to a published configuration, so it is its own change and not a line in someone else's
+- [ ] Drop `AUTH_MODE`. It has one legal value, and the other exists only to be refused at boot. A breaking change to a configuration this repository has published documentation for, so it is its own change and not a line in someone else's. Every site, since the point of listing them is that a grep for one name will not find them all: `apps/api/src/env.ts` (the enum, the `Config` field, the refusal, and the mapping at the bottom), `apps/api/src/app.ts` — which serves it from **`GET /api/config`**, not `/api/settings` — `apps/api/wrangler.toml`, `.dev.vars.example`, `scripts/setup.sh` (it writes the key into a generated `.dev.vars`), `docs/self-hosting.md`, `apps/api/worker-configuration.d.ts` (generated: `pnpm cf-typegen`), the client's zod schema in `apps/web/src/api/client.ts`, the three `authMode` guards in `AccountPanel.tsx`, and the tests that pin the value in `apps/api/tests/env.test.ts` and `apps/web/tests/AccountPanel.test.tsx`
 - [ ] Drop the client's `account-first` branch in `AccountPanel` ("Connecting storage needs a sign-in this server does not offer yet"), which describes a state that can no longer exist
+- [x] Drop `signin`, `conflict` and `occupied` from `CONNECT_OUTCOMES`. Phase 7 retired all three server-side — `Outcome` in `routes/connect.ts` is `ok | denied | failed | partial` — and `signin` rendered "Sign in before connecting storage", a message for a product that does not exist. Done in the same change as this decision, because it was the last user-*visible* thing in the tree implying a sign-in
+
+**A bug that removing them exposed, and one worth knowing about beyond this.** `validateSearch: parseSearch` on the index route is supposed to drop any `connect` value outside `CONNECT_OUTCOMES`, and `parseSearch` does exactly that when called directly — but at runtime the value still reaches the component, so the route's guard against "anything at all can arrive in the query string" is not in force. It cost nothing while every reachable value had a message; the moment three stopped having one, a stale `?connect=signin` rendered an **empty** red banner. `connectMessage` now answers `undefined` for anything it does not know and the banner is not rendered at all, which is right whatever the router does — but the router half is unexplained and is not fixed here.
 
 Kept from that phase because neither was ever about identity:
 - [ ] Abuse controls for a shared instance: an implementation behind the Phase 7 rate-limit seam (`createApp({ rateLimiter })`) for token minting and connection changes. The per-connection grant cap is done (§6). Unscheduled — a personal instance does not need it, and what a shared one needs depends on who is running it
@@ -854,7 +857,7 @@ Source files are text. A control byte other than tab, newline or carriage return
 
 1. **App folder name:** `skysa-notes`, exported as `APP_FOLDER_NAME` from `packages/core/src/config.ts`. It governs the folder Google Drive and WebDAV create. OneDrive and Dropbox derive their app-folder name from the provider registration, so those registrations must be named to match; Dropbox's name is immutable after creation, so if the constant changes before launch, re-create the Dropbox app.
 2. **Remote folder renames apply even when contained notes are dirty.** Metadata-only; see §7.
-3. **Single connection per user until Phase 7.** Schema supports many; UI exposes one.
+3. **Several connected sources on one device since Phase 7**, each its own silo, one shown at a time. There is no user to hold them: nothing on the server knows that two connections belong to one person (§6).
 4. **Hosting: Cloudflare Workers** for API + static SPA, D1 for the database. See §6.
 5. **Cold start is a full scan.** No remote index file. Revisit if cold start exceeds ~10 s at ~2k notes.
 6. **Every note the app creates lives in a notebook; the root is not one.** The sidebar lists notebooks, and opens the first one when the URL names none. The root is the container notebooks live in, not a place to put notes, so the app will not create a note there — and it gets a row only in the case below.

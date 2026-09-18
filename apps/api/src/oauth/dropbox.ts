@@ -19,8 +19,9 @@ const TOKEN = 'https://api.dropboxapi.com/oauth2/token';
 const REVOKE = 'https://api.dropboxapi.com/2/auth/token/revoke';
 
 /**
- * Storage scopes only. Identity scopes belong to the `/auth/login/*` flow and
- * are never combined with these — see docs/PLAN.md §6.
+ * Storage scopes only, and there are no others to combine them with: the
+ * `/auth/login/*` flow these were once kept apart from was dropped along with
+ * sign-in (docs/PLAN.md §6).
  *
  * `account_info.read` is what names the connection in the UI.
  */
