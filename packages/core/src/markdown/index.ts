@@ -10,6 +10,7 @@ export {
 	type SplitDocument,
 	type NoteFrontmatter,
 } from './frontmatter.js';
+export { headings, type Heading } from './outline.js';
 export { previewLines, previewText } from './preview.js';
 export {
 	foldName,
