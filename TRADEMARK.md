@@ -9,8 +9,10 @@ project goes by:
 
 - **Skysa**
 - **skysa-notes**
-- any logo, wordmark or icon shipped in this repository
-- confusingly similar names (`skysa.app`, `Skysa Notes Pro`, `skysanotes`, …)
+- the app's logo and wordmark, and the app icons shipped with it
+  (`apps/web/public/`)
+- names close enough to be confused with these (`Skysa Notes Pro`,
+  `skysanotes`, `skysa-notes-plus`, …)
 
 This is the ordinary split for an open-source project, and it exists for one
 reason: someone running a modified instance should not be able to make users
@@ -28,7 +30,9 @@ name.
   company, and call it what it is.
 - **Keep the name in the source tree.** Package names, directory names, import
   paths, test fixtures and the `wrangler.toml` app name are part of the code
-  you received under AGPL-3.0. Renaming them is not required.
+  you received under AGPL-3.0. Renaming them is not required, and nothing here
+  asks you to. This is about what a *user* sees: the app's own name, its icons,
+  and how you describe it.
 
 ## What needs a different name
 

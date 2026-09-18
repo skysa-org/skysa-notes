@@ -100,11 +100,10 @@ become aware that would make these representations inaccurate in any respect.
 *(Adapted from the Harmony Agreements.)*
 
 The Project agrees that it will make each Contribution available under the
-GNU Affero General Public License, version 3 or later, or under any licence
-approved by the Open Source Initiative that is one-way compatible with it. This
-obligation survives any relicensing: whatever else the Project does with the
-sublicensing right granted in section 2, the Contribution remains available to
-the public under a free and open-source licence.
+GNU Affero General Public License, version 3 or later. This obligation survives
+any relicensing: whatever else the Project does with the sublicensing right
+granted in section 2, every Contribution stays available to the public under
+AGPL-3.0.
 
 ## 10. Your rights in your own work are untouched
 
@@ -119,8 +118,14 @@ other projects, or commercially.
 
 ## How to sign
 
-Open a pull request. A bot will comment with a link and the exact sentence to
-post. Signing is once per person, not once per pull request; signatures are
-recorded in the `cla-signatures` branch of this repository.
+The CLA gate is **not wired up yet** — that is the next change. Until it is,
+say on your pull request that you have read and agree to this document, and a
+maintainer will record it.
 
-Signing records your GitHub username, the commit that prompted it, and the date.
+Once it is wired up: open a pull request, and a bot comments with a link and
+the exact sentence to post. Signing is once per person, not once per pull
+request.
+
+Signatures are recorded in the `cla-signatures` branch of this repository, and
+hold your GitHub username, the commit that prompted the signature, and the
+date. Nothing else.

@@ -95,16 +95,17 @@ marking the work as "Submitted on behalf of a third-party: [named here]".
 
 The Corporation agrees to notify the Project of any facts or circumstances of
 which it becomes aware that would make these representations inaccurate in any
-respect, and to maintain the list of designated employees in Schedule B.
+respect, and to maintain the list of designated employees in Schedule A.
 
 ## 9. The Project's promise: it stays AGPL-3.0
 
 *(Adapted from the Harmony Agreements.)*
 
 The Project agrees that it will make each Contribution available under the
-GNU Affero General Public License, version 3 or later, or under any licence
-approved by the Open Source Initiative that is one-way compatible with it. This
-obligation survives any relicensing.
+GNU Affero General Public License, version 3 or later. This obligation survives
+any relicensing: whatever else the Project does with the sublicensing right
+granted in section 2, every Contribution stays available to the public under
+AGPL-3.0.
 
 ## 10. The Corporation's rights in its own work are untouched
 
@@ -125,10 +126,10 @@ including under different terms, in other projects, or commercially.
 
 ## Schedule B — keeping the list current
 
-The Corporation may add or remove designated employees by opening a pull
-request amending its signature record in the `cla-signatures` branch, or by
-contacting the maintainers. A Contribution submitted by someone not on this
-list at the time of submission is not covered by this agreement.
+The Corporation may add or remove designated employees by contacting the
+maintainers, who amend its record in the `cla-signatures` branch. A Contribution
+submitted by someone not on this list at the time of submission is not covered
+by this agreement.
 
 ## Signature
 

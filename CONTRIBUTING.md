@@ -19,6 +19,12 @@ pnpm db:migrate                            # local D1
 pnpm dev                                   # Vite on :5173, wrangler dev on :8787
 ```
 
+A straight copy of `.dev.vars.example` will not boot: `ENABLED_PROVIDERS`
+defaults to `dropbox`, and the Worker refuses to start without that provider's
+credentials rather than starting up and failing at the first connect. Either
+fill them in, or set `ENABLED_PROVIDERS=""` — everything that is not syncing
+works without any of it.
+
 Syncing needs your own app registration at whichever provider you are testing
 (Dropbox, Microsoft Entra or Google Cloud). `.dev.vars.example` lists every key
 and says where each one comes from; [`docs/google-oauth.md`](docs/google-oauth.md)
@@ -32,8 +38,9 @@ locally and talks to nobody until a provider is connected.
 pnpm verify   # format:check + lint + typecheck + test
 ```
 
-CI runs the same thing plus `pnpm build`. A pull request that has not run it
-will fail, and there is nothing in it that a maintainer can fix for you.
+CI runs the same thing plus `pnpm build`, and `pnpm audit --prod` for
+information only. A pull request that has not run `pnpm verify` will fail, and
+there is nothing in it that a maintainer can fix for you.
 
 What is expected of a change:
 
@@ -41,7 +48,9 @@ What is expected of a change:
   if the thing you fixed comes back.
 - **Tick the checklist item** in `docs/PLAN.md` if the change completes one.
 - **Say why** for a new dependency, in the pull request description, and check
-  the licence: MIT, Apache-2.0 or ISC only (`docs/PLAN.md` §13).
+  the licence. Anything that reaches the shipped bundle must be MIT, Apache-2.0
+  or ISC. Build- and test-time tools are held to a looser line — `docs/PLAN.md`
+  §13 records what is already in the tree and why — but say which it is.
 - **Check the vendor docs** rather than assuming, for anything about a provider
   API — scopes, endpoints, conflict semantics — and put the URL in a comment.
 
@@ -61,9 +70,10 @@ and why, not what the diff already says.
 ## The CLA
 
 Every contributor signs the
-[Individual Contributor License Agreement](CLA-individual.md) once. A bot
-comments on your first pull request with a link and the sentence to post;
-signatures live in the `cla-signatures` branch.
+[Individual Contributor License Agreement](CLA-individual.md) once — once per
+person, not once per pull request. The bot that asks for it is **not wired up
+yet**; until it is, say on your pull request that you have read and agree to it.
+Signatures live in the `cla-signatures` branch of this repository.
 
 **It is a licence grant, not an assignment.** You keep ownership of everything
 you write, and you keep the right to use your own work anywhere else, under any

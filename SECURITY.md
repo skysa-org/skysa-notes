@@ -6,8 +6,13 @@
 
 Use GitHub's **private vulnerability reporting** on this repository:
 [Security → Report a vulnerability](https://github.com/skysa-org/skysa-notes/security/advisories/new).
-It creates a private advisory that only the maintainers can see, and it is the
-only channel this project has.
+It creates a private advisory only the maintainers can see.
+
+If that page says reporting is not enabled, it has not been switched on yet —
+it is a repository setting, and turning it on is on the maintainer's list. In
+that case please open an issue saying only *"I have a security report and
+private reporting is off"*, with no detail of the problem in it, and you will
+be given somewhere private to send it.
 
 Please include, as far as you can:
 
@@ -16,9 +21,10 @@ Please include, as far as you can:
 - which version or commit you tested
 - whether it needs a user to be signed in, and whose
 
-You will get an acknowledgement within a week. This is a small project with one
-maintainer, so that is a commitment to answer, not to a fix in that time; the
-advisory thread is where the timeline gets agreed.
+You will get an acknowledgement as soon as the maintainer sees it, usually
+within a week. This is a small project with one maintainer and no paging, so
+that is an expectation rather than a promise, and it is about answering rather
+than fixing; the advisory thread is where a timeline gets agreed.
 
 You are welcome to disclose publicly once a fix has shipped, or after 90 days,
 whichever is sooner. Say so in the report if you want to coordinate on a date.

@@ -59,19 +59,25 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement through the
-repository's **private vulnerability reporting** channel, or by opening a
-GitHub issue if the matter is not sensitive.
+reported by opening a GitHub issue.
 
-All complaints will be reviewed and investigated promptly and fairly.
-
-All community leaders are obligated to respect the privacy and security of the
+All complaints will be reviewed and investigated promptly and fairly, and
+community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
 
-> **Note.** This project currently has a single maintainer, so a report about
-> that maintainer has nowhere impartial to go. That is a real limitation and it
-> is stated here rather than implied away. If the project grows, this section
-> gets a named contact who is not the person the report might be about.
+> **This project has no private conduct channel, and no impartial one.** Both
+> gaps are real and are written here rather than papered over with a route that
+> does not work.
+>
+> There is one maintainer, so a report *about* that maintainer has nowhere
+> impartial to go. And there is no conduct inbox: the repository's private
+> vulnerability reporting is a security-advisory mechanism — a report there
+> opens a draft advisory, reaches the same person, and is the wrong shape for
+> this — so it is not offered as one.
+>
+> What fixes this is a named contact who is not the person a report might be
+> about, published here. Until there is one, a public issue is the only route,
+> and anyone who is not willing to use it is right not to be.
 
 ## Enforcement Guidelines
 
