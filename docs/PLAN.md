@@ -563,6 +563,10 @@ Two modes over one markdown string. Default is rich text; a toolbar/shortcut tog
 
 **Empty paragraphs become `<br />`.** Markdown has no way to say "a blank paragraph here" — blank lines are separators, not content — so Milkdown writes an HTML break for one and reads it back as an empty paragraph. It is the one place the editor puts something in a file the user did not type. It stays because it is a bijection and loses nothing in either direction: stripping it instead would delete a `<br />` that came from the user's own file, which is the worse failure. Pinned by a test in `apps/web/tests/rich.test.ts`.
 
+It is removed where it is *read*, not where it is stored. `previewLines` in `packages/core/src/markdown/preview.ts` is the one rule for turning a body into the lines a list can show — block markers, thematic breaks, the break in every spelling a file carries it in, whitespace collapsed, blanks dropped — and both the note list's preview and the search excerpt are cut from it, so the two can never disagree about what a note says. A preview is the worst place to meet the one thing in the file the user did not type: it sits in grey text beside their own words, looking like a mistake they made.
+
+It is a pass over a string rather than a parse, and that was measured rather than assumed. Running the real pipeline — `parse` plus `mdast-util-to-string` over the top-level nodes, which is the same markdown the editor reads and gets every case right — costs about a millisecond for a 300-word note, so 54 ms for the fifty-one excerpts a single keystroke can ask for, on top of the search itself. Too much for a line of grey text. The price of the cheap pass is that inline syntax survives: `**bold**` keeps its asterisks and a link keeps its brackets. That is deliberate, because removing them without a parser means guessing at the user's own punctuation, and a preview that shows a little syntax is a smaller wrong than one that quietly deletes a word. If it ever needs fixing, the fix is a parse cached per `contentHash`, not a longer regular expression.
+
 **Not `@milkdown/plugin-listener`.** Its `markdownUpdated` is the obvious way to hear about changes, but it debounces on a timer of its own and, more importantly, hands over a markdown string with no way to tell whether a person or the app caused it. That is exactly the distinction the dirty rule is made of. A small ProseMirror plugin — the one in `editor/dirty.ts`, which reads transaction metadata — answers it directly, and the serialization happens where the answer is already known.
 
 **Source-of-truth rules (these matter more than the editor choice):**
@@ -670,7 +674,7 @@ Dropbox first: simplest API, proper conflict semantics, long refresh tokens.
 
 ### Phase 7 — Polish
 - [x] Search (local full-text over IndexedDB; MiniSearch). The middle pane's field searches every notebook, not the open one, and shows what matched: the notebook each note is in, and a line of its body with the matched words marked. `store/search.ts` holds the index and never touches the database — it is handed rows and told to agree with them, which is what lets `useNoteSearch` decide when, and keeps the matching and the excerpting testable as the pure things they are (§7, "Search is a question, not a place"). Opening a match takes the user to the notebook it is in, so the sidebar, the list and the open note never disagree; Escape empties the field and gives the notebook back, and so does creating a note, which would otherwise land in a notebook the open search is not showing.
-- [ ] Rich-editor polish: image paste (once attachments are in scope), find/replace, outline panel. Also here: the `<br />` Milkdown writes for an empty paragraph (§7) is a real part of the file and so reads out in the note list's preview and in a search excerpt, where it is the one thing on screen the user did not type.
+- [ ] Rich-editor polish: image paste (once attachments are in scope), find/replace, outline panel. (The `<br />` Milkdown writes for an empty paragraph is done: one rule, `previewLines` in core, now decides what a readable line is, and the note list's preview and the search excerpt are both cut from it — §7.)
 - [ ] Keyboard shortcuts, command palette
 - [ ] Multiple connections per user (schema already supports it)
 - [ ] Share target, export/import zip
@@ -739,6 +743,7 @@ packages/
         frontmatter.ts slug.ts
         pipeline.ts           # remark pipeline (same plugins/options as the editor) + normalizer, used by editor and tests
         lineEndings.ts        # the three spellings CommonMark calls one, folded on read and chosen on write
+        preview.ts            # a body as the lines a list can show; the one rule the note preview and the search excerpt share
     tests/
       providers/contract.test.ts
       markdown/roundtrip.test.ts

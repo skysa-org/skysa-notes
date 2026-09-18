@@ -49,6 +49,18 @@ describe('NoteList', () => {
 		expect(screen.getByText('Alpha')).toBeDefined();
 	});
 
+	it("shows the note's opening under its title, without the markdown", () => {
+		renderList({
+			notes: [note('Alpha', '# Alpha\n\n- turn the heap\n\n<br />\n\nevery second week\n')],
+		});
+
+		// The heading is the title, already the line above, so the preview starts
+		// after it; the bullet and the break the editor writes for an empty
+		// paragraph are not the user's words and are not shown (docs/PLAN.md §7).
+		const preview = screen.getByText(/turn the heap/);
+		expect(preview.textContent).toBe('turn the heap every second week');
+	});
+
 	it('says an open notebook is empty', () => {
 		renderList({ notes: [] });
 		expect(screen.getByText('No notes here yet.')).toBeDefined();

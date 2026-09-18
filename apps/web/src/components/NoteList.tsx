@@ -1,4 +1,4 @@
-import { parentPath, ROOT } from '@skysa/core';
+import { parentPath, previewLines, ROOT } from '@skysa/core';
 import { type ReactNode } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
@@ -70,16 +70,14 @@ const placeholderFor = ({
 	return notes.length === 0 ? 'No notes here yet.' : undefined;
 };
 
+/**
+ * The note's opening, after its title. `previewLines` is what decides what a
+ * readable line is — the same rule the search excerpt is cut by, so the two
+ * never disagree about what a note says — and the first of them is dropped
+ * because it is the title, already the line above.
+ */
 const preview = (body: string): string => {
-	const text = body
-		// All three spellings: a note written on a pre-OS X Mac has no `\n` in it
-		// at all, and splitting on one yields a single line the `.slice(1)` below
-		// then drops, leaving every such note with an empty excerpt.
-		.split(/\r\n|\n|\r/)
-		.map((line) => line.replace(/^#{1,6}\s+/, '').trim())
-		.filter((line) => line !== '')
-		.slice(1)
-		.join(' ');
+	const text = previewLines(body).slice(1).join(' ');
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 };
 

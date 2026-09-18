@@ -367,4 +367,15 @@ describe('the excerpt', () => {
 		expect(text(hit)).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
 		expect(text(hit)).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
 	});
+	it('does not read out the break the editor writes for an empty paragraph', () => {
+		// Milkdown has no other way to say "a blank paragraph here", so a note
+		// with one in it carries a literal `<br />`. It is the one thing in the
+		// file the user did not type, and an excerpt is the worst place to meet
+		// it: it sits in grey text beside their own words looking like a mistake
+		// they made (docs/PLAN.md §7).
+		const hit = around('the heron stood still\n\n<br />\n\nand then it went', 'heron');
+
+		expect(text(hit)).toContain('the heron stood still and then it went');
+		expect(text(hit)).not.toContain('br');
+	});
 });
