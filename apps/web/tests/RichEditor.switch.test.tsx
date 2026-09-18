@@ -1,9 +1,12 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
+import { FindBar } from '../src/components/FindBar.js';
 import { NoteView } from '../src/components/NoteView.js';
+import { FindTargetProvider } from '../src/editor/findTarget.js';
+import { RichEditor } from '../src/editor/RichEditor.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import {
@@ -228,6 +231,53 @@ describe('finding in the rich editor', () => {
 		await user.type(screen.getByLabelText('Find'), 'a*');
 
 		expect(document.querySelector('.ProseMirror')?.textContent).toContain('banana bread');
+	});
+
+	/**
+	 * The bar appearing over an editor that is already settled — a re-render
+	 * rather than a keystroke. That is the path the microtask in `FindBar` is
+	 * for: ProseMirror's React-backed plugin views call `flushSync` from their
+	 * `update`, and React refuses that while it is still rendering, which is
+	 * exactly where a passive effect runs. Opening the bar with the chord does
+	 * not show it, because a discrete event is not mid-render — so the way in
+	 * here is deliberately the other one.
+	 */
+	it('does not make React complain when it appears over a settled editor', async () => {
+		const note = await importNoteFile(db, {
+			path: 'note.md',
+			source: '# Garden\n\nthe seed and the seedling\n',
+		});
+		const Bar = ({ showing }: { showing: boolean }) => (
+			<FindTargetProvider>
+				<RichEditor
+					noteId={note.id}
+					body={note.body}
+					origin={note.body}
+					onUserEdit={() => undefined}
+					onUnsupported={() => undefined}
+				/>
+				{showing && <FindBar focusToken={1} onClose={() => undefined} />}
+			</FindTargetProvider>
+		);
+		const view = render(<Bar showing={false} />);
+		await waitFor(() => {
+			expect(document.querySelector('.ProseMirror')?.textContent).toContain('the seed');
+		});
+		const complaints: string[] = [];
+		const spy = vi.spyOn(console, 'error').mockImplementation((...args) => {
+			complaints.push(args.map(String).join(' '));
+		});
+
+		view.rerender(<Bar showing />);
+		await waitFor(() => {
+			expect(screen.getByRole('search')).toBeDefined();
+		});
+		await new Promise((resolve) => {
+			setTimeout(resolve, 50);
+		});
+		spy.mockRestore();
+
+		expect(complaints).toEqual([]);
 	});
 
 	it('replaces, and saves the note that results', async () => {

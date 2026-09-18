@@ -61,8 +61,16 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 	// `flushSync` from their `update`, and React refuses that while it is still
 	// rendering — four warnings per keystroke, and the menus render a frame late.
 	// A microtask puts the transaction after the commit, which is what React's
-	// own message asks for, and is safe because a target that has gone away in
-	// the meantime says so (`findRich.ts`) rather than throwing.
+	// own message asks for.
+	//
+	// What makes that safe is *not* the destroyed-view guard, which in practice
+	// never fires here: it is that `highlight` dispatches a transaction with no
+	// steps in it, so arriving late at a view nobody is looking at any more
+	// changes nothing and cannot reach `dirty.ts`, both of whose rules begin at
+	// `docChanged`. Anything that changes the document — `replace`, or a `next`
+	// that did — must not be deferred this way: a document-changing transaction
+	// into a view that is about to be destroyed is a silently lost edit, and no
+	// guard here would catch it.
 	//
 	// `query` is read, not depended on: the effect below wants whatever is typed
 	// at the moment the editor appears. Declared first, so it is already in step

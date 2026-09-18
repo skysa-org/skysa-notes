@@ -194,6 +194,16 @@ describe('the rich find target', () => {
 		expect(editor.action(currentMarkdown)).toBe('wxyz cd wxyz cd wxyz\n');
 	});
 
+	it('stops drawing the matches when it is cleared', async () => {
+		const { view, target } = await mount('one two one\n');
+		target.highlight(query('one'));
+		expect(view.dom.querySelectorAll('.find-match')).toHaveLength(2);
+
+		target.clear();
+
+		expect(view.dom.querySelectorAll('.find-match')).toHaveLength(0);
+	});
+
 	it('leaves the document alone when nothing matches', async () => {
 		const onUserEdit = vi.fn();
 		const { editor, target } = await mount('one two\n', onUserEdit);
