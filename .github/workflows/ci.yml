@@ -24,7 +24,7 @@ jobs:
         # vitest or wrangler cannot sit there for the default six hours.
         timeout-minutes: 15
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
               with:
                   # The changeset check below compares against the base branch,
                   # which a shallow clone does not have.
@@ -34,7 +34,7 @@ jobs:
             # its cache. The version comes from `packageManager` in package.json.
             - run: corepack enable
 
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v7
               with:
                   node-version: 22
                   cache: pnpm
