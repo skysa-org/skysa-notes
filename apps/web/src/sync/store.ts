@@ -439,7 +439,7 @@ export const createDexieSyncStore = (
 	): Promise<void> => {
 		// A file arriving is a note that is here again, whatever this tab did to
 		// the last one of that id (`store/deletedHere.ts`).
-		deletedHere.delete(change.id);
+		deletedHere.delete({ connectionId, id: change.id });
 		// The engine names the note; the store never guesses by path.
 		const existing = await ownNote(scope, change.id);
 		// Decided against a clean note that has been edited since.

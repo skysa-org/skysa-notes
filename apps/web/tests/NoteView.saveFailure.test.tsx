@@ -229,7 +229,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 		type('held\n');
 		flushAutosave();
 		await screen.findByRole('alert');
-		await db.notes.update(note.id, { body: 'from the other tab\n' });
+		await updateNote(db, note.id, { body: 'from the other tab\n' });
 		await waitFor(() => {
 			expect(editorText()).toBe('from the other tab\n');
 		});

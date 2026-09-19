@@ -495,11 +495,12 @@ const pulled = async (content = 'x\n') => {
 describe('a pull that makes a note this tab deleted', () => {
 	it('is the note here again, and an edit to it that finds it gone later is kept', async () => {
 		const { db, store } = await pulled();
-		const note = await getNote(db, 'n1');
+		const there = { connectionId: CONNECTION };
+		const note = await noteById(db, 'n1');
 		if (note === undefined) throw new Error('the pulled note is missing');
-		await deleteNote(db, 'n1');
+		await deleteNote(db, 'n1', there);
 		await db.opQueue.clear();
-		await purgeNote(db, 'n1');
+		await purgeNote(db, 'n1', there);
 		// Restored on another device: the file comes back under the id it names.
 		await store.applyPull({
 			changes: [
@@ -514,11 +515,11 @@ describe('a pull that makes a note this tab deleted', () => {
 			],
 			cursor: 'c2',
 		});
-		await purgeNote(db, 'n1');
+		await purgeNote(db, 'n1', there);
 
 		await saveNoteBody(db, 'n1', 'x\nheld\n', { origin: '', note });
 
-		expect((await getNote(db, 'n1'))?.body).toBe('x\nheld\n');
+		expect((await noteById(db, 'n1'))?.body).toBe('x\nheld\n');
 	});
 });
 
