@@ -24,6 +24,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 	type OpQueueRecord,
+	type SyncStateRecord,
 } from '../store/db.js';
 import { deletedHere } from '../store/deletedHere.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
@@ -128,6 +129,25 @@ const withoutRemote = ({
 /** Absent says the hash already stored still holds (`PullChange`). */
 const syncedHashOf = (syncedHash: string | undefined) =>
 	syncedHash === undefined ? {} : { syncedHash };
+
+type ListedFile = NonNullable<SyncStateRecord['unreadable']>[number];
+
+/**
+ * One listed file as the row holds it (`SyncStateRecord.unreadable`): the
+ * record's own fields and nothing the change carried beside them, and its own
+ * array, since the one on the change is the engine's.
+ */
+const sameFile = (one: ListedFile, two: ListedFile | undefined): boolean =>
+	one.remoteId === two?.remoteId &&
+	one.path === two.path &&
+	(one.movedAside ?? []).length === (two.movedAside ?? []).length &&
+	(one.movedAside ?? []).every((path, at) => path === two.movedAside?.[at]);
+
+const listed = (file: UnreadableFile): ListedFile => ({
+	remoteId: file.remoteId,
+	path: file.path,
+	...(file.movedAside === undefined ? {} : { movedAside: [...file.movedAside] }),
+});
 
 /** Every file a batch or a resolution will write, so each is digested once, up front. */
 const contentsOf = (changes: readonly PullChange[]): string[] =>
@@ -346,18 +366,14 @@ export const createDexieSyncStore = (
 	 */
 	const relist = async (
 		scope: Scope,
-		change: (files: readonly UnreadableFile[]) => UnreadableFile[]
+		change: (files: readonly ListedFile[]) => ListedFile[]
 	): Promise<void> => {
 		const state = await scope.syncState.get(connectionId);
 		if (state === undefined) return;
 		const { unreadable: before = [], ...rest } = state;
 		const after = change(before);
 		const same =
-			after.length === before.length &&
-			after.every(
-				(file, at) =>
-					file.remoteId === before[at]?.remoteId && file.path === before[at].path
-			);
+			after.length === before.length && after.every((file, at) => sameFile(file, before[at]));
 		if (same) return;
 		// Absent rather than empty, as the row was before it ever had one.
 		await scope.syncState.put(after.length === 0 ? rest : { ...rest, unreadable: after });
@@ -652,12 +668,11 @@ export const createDexieSyncStore = (
 			// One record per file: a second for the same id is the file renamed.
 			case 'unreadable':
 				await relist(scope, (files) => {
-					const { remoteId, path } = change.file;
+					const { remoteId } = change.file;
+					const record = listed(change.file);
 					return files.some((file) => file.remoteId === remoteId)
-						? files.map((file) =>
-								file.remoteId === remoteId ? { remoteId, path } : file
-							)
-						: [...files, { remoteId, path }];
+						? files.map((file) => (file.remoteId === remoteId ? record : file))
+						: [...files, record];
 				});
 				return;
 			case 'forget-unreadable':

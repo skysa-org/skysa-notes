@@ -198,26 +198,77 @@ const conflictMessage = (count: number): string =>
 /** How many of the files that could not be read are named before "and N more". */
 const UNREADABLE_NAMED = 5;
 
+const byName = (one: string, two: string): number => one.localeCompare(two);
+
+/**
+ * `a.md, b.md, … and 3 more`. Each path is its own `<bdi>`, so a name written
+ * right-to-left cannot reorder the list around it or swallow the comma after
+ * it — the path is data, and the sentence is not.
+ */
+const PathList = ({ paths }: { paths: readonly string[] }) => {
+	const named = paths.slice(0, UNREADABLE_NAMED);
+	const more = paths.length - named.length;
+	return (
+		<>
+			{named.map((path, at) => (
+				<Fragment key={path}>
+					{at > 0 && ', '}
+					<bdi>{path}</bdi>
+				</Fragment>
+			))}
+			{more > 0 && `, … and ${String(more)} more`}
+		</>
+	);
+};
+
 /**
  * The files in this source that are not UTF-8 text, which sync leaves alone
  * (docs/PLAN.md §7). Said because nothing else does: such a file is not in the
  * list of notes, and a note whose file became one has gone from this device.
  * By path, since that is how the user finds the file in the tool that wrote it,
  * and with what to do about it, since nothing here can do it for them.
+ *
+ * And where a note of theirs went when one of these files took its name
+ * (`movedAside`). That is not a conflict — nothing was edited twice and no copy
+ * was made — so it is said here, beside the file that caused it, rather than in
+ * the conflicts line above.
  */
-const unreadableMessage = (
-	files: SyncStateRecord['unreadable'] = [],
-	label: string
-): string | null => {
-	const paths = files.map((file) => file.path).sort((one, two) => one.localeCompare(two));
+const UnreadableNotice = ({
+	files = [],
+	label,
+}: {
+	files: SyncStateRecord['unreadable'];
+	label: string;
+}) => {
+	const paths = files.map((file) => file.path).sort(byName);
+	const moved = [...new Set(files.flatMap((file) => file.movedAside ?? []))].sort(byName);
 	const [only] = paths;
 	if (only === undefined) return null;
-	if (paths.length === 1) {
-		return `${only} in ${label} is not UTF-8 text, so it is left alone: not shown here, not changed. Save it as UTF-8, or delete it, and it will be read.`;
-	}
-	const more = paths.length - UNREADABLE_NAMED;
-	const named = paths.slice(0, UNREADABLE_NAMED).join(', ');
-	return `${String(paths.length)} files in ${label} are not UTF-8 text, so they are left alone: ${named}${more > 0 ? `, … and ${String(more)} more` : ''}. Save them as UTF-8, or delete them, and they will be read.`;
+	return (
+		<p className="muted wrap-anywhere">
+			{paths.length === 1 ? (
+				<>
+					<bdi>{only}</bdi>
+					{` in ${label} is not UTF-8 text, so it is left alone: not shown here, not changed. Save it as UTF-8, or delete it, and it will be read.`}
+				</>
+			) : (
+				<>
+					{`${String(paths.length)} files in ${label} are not UTF-8 text, so they are left alone: `}
+					<PathList paths={paths} />
+					{`. Save them as UTF-8, or delete them, and they will be read.`}
+				</>
+			)}
+			{moved.length > 0 && (
+				<>
+					{moved.length === 1
+						? ' A note of yours had that name; it is now at '
+						: ' Notes of yours had those names; they are now at '}
+					<PathList paths={moved} />
+					{'.'}
+				</>
+			)}
+		</p>
+	);
 };
 
 /**
@@ -355,7 +406,6 @@ const SyncState = ({
 	const message = statusMessage(status, label, syncable);
 	const reconnect = needsReconnect(status);
 	const [rescanning, setRescanning] = useState(false);
-	const unreadable = unreadableMessage(bound.unreadable, label);
 
 	return (
 		<>
@@ -396,7 +446,7 @@ const SyncState = ({
 			{status.conflicts.length > 0 && (
 				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
 			)}
-			{unreadable !== null && <p className="muted">{unreadable}</p>}
+			<UnreadableNotice files={bound.unreadable} label={label} />
 			{status.phase !== 'local' && (
 				<button
 					type="button"

@@ -1220,21 +1220,51 @@ export const describeSyncStoreContract = (
 				expect(await store.cursor()).toBe('c1');
 			});
 
-			it('stores the file and not what came with it', async () => {
-				// `copyPath` is for the engine's report. The note it names is moved
-				// by the `displace-note` in front of it, not by this.
+			it('keeps where a note of the user’s went, and moves no note itself', async () => {
+				// `movedAside` is the panel's to say. The note it names is moved by
+				// the `displace-note` in front of this change, not by this.
 				const { store } = await harness();
 				await store.applyPull({
 					changes: [
 						{
 							kind: 'unreadable',
-							file: { remoteId: 'r1', path: 'a.md' },
-							copyPath: 'a (conflict).md',
+							file: {
+								remoteId: 'r1',
+								path: 'a.md',
+								movedAside: ['a (conflict).md', 'a (conflict)-2.md'],
+							},
 						},
 					],
 				});
-				expect(await store.unreadable()).toEqual([{ remoteId: 'r1', path: 'a.md' }]);
+				expect(await store.unreadable()).toEqual([
+					{
+						remoteId: 'r1',
+						path: 'a.md',
+						movedAside: ['a (conflict).md', 'a (conflict)-2.md'],
+					},
+				]);
 				expect(await store.allNotes()).toEqual([]);
+			});
+
+			it('drops it when the file is listed again without one', async () => {
+				// One record per file, replaced whole: the engine carries forward
+				// what it means to keep (`leaveUnread`), and the store never
+				// merges — a store that did could not be told to stop saying it.
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'unreadable',
+							file: { remoteId: 'r1', path: 'a.md', movedAside: ['a (conflict).md'] },
+						},
+					],
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'b.md' } }],
+				});
+
+				expect(await store.unreadable()).toEqual([{ remoteId: 'r1', path: 'b.md' }]);
 			});
 
 			it('keeps one record per file: the same id again is the file renamed', async () => {

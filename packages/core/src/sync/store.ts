@@ -59,6 +59,20 @@ export interface SyncNote {
 export interface UnreadableFile {
 	remoteId: string;
 	path: string;
+	/**
+	 * Where a note of the user's went when this file took its name, if one
+	 * did. The file cannot be shown, so without this the note is renamed for
+	 * no reason the user can see — and it is *not* a conflict: nobody edited
+	 * anything twice, a file arrived that could not be read. Carried on the
+	 * record rather than reported once, because the rename is permanent and a
+	 * banner that has scrolled past is no answer to "why is my note called
+	 * that".
+	 *
+	 * Kept when the same file is recorded again at a new path, since the note
+	 * is still where it was put. More than one can end up here: a folder move
+	 * can land two rows on one name before this decision is reached.
+	 */
+	movedAside?: readonly string[];
 }
 
 /** A folder as the engine sees it. Only identity and position matter here. */
@@ -392,18 +406,12 @@ export type PullChange =
 			 *
 			 * `file`, and not a `path` and an `id` of its own: the engine asks
 			 * several questions of a batch by shape — which changes put a note
-			 * at a path, which name a note — and this one does neither.
-			 *
-			 * `copyPath` is where a note of the user's was moved aside to because
-			 * this file has its name, when one was. The file cannot be shown, so
-			 * without being told the user finds their note renamed for no reason
-			 * they can see; with it, the pull reports the path as a conflict.
-			 * The store has nothing to do with it: the `displace-note` in front
-			 * of this change is what moves the note.
+			 * at a path, which name a note — and this one does neither. Its
+			 * `movedAside` is the same: the store only keeps it, and the
+			 * `displace-note` in front of this change is what moves the note.
 			 */
 			kind: 'unreadable';
 			file: UnreadableFile;
-			copyPath?: string;
 	  }>
 	| Readonly<{
 			/**

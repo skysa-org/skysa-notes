@@ -266,7 +266,12 @@ export const createMemoryStore = (): MemoryStore => {
 	 */
 	const applyChange = (change: PullChange): void => {
 		if (change.kind === 'unreadable') {
-			unreadable.set(change.file.remoteId, change.file);
+			const { remoteId, path, movedAside } = change.file;
+			unreadable.set(remoteId, {
+				remoteId,
+				path,
+				...(movedAside === undefined ? {} : { movedAside: [...movedAside] }),
+			});
 			return;
 		}
 		// No anomaly for an id that is not listed, unlike the other no-ops here:

@@ -7183,6 +7183,14 @@ describe('a file that is not UTF-8 text', () => {
 		const listed = async (): Promise<string[]> =>
 			(await store.unreadable()).map((file) => `${file.remoteId} ${file.path}`).sort();
 
+		/** Where the list says the user's notes went, by the file that took the name. */
+		const movedAside = async (): Promise<Record<string, readonly string[]>> =>
+			Object.fromEntries(
+				(await store.unreadable()).flatMap((file) =>
+					file.movedAside === undefined ? [] : [[file.path, file.movedAside]]
+				)
+			);
+
 		/** Every batch handed to the store, to see what a pull had to say. */
 		const watched = (over: StorageProvider = provider) => {
 			const batches: PullBatch[] = [];
@@ -7237,16 +7245,21 @@ describe('a file that is not UTF-8 text', () => {
 			expect(await listed()).toEqual([`${file.remoteId} renamed.md`]);
 		});
 
-		it('with where the user’s edit went, which the pull reports as a conflict', async () => {
-			// The file cannot be shown, so nothing else explains the new name.
+		it('with where the user’s note went, and not as a conflict, which it is not', async () => {
+			// Nothing was edited twice and no copy was made: a file arrived that
+			// could not be read, and the note that had its name was moved. Said
+			// as a conflict, the user is told the one thing that did not happen
+			// — and the banner is gone by the time they wonder about the name.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
 			provider.writeBytes('a.md', LATIN1);
 
 			const result = await engine.pull();
 
-			expect(result.conflicts).toEqual([COPY]);
+			expect(result.conflicts).toEqual([]);
 			expect(await listed()).toEqual([`${entry.remoteId} a.md`]);
+			expect(await movedAside()).toEqual({ 'a.md': [COPY] });
+			expect(noteAt(COPY)?.id).toBe(note.id);
 		});
 
 		it('and so is a note never pushed that an unreadable file took the name of', async () => {
@@ -7260,9 +7273,51 @@ describe('a file that is not UTF-8 text', () => {
 
 			const result = await pullNow([file]);
 
-			expect(result.conflicts).toEqual([COPY]);
+			expect(result.conflicts).toEqual([]);
 			expect(noteAt(COPY)).toMatchObject({ id: 'mine' });
 			expect(await listed()).toEqual([`${file.remoteId} a.md`]);
+			expect(await movedAside()).toEqual({ 'a.md': [COPY] });
+		});
+
+		it('with every note it has moved aside, not only the last', async () => {
+			// The name is free here once the first note has moved off it, so the
+			// user can make another there — and the file takes that one too the
+			// next time it is read. Told only about the last, they go looking
+			// for a note that is not where they left it and nothing says where
+			// it went.
+			await engine.pull();
+			const file = provider.writeBytes('a.md', LATIN1);
+			store.put({ id: 'first', path: 'a.md', content: 'first\n', dirty: true });
+			store.queue({ op: 'write', noteId: 'first', path: 'a.md' });
+
+			await pullNow([file]);
+
+			store.put({ id: 'second', path: 'a.md', content: 'second\n', dirty: true });
+			store.queue({ op: 'write', noteId: 'second', path: 'a.md' });
+			const resaved = provider.writeBytes('a.md', LATIN1);
+
+			await pullNow([resaved]);
+
+			const aside = await movedAside();
+			expect(aside['a.md']).toHaveLength(2);
+			expect(new Set(aside['a.md'])).toEqual(new Set(store.notes().map((each) => each.path)));
+			expect(noteAt('a.md')).toBeUndefined();
+			expect(await listed()).toEqual([`${file.remoteId} a.md`]);
+		});
+
+		it('and keeps saying where they went when the file is listed again elsewhere', async () => {
+			// The note is still at the name it was given. A record re-made for
+			// the rename and left bare would drop the only explanation of it.
+			const { note } = await pulledNote('a.md', 'one\n');
+			editHere(note, 'my edit\n');
+			const file = provider.writeBytes('a.md', LATIN1);
+			await engine.pull();
+			await provider.move(file, 'renamed.md');
+
+			await engine.pull();
+
+			expect(await listed()).toEqual([`${file.remoteId} renamed.md`]);
+			expect(await movedAside()).toEqual({ 'renamed.md': [COPY] });
 		});
 
 		describe('until it reads', () => {
@@ -7293,6 +7348,27 @@ describe('a file that is not UTF-8 text', () => {
 
 				expect(await listed()).toEqual([]);
 				expect(noteAt('b.md')).toMatchObject({ content: 'fixed\n' });
+			});
+
+			it('when a file the device already holds a note for is named again unchanged', async () => {
+				// The version the row holds, so nothing is read — and a file this
+				// device has read is not one it could not read. Left listed, a
+				// notice for a file that reads perfectly well never goes: its
+				// entries all take this branch, and only a re-scan clears it.
+				const { entry, note } = await pulledNote('a.md', 'one\n');
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: entry.remoteId, path: 'zzz.md' } },
+					],
+				});
+				const reads = provider.callLog().filter((call) => call.op === 'read').length;
+
+				const result = await pullNow([entry]);
+
+				expect(result.status).toBe('ok');
+				expect(provider.callLog().filter((call) => call.op === 'read')).toHaveLength(reads);
+				expect(await listed()).toEqual([]);
+				expect(noteAt('a.md')?.id).toBe(note.id);
 			});
 
 			it('or a note this device already holds is renamed onto its path, and nothing is read', async () => {
@@ -7393,6 +7469,64 @@ describe('a file that is not UTF-8 text', () => {
 				expect(await listed()).toEqual([`${other.remoteId} Workshop.md`]);
 			});
 
+			it('by the deletion of a folder above it that we hold no row for', async () => {
+				// A notebook holding nothing but a file we cannot read looks
+				// empty here, so the user removes it: the `rmdir` is refused —
+				// the directory is not empty on the remote — and the row goes
+				// anyway. Nothing but this deletion will ever mention what was
+				// inside it, and left listed the file is named for ever at a
+				// path that no longer exists.
+				const folder = await provider.createFolder('Work');
+				const file = provider.writeBytes('Work/a.md', LATIN1);
+				const other = provider.writeBytes('Workshop.md', LATIN1);
+				await engine.pull();
+				expect(await listed()).toEqual(
+					[`${file.remoteId} Work/a.md`, `${other.remoteId} Workshop.md`].sort()
+				);
+				store.removeFolder('Work');
+
+				await pullNow([{ deleted: true, remoteId: folder.remoteId, path: 'Work' }]);
+
+				expect(await listed()).toEqual([`${other.remoteId} Workshop.md`]);
+			});
+
+			// The file was moved out of the notebook before it went, and the round
+			// says both. Either order: read off the decisions so far, the entry
+			// behind the deletion puts the record back, but the deletion behind
+			// the entry would take it away again.
+			it.each([
+				['the entry last', false],
+				['the entry first', true],
+			])('but not when the same round says the file is elsewhere, %s', async (_o, first) => {
+				const folder = await provider.createFolder('Work');
+				const file = provider.writeBytes('Work/a.md', LATIN1);
+				await engine.pull();
+				store.removeFolder('Work');
+				const moved = await provider.move(file, 'a.md');
+				const gone: ChangeEntry = {
+					deleted: true,
+					remoteId: folder.remoteId,
+					path: 'Work',
+				};
+
+				await pullNow(first ? [moved, gone] : [gone, moved]);
+
+				expect(await listed()).toEqual([`${file.remoteId} a.md`]);
+			});
+
+			it('but not by a deletion that names an id and no path, which says nothing of what was inside', async () => {
+				// Graph, for a folder it can no longer place. The notice waits
+				// for a re-scan (docs/PLAN.md §7).
+				const folder = await provider.createFolder('Work');
+				const file = provider.writeBytes('Work/a.md', LATIN1);
+				await engine.pull();
+				store.removeFolder('Work');
+
+				await pullNow([{ deleted: true, remoteId: folder.remoteId }]);
+
+				expect(await listed()).toEqual([`${file.remoteId} Work/a.md`]);
+			});
+
 			it('by the deletion of a folder above it, on a feed that names the folder by id alone', async () => {
 				const folder = await provider.createFolder('Work');
 				provider.writeBytes('Work/a.md', LATIN1);
@@ -7434,6 +7568,50 @@ describe('a file that is not UTF-8 text', () => {
 
 				expect(result.status).toBe('ok');
 				expect(await listed()).toEqual([`${file.remoteId} b.md`]);
+			});
+
+			describe('under a folder the same round moves', () => {
+				/** The folder renamed, with the listed file still inside it. */
+				const renamedOver = async () => {
+					const folder = await provider.createFolder('Work');
+					const file = provider.writeBytes('Work/a.md', LATIN1);
+					await engine.pull();
+					expect(await listed()).toEqual([`${file.remoteId} Work/a.md`]);
+					const moved = await provider.move(folder, 'Archive');
+					return { file, moved };
+				};
+
+				// Dropbox tells the rename as every path deleted and every one
+				// listed again, in either order. The record went with the folder,
+				// so the deletion names a path it is no longer at.
+				it.each([
+					['the entry last', false],
+					['the entry first', true],
+				])('keeps it where the folder went, %s', async (_order, entryFirst) => {
+					const { file, moved } = await renamedOver();
+					const here = { ...file, path: 'Archive/a.md' };
+					const gone: ChangeEntry = { deleted: true, path: 'Work/a.md' };
+
+					const result = await pullNow(
+						entryFirst ? [moved, here, gone] : [moved, gone, here]
+					);
+
+					expect(result.status).toBe('ok');
+					expect(await listed()).toEqual([`${file.remoteId} Archive/a.md`]);
+				});
+
+				it('and lets go of one deleted out of the folder before the rename', async () => {
+					// The same two entries less the one that says where the file
+					// is — which is the whole difference between a file carried
+					// along and a file that went. Kept, it is named for ever at
+					// a path nothing is at.
+					const { moved } = await renamedOver();
+
+					const result = await pullNow([moved, { deleted: true, path: 'Work/a.md' }]);
+
+					expect(result.status).toBe('ok');
+					expect(await listed()).toEqual([]);
+				});
 			});
 
 			it('and is listed again when the round that deleted it goes on to say it is there', async () => {

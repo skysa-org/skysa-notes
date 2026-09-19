@@ -58,6 +58,12 @@ body {
 	color: var(--muted);
 }
 
+/* A line that names paths: one long unbroken name wraps rather than widening
+   whatever holds it. */
+.wrap-anywhere {
+	overflow-wrap: anywhere;
+}
+
 code {
 	background: var(--surface);
 	border-radius: 0.25rem;

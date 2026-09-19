@@ -1082,6 +1082,53 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			);
 		});
 
+		it('says where a note of theirs went when one of them took its name', async () => {
+			// Not in the conflicts line above: nothing was edited twice and no copy
+			// was made. Here, beside the file that caused it, and for as long as
+			// the file is listed — the banner is gone by the time they wonder.
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [{ ...file('a.md', 1), movedAside: ['a (conflict 2026-09-16).md'] }],
+			});
+
+			expect((await screen.findByText(/not UTF-8 text/)).textContent).toBe(
+				'a.md in Dropbox is not UTF-8 text, so it is left alone: not shown here, not changed. Save it as UTF-8, or delete it, and it will be read. A note of yours had that name; it is now at a (conflict 2026-09-16).md.'
+			);
+		});
+
+		it('and where each of them went, named once, when there are several', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [
+					{ ...file('b.md', 1), movedAside: ['b (2).md', 'b (1).md'] },
+					{ ...file('a.md', 2), movedAside: ['b (1).md'] },
+				],
+			});
+
+			expect((await screen.findByText(/not UTF-8 text/)).textContent).toBe(
+				'2 files in Dropbox are not UTF-8 text, so they are left alone: a.md, b.md. Save them as UTF-8, or delete them, and they will be read. Notes of yours had those names; they are now at b (1).md, b (2).md.'
+			);
+		});
+
+		it('puts every path in a <bdi>, so a name cannot reorder the sentence', async () => {
+			// A path is the user's text in a sentence of ours. Left bare, one
+			// written right-to-left drags the comma after it, or the words around
+			// it, to the wrong side and the list reads as another list.
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [{ ...file('a.md', 1), movedAside: ['moved.md'] }, file('b.md', 2)],
+			});
+			const notice = await screen.findByText(/not UTF-8 text/);
+
+			expect([...notice.querySelectorAll('bdi')].map((each) => each.textContent)).toEqual([
+				'a.md',
+				'b.md',
+				'moved.md',
+			]);
+			// And one long unbroken name wraps rather than widening the panel.
+			expect(notice.classList.contains('wrap-anywhere')).toBe(true);
+		});
+
 		it('stops saying so once the list is empty again', async () => {
 			const db = await connected(fakeSync({ phase: 'idle' }));
 			await db.syncState.update('c1', { unreadable: [file('old.md', 1)] });
