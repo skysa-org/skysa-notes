@@ -64,15 +64,22 @@ type QueueDb = Pick<NotesDatabase, 'opQueue'>;
 export const MAX_OP_ATTEMPTS = 8;
 
 /**
- * Whether an op has been given up on for now. The one statement of the rule:
- * the engine stops a batch at `attempts >= maxAttempts`
- * (`packages/core/src/sync/engine.ts`), the scheduler names the op by it, and
- * what is unsynced is called blocked by it.
+ * Whether an op has been given up on for now, and is holding up everything
+ * queued behind it. The one statement of the rule: the engine stops a batch at
+ * `attempts >= maxAttempts` (`drainOps` in `packages/core/src/sync/engine.ts`),
+ * the scheduler names the op by it, and what is unsynced is called blocked by
+ * it.
+ *
+ * Never an `rmdir`, because the engine makes the same exception: one that is
+ * out of attempts is completed as done and stepped over — it tidies an empty
+ * directory away, nothing behind it depends on that, and it is not the user's
+ * work. Calling it blocked here would tell the user their notes cannot be sent
+ * while the engine is about to send them.
  */
 export const outOfAttempts = (
-	op: Pick<OpQueueRecord, 'attempts'>,
+	op: Pick<OpQueueRecord, 'op' | 'attempts'>,
 	maxAttempts: number = MAX_OP_ATTEMPTS
-): boolean => op.attempts >= maxAttempts;
+): boolean => op.op !== 'rmdir' && op.attempts >= maxAttempts;
 
 // Every helper here returns the promise Dexie made rather than being an `async`
 // function. They run inside the writers' transactions, often straight after a

@@ -1,17 +1,21 @@
+import { createFakeProvider, createSyncEngine } from '@skysa/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { bindConnection, unbindConnection, verifyResume } from '../src/store/connection.js';
 import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
-import { createFolder, deleteFolder } from '../src/store/folders.js';
+import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
 import {
 	createNote,
 	deleteNote,
 	importNoteFile,
+	moveNote,
 	noteRecordFromFile,
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
-import { MAX_OP_ATTEMPTS, queueWrite } from '../src/store/queue.js';
+import { MAX_OP_ATTEMPTS, outOfAttempts, queueWrite } from '../src/store/queue.js';
 import { isEmpty, movable, type Unsynced, unsyncedIn } from '../src/store/unsynced.js';
+import { createDexieSyncStore } from '../src/sync/store.js';
 
 /**
  * What a source holds that its remote has not been sent. Made with the app's
@@ -61,6 +65,15 @@ const summary = (unsynced: Unsynced) => ({
 });
 
 const NOTHING = { notes: [], renames: [], deletes: [], folders: [], rmdirs: [], blocked: false };
+
+/** A remote, and an engine for `connectionId` against it: the app's own push, not a stand-in. */
+const remoteFor = async (db: NotesDatabase, connectionId: string) => {
+	const fake = createFakeProvider();
+	await fake.ensureRoot();
+	const engineFor = (id: string) =>
+		createSyncEngine({ provider: fake, store: createDexieSyncStore(db, { connectionId: id }) });
+	return { fake, engineFor, sync: () => engineFor(connectionId).sync() };
+};
 
 describe('what a source holds that its remote has not been sent', () => {
 	it('is nothing for a connection with no rows at all', async () => {
@@ -243,7 +256,121 @@ describe('what a source holds that its remote has not been sent', () => {
 		expect(movable(unsynced)).toBe(1);
 	});
 
-	it('counts a notebook with no id even once its mkdir has left the queue', async () => {
+	describe('a notebook that came into being around a note', () => {
+		// `moveNote`, `createNote` and a restore make the folder row and queue no
+		// `mkdir`: the engine makes the directory when the note's op finds no
+		// parent, and reports no id for it.
+		const movedIntoNewNotebook = async () => {
+			const db = freshDatabase();
+			await db.syncState.put({ connectionId: CONNECTION, clientId: 'this-browser' });
+			const remote = await remoteFor(db, CONNECTION);
+			const note = await createNote(db, { ...scope, title: 'Plan', body: 'one\n' });
+			await remote.sync();
+			await moveNote(db, note.id, 'Projects/2026', scope);
+			return { db, remote, note };
+		};
+
+		it('is unsent while the note that implies it has not been pushed there', async () => {
+			const { db } = await movedIntoNewNotebook();
+
+			expect((await db.opQueue.toArray()).filter((op) => op.op === 'mkdir')).toEqual([]);
+			expect(summary(await unsyncedIn(db, CONNECTION))).toMatchObject({
+				notes: ['Projects/2026/plan.md'],
+				folders: ['Projects', 'Projects/2026'],
+			});
+		});
+
+		it('is not unsent once that push has landed, though its row still has no id', async () => {
+			const { db, remote } = await movedIntoNewNotebook();
+
+			await remote.sync();
+
+			// The premise: the directory is on the remote, and the row does not say so.
+			expect(remote.fake.contentAt('Projects/2026/plan.md')).toContain('one');
+			expect(await db.opQueue.count()).toBe(0);
+			expect((await db.folders.get([CONNECTION, 'Projects/2026']))?.remoteId).toBeUndefined();
+			expect((await db.folders.get([CONNECTION, 'Projects']))?.remoteId).toBeUndefined();
+
+			const unsynced = await unsyncedIn(db, CONNECTION);
+			expect(summary(unsynced)).toEqual(NOTHING);
+			expect(isEmpty(unsynced)).toBe(true);
+		});
+
+		it('is unsent again when the only note that proved it is edited, and not when one of two is', async () => {
+			const { db, remote, note } = await movedIntoNewNotebook();
+			const second = await createNote(db, {
+				...scope,
+				folderPath: 'Projects',
+				title: 'Other',
+			});
+			await remote.sync();
+			expect(summary(await unsyncedIn(db, CONNECTION))).toEqual(NOTHING);
+
+			// `Projects` still has `other.md` to show for itself; `2026` has nothing.
+			await saveNoteBody(db, note.id, 'two\n', undefined, scope);
+			expect(summary(await unsyncedIn(db, CONNECTION))).toEqual({
+				...NOTHING,
+				notes: ['Projects/2026/plan.md'],
+				folders: ['Projects/2026'],
+			});
+
+			await saveNoteBody(db, second.id, 'two\n', undefined, scope);
+			expect(summary(await unsyncedIn(db, CONNECTION)).folders).toEqual([
+				'Projects',
+				'Projects/2026',
+			]);
+		});
+
+		it('is not proved by a note whose move into it is still owed', async () => {
+			const db = freshDatabase();
+			const note = await pushedNote(db, 'a.md');
+			await db.notes.update([CONNECTION, note.id], { path: 'New/a.md' });
+			await db.folders.put({ ...scope, path: 'New', createdAt: 1 });
+			await db.opQueue.add({
+				...scope,
+				op: 'move',
+				noteId: note.id,
+				path: 'a.md',
+				targetPath: 'New/a.md',
+				attempts: 0,
+				queuedAt: 1,
+			});
+
+			expect(summary(await unsyncedIn(db, CONNECTION))).toEqual({
+				...NOTHING,
+				renames: ['New/a.md'],
+				folders: ['New'],
+			});
+		});
+
+		it('is proved by a note under another spelling of its name', async () => {
+			const db = freshDatabase();
+			await pushedNote(db, 'work/a.md');
+			await db.folders.put({ ...scope, path: 'Work', createdAt: 1 });
+
+			expect(summary(await unsyncedIn(db, CONNECTION))).toEqual(NOTHING);
+		});
+	});
+
+	it('counts a renamed notebook the remote had under its old name: its mkdir is queued', async () => {
+		const db = freshDatabase();
+		await db.syncState.put({ connectionId: CONNECTION, clientId: 'this-browser' });
+		const remote = await remoteFor(db, CONNECTION);
+		await createFolder(db, { ...scope, name: 'Work' });
+		await createNote(db, { ...scope, folderPath: 'Work', title: 'Plan' });
+		await remote.sync();
+		await remote.sync();
+		expect((await db.folders.get([CONNECTION, 'Work']))?.remoteId).toBeDefined();
+		expect(summary(await unsyncedIn(db, CONNECTION))).toEqual(NOTHING);
+
+		await renameFolder(db, 'Work', 'Office', scope);
+
+		const unsynced = await unsyncedIn(db, CONNECTION);
+		expect(unsynced.folders.map((folder) => folder.path)).toEqual(['Office']);
+		expect(unsynced.rmdirs.map((op) => op.path)).toEqual(['Work']);
+	});
+
+	it('counts an empty notebook with no id even once its mkdir has left the queue', async () => {
 		const db = freshDatabase();
 		await createFolder(db, { ...scope, name: 'Work' });
 		await db.opQueue.clear();
@@ -307,6 +434,46 @@ describe('what a source holds that its remote has not been sent', () => {
 
 			expect((await unsyncedIn(db, CONNECTION, { maxAttempts: 3 })).blocked).toBe(true);
 			expect((await unsyncedIn(db, CONNECTION, { maxAttempts: 4 })).blocked).toBe(false);
+		});
+
+		it('is not said of an rmdir, which the engine gives up on rather than stops at', async () => {
+			const db = freshDatabase();
+			await db.folders.put({ ...scope, path: 'Old', remoteId: 'r-old', createdAt: 1 });
+			await deleteFolder(db, 'Old', scope);
+			await db.opQueue.toCollection().modify({ attempts: MAX_OP_ATTEMPTS, lastError: 'no' });
+			await createNote(db, { ...scope, title: 'Waiting behind it' });
+
+			const unsynced = await unsyncedIn(db, CONNECTION);
+
+			expect(unsynced.rmdirs.map((op) => op.attempts)).toEqual([MAX_OP_ATTEMPTS]);
+			expect(unsynced.blocked).toBe(false);
+			expect(outOfAttempts({ op: 'rmdir', attempts: MAX_OP_ATTEMPTS })).toBe(false);
+			expect(outOfAttempts({ op: 'mkdir', attempts: MAX_OP_ATTEMPTS })).toBe(true);
+		});
+
+		it('agrees with the engine, which sends the note queued behind such an rmdir', async () => {
+			const db = freshDatabase();
+			await db.syncState.put({ connectionId: CONNECTION, clientId: 'this-browser' });
+			const remote = await remoteFor(db, CONNECTION);
+			await db.opQueue.add({
+				...scope,
+				op: 'rmdir',
+				path: 'Old',
+				remoteId: 'r-old',
+				attempts: MAX_OP_ATTEMPTS,
+				queuedAt: 1,
+			});
+			const note = await createNote(db, { ...scope, title: 'Behind it' });
+			expect((await unsyncedIn(db, CONNECTION)).blocked).toBe(false);
+
+			const outcome = await createSyncEngine({
+				provider: remote.fake,
+				store: createDexieSyncStore(db, scope),
+				maxAttempts: MAX_OP_ATTEMPTS,
+			}).sync();
+
+			expect(outcome.status).not.toBe('blocked');
+			expect(remote.fake.contentAt(note.path)).toBeDefined();
 		});
 
 		it("is not said because another source's op is stuck", async () => {
@@ -374,11 +541,78 @@ describe('what a source holds that its remote has not been sent', () => {
 		});
 	});
 
+	describe('a connection resumed and not yet verified', () => {
+		const ACCOUNT = { provider: 'dropbox', accountId: 'dbid:1' } as const;
+
+		/** Synced with an account, disconnected, and the same account connected again. */
+		const resumed = async () => {
+			const db = freshDatabase();
+			await bindConnection(db, { connectionId: 'dropbox-1', ...ACCOUNT });
+			const remote = await remoteFor(db, 'dropbox-1');
+			await createFolder(db, { name: 'Work' });
+			await createNote(db, { folderPath: 'Work', title: 'Plan', body: '# Plan\n' });
+			await createNote(db, { title: 'Loose', body: '# Loose\n' });
+			await remote.sync();
+			await remote.sync();
+			// Everything sent, by every rule above.
+			expect({ ...(await unsyncedIn(db, 'dropbox-1')), unverified: undefined }).toEqual({
+				...NOTHING,
+				unverified: undefined,
+			});
+			await unbindConnection(db);
+			await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+			return { db, remote };
+		};
+
+		it('counts every note and notebook, clean and linked as they look, and says why', async () => {
+			const { db } = await resumed();
+			// The rows really do look sent: that is the danger.
+			const rows = await db.notes.where('connectionId').equals('dropbox-2').toArray();
+			expect(rows.map((note) => [note.dirty, note.remoteId !== undefined])).toEqual([
+				[0, true],
+				[0, true],
+			]);
+			expect(await db.opQueue.count()).toBe(0);
+			expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBe(true);
+
+			const unsynced = await unsyncedIn(db, 'dropbox-2');
+
+			expect(summary(unsynced)).toEqual({
+				...NOTHING,
+				notes: ['Work/plan.md', 'loose.md'],
+				folders: ['Work'],
+			});
+			expect(unsynced.unverified).toBe(true);
+			expect(isEmpty(unsynced)).toBe(false);
+			expect(movable(unsynced)).toBe(3);
+		});
+
+		it('counts nothing once the remote has been found to hold the files', async () => {
+			const { db, remote } = await resumed();
+
+			expect(await verifyResume(db, 'dropbox-2', remote.fake)).toBe('resumed');
+
+			const unsynced = await unsyncedIn(db, 'dropbox-2');
+			expect(summary(unsynced)).toEqual(NOTHING);
+			expect(unsynced.unverified).toBe(false);
+			expect(isEmpty(unsynced)).toBe(true);
+		});
+
+		it('is not said of a connection that was never resumed', async () => {
+			const db = freshDatabase();
+			await bindConnection(db, { connectionId: 'dropbox-1', ...ACCOUNT });
+
+			expect((await unsyncedIn(db, 'dropbox-1')).unverified).toBe(false);
+			expect((await unsyncedIn(db, 'never-bound')).unverified).toBe(false);
+		});
+	});
+
 	it('can be asked inside the transaction that will act on the answer', async () => {
 		const db = freshDatabase();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 
-		const paths = await db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
+		const tables = [db.notes, db.folders, db.opQueue, db.syncState];
+		const paths = await db.transaction('rw', tables, async () => {
 			const unsynced = await unsyncedIn(db, CONNECTION);
 			await db.notes.bulkDelete(unsynced.notes.map((each) => [each.connectionId, each.id]));
 			return unsynced.notes.map((each) => each.path);

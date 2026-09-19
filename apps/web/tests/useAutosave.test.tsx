@@ -393,12 +393,17 @@ describe('useAutosave, when a write fails', () => {
 		});
 		expect(await settle()).toBe(0);
 
-		// Two edits to one note that both fail are one note to tell the user of:
-		// the second stands for the first.
 		act(() => {
 			result.current.change('bad 1');
 		});
 		expect(await settle()).toBe(1);
+		// A new sitting: the editor rebuilt from the stored body, as a mode switch
+		// does. What is typed next was not typed over `bad 1`, so it does not
+		// stand for it and both stay held — two edits, and still one note to
+		// tell the user of. Counted by edit, this says 2.
+		act(() => {
+			result.current.rebased();
+		});
 		act(() => {
 			result.current.change('bad 2');
 		});

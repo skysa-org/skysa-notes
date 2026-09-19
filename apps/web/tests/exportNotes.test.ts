@@ -10,6 +10,7 @@ import {
 	crc32,
 	DOWNLOAD_GRACE_MS,
 	downloadNotes,
+	entryName,
 	filesOf,
 	type ZipFile,
 	zipOf,
@@ -51,14 +52,6 @@ interface ReadEntry {
 	offset: number;
 }
 
-interface Walk {
-	entries: ReadEntry[];
-	/** Where the next central header is. */
-	at: number;
-	/** Where the next local header has to be, if entries sit back to back. */
-	local: number;
-}
-
 /**
  * Read an archive the way a tool does: find the end record, walk the central
  * directory it points at, and follow each entry to its local header. Every
@@ -82,7 +75,13 @@ const readZip = (bytes: Uint8Array): { entries: ReadEntry[]; directoryOffset: nu
 	// The directory runs right up to the end record, with nothing between.
 	expect(directoryOffset + directorySize).toBe(end);
 
-	const next = ({ entries, at, local }: Walk): Walk => {
+	// Where the next central header is, and where the next local header has to
+	// be if entries sit back to back. Moved along as it reads, as a reader does.
+	const cursor = { current: directoryOffset };
+	const expected = { current: 0 };
+	const next = (): ReadEntry => {
+		const at = cursor.current;
+		const local = expected.current;
 		expect(u32(at)).toBe(0x02014b50);
 		expect(u16(at + 4)).toBe(20); // made by: 2.0, host 0
 		expect(u16(at + 6)).toBe(20); // needed to extract
@@ -124,35 +123,33 @@ const readZip = (bytes: Uint8Array): { entries: ReadEntry[]; directoryOffset: nu
 		expect(data.length).toBe(size);
 		expect(slowCrc32(data)).toBe(crc);
 
+		cursor.current = at + 46 + nameLength;
+		expected.current = offset + 30 + nameLength + size;
 		return {
-			entries: [
-				...entries,
-				{
-					path: text(name),
-					content: text(data),
-					flags,
-					method,
-					time,
-					date,
-					crc,
-					size,
-					offset,
-				},
-			],
-			at: at + 46 + nameLength,
-			local: offset + 30 + nameLength + size,
+			path: text(name),
+			content: text(data),
+			flags,
+			method,
+			time,
+			date,
+			crc,
+			size,
+			offset,
 		};
 	};
-	const walked = Array.from({ length: count }).reduce<Walk>(next, {
-		entries: [],
-		at: directoryOffset,
-		local: 0,
-	});
+	const entries = Array.from({ length: count }, next);
 	// The directory starts where the last file ends, and ends where it said.
-	expect(walked.local).toBe(directoryOffset);
-	expect(walked.at).toBe(end);
-	return { entries: walked.entries, directoryOffset };
+	expect(expected.current).toBe(directoryOffset);
+	expect(cursor.current).toBe(end);
+	return { entries, directoryOffset };
 };
+
+/** How many entries the end record claims, without reading any of them. */
+const countIn = (bytes: Uint8Array): number =>
+	new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(
+		bytes.length - 14,
+		true
+	);
 
 const pathsAndContents = (bytes: Uint8Array) =>
 	readZip(bytes).entries.map(({ path, content }) => ({ path, content }));
@@ -290,18 +287,211 @@ describe('a store-only ZIP', () => {
 
 		expect(entries[0]?.date).toBe(((2026 - 1980) << 9) | (9 << 5) | 19);
 		expect(entries[0]?.time).toBe((13 << 11) | (37 << 5) | 21);
+		// Two-second steps, so an odd second is the even one before it: 57 is
+		// written as 28, which reads back as 56. Never rounded up, where 59
+		// would become a sixtieth second no clock has.
+		const odd = (seconds: number) =>
+			readZip(
+				zipOf([
+					{
+						path: 'odd.md',
+						content: '',
+						modifiedAt: new Date(2026, 8, 19, 13, 37, seconds).getTime(),
+					},
+				])
+			).entries[0]?.time ?? -1;
+		expect(odd(57) & 0x1f).toBe(28);
+		expect(odd(59) & 0x1f).toBe(29);
+		expect(odd(57)).toBe(odd(56));
 		expect(entries[1]).toMatchObject({ date: (1 << 5) | 1, time: 0 });
 		expect(entries[2]).toMatchObject({ date: (1 << 5) | 1, time: 0 });
 	});
 
-	it('refuses more files than the format can count rather than write a wrong number', () => {
-		const files = Array.from({ length: 0x10000 }, (_, index) => ({
-			path: `${String(index)}.md`,
-			content: '',
-		}));
+	describe('at the edges of what the format can say', () => {
+		const empties = (count: number): ZipFile[] =>
+			Array.from({ length: count }, (_, index) => ({
+				path: `${String(index)}.md`,
+				content: '',
+			}));
 
-		expect(() => zipOf(files.slice(0, 1).concat(files))).toThrow(RangeError);
+		it('writes 65,534 files, and refuses 65,535: that count is how ZIP64 says "look elsewhere"', () => {
+			expect(countIn(zipOf(empties(0xfffe)))).toBe(0xfffe);
+			expect(() => zipOf(empties(0xffff))).toThrow(RangeError);
+		});
+
+		it('writes a name of 65,535 bytes, and refuses one of 65,536 rather than wrap its length', () => {
+			const longest = `${'a'.repeat(0xffff - 3)}.md`;
+
+			const { entries } = readZip(zipOf([{ path: longest, content: 'x' }]));
+			expect(entries[0]?.path).toBe(longest);
+			expect(entries[0]?.content).toBe('x');
+
+			expect(() => zipOf([{ path: `a${longest}`, content: 'x' }])).toThrow(RangeError);
+			// In bytes, not characters: half as many of these is already too long.
+			expect(() => zipOf([{ path: `${'é'.repeat(0x8000)}.md`, content: 'x' }])).toThrow(
+				RangeError
+			);
+		});
 	});
+
+	describe('the name an entry is written under', () => {
+		it.each([
+			['/abs.md', 'abs.md'],
+			['../up.md', 'up.md'],
+			['a/../../b.md', 'b.md'],
+			['a//b.md', 'a/b.md'],
+			['./x.md', 'x.md'],
+			['a\\..\\..\\w.md', 'a_.._.._w.md'],
+			['a/b\\c.md', 'a/b_c.md'],
+			['..\\..\\etc/passwd', '.._.._etc/passwd'],
+			['', 'untitled.md'],
+			['/', 'untitled.md'],
+			['..', 'untitled.md'],
+			['./.', 'untitled.md'],
+			['a/b/', 'a/b'],
+			// The spelling is the user's: only the comparison folds.
+			['Work/Plan É.md', 'Work/Plan É.md'],
+		])('writes %j as %j', (path, name) => {
+			expect(entryName(path)).toBe(name);
+			expect(
+				readZip(zipOf([{ path, content: 'x' }])).entries.map((entry) => entry.path)
+			).toEqual([name]);
+		});
+
+		it('never writes a name that is absolute, climbs, or holds a backslash', () => {
+			const hostile = [
+				'/abs.md',
+				'../up.md',
+				'a/../../b.md',
+				'a//b.md',
+				'./x.md',
+				'a\\..\\..\\w.md',
+				'',
+				'//../..//',
+				'..\\x',
+				'a/./../..',
+			];
+
+			const names = readZip(
+				zipOf(hostile.map((path) => ({ path, content: '' })))
+			).entries.map((entry) => entry.path);
+
+			expect(names).toHaveLength(hostile.length);
+			expect(new Set(names).size).toBe(hostile.length);
+			names.forEach((name) => {
+				expect(name.startsWith('/')).toBe(false);
+				expect(name.includes('\\')).toBe(false);
+				expect(name.split('/').filter((part) => ['', '.', '..'].includes(part))).toEqual(
+					[]
+				);
+			});
+		});
+
+		it('tells apart by the name it writes, so two spellings of one path are one name', () => {
+			// Compared normalized and written raw, these were two entries with two
+			// names that unpack onto one file.
+			expect(
+				pathsAndContents(
+					zipOf([
+						{ path: 'a/b.md', content: 'first' },
+						{ path: 'a//b.md', content: 'second' },
+						{ path: '/a/./b.md', content: 'third' },
+						{ path: '', content: 'fourth' },
+						{ path: 'untitled.md', content: 'fifth' },
+					])
+				)
+			).toEqual([
+				{ path: 'a/b.md', content: 'first' },
+				{ path: 'a/b (2).md', content: 'second' },
+				{ path: 'a/b (3).md', content: 'third' },
+				{ path: 'untitled.md', content: 'fourth' },
+				{ path: 'untitled (2).md', content: 'fifth' },
+			]);
+		});
+	});
+
+	describe('a file where a folder has to be', () => {
+		it('numbers the file, whichever of the two came first', () => {
+			const file = { path: 'a', content: 'a file' };
+			const inside = { path: 'a/b.md', content: 'in a folder' };
+
+			expect(pathsAndContents(zipOf([inside, file]))).toEqual([
+				{ path: 'a/b.md', content: 'in a folder' },
+				{ path: 'a (2)', content: 'a file' },
+			]);
+			expect(pathsAndContents(zipOf([file, inside]))).toEqual([
+				{ path: 'a (2)', content: 'a file' },
+				{ path: 'a/b.md', content: 'in a folder' },
+			]);
+		});
+
+		it('sees the folder at any depth, under any spelling, and does not number onto one', () => {
+			expect(
+				pathsAndContents(
+					zipOf([
+						{ path: 'Work/2026.md/plan.md', content: 'deep' },
+						{ path: 'work/2026.MD', content: 'a file named as the folder is' },
+						{ path: 'x.md', content: 'first' },
+						{ path: 'x.md', content: 'second' },
+						{ path: 'x (2).md/inner.md', content: 'makes `x (2).md` a folder' },
+					])
+				)
+			).toEqual([
+				{ path: 'Work/2026.md/plan.md', content: 'deep' },
+				{ path: 'work/2026 (2).MD', content: 'a file named as the folder is' },
+				{ path: 'x.md', content: 'first' },
+				{ path: 'x (3).md', content: 'second' },
+				{ path: 'x (2).md/inner.md', content: 'makes `x (2).md` a folder' },
+			]);
+		});
+	});
+
+	it('zips twenty thousand files, three thousand of them at one path, each under its own name', () => {
+		const DUPLICATES = 3000;
+		const files: ZipFile[] = Array.from({ length: 20_000 }, (_, index) =>
+			index < DUPLICATES
+				? { path: 'notes/same.md', content: `copy ${String(index)}` }
+				: { path: `notes/${String(index)}.md`, content: `note ${String(index)}` }
+		);
+
+		const { entries } = readZip(zipOf(files));
+
+		expect(entries).toHaveLength(20_000);
+		expect(new Set(entries.map((entry) => entry.path.toLowerCase())).size).toBe(20_000);
+		// In the order given, numbered in the order given, and each with its own text.
+		expect(entries[0]).toMatchObject({ path: 'notes/same.md', content: 'copy 0' });
+		expect(entries[1]).toMatchObject({ path: 'notes/same (2).md', content: 'copy 1' });
+		expect(entries[DUPLICATES - 1]).toMatchObject({
+			path: `notes/same (${String(DUPLICATES)}).md`,
+			content: `copy ${String(DUPLICATES - 1)}`,
+		});
+		expect(entries[DUPLICATES]).toMatchObject({
+			path: `notes/${String(DUPLICATES)}.md`,
+			content: `note ${String(DUPLICATES)}`,
+		});
+		expect(entries.every((entry, index) => entry.content.endsWith(` ${String(index)}`))).toBe(
+			true
+		);
+	}, 60_000);
+
+	it('does not run out of stack on a folder of names already numbered by hand', () => {
+		// What importing one of these archives leaves behind, and then a
+		// duplicate of the first: every number up to the last is taken.
+		const TAKEN = 12_000;
+		const files: ZipFile[] = [
+			{ path: 'a.md', content: 'the first' },
+			...Array.from({ length: TAKEN - 1 }, (_, index) => ({
+				path: `a (${String(index + 2)}).md`,
+				content: '',
+			})),
+			{ path: 'a.md', content: 'the duplicate' },
+		];
+
+		const bytes = zipOf(files);
+
+		expect(countIn(bytes)).toBe(TAKEN + 1);
+		expect(new TextDecoder().decode(bytes).includes(`a (${String(TAKEN + 1)}).md`)).toBe(true);
+	}, 60_000);
 
 	const unzip = (() => {
 		try {
@@ -459,6 +649,65 @@ describe('exporting notes', () => {
 		expect(blobs[0]?.type).toBe('application/zip');
 		const bytes = new Uint8Array(await (blobs[0] ?? new Blob()).arrayBuffer());
 		expect(pathsAndContents(bytes)).toEqual([{ path: 'a.md', content: '# A\n' }]);
+	});
+
+	it('takes the link away and lets the blob go even when the click throws', () => {
+		const revokeObjectURL = vi.fn();
+		vi.stubGlobal('URL', { createObjectURL: () => 'blob:skysa/3', revokeObjectURL });
+		const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {
+			throw new Error('the browser said no');
+		});
+		listening.push(() => {
+			click.mockRestore();
+		});
+
+		vi.useFakeTimers();
+		expect(() => {
+			downloadNotes([]);
+		}).toThrow('the browser said no');
+
+		expect(document.querySelector('a[download]')).toBeNull();
+		vi.advanceTimersByTime(DOWNLOAD_GRACE_MS);
+		expect(revokeObjectURL).toHaveBeenCalledWith('blob:skysa/3');
+	});
+
+	it('makes nothing to let go of when the archive cannot be written', () => {
+		const createObjectURL = vi.fn(() => 'blob:skysa/4');
+		vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: () => undefined });
+		const note = { path: `${'a'.repeat(0x10000)}.md`, source: 'x', id: '1', updatedAt: 1 };
+
+		expect(() => {
+			downloadNotes([note as NoteRecord]);
+		}).toThrow(RangeError);
+
+		expect(createObjectURL).not.toHaveBeenCalled();
+		expect(document.querySelector('a[download]')).toBeNull();
+	});
+
+	it("names the archive by the day on the user's clock, not the one in Greenwich", () => {
+		vi.stubGlobal('URL', {
+			createObjectURL: () => 'blob:skysa/5',
+			revokeObjectURL: () => undefined,
+		});
+		const names: (string | null)[] = [];
+		const onClick = (event: Event) => {
+			event.preventDefault();
+			names.push((event.target as HTMLAnchorElement).getAttribute('download'));
+		};
+		document.addEventListener('click', onClick);
+		listening.push(() => {
+			document.removeEventListener('click', onClick);
+		});
+
+		// Half an hour into the local day, and half an hour before its end: in
+		// any zone but UTC itself, one of the two is another day in Greenwich.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 19, 0, 30));
+		downloadNotes([]);
+		vi.setSystemTime(new Date(2026, 8, 19, 23, 30));
+		downloadNotes([]);
+
+		expect(names).toEqual(['notes-2026-09-19.zip', 'notes-2026-09-19.zip']);
 	});
 
 	it('names the archive by the day when it is not told a name', () => {
