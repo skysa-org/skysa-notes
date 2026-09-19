@@ -176,6 +176,16 @@ export interface SyncStateRecord {
 	 * it (`ensureDetached`). Not indexed, so it needs no version of its own.
 	 */
 	detached?: Detached;
+	/**
+	 * The files in this source that are not UTF-8 text, which the engine leaves
+	 * alone and the storage panel lists (docs/PLAN.md §7). Here, beside the
+	 * cursor, because they are written with it: one row, one `put`, so the list
+	 * never names a file from a batch that did not land. Keyed by `remoteId`
+	 * by whoever writes it (`sync/store.ts`). A notice and nothing else —
+	 * nothing reads it to decide anything. Not indexed, so it needs no version
+	 * of its own, and absent means none.
+	 */
+	unreadable?: { remoteId: string; path: string; movedAside?: string[] }[];
 }
 
 export interface Detached {

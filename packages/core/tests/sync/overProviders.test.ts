@@ -365,6 +365,26 @@ const remoteFiles = (remote: Remote): Record<string, string> =>
 			})
 	);
 
+/**
+ * The files the remote holds that no device can read, which each device lists
+ * for its user instead (docs/PLAN.md §7). Only what would have been a note.
+ */
+const remoteUnreadable = (remote: Remote): string[] =>
+	remote.backing
+		.snapshot()
+		.filter(
+			(entry) =>
+				entry.kind === 'file' &&
+				!isHidden(entry.path) &&
+				entry.path.endsWith('.md') &&
+				remote.backing.contentAt(entry.path) === undefined
+		)
+		.map((entry) => entry.path)
+		.sort();
+
+const listedUnreadable = async (d: Device): Promise<string[]> =>
+	(await d.store.unreadable()).map((file) => file.path).sort();
+
 const localFiles = (d: Device): Record<string, string> =>
 	Object.fromEntries(d.store.notes().map((note) => [note.path, note.content]));
 
@@ -379,6 +399,9 @@ const converged = async (
 	const files = remoteFiles(remote);
 	expect(localFiles(a), trace()).toEqual(files);
 	expect(localFiles(b), trace()).toEqual(files);
+	// And each says which files it is not showing: those, and no others.
+	expect(await listedUnreadable(a), trace()).toEqual(remoteUnreadable(remote));
+	expect(await listedUnreadable(b), trace()).toEqual(remoteUnreadable(remote));
 	[a, b].forEach((d) => {
 		expect(d.store.notes().filter((note) => note.dirty)).toEqual([]);
 		expect(d.store.anomalies()).toEqual([]);
@@ -589,6 +612,68 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			expect(copiesOf(files, 'taken.md')).toEqual(['from a\n']);
 			expect(Object.keys(files)).toHaveLength(2);
 			leftAlone(remote, 'plan.md', id, [a, b]);
+		});
+	});
+
+	describe('a file listed as not UTF-8 text', () => {
+		const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+		const entryAt = (remote: Remote, path: string) => {
+			const found = remote.backing.snapshot().find((entry) => entry.path === path);
+			if (found === undefined) throw new Error(`nothing on the remote at ${path}`);
+			return found;
+		};
+
+		it('is listed while it cannot be read, and not once it is fixed or gone', async () => {
+			// `converged` asks both devices for exactly the unreadable files the
+			// remote holds, each time.
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'plan.md', 'base\n');
+			remote.backing.writeBytes('plan.md', LATIN1);
+
+			expect(await converged(remote, a, b)).toEqual({});
+			expect(await listedUnreadable(a)).toEqual(['plan.md']);
+
+			// Saved again as UTF-8, in place: read, imported, and off the list.
+			await remote.backing.write('plan.md', 'fixed\n', {
+				expectedVersion: entryAt(remote, 'plan.md').version,
+			});
+
+			expect(await converged(remote, a, b)).toEqual({ 'plan.md': 'fixed\n' });
+			expect(await listedUnreadable(a)).toEqual([]);
+
+			remote.backing.writeBytes('plan.md', LATIN1);
+
+			expect(await converged(remote, a, b)).toEqual({});
+			expect(await listedUnreadable(b)).toEqual(['plan.md']);
+
+			await remote.backing.delete(entryAt(remote, 'plan.md'));
+
+			expect(await converged(remote, a, b)).toEqual({});
+			expect(await listedUnreadable(a)).toEqual([]);
+			expect(await listedUnreadable(b)).toEqual([]);
+		});
+
+		it('is listed where it is, through a rename, a notebook’s rename and a notebook’s deletion', async () => {
+			// Each provider tells these its own way: a move as a deletion and
+			// an entry, a folder by id alone, a subtree entry by entry.
+			const { remote, a, b } = await setUp(make);
+			await remote.backing.createFolder('Work');
+			remote.backing.writeBytes('Work/old.md', LATIN1);
+			await converged(remote, a, b);
+			expect(await listedUnreadable(a)).toEqual(['Work/old.md']);
+
+			await remote.backing.move(entryAt(remote, 'Work/old.md'), 'Work/older.md');
+			await converged(remote, a, b);
+			expect(await listedUnreadable(a)).toEqual(['Work/older.md']);
+
+			await remote.backing.move(entryAt(remote, 'Work'), 'Archive');
+			await converged(remote, a, b);
+			expect(await listedUnreadable(a)).toEqual(['Archive/older.md']);
+
+			await remote.backing.delete(entryAt(remote, 'Archive'));
+			await converged(remote, a, b);
+			expect(await listedUnreadable(a)).toEqual([]);
 		});
 	});
 

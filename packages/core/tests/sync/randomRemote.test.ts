@@ -350,6 +350,20 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 						])
 					)
 				);
+				// And the rest are listed for the user, each once and where it is
+				// now: whatever the remote did to them since — renamed, moved with
+				// a folder, fixed, deleted — and however this feed told it.
+				expect(
+					(await store.unreadable())
+						.map((file) => `${file.path} ${file.remoteId}`)
+						.sort(),
+					remote.trace()
+				).toEqual(
+					files(backing)
+						.filter((entry) => backing.contentAt(entry.path) === undefined)
+						.map((entry) => `${entry.path} ${entry.remoteId}`)
+						.sort()
+				);
 				expect(
 					store
 						.folders()

@@ -98,6 +98,7 @@ export type {
 	SyncOp,
 	SyncOperation,
 	SyncStore,
+	UnreadableFile,
 } from './sync/store.js';
 
 export * from './hash.js';

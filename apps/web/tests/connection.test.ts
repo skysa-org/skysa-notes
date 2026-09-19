@@ -214,6 +214,27 @@ describe('binding a connection', () => {
 		expect((await db.syncState.get(DROPBOX.connectionId))?.cursor).toBe('c1');
 	});
 
+	it('keeps the files a source lists as not UTF-8 text, bound again or beside a new source', async () => {
+		// The list lives on the row a bind rewrites (`SyncStateRecord.unreadable`).
+		// Dropped, the panel stops saying which files it is not showing until
+		// something next names them — and the cursor kept beside it means nothing
+		// will.
+		const db = freshDatabase();
+		await bindConnection(db, DROPBOX);
+		const unreadable = [{ remoteId: 'id:9', path: 'Work/old.md' }];
+		await db.syncState.update(DROPBOX.connectionId, { cursor: 'c1', unreadable });
+
+		await bindConnection(db, DROPBOX);
+
+		expect((await db.syncState.get(DROPBOX.connectionId))?.unreadable).toEqual(unreadable);
+
+		await bindConnection(db, { connectionId: 'dropbox-2', provider: 'dropbox' });
+
+		expect((await db.syncState.get(DROPBOX.connectionId))?.unreadable).toEqual(unreadable);
+		// Another account's files are not this one's: a new source lists none.
+		expect((await db.syncState.get('dropbox-2'))?.unreadable).toBeUndefined();
+	});
+
 	it('keeps the install’s client id across connections', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, DROPBOX);

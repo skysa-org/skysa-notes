@@ -113,6 +113,34 @@ describeSyncStoreContract('Dexie', async () => {
 });
 
 describe('the Dexie sync store, beyond the contract', () => {
+	it('lists the files it could not read on the connection’s own row, and leaves the rest of the row alone', async () => {
+		// The storage panel reads the row, so that is where the list has to be;
+		// and the row is also the token, the root and the account's name, which a
+		// careless `put` here would take with it.
+		const db = freshDatabase();
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		await db.syncState.update(CONNECTION, { rootId: 'root', displayName: 'ada@example.com' });
+		await db.syncState.put({ connectionId: 'elsewhere', clientId: 'this-browser' });
+		const before = await db.syncState.get(CONNECTION);
+
+		await store.applyPull({
+			changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'Work/old.md' } }],
+			cursor: 'c1',
+		});
+
+		expect(await db.syncState.get(CONNECTION)).toEqual({
+			...before,
+			cursor: 'c1',
+			unreadable: [{ remoteId: 'r1', path: 'Work/old.md' }],
+		});
+		expect((await db.syncState.get('elsewhere'))?.unreadable).toBeUndefined();
+
+		await store.applyPull({ changes: [{ kind: 'forget-unreadable', remoteId: 'r1' }] });
+
+		// Absent, not empty: the row as it was before it ever listed one.
+		expect(await db.syncState.get(CONNECTION)).toEqual({ ...before, cursor: 'c1' });
+	});
+
 	it('hands the engine a pulled file byte for byte, not re-serialized', async () => {
 		// A file another tool wrote has no frontmatter, and one this app wrote on
 		// another device may spell a timestamp differently. Re-serializing either

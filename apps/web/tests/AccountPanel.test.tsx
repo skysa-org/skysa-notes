@@ -1025,6 +1025,127 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		sync.say({ phase: 'idle', conflicts: ['a', 'b'] });
 		expect(await screen.findByText(/^2 notes were edited here and elsewhere/)).toBeTruthy();
 	});
+
+	describe('files that are not UTF-8 text', () => {
+		const file = (path: string, at: number) => ({ remoteId: `id:${String(at)}`, path });
+
+		it('says nothing when there are none', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', { unreadable: [] });
+
+			expect(await screen.findByRole('button', { name: 'Sync now' })).toBeTruthy();
+			expect(screen.queryByText(/not UTF-8 text/)).toBeNull();
+		});
+
+		it('names the one file, says it is untouched, and says what to do', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', { unreadable: [file('Work/old.md', 1)] });
+
+			const notice = await screen.findByText(/not UTF-8 text/);
+
+			expect(notice.textContent).toBe(
+				'Work/old.md in Dropbox is not UTF-8 text, so it is left alone: not shown here, not changed. Save it as UTF-8, or delete it, and it will be read.'
+			);
+			// Where the user is looking, not announced: it is there on every
+			// render until they fix the file (`SyncState`).
+			expect(notice.getAttribute('role')).toBeNull();
+			expect(notice.getAttribute('aria-live')).toBeNull();
+			// After the conflicts and before the button, as the rest of what sync
+			// has to say is.
+			const button = screen.getByRole('button', { name: 'Sync now' });
+			expect(
+				notice.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING
+			).toBeTruthy();
+		});
+
+		it('names a few in order', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [file('c.md', 1), file('a.md', 2), file('Work/b.md', 3)],
+			});
+
+			expect((await screen.findByText(/not UTF-8 text/)).textContent).toBe(
+				'3 files in Dropbox are not UTF-8 text, so they are left alone: a.md, c.md, Work/b.md. Save them as UTF-8, or delete them, and they will be read.'
+			);
+		});
+
+		it('names five of many and counts the rest', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: ['g', 'c', 'a', 'h', 'e', 'b', 'f', 'd'].map((name, at) =>
+					file(`${name}.md`, at)
+				),
+			});
+
+			expect((await screen.findByText(/not UTF-8 text/)).textContent).toBe(
+				'8 files in Dropbox are not UTF-8 text, so they are left alone: a.md, b.md, c.md, d.md, e.md, … and 3 more. Save them as UTF-8, or delete them, and they will be read.'
+			);
+		});
+
+		it('says where a note of theirs went when one of them took its name', async () => {
+			// Not in the conflicts line above: nothing was edited twice and no copy
+			// was made. Here, beside the file that caused it, and for as long as
+			// the file is listed — the banner is gone by the time they wonder.
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [{ ...file('a.md', 1), movedAside: ['a (conflict 2026-09-16).md'] }],
+			});
+
+			expect((await screen.findByText(/not UTF-8 text/)).textContent).toBe(
+				'a.md in Dropbox is not UTF-8 text, so it is left alone: not shown here, not changed. Save it as UTF-8, or delete it, and it will be read. A note of yours had that name; it is now at a (conflict 2026-09-16).md.'
+			);
+		});
+
+		it('and where each of them went, named once, when there are several', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [
+					{ ...file('b.md', 1), movedAside: ['b (2).md', 'b (1).md'] },
+					{ ...file('a.md', 2), movedAside: ['b (1).md'] },
+				],
+			});
+
+			expect((await screen.findByText(/not UTF-8 text/)).textContent).toBe(
+				'2 files in Dropbox are not UTF-8 text, so they are left alone: a.md, b.md. Save them as UTF-8, or delete them, and they will be read. Notes of yours had those names; they are now at b (1).md, b (2).md.'
+			);
+		});
+
+		it('puts every path in a <bdi>, so a name cannot reorder the sentence', async () => {
+			// A path is the user's text in a sentence of ours. Left bare, one
+			// written right-to-left drags the comma after it, or the words around
+			// it, to the wrong side and the list reads as another list.
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', {
+				unreadable: [{ ...file('a.md', 1), movedAside: ['moved.md'] }, file('b.md', 2)],
+			});
+			const notice = await screen.findByText(/not UTF-8 text/);
+
+			expect([...notice.querySelectorAll('bdi')].map((each) => each.textContent)).toEqual([
+				'a.md',
+				'b.md',
+				'moved.md',
+			]);
+			// And one long unbroken name wraps rather than widening the panel.
+			expect(notice.classList.contains('wrap-anywhere')).toBe(true);
+		});
+
+		it('stops saying so once the list is empty again', async () => {
+			const db = await connected(fakeSync({ phase: 'idle' }));
+			await db.syncState.update('c1', { unreadable: [file('old.md', 1)] });
+			await screen.findByText(/not UTF-8 text/);
+
+			await db.syncState
+				.where('connectionId')
+				.equals('c1')
+				.modify((state) => {
+					delete state.unreadable;
+				});
+
+			await waitFor(() => {
+				expect(screen.queryByText(/not UTF-8 text/)).toBeNull();
+			});
+		});
+	});
 });
 
 describe('AccountPanel, when another tab changes the connection', () => {
