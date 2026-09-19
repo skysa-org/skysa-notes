@@ -24,6 +24,7 @@ import {
 } from '../src/store/notes.js';
 import { queueWrite } from '../src/store/queue.js';
 import { createDexieSyncStore, type DexieSyncStoreOptions } from '../src/sync/store.js';
+import { noteById, updateNote } from './noteRows.js';
 
 const CONNECTION = 'dropbox-1';
 const scope = { connectionId: CONNECTION };
@@ -62,7 +63,7 @@ const queued = async (db: NotesDatabase) =>
 /** A note the remote already has, so that renaming it has a file to move. */
 const pushedNote = async (db: NotesDatabase, path = 'a.md') => {
 	const note = await importNoteFile(db, { ...scope, path, source: '# A\n' });
-	await db.notes.update(note.id, { remoteId: `r-${note.id}`, remoteVersion: 'v1' });
+	await updateNote(db, note.id, { remoteId: `r-${note.id}`, remoteVersion: 'v1' });
 	return note;
 };
 
@@ -78,8 +79,8 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await pushedNote(db);
 
-		await saveNoteBody(db, note.id, '# A\n\none\n');
-		await saveNoteBody(db, note.id, '# A\n\ntwo\n');
+		await saveNoteBody(db, note.id, '# A\n\none\n', undefined, scope);
+		await saveNoteBody(db, note.id, '# A\n\ntwo\n', undefined, scope);
 
 		expect(await queued(db)).toEqual([{ op: 'write', path: 'a.md', noteId: note.id }]);
 	});
@@ -97,7 +98,7 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await pushedNote(db);
 
-		const renamed = await renameNote(db, note.id, 'B');
+		const renamed = await renameNote(db, note.id, 'B', scope);
 
 		expect(await queued(db)).toContainEqual({
 			op: 'move',
@@ -111,8 +112,8 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await pushedNote(db);
 
-		await renameNote(db, note.id, 'B');
-		const twice = await renameNote(db, note.id, 'C');
+		await renameNote(db, note.id, 'B', scope);
+		const twice = await renameNote(db, note.id, 'C', scope);
 
 		const moves = (await queued(db)).filter((op) => op.op === 'move');
 		expect(moves).toEqual([
@@ -124,8 +125,8 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await pushedNote(db, 'notes/a.md');
 
-		await moveNote(db, note.id, '');
-		await moveNote(db, note.id, 'notes');
+		await moveNote(db, note.id, '', scope);
+		await moveNote(db, note.id, 'notes', scope);
 
 		expect((await queued(db)).filter((op) => op.op === 'move')).toEqual([]);
 	});
@@ -134,7 +135,7 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 
-		const renamed = await renameNote(db, note.id, 'Other');
+		const renamed = await renameNote(db, note.id, 'Other', scope);
 
 		// The write creates the file wherever the note is when it runs.
 		expect(await queued(db)).toEqual([{ op: 'write', path: note.path, noteId: note.id }]);
@@ -145,8 +146,8 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 
-		await deleteNote(db, note.id);
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
+		await deleteNote(db, note.id, scope);
 
 		// A tombstone owes the remote its delete and nothing else — the rule
 		// `queueWrite` already applied from the other end. Sending the write
@@ -160,8 +161,8 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await pushedNote(db);
 
-		await deleteNote(db, note.id);
-		await restoreNote(db, note.id);
+		await deleteNote(db, note.id, scope);
+		await restoreNote(db, note.id, scope);
 
 		expect(await queued(db)).toEqual([{ op: 'write', path: 'a.md', noteId: note.id }]);
 	});
@@ -176,11 +177,11 @@ describe('the push queue a local change leaves behind', () => {
 		const db = freshDatabase();
 		const note = await pushedNote(db);
 		await db.opQueue.clear();
-		await renameNote(db, note.id, 'Later');
+		await renameNote(db, note.id, 'Later', scope);
 
-		const renamed = await getNote(db, note.id);
+		const renamed = await getNote(db, note.id, scope);
 		if (renamed === undefined) throw new Error('no note');
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
 
 		expect((await queued(db)).map((op) => op.op)).toEqual(['move', 'delete']);
 	});
@@ -190,11 +191,11 @@ describe('the push queue a local change leaves behind', () => {
 		await createFolder(db, { ...scope, name: 'Work' });
 		const note = await pushedNote(db, 'Work/a.md');
 		await db.opQueue.clear();
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
 
 		await renameFolder(db, 'Work', 'Play', scope);
 		await db.transaction('rw', db.notes, db.folders, db.opQueue, async () => {
-			const row = await db.notes.get(note.id);
+			const row = await noteById(db, note.id);
 			await queueWrite(db, row!);
 		});
 
@@ -562,11 +563,11 @@ describe('local changes, pushed', () => {
 		expect((await engine.sync()).status).toBe('ok');
 		await expectMirrored(db, fake);
 
-		await saveNoteBody(db, plan.id, '# Plan\n\nmore\n');
-		await renameNote(db, plan.id, 'Roadmap');
+		await saveNoteBody(db, plan.id, '# Plan\n\nmore\n', undefined, scope);
+		await renameNote(db, plan.id, 'Roadmap', scope);
 		await createFolder(db, { ...scope, name: 'Work' });
-		await moveNote(db, plan.id, 'Work');
-		await deleteNote(db, gone.id);
+		await moveNote(db, plan.id, 'Work', scope);
+		await deleteNote(db, gone.id, scope);
 		const result = await engine.sync();
 
 		expect(result).toMatchObject({ status: 'ok', conflicts: [] });
@@ -578,7 +579,7 @@ describe('local changes, pushed', () => {
 	it('writes a note renamed before its first push once, at its final name', async () => {
 		const { db, fake, engine } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
-		await renameNote(db, note.id, 'Roadmap');
+		await renameNote(db, note.id, 'Roadmap', scope);
 
 		expect((await engine.sync()).status).toBe('ok');
 
@@ -621,8 +622,8 @@ describe('local changes, pushed', () => {
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 		await engine.sync();
 
-		await deleteNote(db, note.id);
-		await restoreNote(db, note.id);
+		await deleteNote(db, note.id, scope);
+		await restoreNote(db, note.id, scope);
 		expect((await engine.sync()).status).toBe('ok');
 
 		await expectMirrored(db, fake);
@@ -634,14 +635,14 @@ describe('local changes, pushed', () => {
 		const old = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nold\n' });
 		await engine.sync();
 
-		await deleteNote(db, old.id);
+		await deleteNote(db, old.id, scope);
 		const fresh = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nnew\n' });
 		const result = await engine.sync();
 
 		expect(result).toMatchObject({ status: 'ok', conflicts: [] });
 		await expectMirrored(db, fake);
 		expect(Object.values(remoteFiles(fake))).toEqual([
-			noteFile((await getNote(db, fresh.id))!),
+			noteFile((await getNote(db, fresh.id, scope))!),
 		]);
 	});
 });
@@ -651,12 +652,14 @@ describe('local changes made while a push is in flight', () => {
 		const { db, fake, engineOver } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\none\n' });
 		const engine = engineOver(
-			inFlight(fake, 'write', () => saveNoteBody(db, note.id, '# Plan\n\ntwo\n'))
+			inFlight(fake, 'write', () =>
+				saveNoteBody(db, note.id, '# Plan\n\ntwo\n', undefined, scope)
+			)
 		);
 
 		await engine.sync();
 
-		const row = await getNote(db, note.id);
+		const row = await getNote(db, note.id, scope);
 		expect(row?.dirty).toBe(1);
 		expect(row?.remoteId).toBeDefined();
 		expect(await db.opQueue.count()).toBe(1);
@@ -670,7 +673,7 @@ describe('local changes made while a push is in flight', () => {
 		const { db, fake, engineOver } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 		const engine = engineOver(
-			inFlight(fake, 'write', () => renameNote(db, note.id, 'Roadmap'))
+			inFlight(fake, 'write', () => renameNote(db, note.id, 'Roadmap', scope))
 		);
 
 		await engine.sync();
@@ -684,9 +687,9 @@ describe('local changes made while a push is in flight', () => {
 		const { db, fake, engineOver } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 		await engineOver(fake).sync();
-		await saveNoteBody(db, note.id, '# Plan\n\nmore\n');
+		await saveNoteBody(db, note.id, '# Plan\n\nmore\n', undefined, scope);
 		const engine = engineOver(
-			inFlight(fake, 'write', () => renameNote(db, note.id, 'Roadmap'))
+			inFlight(fake, 'write', () => renameNote(db, note.id, 'Roadmap', scope))
 		);
 
 		await engine.sync();
@@ -700,11 +703,13 @@ describe('local changes made while a push is in flight', () => {
 		const { db, fake, engineOver } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 		await engineOver(fake).sync();
-		await renameNote(db, note.id, 'Roadmap');
-		const engine = engineOver(inFlight(fake, 'move', () => renameNote(db, note.id, 'Vision')));
+		await renameNote(db, note.id, 'Roadmap', scope);
+		const engine = engineOver(
+			inFlight(fake, 'move', () => renameNote(db, note.id, 'Vision', scope))
+		);
 
 		await engine.sync();
-		expect((await getNote(db, note.id))?.path).toBe('vision.md');
+		expect((await getNote(db, note.id, scope))?.path).toBe('vision.md');
 		expect((await engine.sync()).status).toBe('ok');
 
 		await expectMirrored(db, fake);
@@ -715,11 +720,11 @@ describe('local changes made while a push is in flight', () => {
 		const { db, fake, engineOver } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nkeep\n' });
 		await engineOver(fake).sync();
-		await deleteNote(db, note.id);
-		const engine = engineOver(inFlight(fake, 'delete', () => restoreNote(db, note.id)));
+		await deleteNote(db, note.id, scope);
+		const engine = engineOver(inFlight(fake, 'delete', () => restoreNote(db, note.id, scope)));
 
 		await engine.sync();
-		expect((await getNote(db, note.id))?.deletedLocally).toBe(0);
+		expect((await getNote(db, note.id, scope))?.deletedLocally).toBe(0);
 		expect((await engine.sync()).status).toBe('ok');
 
 		await expectMirrored(db, fake);
@@ -761,13 +766,13 @@ describe('local changes made while a push is in flight', () => {
 		// as a note the user deleted.
 		const { db, fake, engineOver } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
-		const engine = engineOver(inFlight(fake, 'write', () => deleteNote(db, note.id)));
+		const engine = engineOver(inFlight(fake, 'write', () => deleteNote(db, note.id, scope)));
 
 		await engine.sync();
 		expect((await engine.sync()).status).toBe('ok');
 
 		expect(remoteFiles(fake)).toEqual({});
-		expect(await getNote(db, note.id)).toBeUndefined();
+		expect(await getNote(db, note.id, scope)).toBeUndefined();
 		expect(await db.opQueue.count()).toBe(0);
 	});
 
@@ -779,14 +784,14 @@ describe('local changes made while a push is in flight', () => {
 		const { db, fake, engine } = await connected();
 		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n' });
 		await engine.sync();
-		await saveNoteBody(db, note.id, '# Plan\n\nthrown away\n');
-		await deleteNote(db, note.id);
+		await saveNoteBody(db, note.id, '# Plan\n\nthrown away\n', undefined, scope);
+		await deleteNote(db, note.id, scope);
 
 		await engine.sync();
 
 		expect(fake.callLog().filter((call) => call.op === 'write')).toHaveLength(1);
 		expect(remoteFiles(fake)).toEqual({});
-		expect(await getNote(db, note.id)).toBeUndefined();
+		expect(await getNote(db, note.id, scope)).toBeUndefined();
 	});
 });
 
@@ -795,8 +800,8 @@ describe('an op the user has moved on from, settled', () => {
 		const db = freshDatabase();
 		const store = await boundStore(db, scope);
 		const note = await pushedNote(db);
-		await saveNoteBody(db, note.id, '# A\n\nmore\n');
-		const renamed = await renameNote(db, note.id, 'B');
+		await saveNoteBody(db, note.id, '# A\n\nmore\n', undefined, scope);
+		const renamed = await renameNote(db, note.id, 'B', scope);
 		const [write, move] = await store.pendingOps();
 
 		await store.completeOp(write!.seq, {
@@ -822,9 +827,9 @@ describe('an op the user has moved on from, settled', () => {
 		const db = freshDatabase();
 		const store = await boundStore(db, scope);
 		const note = await pushedNote(db);
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
 		const [remove] = await store.pendingOps();
-		await restoreNote(db, note.id);
+		await restoreNote(db, note.id, scope);
 		const before = await store.pendingOps();
 
 		await store.failOp(remove!.seq, 'offline');
@@ -863,9 +868,9 @@ describe('a queue that has moved on by the time it is sent', () => {
 		await engine.sync();
 		await engine.sync();
 
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
 		await renameFolder(db, 'Work', 'Play', scope);
-		await restoreNote(db, note.id);
+		await restoreNote(db, note.id, scope);
 		expect((await engine.sync()).status).toBe('ok');
 
 		await expectMirrored(db, fake);
@@ -877,16 +882,16 @@ describe('a queue that has moved on by the time it is sent', () => {
 		const other = await createNote(db, { ...scope, title: 'Other' });
 		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nkeep\n' });
 		await engine.sync();
-		const before = (await getNote(db, note.id))?.remoteId;
+		const before = (await getNote(db, note.id, scope))?.remoteId;
 
-		await saveNoteBody(db, other.id, '# Other\n\nedit\n');
-		await deleteNote(db, note.id);
+		await saveNoteBody(db, other.id, '# Other\n\nedit\n', undefined, scope);
+		await deleteNote(db, note.id, scope);
 		// Restored while the other note's write, ahead of the delete, is out.
-		await engineOver(inFlight(fake, 'write', () => restoreNote(db, note.id))).sync();
+		await engineOver(inFlight(fake, 'write', () => restoreNote(db, note.id, scope))).sync();
 		await engine.sync();
 
 		expect(fake.callLog().filter((call) => call.op === 'delete')).toEqual([]);
-		expect((await getNote(db, note.id))?.remoteId).toBe(before);
+		expect((await getNote(db, note.id, scope))?.remoteId).toBe(before);
 		await expectMirrored(db, fake);
 	});
 
@@ -895,9 +900,9 @@ describe('a queue that has moved on by the time it is sent', () => {
 		const note = await createNote(db, { ...scope, title: 'Plan', body: '# Plan\n\nmine\n' });
 		await engine.sync();
 		await engine.sync();
-		const version = (await getNote(db, note.id))?.remoteVersion;
+		const version = (await getNote(db, note.id, scope))?.remoteVersion;
 
-		await renameNote(db, note.id, 'Roadmap');
+		await renameNote(db, note.id, 'Roadmap', scope);
 		await engineOver(
 			afterPull(fake, () => fake.write('plan.md', 'THEIRS\n', { expectedVersion: version }))
 		).sync();
@@ -917,14 +922,14 @@ describe('a queue that has moved on by the time it is sent', () => {
 		await engine.sync();
 		await engine.sync();
 
-		await renameNote(db, note.id, 'Roadmap');
+		await renameNote(db, note.id, 'Roadmap', scope);
 		await engineOver(
 			afterPull(fake, () => fake.write('roadmap.md', 'OTHER NOTE\n', {}))
 		).sync();
 		await engine.sync();
 		await engine.sync();
 
-		const row = await getNote(db, note.id);
+		const row = await getNote(db, note.id, scope);
 		expect(noteFile(row!)).toContain('mine');
 		expect(fake.contentAt('roadmap.md')).toBe('OTHER NOTE\n');
 		expect(fake.contentAt('plan.md')).toBeUndefined();
@@ -943,7 +948,7 @@ describe('a note deleted before its write was ever sent', () => {
 		const note = await createNote(db, { connectionId: CONNECTION, title: 'Plans' });
 		expect((await db.opQueue.toArray()).map((op) => op.op)).toEqual(['write']);
 
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
 
 		expect((await db.opQueue.toArray()).map((op) => op.op)).toEqual(['delete']);
 	});
@@ -951,11 +956,11 @@ describe('a note deleted before its write was ever sent', () => {
 	it('still queues the delete for a note the remote already has', async () => {
 		const db = freshDatabase();
 		const note = await createNote(db, { connectionId: CONNECTION, title: 'Plans' });
-		await db.notes.update(note.id, { remoteId: 'r1', remoteVersion: 'v1' });
-		const withFile = await getNote(db, note.id);
+		await updateNote(db, note.id, { remoteId: 'r1', remoteVersion: 'v1' });
+		const withFile = await getNote(db, note.id, scope);
 		if (withFile === undefined) throw new Error('no note');
 
-		await deleteNote(db, note.id);
+		await deleteNote(db, note.id, scope);
 
 		const ops = await db.opQueue.toArray();
 		expect(ops.map((op) => op.op)).toEqual(['delete']);

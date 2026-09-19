@@ -30,7 +30,6 @@ import {
 import {
 	createNote,
 	deleteNote,
-	getNote,
 	moveNote,
 	noteFile,
 	renameNote,
@@ -42,6 +41,7 @@ import {
 	type SchedulerEvent,
 	type SyncScheduler,
 } from '../src/sync/scheduler.js';
+import { noteById } from './noteRows.js';
 
 /**
  * Two browsers, one account — Phase 6's soak, as the checklist names it: "two
@@ -1139,7 +1139,7 @@ describe('one browser over two sources', () => {
 		expect(theirs.connectionId).toBe('c-second');
 		expect(files(second)).toEqual(['theirs.md']);
 		expect(files(first)).toEqual(['mine.md']);
-		const kept = await getNote(db, mine.id);
+		const kept = await noteById(db, mine.id);
 		expect(kept?.connectionId).toBe('c-first');
 		expect(kept?.remoteId).toBeDefined();
 		expect(await db.notes.where('connectionId').equals('c-first').count()).toBe(1);
@@ -1152,8 +1152,8 @@ describe('one browser over two sources', () => {
 
 		expect(files(first)).toEqual(['mine.md']);
 		expect(files(second)).toEqual(['theirs.md']);
-		expect((await getNote(db, mine.id))?.body).toBe('on the first');
-		expect((await getNote(db, theirs.id))?.body).toBe('on the second');
+		expect((await noteById(db, mine.id))?.body).toBe('on the first');
+		expect((await noteById(db, theirs.id))?.body).toBe('on the second');
 	});
 
 	it('takes only the source in front with it when one is let go', async () => {
@@ -1170,8 +1170,8 @@ describe('one browser over two sources', () => {
 
 		// The second source's notes come back to the device; the first's stay
 		// where they are, with its cursor and its credential intact.
-		expect((await getNote(db, theirs.id))?.connectionId).toBe(LOCAL_CONNECTION_ID);
-		expect((await getNote(db, mine.id))?.connectionId).toBe('c-first');
+		expect((await noteById(db, theirs.id))?.connectionId).toBe(LOCAL_CONNECTION_ID);
+		expect((await noteById(db, mine.id))?.connectionId).toBe('c-first');
 		expect(await db.syncState.get('c-first')).toBeDefined();
 		expect(await db.syncState.get('c-second')).toBeUndefined();
 		expect(await db.credentials.get('c-first')).toBeDefined();

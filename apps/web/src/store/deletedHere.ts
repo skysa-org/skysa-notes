@@ -1,3 +1,5 @@
+import { noteRef } from './db.js';
+
 /**
  * The notes deleted from this tab, by id, for as long as the tab lives.
  *
@@ -13,15 +15,19 @@
  * either. A note deleted in one tab while another holds a failing edit to it is
  * not covered.
  */
-const ids = new Set<string>();
+const keys = new Set<string>();
+
+type Named = Readonly<{ connectionId: string; id: string }>;
+
+const keyOf = noteRef;
 
 export const deletedHere = {
-	add: (id: string): void => {
-		ids.add(id);
+	add: (note: Named): void => {
+		keys.add(keyOf(note));
 	},
 	/** On undo: from here on a vanished row is a note to bring back again. */
-	delete: (id: string): void => {
-		ids.delete(id);
+	delete: (note: Named): void => {
+		keys.delete(keyOf(note));
 	},
-	has: (id: string): boolean => ids.has(id),
+	has: (note: Named): boolean => keys.has(keyOf(note)),
 };

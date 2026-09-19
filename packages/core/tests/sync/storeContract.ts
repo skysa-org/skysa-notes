@@ -70,54 +70,35 @@ export const describeSyncStoreContract = (
 	describe(`SyncStore contract: ${name}`, () => {
 		const harness = create;
 
-		describe('an id another connection holds', () => {
-			// Ids are unique on the device, not within a connection, and the one
-			// a file arrives claiming is whatever its frontmatter says. The
-			// engine can only ask this store, so this store has to be able to
-			// say "taken" about a note it will not otherwise admit to.
-			it('says an id nobody holds is not held elsewhere', async () => {
-				const { store } = await harness();
-				expect(await store.idHeldElsewhere('n1')).toBe(false);
-			});
-
-			it('does not count a note of its own, which `noteById` answers for', async () => {
-				const { store, seed } = await harness();
-				await seed({ id: 'n1', path: 'a.md', content: 'x\n' });
-				expect(await store.idHeldElsewhere('n1')).toBe(false);
-				expect((await store.noteById('n1'))?.path).toBe('a.md');
-			});
-
-			it('says so, while showing the engine nothing of the note', async () => {
+		describe('an id another connection holds too', () => {
+			// The id a file arrives claiming is whatever its frontmatter says, and
+			// the same folder in two accounts is enough for two connections to
+			// hold one. An id names a note within its connection.
+			it('shows the engine nothing of the other note', async () => {
 				const { store, seedElsewhere } = await harness();
 				await seedElsewhere('n1');
-				expect(await store.idHeldElsewhere('n1')).toBe(true);
 				expect(await store.noteById('n1')).toBeUndefined();
 				expect(await store.allNotes()).toEqual([]);
 			});
 
-			it('refuses a note written under it anyway, and the whole batch with it', async () => {
-				// The last line of defence, not the first: written, it replaces
-				// another account's note, unpushed edits included.
+			it('takes a note of its own under that id, and the batch with it', async () => {
 				const { store, seedElsewhere } = await harness();
 				await seedElsewhere('n1');
-				await expect(
-					store.applyPull({
-						changes: [
-							{
-								kind: 'upsert-note',
-								id: 'n1',
-								path: 'a.md',
-								content: 'x\n',
-								remote: remote('a.md'),
-								syncedHash: 'h1',
-							},
-						],
-						cursor: 'c1',
-					})
-				).rejects.toThrow();
-				expect(await store.cursor()).toBeUndefined();
-				expect(await store.idHeldElsewhere('n1')).toBe(true);
-				expect(await store.noteByPath('a.md')).toBeUndefined();
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'upsert-note',
+							id: 'n1',
+							path: 'a.md',
+							content: 'x\n',
+							remote: remote('a.md'),
+							syncedHash: 'h1',
+						},
+					],
+					cursor: 'c1',
+				});
+				expect(await store.cursor()).toBe('c1');
+				expect((await store.noteById('n1'))?.path).toBe('a.md');
 			});
 		});
 

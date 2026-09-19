@@ -1,7 +1,7 @@
 import { parseNoteFile, splitFrontmatter } from '@skysa/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, noteKey, type NotesDatabase } from '../src/store/db.js';
 import { listFolders } from '../src/store/folders.js';
 import {
 	createNote,
@@ -19,6 +19,7 @@ import {
 	setNoteEditorMode,
 	setNoteTags,
 } from '../src/store/notes.js';
+import { noteById, updateNote } from './noteRows.js';
 
 let db: NotesDatabase;
 let counter = 0;
@@ -296,7 +297,7 @@ describe('deleting', () => {
 		const note = await createNote(db, { title: 'Back' });
 		await deleteNote(db, note.id);
 		// As though everything before the delete had already been pushed.
-		await db.notes.update(note.id, { dirty: 0 });
+		await updateNote(db, note.id, { dirty: 0 });
 		await restoreNote(db, note.id);
 
 		expect((await getNote(db, note.id))?.deletedLocally).toBe(0);
@@ -351,7 +352,7 @@ describe('finding the note at a path when two rows hold it', () => {
 		const live = await createNote(db, { title: 'Report' });
 		const row = await getNote(db, live.id);
 		expect(row).toBeDefined();
-		await db.notes.delete(live.id);
+		await db.notes.delete(noteKey(live));
 		await db.notes.bulkPut([
 			{ ...row!, id: tombstoneId, deletedLocally: 1 },
 			{ ...row!, id: liveId, deletedLocally: 0 },
@@ -592,7 +593,7 @@ describe('setNoteEditorMode', () => {
 
 		await setNoteEditorMode(db, note.id, 'raw');
 
-		const stored = await db.notes.get(note.id);
+		const stored = await noteById(db, note.id);
 		expect(stored?.editorMode).toBe('raw');
 		// Which editor a note is shown in says nothing about the file, so it must
 		// not queue a write to the provider.

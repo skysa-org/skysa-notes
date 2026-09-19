@@ -189,7 +189,7 @@ export interface OpQueueRecord {
 }
 
 export type NotesDatabase = Dexie & {
-	notes: Table<NoteRecord, string>;
+	notes: Table<NoteRecord, NoteKey>;
 	folders: Table<FolderRecord, [string, string]>;
 	syncState: Table<SyncStateRecord, string>;
 	opQueue: Table<OpQueueRecord, number>;
@@ -198,6 +198,25 @@ export type NotesDatabase = Dexie & {
 };
 
 export const DATABASE_NAME = 'skysa-notes';
+
+/** Where the notes wait while their store is made again under a new key. */
+const NOTES_REKEYING = 'notesRekeying';
+
+/** A note's primary key: the source it belongs to, then its id within it. */
+export type NoteKey = [connectionId: string, id: string];
+
+export const noteKey = (note: Pick<NoteRecord, 'connectionId' | 'id'>): NoteKey => [
+	note.connectionId,
+	note.id,
+];
+
+/**
+ * The same, as a string: for a `Map`, a `Set`, a React `key`. An id on its own
+ * names a note only inside its source, so state held by bare id is state two
+ * sources' notes can share by accident.
+ */
+export const noteRef = (note: Pick<NoteRecord, 'connectionId' | 'id'>): string =>
+	JSON.stringify(noteKey(note));
 
 /**
  * Built without subclassing Dexie: the table properties are declared through the
@@ -253,6 +272,45 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	db.version(3).stores({
 		credentials: 'id',
 	});
+
+	// A note is keyed by its connection *and* its id. Keyed by id alone, two
+	// connected sources could not both hold a note with one id — and they do,
+	// whenever a folder has been copied from one account to another, since the
+	// id travels in the file. The second source then either failed to sync at
+	// all or was handed a made-up id for a file that names its own, and wrote it
+	// back over the real one. Each source is its own silo (docs/PLAN.md §6);
+	// the key now says so, as `folders` always has.
+	//
+	// IndexedDB cannot change a store's key, and Dexie refuses to try, so the
+	// rows go through a second store: out in one version, back in the next.
+	// Both run in the one `versionchange` transaction an open gets, so a failure
+	// anywhere leaves the database at version 3 with every row where it was. A
+	// store a version removes is still readable in that version's upgrade.
+	db.version(4)
+		.stores({ notes: null, [NOTES_REKEYING]: '[connectionId+id]' })
+		.upgrade(async (tx) => {
+			const rows = (await tx.table('notes').toArray()) as NoteRecord[];
+			// Every row has had a `connectionId` since version 1. One without, or
+			// with one that is no string, would have no key here, and a failed add fails the upgrade on every open —
+			// so it is given the device's own rather than trusted to be there.
+			await tx.table(NOTES_REKEYING).bulkAdd(
+				rows.map((row) => ({
+					...row,
+					connectionId:
+						typeof (row.connectionId as unknown) === 'string'
+							? row.connectionId
+							: LOCAL_CONNECTION_ID,
+				}))
+			);
+		});
+	db.version(5)
+		.stores({
+			[NOTES_REKEYING]: null,
+			notes: '[connectionId+id], id, connectionId, path, [connectionId+path], dirty, deletedLocally, updatedAt, remoteId',
+		})
+		.upgrade(async (tx) => {
+			await tx.table('notes').bulkAdd(await tx.table(NOTES_REKEYING).toArray());
+		});
 
 	// A build with a later version than the last one above, opening this database
 	// in another tab, must find this tab stopped rather than still writing —

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	ACTIVE_CONNECTION_KEY,
 	createDatabase,
+	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
 } from '../src/store/db.js';
@@ -16,6 +17,7 @@ import {
 	saveNoteBody,
 	undeleteNote,
 } from '../src/store/notes.js';
+import { updateNote } from './noteRows.js';
 
 /**
  * Taking a delete back, for as long as the UI offers to — which is longer than
@@ -40,7 +42,7 @@ const opsFor = async (id: string) =>
 const deletedNote = async (body = 'the words\n'): Promise<NoteRecord> => {
 	const { db } = box;
 	const made = await createNote(db, { title: 'Kept', body });
-	await db.notes.update(made.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+	await updateNote(db, made.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
 	await db.opQueue.clear();
 	await deleteNote(db, made.id);
 	const row = await getNote(db, made.id);
@@ -133,7 +135,7 @@ describe('undeleteNote', () => {
 		const made = await deletedNote();
 		const spelled = made.path.replace(/kept\.md$/u, 'Kept.md');
 		expect(spelled).not.toBe(made.path);
-		await db.notes.update(made.id, { path: spelled });
+		await updateNote(db, made.id, { path: spelled });
 		const usurper = await createNote(db, { title: 'Kept' });
 		expect(usurper.path.toLowerCase()).toBe(spelled.toLowerCase());
 
@@ -163,7 +165,7 @@ describe('undeleteNote', () => {
 		expect((await db.opQueue.toArray()).map((op) => op.connectionId)).toEqual(['source-a']);
 	});
 
-	it('falls back to the source showing when its own has been disconnected', async () => {
+	it('goes to the device’s own pile when its source has been let go, never to another account', async () => {
 		const { db } = box;
 		await db.syncState.bulkPut([
 			{ connectionId: 'source-a', clientId: 'client' },
@@ -174,7 +176,7 @@ describe('undeleteNote', () => {
 		await pushed(deleted.id);
 		await db.syncState.delete('source-a');
 
-		expect((await undeleteNote(db, deleted)).connectionId).toBe('source-b');
+		expect((await undeleteNote(db, deleted)).connectionId).toBe(LOCAL_CONNECTION_ID);
 	});
 
 	it('is all or nothing: a failure leaves the note deleted, not back without its text', async () => {

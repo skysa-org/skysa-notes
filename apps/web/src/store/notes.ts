@@ -19,9 +19,18 @@ import {
 import Dexie from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
-import { activeConnectionId, type Flag, type NoteRecord, type NotesDatabase } from './db.js';
+import {
+	activeConnectionId,
+	type Flag,
+	LOCAL_CONNECTION_ID,
+	type NoteKey,
+	noteKey,
+	type NoteRecord,
+	type NotesDatabase,
+} from './db.js';
 import { deletedHere } from './deletedHere.js';
 import { ensureFolder } from './folders.js';
+import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
 
@@ -175,8 +184,23 @@ export const createNote = async (
 	);
 };
 
-export const getNote = async (db: NotesDatabase, id: string): Promise<NoteRecord | undefined> =>
-	db.notes.get(id);
+/**
+ * A note's key: the source named, or the one showing, and its id within it.
+ *
+ * An id names a note only inside its source — two connected sources can hold a
+ * file with one id each — so every lookup says which. Asked inside the writer's
+ * own transaction, like `activeConnectionId` itself and for its reason.
+ */
+const keyFor = async (db: NotesDatabase, id: string, scope: NoteScope = {}): Promise<NoteKey> => [
+	scope.connectionId ?? (await activeConnectionId(db)),
+	id,
+];
+
+export const getNote = async (
+	db: NotesDatabase,
+	id: string,
+	scope: NoteScope = {}
+): Promise<NoteRecord | undefined> => db.notes.get(await keyFor(db, id, scope));
 
 export interface ListNotesOptions extends NoteScope {
 	/** Restrict to notes directly inside this folder. Omit for every note. */
@@ -237,12 +261,13 @@ type NoteEdit = Omit<Partial<NoteRecord>, 'contentHash' | 'dirty' | 'updatedAt'>
 const applyEdit = async (
 	db: NotesDatabase,
 	id: string,
-	change: (note: NoteRecord) => NoteEdit | Promise<NoteEdit>
+	change: (note: NoteRecord) => NoteEdit | Promise<NoteEdit>,
+	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
 	// `folders` is in scope because a note can move into a folder that does not
 	// exist yet, and creating it belongs to the same all-or-nothing step.
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
-		const existing = await db.notes.get(id);
+		const existing = await db.notes.get(await keyFor(db, id, scope));
 		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
 		const updated: NoteRecord = {
@@ -320,59 +345,115 @@ export const saveNoteBody = async (
 	db: NotesDatabase,
 	id: string,
 	body: string,
-	base?: EditBase
+	base?: EditBase,
+	/** Where the note is, for a caller with no `base` to say. */
+	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
-		if (base === undefined) return applyBody(db, id, body);
-		const current = await db.notes.get(id);
+		if (base === undefined) return applyBody(db, id, body, scope);
+		const current = await whereShown(db, base.note);
 		if (current === undefined) {
-			const letGo = base.displaced === true || deletedHere.has(id);
+			const letGo = base.displaced === true || deletedHere.has(base.note);
 			return letGo ? base.note : bringBack(db, base, body);
 		}
 		// Here again, by whatever road — a pull re-creating a file another device
 		// restored, under the id it names. It is no longer the note deleted from
-		// this tab, and an edit to it that finds it gone later is kept.
-		if (current.deletedLocally === 0) deletedHere.delete(id);
+		// this tab, and an edit to it that finds it gone later is kept. Under
+		// both names: the row may have moved source since the editor took it.
+		if (current.deletedLocally === 0) {
+			deletedHere.delete(current);
+			deletedHere.delete(base.note);
+		}
+		const there = { connectionId: current.connectionId };
 		// A tombstone keeps the edit and stays deleted, as it always has: the
 		// delete wins (§7), and restoring it brings the edit back with it.
 		// A displaced one is not: the tombstone holds the later text, which is
 		// what restoring it should bring back.
 		if (current.deletedLocally === 1) {
-			return base.displaced === true ? current : applyBody(db, id, body);
+			return base.displaced === true ? current : applyBody(db, current.id, body, there);
 		}
 		if (base.displaced !== true && (current.bodyOrigin ?? '') === base.origin) {
-			return applyBody(db, id, body);
+			return applyBody(db, current.id, body, there);
 		}
 		if (current.body === body) return current;
 		return copyBeside(db, current, base.note, body);
 	});
 
-const applyBody = (db: NotesDatabase, id: string, body: string): Promise<NoteRecord> =>
+/**
+ * Is this row the note that was shown, under another key? A move keeps when the
+ * note was made, and keeps the file it names unless it cuts the note loose from
+ * it. Another account's note of the same id — one folder copied into two — can
+ * share the first, since it is read from the file, and never the second.
+ */
+const sameNote = (row: NoteRecord, shown: NoteRecord): boolean =>
+	row.createdAt === shown.createdAt &&
+	(row.remoteId === undefined || shown.remoteId === undefined || row.remoteId === shown.remoteId);
+
+/**
+ * The row of a note as an editor, or an undo, last saw it.
+ *
+ * Under its own key, normally. A bind or an unbind since moved its rows under
+ * another connection, and the key went with them: this tab's moves are
+ * remembered (`movedRows`, a new id included), and one made from another tab is
+ * looked for by id, and taken only if it is the one row that is this same note
+ * (`sameNote`). Failing that the note is made again (`bringBack`), and nothing
+ * is lost either way.
+ *
+ * Never simply "the row of this id under the source showing". With two sources
+ * connected that is another account, and an id found there may be another note:
+ * the edit would be uploaded into storage it has nothing to do with.
+ */
+const whereShown = async (
+	db: NotesDatabase,
+	shown: NoteRecord
+): Promise<NoteRecord | undefined> => {
+	const own = await db.notes.get(noteKey(shown));
+	if (own !== undefined) return own;
+	const forwarded = movedRows.whereNow(shown);
+	const moved = forwarded === undefined ? undefined : await db.notes.get(forwarded);
+	if (moved !== undefined) return moved;
+	const candidates = (await db.notes.where('id').equals(shown.id).toArray()).filter((row) =>
+		sameNote(row, shown)
+	);
+	return candidates.length === 1 ? candidates[0] : undefined;
+};
+
+const applyBody = (
+	db: NotesDatabase,
+	id: string,
+	body: string,
+	scope: NoteScope = {}
+): Promise<NoteRecord> =>
 	// Every one of these questions — is the note still unnamed, what is it called
 	// now, which filenames are taken — is asked inside the transaction. Asked
 	// outside it, an autosave that fires on its own two seconds after the user
 	// typed can decide the note is unnamed, then land after the user has named
 	// it, and put the heading back over the name they chose.
-	applyEdit(db, id, async (note) => {
-		if (!isUnnamed(note)) {
-			return { body, title: titleFor(note.frontmatter, body, note.path) };
-		}
+	applyEdit(
+		db,
+		id,
+		async (note) => {
+			if (!isUnnamed(note)) {
+				return { body, title: titleFor(note.frontmatter, body, note.path) };
+			}
 
-		const heading = deriveTitle({ body });
-		if (heading === UNTITLED_TITLE) return { body };
+			const heading = deriveTitle({ body });
+			if (heading === UNTITLED_TITLE) return { body };
 
-		const folderPath = parentPath(note.path);
-		const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
+			const folderPath = parentPath(note.path);
+			const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
 
-		return {
-			body,
-			title: heading,
-			// Deliberately not writing `title` to frontmatter here. Naming the file
-			// is enough; pinning the title as well would stop it following later
-			// heading edits, which only an explicit rename should do.
-			path: replaceBasename(note.path, uniqueFilename(heading, taken)),
-		};
-	});
+			return {
+				body,
+				title: heading,
+				// Deliberately not writing `title` to frontmatter here. Naming the file
+				// is enough; pinning the title as well would stop it following later
+				// heading edits, which only an explicit rename should do.
+				path: replaceBasename(note.path, uniqueFilename(heading, taken)),
+			};
+		},
+		scope
+	);
 
 /** Write a new dirty note and owe the remote its file. Inside the caller's transaction. */
 const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRecord> => {
@@ -395,14 +476,23 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
  * The source a note that has gone is made again in: its own, while this device
  * still has it. Not "whichever is showing" — undo outlives the view, and the
  * user may have turned to another source since, where this would put one
- * account's note into another account's folder. A source disconnected
- * meanwhile has nothing to go back to, and the one showing is where the user
- * will find it.
+ * account's note into another account's folder.
+ *
+ * A source that is no longer there has nothing to go back to, and its rows say
+ * where to go instead: wherever this tab moved them, or — for a note of the
+ * device's own pile, which is only ever on screen while nothing is connected —
+ * the source showing, since a bind is what took the pile's rows and made its
+ * connection the one showing. A source let go had its rows sent to the pile,
+ * and so does this, for the same reason it is never simply the source showing.
  */
-const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> =>
-	(await db.syncState.get(note.connectionId)) === undefined
-		? activeConnectionId(db)
-		: note.connectionId;
+const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> => {
+	const bound = async (connectionId: string | undefined): Promise<boolean> =>
+		connectionId !== undefined && (await db.syncState.get(connectionId)) !== undefined;
+	if (await bound(note.connectionId)) return note.connectionId;
+	const forwarded = movedRows.whereNow(note)?.[0];
+	if (await bound(forwarded)) return forwarded ?? LOCAL_CONNECTION_ID;
+	return note.connectionId === LOCAL_CONNECTION_ID ? activeConnectionId(db) : LOCAL_CONNECTION_ID;
+};
 
 const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
 	const shown = base.note;
@@ -476,52 +566,70 @@ const copyBeside = async (
 export const renameNote = async (
 	db: NotesDatabase,
 	id: string,
-	title: string
+	title: string,
+	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
-	applyEdit(db, id, async (note) => {
-		const taken = await takenNamesIn(db, note.connectionId, parentPath(note.path), id);
+	applyEdit(
+		db,
+		id,
+		async (note) => {
+			const taken = await takenNamesIn(db, note.connectionId, parentPath(note.path), id);
 
-		return {
-			title,
-			path: replaceBasename(note.path, uniqueFilename(title, taken)),
-			frontmatter: writeFrontmatter(note.frontmatter, { title }),
-		};
-	});
+			return {
+				title,
+				path: replaceBasename(note.path, uniqueFilename(title, taken)),
+				frontmatter: writeFrontmatter(note.frontmatter, { title }),
+			};
+		},
+		scope
+	);
 
 /** Move a note to another folder, keeping its filename where possible. */
 export const moveNote = async (
 	db: NotesDatabase,
 	id: string,
-	folderPath: string
+	folderPath: string,
+	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
-	applyEdit(db, id, async (note) => {
-		const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
-		// `freeName` rather than a comparison here: `taken.includes(name)` missed
-		// a name that differed only in case, which is one name to every provider
-		// the app syncs to and so exactly the collision this is asked to avoid.
-		const filename = freeName(basename(note.path), taken);
+	applyEdit(
+		db,
+		id,
+		async (note) => {
+			const taken = await takenNamesIn(db, note.connectionId, folderPath, id);
+			// `freeName` rather than a comparison here: `taken.includes(name)` missed
+			// a name that differed only in case, which is one name to every provider
+			// the app syncs to and so exactly the collision this is asked to avoid.
+			const filename = freeName(basename(note.path), taken);
 
-		// Inside the transaction, so a move that fails leaves no empty folder
-		// behind for a notebook the note never reached.
-		if (folderPath !== '')
-			await ensureFolder(db, folderPath, { connectionId: note.connectionId });
-		return { path: joinPath(folderPath, filename) };
-	});
+			// Inside the transaction, so a move that fails leaves no empty folder
+			// behind for a notebook the note never reached.
+			if (folderPath !== '')
+				await ensureFolder(db, folderPath, { connectionId: note.connectionId });
+			return { path: joinPath(folderPath, filename) };
+		},
+		scope
+	);
 
 export const setNoteTags = async (
 	db: NotesDatabase,
 	id: string,
-	tags: readonly string[]
+	tags: readonly string[],
+	scope: NoteScope = {}
 ): Promise<NoteRecord> => {
 	const cleaned = [
 		...new Set(tags.map(normalizeTag).filter((tag): tag is string => tag !== undefined)),
 	];
-	return applyEdit(db, id, (note) => ({
-		tags: cleaned,
-		frontmatter: writeFrontmatter(note.frontmatter, {
-			tags: cleaned.length > 0 ? cleaned : undefined,
+	return applyEdit(
+		db,
+		id,
+		(note) => ({
+			tags: cleaned,
+			frontmatter: writeFrontmatter(note.frontmatter, {
+				tags: cleaned.length > 0 ? cleaned : undefined,
+			}),
 		}),
-	}));
+		scope
+	);
 };
 
 /**
@@ -534,9 +642,14 @@ export const setNoteTags = async (
  * otherwise re-serialize with the new time in it. Asking for the state a note is
  * already in changes nothing and queues nothing.
  */
-const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void> =>
+const setDeleted = (
+	db: NotesDatabase,
+	id: string,
+	deleted: Flag,
+	scope: NoteScope = {}
+): Promise<void> =>
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
-		const note = await db.notes.get(id);
+		const note = await db.notes.get(await keyFor(db, id, scope));
 		if (note === undefined || note.deletedLocally === deleted) return;
 		const updated: NoteRecord = {
 			...note,
@@ -547,12 +660,14 @@ const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void>
 		};
 		await db.notes.put(updated);
 		await (deleted === 1 ? queueDelete(db, updated) : queueRestore(db, updated));
-		if (deleted === 1) deletedHere.add(id);
+		if (deleted === 1) deletedHere.add(note);
 	});
 
-export const deleteNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 1);
+export const deleteNote = (db: NotesDatabase, id: string, scope?: NoteScope): Promise<void> =>
+	setDeleted(db, id, 1, scope);
 
-export const restoreNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 0);
+export const restoreNote = (db: NotesDatabase, id: string, scope?: NoteScope): Promise<void> =>
+	setDeleted(db, id, 0, scope);
 
 /**
  * Whatever has taken a restored note's path since moves to a free name beside
@@ -582,7 +697,13 @@ const makeRoomFor = async (db: NotesDatabase, restored: NoteRecord | undefined):
 		.toArray();
 	await inTheWay.reduce(
 		(done, note) =>
-			done.then(() => moveNote(db, note.id, parentPath(note.path))).then(() => undefined),
+			done
+				.then(() =>
+					moveNote(db, note.id, parentPath(note.path), {
+						connectionId: note.connectionId,
+					})
+				)
+				.then(() => undefined),
 		Promise.resolve()
 	);
 };
@@ -609,9 +730,14 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 	db
 		.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 			// Before the save below, which would otherwise let the text go.
-			deletedHere.delete(deleted.id);
-			await restoreNote(db, deleted.id);
-			const current = await db.notes.get(deleted.id);
+			deletedHere.delete(deleted);
+			// Wherever the tombstone is by now: its source may have been let go
+			// inside the undo window, and the row moved with it.
+			const tombstone = await whereShown(db, deleted);
+			if (tombstone !== undefined) {
+				await restoreNote(db, tombstone.id, { connectionId: tombstone.connectionId });
+			}
+			const current = tombstone && (await db.notes.get(noteKey(tombstone)));
 			await makeRoomFor(db, current);
 			if (current?.body === deleted.body) return current;
 			return saveNoteBody(db, deleted.id, deleted.body, {
@@ -621,13 +747,17 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 		})
 		.catch((error: unknown) => {
 			// Rolled back, so it is as deleted as it was.
-			deletedHere.add(deleted.id);
+			deletedHere.add(deleted);
 			throw error;
 		});
 
 /** Drop a tombstoned note for good, once the provider has confirmed the delete. */
-export const purgeNote = async (db: NotesDatabase, id: string): Promise<void> => {
-	await db.notes.delete(id);
+export const purgeNote = async (
+	db: NotesDatabase,
+	id: string,
+	scope: NoteScope = {}
+): Promise<void> => {
+	await db.notes.delete(await keyFor(db, id, scope));
 };
 
 export interface ImportNoteFileInput extends NoteScope {
@@ -714,7 +844,7 @@ export const importNoteFile = async (
 			const existing =
 				parsed.id === undefined
 					? await noteAtPath(db, connectionId, input.path)
-					: await db.notes.get(parsed.id);
+					: await db.notes.get([connectionId, parsed.id]);
 
 			const record: NoteRecord = {
 				...noteRecordFromFile({
@@ -815,9 +945,10 @@ export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 export const setNoteEditorMode = async (
 	db: NotesDatabase,
 	id: string,
-	mode: EditorMode
+	mode: EditorMode,
+	scope: NoteScope = {}
 ): Promise<void> => {
-	await db.notes.update(id, { editorMode: mode });
+	await db.notes.update(await keyFor(db, id, scope), { editorMode: mode });
 };
 
 /** Notes with unpushed local changes, oldest edit first. */

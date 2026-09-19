@@ -14,7 +14,8 @@ describeSyncStoreContract('in-memory', () => {
 	return {
 		store,
 		seed: store.put,
-		seedElsewhere: store.holdElsewhere,
+		// One connection is all this store is: there is no elsewhere to put it.
+		seedElsewhere: () => undefined,
 		seedFolder: store.putFolder,
 		seedOp: (op) => store.queue(op).seq,
 		withdrawOp: (seq) => {

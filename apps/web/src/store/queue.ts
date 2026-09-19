@@ -58,8 +58,21 @@ type QueueDb = Pick<NotesDatabase, 'opQueue'>;
 // transaction to a `PrematureCommitError`.
 type Queued = PromiseExtended<void>;
 
-const opsFor = (db: QueueDb, noteId: string): PromiseExtended<OpQueueRecord[]> =>
-	db.opQueue.where('noteId').equals(noteId).toArray();
+/**
+ * The ops queued for one note. For *that* note: an id names a note only inside
+ * its connection, and another source's note of the same id has a queue of its
+ * own, which a write here must not be taken to be covered by, nor a delete here
+ * withdraw.
+ */
+const opsFor = (
+	db: QueueDb,
+	note: Pick<NoteRecord, 'connectionId' | 'id'>
+): PromiseExtended<OpQueueRecord[]> =>
+	db.opQueue
+		.where('noteId')
+		.equals(note.id)
+		.filter((op) => op.connectionId === note.connectionId)
+		.toArray();
 
 const seqsOf = (ops: readonly OpQueueRecord[]): number[] =>
 	ops.flatMap((op) => (op.seq === undefined ? [] : [op.seq]));
@@ -92,7 +105,7 @@ export const queueWrite = (db: QueueDb, note: NoteRecord, except?: number): Queu
 	// A tombstone owes the remote its delete and nothing else.
 	note.deletedLocally === 1
 		? nothing()
-		: opsFor(db, note.id).then((queued) =>
+		: opsFor(db, note).then((queued) =>
 				queued.some((op) => op.op === 'write' && op.seq !== except)
 					? undefined
 					: add(db, {
@@ -109,7 +122,7 @@ export const queueWrite = (db: QueueDb, note: NoteRecord, except?: number): Queu
  * the first move would have taken it from.
  */
 export const queueMove = (db: QueueDb, note: NoteRecord, from: string): Queued =>
-	opsFor(db, note.id).then((ops) => {
+	opsFor(db, note).then((ops) => {
 		const moves = ops.filter((op) => op.op === 'move');
 		// Already on its way to where the note is: leave it where it stands in the
 		// queue rather than sending it to the back.
@@ -154,7 +167,7 @@ export const queueMove = (db: QueueDb, note: NoteRecord, from: string): Queued =
  * this delete has the `remoteId` it needs to remove it.
  */
 export const queueDelete = (db: QueueDb, note: NoteRecord): Queued =>
-	opsFor(db, note.id)
+	opsFor(db, note)
 		.then((queued) => db.opQueue.bulkDelete(seqsOf(queued.filter((op) => op.op === 'write'))))
 		.then(() =>
 			add(db, {
@@ -171,7 +184,7 @@ export const queueDelete = (db: QueueDb, note: NoteRecord): Queued =>
  * note is owed a write either way.
  */
 export const queueRestore = (db: QueueDb, note: NoteRecord): Queued =>
-	opsFor(db, note.id)
+	opsFor(db, note)
 		.then((ops) => db.opQueue.bulkDelete(seqsOf(ops.filter((op) => op.op === 'delete'))))
 		.then(() => queueWrite(db, note));
 

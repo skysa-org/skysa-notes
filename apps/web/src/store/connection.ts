@@ -14,10 +14,12 @@ import {
 	activeConnectionId,
 	type FolderRecord,
 	LOCAL_CONNECTION_ID,
+	noteKey,
 	type NoteRecord,
 	type NotesDatabase,
 	type SyncStateRecord,
 } from './db.js';
+import { movedRows } from './movedRows.js';
 import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
 import { queueMkdir, queueWrite } from './queue.js';
@@ -34,9 +36,10 @@ import { queueMkdir, queueWrite } from './queue.js';
  * Two things the sync store relies on, and so are guaranteed here
  * (docs/PLAN.md, Phase 2 UI item):
  *
- * - **No row is left under any other connection.** The store refuses to pull a
- *   file over another connection's row with the same frontmatter `id`, and it
- *   refuses the same way on every retry.
+ * - **A row's key is its connection and its id**, so a row that moves is
+ *   deleted and added, two notes of one id can meet where they land, and an
+ *   editor holding the note as it was has to be able to find it again
+ *   (`moveRowsTo`, `store/movedRows.ts`).
  * - **A moved row's `source` is pinned before it moves.** A row written before
  *   `source` existed re-serializes from its parts, including `updatedAt` and
  *   its path, so its bytes would otherwise change under the engine.
@@ -175,6 +178,15 @@ interface Placed<T> {
  * remote file it names. `unbindConnection` reaches it whenever there is nothing
  * bound — a disconnect of an account the device declined to bind to — and the
  * cost of not saying it is a note silently losing its `remoteId`.
+ *
+ * A note's key is its connection and its id, so a move is the one place two
+ * notes can meet under one key: the rows of two accounts let go one after the
+ * other, both landing under `LOCAL_CONNECTION_ID`, where the second account held
+ * a copy of the first's folder. The one already there keeps its id. The
+ * newcomer is given a fresh one, and what is queued for it follows it; it is
+ * otherwise the row it was, file and all. Its file still says the old id until
+ * the note is next written, which is how any note stands whose file names an id
+ * its source already had (`idForNewNote` in `packages/core`).
  */
 const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): Promise<Moved> => {
 	if (from === target) return { notes: [], folders: [], linked: false };
@@ -220,9 +232,21 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 			.filter((note) => note.connectionId === target && note.deletedLocally === 0)
 			.map((note) => foldPath(note.path))
 	);
+	const held = new Set(
+		notes.filter((note) => note.connectionId === target).map((note) => note.id)
+	);
+	const renamed = new Map(
+		leaving.filter((note) => held.has(note.id)).map((note) => [note.id, crypto.randomUUID()])
+	);
+	const idNow = (id: string): string => renamed.get(id) ?? id;
 	const notesPlaced = leaving.flatMap((note): Placed<NoteRecord>[] => {
 		// Before anything else changes: these are the bytes it had.
-		const pinned: NoteRecord = { ...note, source: noteFile(note), connectionId: target };
+		const pinned: NoteRecord = {
+			...note,
+			id: renamed.get(note.id) ?? note.id,
+			source: noteFile(note),
+			connectionId: target,
+		};
 		if (note.deletedLocally === 1) {
 			// A delete owed to the account it came from, which the new one
 			// only is when resuming.
@@ -238,12 +262,14 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 		}
 		return [{ row: { ...withoutRemote(pinned), path, dirty: 1 }, owed: true }];
 	});
-	await db.notes.bulkDelete(
-		leaving
-			.filter((note) => !notesPlaced.some((placed) => placed.row.id === note.id))
-			.map((note) => note.id)
-	);
-	if (notesPlaced.length > 0) await db.notes.bulkPut(notesPlaced.map((placed) => placed.row));
+	// Every one of them, placed or not: the connection is half of the key, so a
+	// row that moves is a row deleted and a row added.
+	await db.notes.bulkDelete(leaving.map(noteKey));
+	if (notesPlaced.length > 0) await db.notes.bulkAdd(notesPlaced.map((placed) => placed.row));
+	// For an editor open on one of them, whose next save names the old key.
+	leaving.forEach((note) => {
+		movedRows.record(note, { connectionId: target, id: idNow(note.id) });
+	});
 
 	// A row owed to the new connection as though new owes what it is now, which
 	// the caller queues; what was queued for it was owed to its old file. Every
@@ -252,12 +278,18 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 		notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row.id)
 	);
 	const dropped = ops.filter(
-		(op) => mode === 'copy' || (op.noteId !== undefined && owed.has(op.noteId))
+		(op) => mode === 'copy' || (op.noteId !== undefined && owed.has(idNow(op.noteId)))
 	);
 	await db.opQueue.bulkDelete(dropped.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
 	const carried = ops.filter((op) => !dropped.includes(op));
 	if (carried.length > 0) {
-		await db.opQueue.bulkPut(carried.map((op) => ({ ...op, connectionId: target })));
+		await db.opQueue.bulkPut(
+			carried.map((op) => ({
+				...op,
+				connectionId: target,
+				...(op.noteId === undefined ? {} : { noteId: idNow(op.noteId) }),
+			}))
+		);
 	}
 
 	return {
@@ -291,7 +323,7 @@ const cutLoose = async (db: Scope, connectionId: string): Promise<Moved> => {
 		notes.filter((note) => note.deletedLocally === 1),
 		notes.filter((note) => note.deletedLocally === 0),
 	];
-	await db.notes.bulkDelete(gone.map((note) => note.id));
+	await db.notes.bulkDelete(gone.map(noteKey));
 	const cut = staying.map((note): NoteRecord => ({
 		...withoutRemote(note),
 		source: noteFile(note),

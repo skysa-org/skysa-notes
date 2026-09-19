@@ -9,6 +9,7 @@ import { db } from '../src/store/db.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { updateNote } from './noteRows.js';
 
 /**
  * Undo, for a note deleted while the editor still held an edit older than the
@@ -73,7 +74,7 @@ describe('undoing the delete of a note the editor held an older edit to', () => 
 		type('held\n');
 		flushAutosave();
 		await screen.findByRole('alert');
-		await db.notes.update(note.id, { body: 'from the other tab\n' });
+		await updateNote(db, note.id, { body: 'from the other tab\n' });
 		await waitFor(() => {
 			expect(editorText()).toBe('from the other tab\n');
 		});

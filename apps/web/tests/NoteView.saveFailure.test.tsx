@@ -9,6 +9,7 @@ import { useNote } from '../src/store/hooks.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote, purgeNote, undeleteNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { updateNote } from './noteRows.js';
 
 /**
  * A save the store refuses. The user is still typing, so the two things that
@@ -205,7 +206,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 
 		// Another tab saves the note: a local edit, so the origin does not move,
 		// and this editor takes the new body in. The held text leaves the screen.
-		await db.notes.update(note.id, { body: 'from the other tab\n' });
+		await updateNote(db, note.id, { body: 'from the other tab\n' });
 		await waitFor(() => {
 			expect(editorText()).toBe('from the other tab\n');
 		});
@@ -228,7 +229,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 		type('held\n');
 		flushAutosave();
 		await screen.findByRole('alert');
-		await db.notes.update(note.id, { body: 'from the other tab\n' });
+		await updateNote(db, note.id, { body: 'from the other tab\n' });
 		await waitFor(() => {
 			expect(editorText()).toBe('from the other tab\n');
 		});
@@ -253,7 +254,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 		const { note, type } = await open();
 		type('typed into the old body\n');
 		// A sync pull lands before the autosave does.
-		await db.notes.update(note.id, { body: 'pulled\n', bodyOrigin: 'pull-2' });
+		await updateNote(db, note.id, { body: 'pulled\n', bodyOrigin: 'pull-2' });
 		await waitFor(() => {
 			expect(editorText()).toBe('pulled\n');
 		});

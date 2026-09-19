@@ -13,6 +13,9 @@ import { beforeClosing, CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.j
  * that needs the state before it comes first.
  */
 
+/** Later than any version this build declares. */
+const NEWER = 99;
+
 const opened: Dexie[] = [];
 
 afterEach(async () => {
@@ -30,7 +33,7 @@ const thisTab = async (): Promise<NotesDatabase> => {
 /** The same database as a later build declares it: everything there is, and more. */
 const newerBuild = (name: string): Dexie => {
 	const db = createDatabase(name) as Dexie;
-	db.version(4).stores({ somethingNew: 'id' });
+	db.version(NEWER).stores({ somethingNew: 'id' });
 	opened.push(db);
 	return db;
 };
@@ -102,7 +105,7 @@ describe('a tab whose database a newer build has asked for', () => {
 		expect(db.isOpen()).toBe(false);
 		// Not written by old code into a database it has never seen.
 		expect(await newer.table('prefs').get('after')).toBeUndefined();
-		expect(newer.verno).toBe(4);
+		expect(newer.verno).toBe(NEWER);
 	});
 
 	it('does not keep the upgrade waiting for ever on a write that never ends', async () => {

@@ -19,6 +19,7 @@ import {
 	listNotes,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { updateNote } from './noteRows.js';
 
 let db: NotesDatabase;
 let counter = 0;
@@ -219,7 +220,7 @@ describe('moveFolder', () => {
 		const note = notes[0];
 		expect(note).toBeDefined();
 		// Simulate a note that has already been pushed.
-		await db.notes.update(note!.id, { dirty: 0 });
+		await updateNote(db, note!.id, { dirty: 0 });
 
 		await moveFolder(db, 'work', 'archive');
 

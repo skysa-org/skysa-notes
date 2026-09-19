@@ -1329,46 +1329,6 @@ describe('a file the user duplicated', () => {
 	});
 });
 
-describe('a file whose id another connection on the device holds', () => {
-	const noteFile = (id: string, body: string) => `---\nid: ${id}\n---\n\n${body}\n`;
-
-	it('is a new note, rather than a batch the store refuses for ever', async () => {
-		// Ids are unique on the device, not within a connection, and the store
-		// shows the engine one connection. A folder copied into a second account,
-		// or one account connected twice, brings files naming notes the other
-		// connection holds: `noteById` says nothing is there, the id is adopted,
-		// and the store refuses the write — identically on every retry, so the
-		// cursor never moves and this connection never syncs again.
-		store.holdElsewhere('theirs');
-		const entry = await remoteFile('a.md', noteFile('theirs', 'body'));
-
-		const result = await engine.pull();
-
-		expect(result.status).toBe('ok');
-		expect(store.storedCursor()).toBeDefined();
-		expect(noteAt('a.md')?.id).toBe('copy-1');
-		expect(noteAt('a.md')?.remoteId).toBe(entry.remoteId);
-	});
-
-	it('is that same note from then on, whatever the file goes on calling itself', async () => {
-		// The file still names the other connection's note until something here
-		// writes it, so the note is known by its `remoteId` and nothing else.
-		store.holdElsewhere('theirs');
-		const entry = await remoteFile('a.md', noteFile('theirs', 'body'));
-		await engine.pull();
-
-		expect((await engine.pull()).status).toBe('ok');
-		await provider.write('a.md', noteFile('theirs', 'edited there'), {
-			expectedVersion: entry.version,
-		});
-		expect((await engine.pull()).status).toBe('ok');
-
-		expect(store.notes()).toHaveLength(1);
-		expect(noteAt('a.md')?.id).toBe('copy-1');
-		expect(noteAt('a.md')?.content).toContain('edited there');
-	});
-});
-
 describe('a rescan of a remote that changed while the cursor was dead', () => {
 	it('does not delete the note it has just imported', async () => {
 		// The file was replaced at the same path, so the row still carries the
