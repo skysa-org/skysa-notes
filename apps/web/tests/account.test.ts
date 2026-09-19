@@ -104,6 +104,90 @@ describe('claiming a connection the user has just consented to', () => {
 		expect((await getNote(db, note.id))?.connectionId).toBe('c1');
 	});
 
+	it('signs out the credential it held for the same connection, once the new one is kept', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const old = await holding(db, 'c1', 'sk1_old');
+		const { credential } = await beginConnect(db, 'dropbox');
+		const revoked: string[] = [];
+		const kept: (string | undefined)[] = [];
+		const bound: (string | undefined)[] = [];
+		const withCredential = vi.fn(
+			(presented: string) =>
+				({
+					connection: () =>
+						Promise.resolve({
+							ok: true,
+							value: {
+								...connection('c1'),
+								grantId: presented === old ? 'g-old' : 'g-new',
+							},
+						}),
+					revokeGrant: async (id: string) => {
+						bound.push(await activeConnectionId(db));
+						kept.push((await db.credentials.get('c1'))?.credential);
+						revoked.push(`${presented} ${id}`);
+						return { ok: true, value: { ok: true } };
+					},
+				}) as unknown as ReturnType<ApiClient['withCredential']>
+		);
+
+		await claimConnection(db, { withCredential });
+
+		// Its own grant, with its own credential — and not before the device
+		// held the new one, or a failure in between leaves it holding none.
+		expect(revoked).toEqual(['sk1_old g-old']);
+		expect(kept).toEqual([credential]);
+		// Nor before it was bound: a slow server is not put in front of that.
+		expect(bound).toEqual(['c1']);
+	});
+
+	it('connects all the same when the old credential cannot be signed out', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const old = await holding(db, 'c1', 'sk1_old');
+		const { credential } = await beginConnect(db, 'dropbox');
+		const revokeGrant = vi.fn();
+		const withCredential = vi.fn(
+			(presented: string) =>
+				({
+					// Revoked already, which is the usual reason to connect again.
+					connection: () =>
+						presented === old
+							? Promise.resolve({ ok: false, error: 'credential_revoked' })
+							: Promise.resolve({ ok: true, value: connection('c1') }),
+					revokeGrant,
+				}) as unknown as ReturnType<ApiClient['withCredential']>
+		);
+
+		const state = await claimConnection(db, { withCredential });
+
+		expect(state.kind).toBe('connected');
+		expect(revokeGrant).not.toHaveBeenCalled();
+		expect((await db.credentials.get('c1'))?.credential).toBe(credential);
+	});
+
+	it('nor is it stopped by a server that does not answer about the old one at all', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const old = await holding(db, 'c1', 'sk1_old');
+		const { credential } = await beginConnect(db, 'dropbox');
+		const withCredential = vi.fn(
+			(presented: string) =>
+				({
+					connection: () =>
+						presented === old
+							? Promise.reject(new Error('offline'))
+							: Promise.resolve({ ok: true, value: connection('c1') }),
+				}) as unknown as ReturnType<ApiClient['withCredential']>
+		);
+
+		const state = await claimConnection(db, { withCredential });
+
+		expect(state.kind).toBe('connected');
+		expect((await db.credentials.get('c1'))?.credential).toBe(credential);
+	});
+
 	it('keeps the credential even when it stops to ask about the account', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });

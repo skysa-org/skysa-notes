@@ -1,7 +1,8 @@
+import { ne } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
-import { buildApp, newCredential, secretOf } from './harness.js';
+import { bothProvidersConfig, buildApp, dropboxStub, newCredential, secretOf } from './harness.js';
 
 /**
  * Describing and removing the one connection the caller's credential reaches.
@@ -224,9 +225,184 @@ describe('DELETE /api/connection/grants/:id', () => {
 			).status
 		).toBe(200);
 		expect((await app.request('/api/connection', { credential })).status).toBe(401);
-		// Signing out is not disconnecting: the connection survives for the other
-		// devices, and for this one when it connects again.
+	});
+
+	it('is not disconnecting, while another device still reaches the account', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+		const other = await app.connect();
+		const { grantId }: { grantId: string } = await (
+			await app.request('/api/connection', { credential })
+		).json();
+
+		const response = await app.request(`/api/connection/grants/${grantId}`, {
+			method: 'DELETE',
+			credential,
+		});
+
+		expect(await response.json()).toEqual({ ok: true, disconnected: false });
 		expect(await rows(app.db)).toHaveLength(1);
+		expect(
+			(await app.request('/api/connection', { credential: other.credential })).status
+		).toBe(200);
+		expect(app.stub.calls.some((call) => call.url.endsWith('/auth/token/revoke'))).toBe(false);
+	});
+
+	it('takes the account with the last device that could reach it', async () => {
+		// Left behind, the row is a live refresh token that no credential
+		// reaches: nothing can use it, and nothing can revoke it either.
+		const app = buildApp();
+		const { credential } = await app.connect();
+		const { grantId }: { grantId: string } = await (
+			await app.request('/api/connection', { credential })
+		).json();
+
+		const response = await app.request(`/api/connection/grants/${grantId}`, {
+			method: 'DELETE',
+			credential,
+		});
+
+		expect(await response.json()).toEqual({ ok: true, disconnected: true, revoked: true });
+		expect(await rows(app.db)).toEqual([]);
+		// Withdrawn at the provider too, as a disconnect is.
+		expect(app.stub.calls.some((call) => call.url.endsWith('/auth/token/revoke'))).toBe(true);
+		// And the hash stays spent: the grant row outlives the connection.
+		const grants = await createDb(app.db).select().from(schema.grants);
+		expect(grants.map((grant) => grant.connectionId)).toEqual([null]);
+	});
+
+	it('does not count a device idle past its expiry as one that can reach it', async () => {
+		const app = buildApp();
+		const { credential } = await app.connect();
+		await app.connect();
+		const drizzle = createDb(app.db);
+		const { grantId }: { grantId: string } = await (
+			await app.request('/api/connection', { credential })
+		).json();
+		// The other device has not asked for anything in a year.
+		await drizzle
+			.update(schema.grants)
+			.set({ lastUsedAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) })
+			.where(ne(schema.grants.id, grantId));
+
+		const response = await app.request(`/api/connection/grants/${grantId}`, {
+			method: 'DELETE',
+			credential,
+		});
+
+		expect(await response.json()).toMatchObject({ disconnected: true });
+		expect(await rows(app.db)).toEqual([]);
+	});
+
+	it('goes all the same when the provider will not take the grant back, or has no way to', async () => {
+		const refusing = buildApp({
+			script: { revoke: () => new Response('no', { status: 503 }) },
+		});
+		const microsoft = buildApp({ config: bothProvidersConfig() });
+
+		const answers = await Promise.all(
+			[
+				{ app: refusing, provider: 'dropbox' as const },
+				{ app: microsoft, provider: 'onedrive' as const },
+			].map(async ({ app, provider }) => {
+				const { credential } = await app.connect({ provider });
+				const { grantId }: { grantId: string } = await (
+					await app.request('/api/connection', { credential })
+				).json();
+				const response = await app.request(`/api/connection/grants/${grantId}`, {
+					method: 'DELETE',
+					credential,
+				});
+				return { body: await response.json(), rows: await rows(app.db) };
+			})
+		);
+
+		expect(answers).toEqual([
+			{ body: { ok: true, disconnected: true, revoked: false }, rows: [] },
+			{ body: { ok: true, disconnected: true, revoked: false }, rows: [] },
+		]);
+	});
+
+	it('does not take the row from under a device that connects while the provider is being asked', async () => {
+		// The provider's calls are the slow part, up to twenty seconds of them.
+		// Asked about live devices first and deleted after those calls, the row
+		// went from under whoever connected in between: told `ok`, holding a
+		// credential that reaches nothing, its hash spent for good.
+		const stub = dropboxStub();
+		const late: { connect?: () => Promise<{ credential: string }>; credential?: string } = {};
+		const app = buildApp({
+			fetch: async (url, init) => {
+				if (url.endsWith('/auth/token/revoke') && late.connect !== undefined) {
+					const connect = late.connect;
+					delete late.connect;
+					late.credential = (await connect()).credential;
+				}
+				return stub.fetch(url, init);
+			},
+		});
+		const { credential } = await app.connect();
+		const { grantId }: { grantId: string } = await (
+			await app.request('/api/connection', { credential })
+		).json();
+		late.connect = () => app.connect();
+
+		await app.request(`/api/connection/grants/${grantId}`, { method: 'DELETE', credential });
+
+		expect(late.credential).toBeDefined();
+		expect(
+			(await app.request('/api/connection', { credential: late.credential ?? '' })).status
+		).toBe(200);
+		expect(await rows(app.db)).toHaveLength(1);
+	});
+
+	it('takes it once when two devices sign themselves out together', async () => {
+		const app = buildApp();
+		const devices = [await app.connect(), await app.connect()];
+		const ids = await Promise.all(
+			devices.map(async ({ credential }) => {
+				const body: { grantId: string } = await (
+					await app.request('/api/connection', { credential })
+				).json();
+				return { credential, grantId: body.grantId };
+			})
+		);
+
+		const answers = await Promise.all(
+			ids.map(async ({ credential, grantId }) =>
+				(
+					await app.request(`/api/connection/grants/${grantId}`, {
+						method: 'DELETE',
+						credential,
+					})
+				).json()
+			)
+		);
+
+		expect(
+			answers.filter((body) => (body as { disconnected: boolean }).disconnected)
+		).toHaveLength(1);
+		expect(await rows(app.db)).toEqual([]);
+	});
+
+	it('connects the account afresh afterwards, under a new row', async () => {
+		const app = buildApp();
+		const first = await app.connect();
+		const before: { id: string; grantId: string } = await (
+			await app.request('/api/connection', { credential: first.credential })
+		).json();
+		await app.request(`/api/connection/grants/${before.grantId}`, {
+			method: 'DELETE',
+			credential: first.credential,
+		});
+
+		const again = await app.connect();
+
+		const after: { id: string; accountId: string } = await (
+			await app.request('/api/connection', { credential: again.credential })
+		).json();
+		expect(after.id).not.toBe(before.id);
+		// Which is how the device knows the notes it holds are this account's.
+		expect(after.accountId).toBe('dbid:1');
 	});
 
 	it("will not revoke a grant on somebody else's connection", async () => {
