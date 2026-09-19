@@ -695,6 +695,83 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await activeConnectionId(db)).toBe('c1');
 	});
 
+	it.each([
+		[
+			'could not be reached',
+			() => Promise.reject(new TypeError('offline')),
+			/The server cannot be reached/,
+		],
+		[
+			'answered with a failure',
+			() => Promise.reject(new ApiError('DELETE /connection failed with 500', 500)),
+			/The server could not disconnect the account/,
+		],
+	] as const)(
+		'still names the server where the server is what failed, and it %s',
+		async (_, disconnect, said) => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+			await holding(db, 'c1');
+			renderPanel(
+				clientWith({
+					connection: () => Promise.resolve({ ok: true, value: dropbox }),
+					disconnect,
+				}),
+				db
+			);
+
+			await user.click(await enabled('Disconnect…'));
+			await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
+
+			// The call did leave the device, so the wording that sends the user to
+			// the connection is the true one — and the local one would be a lie.
+			const problem = await screen.findByText(said);
+			expect(problem.textContent).not.toMatch(/this device went wrong/);
+			expect(await activeConnectionId(db)).toBe('c1');
+		}
+	);
+
+	it('does not blame a server for a failure that never left the device', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		renderPanel(
+			clientWith({
+				connection: () => Promise.resolve({ ok: true, value: dropbox }),
+				// Refused, which is what puts "Stop syncing on this device" on offer
+				// — and that asks the server nothing at all.
+				disconnect: () => Promise.resolve({ ok: false, refusal: 'not_entitled' }),
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
+		await user.click(
+			await screen.findByRole('button', { name: 'Stop syncing on this device' })
+		);
+		// The store is broken only once the question is up: the list it is about
+		// is read from that same store, and a store that refused before now is a
+		// different message about a different moment ("could not be read").
+		const answering = await screen.findByRole('button', { name: 'Disconnect' });
+		const refused = vi.spyOn(db, 'transaction').mockImplementationOnce(() => {
+			throw new Error('QuotaExceededError');
+		});
+		await user.click(answering);
+
+		const problem = await screen.findByText(/on this device went wrong/);
+		// Nothing was asked of a server, so nothing here may send the user to
+		// look at one, or to try one again.
+		expect(problem.textContent).not.toMatch(/server|reach|connection/i);
+		expect(problem.getAttribute('role')).toBe('alert');
+		expect(refused).toHaveBeenCalledTimes(1);
+		// Still here to try again, and still syncing meanwhile.
+		expect(await activeConnectionId(db)).toBe('c1');
+		refused.mockRestore();
+	});
+
 	it('can stop syncing on this device alone when the server cannot be asked', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();

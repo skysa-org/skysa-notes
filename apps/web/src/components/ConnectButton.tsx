@@ -2,6 +2,7 @@ import { type ProviderKind } from '@skysa/core';
 import { type ReactNode, useState } from 'react';
 
 import { type ApiClient } from '../api/client.js';
+import { failedAt, saying } from '../api/failure.js';
 import { beginConnect } from '../store/credentials.js';
 import { type NotesDatabase } from '../store/db.js';
 
@@ -60,8 +61,15 @@ export const ConnectButton = ({
 		setFailed(null);
 		void (async () => {
 			try {
-				const { credentialHash } = await beginConnect(db, provider);
-				const result = await client.startConnect(provider, credentialHash, returnTo);
+				// Which half failed, said as each is called: writing the
+				// credential down is this device's, asking where to send the
+				// browser is the server's, and a message that named the wrong one
+				// would send the user somewhere there is nothing to fix.
+				const { credentialHash } = await failedAt('device', beginConnect(db, provider));
+				const result = await failedAt(
+					'server',
+					client.startConnect(provider, credentialHash, returnTo)
+				);
 				if (!result.ok) {
 					setFailed(
 						MESSAGES[result.refusal] ??
@@ -72,8 +80,14 @@ export const ConnectButton = ({
 				}
 				// Nothing after this line runs: the page is leaving.
 				navigate(result.value);
-			} catch {
-				setFailed('The server cannot be reached, so nothing was connected.');
+			} catch (error) {
+				setFailed(
+					saying(error, {
+						server: 'The server cannot be reached, so nothing was connected.',
+						device: 'Something on this device went wrong, so nothing was connected. Try again.',
+						unknown: 'Connecting could not be started. Try again.',
+					})
+				);
 				setBusy(false);
 			}
 		})();

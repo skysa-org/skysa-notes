@@ -1,6 +1,7 @@
 import { type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
+import { failedAt } from '../api/failure.js';
 import {
 	bindConnection,
 	bindingCount,
@@ -388,7 +389,13 @@ export const disconnectAccount = async (
 	// finish the job here rather than refuse: the server cannot be asked, and
 	// the alternative is a binding the user cannot get rid of.
 	if (held !== undefined) {
-		const result = await client.withCredential(held.credential).disconnect();
+		// The one thing here that leaves the device, and said so, because a
+		// caller reporting a failure has two different true things to say and no
+		// other way to tell which (`api/failure.ts`).
+		const result = await failedAt(
+			'server',
+			client.withCredential(held.credential).disconnect()
+		);
 		// Already gone on the server is what was asked for. So is a credential it
 		// no longer honours: whatever removed it did the disconnecting.
 		const done =
@@ -453,8 +460,20 @@ export type LetGoResult = { ok: false; refusal: Refusal } | { ok: true; outcome:
  * would otherwise take them straight back out. And the dialog's own guard was
  * computed before the question was asked, which a save that begins failing
  * while the user is reading it walks straight past.
+ *
+ * A failure says how far it got (`api/failure.ts`). Everything here except the
+ * disconnect is this device's own work, and a caller told only that something
+ * threw would have to answer "the server cannot be reached" for a store that
+ * refused a write with no server near it — which is every failure of `onServer:
+ * false`, where nothing is asked of the server at all.
  */
-export const letGoOfSource = async (
+export const letGoOfSource = (
+	db: NotesDatabase,
+	client: Pick<ApiClient, 'withCredential'>,
+	input: LetGoInput
+): Promise<LetGoResult> => failedAt('device', releasing(db, client, input));
+
+const releasing = async (
 	db: NotesDatabase,
 	client: Pick<ApiClient, 'withCredential'>,
 	input: LetGoInput

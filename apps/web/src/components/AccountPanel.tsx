@@ -11,6 +11,7 @@ import {
 	type InstanceConfig,
 	type Refusal,
 } from '../api/client.js';
+import { causeOf, failedAt, saying } from '../api/failure.js';
 import { folderToSearch } from '../routes/search.js';
 import { type ConnectedSource, connectedSources, showConnection } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
@@ -110,10 +111,29 @@ const refusalMessage = (refusal: Refusal): string =>
 		? 'This account cannot sync on this server, and it would not disconnect it either.'
 		: 'The server would not disconnect this account.';
 
+/**
+ * Why a disconnect did not happen, where it failed rather than being refused.
+ *
+ * Three answers, because there are three different things it can have been and
+ * they are not the same thing to do about. A call to our API that failed is
+ * worth trying again, and worth looking at the connection for. A failure that
+ * never left the device is neither: "stop syncing on this device" asks the
+ * server nothing at all, so a message about a connection would send the user to
+ * the one part that was not used. And a failure from neither says nothing about
+ * where it happened, so nothing is claimed about it.
+ *
+ * Which it was comes from `letGoOfSource`, which knows because it made the call
+ * (`api/failure.ts`), rather than from the shape or the words of the error.
+ */
 const failureMessage = (error: unknown): string =>
-	error instanceof ApiError
-		? 'The server could not disconnect the account. Try again.'
-		: 'The server cannot be reached, so the account is still connected.';
+	saying(error, {
+		server:
+			causeOf(error) instanceof ApiError
+				? 'The server could not disconnect the account. Try again.'
+				: 'The server cannot be reached, so the account is still connected.',
+		device: 'Something on this device went wrong, so the account was not disconnected. Try again.',
+		unknown: 'The account could not be disconnected. Try again.',
+	});
 
 /** A time today as a time, and any other as a date. */
 const when = (at: number): string => {
@@ -682,8 +702,13 @@ const Devices = ({
 	const revoke = (grantId: string) => {
 		setBusy(grantId);
 		setProblem(null);
-		void withHeld(database, client, connectionId)
-			.then((authed) => (authed === undefined ? undefined : authed.revokeGrant(grantId)))
+		// Each half labelled as it is called: the credential is read from this
+		// device and the grant is revoked on the server, and a failure of the
+		// first has nothing to do with a connection.
+		void failedAt('device', withHeld(database, client, connectionId))
+			.then((authed) =>
+				authed === undefined ? undefined : failedAt('server', authed.revokeGrant(grantId))
+			)
 			.then((result) => {
 				if (result?.ok === true) {
 					ask();
@@ -691,8 +716,14 @@ const Devices = ({
 				}
 				setProblem('That device is still signed in: the server would not remove it.');
 			})
-			.catch(() => {
-				setProblem('The server cannot be reached, so nothing was removed.');
+			.catch((error: unknown) => {
+				setProblem(
+					saying(error, {
+						server: 'The server cannot be reached, so nothing was removed.',
+						device: 'Something on this device went wrong, so nothing was removed. Try again.',
+						unknown: 'That device could not be removed. Try again.',
+					})
+				);
 			})
 			.finally(() => {
 				setBusy(null);
