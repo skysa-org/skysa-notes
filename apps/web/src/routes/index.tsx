@@ -11,7 +11,13 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
+import {
+	activeConnectionId,
+	db,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	noteRef,
+} from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
 	useFolderTree,
@@ -183,7 +189,11 @@ const Home = () => {
 				// It goes back to the source it was deleted from, which need not be
 				// the one showing by now: the notice outlives a change of source.
 				if (restored.connectionId !== (await activeConnectionId(db))) {
-					setProblem(`“${restored.title}” is back, in the source it was deleted from.`);
+					setProblem(
+						restored.connectionId === LOCAL_CONNECTION_ID
+							? `“${restored.title}” is back, on this device: its source is no longer connected.`
+							: `“${restored.title}” is back, in the source it was deleted from.`
+					);
 					return;
 				}
 				// Back where it was, open. By the row's own path, not the one it

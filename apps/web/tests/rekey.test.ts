@@ -263,3 +263,64 @@ describe('a note whose source is let go under an open editor', () => {
 		expect(await inB(db)).toEqual([]);
 	});
 });
+
+describe('a note whose rows another tab moved, of which this tab was told nothing', () => {
+	/** What `moveRowsTo` does to a row, done by hand so nothing here remembers it. */
+	const movedElsewhere = async (db: NotesDatabase, note: NoteRecord, to: Partial<NoteRecord>) => {
+		await db.notes.delete([note.connectionId, note.id]);
+		await db.notes.add({ ...note, ...to });
+	};
+
+	it('finds a note of the device’s own pile in the source a bind took it to', async () => {
+		const db = createDatabase(fresh());
+		const shown = await createNote(db, { title: 'Plan', body: 'as shown\n' });
+		await db.syncState.put({ connectionId: 'c-x', clientId: 'client' });
+		await movedElsewhere(db, shown, { connectionId: 'c-x' });
+
+		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
+
+		expect((await db.notes.get(['c-x', shown.id]))?.body).toBe('as shown\nand edited\n');
+		// Not a second note in a pile nothing shows while a source is connected.
+		expect(await db.notes.count()).toBe(1);
+	});
+
+	it('does not take another account’s note of the same id for it', async () => {
+		const db = createDatabase(fresh());
+		await db.syncState.bulkPut([
+			{ connectionId: 'c-a', clientId: 'client' },
+			{ connectionId: 'c-b', clientId: 'client' },
+		]);
+		const made = await createNote(db, { connectionId: 'c-a', title: 'Plan', body: 'same\n' });
+		const shown = { ...made, remoteId: 'a:1' };
+		// One folder in two accounts: same id, same text, same `created`.
+		await db.notes.add({ ...shown, connectionId: 'c-b', remoteId: 'b:1' });
+		// A's is deleted here; another tab lets A go, and its tombstone is named again.
+		await db.notes.delete(['c-a', shown.id]);
+		await db.syncState.delete('c-a');
+		await db.notes.add({
+			...shown,
+			connectionId: LOCAL_CONNECTION_ID,
+			id: 'named-again',
+			deletedLocally: 1,
+		});
+
+		const restored = await undeleteNote(db, { ...shown, deletedLocally: 1 });
+
+		// Made again on the device, rather than B's note handed back as "restored".
+		expect(restored.connectionId).toBe(LOCAL_CONNECTION_ID);
+		expect(restored.id).toBe(shown.id);
+		expect((await db.notes.get(['c-b', shown.id]))?.remoteId).toBe('b:1');
+	});
+
+	it('makes a deleted pile note again in the source a bind made, not in the hidden pile', async () => {
+		const db = createDatabase(fresh());
+		const note = await createNote(db, { title: 'Plan', body: 'mine\n' });
+		await deleteNote(db, note.id);
+		const deleted = (await getNote(db, note.id))!;
+		// Copy mode leaves a tombstone behind, so there is no row to follow.
+		await bindConnection(db, { connectionId: 'c-new', provider: 'dropbox', accountId: 'n' });
+		expect(await db.notes.count()).toBe(0);
+
+		expect((await undeleteNote(db, deleted)).connectionId).toBe('c-new');
+	});
+});

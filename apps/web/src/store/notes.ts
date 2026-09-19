@@ -380,18 +380,28 @@ export const saveNoteBody = async (
 	});
 
 /**
+ * Is this row the note that was shown, under another key? A move keeps when the
+ * note was made, and keeps the file it names unless it cuts the note loose from
+ * it. Another account's note of the same id — one folder copied into two — can
+ * share the first, since it is read from the file, and never the second.
+ */
+const sameNote = (row: NoteRecord, shown: NoteRecord): boolean =>
+	row.createdAt === shown.createdAt &&
+	(row.remoteId === undefined || shown.remoteId === undefined || row.remoteId === shown.remoteId);
+
+/**
  * The row of a note as an editor, or an undo, last saw it.
  *
- * Under its own key, normally. A source let go since had its rows moved to the
- * device's own pile, and the key went with the connection: this tab's moves are
- * remembered (`movedRows`), and one made from another tab is followed to the
- * pile by id, which is where it went unless it met a note of the same id there
- * and was named again — then the edit is kept as a copy beside that note, or
- * the note brought back in the pile, and nothing is lost either way.
+ * Under its own key, normally. A bind or an unbind since moved its rows under
+ * another connection, and the key went with them: this tab's moves are
+ * remembered (`movedRows`, a new id included), and one made from another tab is
+ * looked for by id, and taken only if it is the one row that is this same note
+ * (`sameNote`). Failing that the note is made again (`bringBack`), and nothing
+ * is lost either way.
  *
- * Never "the source showing". With two sources connected that is another
- * account, and an id found there is another note: the edit would be uploaded
- * into storage it has nothing to do with.
+ * Never simply "the row of this id under the source showing". With two sources
+ * connected that is another account, and an id found there may be another note:
+ * the edit would be uploaded into storage it has nothing to do with.
  */
 const whereShown = async (
 	db: NotesDatabase,
@@ -402,9 +412,10 @@ const whereShown = async (
 	const forwarded = movedRows.whereNow(shown);
 	const moved = forwarded === undefined ? undefined : await db.notes.get(forwarded);
 	if (moved !== undefined) return moved;
-	return (await homeOf(db, shown)) === shown.connectionId
-		? undefined
-		: db.notes.get([LOCAL_CONNECTION_ID, shown.id]);
+	const candidates = (await db.notes.where('id').equals(shown.id).toArray()).filter((row) =>
+		sameNote(row, shown)
+	);
+	return candidates.length === 1 ? candidates[0] : undefined;
 };
 
 const applyBody = (
@@ -465,14 +476,23 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
  * The source a note that has gone is made again in: its own, while this device
  * still has it. Not "whichever is showing" — undo outlives the view, and the
  * user may have turned to another source since, where this would put one
- * account's note into another account's folder. A source let go meanwhile has
- * nothing to go back to: its rows went to the device's own pile, and so does
- * this, for the same reason it is never the source showing.
+ * account's note into another account's folder.
+ *
+ * A source that is no longer there has nothing to go back to, and its rows say
+ * where to go instead: wherever this tab moved them, or — for a note of the
+ * device's own pile, which is only ever on screen while nothing is connected —
+ * the source showing, since a bind is what took the pile's rows and made its
+ * connection the one showing. A source let go had its rows sent to the pile,
+ * and so does this, for the same reason it is never simply the source showing.
  */
-const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> =>
-	(await db.syncState.get(note.connectionId)) === undefined
-		? LOCAL_CONNECTION_ID
-		: note.connectionId;
+const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> => {
+	const bound = async (connectionId: string | undefined): Promise<boolean> =>
+		connectionId !== undefined && (await db.syncState.get(connectionId)) !== undefined;
+	if (await bound(note.connectionId)) return note.connectionId;
+	const forwarded = movedRows.whereNow(note)?.[0];
+	if (await bound(forwarded)) return forwarded ?? LOCAL_CONNECTION_ID;
+	return note.connectionId === LOCAL_CONNECTION_ID ? activeConnectionId(db) : LOCAL_CONNECTION_ID;
+};
 
 const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
 	const shown = base.note;

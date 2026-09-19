@@ -23,6 +23,9 @@ type Named = Readonly<{ connectionId: string; id: string }>;
 export const movedRows = {
 	record: (from: Named, to: Named): void => {
 		moved.set(noteRef(from), [to.connectionId, to.id]);
+		// Back where it once was is not on from there: bound and let go again in
+		// one page life would otherwise leave the two pointing at each other.
+		moved.delete(noteRef(to));
 	},
 	/** The last place it is known to have got to, through every move since. */
 	whereNow: (note: Named): NoteKey | undefined => {
