@@ -118,6 +118,15 @@ describe('the app', () => {
 		);
 	});
 
+	it('says the server will not have the account when its operator refused it', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=refused', 'Work');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(
+			/cannot sync on this server/
+		);
+	});
+
 	it('puts the connect outcome away once the user moves on', async () => {
 		const user = userEvent.setup();
 		await createFolder(db, { name: 'Work' });

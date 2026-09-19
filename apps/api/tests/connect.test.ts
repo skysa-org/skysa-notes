@@ -7,6 +7,7 @@ import { createDb, schema } from '../src/db/client.js';
 import { challengeFor } from '../src/oauth/pkce.js';
 import { blindable, createD1 } from './d1.js';
 import {
+	allProvidersConfig,
 	bothProvidersConfig,
 	buildApp,
 	cookieNames,
@@ -511,6 +512,170 @@ describe('callback', () => {
  * The property the whole redesign exists for: the credential is generated on
  * the device and the server is only ever told its hash.
  */
+describe('callback, on a server whose operator chooses who may sync', () => {
+	const refusing = (seen: unknown[] = []) => ({
+		check: (subject: unknown) => {
+			seen.push(subject);
+			return Promise.resolve({ allowed: false, reason: 'not_on_the_list' });
+		},
+	});
+
+	it('stores nothing for an account the operator refuses, and says which refusal it was', async () => {
+		const seen: unknown[] = [];
+		const { db, connect } = buildApp({ entitlements: refusing(seen) });
+
+		const { callback } = await connect();
+
+		expect(callback.status).toBe(302);
+		expect(callback.headers.get('location')).toBe('/?connect=refused');
+		// Asked about the account, before there is a connection to name.
+		expect(seen).toEqual([
+			{ provider: 'dropbox', accountId: DEFAULT_ACCOUNT, displayName: 'user@example.com' },
+		]);
+		const drizzle = createDb(db);
+		expect(await drizzle.select().from(schema.connections)).toEqual([]);
+		// Nor the grant: a hash bound to nothing would be spent for good.
+		expect(await drizzle.select().from(schema.grants)).toEqual([]);
+	});
+
+	it('withdraws the consent the user has just given, where the provider has a call for it', async () => {
+		const { connect, stub } = buildApp({ entitlements: refusing() });
+
+		await connect();
+
+		const revoke = stub.calls.find((call) => call.url.endsWith('/auth/token/revoke'));
+		expect(revoke?.authorization).toMatch(/^Bearer /);
+	});
+
+	it('refuses all the same when the provider will not take the consent back', async () => {
+		const { db, connect } = buildApp({
+			entitlements: refusing(),
+			script: { revoke: () => new Response('no', { status: 500 }) },
+		});
+
+		const { callback } = await connect();
+
+		expect(callback.headers.get('location')).toBe('/?connect=refused');
+		expect(await createDb(db).select().from(schema.connections)).toEqual([]);
+	});
+
+	it('names the connection when the account already has one, and leaves it as it was', async () => {
+		const seen: unknown[] = [];
+		const allowed = { yes: true };
+		const { db, connect } = buildApp({
+			entitlements: {
+				check: (subject) => {
+					seen.push(subject);
+					return Promise.resolve(
+						allowed.yes ? { allowed: true } : { allowed: false, reason: 'lapsed' }
+					);
+				},
+			},
+		});
+		await connect();
+		const drizzle = createDb(db);
+		const [before] = await drizzle.select().from(schema.connections);
+		allowed.yes = false;
+
+		const { callback } = await connect();
+
+		expect(callback.headers.get('location')).toBe('/?connect=refused');
+		expect(seen[1]).toMatchObject({ connectionId: before?.id });
+		// Not re-sealed with the new refresh token, and no second device let in.
+		expect(await drizzle.select().from(schema.connections)).toEqual([before]);
+		expect(await drizzle.select().from(schema.grants)).toHaveLength(1);
+	});
+
+	it('leaves the grant an account already has alone: Google would take every token with it', async () => {
+		const allowed = { yes: true };
+		const { connect, stub } = buildApp({
+			config: allProvidersConfig(),
+			entitlements: {
+				check: () =>
+					Promise.resolve(
+						allowed.yes ? { allowed: true } : { allowed: false, reason: 'lapsed' }
+					),
+			},
+		});
+		await connect({ provider: 'gdrive' });
+		allowed.yes = false;
+
+		const { callback } = await connect({ provider: 'gdrive' });
+
+		expect(callback.headers.get('location')).toBe('/?connect=refused');
+		// The refresh token sealed in the row is one of those, and the lapse may
+		// be lifted: revoking here would leave every device told to reconnect.
+		expect(stub.calls.filter((call) => call.url.endsWith('/revoke'))).toEqual([]);
+	});
+
+	it('withdraws a first consent at Google too, and refuses where there is no call to make', async () => {
+		const { db, connect, stub } = buildApp({
+			config: allProvidersConfig(),
+			entitlements: refusing(),
+		});
+
+		const google = await connect({ provider: 'gdrive' });
+		// Microsoft has no endpoint for an app to withdraw its own grant.
+		const microsoft = await connect({ provider: 'onedrive' });
+
+		expect(google.callback.headers.get('location')).toBe('/?connect=refused');
+		expect(microsoft.callback.headers.get('location')).toBe('/?connect=refused');
+		expect(stub.calls.filter((call) => call.url.endsWith('/revoke'))).toHaveLength(1);
+		expect(await createDb(db).select().from(schema.connections)).toEqual([]);
+	});
+
+	it('goes back to the app, not to raw JSON, when the account cannot be looked up', async () => {
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const real = createD1();
+		const failing = { next: false };
+		const db = new Proxy(real, {
+			get: (target, property, receiver: unknown) => {
+				if (property !== 'prepare')
+					return Reflect.get(target, property, receiver) as unknown;
+				return (sql: string) => {
+					if (failing.next && /\bstorage_connections\b/i.test(sql)) {
+						failing.next = false;
+						throw new Error('D1_ERROR: the database is having a moment');
+					}
+					return target.prepare(sql);
+				};
+			},
+		});
+		const app = buildApp({ db });
+		const jar = createJar();
+		jar.absorb(await start(app.request, { credentialHash: HASH }, { jar }));
+
+		failing.next = true;
+		const response = await app.request(
+			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
+			{ cookies: jar }
+		);
+
+		expect(response.status).toBe(302);
+		expect(response.headers.get('location')).toBe('/?connect=failed');
+		logged.mockRestore();
+	});
+
+	it('takes a seam that throws for a no: nothing is stored, and nothing is a 500', async () => {
+		const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const { db, connect } = buildApp({
+			entitlements: { check: () => Promise.reject(new Error('billing is down')) },
+		});
+
+		const { callback } = await connect();
+
+		expect(callback.status).toBe(302);
+		expect(callback.headers.get('location')).toBe('/?connect=failed');
+		const drizzle = createDb(db);
+		expect(await drizzle.select().from(schema.connections)).toEqual([]);
+		expect(await drizzle.select().from(schema.grants)).toEqual([]);
+		expect(logged).toHaveBeenCalledWith(
+			expect.stringContaining('the entitlement check failed')
+		);
+		logged.mockRestore();
+	});
+});
+
 describe('what the server is allowed to know', () => {
 	it('never says a credential or its hash back, anywhere in the flow', async () => {
 		const app = buildApp();
@@ -533,10 +698,17 @@ describe('what the server is allowed to know', () => {
 
 		const grants = await app.request('/api/connection/grants', { credential });
 
+		// And the flow that ends in a refusal, which has the hash in hand too.
+		const refusingApp = buildApp({
+			entitlements: { check: () => Promise.resolve({ allowed: false, reason: 'no' }) },
+		});
+		const refused = (await refusingApp.connect({ credential })).callback;
+		expect(refused.headers.get('location')).toBe('/?connect=refused');
+
 		// Not by reading the code: by generating a secret this test knows and
 		// looking for it in everything the server ever sends.
 		const surfaces = await Promise.all(
-			[started, callback, connection, token, grants].map(async (response) => ({
+			[started, callback, connection, token, grants, refused].map(async (response) => ({
 				cookies: response.headers.getSetCookie().join('\n'),
 				// Everything a page, a log, a proxy or a referrer could keep.
 				visible: [
@@ -775,9 +947,13 @@ describe('one row per account, many devices per row', () => {
 		// fresh id — so the comparison says "bound elsewhere" about the one device
 		// it is not. Refusing that outright discards the new refresh token and
 		// tells a user whose credential is fine that connecting failed.
+		//
+		// Two reads: the callback's own, which names the row to the entitlement
+		// seam, comes before the one this is about.
+		blind.once();
 		blind.once();
 		const { callback } = await app.connect({ credential });
-		expect(blind.blinded).toBe(1);
+		expect(blind.blinded).toBe(2);
 
 		expect(callback.headers.get('location')).toBe('/?connect=ok');
 		expect((await app.request('/api/connection', { credential })).status).toBe(200);
@@ -822,9 +998,14 @@ describe('one row per account, many devices per row', () => {
 		// exist — a foreign key violation, which rolls its whole batch back rather
 		// than leaving a connection nothing can reach. The retry reads honestly
 		// and attaches to the winner's row.
+		//
+		// Two reads blinded, since the callback reads the account's row once
+		// before it stores anything, to name it to the entitlement seam — and a
+		// flow racing another sees nothing there either.
+		blind.once();
 		blind.once();
 		const second = await callback(two);
-		expect(blind.blinded).toBe(1);
+		expect(blind.blinded).toBe(2);
 
 		const drizzle = createDb(app.db);
 		expect(await drizzle.select().from(schema.connections)).toHaveLength(1);
@@ -852,16 +1033,20 @@ describe('one row per account, many devices per row', () => {
 
 		// Blinded for both attempts: a database that keeps answering staleness is
 		// not a race, and retrying it forever would be an outbound provider call
-		// per iteration.
+		// per iteration. The third is the entitlement seam's read, which comes
+		// first.
 		const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 		blind.once();
 		blind.once();
+		blind.once();
+		const before = blind.blinded;
 		const response = await app.request(
 			`/api/auth/connect/dropbox/callback?code=c&state=${flowStateOf(jar)}`,
 			{ cookies: jar }
 		);
 
 		expect(response.headers.get('location')).toBe('/?connect=failed');
+		expect(blind.blinded - before).toBe(3);
 		expect(log).toHaveBeenCalledWith(
 			expect.stringContaining('storing the connection failed on retry: Error: FOREIGN KEY')
 		);

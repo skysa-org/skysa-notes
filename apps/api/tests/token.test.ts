@@ -135,15 +135,19 @@ describe('POST /api/token', () => {
 
 	it('asks the entitlement seam about the account, not about a user', async () => {
 		const seen: unknown[] = [];
+		// Allowed when it connected — the callback asks too — and not since.
+		const trial = { over: false };
 		const app = buildApp({
 			entitlements: {
 				check: (subject) => {
+					if (!trial.over) return Promise.resolve({ allowed: true });
 					seen.push(subject);
 					return Promise.resolve({ allowed: false, reason: 'trial_expired' });
 				},
 			},
 		});
 		const { credential } = await app.connect();
+		trial.over = true;
 
 		const response = await post(app.request, credential);
 		expect(response.status).toBe(403);

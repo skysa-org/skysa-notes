@@ -31,7 +31,7 @@ export interface AppSearch {
  * message the server has no way to ask for is one nobody can be shown and
  * nobody can test, and this one described a product that does not exist.
  */
-export const CONNECT_OUTCOMES = ['ok', 'denied', 'failed', 'partial'] as const;
+export const CONNECT_OUTCOMES = ['ok', 'denied', 'failed', 'partial', 'refused'] as const;
 
 export type ConnectOutcome = (typeof CONNECT_OUTCOMES)[number];
 

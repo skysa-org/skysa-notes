@@ -8,7 +8,12 @@ import type { ProviderKind } from './config.js';
  */
 export interface EntitlementDecision {
 	allowed: boolean;
-	/** Shown to the user when `allowed` is false. Never include internal detail. */
+	/**
+	 * Why not, for the client: `/api/token` returns it with its `not_entitled`.
+	 * Never include internal detail. The OAuth callback reports only that the
+	 * account was refused — it answers with a redirect, and free text in a URL is
+	 * text anyone can put in a link.
+	 */
 	reason?: string;
 }
 
@@ -23,7 +28,12 @@ export interface EntitlementDecision {
  * opaque internal ids may" is not.
  */
 export interface EntitlementSubject {
-	readonly connectionId: string;
+	/**
+	 * The connection the account has on this server. Absent when the account is
+	 * connecting for the first time: the OAuth callback asks before anything is
+	 * stored, so there is no row yet to name (docs/PLAN.md §6).
+	 */
+	readonly connectionId?: string;
 	readonly provider: ProviderKind;
 	/** The provider's own id for the account. Stable across reconnects. */
 	readonly accountId: string;

@@ -40,7 +40,7 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 };
 
 /** `returnTo` may already carry a query of its own, so the separator varies. */
-type Outcome = 'ok' | 'denied' | 'failed' | 'partial';
+type Outcome = 'ok' | 'denied' | 'failed' | 'partial' | 'refused';
 
 const back = (returnTo: string, outcome: Outcome): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
@@ -198,6 +198,60 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		if (tokens.accountId === undefined) return c.redirect(back(flow.returnTo, 'failed'));
 
 		const displayName = await client.accountName(doFetch, tokens);
+
+		// The entitlement seam, asked here as well as at `/token`, and before
+		// anything is stored: an account the operator has refused would otherwise
+		// leave its refresh token in D1, unusable and unreachable, and its owner
+		// would learn of the refusal only once sync failed. `/token` still asks,
+		// since what is allowed today can lapse. A seam that throws has not said
+		// yes, so nothing is stored then either — and nor has a read that failed,
+		// which goes back to the app like every other failure after the exchange
+		// rather than leaving raw JSON in the address bar.
+		const known = await db.query.connections
+			.findFirst({
+				columns: { id: true },
+				where: and(
+					eq(schema.connections.provider, provider),
+					eq(schema.connections.accountId, tokens.accountId)
+				),
+			})
+			.catch((error: unknown) => {
+				logFailure('reading the connection failed', error);
+				return null;
+			});
+		if (known === null) return c.redirect(back(flow.returnTo, 'failed'));
+		const decision = await c
+			.get('entitlements')
+			.check({
+				...(known === undefined ? {} : { connectionId: known.id }),
+				provider,
+				accountId: tokens.accountId,
+				displayName,
+			})
+			.catch((error: unknown) => {
+				logFailure('the entitlement check failed', error);
+				return undefined;
+			});
+		if (decision === undefined) return c.redirect(back(flow.returnTo, 'failed'));
+		if (!decision.allowed) {
+			// The consent the user just gave is withdrawn where the provider has a
+			// call for it, so it does not linger on their account for a server that
+			// will not use it. Best effort, as on disconnect: the refusal stands
+			// either way.
+			//
+			// Only for an account with no connection here. Google's revoke takes
+			// every token the user has granted this app, not the one presented
+			// (https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke),
+			// so for an account already connected it would kill the refresh token
+			// in its row — and a refusal can be a lapse the operator lifts next
+			// week, to find every device told to reconnect. That account has a
+			// standing grant whatever happens here, and the tokens from this flow
+			// are dropped unstored, so there is nothing of this flow's to withdraw.
+			if (known === undefined) {
+				await client.revokeToken?.(doFetch, tokens.accessToken).catch(() => false);
+			}
+			return c.redirect(back(flow.returnTo, 'refused'));
+		}
 
 		const committed = await commit(db, {
 			provider,
