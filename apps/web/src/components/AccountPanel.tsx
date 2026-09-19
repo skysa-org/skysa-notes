@@ -50,8 +50,10 @@ import { otherLiveSources } from './MoveUnsent.js';
 import { useEscape } from './useEscape.js';
 
 /**
- * Where the storage account is connected and disconnected: one account, replace
- * or disconnect only (docs/PLAN.md, Phase 2).
+ * Where storage is connected, switched between and let go of: the sources this
+ * device holds, the one in front, the devices holding that one, and — for a
+ * source being let go — what becomes of the work its remote was never sent
+ * (docs/PLAN.md §6, "Letting a source go").
  *
  * What the device is bound to is read from the store, so the panel is right
  * offline and the moment a bind lands. What the server says is asked on open —
