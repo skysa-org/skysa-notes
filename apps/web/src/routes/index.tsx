@@ -23,7 +23,7 @@ import {
 } from '../store/hooks.js';
 import { createNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
-import { sourceName } from '../sync/account.js';
+import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
 import {
 	type AppSearch,
 	type ConnectOutcome,
@@ -325,8 +325,9 @@ const Home = () => {
 			 */}
 			{source?.detached !== undefined && (
 				<p className="banner" role="note">
-					{sourceName(source) ?? 'This source'} is disconnected. The notes here were never
-					sent to it, and nothing written here is synced. Reconnect it, or download or
+					{sourceName(source) ?? 'This source'} is disconnected. What is here has changes{' '}
+					{source.provider === undefined ? 'it' : PROVIDER_LABELS[source.provider]} was
+					never sent, and nothing written here is synced. Reconnect it, or download or
 					discard them, from the storage panel.
 				</p>
 			)}

@@ -6,6 +6,7 @@ import {
 	connectedSources,
 	detachConnection,
 	releaseConnection,
+	showConnection,
 } from '../src/store/connection.js';
 import { credentialFor } from '../src/store/credentials.js';
 import {
@@ -19,15 +20,18 @@ import {
 } from '../src/store/db.js';
 import { deletedHere } from '../src/store/deletedHere.js';
 import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
+import { goneSources } from '../src/store/goneSources.js';
+import { movedRows } from '../src/store/movedRows.js';
 import {
 	createNote,
 	deleteNote,
 	getNote,
 	importNoteFile,
+	listNotes,
 	saveNoteBody,
 } from '../src/store/notes.js';
 import { queueWrite } from '../src/store/queue.js';
-import { countOf, isEmpty, unsyncedIn } from '../src/store/unsynced.js';
+import { countOf, isEmpty, type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.js';
 
 /**
@@ -112,6 +116,14 @@ const opsUnder = async (db: NotesDatabase, connectionId: string) =>
 	(await db.opQueue.where('connectionId').equals(connectionId).sortBy('seq')).map(
 		(op) => `${op.op} ${op.targetPath ?? op.path}`
 	);
+
+/** What the user was shown of a source: everything it holds, as it stands now. */
+const shownNow = async (
+	db: NotesDatabase,
+	connectionId: string = ADA.connectionId
+): Promise<Seen> => seenIn(await unsyncedIn(db, connectionId));
+
+const NOTHING_SEEN: Seen = { notes: new Map(), folders: new Set(), rmdirs: new Set() };
 
 describe('letting a source go', () => {
 	it('removes what the remote has, and the source with it when that is everything', async () => {
@@ -310,26 +322,62 @@ describe('letting a source go', () => {
 		expect(await opsUnder(db, LOCAL_CONNECTION_ID)).toEqual([]);
 	});
 
-	it('lets a save held for a removed note go, and not one for a kept note', async () => {
+	it('keeps a save that arrives for a removed note: the remote has the note, not the edit', async () => {
 		const db = await connected();
 		const sent = await pushed(db, 'sent.md');
-		const unsent = await createNote(db, { ...ada, title: 'Unsent' });
+		await createNote(db, { ...ada, title: 'Unsent' });
 
 		await detachConnection(db, { connectionId: ADA.connectionId });
 
-		expect(deletedHere.has(sent)).toBe(true);
-		expect(deletedHere.has(unsent)).toBe(false);
-		// The editor that was open on it retries a save from before: the remote
-		// has the note, and it was taken off this device on purpose.
-		await saveNoteBody(db, sent.id, '# sent\n\nheld from before\n', {
+		// Not a delete of the user's, and never taken for one.
+		expect(await deletedHere.has(db, sent)).toBe(false);
+		// The editor that was open on it saves what it was holding — typed while
+		// the server was being asked, or a save that had been failing.
+		const saved = await saveNoteBody(db, sent.id, '# sent\n\nheld from before\n', {
 			origin: sent.bodyOrigin ?? '',
 			note: sent,
 		});
-		expect(await db.notes.get([ADA.connectionId, sent.id])).toBeUndefined();
-		expect(await db.notes.count()).toBe(1);
+
+		// As an unsent note of the source, in sight, and counted.
+		expect(saved).toMatchObject({
+			connectionId: ADA.connectionId,
+			id: sent.id,
+			body: '# sent\n\nheld from before\n',
+			dirty: 1,
+		});
+		expect(saved.remoteId).toBeUndefined();
+		expect(await pathsUnder(db, ADA.connectionId)).toEqual(['sent.md', 'unsent.md']);
+		expect(countOf(await unsyncedIn(db, ADA.connectionId))).toBe(2);
+		expect(await pathsUnder(db, LOCAL_CONNECTION_ID)).toEqual([]);
 	});
 
-	it('marks nothing when it did not happen', async () => {
+	it('keeps a note an editor still holds text for, whatever its row says', async () => {
+		const db = await connected();
+		const failing = await pushed(db, 'failing.md');
+		const sent = await pushed(db, 'sent.md');
+
+		// Clean, linked, nothing queued: the row is not the whole of what the
+		// user wrote, and the editors said so (`settleEditors`).
+		await detachConnection(db, {
+			connectionId: ADA.connectionId,
+			holding: new Set([noteRef(failing)]),
+		});
+
+		expect(await db.notes.get([ADA.connectionId, failing.id])).toMatchObject({
+			remoteId: failing.remoteId,
+			dirty: 0,
+		});
+		expect(await db.notes.get([ADA.connectionId, sent.id])).toBeUndefined();
+		// Kept for it: the source stays, with its row, for the save to land in.
+		expect((await db.syncState.get(ADA.connectionId))?.detached).toBeDefined();
+		const saved = await saveNoteBody(db, failing.id, '# failing\n\nat last\n', {
+			origin: failing.bodyOrigin ?? '',
+			note: failing,
+		});
+		expect(saved).toMatchObject({ remoteId: failing.remoteId, dirty: 1 });
+	});
+
+	it('changes nothing when it did not happen', async () => {
 		const db = await connected();
 		const sent = await pushed(db, 'sent.md');
 
@@ -337,8 +385,31 @@ describe('letting a source go', () => {
 			await detachConnection(db, { connectionId: ADA.connectionId, ifUnchangedSince: -1 })
 		).toBe(false);
 
-		expect(deletedHere.has(sent)).toBe(false);
 		expect(await getNote(db, sent.id, ada)).toBeDefined();
+		expect(goneSources.recall(ADA.connectionId)).toBeUndefined();
+	});
+
+	it('does not take a note deleted before a reconnect for one deleted since', async () => {
+		const db = await connected();
+		const sent = await pushed(db, 'sent.md');
+		await deleteNote(db, sent.id, ada);
+		expect(await deletedHere.has(db, sent)).toBe(true);
+		await detachConnection(db, { connectionId: ADA.connectionId });
+
+		// The same connection again, and its first pull brings the note back:
+		// another device restored it, or the delete never got there.
+		await bindConnection(db, ADA);
+		await db.notes.put({ ...sent, deletedLocally: 0, dirty: 0 });
+		// A pull in some other tab deletes it again before the editor's save lands.
+		await db.notes.delete([ADA.connectionId, sent.id]);
+
+		// Not the note the user deleted before: that binding is over. Kept.
+		expect(await deletedHere.has(db, sent)).toBe(false);
+		const saved = await saveNoteBody(db, sent.id, '# sent\n\nafter the reconnect\n', {
+			origin: sent.bodyOrigin ?? '',
+			note: sent,
+		});
+		expect(saved).toMatchObject({ connectionId: ADA.connectionId, dirty: 1 });
 	});
 
 	it('is refused by the sync store from then on, as a source that has gone is', async () => {
@@ -421,10 +492,11 @@ describe('discarding what a detached source holds', () => {
 		const { db, notes } = await detachedWith(['One', 'Two']);
 		await createFolder(db, { ...ada, name: 'Empty' });
 
+		const seen = await shownNow(db);
 		const outcome = await releaseConnection(db, {
 			connectionId: ADA.connectionId,
 			unsynced: 'discard',
-			seen: new Set(notes.map(noteRef)),
+			seen,
 		});
 
 		expect(outcome).toBe('released');
@@ -433,18 +505,18 @@ describe('discarding what a detached source holds', () => {
 		expect(await db.opQueue.count()).toBe(0);
 		expect(await db.syncState.count()).toBe(0);
 		expect(await db.prefs.get(ACTIVE_CONNECTION_KEY)).toBeUndefined();
-		// A save an editor was still holding for one of them does not undo it.
-		expect(notes.every((note) => deletedHere.has(note))).toBe(true);
+		expect(notes).toHaveLength(2);
 	});
 
-	it('never reaches a note the user was not shown: it is kept, and the source stays', async () => {
+	it('never reaches text the user was not shown: it is kept, and the source stays', async () => {
 		const { db, notes } = await detachedWith(['One', 'Two']);
-		const seen = new Set(notes.map(noteRef));
+		const seen = await shownNow(db);
 		// Another tab, after the list was put in front of the user.
 		await createFolder(db, { ...ada, name: 'Late' });
 		const late = await createNote(db, { ...ada, folderPath: 'Late', title: 'Typed since' });
-		// And into a note that *was* on the list: shown, so it goes with the rest.
-		await saveNoteBody(db, notes[0]!.id, '# One\n\nmore\n', undefined, ada);
+		// And into a note that *was* on the list — the same note, by name, but
+		// not as it was shown: a chapter the user never saw go on the list.
+		await saveNoteBody(db, notes[0]!.id, '# One\n\nan hour of work\n', undefined, ada);
 
 		const outcome = await releaseConnection(db, {
 			connectionId: ADA.connectionId,
@@ -453,12 +525,49 @@ describe('discarding what a detached source holds', () => {
 		});
 
 		expect(outcome).toBe('detached');
-		expect(await pathsUnder(db, ADA.connectionId)).toEqual([late.path]);
+		expect(await pathsUnder(db, ADA.connectionId)).toEqual([late.path, notes[0]!.path].sort());
+		expect((await db.notes.get([ADA.connectionId, notes[0]!.id]))?.body).toBe(
+			'# One\n\nan hour of work\n'
+		);
+		expect(await db.notes.get([ADA.connectionId, notes[1]!.id])).toBeUndefined();
 		expect(await foldersUnder(db, ADA.connectionId)).toEqual(['Late']);
-		expect(await opsUnder(db, ADA.connectionId)).toEqual(['mkdir Late', `write ${late.path}`]);
+		expect(await opsUnder(db, ADA.connectionId)).toEqual(
+			expect.arrayContaining(['mkdir Late', `write ${late.path}`, `write ${notes[0]!.path}`])
+		);
 		expect((await db.syncState.get(ADA.connectionId))?.detached).toBeDefined();
-		expect(deletedHere.has(late)).toBe(false);
-		expect(deletedHere.has(notes[1]!)).toBe(true);
+	});
+
+	it('keeps a notebook made, or a notebook delete queued, after the list was shown', async () => {
+		const { db } = await detachedWith(['One']);
+		const seen = await shownNow(db);
+		await createFolder(db, { ...ada, name: 'Late' });
+
+		expect(
+			await releaseConnection(db, {
+				connectionId: ADA.connectionId,
+				unsynced: 'discard',
+				seen,
+			})
+		).toBe('detached');
+		expect(await foldersUnder(db, ADA.connectionId)).toEqual(['Late']);
+		expect(await db.notes.count()).toBe(0);
+
+		// Shown again, with the notebook on the list, and then a directory
+		// deleted since — its `rmdir` was not shown either.
+		const again = await shownNow(db);
+		await db.folders.put({ ...ada, path: 'Gone', remoteId: 'f:gone', createdAt: 0 });
+		await deleteFolder(db, 'Gone', ada);
+		expect(
+			await releaseConnection(db, {
+				connectionId: ADA.connectionId,
+				unsynced: 'discard',
+				seen: again,
+			})
+		).toBe('detached');
+		// The notebook that was shown stays too: nothing shown is discarded
+		// while anything unshown keeps the source, rather than half of it.
+		expect(await opsUnder(db, ADA.connectionId)).toEqual(['mkdir Late', 'rmdir Gone']);
+		expect(await foldersUnder(db, ADA.connectionId)).toEqual(['Late']);
 	});
 
 	it('discards nothing at all when nothing was shown', async () => {
@@ -467,11 +576,33 @@ describe('discarding what a detached source holds', () => {
 		const outcome = await releaseConnection(db, {
 			connectionId: ADA.connectionId,
 			unsynced: 'discard',
-			seen: new Set(),
+			seen: NOTHING_SEEN,
 		});
 
 		expect(outcome).toBe('detached');
 		expect(await db.notes.get([ADA.connectionId, notes[0]!.id])).toEqual(notes[0]);
+	});
+
+	it('refuses a source that has been connected again meanwhile', async () => {
+		const { db, notes } = await detachedWith(['One']);
+		const seen = await shownNow(db);
+		// Another tab, while the question was open.
+		await holdCredential(db, ADA.connectionId);
+		await bindConnection(db, ADA);
+		const state = await db.syncState.get(ADA.connectionId);
+
+		const outcome = await releaseConnection(db, {
+			connectionId: ADA.connectionId,
+			unsynced: 'discard',
+			seen,
+		});
+
+		// Live, and left alone: its rows are the remote's now, and taking them
+		// with the credential would strand the connection on the server.
+		expect(outcome).toBe('reconnected');
+		expect(await db.notes.get([ADA.connectionId, notes[0]!.id])).toEqual(notes[0]);
+		expect(await db.syncState.get(ADA.connectionId)).toEqual(state);
+		expect(await credentialFor(db, ADA.connectionId)).toBeDefined();
 	});
 
 	it('leaves every other source exactly as it was', async () => {
@@ -484,7 +615,7 @@ describe('discarding what a detached source holds', () => {
 		await releaseConnection(db, {
 			connectionId: ADA.connectionId,
 			unsynced: 'discard',
-			seen: new Set(notes.map(noteRef)),
+			seen: await shownNow(db),
 		});
 
 		expect(await pathsUnder(db, BOB.connectionId)).toEqual(['copy.md', his.path].sort());
@@ -566,6 +697,74 @@ describe('connecting again after a source was detached', () => {
 		expect(await activeConnectionId(db)).toBe('c-ada-2');
 	});
 
+	it('into the same account already live under another id: its rows yield to the pulled ones', async () => {
+		const db = await connected();
+		const edited = await pushed(db, 'edited.md');
+		await saveNoteBody(db, edited.id, '# edited\n\nmine, here\n', undefined, ada);
+		const renamed = await pushed(db, 'renamed.md');
+		await db.opQueue.add({
+			...ada,
+			op: 'move',
+			noteId: renamed.id,
+			path: 'renamed.md',
+			targetPath: 'moved.md',
+			attempts: 0,
+			queuedAt: 0,
+		});
+		await db.notes.update([ADA.connectionId, renamed.id], { path: 'moved.md' });
+		const doomed = await pushed(db, 'doomed.md');
+		await deleteNote(db, doomed.id, ada);
+		await detachConnection(db, { connectionId: ADA.connectionId });
+		// The same account, connected again under a new id in another tab, which
+		// has since pulled the same three files; this tab's bind lands after.
+		const AGAIN = { ...ADA, connectionId: 'c-ada-2' };
+		await db.syncState.put({ ...AGAIN, clientId: 'client', cursor: 'cursor-2' });
+		// The same notes, as the pull under the new id left them: same id, same
+		// file, a newer version.
+		const later = async (note: NoteRecord, path: string): Promise<NoteRecord> => {
+			const { source: _source, ...pulled } = note;
+			const row: NoteRecord = {
+				...pulled,
+				connectionId: AGAIN.connectionId,
+				path,
+				body: `# ${path}\n\nchanged there\n`,
+				dirty: 0,
+				deletedLocally: 0,
+				remoteVersion: 'v2',
+			};
+			await db.notes.put(row);
+			return row;
+		};
+		const theirs = {
+			edited: await later(edited, 'edited.md'),
+			renamed: await later(renamed, 'renamed.md'),
+			doomed: await later(doomed, 'doomed.md'),
+		};
+
+		await bindConnection(db, AGAIN);
+
+		// One row per file. The pulled row is the file's, untouched.
+		expect(await db.notes.get([AGAIN.connectionId, edited.id])).toEqual(theirs.edited);
+		expect(await db.notes.get([AGAIN.connectionId, renamed.id])).toEqual(theirs.renamed);
+		expect(await db.notes.get([AGAIN.connectionId, doomed.id])).toEqual(theirs.doomed);
+		// The edit survives beside it, as a conflict copy: fresh id, no file,
+		// owed a write; and an editor still open on it is pointed at the copy.
+		const rows = await db.notes.where('connectionId').equals(AGAIN.connectionId).toArray();
+		const copy = rows.find((note) => note.body === '# edited\n\nmine, here\n');
+		expect(copy).toMatchObject({ dirty: 1, deletedLocally: 0 });
+		expect(copy?.id).not.toBe(edited.id);
+		expect(copy?.remoteId).toBeUndefined();
+		expect(copy?.path).toMatch(/^edited \(conflict .*\)\.md$/);
+		expect(movedRows.whereNow(edited)).toEqual([AGAIN.connectionId, copy?.id]);
+		// The rename and the delete held no text, and are dropped in favour of
+		// the file as it is; an editor on either lands on the pulled row.
+		expect(rows).toHaveLength(4);
+		expect(await opsUnder(db, AGAIN.connectionId)).toEqual([`write ${copy?.path ?? ''}`]);
+		expect(movedRows.whereNow(renamed)).toEqual([AGAIN.connectionId, renamed.id]);
+		expect(movedRows.whereNow(doomed)).toEqual([AGAIN.connectionId, doomed.id]);
+		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
+	});
+
 	it('another account absorbs nothing: the detached source stays exactly as it is', async () => {
 		const { db, ops } = await detached();
 		const before = {
@@ -645,13 +844,75 @@ describe('a save that arrives after its source has gone', () => {
 		expect(await activeConnectionId(db)).toBe(BOB.connectionId);
 	});
 
+	it('is made again as the source was, where this tab let it go, and goes home with it', async () => {
+		const db = await connected();
+		const shown = await pushed(db, 'plan.md');
+		// This tab's own disconnect, with nothing unsent: the whole source went,
+		// and this tab remembers whose it was.
+		await detachConnection(db, { connectionId: ADA.connectionId });
+		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
+
+		const saved = await saveNoteBody(db, shown.id, '# plan\n\nlate\n', {
+			origin: shown.bodyOrigin ?? '',
+			note: shown,
+		});
+
+		expect(saved.connectionId).toBe(ADA.connectionId);
+		expect(await db.syncState.get(ADA.connectionId)).toMatchObject({
+			provider: 'dropbox',
+			accountId: 'dbid:ada',
+			displayName: 'ada@example.com',
+			detached: { reason: 'interrupted' },
+		});
+		expect((await connectedSources(db)).map((source) => source.displayName)).toEqual([
+			'ada@example.com',
+		]);
+		// So the same account, back under a new id, takes the note home.
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+		expect((await db.notes.get(['c-ada-2', shown.id]))?.body).toBe('# plan\n\nlate\n');
+		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
+	});
+
+	it('never takes the screen from the device’s own notes', async () => {
+		const db = await connected();
+		const sent = await pushed(db, 'sent.md');
+		await detachConnection(db, { connectionId: ADA.connectionId });
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		// Nothing connected, so the user writes on the device itself.
+		const own = await createNote(db, { title: 'Written with nothing connected' });
+		expect(own.connectionId).toBe(LOCAL_CONNECTION_ID);
+
+		// A tab that never heard of the detach saves into the removed note.
+		await saveNoteBody(db, sent.id, '# sent\n\nlate\n', {
+			origin: sent.bodyOrigin ?? '',
+			note: sent,
+		});
+
+		// The source is back, detached, and the device's notes are still what
+		// is showing — a keystroke into an old note does not hide the new one.
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect((await listNotes(db)).map((note) => note.title)).toEqual([
+			'Written with nothing connected',
+		]);
+		// Both are on offer, and either can be shown.
+		expect(
+			(await connectedSources(db)).map((source) => [source.connectionId, source.active])
+		).toEqual([
+			[ADA.connectionId, false],
+			[LOCAL_CONNECTION_ID, true],
+		]);
+		expect(await showConnection(db, ADA.connectionId)).toBe(true);
+		expect((await listNotes(db)).map((note) => note.path)).toEqual(['sent.md']);
+		expect(await showConnection(db, LOCAL_CONNECTION_ID)).toBe(true);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
 	it('goes into the source as it stands when that is still here, detached', async () => {
 		const db = await connected();
 		const shown = await pushed(db, 'plan.md');
 		await createNote(db, { ...ada, title: 'Unsent' });
 		// Another tab's detach: the clean note removed, the source kept.
 		await detachConnection(db, { connectionId: ADA.connectionId });
-		deletedHere.delete(shown);
 		const state = await db.syncState.get(ADA.connectionId);
 
 		const saved = await saveNoteBody(db, shown.id, '# plan\n\nlate\n', {

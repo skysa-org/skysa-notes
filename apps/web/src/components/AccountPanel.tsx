@@ -17,6 +17,7 @@ import { credentialFor } from '../store/credentials.js';
 import {
 	activeConnectionId,
 	db as defaultDb,
+	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
 	type QueuedOperation,
@@ -40,6 +41,7 @@ import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
+import { useEscape } from './useEscape.js';
 
 /**
  * Where the storage account is connected and disconnected: one account, replace
@@ -248,6 +250,14 @@ const NotConnected = ({ client, database, config, returnTo, navigate }: LocalPro
 					Connect {PROVIDER_LABELS[provider]}
 				</ConnectButton>
 			))}
+			<Sources
+				client={client}
+				database={database}
+				config={config}
+				returnTo={returnTo}
+				another={false}
+				{...(navigate === undefined ? {} : { navigate })}
+			/>
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">
 					Connecting storage needs a sign-in this server does not offer yet.
@@ -435,7 +445,12 @@ const Sources = ({
 	config,
 	returnTo,
 	navigate,
-}: LocalProps & { config: Asked<InstanceConfig> }) => {
+	another = true,
+}: LocalProps & {
+	config: Asked<InstanceConfig>;
+	/** Whether to offer connecting another account: not where the panel already offers the first. */
+	another?: boolean;
+}) => {
 	const sources = useLiveQuery(() => connectedSources(database), [database]);
 	const settings = answer(config);
 	const offerable =
@@ -467,19 +482,20 @@ const Sources = ({
 					))}
 				</ul>
 			)}
-			{offerable.map((provider) => (
-				<ConnectButton
-					key={provider}
-					db={database}
-					client={client}
-					provider={provider}
-					returnTo={returnTo}
-					className="link"
-					{...(navigate === undefined ? {} : { navigate })}
-				>
-					Connect another {PROVIDER_LABELS[provider]} account
-				</ConnectButton>
-			))}
+			{another &&
+				offerable.map((provider) => (
+					<ConnectButton
+						key={provider}
+						db={database}
+						client={client}
+						provider={provider}
+						returnTo={returnTo}
+						className="link"
+						{...(navigate === undefined ? {} : { navigate })}
+					>
+						Connect another {PROVIDER_LABELS[provider]} account
+					</ConnectButton>
+				))}
 		</div>
 	);
 };
@@ -489,15 +505,21 @@ const Sources = ({
  *
  * The account id when there is one, because the case this list exists for is
  * two accounts at the same provider — "Dropbox" twice, one of them "showing",
- * is not a choice anyone can make.
+ * is not a choice anyone can make. Not the account's name: that is written
+ * onto a row only when the server is asked about it, which is only while it is
+ * the one in front, so a list naming live sources by it would name a source
+ * one way until it was shown and another way after.
  *
  * A detached source is named as its own panel names it (`sourceName`: by what
  * the server last called the account, which is what the user knows it by), and
  * says that it is disconnected and how much it holds. That is the whole reason
  * it is on the list, and a line that looked like any other source would leave
- * the user to find out by switching to it.
+ * the user to find out by switching to it. The device's own pile is listed
+ * only while it holds something (`connectedSources`), and is named for what it
+ * is: not an account.
  */
 const sourceLabel = (source: ConnectedSource): string => {
+	if (source.connectionId === LOCAL_CONNECTION_ID) return 'On this device only';
 	if (source.detached !== undefined) {
 		return `${sourceName(source) ?? 'A source'} — disconnected, ${String(source.detached.unsent)} not sent`;
 	}
@@ -822,6 +844,11 @@ const Connected = ({
 		// count is live and follows the write.
 		if (next) void settleEditors();
 	};
+	const cancel = useCallback(() => {
+		focusNext.current = 'open';
+		setConfirming(false);
+	}, []);
+	useEscape(panel, confirming, cancel);
 
 	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
 	const displayName = accountName(answer(account), bound);
@@ -929,6 +956,7 @@ const Connected = ({
 interface DetachedProps extends LocalProps {
 	bound: SyncStateRecord;
 	download: (notes: readonly NoteRecord[]) => void;
+	onReleased: () => void;
 }
 
 /**
@@ -948,6 +976,7 @@ const Detached = ({
 	config,
 	bound,
 	download,
+	onReleased,
 	returnTo,
 	navigate,
 }: DetachedProps) => {
@@ -963,6 +992,7 @@ const Detached = ({
 			database={database}
 			bound={bound}
 			download={download}
+			onReleased={onReleased}
 			reconnect={
 				reconnectable && (
 					<ConnectButton
@@ -1012,6 +1042,25 @@ export const AccountPanel = ({
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
 	const { disconnects, disconnect, clear } = useDisconnects(database, client);
+
+	// A discard takes its source, and its panel, with it: the button the user
+	// pressed is gone and the focus would fall to the page. It goes to the next
+	// panel instead, once that has rendered — to the source list, which is what
+	// is left to choose from, or failing that whatever the panel offers first.
+	const frame = useRef<HTMLDivElement>(null);
+	const landing = useRef(false);
+	const showing = bound?.state?.connectionId ?? null;
+	useEffect(() => {
+		if (!landing.current) return;
+		landing.current = false;
+		const next =
+			frame.current?.querySelector<HTMLElement>('.account-sources button') ??
+			frame.current?.querySelector<HTMLElement>('button');
+		next?.focus();
+	}, [showing]);
+	const released = () => {
+		landing.current = true;
+	};
 
 	useEffect(() => {
 		void client
@@ -1065,52 +1114,56 @@ export const AccountPanel = ({
 	if (bound === undefined) return null;
 	const returnTo = returnPath(href);
 
-	if (bound.state === undefined) {
-		return (
-			<NotConnected
-				client={client}
-				database={database}
-				config={config}
-				returnTo={returnTo}
-				{...(navigate === undefined ? {} : { navigate })}
-			/>
-		);
-	}
+	const panel = () => {
+		if (bound.state === undefined) {
+			return (
+				<NotConnected
+					client={client}
+					database={database}
+					config={config}
+					returnTo={returnTo}
+					{...(navigate === undefined ? {} : { navigate })}
+				/>
+			);
+		}
 
-	if (bound.state.detached !== undefined) {
+		if (bound.state.detached !== undefined) {
+			return (
+				<Detached
+					key={bound.state.connectionId}
+					client={client}
+					database={database}
+					config={config}
+					bound={bound.state}
+					download={download}
+					onReleased={released}
+					returnTo={returnTo}
+					{...(navigate === undefined ? {} : { navigate })}
+				/>
+			);
+		}
+
 		return (
-			<Detached
+			// Keyed by source. Everything under here holds state about one source — a
+			// confirm half way through, a re-scan being asked about, a list of devices
+			// — and unkeyed it survives "Show other source" and is rendered, and acted
+			// on, under the other one's name. What has to outlive the switch is handed
+			// down instead, by the source it names.
+			<Connected
 				key={bound.state.connectionId}
+				disconnects={disconnects}
+				onDisconnect={disconnect}
+				onUnbound={clear}
 				client={client}
 				database={database}
-				config={config}
+				sync={sync}
 				bound={bound.state}
-				download={download}
+				config={config}
+				account={account}
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
 			/>
 		);
-	}
-
-	return (
-		// Keyed by source. Everything under here holds state about one source — a
-		// confirm half way through, a re-scan being asked about, a list of devices
-		// — and unkeyed it survives "Show other source" and is rendered, and acted
-		// on, under the other one's name. What has to outlive the switch is handed
-		// down instead, by the source it names.
-		<Connected
-			key={bound.state.connectionId}
-			disconnects={disconnects}
-			onDisconnect={disconnect}
-			onUnbound={clear}
-			client={client}
-			database={database}
-			sync={sync}
-			bound={bound.state}
-			config={config}
-			account={account}
-			returnTo={returnTo}
-			{...(navigate === undefined ? {} : { navigate })}
-		/>
-	);
+	};
+	return <div ref={frame}>{panel()}</div>;
 };

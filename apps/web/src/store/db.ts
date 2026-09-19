@@ -148,6 +148,15 @@ export interface SyncStateRecord {
 	 */
 	resumeUnverified?: true;
 	/**
+	 * When this connection was last bound (`bindConnection`), so that what a tab
+	 * remembers about the connection as it was — a note deleted here, whose row
+	 * a save must not bring back (`store/deletedHere.ts`) — can be told from what
+	 * it remembers about an earlier binding of the same id. A reconnect pulls
+	 * the remote afresh, and a note the remote still has is not one the user
+	 * deleted before. Dropped with the binding (`detachedFrom`).
+	 */
+	boundAt?: number;
+	/**
 	 * The device no longer reaches this source, and it is still here because it
 	 * holds something its remote was never sent (`detachConnection` in
 	 * `store/connection.ts`). Everything the remote has is gone from the device;
@@ -160,10 +169,11 @@ export interface SyncStateRecord {
 	 * the sync store refuses it, and it has no credential, cursor, root or
 	 * token. It can still be shown and written in.
 	 *
-	 * `revoked`: the server stopped answering for the connection, or the user
-	 * disconnected it. `interrupted`: the row had already gone when a save from
-	 * another tab arrived for one of its notes, and was made again to hold it
-	 * (`ensureDetached`). Not indexed, so it needs no version of its own.
+	 * `disconnected`: the user let it go, here. `revoked`: the server stopped
+	 * answering for the connection — disconnected from another device, or the
+	 * credential revoked. `interrupted`: the row had already gone when a save
+	 * from another tab arrived for one of its notes, and was made again to hold
+	 * it (`ensureDetached`). Not indexed, so it needs no version of its own.
 	 */
 	detached?: Detached;
 }
@@ -171,7 +181,7 @@ export interface SyncStateRecord {
 export interface Detached {
 	/** Epoch milliseconds. */
 	at: number;
-	reason: 'revoked' | 'interrupted';
+	reason: 'disconnected' | 'revoked' | 'interrupted';
 }
 
 /**
@@ -254,6 +264,10 @@ export const noteKey = (note: Pick<NoteRecord, 'connectionId' | 'id'>): NoteKey 
  */
 export const noteRef = (note: Pick<NoteRecord, 'connectionId' | 'id'>): string =>
 	JSON.stringify(noteKey(note));
+
+/** Whether a `noteRef` names a note of this connection. */
+export const refIn = (ref: string, connectionId: string): boolean =>
+	ref.startsWith(`${JSON.stringify([connectionId]).slice(0, -1)},`);
 
 /**
  * Built without subclassing Dexie: the table properties are declared through the
@@ -389,6 +403,10 @@ export const activeConnectionId = async (
 	// notes into that table's observability set — so each sync run, which writes
 	// a cursor to it, would re-run every query on the screen.
 	const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
+	// The device's own pile can be chosen by name: it has no row to check, and
+	// it is chosen exactly so that a source made again behind it cannot take the
+	// screen from it (`ensureDetached`).
+	if (chosen === LOCAL_CONNECTION_ID) return chosen;
 	if (chosen !== undefined && (await db.syncState.get(chosen)) !== undefined) return chosen;
 	// No choice recorded, or one that names a source this device no longer has.
 	// One row is not a choice at all; several with no valid preference is a

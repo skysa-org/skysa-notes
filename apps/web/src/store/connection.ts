@@ -1,6 +1,7 @@
 import {
 	ancestorPaths,
 	basename,
+	conflictPath,
 	isNotFoundError,
 	isUnreadableError,
 	joinPath,
@@ -24,13 +25,21 @@ import {
 	type OpQueueRecord,
 	type SyncStateRecord,
 } from './db.js';
-import { deletedHere } from './deletedHere.js';
 import { detachedFrom } from './detached.js';
+import { goneSources } from './goneSources.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
 import { queueMkdir, queueWrite } from './queue.js';
-import { countOf, isEmpty, type Unsynced, unsyncedIn } from './unsynced.js';
+import {
+	countOf,
+	isEmpty,
+	type Seen,
+	unseenIn,
+	type Unsynced,
+	unsyncedIn,
+	wasSeen,
+} from './unsynced.js';
 
 /**
  * Which storage account the notes on this device belong to.
@@ -176,6 +185,15 @@ interface Placed<T> {
  * was, file and all. Its file still says the old id until the note is next
  * written, which is how any note stands whose file names an id its source
  * already had (`idForNewNote` in `packages/core`).
+ *
+ * Two rows can also meet over one *file*: a detached source's rows resuming
+ * into a connection that is already live for the same account, and has pulled
+ * the file a kept row still names. The remote is the truth, and its row is the
+ * one that stands. A kept note with text of its own becomes a conflict copy
+ * beside it — fresh id, no file, a free name, owed a write — so nothing written
+ * is lost and nothing is written over the file. A kept rename or delete, which
+ * holds no text, is dropped in its favour. Either way an editor open on the
+ * kept row is pointed at the row that stands for it (`movedRows`).
  */
 const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): Promise<Moved> => {
 	if (from === target) return { notes: [], folders: [], linked: false };
@@ -224,15 +242,37 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	const held = new Set(
 		notes.filter((note) => note.connectionId === target).map((note) => note.id)
 	);
-	const renamed = new Map(
-		leaving.filter((note) => held.has(note.id)).map((note) => [note.id, crypto.randomUUID()])
+	const targetsFile = new Map(
+		notes.flatMap((note) =>
+			note.connectionId === target && note.remoteId !== undefined
+				? [[note.remoteId, note]]
+				: []
+		)
 	);
-	const idNow = (id: string): string => renamed.get(id) ?? id;
+	const twinOf = (note: NoteRecord): NoteRecord | undefined =>
+		mode === 'resume' && note.remoteId !== undefined
+			? targetsFile.get(note.remoteId)
+			: undefined;
+	// Dropped for the target's row of the same file: nothing of its own to keep.
+	const yielding = (note: NoteRecord): boolean =>
+		twinOf(note) !== undefined && (note.deletedLocally === 1 || note.dirty === 0);
+	// Where each row ends up: its own id, a fresh one where the target holds the
+	// id or the file, or the target's own row where this one yields to it.
+	const landing = new Map(
+		leaving.map((note): [string, string] => {
+			const twin = twinOf(note);
+			if (twin !== undefined)
+				return [note.id, yielding(note) ? twin.id : crypto.randomUUID()];
+			return [note.id, held.has(note.id) ? crypto.randomUUID() : note.id];
+		})
+	);
+	const idNow = (id: string): string => landing.get(id) ?? id;
 	const notesPlaced = leaving.flatMap((note): Placed<NoteRecord>[] => {
+		if (yielding(note)) return [];
 		// Before anything else changes: these are the bytes it had.
 		const pinned: NoteRecord = {
 			...note,
-			id: renamed.get(note.id) ?? note.id,
+			id: idNow(note.id),
 			source: noteFile(note),
 			connectionId: target,
 		};
@@ -242,6 +282,14 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 			return mode === 'resume' ? [{ row: pinned, owed: false }] : [];
 		}
 		const wanted = spelling.note(note.path);
+		if (twinOf(note) !== undefined) {
+			// Its text, beside the file it was an edit to, as a conflict copy is
+			// named (§7); the file as the user was writing it, under the new id.
+			const path = conflictPath(wanted, new Date(), [...taken]);
+			taken.add(foldPath(path));
+			const { source: _source, ...copy } = withoutRemote({ ...pinned, path, dirty: 1 });
+			return [{ row: { ...copy, source: noteFile(copy) }, owed: true }];
+		}
 		const path = taken.has(foldPath(wanted)) ? freePath(wanted, [...taken]) : wanted;
 		taken.add(foldPath(path));
 		if (mode === 'resume' && path === note.path) {
@@ -261,13 +309,17 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	});
 
 	// A row owed to the new connection as though new owes what it is now, which
-	// the caller queues; what was queued for it was owed to its old file. Every
-	// other row takes its queue with it, in the order it was made.
+	// the caller queues; what was queued for it was owed to its old file. A row
+	// that yielded owes nothing: the target's row is the file's. Every other row
+	// takes its queue with it, in the order it was made.
 	const owed = new Set(
 		notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row.id)
 	);
+	const yielded = new Set(leaving.filter(yielding).map((note) => note.id));
 	const dropped = ops.filter(
-		(op) => mode === 'copy' || (op.noteId !== undefined && owed.has(idNow(op.noteId)))
+		(op) =>
+			mode === 'copy' ||
+			(op.noteId !== undefined && (owed.has(idNow(op.noteId)) || yielded.has(op.noteId)))
 	);
 	await db.opQueue.bulkDelete(dropped.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
 	const carried = ops.filter((op) => !dropped.includes(op));
@@ -504,6 +556,10 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 			...(moved.linked || current?.resumeUnverified === true
 				? { resumeUnverified: true }
 				: {}),
+			// This binding, as distinct from any earlier one of the same id: what a
+			// tab remembers of the source as it was bound before is stale from here
+			// (`store/deletedHere.ts`).
+			boundAt: Date.now(),
 		};
 		await db.syncState.put(state);
 		// Connecting a source is choosing it, which is the only moment the app can
@@ -512,6 +568,10 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 
 		await queueOwed(db, input.connectionId, moved);
 		return true;
+	}).then((bound) => {
+		// Bound again, its row says whose it is; nothing has to remember for it.
+		if (bound) goneSources.forget(input.connectionId);
+		return bound;
 	});
 
 /**
@@ -609,8 +669,9 @@ export type ResumeVerdict = 'verified' | 'resumed' | 'copied' | 'superseded';
  *
  * A resume trusts the first full scan to say what was deleted while the device
  * was away. If the app folder was emptied, or replaced — the scan cannot tell
- * the two apart — every note it does not see would be deleted here too, and
- * the dialog said the notes stay on this device. So a few of the notes' own
+ * the two apart — every note it does not see would be deleted here too: the
+ * rows a detach kept are the ones the remote was never sent in full, and the
+ * text in them exists nowhere else. So a few of the notes' own
  * files are looked for by id first, across notebooks. One found, and the resume
  * stands. None, and the rows are copied instead: cut loose and written back, so
  * nothing a scan does not see is taken from the device.
@@ -665,13 +726,14 @@ export const verifyResume = async (
  * Every row of a source that is not being kept, removed; answers the notes that
  * went. Inside the caller's transaction.
  *
- * What is kept is what `keeping` says of the notes the remote was never sent
- * in full — unsent text, a rename owed, a delete owed — with every op queued
- * for them, exactly as they stand: a note that *was* pushed keeps the file it
- * names and the version it last agreed on, so that the same account coming
- * back finds it an edit to that file and not a second note beside it. With
- * them stay the notebooks nothing has made on the remote, their `mkdir`s, and
- * every `rmdir` still owed.
+ * What is kept is `staying` — the caller's choice among the notes the remote
+ * was never sent in full (unsent text, a rename owed, a delete owed), and any
+ * note an editor still holds text for — with every op queued for them, exactly
+ * as they stand: a note that *was* pushed keeps the file it names and the
+ * version it last agreed on, so that the same account coming back finds it an
+ * edit to that file and not a second note beside it. With them stay the
+ * notebooks nothing has made on the remote, their `mkdir`s, and every `rmdir`
+ * still owed.
  *
  * A notebook the remote does have is kept too where a kept note or notebook
  * sits inside it, link and all. It is not unsent and is not counted as such;
@@ -687,9 +749,8 @@ const keepOnly = async (
 	db: Scope,
 	connectionId: string,
 	unsynced: Unsynced,
-	keeping: (note: NoteRecord) => boolean
+	staying: readonly NoteRecord[]
 ): Promise<NoteRecord[]> => {
-	const staying = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].filter(keeping);
 	const stayingIds = new Set(staying.map((note) => note.id));
 	const rows = await db.notes.where('connectionId').equals(connectionId).toArray();
 	const removed = rows.filter((note) => !stayingIds.has(note.id));
@@ -740,16 +801,15 @@ const forgetSource = async (db: NotesDatabase, connectionId: string): Promise<vo
 };
 
 /**
- * For an editor in this tab still open on a row that went: a save held from
- * before, arriving now, is let go rather than allowed to make the note again
- * (`saveNoteBody`'s `deletedHere` branch). The remote has the note, or the user
- * discarded it; either way it was taken off this device on purpose. Only once
- * the transaction has committed, so a rollback leaves nothing marked.
+ * For an editor in this tab still open on a row that went with its source: a
+ * save arriving now is kept, as an unsent note under the source made again
+ * (`ensureDetached`), and this is what lets the row it is made under say whose
+ * it was. Never a mark that lets the save go — the remote has the *note*, not
+ * the edit. Only once the transaction has committed, so a rollback remembers
+ * nothing.
  */
-const letGo = (removed: readonly NoteRecord[]): void => {
-	removed.forEach((note) => {
-		deletedHere.add(note);
-	});
+const remember = (state: SyncStateRecord | undefined): void => {
+	if (state !== undefined) goneSources.remember(state);
 };
 
 export interface DetachInput extends Precondition {
@@ -761,8 +821,15 @@ export interface DetachInput extends Precondition {
 	 * server with nothing on the device able to name it.
 	 */
 	connectionId: string;
-	/** Why, for a source that stays. `revoked` unless said. */
+	/** Why, for a source that stays. `revoked` unless said: the server ended it. */
 	reason?: Detached['reason'];
+	/**
+	 * Notes an editor still holds text for that the store would not take, by
+	 * `noteRef` (`settleEditors` in `store/heldEdits.ts`). Kept, whatever their
+	 * rows say: the row is clean because the edit never reached it, and removing
+	 * the row would leave the edit with nothing to land in.
+	 */
+	holding?: ReadonlySet<string>;
 }
 
 /**
@@ -784,32 +851,40 @@ export interface DetachInput extends Precondition {
  *
  * While a resumed source has not been verified everything live in it is unsent
  * (`Unsynced.unverified`), so everything is kept. Editor-held text is invisible
- * from here; callers settle the editors first (`store/heldEdits.ts`).
+ * from here; callers settle the editors immediately first (`store/heldEdits.ts`)
+ * and pass on what would not save (`holding`), which is kept too.
  *
  * Answers whether it applied, `false` only for a precondition that failed.
  */
 export const detachConnection = (db: NotesDatabase, input: DetachInput): Promise<boolean> =>
 	inTransaction(db, async () => {
-		if (!(await unchangedSince(db, input))) return { applied: false, removed: [] };
+		if (!(await unchangedSince(db, input))) return { applied: false, gone: undefined };
 		const { connectionId } = input;
 		const state = await db.syncState.get(connectionId);
 		// Nothing bound under that name: a source another tab let go first.
 		// Already true, so nothing to do, and no notes changed hands.
-		if (state === undefined) return { applied: true, removed: [] };
+		if (state === undefined) return { applied: true, gone: undefined };
 		await countBinding(db);
 		const unsynced = await unsyncedIn(db, connectionId);
-		const removed = await keepOnly(db, connectionId, unsynced, () => true);
-		if (isEmpty(unsynced)) {
+		const unsent = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes];
+		const holding = input.holding ?? new Set<string>();
+		const heldOnly = (
+			await db.notes.where('connectionId').equals(connectionId).toArray()
+		).filter(
+			(note) => holding.has(noteRef(note)) && !unsent.some((each) => each.id === note.id)
+		);
+		await keepOnly(db, connectionId, unsynced, [...unsent, ...heldOnly]);
+		if (isEmpty(unsynced) && heldOnly.length === 0) {
 			await forgetSource(db, connectionId);
-			return { applied: true, removed };
+			return { applied: true, gone: state };
 		}
 		await db.credentials.delete(connectionId);
 		// Still the source showing, if it was: the user is looking at what they
 		// have to decide about, and moving them off it would hide it again.
 		await db.syncState.put(detachedFrom(state, input.reason ?? 'revoked', Date.now()));
-		return { applied: true, removed };
-	}).then(({ applied, removed }) => {
-		letGo(removed);
+		return { applied: true, gone: undefined };
+	}).then(({ applied, gone }) => {
+		remember(gone);
 		return applied;
 	});
 
@@ -818,53 +893,65 @@ export interface ReleaseInput {
 	/** What becomes of the rows the remote was never sent. */
 	unsynced: 'discard';
 	/**
-	 * The notes the user was shown before they said so, by `noteRef`. Nothing
-	 * outside it is discarded, whatever has been written since.
+	 * What the user was shown before they said so, as it stood (`seenIn` in
+	 * `store/unsynced.ts`). Nothing outside it is discarded, whatever has been
+	 * written since — into a note that was on the list included.
 	 */
-	seen: ReadonlySet<string>;
+	seen: Seen;
 }
 
-/** Gone entirely, or still here detached because something unseen was kept. */
-export type ReleaseOutcome = 'released' | 'detached';
+/**
+ * Gone entirely; still here detached because something unseen was kept; or
+ * connected again meanwhile, and so not touched at all.
+ */
+export type ReleaseOutcome = 'released' | 'detached' | 'reconnected';
 
 /**
  * Let a source go for good, unsent work included: the user's answer to being
  * shown what a source still holds.
  *
  * What is unsent is read again here, inside the transaction that acts on it,
- * and only what the user was shown is discarded. Another tab may have typed
- * into the source since the list was put in front of them; that note was not
- * in the list, so it is not theirs to have discarded, and it is kept and the
- * source stays detached around it. A discard can never reach a note the user
- * was not shown. With nothing unseen, every row, every op, the source's row
- * and its credential go together.
+ * and only what the user was shown, as they were shown it, is discarded.
+ * Another tab may have typed into the source since the list was put in front
+ * of them — a new note, or a chapter into one that was listed — and that text
+ * was not on the list, so it is not theirs to have discarded: it is kept, the
+ * source stays detached around it, and so does everything else that the list
+ * did not stand for. A discard can never reach text the user was not shown.
+ * With nothing unseen, every row, every op, the source's row and its
+ * credential go together.
+ *
+ * Only a detached source. One that another tab has connected again while the
+ * question was open is syncing, and its rows are the remote's: taking them,
+ * and the credential, would leave a live connection on the server that nothing
+ * on the device can name.
  */
 export const releaseConnection = (
 	db: NotesDatabase,
 	input: ReleaseInput
 ): Promise<ReleaseOutcome> =>
-	inTransaction(db, async (): Promise<{ outcome: ReleaseOutcome; removed: NoteRecord[] }> => {
+	inTransaction(db, async (): Promise<{ outcome: ReleaseOutcome; gone?: SyncStateRecord }> => {
 		const { connectionId, seen } = input;
 		const state = await db.syncState.get(connectionId);
-		if (state === undefined) return { outcome: 'released', removed: [] };
+		if (state === undefined) return { outcome: 'released' };
+		if (state.detached === undefined) return { outcome: 'reconnected' };
 		await countBinding(db);
 		const unsynced = await unsyncedIn(db, connectionId);
-		const unseen = (note: NoteRecord): boolean => !seen.has(noteRef(note));
-		const kept = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].filter(unseen);
-		if (kept.length > 0) {
-			const removed = await keepOnly(db, connectionId, unsynced, unseen);
+		if (unseenIn(unsynced, seen)) {
+			const unseen = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].filter(
+				(note) => !wasSeen(seen, note)
+			);
+			await keepOnly(db, connectionId, unsynced, unseen);
 			await db.credentials.delete(connectionId);
-			await db.syncState.put(detachedFrom(state, 'revoked', Date.now()));
-			return { outcome: 'detached', removed };
+			await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
+			return { outcome: 'detached' };
 		}
-		const removed = await db.notes.where('connectionId').equals(connectionId).toArray();
-		await db.notes.bulkDelete(removed.map(noteKey));
+		await db.notes.where('connectionId').equals(connectionId).delete();
 		await db.folders.where('connectionId').equals(connectionId).delete();
 		await db.opQueue.where('connectionId').equals(connectionId).delete();
 		await forgetSource(db, connectionId);
-		return { outcome: 'released', removed };
-	}).then(({ outcome, removed }) => {
-		letGo(removed);
+		return { outcome: 'released', gone: state };
+	}).then(({ outcome, gone }) => {
+		remember(gone);
 		return outcome;
 	});
 
@@ -878,11 +965,17 @@ export const releaseConnection = (
  *
  * Answers whether the source was one this device actually has. A preference
  * naming a connection with no `syncState` row would leave the app showing
- * nothing, so it is refused rather than recorded.
+ * nothing, so it is refused rather than recorded. The device's own pile has no
+ * row and is always there to show: it is offered when it holds anything
+ * (`connectedSources`), since a source made again behind it would otherwise
+ * be the only way back to it.
  */
 export const showConnection = (db: NotesDatabase, connectionId: string): Promise<boolean> =>
 	inTransaction(db, async () => {
-		if ((await db.syncState.get(connectionId)) === undefined) return false;
+		const known =
+			connectionId === LOCAL_CONNECTION_ID ||
+			(await db.syncState.get(connectionId)) !== undefined;
+		if (!known) return false;
 		await countBinding(db);
 		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: connectionId });
 		return true;
@@ -907,14 +1000,23 @@ export interface ConnectedSource {
 /**
  * Every source on this device, in the order they were connected: the live ones
  * and the detached ones alike, since a detached source is listed precisely so
- * that what it holds is not forgotten.
+ * that what it holds is not forgotten. And the device's own pile, last, when it
+ * holds a note or a notebook: it is written in while nothing is connected, and
+ * a source that comes back detached beside it (`ensureDetached`) must not be
+ * the only thing the list offers.
  */
 export const connectedSources = async (
 	db: Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs'>
 ): Promise<ConnectedSource[]> => {
 	const active = await activeConnectionId(db);
 	const states = await db.syncState.toArray();
-	return states.reduce<Promise<ConnectedSource[]>>(async (sofar, state) => {
+	const own = async (table: 'notes' | 'folders') =>
+		db[table].where('connectionId').equals(LOCAL_CONNECTION_ID).count();
+	const pile =
+		(await own('notes')) + (await own('folders')) > 0
+			? [{ connectionId: LOCAL_CONNECTION_ID, active: active === LOCAL_CONNECTION_ID }]
+			: [];
+	const connected = await states.reduce<Promise<ConnectedSource[]>>(async (sofar, state) => {
 		const listed = await sofar;
 		const detached =
 			state.detached === undefined
@@ -932,4 +1034,5 @@ export const connectedSources = async (
 			},
 		];
 	}, Promise.resolve([]));
+	return [...connected, ...pile];
 };

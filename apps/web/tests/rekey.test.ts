@@ -242,21 +242,36 @@ describe('a note whose source is let go under an open editor', () => {
 		expect(await onTheDevice(db)).toEqual([]);
 	});
 
-	it('lets a held save go for a note the remote has, rather than bring it back anywhere', async () => {
+	it('keeps a held save for a note the remote has, under its own source made again as it was', async () => {
 		const { db, shown } = await open(true, true);
 		await detachConnection(db, { connectionId: 'c-a' });
 		// The remote has it, so it left the device, and A with it.
 		expect(await db.notes.get(['c-a', shown.id])).toBeUndefined();
 		expect(await db.syncState.get('c-a')).toBeUndefined();
 
-		// A retry of a save from before. The editors were asked to write before
-		// the source went (`settleEditors`), so this is one that was failing.
+		// A retry of a save from before, which had been failing. The remote has
+		// the note; it does not have this.
 		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
 
-		expect(await db.notes.get(['c-a', shown.id])).toBeUndefined();
-		expect(await db.syncState.get('c-a')).toBeUndefined();
+		expect(await db.notes.get(['c-a', shown.id])).toMatchObject({
+			body: 'as shown\nand edited\n',
+			dirty: 1,
+		});
+		// Under A's own name — and A as it was, account and all, since this tab
+		// let it go: the panel can name it, and A's account coming back takes
+		// the note home rather than leaving it as "a source".
+		expect(await db.syncState.get('c-a')).toMatchObject({
+			provider: 'dropbox',
+			accountId: 'a',
+			detached: { reason: 'interrupted' },
+		});
 		expect((await inB(db)).map((note) => note.body)).toEqual(['b’s own\n']);
 		expect(await onTheDevice(db)).toEqual([]);
+
+		await bindConnection(db, { connectionId: 'c-a2', provider: 'dropbox', accountId: 'a' });
+
+		expect((await db.notes.get(['c-a2', shown.id]))?.body).toBe('as shown\nand edited\n');
+		expect(await db.syncState.get('c-a')).toBeUndefined();
 	});
 
 	it('follows the note through a new id, where the connection it goes home to held that one', async () => {

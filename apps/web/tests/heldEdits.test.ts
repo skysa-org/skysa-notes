@@ -2,6 +2,7 @@ import type Dexie from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { holdsTextFor } from '../src/store/detached.js';
 import { beforeClosing, flushEditors, settleEditors } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
 
@@ -39,12 +40,12 @@ const manualFlush = <T>() => {
 describe('settling what the editors hold', () => {
 	it('has nothing to wait for when no editor is open', async () => {
 		expect(flushEditors()).toEqual([]);
-		expect(await settleEditors()).toEqual({ failing: 0 });
+		expect(await settleEditors()).toEqual({ failing: [], rejected: 0 });
 	});
 
 	it('starts every flush at once, and answers only when all of them have', async () => {
-		const first = manualFlush<number>();
-		const second = manualFlush<number>();
+		const first = manualFlush<string[]>();
+		const second = manualFlush<string[]>();
 		register(first.finish);
 		register(second.finish);
 		const settled = vi.fn();
@@ -53,34 +54,38 @@ describe('settling what the editors hold', () => {
 		expect(first.finish).toHaveBeenCalledTimes(1);
 		expect(second.finish).toHaveBeenCalledTimes(1);
 
-		first.ends.resolve(0);
+		first.ends.resolve([]);
 		await Promise.resolve();
 		await Promise.resolve();
 		expect(settled).not.toHaveBeenCalled();
 
-		second.ends.resolve(0);
+		second.ends.resolve([]);
 		await vi.waitFor(() => {
-			expect(settled).toHaveBeenCalledWith({ failing: 0 });
+			expect(settled).toHaveBeenCalledWith({ failing: [], rejected: 0 });
 		});
 	});
 
-	it('adds up the notes the editors say they could not save', async () => {
-		register(() => Promise.resolve(2));
-		register(() => Promise.resolve(0));
-		register(() => Promise.resolve(1));
+	it('names the notes the editors say they could not save, each once', async () => {
+		register(() => Promise.resolve(['["c1","a"]', '["c1","b"]']));
+		register(() => Promise.resolve([]));
+		register(() => Promise.resolve(['["c2","c"]', '["c1","a"]']));
 
-		expect(await settleEditors()).toEqual({ failing: 3 });
+		expect(await settleEditors()).toEqual({
+			failing: ['["c1","a"]', '["c1","b"]', '["c2","c"]'],
+			rejected: 0,
+		});
 	});
 
 	it('takes a flush that says nothing as having claimed nothing', async () => {
 		register(() => Promise.resolve());
 		register(() => Promise.resolve('done'));
+		register(() => Promise.resolve(3));
 
-		expect(await settleEditors()).toEqual({ failing: 0 });
+		expect(await settleEditors()).toEqual({ failing: [], rejected: 0 });
 	});
 
 	it('survives a flush that rejects, waits for the rest, and counts it as not saved', async () => {
-		const slow = manualFlush<number>();
+		const slow = manualFlush<string[]>();
 		register(() => Promise.reject(new Error('the database is closed')));
 		register(slow.finish);
 		const settled = vi.fn();
@@ -90,30 +95,39 @@ describe('settling what the editors hold', () => {
 		await Promise.resolve();
 		expect(settled).not.toHaveBeenCalled();
 
-		slow.ends.resolve(0);
+		slow.ends.resolve([]);
 		await vi.waitFor(() => {
-			expect(settled).toHaveBeenCalledWith({ failing: 1 });
+			expect(settled).toHaveBeenCalledWith({ failing: [], rejected: 1 });
 		});
 	});
 
 	it('survives a flush that throws before it has made a promise at all', async () => {
-		const after = vi.fn(() => Promise.resolve(0));
+		const after = vi.fn(() => Promise.resolve([]));
 		register(() => {
 			throw new Error('not even a promise');
 		});
 		register(after);
 
-		expect(await settleEditors()).toEqual({ failing: 1 });
+		expect(await settleEditors()).toEqual({ failing: [], rejected: 1 });
 		expect(after).toHaveBeenCalledTimes(1);
 	});
 
 	it('no longer asks an editor that has gone', async () => {
-		const finish = vi.fn(() => Promise.resolve(1));
+		const finish = vi.fn(() => Promise.resolve(['["c1","a"]']));
 		const release = beforeClosing(finish);
 		release();
 
-		expect(await settleEditors()).toEqual({ failing: 0 });
+		expect(await settleEditors()).toEqual({ failing: [], rejected: 0 });
 		expect(finish).not.toHaveBeenCalled();
+	});
+
+	it('says whether a source has text held for it, and cannot say for a flush that rejected', () => {
+		const settled = { failing: ['["c1","a"]'], rejected: 0 };
+		expect(holdsTextFor(settled, 'c1')).toBe(true);
+		expect(holdsTextFor(settled, 'c2')).toBe(false);
+		// A prefix is not a connection: `c1` is not `c10`.
+		expect(holdsTextFor(settled, 'c')).toBe(false);
+		expect(holdsTextFor({ failing: [], rejected: 1 }, 'c2')).toBe(true);
 	});
 
 	it('is still what a tab closing for a newer build writes first', async () => {

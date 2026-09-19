@@ -375,7 +375,7 @@ export const saveNoteBody = async (
 		if (base === undefined) return applyBody(db, id, body, scope);
 		const current = await whereShown(db, base.note);
 		if (current === undefined) {
-			const letGo = base.displaced === true || deletedHere.has(base.note);
+			const letGo = base.displaced === true || (await deletedHere.has(db, base.note));
 			return letGo ? base.note : bringBack(db, base, body);
 		}
 		// Here again, by whatever road — a pull re-creating a file another device
@@ -416,14 +416,19 @@ const sameNote = (row: NoteRecord, shown: NoteRecord): boolean =>
  *
  * Under its own key, normally. A bind since may have moved its rows under
  * another connection, and the key went with them: this tab's moves are
- * remembered (`movedRows`, a new id included), and one made from another tab is
- * looked for by id, and taken only if it is the one row that is this same note
- * (`sameNote`). Failing that the note is made again (`bringBack`), and nothing
- * is lost either way.
+ * remembered (`movedRows`, a new id included). Failing that the note is made
+ * again (`bringBack`), under its own source, and nothing is lost either way.
  *
- * Never simply "the row of this id under the source showing". With two sources
- * connected that is another account, and an id found there may be another note:
- * the edit would be uploaded into storage it has nothing to do with.
+ * Never a row of the same id under some other connection, with one exception.
+ * A note of the device's own pile moves once, into the first source bound, and
+ * a bind made from another tab is not in `movedRows`: so a pile note is looked
+ * for by id, and taken only if it is the one row that is this same note
+ * (`sameNote`). A connected source's note is not: its rows are removed when the
+ * source is let go, not moved, so the only thing its id can find is another
+ * account's note of it — one folder copied into two accounts — and `sameNote`
+ * cannot tell the two apart while either has yet to be pushed. A save held
+ * from before would be written into a stranger's storage. Not simply "the row
+ * of this id under the source showing" either, for the same reason.
  */
 const whereShown = async (
 	db: NotesDatabase,
@@ -434,14 +439,7 @@ const whereShown = async (
 	const forwarded = movedRows.whereNow(shown);
 	const moved = forwarded === undefined ? undefined : await db.notes.get(forwarded);
 	if (moved !== undefined) return moved;
-	// Taken off this device from this tab — deleted, or removed with a source
-	// that was let go (`deletedHere`) — and so not moved anywhere: there is no
-	// row to look for. Looked for all the same, the only thing an id can find is
-	// another account's note of it, and `sameNote` cannot tell the two apart
-	// while either has yet to be pushed; a save held from before would then be
-	// written into a stranger's storage. An undo clears the mark first, and
-	// still follows its tombstone wherever another tab took it.
-	if (deletedHere.has(shown)) return undefined;
+	if (shown.connectionId !== LOCAL_CONNECTION_ID) return undefined;
 	const candidates = (await db.notes.where('id').equals(shown.id).toArray()).filter((row) =>
 		sameNote(row, shown)
 	);
@@ -699,7 +697,7 @@ const setDeleted = (
 		};
 		await db.notes.put(updated);
 		await (deleted === 1 ? queueDelete(db, updated) : queueRestore(db, updated));
-		if (deleted === 1) deletedHere.add(note);
+		if (deleted === 1) await deletedHere.add(db, note);
 	});
 
 export const deleteNote = (db: NotesDatabase, id: string, scope?: NoteScope): Promise<void> =>
@@ -785,9 +783,9 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 				note: deleted,
 			});
 		})
-		.catch((error: unknown) => {
+		.catch(async (error: unknown) => {
 			// Rolled back, so it is as deleted as it was.
-			deletedHere.add(deleted);
+			await deletedHere.add(db, deleted);
 			throw error;
 		});
 

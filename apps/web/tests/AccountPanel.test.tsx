@@ -14,6 +14,7 @@ import { AccountPanel } from '../src/components/AccountPanel.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
 import { beginConnect, hashCredential } from '../src/store/credentials.js';
 import {
+	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
 	createDatabase,
 	LOCAL_CONNECTION_ID,
@@ -21,7 +22,8 @@ import {
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
-import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { beforeClosing } from '../src/store/heldEdits.js';
+import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -1276,6 +1278,39 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
 	});
 
+	it('offers the device’s own notes beside a source brought back behind them', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		// Nothing connected, the user writing on the device itself, and then a
+		// source made again by a late save: the notes on screen stay on screen.
+		await createNote(db, { title: 'Mine' });
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: LOCAL_CONNECTION_ID });
+		await db.syncState.put({
+			connectionId: 'c-gone',
+			clientId: 'client',
+			detached: { at: 1, reason: 'interrupted' },
+		});
+		await createNote(db, { connectionId: 'c-gone', title: 'Late' });
+		renderPanel(clientWith(), db);
+
+		expect(await screen.findByText(/Notes are kept on this device only/)).toBeTruthy();
+		expect(await screen.findByText('On this device only · showing')).toBeTruthy();
+		// The first connect is offered, and not "another": the pile is no account.
+		expect(screen.getByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(
+			screen.queryByRole('button', { name: 'Connect another Dropbox account' })
+		).toBeNull();
+
+		await user.click(
+			screen.getByRole('button', { name: 'Show A source — disconnected, 1 not sent' })
+		);
+
+		expect(await screen.findByText('A source is disconnected')).toBeTruthy();
+		expect(
+			await screen.findByRole('button', { name: 'Show On this device only' })
+		).toBeTruthy();
+	});
+
 	it('downloads the notes that were never sent', async () => {
 		const user = userEvent.setup();
 		const { db } = await detached();
@@ -1332,28 +1367,138 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(await db.syncState.count()).toBe(0);
 	});
 
-	it('keeps a note written after the list was shown, and says so', async () => {
+	it('keeps what was written after the list was shown, and says so', async () => {
 		const user = userEvent.setup();
 		const { db, plan, list } = await detached();
 		renderPanel(clientWith(), db);
 		await user.click(await enabled('Discard…'));
 		await screen.findByRole('list', { name: 'Notes to discard' });
 
-		// Another tab, while the confirm is open.
+		// Another tab, while the confirm is open: a new note, and a chapter into
+		// one that was on the list.
 		const late = await createNote(db, { connectionId: 'c1', title: 'Typed since' });
-		await saveNoteBody(db, plan.id, '# Plan\n\nmore\n', undefined, { connectionId: 'c1' });
+		await saveNoteBody(db, plan.id, '# Plan\n\nan hour of work\n', undefined, {
+			connectionId: 'c1',
+		});
 		await user.click(screen.getByRole('button', { name: 'Discard for good' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(
 			/was not on the list, so it has been kept/
 		);
-		// What was listed went — an edit to a listed note included — and the one
-		// the user was never shown is still here, in a source still detached.
-		expect(await noteById(db, plan.id)).toBeUndefined();
+		// What was listed as shown went. The note the user was never shown, and
+		// the text they were never shown, are still here, in a source still
+		// detached: the list promised to discard what it listed, and no more.
+		expect((await noteById(db, plan.id))?.body).toBe('# Plan\n\nan hour of work\n');
 		expect(await noteById(db, list.id)).toBeUndefined();
 		expect((await noteById(db, late.id))?.connectionId).toBe('c1');
 		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
-		expect(await screen.findByText(/1 change here was never sent, and is kept/)).toBeTruthy();
+		expect(
+			await screen.findByText(/2 changes here were never sent, and are kept/)
+		).toBeTruthy();
+	});
+
+	it('keeps what the editor was still holding when Discard for good was pressed', async () => {
+		const user = userEvent.setup();
+		const { db, plan } = await detached();
+		renderPanel(clientWith(), db);
+		await user.click(await enabled('Discard…'));
+		await screen.findByRole('list', { name: 'Notes to discard' });
+		// The panel is not a modal: the user typed into a listed note meanwhile,
+		// and the editor is still holding it inside the autosave window.
+		const withdraw = beforeClosing(() =>
+			saveNoteBody(db, plan.id, '# Plan\n\nstill in the editor\n', undefined, {
+				connectionId: 'c1',
+			})
+		);
+
+		await user.click(screen.getByRole('button', { name: 'Discard for good' }));
+		await screen.findByRole('alert');
+		withdraw();
+
+		expect((await noteById(db, plan.id))?.body).toBe('# Plan\n\nstill in the editor\n');
+	});
+
+	it('discards nothing when the source was connected again while it asked', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		renderPanel(clientWith(), db);
+		await user.click(await enabled('Discard…'));
+		await screen.findByRole('list', { name: 'Notes to discard' });
+
+		// Another tab, while the confirm is open — and the click lands before
+		// this panel has heard, or the panel has already become the live one.
+		await holding(db, 'c1');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const confirm = screen.queryByRole('button', { name: 'Discard for good' });
+		if (confirm !== null) await user.click(confirm);
+
+		// Either way nothing went, and the panel is the live source's.
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(await db.notes.count()).toBe(2);
+		expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
+		expect(await db.credentials.get('c1')).toBeDefined();
+	});
+
+	it('closes the confirm on Escape, as Cancel does', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		renderPanel(clientWith(), db);
+		await user.click(await enabled('Discard…'));
+		await screen.findByRole('list', { name: 'Notes to discard' });
+
+		await user.keyboard('{Escape}');
+
+		expect(screen.queryByRole('button', { name: 'Discard for good' })).toBeNull();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Discard…' }));
+		expect(await db.notes.count()).toBe(2);
+	});
+
+	it('puts the focus in the next panel once the source has gone with its notes', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		renderPanel(clientWith(), db);
+		await user.click(await enabled('Discard…'));
+		await user.click(await screen.findByRole('button', { name: 'Discard for good' }));
+
+		await screen.findByText(/Notes are kept on this device only/);
+		// Not on the page: on what the panel offers now.
+		await waitFor(() => {
+			expect(document.activeElement).toBe(
+				screen.getByRole('button', { name: 'Connect Dropbox' })
+			);
+		});
+	});
+
+	it('says plainly that a delete still owed will be carried out on reconnecting', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		const sent = await sentNote(db, 'Sent');
+		await deleteNote(db, sent.id, { connectionId: 'c1' });
+		await detachConnection(db, { connectionId: 'c1' });
+		renderPanel(clientWith(), db);
+
+		expect(
+			await screen.findByText(
+				/1 note deleted here will be deleted from Dropbox when you reconnect, even if it has been changed there since/
+			)
+		).toBeTruthy();
+	});
+
+	it('does not let the disconnect confirm close on Escape take a note’s keystrokes', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		renderPanel(clientWith(), db);
+		await user.click(await enabled('Disconnect…'));
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+
+		await user.keyboard('{Escape}');
+
+		expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Disconnect…' }));
+		expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
 	});
 
 	it('is listed for what it is behind a live source, and can be shown', async () => {

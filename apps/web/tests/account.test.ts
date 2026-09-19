@@ -7,6 +7,7 @@ import {
 	activeConnectionId,
 	createDatabase,
 	LOCAL_CONNECTION_ID,
+	noteRef,
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
@@ -746,6 +747,82 @@ describe('disconnecting', () => {
 		// has no way to get rid of.
 		expect(client.withCredential).not.toHaveBeenCalled();
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('keeps what was typed while the server was being asked', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sent = await createNote(db, { title: 'Sent', body: '# Sent\n' });
+		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		// The editor: what it holds, and the flush it registers.
+		const held: { body?: string } = {};
+		const withdraw = beforeClosing(async () => {
+			if (held.body === undefined) return [];
+			const body = held.body;
+			delete held.body;
+			await saveNoteBody(db, sent.id, body, { origin: '', note: sent });
+			return [];
+		});
+		// A server that answers only when the test lets it.
+		const notYet = () => undefined;
+		const answer: { now: () => void } = { now: notYet };
+		const client = {
+			withCredential: () => ({
+				disconnect: () =>
+					new Promise<{ ok: true; value: { revoked: boolean } }>((resolve) => {
+						answer.now = () => {
+							resolve({ ok: true, value: { revoked: true } });
+						};
+					}),
+			}),
+		} as unknown as Pick<ApiClient, 'withCredential'>;
+
+		const disconnecting = disconnectAccount(db, client, 'c1');
+		// The editors were settled before the server was asked; the confirm is
+		// not modal, and the user keeps typing while it thinks.
+		await vi.waitFor(() => {
+			expect(answer.now).not.toBe(notYet);
+		});
+		held.body = '# Sent\n\ntyped while the server was thinking\n';
+		answer.now();
+		expect(await disconnecting).toEqual({ ok: true });
+		withdraw();
+
+		// The remote has the note. It does not have this, and this is kept.
+		expect(await db.notes.get(['c1', sent.id])).toMatchObject({
+			body: '# Sent\n\ntyped while the server was thinking\n',
+			dirty: 1,
+			remoteId: 'id:1',
+		});
+		expect(await db.syncState.get('c1')).toMatchObject({
+			detached: { reason: 'disconnected' },
+		});
+	});
+
+	it('keeps a note whose save is still failing, whatever its row says', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sent = await createNote(db, { title: 'Sent' });
+		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		const other = await createNote(db, { title: 'Other' });
+		await updateNote(db, other.id, { remoteId: 'id:2', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		// An editor whose save of `sent` has been failing: its text is in no row,
+		// and the row is clean. It says so when asked to write.
+		const withdraw = beforeClosing(() => Promise.resolve([noteRef(sent)]));
+		const client = disconnecting({ ok: true, value: { revoked: true } });
+
+		expect(await disconnectAccount(db, client, 'c1')).toEqual({ ok: true });
+		withdraw();
+
+		// The row is not the whole of what the user wrote, so it stays, for the
+		// save to land in when it can; the other went with the remote.
+		expect(await db.notes.get(['c1', sent.id])).toMatchObject({ remoteId: 'id:1', dirty: 0 });
+		expect(await db.notes.get(['c1', other.id])).toBeUndefined();
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
 	});
 
 	it('removes the synced notes, and keeps what was never sent under the source, detached', async () => {

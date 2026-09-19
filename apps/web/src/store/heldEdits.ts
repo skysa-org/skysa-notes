@@ -16,8 +16,9 @@
 
 /**
  * Write what is held, now. It should resolve whether or not the writes went
- * through, and may say how they went: a number is how many notes it still holds
- * text for that the store would not take. Anything else makes no claim.
+ * through, and may say how they went: an array of `noteRef`s is the notes it
+ * still holds text for that the store would not take. Anything else makes no
+ * claim.
  */
 export type HeldEditsFlush = () => Promise<unknown>;
 
@@ -31,43 +32,54 @@ export const beforeClosing = (finish: HeldEditsFlush): (() => void) => {
 	};
 };
 
-/** One for a flush that threw or rejected: it cannot be said to have stored anything. */
-const REJECTED = 1;
+export interface SettledEditors {
+	/**
+	 * The notes that still have text here that could not be saved, by `noteRef`,
+	 * as far as the editors said. A floor, not a census: a flush that answers
+	 * with no list is counted as holding none, because the registry cannot know
+	 * what it is not told. The editor's own flush (`Autosave.settle`) does
+	 * answer with one. Named, so that whoever is about to remove a source's rows
+	 * can keep exactly these, whose row is not the whole of what the user wrote.
+	 */
+	failing: readonly string[];
+	/**
+	 * How many flushes threw or rejected. Each holds whatever it holds and
+	 * cannot say for which notes, so above zero the store is not the whole of
+	 * what the user has written and nothing here can say where the rest is.
+	 */
+	rejected: number;
+}
+
+const isRefs = (answer: unknown): answer is readonly string[] =>
+	Array.isArray(answer) && answer.every((each) => typeof each === 'string');
+
+const NOTHING_CLAIMED: SettledEditors = { failing: [], rejected: 0 };
+const REJECTED: SettledEditors = { failing: [], rejected: 1 };
 
 /**
  * Start every registered flush, there and then, and answer one promise for
  * each. None of them rejects. Empty when no editor is holding anything open, so
  * a caller with nothing to wait for can tell without waiting.
  */
-export const flushEditors = (): Promise<number>[] =>
+export const flushEditors = (): Promise<SettledEditors>[] =>
 	[...unfinished].map((finish) =>
 		// Inside the executor, so a `finish` that throws is one that settled.
 		new Promise<unknown>((resolve) => {
 			resolve(finish());
 		}).then(
-			(left) => (typeof left === 'number' ? left : 0),
+			(left) => (isRefs(left) ? { failing: left, rejected: 0 } : NOTHING_CLAIMED),
 			() => REJECTED
 		)
 	);
-
-export interface SettledEditors {
-	/**
-	 * How many notes still have text that could not be saved, as far as the
-	 * editors said. A floor, not a census: a flush that answers with no number
-	 * is counted as having none, because the registry cannot know what it is
-	 * not told, and one that rejects is counted as one. The editor's own flush
-	 * (`Autosave.settle`) does answer with a number. Above zero, the store is
-	 * not the whole of what the user has written, and whoever asked must not go
-	 * on as though it were.
-	 */
-	failing: number;
-}
 
 /**
  * Have every editor write what it holds, and wait for all of them. One that
  * rejects does not stop the others being waited for.
  */
 export const settleEditors = async (): Promise<SettledEditors> => {
-	const left = await Promise.all(flushEditors());
-	return { failing: left.reduce((sum, each) => sum + each, 0) };
+	const each = await Promise.all(flushEditors());
+	return {
+		failing: [...new Set(each.flatMap((settled) => settled.failing))],
+		rejected: each.reduce((sum, settled) => sum + settled.rejected, 0),
+	};
 };

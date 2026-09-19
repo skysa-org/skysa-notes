@@ -15,6 +15,7 @@ import {
 } from '../store/credentials.js';
 import {
 	activeConnectionId,
+	type Detached,
 	LOCAL_CONNECTION_ID,
 	type NotesDatabase,
 	type SyncStateRecord,
@@ -205,9 +206,34 @@ const settle = async (
 	since: number,
 	again: boolean
 ): Promise<AccountState> => {
-	await settleEditors();
-	const applied = await detachConnection(db, { connectionId, ifUnchangedSince: since });
+	const applied = await letGo(db, connectionId, 'revoked', since);
 	return applied ? { kind: 'none' } : retry(db, client, again);
+};
+
+/**
+ * The one way out for every path: the editors write, and then the source is
+ * let go with what they could not write named, so that it is kept.
+ *
+ * Immediately before, not merely earlier. A disconnect waits on the server,
+ * the confirm is not a modal, and a sentence typed while the server was
+ * thinking is held by the editor and in no row: settled before the round trip
+ * and not after, its note would look clean, go with the rest of what the
+ * remote has, and take the sentence with it. "The remote has the note" is not
+ * "the remote has the edit".
+ */
+const letGo = async (
+	db: NotesDatabase,
+	connectionId: string,
+	reason: Detached['reason'],
+	ifUnchangedSince?: number
+): Promise<boolean> => {
+	const { failing } = await settleEditors();
+	return detachConnection(db, {
+		connectionId,
+		reason,
+		holding: new Set(failing),
+		...(ifUnchangedSince === undefined ? {} : { ifUnchangedSince }),
+	});
 };
 
 /**
@@ -327,8 +353,10 @@ export type DisconnectOutcome = { ok: true } | { ok: false; refusal: Refusal };
  *
  * Here, the source's synced notes leave the device and anything it was never
  * sent stays under it, detached (`detachConnection`). Nothing on the remote is
- * touched. The editors write first, so that what is unsent is counted from
- * everything the user has typed and not only from what autosave had reached.
+ * touched. The editors write before the server is asked, so that nothing waits
+ * on a round trip to reach a row, and again once it has answered (`letGo`),
+ * for what was typed while it was being asked — which is what decides whether
+ * a note's row is the whole of it.
  */
 export const disconnectAccount = async (
 	db: NotesDatabase,
@@ -352,7 +380,7 @@ export const disconnectAccount = async (
 	// By name, not "whichever is in front": the answer can arrive after the user
 	// has turned to another source, and letting that one go would drop a
 	// connection nobody asked about while the one that was meant stays bound.
-	await detachConnection(db, { connectionId });
+	await letGo(db, connectionId, 'disconnected');
 	return { ok: true };
 };
 
@@ -363,6 +391,5 @@ export const disconnectAccount = async (
  * the panel has already said. Here it is the same letting go as any other.
  */
 export const stopSyncingHere = async (db: NotesDatabase, connectionId: string): Promise<void> => {
-	await settleEditors();
-	await detachConnection(db, { connectionId });
+	await letGo(db, connectionId, 'disconnected');
 };

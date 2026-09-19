@@ -3,6 +3,7 @@ import { isWithin } from '@skysa/core';
 import {
 	type FolderRecord,
 	type NoteRecord,
+	noteRef,
 	type NotesDatabase,
 	type OpQueueRecord,
 } from './db.js';
@@ -149,6 +150,50 @@ export const unsyncedIn = async (
 		unverified,
 	};
 };
+
+/**
+ * What the user was shown of a source, as it stood: each listed note by
+ * `noteRef` with its `updatedAt`, and the notebooks and directory removals by
+ * path. For a discard, which may reach only this (`releaseConnection` in
+ * `store/connection.ts`): a note written into since — same ref, new text — is
+ * not the note that was listed, and neither is one the list never had.
+ *
+ * `updatedAt` rather than the text, because every writer moves it — an edit, a
+ * rename, a move, a delete — and nothing else does while the source is
+ * detached: a pull would, and nothing pulls a detached source.
+ */
+export interface Seen {
+	notes: ReadonlyMap<string, number>;
+	folders: ReadonlySet<string>;
+	rmdirs: ReadonlySet<string>;
+}
+
+export const seenIn = (unsynced: Unsynced): Seen => ({
+	notes: new Map(
+		[...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].map((note) => [
+			noteRef(note),
+			note.updatedAt,
+		])
+	),
+	folders: new Set(unsynced.folders.map((folder) => folder.path)),
+	rmdirs: new Set(unsynced.rmdirs.map((op) => op.path)),
+});
+
+/** Whether the note is one the list stood for, exactly as it stood. */
+export const wasSeen = (seen: Seen, note: NoteRecord): boolean =>
+	seen.notes.get(noteRef(note)) === note.updatedAt;
+
+/**
+ * What a source holds now that `seen` did not stand for: written since the
+ * list was made, or into a note on it. Anything, and a discard of what was
+ * shown must leave the source standing around it.
+ */
+export const unseenIn = (unsynced: Unsynced, seen: Seen): boolean =>
+	[...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].some(
+		(note) => !wasSeen(seen, note)
+	) ||
+	unsynced.folders.some((folder) => !seen.folders.has(folder.path)) ||
+	unsynced.rmdirs.some((op) => !seen.rmdirs.has(op.path));
 
 /**
  * How many rows could be taken to another source: the notes and the notebooks.

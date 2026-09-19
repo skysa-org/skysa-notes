@@ -27,6 +27,7 @@ import {
 	FolderExistsError,
 	renameFolder,
 } from '../src/store/folders.js';
+import { beforeClosing } from '../src/store/heldEdits.js';
 import {
 	createNote,
 	deleteNote,
@@ -35,6 +36,7 @@ import {
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { disconnectAccount } from '../src/sync/account.js';
 import {
 	createSyncScheduler,
 	type SchedulerEnvironment,
@@ -1232,6 +1234,81 @@ describe('one browser over two sources', () => {
 		expect((await db.syncState.get('c-second'))?.detached).toBeUndefined();
 		expect(await db.notes.where('connectionId').equals('c-first').count()).toBe(1);
 		expect(await db.notes.where('connectionId').equals('c-second').count()).toBe(2);
+		await nothingOnTheDeviceItself(db);
+	});
+
+	/**
+	 * Every note's text on the device, wherever its row is: what the user can
+	 * find by switching sources. Text typed at any point around a disconnect —
+	 * before it, while the server was being asked, after it — is in here.
+	 */
+	const everyBody = async (db: NotesDatabase): Promise<string> =>
+		(await db.notes.toArray()).map((note) => note.body).join('\n');
+
+	it('keeps text typed at any point around a disconnect, somewhere the user can see', async () => {
+		const { db, scheduler, second } = await twoSources();
+		await showConnection(db, 'c-second');
+		await following(scheduler, db, 'c-second');
+		const note = await createNote(db, { title: 'Draft', body: '# Draft\n\nfirst\n' });
+		await syncing(scheduler);
+		const shown = (await noteById(db, note.id))!;
+		expect(shown.remoteId).toBeDefined();
+		// An editor on it: text it holds, written when the editors are settled.
+		const held: { body?: string } = {};
+		const withdraw = beforeClosing(async () => {
+			if (held.body === undefined) return [];
+			const body = held.body;
+			delete held.body;
+			await saveNoteBody(db, note.id, body, { origin: shown.bodyOrigin ?? '', note: shown });
+			return [];
+		});
+		// A server that answers the disconnect only when the test lets it.
+		const notYet = () => undefined;
+		const answer: { now: () => void } = { now: notYet };
+		const client = {
+			withCredential: () => ({
+				disconnect: () =>
+					new Promise<{ ok: true; value: { revoked: boolean } }>((resolve) => {
+						answer.now = () => {
+							resolve({ ok: true, value: { revoked: true } });
+						};
+					}),
+			}),
+		} as unknown as Pick<ApiClient, 'withCredential'>;
+
+		// Typed before Disconnect was pressed, still inside the autosave window.
+		held.body = '# Draft\n\nfirst\nbefore\n';
+		const disconnecting = disconnectAccount(db, client, 'c-second');
+		// And while the server was thinking: the confirm is not a modal.
+		await vi.waitFor(() => {
+			expect(answer.now).not.toBe(notYet);
+		});
+		expect(held.body).toBeUndefined();
+		held.body = '# Draft\n\nfirst\nbefore\nduring\n';
+		answer.now();
+		expect(await disconnecting).toEqual({ ok: true });
+		expect(await everyBody(db)).toContain('during');
+		await nothingOnTheDeviceItself(db);
+
+		// And after: the source is detached, in front, and written in.
+		await saveNoteBody(db, note.id, '# Draft\n\nfirst\nbefore\nduring\nafter\n', undefined, {
+			connectionId: 'c-second',
+		});
+		expect((await noteById(db, note.id))?.connectionId).toBe('c-second');
+		expect(await activeConnectionId(db)).toBe('c-second');
+		withdraw();
+
+		// Connected again, all of it goes up.
+		await holdCredential(db, 'c-second');
+		await bindConnection(db, {
+			connectionId: 'c-second',
+			provider: 'onedrive',
+			accountId: 'c-second',
+		});
+		await following(scheduler, db, 'c-second');
+		await syncing(scheduler);
+		await syncing(scheduler);
+		expect(second.contentAt('draft.md')).toContain('before\nduring\nafter');
 		await nothingOnTheDeviceItself(db);
 	});
 });

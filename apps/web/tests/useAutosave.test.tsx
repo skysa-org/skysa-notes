@@ -378,7 +378,7 @@ describe('useAutosave, when a write fails', () => {
 		expect(result.current.failing).toBe(true);
 	});
 
-	it('answers settle with how many notes still have text the store would not take', async () => {
+	it('answers settle with which notes still have text the store would not take', async () => {
 		const save = vi.fn<(value: string) => Promise<void>>((value) =>
 			value.startsWith('bad') ? Promise.reject(new Error('no')) : Promise.resolve()
 		);
@@ -391,12 +391,12 @@ describe('useAutosave, when a write fails', () => {
 		act(() => {
 			result.current.change('fine');
 		});
-		expect(await settle()).toBe(0);
+		expect(await settle()).toEqual([]);
 
 		act(() => {
 			result.current.change('bad 1');
 		});
-		expect(await settle()).toBe(1);
+		expect(await settle()).toEqual(['a']);
 		// A new sitting: the editor rebuilt from the stored body, as a mode switch
 		// does. What is typed next was not typed over `bad 1`, so it does not
 		// stand for it and both stay held — two edits, and still one note to
@@ -407,18 +407,18 @@ describe('useAutosave, when a write fails', () => {
 		act(() => {
 			result.current.change('bad 2');
 		});
-		expect(await settle()).toBe(1);
+		expect(await settle()).toEqual(['a']);
 
 		// A second note, held by the same editor since the user moved on.
 		rerender({ key: 'b' });
 		act(() => {
 			result.current.change('bad in b');
 		});
-		expect(await settle()).toBe(2);
+		expect(await settle()).toEqual(['a', 'b']);
 
 		// And none once a save goes through for each.
 		save.mockImplementation(() => Promise.resolve());
-		expect(await settle()).toBe(0);
+		expect(await settle()).toEqual([]);
 		expect(result.current.failing).toBe(false);
 	});
 
