@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -141,9 +141,11 @@ describe('the app', () => {
 		});
 	});
 
-	it('keeps showing the notes when an account is connected, and when it is disconnected', async () => {
+	it('keeps showing the notes when an account is connected, and what was never sent when it is disconnected', async () => {
 		// The rows move to the new connection in one transaction; the app reads
-		// whichever connection is active, and follows without a reload.
+		// whichever connection is active, and follows without a reload. Let go
+		// before anything was sent, the source stays in front, detached, with the
+		// notes still in it: nothing unsent disappears from under the user.
 		await createFolder(db, { name: 'Work' });
 		await createNote(db, { title: 'Standup', folderPath: 'Work' });
 		await open('/', 'Work');
@@ -158,10 +160,14 @@ describe('the app', () => {
 		expect(await screen.findByText('Standup')).toBeTruthy();
 
 		await act(async () => {
-			await unbindConnection(db);
+			await detachConnection(db, { connectionId: 'dropbox-1' });
 		});
 		expect(await screen.findByText('Standup')).toBeTruthy();
 		expect(paneHeading()).toBe('Work');
+		expect(await screen.findByRole('note')).toHaveProperty(
+			'textContent',
+			expect.stringContaining('Dropbox is disconnected')
+		);
 	});
 
 	it('opens the first notebook when the root is empty', async () => {

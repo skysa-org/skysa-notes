@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeletedNotice, UNDO_WINDOW_MS } from '../src/components/DeletedNotice.js';
 import { routeTree } from '../src/routeTree.gen.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, getNote, purgeNote } from '../src/store/notes.js';
@@ -23,6 +24,8 @@ afterEach(async () => {
 	await db.folders.clear();
 	await db.opQueue.clear();
 	await db.prefs.clear();
+	await db.syncState.clear();
+	await db.credentials.clear();
 });
 
 const openApp = async (...titles: string[]) => {
@@ -133,6 +136,44 @@ describe('deleting a note', () => {
 		await waitFor(async () => {
 			expect((await getNote(db, notes[0]?.id ?? ''))?.deletedLocally).toBe(0);
 		});
+	});
+
+	it('says where it went when its source was disconnected meanwhile, and what can be done there', async () => {
+		const user = userEvent.setup();
+		const held = (id: string) =>
+			db.credentials.put({ id, credential: `sk1_${id}`, provider: 'dropbox', createdAt: 0 });
+		await held('c-ada');
+		await bindConnection(db, {
+			connectionId: 'c-ada',
+			provider: 'dropbox',
+			accountId: 'dbid:ada',
+			displayName: 'ada@example.com',
+		});
+		const { notes } = await openApp('Alpha');
+		const id = notes[0]?.id ?? '';
+		// The remote has it, so its delete is owed — which is what keeps the
+		// tombstone, and the source, on the device through the disconnect.
+		await db.notes.update(['c-ada', id], { remoteId: 'ada:1', dirty: 0 });
+		const notice = await openAndDelete(user, 'Alpha');
+		// Inside the undo window: another source connected, and Ada's let go.
+		await held('c-bob');
+		await act(async () => {
+			await bindConnection(db, {
+				connectionId: 'c-bob',
+				provider: 'dropbox',
+				accountId: 'dbid:bob',
+			});
+			await detachConnection(db, { connectionId: 'c-ada' });
+		});
+
+		await user.click(within(notice).getByRole('button', { name: 'Undo' }));
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'“Alpha” is back, in Dropbox · ada@example.com, which is disconnected. Reconnect it, or download the note.'
+		);
+		// In its own source — not Bob's, and not the device's own pile.
+		expect(await db.notes.get(['c-ada', id])).toMatchObject({ deletedLocally: 0 });
+		expect(await db.notes.where('connectionId').notEqual('c-ada').count()).toBe(0);
 	});
 
 	it('can be dismissed', async () => {

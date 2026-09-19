@@ -1,7 +1,7 @@
 import { createFakeProvider, createSyncEngine } from '@skysa/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { bindConnection, unbindConnection, verifyResume } from '../src/store/connection.js';
+import { bindConnection, verifyResume } from '../src/store/connection.js';
 import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
 import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
 import {
@@ -544,7 +544,15 @@ describe('what a source holds that its remote has not been sent', () => {
 	describe('a connection resumed and not yet verified', () => {
 		const ACCOUNT = { provider: 'dropbox', accountId: 'dbid:1' } as const;
 
-		/** Synced with an account, disconnected, and the same account connected again. */
+		/**
+		 * Synced with an account, and then marked as a resume nobody has checked.
+		 *
+		 * Set on the row rather than arrived at, because the road there is long: a
+		 * source is only resumed with rows still naming files when it was detached
+		 * holding some, and clean ones among them only when it was detached while
+		 * already unverified (`detach.test.ts` has that road). What is asked here
+		 * is what the flag means to `unsyncedIn`, whichever way it came to be set.
+		 */
 		const resumed = async () => {
 			const db = freshDatabase();
 			await bindConnection(db, { connectionId: 'dropbox-1', ...ACCOUNT });
@@ -559,23 +567,22 @@ describe('what a source holds that its remote has not been sent', () => {
 				...NOTHING,
 				unverified: undefined,
 			});
-			await unbindConnection(db);
-			await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+			await db.syncState.update('dropbox-1', { resumeUnverified: true });
 			return { db, remote };
 		};
 
 		it('counts every note and notebook, clean and linked as they look, and says why', async () => {
 			const { db } = await resumed();
 			// The rows really do look sent: that is the danger.
-			const rows = await db.notes.where('connectionId').equals('dropbox-2').toArray();
+			const rows = await db.notes.where('connectionId').equals('dropbox-1').toArray();
 			expect(rows.map((note) => [note.dirty, note.remoteId !== undefined])).toEqual([
 				[0, true],
 				[0, true],
 			]);
 			expect(await db.opQueue.count()).toBe(0);
-			expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBe(true);
+			expect((await db.syncState.get('dropbox-1'))?.resumeUnverified).toBe(true);
 
-			const unsynced = await unsyncedIn(db, 'dropbox-2');
+			const unsynced = await unsyncedIn(db, 'dropbox-1');
 
 			expect(summary(unsynced)).toEqual({
 				...NOTHING,
@@ -590,9 +597,9 @@ describe('what a source holds that its remote has not been sent', () => {
 		it('counts nothing once the remote has been found to hold the files', async () => {
 			const { db, remote } = await resumed();
 
-			expect(await verifyResume(db, 'dropbox-2', remote.fake)).toBe('resumed');
+			expect(await verifyResume(db, 'dropbox-1', remote.fake)).toBe('resumed');
 
-			const unsynced = await unsyncedIn(db, 'dropbox-2');
+			const unsynced = await unsyncedIn(db, 'dropbox-1');
 			expect(summary(unsynced)).toEqual(NOTHING);
 			expect(unsynced.unverified).toBe(false);
 			expect(isEmpty(unsynced)).toBe(true);

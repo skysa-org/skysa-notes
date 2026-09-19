@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGDriveStub } from '../../../packages/core/tests/providers/gdriveStub.js';
 import { createOneDriveStub } from '../../../packages/core/tests/providers/onedriveStub.js';
 import { type ApiClient } from '../src/api/client.js';
-import { bindConnection, showConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
@@ -27,6 +27,7 @@ import {
 	FolderExistsError,
 	renameFolder,
 } from '../src/store/folders.js';
+import { beforeClosing } from '../src/store/heldEdits.js';
 import {
 	createNote,
 	deleteNote,
@@ -35,6 +36,7 @@ import {
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { disconnectAccount } from '../src/sync/account.js';
 import {
 	createSyncScheduler,
 	type SchedulerEnvironment,
@@ -1109,6 +1111,19 @@ describe('one browser over two sources', () => {
 		await idle(scheduler);
 	};
 
+	/**
+	 * Nothing is in the device's own pile: not a note, not a notebook, not an
+	 * op. True from the moment a source is connected and for ever after, whatever
+	 * is switched, let go or connected again — the pile is for a device that has
+	 * never had a source, and a row in it while one is connected is a row
+	 * nothing shows and nothing syncs.
+	 */
+	const nothingOnTheDeviceItself = async (db: NotesDatabase) => {
+		const own = (table: 'notes' | 'folders' | 'opQueue') =>
+			db[table].where('connectionId').equals(LOCAL_CONNECTION_ID).count();
+		expect([await own('notes'), await own('folders'), await own('opQueue')]).toEqual([0, 0, 0]);
+	};
+
 	/** The scheduler has picked the source up and is syncing it, not the other. */
 	const following = async (scheduler: SyncScheduler, db: NotesDatabase, id: string) => {
 		await vi.waitFor(async () => {
@@ -1123,6 +1138,7 @@ describe('one browser over two sources', () => {
 
 		const mine = await createNote(db, { title: 'Mine', body: 'on the first' });
 		await syncing(scheduler);
+		await nothingOnTheDeviceItself(db);
 
 		// Written under the source in front, and pushed to that source's storage.
 		expect(mine.connectionId).toBe('c-first');
@@ -1144,6 +1160,7 @@ describe('one browser over two sources', () => {
 		expect(kept?.remoteId).toBeDefined();
 		expect(await db.notes.where('connectionId').equals('c-first').count()).toBe(1);
 		expect(await db.notes.where('connectionId').equals('c-second').count()).toBe(1);
+		await nothingOnTheDeviceItself(db);
 
 		// And back, with everything where it was left.
 		expect(await showConnection(db, 'c-first')).toBe(true);
@@ -1154,9 +1171,10 @@ describe('one browser over two sources', () => {
 		expect(files(second)).toEqual(['theirs.md']);
 		expect((await noteById(db, mine.id))?.body).toBe('on the first');
 		expect((await noteById(db, theirs.id))?.body).toBe('on the second');
+		await nothingOnTheDeviceItself(db);
 	});
 
-	it('takes only the source in front with it when one is let go', async () => {
+	it('lets go of one source alone, keeps what it never sent in sight, and takes it up again', async () => {
 		const { db, scheduler, first, second } = await twoSources();
 		await following(scheduler, db, 'c-first');
 		const mine = await createNote(db, { title: 'Mine' });
@@ -1165,18 +1183,132 @@ describe('one browser over two sources', () => {
 		await following(scheduler, db, 'c-second');
 		const theirs = await createNote(db, { title: 'Theirs' });
 		await syncing(scheduler);
+		// And one more, which the second source's storage never hears of.
+		const unsent = await createNote(db, { title: 'Unsent', body: 'only here' });
+		await nothingOnTheDeviceItself(db);
 
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c-second' });
 
-		// The second source's notes come back to the device; the first's stay
-		// where they are, with its cursor and its credential intact.
-		expect((await noteById(db, theirs.id))?.connectionId).toBe(LOCAL_CONNECTION_ID);
+		// What the second storage has is gone from the device. What it lacks is
+		// exactly where it was, under a source that says it is disconnected and
+		// is still the one in front — not in the pile, and not in the first.
+		expect(await noteById(db, theirs.id)).toBeUndefined();
+		expect((await noteById(db, unsent.id))?.connectionId).toBe('c-second');
+		expect((await db.syncState.get('c-second'))?.detached).toBeDefined();
+		expect(await db.credentials.get('c-second')).toBeUndefined();
+		expect(await activeConnectionId(db)).toBe('c-second');
+		await nothingOnTheDeviceItself(db);
+		// The first source is untouched, cursor and credential included.
 		expect((await noteById(db, mine.id))?.connectionId).toBe('c-first');
-		expect(await db.syncState.get('c-first')).toBeDefined();
-		expect(await db.syncState.get('c-second')).toBeUndefined();
+		expect((await db.syncState.get('c-first'))?.cursor).toBeDefined();
 		expect(await db.credentials.get('c-first')).toBeDefined();
-		// Nothing was asked of either storage on the way out.
+		// Nothing syncs a detached source, asked or not.
+		await vi.waitFor(() => {
+			expect(scheduler.status().phase).toBe('local');
+		});
+		await scheduler.syncNow();
+		// Nothing was asked of either storage on the way out, or since.
 		expect(files(first)).toEqual(['mine.md']);
 		expect(files(second)).toEqual(['theirs.md']);
+
+		// Written in while detached: it stays editable, and stays put.
+		await saveNoteBody(db, unsent.id, 'only here, and more');
+		await nothingOnTheDeviceItself(db);
+
+		// The same account again. What was kept goes up, what was removed comes
+		// back, and neither storage sees anything of the other's.
+		await holdCredential(db, 'c-second');
+		await bindConnection(db, {
+			connectionId: 'c-second',
+			provider: 'onedrive',
+			accountId: 'c-second',
+		});
+		await following(scheduler, db, 'c-second');
+		await syncing(scheduler);
+		await syncing(scheduler);
+
+		expect(files(second)).toEqual(['theirs.md', 'unsent.md']);
+		expect(files(first)).toEqual(['mine.md']);
+		expect(second.contentAt('unsent.md')).toContain('only here, and more');
+		expect((await noteById(db, theirs.id))?.connectionId).toBe('c-second');
+		expect((await db.syncState.get('c-second'))?.detached).toBeUndefined();
+		expect(await db.notes.where('connectionId').equals('c-first').count()).toBe(1);
+		expect(await db.notes.where('connectionId').equals('c-second').count()).toBe(2);
+		await nothingOnTheDeviceItself(db);
+	});
+
+	/**
+	 * Every note's text on the device, wherever its row is: what the user can
+	 * find by switching sources. Text typed at any point around a disconnect —
+	 * before it, while the server was being asked, after it — is in here.
+	 */
+	const everyBody = async (db: NotesDatabase): Promise<string> =>
+		(await db.notes.toArray()).map((note) => note.body).join('\n');
+
+	it('keeps text typed at any point around a disconnect, somewhere the user can see', async () => {
+		const { db, scheduler, second } = await twoSources();
+		await showConnection(db, 'c-second');
+		await following(scheduler, db, 'c-second');
+		const note = await createNote(db, { title: 'Draft', body: '# Draft\n\nfirst\n' });
+		await syncing(scheduler);
+		const shown = (await noteById(db, note.id))!;
+		expect(shown.remoteId).toBeDefined();
+		// An editor on it: text it holds, written when the editors are settled.
+		const held: { body?: string } = {};
+		const withdraw = beforeClosing(async () => {
+			if (held.body === undefined) return [];
+			const body = held.body;
+			delete held.body;
+			await saveNoteBody(db, note.id, body, { origin: shown.bodyOrigin ?? '', note: shown });
+			return [];
+		});
+		// A server that answers the disconnect only when the test lets it.
+		const notYet = () => undefined;
+		const answer: { now: () => void } = { now: notYet };
+		const client = {
+			withCredential: () => ({
+				disconnect: () =>
+					new Promise<{ ok: true; value: { revoked: boolean } }>((resolve) => {
+						answer.now = () => {
+							resolve({ ok: true, value: { revoked: true } });
+						};
+					}),
+			}),
+		} as unknown as Pick<ApiClient, 'withCredential'>;
+
+		// Typed before Disconnect was pressed, still inside the autosave window.
+		held.body = '# Draft\n\nfirst\nbefore\n';
+		const disconnecting = disconnectAccount(db, client, 'c-second');
+		// And while the server was thinking: the confirm is not a modal.
+		await vi.waitFor(() => {
+			expect(answer.now).not.toBe(notYet);
+		});
+		expect(held.body).toBeUndefined();
+		held.body = '# Draft\n\nfirst\nbefore\nduring\n';
+		answer.now();
+		expect(await disconnecting).toEqual({ ok: true });
+		expect(await everyBody(db)).toContain('during');
+		await nothingOnTheDeviceItself(db);
+
+		// And after: the source is detached, in front, and written in.
+		await saveNoteBody(db, note.id, '# Draft\n\nfirst\nbefore\nduring\nafter\n', undefined, {
+			connectionId: 'c-second',
+		});
+		expect((await noteById(db, note.id))?.connectionId).toBe('c-second');
+		expect(await activeConnectionId(db)).toBe('c-second');
+		withdraw();
+
+		// Connected again, all of it goes up.
+		await holdCredential(db, 'c-second');
+		await bindConnection(db, {
+			connectionId: 'c-second',
+			provider: 'onedrive',
+			accountId: 'c-second',
+		});
+		await following(scheduler, db, 'c-second');
+		await syncing(scheduler);
+		await syncing(scheduler);
+		expect(second.contentAt('draft.md')).toContain('before\nduring\nafter');
+		await nothingOnTheDeviceItself(db);
 	});
 });

@@ -42,7 +42,12 @@ import { queueMove, queueWrite } from '../store/queue.js';
  * `remoteId` the delete needs; the UI is what hides them.
  */
 
-/** The store was asked to write for a connection this device has since let go of. */
+/**
+ * The store was asked to write for a connection this device has since let go
+ * of: its row is gone, or is still here detached, kept for what it never sent
+ * (`SyncStateRecord.detached`). One error for both, because they are one fact
+ * to an engine — nothing of this connection's is its to write any more.
+ */
 export class UnboundConnectionError extends Error {
 	override readonly name = 'UnboundConnectionError';
 
@@ -173,7 +178,12 @@ export const createDexieSyncStore = (
 			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs],
 			async () => {
 				const state = await db.syncState.get(connectionId);
-				if (state === undefined) throw new UnboundConnectionError(connectionId);
+				// Gone, or detached. A run that was at the network when the source
+				// was let go would otherwise pull back in every note the detach had
+				// just removed, and put a cursor on a row that must not have one.
+				if (state === undefined || state.detached !== undefined) {
+					throw new UnboundConnectionError(connectionId);
+				}
 				// A scan before `verifyResume` has checked the remote could delete
 				// every note an emptied app folder no longer holds.
 				if (state.resumeUnverified === true) throw new UnverifiedResumeError(connectionId);

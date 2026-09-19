@@ -1,7 +1,7 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import {
 	createDatabase,
 	LOCAL_CONNECTION_ID,
@@ -198,69 +198,136 @@ describe('two sources each holding a note of one id', () => {
 });
 
 describe('a note whose source is let go under an open editor', () => {
-	/** Two sources bound, A showing, with a synced note in A as an editor holds it. */
-	const open = async (alsoInB: boolean) => {
+	/**
+	 * Two sources bound, with a note in A as an editor holds it: never sent,
+	 * unless `sent` says the remote has it.
+	 */
+	const open = async (alsoInB: boolean, sent = false) => {
 		const db = createDatabase(fresh());
 		await bindConnection(db, { connectionId: 'c-a', provider: 'dropbox', accountId: 'a' });
-		const shown = await createNote(db, { title: 'Plan', body: 'as shown\n' });
+		const made = await createNote(db, { title: 'Plan', body: 'as shown\n' });
 		await db.opQueue.clear();
+		if (sent) await db.notes.update(['c-a', made.id], { remoteId: 'a:1', dirty: 0 });
+		const shown = (await db.notes.get(['c-a', made.id]))!;
 		await bindConnection(db, { connectionId: 'c-b', provider: 'dropbox', accountId: 'b' });
 		if (alsoInB) await db.notes.add({ ...shown, connectionId: 'c-b', body: 'b’s own\n' });
 		return { db, shown };
 	};
 	const inB = (db: NotesDatabase) => db.notes.where('connectionId').equals('c-b').toArray();
+	const onTheDevice = (db: NotesDatabase) =>
+		db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray();
 
-	it('saves the edit into the row the note became, not into the other account', async () => {
+	it('saves the edit into the note’s own row, in its own source, not into the other account', async () => {
 		const { db, shown } = await open(false);
-		await unbindConnection(db, { connectionId: 'c-a' });
+		await detachConnection(db, { connectionId: 'c-a' });
 
 		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
 
-		expect((await db.notes.get([LOCAL_CONNECTION_ID, shown.id]))?.body).toBe(
-			'as shown\nand edited\n'
-		);
+		// Never sent, so the row stayed where it was: under A, which is detached.
+		expect((await db.notes.get(['c-a', shown.id]))?.body).toBe('as shown\nand edited\n');
+		expect((await db.syncState.get('c-a'))?.detached).toBeDefined();
 		expect(await inB(db)).toEqual([]);
+		expect(await onTheDevice(db)).toEqual([]);
 		expect((await db.opQueue.toArray()).filter((op) => op.connectionId === 'c-b')).toEqual([]);
 	});
 
 	it('nor beside the other account’s note of the same id', async () => {
 		const { db, shown } = await open(true);
-		await unbindConnection(db, { connectionId: 'c-a' });
+		await detachConnection(db, { connectionId: 'c-a' });
 
 		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
 
 		expect((await inB(db)).map((note) => note.body)).toEqual(['b’s own\n']);
-		expect((await db.notes.get([LOCAL_CONNECTION_ID, shown.id]))?.body).toBe(
-			'as shown\nand edited\n'
-		);
+		expect((await db.notes.get(['c-a', shown.id]))?.body).toBe('as shown\nand edited\n');
+		expect(await onTheDevice(db)).toEqual([]);
 	});
 
-	it('follows the note through a new id, where the pile already held that one', async () => {
-		const { db, shown } = await open(true);
-		// B goes first, so its note of this id is in the pile when A's arrives.
-		await unbindConnection(db, { connectionId: 'c-b' });
-		await unbindConnection(db, { connectionId: 'c-a' });
+	it('keeps a held save for a note the remote has, under its own source made again as it was', async () => {
+		const { db, shown } = await open(true, true);
+		await detachConnection(db, { connectionId: 'c-a' });
+		// The remote has it, so it left the device, and A with it.
+		expect(await db.notes.get(['c-a', shown.id])).toBeUndefined();
+		expect(await db.syncState.get('c-a')).toBeUndefined();
+
+		// A retry of a save from before, which had been failing. The remote has
+		// the note; it does not have this.
+		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
+
+		expect(await db.notes.get(['c-a', shown.id])).toMatchObject({
+			body: 'as shown\nand edited\n',
+			dirty: 1,
+		});
+		// Under A's own name — and A as it was, account and all, since this tab
+		// let it go: the panel can name it, and A's account coming back takes
+		// the note home rather than leaving it as "a source".
+		expect(await db.syncState.get('c-a')).toMatchObject({
+			provider: 'dropbox',
+			accountId: 'a',
+			detached: { reason: 'interrupted' },
+		});
+		expect((await inB(db)).map((note) => note.body)).toEqual(['b’s own\n']);
+		expect(await onTheDevice(db)).toEqual([]);
+
+		await bindConnection(db, { connectionId: 'c-a2', provider: 'dropbox', accountId: 'a' });
+
+		expect((await db.notes.get(['c-a2', shown.id]))?.body).toBe('as shown\nand edited\n');
+		expect(await db.syncState.get('c-a')).toBeUndefined();
+	});
+
+	it('follows the note through a new id, where the connection it goes home to held that one', async () => {
+		const { db, shown } = await open(false);
+		await detachConnection(db, { connectionId: 'c-a' });
+		// A's account connected again, under a new id, which already holds a note
+		// of this id — the same file, pulled by another tab a moment before.
+		await db.notes.add({ ...shown, connectionId: 'c-a2', body: 'already there\n' });
+		await bindConnection(db, { connectionId: 'c-a2', provider: 'dropbox', accountId: 'a' });
 
 		await saveNoteBody(db, shown.id, 'as shown\nand edited\n', { origin: '', note: shown });
 
-		const pile = await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray();
-		expect(pile.map((note) => note.body).sort()).toEqual([
+		const home = await db.notes.where('connectionId').equals('c-a2').toArray();
+		expect(home.map((note) => note.body).sort()).toEqual([
+			'already there\n',
 			'as shown\nand edited\n',
-			'b’s own\n',
 		]);
+		expect(await db.notes.where('connectionId').equals('c-a').count()).toBe(0);
+		expect(await inB(db)).toEqual([]);
 	});
 
-	it('undoes a delete made before the source was let go', async () => {
-		const { db, shown } = await open(false);
+	it('undoes a delete made before the source was let go, into the source, detached', async () => {
+		const { db, shown } = await open(false, true);
 		await deleteNote(db, shown.id, { connectionId: 'c-a' });
 		const deleted = (await db.notes.get(['c-a', shown.id]))!;
-		await unbindConnection(db, { connectionId: 'c-a' });
+		// The delete was never sent, so the tombstone is kept, and the source.
+		await detachConnection(db, { connectionId: 'c-a' });
 
 		const restored = await undeleteNote(db, deleted);
 
-		expect(restored).toMatchObject({ connectionId: LOCAL_CONNECTION_ID, deletedLocally: 0 });
-		expect(await listNotes(db, { connectionId: LOCAL_CONNECTION_ID })).toHaveLength(1);
+		expect(restored).toMatchObject({ connectionId: 'c-a', deletedLocally: 0 });
+		expect(await listNotes(db, { connectionId: 'c-a' })).toHaveLength(1);
+		expect(await db.syncState.get('c-a')).toMatchObject({ detached: { reason: 'revoked' } });
 		expect(await inB(db)).toEqual([]);
+		expect(await onTheDevice(db)).toEqual([]);
+	});
+
+	it('undoes one whose tombstone went with the source, by bringing the source back detached', async () => {
+		// Never pushed, so its delete owed the remote nothing: the tombstone was
+		// not unsent work, and with nothing else unsent the whole source went.
+		const { db, shown } = await open(false);
+		await deleteNote(db, shown.id, { connectionId: 'c-a' });
+		const deleted = (await db.notes.get(['c-a', shown.id]))!;
+		await detachConnection(db, { connectionId: 'c-a' });
+		expect(await db.syncState.get('c-a')).toBeUndefined();
+
+		const restored = await undeleteNote(db, deleted);
+
+		// Under its own source's name — not the pile, which nothing shows while B
+		// is connected, and not B.
+		expect(restored).toMatchObject({ connectionId: 'c-a', deletedLocally: 0, dirty: 1 });
+		expect(await db.syncState.get('c-a')).toMatchObject({
+			detached: { reason: 'interrupted' },
+		});
+		expect(await inB(db)).toEqual([]);
+		expect(await onTheDevice(db)).toEqual([]);
 	});
 });
 
@@ -294,22 +361,19 @@ describe('a note whose rows another tab moved, of which this tab was told nothin
 		const shown = { ...made, remoteId: 'a:1' };
 		// One folder in two accounts: same id, same text, same `created`.
 		await db.notes.add({ ...shown, connectionId: 'c-b', remoteId: 'b:1' });
-		// A's is deleted here; another tab lets A go, and its tombstone is named again.
+		// A's is deleted here; another tab lets A go, tombstone and all.
 		await db.notes.delete(['c-a', shown.id]);
 		await db.syncState.delete('c-a');
-		await db.notes.add({
-			...shown,
-			connectionId: LOCAL_CONNECTION_ID,
-			id: 'named-again',
-			deletedLocally: 1,
-		});
 
 		const restored = await undeleteNote(db, { ...shown, deletedLocally: 1 });
 
-		// Made again on the device, rather than B's note handed back as "restored".
-		expect(restored.connectionId).toBe(LOCAL_CONNECTION_ID);
+		// Made again under A's own name, rather than B's note handed back as
+		// "restored" — and not in the device's pile, which B's being connected hides.
+		expect(restored.connectionId).toBe('c-a');
 		expect(restored.id).toBe(shown.id);
+		expect((await db.syncState.get('c-a'))?.detached?.reason).toBe('interrupted');
 		expect((await db.notes.get(['c-b', shown.id]))?.remoteId).toBe('b:1');
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
 	});
 
 	it('makes a deleted pile note again in the source a bind made, not in the hidden pile', async () => {

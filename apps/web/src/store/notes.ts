@@ -30,6 +30,7 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { deletedHere } from './deletedHere.js';
+import { ensureDetached } from './detached.js';
 import { ensureFolder } from './folders.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
@@ -374,7 +375,7 @@ export const saveNoteBody = async (
 		if (base === undefined) return applyBody(db, id, body, scope);
 		const current = await whereShown(db, base.note);
 		if (current === undefined) {
-			const letGo = base.displaced === true || deletedHere.has(base.note);
+			const letGo = base.displaced === true || (await deletedHere.has(db, base.note));
 			return letGo ? base.note : bringBack(db, base, body);
 		}
 		// Here again, by whatever road — a pull re-creating a file another device
@@ -413,16 +414,21 @@ const sameNote = (row: NoteRecord, shown: NoteRecord): boolean =>
 /**
  * The row of a note as an editor, or an undo, last saw it.
  *
- * Under its own key, normally. A bind or an unbind since moved its rows under
+ * Under its own key, normally. A bind since may have moved its rows under
  * another connection, and the key went with them: this tab's moves are
- * remembered (`movedRows`, a new id included), and one made from another tab is
- * looked for by id, and taken only if it is the one row that is this same note
- * (`sameNote`). Failing that the note is made again (`bringBack`), and nothing
- * is lost either way.
+ * remembered (`movedRows`, a new id included). Failing that the note is made
+ * again (`bringBack`), under its own source, and nothing is lost either way.
  *
- * Never simply "the row of this id under the source showing". With two sources
- * connected that is another account, and an id found there may be another note:
- * the edit would be uploaded into storage it has nothing to do with.
+ * Never a row of the same id under some other connection, with one exception.
+ * A note of the device's own pile moves once, into the first source bound, and
+ * a bind made from another tab is not in `movedRows`: so a pile note is looked
+ * for by id, and taken only if it is the one row that is this same note
+ * (`sameNote`). A connected source's note is not: its rows are removed when the
+ * source is let go, not moved, so the only thing its id can find is another
+ * account's note of it — one folder copied into two accounts — and `sameNote`
+ * cannot tell the two apart while either has yet to be pushed. A save held
+ * from before would be written into a stranger's storage. Not simply "the row
+ * of this id under the source showing" either, for the same reason.
  */
 const whereShown = async (
 	db: NotesDatabase,
@@ -433,6 +439,7 @@ const whereShown = async (
 	const forwarded = movedRows.whereNow(shown);
 	const moved = forwarded === undefined ? undefined : await db.notes.get(forwarded);
 	if (moved !== undefined) return moved;
+	if (shown.connectionId !== LOCAL_CONNECTION_ID) return undefined;
 	const candidates = (await db.notes.where('id').equals(shown.id).toArray()).filter((row) =>
 		sameNote(row, shown)
 	);
@@ -494,25 +501,34 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
 };
 
 /**
- * The source a note that has gone is made again in: its own, while this device
- * still has it. Not "whichever is showing" — undo outlives the view, and the
- * user may have turned to another source since, where this would put one
- * account's note into another account's folder.
+ * The source a note that has gone is made again in: its own, live or detached,
+ * while this device still has it. Not "whichever is showing" — undo outlives
+ * the view, and the user may have turned to another source since, where this
+ * would put one account's note into another account's folder.
  *
- * A source that is no longer there has nothing to go back to, and its rows say
- * where to go instead: wherever this tab moved them, or — for a note of the
- * device's own pile, which is only ever on screen while nothing is connected —
- * the source showing, since a bind is what took the pile's rows and made its
- * connection the one showing. A source let go had its rows sent to the pile,
- * and so does this, for the same reason it is never simply the source showing.
+ * A source that is no longer there has its rows say where to go instead:
+ * wherever this tab moved them — a detached source's rows going home to the
+ * connection its account came back under — or, for a note of the device's own
+ * pile, which is only ever on screen while nothing is connected, the source
+ * showing, since a bind is what took the pile's rows and made its connection
+ * the one showing.
+ *
+ * Failing both, the note belonged to a connected source that has since gone
+ * entirely, and it is made again **under that source's own id**, which is
+ * brought back detached to hold it (`ensureDetached`). Never in the device's
+ * own pile: that is shown only while nothing is connected, so a keystroke put
+ * there is one the user cannot find. And never in the source showing, for the
+ * reason above.
  */
 const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> => {
 	const bound = async (connectionId: string | undefined): Promise<boolean> =>
 		connectionId !== undefined && (await db.syncState.get(connectionId)) !== undefined;
 	if (await bound(note.connectionId)) return note.connectionId;
 	const forwarded = movedRows.whereNow(note)?.[0];
-	if (await bound(forwarded)) return forwarded ?? LOCAL_CONNECTION_ID;
-	return note.connectionId === LOCAL_CONNECTION_ID ? activeConnectionId(db) : LOCAL_CONNECTION_ID;
+	if (forwarded !== undefined && (await bound(forwarded))) return forwarded;
+	if (note.connectionId === LOCAL_CONNECTION_ID) return activeConnectionId(db);
+	await ensureDetached(db, note.connectionId);
+	return note.connectionId;
 };
 
 const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
@@ -681,7 +697,7 @@ const setDeleted = (
 		};
 		await db.notes.put(updated);
 		await (deleted === 1 ? queueDelete(db, updated) : queueRestore(db, updated));
-		if (deleted === 1) deletedHere.add(note);
+		if (deleted === 1) await deletedHere.add(db, note);
 	});
 
 export const deleteNote = (db: NotesDatabase, id: string, scope?: NoteScope): Promise<void> =>
@@ -752,8 +768,9 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 		.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 			// Before the save below, which would otherwise let the text go.
 			deletedHere.delete(deleted);
-			// Wherever the tombstone is by now: its source may have been let go
-			// inside the undo window, and the row moved with it.
+			// Wherever the tombstone is by now: its source may have been detached
+			// and connected again inside the undo window, under another id, and the
+			// row moved with it.
 			const tombstone = await whereShown(db, deleted);
 			if (tombstone !== undefined) {
 				await restoreNote(db, tombstone.id, { connectionId: tombstone.connectionId });
@@ -766,9 +783,9 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 				note: deleted,
 			});
 		})
-		.catch((error: unknown) => {
+		.catch(async (error: unknown) => {
 			// Rolled back, so it is as deleted as it was.
-			deletedHere.add(deleted);
+			await deletedHere.add(db, deleted);
 			throw error;
 		});
 

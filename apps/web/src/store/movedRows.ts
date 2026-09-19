@@ -2,8 +2,9 @@ import { type NoteKey, noteRef } from './db.js';
 
 /**
  * Where a note's row went when its connection changed under an open editor —
- * a source let go, its rows moved to the device's own pile — for as long as
- * the tab lives.
+ * the device's own notes going into the first source bound, or a detached
+ * source's going home to the connection its account came back under
+ * (`store/connection.ts`) — for as long as the tab lives.
  *
  * A note's key is its connection and its id, so a row that moves is a row
  * deleted and another added, and an edit typed before the move names a key

@@ -1,5 +1,7 @@
 import {
+	ancestorPaths,
 	basename,
+	conflictPath,
 	isNotFoundError,
 	isUnreadableError,
 	joinPath,
@@ -13,26 +15,55 @@ import { type PromiseExtended } from 'dexie';
 import {
 	ACTIVE_CONNECTION_KEY,
 	activeConnectionId,
+	type Detached,
 	type FolderRecord,
 	LOCAL_CONNECTION_ID,
 	noteKey,
 	type NoteRecord,
+	noteRef,
 	type NotesDatabase,
+	type OpQueueRecord,
 	type SyncStateRecord,
 } from './db.js';
+import { detachedFrom } from './detached.js';
+import { goneSources } from './goneSources.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
 import { queueMkdir, queueWrite } from './queue.js';
+import {
+	countOf,
+	isEmpty,
+	type Seen,
+	unseenIn,
+	type Unsynced,
+	unsyncedIn,
+	wasSeen,
+} from './unsynced.js';
 
 /**
  * Which storage account the notes on this device belong to.
  *
  * Every row carries a `connectionId`, and the app shows and syncs exactly one
- * connection's rows (`activeConnectionId` in `db.ts`). Connecting an account, or
- * disconnecting one, therefore moves every row onto the connection that is now
- * the app's — in one transaction, so a note is never left behind under a
- * connection nothing shows or syncs, and never half-moved.
+ * connection's rows (`activeConnectionId` in `db.ts`). The remote is the source
+ * of truth, and each connected source is its own silo (docs/PLAN.md §6), so
+ * rows change connection in two cases only, each in one transaction — a note is
+ * never left behind under a connection nothing shows, and never half-moved:
+ *
+ * - **The device's own rows go into the first source bound.** Whatever was
+ *   written before anything was connected (`LOCAL_CONNECTION_ID`) is copied
+ *   into it. That is the only thing the local pile is for: it holds notes only
+ *   while nothing is, or ever was, connected.
+ * - **A detached source's rows go home.** When the account a detached source
+ *   was to is connected again, under whatever id the server gives it this
+ *   time, the rows it kept are resumed under that connection.
+ *
+ * Letting a source go moves nothing. What the remote has is removed from the
+ * device — connecting again brings it back — and what it was never sent stays
+ * where it is, under a source marked `detached`, in plain sight, until the user
+ * reconnects, downloads or discards it (`detachConnection`). Nothing a
+ * disconnect does fills the local pile, where it would be invisible behind any
+ * other source, and nothing is carried into another account.
  *
  * Two things the sync store relies on, and so are guaranteed here
  * (docs/PLAN.md, Phase 2 UI item):
@@ -45,21 +76,17 @@ import { queueMkdir, queueWrite } from './queue.js';
  *   `source` existed re-serializes from its parts, including `updatedAt` and
  *   its path, so its bytes would otherwise change under the engine.
  *
- * What a moved row keeps depends on whose files it knows. The device remembers
- * the provider account its notes were last bound to (`NOTES_ACCOUNT_KEY`), and
- * a connection id says nothing about that: the same account connected again
- * after a disconnect gets a new one.
+ * What a moved row keeps depends on whose files it knows:
  *
- * - **Resumed**, when the notes go back to the account they came from, or to
- *   the device on a disconnect: each row keeps its `remoteId`, `remoteVersion`,
- *   `dirty` and tombstone, and every queued op follows it. The engine then picks
- *   up where it stopped — its first pull on a connection with no cursor is a
- *   full scan, which sees what changed and what went while it was away — rather
- *   than meeting every note as new writing with a file already in the way.
- * - **Copied**, onto any other account: each row is cut loose from the file it
- *   had, which belongs to an account this app no longer talks to. It is marked
- *   dirty and owed a write, each notebook a `mkdir`. A deleted note is dropped:
- *   its delete was owed to the old account, and on the new one there is no file
+ * - **Resumed**, when a detached source's rows go back to the account they came
+ *   from: each row keeps its `remoteId`, `remoteVersion`, `dirty` and
+ *   tombstone, and every queued op follows it. The engine then picks up where
+ *   it stopped — its first pull on a connection with no cursor is a full scan,
+ *   which sees what changed and what went while it was away, and brings back
+ *   everything the detach removed — rather than meeting every note as new
+ *   writing with a file already in the way.
+ * - **Copied**, from the device's own pile: each row is marked dirty and owed a
+ *   write, each notebook a `mkdir`. A deleted note is dropped: there is no file
  *   to delete. The remote may already hold the same notes; the first pull meets
  *   them as it meets any file whose note holds unpushed writing, and nothing is
  *   overwritten.
@@ -68,39 +95,6 @@ import { queueMkdir, queueWrite } from './queue.js';
  * connections want one — is copied either way: the file it knows is at the
  * old path.
  */
-
-/**
- * Prefs key: `provider:accountId` of the account the notes **on the device
- * itself** belong to — the rows under `LOCAL_CONNECTION_ID`, and nothing else.
- *
- * Device-wide, and rightly so even now that a device may hold several connected
- * sources: there is one local pile, and it is filled by exactly one thing, a
- * source being let go. So this is written by `unbindConnection`, from the row
- * it is deleting, and read by `bindingMode` to decide whether that pile is
- * going home (resume) or somewhere new (copy).
- *
- * It used to be written on every bind, which was the same thing while a device
- * could hold one source and is wrong now: connecting a second source would
- * relabel a local pile it had not touched, and the first source's notes, let go
- * afterwards, would be copied into a stranger's storage on reconnecting the
- * account they came from — every file duplicated, every link to the original
- * cut. Which account a *connection* is to lives on its `syncState` row instead.
- *
- * The pile is usually one account's, but nothing makes it so: let two sources
- * go in turn and it holds both. There is one label and no honest single answer
- * then, so it holds `MIXED_ACCOUNTS` and every bind is a copy the user is asked
- * about. Deleting it instead would be worse than useless — `needsAsking` reads
- * an absent label as "nothing is known", binds without asking, and writes one
- * account's notes into the other's storage.
- */
-export const NOTES_ACCOUNT_KEY = 'sync.notesAccount';
-
-/**
- * More than one account's notes are on the device, so no reconnect can resume.
- * Deliberately not of the `provider:accountId` shape `accountKey` produces, so
- * it can never be equal to a real account.
- */
-export const MIXED_ACCOUNTS = 'mixed';
 
 /** One provider account, however many connections it has had. */
 export const accountKey = (provider: ProviderKind, accountId: string | null | undefined) =>
@@ -174,24 +168,32 @@ interface Placed<T> {
  * wrong one: connecting a second source would take the first source's notes
  * with it, into a stranger's storage, and the user would be told nothing. Each
  * connected source is its own silo (docs/PLAN.md §6), so the only rows that
- * move are the device's own — `LOCAL_CONNECTION_ID`, on the way in, and the
- * connection being let go, on the way out.
+ * move are the device's own — `LOCAL_CONNECTION_ID` — and a detached source's,
+ * to the connection its own account came back under.
  *
  * Moving rows onto the connection they are already on does nothing, and has to
  * say so explicitly: every row would be found both leaving and already taken,
  * collide with itself over its own path, and be renamed and unlinked from the
- * remote file it names. `unbindConnection` reaches it whenever there is nothing
- * bound — a disconnect of an account the device declined to bind to — and the
- * cost of not saying it is a note silently losing its `remoteId`.
+ * remote file it names. The cost of not saying it is a note silently losing
+ * its `remoteId`.
  *
  * A note's key is its connection and its id, so a move is the one place two
- * notes can meet under one key: the rows of two accounts let go one after the
- * other, both landing under `LOCAL_CONNECTION_ID`, where the second account held
- * a copy of the first's folder. The one already there keeps its id. The
- * newcomer is given a fresh one, and what is queued for it follows it; it is
- * otherwise the row it was, file and all. Its file still says the old id until
- * the note is next written, which is how any note stands whose file names an id
- * its source already had (`idForNewNote` in `packages/core`).
+ * notes can meet under one key: a note imported on the device before anything
+ * was connected, from a file that carried its id, going into a source that has
+ * the same file. The one already there keeps its id. The newcomer is given a
+ * fresh one, and what is queued for it follows it; it is otherwise the row it
+ * was, file and all. Its file still says the old id until the note is next
+ * written, which is how any note stands whose file names an id its source
+ * already had (`idForNewNote` in `packages/core`).
+ *
+ * Two rows can also meet over one *file*: a detached source's rows resuming
+ * into a connection that is already live for the same account, and has pulled
+ * the file a kept row still names. The remote is the truth, and its row is the
+ * one that stands. A kept note with text of its own becomes a conflict copy
+ * beside it — fresh id, no file, a free name, owed a write — so nothing written
+ * is lost and nothing is written over the file. A kept rename or delete, which
+ * holds no text, is dropped in its favour. Either way an editor open on the
+ * kept row is pointed at the row that stands for it (`movedRows`).
  */
 const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): Promise<Moved> => {
 	if (from === target) return { notes: [], folders: [], linked: false };
@@ -240,15 +242,37 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	const held = new Set(
 		notes.filter((note) => note.connectionId === target).map((note) => note.id)
 	);
-	const renamed = new Map(
-		leaving.filter((note) => held.has(note.id)).map((note) => [note.id, crypto.randomUUID()])
+	const targetsFile = new Map(
+		notes.flatMap((note) =>
+			note.connectionId === target && note.remoteId !== undefined
+				? [[note.remoteId, note]]
+				: []
+		)
 	);
-	const idNow = (id: string): string => renamed.get(id) ?? id;
+	const twinOf = (note: NoteRecord): NoteRecord | undefined =>
+		mode === 'resume' && note.remoteId !== undefined
+			? targetsFile.get(note.remoteId)
+			: undefined;
+	// Dropped for the target's row of the same file: nothing of its own to keep.
+	const yielding = (note: NoteRecord): boolean =>
+		twinOf(note) !== undefined && (note.deletedLocally === 1 || note.dirty === 0);
+	// Where each row ends up: its own id, a fresh one where the target holds the
+	// id or the file, or the target's own row where this one yields to it.
+	const landing = new Map(
+		leaving.map((note): [string, string] => {
+			const twin = twinOf(note);
+			if (twin !== undefined)
+				return [note.id, yielding(note) ? twin.id : crypto.randomUUID()];
+			return [note.id, held.has(note.id) ? crypto.randomUUID() : note.id];
+		})
+	);
+	const idNow = (id: string): string => landing.get(id) ?? id;
 	const notesPlaced = leaving.flatMap((note): Placed<NoteRecord>[] => {
+		if (yielding(note)) return [];
 		// Before anything else changes: these are the bytes it had.
 		const pinned: NoteRecord = {
 			...note,
-			id: renamed.get(note.id) ?? note.id,
+			id: idNow(note.id),
 			source: noteFile(note),
 			connectionId: target,
 		};
@@ -258,6 +282,14 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 			return mode === 'resume' ? [{ row: pinned, owed: false }] : [];
 		}
 		const wanted = spelling.note(note.path);
+		if (twinOf(note) !== undefined) {
+			// Its text, beside the file it was an edit to, as a conflict copy is
+			// named (§7); the file as the user was writing it, under the new id.
+			const path = conflictPath(wanted, new Date(), [...taken]);
+			taken.add(foldPath(path));
+			const { source: _source, ...copy } = withoutRemote({ ...pinned, path, dirty: 1 });
+			return [{ row: { ...copy, source: noteFile(copy) }, owed: true }];
+		}
 		const path = taken.has(foldPath(wanted)) ? freePath(wanted, [...taken]) : wanted;
 		taken.add(foldPath(path));
 		if (mode === 'resume' && path === note.path) {
@@ -277,13 +309,17 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
 	});
 
 	// A row owed to the new connection as though new owes what it is now, which
-	// the caller queues; what was queued for it was owed to its old file. Every
-	// other row takes its queue with it, in the order it was made.
+	// the caller queues; what was queued for it was owed to its old file. A row
+	// that yielded owes nothing: the target's row is the file's. Every other row
+	// takes its queue with it, in the order it was made.
 	const owed = new Set(
 		notesPlaced.filter((placed) => placed.owed).map((placed) => placed.row.id)
 	);
+	const yielded = new Set(leaving.filter(yielding).map((note) => note.id));
 	const dropped = ops.filter(
-		(op) => mode === 'copy' || (op.noteId !== undefined && owed.has(idNow(op.noteId)))
+		(op) =>
+			mode === 'copy' ||
+			(op.noteId !== undefined && (owed.has(idNow(op.noteId)) || yielded.has(op.noteId)))
 	);
 	await db.opQueue.bulkDelete(dropped.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
 	const carried = ops.filter((op) => !dropped.includes(op));
@@ -310,12 +346,10 @@ const moveRowsTo = async (db: Scope, target: string, mode: Mode, from: string): 
  * Cut a connection's rows loose from the files they name, in place: the copy
  * half of a bind, without the move.
  *
- * `verifyResume` used to do this by sending the rows through
- * `LOCAL_CONNECTION_ID` and back, which was right while the local pile could
- * only hold this connection's rows. It is not any more: the return trip moved
- * *everything* under `LOCAL`, so a source let go while another was resuming had
- * its notes swept into that other account's storage — dirty, queued, and with
- * nobody asked. Doing it in place cannot reach another row at all.
+ * In place, and not by sending the rows through `LOCAL_CONNECTION_ID` and
+ * back, as `verifyResume` once did: the return trip moved *everything* under
+ * `LOCAL`, whoever had put it there. Doing it in place cannot reach another
+ * row at all.
  *
  * Nothing is renamed, because nothing moves: the rows are already where they
  * are and already agree about their paths. A tombstone goes — its delete was
@@ -361,8 +395,15 @@ const queueOwed = async (db: NotesDatabase, connectionId: string, moved: Moved) 
 		}, Promise.resolve());
 };
 
+// The credentials too: a source let go loses its rows and the key to its
+// account together, or a failure between the two leaves a device holding a
+// live credential for a source it no longer admits to having.
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
-	db.transaction('rw', [db.notes, db.folders, db.opQueue, db.syncState, db.prefs], work);
+	db.transaction(
+		'rw',
+		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.credentials],
+		work
+	);
 
 /** Prefs key: how many binds and unbinds this device has seen. */
 export const BINDINGS_KEY = 'sync.bindings';
@@ -405,21 +446,63 @@ export interface BindInput extends Precondition {
 	displayName?: string | null;
 }
 
-/** What the device's notes would do on binding `input`: see the top of this module. */
+/**
+ * Which detached sources are `input`'s own account, and so go home when it is
+ * bound: the rows they kept are resumed under it. None for an account the API
+ * does not name — nothing can be said to be its — and none for any other
+ * account, whose connecting leaves every detached source exactly where it is.
+ * Never `input`'s own connection: coming back under the same id moves nothing.
+ */
 export const bindingMode = async (
-	db: Pick<NotesDatabase, 'prefs'>,
-	input: Pick<BindInput, 'provider' | 'accountId'>
-): Promise<{ mode: Mode; from: string | undefined }> => {
-	const from = (await db.prefs.get(NOTES_ACCOUNT_KEY))?.value;
+	db: Pick<NotesDatabase, 'syncState'>,
+	input: Pick<BindInput, 'connectionId' | 'provider' | 'accountId'>
+): Promise<{ mode: Mode; from: string[] }> => {
 	const to = accountKey(input.provider, input.accountId);
-	return { mode: to !== undefined && to === from ? 'resume' : 'copy', from };
+	const from = (await db.syncState.toArray())
+		.filter(
+			(state) =>
+				state.detached !== undefined &&
+				state.connectionId !== input.connectionId &&
+				state.provider !== undefined &&
+				to !== undefined &&
+				accountKey(state.provider, state.accountId) === to
+		)
+		.map((state) => state.connectionId);
+	return { mode: from.length > 0 ? 'resume' : 'copy', from };
+};
+
+const NOTHING_MOVED: Moved = { notes: [], folders: [], linked: false };
+
+const together = (a: Moved, b: Moved): Moved => ({
+	notes: [...a.notes, ...b.notes],
+	folders: [...a.folders, ...b.folders],
+	linked: a.linked || b.linked,
+});
+
+/**
+ * What a detached source's rows owe once the same connection is live again,
+ * having gone nowhere: the counterpart of what `moveRowsTo` answers for rows
+ * that resume under a new id. A note with no file is owed a write and a
+ * notebook with no id a `mkdir` — asking for either twice changes nothing
+ * (`queueWrite`, `queueMkdir`) — and `linked` says whether any of them still
+ * names a file, which is what has to be checked before the first scan.
+ */
+const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
+	const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+	return {
+		notes: notes.filter((note) => note.deletedLocally === 0 && note.remoteId === undefined),
+		folders: folders.filter((folder) => folder.remoteId === undefined),
+		linked: [...notes, ...folders].some((row) => row.remoteId !== undefined),
+	};
 };
 
 /**
- * Make `connectionId` the app's connection, bringing every note and notebook on
- * this device with it — resumed if they belong to its account, copied into it
- * if not. Safe to call again: rows already under it are left as they are,
- * cursor included, and queue nothing. Answers whether it bound.
+ * Make `connectionId` the app's connection. The device's own notes and
+ * notebooks come with it, copied into it, and so do the rows of any detached
+ * source that was this same account, resumed. Safe to call again: rows already
+ * under it are left as they are, cursor included, and queue nothing. Answers
+ * whether it bound.
  */
 export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boolean> =>
 	inTransaction(db, async () => {
@@ -427,23 +510,43 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		await countBinding(db);
 		const states = await db.syncState.toArray();
 		const current = states.find((state) => state.connectionId === input.connectionId);
-		const { mode } = await bindingMode(db, input);
-		// Only the device's own rows come along. A source already connected keeps
-		// everything of its own, whichever source is being connected now.
-		const moved = await moveRowsTo(db, input.connectionId, mode, LOCAL_CONNECTION_ID);
+		const { from } = await bindingMode(db, input);
+		// The account's own rows first, so they keep the paths their files are
+		// at and anything from the device's pile that wants one gives way.
+		const resumed = await from.reduce<Promise<Moved>>(
+			async (sofar, detachedId) =>
+				together(
+					await sofar,
+					await moveRowsTo(db, input.connectionId, 'resume', detachedId)
+				),
+			Promise.resolve(NOTHING_MOVED)
+		);
+		// Gone home, every row: the source they waited under has nothing left to
+		// stand for. It held no credential, cursor or token to let go of.
+		await db.syncState.bulkDelete(from);
+		// The same connection, back: the rows it kept never left it.
+		const waiting =
+			current?.detached === undefined
+				? NOTHING_MOVED
+				: await owedInPlace(db, input.connectionId);
+		// Only the device's own rows besides. A source already connected keeps
+		// everything of its own, whichever source is being connected now, and so
+		// does a detached source of any other account: nobody was asked.
+		const copied = await moveRowsTo(db, input.connectionId, 'copy', LOCAL_CONNECTION_ID);
+		const moved = together(together(resumed, waiting), copied);
 
 		// Every other connected source keeps its `syncState` row, and with it its
 		// cursor, its root and its place. Deleting them was right while a device
 		// could hold one source; now it would strand another source's notes under
 		// a connection nothing shows, having just refused to move them.
-		const { resumeUnverified: _unverified, ...kept } = current ?? {};
+		const { resumeUnverified: _unverified, detached: _detached, ...kept } = current ?? {};
 		const state: SyncStateRecord = {
 			...kept,
 			connectionId: input.connectionId,
 			provider: input.provider,
-			// Whose account this source is to, so letting it go can say whose
-			// notes came back to the device. Kept from the row when the API did
-			// not name one, rather than dropped.
+			// Whose account this source is to, so that a reconnect can tell whether
+			// the rows a detach kept are its own. Kept from the row when the API
+			// did not name one, rather than dropped.
 			...accountOn(input.accountId ?? current?.accountId),
 			// The same for its name: a bind that was not told one keeps the last
 			// one heard rather than forgetting what the source is called.
@@ -453,6 +556,10 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 			...(moved.linked || current?.resumeUnverified === true
 				? { resumeUnverified: true }
 				: {}),
+			// This binding, as distinct from any earlier one of the same id: what a
+			// tab remembers of the source as it was bound before is stale from here
+			// (`store/deletedHere.ts`).
+			boundAt: Date.now(),
 		};
 		await db.syncState.put(state);
 		// Connecting a source is choosing it, which is the only moment the app can
@@ -461,13 +568,18 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 
 		await queueOwed(db, input.connectionId, moved);
 		return true;
+	}).then((bound) => {
+		// Bound again, its row says whose it is; nothing has to remember for it.
+		if (bound) goneSources.forget(input.connectionId);
+		return bound;
 	});
 
 /**
  * Record which account the connection in front of the user is to, for a device
  * bound before the API named accounts: nothing else writes it until the next
- * bind, and a disconnect in between would have the reconnect copy rather than
- * resume. Answers whether the device was still as `ifUnchangedSince` says.
+ * bind, and a source detached in between could not be told from a stranger's
+ * when its account came back. Answers whether the device was still as
+ * `ifUnchangedSince` says.
  *
  * And what the account is called, every time the server says: the name can
  * change under a connection, and the last one heard is what the device has to
@@ -557,8 +669,9 @@ export type ResumeVerdict = 'verified' | 'resumed' | 'copied' | 'superseded';
  *
  * A resume trusts the first full scan to say what was deleted while the device
  * was away. If the app folder was emptied, or replaced — the scan cannot tell
- * the two apart — every note it does not see would be deleted here too, and
- * the dialog said the notes stay on this device. So a few of the notes' own
+ * the two apart — every note it does not see would be deleted here too: the
+ * rows a detach kept are the ones the remote was never sent in full, and the
+ * text in them exists nowhere else. So a few of the notes' own
  * files are looked for by id first, across notebooks. One found, and the resume
  * stands. None, and the rows are copied instead: cut loose and written back, so
  * nothing a scan does not see is taken from the device.
@@ -610,83 +723,237 @@ export const verifyResume = async (
 };
 
 /**
- * Stop syncing a source, keeping everything on this device. Its notes go back
- * to `LOCAL_CONNECTION_ID` still knowing their files, with their queue, so that
- * connecting the same account again resumes; its cursor goes. The remote is not
- * touched: disconnecting is not deleting.
+ * Every row of a source that is not being kept, removed; answers the notes that
+ * went. Inside the caller's transaction.
  *
- * Which source, by name. It defaults to the one in front, but a disconnect is
- * not always about that one: an account the device claimed and declined to bind
- * to is let go from the panel while some other source is the one being shown,
- * and unbinding "the active one" there would delete a connection the user never
- * asked about — leaving it live on the server with a refresh token and nothing
- * on the device able to name it.
+ * What is kept is `staying` — the caller's choice among the notes the remote
+ * was never sent in full (unsent text, a rename owed, a delete owed), and any
+ * note an editor still holds text for — with every op queued for them, exactly
+ * as they stand: a note that *was* pushed keeps the file it names and the
+ * version it last agreed on, so that the same account coming back finds it an
+ * edit to that file and not a second note beside it. With them stay the
+ * notebooks nothing has made on the remote, their `mkdir`s, and every `rmdir`
+ * still owed.
+ *
+ * A notebook the remote does have is kept too where a kept note or notebook
+ * sits inside it, link and all. It is not unsent and is not counted as such;
+ * it is there because a note's folder has a row, everywhere else in the store,
+ * and a note left in a notebook that no longer exists would be one the sidebar
+ * can show and nothing can rename.
+ *
+ * Everything else goes, and the remote has all of it: clean pushed notes, the
+ * notebooks only they were in, tombstones that never had a file, and any op
+ * that names a row no longer here.
  */
-export interface UnbindOptions extends Precondition {
-	/** The source to let go. Defaults to the one the app is showing. */
-	connectionId?: string;
-}
+const keepOnly = async (
+	db: Scope,
+	connectionId: string,
+	unsynced: Unsynced,
+	staying: readonly NoteRecord[]
+): Promise<NoteRecord[]> => {
+	const stayingIds = new Set(staying.map((note) => note.id));
+	const rows = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const removed = rows.filter((note) => !stayingIds.has(note.id));
+	await db.notes.bulkDelete(removed.map(noteKey));
 
-export const unbindConnection = (
-	db: NotesDatabase,
-	options: UnbindOptions = {}
-): Promise<boolean> =>
-	inTransaction(db, async () => {
-		if (!(await unchangedSince(db, options))) return false;
-		const letting = options.connectionId ?? (await activeConnectionId(db));
-		const state = await db.syncState.get(letting);
-		// Nothing bound under that name: an account claimed and never adopted,
-		// or a source another tab let go first. Already true, so nothing to do —
-		// and nothing to relabel, since no notes changed hands.
-		if (state === undefined) return true;
-		await countBinding(db);
-		// Both reads before anything moves, and both here rather than inside a
-		// helper: an `await` on a promise that does no Dexie work of its own
-		// lets the transaction commit underneath this one (`PrematureCommitError`).
-		const held = await heldLocally(db);
-		const before = (await db.prefs.get(NOTES_ACCOUNT_KEY))?.value;
-		// The connection being let go, and only it: another source's rows are not
-		// this one's to take back to the device.
-		await moveRowsTo(db, LOCAL_CONNECTION_ID, 'resume', letting);
-		await db.prefs.put({ key: NOTES_ACCOUNT_KEY, value: labelFor(state, held, before) });
-		// Only the source being let go. Another one's cursor is not this one's to
-		// throw away, and the app switches to whatever is left.
-		await db.syncState.delete(letting);
-		// And only the choice that named it. Clearing it for a source that is
-		// not the one in front would move the app off a source the user did not
-		// touch. Read from `prefs` rather than through `activeConnectionId`,
-		// which falls back to whatever row is left and would answer for the
-		// wrong one now that the row is gone.
-		const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
-		if (chosen === undefined || chosen === letting) {
-			await db.prefs.delete(ACTIVE_CONNECTION_KEY);
-		}
-		return true;
-	});
+	// Folded, as the providers compare: `Work` and `work` are one directory.
+	const needed = new Set(
+		[
+			...unsynced.folders.flatMap((folder) => [...ancestorPaths(folder.path), folder.path]),
+			...staying
+				.filter((note) => note.deletedLocally === 0)
+				.flatMap((note) => ancestorPaths(note.path)),
+		].map(foldPath)
+	);
+	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
+	await db.folders.bulkDelete(
+		folders
+			.filter((folder) => !needed.has(foldPath(folder.path)))
+			.map((folder): [string, string] => [folder.connectionId, folder.path])
+	);
 
-/** Whether the device already holds notes or notebooks of its own. */
-const heldLocally = async (db: Scope): Promise<boolean> =>
-	(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()) > 0 ||
-	(await db.folders.where('connectionId').equals(LOCAL_CONNECTION_ID).count()) > 0;
+	const unmade = new Set(unsynced.folders.map((folder) => foldPath(folder.path)));
+	const stays = (op: OpQueueRecord): boolean => {
+		if (op.op === 'rmdir') return true;
+		if (op.op === 'mkdir') return unmade.has(foldPath(op.path));
+		return op.noteId !== undefined && stayingIds.has(op.noteId);
+	};
+	const ops = await db.opQueue.where('connectionId').equals(connectionId).toArray();
+	await db.opQueue.bulkDelete(
+		ops.filter((op) => !stays(op)).flatMap((op) => (op.seq === undefined ? [] : [op.seq]))
+	);
+	return removed;
+};
 
 /**
- * Whose the local pile is once `state`'s rows have joined it.
- *
- * Empty before: it is this account's. Already this account's: unchanged. Anyone
- * else's, or an account the API never named: no single answer is true, and
- * `MIXED_ACCOUNTS` is the one that makes every reconnect ask.
+ * The source is gone from this device: its row, the credential that reached it,
+ * and the choice of it as the one to show. Only the choice that named it —
+ * clearing the choice for a source that is not the one in front would move the
+ * app off a source the user did not touch. Read from `prefs` rather than
+ * through `activeConnectionId`, which falls back to whatever row is left and
+ * would answer for the wrong one now that this row is gone.
  */
-const labelFor = (
-	state: SyncStateRecord,
-	heldBefore: boolean,
-	before: string | undefined
-): string => {
-	const account =
-		state.provider === undefined ? undefined : accountKey(state.provider, state.accountId);
-	if (account === undefined) return MIXED_ACCOUNTS;
-	if (!heldBefore) return account;
-	return before === account ? account : MIXED_ACCOUNTS;
+const forgetSource = async (db: NotesDatabase, connectionId: string): Promise<void> => {
+	await db.syncState.delete(connectionId);
+	await db.credentials.delete(connectionId);
+	const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
+	if (chosen === connectionId) await db.prefs.delete(ACTIVE_CONNECTION_KEY);
 };
+
+/**
+ * For an editor in this tab still open on a row that went with its source: a
+ * save arriving now is kept, as an unsent note under the source made again
+ * (`ensureDetached`), and this is what lets the row it is made under say whose
+ * it was. Never a mark that lets the save go — the remote has the *note*, not
+ * the edit. Only once the transaction has committed, so a rollback remembers
+ * nothing.
+ */
+const remember = (state: SyncStateRecord | undefined): void => {
+	if (state !== undefined) goneSources.remember(state);
+};
+
+export interface DetachInput extends Precondition {
+	/**
+	 * The source to let go, always by name. A disconnect is not always about
+	 * the source in front — the answer to one can arrive after the user has
+	 * turned to another — and "whichever is showing" would let go of a
+	 * connection nobody asked about, leaving the one that was meant live on the
+	 * server with nothing on the device able to name it.
+	 */
+	connectionId: string;
+	/** Why, for a source that stays. `revoked` unless said: the server ended it. */
+	reason?: Detached['reason'];
+	/**
+	 * Notes an editor still holds text for that the store would not take, by
+	 * `noteRef` (`settleEditors` in `store/heldEdits.ts`). Kept, whatever their
+	 * rows say: the row is clean because the edit never reached it, and removing
+	 * the row would leave the edit with nothing to land in.
+	 */
+	holding?: ReadonlySet<string>;
+}
+
+/**
+ * Stop syncing a source. The remote is the source of truth, so what it has is
+ * removed from this device, and connecting the account again brings it back.
+ * The remote itself is not touched: disconnecting is not deleting.
+ *
+ * What the remote was never sent is not removed, and is not moved either
+ * (`keepOnly`). If there is any, the source stays on the device **detached**:
+ * same connection id, same rows, same queue, but no credential, cursor, root
+ * or token, and marked as such (`detachedFrom`), so nothing syncs it and the
+ * user can see what is waiting and decide. If there is none, the source goes
+ * entirely, as though it had never been connected here.
+ *
+ * Every path that lets a source go comes through here — the user's Disconnect,
+ * "Stop syncing on this device", and the server saying the connection is gone —
+ * so that none of them can discard unsent work unasked, move it into another
+ * account, or file it in the device's own pile where nothing would show it.
+ *
+ * While a resumed source has not been verified everything live in it is unsent
+ * (`Unsynced.unverified`), so everything is kept. Editor-held text is invisible
+ * from here; callers settle the editors immediately first (`store/heldEdits.ts`)
+ * and pass on what would not save (`holding`), which is kept too.
+ *
+ * Answers whether it applied, `false` only for a precondition that failed.
+ */
+export const detachConnection = (db: NotesDatabase, input: DetachInput): Promise<boolean> =>
+	inTransaction(db, async () => {
+		if (!(await unchangedSince(db, input))) return { applied: false, gone: undefined };
+		const { connectionId } = input;
+		const state = await db.syncState.get(connectionId);
+		// Nothing bound under that name: a source another tab let go first.
+		// Already true, so nothing to do, and no notes changed hands.
+		if (state === undefined) return { applied: true, gone: undefined };
+		await countBinding(db);
+		const unsynced = await unsyncedIn(db, connectionId);
+		const unsent = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes];
+		const holding = input.holding ?? new Set<string>();
+		const heldOnly = (
+			await db.notes.where('connectionId').equals(connectionId).toArray()
+		).filter(
+			(note) => holding.has(noteRef(note)) && !unsent.some((each) => each.id === note.id)
+		);
+		await keepOnly(db, connectionId, unsynced, [...unsent, ...heldOnly]);
+		if (isEmpty(unsynced) && heldOnly.length === 0) {
+			await forgetSource(db, connectionId);
+			return { applied: true, gone: state };
+		}
+		await db.credentials.delete(connectionId);
+		// Still the source showing, if it was: the user is looking at what they
+		// have to decide about, and moving them off it would hide it again.
+		await db.syncState.put(detachedFrom(state, input.reason ?? 'revoked', Date.now()));
+		return { applied: true, gone: undefined };
+	}).then(({ applied, gone }) => {
+		remember(gone);
+		return applied;
+	});
+
+export interface ReleaseInput {
+	connectionId: string;
+	/** What becomes of the rows the remote was never sent. */
+	unsynced: 'discard';
+	/**
+	 * What the user was shown before they said so, as it stood (`seenIn` in
+	 * `store/unsynced.ts`). Nothing outside it is discarded, whatever has been
+	 * written since — into a note that was on the list included.
+	 */
+	seen: Seen;
+}
+
+/**
+ * Gone entirely; still here detached because something unseen was kept; or
+ * connected again meanwhile, and so not touched at all.
+ */
+export type ReleaseOutcome = 'released' | 'detached' | 'reconnected';
+
+/**
+ * Let a source go for good, unsent work included: the user's answer to being
+ * shown what a source still holds.
+ *
+ * What is unsent is read again here, inside the transaction that acts on it,
+ * and only what the user was shown, as they were shown it, is discarded.
+ * Another tab may have typed into the source since the list was put in front
+ * of them — a new note, or a chapter into one that was listed — and that text
+ * was not on the list, so it is not theirs to have discarded: it is kept, the
+ * source stays detached around it, and so does everything else that the list
+ * did not stand for. A discard can never reach text the user was not shown.
+ * With nothing unseen, every row, every op, the source's row and its
+ * credential go together.
+ *
+ * Only a detached source. One that another tab has connected again while the
+ * question was open is syncing, and its rows are the remote's: taking them,
+ * and the credential, would leave a live connection on the server that nothing
+ * on the device can name.
+ */
+export const releaseConnection = (
+	db: NotesDatabase,
+	input: ReleaseInput
+): Promise<ReleaseOutcome> =>
+	inTransaction(db, async (): Promise<{ outcome: ReleaseOutcome; gone?: SyncStateRecord }> => {
+		const { connectionId, seen } = input;
+		const state = await db.syncState.get(connectionId);
+		if (state === undefined) return { outcome: 'released' };
+		if (state.detached === undefined) return { outcome: 'reconnected' };
+		await countBinding(db);
+		const unsynced = await unsyncedIn(db, connectionId);
+		if (unseenIn(unsynced, seen)) {
+			const unseen = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].filter(
+				(note) => !wasSeen(seen, note)
+			);
+			await keepOnly(db, connectionId, unsynced, unseen);
+			await db.credentials.delete(connectionId);
+			await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
+			return { outcome: 'detached' };
+		}
+		await db.notes.where('connectionId').equals(connectionId).delete();
+		await db.folders.where('connectionId').equals(connectionId).delete();
+		await db.opQueue.where('connectionId').equals(connectionId).delete();
+		await forgetSource(db, connectionId);
+		return { outcome: 'released', gone: state };
+	}).then(({ outcome, gone }) => {
+		remember(gone);
+		return outcome;
+	});
 
 /**
  * Show a different connected source.
@@ -698,11 +965,17 @@ const labelFor = (
  *
  * Answers whether the source was one this device actually has. A preference
  * naming a connection with no `syncState` row would leave the app showing
- * nothing, so it is refused rather than recorded.
+ * nothing, so it is refused rather than recorded. The device's own pile has no
+ * row and is always there to show: it is offered when it holds anything
+ * (`connectedSources`), since a source made again behind it would otherwise
+ * be the only way back to it.
  */
 export const showConnection = (db: NotesDatabase, connectionId: string): Promise<boolean> =>
 	inTransaction(db, async () => {
-		if ((await db.syncState.get(connectionId)) === undefined) return false;
+		const known =
+			connectionId === LOCAL_CONNECTION_ID ||
+			(await db.syncState.get(connectionId)) !== undefined;
+		if (!known) return false;
 		await countBinding(db);
 		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: connectionId });
 		return true;
@@ -713,19 +986,53 @@ export interface ConnectedSource {
 	provider?: ProviderKind;
 	/** The provider's id for the account, where the API named one. */
 	accountId?: string;
+	/** What the server last called the account, where it said. */
+	displayName?: string;
 	/** Whether this is the one the app is showing. */
 	active: boolean;
+	/**
+	 * A source this device no longer reaches, and how much it holds that was
+	 * never sent — which is the whole reason it is still listed.
+	 */
+	detached?: { unsent: number };
 }
 
-/** Every connected source on this device, in the order they were connected. */
+/**
+ * Every source on this device, in the order they were connected: the live ones
+ * and the detached ones alike, since a detached source is listed precisely so
+ * that what it holds is not forgotten. And the device's own pile, last, when it
+ * holds a note or a notebook: it is written in while nothing is connected, and
+ * a source that comes back detached beside it (`ensureDetached`) must not be
+ * the only thing the list offers.
+ */
 export const connectedSources = async (
-	db: Pick<NotesDatabase, 'syncState' | 'prefs'>
+	db: Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs'>
 ): Promise<ConnectedSource[]> => {
 	const active = await activeConnectionId(db);
-	return (await db.syncState.toArray()).map((state) => ({
-		connectionId: state.connectionId,
-		...(state.provider === undefined ? {} : { provider: state.provider }),
-		...accountOn(state.accountId),
-		active: state.connectionId === active,
-	}));
+	const states = await db.syncState.toArray();
+	const own = async (table: 'notes' | 'folders') =>
+		db[table].where('connectionId').equals(LOCAL_CONNECTION_ID).count();
+	const pile =
+		(await own('notes')) + (await own('folders')) > 0
+			? [{ connectionId: LOCAL_CONNECTION_ID, active: active === LOCAL_CONNECTION_ID }]
+			: [];
+	const connected = await states.reduce<Promise<ConnectedSource[]>>(async (sofar, state) => {
+		const listed = await sofar;
+		const detached =
+			state.detached === undefined
+				? {}
+				: { detached: { unsent: countOf(await unsyncedIn(db, state.connectionId)) } };
+		return [
+			...listed,
+			{
+				connectionId: state.connectionId,
+				...(state.provider === undefined ? {} : { provider: state.provider }),
+				...accountOn(state.accountId),
+				...nameOn(state.displayName),
+				active: state.connectionId === active,
+				...detached,
+			},
+		];
+	}, Promise.resolve([]));
+	return [...connected, ...pile];
 };

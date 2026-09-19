@@ -18,6 +18,7 @@ import {
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { updateLive } from '../store/detached.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
@@ -332,8 +333,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const state = await db.syncState.get(session.connectionId);
 		if (state === undefined || state.rootId !== undefined) return;
 		const { rootId } = await withAuth(session, provider.ensureRoot);
-		// `update`: a connection let go of meanwhile does not get its row back.
-		await db.syncState.update(session.connectionId, { rootId });
+		// A connection let go of meanwhile does not get its row back, and one
+		// kept detached is not given a root.
+		await updateLive(db, session.connectionId, (live) => ({ ...live, rootId }));
 	};
 
 	/** `engine.sync`, saying whether the pull reached the end whatever the push did. */
@@ -344,8 +346,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const pulled = await engine.pull();
 		if (pulled.status !== 'ok') return { outcome: pulled };
 		const pulledAt = environment.now();
-		// `update`: a connection let go of meanwhile does not get its row back.
-		await db.syncState.update(session.connectionId, { lastSyncAt: pulledAt });
+		// As above: only while the device still syncs it.
+		await updateLive(db, session.connectionId, (live) => ({ ...live, lastSyncAt: pulledAt }));
 		const pushed = await engine.push();
 		return {
 			outcome: {
@@ -678,7 +680,15 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		});
 	};
 
-	const follow = (state: SyncStateRecord | undefined) => {
+	const follow = (showing: SyncStateRecord | undefined) => {
+		// A detached source is shown and is not synced: it has no credential to
+		// mint a token with and no cursor to pull from, and the rows it holds are
+		// waiting for the user, not for the network. So it gets no session — not
+		// one that would start, ask the server for a token, be refused, and tell
+		// the user to connect again about a source that already says so. Asked
+		// here, on every change of the row, so a session running when its source
+		// is detached ends there, and one starts when it is connected again.
+		const state = showing?.detached === undefined ? showing : undefined;
 		const active = current.get('session');
 		if (state?.connectionId === active?.connectionId && active !== undefined) return;
 		endSession();
@@ -800,8 +810,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				db.transaction('rw', db.syncState, db.opQueue, async () => {
 					const state = await db.syncState.get(session.connectionId);
 					// Let go of meanwhile: there is nothing to re-scan, and a `put`
-					// would bring the row back.
-					if (state === undefined) return;
+					// would bring the row back. Detached is let go as well.
+					if (state === undefined || state.detached !== undefined) return;
 					// `rootId` is kept: it is the same folder, and finding it again
 					// costs a search whose answer we already have.
 					const { cursor: _cursor, ...kept } = state;

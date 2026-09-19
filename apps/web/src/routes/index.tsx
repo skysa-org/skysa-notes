@@ -11,15 +11,10 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import {
-	activeConnectionId,
-	db,
-	LOCAL_CONNECTION_ID,
-	type NoteRecord,
-	noteRef,
-} from '../store/db.js';
+import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
+	useActiveSource,
 	useFolderTree,
 	useLooseNoteCount,
 	useNote,
@@ -28,6 +23,7 @@ import {
 } from '../store/hooks.js';
 import { createNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
+import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
 import {
 	type AppSearch,
 	type ConnectOutcome,
@@ -109,6 +105,7 @@ const Home = () => {
 		});
 	}, [connect, navigate]);
 
+	const source = useActiveSource();
 	const tree = useFolderTree();
 	const looseNoteCount = useLooseNoteCount();
 	// Derived rather than written back to the URL: the URL records the user's
@@ -190,11 +187,16 @@ const Home = () => {
 				);
 				// It goes back to the source it was deleted from, which need not be
 				// the one showing by now: the notice outlives a change of source.
+				// Nor need it still be connected. A note is never brought back into
+				// the device's own pile or into another account (`homeOf`), so one
+				// whose source was let go meanwhile is in that source, detached, and
+				// the user is told where to look and what can be done with it there.
 				if (restored.connectionId !== (await activeConnectionId(db))) {
+					const home = await db.syncState.get(restored.connectionId);
 					setProblem(
-						restored.connectionId === LOCAL_CONNECTION_ID
-							? `“${restored.title}” is back, on this device: its source is no longer connected.`
-							: `“${restored.title}” is back, in the source it was deleted from.`
+						home?.detached === undefined
+							? `“${restored.title}” is back, in the source it was deleted from.`
+							: `“${restored.title}” is back, in ${sourceName(home) ?? 'its source'}, which is disconnected. Reconnect it, or download the note.`
 					);
 					return;
 				}
@@ -312,6 +314,21 @@ const Home = () => {
 			{connectOutcome !== undefined && connectMessage(connectOutcome) !== undefined && (
 				<p className="banner" role={connectOutcome === 'ok' ? 'status' : 'alert'}>
 					{connectMessage(connectOutcome)}
+				</p>
+			)}
+			{/*
+			 * For as long as a detached source is the one showing, and not
+			 * dismissable: its notes look like any others, can be opened and
+			 * written in like any others, and sync nowhere. `role="note"` rather
+			 * than `status`, as a standing remark about what is on screen and not
+			 * news of something that has just happened.
+			 */}
+			{source?.detached !== undefined && (
+				<p className="banner" role="note">
+					{sourceName(source) ?? 'This source'} is disconnected. What is here has changes{' '}
+					{source.provider === undefined ? 'it' : PROVIDER_LABELS[source.provider]} was
+					never sent, and nothing written here is synced. Reconnect it, or download or
+					discard them, from the storage panel.
 				</p>
 			)}
 			{paletteOpen && (

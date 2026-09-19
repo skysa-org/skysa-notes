@@ -80,12 +80,14 @@ export interface Autosave<T> {
 	 * Flush, and resolve once every edit held at that point has been attempted
 	 * and nothing is still being written — whatever came of it.
 	 *
-	 * Answers what came of it, as the one number that can be said honestly: how
-	 * many notes still have an edit here that the store would not take. Zero is
-	 * "everything typed is in a row"; it is not "every row is as typed", since a
-	 * save may have gone into a conflict copy beside the note instead.
+	 * Answers what came of it, as the one thing that can be said honestly: which
+	 * notes (by `key`) still have an edit here that the store would not take.
+	 * None is "everything typed is in a row"; it is not "every row is as typed",
+	 * since a save may have gone into a conflict copy beside the note instead.
+	 * Named rather than counted, so that whoever is about to remove rows can
+	 * keep exactly these (`store/heldEdits.ts`).
 	 */
-	settle: () => Promise<number>;
+	settle: () => Promise<readonly string[]>;
 	/**
 	 * The editor has been rebuilt from the stored body — a mode switch. Flushes,
 	 * and ends the sitting. A change of `key` does this by itself.
@@ -315,11 +317,11 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 	};
 
 	/**
-	 * How many notes have an edit the store refused and nothing newer stands
+	 * The notes that have an edit the store refused and nothing newer stands
 	 * for. By note rather than by edit: two sittings' worth held for one note is
 	 * one note the user has to be told about.
 	 */
-	const unstored = (): number => new Set([...failed].map((each) => each.key)).size;
+	const unstored = (): readonly string[] => [...new Set([...failed].map((each) => each.key))];
 
 	return { issue, retry, follow, forget, stop, unstored };
 };

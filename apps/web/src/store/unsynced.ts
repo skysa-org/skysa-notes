@@ -3,6 +3,7 @@ import { isWithin } from '@skysa/core';
 import {
 	type FolderRecord,
 	type NoteRecord,
+	noteRef,
 	type NotesDatabase,
 	type OpQueueRecord,
 } from './db.js';
@@ -151,12 +152,78 @@ export const unsyncedIn = async (
 };
 
 /**
+ * What the user was shown of a source, as it stood: each listed note by
+ * `noteRef` with its `updatedAt`, and the notebooks and directory removals by
+ * path. For a discard, which may reach only this (`releaseConnection` in
+ * `store/connection.ts`): a note written into since — same ref, new text — is
+ * not the note that was listed, and neither is one the list never had.
+ *
+ * `updatedAt` rather than the text, because every writer moves it — an edit, a
+ * rename, a move, a delete — and nothing else does while the source is
+ * detached: a pull would, and nothing pulls a detached source.
+ */
+export interface Seen {
+	notes: ReadonlyMap<string, number>;
+	folders: ReadonlySet<string>;
+	rmdirs: ReadonlySet<string>;
+}
+
+export const seenIn = (unsynced: Unsynced): Seen => ({
+	notes: new Map(
+		[...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].map((note) => [
+			noteRef(note),
+			note.updatedAt,
+		])
+	),
+	folders: new Set(unsynced.folders.map((folder) => folder.path)),
+	rmdirs: new Set(unsynced.rmdirs.map((op) => op.path)),
+});
+
+/** Whether the note is one the list stood for, exactly as it stood. */
+export const wasSeen = (seen: Seen, note: NoteRecord): boolean =>
+	seen.notes.get(noteRef(note)) === note.updatedAt;
+
+/**
+ * What a source holds now that `seen` did not stand for: written since the
+ * list was made, or into a note on it. Anything, and a discard of what was
+ * shown must leave the source standing around it.
+ */
+export const unseenIn = (unsynced: Unsynced, seen: Seen): boolean =>
+	[...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].some(
+		(note) => !wasSeen(seen, note)
+	) ||
+	unsynced.folders.some((folder) => !seen.folders.has(folder.path)) ||
+	unsynced.rmdirs.some((op) => !seen.rmdirs.has(op.path));
+
+/**
  * How many rows could be taken to another source: the notes and the notebooks.
  * Not the renames and not the deletes — each is about a file in the account
  * being left, and means nothing anywhere else.
  */
 export const movable = (unsynced: Unsynced): number =>
 	unsynced.notes.length + unsynced.folders.length;
+
+/**
+ * How many changes the remote has not had, for saying "3 not sent" of a source.
+ *
+ * Every category, since each is something the user did that went nowhere — but
+ * a notebook is counted only where no unsent note is inside it. One that holds
+ * an unsent note goes up with that note and is not a second thing to tell the
+ * user about; and on a detached source a notebook can look unmade only because
+ * the clean notes that proved it was there were removed with the rest of what
+ * the remote has (`keepOnly` in `store/connection.ts`), which is no change of
+ * the user's at all. A number for people, then, and not the test of whether a
+ * source can be let go: that is `isEmpty`, which counts everything.
+ */
+export const countOf = (unsynced: Unsynced): number =>
+	unsynced.notes.length +
+	unsynced.renames.length +
+	unsynced.deletes.length +
+	unsynced.rmdirs.length +
+	unsynced.folders.filter(
+		(folder) =>
+			!unsynced.notes.some((note) => isWithin(foldPath(note.path), foldPath(folder.path)))
+	).length;
 
 /**
  * Nothing here that the remote lacks. `blocked` is not asked: an op that is

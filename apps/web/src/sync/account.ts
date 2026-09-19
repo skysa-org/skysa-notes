@@ -2,12 +2,10 @@ import { type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
 import {
-	accountKey,
 	bindConnection,
 	bindingCount,
-	bindingMode,
+	detachConnection,
 	rememberAccount,
-	unbindConnection,
 } from '../store/connection.js';
 import {
 	credentialFor,
@@ -15,7 +13,14 @@ import {
 	keepCredential,
 	pendingCredential,
 } from '../store/credentials.js';
-import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
+import {
+	activeConnectionId,
+	type Detached,
+	LOCAL_CONNECTION_ID,
+	type NotesDatabase,
+	type SyncStateRecord,
+} from '../store/db.js';
+import { settleEditors } from '../store/heldEdits.js';
 
 /**
  * The storage account, as the server knows it, reconciled with the device.
@@ -27,12 +32,18 @@ import { activeConnectionId, LOCAL_CONNECTION_ID, type NotesDatabase } from '../
  * The question is now asked with a credential rather than a session, and that
  * changes what an answer means. There is no "signed out" — a credential either
  * reaches a connection or has stopped reaching anything, for ever. So the
- * device unbinds on a definite answer *about its own connection*
+ * device lets the source go on a definite answer *about its own connection*
  * (`credential_revoked`: revoked from another device, or the account
  * disconnected) and on nothing else. Offline, a 5xx or a body it cannot read
  * throws, and the device keeps what it has — which is the fix for the reconcile
  * race arriving from the other side, since there is no longer a list that can
  * fail to mention a connection (docs/PLAN.md §6).
+ *
+ * Letting go is `detachConnection` on every path, the server's and the user's
+ * alike: what the remote has leaves the device, and what it was never sent
+ * stays under its own source, detached and in sight. Nobody is there to ask
+ * when the server is the one that said so, which is exactly why nothing may be
+ * discarded, and nothing moved into another account, on the way.
  */
 
 /** Providers the app can sync with today. The rest arrive with their adapters. */
@@ -82,18 +93,31 @@ export const PROVIDER_LABELS: Record<ProviderKind, string> = {
 	webdav: 'WebDAV',
 };
 
+/**
+ * A source as the device can name it without asking anyone: "Dropbox ·
+ * ann@example.com". The name the server last gave, which is what the user
+ * knows the account by; failing that the provider's id for it, which at least
+ * tells two accounts at one provider apart; failing that the provider alone.
+ * Nothing at all for a row that names no provider (`ensureDetached`), and the
+ * caller finds its own words.
+ */
+export const sourceName = (
+	source: Pick<SyncStateRecord, 'provider' | 'displayName' | 'accountId'>
+): string | undefined => {
+	if (source.provider === undefined) return undefined;
+	const account = source.displayName ?? source.accountId;
+	const provider = PROVIDER_LABELS[source.provider];
+	return account === undefined ? provider : `${provider} · ${account}`;
+};
+
 export type AccountState =
-	/** Signed in, with the connection the device is now bound to. */
+	/** The connection the device is now bound to, as the server answers for it. */
 	| { kind: 'connected'; connection: Connection }
-	/** Signed in, with nothing connected: the device keeps its notes to itself. */
-	| { kind: 'none' }
 	/**
-	 * Signed in with an account other than the one the notes on this device
-	 * belong to — most often the other of two Dropbox accounts the browser is
-	 * logged in to, picked on the consent page. Binding it would copy every
-	 * note into it, so nothing is bound until the user says (`adoptAccount`).
+	 * Nothing the server answers for: nothing connected, or a source in front
+	 * that is detached, which has no credential to ask with.
 	 */
-	| { kind: 'other-account'; connection: Connection };
+	| { kind: 'none' };
 
 /**
  * Confirm the connection this device is bound to, with the credential it holds.
@@ -103,7 +127,7 @@ export type AccountState =
  * and the row it is filed under is that connection. So the only outcomes are
  * "still there", "gone for good", and "could not ask".
  *
- * Unbinding happens on the two answers that are definite *about this
+ * Letting go happens on the two answers that are definite *about this
  * connection* — `credential_revoked` (revoked from another device, or the
  * account disconnected) and `not_found` (the connection is gone) — and on
  * nothing else. Both are permanent: the server spends a credential's hash for
@@ -127,13 +151,17 @@ const reconcileOnce = async (
 	const since = await bindingCount(db);
 	const active = await activeConnectionId(db);
 	if (active === LOCAL_CONNECTION_ID) return { kind: 'none' };
+	// Already let go, and kept for what it never sent. There is no credential to
+	// ask with and nothing the answer could change; asking anyway would find none
+	// and detach it again, on every open, for as long as it is in front.
+	if ((await db.syncState.get(active))?.detached !== undefined) return { kind: 'none' };
 
 	const held = await credentialFor(db, active);
 	// Bound to a connection with no credential to ask about it. Nothing here can
 	// reach it again — a credential cannot be re-derived, and the server will
 	// never issue a second one for a connection already made — so the honest
-	// thing is to stop claiming the device is connected. The notes stay.
-	if (held === undefined) return settle(db, client, since, again, { kind: 'none' });
+	// thing is to stop claiming the device is connected.
+	if (held === undefined) return settle(db, client, active, since, again);
 
 	const result = await client.withCredential(held.credential).connection();
 	if (!result.ok) {
@@ -141,7 +169,7 @@ const reconcileOnce = async (
 			throw new Error(`the server refused to answer for this connection: ${result.refusal}`);
 		}
 		await forgetCredential(db, active);
-		return settle(db, client, since, again, { kind: 'none' });
+		return settle(db, client, active, since, again);
 	}
 
 	const connection = result.value;
@@ -161,15 +189,52 @@ const reconcileOnce = async (
 	return { kind: 'connected', connection };
 };
 
-/** Unbind, and answer `state` — or start over if the device moved underneath. */
+/**
+ * Let the source go, and answer `none` — or start over if the device moved
+ * underneath. By name: the source the server was asked about, which need not be
+ * the one in front by the time it has answered.
+ *
+ * The editors write first. Nobody chose this moment, so there may be a sentence
+ * typed inside the autosave window that is in no row yet; unsaved, its note
+ * would look clean, be removed with everything else the remote has, and the
+ * sentence would go with it.
+ */
 const settle = async (
 	db: NotesDatabase,
 	client: Pick<ApiClient, 'withCredential'>,
+	connectionId: string,
 	since: number,
-	again: boolean,
-	state: AccountState
-): Promise<AccountState> =>
-	(await unbindConnection(db, { ifUnchangedSince: since })) ? state : retry(db, client, again);
+	again: boolean
+): Promise<AccountState> => {
+	const applied = await letGo(db, connectionId, 'revoked', since);
+	return applied ? { kind: 'none' } : retry(db, client, again);
+};
+
+/**
+ * The one way out for every path: the editors write, and then the source is
+ * let go with what they could not write named, so that it is kept.
+ *
+ * Immediately before, not merely earlier. A disconnect waits on the server,
+ * the confirm is not a modal, and a sentence typed while the server was
+ * thinking is held by the editor and in no row: settled before the round trip
+ * and not after, its note would look clean, go with the rest of what the
+ * remote has, and take the sentence with it. "The remote has the note" is not
+ * "the remote has the edit".
+ */
+const letGo = async (
+	db: NotesDatabase,
+	connectionId: string,
+	reason: Detached['reason'],
+	ifUnchangedSince?: number
+): Promise<boolean> => {
+	const { failing } = await settleEditors();
+	return detachConnection(db, {
+		connectionId,
+		reason,
+		holding: new Set(failing),
+		...(ifUnchangedSince === undefined ? {} : { ifUnchangedSince }),
+	});
+};
 
 /**
  * The device changed connection while the server was being asked — a disconnect
@@ -193,12 +258,15 @@ const retry = (
  * server answers there is no id to file it under, which is why it is not
  * promoted in place.
  *
- * Binding is a separate decision and stays one: if the account is not the one
- * this device's notes belong to, binding would copy every note into a
- * stranger's storage, so it answers `other-account` and waits to be told
- * (`adoptAccount`). The credential is kept eitherway — the connection exists on
- * the server whether or not this device binds to it, and a credential thrown
- * away here would leave it unreachable and unrevokable from this device.
+ * It binds without asking, because nothing it could take along is anyone
+ * else's. The device's own pile holds only what was written before anything
+ * was connected, and that belongs wherever the user first connects. The one
+ * other thing a bind moves is a detached source's rows, and only into the
+ * account they came from. A detached source of some *other* account stays
+ * exactly where it is (`bindConnection`). There used to be a question here —
+ * "these notes belong to another account; copy them in?" — and it existed for a
+ * pile that a disconnect had filled with one account's notes. No disconnect
+ * fills it any more.
  */
 export const claimConnection = async (
 	db: NotesDatabase,
@@ -223,15 +291,12 @@ export const claimConnection = async (
 	const connection = result.value;
 	const previous = await credentialFor(db, connection.id);
 	await keepCredential(db, connection.id, pending);
-	const asking = await needsAsking(db, connection);
-	if (!asking) {
-		await bindConnection(db, {
-			connectionId: connection.id,
-			provider: connection.provider,
-			accountId: connection.accountId,
-			displayName: connection.displayName,
-		});
-	}
+	await bindConnection(db, {
+		connectionId: connection.id,
+		provider: connection.provider,
+		accountId: connection.accountId,
+		displayName: connection.displayName,
+	});
 	// Last, and awaited: two calls to a server are not something to put between
 	// a credential kept and a device bound, where a closed tab leaves the one
 	// without the other — and let go of unawaited they die with the tab, and
@@ -239,7 +304,7 @@ export const claimConnection = async (
 	if (previous !== undefined && previous.credential !== pending.credential) {
 		await retire(client, previous.credential, connection.id);
 	}
-	return asking ? { kind: 'other-account', connection } : { kind: 'connected', connection };
+	return { kind: 'connected', connection };
 };
 
 /**
@@ -273,74 +338,32 @@ const retire = async (
 		.catch(() => undefined);
 };
 
-/** Whether binding `connection` would copy notes that belong to another account into it. */
-const needsAsking = async (db: NotesDatabase, connection: Connection): Promise<boolean> => {
-	const { mode, from } = await bindingMode(db, connection);
-	// An account the API does not name cannot be said to be another one: a
-	// Worker older than this app, reconnecting the account the notes are from.
-	const named = accountKey(connection.provider, connection.accountId) !== undefined;
-	return mode === 'copy' && named && from !== undefined && (await holdsAnything(db));
-};
-
-/**
- * Whether the device itself holds anything of the account's: a note, a notebook,
- * or a delete still owed to one of its files — which a copy would drop, and the
- * note would come back the next time the account is connected.
- *
- * The device's own rows, and only those. Another connected source's notes are
- * not in question: binding no longer moves them anywhere (`moveRowsTo` takes
- * the connection to move *from*), so counting them would stop the user with a
- * question about notes nothing was going to touch.
- */
-const holdsAnything = async (db: NotesDatabase): Promise<boolean> =>
-	(await db.notes
-		.filter(
-			(note) =>
-				note.connectionId === LOCAL_CONNECTION_ID &&
-				(note.deletedLocally === 0 || note.remoteId !== undefined)
-		)
-		.count()) > 0 ||
-	(await db.folders.filter((folder) => folder.connectionId === LOCAL_CONNECTION_ID).count()) > 0;
-
-/**
- * Bind the device to `connection`, whichever account its notes belong to: the
- * user's answer to `other-account`, and what reconciling does when there is
- * nothing to ask.
- */
-export const adoptAccount = async (
-	db: NotesDatabase,
-	connection: Connection
-): Promise<AccountState> => {
-	await bindConnection(db, {
-		connectionId: connection.id,
-		provider: connection.provider,
-		accountId: connection.accountId,
-		displayName: connection.displayName,
-	});
-	return { kind: 'connected', connection };
-};
-
 export type DisconnectOutcome = { ok: true } | { ok: false; refusal: Refusal };
 
 /**
  * Disconnect on the server, then here. Only in that order, and only once the
- * server has let go: unbinding first and failing to reach the server would
- * leave the account connected there — with a live refresh token — and nothing
- * on this device able to name it.
+ * server has let go: letting go here first and failing to reach the server
+ * would leave the account connected there — with a live refresh token — and
+ * nothing on this device able to name it.
  *
  * The credential is thrown away with the binding. There is nothing to tell the
  * server: its hash is already spent there, and spent for ever, so a copy of
  * this credential taken before now can never claim a connection of its own
  * (docs/PLAN.md §6).
  *
- * The notes stay on the device either way (`unbindConnection`). Nothing on the
- * remote is touched.
+ * Here, the source's synced notes leave the device and anything it was never
+ * sent stays under it, detached (`detachConnection`). Nothing on the remote is
+ * touched. The editors write before the server is asked, so that nothing waits
+ * on a round trip to reach a row, and again once it has answered (`letGo`),
+ * for what was typed while it was being asked — which is what decides whether
+ * a note's row is the whole of it.
  */
 export const disconnectAccount = async (
 	db: NotesDatabase,
 	client: Pick<ApiClient, 'withCredential'>,
 	connectionId: string
 ): Promise<DisconnectOutcome> => {
+	await settleEditors();
 	const held = await credentialFor(db, connectionId);
 	// No credential is the same position a disconnect leaves the device in, so
 	// finish the job here rather than refuse: the server cannot be asked, and
@@ -354,11 +377,19 @@ export const disconnectAccount = async (
 		if (!done) return result;
 	}
 	await forgetCredential(db, connectionId);
-	// By name, not "whichever is in front". This is reached for a connection the
-	// device claimed and declined to bind to, while some other source is the one
-	// being shown — and unbinding that one would delete a connection the user
-	// never asked about, leaving it live on the server with nothing here able to
-	// name it.
-	await unbindConnection(db, { connectionId });
+	// By name, not "whichever is in front": the answer can arrive after the user
+	// has turned to another source, and letting that one go would drop a
+	// connection nobody asked about while the one that was meant stays bound.
+	await letGo(db, connectionId, 'disconnected');
 	return { ok: true };
+};
+
+/**
+ * Stop syncing a source on this device without the server's say: the way out
+ * when it will not, or cannot, disconnect. Nothing is asked of the server and
+ * nothing on it is touched, so the connection may well live on there — which
+ * the panel has already said. Here it is the same letting go as any other.
+ */
+export const stopSyncingHere = async (db: NotesDatabase, connectionId: string): Promise<void> => {
+	await letGo(db, connectionId, 'disconnected');
 };
