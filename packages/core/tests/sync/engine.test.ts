@@ -681,6 +681,72 @@ describe('push', () => {
 		expect(provider.contentAt('a.md')).toBeUndefined();
 	});
 
+	it('holds the version a move hands back only over bytes it has seen under it', async () => {
+		// The fake gives a moved file a new version, as OneDrive and Drive do. It
+		// is the version of whatever the move found, which nobody here has read.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'one\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+
+		await engine.push();
+
+		// Read, found to be the bytes last synced, and held under the version
+		// they were read under.
+		const read = await provider.read({ remoteId: entry.remoteId, path: 'b.md' });
+		expect(noteAt('b.md')?.remoteVersion).toBe(read.version);
+		expect(read.version).not.toBe(entry.version);
+	});
+
+	it('goes on holding the version it had when the moved file is not the one it synced', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'one\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+
+		await engine.push();
+
+		// Moved all the same: the rename is the user's, and takes no bytes.
+		expect(provider.contentAt('b.md')).toBe('theirs\n');
+		expect(noteAt('b.md')?.remoteVersion).toBe(entry.version);
+		// So the pull does not take the file for one it has already seen.
+		await engine.pull();
+		expect(noteAt('b.md')?.content).toBe('theirs\n');
+	});
+
+	it('does the same when the moved file cannot be read, rather than failing a rename that landed', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'one\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(noteAt('b.md')?.remoteVersion).toBe(entry.version);
+	});
+
 	it('deletes remotely and then drops the tombstone', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
 		store.put({
@@ -2688,6 +2754,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -2715,6 +2782,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'Work/Inner/a.md' });
@@ -2800,6 +2868,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });

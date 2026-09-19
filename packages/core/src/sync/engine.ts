@@ -2307,6 +2307,51 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 
 	/**
+	 * The version a note may hold once its file has been moved: one whose bytes
+	 * are the ones the note was last in step with, or none.
+	 *
+	 * A move hands back a version, and it is tempting to keep it — the move
+	 * changed no bytes, so the note is as in step as it was. But it is the
+	 * version of the file as the move *found* it, and nothing here has read
+	 * that. Another device can have edited the file since this one's pull; held
+	 * as the note's own, the new version then says "in step" about text this
+	 * device has never seen. The pull skips the file as the version it already
+	 * has, and the note shows the old text until the file next changes. Worse,
+	 * a write checked against it is checked against the other device's edit,
+	 * passes, and overwrites it, with no conflict anywhere (§7, and CLAUDE.md:
+	 * never lose user data). The two-browser soak found both, as seeds 578 and
+	 * 461.
+	 *
+	 * Where the version survives a move (Dropbox's `rev`) it answers the
+	 * question by itself, and nothing is read. Where it does not (OneDrive's
+	 * `eTag`, Drive's `version`) the file is read and its bytes compared with
+	 * the ones last synced; the version kept is the *read's*, since that is the
+	 * one these bytes were seen under. A rename costs a download there, which is
+	 * what it costs to know.
+	 *
+	 * `undefined` is "cannot say" — the bytes differ, there is no record of
+	 * what was synced, or the read failed — and the caller goes on holding the
+	 * version it had. That is always safe: the next pull finds a version it
+	 * does not know, reads the file, and answers it as any other change.
+	 */
+	const versionAfterMove = async (
+		note: SyncNote,
+		moved: RemoteEntry
+	): Promise<string | undefined> => {
+		if (moved.version === note.remoteVersion) return moved.version;
+		// A row from before the hash was kept has none. Clean, its own text is
+		// what it synced; dirty, there is nothing left to compare with.
+		const synced =
+			note.syncedHash ?? (note.dirty ? undefined : await contentHash(note.content));
+		if (synced === undefined) return undefined;
+		const file = await provider
+			.read({ remoteId: moved.remoteId, path: moved.path })
+			.catch(() => undefined);
+		if (file === undefined) return undefined;
+		return (await contentHash(file.content)) === synced ? file.version : undefined;
+	};
+
+	/**
 	 * A write that found nothing at the note's path, over a file that is still
 	 * there under the id we hold. Either the remote renamed it — in which case
 	 * the next pull rebases the note and this op with it — or the *user* renamed
@@ -2336,14 +2381,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			(each) => each.op === 'move' && each.noteId === note.id && each.targetPath === note.path
 		);
 		if (!explains) throw error;
-		// The write that follows is checked against the version the move hands
-		// back, not the one this note was last in step with — so a file changed
-		// on another device since our pull would be moved and then overwritten,
-		// with no conflict anywhere. Not moved, it fails here instead, and the
-		// next pull finds the change and answers it as any other (§7).
-		if (found !== note.remoteVersion) {
-			throw new Error(`${note.path} has changed on the remote since it was last pulled`);
-		}
+		// A file changed on another device since our pull must not be written
+		// over. Not moved, it fails here instead, and the next pull finds the
+		// change and answers it as any other (§7).
+		const changed = new Error(
+			`${note.path} has changed on the remote since it was last pulled`
+		);
+		if (found !== note.remoteVersion) throw changed;
 		const from = { remoteId, path: note.path };
 		const moved = await provider.move(from, note.path).catch(async (problem: unknown) => {
 			// A conflict here — another device has taken the name since our
@@ -2356,7 +2400,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			await ensureRemoteFolder(parentPath(note.path));
 			return provider.move(from, note.path);
 		});
-		return write(note, moved.version);
+		// That check and the move are two calls, and the other device's edit can
+		// land between them. So the write is not checked against the version the
+		// move hands back, which is the version of whatever it moved, but against
+		// one whose bytes are known (`versionAfterMove`). With none, the file has
+		// been moved and is left at that: the op fails, its retry meets the file
+		// at the note's path under a version it does not hold, and that is an
+		// ordinary conflict, which keeps both.
+		const version = await versionAfterMove(note, moved);
+		if (version === undefined) throw changed;
+		return write(note, version);
 	};
 
 	const runWrite = async (op: SyncOp, note: SyncNote): Promise<void> => {
@@ -2502,7 +2555,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			await store.completeOp(op.seq, { kind: 'done' });
 			return;
 		}
-		await store.completeOp(op.seq, { kind: 'moved', noteId: note.id, remote: entry });
+		// Where the file is now, and the version the note may hold there: the
+		// one the move handed back only if its bytes are known to be the ones
+		// last synced (`versionAfterMove`), and otherwise the one it held.
+		const version = (await versionAfterMove(note, entry)) ?? note.remoteVersion;
+		await store.completeOp(op.seq, {
+			kind: 'moved',
+			noteId: note.id,
+			remote: version === undefined ? entry : { ...entry, version },
+		});
 	};
 
 	const runDelete = async (op: SyncOp, note: SyncNote | undefined): Promise<void> => {
