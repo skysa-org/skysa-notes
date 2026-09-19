@@ -1709,6 +1709,28 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
 	});
 
+	it('offers no move where all it holds is a delete the other account has no file for', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		const doomed = await sentNote(db, 'Doomed');
+		await deleteNote(db, doomed.id, { connectionId: 'c1' });
+		await detachConnection(db, { connectionId: 'c1' });
+		await holding(db, 'c2', 'sk1_onedrive');
+		await bindConnection(db, { connectionId: 'c2', provider: 'onedrive', accountId: 'ms:1' });
+		await showConnection(db, 'c1');
+		renderPanel(clientWith(), db);
+
+		expect(await screen.findByRole('button', { name: 'Discard…' })).toBeTruthy();
+		// There is a source to move to, and nothing a move could carry there.
+		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
+
+		// And the discard is still reached by its own name, which says what it is.
+		await user.click(screen.getByRole('button', { name: 'Discard…' }));
+		expect(await screen.findByText('Discard what this source never sent?')).toBeTruthy();
+	});
+
 	it('moves what it never sent into a live source, in two steps', async () => {
 		const user = userEvent.setup();
 		const { db, plan, list } = await detached();
@@ -1728,7 +1750,7 @@ describe('AccountPanel, with a detached source in front', () => {
 
 		await user.click(await enabled('Move 2 notes to OneDrive · ms:1…'));
 		expect(
-			await screen.findByText('These 2 notes will be uploaded to OneDrive · ms:1.')
+			await screen.findByText('2 notes will be uploaded to OneDrive · ms:1.')
 		).toBeTruthy();
 		// Nothing has moved yet: the first button only offers it.
 		expect((await noteById(db, plan.id))?.connectionId).toBe('c1');
@@ -1864,14 +1886,12 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 
 		await user.click(await enabled('Disconnect…'));
 		await user.click(
-			await screen.findByRole('button', { name: 'Move 1 notes to OneDrive · ms:1…' })
+			await screen.findByRole('button', { name: 'Move 1 note to OneDrive · ms:1…' })
 		);
 
 		// A second step, which says what will be in each account afterwards, and
 		// still nothing asked of the server.
-		expect(
-			await screen.findByText('These 1 note will be uploaded to OneDrive · ms:1.')
-		).toBeTruthy();
+		expect(await screen.findByText('1 note will be uploaded to OneDrive · ms:1.')).toBeTruthy();
 		expect(disconnect).not.toHaveBeenCalled();
 
 		await user.click(screen.getByRole('button', { name: 'Move them' }));
@@ -1898,12 +1918,12 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const choices = screen.getAllByRole('radio');
 		expect(choices.map((choice) => choice.getAttribute('value'))).toEqual(['c2', 'c3']);
 		expect(
-			screen.getByRole('button', { name: 'Move 1 notes to OneDrive · ms:1…' })
+			screen.getByRole('button', { name: 'Move 1 note to OneDrive · ms:1…' })
 		).toBeTruthy();
 
 		await user.click(screen.getByRole('radio', { name: 'Google Drive · g:1' }));
 		await user.click(
-			await screen.findByRole('button', { name: 'Move 1 notes to Google Drive · g:1…' })
+			await screen.findByRole('button', { name: 'Move 1 note to Google Drive · g:1…' })
 		);
 		await user.click(await screen.findByRole('button', { name: 'Move them' }));
 
@@ -1957,7 +1977,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 
 		expect(
 			await screen.findByText(
-				'These 2 notes will be uploaded to OneDrive · ms:1. 1 of them also exists in Dropbox in an older version, which stays there. 1 delete was never sent; Dropbox keeps those files as they are.'
+				'2 notes will be uploaded to OneDrive · ms:1. 1 of them also exists in Dropbox in an older version, which stays there. 1 delete was never sent; Dropbox keeps those files as they are.'
 			)
 		).toBeTruthy();
 	});
@@ -2035,6 +2055,186 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		expect(screen.getByRole('button', { name: 'Download them' }).hasAttribute('disabled')).toBe(
 			false
 		);
+		withdraw();
+	});
+
+	it('names the account a move writes into by the name the server gave it', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await holding(db, 'c2', 'sk1_onedrive');
+		// The server has said what this account is called. An id is what the
+		// switcher shows, for reasons of its own; the one confirm that writes
+		// into another account has to be readable.
+		await bindConnection(db, {
+			connectionId: 'c2',
+			provider: 'onedrive',
+			accountId: 'ms:AAAAB3NzaC1yc2E',
+			displayName: 'ada@work.example',
+		});
+		await holding(db, 'c1', 'sk1_dropbox');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await createNote(db, { title: 'Unsent' });
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+
+		expect(
+			await screen.findByRole('button', {
+				name: 'Move 1 note to OneDrive · ada@work.example…',
+			})
+		).toBeTruthy();
+	});
+
+	it('offers no move where nothing it moves is on the list', async () => {
+		const user = userEvent.setup();
+		const { db } = await withSomewhereToPutIt();
+		// Only a delete, which belongs to the account being left: "Move 0 notes"
+		// would be a discard reached through a button that says Move.
+		await db.notes.clear();
+		const doomed = await sentNote(db, 'Doomed');
+		await deleteNote(db, doomed.id, { connectionId: 'c1' });
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+
+		expect(await screen.findByRole('button', { name: 'Discard them…' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
+		// And nothing about what a move would leave behind, since there is none.
+		expect(screen.queryByText(/Moving takes the notes/)).toBeNull();
+	});
+
+	it('will not offer a source its files have not been checked against, and says why', async () => {
+		const user = userEvent.setup();
+		const { db } = await withSomewhereToPutIt();
+		// Reconnected, and offline ever since, so `verifyResume` has never run.
+		// Every row reads as unsent, and the whole library is on the list.
+		await sentNote(db, 'One');
+		await sentNote(db, 'Two');
+		await db.syncState.update('c1', { resumeUnverified: true });
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+
+		expect(
+			await screen.findByText(
+				'Everything this device holds for Dropbox is listed below. This source was connected again and its files have not been checked against Dropbox yet, so nothing here can be told apart from work that was never sent. Most of it is probably already there. Cancel, and connecting again while this device is online settles it.'
+			)
+		).toBeTruthy();
+		// A bulk copy into another account, on a count known to be wrong, is the
+		// one thing this must not offer.
+		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
+		// The other three are all still there, Cancel included.
+		expect(screen.getByRole('button', { name: 'Discard them…' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Download them' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+
+		await user.click(screen.getByRole('button', { name: 'Discard them…' }));
+
+		// And the second step does not promise what it cannot know either.
+		expect(
+			await screen.findByText(/Most are probably still in Dropbox, but this device has not/)
+		).toBeTruthy();
+	});
+
+	it('counts a notebook the same way in the headline, the breakdown and the move', async () => {
+		const user = userEvent.setup();
+		const { db } = await withSomewhereToPutIt();
+		// A notebook the remote never made, with the unsent note inside it: the
+		// notebook goes up with that note and is not a second change to report.
+		await db.folders.put({ connectionId: 'c1', path: 'Ideas', createdAt: 0 });
+		const rows = await db.notes.where('connectionId').equals('c1').toArray();
+		await db.notes.update(['c1', rows[0]?.id ?? ''], { path: 'Ideas/unsent.md' });
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+
+		expect(
+			await screen.findByText(
+				'1 change on this device has not reached Dropbox, and cannot once it is disconnected.'
+			)
+		).toBeTruthy();
+		expect(screen.getByText('1 note not yet sent')).toBeTruthy();
+		expect(
+			screen.getByRole('button', { name: 'Move 1 note to OneDrive · ms:1…' })
+		).toBeTruthy();
+	});
+
+	it('names an empty notebook an unsent rename left behind, in both steps of the move', async () => {
+		const user = userEvent.setup();
+		const { db } = await withSomewhereToPutIt();
+		// A notebook nothing has ever made on the remote, with nothing in it: a
+		// change of the user's in its own right, and it goes with the notes.
+		await db.folders.put({ connectionId: 'c1', path: 'Empty', createdAt: 0 });
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+		expect(await screen.findByText('1 note not yet sent · 1 notebook')).toBeTruthy();
+
+		await user.click(
+			screen.getByRole('button', { name: 'Move 1 note and 1 notebook to OneDrive · ms:1…' })
+		);
+
+		expect(
+			await screen.findByText('1 note and 1 notebook will be uploaded to OneDrive · ms:1.')
+		).toBeTruthy();
+	});
+
+	it('puts the focus on Cancel in the discard step too, where Escape can reach it', async () => {
+		const user = userEvent.setup();
+		const { db, unsent } = await withSomewhereToPutIt();
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(await screen.findByRole('button', { name: 'Discard them…' }));
+		const step = await screen.findByRole('group', { name: 'Discard for good' });
+
+		// The button that was pressed went with the step. Left on the page, the
+		// focus is nowhere the panel's Escape listener can hear.
+		expect(document.activeElement).toBe(step.querySelector('button.ghost'));
+
+		await user.keyboard('{Escape}');
+
+		expect(screen.queryByRole('button', { name: 'Discard for good' })).toBeNull();
+		expect(await screen.findByRole('button', { name: 'Disconnect…' })).toBeTruthy();
+		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
+	});
+
+	it('puts the focus back on the Move button when the second step is cancelled', async () => {
+		const user = userEvent.setup();
+		const { db } = await withSomewhereToPutIt();
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(await screen.findByRole('button', { name: /^Move/ }));
+		const step = await screen.findByRole('group', { name: 'Move to another source' });
+		// The step's own Cancel, which goes back rather than closing the question.
+		await user.click(step.querySelector('button.ghost') as HTMLElement);
+
+		const offer = await screen.findByRole('button', { name: /^Move/ });
+		expect(document.activeElement).toBe(offer);
+	});
+
+	it('keeps a note whose save starts failing while the question is being read', async () => {
+		const user = userEvent.setup();
+		const { db, unsent } = await withSomewhereToPutIt();
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+		await screen.findByRole('button', { name: 'Discard them…' });
+		// Only now does a save begin failing: the dialog's own guard was computed
+		// before the question was asked, and cannot know about this.
+		const withdraw = beforeClosing(() => Promise.resolve([JSON.stringify(['c1', unsent.id])]));
+
+		await user.click(screen.getByRole('button', { name: 'Discard them…' }));
+		await user.click(await screen.findByRole('button', { name: 'Discard for good' }));
+
+		// The note, and the source around it, are kept rather than removed with
+		// the rest: the row is where the text lands once it can be written.
+		expect((await screen.findByText(/text that could not be saved/)).getAttribute('role')).toBe(
+			'alert'
+		);
+		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
 		withdraw();
 	});
 

@@ -852,10 +852,20 @@ const wentAs = (result: LetGoResult): Disconnecting | undefined => {
 			return said(
 				'Something was written in this source after the list was shown. It was not on the list, so it has been kept.'
 			);
+		case 'holding':
+			return said(
+				'A note here has text that could not be saved, so the note and this source have been kept rather than removed with it. Open the note and copy the text somewhere safe; the note says how.'
+			);
 		case 'reconnected':
 			return said('This source was connected again meanwhile. Nothing has been changed.');
 		case 'no-target':
 			return said('That source is not connected any more, so nothing was moved.');
+		case 'unverified':
+			return said(
+				'This source has not been checked against its account yet, so what it holds could not be told apart from work that was never sent. Nothing was moved.'
+			);
+		case 'nothing-to-move':
+			return said('There was nothing here to move, so nothing was moved.');
 	}
 };
 

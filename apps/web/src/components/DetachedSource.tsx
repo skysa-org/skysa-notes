@@ -94,17 +94,31 @@ const stillOwed = (unsynced: Unsynced, bound: SyncStateRecord): string | null =>
 };
 
 /**
+ * A save the store would not take, found at the last moment: the note and the
+ * source around it are kept rather than removed with the rest, so the text has
+ * somewhere to land when it can be written.
+ */
+const HELD_BACK =
+	'A note here has text that could not be saved, so the note and this source have been kept. Open the note and copy the text somewhere safe; the note says how.';
+
+/**
  * What is left to say of a move, where what happened was not quite what was
- * asked for. None of the three lost anything, so none is said as a failure.
+ * asked for. None of them lost anything, so none is said as a failure.
  */
 const wentAs = (outcome: MoveOutcome): string | null => {
 	switch (outcome) {
 		case 'detached':
 			return 'Something was written in this source after the list was shown. It was not on the list, so it has been kept here.';
+		case 'holding':
+			return HELD_BACK;
 		case 'reconnected':
 			return 'This source was connected again meanwhile. Nothing has been moved.';
 		case 'no-target':
 			return 'That source is not connected any more, so nothing was moved.';
+		case 'unverified':
+			return 'This source has not been checked against its account yet, so what it holds cannot be told apart from work that was never sent. Nothing was moved.';
+		case 'nothing-to-move':
+			return 'There was nothing here to move, so nothing was moved.';
 		case 'released':
 			return null;
 	}
@@ -273,6 +287,7 @@ export const DetachedSource = ({
 					connectionId,
 					target,
 					seen: seenIn(shown),
+					holding: new Set(settled.failing),
 				});
 				if (outcome === 'released') onReleased?.();
 				setProblem(wentAs(outcome));
@@ -291,12 +306,14 @@ export const DetachedSource = ({
 		// The editors write once more first: a sentence typed into a listed note
 		// while the list was open is in no row, and would go with the row. In a
 		// row, it makes the note one the list did not stand for, and it is kept.
+		// What they still cannot write is named, and kept for the same reason.
 		void settleEditors()
-			.then(() =>
+			.then((settled) =>
 				releaseConnection(database, {
 					connectionId,
 					unsynced: 'discard',
 					seen: seenIn(shown),
+					holding: new Set(settled.failing),
 				})
 			)
 			.then((outcome) => {
@@ -305,6 +322,7 @@ export const DetachedSource = ({
 						'Something was written in this source after the list was shown. It was not on the list, so it has been kept.'
 					);
 				}
+				if (outcome === 'holding') setProblem(HELD_BACK);
 				if (outcome === 'reconnected') {
 					setProblem(
 						'This source was connected again meanwhile. Nothing has been discarded.'
@@ -355,8 +373,11 @@ export const DetachedSource = ({
 					targets={targets}
 					busy={busy}
 					disabled={false}
-					onMove={(target) => {
-						move(unsynced, target);
+					// The list the second step was about, not whatever the live query
+					// has made of it since: what the user was shown is what the move
+					// is held to (`seenIn`).
+					onMove={(target, shown) => {
+						move(shown, target);
 					}}
 				/>
 			)}

@@ -11,6 +11,7 @@ import {
 	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
+	noteRef,
 	type NotesDatabase,
 } from '../src/store/db.js';
 import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
@@ -24,7 +25,7 @@ import {
 	saveNoteBody,
 	undeleteNote,
 } from '../src/store/notes.js';
-import { queueWrite } from '../src/store/queue.js';
+import { queueMove, queueWrite } from '../src/store/queue.js';
 import { type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -224,6 +225,9 @@ describe('moving what a source never sent into another source', () => {
 		await saveNoteBody(db, doomed.id, '# doomed\n\nworth keeping\n', undefined, ada);
 		const held = (await noteById(db, doomed.id))!;
 		await deleteNote(db, doomed.id, ada);
+		// Something for the move to actually be about: a move whose list holds
+		// nothing movable is refused rather than carried out (`nothing-to-move`).
+		await createNote(db, { ...ada, title: 'Kept' });
 		const seen = await detached(db);
 
 		expect(await moving(db, seen)).toBe('released');
@@ -363,6 +367,132 @@ describe('moving what a source never sent into another source', () => {
 		expect(ops[0]?.connectionId).toBe(BOB.connectionId);
 		// A fresh op, not the old one re-pointed at another account.
 		expect(wasQueued).not.toContain(ops[0]?.seq);
+	});
+
+	it('refuses a list with nothing in it that a move is for, rather than discarding it', async () => {
+		const db = await twoSources();
+		// Everything unsent here is about a file only Ada's account has: a rename
+		// it never heard of, and a delete it can never be told about now. There is
+		// nothing to carry, so "Move" would be a discard of both under a button
+		// that says otherwise.
+		const renamed = await pushed(db, 'renamed.md');
+		await updateNote(db, renamed.id, { path: 'moved.md' });
+		await queueMove(db, (await noteById(db, renamed.id))!, 'renamed.md');
+		const doomed = await pushed(db, 'doomed.md');
+		await deleteNote(db, doomed.id, ada);
+		const seen = await detached(db);
+
+		expect(await moving(db, seen)).toBe('nothing-to-move');
+
+		// Nothing touched, on either side: the source is still here holding both.
+		expect(await db.notes.where('connectionId').equals(BOB.connectionId).count()).toBe(0);
+		expect((await db.syncState.get(ADA.connectionId))?.detached).toBeDefined();
+		expect((await noteById(db, renamed.id))?.path).toBe('moved.md');
+		expect((await noteById(db, doomed.id))?.deletedLocally).toBe(1);
+	});
+
+	it('refuses to move a source whose files have not been checked against its remote', async () => {
+		const db = await twoSources();
+		// A whole library, pushed and clean, resumed from an earlier bind. Until
+		// `verifyResume` has looked for the files, "clean, with a remote id" is a
+		// memory and every row reads as unsent (`Unsynced.unverified`) — and a
+		// move made on that would copy the lot into a stranger's account.
+		await pushed(db, 'one.md');
+		await pushed(db, 'two.md');
+		await db.syncState.update(ADA.connectionId, { resumeUnverified: true });
+		const seen = await detached(db);
+		expect((await unsyncedIn(db, ADA.connectionId)).unverified).toBe(true);
+
+		expect(await moving(db, seen)).toBe('unverified');
+
+		expect(await db.notes.where('connectionId').equals(BOB.connectionId).count()).toBe(0);
+		expect(await pathsUnder(db, ADA.connectionId)).toEqual(['one.md', 'two.md']);
+		expect((await db.syncState.get(ADA.connectionId))?.detached).toBeDefined();
+	});
+
+	it('keeps a note an editor still holds text for, rather than moving half of it', async () => {
+		const db = await twoSources();
+		const going = await createNote(db, { ...ada, title: 'Going' });
+		const held = await createNote(db, { ...ada, title: 'Held', body: '# Held\n\nrow\n' });
+		const seen = await detached(db);
+
+		// A save of `held` that the store would not take, found by the settle
+		// immediately before this: the row is not the whole of what was written.
+		expect(
+			await moveUnsyncedTo(db, {
+				connectionId: ADA.connectionId,
+				target: BOB.connectionId,
+				seen,
+				holding: new Set([noteRef(held)]),
+			})
+		).toBe('holding');
+
+		expect((await noteById(db, going.id))?.connectionId).toBe(BOB.connectionId);
+		// Left where its editor can still write into it, under a source that stays.
+		expect((await noteById(db, held.id))?.connectionId).toBe(ADA.connectionId);
+		expect((await db.syncState.get(ADA.connectionId))?.detached).toBeDefined();
+	});
+
+	it('undoing a delete after the move never writes over the target’s own note of that id', async () => {
+		const db = await twoSources();
+		const doomed = await pushed(db, 'doomed.md');
+		await saveNoteBody(db, doomed.id, '# doomed\n\nworth keeping\n', undefined, ada);
+		const shown = (await noteById(db, doomed.id))!;
+		await deleteNote(db, doomed.id, ada);
+		// Bob's account holds a note of the same id — one folder copied into two,
+		// the id travelling in the file — and it has never been pushed, so its
+		// text is on no remote anywhere.
+		const theirs = await importNoteFile(db, {
+			...bob,
+			path: 'theirs.md',
+			source: `---\nid: ${doomed.id}\n---\n\n# Theirs\n\nbob wrote this\n`,
+		});
+		await updateNote(db, theirs.id, { dirty: 1 });
+		await createNote(db, { ...ada, title: 'Kept' });
+		const seen = await detached(db);
+		expect(await moving(db, seen)).toBe('released');
+
+		const back = await undeleteNote(db, shown);
+
+		// The undo follows the tombstone into Bob's account, which is the only
+		// place the device still has for it — and under a fresh id, because the
+		// one it had is Bob's own note's.
+		expect(back.connectionId).toBe(BOB.connectionId);
+		expect(back.id).not.toBe(doomed.id);
+		// Exactly the row the move said it became, id and all: the forward has
+		// two halves and an editor open on the note follows both of them.
+		expect(back.id).toBe(movedRows.whereNow(shown)?.[1]);
+		expect(back.body).toBe('# doomed\n\nworth keeping\n');
+		expect((await db.notes.get([BOB.connectionId, doomed.id]))?.body).toBe(
+			'\n# Theirs\n\nbob wrote this\n'
+		);
+	});
+
+	it('nor over one the target has pushed, which an undo would unlink from its file', async () => {
+		const db = await twoSources();
+		const doomed = await pushed(db, 'doomed.md');
+		await saveNoteBody(db, doomed.id, '# doomed\n\nworth keeping\n', undefined, ada);
+		const shown = (await noteById(db, doomed.id))!;
+		await deleteNote(db, doomed.id, ada);
+		await importNoteFile(db, {
+			...bob,
+			path: 'theirs.md',
+			source: `---\nid: ${doomed.id}\n---\n\n# Theirs\n`,
+			remoteId: 'r:bob:theirs',
+			remoteVersion: 'v1',
+		});
+		await createNote(db, { ...ada, title: 'Kept' });
+		const seen = await detached(db);
+		expect(await moving(db, seen)).toBe('released');
+
+		const back = await undeleteNote(db, shown);
+
+		expect(back.id).not.toBe(doomed.id);
+		expect(back.id).toBe(movedRows.whereNow(shown)?.[1]);
+		const held = await db.notes.get([BOB.connectionId, doomed.id]);
+		expect(held?.path).toBe('theirs.md');
+		expect(held?.remoteId).toBe('r:bob:theirs');
+		expect(held?.deletedLocally).toBe(0);
 	});
 
 	it('refuses a target that is not a connected source, and touches nothing', async () => {

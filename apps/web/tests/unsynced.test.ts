@@ -591,7 +591,10 @@ describe('what a source holds that its remote has not been sent', () => {
 			});
 			expect(unsynced.unverified).toBe(true);
 			expect(isEmpty(unsynced)).toBe(false);
-			expect(movable(unsynced)).toBe(3);
+			// Both notes, and not the notebook: one of the notes is inside it, so
+			// it goes wherever that note goes and is not a second thing to count
+			// (`countedFolders`). Every number the user is shown uses this rule.
+			expect(movable(unsynced)).toBe(2);
 		});
 
 		it('counts nothing once the remote has been found to hold the files', async () => {

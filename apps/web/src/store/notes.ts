@@ -501,17 +501,25 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
 };
 
 /**
- * The source a note that has gone is made again in: its own, live or detached,
- * while this device still has it. Not "whichever is showing" — undo outlives
- * the view, and the user may have turned to another source since, where this
- * would put one account's note into another account's folder.
+ * The key a note that has gone is made again under: its own source, live or
+ * detached, while this device still has it, and its own id. Not "whichever is
+ * showing" — undo outlives the view, and the user may have turned to another
+ * source since, where this would put one account's note into another account's
+ * folder.
  *
  * A source that is no longer there has its rows say where to go instead:
  * wherever this tab moved them — a detached source's rows going home to the
- * connection its account came back under — or, for a note of the device's own
+ * connection its account came back under, or what one source never sent taken
+ * into another account (`moveUnsyncedTo`) — or, for a note of the device's own
  * pile, which is only ever on screen while nothing is connected, the source
  * showing, since a bind is what took the pile's rows and made its connection
  * the one showing.
+ *
+ * **Both halves of a forward are honoured, id included.** A move gives a row a
+ * fresh id where the account it lands in already holds that id (`moveRowsTo`),
+ * and following only the connection would take the note back to the id it had
+ * — which in that account is *somebody else's note*, and a `put` over it would
+ * be the one thing this store may never do.
  *
  * Failing both, the note belonged to a connected source that has since gone
  * entirely, and it is made again **under that source's own id**, which is
@@ -520,25 +528,48 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
  * there is one the user cannot find. And never in the source showing, for the
  * reason above.
  */
-const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> => {
+const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<NoteKey> => {
 	const bound = async (connectionId: string | undefined): Promise<boolean> =>
 		connectionId !== undefined && (await db.syncState.get(connectionId)) !== undefined;
-	if (await bound(note.connectionId)) return note.connectionId;
-	const forwarded = movedRows.whereNow(note)?.[0];
-	if (forwarded !== undefined && (await bound(forwarded))) return forwarded;
-	if (note.connectionId === LOCAL_CONNECTION_ID) return activeConnectionId(db);
+	if (await bound(note.connectionId)) return [note.connectionId, note.id];
+	const forwarded = movedRows.whereNow(note);
+	if (forwarded !== undefined && (await bound(forwarded[0]))) return forwarded;
+	if (note.connectionId === LOCAL_CONNECTION_ID) return [await activeConnectionId(db), note.id];
 	await ensureDetached(db, note.connectionId);
-	return note.connectionId;
+	return [note.connectionId, note.id];
+};
+
+/**
+ * The key to make it under, once the row that is already there has had its say.
+ *
+ * A note's key is its connection and its id, and a note brought back into an
+ * account it did not come from can find that id taken: two accounts holding one
+ * folder, imported from files that carry their ids, is enough. The row there is
+ * another account's note, and writing over it would delete text that — where it
+ * had never been pushed — exists nowhere else. So the newcomer takes a fresh
+ * id, exactly as a move does (`landing` in `store/connection.ts`), and its file
+ * still says the old one until it is next written, which is how any note stands
+ * whose file names an id its source already had.
+ *
+ * The row that *is* this note is written back over, which is the whole point of
+ * bringing it back (`sameNote`).
+ */
+const freeKeyFor = async (db: NotesDatabase, shown: NoteRecord): Promise<NoteKey> => {
+	const [connectionId, id] = await homeOf(db, shown);
+	const held = await db.notes.get([connectionId, id]);
+	return [connectionId, held === undefined || sameNote(held, shown) ? id : crypto.randomUUID()];
 };
 
 const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
 	const shown = base.note;
-	const connectionId = await homeOf(db, shown);
+	const [connectionId, id] = await freeKeyFor(db, shown);
 	const folderPath = parentPath(shown.path);
 	// The path may have been taken since, by a file the same pull brought in:
 	// a local note meeting a remote file at its path, which is a conflict, and
-	// named like one (§7).
-	const taken = await takenNamesIn(db, connectionId, folderPath, shown.id);
+	// named like one (§7). By the id it is landing under, not the one it had:
+	// under a fresh id the account's own note of the old id is another note, and
+	// its name is taken.
+	const taken = await takenNamesIn(db, connectionId, folderPath, id);
 	const free = freeName(basename(shown.path), taken) === basename(shown.path);
 	const path = free ? shown.path : conflictPath(shown.path, new Date(), taken);
 	const {
@@ -550,6 +581,7 @@ const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promi
 	} = shown;
 	return addEdited(db, {
 		...kept,
+		id,
 		connectionId,
 		path,
 		body,

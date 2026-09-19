@@ -941,13 +941,46 @@ export interface ReleaseInput {
 	 * written since — into a note that was on the list included.
 	 */
 	seen: Seen;
+	/**
+	 * Notes an editor still holds text for that the store would not take, by
+	 * `noteRef`, settled immediately before this (`store/heldEdits.ts`). Kept
+	 * whatever the answer was: the row is not the whole of what the user wrote,
+	 * so the list they answered about was not the whole of what would go.
+	 */
+	holding?: ReadonlySet<string>;
 }
 
 /**
- * Gone entirely; still here detached because something unseen was kept; or
- * connected again meanwhile, and so not touched at all.
+ * Gone entirely; still here detached because something unseen was kept, or
+ * because an editor is holding text no row has; or connected again meanwhile,
+ * and so not touched at all.
  */
-export type ReleaseOutcome = 'released' | 'detached' | 'reconnected';
+export type ReleaseOutcome = 'released' | 'detached' | 'holding' | 'reconnected';
+
+/**
+ * The rows an editor still holds text for that the store would not take.
+ *
+ * Kept by every path that removes a source's rows, and for the same reason
+ * `detachConnection` keeps them: the row is clean only because the edit never
+ * reached it, and removing the row leaves the edit with nothing to land in. A
+ * failing save that begins *while the question is up* is caught here rather
+ * than by the guard the dialog computed before it was asked.
+ */
+const heldRowsIn = async (
+	db: Scope,
+	connectionId: string,
+	holding: ReadonlySet<string>
+): Promise<NoteRecord[]> => {
+	if (holding.size === 0) return [];
+	const rows = await db.notes.where('connectionId').equals(connectionId).toArray();
+	return rows.filter((note) => holding.has(noteRef(note)));
+};
+
+/** Everything that may not go: what the list did not stand for, and what is held. */
+const stayingRows = (unseen: readonly NoteRecord[], held: readonly NoteRecord[]): NoteRecord[] => [
+	...unseen,
+	...held.filter((note) => !unseen.some((each) => each.id === note.id)),
+];
 
 /**
  * Let a source go for good, unsent work included: the user's answer to being
@@ -979,14 +1012,17 @@ export const releaseConnection = (
 		if (state.detached === undefined) return { outcome: 'reconnected' };
 		await countBinding(db);
 		const unsynced = await unsyncedIn(db, connectionId);
-		if (unseenIn(unsynced, seen)) {
+		const held = await heldRowsIn(db, connectionId, input.holding ?? new Set());
+		if (unseenIn(unsynced, seen) || held.length > 0) {
 			const unseen = [...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].filter(
 				(note) => !wasSeen(seen, note)
 			);
-			await keepOnly(db, connectionId, unsynced, unseen);
+			await keepOnly(db, connectionId, unsynced, stayingRows(unseen, held));
 			await db.credentials.delete(connectionId);
 			await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
-			return { outcome: 'detached' };
+			// Held text is the one of the two the user can do something about, so
+			// it is what they are told about where both are true.
+			return { outcome: held.length > 0 ? 'holding' : 'detached' };
 		}
 		await db.notes.where('connectionId').equals(connectionId).delete();
 		await db.folders.where('connectionId').equals(connectionId).delete();
@@ -1005,10 +1041,16 @@ export interface MoveInput {
 	target: string;
 	/** What the user was shown before they said so (`seenIn` in `store/unsynced.ts`). */
 	seen: Seen;
+	/** As `ReleaseInput.holding`: held text is never moved, and never removed. */
+	holding?: ReadonlySet<string>;
 }
 
-/** As a release, and `no-target` for a target that is not a connected source. */
-export type MoveOutcome = ReleaseOutcome | 'no-target';
+/**
+ * As a release, and three refusals that change nothing: a target that is not a
+ * connected source, a source whose files have not been checked against its
+ * remote yet, and a move with nothing in it to move.
+ */
+export type MoveOutcome = ReleaseOutcome | 'no-target' | 'unverified' | 'nothing-to-move';
 
 /**
  * Take what one source never sent into another one, and let the first go: the
@@ -1042,8 +1084,16 @@ export type MoveOutcome = ReleaseOutcome | 'no-target';
  * One transaction with the release, and with the same care for what the user
  * was not shown as a discard takes: what is unsent is read again here, and a
  * note written into since the list was made is neither moved nor let go. It is
- * kept, the source stays detached around it, and the user is told. Only a
- * detached source, and only into a live one.
+ * kept, the source stays detached around it, and the user is told. So is a note
+ * an editor still holds text for (`holding`).
+ *
+ * Only a detached source, and only into a live one. It refuses outright, having
+ * changed nothing, in three more cases: a target that is not a connected
+ * source; a source whose files have not been checked against its remote yet,
+ * where everything it holds is listed as unsent and a bulk copy would be made on
+ * a count known to be wrong; and a list with nothing of the kind this moves in
+ * it, where carrying on would be a discard of the renames and deletes reached
+ * through a button that says Move.
  */
 export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<MoveOutcome> =>
 	inTransaction(db, async (): Promise<{ outcome: MoveOutcome; gone?: SyncStateRecord }> => {
@@ -1057,10 +1107,31 @@ export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<Mov
 		if (target === connectionId || to === undefined || to.detached !== undefined) {
 			return { outcome: 'no-target' };
 		}
-		await countBinding(db);
 		const unsynced = await unsyncedIn(db, connectionId);
-		const moving = unsynced.notes.filter((note) => wasSeen(seen, note));
+		// A resumed source nobody has checked against its remote counts everything
+		// live in it as unsent (`Unsynced.unverified`), which here would be a whole
+		// synced library copied into a stranger's account on a number known to be
+		// wrong. Connecting it again is what settles the question; until then this
+		// refuses rather than guesses.
+		if (unsynced.unverified) return { outcome: 'unverified' };
+		const holding = input.holding ?? new Set<string>();
+		const held = await heldRowsIn(db, connectionId, holding);
+		// Never a row an editor is holding text for: the row is not the whole of
+		// the note, and half of it in another account is the worst of both.
+		const moving = unsynced.notes.filter(
+			(note) => wasSeen(seen, note) && !holding.has(noteRef(note))
+		);
 		const shownFolders = unsynced.folders.filter((folder) => seen.folders.has(folder.path));
+		// Nothing of the kind a move is for. Carried on, this would be a discard of
+		// the renames and the deletes reached through a button that says Move, so
+		// it stops here and touches nothing. Which of the two it is told as depends
+		// on why: a list that held something movable when it was shown, and does
+		// not now, is a source written into since, and saying so is the useful
+		// half of it.
+		if (moving.length === 0 && shownFolders.length === 0) {
+			return { outcome: unseenIn(unsynced, seen) ? 'detached' : 'nothing-to-move' };
+		}
+		await countBinding(db);
 		const moved = await moveRowsTo(db, target, 'copy', connectionId, {
 			notes: new Set(moving.map((note) => note.id)),
 			// Every notebook above a note that is going, whether or not it was
@@ -1074,7 +1145,7 @@ export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<Mov
 		});
 		await queueOwed(db, target, moved);
 
-		if (!unseenIn(unsynced, seen)) {
+		if (!unseenIn(unsynced, seen) && held.length === 0) {
 			// Everything the source held was either shown and moved, or is the
 			// remote's and comes back if the account ever does.
 			await db.notes.where('connectionId').equals(connectionId).delete();
@@ -1084,16 +1155,17 @@ export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<Mov
 			return { outcome: 'released', gone: state };
 		}
 		// Written in since the list was made — another tab — and so not the user's
-		// to have moved or let go. Read again, because the move has just changed
-		// what is here, and kept with the notebooks it needs.
+		// to have moved or let go, or held by an editor whose save will not go
+		// through. Read again, because the move has just changed what is here, and
+		// kept with the notebooks it needs.
 		const left = await unsyncedIn(db, connectionId);
 		const unseen = [...left.notes, ...left.renames, ...left.deletes].filter(
 			(note) => !wasSeen(seen, note)
 		);
-		await keepOnly(db, connectionId, left, unseen);
+		await keepOnly(db, connectionId, left, stayingRows(unseen, held));
 		await db.credentials.delete(connectionId);
 		await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
-		return { outcome: 'detached' };
+		return { outcome: held.length > 0 ? 'holding' : 'detached' };
 	}).then(({ outcome, gone }) => {
 		remember(gone);
 		return outcome;

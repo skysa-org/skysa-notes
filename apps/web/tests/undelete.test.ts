@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { bindConnection } from '../src/store/connection.js';
 import {
 	ACTIVE_CONNECTION_KEY,
 	createDatabase,
@@ -306,6 +307,37 @@ describe('saveNoteBody, for a note whose row has gone', () => {
 		await saveNoteBody(db, note.id, 'stored\nheld\n', { origin: '', note });
 
 		expect(await getNote(db, note.id)).toBeUndefined();
+	});
+
+	it('never writes over the source’s own note of that id, coming out of the device’s pile', async () => {
+		const { db } = box;
+		// Written before anything was connected, and its row gone since: a save
+		// the editor is holding is the whole of what is left of it.
+		const note = await createNote(db, { title: 'Note', body: 'stored\n' });
+		await purgeNote(db, note.id);
+		// A source connected from another tab, so nothing in this one forwards
+		// the note (`movedRows`) — and it already holds that id, as two accounts
+		// holding one copied folder do. Its note has never been pushed either.
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await db.notes.add({
+			...note,
+			connectionId: 'c1',
+			createdAt: note.createdAt + 1,
+			path: 'theirs.md',
+			title: 'Theirs',
+			body: 'theirs\n',
+			dirty: 1,
+		});
+
+		const back = await saveNoteBody(db, note.id, 'stored\nmore\n', { origin: '', note });
+
+		// The pile's note lands in the source, under a fresh id, and the source's
+		// own note is exactly where it was.
+		expect(back.connectionId).toBe('c1');
+		expect(back.id).not.toBe(note.id);
+		expect(back.body).toBe('stored\nmore\n');
+		expect((await db.notes.get(['c1', note.id]))?.body).toBe('theirs\n');
+		expect((await db.notes.get(['c1', note.id]))?.path).toBe('theirs.md');
 	});
 
 	it('nor for a displaced edit: the later one was stored, and went with the note', async () => {

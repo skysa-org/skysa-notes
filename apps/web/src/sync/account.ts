@@ -446,6 +446,13 @@ export type LetGoResult = { ok: false; refusal: Refusal } | { ok: true; outcome:
  * A server that refuses leaves the device exactly as it was, answer and all:
  * the panel says so and offers to stop syncing here instead, which is this
  * again with `onServer: false`.
+ *
+ * The editors write once more immediately before the release, and what they
+ * still cannot write is carried into it (`holding`). The detach just before
+ * kept those rows so unsavable text would have somewhere to land; the release
+ * would otherwise take them straight back out. And the dialog's own guard was
+ * computed before the question was asked, which a save that begins failing
+ * while the user is reading it walks straight past.
  */
 export const letGoOfSource = async (
 	db: NotesDatabase,
@@ -459,9 +466,16 @@ export const letGoOfSource = async (
 	} else {
 		await stopSyncingHere(db, connectionId);
 	}
+	const { failing } = await settleEditors();
+	const holding = new Set(failing);
 	const outcome =
 		unsent === 'discard'
-			? await releaseConnection(db, { connectionId, unsynced: 'discard', seen })
-			: await moveUnsyncedTo(db, { connectionId, target: unsent.moveTo, seen });
+			? await releaseConnection(db, { connectionId, unsynced: 'discard', seen, holding })
+			: await moveUnsyncedTo(db, {
+					connectionId,
+					target: unsent.moveTo,
+					seen,
+					holding,
+				});
 	return { ok: true, outcome };
 };
