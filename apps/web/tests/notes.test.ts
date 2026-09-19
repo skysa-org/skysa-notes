@@ -11,6 +11,7 @@ import {
 	listDirtyNotes,
 	listNotes,
 	moveNote,
+	noteFile,
 	noteFileContents,
 	purgeNote,
 	renameNote,
@@ -584,6 +585,72 @@ describe('noteFileContents', () => {
 		expect(note.frontmatter).toBeNull();
 		// Serializing adds the block, because the app now has an id and title for it.
 		expect(noteFileContents(note)).toMatch(/^---\n/);
+	});
+});
+
+/**
+ * docs/PLAN.md §7: a file holding a U+0000 is not a note to any device that
+ * reads it, and is left alone. A note this app pushed with one would go from
+ * every device, the one that wrote it included — so it never writes one.
+ */
+describe('a U+0000 in what the user gave', () => {
+	const NUL = '\u0000';
+
+	it('is dropped from a saved body, in the row and in the file', async () => {
+		const note = await createNote(db, { title: 'Pasted', body: '# Pasted\n' });
+
+		const saved = await saveNoteBody(db, note.id, `# Pasted\n\nfrom a${NUL} terminal${NUL}\n`);
+
+		expect(saved.body).toBe('# Pasted\n\nfrom a terminal\n');
+		expect(saved.source).not.toContain(NUL);
+		expect(noteFileContents(saved)).not.toContain(NUL);
+		expect((await noteById(db, note.id))?.body).toBe('# Pasted\n\nfrom a terminal\n');
+	});
+
+	it('is dropped from a new note, its title included', async () => {
+		const note = await createNote(db, { title: `Na${NUL}med`, body: `bo${NUL}dy\n` });
+
+		expect(note.title).toBe('Named');
+		expect(note.body).toBe('body\n');
+		expect(note.path).toBe('named.md');
+		expect(note.source).not.toContain(NUL);
+	});
+
+	it('is dropped from the file wherever else in the note it got to', async () => {
+		// A rename, a tag, frontmatter from a file on disk: all of it reaches the
+		// remote through the one serializer.
+		const imported = await importNoteFile(db, {
+			path: 'a.md',
+			source: `---\nkept: va${NUL}lue\n---\n\n# A\n`,
+		});
+		const renamed = await renameNote(db, imported.id, `Ti${NUL}tle`);
+		const tagged = await setNoteTags(db, renamed.id, [`ta${NUL}g`]);
+
+		expect(tagged.source).not.toContain(NUL);
+		expect(noteFileContents(tagged)).not.toContain(NUL);
+		expect(noteFileContents(tagged)).toContain('kept: value');
+	});
+
+	it('is dropped from an imported file at the door, so the file kept verbatim has none', async () => {
+		// An unedited note is pushed as its `source`, not re-serialized, so
+		// stripping where files are made would never see this one.
+		const note = await importNoteFile(db, {
+			path: 'a.md',
+			source: `---\ntitle: Im\u0000ported\n---\n\n# A\u0000\n`,
+		});
+
+		expect(note.source).toBe('---\ntitle: Imported\n---\n\n# A\n');
+		expect(noteFile(note)).not.toContain(NUL);
+		expect(note.title).toBe('Imported');
+		expect(note.body).not.toContain(NUL);
+		expect(note.dirty).toBe(0);
+	});
+
+	it('leaves a body without one exactly as typed', async () => {
+		const note = await createNote(db, { title: 'Plain', body: '' });
+		const body = '# Plain\n\ttabs, é, 🙂 and a trailing space \n';
+
+		expect((await saveNoteBody(db, note.id, body)).body).toBe(body);
 	});
 });
 

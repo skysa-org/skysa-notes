@@ -353,7 +353,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		const existing = byId(id);
 		if (existing === undefined || existing.kind === 'folder')
 			return driveError(404, 'notFound');
-		return new Response((await backing.read(existing)).content, { status: 200 });
+		return new Response((await backing.readBytes(existing)).bytes.slice(), { status: 200 });
 	};
 
 	const changeList = (url: URL): Response => {

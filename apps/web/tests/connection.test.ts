@@ -813,6 +813,23 @@ describe('checking a resumed connection against its remote', () => {
 		expect((await noteById(db, plan.id))?.remoteId).toBe(plan.remoteId);
 	});
 
+	it('takes a file that is no longer UTF-8 text for one that is still there', async () => {
+		// Every note's file re-saved by some other tool in its own encoding. Each
+		// read fails the same way however often it is asked, so counted as "could
+		// not be asked" the connection never verifies; and the files are there,
+		// which is all this asks. The sync that follows lets go of the notes.
+		const { db, fake } = await syncedThenDisconnected();
+		fake.snapshot()
+			.filter((entry) => entry.kind === 'file' && entry.path.endsWith('.md'))
+			.forEach((entry) => {
+				fake.writeBytes(entry.path, new Uint8Array([0x63, 0x61, 0x66, 0xe9]));
+			});
+		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
+
+		expect(await verifyResume(db, 'dropbox-2', fake)).toBe('resumed');
+		expect((await db.syncState.get('dropbox-2'))?.resumeUnverified).toBeUndefined();
+	});
+
 	it('has nothing to check on a connection bound by copying', async () => {
 		const { db } = await usedLocally();
 		await bindConnection(db, DROPBOX);

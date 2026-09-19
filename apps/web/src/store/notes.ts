@@ -14,6 +14,7 @@ import {
 	serializeNoteFile,
 	uniqueFilename,
 	UNTITLED_SLUG,
+	withoutNul,
 	writeFrontmatter,
 } from '@skysa/core';
 import Dexie from 'dexie';
@@ -55,23 +56,36 @@ const isUnnamed = (note: NoteRecord): boolean =>
 	basename(note.path) === `${UNTITLED_SLUG}${NOTE_EXTENSION}` &&
 	readFrontmatter(note.frontmatter).title === undefined;
 
-/** Everything a note needs written back to its file. */
+/**
+ * Everything a note needs written back to its file.
+ *
+ * Never a U+0000, wherever in the note one got to — a title, a tag, frontmatter
+ * imported from a file on disk. A file holding one is not a note to any device
+ * that reads it (`decodeText`, docs/PLAN.md §7), so a note pushed with one
+ * would go from every device, this one included. Every file the app originates
+ * is made here. The other thing a push can send is a `source` kept verbatim
+ * (`noteFile`), and neither door a source comes through lets one in: a pulled
+ * file holding a NUL is refused before it is a row, and `importNoteFile` drops
+ * it on the way in.
+ */
 export const noteFileContents = (note: NoteRecord): string =>
-	serializeNoteFile({
-		frontmatter: note.frontmatter,
-		body: note.body,
-		metadata: {
-			// Not written over an `id` the user wrote and the app could not use
-			// (`id: 202409141302`): `writeFrontmatter` holds that.
-			id: note.id,
-			// An unnamed note has no title worth recording; writing "Untitled"
-			// would pin it and stop the first heading from ever naming the note.
-			...(isUnnamed(note) ? {} : { title: note.title }),
-			created: new Date(note.createdAt).toISOString(),
-			updated: new Date(note.updatedAt).toISOString(),
-			...(note.tags.length > 0 ? { tags: note.tags } : {}),
-		},
-	});
+	withoutNul(
+		serializeNoteFile({
+			frontmatter: note.frontmatter,
+			body: note.body,
+			metadata: {
+				// Not written over an `id` the user wrote and the app could not use
+				// (`id: 202409141302`): `writeFrontmatter` holds that.
+				id: note.id,
+				// An unnamed note has no title worth recording; writing "Untitled"
+				// would pin it and stop the first heading from ever naming the note.
+				...(isUnnamed(note) ? {} : { title: note.title }),
+				created: new Date(note.createdAt).toISOString(),
+				updated: new Date(note.updatedAt).toISOString(),
+				...(note.tags.length > 0 ? { tags: note.tags } : {}),
+			},
+		})
+	);
 
 /** The file for a note, exactly: see `NoteRecord.source`. */
 export const noteFile = (note: NoteRecord): string => note.source ?? noteFileContents(note);
@@ -122,7 +136,8 @@ export const createNote = async (
 	input: CreateNoteInput = {}
 ): Promise<NoteRecord> => {
 	const folderPath = input.folderPath ?? '';
-	const body = input.body ?? '';
+	// As `saveNoteBody`: the row holds what its file will.
+	const body = withoutNul(input.body ?? '');
 	const now = Date.now();
 
 	// One transaction, for the same reason `applyEdit` is one: the filename is
@@ -138,7 +153,8 @@ export const createNote = async (
 		db.prefs,
 		async () => {
 			const connectionId = input.connectionId ?? (await activeConnectionId(db));
-			const title = input.title ?? deriveTitle({ body });
+			const title =
+				input.title === undefined ? deriveTitle({ body }) : withoutNul(input.title);
 			const filename = uniqueFilename(
 				title,
 				await takenNamesIn(db, connectionId, folderPath)
@@ -344,12 +360,17 @@ export interface EditBase {
 export const saveNoteBody = async (
 	db: NotesDatabase,
 	id: string,
-	body: string,
+	typed: string,
 	base?: EditBase,
 	/** Where the note is, for a caller with no `base` to say. */
 	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+		// A paste can carry a U+0000, and a file holding one is unreadable to
+		// every device (`withoutNul`). Dropped here, ahead of every road the
+		// body takes below, so the row holds what its file will; the file is
+		// held to it again where it is made (`noteFileContents`).
+		const body = withoutNul(typed);
 		if (base === undefined) return applyBody(db, id, body, scope);
 		const current = await whereShown(db, base.note);
 		if (current === undefined) {
@@ -819,7 +840,13 @@ export const importNoteFile = async (
 	db: NotesDatabase,
 	input: ImportNoteFileInput
 ): Promise<NoteRecord> => {
-	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
+	// A file from outside the sync: nothing has decoded it, so nothing has
+	// refused a U+0000 in it (`decodeText`), and `source` is what a push sends
+	// for as long as the note is not edited (`noteFile`). Dropped at the door,
+	// then, so the row never holds a file no device would read back. A pulled
+	// file needs no such thing: one holding a NUL never becomes a row.
+	const source = withoutNul(input.source);
+	const parsed = parseNoteFile(source, { filename: basename(input.path) });
 	const now = Date.now();
 
 	// Transactional for the same reason every other write here is, and more
@@ -851,8 +878,8 @@ export const importNoteFile = async (
 					id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
 					connectionId,
 					path: input.path,
-					source: input.source,
-					hash: await Dexie.waitFor(contentHash(input.source)),
+					source,
+					hash: await Dexie.waitFor(contentHash(source)),
 					existing,
 					now,
 				}),

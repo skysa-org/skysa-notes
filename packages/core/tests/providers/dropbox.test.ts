@@ -500,7 +500,8 @@ describe('encoding', () => {
 	});
 
 	it('drops a byte-order mark, and does so deliberately', async () => {
-		// `Response.text()` strips a leading BOM. That is the behaviour we want —
+		// `TextDecoder` strips a leading BOM, as `Response.text()` did before the
+		// decode was made strict (`providers/text.ts`). That is the behaviour we want —
 		// a BOM is an encoding artefact, not something the user typed, and leaving
 		// it in would put a stray character at the top of the editor. Worth
 		// knowing: a note written by an editor that adds one loses it here the

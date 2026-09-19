@@ -24,6 +24,7 @@ import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
+import { richWithoutNul } from './noNul.js';
 
 /**
  * The rich editor itself, with no React in it.
@@ -79,6 +80,9 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
 		// Always, since a plugin cannot be added to a running editor and one with
 		// no query costs a string search per block of a note.
 		.use($prose(findPlugin))
+		// Ahead of the plugin that reports edits, though it need not be: an
+		// appended transaction is applied before any view hears of the change.
+		.use($prose(richWithoutNul))
 		.use(
 			$prose((ctx) => {
 				const plugin = userEditPlugin((doc) => {

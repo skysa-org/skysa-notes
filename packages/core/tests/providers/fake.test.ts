@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createFakeProvider } from '../../src/providers/fake.js';
-import { AuthError, NotFoundError } from '../../src/providers/types.js';
+import { AuthError, NotFoundError, UnreadableError } from '../../src/providers/types.js';
 import { drainChanges } from './contract.js';
 
 /**
@@ -212,5 +212,76 @@ describe('determinism', () => {
 		const second = await provider.write('b.md', 'y\n', {});
 
 		expect(Date.parse(second.modifiedAt)).toBeGreaterThan(Date.parse(first.modifiedAt));
+	});
+});
+
+/**
+ * The way a test puts a file there that no `write` could: one that is not
+ * UTF-8. It has to behave as another tool saving into the folder does, or the
+ * engine tests built on it prove nothing about a real one.
+ */
+describe('a file written as bytes', () => {
+	const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+	it('keeps the id of the file it saves over, renews the version, and is in the feed', async () => {
+		const provider = await ready();
+		const first = await provider.write('a.md', 'one\n', {});
+		const { cursor } = await drainChanges(provider);
+
+		const saved = provider.writeBytes('a.md', LATIN1);
+
+		expect(saved.remoteId).toBe(first.remoteId);
+		expect(saved.version).not.toBe(first.version);
+		expect(saved.size).toBe(LATIN1.length);
+		const { entries } = await drainChanges(provider, cursor);
+		expect(entries).toEqual([saved]);
+	});
+
+	it('is a new file where there was none, and needs its folder like any other', async () => {
+		const provider = await ready();
+
+		expect(provider.writeBytes('a.md', LATIN1).remoteId).not.toBe('');
+		expect(() => provider.writeBytes('Nowhere/a.md', LATIN1)).toThrow(NotFoundError);
+	});
+
+	it('is unreadable as text and whole as bytes', async () => {
+		const provider = await ready();
+		const saved = provider.writeBytes('a.md', LATIN1);
+
+		await expect(provider.read(saved)).rejects.toThrow(UnreadableError);
+		expect((await provider.readBytes(saved)).bytes).toEqual(LATIN1);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(provider.contentAt('a.md')).toBeUndefined();
+	});
+
+	it('is text again once text is written over it', async () => {
+		const provider = await ready();
+		const saved = provider.writeBytes('a.md', LATIN1);
+
+		const fixed = await provider.write('a.md', 'café\n', { expectedVersion: saved.version });
+
+		expect((await provider.read(fixed)).content).toBe('café\n');
+		expect(provider.contentAt('a.md')).toBe('café\n');
+		expect(provider.bytesAt('a.md')).toEqual(new TextEncoder().encode('café\n'));
+	});
+
+	it('reads through the same faults and the same not-found as `read`', async () => {
+		const provider = await ready();
+		const saved = provider.writeBytes('a.md', LATIN1);
+		provider.setFault((call) => (call.op === 'read' ? new AuthError('expired') : undefined));
+		await expect(provider.readBytes(saved)).rejects.toThrow(AuthError);
+
+		provider.setFault(undefined);
+		await provider.delete(saved);
+		await expect(provider.readBytes(saved)).rejects.toThrow(NotFoundError);
+	});
+
+	it('refuses text holding a NUL that `write` put there, as an adapter would', async () => {
+		// Decoded from the bytes whoever wrote them: the fake stays the strictest
+		// provider, so an engine that pushed a NUL finds out here.
+		const provider = await ready();
+		const entry = await provider.write('a.md', 'a\u0000b\n', {});
+
+		await expect(provider.read(entry)).rejects.toThrow(UnreadableError);
 	});
 });

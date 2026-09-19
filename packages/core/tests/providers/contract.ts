@@ -8,6 +8,7 @@ import {
 	NotFoundError,
 	type RemoteEntry,
 	type StorageProvider,
+	UnreadableError,
 } from '../../src/providers/types.js';
 
 /**
@@ -29,6 +30,15 @@ export interface ProviderHarness {
 	 * in-memory fake built fresh per test does not.
 	 */
 	cleanup?: () => Promise<void>;
+	/**
+	 * Put a file there beneath the adapter, as another tool would: any bytes at
+	 * all. No adapter can do it — `write` takes text — so the scenarios about a
+	 * file that is not UTF-8 need a way in from underneath. The fake and the
+	 * wire stubs have one; a live account has not, and those scenarios skip.
+	 */
+	plant?: (path: string, bytes: Uint8Array) => Promise<void>;
+	/** The bytes at a path now, asked the same way. Required with `plant`. */
+	bytesAt?: (path: string) => Promise<Uint8Array | undefined>;
 }
 
 export interface ProviderContractOptions {
@@ -481,6 +491,108 @@ export const describeProviderContract = (
 			it('rejects a cursor it cannot use', config, async () => {
 				const provider = await open();
 				await expect(provider.changes('not-a-cursor')).rejects.toThrow(CursorResetError);
+			});
+		});
+
+		/**
+		 * docs/PLAN.md §4: `read` says when a file is not UTF-8 text, and that
+		 * is all that is different about it. The file is still listed, still in
+		 * the feed, and can still be moved and deleted — the engine needs every
+		 * one of those to leave it alone on purpose rather than by accident.
+		 */
+		describe('a file that is not UTF-8 text', () => {
+			/** "café" as Latin-1 writes it: `0xE9` alone is not a UTF-8 sequence. */
+			const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+			const planted = async (
+				path: string,
+				skip: () => void
+			): Promise<
+				| (Required<Pick<ProviderHarness, 'bytesAt'>> & { provider: StorageProvider })
+				| undefined
+			> => {
+				const harness = await createHarness();
+				const { plant, bytesAt } = harness;
+				if (plant === undefined || bytesAt === undefined) {
+					skip();
+					return undefined;
+				}
+				await harness.cleanup?.();
+				await harness.provider.ensureRoot();
+				await plant(path, LATIN1);
+				return { provider: harness.provider, bytesAt };
+			};
+
+			it('is an UnreadableError to read, never text', config, async ({ skip }) => {
+				const under = await planted('old.md', skip);
+				if (under === undefined) return;
+				const { provider, bytesAt } = under;
+				const listed = (await provider.list('')).find((entry) => entry.path === 'old.md');
+				expect(listed?.kind).toBe('file');
+
+				const failure = await provider.read(listed!).then(
+					() => undefined,
+					(error: unknown) => error
+				);
+
+				expect(failure).toBeInstanceOf(UnreadableError);
+				expect(failure).toMatchObject({ code: 'unreadable', path: 'old.md' });
+				expect(await bytesAt('old.md')).toEqual(LATIN1);
+			});
+
+			it('is reported by a scan like any other file', config, async ({ skip }) => {
+				const under = await planted('old.md', skip);
+				if (under === undefined) return;
+
+				const { entries } = await drainChanges(under.provider);
+
+				expect(liveAt(entries, 'old.md')?.kind).toBe('file');
+			});
+
+			it(
+				'shows up in the feed when a readable file becomes one',
+				config,
+				async ({ skip }) => {
+					const harness = await createHarness();
+					const { plant } = harness;
+					if (plant === undefined) {
+						skip();
+						return;
+					}
+					await harness.cleanup?.();
+					await harness.provider.ensureRoot();
+					const { provider } = harness;
+					const before = await seedFile(provider, 'note.md', 'readable\n');
+					const { cursor } = await drainChanges(provider);
+
+					await plant('note.md', LATIN1);
+
+					const { entries } = await drainChanges(provider, cursor);
+					const after = liveAt(entries, 'note.md');
+					expect(after).toBeDefined();
+					// The engine tells a changed file by its version and nothing else.
+					expect(after?.version).not.toBe(before.version);
+					await expect(provider.read(after!)).rejects.toThrow(UnreadableError);
+				}
+			);
+
+			it('can be moved and deleted, with its bytes untouched', config, async ({ skip }) => {
+				const under = await planted('old.md', skip);
+				if (under === undefined) return;
+				const { provider, bytesAt } = under;
+				const listed = (await provider.list('')).find((entry) => entry.path === 'old.md')!;
+
+				const moved = await provider.move(listed, 'renamed.md');
+
+				expect(moved.path).toBe('renamed.md');
+				expect(await bytesAt('renamed.md')).toEqual(LATIN1);
+				expect(await bytesAt('old.md')).toBeUndefined();
+
+				await provider.delete(moved);
+
+				expect((await provider.list('')).map((entry) => entry.path)).not.toContain(
+					'renamed.md'
+				);
 			});
 		});
 	});

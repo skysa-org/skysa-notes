@@ -99,13 +99,16 @@ export interface WriteOptions {
  *   `ConflictError` — the engine uses a read as an existence probe and takes a
  *   `NotFoundError` for "gone" and everything else for "could not say", and a
  *   conflict arriving from one would be routed as a conflict on the write.
+ *   A file that is there and is not UTF-8 text is an `UnreadableError`, never
+ *   text with U+FFFD where the bytes were: that looks like a note, and the next
+ *   push writes the damage over the original. A probe takes it for "there".
  * - `list` is one level; `changes` covers the whole tree at every depth.
  * - Neither filters hidden paths: `.notesapp.json` has to reach the engine.
  *   Callers filter with `isHidden`.
  * - `rootId` is opaque, non-empty and stable. A provider whose root has no id
  *   of its own — a Dropbox app folder, where the root simply is `/` — returns a
  *   synthetic constant.
- * - Content is UTF-8 text. Binary attachments are out of scope (docs/PLAN.md §14).
+ * - Content is UTF-8 text, decoded strictly (`decodeText`). Binary attachments are out of scope (docs/PLAN.md §14).
  * - No `AbortSignal`: operations are short, and the engine discards results it
  *   no longer wants. Revisit in Phase 6 if a hung request ever blocks a queue.
  */
@@ -143,7 +146,8 @@ export interface StorageProvider {
  * the code is what keeps the guards below honest if core is ever published and
  * a consumer ends up with two copies of it either side of a sync boundary.
  */
-export type ProviderErrorCode = 'conflict' | 'auth' | 'not-found' | 'cursor-reset' | 'rate-limit';
+export type ProviderErrorCode =
+	'conflict' | 'auth' | 'not-found' | 'cursor-reset' | 'rate-limit' | 'unreadable';
 
 /**
  * The remote moved under us. `remote` is the entry as it exists now, so the
@@ -174,6 +178,24 @@ export class NotFoundError extends Error {
 
 	constructor(readonly path: string) {
 		super(`not found: ${path}`);
+	}
+}
+
+/**
+ * The file is there and is not a note this app can hold: its bytes are not
+ * UTF-8, or they are and the text carries a U+0000 (`decodeText`). Distinct
+ * from `NotFoundError`, because the file exists and must be left exactly as it
+ * is, and from an untyped failure, because trying again reads the same bytes.
+ *
+ * `path` is the one the caller asked with. On a read by id that is where the
+ * note is, which need not be where the file is, so nothing is decided from it.
+ */
+export class UnreadableError extends Error {
+	override readonly name = 'UnreadableError';
+	readonly code: ProviderErrorCode = 'unreadable';
+
+	constructor(readonly path: string) {
+		super(`not UTF-8 text: ${path}`);
 	}
 }
 
@@ -302,3 +324,6 @@ export const isCursorResetError = (error: unknown): error is CursorResetError =>
 
 export const isRateLimitError = (error: unknown): error is RateLimitError =>
 	error instanceof RateLimitError || hasCode(error, 'rate-limit');
+
+export const isUnreadableError = (error: unknown): error is UnreadableError =>
+	error instanceof UnreadableError || hasCode(error, 'unreadable');

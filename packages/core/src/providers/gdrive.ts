@@ -17,6 +17,7 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
+import { readText } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -812,7 +813,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 		const response = await send('GET', `${FILES}/${encodeURIComponent(id)}?alt=media`);
 		if (!response.ok) return raise(await failureOf(response), entry.path);
-		return { content: await response.text(), version };
+		return { content: await readText(response, entry.path), version };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
