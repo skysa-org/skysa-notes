@@ -402,11 +402,22 @@ const converged = async (
 	// And each says which files it is not showing: those, and no others.
 	expect(await listedUnreadable(a), trace()).toEqual(remoteUnreadable(remote));
 	expect(await listedUnreadable(b), trace()).toEqual(remoteUnreadable(remote));
+	// And no row names a file the remote has not got. The general form of the
+	// ghost this suite keeps finding: the row reads as in step, its path and
+	// bytes match, and the file behind it is gone — so the next edit is written
+	// against a version of nothing, and nothing in the feed will ever mention
+	// that id again to put it right.
+	const onRemote = new Set(remote.backing.snapshot().map((entry) => entry.remoteId));
 	[a, b].forEach((d) => {
 		expect(d.store.notes().filter((note) => note.dirty)).toEqual([]);
 		expect(d.store.anomalies()).toEqual([]);
 		const remotes = d.store.notes().map((note) => note.remoteId);
 		expect(remotes).toEqual([...new Set(remotes)]);
+		const dead = d.store
+			.notes()
+			.filter((note) => note.remoteId !== undefined && !onRemote.has(note.remoteId))
+			.map((note) => `${note.path} -> ${note.remoteId ?? ''}`);
+		expect(dead, `${d.name}\n${trace()}`).toEqual([]);
 	});
 	return files;
 };

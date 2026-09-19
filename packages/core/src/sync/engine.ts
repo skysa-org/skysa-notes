@@ -2415,6 +2415,23 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			})
 		);
 
+	/**
+	 * The same, minus the notes the batch only moved aside. A displacement is
+	 * not a word about the note's own file: it says a *different* file arrived
+	 * at the note's path and ours got out of the way, which a scan can do
+	 * without ever mentioning the file our row is bound to. Exempted on the
+	 * strength of that, a clean note whose file is gone keeps its row and its
+	 * dead `remoteId` for good — nothing names that file again, so no later
+	 * round can put it right — and the user is left a conflict copy of a note
+	 * that never conflicted.
+	 *
+	 * A note the scan did return is still safe: `seen` holds its file's id and
+	 * answers before this is asked. This only stops a displacement from
+	 * standing in for an answer nothing gave.
+	 */
+	const decidedApartFromMoves = (changes: readonly PullChange[]): ReadonlySet<string> =>
+		decidedNotes(changes.filter((change) => change.kind !== 'displace-note'));
+
 	const reconcile = async (
 		seen: ReadonlySet<string>,
 		changes: readonly PullChange[],
@@ -2428,7 +2445,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		/** The unreadable files listed when this page of the scan began. */
 		unread: ReadonlyMap<string, UnreadableFile> = new Map()
 	): Promise<PullChange[]> => {
-		const kept = { notes: decidedNotes(changes), folders: reestablished(changes).folders };
+		// A scan that proves what is there asks the narrower question, so a note
+		// moved aside for somebody else's file is still asked after. One that may
+		// be missing things proves nothing, and there every note the batch named
+		// is left alone: a displacement is no reason to send a file back up that
+		// the scan may simply have failed to mention.
+		const kept = {
+			notes: upload ? decidedNotes(changes) : decidedApartFromMoves(changes),
+			folders: reestablished(changes).folders,
+		};
 		// Folders the batch has just put a note into. Deleting one cascades over
 		// what is inside it, so the exemption above would be undone from the
 		// other direction — the note is spared by name and taken by its folder.
@@ -3150,6 +3175,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * the op finishes in this drain instead of spending an attempt on a conflict
 	 * nobody can resolve.
 	 *
+	 * And a write that met somebody else's ordinary file at the name, by a note
+	 * with no file of its own: nothing there can be resolved either, since the
+	 * two are not two versions of one note, and the same answer serves.
+	 *
 	 * A note bound to a file is cut loose first. Still bound, it holds the id of
 	 * a file this device could not read, and its next write goes out against a
 	 * version of bytes nobody here has seen.
@@ -3386,9 +3415,20 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		//
 		// A file of its own that is there and cannot be read is still there
 		// (`fileState`), so the note moves aside for that too.
+		//
+		// With no file of its own left to stay bound to, though, the note is not
+		// stepped aside but set aside: `stepAside` can only ask the store for a
+		// free name, and a name free here may be held on the remote by a file
+		// this device has not pulled — another device set its own edit aside in
+		// the same minute. Left queued, the op meets that file on its retry and
+		// the note is moved aside a second time: an attempt spent, and a second
+		// conflict suffix on a name that should carry one. `setAside` asks the
+		// remote instead, by taking the name, and moves on to the next when the
+		// remote says no, so the op finishes in this drain.
 		const taken = await store.noteByRemoteId(remote.remoteId);
 		const held = taken !== undefined && taken.id !== note.id;
 		const own = await ownFile();
+		if (held && own === 'gone') return setAside(op, note);
 		if (held || own !== 'gone') return stepAside(own);
 
 		const resolution = await resolutionFor(note, content, remote, new Set(), []);
