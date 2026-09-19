@@ -8,7 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient } from '../src/api/client.js';
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
 import {
@@ -245,6 +245,24 @@ const bound = async (connectionId = 'c1') => {
 	await holdCredential(db, connectionId);
 	return db;
 };
+
+/**
+ * Let `c1` go and connect the same account again. The credential goes with the
+ * one and comes with the other, as it does for a user: a detach throws it away.
+ */
+const reconnect = async (db: NotesDatabase) => {
+	await detachConnection(db, { connectionId: 'c1' });
+	await bindConnection(db, ACCOUNT);
+	await holdCredential(db, 'c1');
+};
+
+/** The same, as another tab does it: in one step, which liveQuery may never show. */
+const reconnectAtOnce = (db: NotesDatabase) =>
+	db.transaction(
+		'rw',
+		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.credentials],
+		() => reconnect(db)
+	);
 
 interface Harness {
 	db: NotesDatabase;
@@ -1385,10 +1403,11 @@ describe('following the connection', () => {
 		});
 		await reaches(first.scheduler, 'idle');
 		first.scheduler.stop();
+		// Edited since, and not sent: what a disconnect keeps, still naming its file.
+		await saveNoteBody(db, note.id, 'kept, and written in since\n');
 
 		// The same account, disconnected and connected again, over the same remote.
-		await unbindConnection(db);
-		await bindConnection(db, ACCOUNT);
+		await reconnect(db);
 		expect((await db.syncState.get('c1'))?.resumeUnverified).toBe(true);
 		const env = fakeEnvironment();
 		const scheduler = createSyncScheduler({
@@ -1414,8 +1433,7 @@ describe('following the connection', () => {
 		const db = await bound();
 		const note = await createNote(db, { title: 'Kept' });
 		await updateNote(db, note.id, { remoteId: 'id:gone' });
-		await unbindConnection(db);
-		await bindConnection(db, ACCOUNT);
+		await reconnect(db);
 		const env = fakeEnvironment();
 		const theRemote = remote();
 		theRemote.fake.setFault((call) => (call.op === 'read' ? new Error('502') : undefined));
@@ -1442,8 +1460,7 @@ describe('following the connection', () => {
 		const db = await bound();
 		const note = await createNote(db, { title: 'Kept' });
 		await updateNote(db, note.id, { remoteId: 'id:gone' });
-		await unbindConnection(db);
-		await bindConnection(db, ACCOUNT);
+		await reconnect(db);
 		const h = started(db);
 		h.remote.rejected.add('t1');
 
@@ -1459,7 +1476,7 @@ describe('following the connection', () => {
 		await reaches(h.scheduler, 'idle');
 		const before = h.remote.pulls();
 
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c1' });
 		await reaches(h.scheduler, 'local');
 
 		expect(h.env.pending()).toEqual([]);
@@ -1469,6 +1486,54 @@ describe('following the connection', () => {
 		h.env.advance(INTERVAL);
 		await quiet();
 		expect(h.remote.pulls()).toBe(before);
+	});
+
+	it('starts no session for a detached source, and asks the server for no token', async () => {
+		const db = await bound();
+		// Never sent, so letting the source go keeps it, detached, and in front.
+		await createNote(db, { title: 'Unsent' });
+		await detachConnection(db, { connectionId: 'c1' });
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+		const factory = vi.fn<ProviderFactory>(remote().factory);
+		const h = started(db, { createProvider: factory });
+		await quiet();
+
+		expect(h.scheduler.status().phase).toBe('local');
+		// Nothing wakes it: not a focus, not an edit, not the clock, not being asked.
+		h.env.fire('focus');
+		h.env.fire('online');
+		await createNote(db, { title: 'Written while detached' });
+		await h.scheduler.syncNow();
+		await h.scheduler.resync();
+		await quiet();
+		h.env.advance(INTERVAL);
+		await quiet();
+
+		expect(h.scheduler.status().phase).toBe('local');
+		expect(h.env.pending()).toEqual([]);
+		expect(factory).not.toHaveBeenCalled();
+		expect(h.server.withCredential).not.toHaveBeenCalled();
+		expect(h.server.token).not.toHaveBeenCalled();
+	});
+
+	it('ends the session of a source detached under it, and starts one when it is connected again', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		await createNote(db, { title: 'Unsent' });
+
+		await detachConnection(db, { connectionId: 'c1' });
+		await reaches(h.scheduler, 'local');
+		// Still the source showing: the row is there, and it is not synced.
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+		expect(h.env.pending()).toEqual([]);
+
+		await bindConnection(db, ACCOUNT);
+		await holdCredential(db, 'c1');
+		await reaches(h.scheduler, 'idle');
+		await vi.waitFor(() => {
+			expect(h.remote.fake.contentAt('unsent.md')).toBeDefined();
+		});
 	});
 
 	it('drops a sync the disconnect caught halfway, without calling it a failure', async () => {
@@ -1487,7 +1552,7 @@ describe('following the connection', () => {
 		await vi.waitFor(() => {
 			expect(h.remote.gated()).toBe(arrived + 1);
 		});
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c1' });
 		await reaches(h.scheduler, 'local');
 		held.resolve();
 		await running;
@@ -1519,15 +1584,11 @@ describe('following the connection', () => {
 		await vi.waitFor(() => {
 			expect(h.remote.gated()).toBe(arrived + 1);
 		});
+		// Written in while the pull is out, so there is something a disconnect
+		// keeps: a source with nothing unsent is simply gone, and comes back new.
+		await saveNoteBody(db, note.id, 'linked, and written in since\n');
 		// Another tab: off and straight back on, which liveQuery may never show.
-		await db.transaction(
-			'rw',
-			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs],
-			async () => {
-				await unbindConnection(db);
-				await bindConnection(db, ACCOUNT);
-			}
-		);
+		await reconnectAtOnce(db);
 		h.remote.gate.delete('changes');
 		held.resolve();
 		// The store refuses the pull it was in: the resume has not been checked.
@@ -1569,8 +1630,8 @@ describe('following the connection', () => {
 		});
 		await reaches(first.scheduler, 'idle');
 		first.scheduler.stop();
-		await unbindConnection(db);
-		await bindConnection(db, ACCOUNT);
+		await saveNoteBody(db, note.id, 'kept, and written in since\n');
+		await reconnect(db);
 
 		const held = deferred();
 		first.remote.gate.set('read', held.promise);
@@ -1599,14 +1660,7 @@ describe('following the connection', () => {
 		});
 
 		// Another tab disconnects and connects the same account while it reads.
-		await db.transaction(
-			'rw',
-			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs],
-			async () => {
-				await unbindConnection(db);
-				await bindConnection(db, ACCOUNT);
-			}
-		);
+		await reconnectAtOnce(db);
 		first.remote.gate.delete('read');
 		held.resolve();
 		await reaches(scheduler, 'idle');
@@ -1630,7 +1684,7 @@ describe('following the connection', () => {
 			expect(h.remote.gated()).toBe(arrived + 1);
 		});
 		void h.scheduler.syncNow();
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c1' });
 		await reaches(h.scheduler, 'local');
 		h.remote.gate.delete('changes');
 		held.resolve();

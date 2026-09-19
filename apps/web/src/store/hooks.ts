@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo } from 'react';
 
 import { type EditorMode } from '../editor/mode.js';
-import { activeConnectionId, db, type NoteRecord } from './db.js';
+import { activeConnectionId, db, type NoteRecord, type SyncStateRecord } from './db.js';
 import { folderTree } from './folders.js';
 import { getNote, listNotes } from './notes.js';
 import { getDefaultEditorMode } from './prefs.js';
@@ -19,6 +19,14 @@ import { buildFolderTree, type FolderNode } from './tree.js';
  * resolved. That is a genuine "not loaded yet" and callers must handle it —
  * though the wait is a local IndexedDB round trip, not a network one.
  */
+
+/**
+ * The source the app is showing, as the device knows it, or `null` for the
+ * device's own pile. For saying what kind of source the notes on screen belong
+ * to — a detached one, above all, which looks like any other from its notes.
+ */
+export const useActiveSource = (): SyncStateRecord | null | undefined =>
+	useLiveQuery(async () => (await db.syncState.get(await activeConnectionId(db))) ?? null, []);
 
 export const useFolderTree = (): FolderNode[] | undefined =>
 	useLiveQuery(async () => {

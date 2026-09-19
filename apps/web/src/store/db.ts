@@ -110,9 +110,10 @@ export interface SyncStateRecord {
 	 * The provider's id for the account this connection is to, once the API has
 	 * named it. Kept per connection rather than per device since Phase 7: with
 	 * several sources connected at once there is no single "the account", and
-	 * this is what says whose files a source's notes are when it is let go
-	 * (`NOTES_ACCOUNT_KEY` in `store/connection.ts`). Absent on rows written
-	 * before it, and by an API too old to name accounts.
+	 * this is what says whose files a source's notes are — which a reconnect
+	 * asks of a detached source, to know whether the rows it kept are going home
+	 * (`bindingMode` in `store/connection.ts`). Absent on rows written before
+	 * it, and by an API too old to name accounts.
 	 */
 	accountId?: string;
 	/**
@@ -146,6 +147,31 @@ export interface SyncStateRecord {
 	 * store writes nothing for the connection until it is.
 	 */
 	resumeUnverified?: true;
+	/**
+	 * The device no longer reaches this source, and it is still here because it
+	 * holds something its remote was never sent (`detachConnection` in
+	 * `store/connection.ts`). Everything the remote has is gone from the device;
+	 * what is left is kept under the source it was written in, where the user
+	 * can see it, until they reconnect the account, download it or discard it.
+	 * It is never moved to the device's own pile, where it would be invisible
+	 * behind any other source, and never into another account.
+	 *
+	 * A detached source syncs nothing: the scheduler starts no session for it,
+	 * the sync store refuses it, and it has no credential, cursor, root or
+	 * token. It can still be shown and written in.
+	 *
+	 * `revoked`: the server stopped answering for the connection, or the user
+	 * disconnected it. `interrupted`: the row had already gone when a save from
+	 * another tab arrived for one of its notes, and was made again to hold it
+	 * (`ensureDetached`). Not indexed, so it needs no version of its own.
+	 */
+	detached?: Detached;
+}
+
+export interface Detached {
+	/** Epoch milliseconds. */
+	at: number;
+	reason: 'revoked' | 'interrupted';
 }
 
 /**
@@ -368,7 +394,16 @@ export const activeConnectionId = async (
 	// One row is not a choice at all; several with no valid preference is a
 	// device mid-migration, and the first is as good an answer as any until
 	// something records one.
-	return (await db.syncState.toCollection().first())?.connectionId ?? LOCAL_CONNECTION_ID;
+	//
+	// The first *live* one, though. A detached source is kept only for what it
+	// never sent (`SyncStateRecord.detached`), and winning this over a source
+	// that syncs would put the app on a handful of stranded notes while the
+	// user's whole working set sat behind it. It is still ahead of the device's
+	// own pile: with nothing else connected it is what there is to show, and
+	// answering `LOCAL` would hide the very notes it was kept to keep in sight.
+	const states = await db.syncState.toArray();
+	const first = states.find((state) => state.detached === undefined) ?? states[0];
+	return first?.connectionId ?? LOCAL_CONNECTION_ID;
 };
 
 export const db = createDatabase();

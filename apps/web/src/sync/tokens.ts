@@ -3,6 +3,7 @@ import { AuthError } from '@skysa/core';
 import { type AccessToken, type ApiClient, type Refusal } from '../api/client.js';
 import { credentialFor } from '../store/credentials.js';
 import { type NotesDatabase } from '../store/db.js';
+import { updateLive } from '../store/detached.js';
 
 /**
  * Provider access tokens for one connection, minted by `apps/api` and held in
@@ -80,12 +81,14 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			throw new AuthError(`The server would not mint a token: ${result.refusal}`);
 		}
 		using(result.value);
-		// `update`, not `put`: a connection unbound while the token was on its
-		// way has no row, and must not get one back (`store/connection.ts`).
-		await db.syncState.update(connectionId, {
+		// Only onto a live row: a connection let go while the token was on its
+		// way has no row, and must not get one back, or has a detached one,
+		// which must not hold a key to the account (`store/detached.ts`).
+		await updateLive(db, connectionId, (state) => ({
+			...state,
 			accessToken: result.value.accessToken,
 			accessTokenExpiresAt: result.value.expiresAt,
-		});
+		}));
 		return result.value.accessToken;
 	};
 
@@ -95,6 +98,14 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			if (usable(inMemory)) return using(inMemory);
 
 			const state = await db.syncState.get(connectionId);
+			// A detached source is never minted for. Nothing starts a session for
+			// one, so this is for a run that was already going when it was let go:
+			// it stops here rather than at the server.
+			if (state?.detached !== undefined) {
+				refused.set('refusal', 'credential_required');
+				cached.delete('token');
+				throw new AuthError('This device no longer syncs that connection');
+			}
 			const stored =
 				state?.accessToken === undefined || state.accessTokenExpiresAt === undefined
 					? undefined
@@ -108,10 +119,11 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			// Forgotten before the new one is asked for, row included: if it
 			// cannot be had, the refused one must not be handed out again.
 			cached.delete('token');
-			await db.syncState.update(connectionId, {
-				accessToken: undefined,
-				accessTokenExpiresAt: undefined,
-			});
+			await updateLive(
+				db,
+				connectionId,
+				({ accessToken: _token, accessTokenExpiresAt: _expiry, ...rest }) => rest
+			);
 			await mint();
 		},
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
-import { bindConnection, NOTES_ACCOUNT_KEY, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { beginConnect } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
@@ -11,12 +11,13 @@ import {
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
-import { createNote, deleteNote, getNote } from '../src/store/notes.js';
+import { beforeClosing } from '../src/store/heldEdits.js';
+import { createNote, deleteNote, getNote, saveNoteBody } from '../src/store/notes.js';
 import {
-	adoptAccount,
 	claimConnection,
 	disconnectAccount,
 	reconcileAccount,
+	stopSyncingHere,
 } from '../src/sync/account.js';
 import { updateNote } from './noteRows.js';
 
@@ -26,8 +27,10 @@ import { updateNote } from './noteRows.js';
  *
  * The shape of the question changed with it, and that is what most of these are
  * about. There is no list to read an absence out of: a credential reaches one
- * connection or it has stopped reaching anything, so the device unbinds on a
- * definite answer about its own connection and on nothing else.
+ * connection or it has stopped reaching anything, so the device lets a source
+ * go on a definite answer about its own connection and on nothing else — and
+ * lets it go the one way there is: what the remote has leaves the device, and
+ * what it was never sent stays under its own source, detached.
  */
 
 const opened: NotesDatabase[] = [];
@@ -188,24 +191,22 @@ describe('claiming a connection the user has just consented to', () => {
 		expect((await db.credentials.get('c1'))?.credential).toBe(credential);
 	});
 
-	it('keeps the credential even when it stops to ask about the account', async () => {
+	it('binds without asking, whatever the device held of its own', async () => {
 		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		// Written before anything was connected: the only thing the device's own
+		// pile ever holds, and it belongs wherever the user first connects.
 		await createFolder(db, { name: 'Work' });
-		// Let go, so the notebook is the device's own and Ada's — which is what
-		// binding a second account would copy into it.
-		await unbindConnection(db);
+		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
 		const { credential } = await beginConnect(db, 'dropbox');
-		const other = connection('c9', 'dropbox', 'dbid:2');
+		const first = connection('c9', 'dropbox', 'dbid:2');
 
-		const state = await claimConnection(db, answering({ ok: true, value: other }));
+		const state = await claimConnection(db, answering({ ok: true, value: first }));
 
-		expect(state).toEqual({ kind: 'other-account', connection: other });
-		// The connection exists on the server whether or not the device binds to
-		// it. Throwing the credential away here would leave it live, holding a
-		// refresh token, with nothing on this device able to name or revoke it.
+		expect(state).toEqual({ kind: 'connected', connection: first });
 		expect((await db.credentials.get('c9'))?.credential).toBe(credential);
-		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect(await activeConnectionId(db)).toBe('c9');
+		expect((await getNote(db, note.id))?.connectionId).toBe('c9');
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
 	});
 
 	it('does not ask about another source’s notes, which binding will not move', async () => {
@@ -310,11 +311,14 @@ describe('reconciling with the server', () => {
 		expect(client.withCredential).not.toHaveBeenCalled();
 	});
 
-	it('unbinds, keeping the notes, when the credential reaches nothing any more', async () => {
+	it('lets the source go, keeping what was never sent, when the credential reaches nothing any more', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
-		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		const sent = await createNote(db, { title: 'Sent', folderPath: 'Work' });
+		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		const unsent = await createNote(db, { title: 'Plan', folderPath: 'Work' });
 
 		// Revoked from another device, or the account disconnected there. The
 		// server spends a credential's hash for ever, so this never comes back.
@@ -322,12 +326,58 @@ describe('reconciling with the server', () => {
 			await reconcileAccount(db, answering({ ok: false, refusal: 'credential_revoked' }))
 		).toEqual({ kind: 'none' });
 
-		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
 		expect(await db.credentials.get('c1')).toBeUndefined();
-		expect((await getNote(db, note.id))?.connectionId).toBe(LOCAL_CONNECTION_ID);
+		// Nobody was there to ask, so nothing was discarded and nothing moved:
+		// the note the remote never had is where it was, in a source that says
+		// it is disconnected, and that source is still the one in front.
+		expect(await db.syncState.get('c1')).toMatchObject({ detached: { reason: 'revoked' } });
+		expect(await activeConnectionId(db)).toBe('c1');
+		expect((await getNote(db, unsent.id))?.connectionId).toBe('c1');
+		// What the remote has is gone from here, and comes back on reconnecting.
+		expect(await db.notes.get(['c1', sent.id])).toBeUndefined();
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
 	});
 
-	it('unbinds when it is bound to a connection it holds no credential for', async () => {
+	it('lets it go entirely when there was nothing the remote lacked', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sent = await createNote(db, { title: 'Sent' });
+		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+
+		expect(await reconcileAccount(db, answering({ ok: false, refusal: 'not_found' }))).toEqual({
+			kind: 'none',
+		});
+
+		expect(await db.syncState.count()).toBe(0);
+		expect(await db.notes.count()).toBe(0);
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('has the editors write first, so a sentence still held is kept and not removed', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const note = await createNote(db, { title: 'Plan' });
+		await updateNote(db, note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		// Typed inside the autosave window: in no row yet. The note looks clean,
+		// and would go with everything else the remote has.
+		const withdraw = beforeClosing(() => saveNoteBody(db, note.id, '# Plan\n\njust typed\n'));
+
+		await reconcileAccount(db, answering({ ok: false, refusal: 'credential_revoked' }));
+		withdraw();
+
+		expect(await db.notes.get(['c1', note.id])).toMatchObject({
+			body: '# Plan\n\njust typed\n',
+			dirty: 1,
+			remoteId: 'id:1',
+		});
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+	});
+
+	it('lets go when it is bound to a connection it holds no credential for', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		const client = answering({ ok: true, value: connection('c1') });
@@ -339,6 +389,25 @@ describe('reconciling with the server', () => {
 		// claiming to be connected would be a lie with a sync loop attached.
 		expect(client.withCredential).not.toHaveBeenCalled();
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('asks nothing about a detached source, and leaves it exactly as it is', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await createNote(db, { title: 'Unsent' });
+		await detachConnection(db, { connectionId: 'c1' });
+		const state = await db.syncState.get('c1');
+		const bindings = await db.prefs.get('sync.bindings');
+		const client = answering({ ok: true, value: connection('c1') });
+
+		// It is the source in front, and it has no credential — which is the very
+		// shape that means "let it go" for a live source. Asked on every open.
+		expect(await reconcileAccount(db, client)).toEqual({ kind: 'none' });
+		expect(await reconcileAccount(db, client)).toEqual({ kind: 'none' });
+
+		expect(client.withCredential).not.toHaveBeenCalled();
+		expect(await db.syncState.get('c1')).toEqual(state);
+		expect(await db.prefs.get('sync.bindings')).toEqual(bindings);
 	});
 
 	it('changes nothing when the server cannot be asked', async () => {
@@ -400,7 +469,7 @@ describe('reconciling while the device changes under it', () => {
 		const asked = vi.fn<() => Promise<Result<Connection>>>();
 		asked
 			.mockImplementationOnce(async () => {
-				await unbindConnection(db);
+				await detachConnection(db, { connectionId: 'c1' });
 				return { ok: true, value: connection('c1') };
 			})
 			.mockImplementation(() => Promise.resolve({ ok: true, value: connection('c1') }));
@@ -443,79 +512,85 @@ describe('reconciling while the device changes under it', () => {
 	});
 });
 
-describe('the account the notes belong to', () => {
-	/** Notes synced with account `dbid:1` as connection `c1`, then disconnected. */
-	const disconnectedFrom = async () => {
+describe('the account a detached source belongs to', () => {
+	/** Account `dbid:1` as connection `c1`, let go holding an edit it never sent. */
+	const detachedFrom = async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
 		await updateNote(db, note.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
-		await unbindConnection(db);
+		await db.opQueue.clear();
+		await saveNoteBody(db, note.id, '# Plan\n\nnot sent\n');
+		await detachConnection(db, { connectionId: 'c1' });
 		return { db, note };
 	};
 
 	it('picks up with the same account, under the new id reconnecting gave it', async () => {
-		const { db, note } = await disconnectedFrom();
+		const { db, note } = await detachedFrom();
 		await beginConnect(db, 'dropbox');
 
 		const state = await claimConnection(db, answering({ ok: true, value: connection('c2') }));
 
 		expect(state).toEqual({ kind: 'connected', connection: connection('c2') });
-		expect(await getNote(db, note.id)).toMatchObject({ connectionId: 'c2', remoteId: 'id:1' });
+		expect(await getNote(db, note.id)).toMatchObject({
+			connectionId: 'c2',
+			remoteId: 'id:1',
+			dirty: 1,
+		});
+		// The source it waited under has gone home with it.
+		expect(await db.syncState.get('c1')).toBeUndefined();
+		expect((await db.syncState.get('c2'))?.resumeUnverified).toBe(true);
 	});
 
-	it('asks before copying the notes into a different account', async () => {
-		const { db, note } = await disconnectedFrom();
+	it('picks up under the same id, where the server still has the connection', async () => {
+		const { db, note } = await detachedFrom();
+		await beginConnect(db, 'dropbox');
+
+		const state = await claimConnection(db, answering({ ok: true, value: connection('c1') }));
+
+		expect(state).toEqual({ kind: 'connected', connection: connection('c1') });
+		expect(await db.syncState.get('c1')).toMatchObject({ resumeUnverified: true });
+		expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
+		expect(await getNote(db, note.id)).toMatchObject({ connectionId: 'c1', remoteId: 'id:1' });
+	});
+
+	it('connects a different account beside it, taking nothing of its', async () => {
+		const { db, note } = await detachedFrom();
 		await beginConnect(db, 'dropbox');
 		const other = connection('c9', 'dropbox', 'dbid:2');
 
 		const state = await claimConnection(db, answering({ ok: true, value: other }));
 
-		expect(state).toEqual({ kind: 'other-account', connection: other });
-		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
-		expect((await getNote(db, note.id))?.remoteId).toBe('id:1');
-	});
-
-	it('does not ask when there is nothing on the device to copy', async () => {
-		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
-		const gone = await createNote(db, { title: 'Gone' });
-		// Deleted before it ever reached the remote: nothing is owed to a file.
-		await deleteNote(db, gone.id);
-		await unbindConnection(db);
-		await beginConnect(db, 'dropbox');
-
-		const state = await claimConnection(
-			db,
-			answering({ ok: true, value: connection('c9', 'dropbox', 'dbid:2') })
-		);
-
-		expect(state.kind).toBe('connected');
+		// Nothing to ask, because nothing is going anywhere: the unsent edit
+		// stays where it is, and is never uploaded into somebody else's storage.
+		expect(state).toEqual({ kind: 'connected', connection: other });
 		expect(await activeConnectionId(db)).toBe('c9');
+		expect(await db.notes.get(['c1', note.id])).toMatchObject({ remoteId: 'id:1', dirty: 1 });
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+		expect(await db.notes.where('connectionId').equals('c9').count()).toBe(0);
+		expect(await db.opQueue.where('connectionId').equals('c9').count()).toBe(0);
 	});
 
-	it('asks before dropping deletes owed to the account the notes belong to', async () => {
+	it('does not take a delete that was owed to it into another account either', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		const note = await createNote(db, { title: 'Gone' });
 		await updateNote(db, note.id, { remoteId: 'id:1' });
 		await deleteNote(db, note.id);
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c1' });
 		await beginConnect(db, 'dropbox');
 
-		const state = await claimConnection(
+		await claimConnection(
 			db,
 			answering({ ok: true, value: connection('c9', 'dropbox', 'dbid:2') })
 		);
 
-		expect(state.kind).toBe('other-account');
+		expect(await db.notes.get(['c1', note.id])).toMatchObject({ deletedLocally: 1 });
+		expect(await db.opQueue.where('connectionId').equals('c1').count()).toBe(1);
 	});
 
-	it('does not call an account the API does not name another one', async () => {
-		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
-		await createFolder(db, { name: 'Work' });
-		await unbindConnection(db);
+	it('does not call an account the API does not name the same one', async () => {
+		const { db, note } = await detachedFrom();
 		await beginConnect(db, 'dropbox');
 
 		const state = await claimConnection(
@@ -523,22 +598,10 @@ describe('the account the notes belong to', () => {
 			answering({ ok: true, value: connection('c2', 'dropbox', null) })
 		);
 
+		// A Worker older than this app. It may well be the same account, and it
+		// cannot be said to be: the rows stay, to be downloaded or discarded.
 		expect(state.kind).toBe('connected');
-	});
-
-	it('copies the notes into the other account once the user says so', async () => {
-		const { db, note } = await disconnectedFrom();
-		const other = connection('c9', 'dropbox', 'dbid:2');
-
-		expect(await adoptAccount(db, other)).toEqual({ kind: 'connected', connection: other });
-
-		const row = await getNote(db, note.id);
-		expect(row?.connectionId).toBe('c9');
-		expect(row?.remoteId).toBeUndefined();
-		// They are its notes now, and come back to it without asking.
-		expect((await db.syncState.get('c9'))?.accountId).toBe('dbid:2');
-		await unbindConnection(db);
-		expect((await db.prefs.get(NOTES_ACCOUNT_KEY))?.value).toBe('dropbox:dbid:2');
+		expect((await db.notes.get(['c1', note.id]))?.remoteId).toBe('id:1');
 	});
 });
 
@@ -604,7 +667,7 @@ describe('what the account is called', () => {
 		await reconcileAccount(db, answering({ ok: true, value: named('ada@example.com') }));
 		await db.syncState.update('c1', { cursor: 'cursor-1', rootId: 'root-1' });
 
-		// As `adoptAccount` and a flow finishing twice both do, and as a caller
+		// As a flow finishing twice does, and as a caller
 		// that was never told a name does.
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 
@@ -640,7 +703,7 @@ describe('disconnecting', () => {
 		return { withCredential, disconnect };
 	};
 
-	it('lets go on the server first, then unbinds and forgets the credential', async () => {
+	it('lets go on the server first, then here, and forgets the credential', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		const credential = await holding(db, 'c1');
@@ -672,7 +735,7 @@ describe('disconnecting', () => {
 		expect(await db.credentials.get('c1')).toBeUndefined();
 	});
 
-	it('unbinds without asking when there is no credential to ask with', async () => {
+	it('lets go without asking when there is no credential to ask with', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		const client = disconnecting({ ok: true, value: { revoked: true } });
@@ -683,6 +746,44 @@ describe('disconnecting', () => {
 		// has no way to get rid of.
 		expect(client.withCredential).not.toHaveBeenCalled();
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('removes the synced notes, and keeps what was never sent under the source, detached', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sent = await createNote(db, { title: 'Sent' });
+		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		const unsent = await createNote(db, { title: 'Unsent' });
+		const client = disconnecting({ ok: true, value: { revoked: true } });
+
+		expect(await disconnectAccount(db, client, 'c1')).toEqual({ ok: true });
+
+		expect(await db.notes.get(['c1', sent.id])).toBeUndefined();
+		expect(await db.notes.get(['c1', unsent.id])).toBeDefined();
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+		expect(await db.credentials.get('c1')).toBeUndefined();
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
+	});
+
+	it('stops syncing on this device alone the same way, asking the server nothing', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sent = await createNote(db, { title: 'Sent' });
+		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+		await db.opQueue.clear();
+		const unsent = await createNote(db, { title: 'Unsent' });
+
+		await stopSyncingHere(db, 'c1');
+
+		expect(await db.notes.get(['c1', sent.id])).toBeUndefined();
+		expect(await db.notes.get(['c1', unsent.id])).toBeDefined();
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+		// The key to the account goes with it: a source that says it is
+		// disconnected must not be holding a live credential.
+		expect(await db.credentials.get('c1')).toBeUndefined();
 	});
 
 	it('stays connected when the server refuses', async () => {

@@ -2,8 +2,9 @@ import { isAuthError } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient } from '../src/api/client.js';
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createNote } from '../src/store/notes.js';
 import { createTokenSource } from '../src/sync/tokens.js';
 
 const opened: NotesDatabase[] = [];
@@ -218,16 +219,46 @@ describe('provider access tokens', () => {
 		expect(tokens.refusal()).toBeUndefined();
 	});
 
-	it('does not bring back the row of a connection unbound while minting', async () => {
+	it('does not bring back the row of a connection let go while minting', async () => {
 		const db = await bound();
 		const client = presenting(async (): ReturnType<ApiClient['token']> => {
-			await unbindConnection(db);
+			await detachConnection(db, { connectionId: 'c1' });
 			return { ok: true, value: { accessToken: 't1', expiresAt: Date.now() + HOUR } };
 		});
 
 		await createTokenSource({ db, client, connectionId: 'c1' }).get();
 
 		expect(await db.syncState.count()).toBe(0);
+	});
+
+	it('does not hand a token to a source detached while minting, which is kept for its notes', async () => {
+		const db = await bound();
+		// Never sent, so the source stays, detached, to hold it.
+		await createNote(db, { connectionId: 'c1', title: 'Unsent' });
+		const client = presenting(async (): ReturnType<ApiClient['token']> => {
+			await detachConnection(db, { connectionId: 'c1' });
+			return { ok: true, value: { accessToken: 't1', expiresAt: Date.now() + HOUR } };
+		});
+
+		await createTokenSource({ db, client, connectionId: 'c1' }).get();
+
+		const state = await db.syncState.get('c1');
+		expect(state?.detached).toBeDefined();
+		expect(state?.accessToken).toBeUndefined();
+		expect(state?.accessTokenExpiresAt).toBeUndefined();
+	});
+
+	it('is never asked of the server for a detached source', async () => {
+		const db = await bound();
+		await createNote(db, { connectionId: 'c1', title: 'Unsent' });
+		await detachConnection(db, { connectionId: 'c1' });
+		const token = vi.fn<ApiClient['token']>();
+		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+
+		await expect(tokens.get()).rejects.toThrow(/no longer syncs/);
+
+		expect(token).not.toHaveBeenCalled();
+		expect(tokens.refusal()).toBe('credential_required');
 	});
 
 	it('will not mint once this device holds no credential for the connection', async () => {

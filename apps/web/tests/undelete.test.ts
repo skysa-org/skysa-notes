@@ -165,7 +165,7 @@ describe('undeleteNote', () => {
 		expect((await db.opQueue.toArray()).map((op) => op.connectionId)).toEqual(['source-a']);
 	});
 
-	it('goes to the device’s own pile when its source has been let go, never to another account', async () => {
+	it('goes back under its own source when that has been let go, never the pile or another account', async () => {
 		const { db } = box;
 		await db.syncState.bulkPut([
 			{ connectionId: 'source-a', clientId: 'client' },
@@ -176,7 +176,37 @@ describe('undeleteNote', () => {
 		await pushed(deleted.id);
 		await db.syncState.delete('source-a');
 
-		expect((await undeleteNote(db, deleted)).connectionId).toBe(LOCAL_CONNECTION_ID);
+		const restored = await undeleteNote(db, deleted);
+
+		// Where the user can see it: a source of its own, brought back detached.
+		// The pile is shown only while nothing is connected, and B is.
+		expect(restored.connectionId).toBe('source-a');
+		expect(await db.syncState.get('source-a')).toMatchObject({
+			clientId: 'client',
+			detached: { reason: 'interrupted' },
+		});
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
+		expect(await db.notes.where('connectionId').equals('source-b').count()).toBe(0);
+		// Nothing syncs it, and nothing is lost: it waits to be downloaded.
+		expect((await db.opQueue.toArray()).map((op) => op.connectionId)).toEqual(['source-a']);
+	});
+
+	it('goes back into a detached source as it stands', async () => {
+		const { db } = box;
+		await db.syncState.put({
+			connectionId: 'source-a',
+			clientId: 'client',
+			provider: 'dropbox',
+			detached: { at: 1, reason: 'revoked' },
+		});
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'source-a' });
+		const deleted = await deletedNote();
+		const state = await db.syncState.get('source-a');
+
+		const restored = await undeleteNote(db, deleted);
+
+		expect(restored).toMatchObject({ connectionId: 'source-a', deletedLocally: 0 });
+		expect(await db.syncState.get('source-a')).toEqual(state);
 	});
 
 	it('is all or nothing: a failure leaves the note deleted, not back without its text', async () => {

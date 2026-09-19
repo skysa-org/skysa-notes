@@ -7,39 +7,39 @@ import {
 	api,
 	type ApiClient,
 	ApiError,
-	type Connection,
 	type Grant,
 	type InstanceConfig,
 	type Refusal,
 } from '../api/client.js';
 import { folderToSearch } from '../routes/search.js';
-import {
-	type ConnectedSource,
-	connectedSources,
-	showConnection,
-	unbindConnection,
-} from '../store/connection.js';
+import { type ConnectedSource, connectedSources, showConnection } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
 import {
 	activeConnectionId,
 	db as defaultDb,
+	type NoteRecord,
 	type NotesDatabase,
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { downloadNotes } from '../store/exportNotes.js';
+import { settleEditors } from '../store/heldEdits.js';
 import { getNote } from '../store/notes.js';
+import { countOf, unsyncedIn } from '../store/unsynced.js';
 import {
 	type AccountState,
-	adoptAccount,
 	claimConnection,
 	CONNECTABLE,
 	disconnectAccount,
 	LEFT_AT_PROVIDER,
 	PROVIDER_LABELS,
+	sourceName,
+	stopSyncingHere,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
 import { ConnectButton } from './ConnectButton.js';
+import { DetachedSource } from './DetachedSource.js';
 
 /**
  * Where the storage account is connected and disconnected: one account, replace
@@ -69,6 +69,11 @@ export interface AccountPanelProps {
 	 * supply this could only ever prove the button renders.
 	 */
 	navigate?: (url: string) => void;
+	/**
+	 * How notes are handed to the user as a file. Injected for the same reason:
+	 * jsdom cannot make a blob URL, so the real one cannot run in a test.
+	 */
+	download?: (notes: readonly NoteRecord[]) => void;
 }
 
 /** A server answer: still being asked, not reachable, or what it said. */
@@ -484,12 +489,18 @@ const Sources = ({
  *
  * The account id when there is one, because the case this list exists for is
  * two accounts at the same provider — "Dropbox" twice, one of them "showing",
- * is not a choice anyone can make. It is the provider's own id rather than a
- * display name: the panel only ever asks the server about the source in front,
- * so a name for the others would mean holding answers this device has no
- * reason to keep.
+ * is not a choice anyone can make.
+ *
+ * A detached source is named as its own panel names it (`sourceName`: by what
+ * the server last called the account, which is what the user knows it by), and
+ * says that it is disconnected and how much it holds. That is the whole reason
+ * it is on the list, and a line that looked like any other source would leave
+ * the user to find out by switching to it.
  */
 const sourceLabel = (source: ConnectedSource): string => {
+	if (source.detached !== undefined) {
+		return `${sourceName(source) ?? 'A source'} — disconnected, ${String(source.detached.unsent)} not sent`;
+	}
 	const provider = source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
 	return source.accountId === undefined ? provider : `${provider} · ${source.accountId}`;
 };
@@ -628,6 +639,38 @@ const withHeld = async (
 	return held === undefined ? undefined : client.withCredential(held.credential);
 };
 
+/**
+ * The half of the disconnect confirm that the first half would otherwise make
+ * untrue. "Its notes are removed" is about what the remote has; whatever it was
+ * never sent is not removed, and the user is told how much that is and where
+ * it will be, before they say yes rather than after.
+ */
+const StaysBehind = ({ unsent, label }: { unsent: number; label: string }) => {
+	if (unsent === 0) return null;
+	const one = unsent === 1;
+	return (
+		<p className="muted">
+			{one
+				? `1 change has not been sent to ${label}. It will stay`
+				: `${String(unsent)} changes have not been sent to ${label}. They will stay`}{' '}
+			on this device under this source, marked disconnected, until you reconnect, discard or
+			download {one ? 'it' : 'them'}.
+		</p>
+	);
+};
+
+/**
+ * What the account is called: as the server has just said it, or else as it
+ * last did — the panel has to be able to name the account offline too.
+ */
+const accountName = (state: AccountState | undefined, bound: SyncStateRecord): string | null => {
+	const said =
+		state?.kind === 'connected' && state.connection.id === bound.connectionId
+			? state.connection.displayName
+			: null;
+	return said ?? bound.displayName ?? null;
+};
+
 interface ConnectedProps {
 	client: Client;
 	database: NotesDatabase;
@@ -741,6 +784,13 @@ const Connected = ({
 	// Only ever this source's. Named once per render, so the click below is
 	// about the source the user was looking at when they pressed it.
 	const connectionId = bound.connectionId;
+	// What the confirm has to own up to: the changes here that the remote has
+	// not had, which a disconnect will leave behind under this source. Live, so
+	// that what the editors write when the confirm opens is counted in it.
+	const unsent = useLiveQuery(
+		async () => countOf(await unsyncedIn(database, connectionId)),
+		[database, connectionId]
+	);
 	const disconnecting = disconnects[connectionId];
 	const busy = disconnecting?.busy === true;
 	const problem = disconnecting?.problem ?? null;
@@ -767,15 +817,14 @@ const Connected = ({
 	const confirm = (next: boolean) => {
 		focusNext.current = next ? 'cancel' : 'open';
 		setConfirming(next);
+		// Whatever the editors still hold is written now, so that the count the
+		// confirm gives is of everything the user has typed. Not waited for: the
+		// count is live and follows the write.
+		if (next) void settleEditors();
 	};
 
 	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
-	const state = answer(account);
-	const displayName =
-		(state?.kind === 'connected' || state?.kind === 'other-account') &&
-		state.connection.id === bound.connectionId
-			? state.connection.displayName
-			: null;
+	const displayName = accountName(answer(account), bound);
 
 	const disconnect = () => {
 		// Closing the confirm is this instance's to do, and nothing if it has
@@ -823,7 +872,7 @@ const Connected = ({
 						// By name: with none, this lets go of whichever source is in
 						// front — another one's rows and cursor, while the one that
 						// failed stays live on the server.
-						void unbindConnection(database, { connectionId }).then(() => {
+						void stopSyncingHere(database, connectionId).then(() => {
 							onUnbound(connectionId);
 						});
 					}}
@@ -834,9 +883,12 @@ const Connected = ({
 			{confirming ? (
 				<div className="account-confirm">
 					<p className="muted">
-						Disconnect {label}? Your notes stay on this device, and nothing is deleted
-						from {label}.
+						Disconnect {label}
+						{displayName !== null && ` · ${displayName}`}? Its notes are removed from
+						this device. Nothing is deleted from {label}; connect it again to get them
+						back.
 					</p>
+					<StaysBehind unsent={unsent ?? 0} label={label} />
 					<LeftAtProvider provider={bound.provider} />
 					<button type="button" onClick={disconnect} disabled={busy}>
 						Disconnect
@@ -874,83 +926,66 @@ const Connected = ({
 	);
 };
 
-interface OtherAccountProps {
-	client: Client;
-	database: NotesDatabase;
-	connection: Connection;
-	onSettled: (state: AccountState) => void;
+interface DetachedProps extends LocalProps {
+	bound: SyncStateRecord;
+	download: (notes: readonly NoteRecord[]) => void;
 }
 
 /**
- * Signed in with an account the notes here do not belong to. Nothing has been
- * bound: the user either copies the notes into it or lets it go.
+ * The panel of a detached source (`DetachedSource`), given the two things only
+ * this module can make for it: the way to connect its account again, and the
+ * list of the other sources.
+ *
+ * Reconnecting is the ordinary connect flow, for the provider this source was
+ * at, and offered only where the server offers that. Whether what comes back is
+ * this source's account is decided when it is bound (`bindConnection`): the
+ * same one takes these rows up, and any other is simply another source, with
+ * these left exactly where they are.
  */
-const OtherAccount = ({ client, database, connection, onSettled }: OtherAccountProps) => {
-	const [busy, setBusy] = useState(false);
-	const [problem, setProblem] = useState<string | null>(null);
-	const label = PROVIDER_LABELS[connection.provider];
-	const name = connection.displayName ?? `this ${label} account`;
-
-	const run = (work: () => Promise<AccountState | string>) => {
-		setBusy(true);
-		setProblem(null);
-		void work()
-			.then((outcome) => {
-				if (typeof outcome === 'string') setProblem(outcome);
-				else onSettled(outcome);
-			})
-			.catch(() => {
-				setProblem('That did not work. Nothing has changed; try again.');
-			})
-			.finally(() => {
-				setBusy(false);
-			});
-	};
-
+const Detached = ({
+	client,
+	database,
+	config,
+	bound,
+	download,
+	returnTo,
+	navigate,
+}: DetachedProps) => {
+	const settings = answer(config);
+	const provider = bound.provider;
+	const reconnectable =
+		provider !== undefined &&
+		CONNECTABLE.includes(provider) &&
+		settings?.authMode === 'storage-first' &&
+		settings.providers.includes(provider);
 	return (
-		<section className="account" aria-label="Storage">
-			<p>
-				You connected {name}, but the notes on this device belong to another {label}{' '}
-				account.
-			</p>
-			<p className="muted">Syncing with {name} copies every note on this device into it.</p>
-			{problem !== null && (
-				<p className="muted" role="alert">
-					{problem}
-				</p>
-			)}
-			<div className="account-confirm">
-				<LeftAtProvider provider={connection.provider} />
-				<button
-					type="button"
-					disabled={busy}
-					onClick={() => {
-						run(() => adoptAccount(database, connection));
-					}}
-				>
-					Copy notes into {name}
-				</button>
-				<button
-					type="button"
-					className="ghost"
-					disabled={busy}
-					onClick={() => {
-						run(async () => {
-							const outcome = await disconnectAccount(
-								database,
-								client,
-								connection.id
-							);
-							return outcome.ok
-								? { kind: 'none' }
-								: 'The server would not disconnect it.';
-						});
-					}}
-				>
-					Disconnect {name}
-				</button>
-			</div>
-		</section>
+		<DetachedSource
+			database={database}
+			bound={bound}
+			download={download}
+			reconnect={
+				reconnectable && (
+					<ConnectButton
+						db={database}
+						client={client}
+						provider={provider}
+						returnTo={returnTo}
+						{...(navigate === undefined ? {} : { navigate })}
+					>
+						Reconnect
+					</ConnectButton>
+				)
+			}
+			sources={
+				<Sources
+					client={client}
+					database={database}
+					config={config}
+					returnTo={returnTo}
+					{...(navigate === undefined ? {} : { navigate })}
+				/>
+			}
+		/>
 	);
 };
 
@@ -959,6 +994,7 @@ export const AccountPanel = ({
 	database = defaultDb,
 	sync = syncScheduler,
 	navigate,
+	download = downloadNotes,
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
@@ -996,10 +1032,7 @@ export const AccountPanel = ({
 	// once the answer is in, against the binding the question was about.
 	const boundId = bound === undefined ? null : (bound.state?.connectionId ?? '');
 	const answered = answer(account);
-	const named =
-		answered?.kind === 'connected' || answered?.kind === 'other-account'
-			? answered.connection.id
-			: undefined;
+	const named = answered?.kind === 'connected' ? answered.connection.id : undefined;
 	const asking = useRef(false);
 	const askedAbout = useRef<string | null>(null);
 	useEffect(() => {
@@ -1032,31 +1065,34 @@ export const AccountPanel = ({
 	if (bound === undefined) return null;
 	const returnTo = returnPath(href);
 
-	const state = answer(account);
-	// Unless it has been answered already, in another tab.
-	if (state?.kind === 'other-account' && bound.state?.connectionId !== state.connection.id) {
+	if (bound.state === undefined) {
 		return (
-			<OtherAccount
-				key={state.connection.id}
+			<NotConnected
 				client={client}
 				database={database}
-				connection={state.connection}
-				onSettled={(settled) => {
-					setAccount({ kind: 'answered', value: settled });
-				}}
+				config={config}
+				returnTo={returnTo}
+				{...(navigate === undefined ? {} : { navigate })}
 			/>
 		);
 	}
 
-	return bound.state === undefined ? (
-		<NotConnected
-			client={client}
-			database={database}
-			config={config}
-			returnTo={returnTo}
-			{...(navigate === undefined ? {} : { navigate })}
-		/>
-	) : (
+	if (bound.state.detached !== undefined) {
+		return (
+			<Detached
+				key={bound.state.connectionId}
+				client={client}
+				database={database}
+				config={config}
+				bound={bound.state}
+				download={download}
+				returnTo={returnTo}
+				{...(navigate === undefined ? {} : { navigate })}
+			/>
+		);
+	}
+
+	return (
 		// Keyed by source. Everything under here holds state about one source — a
 		// confirm half way through, a re-scan being asked about, a list of devices
 		// — and unkeyed it survives "Show other source" and is rendered, and acted

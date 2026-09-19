@@ -159,6 +159,28 @@ export const movable = (unsynced: Unsynced): number =>
 	unsynced.notes.length + unsynced.folders.length;
 
 /**
+ * How many changes the remote has not had, for saying "3 not sent" of a source.
+ *
+ * Every category, since each is something the user did that went nowhere — but
+ * a notebook is counted only where no unsent note is inside it. One that holds
+ * an unsent note goes up with that note and is not a second thing to tell the
+ * user about; and on a detached source a notebook can look unmade only because
+ * the clean notes that proved it was there were removed with the rest of what
+ * the remote has (`keepOnly` in `store/connection.ts`), which is no change of
+ * the user's at all. A number for people, then, and not the test of whether a
+ * source can be let go: that is `isEmpty`, which counts everything.
+ */
+export const countOf = (unsynced: Unsynced): number =>
+	unsynced.notes.length +
+	unsynced.renames.length +
+	unsynced.deletes.length +
+	unsynced.rmdirs.length +
+	unsynced.folders.filter(
+		(folder) =>
+			!unsynced.notes.some((note) => isWithin(foldPath(note.path), foldPath(folder.path)))
+	).length;
+
+/**
  * Nothing here that the remote lacks. `blocked` is not asked: an op that is
  * stuck with nothing behind it that the user made — left over for a row since
  * purged — is no reason to stop them and ask about work that does not exist.

@@ -11,16 +11,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel } from '../src/components/AccountPanel.js';
-import { bindConnection, showConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
 import { beginConnect, hashCredential } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
 	createDatabase,
 	LOCAL_CONNECTION_ID,
+	type NoteRecord,
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
-import { createNote } from '../src/store/notes.js';
+import { createNote, saveNoteBody } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -160,6 +161,8 @@ const renderPanel = (
 	// Where the panel would send the browser. jsdom has no navigation, so
 	// without this seam a connect test could only prove the button renders.
 	const went: string[] = [];
+	// And what it would hand the user as a file, by title: no blob URLs either.
+	const downloaded: string[][] = [];
 	const router = createRouter({
 		routeTree: createRootRoute({
 			component: () => (
@@ -168,13 +171,24 @@ const renderPanel = (
 					database={database}
 					sync={sync}
 					navigate={(to) => went.push(to)}
+					download={(notes: readonly NoteRecord[]) =>
+						downloaded.push(notes.map((note) => note.title))
+					}
 				/>
 			),
 		}),
 		history: createMemoryHistory({ initialEntries: [url] }),
 	});
 	render(<RouterProvider router={router} />);
-	return { went };
+	return { went, downloaded };
+};
+
+/** A note the remote has in full, as a sync leaves it. */
+const sentNote = async (db: NotesDatabase, title: string) => {
+	const note = await createNote(db, { title });
+	await updateNote(db, note.id, { remoteId: `id:${title}`, remoteVersion: 'v1', dirty: 0 });
+	await db.opQueue.where('noteId').equals(note.id).delete();
+	return note;
 };
 
 describe('AccountPanel, with nothing connected', () => {
@@ -317,11 +331,12 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
 	});
 
-	it('asks before disconnecting, then keeps the notes here and stops syncing', async () => {
+	it('asks before disconnecting, then removes its notes from this device and stops syncing', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1', 'sk1_for-c1');
+		const sent = await sentNote(db, 'Sent');
 		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
 			Promise.resolve({ ok: true, value: { revoked: true } })
 		);
@@ -333,7 +348,14 @@ describe('AccountPanel, with an account connected', () => {
 
 		await user.click(await enabled('Disconnect…'));
 		expect(disconnect).not.toHaveBeenCalled();
-		expect(screen.getByText(/Your notes stay on this device/)).toBeTruthy();
+		// What it says is what happens, and by the account's name.
+		expect(
+			screen.getByText(
+				'Disconnect Dropbox · ada@example.com? Its notes are removed from this device. Nothing is deleted from Dropbox; connect it again to get them back.'
+			)
+		).toBeTruthy();
+		// Everything here has been sent, so there is nothing more to own up to.
+		expect(screen.queryByText(/not been sent/)).toBeNull();
 		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
 
 		expect(await screen.findByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
@@ -342,8 +364,58 @@ describe('AccountPanel, with an account connected', () => {
 		expect(disconnect).toHaveBeenCalledTimes(1);
 		expect(client.asked).toContain('sk1_for-c1');
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect(await noteById(db, sent.id)).toBeUndefined();
 		// And the credential is gone with the binding: it reaches nothing now.
 		expect(await db.credentials.get('c1')).toBeUndefined();
+	});
+
+	it('says how much has not been sent, and leaves that here under the source, disconnected', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sent = await sentNote(db, 'Sent');
+		const unsent = await createNote(db, { title: 'Unsent' });
+		renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		expect(
+			await screen.findByText(
+				'1 change has not been sent to Dropbox. It will stay on this device under this source, marked disconnected, until you reconnect, discard or download it.'
+			)
+		).toBeTruthy();
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+		expect(await screen.findByText('Dropbox · ada@example.com is disconnected')).toBeTruthy();
+		expect(await noteById(db, sent.id)).toBeUndefined();
+		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
+		expect(await activeConnectionId(db)).toBe('c1');
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
+		expect(await db.credentials.get('c1')).toBeUndefined();
+	});
+
+	it('counts the changes in the plural', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		await createNote(db, { title: 'One' });
+		await createNote(db, { title: 'Two' });
+		renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+
+		expect(
+			await screen.findByText(
+				'2 changes have not been sent to Dropbox. They will stay on this device under this source, marked disconnected, until you reconnect, discard or download them.'
+			)
+		).toBeTruthy();
 	});
 
 	it('says where to remove OneDrive’s access, which disconnecting cannot', async () => {
@@ -380,7 +452,7 @@ describe('AccountPanel, with an account connected', () => {
 		);
 
 		await user.click(await enabled('Disconnect…'));
-		expect(screen.getByText(/Your notes stay on this device/)).toBeTruthy();
+		expect(screen.getByText(/Its notes are removed from this device/)).toBeTruthy();
 		expect(screen.queryByText(/keeps this app’s access/)).toBeNull();
 		expect(screen.queryByRole('link', { name: 'microsoft.com/consent' })).toBeNull();
 	});
@@ -1064,7 +1136,7 @@ describe('AccountPanel, when another tab changes the connection', () => {
 			expect(connection).toHaveBeenCalledTimes(1);
 		});
 
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c1' });
 		await holding(db, 'c2');
 		await bindConnection(db, { connectionId: 'c2', provider: 'dropbox' });
 		await waitFor(() => {
@@ -1084,7 +1156,7 @@ describe('AccountPanel, when another tab changes the connection', () => {
 		renderPanel(clientWith({ connection }), db);
 		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
 
-		await unbindConnection(db);
+		await detachConnection(db, { connectionId: 'c1' });
 
 		expect(await screen.findByText(/Notes are kept on this device only/)).toBeTruthy();
 		await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1092,133 +1164,230 @@ describe('AccountPanel, when another tab changes the connection', () => {
 	});
 });
 
-describe('AccountPanel, signed in with an account the notes do not belong to', () => {
-	const bob = { ...dropbox, id: 'c9', displayName: 'bob@example.com', accountId: 'dbid:2' };
-
-	/** Notes that belong to Ada's account, and a server that has Bob's. */
-	const adasNotes = async () => {
+describe('AccountPanel, with a detached source in front', () => {
+	/** Ada's Dropbox, let go holding two notes it never sent and one it had. */
+	const detached = async () => {
 		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await bindConnection(db, {
+			connectionId: 'c1',
+			provider: 'dropbox',
+			accountId: 'dbid:1',
+			displayName: 'ada@example.com',
+		});
 		await holding(db, 'c1');
-		const note = await createNote(db, { title: 'Plan', folderPath: 'Work' });
-		await updateNote(db, note.id, { remoteId: 'id:1' });
-		await unbindConnection(db);
-		await db.credentials.delete('c1');
-		await backFromConsent(db);
-		return { db, note };
+		await sentNote(db, 'Sent');
+		const plan = await createNote(db, { title: 'Plan' });
+		const list = await createNote(db, { title: 'List' });
+		await detachConnection(db, { connectionId: 'c1' });
+		return { db, plan, list };
 	};
 
-	it('asks before copying the notes into it, and copies them when told to', async () => {
-		const user = userEvent.setup();
-		const { db, note } = await adasNotes();
-		renderPanel(
-			clientWith({ connection: () => Promise.resolve({ ok: true, value: bob }) }),
-			db
-		);
-
-		expect(await screen.findByText(/belong to another Dropbox account/)).toBeTruthy();
-		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
-
-		await user.click(screen.getByRole('button', { name: 'Copy notes into bob@example.com' }));
-
-		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
-		expect(await activeConnectionId(db)).toBe('c9');
-		expect((await noteById(db, note.id))?.remoteId).toBeUndefined();
-	});
-
-	it('lets it go instead, keeping the notes as they are', async () => {
-		const user = userEvent.setup();
-		const { db, note } = await adasNotes();
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
-			Promise.resolve({ ok: true, value: { revoked: true } })
-		);
-		const client = clientWith({
-			connection: () => Promise.resolve({ ok: true, value: bob }),
-			disconnect,
-		});
+	it('says which source it is and what it holds, and asks the server nothing', async () => {
+		const { db } = await detached();
+		const client = clientWith();
 		renderPanel(client, db);
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect bob@example.com' }));
-
-		expect(await screen.findByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
-		// Which connection is let go is not an argument: the credential the
-		// device kept when it claimed Bob's connection is what says so.
-		expect(disconnect).toHaveBeenCalledTimes(1);
-		expect(await db.credentials.get('c9')).toBeUndefined();
-		expect((await noteById(db, note.id))?.remoteId).toBe('id:1');
-	});
-
-	it('says where to remove OneDrive’s access before letting a wrong account go', async () => {
-		// Picking the wrong Microsoft account at sign-in is the ordinary way to
-		// get here, and that account keeps the app's access after it is let go.
-		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'onedrive', accountId: 'ms:1' });
-		await createNote(db, { title: 'Plan', folderPath: 'Work' });
-		await unbindConnection(db);
-		await beginConnect(db, 'onedrive');
-		const wrong = { ...bob, provider: 'onedrive' as const, accountId: 'ms:2' };
-		renderPanel(
-			clientWith({ connection: () => Promise.resolve({ ok: true, value: wrong }) }),
-			db
-		);
-
+		expect(await screen.findByText('Dropbox · ada@example.com is disconnected')).toBeTruthy();
 		expect(
-			await screen.findByRole('button', { name: 'Disconnect bob@example.com' })
+			await screen.findByText(/2 changes here were never sent, and are kept on this device/)
 		).toBeTruthy();
-		expect(screen.getByRole('link', { name: 'microsoft.com/consent' })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'Reconnect' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Discard…' })).toBeTruthy();
+		// Not synced, so none of what a live source offers.
+		expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Disconnect…' })).toBeNull();
+		expect(screen.queryByText(/Syncing with/)).toBeNull();
+		// It holds no credential, and there is nothing an answer could change.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(client.asked).toEqual([]);
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
 	});
 
-	it('stops asking once another tab has answered', async () => {
-		const { db } = await adasNotes();
+	it('reconnects through the ordinary flow, credential and all', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		const startConnect = vi.fn<ApiClient['startConnect']>(() =>
+			Promise.resolve({ ok: true, value: 'https://dropbox.example/authorize' })
+		);
+		const { went } = renderPanel(clientWith({ startConnect }), db, '/?folder=Work');
+
+		await user.click(await screen.findByRole('button', { name: 'Reconnect' }));
+
+		await waitFor(() => {
+			expect(went).toEqual(['https://dropbox.example/authorize']);
+		});
+		const pending = await db.credentials.get(PENDING_CREDENTIAL_ID);
+		expect(startConnect).toHaveBeenCalledWith(
+			'dropbox',
+			await hashCredential(pending?.credential ?? ''),
+			'/?folder=Work'
+		);
+		// Nothing has happened to the source yet: that is the bind's to decide.
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+	});
+
+	it('takes the rows up again when the same account comes back', async () => {
+		const { db, plan } = await detached();
+		await backFromConsent(db);
 		renderPanel(
-			clientWith({ connection: () => Promise.resolve({ ok: true, value: bob }) }),
+			clientWith({
+				connection: () => Promise.resolve({ ok: true, value: { ...dropbox, id: 'c2' } }),
+			}),
 			db
 		);
-		expect(await screen.findByText(/belong to another Dropbox account/)).toBeTruthy();
-
-		await bindConnection(db, { connectionId: 'c9', provider: 'dropbox', accountId: 'dbid:2' });
 
 		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
-		expect(screen.queryByRole('button', { name: /Disconnect bob@example.com/ })).toBeNull();
+		expect((await noteById(db, plan.id))?.connectionId).toBe('c2');
+		expect(await db.syncState.get('c1')).toBeUndefined();
 	});
 
-	it('says so when the server will not let it go, and still asks', async () => {
-		const user = userEvent.setup();
-		const { db } = await adasNotes();
+	it('offers no reconnect where the server does not offer the provider', async () => {
+		const { db } = await detached();
 		renderPanel(
 			clientWith({
-				connection: () => Promise.resolve({ ok: true, value: bob }),
-				disconnect: () => Promise.resolve({ ok: false, refusal: 'not_entitled' }),
+				config: () =>
+					Promise.resolve({ authMode: 'storage-first', providers: ['onedrive'] }),
 			}),
 			db
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect bob@example.com' }));
-
-		expect((await screen.findByRole('alert')).textContent).toMatch(/would not disconnect it/);
-		expect(
-			screen.getByRole('button', { name: 'Copy notes into bob@example.com' })
-		).toBeTruthy();
-		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect(await screen.findByText('Dropbox · ada@example.com is disconnected')).toBeTruthy();
+		await screen.findByRole('button', { name: 'Connect another OneDrive account' });
+		expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
+		// The rest does not need the server at all.
+		expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Discard…' })).toBeTruthy();
 	});
 
-	it('says so when letting it go is refused, and still asks', async () => {
+	it('says so for a source brought back by a late save, which names no account', async () => {
+		const db = freshDatabase();
+		await db.syncState.put({
+			connectionId: 'c-gone',
+			clientId: 'client',
+			detached: { at: 1, reason: 'interrupted' },
+		});
+		await createNote(db, { connectionId: 'c-gone', title: 'Late' });
+		renderPanel(clientWith(), db);
+
+		expect(await screen.findByText('A source is disconnected')).toBeTruthy();
+		expect(screen.getByText(/no longer knows which account it was/)).toBeTruthy();
+		await screen.findByRole('button', { name: 'Connect another Dropbox account' });
+		expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
+	});
+
+	it('downloads the notes that were never sent', async () => {
 		const user = userEvent.setup();
-		const { db } = await adasNotes();
+		const { db } = await detached();
+		const { downloaded } = renderPanel(clientWith(), db);
+
+		await user.click(await enabled('Download'));
+
+		expect(downloaded.map((titles) => [...titles].sort())).toEqual([['List', 'Plan']]);
+		// A download takes nothing away.
+		expect(await db.notes.count()).toBe(2);
+	});
+
+	it('discards in two steps: the first only lists what would go, with the focus on Cancel', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		const { downloaded } = renderPanel(clientWith(), db);
+
+		await user.click(await enabled('Discard…'));
+
+		const listed = await screen.findByRole('list', { name: 'Notes to discard' });
+		expect([...listed.querySelectorAll('li')].map((item) => item.textContent).sort()).toEqual([
+			'List',
+			'Plan',
+		]);
+		expect(screen.getByText('Discard these 2 notes?')).toBeTruthy();
+		expect(screen.getByText('These exist nowhere else. This cannot be undone.')).toBeTruthy();
+		// A stray Enter answers no.
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+		expect(screen.getByRole('button', { name: 'Discard for good' })).toBeTruthy();
+		// Nothing has gone, and a download is within reach.
+		expect(await db.notes.count()).toBe(2);
+		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		expect(downloaded).toHaveLength(1);
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(screen.queryByRole('button', { name: 'Discard for good' })).toBeNull();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Discard…' }));
+		expect(await db.notes.count()).toBe(2);
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+	});
+
+	it('discards for good on the second step, and the source goes with its notes', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		renderPanel(clientWith(), db);
+
+		await user.click(await enabled('Discard…'));
+		await user.click(await screen.findByRole('button', { name: 'Discard for good' }));
+
+		expect(await screen.findByText(/Notes are kept on this device only/)).toBeTruthy();
+		expect(await db.notes.count()).toBe(0);
+		expect(await db.opQueue.count()).toBe(0);
+		expect(await db.syncState.count()).toBe(0);
+	});
+
+	it('keeps a note written after the list was shown, and says so', async () => {
+		const user = userEvent.setup();
+		const { db, plan, list } = await detached();
+		renderPanel(clientWith(), db);
+		await user.click(await enabled('Discard…'));
+		await screen.findByRole('list', { name: 'Notes to discard' });
+
+		// Another tab, while the confirm is open.
+		const late = await createNote(db, { connectionId: 'c1', title: 'Typed since' });
+		await saveNoteBody(db, plan.id, '# Plan\n\nmore\n', undefined, { connectionId: 'c1' });
+		await user.click(screen.getByRole('button', { name: 'Discard for good' }));
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(
+			/was not on the list, so it has been kept/
+		);
+		// What was listed went — an edit to a listed note included — and the one
+		// the user was never shown is still here, in a source still detached.
+		expect(await noteById(db, plan.id)).toBeUndefined();
+		expect(await noteById(db, list.id)).toBeUndefined();
+		expect((await noteById(db, late.id))?.connectionId).toBe('c1');
+		expect((await db.syncState.get('c1'))?.detached).toBeDefined();
+		expect(await screen.findByText(/1 change here was never sent, and is kept/)).toBeTruthy();
+	});
+
+	it('is listed for what it is behind a live source, and can be shown', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		await holding(db, 'c2', 'sk1_onedrive');
+		await bindConnection(db, { connectionId: 'c2', provider: 'onedrive', accountId: 'ms:1' });
 		renderPanel(
 			clientWith({
-				connection: () => Promise.resolve({ ok: true, value: bob }),
-				disconnect: () => Promise.reject(new TypeError('offline')),
+				config: () =>
+					Promise.resolve({
+						authMode: 'storage-first',
+						providers: ['dropbox', 'onedrive'],
+					}),
+				connection: () =>
+					Promise.resolve({
+						ok: true,
+						value: { ...dropbox, id: 'c2', provider: 'onedrive', accountId: 'ms:1' },
+					}),
 			}),
 			db
 		);
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
 
-		await user.click(await screen.findByRole('button', { name: 'Disconnect bob@example.com' }));
+		await user.click(
+			await screen.findByRole('button', {
+				name: 'Show Dropbox · ada@example.com — disconnected, 2 not sent',
+			})
+		);
 
-		expect((await screen.findByRole('alert')).textContent).toMatch(/Nothing has changed/);
-		expect(
-			screen.getByRole('button', { name: 'Copy notes into bob@example.com' })
-		).toBeTruthy();
+		expect(await screen.findByText('Dropbox · ada@example.com is disconnected')).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe('c1');
+		// And back again, from the detached source's own panel.
+		expect(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' })).toBeTruthy();
 	});
 });
 

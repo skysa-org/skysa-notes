@@ -11,6 +11,12 @@ import { noteRef } from './db.js';
  * bring back a note the user deleted, and on the provider too. The tombstone
  * said which of the two it was; once it has been purged only this does.
  *
+ * A source being disconnected asks the same thing of it (`detachConnection`).
+ * The rows the remote already has are removed from the device, and a save held
+ * for one of them would otherwise bring it back as a new, unsent note under a
+ * source that has just been let go — or, worse, be matched by id to another
+ * account's note (`whereShown`). Those rows are marked here as they go.
+ *
  * In memory and per tab because the held edits are: they do not outlive the tab
  * either. A note deleted in one tab while another holds a failing edit to it is
  * not covered.
