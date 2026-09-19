@@ -476,6 +476,26 @@ export interface SyncStore {
 	readonly cursor: () => Promise<string | undefined>;
 	readonly noteById: (id: string) => Promise<SyncNote | undefined>;
 	/**
+	 * Whether a note this store cannot show the engine already has this id.
+	 *
+	 * A store is one connection's view, and a device can hold several: their
+	 * notes share one id space, because an id names a note on the device and
+	 * not within an account. `noteById` rightly hides the others' rows — they
+	 * are not this connection's to decide about — so on its own it says an id
+	 * is free when it is not. And the id an arriving file claims is the
+	 * remote's to choose: a folder copied from one account into another, or
+	 * one account connected a second time, brings files whose frontmatter names
+	 * notes another connection still holds. Adopted, the write is either
+	 * refused — on every retry, since nothing about the batch changes, so the
+	 * cursor never moves again — or lands on the other account's note and takes
+	 * its unpushed edits with it. Told, the engine gives the file a new id, as
+	 * it does for a duplicated file.
+	 *
+	 * Tombstones count: the row is still there, and still another note's.
+	 * `false` from a store that only ever holds one connection.
+	 */
+	readonly idHeldElsewhere: (id: string) => Promise<boolean>;
+	/**
 	 * Only ever asked between batches, when exactly one note is at each path.
 	 * Within a batch two can be — a note moving out of the way is a change of
 	 * its own — but nothing reads the store while one is being applied, so the

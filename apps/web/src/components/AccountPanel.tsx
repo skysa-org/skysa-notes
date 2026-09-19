@@ -526,21 +526,36 @@ const Devices = ({
 	const [busy, setBusy] = useState<string | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
 
+	// Only the newest question's answer is kept, and none once the source has
+	// changed or the panel has gone. A slow answer about one source landing under
+	// another's name is a list of grant ids the source on screen has never heard
+	// of, each with a Remove button.
+	const question = useRef(0);
 	const ask = useCallback(() => {
+		question.current += 1;
+		const mine = question.current;
+		const settle = (next: Asked<Grant[]>) => {
+			if (question.current === mine) setGrants(next);
+		};
 		void withHeld(database, client, connectionId)
 			.then((authed) => (authed === undefined ? undefined : authed.grants()))
 			.then((result) => {
-				setGrants(
+				settle(
 					result === undefined || !result.ok
 						? { kind: 'unreachable' }
 						: { kind: 'answered', value: result.value }
 				);
 			})
 			.catch(() => {
-				setGrants({ kind: 'unreachable' });
+				settle({ kind: 'unreachable' });
 			});
 	}, [client, database, connectionId]);
-	useEffect(ask, [ask]);
+	useEffect(() => {
+		ask();
+		return () => {
+			question.current += 1;
+		};
+	}, [ask]);
 
 	const listed = answer(grants);
 	if (listed === undefined || listed.length < 2) return null;
@@ -618,9 +633,94 @@ interface ConnectedProps {
 	bound: SyncStateRecord;
 	config: Asked<InstanceConfig>;
 	account: Asked<AccountState>;
+	/** Every disconnect that has been asked for, by source: see `useDisconnects`. */
+	disconnects: Readonly<Record<string, Disconnecting>>;
+	onDisconnect: (connectionId: string) => Promise<void>;
+	onUnbound: (connectionId: string) => void;
 	returnTo: string;
 	navigate?: (url: string) => void;
 }
+
+/** A disconnect that is under way, or that the server would not or could not do. */
+interface Disconnecting {
+	busy: boolean;
+	problem: string | null;
+	/**
+	 * The device is left bound to a connection it cannot get rid of by asking.
+	 * Any failure counts: a refusal and an unreachable server strand the user the
+	 * same way, and the old rule — only where the credential had stopped working
+	 * — now names a case that cannot happen, because a credential the server no
+	 * longer honours *is* the disconnect and `disconnectAccount` finishes the job.
+	 */
+	stranded: boolean;
+}
+
+/**
+ * Disconnects, by the source each is for, held by the panel rather than by
+ * `Connected`.
+ *
+ * `Connected` is keyed by source and the switcher stays live while the server
+ * is being asked, so the answer can come back to an instance that has gone. Held
+ * there, a failure that arrived after "Show other source" was lost: back on the
+ * first source there was no error, no way to stop syncing on this device, and
+ * nothing to stop a second disconnect being started on top of the first.
+ *
+ * Every entry names its source, from the moment the user asked — the answer can
+ * take seconds, and it is about that source whatever the panel shows by then.
+ */
+const useDisconnects = (database: NotesDatabase, client: Client) => {
+	const [disconnects, setDisconnects] = useState<Readonly<Record<string, Disconnecting>>>({});
+	// Read where a second one is refused: state as the last render saw it would
+	// let two clicks in one tick both through.
+	const pending = useRef(new Set<string>());
+
+	const put = useCallback((connectionId: string, next: Disconnecting | undefined) => {
+		setDisconnects(({ [connectionId]: _before, ...rest }) =>
+			next === undefined ? rest : { ...rest, [connectionId]: next }
+		);
+	}, []);
+
+	const disconnect = useCallback(
+		(connectionId: string): Promise<void> => {
+			if (pending.current.has(connectionId)) return Promise.resolve();
+			pending.current.add(connectionId);
+			put(connectionId, { busy: true, problem: null, stranded: false });
+			return disconnectAccount(database, client, connectionId)
+				.then((outcome) => {
+					put(
+						connectionId,
+						outcome.ok
+							? undefined
+							: {
+									busy: false,
+									problem: refusalMessage(outcome.refusal),
+									stranded: true,
+								}
+					);
+				})
+				.catch((error: unknown) => {
+					put(connectionId, {
+						busy: false,
+						problem: failureMessage(error),
+						stranded: true,
+					});
+				})
+				.finally(() => {
+					pending.current.delete(connectionId);
+				});
+		},
+		[client, database, put]
+	);
+
+	const clear = useCallback(
+		(connectionId: string) => {
+			put(connectionId, undefined);
+		},
+		[put]
+	);
+
+	return { disconnects, disconnect, clear };
+};
 
 const Connected = ({
 	client,
@@ -629,24 +729,20 @@ const Connected = ({
 	bound,
 	config,
 	account,
+	disconnects,
+	onDisconnect,
+	onUnbound,
 	returnTo,
 	navigate,
 }: ConnectedProps) => {
 	const [confirming, setConfirming] = useState(false);
-	const [busy, setBusy] = useState(false);
-	const [problem, setProblem] = useState<string | null>(null);
-	// Refused for want of a session: the server cannot be asked, and may even
-	// have let go already, its answer lost on the way back.
-	/**
-	 * A disconnect the server would not or could not do, leaving the device
-	 * bound to a connection it cannot get rid of by asking. Any failure counts:
-	 * a refusal and an unreachable server strand the user the same way, and the
-	 * old rule — only where the credential had stopped working — now names a
-	 * case that cannot happen, because a credential the server no longer
-	 * honours *is* the disconnect and `disconnectAccount` finishes the job.
-	 */
-	const [stranded, setStranded] = useState(false);
-
+	// Only ever this source's. Named once per render, so the click below is
+	// about the source the user was looking at when they pressed it.
+	const connectionId = bound.connectionId;
+	const disconnecting = disconnects[connectionId];
+	const busy = disconnecting?.busy === true;
+	const problem = disconnecting?.problem ?? null;
+	const stranded = disconnecting?.stranded === true;
 	// Focus follows the step the user is on, rather than falling to the page
 	// when the button they pressed goes away. Not on first render.
 	const focusNext = useRef<'cancel' | 'open' | null>(null);
@@ -680,23 +776,11 @@ const Connected = ({
 			: null;
 
 	const disconnect = () => {
-		setBusy(true);
-		setProblem(null);
-		setStranded(false);
-		void disconnectAccount(database, client, bound.connectionId)
-			.then((outcome) => {
-				if (outcome.ok) return;
-				setProblem(refusalMessage(outcome.refusal));
-				setStranded(true);
-			})
-			.catch((error: unknown) => {
-				setProblem(failureMessage(error));
-				setStranded(true);
-			})
-			.finally(() => {
-				setBusy(false);
-				confirm(false);
-			});
+		// Closing the confirm is this instance's to do, and nothing if it has
+		// gone; what came of the disconnect is the panel's, and is kept.
+		void onDisconnect(connectionId).finally(() => {
+			confirm(false);
+		});
 	};
 
 	return (
@@ -734,7 +818,12 @@ const Connected = ({
 					className="ghost"
 					onClick={() => {
 						// Nothing is asked of the server, and nothing on it is touched.
-						void unbindConnection(database);
+						// By name: with none, this lets go of whichever source is in
+						// front — another one's rows and cursor, while the one that
+						// failed stays live on the server.
+						void unbindConnection(database, { connectionId }).then(() => {
+							onUnbound(connectionId);
+						});
 					}}
 				>
 					Stop syncing on this device
@@ -768,8 +857,10 @@ const Connected = ({
 					type="button"
 					className="ghost"
 					// Not while the server is still being asked on open: its
-					// answer could bind the device again right after.
-					disabled={account.kind === 'asking'}
+					// answer could bind the device again right after. Nor while a
+					// disconnect of this source is still out, which may have been
+					// started before the user looked at another source and back.
+					disabled={account.kind === 'asking' || busy}
 					onClick={() => {
 						confirm(true);
 					}}
@@ -882,6 +973,7 @@ export const AccountPanel = ({
 	);
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
+	const { disconnects, disconnect, clear } = useDisconnects(database, client);
 
 	useEffect(() => {
 		void client
@@ -943,6 +1035,7 @@ export const AccountPanel = ({
 	if (state?.kind === 'other-account' && bound.state?.connectionId !== state.connection.id) {
 		return (
 			<OtherAccount
+				key={state.connection.id}
 				client={client}
 				database={database}
 				connection={state.connection}
@@ -962,7 +1055,16 @@ export const AccountPanel = ({
 			{...(navigate === undefined ? {} : { navigate })}
 		/>
 	) : (
+		// Keyed by source. Everything under here holds state about one source — a
+		// confirm half way through, a re-scan being asked about, a list of devices
+		// — and unkeyed it survives "Show other source" and is rendered, and acted
+		// on, under the other one's name. What has to outlive the switch is handed
+		// down instead, by the source it names.
 		<Connected
+			key={bound.state.connectionId}
+			disconnects={disconnects}
+			onDisconnect={disconnect}
+			onUnbound={clear}
 			client={client}
 			database={database}
 			sync={sync}

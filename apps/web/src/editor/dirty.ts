@@ -52,8 +52,27 @@ export const isUserEdit = (update: ChangeLike): boolean => {
  */
 export const PROGRAMMATIC_META = 'skysa/programmatic';
 
+/**
+ * The transaction a dispatch began with. Plugins answer a change with changes of
+ * their own — `prosemirror-tables` squares up a ragged table that way — and
+ * ProseMirror hands each of those the transaction it was appended to.
+ */
+const rootOf = (transaction: Transaction): Transaction => {
+	const parent = transaction.getMeta('appendedTransaction') as Transaction | undefined;
+	return parent === undefined ? transaction : rootOf(parent);
+};
+
+/**
+ * Whose change it is follows the transaction that began the dispatch, not the
+ * one that made it. A plugin tidying up after a body the app put in is still the
+ * app — counted as the user, it is an edit nobody typed, carrying the origin of
+ * the body that was just replaced, and it saves as a conflict copy. The same
+ * tidying after the user's own keystroke is still the user.
+ */
 export const isUserTransaction = (transaction: Transaction): boolean =>
-	transaction.docChanged && transaction.getMeta(PROGRAMMATIC_META) !== true;
+	transaction.docChanged &&
+	transaction.getMeta(PROGRAMMATIC_META) !== true &&
+	rootOf(transaction).getMeta(PROGRAMMATIC_META) !== true;
 
 /**
  * Counts user edits. A count rather than a boolean because a single dispatch can
@@ -64,12 +83,26 @@ export const isUserTransaction = (transaction: Transaction): boolean =>
 export const userEditKey = new PluginKey<number>('skysa-user-edit');
 
 /**
+ * Not every follow-up is appended. Milkdown's heading-id plugin answers a
+ * changed document from its plugin view, with a `view.dispatch` of its own made
+ * *inside* the dispatch it is answering — and once more inside the `EditorView`
+ * constructor, for the document the editor opens with. Nothing on such a
+ * transaction says what it was answering, so the app says so from outside: while
+ * a hold is out, the editor reports no edits.
+ *
+ * Only ever held where nothing can be typed — across one synchronous dispatch,
+ * or until the view has finished being built — so there is no keystroke a hold
+ * could swallow.
+ */
+const holds = new WeakMap<Plugin, number>();
+
+/**
  * Reports user edits to the rich editor's document, and nothing else. The
  * callback receives the document; serializing it back to markdown is the
  * editor's job, not this rule's.
  */
-export const userEditPlugin = (onUserEdit: (doc: ProseNode) => void): Plugin =>
-	new Plugin({
+export const userEditPlugin = (onUserEdit: (doc: ProseNode) => void): Plugin<number> => {
+	const plugin: Plugin<number> = new Plugin({
 		key: userEditKey,
 		state: {
 			init: () => 0,
@@ -78,9 +111,21 @@ export const userEditPlugin = (onUserEdit: (doc: ProseNode) => void): Plugin =>
 		},
 		view: () => ({
 			update: (view, previous) => {
+				if ((holds.get(plugin) ?? 0) > 0) return;
 				const before = userEditKey.getState(previous) ?? 0;
 				const after = userEditKey.getState(view.state) ?? 0;
 				if (after > before) onUserEdit(view.state.doc);
 			},
 		}),
 	});
+	return plugin;
+};
+
+/** Stop this plugin's editor reporting edits until the returned release is called, once. */
+export const holdUserEdits = (plugin: Plugin | undefined): (() => void) => {
+	if (plugin === undefined) return () => undefined;
+	holds.set(plugin, (holds.get(plugin) ?? 0) + 1);
+	return () => {
+		holds.set(plugin, (holds.get(plugin) ?? 1) - 1);
+	};
+};

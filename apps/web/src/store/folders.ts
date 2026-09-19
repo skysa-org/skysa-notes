@@ -14,6 +14,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
+import { deletedHere } from './deletedHere.js';
 import { foldPath, freePath } from './naming.js';
 import { queueDelete, queueMkdir, queueMove, queueRmdir, withdrawMkdirs } from './queue.js';
 
@@ -435,6 +436,9 @@ export const deleteFolder = async (
 				.filter((note) => isWithin(note.path, target) && note.deletedLocally === 0)
 				.map((note) => ({ ...note, deletedLocally: 1 as const, dirty: 1 as const }));
 			if (tombstoned.length > 0) await db.notes.bulkPut(tombstoned);
+			tombstoned.forEach((note) => {
+				deletedHere.add(note.id);
+			});
 			await tombstoned.reduce<Promise<void>>(async (pending, note) => {
 				await pending;
 				await queueDelete(db, note);

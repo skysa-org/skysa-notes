@@ -20,6 +20,7 @@ import Dexie from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 import { activeConnectionId, type Flag, type NoteRecord, type NotesDatabase } from './db.js';
+import { deletedHere } from './deletedHere.js';
 import { ensureFolder } from './folders.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
@@ -51,6 +52,8 @@ export const noteFileContents = (note: NoteRecord): string =>
 		frontmatter: note.frontmatter,
 		body: note.body,
 		metadata: {
+			// Not written over an `id` the user wrote and the app could not use
+			// (`id: 202409141302`): `writeFrontmatter` holds that.
 			id: note.id,
 			// An unnamed note has no title worth recording; writing "Untitled"
 			// would pin it and stop the first heading from ever naming the note.
@@ -277,6 +280,14 @@ export interface EditBase {
 	 * written from, and what a note deleted meanwhile is brought back as.
 	 */
 	note: NoteRecord;
+	/**
+	 * A later edit to this note has been saved since this one was typed, and was
+	 * not typed on top of it: this one's save failed, the editor was rebuilt from
+	 * the stored body, and the user carried on from there (`useAutosave`). Its
+	 * origin still matches, so written as the body it would undo that later edit.
+	 * It is kept the way an edit to a replaced body is — beside the note.
+	 */
+	displaced?: true;
 }
 
 /**
@@ -298,6 +309,12 @@ export interface EditBase {
  * - the note is gone (deleted elsewhere): it is brought back as it was shown,
  *   holding the edit, cut loose from the file that was deleted — what a dirty
  *   note deleted remotely gets too.
+ *
+ * Two edits to a note that is gone are let go instead, and both are retries of
+ * a save that failed (`useAutosave`), since nothing else arrives this late. One
+ * is to a note deleted from this tab (`deletedHere`): that delete was the
+ * user's, and an edit held from before it does not get to undo it. The other is
+ * a displaced one: a later edit was stored, and went with the note.
  */
 export const saveNoteBody = async (
 	db: NotesDatabase,
@@ -308,11 +325,24 @@ export const saveNoteBody = async (
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
 		if (base === undefined) return applyBody(db, id, body);
 		const current = await db.notes.get(id);
-		if (current === undefined) return bringBack(db, base, body);
+		if (current === undefined) {
+			const letGo = base.displaced === true || deletedHere.has(id);
+			return letGo ? base.note : bringBack(db, base, body);
+		}
+		// Here again, by whatever road — a pull re-creating a file another device
+		// restored, under the id it names. It is no longer the note deleted from
+		// this tab, and an edit to it that finds it gone later is kept.
+		if (current.deletedLocally === 0) deletedHere.delete(id);
 		// A tombstone keeps the edit and stays deleted, as it always has: the
 		// delete wins (§7), and restoring it brings the edit back with it.
-		if (current.deletedLocally === 1) return applyBody(db, id, body);
-		if ((current.bodyOrigin ?? '') === base.origin) return applyBody(db, id, body);
+		// A displaced one is not: the tombstone holds the later text, which is
+		// what restoring it should bring back.
+		if (current.deletedLocally === 1) {
+			return base.displaced === true ? current : applyBody(db, id, body);
+		}
+		if (base.displaced !== true && (current.bodyOrigin ?? '') === base.origin) {
+			return applyBody(db, id, body);
+		}
 		if (current.body === body) return current;
 		return copyBeside(db, current, base.note, body);
 	});
@@ -361,9 +391,22 @@ const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRec
 	return withHash;
 };
 
+/**
+ * The source a note that has gone is made again in: its own, while this device
+ * still has it. Not "whichever is showing" — undo outlives the view, and the
+ * user may have turned to another source since, where this would put one
+ * account's note into another account's folder. A source disconnected
+ * meanwhile has nothing to go back to, and the one showing is where the user
+ * will find it.
+ */
+const homeOf = async (db: NotesDatabase, note: NoteRecord): Promise<string> =>
+	(await db.syncState.get(note.connectionId)) === undefined
+		? activeConnectionId(db)
+		: note.connectionId;
+
 const bringBack = async (db: NotesDatabase, base: EditBase, body: string): Promise<NoteRecord> => {
 	const shown = base.note;
-	const connectionId = await activeConnectionId(db);
+	const connectionId = await homeOf(db, shown);
 	const folderPath = parentPath(shown.path);
 	// The path may have been taken since, by a file the same pull brought in:
 	// a local note meeting a remote file at its path, which is a conflict, and
@@ -504,11 +547,83 @@ const setDeleted = (db: NotesDatabase, id: string, deleted: Flag): Promise<void>
 		};
 		await db.notes.put(updated);
 		await (deleted === 1 ? queueDelete(db, updated) : queueRestore(db, updated));
+		if (deleted === 1) deletedHere.add(id);
 	});
 
 export const deleteNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 1);
 
 export const restoreNote = (db: NotesDatabase, id: string): Promise<void> => setDeleted(db, id, 0);
+
+/**
+ * Whatever has taken a restored note's path since moves to a free name beside
+ * it. A deleted note's name is free at once (`takenNamesIn`), so deleting
+ * `untitled.md`, making a new note and undoing is all it takes — and lifted with
+ * nothing moved, the tombstone leaves two live notes at one path, which the list
+ * shows twice and the next push has overwrite each other.
+ *
+ * The restored note keeps the path, for the reason the remote does in a
+ * conflict: its file is still there. The delete that would have removed it was
+ * queued and never sent, or this would be `bringBack`'s case. The newcomer has
+ * at most a write queued, which goes wherever the note is by then.
+ *
+ * Compared folded, the way every other writer asks: `Ideas.md` and `ideas.md`
+ * are one name to every provider the app syncs to.
+ */
+const makeRoomFor = async (db: NotesDatabase, restored: NoteRecord | undefined): Promise<void> => {
+	if (restored === undefined || restored.deletedLocally === 1) return;
+	const at = foldPath(restored.path);
+	const inTheWay = await db.notes
+		.where('connectionId')
+		.equals(restored.connectionId)
+		.filter(
+			(note) =>
+				note.id !== restored.id && note.deletedLocally === 0 && foldPath(note.path) === at
+		)
+		.toArray();
+	await inTheWay.reduce(
+		(done, note) =>
+			done.then(() => moveNote(db, note.id, parentPath(note.path))).then(() => undefined),
+		Promise.resolve()
+	);
+};
+
+/**
+ * Undo a delete, for as long as the UI offers to — which is longer than the
+ * tombstone may last: sync pushes the delete within seconds and purges the row.
+ *
+ * `deleted` is the note as it was when the user deleted it, holding the text
+ * the editor held. While the tombstone is there it is restored, which withdraws
+ * a delete still queued and owes the remote a write either way. Once it has
+ * gone the note is made again as an edit to a note deleted elsewhere is — same
+ * id, cut loose from the file that was removed, dirty, a write queued, and
+ * under a conflict name if its path has been taken meanwhile (`bringBack`).
+ *
+ * The text goes in through `saveNoteBody`, so whatever it would not write over
+ * — a body a pull put into the tombstone meanwhile — it is kept beside instead.
+ */
+export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<NoteRecord> =>
+	// One step, as every other writer here is. In pieces, a push could run with
+	// the note restored and the newcomer still at its path, and a failure half
+	// way would leave the note back without the text only `deleted` holds — and
+	// reported as not brought back at all.
+	db
+		.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+			// Before the save below, which would otherwise let the text go.
+			deletedHere.delete(deleted.id);
+			await restoreNote(db, deleted.id);
+			const current = await db.notes.get(deleted.id);
+			await makeRoomFor(db, current);
+			if (current?.body === deleted.body) return current;
+			return saveNoteBody(db, deleted.id, deleted.body, {
+				origin: deleted.bodyOrigin ?? '',
+				note: deleted,
+			});
+		})
+		.catch((error: unknown) => {
+			// Rolled back, so it is as deleted as it was.
+			deletedHere.add(deleted.id);
+			throw error;
+		});
 
 /** Drop a tombstoned note for good, once the provider has confirmed the delete. */
 export const purgeNote = async (db: NotesDatabase, id: string): Promise<void> => {

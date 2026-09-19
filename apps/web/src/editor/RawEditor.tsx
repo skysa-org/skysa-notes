@@ -1,6 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 
@@ -24,9 +24,21 @@ export interface RawEditorProps {
 	origin?: string;
 	/** The edited body, and the origin of the body it was typed into. */
 	onUserEdit: (body: string, origin: string) => void;
+	/**
+	 * The editor's text has been replaced by a body from outside — a sync pull,
+	 * another tab. What was typed before is no longer under what is typed next.
+	 */
+	onAdopted?: () => void;
 }
 
-export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) => {
+/**
+ * The undo history sits in a compartment so it can be emptied. CodeMirror has no
+ * call for that; taking the extension out and putting it back is how its state
+ * is thrown away.
+ */
+const undoHistory = new Compartment();
+
+export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
@@ -35,6 +47,10 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 	useEffect(() => {
 		notify.current = onUserEdit;
 	}, [onUserEdit]);
+	const replaced = useRef(onAdopted);
+	useEffect(() => {
+		replaced.current = onAdopted;
+	}, [onAdopted]);
 	const incoming = useIncomingBody(noteId, body, origin);
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
@@ -50,7 +66,7 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 				doc: body,
 				extensions: [
 					lineNumbers(),
-					history(),
+					undoHistory.of(history()),
 					keymap.of([...defaultKeymap, ...historyKeymap]),
 					markdown(),
 					findExtension(),
@@ -79,6 +95,12 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 
 	// Adopt a body that changed underneath us — a sync pull, or an edit made in
 	// the other mode. Annotated as programmatic so it cannot mark the note dirty.
+	//
+	// And the history goes with the old text. Undo after a pull would otherwise
+	// put that text back as a *user* edit made against the new body, and autosave
+	// would push it — quietly reverting whatever someone else wrote. Keeping the
+	// adoption out of the history is not enough on its own: the older entries
+	// stay, and describe a document that is no longer on screen.
 	useEffect(() => {
 		const instance = view.current;
 		if (instance === null) return;
@@ -88,10 +110,13 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit }: RawEditorProps) 
 		if (current !== body) {
 			instance.dispatch({
 				changes: { from: 0, to: current.length, insert: body },
-				...programmatic,
+				effects: undoHistory.reconfigure([]),
+				annotations: [programmatic.annotations, Transaction.addToHistory.of(false)],
 			});
+			instance.dispatch({ effects: undoHistory.reconfigure(history()) });
 		}
 		incoming.adopted();
+		if (current !== body) replaced.current?.();
 	}, [body, origin, incoming]);
 
 	return <div className="editor editor-raw" ref={host} data-testid="raw-editor" />;

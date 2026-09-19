@@ -28,6 +28,11 @@ export interface StoreHarness {
 		syncedHash?: string;
 		dirty?: boolean;
 	}) => void | Promise<void>;
+	/**
+	 * Put a note under this id where the store cannot show it to the engine:
+	 * another connection's, on a device that holds more than one.
+	 */
+	seedElsewhere: (id: string) => void | Promise<void>;
 	seedFolder: (folder: { path: string; remoteId?: string }) => void | Promise<void>;
 	/** Queue an op and return the seq it was given. */
 	seedOp: (op: {
@@ -64,6 +69,57 @@ export const describeSyncStoreContract = (
 ): void => {
 	describe(`SyncStore contract: ${name}`, () => {
 		const harness = create;
+
+		describe('an id another connection holds', () => {
+			// Ids are unique on the device, not within a connection, and the one
+			// a file arrives claiming is whatever its frontmatter says. The
+			// engine can only ask this store, so this store has to be able to
+			// say "taken" about a note it will not otherwise admit to.
+			it('says an id nobody holds is not held elsewhere', async () => {
+				const { store } = await harness();
+				expect(await store.idHeldElsewhere('n1')).toBe(false);
+			});
+
+			it('does not count a note of its own, which `noteById` answers for', async () => {
+				const { store, seed } = await harness();
+				await seed({ id: 'n1', path: 'a.md', content: 'x\n' });
+				expect(await store.idHeldElsewhere('n1')).toBe(false);
+				expect((await store.noteById('n1'))?.path).toBe('a.md');
+			});
+
+			it('says so, while showing the engine nothing of the note', async () => {
+				const { store, seedElsewhere } = await harness();
+				await seedElsewhere('n1');
+				expect(await store.idHeldElsewhere('n1')).toBe(true);
+				expect(await store.noteById('n1')).toBeUndefined();
+				expect(await store.allNotes()).toEqual([]);
+			});
+
+			it('refuses a note written under it anyway, and the whole batch with it', async () => {
+				// The last line of defence, not the first: written, it replaces
+				// another account's note, unpushed edits included.
+				const { store, seedElsewhere } = await harness();
+				await seedElsewhere('n1');
+				await expect(
+					store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-note',
+								id: 'n1',
+								path: 'a.md',
+								content: 'x\n',
+								remote: remote('a.md'),
+								syncedHash: 'h1',
+							},
+						],
+						cursor: 'c1',
+					})
+				).rejects.toThrow();
+				expect(await store.cursor()).toBeUndefined();
+				expect(await store.idHeldElsewhere('n1')).toBe(true);
+				expect(await store.noteByPath('a.md')).toBeUndefined();
+			});
+		});
 
 		describe('the bytes a note last synced', () => {
 			// What tells a remote rename from a remote edit on a provider whose

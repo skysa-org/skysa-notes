@@ -21,6 +21,7 @@ import {
 	noteFile,
 	noteFileContents,
 	noteRecordFromFile,
+	purgeNote,
 	restoreNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
@@ -83,6 +84,18 @@ describeSyncStoreContract('Dexie', async () => {
 				...(note.syncedHash === undefined ? {} : { syncedHash: note.syncedHash }),
 				dirty: note.dirty === true ? 1 : 0,
 			});
+		},
+		seedElsewhere: async (id) => {
+			await db.notes.put(
+				noteRecordFromFile({
+					id,
+					connectionId: 'elsewhere',
+					path: 'theirs.md',
+					source: 'theirs\n',
+					hash: await contentHash('theirs\n'),
+					now: 0,
+				})
+			);
 		},
 		seedFolder: async (folder) => {
 			await db.folders.put({ connectionId: CONNECTION, createdAt: 0, ...folder });
@@ -479,6 +492,36 @@ const pulled = async (content = 'x\n') => {
 	return { db, store };
 };
 
+describe('a pull that makes a note this tab deleted', () => {
+	it('is the note here again, and an edit to it that finds it gone later is kept', async () => {
+		const { db, store } = await pulled();
+		const note = await getNote(db, 'n1');
+		if (note === undefined) throw new Error('the pulled note is missing');
+		await deleteNote(db, 'n1');
+		await db.opQueue.clear();
+		await purgeNote(db, 'n1');
+		// Restored on another device: the file comes back under the id it names.
+		await store.applyPull({
+			changes: [
+				{
+					kind: 'upsert-note',
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remote: remote('a.md', 'r2'),
+					syncedHash: 'hash',
+				},
+			],
+			cursor: 'c2',
+		});
+		await purgeNote(db, 'n1');
+
+		await saveNoteBody(db, 'n1', 'x\nheld\n', { origin: '', note });
+
+		expect((await getNote(db, 'n1'))?.body).toBe('x\nheld\n');
+	});
+});
+
 describe('a pull that lands after the user has typed', () => {
 	// The engine reads the note clean, goes to the network, and hands the batch
 	// over afterwards. An autosave can land in that window.
@@ -645,6 +688,80 @@ describe('another connection’s note under the same id', () => {
 		expect((await theirs.pendingOps()).map((op) => op.seq)).toEqual([seq]);
 		expect(await mine.opBySeq(seq)).toBeUndefined();
 		expect(await theirs.opBySeq(seq)).toMatchObject({ seq, op: 'delete' });
+	});
+});
+
+describe('two connected sources holding one note id', () => {
+	// Reached with no mistake on the user's part: connect X, disconnect, connect
+	// Y answering "copy" — the rows keep their ids, so Y's files carry them —
+	// and connect X again as a second source. Or one folder in two clouds.
+	const twoSources = async () => {
+		const db = freshDatabase();
+		const theirs = await createNote(db, { connectionId: 'c-y', body: 'unpushed in y\n' });
+		const store = await boundStore(db, { connectionId: 'c-x' });
+		const provider = createFakeProvider();
+		await provider.ensureRoot();
+		const engine = createSyncEngine({
+			provider,
+			store,
+			now: () => new Date('2026-09-15T14:32:00Z'),
+		});
+		const file = `---\nid: ${theirs.id}\n---\n\nas x has it\n`;
+		const entry = await provider.write('a.md', file, {});
+		return { db, theirs, store, provider, engine, file, entry };
+	};
+
+	it('pulls the file as a note of its own and leaves the other source’s alone', async () => {
+		// Adopting the id has the store refuse the batch, identically on every
+		// retry, so the cursor never moves and X never syncs again.
+		const { db, theirs, store, engine, file, entry } = await twoSources();
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(await store.cursor()).toBeDefined();
+		expect(await getNote(db, theirs.id)).toEqual(theirs);
+		expect(theirs.dirty).toBe(1);
+		const mine = await listNotes(db, { connectionId: 'c-x' });
+		expect(mine).toHaveLength(1);
+		expect(mine[0]?.id).not.toBe(theirs.id);
+		expect(mine[0]?.remoteId).toBe(entry.remoteId);
+		expect(noteFile(mine[0]!)).toBe(file);
+
+		// Known by its `remoteId` from here on, whatever the file says it is.
+		const again = await engine.pull();
+		expect(again.status).toBe('ok');
+		expect(await listNotes(db, { connectionId: 'c-x' })).toEqual(mine);
+		expect(await db.notes.count()).toBe(2);
+	});
+
+	it('counts a note the other source has deleted and not yet purged', async () => {
+		const { db, theirs, engine } = await twoSources();
+		await deleteNote(db, theirs.id);
+		const tombstone = await getNote(db, theirs.id);
+
+		expect((await engine.pull()).status).toBe('ok');
+
+		expect(await getNote(db, theirs.id)).toEqual(tombstone);
+		expect(await listNotes(db, { connectionId: 'c-x' })).toHaveLength(1);
+	});
+
+	it('writes the file under its own id at the next edit, and stays one note', async () => {
+		const { db, theirs, provider, engine } = await twoSources();
+		await engine.pull();
+		const [mine] = await listNotes(db, { connectionId: 'c-x' });
+
+		await saveNoteBody(db, mine!.id, 'edited in x\n');
+		expect((await engine.sync()).status).toBe('ok');
+
+		expect(provider.contentAt('a.md')).toContain(`id: ${mine!.id}`);
+		expect(provider.contentAt('a.md')).not.toContain(theirs.id);
+		expect((await engine.sync()).status).toBe('ok');
+		expect((await listNotes(db, { connectionId: 'c-x' })).map((note) => note.id)).toEqual([
+			mine!.id,
+		]);
+		expect((await getNote(db, mine!.id))?.dirty).toBe(0);
+		expect(await getNote(db, theirs.id)).toEqual(theirs);
 	});
 });
 

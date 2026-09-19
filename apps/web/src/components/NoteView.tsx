@@ -7,10 +7,17 @@ import { FindTargetProvider } from '../editor/findTarget.js';
 import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor } from '../editor/RichEditor.js';
-import { useAutosave } from '../editor/useAutosave.js';
+import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
-import { deleteNote, renameNote, saveNoteBody, setNoteEditorMode } from '../store/notes.js';
+import {
+	deleteNote,
+	getNote,
+	renameNote,
+	saveNoteBody,
+	setNoteEditorMode,
+} from '../store/notes.js';
+import { beforeClosing } from '../store/staleTab.js';
 import { FindBar } from './FindBar.js';
 import { Outline } from './Outline.js';
 
@@ -34,7 +41,18 @@ const FIND = parseChord('Mod+F');
 
 export interface NoteViewProps {
 	note: NoteRecord | undefined;
-	onDeleted: () => void;
+	/**
+	 * With the note as it was deleted, holding the text the editor held — which
+	 * is not always what the row holds: a save the store refused never got there.
+	 * It is what an undo puts back.
+	 */
+	/**
+	 * The note as it was deleted, holding the last text the store never took.
+	 * `beside` is such text where it is *not* the newest — an edit whose save
+	 * failed, with a later one stored since that was not typed over it. An undo
+	 * keeps it beside the note; as the body it would undo that later edit.
+	 */
+	onDeleted: (deleted: NoteRecord, beside?: DisplacedText) => void;
 }
 
 /**
@@ -81,6 +99,13 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 	);
 };
 
+/** Text typed into a note that belongs beside it: see `NoteViewProps.onDeleted`. */
+export interface DisplacedText {
+	body: string;
+	/** See `NoteRecord.bodyOrigin`. */
+	origin: string;
+}
+
 interface Edit {
 	body: string;
 	/** See `NoteRecord.bodyOrigin`. */
@@ -104,12 +129,14 @@ const NoteBody = ({
 	showOutline,
 	onUserEdit,
 	onUnsupported,
+	onAdopted,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
 	showOutline: boolean;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
+	onAdopted: () => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
 	return (
@@ -120,6 +147,7 @@ const NoteBody = ({
 					body={note.body}
 					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
+					onAdopted={onAdopted}
 				/>
 			)}
 			{mode === 'rich' && (
@@ -129,6 +157,7 @@ const NoteBody = ({
 					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
 					onUnsupported={onUnsupported}
+					onAdopted={onAdopted}
 				/>
 			)}
 			{showOutline && (
@@ -164,13 +193,20 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	}, [note]);
 
 	const save = useCallback(
-		({ body, origin, note: typedInto }: Edit) => {
-			if (noteId === undefined) return;
-			void saveNoteBody(
+		({ body, origin, note: typedInto }: Edit, context?: SaveContext) => {
+			if (noteId === undefined) return undefined;
+			const base = typedInto?.id === noteId ? { origin, note: typedInto } : undefined;
+			// Returned, not dropped: autosave holds the edit until this settles,
+			// and a rejection nobody hears is a user typing into nothing.
+			return saveNoteBody(
 				db,
 				noteId,
 				body,
-				typedInto?.id === noteId ? { origin, note: typedInto } : undefined
+				// Displaced with nothing to write a copy from cannot happen — every
+				// edit carries the note — and would be written as the body if it did.
+				base !== undefined && context?.displaced === true
+					? { ...base, displaced: true }
+					: base
 			);
 		},
 		[noteId]
@@ -183,7 +219,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// before the next one — made from the new body — can stand for it.
 		supersedes: sameBase,
 	});
-	const { change, flush } = autosave;
+	const { change, flush, settle, rebased, overtaken, forget } = autosave;
+	// A newer build in another tab closes this one's database; what is held
+	// here goes in first.
+	useEffect(() => beforeClosing(settle), [settle]);
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
 			change({ body, origin, note: shown.current });
@@ -191,16 +230,52 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		[change]
 	);
 
+	const onDelete = useCallback(() => {
+		if (note === undefined) return;
+		// Written first, so the last words are in the row before it is a
+		// tombstone: restoring it brings them back with it.
+		flush();
+		void deleteNote(db, note.id)
+			// Everything out has come back, and what had failed has had one more
+			// try — into the tombstone, which keeps an edit and stays deleted.
+			.then(settle)
+			// Deleted either way; a row that cannot be read is the note as shown.
+			.then(() => getNote(db, note.id).catch(() => undefined))
+			.then((row) => {
+				// Only now that it is deleted, and nothing before: a held edit
+				// retried after sync has purged the row would bring the note back
+				// (`saveNoteBody`), here and on the provider. What is let go is
+				// what the store never took, and undo cannot bring back less than
+				// the user had written — so it goes along. Asked of autosave, by
+				// note, rather than remembered here: a save that went into a
+				// conflict copy is stored, and offered again it would be copied
+				// again.
+				const unstored = forget(note.id);
+				const deleted = row ?? note;
+				if (unstored === undefined) {
+					onDeleted(deleted);
+					return;
+				}
+				if (unstored.displaced) {
+					onDeleted(deleted, unstored.value);
+					return;
+				}
+				const { body, origin } = unstored.value;
+				onDeleted({ ...deleted, body, bodyOrigin: origin });
+			});
+	}, [flush, forget, note, onDeleted, settle]);
+
 	const mode: EditorMode | undefined = unsupported ? 'raw' : (note?.editorMode ?? defaultMode);
 
 	const toggleMode = useCallback(() => {
 		if (noteId === undefined || mode === undefined || unsupported) return;
 		// Write the pending edit first: the incoming editor loads from the note
 		// record, and the mode switch itself must never be what saves — or lose —
-		// what the user typed.
-		flush();
+		// what the user typed. `rebased` flushes, and says the editor that comes
+		// next starts from the stored body rather than from what this one held.
+		rebased();
 		void setNoteEditorMode(db, noteId, otherMode(mode));
-	}, [flush, mode, noteId, unsupported]);
+	}, [rebased, mode, noteId, unsupported]);
 
 	// Shown by default, and unmounted rather than hidden when it is not: the
 	// headings are re-read when it comes back, which is one parse of one note,
@@ -259,20 +334,26 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				note={note}
 				mode={mode}
 				unsupported={unsupported}
+				unsaved={autosave.failing}
 				finding={finding}
 				showOutline={showOutline}
 				toggleMode={toggleMode}
 				onClose={() => {
 					setFinding(0);
 				}}
-				onDelete={() => {
-					autosave.flush();
-					void deleteNote(db, note.id).then(onDeleted);
-				}}
+				onDelete={onDelete}
 				onUserEdit={onUserEdit}
 				onUnsupported={() => {
+					// The raw editor takes over, built from the stored body.
+					rebased();
 					setUnsupportedId(note.id);
 				}}
+				// A body from outside is on screen now. What was typed before it
+				// is not under whatever is typed next — a new sitting, so the next
+				// edit cannot stand for a held one — and what is still pending was
+				// not typed over it: saved as the body, it would put text the
+				// editor no longer shows over the text it does.
+				onAdopted={overtaken}
 			/>
 		</FindTargetProvider>
 	);
@@ -289,6 +370,7 @@ const NoteScreen = ({
 	note,
 	mode,
 	unsupported,
+	unsaved,
 	finding,
 	showOutline,
 	toggleMode,
@@ -296,10 +378,13 @@ const NoteScreen = ({
 	onDelete,
 	onUserEdit,
 	onUnsupported,
+	onAdopted,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
 	unsupported: boolean;
+	/** A save was rejected, and what it held is still only in this tab. */
+	unsaved: boolean;
 	finding: number;
 	showOutline: boolean;
 	toggleMode: () => void;
@@ -307,6 +392,7 @@ const NoteScreen = ({
 	onDelete: () => void;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
+	onAdopted: () => void;
 }) => (
 	<section className="note-view" aria-label="Note">
 		<header className="note-header">
@@ -335,6 +421,19 @@ const NoteScreen = ({
 				</button>
 			</div>
 		</header>
+
+		{/*
+		 * An alert, and it stays for as long as it is true. It does not say "this
+		 * note": a held edit may be to the note that was open before this one.
+		 * Nor what went wrong, which the app cannot tell — only what is safe to
+		 * do about it.
+		 */}
+		{unsaved && (
+			<p className="banner banner-alert" role="alert">
+				Changes are not being saved on this device. Copy your text somewhere safe, then
+				reload.
+			</p>
+		)}
 
 		{unsupported && (
 			<p className="banner" role="status">
@@ -372,6 +471,7 @@ const NoteScreen = ({
 			showOutline={showOutline}
 			onUserEdit={onUserEdit}
 			onUnsupported={onUnsupported}
+			onAdopted={onAdopted}
 		/>
 	</section>
 );

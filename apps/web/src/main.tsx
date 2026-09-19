@@ -6,6 +6,7 @@ import { createRouter, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { StaleTabGate } from './components/StaleTabGate.js';
 import { routeTree } from './routeTree.gen';
 import { syncScheduler } from './sync/runtime.js';
 
@@ -31,6 +32,10 @@ if (!rootElement) throw new Error('#root is missing from index.html');
 
 createRoot(rootElement).render(
 	<StrictMode>
-		<RouterProvider router={router} />
+		{/* Outside the router, so no route's error screen can take its place: once
+		    the database has closed, every query under here fails. */}
+		<StaleTabGate>
+			<RouterProvider router={router} />
+		</StaleTabGate>
 	</StrictMode>
 );

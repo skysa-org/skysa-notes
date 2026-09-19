@@ -1,7 +1,11 @@
 import { NOTE_EXTENSION } from '../config.js';
-import { readFrontmatter, splitFrontmatter } from '../markdown/frontmatter.js';
+import {
+	frontmatterHasDeclinedId,
+	readFrontmatter,
+	splitFrontmatter,
+} from '../markdown/frontmatter.js';
 import { serializeNoteFile } from '../markdown/note.js';
-import { foldName } from '../markdown/slug.js';
+import { fitBytes, foldName, MAX_NAME_BYTES, utf8Length } from '../markdown/slug.js';
 import { basename, replaceBasename } from '../paths.js';
 
 /**
@@ -41,7 +45,7 @@ const conflictName = (
 	at: Date,
 	taken: Iterable<string>
 ): string => {
-	const base = `${stem} (conflict ${conflictStamp(at)})`;
+	const suffix = ` (conflict ${conflictStamp(at)})`;
 	// `foldName`, the same one `uniqueFilename` uses, because it is the same
 	// question: a name that differs from a taken one only in case or in normal
 	// form is not actually free, and a conflict copy that landed on an existing
@@ -49,7 +53,17 @@ const conflictName = (
 	const used = new Set([...taken].map(foldName));
 
 	const free = (n: number): string => {
-		const candidate = n === 1 ? `${base}${extension}` : `${base}-${n}${extension}`;
+		const tail = n === 1 ? `${suffix}${extension}` : `${suffix}-${n}${extension}`;
+		// The stem gives way, from its end, so the whole name fits what a
+		// filesystem allows one: a name the provider (or the disk its desktop
+		// client syncs to) refuses is an op that fails until the queue behind it
+		// stops. A slug leaves room for one suffix; a copy of a copy, or a long
+		// name from another tool, does not. Nothing already in the name is
+		// stripped to make room — a copy of a copy should say so.
+		//
+		// Fitted before it is looked up, not after: two long names that differ
+		// only past the cut are one name once cut.
+		const candidate = `${fitBytes(stem, MAX_NAME_BYTES - utf8Length(tail))}${tail}`;
 		return used.has(foldName(candidate)) ? free(n + 1) : candidate;
 	};
 	return free(1);
@@ -100,6 +114,13 @@ export const conflictPath = (path: string, at: Date, taken: Iterable<string> = [
  */
 export const conflictContent = (localContent: string, id: string): string => {
 	const { frontmatter, body } = splitFrontmatter(localContent);
+
+	// An `id` the app declined to read — `id: 202409141302`, which YAML makes a
+	// number — is the user's own, and one no device reads as an identity. The
+	// copy claims nobody's note by keeping it, and writing ours over it would
+	// take the user's id out of the half of the pair they may well keep.
+	if (frontmatterHasDeclinedId(frontmatter)) return localContent;
+
 	const written = serializeNoteFile({ frontmatter, body, metadata: { id } });
 	if (readFrontmatter(splitFrontmatter(written).frontmatter).id === id) return written;
 

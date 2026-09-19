@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel } from '../src/components/AccountPanel.js';
-import { bindConnection, unbindConnection } from '../src/store/connection.js';
+import { bindConnection, showConnection, unbindConnection } from '../src/store/connection.js';
 import { beginConnect, hashCredential } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
@@ -1314,6 +1314,100 @@ describe('AccountPanel, with more than one source connected', () => {
 		expect(await db.syncState.count()).toBe(2);
 	});
 
+	it('keeps a disconnect that failed with the source it failed for', async () => {
+		const user = userEvent.setup();
+		const db = await twoSources();
+		// Written while OneDrive is in front, so it is OneDrive's.
+		await showConnection(db, 'c2');
+		const there = await createNote(db, { title: 'On OneDrive' });
+		await showConnection(db, 'c1');
+		await db.syncState.update('c2', { cursor: 'cursor-2' });
+		renderPanel(
+			clientWith({
+				connection: async () => ({
+					ok: true as const,
+					value: (await activeConnectionId(db)) === 'c1' ? dropbox : onedrive,
+				}),
+				disconnect: () => Promise.reject(new TypeError('offline')),
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+		expect(
+			await screen.findByRole('button', { name: 'Stop syncing on this device' })
+		).toBeTruthy();
+
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+
+		// Dropbox's failure is not OneDrive's. Left on screen, the button would
+		// let go of OneDrive — its rows to the device, its cursor gone — while
+		// Dropbox, the one the user asked about, stayed live on the server.
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Stop syncing on this device' })).toBeNull();
+		expect((await db.syncState.get('c2'))?.cursor).toBe('cursor-2');
+		expect((await getNote(db, there.id))?.connectionId).toBe('c2');
+		expect(await db.syncState.get('c1')).toBeDefined();
+	});
+
+	it('keeps the answer to a disconnect for its source, even when it arrives under another', async () => {
+		const user = userEvent.setup();
+		const db = await twoSources();
+		const out: { fail: (error: Error) => void } = { fail: () => undefined };
+		const disconnect = vi.fn<ApiClient['disconnect']>(
+			() =>
+				new Promise((_resolve, reject) => {
+					out.fail = reject;
+				})
+		);
+		renderPanel(
+			clientWith({
+				connection: async () => ({
+					ok: true as const,
+					value: (await activeConnectionId(db)) === 'c1' ? dropbox : onedrive,
+				}),
+				disconnect,
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+
+		// Back on Dropbox with its disconnect still out: not one to start again.
+		await user.click(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' }));
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Disconnect…' }).hasAttribute('disabled')).toBe(
+			true
+		);
+
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+		await act(async () => {
+			out.fail(new TypeError('offline'));
+			await Promise.resolve();
+		});
+		// Not OneDrive's failure, and not said under its name.
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Stop syncing on this device' })).toBeNull();
+
+		// But not lost either: it is there when the user comes back to Dropbox.
+		await user.click(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' }));
+		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
+		expect(screen.getByRole('button', { name: 'Stop syncing on this device' })).toBeTruthy();
+		expect(disconnect).toHaveBeenCalledTimes(1);
+
+		await user.click(screen.getByRole('button', { name: 'Stop syncing on this device' }));
+		await waitFor(async () => {
+			expect(await db.syncState.get('c1')).toBeUndefined();
+		});
+		expect(await db.syncState.get('c2')).toBeDefined();
+	});
+
 	it('says nothing about sources when only one is connected', async () => {
 		const db = freshDatabase();
 		await holding(db, 'c1');
@@ -1429,6 +1523,48 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 		await waitFor(async () => {
 			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(3);
 		});
+	});
+
+	it('drops an answer about one source that arrives once another is showing', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await holding(db, 'c2', 'sk1_second');
+		await bindConnection(db, { connectionId: 'c2', provider: 'onedrive', accountId: 'ms:1' });
+		await holding(db, 'c1', 'sk1_first');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		const second = { id: 'g9', createdAt: 3, lastUsedAt: 3, expired: false, current: false };
+		type Answer = Awaited<ReturnType<ApiClient['grants']>>;
+		const slow: { resolve: (answer: Answer) => void } = { resolve: () => undefined };
+		const held = new Promise<Answer>((resolve) => {
+			slow.resolve = resolve;
+		});
+		const client = clientWith({
+			connection: async () => ({
+				ok: true as const,
+				value:
+					(await activeConnectionId(db)) === 'c1'
+						? dropbox
+						: { ...dropbox, id: 'c2', provider: 'onedrive' as const },
+			}),
+			// Dropbox's answer is still out when the user moves on.
+			grants: async () =>
+				(await activeConnectionId(db)) === 'c1'
+					? held
+					: { ok: true as const, value: [...GRANTS, second] },
+		});
+		renderPanel(client, db);
+
+		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await waitFor(async () => {
+			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(3);
+		});
+
+		await act(async () => {
+			slow.resolve({ ok: true, value: GRANTS });
+			await held;
+		});
+
+		expect(screen.getByRole('list', { name: 'Devices' }).children.length).toBe(3);
 	});
 
 	it('says nothing where this is the only device, or the server cannot be asked', async () => {

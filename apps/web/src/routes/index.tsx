@@ -1,15 +1,17 @@
 import { parentPath, ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { DeletedNotice } from '../components/DeletedNotice.js';
+import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
-import { NoteView } from '../components/NoteView.js';
+import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { db } from '../store/db.js';
+import { activeConnectionId, db, type NoteRecord } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
 	useFolderTree,
@@ -18,7 +20,7 @@ import {
 	useNoteSearch,
 	useNotesInFolder,
 } from '../store/hooks.js';
-import { createNote } from '../store/notes.js';
+import { createNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
 import {
 	type AppSearch,
@@ -38,13 +40,13 @@ import {
  * What to tell the user on the way back from connecting a storage account, or
  * `undefined` for a value this build has no message for.
  *
- * The `default` is not dead code, which is the whole reason it is written out.
- * `validateSearch` is supposed to have dropped anything not in
- * `CONNECT_OUTCOMES` before this is reached, and at runtime it does not — a
- * hand-typed or bookmarked `?connect=signin` arrives here intact. Without the
- * default this returned `undefined` through a `string` signature and the app
- * rendered an **empty** alert banner: a red bar saying nothing, which is worse
- * than either showing the message or showing nothing at all.
+ * The `default` is what stopped an **empty** alert banner — a red bar saying
+ * nothing — when a hand-typed or bookmarked `?connect=signin` arrived here
+ * intact, returning `undefined` through a `string` signature. It arrived
+ * because `parseSearch` left a refused key out instead of overriding it, and
+ * the router's spread put the raw one back (see `parseSearch`). That is fixed
+ * there; this stays, because a build older than the API it talks to can still
+ * be sent an outcome it has no words for.
  *
  * Found on 2026-09-18 by removing `signin`, `conflict` and `occupied` — the
  * three outcomes Phase 7 retired server-side — which is when a value outside
@@ -107,6 +109,11 @@ const Home = () => {
 	const folder = selectedFolderPath(tree, folderFromSearch(requestedFolder), looseNoteCount);
 	const notes = useNotesInFolder(folder);
 	const openNote = useNote(noteId);
+	// Read by a continuation that finishes after the user may have moved on.
+	const noteIdRef = useRef(noteId);
+	useEffect(() => {
+		noteIdRef.current = noteId;
+	}, [noteId]);
 
 	/**
 	 * What is in the search field. Component state and not the URL, unlike the
@@ -141,6 +148,56 @@ const Home = () => {
 		setProblem(null);
 		setConnectOutcome(undefined);
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
+	};
+
+	/**
+	 * The note just deleted, as it was, for as long as the delete can be taken
+	 * back. Here rather than in `NoteView`, which stops showing a note the moment
+	 * it is a tombstone. One at a time: a second delete takes the notice over and
+	 * the first note simply stays deleted.
+	 */
+	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
+	/** The id of a note whose undo failed: its notice waits to be dismissed. */
+	const [undoFailed, setUndoFailed] = useState<string | null>(null);
+	/** Text that goes back beside the deleted note, not into it (`NoteView`). */
+	const [beside, setBeside] = useState<DisplacedText | null>(null);
+	const dismissDeleted = useCallback(() => {
+		setDeleted(null);
+	}, []);
+
+	const undoDelete = () => {
+		if (deleted === null) return;
+		void undeleteNote(db, deleted)
+			.then(async (restored) => {
+				setUndoFailed(null);
+				if (beside !== null) {
+					await saveNoteBody(db, restored.id, beside.body, {
+						origin: beside.origin,
+						note: deleted,
+						displaced: true,
+					});
+				}
+				setDeleted((current) => (current?.id === deleted.id ? null : current));
+				// It goes back to the source it was deleted from, which need not be
+				// the one showing by now: the notice outlives a change of source.
+				if (restored.connectionId !== (await activeConnectionId(db))) {
+					setProblem(`“${restored.title}” is back, in the source it was deleted from.`);
+					return;
+				}
+				// Back where it was, open. By the row's own path, not the one it
+				// was deleted at: once sync has purged the row the note is made
+				// again, under a conflict name if something took the old one.
+				select({
+					note: restored.id,
+					folder: folderToSearch(parentPath(restored.path)),
+				});
+			})
+			// The notice stays, and for as long as it takes: the note is still
+			// deleted, still offered, and what it holds may be in no other place.
+			.catch(() => {
+				setUndoFailed(deleted.id);
+				setProblem('That note could not be brought back. Try again.');
+			});
 	};
 
 	const onCreateNote = () => {
@@ -217,6 +274,14 @@ const Home = () => {
 		},
 	});
 
+	useCommand({
+		id: 'note.undoDelete',
+		label: 'Undo delete',
+		group: 'Note',
+		enabled: deleted !== null,
+		run: undoDelete,
+	});
+
 	useShortcuts();
 
 	return (
@@ -287,11 +352,27 @@ const Home = () => {
 
 				<NoteView
 					note={openNote}
-					onDeleted={() => {
-						select({ note: undefined });
+					onDeleted={(note, displaced) => {
+						setDeleted(note);
+						setBeside(displaced ?? null);
+						// The delete waits for what autosave had out, and the user
+						// may have opened another note by the time it is done.
+						if (noteIdRef.current === note.id) select({ note: undefined });
 					}}
 				/>
 			</div>
+
+			{deleted !== null && (
+				<DeletedNotice
+					// A second delete is a new notice with a new clock, not the
+					// first one's time running on under another note's name.
+					key={deleted.id}
+					title={deleted.title}
+					onUndo={undoDelete}
+					onDismiss={dismissDeleted}
+					keep={undoFailed === deleted.id}
+				/>
+			)}
 		</div>
 	);
 };
@@ -310,4 +391,8 @@ const HomeWithCommands = () => (
 export const Route = createFileRoute('/')({
 	validateSearch: parseSearch,
 	component: HomeWithCommands,
+	// Here as well as on the root so that the root's layout survives this screen
+	// failing: the "new version" prompt lives there, and a build that throws on
+	// render is exactly the one the user needs to be able to reload out of.
+	errorComponent: ErrorScreen,
 });

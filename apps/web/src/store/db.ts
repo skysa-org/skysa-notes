@@ -2,6 +2,7 @@ import { type ProviderKind } from '@skysa/core';
 import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
+import { watchForNewerTab } from './staleTab.js';
 
 /**
  * The local store. The app boots and renders from here before any network call,
@@ -224,16 +225,15 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// the writers rather than by IndexedDB: `freeName`/`freePath` in
 	// `store/naming.ts`, and `takenNamesIn` in `store/notes.ts`.
 	//
-	// Knowingly is the whole of the claim. Three writers can still do it and do
-	// not look: `restoreNote` lifts a tombstone with no idea whether its path has
-	// been taken since, `importNoteFile` writes a file carrying an `id` it has
-	// never seen straight to its path whatever is already there, and
-	// `moveFolder` rebases a tombstone onto the path it lands on rather than
-	// aiming its queued delete somewhere else. The first two are answered by the
-	// conflict rule rather than a name check — one is a question for the undo
-	// that does not exist yet, the other for the engine, which has
-	// `displace-note` for exactly it — and the third by reading the live row
-	// first, which `noteAtPath` in `store/notes.ts` does.
+	// Knowingly is the whole of the claim. Three writers do not look:
+	// `restoreNote` lifts a tombstone with no idea whether its path has been
+	// taken since, `importNoteFile` writes a file carrying an `id` it has never
+	// seen straight to its path whatever is already there, and `moveFolder`
+	// rebases a tombstone onto the path it lands on rather than aiming its
+	// queued delete somewhere else. Each is answered where it is used: the undo
+	// that calls `restoreNote` moves the restored note aside (`undeleteNote`),
+	// the engine has `displace-note` for a file arriving on a taken path, and
+	// `noteAtPath` in `store/notes.ts` reads the live row first.
 	db.version(1).stores({
 		notes: 'id, connectionId, path, [connectionId+path], dirty, deletedLocally, updatedAt, remoteId',
 		folders: '[connectionId+path], connectionId, path',
@@ -253,6 +253,11 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	db.version(3).stores({
 		credentials: 'id',
 	});
+
+	// A build with a later version than the last one above, opening this database
+	// in another tab, must find this tab stopped rather than still writing —
+	// `store/staleTab.ts` says why Dexie's default is not that.
+	watchForNewerTab(db);
 
 	return db;
 };

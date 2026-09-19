@@ -5,6 +5,7 @@ import {
 	readFrontmatter,
 	splitFrontmatter,
 } from '../../src/markdown/frontmatter.js';
+import { noteFilename } from '../../src/markdown/slug.js';
 import {
 	conflictContent,
 	conflictFilename,
@@ -101,6 +102,79 @@ describe('conflictFilename', () => {
 	});
 });
 
+describe('a conflict name that would not fit in a filename', () => {
+	const bytes = (name: string): number => new TextEncoder().encode(name).length;
+	const SUFFIX = ' (conflict 2026-09-15T14-32)';
+
+	const expectStorable = (name: string): void => {
+		expect(bytes(name)).toBeLessThanOrEqual(255);
+		expect(() => encodeURIComponent(name)).not.toThrow();
+	};
+
+	it('leaves a name with room for the suffix exactly as it was', () => {
+		const slug = noteFilename('\u6f22'.repeat(200));
+		expect(bytes(slug)).toBe(219);
+		const copy = conflictFilename(slug, AT);
+		expect(copy).toBe(`${slug.slice(0, -3)}${SUFFIX}.md`);
+		expect(bytes(copy)).toBe(247);
+	});
+
+	it('cuts the stem of a copy of a copy, from its end, and keeps both suffixes whole', () => {
+		const copy = conflictFilename(noteFilename('\u6f22'.repeat(200)), AT);
+		const later = new Date('2026-09-16T09:05:00Z');
+		const again = conflictFilename(copy, later);
+		expectStorable(again);
+		expect(again.startsWith('\u6f22'.repeat(60))).toBe(true);
+		expect(again.endsWith(' (conflict 2026-09-16T09-05).md')).toBe(true);
+		// 275 bytes uncut. What went is the end of the stem, which here is the
+		// first suffix: nothing is stripped on purpose, and nothing is spared.
+		expect(bytes(again)).toBeGreaterThan(255 - 3);
+	});
+
+	it('cuts a long name from another tool', () => {
+		const theirs = `${'n'.repeat(237)}.md`;
+		expect(bytes(theirs)).toBe(240);
+		const copy = conflictFilename(theirs, AT);
+		expectStorable(copy);
+		expect(copy).toBe(`${'n'.repeat(255 - 28 - 3)}${SUFFIX}.md`);
+	});
+
+	it('does not cut a character in half to do it', () => {
+		// Four bytes each, and a joined family of five code points at the cut.
+		const family = '\u{1f468}\u200d\u{1f469}\u200d\u{1f467}';
+		[`${'\u{1f389}'.repeat(70)}.md`, `${'a'.repeat(215)}${family}.md`].forEach((name) => {
+			const copy = conflictFilename(name, AT);
+			expectStorable(copy);
+			expect(copy.endsWith(`${SUFFIX}.md`)).toBe(true);
+		});
+		expect(conflictFilename(`${'a'.repeat(215)}${family}.md`, AT)).toBe(
+			`${'a'.repeat(215)}${SUFFIX}.md`
+		);
+	});
+
+	it('asks whether the name is taken of the name as cut', () => {
+		// Two names that differ only past the cut are one name once cut.
+		const first = conflictFilename(`${'n'.repeat(236)}A.md`, AT);
+		const second = conflictFilename(`${'n'.repeat(236)}B.md`, AT, [first]);
+		expectStorable(second);
+		expect(second).not.toBe(first);
+		expect(second.endsWith(`${SUFFIX}-2.md`)).toBe(true);
+		// And the counter is paid for out of the stem, not added on top.
+		expect(bytes(second)).toBe(255);
+	});
+
+	it('fits a folder name the same way', () => {
+		const folder = '\u6f22'.repeat(84);
+		const copy = conflictFolderName(folder, AT);
+		expectStorable(copy);
+		expect(copy.endsWith(SUFFIX)).toBe(true);
+
+		const second = conflictFolderName(folder, AT, [copy]);
+		expectStorable(second);
+		expect(second.endsWith(`${SUFFIX}-2`)).toBe(true);
+	});
+});
+
 describe('conflictFolderName', () => {
 	// A folder carries no extension, and the only engine caller computes its
 	// expectation by calling this same function — so nothing anywhere says what
@@ -165,6 +239,15 @@ describe('conflictContent', () => {
 		// exists to avoid: the pair would fight over the same note for ever.
 		expect(conflictContent(original, 'fresh-id')).toContain('id: fresh-id');
 		expect(conflictContent(original, 'fresh-id')).not.toContain('original-id');
+	});
+
+	it('leaves an id the app cannot read exactly as the user wrote it', () => {
+		// YAML reads this as a number, so no device takes it for an identity and
+		// the copy competes with nothing by keeping it.
+		const zettel = ['---', 'id: 202409141302', 'title: Zettel', '---', '', 'Body', ''].join(
+			'\n'
+		);
+		expect(conflictContent(zettel, 'fresh-id')).toBe(zettel);
 	});
 
 	it('keeps every other key, including ones we know nothing about', () => {

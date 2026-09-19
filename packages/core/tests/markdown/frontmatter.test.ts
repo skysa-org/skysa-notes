@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseDocument } from 'yaml';
 
 import {
 	joinFrontmatter,
@@ -6,6 +7,7 @@ import {
 	splitFrontmatter,
 	writeFrontmatter,
 } from '../../src/markdown/frontmatter.js';
+import { type LineEnding, withLineEnding } from '../../src/markdown/lineEndings.js';
 
 describe('splitFrontmatter', () => {
 	it('splits a fenced YAML mapping from the body', () => {
@@ -339,5 +341,430 @@ describe('writeFrontmatter', () => {
 		expect(readFrontmatter(reread.frontmatter)).toEqual({ id: 'abc', title: 'Set' });
 		expect(reread.frontmatter).toContain('custom: keep');
 		expect(reread.body).toBe(body);
+	});
+});
+
+describe('a block closed by the YAML document-end marker', () => {
+	const pandoc = '---\ntitle: X\n...\n\nBody text the user wrote.\n\n---\n\nmore\n';
+
+	it('ends at `...`, not at the first thematic break after it', () => {
+		const { frontmatter, body } = splitFrontmatter(pandoc);
+		expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+		expect(body).toBe('\nBody text the user wrote.\n\n---\n\nmore\n');
+	});
+
+	it('goes back into the file closed the way the file closed it', () => {
+		const { frontmatter, body } = splitFrontmatter(pandoc);
+		expect(joinFrontmatter(frontmatter, body)).toBe(pandoc);
+
+		const written = writeFrontmatter(frontmatter, { id: 'abc' });
+		expect(joinFrontmatter(written, body)).toBe(
+			'---\ntitle: X\nid: abc\n...\n\nBody text the user wrote.\n\n---\n\nmore\n'
+		);
+		// And is still the same block to the next reader.
+		expect(splitFrontmatter(joinFrontmatter(written, body)).body).toBe(body);
+	});
+
+	it('keeps the closer a line of its own when the block ends in a comment', () => {
+		// `yaml` would write this as `... # reviewed`, which closes nothing.
+		const { frontmatter, body } = splitFrontmatter('---\ntitle: X\n# reviewed\n...\nbody\n');
+		const file = joinFrontmatter(writeFrontmatter(frontmatter, { id: 'abc' }), body);
+		expect(file).toMatch(/\n\.\.\.\nbody\n$/);
+		expect(readFrontmatter(splitFrontmatter(file).frontmatter)).toEqual({
+			id: 'abc',
+			title: 'X',
+		});
+		expect(splitFrontmatter(file).body).toBe('body\n');
+	});
+
+	it('reads CRLF and CR files the same way', () => {
+		['\r\n', '\r'].forEach((eol) => {
+			const { frontmatter, body } = splitFrontmatter(pandoc.replaceAll('\n', eol));
+			expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+			expect(body.startsWith(`${eol}Body text`)).toBe(true);
+		});
+	});
+
+	it('does not take an ellipsis under a thematic break for one', () => {
+		const source = '---\nNote to self: call the bank\n...\nand then the rest\n';
+		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	it('still reads a block that holds `...` and is closed by `---`, as it always did', () => {
+		const source = '---\nfoo: bar\n...\n---\nbody\n';
+		const { frontmatter, body } = splitFrontmatter(source);
+		expect(frontmatter).toBe('foo: bar\n...');
+		expect(body).toBe('body\n');
+		expect(joinFrontmatter(frontmatter, body)).toBe(source);
+	});
+});
+
+describe('a fence that was never closed', () => {
+	it('does not take the prose above the first thematic break as frontmatter', () => {
+		const source = '---\ntitle: X\n\nSome prose the user wrote, locally.\n\n---\n\nrest\n';
+		expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+	});
+
+	it('still recovers a malformed block whose blank lines are followed by YAML', () => {
+		const source =
+			'---\ntitle: X\ntitle: Y\n\nid: abc\n\n# a comment\ntags:\n\n  - a\n---\nbody\n';
+		const { frontmatter, body } = splitFrontmatter(source);
+		expect(readFrontmatter(frontmatter).id).toBe('abc');
+		expect(body).toBe('body\n');
+	});
+
+	it('leaves a well-formed block scalar alone, blank lines, prose and all', () => {
+		const source =
+			'---\ntitle: X\nsummary: |\n  First paragraph.\n\n  Second paragraph, with prose: in it.\nnotes: >\n\n  Folded.\n---\nbody\n';
+		const { frontmatter, body } = splitFrontmatter(source);
+		expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+		expect(frontmatter).toContain('Second paragraph');
+		expect(body).toBe('body\n');
+	});
+
+	it('recovers a block scalar with blank lines in a block that has an error elsewhere', () => {
+		const source = '---\ntitle: X\ntitle: Y\nsummary: |\n  One.\n\n  Two.\n---\nbody\n';
+		expect(splitFrontmatter(source).body).toBe('body\n');
+	});
+});
+
+describe('line and paragraph separators', () => {
+	it('are not line endings, so a fence after one inside a value closes nothing', () => {
+		['\u2028', '\u2029'].forEach((separator) => {
+			const source = `---\ntitle: "a${separator}---${separator}b"\nid: abc\n---\nbody\n`;
+			const { frontmatter, body } = splitFrontmatter(source);
+			expect(readFrontmatter(frontmatter).id).toBe('abc');
+			expect(body).toBe('body\n');
+		});
+	});
+
+	it('do not open or close a block either', () => {
+		const source = '---\u2028title: X\n---\nbody\n';
+		expect(splitFrontmatter(source).frontmatter).toBeNull();
+	});
+});
+
+/** Every input below in the three spellings of a line ending the splitter reads. */
+const inEachEnding = (source: string): readonly string[] =>
+	['\n', '\r\n', '\r'].map((eol) => source.replaceAll('\n', eol));
+
+describe('a repaired block with a blank line in it', () => {
+	it('is still frontmatter when what follows is a key with a space in it', () => {
+		// Obsidian's `date created:`, under a duplicate key the parser repairs.
+		inEachEnding(
+			'---\nid: abc\ntags: a\ntags: b\n\ndate created: 2024-01-01\n---\nbody\n'
+		).forEach((source) => {
+			const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+			expect(splitFrontmatter(source)).toEqual({
+				frontmatter: ['id: abc', 'tags: a', 'tags: b', '', 'date created: 2024-01-01'].join(
+					eol
+				),
+				body: `body${eol}`,
+			});
+			expect(readFrontmatter(splitFrontmatter(source).frontmatter).id).toBe('abc');
+		});
+	});
+});
+
+describe('`...` where `---` never closed the block', () => {
+	it('is an ellipsis when the lines above it are not clean YAML', () => {
+		[
+			'---\ntitle: Poem\nAnd then it rained\n...\nthe end\n',
+			'---\ntitle: Trip\n\nTodo: pack bags\nand so on\n...\nlater\n',
+			// An error the parser would repair is not repaired here.
+			'---\ntitle: X\ntitle: Y\n...\nbody\n',
+		]
+			.flatMap(inEachEnding)
+			.forEach((source) => {
+				expect(splitFrontmatter(source)).toEqual({ frontmatter: null, body: source });
+			});
+	});
+});
+
+describe('`...` inside a block that `---` closes', () => {
+	it('closes nothing: the block ends where it always ended', () => {
+		inEachEnding('---\ntitle: a\n...\n---\nbody\n').forEach((source) => {
+			const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+			expect(splitFrontmatter(source)).toEqual({
+				frontmatter: `title: a${eol}...`,
+				body: `body${eol}`,
+			});
+		});
+
+		// Blank lines between the two closers are still nothing between them.
+		expect(splitFrontmatter('---\ntitle: a\n...\n\n---\nbody\n')).toEqual({
+			frontmatter: 'title: a\n...\n',
+			body: 'body\n',
+		});
+	});
+
+	it('gets its `---` back when the block is rewritten, `...` above it or not', () => {
+		const { frontmatter, body } = splitFrontmatter('---\ntitle: a\n...\n---\nbody\n');
+		expect(joinFrontmatter(frontmatter, body)).toBe('---\ntitle: a\n...\n---\nbody\n');
+		expect(joinFrontmatter(writeFrontmatter(frontmatter, { id: 'abc' }), body)).toBe(
+			'---\ntitle: a\nid: abc\n...\n---\nbody\n'
+		);
+	});
+});
+
+describe('a pandoc block with anything under it before the first `---`', () => {
+	const bodyOf = (source: string): string => splitFrontmatter(source).body;
+
+	it('ends at `...`, blank line under it or not', () => {
+		// A setext heading straight under the block.
+		expect(bodyOf('---\ntitle: Trip\n...\nDay one\n---\nWe left early.\n')).toBe(
+			'Day one\n---\nWe left early.\n'
+		);
+		// A slide deck: `# Slide 1` is a comment to YAML, so the `---` reading of
+		// this parses without an error and used to take the heading with it.
+		expect(bodyOf('---\ntitle: Deck\n...\n\n# Slide 1\n\n---\n\n# Slide 2\n')).toBe(
+			'\n# Slide 1\n\n---\n\n# Slide 2\n'
+		);
+		expect(
+			bodyOf('---\ntitle: Foo\n...\n# Heading right under\n\nText: more\n\n---\n\nrest\n')
+		).toBe('# Heading right under\n\nText: more\n\n---\n\nrest\n');
+	});
+
+	it('reads the same after the app has written to the block', () => {
+		// The write tidies the blank line above `...` away; a rule that counted
+		// blank lines read this one way before the first save and another after,
+		// and "Day one" left the editor.
+		const source = '---\ntitle: Trip\n\n...\nDay one\n---\nWe left early.\n';
+		const first = splitFrontmatter(source);
+		expect(first.body).toBe('Day one\n---\nWe left early.\n');
+
+		const written = joinFrontmatter(
+			writeFrontmatter(first.frontmatter, { id: 'abc' }),
+			first.body
+		);
+		const second = splitFrontmatter(written);
+		expect(second.body).toBe(first.body);
+		expect(readFrontmatter(second.frontmatter)).toEqual({ id: 'abc', title: 'Trip' });
+	});
+
+	it('survives the blank line under it being deleted', () => {
+		const written = '---\ntitle: a\nid: abc\n...\nIntro line\n\n---\n\nrest\n';
+		expect(bodyOf(written)).toBe('Intro line\n\n---\n\nrest\n');
+	});
+});
+
+describe('a repaired block with a slip under a blank line', () => {
+	it('is still frontmatter: one word, or a template tag, is not a sentence', () => {
+		[
+			'---\nid: abc\ntitle: Trip\n\nurl:http://example.com\n---\nbody\n',
+			'---\nid: abc\ntitle: a\ntitle: b\n\n<% tp.file.cursor() %>\n---\nbody\n',
+			'---\nid: abc\ntitle: Trip: two\n\ndescription\n---\nbody\n',
+			'---\nid: abc\ntitle: a\ntitle: b\ntags: [a,\n\nb]\n---\nbody\n',
+		]
+			.flatMap(inEachEnding)
+			.forEach((source) => {
+				const { frontmatter, body } = splitFrontmatter(source);
+				expect(readFrontmatter(frontmatter).id, JSON.stringify(source)).toBe('abc');
+				expect(body.trim()).toBe('body');
+			});
+	});
+});
+
+describe('a pandoc block run together with the paragraph under it', () => {
+	it('ends at `...` even when the paragraph could pass for YAML', () => {
+		inEachEnding('---\ntitle: X\n...\n\nNote: remember this\n\n---\n\nmore\n').forEach(
+			(source) => {
+				const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+				const { frontmatter, body } = splitFrontmatter(source);
+				expect(readFrontmatter(frontmatter)).toEqual({ title: 'X' });
+				expect(body).toBe(['', 'Note: remember this', '', '---', '', 'more', ''].join(eol));
+				expect(
+					withLineEnding(joinFrontmatter(frontmatter, ''), eol as LineEnding) + body
+				).toBe(source);
+			}
+		);
+	});
+});
+
+/**
+ * `splitFrontmatter` as it stood before `...` closed anything, kept to say
+ * exactly what changed: every input below splits the way it did, except the
+ * ones that name why not.
+ */
+const LEGACY_EOL = String.raw`(?:\r\n|\n|\r)`;
+const LEGACY_PATTERN = new RegExp(
+	String.raw`^---[ \t]*${LEGACY_EOL}([\s\S]*?)(?:${LEGACY_EOL})?^---[ \t]*(?:${LEGACY_EOL}|$)`,
+	'm'
+);
+const LEGACY_KEYS = [
+	...['id', 'title', 'created', 'updated', 'tags', 'aliases', 'bibliography', 'cssclass'],
+	...['cssclasses', 'jupyter', 'layout', 'marp', 'permalink', 'pubDate', 'publish'],
+	...['sidebar_position', 'slug', 'taxonomies', 'weight'],
+];
+
+const legacyIsBlock = (yaml: string): boolean => {
+	if (yaml.trim() === '') return true;
+	try {
+		const doc = parseDocument(yaml.replace(/\r\n|\r/g, '\n'));
+		const data: unknown = doc.toJS();
+		if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+		return doc.errors.length === 0 || LEGACY_KEYS.some((key) => Object.hasOwn(data, key));
+	} catch {
+		return false;
+	}
+};
+
+const legacySplit = (source: string): { frontmatter: string | null; body: string } => {
+	const match = source.startsWith('---') ? LEGACY_PATTERN.exec(source) : null;
+	if (match === null || match.index !== 0 || !legacyIsBlock(match[1] ?? '')) {
+		return { frontmatter: null, body: source };
+	}
+	return { frontmatter: match[1] ?? '', body: source.slice(match[0].length) };
+};
+
+describe('splitFrontmatter, against what it did before', () => {
+	const UNCHANGED = [
+		'',
+		'body\n',
+		'---\n',
+		'---',
+		'---\n---\n',
+		'---\n---',
+		'---\n\n---\nbody\n',
+		'---\n---\nbody\n---\nmore\n',
+		'---\ntitle: a\n---\nbody\n',
+		'---  \ntitle: a\n---\t\nbody\n',
+		'---\ntitle: a\n----\nbody\n---\nx\n',
+		'----\ntitle: a\n---\nbody\n',
+		'---\ntitle: a\n---',
+		'---\njust prose\n---\nbody\n',
+		'---\n- a\n- b\n---\nbody\n',
+		'---\nNext steps: see below\n- do the thing\n---\nbody\n',
+		'---\ntitle: "unterminated\nid: abc\n---\nbody\n',
+		'---\nid: abc\ntags: a\ntags: b\n---\nbody\n',
+		'---\nid: abc\ntags: a\ntags: b\n\ndate created: 2024-01-01\n---\nbody\n',
+		'---\nid: abc\ntags:\n\t- a\n\n"quoted key": 1\n---\nbody\n',
+		'---\ntitle: X\nsummary: |\n  One.\n\n  Two, with prose: in it.\n---\nbody\n',
+		'---\ntitle: X\ntitle: Y\nsummary: |\n  One.\n\n  Two.\n---\nbody\n',
+		'---\ntitle: X\n\n# only a comment\n\nid: abc\n---\nbody\n',
+		'---\ntitle: Poem\nAnd then it rained\n...\nthe end\n',
+		'---\ntitle: Trip\n\nTodo: pack bags\nand so on\n...\nlater\n',
+		'---\nNote to self: call the bank\n...\nand then the rest\n',
+		'---\ntitle: a\n...\n---\nbody\n',
+		'---\nfoo: bar\n...\n---\nbody\n',
+		'---\ntitle: a\n...\n\n---\nbody\n',
+		'---\nid: abc\ntitle: Trip\n\nurl:http://example.com\n---\nbody\n',
+		'---\nid: abc\ntitle: a\ntitle: b\n\n<% tp.file.cursor() %>\n---\nbody\n',
+		'---\n...\nbody\n',
+		'---\ntext\n...\nbody\n',
+	];
+
+	it('splits these exactly as it did, in every line ending', () => {
+		UNCHANGED.flatMap(inEachEnding).forEach((source) => {
+			expect(splitFrontmatter(source), JSON.stringify(source)).toEqual(legacySplit(source));
+		});
+	});
+
+	const CHANGED: readonly (readonly [why: string, source: string])[] = [
+		[
+			'`...` closes a clean block that `---` never closed; it was all body',
+			'---\ntitle: X\n...\nbody\n',
+		],
+		[
+			'a pandoc block no longer runs on to the first thematic break of the note',
+			'---\ntitle: X\n...\n\nBody text the user wrote.\n\n---\n\nmore\n',
+		],
+		[
+			'the same, where the paragraph has a colon in it and so passes for YAML',
+			'---\ntitle: X\n...\n\nNote: remember this\n\n---\n\nmore\n',
+		],
+		[
+			'YAML ends its document at `...`: what follows was never read as metadata, only hidden',
+			'---\ntitle: x\nnote: |\n  a\n...\nstill: yaml\n---\nbody\n',
+		],
+		[
+			'a setext heading straight under a pandoc block is the note, not the block',
+			'---\ntitle: Trip\n...\nDay one\n---\nWe left early.\n',
+		],
+		[
+			'a slide deck keeps its first slide, which YAML reads as a comment',
+			'---\ntitle: Deck\n...\n\n# Slide 1\n\n---\n\n# Slide 2\n',
+		],
+		[
+			'a fence nobody closed no longer takes the prose under it; it is all body',
+			'---\ntitle: X\n\nSome prose the user wrote, locally.\n\n---\n\nrest\n',
+		],
+		[
+			'U+2028 is not a line ending, so a fence after one closes nothing',
+			'---\ntitle: "a\u2028---\u2028b"\nid: abc\n---\nbody\n',
+		],
+	];
+
+	it('and differs on these, each for a reason', () => {
+		CHANGED.flatMap(([why, source]) => inEachEnding(source).map((each) => [why, each])).forEach(
+			([why, source]) => {
+				expect(splitFrontmatter(source ?? ''), why).not.toEqual(legacySplit(source ?? ''));
+			}
+		);
+	});
+});
+
+describe('writeFrontmatter, over an `id` the app declined', () => {
+	it('neither replaces it nor respells it, whatever else the patch sets', () => {
+		expect(writeFrontmatter('title: a\nid: 0123', { title: 'T', id: 'uuid' })).toBe(
+			'title: T\nid: 0123\n'
+		);
+		expect(writeFrontmatter('title: a\nid: +12 # mine\nx: 1', { title: 'T' })).toBe(
+			'title: T\nid: +12 # mine\nx: 1\n'
+		);
+		expect(writeFrontmatter('id: 0x1F\ntitle: a', { tags: ['a'] })).toBe(
+			'id: 0x1F\ntitle: a\ntags:\n  - a\n'
+		);
+		expect(writeFrontmatter('id: [1, 2]\ntitle: a', { id: 'uuid' })).toBe(
+			'id: [ 1, 2 ]\ntitle: a\n'
+		);
+	});
+
+	it('still fills in an `id:` nobody gave a value, and still removes one when asked', () => {
+		expect(writeFrontmatter('id:\ntitle: a', { id: 'uuid' })).toBe('id: uuid\ntitle: a\n');
+		expect(writeFrontmatter('id: 0123\ntitle: a', { id: undefined })).toBe('title: a\n');
+	});
+});
+
+describe('writeFrontmatter, emptying a block that `...` closed', () => {
+	it('writes one that is still read as a block', () => {
+		const written = writeFrontmatter('---\ntitle: a\n...', { title: undefined });
+		expect(splitFrontmatter(joinFrontmatter(written, 'body\n'))).toEqual({
+			frontmatter: '{}',
+			body: 'body\n',
+		});
+	});
+});
+
+describe('a block that `...` closed, written back', () => {
+	it('takes a `---` closer when the body has come to open with a `---` line', () => {
+		// Left under the `...`, that line is read as the block's closing fence and
+		// the rule the user typed leaves the editor.
+		const { frontmatter } = splitFrontmatter('---\ntitle: a\nid: abc\n...\nfirst\n');
+		['---\n\nrest\n', '\n---\n\nrest\n', '\n\n---\nrest\n---\nmore\n'].forEach((body) => {
+			const again = splitFrontmatter(joinFrontmatter(frontmatter, body));
+			expect(again.body, JSON.stringify(body)).toBe(body);
+			expect(readFrontmatter(again.frontmatter)).toEqual({ id: 'abc', title: 'a' });
+		});
+		// And keeps its own closer otherwise.
+		expect(joinFrontmatter(frontmatter, 'first\n')).toBe(
+			'---\ntitle: a\nid: abc\n...\nfirst\n'
+		);
+	});
+
+	it('is still read as a block when a patch takes its last metadata key away', () => {
+		const written = writeFrontmatter('---\ntitle: a\nfoo: b\n...', { title: undefined });
+		expect(splitFrontmatter(joinFrontmatter(written, 'body\n'))).toEqual({
+			frontmatter: 'foo: b',
+			body: 'body\n',
+		});
+	});
+});
+
+describe('an `id` that is an alias', () => {
+	it('is written as it is read: not declined, where what it points at is a usable id', () => {
+		const block = 'x: &z abc\nid: *z\ntitle: a';
+		expect(readFrontmatter(block).id).toBe('abc');
+		expect(readFrontmatter(writeFrontmatter(block, { id: 'uuid' })).id).toBe('uuid');
 	});
 });
