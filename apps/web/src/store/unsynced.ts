@@ -168,14 +168,25 @@ export interface Seen {
 	rmdirs: ReadonlySet<string>;
 }
 
-export const seenIn = (unsynced: Unsynced): Seen => ({
+/**
+ * `standing` is every notebook the source had when the list was made, for a
+ * caller that made it while the source was still connected.
+ *
+ * Letting a source go removes the notes the remote has, and a notebook with no
+ * `remoteId` was only ever *not* listed because one of those notes was inside
+ * it and sent (`unsentFolder` above). With them gone the same notebook reads as
+ * unsent, having had nothing done to it — and taken for something written since
+ * the list, it would keep the whole source standing. A notebook the user really
+ * did make in between is not in `standing` either way.
+ */
+export const seenIn = (unsynced: Unsynced, standing: readonly string[] = []): Seen => ({
 	notes: new Map(
 		[...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].map((note) => [
 			noteRef(note),
 			note.updatedAt,
 		])
 	),
-	folders: new Set(unsynced.folders.map((folder) => folder.path)),
+	folders: new Set([...unsynced.folders.map((folder) => folder.path), ...standing]),
 	rmdirs: new Set(unsynced.rmdirs.map((op) => op.path)),
 });
 

@@ -23,24 +23,30 @@ import {
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { holdsTextFor } from '../store/detached.js';
 import { downloadNotes } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { getNote } from '../store/notes.js';
-import { countOf, unsyncedIn } from '../store/unsynced.js';
+import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
 	type AccountState,
 	claimConnection,
 	CONNECTABLE,
-	disconnectAccount,
+	connectedName,
 	LEFT_AT_PROVIDER,
+	type LetGoInput,
+	letGoOfSource,
+	type LetGoResult,
 	PROVIDER_LABELS,
 	sourceName,
-	stopSyncingHere,
+	type UnsentAnswer,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
+import { DisconnectDialog } from './DisconnectDialog.js';
+import { otherLiveSources } from './MoveUnsent.js';
 import { useEscape } from './useEscape.js';
 
 /**
@@ -600,8 +606,7 @@ const sourceLabel = (source: ConnectedSource): string => {
 	if (source.detached !== undefined) {
 		return `${sourceName(source) ?? 'A source'} — disconnected, ${String(source.detached.unsent)} not sent`;
 	}
-	const provider = source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
-	return source.accountId === undefined ? provider : `${provider} · ${source.accountId}`;
+	return connectedName(source);
 };
 
 /**
@@ -739,23 +744,50 @@ const withHeld = async (
 };
 
 /**
- * The half of the disconnect confirm that the first half would otherwise make
- * untrue. "Its notes are removed" is about what the remote has; whatever it was
- * never sent is not removed, and the user is told how much that is and where
- * it will be, before they say yes rather than after.
+ * How long the last push before a disconnect is given, before the user is asked
+ * anyway.
+ *
+ * A push still going is not cancelled — whatever it lands is one less thing on
+ * the list — but nobody is kept waiting on a provider that is not answering,
+ * and the question is the same either way: what is left when it stops.
  */
-const StaysBehind = ({ unsent, label }: { unsent: number; label: string }) => {
-	if (unsent === 0) return null;
-	const one = unsent === 1;
-	return (
-		<p className="muted">
-			{one
-				? `1 change has not been sent to ${label}. It will stay`
-				: `${String(unsent)} changes have not been sent to ${label}. They will stay`}{' '}
-			on this device under this source, marked disconnected, until you reconnect, discard or
-			download {one ? 'it' : 'them'}.
-		</p>
-	);
+const LAST_PUSH_MS = 10_000;
+
+const after = (ms: number): Promise<void> =>
+	new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+
+/**
+ * Everything the dialog before a disconnect is about, gathered in the order it
+ * has to be gathered in.
+ *
+ * The editors write first, because text inside the autosave window is in no row
+ * and a list taken from the store alone would leave out the sentence just
+ * typed. Then, where there is any prospect of it working, one last push: the
+ * best answer to "this has not been sent" is to send it. Only then is the list
+ * made, and with it the record of what the user is being shown — which is all a
+ * discard may ever reach (`seenIn`).
+ *
+ * The notebooks the source has are part of that record even where they are not
+ * listed as unsent. Letting the source go removes the sent notes that are the
+ * proof a notebook was made, so a notebook that had nothing done to it reads as
+ * unsent afterwards, and would otherwise look like something written since.
+ */
+const prepare = async (
+	database: NotesDatabase,
+	connectionId: string,
+	push: (() => Promise<void>) | undefined
+): Promise<{ listed: Unsynced; seen: Seen; failing: boolean }> => {
+	const settled = await settleEditors();
+	if (push !== undefined) {
+		await Promise.race([push().catch(() => undefined), after(LAST_PUSH_MS)]);
+	}
+	const listed = await unsyncedIn(database, connectionId);
+	const standing = (
+		await database.folders.where('connectionId').equals(connectionId).toArray()
+	).map((folder) => folder.path);
+	return { listed, seen: seenIn(listed, standing), failing: holdsTextFor(settled, connectionId) };
 };
 
 /**
@@ -779,8 +811,9 @@ interface ConnectedProps {
 	account: Asked<AccountState>;
 	/** Every disconnect that has been asked for, by source: see `useDisconnects`. */
 	disconnects: Readonly<Record<string, Disconnecting>>;
-	onDisconnect: (connectionId: string) => Promise<void>;
-	onUnbound: (connectionId: string) => void;
+	onDisconnect: (connectionId: string, answer: Omit<LetGoInput, 'connectionId'>) => Promise<void>;
+	/** Hand the notes that were never sent to the user as a file. */
+	download: (notes: readonly NoteRecord[]) => void;
 	returnTo: string;
 	navigate?: (url: string) => void;
 }
@@ -798,6 +831,33 @@ interface Disconnecting {
 	 */
 	stranded: boolean;
 }
+
+/**
+ * What is left to say once a source has been let go — or has not been.
+ *
+ * `released` is the whole of what was asked for, and says nothing. The other
+ * three each mean the user's answer was not carried out in full, and each names
+ * something that happened while they were deciding, so none of them is a
+ * failure to report as one: nothing was lost in any of them.
+ */
+const wentAs = (result: LetGoResult): Disconnecting | undefined => {
+	if (!result.ok) {
+		return { busy: false, problem: refusalMessage(result.refusal), stranded: true };
+	}
+	const said = (problem: string): Disconnecting => ({ busy: false, problem, stranded: false });
+	switch (result.outcome) {
+		case 'released':
+			return undefined;
+		case 'detached':
+			return said(
+				'Something was written in this source after the list was shown. It was not on the list, so it has been kept.'
+			);
+		case 'reconnected':
+			return said('This source was connected again meanwhile. Nothing has been changed.');
+		case 'no-target':
+			return said('That source is not connected any more, so nothing was moved.');
+	}
+};
 
 /**
  * Disconnects, by the source each is for, held by the panel rather than by
@@ -825,22 +885,13 @@ const useDisconnects = (database: NotesDatabase, client: Client) => {
 	}, []);
 
 	const disconnect = useCallback(
-		(connectionId: string): Promise<void> => {
+		(connectionId: string, answer: Omit<LetGoInput, 'connectionId'>): Promise<void> => {
 			if (pending.current.has(connectionId)) return Promise.resolve();
 			pending.current.add(connectionId);
 			put(connectionId, { busy: true, problem: null, stranded: false });
-			return disconnectAccount(database, client, connectionId)
-				.then((outcome) => {
-					put(
-						connectionId,
-						outcome.ok
-							? undefined
-							: {
-									busy: false,
-									problem: refusalMessage(outcome.refusal),
-									stranded: true,
-								}
-					);
+			return letGoOfSource(database, client, { connectionId, ...answer })
+				.then((result) => {
+					put(connectionId, wentAs(result));
 				})
 				.catch((error: unknown) => {
 					put(connectionId, {
@@ -856,15 +907,44 @@ const useDisconnects = (database: NotesDatabase, client: Client) => {
 		[client, database, put]
 	);
 
-	const clear = useCallback(
-		(connectionId: string) => {
-			put(connectionId, undefined);
-		},
-		[put]
-	);
-
-	return { disconnects, disconnect, clear };
+	return { disconnects, disconnect };
 };
+
+/**
+ * Whether one last push before the question is worth waiting for. Not where the
+ * scheduler is not syncing this source anyway, not where it has already stopped
+ * on something it will stop on again, and not where there is no network: each
+ * of those is a delay in front of the same question.
+ */
+const worthPushing = (status: SchedulerStatus): boolean =>
+	navigator.onLine &&
+	status.phase !== 'local' &&
+	status.phase !== 'attention' &&
+	status.phase !== 'offline';
+
+/**
+ * Why the last push could not clear what is here, where the user would do
+ * better to cancel and come back to it. Not a reason to refuse the disconnect:
+ * they may have no intention of ever reaching this account again.
+ */
+const stoppedBy = (status: SchedulerStatus, listed: Unsynced): 'offline' | 'blocked' | null => {
+	if (status.phase === 'offline' || !navigator.onLine) return 'offline';
+	return listed.blocked ? 'blocked' : null;
+};
+
+/**
+ * Where the disconnect has got to. Closed; sending what is left, which can take
+ * as long as a provider takes; or asking, holding the list the question is
+ * about and the record of it the answer will be held to.
+ *
+ * `onServer` rides along from the button that started it: the same question is
+ * asked for a plain Disconnect and for "stop syncing on this device", and the
+ * only difference is whether the server is told.
+ */
+type Step =
+	| { kind: 'closed' }
+	| { kind: 'pushing'; onServer: boolean }
+	| ({ kind: 'asking'; onServer: boolean } & Awaited<ReturnType<typeof prepare>>);
 
 const Connected = ({
 	client,
@@ -875,21 +955,19 @@ const Connected = ({
 	account,
 	disconnects,
 	onDisconnect,
-	onUnbound,
+	download,
 	returnTo,
 	navigate,
 }: ConnectedProps) => {
-	const [confirming, setConfirming] = useState(false);
+	const [step, setStep] = useState<Step>({ kind: 'closed' });
+	const [trouble, setTrouble] = useState<string | null>(null);
+	const status = useSyncStatus(sync);
 	// Only ever this source's. Named once per render, so the click below is
 	// about the source the user was looking at when they pressed it.
 	const connectionId = bound.connectionId;
-	// What the confirm has to own up to: the changes here that the remote has
-	// not had, which a disconnect will leave behind under this source. Live, so
-	// that what the editors write when the confirm opens is counted in it.
-	const unsent = useLiveQuery(
-		async () => countOf(await unsyncedIn(database, connectionId)),
-		[database, connectionId]
-	);
+	// The other live sources, which what this one never sent could go to.
+	const sources = useLiveQuery(() => connectedSources(database), [database]);
+	const targets = otherLiveSources(sources, connectionId);
 	const disconnecting = disconnects[connectionId];
 	const busy = disconnecting?.busy === true;
 	const problem = disconnecting?.problem ?? null;
@@ -900,6 +978,9 @@ const Connected = ({
 	const cancelButton = useRef<HTMLButtonElement>(null);
 	const openButton = useRef<HTMLButtonElement>(null);
 	const panel = useRef<HTMLElement>(null);
+	// Which question the answer coming back belongs to (`ask`).
+	const asking = useRef(0);
+	const open = step.kind !== 'closed';
 	useEffect(() => {
 		const target = focusNext.current === 'cancel' ? cancelButton : openButton;
 		// Only focus that is still here to move. A disconnect can take seconds
@@ -912,29 +993,57 @@ const Connected = ({
 			panel.current?.contains(focused) === true;
 		if (focusNext.current !== null && here) target.current?.focus();
 		focusNext.current = null;
-	}, [confirming]);
-	const confirm = (next: boolean) => {
-		focusNext.current = next ? 'cancel' : 'open';
-		setConfirming(next);
-		// Whatever the editors still hold is written now, so that the count the
-		// confirm gives is of everything the user has typed. Not waited for: the
-		// count is live and follows the write.
-		if (next) void settleEditors();
-	};
+	}, [step.kind]);
 	const cancel = useCallback(() => {
+		// A question nobody is waiting for the answer to: whatever the last push
+		// is doing, it can go on doing.
+		asking.current += 1;
 		focusNext.current = 'open';
-		setConfirming(false);
+		setStep({ kind: 'closed' });
 	}, []);
-	useEscape(panel, confirming, cancel);
+	useEscape(panel, open, cancel);
 
 	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
 	const displayName = accountName(answer(account), bound);
 
-	const disconnect = () => {
-		// Closing the confirm is this instance's to do, and nothing if it has
+	const pushable = worthPushing(status);
+
+	/**
+	 * Ask the question. Only the newest one's answer is taken up: a user who
+	 * cancels while the last push is out, and presses Disconnect again, must not
+	 * have the first list arrive on top of the second.
+	 */
+	const ask = (onServer: boolean) => {
+		asking.current += 1;
+		const mine = asking.current;
+		focusNext.current = 'cancel';
+		setTrouble(null);
+		setStep({ kind: 'pushing', onServer });
+		void prepare(database, connectionId, pushable ? () => sync.syncNow() : undefined)
+			.then((ready) => {
+				if (asking.current !== mine) return;
+				// Again: the Cancel the focus was on belonged to the step that is
+				// about to go, and the question is the one that has to be answered
+				// safely by a stray Enter.
+				focusNext.current = 'cancel';
+				setStep({ kind: 'asking', onServer, ...ready });
+			})
+			.catch(() => {
+				if (asking.current !== mine) return;
+				setStep({ kind: 'closed' });
+				setTrouble(
+					'What is on this device could not be read, so nothing was disconnected.'
+				);
+			});
+	};
+
+	const answered = (choice: UnsentAnswer) => {
+		if (step.kind !== 'asking') return;
+		const { seen, onServer } = step;
+		// Closing the question is this instance's to do, and nothing if it has
 		// gone; what came of the disconnect is the panel's, and is kept.
-		void onDisconnect(connectionId).finally(() => {
-			confirm(false);
+		void onDisconnect(connectionId, { unsent: choice, seen, onServer }).finally(() => {
+			cancel();
 		});
 	};
 
@@ -962,54 +1071,53 @@ const Connected = ({
 				{...(navigate === undefined ? {} : { navigate })}
 			/>
 			<Devices client={client} database={database} connectionId={bound.connectionId} />
-			{problem !== null && (
+			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
-					{problem}
+					{problem ?? trouble}
 				</p>
 			)}
-			{stranded && (
+			{stranded && !open && (
 				<button
 					type="button"
 					className="ghost"
 					onClick={() => {
-						// Nothing is asked of the server, and nothing on it is touched.
-						// By name: with none, this lets go of whichever source is in
-						// front — another one's rows and cursor, while the one that
-						// failed stays live on the server.
-						void stopSyncingHere(database, connectionId).then(() => {
-							onUnbound(connectionId);
-						});
+						// The same question again, and nothing asked of the server:
+						// it has already refused, and nothing on it is touched.
+						ask(false);
 					}}
 				>
 					Stop syncing on this device
 				</button>
 			)}
-			{confirming ? (
-				<div className="account-confirm">
-					<p className="muted">
-						Disconnect {label}
-						{displayName !== null && ` · ${displayName}`}? Its notes are removed from
-						this device. Nothing is deleted from {label}; connect it again to get them
-						back.
-					</p>
-					<StaysBehind unsent={unsent ?? 0} label={label} />
-					<LeftAtProvider provider={bound.provider} />
-					<button type="button" onClick={disconnect} disabled={busy}>
-						Disconnect
-					</button>
-					<button
-						ref={cancelButton}
-						type="button"
-						className="ghost"
-						onClick={() => {
-							confirm(false);
-						}}
-						disabled={busy}
-					>
+			{step.kind === 'pushing' && (
+				<div
+					className="account-confirm"
+					role="group"
+					aria-label="Sending your last changes"
+				>
+					<p className="muted">Sending your last changes…</p>
+					<button ref={cancelButton} type="button" className="ghost" onClick={cancel}>
 						Cancel
 					</button>
 				</div>
-			) : (
+			)}
+			{step.kind === 'asking' && (
+				<DisconnectDialog
+					label={label}
+					displayName={displayName}
+					listed={step.listed}
+					targets={targets}
+					failing={step.failing}
+					busy={busy}
+					leftAtProvider={<LeftAtProvider provider={bound.provider} />}
+					stopped={stoppedBy(status, step.listed)}
+					download={download}
+					onAnswer={answered}
+					onCancel={cancel}
+					cancelRef={cancelButton}
+				/>
+			)}
+			{!open && (
 				<button
 					ref={openButton}
 					type="button"
@@ -1020,7 +1128,7 @@ const Connected = ({
 					// started before the user looked at another source and back.
 					disabled={account.kind === 'asking' || busy}
 					onClick={() => {
-						confirm(true);
+						ask(true);
 					}}
 				>
 					Disconnect…
@@ -1034,6 +1142,12 @@ interface DetachedProps extends LocalProps {
 	bound: SyncStateRecord;
 	download: (notes: readonly NoteRecord[]) => void;
 	onReleased: () => void;
+	/**
+	 * What came of the disconnect that left it detached, where that is not what
+	 * was asked for — the panel underneath the answer changes as the answer
+	 * lands, so the source's own panel is where it has to be said.
+	 */
+	notice: string | null;
 }
 
 /**
@@ -1054,6 +1168,7 @@ const Detached = ({
 	bound,
 	download,
 	onReleased,
+	notice,
 	returnTo,
 	navigate,
 }: DetachedProps) => {
@@ -1070,6 +1185,7 @@ const Detached = ({
 			bound={bound}
 			download={download}
 			onReleased={onReleased}
+			notice={notice}
 			reconnect={
 				reconnectable && (
 					<ConnectButton
@@ -1118,7 +1234,7 @@ export const AccountPanel = ({
 	);
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
-	const { disconnects, disconnect, clear } = useDisconnects(database, client);
+	const { disconnects, disconnect } = useDisconnects(database, client);
 
 	// A discard takes its source, and its panel, with it: the button the user
 	// pressed is gone and the focus would fall to the page. It goes to the next
@@ -1214,6 +1330,7 @@ export const AccountPanel = ({
 					bound={bound.state}
 					download={download}
 					onReleased={released}
+					notice={disconnects[bound.state.connectionId]?.problem ?? null}
 					returnTo={returnTo}
 					{...(navigate === undefined ? {} : { navigate })}
 				/>
@@ -1230,7 +1347,7 @@ export const AccountPanel = ({
 				key={bound.state.connectionId}
 				disconnects={disconnects}
 				onDisconnect={disconnect}
-				onUnbound={clear}
+				download={download}
 				client={client}
 				database={database}
 				sync={sync}

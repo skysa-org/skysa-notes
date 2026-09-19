@@ -1,12 +1,18 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
-import { releaseConnection } from '../store/connection.js';
+import {
+	connectedSources,
+	type MoveOutcome,
+	moveUnsyncedTo,
+	releaseConnection,
+} from '../store/connection.js';
 import { type NoteRecord, noteRef, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { holdsTextFor } from '../store/detached.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
+import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
 import { useEscape } from './useEscape.js';
 
 /**
@@ -14,9 +20,11 @@ import { useEscape } from './useEscape.js';
  * something its remote was never sent (`SyncStateRecord.detached`).
  *
  * The panel is where the user decides what becomes of that, and it offers the
- * three things that can: connect the account again, which sends it; download
- * it; or discard it. Nothing here happens on its own, and nothing is moved into
- * another source — that is a separate, explicit act (docs/PLAN.md §10).
+ * four things that can: connect the account again, which sends it; move it into
+ * another connected source; download it; or discard it. Nothing here happens on
+ * its own, and the move is a separate, explicit act that names the account it
+ * is going to, since it is the one thing here that crosses between two people's
+ * storage (docs/PLAN.md §10).
  *
  * Discarding takes two steps, and the second one names what goes. These notes
  * are the only copies there are, so "Discard…" is not the button that does it:
@@ -42,6 +50,8 @@ export interface DetachedSourceProps {
 	 * still does.
 	 */
 	onReleased?: () => void;
+	/** Something the caller has to say about how the source came to be here. */
+	notice?: string | null;
 }
 
 /** "1 change", "3 changes". */
@@ -84,6 +94,23 @@ const stillOwed = (unsynced: Unsynced, bound: SyncStateRecord): string | null =>
 };
 
 /**
+ * What is left to say of a move, where what happened was not quite what was
+ * asked for. None of the three lost anything, so none is said as a failure.
+ */
+const wentAs = (outcome: MoveOutcome): string | null => {
+	switch (outcome) {
+		case 'detached':
+			return 'Something was written in this source after the list was shown. It was not on the list, so it has been kept here.';
+		case 'reconnected':
+			return 'This source was connected again meanwhile. Nothing has been moved.';
+		case 'no-target':
+			return 'That source is not connected any more, so nothing was moved.';
+		case 'released':
+			return null;
+	}
+};
+
+/**
  * What the second step asks. A source can be left holding nothing — the one
  * unsent note deleted since — and then there is nothing to lose and the
  * question is only whether to take it off the list.
@@ -96,6 +123,55 @@ const question = (unsynced: Unsynced): string => {
 		: `Discard these ${String(unsynced.notes.length)} notes?`;
 };
 
+/**
+ * The second step of a discard: what goes, by name, and that it goes for good.
+ * The list is the one the user was shown, held still while they read it — not
+ * the live one, which is what the answer is then held to (`seenIn`).
+ */
+const DiscardConfirm = ({
+	listed,
+	busy,
+	download,
+	cancelRef,
+	onDiscard,
+	onCancel,
+}: {
+	listed: Unsynced;
+	busy: boolean;
+	download: (notes: readonly NoteRecord[]) => void;
+	cancelRef: RefObject<HTMLButtonElement | null>;
+	onDiscard: () => void;
+	onCancel: () => void;
+}) => (
+	<div className="account-confirm" role="group" aria-label="Discard for good">
+		<p className="muted">{question(listed)}</p>
+		{listed.notes.length > 0 && (
+			<ul aria-label="Notes to discard">
+				{listed.notes.map((note) => (
+					<li key={noteRef(note)}>{note.title}</li>
+				))}
+			</ul>
+		)}
+		{alsoGoing(listed) !== null && <p className="muted">{alsoGoing(listed)}</p>}
+		{!isEmpty(listed) && <p>These exist nowhere else. This cannot be undone.</p>}
+		<button type="button" disabled={busy} onClick={onDiscard}>
+			{isEmpty(listed) ? 'Remove' : 'Discard for good'}
+		</button>
+		<button
+			type="button"
+			disabled={busy || listed.notes.length === 0}
+			onClick={() => {
+				download(listed.notes);
+			}}
+		>
+			Download them first
+		</button>
+		<button ref={cancelRef} type="button" className="ghost" disabled={busy} onClick={onCancel}>
+			Cancel
+		</button>
+	</div>
+);
+
 export const DetachedSource = ({
 	database,
 	bound,
@@ -103,12 +179,17 @@ export const DetachedSource = ({
 	sources,
 	download,
 	onReleased,
+	notice = null,
 }: DetachedSourceProps) => {
 	const connectionId = bound.connectionId;
 	const unsynced = useLiveQuery(
 		() => unsyncedIn(database, connectionId),
 		[database, connectionId]
 	);
+	// Where what is here could go instead of waiting for an account that may
+	// never come back. Live sources only: a detached one cannot send it either.
+	const others = useLiveQuery(() => connectedSources(database), [database]);
+	const targets = otherLiveSources(others, connectionId);
 	/** The list the user is being asked about, as it stood when they asked. */
 	const [listed, setListed] = useState<Unsynced | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -170,6 +251,40 @@ export const DetachedSource = ({
 	}, []);
 	useEscape(panel, confirming, close);
 
+	/**
+	 * Into another account, which is the one thing here that is not about this
+	 * source alone. The list is the one the user was just shown, and the editors
+	 * write once more first: a sentence typed while they were reading it is in
+	 * no row, and a note that has changed since is kept rather than carried into
+	 * a stranger's storage under a description that no longer fits it.
+	 */
+	const move = (shown: Unsynced, target: string) => {
+		setBusy(true);
+		setProblem(null);
+		void settleEditors()
+			.then(async (settled) => {
+				if (holdsTextFor(settled, connectionId)) {
+					setProblem(
+						'A note here has text that could not be saved yet, so it cannot be moved. Copy it somewhere safe first; the note says how.'
+					);
+					return;
+				}
+				const outcome = await moveUnsyncedTo(database, {
+					connectionId,
+					target,
+					seen: seenIn(shown),
+				});
+				if (outcome === 'released') onReleased?.();
+				setProblem(wentAs(outcome));
+			})
+			.catch(() => {
+				setProblem('That did not work. Nothing has been moved.');
+			})
+			.finally(() => {
+				setBusy(false);
+			});
+	};
+
 	const discard = (shown: Unsynced) => {
 		setBusy(true);
 		setProblem(null);
@@ -227,12 +342,24 @@ export const DetachedSource = ({
 					again from here.
 				</p>
 			)}
-			{problem !== null && (
+			{(problem ?? notice) !== null && (
 				<p className="muted" role="alert">
-					{problem}
+					{problem ?? notice}
 				</p>
 			)}
 			{reconnect}
+			{listed === null && unsynced !== undefined && !isEmpty(unsynced) && (
+				<MoveUnsent
+					listed={unsynced}
+					from={name}
+					targets={targets}
+					busy={busy}
+					disabled={false}
+					onMove={(target) => {
+						move(unsynced, target);
+					}}
+				/>
+			)}
 			<button
 				type="button"
 				disabled={unsynced === undefined || unsynced.notes.length === 0}
@@ -253,45 +380,16 @@ export const DetachedSource = ({
 					Discard…
 				</button>
 			) : (
-				<div className="account-confirm" role="group" aria-label="Discard for good">
-					<p className="muted">{question(listed)}</p>
-					{listed.notes.length > 0 && (
-						<ul aria-label="Notes to discard">
-							{listed.notes.map((note) => (
-								<li key={noteRef(note)}>{note.title}</li>
-							))}
-						</ul>
-					)}
-					{alsoGoing(listed) !== null && <p className="muted">{alsoGoing(listed)}</p>}
-					{!isEmpty(listed) && <p>These exist nowhere else. This cannot be undone.</p>}
-					<button
-						type="button"
-						disabled={busy}
-						onClick={() => {
-							discard(listed);
-						}}
-					>
-						{isEmpty(listed) ? 'Remove' : 'Discard for good'}
-					</button>
-					<button
-						type="button"
-						disabled={busy || listed.notes.length === 0}
-						onClick={() => {
-							download(listed.notes);
-						}}
-					>
-						Download them first
-					</button>
-					<button
-						ref={cancelButton}
-						type="button"
-						className="ghost"
-						disabled={busy}
-						onClick={close}
-					>
-						Cancel
-					</button>
-				</div>
+				<DiscardConfirm
+					listed={listed}
+					busy={busy}
+					download={download}
+					cancelRef={cancelButton}
+					onDiscard={() => {
+						discard(listed);
+					}}
+					onCancel={close}
+				/>
 			)}
 			{sources}
 		</section>
