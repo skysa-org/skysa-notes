@@ -6,12 +6,11 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
 	api,
 	type ApiClient,
-	ApiError,
 	type Grant,
 	type InstanceConfig,
 	type Refusal,
 } from '../api/client.js';
-import { causeOf, failedAt, saying } from '../api/failure.js';
+import { failedAt, saying } from '../errors/reached.js';
 import { folderToSearch } from '../routes/search.js';
 import { type ConnectedSource, connectedSources, showConnection } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
@@ -112,27 +111,47 @@ const refusalMessage = (refusal: Refusal): string =>
 		: 'The server would not disconnect this account.';
 
 /**
+ * What is not known about the outcome, which differs by what was asked of whom.
+ *
+ * Everything after the disconnect itself is this device's work
+ * (`letGoOfSource`), so a failure of the device half can be one that ran before
+ * the server was asked or one that ran after it said yes — the account gone at
+ * the provider, its refresh token with it, and this device still bound to it.
+ * Saying "the account was not disconnected" there was simply false. With
+ * nothing asked of the server there is no such doubt, and the doubt is about
+ * this device instead.
+ *
+ * Trying again is safe from either: a second attempt presents a credential the
+ * server has already spent, which comes back `credential_revoked` or
+ * `not_found`, and `disconnectAccount` counts both as the disconnect having
+ * happened.
+ */
+const mayHave = (onServer: boolean): string =>
+	onServer
+		? 'The account may already be disconnected; try again.'
+		: 'This device may still be syncing the account; try again.';
+
+/**
  * Why a disconnect did not happen, where it failed rather than being refused.
  *
- * Three answers, because there are three different things it can have been and
- * they are not the same thing to do about. A call to our API that failed is
- * worth trying again, and worth looking at the connection for. A failure that
- * never left the device is neither: "stop syncing on this device" asks the
- * server nothing at all, so a message about a connection would send the user to
- * the one part that was not used. And a failure from neither says nothing about
- * where it happened, so nothing is claimed about it.
+ * Four answers, because there are four different things it can have been and no
+ * two are the same thing to do about. A server that answered with a failure is
+ * worth trying again; a server that never answered is worth looking at the
+ * connection for; a failure that never left the device is neither, since "stop
+ * syncing on this device" asks the server nothing at all and a message about a
+ * connection would send the user to the one part that was not used. And a
+ * failure from neither call cannot say where it happened, so it does not.
  *
  * Which it was comes from `letGoOfSource`, which knows because it made the call
- * (`api/failure.ts`), rather than from the shape or the words of the error.
+ * (`errors/reached.ts`), rather than from the shape or the words of the error.
+ * What it does *not* know is whether the work landed, so no wording here says.
  */
-const failureMessage = (error: unknown): string =>
+const failureMessage = (error: unknown, onServer: boolean): string =>
 	saying(error, {
-		server:
-			causeOf(error) instanceof ApiError
-				? 'The server could not disconnect the account. Try again.'
-				: 'The server cannot be reached, so the account is still connected.',
-		device: 'Something on this device went wrong, so the account was not disconnected. Try again.',
-		unknown: 'The account could not be disconnected. Try again.',
+		answered: 'The server could not disconnect the account. Try again.',
+		unreachable: 'The server cannot be reached, so the account is still connected. Try again.',
+		device: `Something on this device went wrong. ${mayHave(onServer)}`,
+		unknown: `Something went wrong. ${mayHave(onServer)}`,
 	});
 
 /** A time today as a time, and any other as a date. */
@@ -704,10 +723,14 @@ const Devices = ({
 		setProblem(null);
 		// Each half labelled as it is called: the credential is read from this
 		// device and the grant is revoked on the server, and a failure of the
-		// first has nothing to do with a connection.
-		void failedAt('device', withHeld(database, client, connectionId))
+		// first has nothing to do with a connection. The device half runs strictly
+		// before the server is asked, which is what lets its wording say that
+		// nothing was removed.
+		void failedAt('device', () => withHeld(database, client, connectionId))
 			.then((authed) =>
-				authed === undefined ? undefined : failedAt('server', authed.revokeGrant(grantId))
+				authed === undefined
+					? undefined
+					: failedAt('server', () => authed.revokeGrant(grantId))
 			)
 			.then((result) => {
 				if (result?.ok === true) {
@@ -719,9 +742,14 @@ const Devices = ({
 			.catch((error: unknown) => {
 				setProblem(
 					saying(error, {
-						server: 'The server cannot be reached, so nothing was removed.',
+						answered: 'The server could not remove that device. Try again.',
+						unreachable:
+							'The server cannot be reached, so nothing was removed. Try again.',
 						device: 'Something on this device went wrong, so nothing was removed. Try again.',
-						unknown: 'That device could not be removed. Try again.',
+						// Neither call, so it happened after the revoke had already
+						// done whatever it did.
+						unknown:
+							'Something went wrong. That device may already have been removed; try again.',
 					})
 				);
 			})
@@ -939,7 +967,9 @@ const useDisconnects = (database: NotesDatabase, client: Client) => {
 				.catch((error: unknown) => {
 					put(connectionId, {
 						busy: false,
-						problem: failureMessage(error),
+						// What was asked of whom, which is what decides which outcome
+						// the message may leave open.
+						problem: failureMessage(error, answer.onServer),
 						stranded: true,
 					});
 				})

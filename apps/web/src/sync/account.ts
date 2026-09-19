@@ -1,7 +1,7 @@
 import { type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
-import { failedAt } from '../api/failure.js';
+import { failedAt } from '../errors/reached.js';
 import {
 	bindConnection,
 	bindingCount,
@@ -391,9 +391,8 @@ export const disconnectAccount = async (
 	if (held !== undefined) {
 		// The one thing here that leaves the device, and said so, because a
 		// caller reporting a failure has two different true things to say and no
-		// other way to tell which (`api/failure.ts`).
-		const result = await failedAt(
-			'server',
+		// other way to tell which (`errors/reached.ts`).
+		const result = await failedAt('server', () =>
 			client.withCredential(held.credential).disconnect()
 		);
 		// Already gone on the server is what was asked for. So is a credential it
@@ -461,17 +460,24 @@ export type LetGoResult = { ok: false; refusal: Refusal } | { ok: true; outcome:
  * computed before the question was asked, which a save that begins failing
  * while the user is reading it walks straight past.
  *
- * A failure says how far it got (`api/failure.ts`). Everything here except the
- * disconnect is this device's own work, and a caller told only that something
- * threw would have to answer "the server cannot be reached" for a store that
- * refused a write with no server near it — which is every failure of `onServer:
- * false`, where nothing is asked of the server at all.
+ * A failure says how far it got (`errors/reached.ts`). Everything here except
+ * the disconnect is this device's own work, and a caller told only that
+ * something threw would have to answer "the server cannot be reached" for a
+ * store that refused a write with no server near it — which is every failure of
+ * `onServer: false`, where nothing is asked of the server at all.
+ *
+ * How far is all it says. A `device` failure here can be a write that never ran
+ * or one that ran *after* the server disconnected the account, since everything
+ * following that call is this device's too — so the caller's wording has to
+ * leave the outcome open. Asking again is safe either way: a credential the
+ * server has already spent comes back `credential_revoked` or `not_found`, and
+ * `disconnectAccount` counts both as the disconnect having happened.
  */
 export const letGoOfSource = (
 	db: NotesDatabase,
 	client: Pick<ApiClient, 'withCredential'>,
 	input: LetGoInput
-): Promise<LetGoResult> => failedAt('device', releasing(db, client, input));
+): Promise<LetGoResult> => failedAt('device', () => releasing(db, client, input));
 
 const releasing = async (
 	db: NotesDatabase,

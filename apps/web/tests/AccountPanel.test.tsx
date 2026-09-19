@@ -158,7 +158,9 @@ const renderPanel = (
 	client: Client,
 	database: NotesDatabase,
 	url = '/',
-	sync: FakeSync = fakeSync({ phase: 'local' })
+	sync: FakeSync = fakeSync({ phase: 'local' }),
+	/** What leaving does, for a test about a navigation that does not work. */
+	go: (url: string) => void = () => undefined
 ) => {
 	// Where the panel would send the browser. jsdom has no navigation, so
 	// without this seam a connect test could only prove the button renders.
@@ -172,7 +174,10 @@ const renderPanel = (
 					client={client}
 					database={database}
 					sync={sync}
-					navigate={(to) => went.push(to)}
+					navigate={(to) => {
+						went.push(to);
+						go(to);
+					}}
 					download={(notes: readonly NoteRecord[]) =>
 						downloaded.push(notes.map((note) => note.title))
 					}
@@ -307,6 +312,75 @@ describe('AccountPanel, with nothing connected', () => {
 		);
 
 		expect(await screen.findByText(/cannot be reached/)).toBeTruthy();
+	});
+
+	it.each([
+		[
+			'answered with a failure',
+			() =>
+				Promise.reject(
+					new ApiError('POST /auth/connect/dropbox/start failed with 500', 500)
+				),
+			/The server could not start connecting/,
+		],
+		[
+			'could not be reached',
+			() => Promise.reject(new TypeError('offline')),
+			/The server cannot be reached, so nothing was connected/,
+		],
+	] as const)(
+		'tells a server that %s from one that did not, and says so out loud',
+		async (_, startConnect, said) => {
+			const user = userEvent.setup();
+			const { went } = renderPanel(clientWith({ startConnect }), freshDatabase());
+
+			await user.click(await screen.findByRole('button', { name: 'Connect Dropbox' }));
+
+			const problem = await screen.findByText(said);
+			expect(problem.textContent).not.toMatch(/this device went wrong/);
+			// Announced: it replaces the thing the user just pressed for.
+			expect(problem.getAttribute('role')).toBe('alert');
+			expect(went).toEqual([]);
+		}
+	);
+
+	it('does not blame the server when the credential could not be written down', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		const startConnect = vi.fn<ApiClient['startConnect']>(() =>
+			Promise.resolve({ ok: true, value: 'https://dropbox.example/authorize' })
+		);
+		const { went } = renderPanel(clientWith({ startConnect }), db);
+		await screen.findByRole('button', { name: 'Connect Dropbox' });
+		// Written down and awaited before the POST, so a store that refuses here
+		// really does leave nothing connected anywhere.
+		const refused = vi
+			.spyOn(db.credentials, 'put')
+			.mockRejectedValueOnce(new Error('QuotaExceededError'));
+
+		await user.click(screen.getByRole('button', { name: 'Connect Dropbox' }));
+
+		const problem = await screen.findByText(/on this device went wrong/);
+		expect(problem.textContent).toMatch(/nothing was connected/);
+		expect(problem.textContent).not.toMatch(/server|reach/i);
+		expect(startConnect).not.toHaveBeenCalled();
+		expect(went).toEqual([]);
+		refused.mockRestore();
+	});
+
+	it('claims nothing about a failure that was neither the device nor the server', async () => {
+		const user = userEvent.setup();
+		// The one thing here that runs after the server has answered: leaving.
+		renderPanel(clientWith(), freshDatabase(), '/', fakeSync({ phase: 'local' }), () => {
+			throw new Error('jsdom will not navigate');
+		});
+
+		await user.click(await screen.findByRole('button', { name: 'Connect Dropbox' }));
+
+		const problem = await screen.findByText(/Something went wrong/);
+		// The server did answer and a flow may well have begun, so neither
+		// "nothing was connected" nor a word about this device is true here.
+		expect(problem.textContent).not.toMatch(/server|reach|this device|nothing was/i);
 	});
 });
 
@@ -732,7 +806,44 @@ describe('AccountPanel, with an account connected', () => {
 		}
 	);
 
-	it('does not blame a server for a failure that never left the device', async () => {
+	it('does not claim the account is still connected once the server has let it go', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
+			Promise.resolve({ ok: true, value: { revoked: true } })
+		);
+		renderPanel(
+			clientWith({
+				connection: () => Promise.resolve({ ok: true, value: dropbox }),
+				disconnect,
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		// Everything after the server's yes is this device's own work, so this is
+		// where the store is made to refuse: the account really is disconnected.
+		const refused = vi
+			.spyOn(db.credentials, 'delete')
+			.mockRejectedValueOnce(new Error('QuotaExceededError'));
+		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
+
+		const problem = await screen.findByText(/on this device went wrong/);
+		// The account is gone at the provider and its refresh token with it, so
+		// the old wording — "the account was not disconnected" — was a plain lie.
+		expect(problem.textContent).toMatch(/may already be disconnected/);
+		expect(problem.textContent).not.toMatch(/was not disconnected|still connected/);
+		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(refused).toHaveBeenCalledTimes(1);
+		// And the proof that the two halves really did come apart.
+		expect(await db.credentials.get('c1')).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe('c1');
+		refused.mockRestore();
+	});
+
+	it('reads a client that throws where it stands as the server, not the device', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
@@ -740,9 +851,37 @@ describe('AccountPanel, with an account connected', () => {
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				// Refused, which is what puts "Stop syncing on this device" on offer
-				// — and that asks the server nothing at all.
-				disconnect: () => Promise.resolve({ ok: false, refusal: 'not_entitled' }),
+				// Not what the real client does — `call` is async — but `client` is
+				// an injected seam, and a label that only holds for promises is a
+				// label the signature does not keep.
+				disconnect: () => {
+					throw new TypeError('the seam refused');
+				},
+			}),
+			db
+		);
+
+		await user.click(await enabled('Disconnect…'));
+		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
+
+		const problem = await screen.findByText(/The server cannot be reached/);
+		expect(problem.textContent).not.toMatch(/this device/);
+	});
+
+	it('does not blame a server for a failure that never left the device', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		// Refused, which is what puts "Stop syncing on this device" on offer — and
+		// that asks the server nothing at all.
+		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
+			Promise.resolve({ ok: false, refusal: 'not_entitled' })
+		);
+		renderPanel(
+			clientWith({
+				connection: () => Promise.resolve({ ok: true, value: dropbox }),
+				disconnect,
 			}),
 			db
 		);
@@ -767,6 +906,9 @@ describe('AccountPanel, with an account connected', () => {
 		expect(problem.textContent).not.toMatch(/server|reach|connection/i);
 		expect(problem.getAttribute('role')).toBe('alert');
 		expect(refused).toHaveBeenCalledTimes(1);
+		// The claim the message makes, pinned: one call to disconnect the account
+		// (the first attempt, which was refused) and none for this one.
+		expect(disconnect).toHaveBeenCalledTimes(1);
 		// Still here to try again, and still syncing meanwhile.
 		expect(await activeConnectionId(db)).toBe('c1');
 		refused.mockRestore();
@@ -2654,6 +2796,56 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/would not remove it/);
 		expect(screen.getByRole('list', { name: 'Devices' }).querySelectorAll('li').length).toBe(2);
+	});
+
+	it.each([
+		[
+			'answered with a failure',
+			() => Promise.reject(new ApiError('DELETE /connection/grants/g2 failed with 500', 500)),
+			/The server could not remove that device/,
+		],
+		[
+			'could not be reached',
+			() => Promise.reject(new TypeError('offline')),
+			/The server cannot be reached, so nothing was removed/,
+		],
+	] as const)('tells a server that %s from one that did not', async (_, revokeGrant, said) => {
+		const user = userEvent.setup();
+		await connected({
+			grants: () => Promise.resolve({ ok: true, value: GRANTS }),
+			revokeGrant,
+		});
+		await screen.findByRole('list', { name: 'Devices' });
+
+		await user.click(screen.getByRole('button', { name: 'Remove' }));
+
+		const problem = await screen.findByText(said);
+		expect(problem.textContent).not.toMatch(/this device went wrong/);
+	});
+
+	it('does not blame the server when the credential could not be read', async () => {
+		const user = userEvent.setup();
+		const revokeGrant = vi.fn<ApiClient['revokeGrant']>(() =>
+			Promise.resolve({ ok: true, value: { ok: true } })
+		);
+		const { db } = await connected({
+			grants: () => Promise.resolve({ ok: true, value: GRANTS }),
+			revokeGrant,
+		});
+		await screen.findByRole('list', { name: 'Devices' });
+		// The credential is read from this device before anything is asked of
+		// the server, so this failure is strictly before the revoke.
+		const refused = vi
+			.spyOn(db.credentials, 'get')
+			.mockRejectedValueOnce(new Error('the store refused'));
+
+		await user.click(screen.getByRole('button', { name: 'Remove' }));
+
+		const problem = await screen.findByText(/on this device went wrong/);
+		expect(problem.textContent).toMatch(/nothing was removed/);
+		expect(problem.textContent).not.toMatch(/server|reach/i);
+		expect(revokeGrant).not.toHaveBeenCalled();
+		refused.mockRestore();
 	});
 
 	it('asks again when the user switches source, so the list is that source’s', async () => {

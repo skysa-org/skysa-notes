@@ -2,7 +2,7 @@ import { type ProviderKind } from '@skysa/core';
 import { type ReactNode, useState } from 'react';
 
 import { type ApiClient } from '../api/client.js';
-import { failedAt, saying } from '../api/failure.js';
+import { failedAt, saying } from '../errors/reached.js';
 import { beginConnect } from '../store/credentials.js';
 import { type NotesDatabase } from '../store/db.js';
 
@@ -65,9 +65,10 @@ export const ConnectButton = ({
 				// credential down is this device's, asking where to send the
 				// browser is the server's, and a message that named the wrong one
 				// would send the user somewhere there is nothing to fix.
-				const { credentialHash } = await failedAt('device', beginConnect(db, provider));
-				const result = await failedAt(
-					'server',
+				const { credentialHash } = await failedAt('device', () =>
+					beginConnect(db, provider)
+				);
+				const result = await failedAt('server', () =>
 					client.startConnect(provider, credentialHash, returnTo)
 				);
 				if (!result.ok) {
@@ -83,9 +84,17 @@ export const ConnectButton = ({
 			} catch (error) {
 				setFailed(
 					saying(error, {
-						server: 'The server cannot be reached, so nothing was connected.',
+						// "could not", against the refusal's "would not" above: one
+						// is the server failing, the other the server deciding.
+						answered: 'The server could not start connecting. Try again.',
+						unreachable:
+							'The server cannot be reached, so nothing was connected. Try again.',
+						// The credential is written down before the server is
+						// asked, so this half really did leave nothing connected.
 						device: 'Something on this device went wrong, so nothing was connected. Try again.',
-						unknown: 'Connecting could not be started. Try again.',
+						// Neither call, so it is after the server answered, and
+						// whether a flow was begun is not this to say.
+						unknown: 'Something went wrong. Try again.',
 					})
 				);
 				setBusy(false);
@@ -98,7 +107,16 @@ export const ConnectButton = ({
 			<button type="button" className={className} onClick={begin} disabled={busy}>
 				{children}
 			</button>
-			{failed !== null && <p className="muted">{failed}</p>}
+			{/*
+			 * Announced, as the storage panel's own problems are: it replaces
+			 * the thing the user just pressed for, and a reader that had moved
+			 * on would otherwise be left waiting on a page that had answered.
+			 */}
+			{failed !== null && (
+				<p className="muted" role="alert">
+					{failed}
+				</p>
+			)}
 		</>
 	);
 };
