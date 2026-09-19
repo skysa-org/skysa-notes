@@ -10,7 +10,7 @@ propose the edit to `docs/PLAN.md` in the same pull request.
 
 ## Getting it running
 
-Node 22.13 or later and pnpm 10 (`corepack enable`). The API tests use `node:sqlite`, which earlier 22.x releases keep behind a flag.
+Node 22.13 or later and pnpm 10 (`corepack enable`). The API tests use `node:sqlite`, which 22.x before 22.13 keeps behind a flag or does not have.
 
 ```bash
 pnpm install

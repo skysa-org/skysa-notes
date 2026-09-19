@@ -164,7 +164,8 @@ subdomain under the one you serve from is yours to commit to HTTPS, add
 `; includeSubDomains` to that line in `apps/web/public/_headers` before you
 deploy — and `; preload` only if you mean to submit the domain to the preload
 list, which is slow to undo. Served from an apex domain, `includeSubDomains`
-covers every subdomain you own.
+covers every subdomain you own. `apps/web/tests/csp.test.ts` holds the default
+and will fail on your fork once you change it; change its assertion with it.
 
 Migrations are separate from deploys on purpose. `pnpm --filter @skysa/api run
 deploy:migrate` does both in order when you want them together.

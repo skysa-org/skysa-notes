@@ -31,7 +31,8 @@
 # host alone. `includeSubDomains` and `preload` are deliberately absent: each
 # is a commitment on behalf of whoever self-hosts this — served from an apex
 # domain, the first forces HTTPS on every subdomain they own, for two years,
-# with no taking it back — and it is theirs to make (docs/self-hosting.md).
+# and taking it back means every browser that saw it coming back over HTTPS
+# to be told `max-age=0` — and it is theirs to make (docs/self-hosting.md).
 # What it would protect is already kept to the origin: the credentials are in
 # IndexedDB, and the flow cookie is `__Host-`, which no other host can set.
 # A plain-HTTP local deployment is unaffected — browsers ignore the header off
