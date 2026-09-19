@@ -13,7 +13,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGDriveStub } from '../../../packages/core/tests/providers/gdriveStub.js';
 import { createOneDriveStub } from '../../../packages/core/tests/providers/onedriveStub.js';
 import { type ApiClient } from '../src/api/client.js';
-import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
+import {
+	bindConnection,
+	detachConnection,
+	moveUnsyncedTo,
+	showConnection,
+} from '../src/store/connection.js';
 import {
 	activeConnectionId,
 	createDatabase,
@@ -36,6 +41,7 @@ import {
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { disconnectAccount } from '../src/sync/account.js';
 import {
 	createSyncScheduler,
@@ -1267,6 +1273,75 @@ describe('one browser over two sources', () => {
 		expect((await db.syncState.get('c-second'))?.detached).toBeUndefined();
 		expect(await db.notes.where('connectionId').equals('c-first').count()).toBe(1);
 		expect(await db.notes.where('connectionId').equals('c-second').count()).toBe(2);
+		await nothingOnTheDeviceItself(db);
+	});
+
+	it('carries every word of what one source never sent into the other, and up', async () => {
+		const { db, scheduler, first, second } = await twoSources();
+		await showConnection(db, 'c-second');
+		await following(scheduler, db, 'c-second');
+		// What the second storage has in full, and will keep.
+		const sent = await createNote(db, { title: 'Sent', body: '# Sent\n\nsafe there\n' });
+		await syncing(scheduler);
+		// And what it has never heard of: a notebook, notes in it and beside it,
+		// and an edit to a note it does have.
+		await createFolder(db, { name: 'Ideas' });
+		const written = await [
+			['Ideas/One', '# One\n\nfirst idea\n'],
+			['Ideas/Two', '# Two\n\nsecond idea, with a *list*:\n\n- a\n- b\n'],
+			['Loose', '# Loose\n\nnot in a notebook\n'],
+		].reduce<Promise<NoteRecord[]>>(async (sofar, [name, body]) => {
+			const made = await sofar;
+			const [folder, title] = (name ?? '').includes('/')
+				? (name ?? '').split('/')
+				: [undefined, name];
+			return [
+				...made,
+				await createNote(db, {
+					title: title ?? '',
+					body: body ?? '',
+					...(folder === undefined ? {} : { folderPath: folder }),
+				}),
+			];
+		}, Promise.resolve([]));
+		await saveNoteBody(db, sent.id, '# Sent\n\nsafe there, and edited here\n');
+		const kept = [...written, (await noteById(db, sent.id))!];
+		await nothingOnTheDeviceItself(db);
+
+		// Let it go, and answer the question with the other source.
+		const seen = seenIn(await unsyncedIn(db, 'c-second'));
+		await detachConnection(db, { connectionId: 'c-second' });
+		expect(
+			await moveUnsyncedTo(db, {
+				connectionId: 'c-second',
+				target: 'c-first',
+				seen: seenIn(await unsyncedIn(db, 'c-second')),
+			})
+		).toBe('released');
+		expect(seen.notes.size).toBe(kept.length);
+
+		// Every word of it is in the first source now, and nowhere else.
+		const landed = await db.notes.where('connectionId').equals('c-first').toArray();
+		expect(landed.map((note) => note.body).sort()).toEqual(
+			kept.map((note) => note.body).sort()
+		);
+		expect(await db.syncState.get('c-second')).toBeUndefined();
+		await nothingOnTheDeviceItself(db);
+
+		// And it goes up to the first source's storage, byte for byte, in its
+		// notebook — while the second's storage is exactly as it was left.
+		await following(scheduler, db, 'c-first');
+		await syncing(scheduler);
+		await syncing(scheduler);
+		expect(files(first)).toEqual(['Ideas/one.md', 'Ideas/two.md', 'loose.md', 'sent.md']);
+		landed.forEach((note) => {
+			expect(first.contentAt(note.path)).toContain(note.body.trimEnd());
+		});
+		// The older version of the note that had been pushed stays where it was,
+		// which is the one thing a move is allowed to leave in two places.
+		expect(files(second)).toEqual(['sent.md']);
+		expect(second.contentAt('sent.md')).toContain('safe there');
+		expect(second.contentAt('sent.md')).not.toContain('edited here');
 		await nothingOnTheDeviceItself(db);
 	});
 

@@ -168,14 +168,25 @@ export interface Seen {
 	rmdirs: ReadonlySet<string>;
 }
 
-export const seenIn = (unsynced: Unsynced): Seen => ({
+/**
+ * `standing` is every notebook the source had when the list was made, for a
+ * caller that made it while the source was still connected.
+ *
+ * Letting a source go removes the notes the remote has, and a notebook with no
+ * `remoteId` was only ever *not* listed because one of those notes was inside
+ * it and sent (`unsentFolder` above). With them gone the same notebook reads as
+ * unsent, having had nothing done to it — and taken for something written since
+ * the list, it would keep the whole source standing. A notebook the user really
+ * did make in between is not in `standing` either way.
+ */
+export const seenIn = (unsynced: Unsynced, standing: readonly string[] = []): Seen => ({
 	notes: new Map(
 		[...unsynced.notes, ...unsynced.renames, ...unsynced.deletes].map((note) => [
 			noteRef(note),
 			note.updatedAt,
 		])
 	),
-	folders: new Set(unsynced.folders.map((folder) => folder.path)),
+	folders: new Set([...unsynced.folders.map((folder) => folder.path), ...standing]),
 	rmdirs: new Set(unsynced.rmdirs.map((op) => op.path)),
 });
 
@@ -196,34 +207,47 @@ export const unseenIn = (unsynced: Unsynced, seen: Seen): boolean =>
 	unsynced.rmdirs.some((op) => !seen.rmdirs.has(op.path));
 
 /**
- * How many rows could be taken to another source: the notes and the notebooks.
- * Not the renames and not the deletes — each is about a file in the account
- * being left, and means nothing anywhere else.
+ * The notebooks worth telling the user about in their own right: the ones with
+ * no unsent note inside them.
+ *
+ * One that holds an unsent note goes wherever that note goes and is not a
+ * second thing to count; and on a detached source a notebook can look unmade
+ * only because the clean notes that proved it was there were removed with the
+ * rest of what the remote has (`keepOnly` in `store/connection.ts`), which is
+ * no change of the user's at all. What is left is the notebook that is a change
+ * on its own — made and never sent, or the empty one an unsent rename left
+ * behind — and every count the user sees uses this one rule, so the headline,
+ * the breakdown and the two steps of a move cannot disagree.
+ */
+export const countedFolders = (unsynced: Unsynced): FolderRecord[] =>
+	unsynced.folders.filter(
+		(folder) =>
+			!unsynced.notes.some((note) => isWithin(foldPath(note.path), foldPath(folder.path)))
+	);
+
+/**
+ * How many rows could be taken to another source: the notes and the notebooks
+ * that are changes in their own right. Not the renames and not the deletes —
+ * each is about a file in the account being left, and means nothing anywhere
+ * else. Zero means a move would move nothing, and a move of nothing is a
+ * discard under another name.
  */
 export const movable = (unsynced: Unsynced): number =>
-	unsynced.notes.length + unsynced.folders.length;
+	unsynced.notes.length + countedFolders(unsynced).length;
 
 /**
  * How many changes the remote has not had, for saying "3 not sent" of a source.
  *
- * Every category, since each is something the user did that went nowhere — but
- * a notebook is counted only where no unsent note is inside it. One that holds
- * an unsent note goes up with that note and is not a second thing to tell the
- * user about; and on a detached source a notebook can look unmade only because
- * the clean notes that proved it was there were removed with the rest of what
- * the remote has (`keepOnly` in `store/connection.ts`), which is no change of
- * the user's at all. A number for people, then, and not the test of whether a
- * source can be let go: that is `isEmpty`, which counts everything.
+ * Every category, since each is something the user did that went nowhere. A
+ * number for people, then, and not the test of whether a source can be let go:
+ * that is `isEmpty`, which counts everything.
  */
 export const countOf = (unsynced: Unsynced): number =>
 	unsynced.notes.length +
 	unsynced.renames.length +
 	unsynced.deletes.length +
 	unsynced.rmdirs.length +
-	unsynced.folders.filter(
-		(folder) =>
-			!unsynced.notes.some((note) => isWithin(foldPath(note.path), foldPath(folder.path)))
-	).length;
+	countedFolders(unsynced).length;
 
 /**
  * Nothing here that the remote lacks. `blocked` is not asked: an op that is

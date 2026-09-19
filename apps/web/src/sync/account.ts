@@ -5,6 +5,9 @@ import {
 	bindConnection,
 	bindingCount,
 	detachConnection,
+	type MoveOutcome,
+	moveUnsyncedTo,
+	releaseConnection,
 	rememberAccount,
 } from '../store/connection.js';
 import {
@@ -21,6 +24,7 @@ import {
 	type SyncStateRecord,
 } from '../store/db.js';
 import { settleEditors } from '../store/heldEdits.js';
+import { type Seen } from '../store/unsynced.js';
 
 /**
  * The storage account, as the server knows it, reconciled with the device.
@@ -108,6 +112,21 @@ export const sourceName = (
 	const account = source.displayName ?? source.accountId;
 	const provider = PROVIDER_LABELS[source.provider];
 	return account === undefined ? provider : `${provider} · ${account}`;
+};
+
+/**
+ * A source that is connected, named without asking anyone: the provider, and
+ * the provider's own id for the account where there is one.
+ *
+ * Not the account's name, deliberately. That is written onto a row only when
+ * the server is asked about it, which is only while the source is the one in
+ * front — so naming live sources by it would call a source one thing until it
+ * had been shown and another after. The id is stable and tells two accounts at
+ * one provider apart, which is the whole reason these are ever named in a list.
+ */
+export const connectedName = (source: Pick<SyncStateRecord, 'provider' | 'accountId'>): string => {
+	const provider = source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
+	return source.accountId === undefined ? provider : `${provider} · ${source.accountId}`;
 };
 
 export type AccountState =
@@ -392,4 +411,71 @@ export const disconnectAccount = async (
  */
 export const stopSyncingHere = async (db: NotesDatabase, connectionId: string): Promise<void> => {
 	await letGo(db, connectionId, 'disconnected');
+};
+
+/** What the user answered about the work the remote was never sent. */
+export type UnsentAnswer = 'discard' | { moveTo: string };
+
+export interface LetGoInput {
+	connectionId: string;
+	/** Which they chose, having been shown what it is about. */
+	unsent: UnsentAnswer;
+	/** What they were shown, as it stood (`seenIn` in `store/unsynced.ts`). */
+	seen: Seen;
+	/**
+	 * Whether to ask the server to disconnect the account first. `false` is
+	 * "stop syncing on this device": the same question, the same answer, and no
+	 * server — for a connection it will not or cannot let go of.
+	 */
+	onServer: boolean;
+}
+
+export type LetGoResult = { ok: false; refusal: Refusal } | { ok: true; outcome: MoveOutcome };
+
+/**
+ * A source let go for good, with the user's answer about what it never sent
+ * carried out in the same breath.
+ *
+ * The order is the whole of it. The server goes first, for the reason
+ * `disconnectAccount` gives; and nothing is asked of it until the user has
+ * answered, so a dialog they cancel has changed nothing anywhere. The detach
+ * that follows keeps what was never sent (`detachConnection`) and the answer
+ * then decides what becomes of it, in one transaction, against the list they
+ * were shown rather than against whatever the store says by then.
+ *
+ * A server that refuses leaves the device exactly as it was, answer and all:
+ * the panel says so and offers to stop syncing here instead, which is this
+ * again with `onServer: false`.
+ *
+ * The editors write once more immediately before the release, and what they
+ * still cannot write is carried into it (`holding`). The detach just before
+ * kept those rows so unsavable text would have somewhere to land; the release
+ * would otherwise take them straight back out. And the dialog's own guard was
+ * computed before the question was asked, which a save that begins failing
+ * while the user is reading it walks straight past.
+ */
+export const letGoOfSource = async (
+	db: NotesDatabase,
+	client: Pick<ApiClient, 'withCredential'>,
+	input: LetGoInput
+): Promise<LetGoResult> => {
+	const { connectionId, seen, unsent } = input;
+	if (input.onServer) {
+		const disconnected = await disconnectAccount(db, client, connectionId);
+		if (!disconnected.ok) return disconnected;
+	} else {
+		await stopSyncingHere(db, connectionId);
+	}
+	const { failing } = await settleEditors();
+	const holding = new Set(failing);
+	const outcome =
+		unsent === 'discard'
+			? await releaseConnection(db, { connectionId, unsynced: 'discard', seen, holding })
+			: await moveUnsyncedTo(db, {
+					connectionId,
+					target: unsent.moveTo,
+					seen,
+					holding,
+				});
+	return { ok: true, outcome };
 };
