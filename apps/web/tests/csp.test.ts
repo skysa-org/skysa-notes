@@ -95,11 +95,10 @@ describe('Content-Security-Policy', () => {
 		// the device's credentials out of. Two years is the usual floor for a
 		// policy meant to be relied on.
 		expect(Number(directives.get('max-age'))).toBeGreaterThanOrEqual(63072000);
-		// Without this a sibling subdomain served over plain HTTP is the way
-		// around the `__Host-` flow cookie.
-		expect(directives.has('includesubdomains')).toBe(true);
-		// `preload` is a commitment on behalf of whoever self-hosts this, and it
-		// is theirs to make, not this repo's.
+		// Both are commitments on behalf of whoever self-hosts this — from an
+		// apex domain the first takes in every subdomain they own — and they are
+		// theirs to make, not this repo's (docs/self-hosting.md).
+		expect(directives.has('includesubdomains')).toBe(false);
 		expect(directives.has('preload')).toBe(false);
 	});
 
