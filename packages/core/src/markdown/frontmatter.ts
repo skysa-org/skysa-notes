@@ -3,6 +3,7 @@ import {
 	isAlias,
 	isDocument,
 	isMap,
+	isNode,
 	isScalar,
 	parseDocument,
 	stringify as stringifyYaml,
@@ -486,19 +487,11 @@ export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
 };
 
 /**
- * Apply a patch to frontmatter, preserving every key the app does not know
- * about, along with their order and any comments. A key set to `undefined` is
- * removed. Whitespace inside flow collections may be normalized, since the
- * document is re-stringified; no key or value is lost. Unparseable YAML is never
- * rewritten — doing so would destroy whatever the user meant by it — so the
- * patch is dropped and the raw text kept.
- *
  * An `id` the user wrote and the app declined to read (`frontmatterHasDeclinedId`)
- * is neither set over nor respelled: `yaml` writes `id: 0123` back as `id: 123`,
- * which is a different Zettelkasten id, so the characters the file had are put
- * back after the rest has been stringified. That is held here, once, rather
- * than by each caller remembering to ask. Only a clean document gets this far,
- * and in one of those a declined id is simply one that is not a string.
+ * is never set over: `id: 202409141302` is a Zettelkasten id, in the user's own
+ * file. That is held in `writeFrontmatter`, once, rather than by each caller
+ * remembering to ask. Only a clean document gets this far, and in one of those a
+ * declined id is simply one that is not a string.
  */
 const declinedId = (yaml: string, doc: Document): Readonly<{ source?: string }> | undefined => {
 	const found = doc.get('id', true);
@@ -517,6 +510,168 @@ const withIdSpelled = (written: string, source: string): string => {
 	return `${written.slice(0, node.range[0])}${source}${written.slice(node.range[1])}`;
 };
 
+type KnownKey = (typeof KNOWN_KEYS)[number];
+
+/** `created` and `updated` are read as an instant, not as a spelling of one. */
+const isTime = (value: string | undefined): value is string =>
+	value !== undefined && !Number.isNaN(Date.parse(value));
+
+const sameList = (a: readonly string[], b: readonly string[]): boolean =>
+	a.length === b.length && a.every((item, index) => item === b[index]);
+
+const recordOf = (doc: Document): Record<string, unknown> => {
+	const data: unknown = doc.toJS();
+	return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : {};
+};
+
+/**
+ * Is the patch asking for something the file does not already say?
+ *
+ * Asked of the value as `readFrontmatter` reads it, because that is what the
+ * app was shown and what it hands back. The store writes every field it holds
+ * on every save — it cannot know which of them the user touched — so "the patch
+ * names this key" says nothing, and a writer that took it for a change respelled
+ * the whole block on the first edit to the body. `tags: work, home` reads as two
+ * tags, and is left as the string it is when the patch says those two tags.
+ *
+ * A time is compared as an instant. The store keeps `createdAt` as a number and
+ * hands back `2024-09-14T00:00:00.000Z` for a file that said `2024-09-14`; that
+ * is the file's own date coming home, and the user's spelling of it stays.
+ * `Date.parse` reads formats differently from one engine to the next, which
+ * does not matter here: the number being compared came out of the same
+ * `Date.parse`, on this device, from this string.
+ *
+ * A `created` that is not a time at all — `created: last spring` — is declined
+ * the way an `id` is. The app could not read it, so the store fell back on the
+ * time of the import, and writing that over the line would replace something
+ * the user meant with something nobody did. `updated` is not held to that: the
+ * app changes it on every save, by design, and what it says afterwards is true.
+ */
+const changes = (
+	key: KnownKey,
+	value: string | readonly string[] | undefined,
+	doc: Document,
+	record: Record<string, unknown>
+): boolean => {
+	if (value === undefined) return doc.has(key);
+	const current = record[key];
+	// `id:` with nothing after it is not a value anyone wrote.
+	if (current === undefined || current === null) return true;
+	if (typeof value !== 'string') return !sameList(asTags(current) ?? [], value);
+
+	const read = asString(current);
+	if (key === 'created' && !isTime(read)) return false;
+	if (read === value) return false;
+	const times = key === 'created' || key === 'updated';
+	return !(times && isTime(read) && Date.parse(read) === Date.parse(value));
+};
+
+/** One top-level pair as the text spells it: its key, to the end of its value's last line. */
+interface Span {
+	readonly key: unknown;
+	readonly start: number;
+	readonly end: number;
+}
+
+const lineEndFrom = (yaml: string, at: number): number => {
+	if (at > 0 && yaml[at - 1] === '\n') return at;
+	const next = yaml.indexOf('\n', at);
+	return next === -1 ? yaml.length : next + 1;
+};
+
+/**
+ * Where each top-level pair sits in `yaml`, or undefined for a block whose
+ * pairs cannot be lifted out line by line: a flow mapping (`{a: 1}`), an
+ * indented one, a `? key`, a key carrying an anchor, or no pairs at all. A
+ * comment above a key is outside its span, and so is a blank line.
+ */
+const spansOf = (yaml: string, doc: Document): readonly Span[] | undefined => {
+	const map = doc.contents;
+	if (!isMap(map) || map.flow === true || map.items.length === 0) return undefined;
+	const spans = map.items.map(({ key, value }): Span | undefined => {
+		if (!isScalar(key) || !isNode(value)) return undefined;
+		const start = key.range?.[0];
+		const end = value.range?.[2];
+		if (start === undefined || end === undefined) return undefined;
+		if (start > 0 && yaml[start - 1] !== '\n') return undefined;
+		return { key: key.value, start, end: lineEndFrom(yaml, end) };
+	});
+	return spans.every((span) => span !== undefined) ? spans : undefined;
+};
+
+interface Splice {
+	readonly start: number;
+	readonly end: number;
+	readonly text: string;
+}
+
+/**
+ * The lines of the changed keys, taken out of `written` and put into `source`
+ * where those keys were; a key the source never had goes under its last pair.
+ * Undefined when either text will not come apart that way, or when what was
+ * put together does not parse — the caller then writes the block whole, as it
+ * always did.
+ */
+const spliced = (
+	source: string,
+	written: string,
+	changed: readonly KnownKey[]
+): string | undefined => {
+	const from = spansOf(source, parseDocument(source));
+	// A patch that took the last pair away leaves `{}`, which has to be written:
+	// a block of nothing, or of comments alone, is not read back as a mapping.
+	const to = spansOf(written, parseDocument(written));
+	if (from === undefined || to === undefined) return undefined;
+
+	const lineOf = (key: unknown): string => {
+		const span = to.find((each) => each.key === key);
+		return span === undefined ? '' : written.slice(span.start, span.end);
+	};
+	const replaced = from
+		.filter((span) => changed.some((key) => key === span.key))
+		.map((span): Splice => ({ start: span.start, end: span.end, text: lineOf(span.key) }));
+	const last = Math.max(...from.map((span) => span.end));
+	const added = changed
+		.filter((key) => !from.some((span) => span.key === key))
+		.map(lineOf)
+		.join('');
+
+	const result = [...replaced, { start: last, end: last, text: added }]
+		// From the bottom up, so no splice moves the ground under the next one.
+		.sort((a, b) => b.start - a.start)
+		.reduce(
+			(text, { start, end, text: line }) =>
+				`${text.slice(0, start)}${line}${text.slice(end)}`,
+			source
+		);
+
+	return parseDocument(result).errors.length > 0 ? undefined : result;
+};
+
+/**
+ * Apply a patch to frontmatter. A key set to `undefined` is removed.
+ * Unparseable YAML is never rewritten — doing so would destroy whatever the
+ * user meant by it — so the patch is dropped and the raw text kept.
+ *
+ * Only the keys whose value the patch actually changes (`changes`) are written.
+ * Everything else keeps the characters the file had, and that is done by never
+ * writing it rather than by writing it carefully: the changed pairs are
+ * stringified, and their lines alone are spliced into the text that was there.
+ * The other way round was tried first, for `id` only — stringify the whole
+ * document, then put the user's `0123` back where `yaml` had written `123` —
+ * and it does not generalise, because a stringifier has an opinion about every
+ * scalar it meets. `zip: 02134` came back as `2134`, `0x1F` as `31`,
+ * `12345678901234567890` short of its last digits, `[a, b]` as `[ a, b ]`, and
+ * that is a list that only grows. Text that is never handed to the stringifier
+ * cannot be respelled by it, and that needs no list.
+ *
+ * So a patch that changes nothing returns its input, byte for byte.
+ *
+ * The exception is a block whose pairs do not sit one to a line at the left
+ * margin (`spansOf`). No tool writes frontmatter that way; one that turns up is
+ * stringified whole, as every block used to be, with a declined `id` spelled
+ * back in.
+ */
 export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmatter): string => {
 	const entries = KNOWN_KEYS.filter((key) => key in patch).map(
 		(key) => [key, patch[key]] as const
@@ -527,30 +682,33 @@ export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmat
 		return Object.keys(seed).length === 0 ? '' : stringifyYaml(seed);
 	}
 
-	const yaml = toLf(yamlOf(frontmatter));
+	const inner = toLf(yamlOf(frontmatter));
+	const yaml = inner.endsWith('\n') ? inner : `${inner}\n`;
 	const doc = parseDocument(yaml);
 	if (!isDocument(doc) || doc.errors.length > 0) return frontmatter;
 
 	const own = declinedId(yaml, doc);
 	const keepsOwnId = own !== undefined && patch.id !== undefined;
-	entries
+	const record = recordOf(doc);
+	const changed = entries
 		.filter(([key]) => !(key === 'id' && keepsOwnId))
-		.forEach(([key, value]) => (value === undefined ? doc.delete(key) : doc.set(key, value)));
+		.filter(([key, value]) => changes(key, value, doc, record));
+	if (changed.length === 0) return frontmatter;
 
+	changed.forEach(([key, value]) =>
+		value === undefined ? doc.delete(key) : doc.set(key, value)
+	);
+
+	const whole = String(doc);
 	const stillThere = keepsOwnId || !('id' in patch);
+	const keys = changed.map(([key]) => key);
 	const written =
-		own?.source !== undefined && stillThere
-			? withIdSpelled(String(doc), own.source)
-			: String(doc);
+		spliced(yaml, whole, keys) ??
+		(own?.source !== undefined && stillThere ? withIdSpelled(whole, own.source) : whole);
 	// `...` closes a block only under YAML that names something metadata is
 	// named (`endedReading`). A patch that takes the last such key away leaves a
 	// block that would be read back as body; fenced with `---`, it still is one.
-	const record: unknown = doc.toJS();
-	const stillMetadata =
-		typeof record === 'object' &&
-		record !== null &&
-		namesMetadata(record as Record<string, unknown>);
-	return EXPLICIT_DOCUMENT.test(frontmatter) && stillMetadata
+	return EXPLICIT_DOCUMENT.test(frontmatter) && namesMetadata(recordOf(doc))
 		? `${FENCE}\n${written}${DOCUMENT_END}\n`
 		: written;
 };

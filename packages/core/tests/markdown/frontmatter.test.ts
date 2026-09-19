@@ -8,6 +8,7 @@ import {
 	writeFrontmatter,
 } from '../../src/markdown/frontmatter.js';
 import { type LineEnding, withLineEnding } from '../../src/markdown/lineEndings.js';
+import { serializeNoteFile } from '../../src/markdown/note.js';
 
 describe('splitFrontmatter', () => {
 	it('splits a fenced YAML mapping from the body', () => {
@@ -281,10 +282,9 @@ describe('writeFrontmatter', () => {
 			title: 'New',
 		});
 		expect(yaml).toContain('obsidian_banner: cover.png');
-		// Re-stringifying may normalize spacing inside a flow collection, but the
-		// key and its values survive.
 		expect(readFrontmatter(yaml)).toMatchObject({ id: 'abc', title: 'New' });
-		expect(yaml).toMatch(/aliases: \[ ?x ?\]/);
+		// As written, spacing and all: see "values the app did not change" below.
+		expect(yaml).toContain('aliases: [x]\n');
 	});
 
 	it('preserves comments and key order', () => {
@@ -715,8 +715,9 @@ describe('writeFrontmatter, over an `id` the app declined', () => {
 		expect(writeFrontmatter('id: 0x1F\ntitle: a', { tags: ['a'] })).toBe(
 			'id: 0x1F\ntitle: a\ntags:\n  - a\n'
 		);
+		// Nothing to write, so nothing is: not even the spacing inside the list.
 		expect(writeFrontmatter('id: [1, 2]\ntitle: a', { id: 'uuid' })).toBe(
-			'id: [ 1, 2 ]\ntitle: a\n'
+			'id: [1, 2]\ntitle: a'
 		);
 	});
 
@@ -766,5 +767,174 @@ describe('an `id` that is an alias', () => {
 		const block = 'x: &z abc\nid: *z\ntitle: a';
 		expect(readFrontmatter(block).id).toBe('abc');
 		expect(readFrontmatter(writeFrontmatter(block, { id: 'uuid' })).id).toBe('uuid');
+	});
+});
+
+/**
+ * The writer used to stringify the whole document to change one key, and a
+ * stringifier has an opinion about every scalar it meets. Each line below is
+ * something a person wrote in their own file, that the app was never asked to
+ * touch, and that came back different after a rename.
+ */
+describe('writeFrontmatter, over values the app did not change', () => {
+	const kept = {
+		'a leading zero': 'zip: 02134',
+		'a hexadecimal number': 'mask: 0x1F',
+		'an integer too long for a double': 'id2: 12345678901234567890',
+		'a float with its trailing zero': 'ratio: 1.50',
+		'an exponent': 'big: 1E3',
+		'a quoted string with an escape in it': String.raw`author: "Zoë"`,
+		'a single-quoted string that needed no quotes': "place: 'Here'",
+		'a flow list, spaced the way it was': 'aliases: [one,two]',
+		'a flow mapping': 'geo: {lat: 1,lon: 2}',
+		'a block list indented further than the app would': 'aliases:\n    - one\n    - two',
+		'a list that is not indented at all': 'aliases:\n- one\n- two',
+		'a comment, however it is spaced': '#kept by hand\nweight: 1   #and this',
+		'a null spelled with a tilde': 'parent: ~',
+		'a boolean in capitals': 'publish: TRUE',
+		'a long line the stringifier would fold': `summary: ${'word '.repeat(30).trim()}`,
+		'a blank line between keys': 'layout: post\n\nslug: a-note',
+	};
+
+	Object.entries(kept).forEach(([what, lines]) => {
+		it(`keeps ${what}`, () => {
+			expect(writeFrontmatter(`id: abc\n${lines}\ntitle: Old`, { title: 'New' })).toBe(
+				`id: abc\n${lines}\ntitle: New\n`
+			);
+		});
+	});
+
+	it('keeps the order the keys were in, and puts a new one under the last', () => {
+		expect(
+			writeFrontmatter('updated: 2026-01-01T00:00:00.000Z\nzip: 02134\ntitle: Old\nid: abc', {
+				id: 'abc',
+				title: 'New',
+				tags: ['a'],
+			})
+		).toBe(
+			'updated: 2026-01-01T00:00:00.000Z\nzip: 02134\ntitle: New\nid: abc\ntags:\n  - a\n'
+		);
+	});
+
+	/**
+	 * What a save looks like from here: the store hands back every field it
+	 * holds, because it cannot know which of them the user touched. Being named
+	 * in the patch is therefore not a change — differing from the file is.
+	 */
+	const saved = {
+		id: 'abc',
+		title: 'Trip',
+		created: '2024-09-14T00:00:00.000Z',
+		updated: '2026-03-01T10:00:00.000Z',
+		tags: ['work', 'home'],
+	};
+
+	it('returns its input, byte for byte, when the patch says what the file says', () => {
+		[
+			'id: abc\ntitle: Trip\ncreated: 2024-09-14\nupdated: 2026-03-01T10:00:00Z\ntags: [work,home]',
+			'id: "abc"\ntitle:   Trip\ncreated: 2024-09-14\nupdated: 2026-03-01 10:00:00Z\ntags: work, home\n',
+			"id: abc\r\ntitle: 'Trip'\r\ncreated: 2024-09-14\r\nupdated: 2026-03-01T10:00:00.000Z\r\ntags:\r\n- work\r\n- home\r\nzip: 02134\r\n",
+			'---\nid: abc\ntitle: Trip\ncreated: 2024-09-14\nupdated: 2026-03-01T10:00:00Z\ntags: [ work, home ]\n...',
+		].forEach((block) => {
+			expect(writeFrontmatter(block, saved), JSON.stringify(block)).toBe(block);
+		});
+		// A title YAML reads as a number is the title the app was shown.
+		expect(readFrontmatter('id: abc\ntitle: 007').title).toBe('7');
+		expect(writeFrontmatter('id: abc\ntitle: 007', { id: 'abc', title: '7' })).toBe(
+			'id: abc\ntitle: 007'
+		);
+		expect(writeFrontmatter('zip: 02134\nid: [1,2]', {})).toBe('zip: 02134\nid: [1,2]');
+	});
+
+	it('leaves `created` as the user spelled it, and still moves `updated`', () => {
+		const block =
+			'id: abc\ntitle: Trip\ncreated: 2024-09-14\nupdated: 2025-01-01\ntags: work, home';
+		expect(writeFrontmatter(block, saved)).toBe(
+			'id: abc\ntitle: Trip\ncreated: 2024-09-14\nupdated: 2026-03-01T10:00:00.000Z\ntags: work, home\n'
+		);
+	});
+
+	it('does not put the time of the import over a `created` it could not read', () => {
+		// The store has no date for this note but the day it first saw the file,
+		// and that is what it hands back. It is nobody's creation date.
+		const block = 'id: abc\ntitle: Trip\ncreated: last spring\nupdated: whenever';
+		const written = writeFrontmatter(block, { ...saved, tags: undefined });
+		expect(written).toBe(
+			'id: abc\ntitle: Trip\ncreated: last spring\nupdated: 2026-03-01T10:00:00.000Z\n'
+		);
+		expect(writeFrontmatter('created: [2024, 9]\ntitle: a', { created: saved.created })).toBe(
+			'created: [2024, 9]\ntitle: a'
+		);
+		// Nothing there is not something someone wrote, and it can still be removed.
+		expect(writeFrontmatter('created:\ntitle: a', { created: saved.created })).toBe(
+			`created: ${saved.created}\ntitle: a\n`
+		);
+		expect(writeFrontmatter(block, { created: undefined })).toBe(
+			'id: abc\ntitle: Trip\nupdated: whenever\n'
+		);
+	});
+
+	it('writes the keys it does change, in place, and adds the ones that are new', () => {
+		const block = '# mine\nzip: 02134\ntitle: "Old" # renamed twice\ntags: [a, b]\n\n# end\n';
+		expect(writeFrontmatter(block, { title: 'New: one' })).toBe(
+			'# mine\nzip: 02134\ntitle: "New: one" # renamed twice\ntags: [a, b]\n\n# end\n'
+		);
+		expect(writeFrontmatter(block, { tags: ['a', 'c'] })).toBe(
+			'# mine\nzip: 02134\ntitle: "Old" # renamed twice\ntags:\n  - a\n  - c\n\n# end\n'
+		);
+		expect(
+			writeFrontmatter(block, { tags: undefined, id: 'abc', updated: saved.updated })
+		).toBe(
+			`# mine\nzip: 02134\ntitle: "Old" # renamed twice\nid: abc\nupdated: ${saved.updated}\n\n# end\n`
+		);
+		const again = writeFrontmatter(block, { title: 'New', tags: ['c'], id: 'abc' });
+		expect(readFrontmatter(again)).toEqual({ id: 'abc', title: 'New', tags: ['c'] });
+		expect(again).toContain('zip: 02134\n');
+	});
+
+	it('replaces a value that ran over several lines, and only that', () => {
+		expect(
+			writeFrontmatter(
+				'title: >-\n  A long\n  title\nzip: 02134\ntags:\n    - a\n    - b\nx: 0x1F',
+				{
+					title: 'Short',
+					tags: ['c'],
+				}
+			)
+			// `yaml` keeps the style a scalar had when it is given a new value, as
+			// it always has here. It is the user's style, and it reads as `Short`.
+		).toBe('title: >-\n  Short\nzip: 02134\ntags:\n  - c\nx: 0x1F\n');
+	});
+
+	it('keeps the line endings of a file that is CRLF throughout', () => {
+		const file = '---\r\nzip: 02134\r\ntitle: Old\r\nmask: 0x1F\r\n---\r\n\r\nbody\r\n';
+		const { frontmatter, body } = splitFrontmatter(file);
+		expect(serializeNoteFile({ frontmatter, body, metadata: { title: 'New' } })).toBe(
+			file.replace('Old', 'New')
+		);
+		expect(serializeNoteFile({ frontmatter, body, metadata: { title: 'Old' } })).toBe(file);
+	});
+
+	it('under a `...` closer too', () => {
+		const { frontmatter, body } = splitFrontmatter('---\ntitle: Old\nzip: 02134\n...\nbody\n');
+		expect(joinFrontmatter(writeFrontmatter(frontmatter, { title: 'New' }), body)).toBe(
+			'---\ntitle: New\nzip: 02134\n...\nbody\n'
+		);
+	});
+
+	/**
+	 * Pairs that do not sit one to a line at the left margin cannot be lifted
+	 * out by line, and no tool writes a block that way. Such a block is written
+	 * whole, as every block used to be — the patch lands and a declined `id` is
+	 * still spelled as it was, which is all that was ever promised of one.
+	 */
+	it('still writes a block it cannot take apart line by line', () => {
+		['{title: a, id: 0123}', '  title: a\n  id: 0123', '? title\n: a\n? id\n: 0123'].forEach(
+			(block) => {
+				const written = writeFrontmatter(block, { title: 'T', id: 'uuid' });
+				expect(readFrontmatter(written), block).toEqual({ title: 'T' });
+				expect(written, block).toContain('0123');
+			}
+		);
 	});
 });
