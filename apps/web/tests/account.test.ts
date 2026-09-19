@@ -542,6 +542,91 @@ describe('the account the notes belong to', () => {
 	});
 });
 
+describe('what the account is called', () => {
+	const named = (
+		displayName: string | null,
+		accountId: string | null = 'dbid:1'
+	): Connection => ({
+		...connection('c1', 'dropbox', accountId),
+		displayName,
+	});
+
+	it('is written down when the connection is taken up', async () => {
+		const db = freshDatabase();
+		await beginConnect(db, 'dropbox');
+
+		await claimConnection(db, answering({ ok: true, value: named('ada@example.com') }));
+
+		expect((await db.syncState.get('c1'))?.displayName).toBe('ada@example.com');
+	});
+
+	it('is written on each reconcile, so the last name heard is the one kept', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		expect((await db.syncState.get('c1'))?.displayName).toBeUndefined();
+
+		await reconcileAccount(db, answering({ ok: true, value: named('ada@example.com') }));
+		expect((await db.syncState.get('c1'))?.displayName).toBe('ada@example.com');
+
+		// Renamed at the provider, under the same connection.
+		await reconcileAccount(db, answering({ ok: true, value: named('ada@lovelace.example') }));
+		expect((await db.syncState.get('c1'))?.displayName).toBe('ada@lovelace.example');
+	});
+
+	it('is written for an account the server does not name by id', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+
+		await reconcileAccount(db, answering({ ok: true, value: named('ada@example.com', null) }));
+
+		const state = await db.syncState.get('c1');
+		expect(state?.displayName).toBe('ada@example.com');
+		expect(state?.accountId).toBeUndefined();
+	});
+
+	it('is kept when the server has no name to give', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		await reconcileAccount(db, answering({ ok: true, value: named('ada@example.com') }));
+
+		await reconcileAccount(db, answering({ ok: true, value: named(null) }));
+
+		expect((await db.syncState.get('c1'))?.displayName).toBe('ada@example.com');
+	});
+
+	it('survives the connection being bound again, and everything else the row is rewritten for', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		await reconcileAccount(db, answering({ ok: true, value: named('ada@example.com') }));
+		await db.syncState.update('c1', { cursor: 'cursor-1', rootId: 'root-1' });
+
+		// As `adoptAccount` and a flow finishing twice both do, and as a caller
+		// that was never told a name does.
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+
+		expect(await db.syncState.get('c1')).toMatchObject({
+			displayName: 'ada@example.com',
+			cursor: 'cursor-1',
+			rootId: 'root-1',
+		});
+
+		// A second source connected alongside has a name of its own, and leaves
+		// this one's alone.
+		await bindConnection(db, {
+			connectionId: 'c2',
+			provider: 'gdrive',
+			accountId: 'g:2',
+			displayName: 'cy@example.com',
+		});
+		expect((await db.syncState.get('c1'))?.displayName).toBe('ada@example.com');
+		expect((await db.syncState.get('c2'))?.displayName).toBe('cy@example.com');
+	});
+});
+
 describe('disconnecting', () => {
 	const disconnecting = (result: Result<{ revoked: boolean }>, order?: string[]) => {
 		const disconnect = vi.fn<ApiClient['disconnect']>(() => {

@@ -9,6 +9,7 @@ import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor } from '../editor/RichEditor.js';
 import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
+import { beforeClosing } from '../store/heldEdits.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
 import {
 	deleteNote,
@@ -17,7 +18,6 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 } from '../store/notes.js';
-import { beforeClosing } from '../store/staleTab.js';
 import { FindBar } from './FindBar.js';
 import { Outline } from './Outline.js';
 

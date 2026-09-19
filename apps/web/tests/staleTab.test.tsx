@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { StaleTabGate } from '../src/components/StaleTabGate.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
-import { beforeClosing, CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';
+import { beforeClosing } from '../src/store/heldEdits.js';
+import { CLOSE_GRACE_MS, tabState } from '../src/store/staleTab.js';
 
 /**
  * A newer build opening the database in another tab. One test file, in one

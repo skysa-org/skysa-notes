@@ -378,6 +378,50 @@ describe('useAutosave, when a write fails', () => {
 		expect(result.current.failing).toBe(true);
 	});
 
+	it('answers settle with how many notes still have text the store would not take', async () => {
+		const save = vi.fn<(value: string) => Promise<void>>((value) =>
+			value.startsWith('bad') ? Promise.reject(new Error('no')) : Promise.resolve()
+		);
+		const { result, rerender } = renderHook(
+			({ key }: { key: string }) => useAutosave({ key, save, delayMs: 2000 }),
+			{ initialProps: { key: 'a' } }
+		);
+		const settle = () => act(() => result.current.settle());
+
+		act(() => {
+			result.current.change('fine');
+		});
+		expect(await settle()).toBe(0);
+
+		act(() => {
+			result.current.change('bad 1');
+		});
+		expect(await settle()).toBe(1);
+		// A new sitting: the editor rebuilt from the stored body, as a mode switch
+		// does. What is typed next was not typed over `bad 1`, so it does not
+		// stand for it and both stay held — two edits, and still one note to
+		// tell the user of. Counted by edit, this says 2.
+		act(() => {
+			result.current.rebased();
+		});
+		act(() => {
+			result.current.change('bad 2');
+		});
+		expect(await settle()).toBe(1);
+
+		// A second note, held by the same editor since the user moved on.
+		rerender({ key: 'b' });
+		act(() => {
+			result.current.change('bad in b');
+		});
+		expect(await settle()).toBe(2);
+
+		// And none once a save goes through for each.
+		save.mockImplementation(() => Promise.resolve());
+		expect(await settle()).toBe(0);
+		expect(result.current.failing).toBe(false);
+	});
+
 	it('resolves settle only once what it started has come back', async () => {
 		const { calls, save } = manualSave<string>();
 		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));

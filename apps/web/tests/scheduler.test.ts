@@ -916,6 +916,24 @@ describe('failures', () => {
 			expect(h.remote.fake.contentAt(note.path)).toContain('one');
 		});
 
+		it('keeps what the account is called, through a sync and through the re-scan', async () => {
+			const db = await bound();
+			await db.syncState.update('c1', { displayName: 'ada@example.com' });
+			const h = started(db);
+			await reaches(h.scheduler, 'idle');
+			// A token, a root, a cursor and a time have all been written to the
+			// row by now, each by a different writer.
+			const synced = await db.syncState.get('c1');
+			expect(synced?.accessToken).toBeDefined();
+			expect(synced?.rootId).toBeDefined();
+			expect(synced?.cursor).toBeDefined();
+			expect(synced?.displayName).toBe('ada@example.com');
+
+			await h.scheduler.resync();
+
+			expect((await db.syncState.get('c1'))?.displayName).toBe('ada@example.com');
+		});
+
 		it('waits for a run already at the network, whose cursor would land on top of ours', async () => {
 			// The held run is mid-round with a cursor of its own, and writes it
 			// back when that round lands. Clearing outside the lock, the clear

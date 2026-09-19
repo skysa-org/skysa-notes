@@ -111,6 +111,10 @@ type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState'>;
 const accountOn = (accountId: string | null | undefined): { accountId?: string } =>
 	accountId === null || accountId === undefined ? {} : { accountId };
 
+/** `displayName` on a `syncState` row, or nothing where the API did not give one. */
+const nameOn = (displayName: string | null | undefined): { displayName?: string } =>
+	displayName === null || displayName === undefined ? {} : { displayName };
+
 const withoutRemote = ({
 	remoteId: _remoteId,
 	remoteVersion: _remoteVersion,
@@ -396,6 +400,8 @@ export interface BindInput extends Precondition {
 	provider: ProviderKind;
 	/** The provider's id for the account, when the API knows it. */
 	accountId?: string | null;
+	/** What the server calls the account, when it says (`SyncStateRecord.displayName`). */
+	displayName?: string | null;
 }
 
 /** What the device's notes would do on binding `input`: see the top of this module. */
@@ -438,6 +444,9 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 			// notes came back to the device. Kept from the row when the API did
 			// not name one, rather than dropped.
 			...accountOn(input.accountId ?? current?.accountId),
+			// The same for its name: a bind that was not told one keeps the last
+			// one heard rather than forgetting what the source is called.
+			...nameOn(input.displayName ?? current?.displayName),
 			// Per install, not per account: kept from whichever connection had one.
 			clientId: current?.clientId ?? states[0]?.clientId ?? crypto.randomUUID(),
 			...(moved.linked || current?.resumeUnverified === true
@@ -458,19 +467,30 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
  * bound before the API named accounts: nothing else writes it until the next
  * bind, and a disconnect in between would have the reconnect copy rather than
  * resume. Answers whether the device was still as `ifUnchangedSince` says.
+ *
+ * And what the account is called, every time the server says: the name can
+ * change under a connection, and the last one heard is what the device has to
+ * go on once the server stops answering for it (`SyncStateRecord.displayName`).
+ * Each is written only where it was given. A server that names no account still
+ * gives a name, and one must not wait on the other.
  */
 export const rememberAccount = (
 	db: NotesDatabase,
-	input: Pick<BindInput, 'provider' | 'accountId'> & Precondition
+	input: Pick<BindInput, 'provider' | 'accountId' | 'displayName'> & Precondition
 ): Promise<boolean> =>
 	inTransaction(db, async () => {
 		if (!(await unchangedSince(db, input))) return false;
 		const active = await activeConnectionId(db);
 		const state = await db.syncState.get(active);
-		if (state === undefined || input.accountId === null || input.accountId === undefined) {
-			return true;
-		}
-		await db.syncState.put({ ...state, provider: input.provider, accountId: input.accountId });
+		const known = {
+			...(input.accountId === null || input.accountId === undefined
+				? {}
+				: { provider: input.provider, accountId: input.accountId }),
+			...nameOn(input.displayName),
+		};
+		// Nothing bound, or nothing said: no row to write, or nothing to write on it.
+		if (state === undefined || Object.keys(known).length === 0) return true;
+		await db.syncState.put({ ...state, ...known });
 		return true;
 	});
 

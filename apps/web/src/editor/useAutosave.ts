@@ -79,8 +79,13 @@ export interface Autosave<T> {
 	/**
 	 * Flush, and resolve once every edit held at that point has been attempted
 	 * and nothing is still being written — whatever came of it.
+	 *
+	 * Answers what came of it, as the one number that can be said honestly: how
+	 * many notes still have an edit here that the store would not take. Zero is
+	 * "everything typed is in a row"; it is not "every row is as typed", since a
+	 * save may have gone into a conflict copy beside the note instead.
 	 */
-	settle: () => Promise<void>;
+	settle: () => Promise<number>;
 	/**
 	 * The editor has been rebuilt from the stored body — a mode switch. Flushes,
 	 * and ends the sitting. A change of `key` does this by itself.
@@ -309,7 +314,14 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 		return unstored;
 	};
 
-	return { issue, retry, follow, forget, stop };
+	/**
+	 * How many notes have an edit the store refused and nothing newer stands
+	 * for. By note rather than by edit: two sittings' worth held for one note is
+	 * one note the user has to be told about.
+	 */
+	const unstored = (): number => new Set([...failed].map((each) => each.key)).size;
+
+	return { issue, retry, follow, forget, stop, unstored };
 };
 
 export const useAutosave = <T>({
@@ -384,7 +396,7 @@ export const useAutosave = <T>({
 		again.current = flush;
 	}, [flush]);
 
-	const settle = useCallback(() => round(true), [round]);
+	const settle = useCallback(() => round(true).then(held.unstored), [held, round]);
 
 	const rebased = useCallback(() => {
 		flush();

@@ -18,6 +18,7 @@ import {
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 
@@ -252,9 +253,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const intervalMs = options.intervalMs ?? 60_000;
 	const backoffMs = options.backoffMs ?? 5000;
 	const maxBackoffMs = options.maxBackoffMs ?? 5 * 60_000;
-	// Enough that an outage has to outlast the backoff's climb to its cap —
-	// about ten minutes of failures in a row — before an op is given up on.
-	const maxAttempts = options.maxAttempts ?? 8;
+	const maxAttempts = options.maxAttempts ?? MAX_OP_ATTEMPTS;
 	const blockedRetryMs = options.blockedRetryMs ?? 15 * 60_000;
 
 	const current = new Map<'session', Session>();
@@ -422,7 +421,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const failing = await db.opQueue
 			.where('connectionId')
 			.equals(connectionId)
-			.filter((op) => op.attempts >= maxAttempts)
+			.filter((op) => outOfAttempts(op, maxAttempts))
 			.toArray();
 		const first = [...failing].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).at(0);
 		if (first === undefined) return undefined;

@@ -1,5 +1,7 @@
 import type Dexie from 'dexie';
 
+import { flushEditors } from './heldEdits.js';
+
 /**
  * What to do when a newer build, in another tab, asks for the database.
  *
@@ -36,7 +38,6 @@ export const WAITING_NOTICE_MS = 1000;
 
 const tab: { current: TabState } = { current: 'current' };
 const listeners = new Set<() => void>();
-const unfinished = new Set<() => Promise<unknown>>();
 
 const publish = (next: TabState) => {
 	// Out of date is for good: the connection is closed and will not reopen.
@@ -57,17 +58,6 @@ export const subscribeTabState = (listener: () => void): (() => void) => {
 };
 
 /**
- * Register work to be finished before the connection closes for good — an
- * editor's held edits. It should resolve whether or not the work succeeded.
- */
-export const beforeClosing = (finish: () => Promise<unknown>): (() => void) => {
-	unfinished.add(finish);
-	return () => {
-		unfinished.delete(finish);
-	};
-};
-
-/**
  * `wait` is for the event: the upgrade has not happened yet, and is held up
  * until this tab closes, so what an editor holds can still go into the schema
  * it was written for. Found out on opening, the newer schema is already live,
@@ -75,12 +65,10 @@ export const beforeClosing = (finish: () => Promise<unknown>): (() => void) => {
  */
 const retire = (db: Dexie, wait: boolean) => {
 	publish('stale');
-	const work = (wait ? [...unfinished] : []).map((finish) =>
-		// Inside the executor, so a `finish` that throws is one that settled.
-		new Promise((resolve) => {
-			resolve(finish());
-		}).catch(() => undefined)
-	);
+	// What the editors hold (`beforeClosing` in `store/heldEdits.ts`), started
+	// now. How it went is not asked: the tab is closing either way, and the
+	// gate says what to do about text that did not make it.
+	const work = wait ? flushEditors() : [];
 	// With nothing to wait for, close before the event returns: the upgrade is
 	// then never reported as blocked at all.
 	if (work.length === 0) {
