@@ -761,16 +761,21 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		// search is still worth running wider, so `SOAK_SEEDS` widens it —
 		// `SOAK_SEEDS=600 pnpm --filter @skysa/web exec vitest run tests/soak`
 		// — and what a wider run has already found is written down in
-		// docs/PLAN.md §7 rather than left for the next person to rediscover:
-		// seeds 318 and 578 fail every time, and 253, 302, 461 and 597 fail
-		// sometimes. None of them is a lost note: all are one browser left
-		// holding a conflict copy whose `updated:` line differs from the copy
-		// the remote and the other browser agree on.
+		// docs/PLAN.md §7 rather than left for the next person to rediscover.
 		const SEEDS = Number(process.env.SOAK_SEEDS ?? '40');
 		it.each(Array.from({ length: SEEDS }, (__, seed) => seed + 1))(
 			'lose nothing and agree, seed %i',
 			run
 		);
+
+		// What the wider run found and nothing has fixed yet (issue #74). No note
+		// is lost: one browser is left clean and holding a body without an edit
+		// the remote and the other browser have, so it shows old text until the
+		// file next changes. Held here as failing so that CI says so the day it
+		// stops — fixed, or moved by a change to what the seed draws — and the
+		// line comes out either way. Outside the forty above; a wider run meets
+		// it twice, once there and once here.
+		it.fails('leaves one browser holding a stale body, seed 578', () => run(578));
 	});
 });
 
