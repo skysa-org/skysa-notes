@@ -14,6 +14,7 @@ import {
 	type SyncNote,
 	type SyncOp,
 	type SyncStore,
+	type UnreadableFile,
 } from '@skysa/core';
 import Dexie from 'dexie';
 
@@ -337,6 +338,31 @@ export const createDexieSyncStore = (
 		await queue(scope, { op: 'write', noteId: resolution.copyId, path: resolution.copyPath });
 	};
 
+	/**
+	 * Rewrite the list of files that could not be read (`SyncStateRecord`). The
+	 * row is there: `inTransaction` has just read it. Left alone when nothing
+	 * changes, which is nearly always — every folder move and delete comes
+	 * through here, and the panel is watching the row.
+	 */
+	const relist = async (
+		scope: Scope,
+		change: (files: readonly UnreadableFile[]) => UnreadableFile[]
+	): Promise<void> => {
+		const state = await scope.syncState.get(connectionId);
+		if (state === undefined) return;
+		const { unreadable: before = [], ...rest } = state;
+		const after = change(before);
+		const same =
+			after.length === before.length &&
+			after.every(
+				(file, at) =>
+					file.remoteId === before[at]?.remoteId && file.path === before[at].path
+			);
+		if (same) return;
+		// Absent rather than empty, as the row was before it ever had one.
+		await scope.syncState.put(after.length === 0 ? rest : { ...rest, unreadable: after });
+	};
+
 	const moveFolder = async (scope: Scope, from: string, to: string, remoteId?: string) => {
 		const folders = (await foldersOf(scope)).filter((folder) => isWithin(folder.path, from));
 		await scope.folders.bulkDelete(folders.map((folder) => [connectionId, folder.path]));
@@ -372,6 +398,16 @@ export const createDexieSyncStore = (
 						? { targetPath: rebasePath(op.targetPath, from, to) }
 						: {}),
 				}))
+		);
+
+		// And the files listed as unreadable: an id-only feed says the folder
+		// moved and nothing about what is in it.
+		await relist(scope, (files) =>
+			files.map((file) =>
+				isWithin(file.path, from)
+					? { ...file, path: rebasePath(file.path, from, to) }
+					: file
+			)
 		);
 	};
 
@@ -418,6 +454,9 @@ export const createDexieSyncStore = (
 	): Promise<void> => {
 		// The app folder is not a notebook, and every path is within it.
 		if (normalizePath(path) === ROOT) return;
+		// Before asking whether the folder is one we hold: the unreadable files
+		// under it are gone with it either way.
+		await relist(scope, (files) => files.filter((file) => !isWithin(file.path, path)));
 		if ((await scope.folders.get([connectionId, path])) === undefined) return;
 
 		const folders = (await foldersOf(scope)).filter((folder) => isWithin(folder.path, path));
@@ -610,6 +649,22 @@ export const createDexieSyncStore = (
 			case 'delete-folder':
 				await deleteFolder(scope, change.path, change.keep, change.was);
 				return;
+			// One record per file: a second for the same id is the file renamed.
+			case 'unreadable':
+				await relist(scope, (files) => {
+					const { remoteId, path } = change.file;
+					return files.some((file) => file.remoteId === remoteId)
+						? files.map((file) =>
+								file.remoteId === remoteId ? { remoteId, path } : file
+							)
+						: [...files, { remoteId, path }];
+				});
+				return;
+			case 'forget-unreadable':
+				await relist(scope, (files) =>
+					files.filter((file) => file.remoteId !== change.remoteId)
+				);
+				return;
 			case 'conflict':
 				await applyConflict(scope, change.resolution, hashes);
 				return;
@@ -757,6 +812,8 @@ export const createDexieSyncStore = (
 			(await foldersOf(db))
 				.filter((folder) => folder.remoteId !== undefined)
 				.map(toSyncFolder),
+
+		unreadable: async () => (await db.syncState.get(connectionId))?.unreadable ?? [],
 
 		applyPull: async (batch: PullBatch) => {
 			const hashes = await digestAll(contentsOf(batch.changes));

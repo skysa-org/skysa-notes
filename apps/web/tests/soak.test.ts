@@ -633,6 +633,39 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		expect(files['schedule.md']).toContain('from b');
 	});
 
+	it('says which file it is not showing while another tool has it as Latin-1, and reads it once it is UTF-8 again', async () => {
+		// §7, "A file that is not UTF-8 is left alone": the note goes from both
+		// browsers with its file untouched, and the list on the connection's row
+		// is the only thing that says so. `quiet` rather than `converged` while
+		// the file cannot be read: that one asks for every remote file as a
+		// note, which is the one thing these browsers must not make of it.
+		const { remote, a, b } = await setUp(make);
+		const path = await shared(remote, a, b, 'Plans', 'base\n');
+		const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+		const listed = async (each: Browser): Promise<string[]> =>
+			((await each.db.syncState.get(ACCOUNT.connectionId))?.unreadable ?? []).map(
+				(file) => file.path
+			);
+
+		remote.backing.writeBytes(path, latin1);
+		await quiet(remote, a, b);
+
+		expect(await localFiles(a)).toEqual({});
+		expect(await localFiles(b)).toEqual({});
+		expect(await listed(a)).toEqual([path]);
+		expect(await listed(b)).toEqual([path]);
+		expect(remote.backing.bytesAt(path)).toEqual(latin1);
+
+		const file = remote.backing.snapshot().find((entry) => entry.path === path);
+		if (file === undefined) throw new Error(`nothing on the remote at ${path}`);
+		await remote.backing.write(path, 'saved as UTF-8\n', { expectedVersion: file.version });
+
+		const files = await converged(remote, a, b);
+		expect(files).toEqual({ [path]: 'saved as UTF-8\n' });
+		expect(await listed(a)).toEqual([]);
+		expect(await listed(b)).toEqual([]);
+	});
+
 	it('treats a rename made here as the edit it also is', async () => {
 		// Every writer that moves a note goes through `applyEdit`, which marks
 		// it dirty, rewrites its `updated` line and queues a write — and

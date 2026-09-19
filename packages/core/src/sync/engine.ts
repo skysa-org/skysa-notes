@@ -42,6 +42,7 @@ import type {
 	SyncNote,
 	SyncOp,
 	SyncStore,
+	UnreadableFile,
 } from './store.js';
 
 /**
@@ -883,7 +884,49 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return here === undefined ? {} : { note: here };
 	};
 
+	/**
+	 * An unreadable file that a deletion is about stops being listed. By its id
+	 * where the deletion has one; Dropbox's has a path and nothing else, and
+	 * then by that.
+	 *
+	 * Whatever else the deletion turns out to mean. If it is half of a move,
+	 * the other half is an entry for the file, which is read again and listed
+	 * again at its new path — behind this in the round, after it; in front, the
+	 * record already names the new path and a deletion by path finds nothing.
+	 *
+	 * The file itself and nothing under the path. A folder's deletion by path
+	 * may be half of a *folder's* move, whose other half need not list what is
+	 * inside it, and then the files under it are carried along, not forgotten
+	 * (`move-folder`). Whether it is takes everything `decideDeletedRow` knows,
+	 * so that is where the files under a folder really gone are let go of.
+	 */
+	const forgetDeleted = (
+		{ path, remoteId }: DeletedEntry,
+		batch: Batch,
+		decided: readonly PullChange[]
+	): PullChange[] =>
+		forgetUnread(batch, decided, (id, at) =>
+			remoteId === undefined ? at === path : id === remoteId
+		);
+
 	const decideDeleted = async (
+		entry: DeletedEntry,
+		batch: Batch,
+		decided: readonly PullChange[],
+		at: number
+	): Promise<PullChange[]> => {
+		// The app folder itself. An adapter that reports an empty path by mistake
+		// would otherwise wipe every note on the device, and a folder the user
+		// really did delete out from under us is not something to act on
+		// silently either — the connection is what is broken, not the notes.
+		if (entry.path !== undefined && normalizePath(entry.path) === ROOT) return [];
+		return [
+			...forgetDeleted(entry, batch, decided),
+			...(await decideDeletedRow(entry, batch, decided, at)),
+		];
+	};
+
+	const decideDeletedRow = async (
 		entry: DeletedEntry,
 		batch: Batch,
 		decided: readonly PullChange[],
@@ -891,11 +934,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<PullChange[]> => {
 		const { path, remoteId } = entry;
 		const { live } = batch;
-		// The app folder itself. An adapter that reports an empty path by mistake
-		// would otherwise wipe every note on the device, and a folder the user
-		// really did delete out from under us is not something to act on
-		// silently either — the connection is what is broken, not the notes.
-		if (path !== undefined && normalizePath(path) === ROOT) return [];
 
 		// A deletion names a path, so unlike an entry it does have to be matched
 		// by path when it carries no id: that is the only thing it has. When it
@@ -974,7 +1012,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// parent — because a second delete of a row that is already gone is an
 		// error the store records.
 		const gone = await doomedFolder(path, remoteId, decided, batch, at);
-		return gone === undefined ? [] : deleteFolderAfterRescue(gone, decided, batch, at);
+		if (gone !== undefined) return deleteFolderAfterRescue(gone, decided, batch, at);
+		// No folder of ours, so no `delete-folder` to take the unreadable files
+		// listed under the path with it — and a deletion that names only a path
+		// is the only word there will be about them. Not a move: a folder the
+		// batch says is alive elsewhere was answered above. With an id, the
+		// deletion is of that one thing, and a file's was forgotten by it.
+		if (remoteId !== undefined || path === undefined) return [];
+		return forgetUnread(batch, decided, (_id, file) => file !== path && isWithin(file, path));
 	};
 
 	/**
@@ -1125,6 +1170,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		removing: ReadonlyMap<string, string>;
 		/** A full scan, which reports what exists and never what was removed. */
 		scanning: boolean;
+		/**
+		 * The files the store lists as unreadable, `remoteId` to path, as the
+		 * batch found them (`unreadNow` for where they stand mid-batch). Read so
+		 * that only a change to the list is emitted, and for nothing else: no
+		 * decision about a note or a file may rest on it (`UnreadableFile`).
+		 */
+		unread: ReadonlyMap<string, string>;
 		/** The batch's entries, in order, as the decisions index them. */
 		entries: readonly ChangeEntry[];
 		/**
@@ -1146,6 +1198,58 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			)
 		),
 	});
+
+	const unreadMap = (files: readonly UnreadableFile[]): ReadonlyMap<string, string> =>
+		new Map(files.map((file) => [file.remoteId, file.path]));
+
+	/**
+	 * The unreadable files the store will be listing once the decisions so far
+	 * have been applied. The same replay `placement` is for notes, and what the
+	 * stores do with each kind: a record replaces the one with its id, a folder
+	 * move carries the paths under it along, a folder's deletion takes them.
+	 *
+	 * What it buys is a round that says two things about one file. Dropbox tells
+	 * a move as a deletion and an entry, in either order: the deletion forgets
+	 * the file at its old path, and the entry behind it has to see that it is
+	 * forgotten, or it takes the record for a repeat and says nothing.
+	 */
+	const unreadNow = (
+		unread: ReadonlyMap<string, string>,
+		decided: readonly PullChange[]
+	): ReadonlyMap<string, string> =>
+		decided.reduce((files, change) => {
+			if (change.kind === 'unreadable') {
+				return new Map([...files, [change.file.remoteId, change.file.path]]);
+			}
+			if (files.size === 0) return files;
+			if (change.kind === 'forget-unreadable') {
+				return new Map([...files].filter(([remoteId]) => remoteId !== change.remoteId));
+			}
+			if (change.kind === 'move-folder') {
+				return new Map(
+					[...files].map(([remoteId, path]) => [
+						remoteId,
+						isWithin(path, change.from)
+							? rebasePath(path, change.from, change.to)
+							: path,
+					])
+				);
+			}
+			if (change.kind === 'delete-folder') {
+				return new Map([...files].filter(([, path]) => !isWithin(path, change.path)));
+			}
+			return files;
+		}, unread);
+
+	/** Stop listing every unreadable file `gone` is true of. */
+	const forgetUnread = (
+		batch: Batch,
+		decided: readonly PullChange[],
+		gone: (remoteId: string, path: string) => boolean
+	): PullChange[] =>
+		[...unreadNow(batch.unread, decided)].flatMap(([remoteId, path]): PullChange[] =>
+			gone(remoteId, path) ? [{ kind: 'forget-unreadable', remoteId }] : []
+		);
 
 	/**
 	 * A different folder of ours sitting where this one is about to land, which
@@ -1751,13 +1855,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * Never a throw. A pull that throws does not move its cursor, the next one
 	 * fetches the same entry and reads the same bytes, and one Latin-1 file has
 	 * stopped the user's sync for good.
+	 *
+	 * And it is said (`UnreadableFile`): a clean note that goes this way leaves
+	 * the device without a word otherwise. Only when there is something new to
+	 * say. With no row to hold its version the file is read on every mention,
+	 * and a record for each would have `pulled` count a change every time the
+	 * feed named the file again. So: a file not yet listed, one listed at
+	 * another path (renamed, and still unreadable), or one that has just taken
+	 * a note's name — that note's new path rides along as `copyPath`, which is
+	 * what reports it as a conflict. Any other file listed at this path is not
+	 * at it any more: a tool that saves by deleting and writing again gives the
+	 * file a new id, and not every feed mentions the old one going.
 	 */
 	const leaveUnread = async (
 		local: SyncNote | undefined,
 		removed: boolean,
 		entry: RemoteEntry,
 		decided: readonly PullChange[],
-		claimed: ReadonlySet<string>
+		batch: Batch
 	): Promise<PullChange[]> => {
 		const letGo =
 			local !== undefined && !removed && local.remoteId !== undefined
@@ -1767,10 +1882,47 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			entry.path,
 			undefined,
 			[...decided, ...letGo],
-			claimed
+			batch.claimed
 		);
-		return [...letGo, ...aside];
+		const copyPath = aside.flatMap((change) =>
+			change.kind === 'displace-note' ? [change.path] : []
+		)[0];
+		const replaced = forgetUnread(
+			batch,
+			decided,
+			(remoteId, path) => path === entry.path && remoteId !== entry.remoteId
+		);
+		const listed = unreadNow(batch.unread, decided).get(entry.remoteId) === entry.path;
+		const record: PullChange[] =
+			listed && copyPath === undefined
+				? []
+				: [
+						{
+							kind: 'unreadable',
+							file: { remoteId: entry.remoteId, path: entry.path },
+							...(copyPath === undefined ? {} : { copyPath }),
+						},
+					];
+		return [...letGo, ...aside, ...replaced, ...record];
 	};
+
+	/**
+	 * A file that reads, at this path and under this id, is not an unreadable
+	 * one: whatever is listed under either stops being. The id is the file
+	 * fixed in place. The path is the file fixed by a tool that saves by
+	 * writing a new one over the old name — a new id, and on some feeds no word
+	 * of the old one going.
+	 */
+	const forgetRead = (
+		entry: RemoteEntry,
+		batch: Batch,
+		decided: readonly PullChange[]
+	): PullChange[] =>
+		forgetUnread(
+			batch,
+			decided,
+			(remoteId, path) => remoteId === entry.remoteId || path === entry.path
+		);
 
 	/**
 	 * A note never pushed has no file to be matched by, only a path, and the
@@ -1802,6 +1954,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// what is left is to write it back, under the id it already had, so the
 		// user keeps one note rather than watching one vanish and another appear.
 		const removed = local !== undefined && removedInBatch(local, decided);
+		// For every way out of here but the two where the file was not read. A
+		// version this device already holds is a file it has read.
+		const cleared = forgetRead(entry, batch, decided);
 
 		// Whatever we decide below puts a note at `entry.path`, so anything of
 		// ours already there has to move first — in that order, or the store is
@@ -1817,16 +1972,21 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// it at its old path — which is exactly where a file moved back onto
 			// that name says it is. Read off the row, that is "nothing happened",
 			// and the note ends up under the folder's new name with its file here.
-			if (whereNow(local, decided) === entry.path) return [];
+			if (whereNow(local, decided) === entry.path) return cleared;
 			// The file's bytes have not moved either, so the hash the note holds
 			// still describes them. Passed rather than left to the store to keep,
 			// because a `detach-note` or deleted folder earlier in this batch has
 			// already dropped it from the row this re-binds.
 			const kept = local.syncedHash === undefined ? {} : { syncedHash: local.syncedHash };
 			if (renaming.has(local.id)) {
-				return [...room, { kind: 'adopt-version', id: local.id, remote: entry, ...kept }];
+				return [
+					...cleared,
+					...room,
+					{ kind: 'adopt-version', id: local.id, remote: entry, ...kept },
+				];
 			}
 			return [
+				...cleared,
 				...room,
 				{ kind: 'move-note', id: local.id, path: entry.path, remote: entry, ...kept },
 			];
@@ -1847,8 +2007,19 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isUnreadableError(error)) return 'unreadable' as const;
 			throw error;
 		});
-		if (found === 'gone') return goneBeforeRead(local, entry, decided);
-		if (found === 'unreadable') return leaveUnread(local, removed, entry, decided, claimed);
+		// Gone, and so not an unreadable file either, if it was listed as one. A
+		// file moved into a folder that was then deleted is told, on a feed that
+		// reports folders alone, as this entry and the folder's deletion: no
+		// deletion of its own will come, and the folder's finds the record at
+		// the path the file had before. If it has only moved on again, its next
+		// entry is read and lists it again.
+		if (found === 'gone') {
+			return [
+				...forgetUnread(batch, decided, (remoteId) => remoteId === entry.remoteId),
+				...goneBeforeRead(local, entry, decided),
+			];
+		}
+		if (found === 'unreadable') return leaveUnread(local, removed, entry, decided, batch);
 		const { content } = found;
 		const stranger = local !== undefined && !removed && isStranger(local, content);
 		if (local === undefined || stranger) {
@@ -1856,6 +2027,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				? await displaceOccupant(entry.path, undefined, decided, claimed)
 				: room;
 			return [
+				...cleared,
 				...aside,
 				{
 					kind: 'upsert-note',
@@ -1869,6 +2041,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 		if (removed) {
 			return [
+				...cleared,
 				...room,
 				{
 					kind: 'upsert-note',
@@ -1880,7 +2053,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				},
 			];
 		}
-		return [...room, ...(await decideKnown(local, found, entry, claimed, after, renaming))];
+		return [
+			...cleared,
+			...room,
+			...(await decideKnown(local, found, entry, claimed, after, renaming)),
+		];
 	};
 
 	const decide = async (
@@ -1895,7 +2072,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (entry.path !== undefined && isHidden(entry.path)) return [];
 			return decideDeleted(entry, batch, decided, at);
 		}
-		if (isHidden(entry.path)) return [];
+		// Nothing the app shows, and so nothing it lists as unreadable either: a
+		// file renamed out of sight, or (below) to something that is not a note,
+		// is no longer a note the user is missing.
+		const unlisted = (): PullChange[] =>
+			forgetUnread(batch, decided, (remoteId) => remoteId === entry.remoteId);
+		if (isHidden(entry.path)) return unlisted();
 		if (entry.kind === 'folder') return decideFolder(entry, decided, batch, at);
 
 		// A file that is not a note. The app owns the folder but does not own
@@ -1906,7 +2088,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// Windows tool is a markdown file, and a gate that says otherwise means
 		// the fold in `conflictFilename` below can never be reached by anything
 		// the engine actually pulls.
-		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) return [];
+		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) return unlisted();
 		return decideFile(entry, decided, batch);
 	};
 
@@ -2067,10 +2249,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const decideAll = async (
 		reported: readonly ChangeEntry[],
 		scanning: boolean,
-		asked?: readonly SyncOp[]
+		asked?: readonly SyncOp[],
+		/** The same for the unreadable files listed, which `reconcile` prunes. */
+		listed?: ReadonlyMap<string, string>
 	): Promise<PullChange[]> => {
 		const entries = deduped(reported);
 		const queue = asked ?? (await store.pendingOps());
+		const unread = listed ?? unreadMap(await store.unreadable());
 
 		const renaming = renamesQueued(queue);
 		const batch: Batch = {
@@ -2091,6 +2276,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				)
 			),
 			scanning,
+			unread,
 			entries,
 			deciding: new Set(),
 		};
@@ -2172,7 +2358,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		 * them gone. Nothing is deleted: every note and notebook it did not
 		 * return is sent back up instead (§7, "A rescan that uploads").
 		 */
-		upload = false
+		upload = false,
+		/** The unreadable files listed when this page of the scan began. */
+		unread: ReadonlyMap<string, string> = new Map()
 	): Promise<PullChange[]> => {
 		const kept = { notes: decidedNotes(changes), folders: reestablished(changes).folders };
 		// Folders the batch has just put a note into. Deleting one cascades over
@@ -2263,15 +2451,33 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const removals = await Promise.all(
 			cascades.map(({ at, was }) => cascadeOver(at, was, renaming, changes))
 		);
-		const tail = [...forgotten, ...removals];
+		// And an unreadable file the scan did not return is not there to be
+		// listed. Those it did return it read again, and said what it found.
+		// This is the whole of what a rescan does to the list: nothing clears it
+		// when the scan starts, so an interrupted one leaves the notice standing
+		// rather than blank. Not on a scan that may be missing things, above —
+		// not seen there does not mean gone.
+		const unlisted = [...unreadNow(unread, changes).keys()]
+			.filter((remoteId) => !seen.has(remoteId))
+			.map((remoteId): PullChange => ({ kind: 'forget-unreadable', remoteId }));
+		const tail = [...forgotten, ...removals, ...unlisted];
 		const paths = cascades.map(({ at }) => at);
 		return [...tail, ...(await roofsFor(paths, [...changes, ...tail]))];
 	};
 
+	/**
+	 * Where the user's writing went when it could not keep its name: a
+	 * conflict's copy, and a note moved aside for a file that cannot be read —
+	 * which, unlike any other file that takes a note's name, is not there in
+	 * the list to explain it.
+	 */
 	const conflictPathsIn = (changes: readonly PullChange[]): string[] =>
-		changes.flatMap((change) =>
-			change.kind === 'conflict' ? [change.resolution.copyPath] : []
-		);
+		changes.flatMap((change) => {
+			if (change.kind === 'conflict') return [change.resolution.copyPath];
+			return change.kind === 'unreadable' && change.copyPath !== undefined
+				? [change.copyPath]
+				: [];
+		});
 
 	interface PullProgress {
 		pulled: number;
@@ -2325,7 +2531,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): Promise<SyncOutcome> => {
 		const set = await provider.changes(cursor);
 		const queue = await store.pendingOps();
-		const changes = await decideAll(set.entries, true, queue);
+		const unread = unreadMap(await store.unreadable());
+		const changes = await decideAll(set.entries, true, queue, unread);
 		const seen = new Set([
 			...progress.seen,
 			...set.entries.flatMap((entry) =>
@@ -2335,7 +2542,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		// A scan is one logical batch: its pages carry no cursor, and the last
 		// one carries both the cursor and whatever the scan proved was deleted.
-		const tail = set.more ? [] : await reconcile(seen, changes, renamesQueued(queue), upload);
+		const tail = set.more
+			? []
+			: await reconcile(seen, changes, renamesQueued(queue), upload, unread);
 		const batch = [...changes, ...tail];
 		await store.applyPull({ changes: batch, ...(set.more ? {} : { cursor: set.cursor }) });
 
@@ -2889,11 +3098,17 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * two then leaves an unbound, dirty note with its write still queued, which
 	 * the next push simply sends. The other order leaves a file on the remote
 	 * that no row knows of, and the retry makes a second one beside it.
+	 *
+	 * `unread` is the file, where the caller knows which it is and where: it is
+	 * listed in the same step as the note moves aside for it
+	 * (`UnreadableFile`), rather than whenever the next pull reads it. Not on
+	 * the way round again for a name that was taken — it has been said.
 	 */
 	const setAside = async (
 		op: SyncOp,
 		note: SyncNote,
-		taken: readonly string[] = []
+		taken: readonly string[] = [],
+		unread?: UnreadableFile
 	): Promise<Settled> => {
 		const path = await freeNotePath(note.path, taken);
 		await store.applyPull({
@@ -2902,6 +3117,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					? []
 					: [{ kind: 'detach-note' as const, id: note.id }]),
 				{ kind: 'displace-note', id: note.id, path },
+				...(unread === undefined ? [] : [{ kind: 'unreadable' as const, file: unread }]),
 			],
 		});
 		const entry = await write({ ...note, path }, undefined).catch((error: unknown) => {
@@ -2931,6 +3147,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * `followTheRename` moved it and could not read what it had moved. Either
 	 * way the unreadable file is the note's own. Only a write gets here — a
 	 * move's reads are probes, which take unreadable for there.
+	 *
+	 * Not listed from here. The error says which file by the note's id and
+	 * nothing of where it is: `runWrite` got here because it is *not* at the
+	 * note's path. The file's own entry is on its way, its bytes having
+	 * changed, and with no row bound to it by then the pull reads it and lists
+	 * it where it is.
 	 */
 	const setAsideForOp = async (op: SyncOp): Promise<Settled | undefined> => {
 		const note =
@@ -2973,13 +3195,19 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		 * still bound, it would be set aside again (`setAsideForOp`) and the user
 		 * handed a note with two conflict names.
 		 */
-		const stepAside = async (own: 'there' | 'gone' | 'unreadable'): Promise<undefined> => {
+		const stepAside = async (
+			own: 'there' | 'gone' | 'unreadable',
+			unread?: UnreadableFile
+		): Promise<undefined> => {
 			await store.applyPull({
 				changes: [
 					...(own === 'unreadable'
 						? [{ kind: 'detach-note' as const, id: note.id }]
 						: []),
 					{ kind: 'displace-note', id: note.id, path: await freeNotePath(note.path) },
+					...(unread === undefined
+						? []
+						: [{ kind: 'unreadable' as const, file: unread }]),
 				],
 			});
 			return undefined;
@@ -2995,9 +3223,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isUnreadableError(error)) return undefined;
 			throw error;
 		});
+		// Which file, and where, the conflict itself has said, so it is listed
+		// as the note moves (`UnreadableFile`). The note's *own* file turning
+		// out unreadable, here or below, is not: it was asked after by id, and
+		// where it is nobody has said. The next pull reads it and lists it.
 		if (read === undefined) {
 			const own = await ownFile();
-			return own === 'gone' ? setAside(op, note) : stepAside(own);
+			const unread = { remoteId: remote.remoteId, path: remote.path };
+			return own === 'gone' ? setAside(op, note, [], unread) : stepAside(own, unread);
 		}
 		const { content, version: readAt } = read;
 

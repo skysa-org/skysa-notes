@@ -9,6 +9,7 @@ import type {
 	SyncNote,
 	SyncOp,
 	SyncStore,
+	UnreadableFile,
 } from '../../src/sync/store.js';
 
 /**
@@ -51,6 +52,8 @@ export const createMemoryStore = (): MemoryStore => {
 	const notes = new Map<string, SyncNote>();
 	const folders = new Map<string, SyncFolder>();
 	const ops = new Map<number, SyncOp & { lastError?: string }>();
+	/** By `remoteId`, which is what makes a second record for a file a rename. */
+	const unreadable = new Map<string, UnreadableFile>();
 	const state = new Map<'cursor', string>();
 	const counters = new Map<'seq', number>();
 	const flags = new Map<'break', boolean>();
@@ -254,7 +257,36 @@ export const createMemoryStore = (): MemoryStore => {
 		queue({ op: 'mkdir', path });
 	};
 
+	type ListChange = Extract<PullChange, { kind: 'unreadable' | 'forget-unreadable' }>;
+
+	/**
+	 * The list of files that could not be read, which no row has anything to do
+	 * with: the two changes that are about it, and the one about rows that it
+	 * has to hear of as well.
+	 */
 	const applyChange = (change: PullChange): void => {
+		if (change.kind === 'unreadable') {
+			unreadable.set(change.file.remoteId, change.file);
+			return;
+		}
+		// No anomaly for an id that is not listed, unlike the other no-ops here:
+		// the engine reads the list once for a batch, and a push may list a file
+		// after that, so forgetting one it never saw listed is not a mistake.
+		if (change.kind === 'forget-unreadable') {
+			unreadable.delete(change.remoteId);
+			return;
+		}
+		// Whether or not the folder is one we hold: the files under it are gone
+		// with it either way. Never the root, which every path is within.
+		if (change.kind === 'delete-folder' && normalizePath(change.path) !== ROOT) {
+			[...unreadable.values()]
+				.filter((file) => isWithin(file.path, change.path))
+				.forEach((file) => unreadable.delete(file.remoteId));
+		}
+		applyRowChange(change);
+	};
+
+	const applyRowChange = (change: Exclude<PullChange, ListChange>): void => {
 		if (change.kind === 'upsert-note') {
 			upsert(change);
 			return;
@@ -395,6 +427,13 @@ export const createMemoryStore = (): MemoryStore => {
 				notes.set(note.id, { ...note, path: rebasePath(note.path, from, to) });
 			}
 		}
+		// The files listed as unreadable too: an id-only feed says the folder
+		// moved and nothing about what is in it.
+		for (const file of [...unreadable.values()]) {
+			if (isWithin(file.path, from)) {
+				unreadable.set(file.remoteId, { ...file, path: rebasePath(file.path, from, to) });
+			}
+		}
 		// And so do the ops that name them, or a queued write would land at a
 		// path that no longer exists.
 		for (const op of [...ops.values()]) {
@@ -452,6 +491,7 @@ export const createMemoryStore = (): MemoryStore => {
 		notes: new Map(notes),
 		folders: new Map(folders),
 		ops: new Map(ops),
+		unreadable: new Map(unreadable),
 		cursor: state.get('cursor'),
 	});
 
@@ -459,6 +499,8 @@ export const createMemoryStore = (): MemoryStore => {
 		notes.clear();
 		folders.clear();
 		ops.clear();
+		unreadable.clear();
+		for (const [key, value] of saved.unreadable) unreadable.set(key, value);
 		for (const [key, value] of saved.notes) notes.set(key, value);
 		for (const [key, value] of saved.folders) folders.set(key, value);
 		for (const [key, value] of saved.ops) ops.set(key, value);
@@ -491,6 +533,7 @@ export const createMemoryStore = (): MemoryStore => {
 			Promise.resolve(
 				[...folders.values()].filter((folder) => folder.remoteId !== undefined)
 			),
+		unreadable: () => Promise.resolve([...unreadable.values()]),
 
 		applyPull: (batch: PullBatch) => {
 			const before = snapshot();

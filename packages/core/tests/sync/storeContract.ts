@@ -1182,6 +1182,257 @@ export const describeSyncStoreContract = (
 			});
 		});
 
+		describe('the files that could not be read', () => {
+			// A notice for the user and nothing more, which is why it is worth
+			// holding to a contract: nothing else would ever notice it was wrong.
+			const listed = async (store: SyncStore): Promise<string[]> =>
+				(await store.unreadable()).map((file) => `${file.remoteId} ${file.path}`).sort();
+
+			/** Fails the batch it is put in: nothing has this id. */
+			const refused = {
+				kind: 'adopt-version',
+				id: 'missing',
+				remote: remote('missing.md', 'r9'),
+			} as const;
+
+			it('is empty for a store that has been told of none', async () => {
+				const { store } = await harness();
+				expect(await store.unreadable()).toEqual([]);
+			});
+
+			it('lists a file with the batch that found it, cursor and all', async () => {
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } }],
+					cursor: 'c1',
+				});
+				expect(await store.unreadable()).toEqual([{ remoteId: 'r1', path: 'a.md' }]);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('lists one with no cursor in the batch, as a scan’s pages and a push have none', async () => {
+				const { store } = await harness();
+				await store.applyPull({ changes: [], cursor: 'c1' });
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } }],
+				});
+				expect(await listed(store)).toEqual(['r1 a.md']);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('stores the file and not what came with it', async () => {
+				// `copyPath` is for the engine's report. The note it names is moved
+				// by the `displace-note` in front of it, not by this.
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{
+							kind: 'unreadable',
+							file: { remoteId: 'r1', path: 'a.md' },
+							copyPath: 'a (conflict).md',
+						},
+					],
+				});
+				expect(await store.unreadable()).toEqual([{ remoteId: 'r1', path: 'a.md' }]);
+				expect(await store.allNotes()).toEqual([]);
+			});
+
+			it('keeps one record per file: the same id again is the file renamed', async () => {
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r2', path: 'b.md' } },
+					],
+				});
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'renamed.md' } }],
+				});
+				expect(await listed(store)).toEqual(['r1 renamed.md', 'r2 b.md']);
+			});
+
+			it('keeps two files at one path apart, since the id is what names a file', async () => {
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r2', path: 'a.md' } },
+					],
+				});
+				expect(await listed(store)).toEqual(['r1 a.md', 'r2 a.md']);
+			});
+
+			it('forgets a file by its id, and only that one', async () => {
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r2', path: 'b.md' } },
+					],
+				});
+				await store.applyPull({
+					changes: [{ kind: 'forget-unreadable', remoteId: 'r1' }],
+					cursor: 'c1',
+				});
+				expect(await listed(store)).toEqual(['r2 b.md']);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('takes a forget for a file it never listed, and the batch with it', async () => {
+				// Same reasoning as the deletes: a batch the store rejects is
+				// retried for ever, since the cursor moves only with it.
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [{ kind: 'forget-unreadable', remoteId: 'never' }],
+					cursor: 'c1',
+				});
+				expect(await store.unreadable()).toEqual([]);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('applies them in the order given', async () => {
+				// A move told as a deletion and then an entry: forgotten, then
+				// listed again where it went.
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } }],
+				});
+				await store.applyPull({
+					changes: [
+						{ kind: 'forget-unreadable', remoteId: 'r1' },
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'b.md' } },
+					],
+				});
+				expect(await listed(store)).toEqual(['r1 b.md']);
+			});
+
+			it('lists nothing from a batch that is refused', async () => {
+				// The list would otherwise name a file from a batch whose cursor
+				// never moved, which the next pull decides all over again.
+				const { store } = await harness();
+				await store.applyPull({ changes: [], cursor: 'c1' });
+
+				await expect(
+					store.applyPull({
+						changes: [
+							{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } },
+							refused,
+						],
+						cursor: 'c2',
+					})
+				).rejects.toThrow();
+
+				expect(await store.unreadable()).toEqual([]);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('forgets nothing in a batch that is refused, and leaves a rebased path where it was', async () => {
+				const { store, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'a.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r2', path: 'Work/b.md' } },
+					],
+					cursor: 'c1',
+				});
+
+				await expect(
+					store.applyPull({
+						changes: [
+							{ kind: 'forget-unreadable', remoteId: 'r1' },
+							{ kind: 'move-folder', from: 'Work', to: 'Archive' },
+							refused,
+						],
+						cursor: 'c2',
+					})
+				).rejects.toThrow();
+
+				expect(await listed(store)).toEqual(['r1 a.md', 'r2 Work/b.md']);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('carries the files under a folder along when it moves, and no others', async () => {
+				// A feed that reports by id says the folder moved and nothing of
+				// what is in it, so nothing else would ever correct these paths.
+				const { store, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seedFolder({ path: 'Work/Old', remoteId: 'f2' });
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'Work/a.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r2', path: 'Work/Old/b.md' } },
+						// A sibling whose name only starts the same way.
+						{ kind: 'unreadable', file: { remoteId: 'r3', path: 'Workshop.md' } },
+					],
+				});
+
+				await store.applyPull({
+					changes: [
+						{ kind: 'move-folder', from: 'Work', to: 'Archive/Work', remoteId: 'f1' },
+					],
+				});
+
+				expect(await listed(store)).toEqual([
+					'r1 Archive/Work/a.md',
+					'r2 Archive/Work/Old/b.md',
+					'r3 Workshop.md',
+				]);
+			});
+
+			it('forgets the files under a folder that is deleted, and no others', async () => {
+				const { store, seedFolder } = await harness();
+				await seedFolder({ path: 'Work', remoteId: 'f1' });
+				await seedFolder({ path: 'Work/Old', remoteId: 'f2' });
+				await store.applyPull({
+					changes: [
+						{ kind: 'unreadable', file: { remoteId: 'r1', path: 'Work/a.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r2', path: 'Work/Old/b.md' } },
+						{ kind: 'unreadable', file: { remoteId: 'r3', path: 'Workshop.md' } },
+					],
+				});
+
+				await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Work' }] });
+
+				expect(await listed(store)).toEqual(['r3 Workshop.md']);
+			});
+
+			it('forgets them under a folder it holds no row for, and takes the batch', async () => {
+				// The files are gone with the directory whether or not this device
+				// ever made a notebook of it.
+				const { store } = await harness();
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'Work/a.md' } }],
+				});
+
+				await store.applyPull({
+					changes: [{ kind: 'delete-folder', path: 'Work' }],
+					cursor: 'c1',
+				});
+
+				expect(await store.unreadable()).toEqual([]);
+				expect(await store.cursor()).toBe('c1');
+			});
+
+			it('leaves every note and folder as it was', async () => {
+				// A record is about a file the store holds no row for. One that
+				// reached for a note at the same path would be reaching for the
+				// user's own, never pushed, which the engine moves aside itself.
+				const { store, seed, seedFolder } = await harness();
+				await seedFolder({ path: 'Work' });
+				await seed({ id: 'n1', path: 'Work/a.md', content: 'mine\n', dirty: true });
+				const before = await store.allNotes();
+
+				await store.applyPull({
+					changes: [{ kind: 'unreadable', file: { remoteId: 'r1', path: 'Work/a.md' } }],
+				});
+				await store.applyPull({ changes: [{ kind: 'forget-unreadable', remoteId: 'r1' }] });
+
+				expect(await store.allNotes()).toEqual(before);
+				expect((await store.folderByPath('Work'))?.path).toBe('Work');
+			});
+		});
+
 		describe('a folder move', () => {
 			it('carries the notes and the queued ops with it', async () => {
 				const { store, seed, seedFolder, seedOp } = await harness();

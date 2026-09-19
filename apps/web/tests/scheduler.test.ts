@@ -983,6 +983,55 @@ describe('failures', () => {
 			expect(h.scheduler.status().phase).toBe('idle');
 		});
 
+		describe('with a file listed as not UTF-8 text', () => {
+			/** "café" as Latin-1: `0xE9` alone is not a UTF-8 sequence. */
+			const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+			/** Synced, with one such file on the remote and listed for the panel. */
+			const listing = async () => {
+				const db = await bound();
+				const h = started(db);
+				await reaches(h.scheduler, 'idle');
+				const file = h.remote.fake.writeBytes('old.md', LATIN1);
+				await h.scheduler.syncNow();
+				const listed = [{ remoteId: file.remoteId, path: 'old.md' }];
+				expect((await db.syncState.get('c1'))?.unreadable).toEqual(listed);
+				return { db, h, file, listed };
+			};
+
+			it('keeps it listed through a re-scan that finds the file still there', async () => {
+				const { db, h, listed } = await listing();
+
+				await h.scheduler.resync();
+
+				expect(h.remote.cursors.at(-1)).toBeUndefined();
+				expect((await db.syncState.get('c1'))?.unreadable).toEqual(listed);
+			});
+
+			it('keeps it listed while the re-scan cannot finish, and lets the scan that does decide', async () => {
+				// Dropping the cursor drops nothing else. A notice blanked when the
+				// scan starts is a notice lost for as long as the device is offline.
+				const { db, h, file, listed } = await listing();
+				await h.remote.fake.delete(file);
+				h.remote.fake.setFault((call) =>
+					call.op === 'changes' ? new Error('offline') : undefined
+				);
+
+				await h.scheduler.resync();
+
+				const waiting = await db.syncState.get('c1');
+				expect(waiting?.cursor).toBeUndefined();
+				expect(waiting?.unreadable).toEqual(listed);
+
+				h.remote.fake.setFault(undefined);
+				await h.scheduler.syncNow();
+
+				const scanned = await db.syncState.get('c1');
+				expect(scanned?.cursor).toBeDefined();
+				expect(scanned?.unreadable).toBeUndefined();
+			});
+		});
+
 		it('does nothing at all with no connection', async () => {
 			const { scheduler, remote: theRemote } = started(freshDatabase());
 

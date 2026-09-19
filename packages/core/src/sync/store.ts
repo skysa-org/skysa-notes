@@ -46,6 +46,21 @@ export interface SyncNote {
 	dirty: boolean;
 }
 
+/**
+ * A file the engine found and could not read as UTF-8 text, and so left alone
+ * (docs/PLAN.md §7). Kept so the app can say which files it is not showing,
+ * and for nothing else: **no decision may rest on this list.** No row holds
+ * such a file's id, so every mention of it in a feed is read again, and a list
+ * that is stale, or lost, costs the user a line of text and never a file.
+ *
+ * Keyed by `remoteId`. The path is where the file was when it was last read,
+ * which is what the user needs to find it by.
+ */
+export interface UnreadableFile {
+	remoteId: string;
+	path: string;
+}
+
 /** A folder as the engine sees it. Only identity and position matter here. */
 export interface SyncFolder {
 	path: string;
@@ -261,6 +276,10 @@ export type PullChange =
 			 * at a folder that no longer exists fails on every attempt. The
 			 * queue is ordered, so that strands every op behind it — for every
 			 * note, not only this one.
+			 *
+			 * And every `UnreadableFile` beneath it, whose path is rebased the
+			 * same way. A feed that reports by id says the folder moved and
+			 * nothing about what is in it, so nothing else would correct them.
 			 */
 			kind: 'move-folder';
 			from: string;
@@ -279,6 +298,10 @@ export type PullChange =
 			 * same reason `delete-note` must: rejecting fails the batch, and
 			 * since the cursor moves only with the batch the user is left with a
 			 * sync that never recovers on its own.
+			 *
+			 * Every `UnreadableFile` beneath the path is forgotten with it,
+			 * whether or not a folder row is there: those files are gone too, and
+			 * an id-only feed mentions the folder alone.
 			 */
 			kind: 'delete-folder';
 			path: string;
@@ -357,6 +380,41 @@ export type PullChange =
 			 */
 			kind: 'reupload-folder';
 			path: string;
+	  }>
+	| Readonly<{
+			/**
+			 * A file is there and is not UTF-8 text, so nothing was imported
+			 * (`UnreadableFile`). Remember it, under its `remoteId`: a second
+			 * record for the same id replaces the first, which is how a rename
+			 * of such a file is told. Committed with the batch and its cursor
+			 * like everything else here, so the list never names a file from a
+			 * batch that did not land.
+			 *
+			 * `file`, and not a `path` and an `id` of its own: the engine asks
+			 * several questions of a batch by shape — which changes put a note
+			 * at a path, which name a note — and this one does neither.
+			 *
+			 * `copyPath` is where a note of the user's was moved aside to because
+			 * this file has its name, when one was. The file cannot be shown, so
+			 * without being told the user finds their note renamed for no reason
+			 * they can see; with it, the pull reports the path as a conflict.
+			 * The store has nothing to do with it: the `displace-note` in front
+			 * of this change is what moves the note.
+			 */
+			kind: 'unreadable';
+			file: UnreadableFile;
+			copyPath?: string;
+	  }>
+	| Readonly<{
+			/**
+			 * The file reads now, or is gone, or is no longer a note: stop
+			 * listing it. An id that is not listed must succeed and do nothing,
+			 * as for `delete-note` — and here it is ordinary too, since the
+			 * engine says this of a file a push recorded after the batch's list
+			 * was read.
+			 */
+			kind: 'forget-unreadable';
+			remoteId: string;
 	  }>
 	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>;
 
@@ -522,6 +580,13 @@ export interface SyncStore {
 	 * never in the scan to begin with and are not candidates.
 	 */
 	readonly foldersWithRemote: () => Promise<SyncFolder[]>;
+	/**
+	 * The files this connection holds that could not be read, one per
+	 * `remoteId`, in no promised order. Written only by `applyPull`. For the
+	 * engine to tell a change from a repeat, and for the app to list: see
+	 * `UnreadableFile` for what it must never be used for.
+	 */
+	readonly unreadable: () => Promise<UnreadableFile[]>;
 
 	/**
 	 * Apply a pull batch and its cursor atomically, **in the order given**.
