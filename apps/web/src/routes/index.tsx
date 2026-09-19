@@ -9,7 +9,7 @@ import { CommandPalette } from '../components/CommandPalette.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
-import { NoteView } from '../components/NoteView.js';
+import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { activeConnectionId, db, type NoteRecord } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
@@ -20,7 +20,7 @@ import {
 	useNoteSearch,
 	useNotesInFolder,
 } from '../store/hooks.js';
-import { createNote, undeleteNote } from '../store/notes.js';
+import { createNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { selectedFolderPath } from '../store/tree.js';
 import {
 	type AppSearch,
@@ -109,6 +109,11 @@ const Home = () => {
 	const folder = selectedFolderPath(tree, folderFromSearch(requestedFolder), looseNoteCount);
 	const notes = useNotesInFolder(folder);
 	const openNote = useNote(noteId);
+	// Read by a continuation that finishes after the user may have moved on.
+	const noteIdRef = useRef(noteId);
+	useEffect(() => {
+		noteIdRef.current = noteId;
+	}, [noteId]);
 
 	/**
 	 * What is in the search field. Component state and not the URL, unlike the
@@ -154,6 +159,8 @@ const Home = () => {
 	const [deleted, setDeleted] = useState<NoteRecord | null>(null);
 	/** The id of a note whose undo failed: its notice waits to be dismissed. */
 	const [undoFailed, setUndoFailed] = useState<string | null>(null);
+	/** Text that goes back beside the deleted note, not into it (`NoteView`). */
+	const [beside, setBeside] = useState<DisplacedText | null>(null);
 	const dismissDeleted = useCallback(() => {
 		setDeleted(null);
 	}, []);
@@ -162,6 +169,14 @@ const Home = () => {
 		if (deleted === null) return;
 		void undeleteNote(db, deleted)
 			.then(async (restored) => {
+				setUndoFailed(null);
+				if (beside !== null) {
+					await saveNoteBody(db, restored.id, beside.body, {
+						origin: beside.origin,
+						note: deleted,
+						displaced: true,
+					});
+				}
 				setDeleted((current) => (current?.id === deleted.id ? null : current));
 				// It goes back to the source it was deleted from, which need not be
 				// the one showing by now: the notice outlives a change of source.
@@ -337,9 +352,12 @@ const Home = () => {
 
 				<NoteView
 					note={openNote}
-					onDeleted={(note) => {
+					onDeleted={(note, displaced) => {
 						setDeleted(note);
-						select({ note: undefined });
+						setBeside(displaced ?? null);
+						// The delete waits for what autosave had out, and the user
+						// may have opened another note by the time it is done.
+						if (noteIdRef.current === note.id) select({ note: undefined });
 					}}
 				/>
 			</div>

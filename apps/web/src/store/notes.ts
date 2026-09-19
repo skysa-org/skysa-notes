@@ -329,6 +329,10 @@ export const saveNoteBody = async (
 			const letGo = base.displaced === true || deletedHere.has(id);
 			return letGo ? base.note : bringBack(db, base, body);
 		}
+		// Here again, by whatever road — a pull re-creating a file another device
+		// restored, under the id it names. It is no longer the note deleted from
+		// this tab, and an edit to it that finds it gone later is kept.
+		if (current.deletedLocally === 0) deletedHere.delete(id);
 		// A tombstone keeps the edit and stays deleted, as it always has: the
 		// delete wins (§7), and restoring it brings the edit back with it.
 		// A displaced one is not: the tombstone holds the later text, which is

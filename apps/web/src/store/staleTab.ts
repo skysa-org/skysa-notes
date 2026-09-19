@@ -67,9 +67,15 @@ export const beforeClosing = (finish: () => Promise<unknown>): (() => void) => {
 	};
 };
 
-const retire = (db: Dexie) => {
+/**
+ * `wait` is for the event: the upgrade has not happened yet, and is held up
+ * until this tab closes, so what an editor holds can still go into the schema
+ * it was written for. Found out on opening, the newer schema is already live,
+ * and anything written now is old code writing into it — so nothing is.
+ */
+const retire = (db: Dexie, wait: boolean) => {
 	publish('stale');
-	const work = [...unfinished].map((finish) =>
+	const work = (wait ? [...unfinished] : []).map((finish) =>
 		// Inside the executor, so a `finish` that throws is one that settled.
 		new Promise((resolve) => {
 			resolve(finish());
@@ -107,7 +113,7 @@ export const watchForNewerTab = (db: Dexie): void => {
 		// so by having no new version. Dexie's own handler is left to it: closed,
 		// and opened again, empty, when next asked.
 		if (event.newVersion === null) return undefined;
-		retire(db);
+		retire(db, true);
 		// Stops the chain before Dexie's own handler, which closes with auto-open
 		// left on.
 		return false;
@@ -131,7 +137,7 @@ export const watchForNewerTab = (db: Dexie): void => {
 			// an error (it retries a `VersionError` with no version at all). Every
 			// route back in comes through here, so here is where it is asked.
 			if (upgradedElsewhere(db)) {
-				retire(db);
+				retire(db, false);
 				return;
 			}
 			publish('current');

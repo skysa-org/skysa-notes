@@ -7,6 +7,9 @@ import { useEffect, useRef, useState } from 'react';
  */
 export const UNDO_WINDOW_MS = 10_000;
 
+/** How soon after a touch a `mouseenter` is the touch's own, and not a mouse. */
+const TOUCH_ECHO_MS = 1000;
+
 export interface DeletedNoticeProps {
 	title: string;
 	onUndo: () => void;
@@ -35,7 +38,7 @@ export interface DeletedNoticeProps {
 export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: DeletedNoticeProps) => {
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
-	const touched = useRef(false);
+	const touchedAt = useRef(0);
 	const held = keep || hovered || focused;
 	useEffect(() => {
 		if (held) return undefined;
@@ -50,10 +53,12 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 			className="update-prompt deleted-notice"
 			role="status"
 			onTouchStart={() => {
-				touched.current = true;
+				touchedAt.current = Date.now();
 			}}
 			onMouseEnter={() => {
-				if (!touched.current) setHovered(true);
+				// The one a touch sends follows it at once; a mouse on the same
+				// device, later, is a pointer that does rest here.
+				if (Date.now() - touchedAt.current > TOUCH_ECHO_MS) setHovered(true);
 			}}
 			onMouseLeave={() => {
 				setHovered(false);

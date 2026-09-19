@@ -1,7 +1,12 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AUTOSAVE_RETRY_MS, type SaveContext, useAutosave } from '../src/editor/useAutosave.js';
+import {
+	AUTOSAVE_RETRY_MS,
+	type SaveContext,
+	type Unstored,
+	useAutosave,
+} from '../src/editor/useAutosave.js';
 
 beforeEach(() => {
 	vi.useFakeTimers();
@@ -530,7 +535,7 @@ describe('useAutosave, asked to forget a note', () => {
 		act(() => {
 			result.current.change('refused, and more not yet sent');
 		});
-		const taken: (string | undefined)[] = [];
+		const taken: (Unstored<string> | undefined)[] = [];
 		act(() => {
 			taken.push(result.current.forget('a'));
 		});
@@ -546,7 +551,57 @@ describe('useAutosave, asked to forget a note', () => {
 			taken.push(result.current.forget('a'));
 		});
 
-		expect(taken).toEqual(['refused, and more not yet sent', undefined]);
+		expect(taken).toEqual([
+			{ value: 'refused, and more not yet sent', displaced: false },
+			undefined,
+		]);
+	});
+
+	it('says so when what it lets go is not the newest: a later edit was stored that it is not under', async () => {
+		const save = vi.fn<(value: string, context?: SaveContext) => Promise<void>>((value) =>
+			value === 'held' ? Promise.reject(new Error('no')) : Promise.resolve()
+		);
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+
+		act(() => {
+			result.current.change('held');
+		});
+		await pass(2000);
+		// The editor is rebuilt from the stored body, and the user carries on.
+		act(() => {
+			result.current.rebased();
+			result.current.change('later, and stored');
+		});
+		await act(async () => {
+			await result.current.settle();
+		});
+
+		const taken: (Unstored<string> | undefined)[] = [];
+		act(() => {
+			taken.push(result.current.forget('a'));
+		});
+		// As the body it would undo the later edit.
+		expect(taken).toEqual([{ value: 'held', displaced: true }]);
+	});
+
+	it('saves what was pending when a body arrived from outside as displaced, not over it', async () => {
+		const save = vi.fn<(value: string, context?: SaveContext) => Promise<void>>(() =>
+			Promise.resolve()
+		);
+		const { result } = renderHook(() => useAutosave({ key: 'a', save, delayMs: 2000 }));
+
+		act(() => {
+			result.current.change('typed before it arrived');
+			result.current.overtaken();
+			result.current.change('typed over what arrived');
+			result.current.flush();
+		});
+		await pass(0);
+
+		expect(save.mock.calls).toEqual([
+			['typed before it arrived', { displaced: true }],
+			['typed over what arrived'],
+		]);
 	});
 
 	it('leaves another note’s held edit alone', async () => {

@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NoteView } from '../src/components/NoteView.js';
+import { type DisplacedText, NoteView } from '../src/components/NoteView.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import type * as Notes from '../src/store/notes.js';
@@ -16,7 +16,12 @@ import { setDefaultEditorMode } from '../src/store/prefs.js';
  * once the store takes writes again.
  */
 
-const store = vi.hoisted(() => ({ refusing: false, asked: [] as string[] }));
+const store = vi.hoisted(() => ({
+	refusing: false,
+	/** Refused whatever else is let through: one edit that stays unstored. */
+	refusingText: undefined as string | undefined,
+	asked: [] as string[],
+}));
 
 vi.mock('../src/store/notes.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof Notes>();
@@ -24,7 +29,10 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 		...actual,
 		saveNoteBody: (...args: Parameters<typeof Notes.saveNoteBody>) => {
 			store.asked.push(args[2]);
-			return store.refusing
+			const refused =
+				store.refusing ||
+				(store.refusingText !== undefined && args[2].includes(store.refusingText));
+			return refused
 				? Promise.reject(new Error('VersionError'))
 				: actual.saveNoteBody(...args);
 		},
@@ -32,10 +40,19 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 });
 
 const deletions: NoteRecord[] = [];
+const besides: (DisplacedText | undefined)[] = [];
 
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
-	return <NoteView note={note} onDeleted={(deleted) => deletions.push(deleted)} />;
+	return (
+		<NoteView
+			note={note}
+			onDeleted={(deleted, beside) => {
+				deletions.push(deleted);
+				besides.push(beside);
+			}}
+		/>
+	);
 };
 
 const open = async () => {
@@ -67,8 +84,10 @@ const flushAutosave = () => {
 afterEach(async () => {
 	cleanup();
 	store.refusing = false;
+	store.refusingText = undefined;
 	store.asked.length = 0;
 	deletions.length = 0;
+	besides.length = 0;
 	await db.notes.clear();
 	await db.opQueue.clear();
 	await db.prefs.clear();
@@ -200,6 +219,33 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 			const others = (await db.notes.toArray()).filter((each) => each.id !== note.id);
 			expect(others.map((each) => each.body)).toEqual(['before\nheld\n']);
 		});
+	});
+
+	it('hands an edit still held from before it over apart, so undo cannot put it over the later one', async () => {
+		const user = userEvent.setup();
+		const { note, type } = await open();
+		store.refusingText = 'held';
+		type('held\n');
+		flushAutosave();
+		await screen.findByRole('alert');
+		await db.notes.update(note.id, { body: 'from the other tab\n' });
+		await waitFor(() => {
+			expect(editorText()).toBe('from the other tab\n');
+		});
+		type('typed after\n');
+		flushAutosave();
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.body).toBe('from the other tab\ntyped after\n');
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		await waitFor(() => {
+			expect(deletions.length).toBe(1);
+		});
+
+		// The note as it was stored, and the older words beside it: not as its body.
+		expect(deletions[0]?.body).toBe('from the other tab\ntyped after\n');
+		expect(besides[0]?.body).toBe('before\nheld\n');
 	});
 
 	it('does not offer an undo text that a save already kept beside the note', async () => {

@@ -244,6 +244,22 @@ describe('saveNoteBody, for a note whose row has gone', () => {
 		expect(await opsFor(note.id)).toEqual([]);
 	});
 
+	it('does bring it back once it has been seen here again: that was another note going', async () => {
+		const { db } = box;
+		const note = await createNote(db, { title: 'Note', body: 'stored\n' });
+		await deleteNote(db, note.id);
+		await pushed(note.id);
+		// Another device restored the file, and a pull made the row again.
+		await db.notes.add({ ...note, remoteId: 'id:9', dirty: 0 });
+		await saveNoteBody(db, note.id, 'stored\nedited\n', { origin: '', note });
+		// And then a sync deleted it, under an edit this tab still holds.
+		await purgeNote(db, note.id);
+
+		await saveNoteBody(db, note.id, 'stored\nedited\nheld\n', { origin: '', note });
+
+		expect((await getNote(db, note.id))?.body).toBe('stored\nedited\nheld\n');
+	});
+
 	it('nor one whose notebook was deleted from under it', async () => {
 		const { db } = box;
 		const folder = await createFolder(db, { name: 'Work' });

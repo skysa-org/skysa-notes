@@ -135,11 +135,17 @@ describe('a tab whose database a newer build has asked for', () => {
 
 		const old = createDatabase(name);
 		opened.push(old);
+		// What an editor holds is not written: the newer schema is already
+		// live, and this is old code that would be writing into it.
+		const finish = vi.fn(() => old.prefs.put({ key: 'held', value: 'by the editor' }));
+		const release = beforeClosing(finish);
 		await old.open().catch(() => undefined);
 
 		await vi.waitFor(() => {
 			expect(old.isOpen()).toBe(false);
 		});
+		release();
+		expect(finish).not.toHaveBeenCalled();
 		expect(tabState()).toBe('stale');
 		await expect(old.prefs.put({ key: 'after', value: 'lost?' })).rejects.toMatchObject({
 			name: 'DatabaseClosedError',

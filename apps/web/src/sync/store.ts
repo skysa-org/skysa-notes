@@ -23,6 +23,7 @@ import {
 	type NotesDatabase,
 	type OpQueueRecord,
 } from '../store/db.js';
+import { deletedHere } from '../store/deletedHere.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 
@@ -435,6 +436,9 @@ export const createDexieSyncStore = (
 		change: Extract<PullChange, { kind: 'upsert-note' }>,
 		hashes: ReadonlyMap<string, string>
 	): Promise<void> => {
+		// A file arriving is a note that is here again, whatever this tab did to
+		// the last one of that id (`store/deletedHere.ts`).
+		deletedHere.delete(change.id);
 		// The engine names the note; the store never guesses by path.
 		const existing = await scope.notes.get(change.id);
 		// Ids are unique across every connection, and the id comes from the

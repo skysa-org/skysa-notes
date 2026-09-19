@@ -97,7 +97,14 @@ export interface Autosave<T> {
 	 * keep it for an undo. Asked after `settle`, that is an edit whose save
 	 * failed, and nothing where every save went through, wherever it went.
 	 */
-	forget: (key: string) => T | undefined;
+	forget: (key: string) => Unstored<T> | undefined;
+	/**
+	 * The editor has taken in a body from outside — a sync pull, another tab.
+	 * What was pending was typed before it and not over it: it is saved as
+	 * displaced, beside the note, where written as the body it would put the
+	 * text the editor no longer shows over the text it does. Ends the sitting.
+	 */
+	overtaken: () => void;
 	/** A write was rejected and what it held is still not stored. */
 	failing: boolean;
 }
@@ -114,6 +121,21 @@ interface Attempt<T> {
 	readonly key: string;
 	readonly save: Save<T>;
 	readonly sitting: number;
+	/**
+	 * Typed before the editor took in a body from outside, and issued after: it
+	 * was not typed over what the note holds now. Displaced from the start.
+	 */
+	readonly overtaken?: true;
+}
+
+/** What `forget` lets go of that the store never took. */
+export interface Unstored<T> {
+	readonly value: T;
+	/**
+	 * Something newer has been stored for the same note that this was not typed
+	 * under: kept, it belongs beside the note, never over it.
+	 */
+	readonly displaced: boolean;
 }
 
 interface HeldOptions<T> {
@@ -210,10 +232,13 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 		report();
 	};
 
+	const isDisplaced = (entry: Attempt<T>): boolean =>
+		entry.overtaken === true ||
+		known().some((other) => other.key === entry.key && other.seq > entry.seq);
+
 	const attempt = (entry: Attempt<T>, tried: Set<Attempt<T>>) => {
 		tried.add(entry);
-		const displaced = known().some((other) => other.key === entry.key && other.seq > entry.seq);
-		const outcome = call(entry, displaced);
+		const outcome = call(entry, isDisplaced(entry));
 		if (typeof outcome === 'boolean') {
 			settled(entry, outcome);
 			return;
@@ -229,7 +254,7 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 	const busy = (key: string) => [...flying.keys()].some((each) => each.key === key);
 
 	const issue = (
-		edit: Pick<Attempt<T>, 'value' | 'key' | 'save' | 'sitting'>,
+		edit: Pick<Attempt<T>, 'value' | 'key' | 'save' | 'sitting' | 'overtaken'>,
 		tried: Set<Attempt<T>>
 	) => {
 		issued.current += 1;
@@ -268,8 +293,12 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 		});
 	};
 
-	const forget = (key: string): T | undefined => {
+	const forget = (key: string): Unstored<T> | undefined => {
 		const mine = held.current.filter((each) => each.key === key);
+		// In issue order, so the last is the newest. Asked before anything is let
+		// go: what makes it displaced is in the lists being emptied.
+		const newest = mine.at(-1);
+		const unstored = newest && { value: newest.value, displaced: isDisplaced(newest) };
 		mine.forEach((each) => {
 			// One that is out cannot be called back; it can be kept from ever
 			// being tried again.
@@ -277,8 +306,7 @@ const createHeld = <T>(options: HeldOptions<T>) => {
 			else release(each);
 		});
 		report();
-		// In issue order, so the last is the newest.
-		return mine.at(-1)?.value;
+		return unstored;
 	};
 
 	return { issue, retry, follow, forget, stop };
@@ -325,7 +353,7 @@ export const useAutosave = <T>({
 
 	/** One round: what is pending first, then whatever failed before. */
 	const round = useCallback(
-		(all: boolean): Promise<void> => {
+		(all: boolean, overtaken = false): Promise<void> => {
 			if (timer.current !== null) clearTimeout(timer.current);
 			timer.current = null;
 			const tried = new Set<Attempt<T>>();
@@ -338,6 +366,7 @@ export const useAutosave = <T>({
 						key: keyRef.current,
 						save: saveRef.current,
 						sitting: sitting.current,
+						...(overtaken ? { overtaken: true as const } : {}),
 					},
 					tried
 				);
@@ -362,8 +391,13 @@ export const useAutosave = <T>({
 		sitting.current += 1;
 	}, [flush]);
 
+	const overtaken = useCallback(() => {
+		void round(false, true);
+		sitting.current += 1;
+	}, [round]);
+
 	const forget = useCallback(
-		(forgotten: string) => {
+		(forgotten: string): Unstored<T> | undefined => {
 			const waiting = forgotten === keyRef.current ? pending.current : null;
 			if (forgotten === keyRef.current) {
 				if (timer.current !== null) clearTimeout(timer.current);
@@ -372,7 +406,7 @@ export const useAutosave = <T>({
 			}
 			const unstored = held.forget(forgotten);
 			// Not yet issued is newer than anything that was.
-			return waiting === null ? unstored : waiting.value;
+			return waiting === null ? unstored : { value: waiting.value, displaced: false };
 		},
 		[held]
 	);
@@ -420,5 +454,5 @@ export const useAutosave = <T>({
 		};
 	}, [flush]);
 
-	return { change, flush, settle, rebased, forget, failing };
+	return { change, flush, settle, rebased, overtaken, forget, failing };
 };

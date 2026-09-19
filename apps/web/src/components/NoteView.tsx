@@ -46,7 +46,13 @@ export interface NoteViewProps {
 	 * is not always what the row holds: a save the store refused never got there.
 	 * It is what an undo puts back.
 	 */
-	onDeleted: (deleted: NoteRecord) => void;
+	/**
+	 * The note as it was deleted, holding the last text the store never took.
+	 * `beside` is such text where it is *not* the newest — an edit whose save
+	 * failed, with a later one stored since that was not typed over it. An undo
+	 * keeps it beside the note; as the body it would undo that later edit.
+	 */
+	onDeleted: (deleted: NoteRecord, beside?: DisplacedText) => void;
 }
 
 /**
@@ -92,6 +98,13 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 		/>
 	);
 };
+
+/** Text typed into a note that belongs beside it: see `NoteViewProps.onDeleted`. */
+export interface DisplacedText {
+	body: string;
+	/** See `NoteRecord.bodyOrigin`. */
+	origin: string;
+}
 
 interface Edit {
 	body: string;
@@ -206,7 +219,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		// before the next one — made from the new body — can stand for it.
 		supersedes: sameBase,
 	});
-	const { change, flush, settle, rebased, forget } = autosave;
+	const { change, flush, settle, rebased, overtaken, forget } = autosave;
 	// A newer build in another tab closes this one's database; what is held
 	// here goes in first.
 	useEffect(() => beforeClosing(settle), [settle]);
@@ -239,11 +252,16 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				// again.
 				const unstored = forget(note.id);
 				const deleted = row ?? note;
-				onDeleted(
-					unstored === undefined
-						? deleted
-						: { ...deleted, body: unstored.body, bodyOrigin: unstored.origin }
-				);
+				if (unstored === undefined) {
+					onDeleted(deleted);
+					return;
+				}
+				if (unstored.displaced) {
+					onDeleted(deleted, unstored.value);
+					return;
+				}
+				const { body, origin } = unstored.value;
+				onDeleted({ ...deleted, body, bodyOrigin: origin });
 			});
 	}, [flush, forget, note, onDeleted, settle]);
 
@@ -330,10 +348,12 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 					rebased();
 					setUnsupportedId(note.id);
 				}}
-				// A body from outside is on screen now, and the held edit typed
-				// before it is not under whatever is typed next: a new sitting,
-				// so the next edit cannot stand for it.
-				onAdopted={rebased}
+				// A body from outside is on screen now. What was typed before it
+				// is not under whatever is typed next — a new sitting, so the next
+				// edit cannot stand for a held one — and what is still pending was
+				// not typed over it: saved as the body, it would put text the
+				// editor no longer shows over the text it does.
+				onAdopted={overtaken}
 			/>
 		</FindTargetProvider>
 	);

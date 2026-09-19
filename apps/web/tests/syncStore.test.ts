@@ -21,6 +21,7 @@ import {
 	noteFile,
 	noteFileContents,
 	noteRecordFromFile,
+	purgeNote,
 	restoreNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
@@ -490,6 +491,36 @@ const pulled = async (content = 'x\n') => {
 	});
 	return { db, store };
 };
+
+describe('a pull that makes a note this tab deleted', () => {
+	it('is the note here again, and an edit to it that finds it gone later is kept', async () => {
+		const { db, store } = await pulled();
+		const note = await getNote(db, 'n1');
+		if (note === undefined) throw new Error('the pulled note is missing');
+		await deleteNote(db, 'n1');
+		await db.opQueue.clear();
+		await purgeNote(db, 'n1');
+		// Restored on another device: the file comes back under the id it names.
+		await store.applyPull({
+			changes: [
+				{
+					kind: 'upsert-note',
+					id: 'n1',
+					path: 'a.md',
+					content: 'x\n',
+					remote: remote('a.md', 'r2'),
+					syncedHash: 'hash',
+				},
+			],
+			cursor: 'c2',
+		});
+		await purgeNote(db, 'n1');
+
+		await saveNoteBody(db, 'n1', 'x\nheld\n', { origin: '', note });
+
+		expect((await getNote(db, 'n1'))?.body).toBe('x\nheld\n');
+	});
+});
 
 describe('a pull that lands after the user has typed', () => {
 	// The engine reads the note clean, goes to the network, and hands the batch

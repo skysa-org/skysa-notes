@@ -1,5 +1,6 @@
 import {
 	type Document,
+	isAlias,
 	isDocument,
 	isMap,
 	isScalar,
@@ -52,6 +53,8 @@ const blockClosedBy = (closer: string): RegExp =>
 	new RegExp(String.raw`^---[ \t]*${EOL}(?:([\s\S]*?)(${EOL}))??${closer}[ \t]*(${EOL}|$)`);
 
 const FENCED = blockClosedBy('---');
+/** Blank lines, if any, and then a `---` line. */
+const OPENS_WITH_FENCE = new RegExp(String.raw`^(?:[ \t]*${EOL})*---[ \t]*(?:${EOL}|$)`);
 const CLOSING_FENCE = new RegExp(String.raw`---[ \t]*(?:${EOL})?$`);
 const ENDED = blockClosedBy(String.raw`\.\.\.`);
 
@@ -324,9 +327,16 @@ export const joinFrontmatter = (frontmatter: string | null, body: string): strin
 	if (frontmatter === null) return body;
 	if (frontmatter === '') return `${FENCE}\n${FENCE}\n${body}`;
 	const yaml = frontmatter.endsWith('\n') ? frontmatter : `${frontmatter}\n`;
-	// Opened and closed already, by the lines its file did that with.
-	if (EXPLICIT_DOCUMENT.test(frontmatter)) return `${yaml}${body}`;
-	return `${FENCE}\n${yaml}${FENCE}\n${body}`;
+	// Opened and closed already, by the lines its file did that with — unless
+	// the body now opens with a `---` line of its own. Under a `...` that line
+	// reads as the block's closing fence (YAML may close with `...` and then
+	// `---`), and the rule the user typed would leave the editor on the next
+	// read. Under a `---` fence it is only a rule, so the block takes that closer.
+	const explicit = EXPLICIT_DOCUMENT.exec(frontmatter);
+	if (explicit === null) return `${FENCE}\n${yaml}${FENCE}\n${body}`;
+	return OPENS_WITH_FENCE.test(body)
+		? `${FENCE}\n${explicit[1] ?? ''}\n${FENCE}\n${body}`
+		: `${yaml}${body}`;
 };
 
 /** The fields the app understands. Every other key is preserved but untouched. */
@@ -491,7 +501,9 @@ export const frontmatterIsEditable = (frontmatter: string | null): boolean => {
  * and in one of those a declined id is simply one that is not a string.
  */
 const declinedId = (yaml: string, doc: Document): Readonly<{ source?: string }> | undefined => {
-	const node = doc.get('id', true);
+	const found = doc.get('id', true);
+	// An alias is read as what it points at, as `readFrontmatter` reads it.
+	const node = isAlias(found) ? found.resolve(doc) : found;
 	if (node === undefined) return undefined;
 	// A list or a mapping is declined too, and is not respelled by the writer.
 	if (!isScalar(node)) return {};
@@ -530,11 +542,15 @@ export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmat
 		own?.source !== undefined && stillThere
 			? withIdSpelled(String(doc), own.source)
 			: String(doc);
-	// An explicit document with nothing left in it is `{}`, which names no
-	// metadata and so would not be read back as a block closed by `...`. Fenced,
-	// it is.
-	const emptied = isMap(doc.contents) && doc.contents.items.length === 0;
-	return EXPLICIT_DOCUMENT.test(frontmatter) && !emptied
+	// `...` closes a block only under YAML that names something metadata is
+	// named (`endedReading`). A patch that takes the last such key away leaves a
+	// block that would be read back as body; fenced with `---`, it still is one.
+	const record: unknown = doc.toJS();
+	const stillMetadata =
+		typeof record === 'object' &&
+		record !== null &&
+		namesMetadata(record as Record<string, unknown>);
+	return EXPLICIT_DOCUMENT.test(frontmatter) && stillMetadata
 		? `${FENCE}\n${written}${DOCUMENT_END}\n`
 		: written;
 };

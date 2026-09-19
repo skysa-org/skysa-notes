@@ -735,3 +735,36 @@ describe('writeFrontmatter, emptying a block that `...` closed', () => {
 		});
 	});
 });
+
+describe('a block that `...` closed, written back', () => {
+	it('takes a `---` closer when the body has come to open with a `---` line', () => {
+		// Left under the `...`, that line is read as the block's closing fence and
+		// the rule the user typed leaves the editor.
+		const { frontmatter } = splitFrontmatter('---\ntitle: a\nid: abc\n...\nfirst\n');
+		['---\n\nrest\n', '\n---\n\nrest\n', '\n\n---\nrest\n---\nmore\n'].forEach((body) => {
+			const again = splitFrontmatter(joinFrontmatter(frontmatter, body));
+			expect(again.body, JSON.stringify(body)).toBe(body);
+			expect(readFrontmatter(again.frontmatter)).toEqual({ id: 'abc', title: 'a' });
+		});
+		// And keeps its own closer otherwise.
+		expect(joinFrontmatter(frontmatter, 'first\n')).toBe(
+			'---\ntitle: a\nid: abc\n...\nfirst\n'
+		);
+	});
+
+	it('is still read as a block when a patch takes its last metadata key away', () => {
+		const written = writeFrontmatter('---\ntitle: a\nfoo: b\n...', { title: undefined });
+		expect(splitFrontmatter(joinFrontmatter(written, 'body\n'))).toEqual({
+			frontmatter: 'foo: b',
+			body: 'body\n',
+		});
+	});
+});
+
+describe('an `id` that is an alias', () => {
+	it('is written as it is read: not declined, where what it points at is a usable id', () => {
+		const block = 'x: &z abc\nid: *z\ntitle: a';
+		expect(readFrontmatter(block).id).toBe('abc');
+		expect(readFrontmatter(writeFrontmatter(block, { id: 'uuid' })).id).toBe('uuid');
+	});
+});
