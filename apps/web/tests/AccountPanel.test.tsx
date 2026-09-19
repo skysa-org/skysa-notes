@@ -2835,17 +2835,23 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 		await screen.findByRole('list', { name: 'Devices' });
 		// The credential is read from this device before anything is asked of
 		// the server, so this failure is strictly before the revoke.
+		//
+		// Refused for as long as the click is being answered, rather than once:
+		// the panel is not the only reader — `reconcileAccount` and the token
+		// source ask for the same credential — and a single rejection is taken
+		// by whichever of them asks first, which is a race the test would lose
+		// about a third of the time.
 		const refused = vi
 			.spyOn(db.credentials, 'get')
-			.mockRejectedValueOnce(new Error('the store refused'));
+			.mockImplementation(() => Promise.reject(new Error('the store refused')) as never);
 
 		await user.click(screen.getByRole('button', { name: 'Remove' }));
 
 		const problem = await screen.findByText(/on this device went wrong/);
+		refused.mockRestore();
 		expect(problem.textContent).toMatch(/nothing was removed/);
 		expect(problem.textContent).not.toMatch(/server|reach/i);
 		expect(revokeGrant).not.toHaveBeenCalled();
-		refused.mockRestore();
 	});
 
 	it('asks again when the user switches source, so the list is that source’s', async () => {
