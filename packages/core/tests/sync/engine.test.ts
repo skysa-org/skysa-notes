@@ -681,6 +681,72 @@ describe('push', () => {
 		expect(provider.contentAt('a.md')).toBeUndefined();
 	});
 
+	it('holds the version a move hands back only over bytes it has seen under it', async () => {
+		// The fake gives a moved file a new version, as OneDrive does. It
+		// is the version of whatever the move found, which nobody here has read.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'one\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+
+		await engine.push();
+
+		// Read, found to be the bytes last synced, and held under the version
+		// they were read under.
+		const read = await provider.read({ remoteId: entry.remoteId, path: 'b.md' });
+		expect(noteAt('b.md')?.remoteVersion).toBe(read.version);
+		expect(read.version).not.toBe(entry.version);
+	});
+
+	it('goes on holding the version it had when the moved file is not the one it synced', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'one\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		await provider.write('a.md', 'theirs\n', { expectedVersion: entry.version });
+
+		await engine.push();
+
+		// Moved all the same: the rename is the user's, and takes no bytes.
+		expect(provider.contentAt('b.md')).toBe('theirs\n');
+		expect(noteAt('b.md')?.remoteVersion).toBe(entry.version);
+		// So the pull does not take the file for one it has already seen.
+		await engine.pull();
+		expect(noteAt('b.md')?.content).toBe('theirs\n');
+	});
+
+	it('does the same when the moved file cannot be read, rather than failing a rename that landed', async () => {
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'one\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+		});
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(noteAt('b.md')?.remoteVersion).toBe(entry.version);
+	});
+
 	it('deletes remotely and then drops the tombstone', async () => {
 		const entry = await remoteFile('a.md', 'one\n');
 		store.put({
@@ -2688,6 +2754,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
@@ -2700,6 +2767,68 @@ describe('a write whose file is not where it was', () => {
 		expect(provider.contentAt('b.md')).toBe('edited\n');
 		expect(provider.contentAt('a.md')).toBeUndefined();
 		expect(noteAt('b.md')?.dirty).toBe(false);
+	});
+
+	it('waits out a rate limit met while reading the file it has just moved, and says so', async () => {
+		// Not "has changed on the remote": nobody changed it, and an op failed
+		// under that name spends an attempt on a throttle.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+		// The first read finds the file by its id; the second is the one after
+		// the move.
+		provider.setFault((call) =>
+			call.op === 'read' && call.attempt === 2
+				? new RateLimitError('slow down', 3000)
+				: undefined
+		);
+
+		const limited = await engine.push();
+
+		expect(limited.retryAfterMs).toBe(3000);
+		expect(store.ops()[0]?.attempts ?? 0).toBe(0);
+
+		// And then the edit goes up over the file it was always for, as itself.
+		provider.setFault(undefined);
+		expect((await engine.push()).conflicts).toEqual([]);
+		expect(provider.contentAt('b.md')).toBe('edited\n');
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('keeps both where there is no record of what the note synced, rather than guess', async () => {
+		// A dirty row from before the hash was kept. The moved file cannot be
+		// told from one another device edited, so the write is not sent over it:
+		// the remote keeps the path and the edit goes beside it. A copy nobody
+		// needed, where the other guess is an edit nobody can get back.
+		const entry = await remoteFile('a.md', 'one\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: entry.remoteId,
+			remoteVersion: entry.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+
+		await engine.push();
+		const result = await engine.push();
+
+		expect(result.conflicts).toHaveLength(1);
+		expect(provider.contentAt('b.md')).toBe('one\n');
+		// The copy carries a frontmatter id of its own, and the words.
+		expect(store.notes().some((note) => note.content.endsWith('edited\n'))).toBe(true);
+		expect(store.ops().filter((op) => op.op === 'move')).toEqual([]);
 	});
 
 	it('makes the notebook the note was moved into, when the remote has not got it yet', async () => {
@@ -2715,6 +2844,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'Work/Inner/a.md' });
@@ -2800,6 +2930,7 @@ describe('a write whose file is not where it was', () => {
 			content: 'edited\n',
 			remoteId: entry.remoteId,
 			remoteVersion: entry.version,
+			syncedHash: await contentHash('one\n'),
 			dirty: true,
 		});
 		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
