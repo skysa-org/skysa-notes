@@ -8,7 +8,12 @@ import type { ProviderKind } from './config.js';
  */
 export interface EntitlementDecision {
 	allowed: boolean;
-	/** Shown to the user when `allowed` is false. Never include internal detail. */
+	/**
+	 * Why not, for the client: `/api/token` returns it with its `not_entitled`.
+	 * Never include internal detail. The OAuth callback reports only that the
+	 * account was refused — it answers with a redirect, and free text in a URL is
+	 * text anyone can put in a link.
+	 */
 	reason?: string;
 }
 
