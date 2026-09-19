@@ -2415,6 +2415,25 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			})
 		);
 
+	/**
+	 * The same, minus the notes the batch only moved aside. A displacement is
+	 * not a word about the note's own file: it says a *different* file arrived
+	 * at the note's path and ours got out of the way, which a scan can do
+	 * without ever mentioning the file our row is bound to. Exempted on the
+	 * strength of that, a clean note whose file is gone keeps its row and a
+	 * dead `remoteId`, and the user is left a conflict copy of a note that
+	 * never conflicted — until the next scan, which is the only thing that can
+	 * put it right and need not come for weeks. That one does: nothing
+	 * displaces the row a second time, so it falls straight out of `kept` and
+	 * is let go of there.
+	 *
+	 * A note the scan did return is still safe: `seen` holds its file's id and
+	 * answers before this is asked. This only stops a displacement from
+	 * standing in for an answer nothing gave.
+	 */
+	const decidedApartFromMoves = (changes: readonly PullChange[]): ReadonlySet<string> =>
+		decidedNotes(changes.filter((change) => change.kind !== 'displace-note'));
+
 	const reconcile = async (
 		seen: ReadonlySet<string>,
 		changes: readonly PullChange[],
@@ -2428,10 +2447,36 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		/** The unreadable files listed when this page of the scan began. */
 		unread: ReadonlyMap<string, UnreadableFile> = new Map()
 	): Promise<PullChange[]> => {
-		const kept = { notes: decidedNotes(changes), folders: reestablished(changes).folders };
+		// A scan that proves what is there asks the narrower question, so a note
+		// moved aside for somebody else's file is still asked after.
+		//
+		// A scan that may be missing things asks the wider one, and not because
+		// absence proves less there — it acts on absence all the time, by
+		// sending the note back up. It is what sending a *displaced* note back
+		// up does. `reupload-note` strips the row and queues a create-only write
+		// at `note.path`, read after the displacement has moved the row, so the
+		// path is a fresh conflict name nothing holds: the create cannot fail
+		// the way it would at the note's own path, where a file that was there
+		// all along conflicts into `resolvePushConflict`'s same-bytes branch and
+		// puts itself right. It simply lands, and the user has two files where
+		// they had one, with nothing left to reconcile them.
+		const kept = {
+			notes: upload ? decidedNotes(changes) : decidedApartFromMoves(changes),
+			folders: reestablished(changes).folders,
+		};
 		// Folders the batch has just put a note into. Deleting one cascades over
 		// what is inside it, so the exemption above would be undone from the
 		// other direction — the note is spared by name and taken by its folder.
+		//
+		// A displacement counts here, unlike above, and on the face of it that
+		// could spare a folder on the strength of a note `forgotten` then
+		// removes, leaving an empty notebook until the next scan. No reachable
+		// shape was found for it: a displacement lands in the note's own folder
+		// (`conflictPath` replaces the basename), and it happens because the
+		// scan returned a file at a path inside that folder — which is a scan
+		// that listed the folder too, so its id is in `seen`, or, where the
+		// directory was replaced at the name, an `ensure-folder` for that path
+		// is in `kept.folders`. If one is ever found, this is where it starts.
 		const holding = changes.flatMap((change) =>
 			'path' in change && change.kind !== 'delete-folder' ? [change.path] : []
 		);
@@ -3135,10 +3180,45 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		conflict?: string;
 	}
 
-	const freeNotePath = async (path: string, taken: readonly string[] = []): Promise<string> => {
+	/**
+	 * `onRemote` for a caller that cannot find out by trying. `setAside` takes
+	 * the name by writing there and moves on when the write is refused, which
+	 * is the better answer because it claims the name in the same breath; a
+	 * note that must stay bound to a file of its own has nothing to write, and
+	 * asks instead. One read per candidate, and the first is nearly always
+	 * free.
+	 *
+	 * `path` is the name the note started from on every turn of the loop, so
+	 * what comes back carries one `(conflict …)` and then the counter that
+	 * `conflictName` adds for a name taken in the same minute. Deriving the
+	 * next candidate from the last one instead is how `x (conflict …)
+	 * (conflict …).md` happens, since nothing strips a suffix back off.
+	 *
+	 * Not proof on a provider whose listings are not the whole truth: under
+	 * `drive.file` a file the user put there through the Drive UI is invisible
+	 * to a read by path as well (docs/PLAN.md §5.1), and the write that follows
+	 * fails as it does today. What it settles is the case this is for — another
+	 * device of this app setting its own edit aside at the same name in the same
+	 * minute — because that file is one this app made.
+	 */
+	const freeNotePath = async (
+		path: string,
+		taken: readonly string[] = [],
+		onRemote = false,
+		left = FREE_PATH_ATTEMPTS
+	): Promise<string> => {
 		const candidate = conflictPath(path, now(), taken);
-		if ((await store.noteByPath(candidate)) === undefined) return candidate;
-		return freeNotePath(path, [...taken, basename(candidate)]);
+		const next = (): Promise<string> =>
+			freeNotePath(path, [...taken, basename(candidate)], onRemote, left - 1);
+		// Bounded exactly as `freeFolderPath` is, and for the same reason: each
+		// turn here is a request, and a `conflictName` that stopped recognising
+		// its own names would spend them without end.
+		if (left <= 0) return candidate;
+		if ((await store.noteByPath(candidate)) !== undefined) return next();
+		if (!onRemote) return candidate;
+		// Unreadable is taken: `fileState` only says `gone` for a path with
+		// nothing at it, which is the one answer that frees the name.
+		return (await fileState({ remoteId: '', path: candidate })) === 'gone' ? candidate : next();
 	};
 
 	/**
@@ -3149,6 +3229,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * displacement in `resolvePushConflict` below, with the create done here so
 	 * the op finishes in this drain instead of spending an attempt on a conflict
 	 * nobody can resolve.
+	 *
+	 * And a write that met somebody else's ordinary file at the name, by a note
+	 * with no file of its own: nothing there can be resolved either, since the
+	 * two are not two versions of one note, and the same answer serves.
 	 *
 	 * A note bound to a file is cut loose first. Still bound, it holds the id of
 	 * a file this device could not read, and its next write goes out against a
@@ -3272,12 +3356,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		 * has seen. Unbound, it creates the file at the new name and is done;
 		 * still bound, it would be set aside again (`setAsideForOp`) and the user
 		 * handed a note with two conflict names.
+		 *
+		 * The name is asked of the remote as well as the store, which is the
+		 * whole of what this can do about it: nothing may be written or moved
+		 * from here, because the note is staying bound to a file of its own and
+		 * the path belongs to somebody else's. Asked of the store alone, a name
+		 * another device took for its own copy in the same minute is chosen
+		 * anyway; the op is left queued, its retry meets that file, and the note
+		 * is moved aside a second time from a name that already carries a suffix
+		 * — an attempt of five spent, the ordered queue stalled behind it, and
+		 * `x (conflict …) (conflict …).md` in the sidebar with nothing said. A
+		 * file that lands at the chosen name between this ask and the retry is
+		 * the race that is left, and it is a race rather than the ordinary case.
 		 */
 		const stepAside = async (
 			own: 'there' | 'gone' | 'unreadable',
 			unread?: UnreadableFile
 		): Promise<undefined> => {
-			const path = await freeNotePath(note.path);
+			const path = await freeNotePath(note.path, [], true);
 			await store.applyPull({
 				changes: [
 					...(own === 'unreadable'
@@ -3386,9 +3482,20 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		//
 		// A file of its own that is there and cannot be read is still there
 		// (`fileState`), so the note moves aside for that too.
+		//
+		// With no file of its own left to stay bound to, though, the note is not
+		// stepped aside but set aside: `stepAside` can only ask the store for a
+		// free name, and a name free here may be held on the remote by a file
+		// this device has not pulled — another device set its own edit aside in
+		// the same minute. Left queued, the op meets that file on its retry and
+		// the note is moved aside a second time: an attempt spent, and a second
+		// conflict suffix on a name that should carry one. `setAside` asks the
+		// remote instead, by taking the name, and moves on to the next when the
+		// remote says no, so the op finishes in this drain.
 		const taken = await store.noteByRemoteId(remote.remoteId);
 		const held = taken !== undefined && taken.id !== note.id;
 		const own = await ownFile();
+		if (held && own === 'gone') return setAside(op, note);
 		if (held || own !== 'gone') return stepAside(own);
 
 		const resolution = await resolutionFor(note, content, remote, new Set(), []);

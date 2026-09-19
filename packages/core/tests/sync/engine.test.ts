@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { contentHash } from '../../src/hash.js';
-import { isHidden, parentPath } from '../../src/paths.js';
+import { basename, isHidden, parentPath } from '../../src/paths.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import {
 	AuthError,
@@ -2341,7 +2341,11 @@ describe('a note of ours where a remote one lands', () => {
 		});
 		const moved = await provider.move(theirs, 'Groceries.md');
 
-		await pullNow([moved]);
+		// Our own file among them: this is a scan, and a scan says everything
+		// that exists, so a list that leaves `Untitled.md` out is a list saying
+		// it is gone — and the note is then displaced *and* let go of, which is
+		// right for that list and not what this test is about.
+		await pullNow([ours, moved]);
 		const result = await engine.push();
 
 		expect(result.status).toBe('ok');
@@ -2951,6 +2955,78 @@ describe('a write whose file is not where it was', () => {
 		);
 	});
 
+	it('steps aside to one conflict name, not two, when the first is taken on the remote', async () => {
+		// A note that keeps a file of its own cannot take the name by writing
+		// there, the way a note with none does \u2014 the path belongs to somebody
+		// else's file and its own may be perfectly good. Chosen from the store
+		// alone, the name another device took for its own copy in the same
+		// minute is chosen anyway: the retry meets that file, steps the note
+		// aside again from a name that already carries a suffix, and spends a
+		// second of five attempts on it with the queue stopped behind.
+		const mine = await remoteFile('a.md', 'one\n');
+		await remoteFile('b.md', 'theirs\n');
+		const theirCopy = conflictPath('b.md', AT);
+		await remoteFile(theirCopy, 'somebody else\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: mine.remoteId,
+			remoteVersion: mine.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+		store.queue({ op: 'move', noteId: 'n1', path: 'a.md', targetPath: 'b.md' });
+
+		await engine.push();
+		await engine.push();
+
+		// One suffix, with the counter `conflictName` adds for a name taken in
+		// the same minute \u2014 not `(conflict \u2026) (conflict \u2026)`.
+		const note = store.notes().find((each) => each.id === 'n1');
+		expect(note?.path).toBe(conflictPath('b.md', AT, [basename(theirCopy)]));
+		// Still bound to its own file, and nothing of ours written or moved
+		// onto either of theirs.
+		expect(note?.remoteId).toBe(mine.remoteId);
+		expect(provider.contentAt(theirCopy)).toBe('somebody else\n');
+		expect(provider.contentAt('b.md')).toBe('theirs\n');
+		// And the op was not stepped aside a second time: it is still aimed at
+		// the one name the note was given.
+		expect(store.ops().map((op) => op.path)).not.toContain(
+			conflictPath(conflictPath('b.md', AT), AT)
+		);
+	});
+
+	it('does the same with no rename queued to carry the file after it', async () => {
+		// The same choice of name, reached without the queued `move` that lets
+		// `followTheRename` move the file. What becomes of the op afterwards is
+		// its own question \u2014 there is nothing here to move the file and the
+		// write finds nothing at the new path \u2014 but the note is moved aside
+		// once, to a name that is free on the remote, rather than twice.
+		const mine = await remoteFile('a.md', 'one\n');
+		await remoteFile('b.md', 'theirs\n');
+		const theirCopy = conflictPath('b.md', AT);
+		await remoteFile(theirCopy, 'somebody else\n');
+		store.put({
+			id: 'n1',
+			path: 'b.md',
+			content: 'edited\n',
+			remoteId: mine.remoteId,
+			remoteVersion: mine.version,
+			dirty: true,
+		});
+		store.queue({ op: 'write', noteId: 'n1', path: 'b.md' });
+
+		await engine.push();
+		await engine.push();
+
+		const note = store.notes().find((each) => each.id === 'n1');
+		expect(note?.path).toBe(conflictPath('b.md', AT, [basename(theirCopy)]));
+		expect(note?.remoteId).toBe(mine.remoteId);
+		expect(note?.content).toBe('edited\n');
+		expect(provider.contentAt(theirCopy)).toBe('somebody else\n');
+	});
+
 	it('answers a file replaced at the note\u2019s own path with the conflict rule, not by moving aside', async () => {
 		// Deleted and written again — a new id at the same path — after our pull.
 		// Moved aside, this note would keep its frontmatter id beside a file that
@@ -3178,6 +3254,77 @@ describe('a dead cursor', () => {
 		expect(noteAt('ghost.md')).toBeUndefined();
 	});
 
+	it('removes a note it only moved aside, whose own file the scan did not find', async () => {
+		// `b.md` is moved onto `a.md`'s name while the cursor is dead, and
+		// `a.md`'s file is deleted. The scan says nothing about that file — a
+		// scan never says what was removed — and moving our note out of the way
+		// for the newcomer is no word about it either. Kept on the strength of
+		// the displacement, the row lives on with a dead `remoteId`, as a
+		// conflict copy of a note that never conflicted.
+		const one = await remoteFile('a.md', 'one\n');
+		const two = await remoteFile('b.md', 'two\n');
+		await engine.pull();
+		const mine = noteAt('a.md')?.id;
+		await provider.delete(one);
+		await provider.move(two, 'a.md');
+		killTheCursor();
+
+		await engine.pull();
+
+		expect(store.notes().map((note) => note.path)).toEqual(['a.md']);
+		expect(noteAt('a.md')?.remoteId).toBe(two.remoteId);
+		expect(store.notes().find((note) => note.id === mine)).toBeUndefined();
+	});
+
+	it('keeps one it moved aside whose own file the scan did find', async () => {
+		// The converse, and the reason the question is asked of `seen` first:
+		// two files swapping names is two displacements and no deletions.
+		const one = await remoteFile('a.md', 'one\n');
+		const two = await remoteFile('b.md', 'two\n');
+		await engine.pull();
+		await provider.move(one, 'c.md');
+		await provider.move(two, 'a.md');
+		killTheCursor();
+
+		await engine.pull();
+
+		expect(
+			store
+				.notes()
+				.map((note) => note.path)
+				.sort()
+		).toEqual(['a.md', 'c.md']);
+		expect(noteAt('c.md')?.remoteId).toBe(one.remoteId);
+		expect(noteAt('a.md')?.remoteId).toBe(two.remoteId);
+	});
+
+	it('keeps a dirty note it moved aside, with its edit', async () => {
+		// Never lose user data: the file is gone, so the row is cut loose rather
+		// than deleted, and the edit goes back up under the name it moved to.
+		const one = await remoteFile('a.md', 'one\n');
+		const two = await remoteFile('b.md', 'two\n');
+		await engine.pull();
+		const mine = noteAt('a.md')?.id ?? '';
+		store.put({
+			id: mine,
+			path: 'a.md',
+			content: 'edited\n',
+			remoteId: one.remoteId,
+			remoteVersion: one.version,
+			dirty: true,
+		});
+		await provider.delete(one);
+		await provider.move(two, 'a.md');
+		killTheCursor();
+
+		await engine.pull();
+
+		const kept = store.notes().find((note) => note.id === mine);
+		expect(kept?.content).toBe('edited\n');
+		expect(kept?.path).toContain('conflict');
+		expect(kept?.remoteId).toBeUndefined();
+	});
+
 	it('removes a notebook the re-scan proves is gone', async () => {
 		// Folders too. A notebook deleted while the cursor was dead is never
 		// mentioned again by anything, so a scan that only reconciles notes
@@ -3307,6 +3454,29 @@ describe('a dead cursor', () => {
 				{ op: 'mkdir', path: 'Work/Sub' },
 				{ op: 'write', path: 'Work/Sub/a.md' },
 			]);
+		});
+
+		it('leaves alone a note it moved aside, rather than sending it back up', async () => {
+			// The other half of the rescan rule: a scan that may be missing
+			// things proves nothing about the file our note holds, so a note the
+			// batch moved out of the way for somebody else's file is not touched
+			// \u2014 not deleted, and not queued for an upload that would put a
+			// second copy of it on a remote that still has the first.
+			const one = await remoteFile('a.md', 'one\n');
+			const two = await remoteFile('b.md', 'two\n');
+			await engine.pull();
+			const mine = noteAt('a.md')?.id;
+			killTheCursor(true);
+			await provider.delete(one);
+			await provider.move(two, 'a.md');
+
+			const result = await engine.pull();
+
+			expect(result.status).toBe('ok');
+			const kept = store.notes().find((note) => note.id === mine);
+			expect(kept?.path).toContain('conflict');
+			expect(kept?.remoteId).toBe(one.remoteId);
+			expect(store.ops()).toEqual([]);
 		});
 
 		it('still takes the remote\u2019s side for a file the scan did return', async () => {
@@ -5025,13 +5195,51 @@ describe('a push conflict over a file another note already holds', () => {
 		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
 
-		await engine.push();
+		const result = await engine.push();
 
 		const mine = store.notes().find((each) => each.id === 'mine');
 		expect(mine?.content).toBe('mine\n');
 		expect(mine?.path).toContain('conflict');
-		expect(mine?.remoteId).toBeUndefined();
 		expect(store.notes().find((each) => each.id === 'theirs')?.remoteId).toBe(file.remoteId);
+		// Its own file, not theirs: the whole point of moving aside. And made
+		// here rather than next round — the note has no file of its own to stay
+		// bound to, so the write goes now and the op is done with.
+		expect(mine?.remoteId).not.toBe(file.remoteId);
+		expect(provider.contentAt(mine?.path ?? '')).toBe('mine\n');
+		expect(store.ops()).toEqual([]);
+		expect(result.conflicts).toEqual([mine?.path]);
+	});
+
+	it('takes the next name when the remote already has the one it picked', async () => {
+		// The name is chosen from the store, which has never heard of the file
+		// another device set its own edit aside to in the same minute. Asked of
+		// the remote as the write goes, the next name is taken instead — rather
+		// than spending an attempt and handing the note two conflict suffixes.
+		const file = await remoteFile('c.md', 'theirs\n');
+		store.put({
+			id: 'theirs',
+			path: 'c.md',
+			content: 'theirs\n',
+			remoteId: file.remoteId,
+			remoteVersion: file.version,
+		});
+		await provider.move(file, 'b.md');
+		await remoteFile(conflictPath('b.md', AT), 'somebody else\n');
+		store.put({ id: 'mine', path: 'b.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'mine', path: 'b.md' });
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		const mine = store.notes().find((each) => each.id === 'mine');
+		// One suffix, with the counter `conflictName` adds for a name taken in
+		// the same minute — not `(conflict …) (conflict …)`.
+		expect(mine?.path).toBe(conflictPath('b.md', AT, [basename(conflictPath('b.md', AT))]));
+		expect(provider.contentAt(mine?.path ?? '')).toBe('mine\n');
+		expect(provider.contentAt(conflictPath('b.md', AT))).toBe('somebody else\n');
+		// One push, and no attempt spent on a name the remote had already given
+		// away: the op is gone from the queue.
+		expect(store.ops()).toEqual([]);
 	});
 });
 
