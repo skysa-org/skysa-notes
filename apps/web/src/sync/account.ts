@@ -220,7 +220,11 @@ export const claimConnection = async (
 	}
 
 	const connection = result.value;
+	const previous = await credentialFor(db, connection.id);
 	await keepCredential(db, connection.id, pending);
+	if (previous !== undefined && previous.credential !== pending.credential) {
+		await retire(client, previous.credential, connection.id);
+	}
 	if (await needsAsking(db, connection)) return { kind: 'other-account', connection };
 
 	await bindConnection(db, {
@@ -229,6 +233,37 @@ export const claimConnection = async (
 		accountId: connection.accountId,
 	});
 	return { kind: 'connected', connection };
+};
+
+/**
+ * Sign out the credential this device held for the connection before it
+ * connected again.
+ *
+ * The new credential has just replaced it here, so nothing will present it
+ * again — but the server does not know that, and its grant would sit in the
+ * device list as a device that is not one, and as one more live key to the
+ * account, until it idled out half a year later. Only once the new one is
+ * written down, so the device never holds none.
+ *
+ * Best effort, and silent. Most often the old credential is why the user is
+ * connecting again — revoked, or expired — and the server refuses it: there is
+ * nothing to retire. Offline, the grant idles out as it would have.
+ */
+const retire = async (
+	client: Pick<ApiClient, 'withCredential'>,
+	credential: string,
+	connectionId: string
+): Promise<void> => {
+	const old = client.withCredential(credential);
+	await old
+		.connection()
+		.then(async (seen) => {
+			// Asked, not assumed: the grant's id is the server's, and a credential
+			// filed under the wrong connection must not sign out somebody else's.
+			if (seen.ok && seen.value.id === connectionId)
+				await old.revokeGrant(seen.value.grantId);
+		})
+		.catch(() => undefined);
 };
 
 /** Whether binding `connection` would copy notes that belong to another account into it. */

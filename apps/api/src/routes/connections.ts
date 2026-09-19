@@ -1,10 +1,11 @@
-import { and, eq } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { and, eq, gt } from 'drizzle-orm';
+import { type Context, Hono } from 'hono';
 
 import type { AppEnv } from '../app.js';
 import { GRANT_IDLE_DAYS } from '../credentials.js';
 import { openOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
+import type { Connection } from '../db/schema.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import type { FetchLike } from '../oauth/types.js';
@@ -22,8 +23,55 @@ import type { FetchLike } from '../oauth/types.js';
  * key id, and not another device's credential hash.
  */
 
+const IDLE_MS = GRANT_IDLE_DAYS * 24 * 60 * 60 * 1000;
+
 export const connectionRoutes = (doFetch: FetchLike) => {
 	const app = new Hono<AppEnv>();
+
+	/**
+	 * Take the account off this server: the grant withdrawn at the provider, and
+	 * the row deleted. Answers whether the provider took the grant back.
+	 *
+	 * Revoked at the provider so the grant does not linger on the user's account
+	 * (docs/PLAN.md §9). Best effort: the row goes either way, because a user who
+	 * asked to disconnect must not be left connected by a network error. `false`
+	 * says only that the grant may still be live: the revoke failed, or —
+	 * Microsoft — there is no revoke to call, and the user has to remove the app
+	 * from their account page.
+	 */
+	const disconnect = async (c: Context<AppEnv>, connection: Connection): Promise<boolean> => {
+		const revoked = await (async (): Promise<boolean> => {
+			const resolved = oauthFor(c.get('config'), connection.provider);
+			if (!resolved.ok) return false;
+			const { client, credentials } = resolved;
+			if (client.revokeToken === undefined) return false;
+
+			const secret = await openOAuthSecret(c.get('secretKey'), {
+				ciphertext: connection.secretCiphertext,
+				iv: connection.secretIv,
+				keyId: connection.secretKeyId,
+			}).catch(() => undefined);
+			if (secret === undefined) return false;
+
+			// Logged: an expired client secret would otherwise make every
+			// disconnect quietly leave its grant behind.
+			const tokens = await client
+				.refreshAccessToken(doFetch, credentials, { refreshToken: secret.refreshToken })
+				.catch((error: unknown) => {
+					logFailure('refresh before revoke failed', error);
+					return undefined;
+				});
+			if (tokens === undefined) return false;
+
+			return client.revokeToken(doFetch, tokens.accessToken);
+		})();
+
+		await c
+			.get('db')
+			.delete(schema.connections)
+			.where(eq(schema.connections.id, connection.id));
+		return revoked;
+	};
 
 	app.get('/connection', (c) => {
 		const { connection, grant } = c.get('bearer');
@@ -99,7 +147,25 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			.update(schema.grants)
 			.set({ connectionId: null })
 			.where(eq(schema.grants.id, target.id));
-		return c.json({ ok: true });
+
+		// The last device that could reach the account has gone, and the account
+		// goes with it. Left behind, the row is a live refresh token, sealed,
+		// that no credential reaches: nothing can use it, and nothing can revoke
+		// it either, since disconnecting takes a credential. A grant idle past
+		// its expiry is no device at all — it cannot authenticate (`bearer`) — so
+		// it does not keep the row. Only a device signing *itself* out can get
+		// here, since a caller revoking another is itself still live; connecting
+		// the account again makes a new row, and the device knows its notes by
+		// the account's id, not the row's (docs/PLAN.md §6).
+		const live = await db.query.grants.findFirst({
+			columns: { id: true },
+			where: and(
+				eq(schema.grants.connectionId, connection.id),
+				gt(schema.grants.lastUsedAt, new Date(Date.now() - IDLE_MS))
+			),
+		});
+		if (live !== undefined) return c.json({ ok: true, disconnected: false });
+		return c.json({ ok: true, disconnected: true, revoked: await disconnect(c, connection) });
 	});
 
 	/**
@@ -110,44 +176,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	 */
 	app.delete('/connection', async (c) => {
 		const { connection } = c.get('bearer');
-		const db = c.get('db');
-		const config = c.get('config');
-
-		// Revoke at the provider so the grant does not linger on the user's
-		// account (docs/PLAN.md §9). Best effort: the row goes either way, because
-		// a user who asked to disconnect must not be left connected by a network
-		// error. `revoked: false` says only that the grant may still be live:
-		// the revoke failed, or — Microsoft — there is no revoke to call, and the
-		// user has to remove the app from their account page.
-		const revoked = await (async (): Promise<boolean> => {
-			const resolved = oauthFor(config, connection.provider);
-			if (!resolved.ok) return false;
-			const { client, credentials } = resolved;
-			if (client.revokeToken === undefined) return false;
-
-			const secret = await openOAuthSecret(c.get('secretKey'), {
-				ciphertext: connection.secretCiphertext,
-				iv: connection.secretIv,
-				keyId: connection.secretKeyId,
-			}).catch(() => undefined);
-			if (secret === undefined) return false;
-
-			// Logged: an expired client secret would otherwise make every
-			// disconnect quietly leave its grant behind.
-			const tokens = await client
-				.refreshAccessToken(doFetch, credentials, { refreshToken: secret.refreshToken })
-				.catch((error: unknown) => {
-					logFailure('refresh before revoke failed', error);
-					return undefined;
-				});
-			if (tokens === undefined) return false;
-
-			return client.revokeToken(doFetch, tokens.accessToken);
-		})();
-
-		await db.delete(schema.connections).where(eq(schema.connections.id, connection.id));
-
-		return c.json({ ok: true, revoked });
+		return c.json({ ok: true, revoked: await disconnect(c, connection) });
 	});
 
 	return app;
