@@ -2,7 +2,7 @@ import { ne } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { createDb, schema } from '../src/db/client.js';
-import { buildApp, newCredential, secretOf } from './harness.js';
+import { bothProvidersConfig, buildApp, dropboxStub, newCredential, secretOf } from './harness.js';
 
 /**
  * Describing and removing the one connection the caller's credential reaches.
@@ -291,6 +291,96 @@ describe('DELETE /api/connection/grants/:id', () => {
 		});
 
 		expect(await response.json()).toMatchObject({ disconnected: true });
+		expect(await rows(app.db)).toEqual([]);
+	});
+
+	it('goes all the same when the provider will not take the grant back, or has no way to', async () => {
+		const refusing = buildApp({
+			script: { revoke: () => new Response('no', { status: 503 }) },
+		});
+		const microsoft = buildApp({ config: bothProvidersConfig() });
+
+		const answers = await Promise.all(
+			[
+				{ app: refusing, provider: 'dropbox' as const },
+				{ app: microsoft, provider: 'onedrive' as const },
+			].map(async ({ app, provider }) => {
+				const { credential } = await app.connect({ provider });
+				const { grantId }: { grantId: string } = await (
+					await app.request('/api/connection', { credential })
+				).json();
+				const response = await app.request(`/api/connection/grants/${grantId}`, {
+					method: 'DELETE',
+					credential,
+				});
+				return { body: await response.json(), rows: await rows(app.db) };
+			})
+		);
+
+		expect(answers).toEqual([
+			{ body: { ok: true, disconnected: true, revoked: false }, rows: [] },
+			{ body: { ok: true, disconnected: true, revoked: false }, rows: [] },
+		]);
+	});
+
+	it('does not take the row from under a device that connects while the provider is being asked', async () => {
+		// The provider's calls are the slow part, up to twenty seconds of them.
+		// Asked about live devices first and deleted after those calls, the row
+		// went from under whoever connected in between: told `ok`, holding a
+		// credential that reaches nothing, its hash spent for good.
+		const stub = dropboxStub();
+		const late: { connect?: () => Promise<{ credential: string }>; credential?: string } = {};
+		const app = buildApp({
+			fetch: async (url, init) => {
+				if (url.endsWith('/auth/token/revoke') && late.connect !== undefined) {
+					const connect = late.connect;
+					delete late.connect;
+					late.credential = (await connect()).credential;
+				}
+				return stub.fetch(url, init);
+			},
+		});
+		const { credential } = await app.connect();
+		const { grantId }: { grantId: string } = await (
+			await app.request('/api/connection', { credential })
+		).json();
+		late.connect = () => app.connect();
+
+		await app.request(`/api/connection/grants/${grantId}`, { method: 'DELETE', credential });
+
+		expect(late.credential).toBeDefined();
+		expect(
+			(await app.request('/api/connection', { credential: late.credential ?? '' })).status
+		).toBe(200);
+		expect(await rows(app.db)).toHaveLength(1);
+	});
+
+	it('takes it once when two devices sign themselves out together', async () => {
+		const app = buildApp();
+		const devices = [await app.connect(), await app.connect()];
+		const ids = await Promise.all(
+			devices.map(async ({ credential }) => {
+				const body: { grantId: string } = await (
+					await app.request('/api/connection', { credential })
+				).json();
+				return { credential, grantId: body.grantId };
+			})
+		);
+
+		const answers = await Promise.all(
+			ids.map(async ({ credential, grantId }) =>
+				(
+					await app.request(`/api/connection/grants/${grantId}`, {
+						method: 'DELETE',
+						credential,
+					})
+				).json()
+			)
+		);
+
+		expect(
+			answers.filter((body) => (body as { disconnected: boolean }).disconnected)
+		).toHaveLength(1);
 		expect(await rows(app.db)).toEqual([]);
 	});
 

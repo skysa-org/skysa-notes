@@ -698,6 +698,26 @@ describe('what the server is allowed to know', () => {
 
 		const grants = await app.request('/api/connection/grants', { credential });
 
+		// The two that take things away, on an app of their own so the rest of
+		// this still has a connection to ask about: a device signed out, which
+		// takes the account with it when it is the last, and a disconnect.
+		const leaving = buildApp();
+		await leaving.connect({ credential });
+		const mine: { grantId: string } = await (
+			await leaving.request('/api/connection', { credential })
+		).json();
+		const signedOut = await leaving.request(`/api/connection/grants/${mine.grantId}`, {
+			method: 'DELETE',
+			credential,
+		});
+		const other = newCredential();
+		await leaving.connect({ credential: other });
+		const disconnected = await leaving.request('/api/connection', {
+			method: 'DELETE',
+			credential: other,
+		});
+		expect([signedOut.status, disconnected.status]).toEqual([200, 200]);
+
 		// And the flow that ends in a refusal, which has the hash in hand too.
 		const refusingApp = buildApp({
 			entitlements: { check: () => Promise.resolve({ allowed: false, reason: 'no' }) },
@@ -708,14 +728,16 @@ describe('what the server is allowed to know', () => {
 		// Not by reading the code: by generating a secret this test knows and
 		// looking for it in everything the server ever sends.
 		const surfaces = await Promise.all(
-			[started, callback, connection, token, grants, refused].map(async (response) => ({
-				cookies: response.headers.getSetCookie().join('\n'),
-				// Everything a page, a log, a proxy or a referrer could keep.
-				visible: [
-					response.headers.get('location') ?? '',
-					await response.clone().text(),
-				].join('\n'),
-			}))
+			[started, callback, connection, token, grants, refused, signedOut, disconnected].map(
+				async (response) => ({
+					cookies: response.headers.getSetCookie().join('\n'),
+					// Everything a page, a log, a proxy or a referrer could keep.
+					visible: [
+						response.headers.get('location') ?? '',
+						await response.clone().text(),
+					].join('\n'),
+				})
+			)
 		);
 
 		for (const { cookies, visible } of surfaces) {

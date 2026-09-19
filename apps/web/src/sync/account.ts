@@ -222,17 +222,22 @@ export const claimConnection = async (
 	const connection = result.value;
 	const previous = await credentialFor(db, connection.id);
 	await keepCredential(db, connection.id, pending);
+	const asking = await needsAsking(db, connection);
+	if (!asking) {
+		await bindConnection(db, {
+			connectionId: connection.id,
+			provider: connection.provider,
+			accountId: connection.accountId,
+		});
+	}
+	// Last, and awaited: two calls to a server are not something to put between
+	// a credential kept and a device bound, where a closed tab leaves the one
+	// without the other — and let go of unawaited they die with the tab, and
+	// the old grant lingers after all.
 	if (previous !== undefined && previous.credential !== pending.credential) {
 		await retire(client, previous.credential, connection.id);
 	}
-	if (await needsAsking(db, connection)) return { kind: 'other-account', connection };
-
-	await bindConnection(db, {
-		connectionId: connection.id,
-		provider: connection.provider,
-		accountId: connection.accountId,
-	});
-	return { kind: 'connected', connection };
+	return asking ? { kind: 'other-account', connection } : { kind: 'connected', connection };
 };
 
 /**
