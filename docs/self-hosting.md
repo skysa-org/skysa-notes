@@ -22,7 +22,7 @@ takes — Dropbox is minutes, Google is the longest.
 
 - A **Cloudflare account**. Workers Free is enough indefinitely for personal
   use; see [Cost](#cost) before running an instance for other people.
-- **Node 22+ and pnpm 10** (`corepack enable`).
+- **Node 22.13 or later and pnpm 10** (`corepack enable`).
 - **An app registration at each storage provider you want to offer.** Every
   OAuth provider needs its own; there is no way around this, and it is why
   `ENABLED_PROVIDERS` defaults to just `dropbox`.
@@ -156,6 +156,16 @@ whatever stale `apps/web/dist` happens to be lying around, or nothing at all.
 For a custom domain, add a route in the Cloudflare dashboard (Workers → your
 Worker → Settings → Domains & Routes), then make `APP_ORIGIN` match it exactly,
 scheme and all, and add the matching redirect URIs at each provider.
+
+The shell is served with `Strict-Transport-Security: max-age=63072000`: a
+browser that has loaded it once will not reach that host over plain HTTP again
+for two years. It says nothing about your other hosts, on purpose. If every
+subdomain under the one you serve from is yours to commit to HTTPS, add
+`; includeSubDomains` to that line in `apps/web/public/_headers` before you
+deploy — and `; preload` only if you mean to submit the domain to the preload
+list, which is slow to undo. Served from an apex domain, `includeSubDomains`
+covers every subdomain you own. `apps/web/tests/csp.test.ts` holds the default
+and will fail on your fork once you change it; change its assertion with it.
 
 Migrations are separate from deploys on purpose. `pnpm --filter @skysa/api run
 deploy:migrate` does both in order when you want them together.

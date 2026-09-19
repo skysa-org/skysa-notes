@@ -22,7 +22,7 @@ at the top.
 
 ## Development
 
-Requires Node 22+ and pnpm 10 (`corepack enable`).
+Requires Node 22.13 or later and pnpm 10 (`corepack enable`).
 
 ```bash
 pnpm install
