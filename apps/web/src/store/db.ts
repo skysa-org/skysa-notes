@@ -115,6 +115,17 @@ export interface SyncStateRecord {
 	 * before it, and by an API too old to name accounts.
 	 */
 	accountId?: string;
+	/**
+	 * What the server calls the account — an email address, for the most part —
+	 * as it last said it (`rememberAccount` in `store/connection.ts`). Kept here
+	 * so that a source can still be named once the server will no longer answer
+	 * for it: a credential revoked from another device leaves nobody to ask, and
+	 * "Dropbox · ann@example.com" is how the user knows which notes are in
+	 * question. A label and nothing else; `accountId` is what says whose files
+	 * these are. Not indexed, so it needs no version of its own, and absent on
+	 * rows written before it.
+	 */
+	displayName?: string;
 	/** Opaque provider cursor; persisted only after a batch commits. */
 	cursor?: string;
 	rootId?: string;

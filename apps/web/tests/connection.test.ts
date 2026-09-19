@@ -717,6 +717,27 @@ describe('checking a resumed connection against its remote', () => {
 		).toBe(true);
 	});
 
+	it('keeps what the account is called, whichever way it answers', async () => {
+		const { db, fake } = await syncedThenDisconnected();
+		await bindConnection(db, {
+			connectionId: 'dropbox-2',
+			...ACCOUNT,
+			displayName: 'ada@example.com',
+		});
+		expect(await verifyResume(db, 'dropbox-2', fake)).toBe('resumed');
+		expect((await db.syncState.get('dropbox-2'))?.displayName).toBe('ada@example.com');
+
+		const copied = await syncedThenDisconnected();
+		await bindConnection(copied.db, {
+			connectionId: 'dropbox-2',
+			...ACCOUNT,
+			displayName: 'ada@example.com',
+		});
+		const empty = { read: () => Promise.reject(new NotFoundError('gone')) };
+		expect(await verifyResume(copied.db, 'dropbox-2', empty)).toBe('copied');
+		expect((await copied.db.syncState.get('dropbox-2'))?.displayName).toBe('ada@example.com');
+	});
+
 	it('looks past a note deleted elsewhere for one that is still there', async () => {
 		const { db, fake, plan, entryOf } = await syncedThenDisconnected();
 		// The most recently written, which is looked for first.

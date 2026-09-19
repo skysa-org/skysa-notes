@@ -154,6 +154,7 @@ const reconcileOnce = async (
 	const applied = await rememberAccount(db, {
 		provider: connection.provider,
 		accountId: connection.accountId,
+		displayName: connection.displayName,
 		ifUnchangedSince: since,
 	});
 	if (!applied) return retry(db, client, again);
@@ -228,6 +229,7 @@ export const claimConnection = async (
 			connectionId: connection.id,
 			provider: connection.provider,
 			accountId: connection.accountId,
+			displayName: connection.displayName,
 		});
 	}
 	// Last, and awaited: two calls to a server are not something to put between
@@ -313,6 +315,7 @@ export const adoptAccount = async (
 		connectionId: connection.id,
 		provider: connection.provider,
 		accountId: connection.accountId,
+		displayName: connection.displayName,
 	});
 	return { kind: 'connected', connection };
 };
