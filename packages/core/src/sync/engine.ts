@@ -2322,21 +2322,27 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * never lose user data). The two-browser soak found both, as seeds 578 and
 	 * 461.
 	 *
-	 * Where the version survives a move (Dropbox's `rev`) it answers the
-	 * question by itself, and nothing is read. Where it does not (OneDrive's
-	 * `eTag`, Drive's `version`) the file is read and its bytes compared with
-	 * the ones last synced; the version kept is the *read's*, since that is the
-	 * one these bytes were seen under. A rename costs a download there, which is
-	 * what it costs to know.
+	 * Every provider had this, the ones whose version survives a move included:
+	 * there the version handed back *is* the other device's edit. Where it
+	 * survives (Dropbox's `rev`, Drive's `headRevisionId`) an unchanged file
+	 * answers the question by itself, and nothing is read. Otherwise — a file
+	 * that did change, and every move on OneDrive, whose `eTag` a move renews —
+	 * the file is read and its bytes compared with the ones last synced; the
+	 * version kept is the *read's*, since that is the one these bytes were seen
+	 * under. A rename costs a download there, which is what it costs to know,
+	 * and no more than the pull would have spent on a version it did not hold.
 	 *
-	 * `undefined` is "cannot say" — the bytes differ, there is no record of
-	 * what was synced, or the read failed — and the caller goes on holding the
-	 * version it had. That is always safe: the next pull finds a version it
-	 * does not know, reads the file, and answers it as any other change.
+	 * `undefined` is "cannot say" — the bytes differ, or there is no record of
+	 * what was synced — and the caller goes on holding the version it had. That
+	 * is always safe: the next pull finds a version it does not know, reads the
+	 * file, and answers it as any other change. A read that fails is the
+	 * caller's to weigh (`unread`): a rename that has landed is not failed over
+	 * it, and a write that has not gone yet is.
 	 */
 	const versionAfterMove = async (
 		note: SyncNote,
-		moved: RemoteEntry
+		moved: RemoteEntry,
+		unread: 'cannot say' | 'throws'
 	): Promise<string | undefined> => {
 		if (moved.version === note.remoteVersion) return moved.version;
 		// A row from before the hash was kept has none. Clean, its own text is
@@ -2346,7 +2352,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (synced === undefined) return undefined;
 		const file = await provider
 			.read({ remoteId: moved.remoteId, path: moved.path })
-			.catch(() => undefined);
+			.catch((error: unknown) => {
+				if (unread === 'throws') throw error;
+				return undefined;
+			});
 		if (file === undefined) return undefined;
 		return (await contentHash(file.content)) === synced ? file.version : undefined;
 	};
@@ -2405,9 +2414,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// move hands back, which is the version of whatever it moved, but against
 		// one whose bytes are known (`versionAfterMove`). With none, the file has
 		// been moved and is left at that: the op fails, its retry meets the file
-		// at the note's path under a version it does not hold, and that is an
-		// ordinary conflict, which keeps both.
-		const version = await versionAfterMove(note, moved);
+		// at the note's path under a version it does not hold, and
+		// `resolvePushConflict` reads it — a conflict, which keeps both, if it
+		// did change. A read that fails here fails the op as itself, so a rate
+		// limit is waited out and an expired token renewed, rather than either
+		// being reported as a change nobody made.
+		const version = await versionAfterMove(note, moved, 'throws');
 		if (version === undefined) throw changed;
 		return write(note, version);
 	};
@@ -2557,11 +2569,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 		// Where the file is now, and the version the note may hold there: the
 		// one the move handed back only if its bytes are known to be the ones
-		// last synced (`versionAfterMove`), and otherwise the one it held.
-		const version = (await versionAfterMove(note, entry)) ?? note.remoteVersion;
+		// last synced (`versionAfterMove`), and otherwise the one it held. The
+		// rename has landed whatever the read says, so a read that fails is
+		// "cannot say" and the op is done.
+		const version = (await versionAfterMove(note, entry, 'cannot say')) ?? note.remoteVersion;
 		await store.completeOp(op.seq, {
 			kind: 'moved',
 			noteId: note.id,
+			// A note with a file and no version is not a state either store
+			// makes — they set and clear the two together — so there is nothing
+			// held to go on holding, and the move's own is all there is.
 			remote: version === undefined ? entry : { ...entry, version },
 		});
 	};
@@ -2762,7 +2779,32 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				: undefined;
 		if (note === undefined) return undefined;
 
-		const { content } = await provider.read(remote);
+		const { content, version: readAt } = await provider.read(remote);
+
+		// The note's own file, holding the bytes the note last synced, under a
+		// version it does not hold: nobody has edited it. A move renewed the
+		// version (OneDrive's `eTag`) and the note could not be told which bytes
+		// it was for — the read after the move failed, or there was no telling
+		// (`versionAfterMove`). This read is the telling, so the write goes again
+		// against the version these bytes were read under. Pull's "same bytes,
+		// new version" rule again; without it the user's edit is demoted to a
+		// conflict copy of a file that has no other editor. If someone does edit
+		// in the gap, that write conflicts and comes back through here.
+		if (
+			note.remoteId === remote.remoteId &&
+			note.syncedHash !== undefined &&
+			(await contentHash(content)) === note.syncedHash
+		) {
+			const entry = await write(note, readAt);
+			await store.completeOp(op.seq, {
+				kind: 'pushed',
+				noteId: note.id,
+				remote: entry,
+				content: note.content,
+				syncedHash: await contentHash(note.content),
+			});
+			return '';
+		}
 
 		// Same bytes on both sides, which is what an interrupted push looks like
 		// from here: the write landed and the store could not be told before the

@@ -799,8 +799,8 @@ const createSoak = (seed: number, devices: readonly Device[]) => {
 };
 
 /**
- * A move hands back a version, and on OneDrive and Drive it is a new one: the
- * version of bytes nobody has read. Held as the note's own, it says "in step"
+ * A move hands back a version — a new one on OneDrive, and everywhere the
+ * version of the file as the move found it: of bytes nobody has read. Held as the note's own, it says "in step"
  * about a file that may have been edited since the last pull — the pull then
  * skips the file as already seen, and a write checked against it overwrites
  * the other device's edit with no conflict anywhere. Both were found by the
@@ -846,9 +846,79 @@ describe.each(REMOTES)('a rename going up past an edit made elsewhere, over %s',
 
 		await a.engine.push();
 
+		// The conflict rule, exactly: the remote keeps the path, and the edit that
+		// met it is beside it. Two files, and nothing left to send.
 		const files = await converged(remote, a, b);
-		const kept = Object.values(files).join('');
-		expect(kept).toContain('from a');
-		expect(kept).toContain('from b');
+		expect(files['ideas.md']).toBe('from b\n');
+		expect(copiesOf(files, 'ideas.md')).toEqual([expect.stringContaining('from a')]);
+		expect(Object.keys(files)).toHaveLength(2);
+	});
+
+	it('nor when the rename was queued first and the edit behind it', async () => {
+		const { remote, a, b } = await setUp(make);
+		await shared(a, b, 'plan.md', 'base\n');
+		rename(b, 'plan.md', 'ideas.md');
+		edit(b, 'ideas.md', 'from b\n');
+		await b.engine.pull();
+		edit(a, 'plan.md', 'from a\n');
+		await synced(a);
+
+		await b.engine.push();
+
+		const files = await converged(remote, a, b);
+		expect(files['ideas.md']).toBe('from a\n');
+		expect(copiesOf(files, 'ideas.md')).toEqual([expect.stringContaining('from b')]);
+		expect(Object.keys(files)).toHaveLength(2);
+	});
+
+	/** The read that tells a moved file's bytes fails once; nobody else is editing. */
+	const readFailsOnce = (provider: StorageProvider): StorageProvider => {
+		const failed = { yet: false, moved: false };
+		return {
+			...provider,
+			move: async (...args) => {
+				failed.moved = true;
+				return provider.move(...args);
+			},
+			read: (...args) => {
+				if (failed.moved && !failed.yet) {
+					failed.yet = true;
+					return Promise.reject(new Error('the network went away'));
+				}
+				return provider.read(...args);
+			},
+		};
+	};
+
+	it('does not make a conflict of an edit nobody else touched, when the moved file could not be read', async () => {
+		// Edited and then renamed, which is the order every rename in the app
+		// queues them in. Where a move renews the version, the file has to be
+		// read to know whose bytes the new one is for; that read failing must
+		// not turn the user's edit into a copy beside a file with no other editor.
+		const remote = make();
+		const a = await device(remote, 'a');
+		const b = await device(remote, 'b', readFailsOnce);
+		await shared(a, b, 'plan.md', 'base\n');
+		edit(b, 'plan.md', 'from b\n');
+		rename(b, 'plan.md', 'ideas.md');
+
+		await b.engine.push();
+		await b.engine.push();
+
+		expect(await converged(remote, a, b)).toEqual({ 'ideas.md': 'from b\n' });
+	});
+
+	it('nor with the rename in front', async () => {
+		const remote = make();
+		const a = await device(remote, 'a');
+		const b = await device(remote, 'b', readFailsOnce);
+		await shared(a, b, 'plan.md', 'base\n');
+		rename(b, 'plan.md', 'ideas.md');
+		edit(b, 'ideas.md', 'from b\n');
+
+		await b.engine.push();
+		await b.engine.push();
+
+		expect(await converged(remote, a, b)).toEqual({ 'ideas.md': 'from b\n' });
 	});
 });
