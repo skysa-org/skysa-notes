@@ -14,6 +14,7 @@ import {
 	serializeNoteFile,
 	uniqueFilename,
 	UNTITLED_SLUG,
+	withoutNul,
 	writeFrontmatter,
 } from '@skysa/core';
 import Dexie from 'dexie';
@@ -55,23 +56,33 @@ const isUnnamed = (note: NoteRecord): boolean =>
 	basename(note.path) === `${UNTITLED_SLUG}${NOTE_EXTENSION}` &&
 	readFrontmatter(note.frontmatter).title === undefined;
 
-/** Everything a note needs written back to its file. */
+/**
+ * Everything a note needs written back to its file.
+ *
+ * Never a U+0000, wherever in the note one got to — a title, a tag, frontmatter
+ * imported from a file on disk. A file holding one is not a note to any device
+ * that reads it (`decodeText`, docs/PLAN.md §7), so a note pushed with one
+ * would go from every device, this one included. Every file the app originates
+ * is made here, which is what makes the promise keepable.
+ */
 export const noteFileContents = (note: NoteRecord): string =>
-	serializeNoteFile({
-		frontmatter: note.frontmatter,
-		body: note.body,
-		metadata: {
-			// Not written over an `id` the user wrote and the app could not use
-			// (`id: 202409141302`): `writeFrontmatter` holds that.
-			id: note.id,
-			// An unnamed note has no title worth recording; writing "Untitled"
-			// would pin it and stop the first heading from ever naming the note.
-			...(isUnnamed(note) ? {} : { title: note.title }),
-			created: new Date(note.createdAt).toISOString(),
-			updated: new Date(note.updatedAt).toISOString(),
-			...(note.tags.length > 0 ? { tags: note.tags } : {}),
-		},
-	});
+	withoutNul(
+		serializeNoteFile({
+			frontmatter: note.frontmatter,
+			body: note.body,
+			metadata: {
+				// Not written over an `id` the user wrote and the app could not use
+				// (`id: 202409141302`): `writeFrontmatter` holds that.
+				id: note.id,
+				// An unnamed note has no title worth recording; writing "Untitled"
+				// would pin it and stop the first heading from ever naming the note.
+				...(isUnnamed(note) ? {} : { title: note.title }),
+				created: new Date(note.createdAt).toISOString(),
+				updated: new Date(note.updatedAt).toISOString(),
+				...(note.tags.length > 0 ? { tags: note.tags } : {}),
+			},
+		})
+	);
 
 /** The file for a note, exactly: see `NoteRecord.source`. */
 export const noteFile = (note: NoteRecord): string => note.source ?? noteFileContents(note);
@@ -122,7 +133,8 @@ export const createNote = async (
 	input: CreateNoteInput = {}
 ): Promise<NoteRecord> => {
 	const folderPath = input.folderPath ?? '';
-	const body = input.body ?? '';
+	// As `saveNoteBody`: the row holds what its file will.
+	const body = withoutNul(input.body ?? '');
 	const now = Date.now();
 
 	// One transaction, for the same reason `applyEdit` is one: the filename is
@@ -138,7 +150,8 @@ export const createNote = async (
 		db.prefs,
 		async () => {
 			const connectionId = input.connectionId ?? (await activeConnectionId(db));
-			const title = input.title ?? deriveTitle({ body });
+			const title =
+				input.title === undefined ? deriveTitle({ body }) : withoutNul(input.title);
 			const filename = uniqueFilename(
 				title,
 				await takenNamesIn(db, connectionId, folderPath)
@@ -344,12 +357,17 @@ export interface EditBase {
 export const saveNoteBody = async (
 	db: NotesDatabase,
 	id: string,
-	body: string,
+	typed: string,
 	base?: EditBase,
 	/** Where the note is, for a caller with no `base` to say. */
 	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
 	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+		// A paste can carry a U+0000, and a file holding one is unreadable to
+		// every device (`withoutNul`). Dropped here, ahead of every road the
+		// body takes below, so the row holds what its file will; the file is
+		// held to it again where it is made (`noteFileContents`).
+		const body = withoutNul(typed);
 		if (base === undefined) return applyBody(db, id, body, scope);
 		const current = await whereShown(db, base.note);
 		if (current === undefined) {

@@ -350,12 +350,19 @@ const quiet = async (a: Device, b: Device, trace: () => string): Promise<void> =
 	expect(settled, `the devices never went quiet\n${trace()}`).toBe(true);
 };
 
+/**
+ * The notes the remote holds. A file that is not text (`writeBytes`) is not one
+ * of them: no device can read it, so none may hold it (docs/PLAN.md §7).
+ */
 const remoteFiles = (remote: Remote): Record<string, string> =>
 	Object.fromEntries(
 		remote.backing
 			.snapshot()
 			.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
-			.map((entry) => [entry.path, remote.backing.contentAt(entry.path) ?? ''])
+			.flatMap((entry) => {
+				const content = remote.backing.contentAt(entry.path);
+				return content === undefined ? [] : [[entry.path, content]];
+			})
 	);
 
 const localFiles = (d: Device): Record<string, string> =>
@@ -499,6 +506,89 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			expect(live(b).map((note) => note.path)).toContain(
 				Object.keys(files).find((path) => COPY.test(path))
 			);
+		});
+	});
+
+	describe('a note another tool saved in an encoding that is not UTF-8', () => {
+		/** "café" as Latin-1 writes it: `0xE9` alone is not a UTF-8 sequence. */
+		const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+		/** Saved in place, as an editor does: the same file, new bytes. */
+		const resaved = (remote: Remote, path: string): string =>
+			remote.backing.writeBytes(path, LATIN1).remoteId;
+
+		const leftAlone = (remote: Remote, path: string, id: string, devices: Device[]): void => {
+			expect(remote.backing.bytesAt(path)).toEqual(LATIN1);
+			devices.forEach((d) => {
+				expect(d.store.notes().filter((note) => note.remoteId === id)).toEqual([]);
+			});
+		};
+
+		it('is left alone, and goes from a device that had not touched it', async () => {
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'plan.md', 'base\n');
+			await shared(a, b, 'other.md', 'other\n');
+			const id = resaved(remote, 'plan.md');
+
+			expect(await converged(remote, a, b)).toEqual({ 'other.md': 'other\n' });
+			leftAlone(remote, 'plan.md', id, [a, b]);
+		});
+
+		it('keeps an edit made here as a file beside it, found by the pull', async () => {
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'plan.md', 'base\n');
+			edit(a, 'plan.md', 'from a\n');
+			const id = resaved(remote, 'plan.md');
+
+			await synced(a);
+
+			const files = await converged(remote, a, b);
+			expect(Object.keys(files)).toHaveLength(1);
+			expect(copiesOf(files, 'plan.md')).toEqual(['from a\n']);
+			leftAlone(remote, 'plan.md', id, [a, b]);
+		});
+
+		it('and the same when it is the push that finds it', async () => {
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'plan.md', 'base\n');
+			edit(a, 'plan.md', 'from a\n');
+			const id = resaved(remote, 'plan.md');
+
+			// Straight to the push, with the other tool's save unseen. One drain:
+			// the copy is up, and the op did not spend an attempt getting there.
+			const pushed = await a.engine.push();
+			expect(pushed.status).toBe('ok');
+			expect(pushed.conflicts).toHaveLength(1);
+			expect(a.store.ops()).toEqual([]);
+
+			const files = await converged(remote, a, b);
+			expect(Object.keys(files)).toHaveLength(1);
+			expect(copiesOf(files, 'plan.md')).toEqual(['from a\n']);
+			leftAlone(remote, 'plan.md', id, [a, b]);
+		});
+
+		it('gives a rename here one conflict name, not two', async () => {
+			// The note's own file cannot be read and another device has taken
+			// the name it was renamed to. Still bound when it steps aside, its
+			// retry is set aside a second time.
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'plan.md', 'base\n');
+			edit(a, 'plan.md', 'from a\n');
+			rename(a, 'plan.md', 'taken.md');
+			create(b, 'taken.md', 'from b\n');
+			await synced(b);
+			const id = resaved(remote, 'plan.md');
+
+			// Two pushes and no pull between them, which would cut the note
+			// loose itself: the first steps aside, the second is the retry.
+			await a.engine.push();
+			await a.engine.push();
+
+			const files = await converged(remote, a, b);
+			expect(files['taken.md']).toBe('from b\n');
+			expect(copiesOf(files, 'taken.md')).toEqual(['from a\n']);
+			expect(Object.keys(files)).toHaveLength(2);
+			leftAlone(remote, 'plan.md', id, [a, b]);
 		});
 	});
 

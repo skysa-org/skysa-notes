@@ -202,9 +202,12 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 	};
 
 	const download = async (arg: Record<string, unknown>): Promise<Response> => {
-		const read = await backing.read(refOf(str(arg.path)));
+		const read = await backing.readBytes(refOf(str(arg.path)));
 		const found = backing.snapshot().find((entry) => entry.version === read.version);
-		return new Response(read.content, {
+		// The bytes as they are, not as text: a file another tool saved need not
+		// be UTF-8, and the adapter has to be the one to find that out. A copy,
+		// because `Response` wants bytes over an `ArrayBuffer` of their own.
+		return new Response(read.bytes.slice(), {
 			status: 200,
 			headers: {
 				'content-type': 'application/octet-stream',

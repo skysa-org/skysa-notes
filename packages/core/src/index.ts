@@ -42,14 +42,18 @@ export {
 	isCursorResetError,
 	isNotFoundError,
 	isRateLimitError,
+	isUnreadableError,
 	NotFoundError,
 	parseRetryAfter,
 	type ProviderErrorCode,
 	RateLimitError,
 	type RemoteEntry,
 	type StorageProvider,
+	UnreadableError,
 	type WriteOptions,
 } from './providers/types.js';
+
+export { withoutNul } from './providers/text.js';
 
 export {
 	createDropboxProvider,

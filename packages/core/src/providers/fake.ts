@@ -1,6 +1,7 @@
 import { MARKER_FILE, type ProviderKind } from '../config.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../paths.js';
+import { decodeText } from './text.js';
 import {
 	type ChangeEntry,
 	type ChangeSet,
@@ -35,8 +36,15 @@ interface FakeNode {
 	kind: 'file' | 'folder';
 	version: string;
 	modifiedAt: string;
-	/** Empty for folders. */
+	/** Empty for folders, and for a file held as `bytes`. */
 	content: string;
+	/**
+	 * A file some other tool wrote, as the bytes it wrote (`writeBytes`). Kept
+	 * apart from `content` because they need not be text at all, and a test of
+	 * what the engine does with such a file has to be able to show that they
+	 * are the same bytes afterwards.
+	 */
+	bytes?: Uint8Array | undefined;
 }
 
 export type FakeOperation =
@@ -84,7 +92,21 @@ export interface FakeProvider extends StorageProvider {
 	readonly setFault: (fault: FakeFault | undefined) => void;
 	/** Every entry that currently exists, ordered by path. */
 	readonly snapshot: () => RemoteEntry[];
+	/** The text `write` put there. `undefined` for a file held as bytes. */
 	readonly contentAt: (path: string) => string | undefined;
+	/**
+	 * A file as another tool would save it: any bytes, and no version check.
+	 * A file already at the path keeps its id, as a save in place does; the
+	 * version is renewed and the change is in the feed.
+	 */
+	readonly writeBytes: (path: string, bytes: Uint8Array) => RemoteEntry;
+	/**
+	 * What a wire stub serves as the download: the same lookup, faults and
+	 * `NotFoundError` as `read`, without the decoding, which is the adapter's
+	 * to do.
+	 */
+	readonly readBytes: (ref: EntryRef) => Promise<{ bytes: Uint8Array; version: string }>;
+	readonly bytesAt: (path: string) => Uint8Array | undefined;
 	/** Every call made, in order — lets a test assert what the engine did not do. */
 	readonly callLog: () => readonly FakeCall[];
 }
@@ -127,13 +149,16 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	const iso = (): string => new Date(startAt.getTime() + bump('tick') * tickMs).toISOString();
 
+	const bytesOf = (node: FakeNode): Uint8Array =>
+		node.bytes ?? new TextEncoder().encode(node.content);
+
 	const toEntry = (node: FakeNode): RemoteEntry => ({
 		remoteId: node.remoteId,
 		path: node.path,
 		kind: node.kind,
 		version: node.version,
 		modifiedAt: node.modifiedAt,
-		...(node.kind === 'file' ? { size: new TextEncoder().encode(node.content).length } : {}),
+		...(node.kind === 'file' ? { size: bytesOf(node).length } : {}),
 	});
 
 	/** Write a node into the tree and append the matching change record. */
@@ -249,12 +274,44 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 				.map(toEntry);
 		});
 
+	const fileAt = (ref: EntryRef): FakeNode => {
+		const node = resolve(ref);
+		if (node === undefined || node.kind === 'folder') throw new NotFoundError(ref.path);
+		return node;
+	};
+
+	const readBytes = (ref: EntryRef): Promise<{ bytes: Uint8Array; version: string }> =>
+		settle('read', ref.path, () => {
+			const node = fileAt(ref);
+			return { bytes: bytesOf(node), version: node.version };
+		});
+
+	// Decoded from the bytes whoever wrote them, as an adapter decodes a
+	// download: text this fake was handed by `write` goes through the same
+	// gate as a file planted by `writeBytes`, so a NUL the engine pushed is
+	// refused here as it would be on the wire.
 	const read = (ref: EntryRef): Promise<{ content: string; version: string }> =>
 		settle('read', ref.path, () => {
-			const node = resolve(ref);
-			if (node === undefined || node.kind === 'folder') throw new NotFoundError(ref.path);
-			return { content: node.content, version: node.version };
+			const node = fileAt(ref);
+			return { content: decodeText(bytesOf(node), ref.path), version: node.version };
 		});
+
+	const writeBytes = (path: string, bytes: Uint8Array): RemoteEntry => {
+		const target = normalizePath(path);
+		if (target === ROOT) throw new NotFoundError(target);
+		requireParent(target);
+		const existing = nodes.get(target);
+		if (existing?.kind === 'folder') throw new ConflictError(toEntry(existing));
+		return put({
+			remoteId: existing?.remoteId ?? `id:${String(bump('id'))}`,
+			path: target,
+			kind: 'file',
+			version: `v${String(bump('version'))}`,
+			modifiedAt: iso(),
+			content: '',
+			bytes,
+		});
+	};
 
 	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
 		settle('write', path, () => {
@@ -286,6 +343,8 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 				version: `v${String(bump('version'))}`,
 				modifiedAt: iso(),
 				content,
+				// Text now, whatever it was: the bytes another tool left are gone.
+				bytes: undefined,
 			});
 		});
 
@@ -422,7 +481,16 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 			if (fault !== undefined) faults.set('fault', fault);
 		},
 		snapshot: () => [...nodes.values()].sort(byPath).map(toEntry),
-		contentAt: (path) => nodes.get(normalizePath(path))?.content,
+		contentAt: (path) => {
+			const node = nodes.get(normalizePath(path));
+			return node?.bytes === undefined ? node?.content : undefined;
+		},
+		writeBytes,
+		readBytes,
+		bytesAt: (path) => {
+			const node = nodes.get(normalizePath(path));
+			return node === undefined || node.kind === 'folder' ? undefined : bytesOf(node);
+		},
 		callLog: () => [...calls.values()],
 	};
 };

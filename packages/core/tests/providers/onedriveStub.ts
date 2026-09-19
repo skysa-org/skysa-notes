@@ -94,7 +94,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 	/** id → the sequence number of its latest change. */
 	const changedAt = new Map<string, number>();
 	const tombstones = new Map<string, Known>();
-	const downloads = new Map<string, string>();
+	const downloads = new Map<string, Uint8Array>();
 
 	const entries = () => backing.snapshot();
 	const byId = (id: string) => entries().find((entry) => entry.remoteId === id);
@@ -172,7 +172,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		if (entry.kind === 'folder') return itemOf(entry);
 		downloadCount += 1;
 		const token = `y4m${String(downloadCount)}`;
-		downloads.set(token, backing.contentAt(entry.path) ?? '');
+		downloads.set(token, backing.bytesAt(entry.path) ?? new Uint8Array());
 		return {
 			...itemOf(entry),
 			'@microsoft.graph.downloadUrl': `${STUB_DOWNLOAD_ORIGIN}/${token}?download=1`,
@@ -355,7 +355,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		const content = downloads.get(url.pathname.slice(1));
 		return content === undefined
 			? new Response('gone', { status: 404 })
-			: new Response(content, { status: 200 });
+			: new Response(content.slice(), { status: 200 });
 	};
 
 	const APPROOT_PATH =

@@ -1,5 +1,9 @@
 import { createDropboxProvider } from '../../src/providers/dropbox.js';
-import { createFakeProvider } from '../../src/providers/fake.js';
+import {
+	createFakeProvider,
+	type FakeProvider,
+	type FakeProviderOptions,
+} from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import { describeProviderContract } from './contract.js';
@@ -13,18 +17,34 @@ import { createOneDriveStub } from './onedriveStub.js';
  * second time behind `PROVIDER_LIVE_TESTS=1`, so CI stays offline.
  */
 
-describeProviderContract('in-memory fake', () => ({ provider: createFakeProvider() }));
+/**
+ * The way in beneath an adapter, for the scenarios about a file that is not
+ * UTF-8 (`ProviderHarness.plant`): straight into the fake every one of these
+ * is backed by.
+ */
+const beneath = (backing: FakeProvider) => ({
+	plant: (path: string, bytes: Uint8Array) => {
+		backing.writeBytes(path, bytes);
+		return Promise.resolve();
+	},
+	bytesAt: (path: string) => Promise.resolve(backing.bytesAt(path)),
+});
+
+const fake = (options: FakeProviderOptions = {}) => {
+	const provider = createFakeProvider(options);
+	return { provider, ...beneath(provider) };
+};
+
+describeProviderContract('in-memory fake', () => fake());
 
 // The fake's own change feed is coalescing-free and paginates one entry at a
 // time here, which is the weakest feed any real provider gives. An adapter that
 // passes this also passes against a friendlier one.
-describeProviderContract('in-memory fake, one entry per page', () => ({
-	provider: createFakeProvider({ pageSize: 1 }),
-}));
+describeProviderContract('in-memory fake, one entry per page', () => fake({ pageSize: 1 }));
 
-describeProviderContract('in-memory fake, provider reports whole subtrees', () => ({
-	provider: createFakeProvider({ folderChanges: 'recursive' }),
-}));
+describeProviderContract('in-memory fake, provider reports whole subtrees', () =>
+	fake({ folderChanges: 'recursive' })
+);
 
 // One entry per page, so the adapter's `has_more` loops — in `list` and in
 // `changes` — are walked rather than assumed.
@@ -37,6 +57,7 @@ describeProviderContract('dropbox over a stubbed transport, one entry per page',
 			appVersion: '0.1.0',
 			clientId: 'stub-client',
 		}),
+		...beneath(stub.backing),
 	};
 });
 
@@ -49,6 +70,7 @@ describeProviderContract('dropbox over a stubbed transport', () => {
 			appVersion: '0.1.0',
 			clientId: 'stub-client',
 		}),
+		...beneath(stub.backing),
 	};
 });
 
@@ -64,6 +86,7 @@ describeProviderContract('onedrive over a stubbed transport, one entry per page'
 			appVersion: '0.1.0',
 			clientId: 'stub-client',
 		}),
+		...beneath(stub.backing),
 	};
 });
 
@@ -76,6 +99,7 @@ describeProviderContract('onedrive over a stubbed transport', () => {
 			appVersion: '0.1.0',
 			clientId: 'stub-client',
 		}),
+		...beneath(stub.backing),
 	};
 });
 
@@ -91,6 +115,7 @@ describeProviderContract('gdrive over a stubbed transport, one entry per page', 
 			appVersion: '0.1.0',
 			clientId: 'stub-client',
 		}),
+		...beneath(stub.backing),
 	};
 });
 
@@ -103,6 +128,7 @@ describeProviderContract('gdrive over a stubbed transport', () => {
 			appVersion: '0.1.0',
 			clientId: 'stub-client',
 		}),
+		...beneath(stub.backing),
 	};
 });
 

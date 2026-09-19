@@ -13,6 +13,7 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
+import { readText } from './text.js';
 import {
 	AuthError,
 	type ChangeSet,
@@ -548,7 +549,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const response = await doFetch(download, { method: 'GET' });
 		if (response.status === 404) throw new NotFoundError(entry.path);
 		if (!response.ok) throw new Error(`onedrive download ${String(response.status)}`);
-		return { content: await response.text(), version };
+		return { content: await readText(response, entry.path), version };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {

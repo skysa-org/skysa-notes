@@ -1,6 +1,7 @@
 import {
 	basename,
 	isNotFoundError,
+	isUnreadableError,
 	joinPath,
 	parentPath,
 	type ProviderKind,
@@ -479,7 +480,15 @@ export const RESUME_SAMPLE_COUNT = 8;
 
 type Sighting = 'found' | 'missing' | { failed: unknown };
 
-/** Whether the remote still has this file, by id. */
+/**
+ * Whether the remote still has this file, by id.
+ *
+ * A file that is there and is no longer UTF-8 text is found: that it cannot be
+ * read is the one thing the error is sure of, and the question here is only
+ * whether this is the folder the notes came from. Taken for a failure, it
+ * fails the same way every time it is asked, and a connection whose samples
+ * are all such files never verifies.
+ */
 const sight = async (
 	provider: Pick<StorageProvider, 'read'>,
 	note: NoteRecord
@@ -488,6 +497,7 @@ const sight = async (
 		await provider.read({ remoteId: note.remoteId ?? '', path: note.path });
 		return 'found';
 	} catch (error) {
+		if (isUnreadableError(error)) return 'found';
 		return isNotFoundError(error) ? 'missing' : { failed: error };
 	}
 };

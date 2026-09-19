@@ -1,6 +1,7 @@
 import { MARKER_FILE } from '../config.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
+import { readText } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -388,7 +389,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (metadata.rev === undefined || metadata.rev === '') {
 			throw new Error('dropbox sent a download with no rev');
 		}
-		return { content: await response.text(), version: metadata.rev };
+		return { content: await readText(response, entry.path), version: metadata.rev };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {

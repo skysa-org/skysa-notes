@@ -22,6 +22,7 @@ import {
 	isCursorResetError,
 	isNotFoundError,
 	isRateLimitError,
+	isUnreadableError,
 	type RemoteEntry,
 	type StorageProvider,
 } from '../providers/types.js';
@@ -400,24 +401,40 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
+	 * What a read says about a file, for the callers that ask whether it exists
+	 * rather than what it holds. Only "not found" is `gone`. A file that is not
+	 * UTF-8 text is there — that is the one thing an `UnreadableError` is sure
+	 * of — and a probe that took it for missing would have a note re-created
+	 * beside its own file, or a rename dropped. Anything else is the provider
+	 * failing to say, and is the caller's failure too.
+	 */
+	const fileState = (ref: EntryRef): Promise<'there' | 'gone' | 'unreadable'> =>
+		provider.read(ref).then(
+			() => 'there' as const,
+			(error: unknown) => {
+				if (isNotFoundError(error)) return 'gone' as const;
+				if (isUnreadableError(error)) return 'unreadable' as const;
+				throw error;
+			}
+		);
+
+	/**
 	 * Whether a note's file is there now, asked of the provider by id, for the
 	 * few decisions a feed cannot settle. Only "not found" says no: with no file
 	 * to ask about the answer is yes, and a read that fails for any other reason
 	 * fails the pull, which is tried again. A whole read, since the port has no
 	 * cheaper question; these cases are rare.
+	 *
+	 * A file that has become unreadable is there. The note stays bound to it
+	 * only until the file's own entry arrives, which it must, since its bytes
+	 * changed; `decideFile` lets go of the note then.
 	 */
 	const stillThere = async ({
 		at,
 		remoteId,
 	}: Pick<Placement, 'at' | 'remoteId'>): Promise<boolean> => {
 		if (at === undefined || remoteId === undefined) return true;
-		return provider.read({ path: at, remoteId }).then(
-			() => true,
-			(error: unknown) => {
-				if (isNotFoundError(error)) return false;
-				throw error;
-			}
-		);
+		return (await fileState({ path: at, remoteId })) !== 'gone';
 	};
 
 	/**
@@ -1687,6 +1704,51 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
+	 * A file that is there and is not UTF-8 text (`UnreadableError`). Nothing is
+	 * imported, and nothing of ours may go on pointing at it: a row bound to a
+	 * file holds that file's version, so its next push passes the version check
+	 * and replaces bytes this device never read with text it made up — even a
+	 * push that only adds an `id`. So **no row holds the id of a file the engine
+	 * could not read** (docs/PLAN.md §7), and nothing decided here writes,
+	 * moves or deletes the file.
+	 *
+	 * A note bound to a file is let go of as one whose file has vanished:
+	 * clean, it goes from this device and nothing is queued against the remote;
+	 * dirty, it is cut loose and keeps its edit. That covers the note this file
+	 * was, and one matched by path whose own file is another that has gone.
+	 *
+	 * Then whatever of ours is still at the path moves aside, as for any file
+	 * arriving there: the dirty note just cut loose, or a note never pushed that
+	 * has the same name. Its write then creates a new file beside the one that
+	 * could not be read. A file we cannot read is nobody's first push coming
+	 * back, so there is no claiming it (`isStranger`). A dirty note the user has
+	 * renamed is not at the path, and stays where they put it.
+	 *
+	 * Never a throw. A pull that throws does not move its cursor, the next one
+	 * fetches the same entry and reads the same bytes, and one Latin-1 file has
+	 * stopped the user's sync for good.
+	 */
+	const leaveUnread = async (
+		local: SyncNote | undefined,
+		removed: boolean,
+		entry: RemoteEntry,
+		decided: readonly PullChange[],
+		claimed: ReadonlySet<string>
+	): Promise<PullChange[]> => {
+		const letGo =
+			local !== undefined && !removed && local.remoteId !== undefined
+				? [forgetNote(local)]
+				: [];
+		const aside = await displaceOccupant(
+			entry.path,
+			undefined,
+			[...decided, ...letGo],
+			claimed
+		);
+		return [...letGo, ...aside];
+	};
+
+	/**
 	 * A note never pushed has no file to be matched by, only a path, and the
 	 * path proves nothing about whose file this is. It is ours when it is our
 	 * own first push coming back — the write landed and the tab closed before
@@ -1753,11 +1815,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// taking push with it, because `sync` stops when a pull is not `ok`.
 		// There is nothing to import and nothing of ours to move aside; the
 		// deletion arrives as an entry of its own, here or in a later batch.
+		//
+		// Nor may a file that is not UTF-8 text throw, for the same reason and
+		// worse: that one reads the same way every time (`leaveUnread`).
 		const found = await provider.read(entry).catch((error: unknown) => {
-			if (isNotFoundError(error)) return undefined;
+			if (isNotFoundError(error)) return 'gone' as const;
+			if (isUnreadableError(error)) return 'unreadable' as const;
 			throw error;
 		});
-		if (found === undefined) return goneBeforeRead(local, entry, decided);
+		if (found === 'gone') return goneBeforeRead(local, entry, decided);
+		if (found === 'unreadable') return leaveUnread(local, removed, entry, decided, claimed);
 		const { content } = found;
 		const stranger = local !== undefined && !removed && isStranger(local, content);
 		if (local === undefined || stranger) {
@@ -2543,18 +2610,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// notebook made on this device and not yet pushed hits it every
 			// time, because nothing queues a `mkdir` for a folder the user has
 			// only ever moved things into. So ask which end was missing.
-			const source = await provider
-				.read(from)
-				.then(() => true)
-				// As in `runWrite`, and with more at stake: `undefined` below
-				// completes the op as done, so a provider that merely failed to
-				// answer would have the user's rename discarded outright, with
-				// nothing reported and nothing left to retry.
-				.catch((problem: unknown) => {
-					if (!isNotFoundError(problem)) throw problem;
-					return false;
-				});
-			if (!source) return undefined;
+			// As in `runWrite`, and with more at stake: `undefined` below
+			// completes the op as done, so a provider that merely failed to
+			// answer would have the user's rename discarded outright, with
+			// nothing reported and nothing left to retry — `fileState` throws
+			// for that. A file that cannot be read is there to be moved: a
+			// rename changes no bytes, and the pull that reads it lets go of
+			// the note.
+			if ((await fileState(from)) === 'gone') return undefined;
 			await ensureRemoteFolder(parentPath(target));
 			return provider.move(from, target);
 		});
@@ -2763,6 +2826,59 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return freeNotePath(path, [...taken, basename(candidate)]);
 	};
 
+	/**
+	 * A write that met a file which is not UTF-8 text (`UnreadableError`), by a
+	 * note with no readable file of its own: the file is the note's own, or it
+	 * is in the way of a note that has none. The file is left exactly as it is,
+	 * and the user's edit goes up beside it under a conflict name — the
+	 * displacement in `resolvePushConflict` below, with the create done here so
+	 * the op finishes in this drain instead of spending an attempt on a conflict
+	 * nobody can resolve.
+	 *
+	 * A note bound to a file is cut loose first. Still bound, it holds the id of
+	 * a file this device could not read, and its next write goes out against a
+	 * version of bytes nobody here has seen.
+	 *
+	 * The displacement carries the queued write with it, so if the create fails
+	 * the op is already a plain create of an unbound note, and its retry needs
+	 * nothing from here.
+	 */
+	const setAside = async (op: SyncOp, note: SyncNote): Promise<string> => {
+		const path = await freeNotePath(note.path);
+		await store.applyPull({
+			changes: [
+				...(note.remoteId === undefined
+					? []
+					: [{ kind: 'detach-note' as const, id: note.id }]),
+				{ kind: 'displace-note', id: note.id, path },
+			],
+		});
+		const entry = await write({ ...note, path }, undefined);
+		await store.completeOp(op.seq, {
+			kind: 'pushed',
+			noteId: note.id,
+			remote: entry,
+			content: note.content,
+			syncedHash: await contentHash(note.content),
+		});
+		return path;
+	};
+
+	/**
+	 * The same, for an `UnreadableError` a write threw on its way: `runWrite`
+	 * found nothing at the note's path and asked after the file by its id, or
+	 * `followTheRename` moved it and could not read what it had moved. Either
+	 * way the unreadable file is the note's own. Only a write gets here — a
+	 * move's reads are probes, which take unreadable for there.
+	 */
+	const setAsideForOp = async (op: SyncOp): Promise<string | undefined> => {
+		const note =
+			op.op === 'write' && op.noteId !== undefined
+				? await store.noteById(op.noteId)
+				: undefined;
+		return note === undefined ? undefined : setAside(op, note);
+	};
+
 	const resolvePushConflict = async (
 		op: SyncOp,
 		remote: RemoteEntry
@@ -2779,7 +2895,50 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				: undefined;
 		if (note === undefined) return undefined;
 
-		const { content, version: readAt } = await provider.read(remote);
+		/**
+		 * The note's own file, when that is not the one in the way. `gone` too
+		 * for a note that has none, or whose file this one is.
+		 */
+		const ownFile = (): Promise<'there' | 'gone' | 'unreadable'> =>
+			note.remoteId !== undefined && note.remoteId !== remote.remoteId
+				? fileState({ remoteId: note.remoteId, path: note.path })
+				: Promise.resolve('gone');
+
+		/**
+		 * Out of the way of a file that is not this note's, the op left to be
+		 * retried where the note now is. Cut loose as it goes from a file of its
+		 * own that cannot be read, or that retry is aimed at bytes nobody here
+		 * has seen. Unbound, it creates the file at the new name and is done;
+		 * still bound, it would be set aside again (`setAsideForOp`) and the user
+		 * handed a note with two conflict names.
+		 */
+		const stepAside = async (own: 'there' | 'gone' | 'unreadable'): Promise<undefined> => {
+			await store.applyPull({
+				changes: [
+					...(own === 'unreadable'
+						? [{ kind: 'detach-note' as const, id: note.id }]
+						: []),
+					{ kind: 'displace-note', id: note.id, path: await freeNotePath(note.path) },
+				],
+			});
+			return undefined;
+		};
+
+		// The file in the way is not UTF-8 text. There are no two versions to
+		// reconcile, since one of them cannot be read, and the remote keeps the
+		// path as it always does. A note with a file of its own elsewhere steps
+		// aside and stays bound to it, as below: that file may be fine, and a
+		// copy made here would leave it behind with no note. Any other note's
+		// edit goes up as a new file now (`setAside`).
+		const read = await provider.read(remote).catch((error: unknown) => {
+			if (isUnreadableError(error)) return undefined;
+			throw error;
+		});
+		if (read === undefined) {
+			const own = await ownFile();
+			return own === 'gone' ? setAside(op, note) : stepAside(own);
+		}
+		const { content, version: readAt } = read;
 
 		// The note's own file, holding the bytes the note last synced, under a
 		// version it does not hold: nobody has edited it. A move renewed the
@@ -2843,25 +3002,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// is its replacement (deleted and written again, as some editors save),
 		// and moving aside would leave two files claiming the note's frontmatter
 		// `id`. That is the conflict rule's case, whose copy takes a fresh one.
+		//
+		// A file of its own that is there and cannot be read is still there
+		// (`fileState`), so the note moves aside for that too.
 		const taken = await store.noteByRemoteId(remote.remoteId);
-		const someoneElses =
-			note.remoteId !== undefined &&
-			note.remoteId !== remote.remoteId &&
-			(await provider
-				.read({ remoteId: note.remoteId, path: note.path })
-				.then(() => true)
-				.catch((problem: unknown) => {
-					if (!isNotFoundError(problem)) throw problem;
-					return false;
-				}));
-		if ((taken !== undefined && taken.id !== note.id) || someoneElses) {
-			await store.applyPull({
-				changes: [
-					{ kind: 'displace-note', id: note.id, path: await freeNotePath(note.path) },
-				],
-			});
-			return undefined;
-		}
+		const held = taken !== undefined && taken.id !== note.id;
+		const own = await ownFile();
+		if (held || own !== 'gone') return stepAside(own);
 
 		const resolution = await resolutionFor(note, content, remote, new Set(), []);
 		await store.resolveConflict(op.seq, resolution);
@@ -2935,12 +3082,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// would spend its attempts on a throttle nobody looked at. So the
 		// resolution's own error is the reason from here on, and it takes
 		// whichever branch below is its own.
+		//
+		// A write that met a file it could not read is answered the same way,
+		// and for the same reason: no retry reads those bytes any differently.
+		const settled = (path: string | undefined) => ({ path });
+		const failed = (failure: unknown) => ({ failure });
 		const resolved = isConflictError(error)
-			? await resolvePushConflict(op, error.remote).then(
-					(path: string | undefined) => ({ path }),
-					(failure: unknown) => ({ failure })
-				)
-			: undefined;
+			? await resolvePushConflict(op, error.remote).then(settled, failed)
+			: isUnreadableError(error)
+				? await setAsideForOp(op).then(settled, failed)
+				: undefined;
 		const aside = resolved !== undefined && 'path' in resolved ? resolved.path : undefined;
 		if (aside !== undefined) {
 			return drainOps(

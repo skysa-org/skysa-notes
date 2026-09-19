@@ -6679,3 +6679,390 @@ describe('two devices at random', () => {
 		expect(provider.contentAt('r.md')).toBe('renamed\n');
 	});
 });
+
+/**
+ * docs/PLAN.md §7, "A file that is not UTF-8 is left alone". One test per place
+ * the engine reads a file, and the same three things asked after each: the pull
+ * or push went through, the file holds the bytes it held, and no note is left
+ * pointing at it — a note that is can push over bytes this device never read.
+ */
+describe('a file that is not UTF-8 text', () => {
+	/** "café" and a newline as Latin-1: `0xE9` alone is not a UTF-8 sequence. */
+	const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+	const COPY = 'a (conflict 2026-09-15T14-32).md';
+
+	/** A note pulled from the remote the ordinary way, with a cursor stored. */
+	const pulledNote = async (path: string, content: string) => {
+		const entry = await remoteFile(path, content);
+		await engine.pull();
+		const note = noteAt(path);
+		if (note === undefined) throw new Error(`no note at ${path}`);
+		return { entry, note };
+	};
+
+	/** The user's edit, as `store/queue.ts` leaves it. */
+	const editHere = (note: SyncNote, content: string): void => {
+		store.put({ ...note, content, dirty: true });
+		store.queue({ op: 'write', noteId: note.id, path: note.path });
+	};
+
+	const holders = (remoteId: string): SyncNote[] =>
+		store.notes().filter((note) => note.remoteId === remoteId);
+
+	/** What the engine has asked the provider to change, which is never this file. */
+	const sent = (): string[] =>
+		provider
+			.callLog()
+			.filter((call) => call.op === 'write' || call.op === 'move' || call.op === 'delete')
+			.map((call) => `${call.op} ${call.path ?? ''}`);
+
+	it('imports nothing, and the pull goes through', async () => {
+		// A throw here is a pull that never moves its cursor: the same entry
+		// and the same bytes next time, and the user's sync is over.
+		const file = provider.writeBytes('a.md', LATIN1);
+		await remoteFile('b.md', 'readable\n');
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.storedCursor()).toBeDefined();
+		expect(store.notes().map((note) => note.path)).toEqual(['b.md']);
+		expect(holders(file.remoteId)).toEqual([]);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+	});
+
+	it('reads a file holding a NUL the same way', async () => {
+		// UTF-16 with no BOM is valid UTF-8 to a decoder, with a NUL for every
+		// other byte; so is most of what a binary holds.
+		const utf16 = new Uint8Array([0x68, 0x00, 0x69, 0x00]);
+		provider.writeBytes('a.md', utf16);
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.notes()).toEqual([]);
+		expect(provider.bytesAt('a.md')).toEqual(utf16);
+	});
+
+	it('moves a note never pushed aside, and its push makes the copy', async () => {
+		await engine.pull();
+		store.put({ id: 'mine', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
+		const file = provider.writeBytes('a.md', LATIN1);
+
+		// By the pull, as for any file arriving at a name of ours: left to the
+		// push, the note sits on the file's path until a write has failed there.
+		const pulled = await engine.pull();
+
+		expect(pulled.status).toBe('ok');
+		expect(noteAt(COPY)).toMatchObject({ id: 'mine', content: 'mine\n', dirty: true });
+		expect(noteAt('a.md')).toBeUndefined();
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(result.conflicts).toEqual([]);
+		expect(noteAt(COPY)).toMatchObject({ id: 'mine', content: 'mine\n', dirty: false });
+		expect(provider.contentAt(COPY)).toBe('mine\n');
+		expect(holders(file.remoteId)).toEqual([]);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+	});
+
+	it('lets go of a clean note whose file became unreadable, and sends nothing', async () => {
+		// Kept, the row holds the file's id and — after the next entry for it —
+		// its version, and the first push from it replaces the user's bytes.
+		const { entry } = await pulledNote('a.md', 'one\n');
+		const before = sent();
+		provider.writeBytes('a.md', LATIN1);
+
+		const result = await engine.sync();
+
+		expect(result.status).toBe('ok');
+		expect(store.notes()).toEqual([]);
+		expect(store.ops()).toEqual([]);
+		expect(sent()).toEqual(before);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		expect(provider.snapshot().find((each) => each.path === 'a.md')?.remoteId).toBe(
+			entry.remoteId
+		);
+	});
+
+	it('cuts a dirty note loose and moves it aside, and its edit goes up beside the file', async () => {
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		editHere(note, 'my edit\n');
+		provider.writeBytes('a.md', LATIN1);
+
+		const pulled = await engine.pull();
+
+		expect(pulled.status).toBe('ok');
+		expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: true });
+		expect(noteAt(COPY)?.remoteId).toBeUndefined();
+		expect(noteAt('a.md')).toBeUndefined();
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(result.conflicts).toEqual([]);
+		expect(store.ops()).toEqual([]);
+		expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
+		expect(noteAt(COPY)?.remoteId).not.toBe(entry.remoteId);
+		expect(provider.contentAt(COPY)).toBe('my edit\n');
+		expect(holders(entry.remoteId)).toEqual([]);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+	});
+
+	it('leaves a dirty note the user renamed where they put it', async () => {
+		// Nothing is in its way at the new name. Its queued move has no file to
+		// move any more and finishes as done; the write makes the file.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
+		store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
+		store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
+		provider.writeBytes('a.md', LATIN1);
+
+		const result = await engine.sync();
+
+		expect(result.status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(store.notes().map((each) => each.path)).toEqual(['b.md']);
+		expect(noteAt('b.md')).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
+		expect(provider.contentAt('b.md')).toBe('my edit\n');
+		expect(sent().filter((call) => call.startsWith('move'))).toEqual([]);
+		expect(holders(entry.remoteId)).toEqual([]);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+	});
+
+	it('keeps an edit typed after the note was decided clean', async () => {
+		// The store refuses a `delete-note` for a note edited since (§7), the
+		// batch rolls back with its cursor, and the next pull meets a dirty note.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		provider.writeBytes('a.md', LATIN1);
+		const cursor = store.storedCursor();
+		const typed = { done: false };
+		const typing: SyncStore = {
+			...store,
+			applyPull: (batch) => {
+				if (!typed.done) editHere(note, 'typed just now\n');
+				typed.done = true;
+				return store.applyPull(batch);
+			},
+		};
+		const racing = createSyncEngine({ provider, store: typing, now: () => AT });
+
+		const refused = await racing.pull();
+
+		expect(refused.status).toBe('retry');
+		expect(store.storedCursor()).toBe(cursor);
+
+		const result = await racing.sync();
+
+		expect(result.status).toBe('ok');
+		expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'typed just now\n' });
+		expect(provider.contentAt(COPY)).toBe('typed just now\n');
+		expect(holders(entry.remoteId)).toEqual([]);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+	});
+
+	it('drops the delete of a note whose file became unreadable', async () => {
+		// The user deleted text they had seen, not these bytes. The file is left
+		// alone, and the tombstone goes with nothing sent.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
+		provider.writeBytes('a.md', LATIN1);
+
+		const result = await engine.sync();
+
+		expect(result.status).toBe('ok');
+		expect(store.notes()).toEqual([]);
+		expect(store.ops()).toEqual([]);
+		expect(sent().filter((call) => call.startsWith('delete'))).toEqual([]);
+		expect(provider.snapshot().find((each) => each.path === 'a.md')?.remoteId).toBe(
+			entry.remoteId
+		);
+		expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+	});
+
+	it('takes a file it cannot read for one that is still there', async () => {
+		// `stillThere`: the note's own file was renamed and re-saved as Latin-1,
+		// and another file took the name. Read as gone, the note would become
+		// that other file; a throw would stop the pull. It is there, so the note
+		// moves aside, and the file's own entry then lets go of it.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		await provider.move(entry, 'old.md');
+		const old = provider.writeBytes('old.md', LATIN1);
+		const theirs = await remoteFile('a.md', 'theirs\n');
+
+		const result = await pullNow([theirs]);
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('a.md')).toMatchObject({ content: 'theirs\n', remoteId: theirs.remoteId });
+		expect(noteAt('a.md')?.id).not.toBe(note.id);
+		expect(noteAt(COPY)?.id).toBe(note.id);
+
+		const next = await pullNow([old]);
+
+		expect(next.status).toBe('ok');
+		expect(store.notes().map((each) => each.path)).toEqual(['a.md']);
+		expect(holders(entry.remoteId)).toEqual([]);
+		expect(provider.bytesAt('old.md')).toEqual(LATIN1);
+	});
+
+	describe('met by a push', () => {
+		it('sets the edit aside in one drain when the note’s own file cannot be read', async () => {
+			const { entry, note } = await pulledNote('a.md', 'one\n');
+			editHere(note, 'my edit\n');
+			provider.writeBytes('a.md', LATIN1);
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(result.conflicts).toEqual([COPY]);
+			// Finished, not failed and retried: no attempt was spent on it.
+			expect(store.ops()).toEqual([]);
+			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
+			expect(provider.contentAt(COPY)).toBe('my edit\n');
+			expect(holders(entry.remoteId)).toEqual([]);
+			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		});
+
+		it('has cut the note loose even when the copy could not be made', async () => {
+			// Still bound, the retry goes out against the unreadable file's id.
+			const { entry, note } = await pulledNote('a.md', 'one\n');
+			editHere(note, 'my edit\n');
+			provider.writeBytes('a.md', LATIN1);
+			provider.setFault((call) =>
+				call.op === 'write' && call.path === COPY ? new Error('network down') : undefined
+			);
+
+			const failed = await engine.push();
+
+			expect(failed.status).toBe('retry');
+			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: true });
+			expect(holders(entry.remoteId)).toEqual([]);
+
+			provider.setFault(undefined);
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(store.notes().map((each) => each.path)).toEqual([COPY]);
+			expect(provider.contentAt(COPY)).toBe('my edit\n');
+			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		});
+
+		it('keeps a note bound to its own file when the one in the way is another', async () => {
+			// The user renamed the note onto a name an unreadable file has taken.
+			// That file says nothing about the note's own, which is fine and
+			// elsewhere: a copy made now would leave it behind with no note. So
+			// the note steps aside still bound, and its own file follows it.
+			const { entry, note } = await pulledNote('mine.md', 'one\n');
+			store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
+			store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
+			store.queue({ op: 'move', noteId: note.id, path: 'mine.md', targetPath: 'a.md' });
+			const file = provider.writeBytes('a.md', LATIN1);
+
+			await engine.push();
+
+			expect(noteAt(COPY)).toMatchObject({ id: note.id, remoteId: entry.remoteId });
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(store.ops()).toEqual([]);
+			expect(noteAt(COPY)).toMatchObject({ remoteId: entry.remoteId, dirty: false });
+			expect(provider.contentAt(COPY)).toBe('my edit\n');
+			expect(provider.contentAt('mine.md')).toBeUndefined();
+			expect(holders(file.remoteId)).toEqual([]);
+			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		});
+
+		it('sets the edit aside when the file was renamed away and cannot be read', async () => {
+			// `runWrite`: nothing at the note's path, so the file is asked after
+			// by id. It is there; what it holds is not for this note to replace.
+			const { entry, note } = await pulledNote('a.md', 'one\n');
+			editHere(note, 'my edit\n');
+			await provider.move(entry, 'renamed.md');
+			provider.writeBytes('renamed.md', LATIN1);
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(result.conflicts).toEqual([COPY]);
+			expect(store.ops()).toEqual([]);
+			expect(provider.contentAt(COPY)).toBe('my edit\n');
+			expect(provider.contentAt('a.md')).toBeUndefined();
+			expect(holders(entry.remoteId)).toEqual([]);
+			expect(provider.bytesAt('renamed.md')).toEqual(LATIN1);
+		});
+
+		it('sets the edit aside when the file it has just renamed cannot be read', async () => {
+			// `followTheRename`: the file changed between the read that found it
+			// and the move. The move has put it at the note's path, so the note
+			// is what moves on.
+			const { entry, note } = await pulledNote('a.md', 'one\n');
+			store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
+			store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
+			store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
+			provider.setFault((call) => {
+				if (call.op === 'move') provider.writeBytes('a.md', LATIN1);
+				return undefined;
+			});
+
+			const result = await engine.push();
+
+			const copy = 'b (conflict 2026-09-15T14-32).md';
+			expect(result.status).toBe('ok');
+			expect(result.conflicts).toEqual([copy]);
+			expect(store.ops()).toEqual([]);
+			expect(noteAt(copy)).toMatchObject({ id: note.id, content: 'my edit\n' });
+			expect(provider.contentAt(copy)).toBe('my edit\n');
+			expect(holders(entry.remoteId)).toEqual([]);
+			expect(provider.bytesAt('b.md')).toEqual(LATIN1);
+		});
+
+		it('cuts the note loose when its own file cannot be read and another has its name', async () => {
+			// `someoneElses`: still bound, the retry is aimed at the unreadable
+			// file, is set aside a second time, and the user is handed a note
+			// named "(conflict …) (conflict …)".
+			const { entry, note } = await pulledNote('x.md', 'one\n');
+			store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
+			store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
+			store.queue({ op: 'move', noteId: note.id, path: 'x.md', targetPath: 'a.md' });
+			await remoteFile('a.md', 'theirs\n');
+			provider.writeBytes('x.md', LATIN1);
+
+			await engine.push();
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(store.ops()).toEqual([]);
+			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
+			expect(provider.contentAt(COPY)).toBe('my edit\n');
+			expect(provider.contentAt('a.md')).toBe('theirs\n');
+			expect(holders(entry.remoteId)).toEqual([]);
+			expect(provider.bytesAt('x.md')).toEqual(LATIN1);
+		});
+
+		it('carries out a rename of a file it cannot read, and the next pull lets go of the note', async () => {
+			// `runMove`: the move found no folder to go into and asks whether the
+			// file is there. It is. A rename changes no bytes.
+			const { entry, note } = await pulledNote('a.md', 'one\n');
+			store.putFolder({ path: 'New' });
+			store.put({ ...note, path: 'New/a.md' });
+			store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'New/a.md' });
+			provider.writeBytes('a.md', LATIN1);
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(store.ops()).toEqual([]);
+			expect(provider.bytesAt('New/a.md')).toEqual(LATIN1);
+
+			const next = await engine.sync();
+
+			expect(next.status).toBe('ok');
+			expect(store.notes()).toEqual([]);
+			expect(holders(entry.remoteId)).toEqual([]);
+			expect(provider.bytesAt('New/a.md')).toEqual(LATIN1);
+		});
+	});
+});

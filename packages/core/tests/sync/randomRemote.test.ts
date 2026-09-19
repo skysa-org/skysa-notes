@@ -162,7 +162,19 @@ const files = (backing: FakeProvider): RemoteEntry[] =>
 const folders = (backing: FakeProvider): RemoteEntry[] =>
 	backing.snapshot().filter((entry) => entry.kind === 'folder');
 
-const createRemote = (seed: number, backing: FakeProvider) => {
+/** "café" as Latin-1 writes it: `0xE9` alone is not a UTF-8 sequence. */
+const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+/** The files a device can hold: the ones that are text (docs/PLAN.md §7). */
+const readable = (backing: FakeProvider): RemoteEntry[] =>
+	files(backing).filter((entry) => backing.contentAt(entry.path) !== undefined);
+
+/**
+ * `encodings` adds the other tool that saves a note as Latin-1, and the user
+ * who then fixes it. Drawn ahead of the ordinary roll and only when asked for,
+ * so the seeds of the run without it go on meaning what they meant.
+ */
+const createRemote = (seed: number, backing: FakeProvider, encodings = false) => {
 	const next = random(seed);
 	const log: string[] = [];
 	const counter = { value: 0 };
@@ -183,12 +195,30 @@ const createRemote = (seed: number, backing: FakeProvider) => {
 		return candidates.length === 0 ? undefined : pick(candidates);
 	};
 
+	const body = (): string => {
+		counter.value += 1;
+		return `body ${String(counter.value)}\n`;
+	};
+
+	/** Whether this step was one about an encoding, and so is spent. */
+	const recode = async (): Promise<boolean> => {
+		if (!encodings || next() >= 0.2) return false;
+		const all = files(backing);
+		if (all.length === 0) return false;
+		const file = pick(all);
+		if (backing.contentAt(file.path) === undefined) {
+			log.push(`fix the encoding of ${file.path}`);
+			await backing.write(file.path, body(), { expectedVersion: file.version });
+			return true;
+		}
+		log.push(`re-save ${file.path} as Latin-1`);
+		backing.writeBytes(file.path, LATIN1);
+		return true;
+	};
+
 	const step = async (): Promise<void> => {
+		if (await recode()) return;
 		const roll = next();
-		const body = (): string => {
-			counter.value += 1;
-			return `body ${String(counter.value)}\n`;
-		};
 		const someFile = files(backing);
 		const someFolder = folders(backing);
 		if (roll < 0.25 || someFile.length === 0) {
@@ -246,14 +276,25 @@ const createRemote = (seed: number, backing: FakeProvider) => {
 	};
 };
 
+/** Fewer for the run with encodings in it: the same walk, and twice the suite otherwise. */
+const ENCODING_SEEDS = 40;
+
+const RUNS = [
+	{ title: 'is followed exactly by a pull after every burst', encodings: false, seeds: SEEDS },
+	{
+		title: 'holds exactly the files that are UTF-8 text, as they come and go',
+		encodings: true,
+		seeds: ENCODING_SEEDS,
+	},
+];
+
 describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
-	it.each(Array.from({ length: SEEDS }, (__, seed) => seed + 1))(
-		'is followed exactly by a pull after every burst, seed %i',
-		async (seed) => {
+	describe.each(RUNS)('$title', ({ encodings, seeds }) => {
+		it.each(Array.from({ length: seeds }, (__, seed) => seed + 1))('seed %i', async (seed) => {
 			const { backing, adapter } = make();
 			await adapter.ensureRoot();
 			const store = createMemoryStore();
-			const remote = createRemote(seed, backing);
+			const remote = createRemote(seed, backing, encodings);
 			// What each page said, for the trace a failure prints.
 			const reporting: StorageProvider = {
 				...adapter,
@@ -294,7 +335,7 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 						.sort(),
 					remote.trace()
 				).toEqual(
-					files(backing)
+					readable(backing)
 						.map((entry) => `${entry.path} ${entry.remoteId}`)
 						.sort()
 				);
@@ -303,7 +344,10 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 					remote.trace()
 				).toEqual(
 					Object.fromEntries(
-						files(backing).map((entry) => [entry.path, backing.contentAt(entry.path)])
+						readable(backing).map((entry) => [
+							entry.path,
+							backing.contentAt(entry.path),
+						])
 					)
 				);
 				expect(
@@ -318,6 +362,6 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 						.sort()
 				);
 			}, Promise.resolve());
-		}
-	);
+		});
+	});
 });
