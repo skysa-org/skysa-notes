@@ -11,6 +11,7 @@ import {
 	listDirtyNotes,
 	listNotes,
 	moveNote,
+	noteFile,
 	noteFileContents,
 	purgeNote,
 	renameNote,
@@ -628,6 +629,21 @@ describe('a U+0000 in what the user gave', () => {
 		expect(tagged.source).not.toContain(NUL);
 		expect(noteFileContents(tagged)).not.toContain(NUL);
 		expect(noteFileContents(tagged)).toContain('kept: value');
+	});
+
+	it('is dropped from an imported file at the door, so the file kept verbatim has none', async () => {
+		// An unedited note is pushed as its `source`, not re-serialized, so
+		// stripping where files are made would never see this one.
+		const note = await importNoteFile(db, {
+			path: 'a.md',
+			source: `---\ntitle: Im\u0000ported\n---\n\n# A\u0000\n`,
+		});
+
+		expect(note.source).toBe('---\ntitle: Imported\n---\n\n# A\n');
+		expect(noteFile(note)).not.toContain(NUL);
+		expect(note.title).toBe('Imported');
+		expect(note.body).not.toContain(NUL);
+		expect(note.dirty).toBe(0);
 	});
 
 	it('leaves a body without one exactly as typed', async () => {

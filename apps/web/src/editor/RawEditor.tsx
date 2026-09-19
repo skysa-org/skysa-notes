@@ -8,6 +8,7 @@ import { isUserEdit, programmatic } from './dirty.js';
 import { findExtension, rawFindTarget } from './findRaw.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { useIncomingBody } from './incoming.js';
+import { rawWithoutNul } from './noNul.js';
 
 /**
  * Raw markdown mode: CodeMirror 6 over the note body. The body string is the
@@ -70,6 +71,7 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEd
 					keymap.of([...defaultKeymap, ...historyKeymap]),
 					markdown(),
 					findExtension(),
+					rawWithoutNul(),
 					EditorView.lineWrapping,
 					EditorView.updateListener.of((update) => {
 						if (!isUserEdit(update)) return;

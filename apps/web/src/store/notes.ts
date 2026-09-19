@@ -63,7 +63,10 @@ const isUnnamed = (note: NoteRecord): boolean =>
  * imported from a file on disk. A file holding one is not a note to any device
  * that reads it (`decodeText`, docs/PLAN.md §7), so a note pushed with one
  * would go from every device, this one included. Every file the app originates
- * is made here, which is what makes the promise keepable.
+ * is made here. The other thing a push can send is a `source` kept verbatim
+ * (`noteFile`), and neither door a source comes through lets one in: a pulled
+ * file holding a NUL is refused before it is a row, and `importNoteFile` drops
+ * it on the way in.
  */
 export const noteFileContents = (note: NoteRecord): string =>
 	withoutNul(
@@ -837,7 +840,13 @@ export const importNoteFile = async (
 	db: NotesDatabase,
 	input: ImportNoteFileInput
 ): Promise<NoteRecord> => {
-	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
+	// A file from outside the sync: nothing has decoded it, so nothing has
+	// refused a U+0000 in it (`decodeText`), and `source` is what a push sends
+	// for as long as the note is not edited (`noteFile`). Dropped at the door,
+	// then, so the row never holds a file no device would read back. A pulled
+	// file needs no such thing: one holding a NUL never becomes a row.
+	const source = withoutNul(input.source);
+	const parsed = parseNoteFile(source, { filename: basename(input.path) });
 	const now = Date.now();
 
 	// Transactional for the same reason every other write here is, and more
@@ -869,8 +878,8 @@ export const importNoteFile = async (
 					id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
 					connectionId,
 					path: input.path,
-					source: input.source,
-					hash: await Dexie.waitFor(contentHash(input.source)),
+					source,
+					hash: await Dexie.waitFor(contentHash(source)),
 					existing,
 					now,
 				}),

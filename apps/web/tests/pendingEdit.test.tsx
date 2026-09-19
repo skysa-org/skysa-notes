@@ -496,3 +496,32 @@ describe('saveNoteBody with a base', () => {
 		expect(await originOf()).toBe(second);
 	});
 });
+
+describe('a U+0000 pasted into a note', () => {
+	it('is saved without it, and what is typed next is saved into the same note', async () => {
+		// The store drops the NUL. Reported with it, the save comes back as a
+		// body the editor never wrote: taken for a change from outside, it
+		// replaces the document, and the edit typed meanwhile is saved as
+		// displaced — a conflict copy of the user's own note.
+		await synced();
+		const editor = await open();
+
+		editor.type('pas\u0000ted\n');
+		flushAutosave();
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.body).toBe('before\npasted\n');
+		});
+		editor.type('and more\n');
+		// The saved body has reached the editor as a prop by now.
+		await waitFor(() => {
+			expect(editor.view().state.doc.toString()).toBe('before\npasted\nand more\n');
+		});
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await getNote(db, 'n1'))?.body).toBe('before\npasted\nand more\n');
+		});
+		expect(await notes()).toHaveLength(1);
+		expect(editor.view().state.doc.toString()).toBe('before\npasted\nand more\n');
+	});
+});

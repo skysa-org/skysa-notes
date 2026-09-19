@@ -379,3 +379,62 @@ describe('representsFaithfully', () => {
 		expect(edits[0]).toContain('<p>x</p>');
 	});
 });
+
+/**
+ * The store never keeps a U+0000 (`saveNoteBody`), so an editor that reported
+ * one would get its save back as a body it never wrote, and take it for a change
+ * from outside. The document never holds one instead (`noNul.ts`).
+ */
+describe('a U+0000 in what is pasted', () => {
+	it('never reaches the document, or the markdown that is reported', async () => {
+		const onUserEdit = vi.fn();
+		const { type, withCtx } = await mount('Hello\n', onUserEdit);
+
+		type(' wor\u0000ld\u0000');
+
+		expect(withCtx((ctx) => ctx.get(editorViewCtx).state.doc.textContent)).toBe('Hello world');
+		expect(onUserEdit).toHaveBeenCalledExactlyOnceWith('Hello world\n');
+	});
+
+	it('is dropped from every block a paste reached', async () => {
+		const onUserEdit = vi.fn();
+		const { withCtx } = await mount('one\n\ntwo\n', onUserEdit);
+
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			// Later position first, so the second insert's position still holds.
+			view.dispatch(view.state.tr.insertText('\u0000b\u0000', 6).insertText('a\u0000', 1));
+		});
+
+		expect(onUserEdit).toHaveBeenCalledExactlyOnceWith('aone\n\nbtwo\n');
+	});
+
+	it('is one step to undo, paste and all', async () => {
+		const { type, withCtx } = await mount('Hello\n');
+
+		type(' wor\u0000ld');
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			undo(view.state, view.dispatch);
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('Hello\n');
+	});
+
+	it('is dropped from a change the app made too, and that is still not an edit', async () => {
+		// A body cannot bring one in: markdown reads a U+0000 as U+FFFD. So the
+		// app's own transaction is made by hand, to show whose the tidying is.
+		const onUserEdit = vi.fn();
+		const { withCtx } = await mount('Hello\n', onUserEdit);
+
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			view.dispatch(
+				view.state.tr.insertText(' the\u0000re', 6).setMeta('skysa/programmatic', true)
+			);
+		});
+
+		expect(withCtx(currentMarkdown)).toBe('Hello there\n');
+		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+});

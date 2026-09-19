@@ -1532,10 +1532,28 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const idForNewNote = async (
 		content: string,
-		decided: readonly PullChange[]
+		decided: readonly PullChange[],
+		batch: Batch
 	): Promise<string> => {
 		const claimed = parseNoteFile(content).id;
 		if (claimed === undefined) return newId();
+
+		// Nor an id the user has a delete queued for. The op names its note by
+		// id and nothing else, so a row made under that id *is* its target,
+		// whatever file the row holds — and a queued delete can outlive its row.
+		// A tombstone whose file became unreadable is let go of with its delete
+		// still queued (`leaveUnread`), and the other device's edit to that same
+		// note is set aside in a file that carries this id; adopted, that copy is
+		// what the delete removes. `noteForEntry` refuses the same note by path,
+		// for the same reason.
+		//
+		// Asked of the queue rather than settled by withdrawing the op when the
+		// row goes: the queue is read for every batch, so this holds for a copy
+		// arriving in this batch or in any later one, for as long as the op is
+		// there — and once a push has run it, with no row, it is done and sends
+		// nothing. Withdrawing would need the store to be told, and would leave
+		// this door open to every other way a delete comes to outlive its row.
+		if (batch.deleting.has(claimed)) return newId();
 
 		// Held by a note that is still going to be there. One this batch has
 		// already taken away is not a competing claim — a file moved in a way the
@@ -1709,12 +1727,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * file holds that file's version, so its next push passes the version check
 	 * and replaces bytes this device never read with text it made up — even a
 	 * push that only adds an `id`. So **no row holds the id of a file the engine
-	 * could not read** (docs/PLAN.md §7), and nothing decided here writes,
-	 * moves or deletes the file.
+	 * could not read** (docs/PLAN.md §7), and nothing this decision leaves
+	 * behind can write, move or delete the file. That is a promise about the
+	 * pull, from the moment it sees the file. A delete already queued and pushed
+	 * before any pull has seen the re-save still removes it, as it would an
+	 * edit made on another device: `runDelete` asks nothing of the file.
 	 *
 	 * A note bound to a file is let go of as one whose file has vanished:
 	 * clean, it goes from this device and nothing is queued against the remote;
-	 * dirty, it is cut loose and keeps its edit. That covers the note this file
+	 * dirty, it is cut loose and keeps its edit. A tombstone is clean, and goes:
+	 * its delete was of text the user saw, not of these bytes. The op stays
+	 * queued until a push finds no note for it, which is why `idForNewNote`
+	 * will not hand its id to a file arriving meanwhile. That covers the note this file
 	 * was, and one matched by path whose own file is another that has gone.
 	 *
 	 * Then whatever of ours is still at the path moves aside, as for any file
@@ -1835,7 +1859,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				...aside,
 				{
 					kind: 'upsert-note',
-					id: await idForNewNote(content, [...decided, ...aside]),
+					id: await idForNewNote(content, [...decided, ...aside], batch),
 					path: entry.path,
 					content,
 					remote: entry,
@@ -2820,6 +2844,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * the push side. `freeFolderPath`'s counterpart, and asked of the store
 	 * rather than of a batch: nothing else is in flight here.
 	 */
+	/**
+	 * How an op that could not simply be sent was settled instead: whether it
+	 * reached the remote after all (`SyncOutcome.pushed` counts those), and the
+	 * conflict copy the user is to be told of, if one was made.
+	 */
+	interface Settled {
+		pushed: boolean;
+		conflict?: string;
+	}
+
 	const freeNotePath = async (path: string, taken: readonly string[] = []): Promise<string> => {
 		const candidate = conflictPath(path, now(), taken);
 		if ((await store.noteByPath(candidate)) === undefined) return candidate;
@@ -2842,9 +2876,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * The displacement carries the queued write with it, so if the create fails
 	 * the op is already a plain create of an unbound note, and its retry needs
 	 * nothing from here.
+	 *
+	 * `freeNotePath` can only ask the store, and the name it finds free may be
+	 * taken on the remote by a file this device has not pulled: another device
+	 * set its own edit aside in the same minute. The create says so, and the
+	 * note is moved on to the next name and tried there, as `moveAside` does for
+	 * a rename — bounded the same way, and always from the name the note
+	 * started with, so the name it ends at carries one conflict suffix.
+	 *
+	 * The store first and the remote second, at every step, rather than one
+	 * displacement made once the name is known. A process that dies between the
+	 * two then leaves an unbound, dirty note with its write still queued, which
+	 * the next push simply sends. The other order leaves a file on the remote
+	 * that no row knows of, and the retry makes a second one beside it.
 	 */
-	const setAside = async (op: SyncOp, note: SyncNote): Promise<string> => {
-		const path = await freeNotePath(note.path);
+	const setAside = async (
+		op: SyncOp,
+		note: SyncNote,
+		taken: readonly string[] = []
+	): Promise<Settled> => {
+		const path = await freeNotePath(note.path, taken);
 		await store.applyPull({
 			changes: [
 				...(note.remoteId === undefined
@@ -2853,7 +2904,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				{ kind: 'displace-note', id: note.id, path },
 			],
 		});
-		const entry = await write({ ...note, path }, undefined);
+		const entry = await write({ ...note, path }, undefined).catch((error: unknown) => {
+			if (!isConflictError(error) || taken.length > 8) throw error;
+			return undefined;
+		});
+		// Cut loose by now, and said so, or the next round would detach a note
+		// that has nothing left to forget.
+		if (entry === undefined) {
+			const { remoteId: _id, remoteVersion: _version, ...loose } = note;
+			return setAside(op, loose, [...taken, basename(path)]);
+		}
 		await store.completeOp(op.seq, {
 			kind: 'pushed',
 			noteId: note.id,
@@ -2861,7 +2921,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			content: note.content,
 			syncedHash: await contentHash(note.content),
 		});
-		return path;
+		// Both: the user is told of the copy, and the op did reach the remote.
+		return { conflict: path, pushed: true };
 	};
 
 	/**
@@ -2871,7 +2932,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * way the unreadable file is the note's own. Only a write gets here — a
 	 * move's reads are probes, which take unreadable for there.
 	 */
-	const setAsideForOp = async (op: SyncOp): Promise<string | undefined> => {
+	const setAsideForOp = async (op: SyncOp): Promise<Settled | undefined> => {
 		const note =
 			op.op === 'write' && op.noteId !== undefined
 				? await store.noteById(op.noteId)
@@ -2882,7 +2943,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const resolvePushConflict = async (
 		op: SyncOp,
 		remote: RemoteEntry
-	): Promise<string | undefined> => {
+	): Promise<Settled | undefined> => {
 		// Only a write carries content there could be two versions of. A `move`
 		// that finds its target occupied, or a `mkdir` that finds a file in the
 		// way, is not this rule's business: resolving it would point the note at
@@ -2962,7 +3023,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				content: note.content,
 				syncedHash: await contentHash(note.content),
 			});
-			return '';
+			return { pushed: true };
 		}
 
 		// Same bytes on both sides, which is what an interrupted push looks like
@@ -2978,7 +3039,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				content: note.content,
 				syncedHash: await contentHash(note.content),
 			});
-			return '';
+			return { pushed: true };
 		}
 
 		// The file in the way is one we already hold, as a different note. That
@@ -3012,7 +3073,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		const resolution = await resolutionFor(note, content, remote, new Set(), []);
 		await store.resolveConflict(op.seq, resolution);
-		return resolution.copyPath;
+		// The op went nowhere: its edit is in the copy, whose own write is
+		// queued and is counted when it goes.
+		return { conflict: resolution.copyPath, pushed: false };
 	};
 
 	interface PushProgress {
@@ -3085,20 +3148,23 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		//
 		// A write that met a file it could not read is answered the same way,
 		// and for the same reason: no retry reads those bytes any differently.
-		const settled = (path: string | undefined) => ({ path });
+		const settled = (how: Settled | undefined) => ({ how });
 		const failed = (failure: unknown) => ({ failure });
 		const resolved = isConflictError(error)
 			? await resolvePushConflict(op, error.remote).then(settled, failed)
 			: isUnreadableError(error)
 				? await setAsideForOp(op).then(settled, failed)
 				: undefined;
-		const aside = resolved !== undefined && 'path' in resolved ? resolved.path : undefined;
-		if (aside !== undefined) {
+		const how = resolved !== undefined && 'how' in resolved ? resolved.how : undefined;
+		if (how !== undefined) {
 			return drainOps(
 				ops.slice(1),
 				{
-					pushed: progress.pushed + (aside === '' ? 1 : 0),
-					conflicts: aside === '' ? progress.conflicts : [...progress.conflicts, aside],
+					pushed: progress.pushed + (how.pushed ? 1 : 0),
+					conflicts:
+						how.conflict === undefined
+							? progress.conflicts
+							: [...progress.conflicts, how.conflict],
 				},
 				retriedAuth
 			);

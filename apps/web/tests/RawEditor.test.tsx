@@ -186,4 +186,73 @@ describe('RawEditor', () => {
 		expect(view.state.doc.toString()).toBe('REMOTE');
 		expect(onUserEdit).toHaveBeenLastCalledWith('REMOTE', 'o2');
 	});
+
+	describe('a U+0000 in what is pasted', () => {
+		// The store never keeps one (`saveNoteBody`), so an editor that reported
+		// one would get back a body it never wrote and take it for a change from
+		// outside: the document replaced, the undo history emptied, and whatever
+		// was typed meanwhile saved as a conflict copy of the user's own note.
+		it('never reaches the document, or the edit that is reported', () => {
+			const onUserEdit = vi.fn();
+			const { container } = render(
+				<RawEditor noteId="a" body="Hello" onUserEdit={onUserEdit} />
+			);
+			const view = editorView(container);
+
+			view.dispatch({
+				changes: { from: 5, insert: ' wor\u0000ld\u0000' },
+				selection: { anchor: 13 },
+				userEvent: 'input.paste',
+			});
+
+			expect(view.state.doc.toString()).toBe('Hello world');
+			expect(view.state.selection.main.anchor).toBe(11);
+			expect(onUserEdit).toHaveBeenCalledExactlyOnceWith('Hello world', '');
+		});
+
+		it('drops one from each of several pasted lines, and leaves the rest where it was', () => {
+			const { container } = render(
+				<RawEditor noteId="a" body={'one\ntwo\n'} onUserEdit={vi.fn()} />
+			);
+			const view = editorView(container);
+
+			view.dispatch({
+				changes: [
+					{ from: 0, insert: '\u0000a\n\u0000b' },
+					{ from: 8, insert: 'c\u0000' },
+				],
+			});
+
+			expect(view.state.doc.toString()).toBe('a\nbone\ntwo\nc');
+		});
+
+		it('lets the user go on typing when the save comes back', () => {
+			const onUserEdit = vi.fn();
+			const onAdopted = vi.fn();
+			const props = { noteId: 'a', onUserEdit, onAdopted };
+			const { container, rerender } = render(<RawEditor {...props} body="Hello" />);
+			const view = editorView(container);
+
+			view.dispatch({ changes: { from: 5, insert: ' wor\u0000ld' } });
+			view.dispatch({ changes: { from: view.state.doc.length, insert: '!!' } });
+			// The first save lands, holding what the store kept of it.
+			rerender(<RawEditor {...props} body="Hello world" />);
+
+			expect(view.state.doc.toString()).toBe('Hello world!!');
+			expect(onAdopted).not.toHaveBeenCalled();
+			expect(undoDepth(view.state)).toBeGreaterThan(0);
+		});
+
+		it('is one step to undo, paste and all', () => {
+			const { container } = render(
+				<RawEditor noteId="a" body="Hello" onUserEdit={vi.fn()} />
+			);
+			const view = editorView(container);
+
+			view.dispatch({ changes: { from: 5, insert: ' wor\u0000ld' } });
+			undo(view);
+
+			expect(view.state.doc.toString()).toBe('Hello');
+		});
+	});
 });

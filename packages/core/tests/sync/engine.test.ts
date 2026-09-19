@@ -6716,6 +6716,12 @@ describe('a file that is not UTF-8 text', () => {
 			.filter((call) => call.op === 'write' || call.op === 'move' || call.op === 'delete')
 			.map((call) => `${call.op} ${call.path ?? ''}`);
 
+	const remoteEntryAt = (path: string) => {
+		const found = provider.snapshot().find((each) => each.path === path);
+		if (found === undefined) throw new Error(`nothing on the remote at ${path}`);
+		return found;
+	};
+
 	it('imports nothing, and the pull goes through', async () => {
 		// A throw here is a pull that never moves its cursor: the same entry
 		// and the same bytes next time, and the user's sync is over.
@@ -6907,6 +6913,55 @@ describe('a file that is not UTF-8 text', () => {
 		expect(provider.bytesAt('old.md')).toEqual(LATIN1);
 	});
 
+	describe('a delete queued for a note whose file became unreadable', () => {
+		// The tombstone goes and its delete stays queued, naming the note by id.
+		// Another device, holding an edit to the same note, sets it aside in a
+		// file that carries that id — and a row made under it is what the delete
+		// then removes: the other device's edit, from every device.
+		const theirCopy = `---\nid: n1\n---\n\ntheir edit\n`;
+
+		const tombstone = async () => {
+			await pulledNote('a.md', `---\nid: n1\n---\n\none\n`);
+			expect(noteAt('a.md')?.id).toBe('n1');
+			store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
+		};
+		const resave = (): void => {
+			provider.writeBytes('a.md', LATIN1);
+		};
+		const setAsideThere = async (): Promise<void> => {
+			await remoteFile(COPY, theirCopy);
+		};
+		const pullNothing = (): Promise<void> => Promise.resolve();
+		const pullBetween = async (): Promise<void> => {
+			expect((await engine.pull()).status).toBe('ok');
+		};
+
+		it.each([
+			['in the batch that says so, behind it', resave, pullNothing, setAsideThere],
+			['in the batch that says so, ahead of it', setAsideThere, pullNothing, resave],
+			['in a later batch', resave, pullBetween, setAsideThere],
+			['in an earlier batch', setAsideThere, pullBetween, resave],
+		])(
+			'is not aimed at the other device’s copy arriving %s',
+			async (_, first, between, second) => {
+				await tombstone();
+				await first();
+				await between();
+				await second();
+
+				const result = await engine.sync();
+
+				expect(result.status).toBe('ok');
+				expect(store.ops()).toEqual([]);
+				expect(sent().filter((call) => call.startsWith('delete'))).toEqual([]);
+				expect(provider.contentAt(COPY)).toBe(theirCopy);
+				expect(noteAt(COPY)?.content).toBe(theirCopy);
+				expect(noteAt(COPY)?.id).not.toBe('n1');
+				expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+			}
+		);
+	});
+
 	describe('met by a push', () => {
 		it('sets the edit aside in one drain when the note’s own file cannot be read', async () => {
 			const { entry, note } = await pulledNote('a.md', 'one\n');
@@ -6917,6 +6972,9 @@ describe('a file that is not UTF-8 text', () => {
 
 			expect(result.status).toBe('ok');
 			expect(result.conflicts).toEqual([COPY]);
+			// The op reached the remote, as a new file, and is counted as one that
+			// did. An ordinary conflict's does not: its copy's write is queued.
+			expect(result.pushed).toBe(1);
 			// Finished, not failed and retried: no attempt was spent on it.
 			expect(store.ops()).toEqual([]);
 			expect(noteAt(COPY)).toMatchObject({ id: note.id, content: 'my edit\n', dirty: false });
@@ -6947,6 +7005,55 @@ describe('a file that is not UTF-8 text', () => {
 			expect(store.notes().map((each) => each.path)).toEqual([COPY]);
 			expect(provider.contentAt(COPY)).toBe('my edit\n');
 			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		});
+
+		it('takes the next name when another device has set its own edit aside under the first', async () => {
+			// The store has never seen that file, so the name looks free from
+			// here and only the create can say otherwise. Thrown, that conflict
+			// spends an attempt, and the retry — a create at a name that holds
+			// another device's file — is resolved as a conflict with it: a copy
+			// of the copy, under two suffixes.
+			const { entry, note } = await pulledNote('a.md', 'one\n');
+			editHere(note, 'my edit\n');
+			provider.writeBytes('a.md', LATIN1);
+			await remoteFile(COPY, 'their edit\n');
+			const next = conflictPath('a.md', AT, [COPY]);
+
+			const result = await engine.push();
+
+			expect(result).toMatchObject({ status: 'ok', pushed: 1, conflicts: [next] });
+			expect(store.ops()).toEqual([]);
+			expect(provider.contentAt(next)).toBe('my edit\n');
+			expect(provider.contentAt(COPY)).toBe('their edit\n');
+			expect(store.notes().map((each) => each.path)).toEqual([next]);
+			expect(noteAt(next)).toMatchObject({
+				id: note.id,
+				dirty: false,
+				remoteId: provider.snapshot().find((each) => each.path === next)?.remoteId,
+			});
+			expect(holders(entry.remoteId)).toEqual([]);
+			expect(provider.bytesAt('a.md')).toEqual(LATIN1);
+		});
+
+		it('gives up on a name after as many refusals as a rename does, and says why', async () => {
+			const { note } = await pulledNote('a.md', 'one\n');
+			editHere(note, 'my edit\n');
+			provider.writeBytes('a.md', LATIN1);
+			provider.setFault((call) =>
+				call.op === 'write' ? new ConflictError(remoteEntryAt('a.md')) : undefined
+			);
+			const before = sent().length;
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('retry');
+			expect(store.ops().map((op) => op.attempts)).toEqual([1]);
+			// The op's own write, and ten names tried.
+			expect(sent().slice(before)).toHaveLength(11);
+			// Still the user's edit, still theirs to send, and cut loose.
+			expect(store.notes()).toHaveLength(1);
+			expect(store.notes()[0]).toMatchObject({ content: 'my edit\n', dirty: true });
+			expect(store.notes()[0]?.remoteId).toBeUndefined();
 		});
 
 		it('keeps a note bound to its own file when the one in the way is another', async () => {
