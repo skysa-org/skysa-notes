@@ -68,6 +68,8 @@ const connectMessage = (outcome: ConnectOutcome): string | undefined => {
 			return 'The storage account could not be connected. Try again.';
 		case 'partial':
 			return 'Access to your files was not granted, so storage was not connected. Connect again and leave that permission ticked.';
+		case 'refused':
+			return 'This account cannot sync on this server, so storage was not connected.';
 		default:
 			return undefined;
 	}

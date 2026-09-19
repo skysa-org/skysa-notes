@@ -23,7 +23,12 @@ export interface EntitlementDecision {
  * opaque internal ids may" is not.
  */
 export interface EntitlementSubject {
-	readonly connectionId: string;
+	/**
+	 * The connection the account has on this server. Absent when the account is
+	 * connecting for the first time: the OAuth callback asks before anything is
+	 * stored, so there is no row yet to name (docs/PLAN.md §6).
+	 */
+	readonly connectionId?: string;
 	readonly provider: ProviderKind;
 	/** The provider's own id for the account. Stable across reconnects. */
 	readonly accountId: string;
