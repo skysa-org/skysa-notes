@@ -109,8 +109,7 @@ const Home = () => {
 	// Worked out once: whether there is a message at all decides whether a toast
 	// is rendered, and `connectMessage` answers `undefined` for an outcome this
 	// build has no words for (see above).
-	const connectNotice =
-		connectOutcome === undefined ? undefined : connectMessage(connectOutcome);
+	const connectNotice = connectOutcome === undefined ? undefined : connectMessage(connectOutcome);
 
 	const source = useActiveSource();
 	const tree = useFolderTree();
