@@ -102,7 +102,7 @@ respect, and to maintain the list of designated employees in Schedule A.
 *(Adapted from the Harmony Agreements.)*
 
 The Project agrees that it will make each Contribution available under the
-GNU Affero General Public License, version 3 or later. This obligation survives
+GNU Affero General Public License, version 3. This obligation survives
 any relicensing: whatever else the Project does with the sublicensing right
 granted in section 2, every Contribution stays available to the public under
 AGPL-3.0.
