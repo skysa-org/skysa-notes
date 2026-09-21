@@ -3134,9 +3134,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				// Reached only where the adapter maps a missing parent to
 				// `NotFoundError`: OneDrive and Drive do. Dropbox's does only
 				// for a failure tagged `not_found`, which `create_folder_v2`'s
-				// documented `WriteError` does not carry, so either it makes the
-				// parents itself or the `mkdir` fails as it did before — one for
-				// the live check, since neither costs data.
+				// documented `WriteError` does not carry — and the live check
+				// this comment used to defer to has been done (2026-09-21):
+				// `create_folder_v2` makes the missing parents itself, in the
+				// one call, so on Dropbox this path is never taken.
 				await ensureRemoteFolder(parentPath(op.path));
 				return provider.createFolder(op.path);
 			});

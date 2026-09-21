@@ -46,33 +46,49 @@ describeProviderContract('in-memory fake, provider reports whole subtrees', () =
 	fake({ folderChanges: 'recursive' })
 );
 
+/**
+ * Well-formed for Dropbox and certain not to be current: a `rev` is lowercase
+ * hex of at least 9 characters, and all-`f` sorts above any real one. The
+ * suite's default is an opaque string Dropbox refuses at parameter validation
+ * with a 400, which is neither of the answers that scenario is checking for.
+ */
+const DROPBOX_STALE_REV = 'ffffffffffffffff';
+
 // One entry per page, so the adapter's `has_more` loops — in `list` and in
 // `changes` — are walked rather than assumed.
-describeProviderContract('dropbox over a stubbed transport, one entry per page', () => {
-	const stub = createDropboxStub({ pageSize: 1 });
-	return {
-		provider: createDropboxProvider({
-			fetch: stub.fetch,
-			getAccessToken: () => Promise.resolve('stub-token'),
-			appVersion: '0.1.0',
-			clientId: 'stub-client',
-		}),
-		...beneath(stub.backing),
-	};
-});
+describeProviderContract(
+	'dropbox over a stubbed transport, one entry per page',
+	() => {
+		const stub = createDropboxStub({ pageSize: 1 });
+		return {
+			provider: createDropboxProvider({
+				fetch: stub.fetch,
+				getAccessToken: () => Promise.resolve('stub-token'),
+				appVersion: '0.1.0',
+				clientId: 'stub-client',
+			}),
+			...beneath(stub.backing),
+		};
+	},
+	{ staleVersion: DROPBOX_STALE_REV }
+);
 
-describeProviderContract('dropbox over a stubbed transport', () => {
-	const stub = createDropboxStub();
-	return {
-		provider: createDropboxProvider({
-			fetch: stub.fetch,
-			getAccessToken: () => Promise.resolve('stub-token'),
-			appVersion: '0.1.0',
-			clientId: 'stub-client',
-		}),
-		...beneath(stub.backing),
-	};
-});
+describeProviderContract(
+	'dropbox over a stubbed transport',
+	() => {
+		const stub = createDropboxStub();
+		return {
+			provider: createDropboxProvider({
+				fetch: stub.fetch,
+				getAccessToken: () => Promise.resolve('stub-token'),
+				appVersion: '0.1.0',
+				clientId: 'stub-client',
+			}),
+			...beneath(stub.backing),
+		};
+	},
+	{ staleVersion: DROPBOX_STALE_REV }
+);
 
 // Graph's feed carries no paths and does not report a renamed folder's
 // contents, so the adapter keeps the tree in its cursor. One entry per page
@@ -160,7 +176,7 @@ if (liveToken !== '') {
 				},
 			};
 		},
-		{ timeout: 30_000 }
+		{ staleVersion: DROPBOX_STALE_REV, timeout: 30_000 }
 	);
 }
 

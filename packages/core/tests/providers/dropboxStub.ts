@@ -63,6 +63,19 @@ const folderMetadata = (entry: RemoteEntry): Record<string, unknown> => ({
 const metadataOf = (entry: RemoteEntry): Record<string, unknown> =>
 	entry.kind === 'folder' ? folderMetadata(entry) : fileMetadata(entry);
 
+/**
+ * Metadata as an endpoint that declares a concrete type returns it: no `.tag`,
+ * because the tag belongs to the `Metadata` union and such a response is not
+ * one of its members. `create_folder_v2` is the one endpoint the adapter reads
+ * entries from that answers this way — confirmed against the live API on
+ * 2026-09-21 — and the stub tagging it anyway was why an adapter that called
+ * every folder it created a file passed this suite.
+ */
+const untagged = (metadata: Record<string, unknown>): Record<string, unknown> => {
+	const { ['.tag']: _tag, ...rest } = metadata;
+	return rest;
+};
+
 /** `DeletedMetadata` really does carry this little: a name and a path. */
 const changeMetadata = (entry: ChangeEntry): Record<string, unknown> => {
 	if (entry.deleted !== true) return metadataOf(entry);
@@ -278,8 +291,8 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		'files/download': (_body, arg) => download(arg),
 		'files/create_folder_v2': async (body) =>
 			json({
-				metadata: folderMetadata(
-					await backing.createFolder(fromDropboxPath(str(body.path)))
+				metadata: untagged(
+					folderMetadata(await backing.createFolder(fromDropboxPath(str(body.path))))
 				),
 			}),
 		'files/move_v2': moveEntry,
