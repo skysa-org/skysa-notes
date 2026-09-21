@@ -29,10 +29,7 @@ const APPROOT = `${GRAPH}/v1.0/me/drive/special/approot`;
 export const STUB_DOWNLOAD_ORIGIN = 'https://public.dm.files.1drv.com';
 export const STUB_ROOT_ID = 'APPROOT!101';
 
-export interface OneDriveStubOptions extends Omit<FakeProviderOptions, 'folderChanges' | 'kind'> {
-	/** OneDrive for Business omits `name` from a deleted item. */
-	businessDeletes?: boolean;
-}
+export type OneDriveStubOptions = Omit<FakeProviderOptions, 'folderChanges' | 'kind'>;
 
 export interface StubRequest {
 	method: string;
@@ -233,9 +230,14 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 				const live = byId(id);
 				if (live !== undefined) return itemOf(live, true);
 				const gone = tombstones.get(id);
+				// No `name`. A deleted item carries its id, its parent, the
+				// `deleted` facet and a file/folder facet, and nothing else —
+				// on a personal account as much as on Business, verified
+				// against a live personal account 2026-09-21 (docs/PLAN.md
+				// §5.2). The adapter never asks for one; the stub used to send
+				// one anyway, which is a name no caller could ever really have.
 				return {
 					id,
-					...(options.businessDeletes === true ? {} : { name: gone?.name }),
 					deleted: { state: 'deleted' },
 					parentReference: { driveId: 'stub-drive', id: gone?.parentId },
 					...(gone?.folder === true ? { folder: {} } : { file: {} }),
