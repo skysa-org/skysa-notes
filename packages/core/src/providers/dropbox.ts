@@ -107,6 +107,16 @@ const asciiArg = (value: unknown): string =>
 		(char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`
 	);
 
+/**
+ * `.tag` is a property of the `Metadata` *union*, not of the structs in it, so
+ * it is present only where the value arrived as a union member: `list_folder`,
+ * `get_metadata`, `move_v2` and `delete_v2` all tag what they return. Where an
+ * endpoint's response declares a concrete type, there is no tag to read, and
+ * this falls through to `file`.
+ *
+ * That default is right for `files/upload`, whose response is a bare
+ * `FileMetadata`, and wrong for `create_folder_v2` — see `toFolderEntry`.
+ */
 const toEntry = (metadata: Metadata): RemoteEntry => ({
 	remoteId: metadata.id ?? '',
 	path: fromDropboxPath(metadata.path_display),
@@ -116,6 +126,22 @@ const toEntry = (metadata: Metadata): RemoteEntry => ({
 	version: metadata.rev ?? '',
 	modifiedAt: metadata.server_modified ?? '',
 	...(metadata.size === undefined ? {} : { size: metadata.size }),
+});
+
+/**
+ * A folder the caller has just made, whose metadata says everything about it
+ * except that it is a folder.
+ *
+ * `create_folder_v2` answers with `CreateFolderResult`, whose `metadata` is
+ * declared as `FolderMetadata` rather than as the union — so, alone among the
+ * endpoints this adapter reads entries from, it carries no `.tag` and
+ * `toEntry` would call the new folder a file. Confirmed against the live API
+ * on 2026-09-21: the same folder listed through `list_folder` comes back
+ * tagged, and the `create_folder_v2` response does not.
+ */
+const toFolderEntry = (metadata: Metadata): RemoteEntry => ({
+	...toEntry(metadata),
+	kind: 'folder',
 });
 
 /**
@@ -397,7 +423,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 			path: toDropboxPath(path),
 			autorename: false,
 		});
-		if (result.ok) return toEntry(result.value.metadata ?? {});
+		if (result.ok) return toFolderEntry(result.value.metadata ?? {});
 
 		// Idempotent, so a replayed `mkdir` op is harmless: a folder already there
 		// is the outcome the caller wanted.

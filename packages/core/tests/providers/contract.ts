@@ -48,6 +48,19 @@ export interface ProviderContractOptions {
 	 * instead (docs/PLAN.md §5.4).
 	 */
 	stableIds?: boolean;
+	/**
+	 * A version the provider will accept as well-formed but that cannot be the
+	 * current one. It sorts above any real version, so the scenario about
+	 * comparing versions for equality rather than order still says what it means.
+	 *
+	 * The default suits a provider whose versions are opaque strings. Dropbox's
+	 * are not: a `rev` must match `[0-9a-f]+` and be at least 9 characters, and
+	 * a malformed one is refused with a 400 at parameter validation — before the
+	 * comparison the scenario is about ever happens. Against a live account that
+	 * turned it into an error that is neither a conflict nor a missing file, so
+	 * the behaviour it exists to pin went unchecked.
+	 */
+	staleVersion?: string;
 	/** Live accounts are slow. */
 	timeout?: number;
 }
@@ -90,7 +103,7 @@ export const describeProviderContract = (
 	createHarness: () => ProviderHarness | Promise<ProviderHarness>,
 	options: ProviderContractOptions = {}
 ): void => {
-	const { stableIds = true, timeout } = options;
+	const { stableIds = true, staleVersion = 'zzzz-9999', timeout } = options;
 	const config = timeout === undefined ? undefined : { timeout };
 
 	describe(`StorageProvider contract: ${name}`, () => {
@@ -212,7 +225,7 @@ export const describeProviderContract = (
 				await seedFile(provider, 'note.md', 'one\n');
 
 				await expect(
-					provider.write('note.md', 'two\n', { expectedVersion: 'zzzz-9999' })
+					provider.write('note.md', 'two\n', { expectedVersion: staleVersion })
 				).rejects.toThrow(ConflictError);
 			});
 
@@ -230,9 +243,24 @@ export const describeProviderContract = (
 			});
 
 			it('reports a missing file when an expected version is given', config, async () => {
+				// The version has to be one the provider really issued for this
+				// path, because that is the only way the engine ever reaches here:
+				// another device deleted the file while this one held its version,
+				// and the push that follows has to be told the file is gone rather
+				// than quietly making a new one.
+				//
+				// Dropbox made the distinction matter. A made-up version is not a
+				// version it has ever issued, so there is nothing for it to find a
+				// conflict against and the upload simply creates the file —
+				// verified against a live account, 2026-09-21. Handed the real
+				// former version it answers `conflict`, which the adapter turns
+				// into this (docs/PLAN.md §5.3).
 				const provider = await open();
+				const seeded = await seedFile(provider, 'ghost.md', 'one\n');
+				await provider.delete(seeded);
+
 				await expect(
-					provider.write('ghost.md', 'x\n', { expectedVersion: 'v1' })
+					provider.write('ghost.md', 'x\n', { expectedVersion: seeded.version })
 				).rejects.toThrow(NotFoundError);
 			});
 		});
