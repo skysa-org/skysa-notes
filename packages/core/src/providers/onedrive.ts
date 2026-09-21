@@ -565,9 +565,31 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		}
 
 		const parent = parentPath(target);
+
+		// The parent goes in by **id**, not by path. Graph answers a
+		// `POST .../children` whose parent is addressed by path with a bare
+		// `400 invalidRequest` — at every depth, including the app folder
+		// itself, and whatever the name or `conflictBehavior` say. Measured
+		// against a live personal account, 2026-09-21:
+		//
+		//   POST special/approot/children            → 400 invalidRequest
+		//   POST approot:/{parent}:/children         → 400 invalidRequest
+		//   POST /me/drive/items/{parentId}/children → 201
+		//
+		// Reads are unaffected (`GET .../children` by path is fine), and so is
+		// a file, which goes in with `PUT approot:/{path}:/content`. That is
+		// why the marker at the root was written while the first notebook
+		// beside it could not be.
+		//
+		// The root's id is cached, so only a nested folder costs the extra
+		// lookup — and a parent that is not there is the `NotFoundError` the
+		// engine answers by making the chain above it (§7).
+		const parentId = parent === ROOT ? await rootId() : (await metadataAt(parent))?.remoteId;
+		if (parentId === undefined || parentId === '') throw new NotFoundError(parent);
+
 		const result = await attempt<DriveItem>(
 			'POST',
-			byPath(parent, '/children'),
+			`${byId(parentId)}/children`,
 			json({
 				name: basename(target),
 				folder: {},

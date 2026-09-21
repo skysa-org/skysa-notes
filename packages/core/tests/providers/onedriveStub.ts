@@ -360,7 +360,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 
 	const APPROOT_PATH =
 		/^\/v1\.0\/me\/drive\/special\/approot(?::\/(.*?)(:(\/children|\/content)?)?)?(\/children|\/delta)?$/;
-	const ITEM_PATH = /^\/v1\.0\/me\/drive\/items\/([^/]+)(\/content)?$/;
+	const ITEM_PATH = /^\/v1\.0\/me\/drive\/items\/([^/]+)(\/content|\/children)?$/;
 
 	const found = (entry: RemoteEntry | undefined): Response =>
 		entry === undefined ? graphError(404, 'itemNotFound') : json(withDownload(entry));
@@ -375,6 +375,15 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		const id = decodeURIComponent(match[1] ?? '');
 		const action = `${method} ${match[2] ?? ''}`;
 		if (action === 'PUT /content') return uploadById(id, headers, body);
+		// A folder is made under its parent's **id**, which is the only
+		// addressing Graph accepts for this (see `createFolder` in the adapter).
+		if (action === 'POST /children') {
+			if (id === STUB_ROOT_ID) return createFolder('', body);
+			const parent = byId(id);
+			return parent === undefined || parent.kind !== 'folder'
+				? graphError(404, 'itemNotFound')
+				: createFolder(parent.path, body);
+		}
 		if (action === 'GET ') return found(byId(id));
 		if (action === 'PATCH ') return moveItem(id, body);
 		if (action === 'DELETE ') return removeItem(id);
@@ -392,7 +401,11 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		const action = `${method} ${match[3] ?? match[4] ?? ''}`;
 		if (action === 'GET /delta' && path === '') return delta(url.searchParams.get('token'));
 		if (action === 'GET /children') return children(path, url);
-		if (action === 'POST /children') return createFolder(path, body);
+		// Graph refuses this, so the stub must too: a `POST .../children` whose
+		// parent is addressed by path is a 400, at every depth. Accepting it
+		// here is what let an adapter that could not make a single folder on
+		// OneDrive pass this suite (docs/PLAN.md §5.2).
+		if (action === 'POST /children') return graphError(400, 'invalidRequest');
 		if (action === 'PUT /content' && path !== '') return uploadByPath(path, url, body);
 		if (action === 'GET ') return path === '' ? json(rootItem()) : found(byPath(path));
 		return graphError(405, 'methodNotAllowed');
