@@ -161,6 +161,48 @@ describe('the app', () => {
 		expect(screen.getByRole('button', { name: 'Work' })).toBeTruthy();
 	});
 
+	it('puts the connect outcome away when the user touches anything else', async () => {
+		// Not a navigation — `select` has always cleared these, and that is the
+		// case the test above covers. This is a press on a heading, which does
+		// nothing else whatsoever: reading a toast is acknowledging it, and a
+		// card about a connection that is over should not have to be aimed at
+		// to be rid of.
+		const user = userEvent.setup();
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=ok', 'Work');
+		expect(await screen.findByText(/Storage connected/)).toBeTruthy();
+
+		await user.click(screen.getByRole('heading', { name: 'Notebooks' }));
+
+		await waitFor(() => {
+			expect(screen.queryByText(/Storage connected/)).toBeNull();
+		});
+	});
+
+	it('colours the outcome by what it is, and announces it to match', async () => {
+		// Three tones, and the two that are not errors are the ones worth
+		// pinning: an unticked permission is not a failure — everything worked
+		// as asked and a tickbox fixes it — where a server that will not have
+		// the account cannot be retried into working.
+		await createFolder(db, { name: 'Work' });
+
+		await open('/?connect=partial', 'Work');
+		const partial = await screen.findByRole('alert');
+		expect(partial.className).toContain('toast-warning');
+		cleanup();
+
+		await open('/?connect=refused', 'Work');
+		const refused = await screen.findByRole('alert');
+		expect(refused.className).toContain('toast-error');
+		cleanup();
+
+		await open('/?connect=ok', 'Work');
+		// A success waits its turn rather than interrupting: `status`, not
+		// `alert`.
+		const ok = await screen.findByRole('status');
+		expect(ok.className).toContain('toast-success');
+	});
+
 	it('keeps showing the notes when an account is connected, and what was never sent when it is disconnected', async () => {
 		// The rows move to the new connection in one transaction; the app reads
 		// whichever connection is active, and follows without a reload. Let go

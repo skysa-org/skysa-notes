@@ -11,7 +11,7 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { Toast } from '../components/Toast.js';
+import { Toast, type ToastTone } from '../components/Toast.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
@@ -40,6 +40,16 @@ import {
  */
 
 /**
+ * Something to say to the user, and what kind of thing it is. The tone is
+ * settled where the words are: only here is it known whether "it is back, but
+ * somewhere else" is good news or a warning.
+ */
+interface Notice {
+	readonly message: string;
+	readonly tone: ToastTone;
+}
+
+/**
  * What to tell the user on the way back from connecting a storage account, or
  * `undefined` for a value this build has no message for.
  *
@@ -55,18 +65,34 @@ import {
  * three outcomes Phase 7 retired server-side — which is when a value outside
  * the union first became reachable.
  */
-const connectMessage = (outcome: ConnectOutcome): string | undefined => {
+const connectMessage = (outcome: ConnectOutcome): Notice | undefined => {
 	switch (outcome) {
 		case 'ok':
-			return 'Storage connected. Your notes will sync with it.';
+			return { message: 'Storage connected. Your notes will sync with it.', tone: 'success' };
+		// The user's own choice, and nothing is broken — but nothing is
+		// connected either, which is not what they will assume from a screen
+		// that looks the same as before they started.
 		case 'denied':
-			return 'Connecting storage was cancelled.';
+			return { message: 'Connecting storage was cancelled.', tone: 'warning' };
 		case 'failed':
-			return 'The storage account could not be connected. Try again.';
+			return {
+				message: 'The storage account could not be connected. Try again.',
+				tone: 'error',
+			};
+		// A warning rather than an error: this one worked exactly as it was
+		// asked to, and what to do about it is a tickbox away.
 		case 'partial':
-			return 'Access to your files was not granted, so storage was not connected. Connect again and leave that permission ticked.';
+			return {
+				message:
+					'Access to your files was not granted, so storage was not connected. Connect again and leave that permission ticked.',
+				tone: 'warning',
+			};
+		// Trying again will not help: this server will not have the account.
 		case 'refused':
-			return 'This account cannot sync on this server, so storage was not connected.';
+			return {
+				message: 'This account cannot sync on this server, so storage was not connected.',
+				tone: 'error',
+			};
 		default:
 			return undefined;
 	}
@@ -150,7 +176,7 @@ const Home = () => {
 	 * the name field has closed and the click is over, so without somewhere to
 	 * put this the user acts and the app shows nothing at all.
 	 */
-	const [problem, setProblem] = useState<string | null>(null);
+	const [problem, setProblem] = useState<Notice | null>(null);
 
 	const select = (next: Partial<AppSearch>) => {
 		// Anything else the user does answers the banner: it is about the name they
@@ -174,6 +200,12 @@ const Home = () => {
 	const [beside, setBeside] = useState<DisplacedText | null>(null);
 	const dismissDeleted = useCallback(() => {
 		setDeleted(null);
+	}, []);
+	const dismissProblem = useCallback(() => {
+		setProblem(null);
+	}, []);
+	const dismissConnect = useCallback(() => {
+		setConnectOutcome(undefined);
 	}, []);
 
 	const undoDelete = () => {
@@ -199,10 +231,20 @@ const Home = () => {
 				// the user is told where to look and what can be done with it there.
 				if (restored.connectionId !== (await activeConnectionId(db))) {
 					const home = await db.syncState.get(restored.connectionId);
+					// Not every one of these is a problem, and with a colour on
+					// them that stops being a detail: the note came back, which
+					// is what was asked for. It is a warning only where it came
+					// back somewhere the user cannot sync it from.
 					setProblem(
 						home?.detached === undefined
-							? `“${restored.title}” is back, in the source it was deleted from.`
-							: `“${restored.title}” is back, in ${sourceName(home) ?? 'its source'}, which is disconnected. Reconnect it, or download the note.`
+							? {
+									message: `“${restored.title}” is back, in the source it was deleted from.`,
+									tone: 'success',
+								}
+							: {
+									message: `“${restored.title}” is back, in ${sourceName(home) ?? 'its source'}, which is disconnected. Reconnect it, or download the note.`,
+									tone: 'warning',
+								}
 					);
 					return;
 				}
@@ -218,7 +260,10 @@ const Home = () => {
 			// deleted, still offered, and what it holds may be in no other place.
 			.catch(() => {
 				setUndoFailed(noteRef(deleted));
-				setProblem('That note could not be brought back. Try again.');
+				setProblem({
+					message: 'That note could not be brought back. Try again.',
+					tone: 'error',
+				});
 			});
 	};
 
@@ -239,7 +284,7 @@ const Home = () => {
 			// itself to refuse — but the same silence if it happens: the button
 			// does nothing and the failure goes to the console.
 			.catch(() => {
-				setProblem('That note could not be made.');
+				setProblem({ message: 'That note could not be made.', tone: 'error' });
 			});
 	};
 
@@ -255,8 +300,11 @@ const Home = () => {
 			.catch((error: unknown) => {
 				setProblem(
 					error instanceof FolderExistsError
-						? `There is already a notebook called “${error.folderName}” here.`
-						: 'That notebook could not be made.'
+						? {
+								message: `There is already a notebook called “${error.folderName}” here.`,
+								tone: 'warning',
+							}
+						: { message: 'That notebook could not be made.', tone: 'error' }
 				);
 			});
 	};
@@ -414,20 +462,16 @@ const Home = () => {
 				)}
 				{connectNotice !== undefined && (
 					<Toast
-						message={connectNotice}
-						tone={connectOutcome === 'ok' ? 'status' : 'alert'}
-						onDismiss={() => {
-							setConnectOutcome(undefined);
-						}}
+						message={connectNotice.message}
+						tone={connectNotice.tone}
+						onDismiss={dismissConnect}
 					/>
 				)}
 				{problem !== null && (
 					<Toast
-						message={problem}
-						tone="alert"
-						onDismiss={() => {
-							setProblem(null);
-						}}
+						message={problem.message}
+						tone={problem.tone}
+						onDismiss={dismissProblem}
 					/>
 				)}
 			</div>
