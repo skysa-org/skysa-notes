@@ -404,8 +404,8 @@ describe('changes, from a feed with no paths', () => {
 		expect(livePaths(later.entries)).toEqual(['Archive/a.md']);
 	});
 
-	it('knows where a deletion was even when Graph does not send its name', async () => {
-		const { stub, provider } = stubbed({ businessDeletes: true });
+	it('knows where a deletion was, though Graph never sends its name', async () => {
+		const { stub, provider } = stubbed();
 		await provider.ensureRoot();
 		await provider.createFolder('Work');
 		const note = await provider.write('Work/a.md', 'one\n', {});
