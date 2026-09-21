@@ -168,9 +168,14 @@ describe('deleting a note', () => {
 
 		await user.click(within(notice).getByRole('button', { name: 'Undo' }));
 
-		expect((await screen.findByRole('alert')).textContent).toBe(
-			'“Alpha” is back, in Dropbox · ada@example.com, which is disconnected. Reconnect it, or download the note.'
-		);
+		// The message itself, not the whole card: a toast carries its own
+		// Dismiss, and `textContent` takes that in too.
+		const back = await screen.findByRole('alert');
+		expect(
+			within(back).getByText(
+				'“Alpha” is back, in Dropbox · ada@example.com, which is disconnected. Reconnect it, or download the note.'
+			)
+		).toBeTruthy();
 		// In its own source — not Bob's, and not the device's own pile.
 		expect(await db.notes.get(['c-ada', id])).toMatchObject({ deletedLocally: 0 });
 		expect(await db.notes.where('connectionId').notEqual('c-ada').count()).toBe(0);

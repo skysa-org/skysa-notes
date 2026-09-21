@@ -141,6 +141,26 @@ describe('the app', () => {
 		});
 	});
 
+	it('lets the user put the connect outcome away without doing anything else', async () => {
+		// The point of the toast over the banner it replaced. The outcome does
+		// not say what to do next in every case — "storage connected" is the end
+		// of it — and before this the only way to be rid of the message was to
+		// go and click something, which is not an answer to a notice the user
+		// has simply read.
+		const user = userEvent.setup();
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=ok', 'Work');
+		expect(await screen.findByText(/Storage connected/)).toBeTruthy();
+
+		await user.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+		await waitFor(() => {
+			expect(screen.queryByText(/Storage connected/)).toBeNull();
+		});
+		// And the app is still the app: the notice went, not the screen.
+		expect(screen.getByRole('button', { name: 'Work' })).toBeTruthy();
+	});
+
 	it('keeps showing the notes when an account is connected, and what was never sent when it is disconnected', async () => {
 		// The rows move to the new connection in one transaction; the app reads
 		// whichever connection is active, and follows without a reload. Let go

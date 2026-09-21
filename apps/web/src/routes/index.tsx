@@ -11,6 +11,7 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
+import { Toast } from '../components/Toast.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
 import {
@@ -104,6 +105,12 @@ const Home = () => {
 			replace: true,
 		});
 	}, [connect, navigate]);
+
+	// Worked out once: whether there is a message at all decides whether a toast
+	// is rendered, and `connectMessage` answers `undefined` for an outcome this
+	// build has no words for (see above).
+	const connectNotice =
+		connectOutcome === undefined ? undefined : connectMessage(connectOutcome);
 
 	const source = useActiveSource();
 	const tree = useFolderTree();
@@ -304,18 +311,10 @@ const Home = () => {
 		// `app-shell` is a three-column grid with exactly three children. A banner
 		// put inside it becomes a fourth grid item, takes the sidebar's column and
 		// pushes the note view into a clipped second row, so anything that sits
-		// above the panes goes in the frame around them instead.
+		// above the panes goes in the frame around them instead. The toasts are
+		// not laid out at all — they are fixed to the viewport — but they are
+		// here for the same reason: a stack in the grid would take a column.
 		<div className="app-frame">
-			{problem !== null && (
-				<p className="banner" role="alert">
-					{problem}
-				</p>
-			)}
-			{connectOutcome !== undefined && connectMessage(connectOutcome) !== undefined && (
-				<p className="banner" role={connectOutcome === 'ok' ? 'status' : 'alert'}>
-					{connectMessage(connectOutcome)}
-				</p>
-			)}
 			{/*
 			 * For as long as a detached source is the one showing, and not
 			 * dismissable: its notes look like any others, can be opened and
@@ -393,17 +392,46 @@ const Home = () => {
 				/>
 			</div>
 
-			{deleted !== null && (
-				<DeletedNotice
-					// A second delete is a new notice with a new clock, not the
-					// first one's time running on under another note's name.
-					key={noteRef(deleted)}
-					title={deleted.title}
-					onUndo={undoDelete}
-					onDismiss={dismissDeleted}
-					keep={undoFailed === noteRef(deleted)}
-				/>
-			)}
+			{/*
+			 * One stack for everything this screen floats over the page. Two
+			 * notices at once is ordinary — a failed create while the account
+			 * just connected is still being read — and in a stack they sit above
+			 * one another instead of on one another.
+			 *
+			 * The undo notice is here rather than placing itself, which is what
+			 * it did while it was the only other card on the screen.
+			 */}
+			<div className="toast-stack">
+				{deleted !== null && (
+					<DeletedNotice
+						// A second delete is a new notice with a new clock, not the
+						// first one's time running on under another note's name.
+						key={noteRef(deleted)}
+						title={deleted.title}
+						onUndo={undoDelete}
+						onDismiss={dismissDeleted}
+						keep={undoFailed === noteRef(deleted)}
+					/>
+				)}
+				{connectNotice !== undefined && (
+					<Toast
+						message={connectNotice}
+						tone={connectOutcome === 'ok' ? 'status' : 'alert'}
+						onDismiss={() => {
+							setConnectOutcome(undefined);
+						}}
+					/>
+				)}
+				{problem !== null && (
+					<Toast
+						message={problem}
+						tone="alert"
+						onDismiss={() => {
+							setProblem(null);
+						}}
+					/>
+				)}
+			</div>
 		</div>
 	);
 };
