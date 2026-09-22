@@ -13,12 +13,11 @@ import {
 import { answer, type Asked } from '../api/instanceConfig.js';
 import { failedAt, saying } from '../errors/reached.js';
 import { folderToSearch } from '../routes/search.js';
-import { type ConnectedSource, connectedSources, showConnection } from '../store/connection.js';
+import { connectedSources } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
 import {
 	activeConnectionId,
 	db as defaultDb,
-	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
 	type QueuedOperation,
@@ -33,13 +32,11 @@ import {
 	type AccountState,
 	claimConnection,
 	CONNECTABLE,
-	connectedName,
 	LEFT_AT_PROVIDER,
 	type LetGoInput,
 	letGoOfSource,
 	type LetGoResult,
 	PROVIDER_LABELS,
-	sourceName,
 	type UnsentAnswer,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
@@ -346,7 +343,7 @@ interface LocalProps {
 	navigate?: (url: string) => void;
 }
 
-const NotConnected = ({ client, database, config, returnTo, navigate }: LocalProps) => {
+const NotConnected = ({ config }: LocalProps) => {
 	const settings = answer(config);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -355,27 +352,10 @@ const NotConnected = ({ client, database, config, returnTo, navigate }: LocalPro
 
 	return (
 		<section className="account" aria-label="Storage">
-			<p className="muted">Notes are kept on this device only.</p>
-			{offerable.map((provider) => (
-				<ConnectButton
-					key={provider}
-					db={database}
-					client={client}
-					provider={provider}
-					returnTo={returnTo}
-					{...(navigate === undefined ? {} : { navigate })}
-				>
-					Connect {PROVIDER_LABELS[provider]}
-				</ConnectButton>
-			))}
-			<Sources
-				client={client}
-				database={database}
-				config={config}
-				returnTo={returnTo}
-				another={false}
-				{...(navigate === undefined ? {} : { navigate })}
-			/>
+			<p className="muted">
+				Notes are kept on this device only.
+				{offerable.length > 0 && ' Use + above to connect storage.'}
+			</p>
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">
 					Connecting storage needs a sign-in this server does not offer yet.
@@ -548,101 +528,6 @@ const SyncState = ({
 				))}
 		</>
 	);
-};
-
-/**
- * The sources this device holds, and which one the app is showing.
- *
- * Shown only once there are two: with one connected source a list of one is
- * noise, and the panel already names it. Switching moves nothing — each source
- * keeps its own notes, notebooks, queue and cursor (docs/PLAN.md §6) — so this
- * is a change of view, and the wording says so rather than implying a transfer.
- */
-const Sources = ({
-	client,
-	database,
-	config,
-	returnTo,
-	navigate,
-	another = true,
-}: LocalProps & {
-	config: Asked<InstanceConfig>;
-	/** Whether to offer connecting another account: not where the panel already offers the first. */
-	another?: boolean;
-}) => {
-	const sources = useLiveQuery(() => connectedSources(database), [database]);
-	const settings = answer(config);
-	const offerable =
-		settings?.authMode === 'storage-first'
-			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
-			: [];
-	if (sources === undefined) return null;
-
-	return (
-		<div className="account-sources">
-			{sources.length > 1 && (
-				<ul aria-label="Connected sources">
-					{sources.map((source: ConnectedSource) => (
-						<li key={source.connectionId}>
-							{source.active ? (
-								<span className="muted">{sourceLabel(source)} · showing</span>
-							) : (
-								<button
-									type="button"
-									className="link"
-									onClick={() => {
-										void showConnection(database, source.connectionId);
-									}}
-								>
-									Show {sourceLabel(source)}
-								</button>
-							)}
-						</li>
-					))}
-				</ul>
-			)}
-			{another &&
-				offerable.map((provider) => (
-					<ConnectButton
-						key={provider}
-						db={database}
-						client={client}
-						provider={provider}
-						returnTo={returnTo}
-						className="link"
-						{...(navigate === undefined ? {} : { navigate })}
-					>
-						Connect another {PROVIDER_LABELS[provider]} account
-					</ConnectButton>
-				))}
-		</div>
-	);
-};
-
-/**
- * A source in as few words as the device can say it without asking the server.
- *
- * The account id when there is one, because the case this list exists for is
- * two accounts at the same provider — "Dropbox" twice, one of them "showing",
- * is not a choice anyone can make. Not the account's name: that is written
- * onto a row only when the server is asked about it, which is only while it is
- * the one in front, so a list naming live sources by it would name a source
- * one way until it was shown and another way after.
- *
- * A detached source is named as its own panel names it (`sourceName`: by what
- * the server last called the account, which is what the user knows it by), and
- * says that it is disconnected and how much it holds. That is the whole reason
- * it is on the list, and a line that looked like any other source would leave
- * the user to find out by switching to it. The device's own pile is listed
- * only while it holds something (`connectedSources`), and is named for what it
- * is: not an account.
- */
-const sourceLabel = (source: ConnectedSource): string => {
-	if (source.connectionId === LOCAL_CONNECTION_ID) return 'On this device only';
-	if (source.detached !== undefined) {
-		return `${sourceName(source) ?? 'A source'} — disconnected, ${String(source.detached.unsent)} not sent`;
-	}
-	return connectedName(source);
 };
 
 /**
@@ -1131,13 +1016,6 @@ const Connected = ({
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
 			/>
-			<Sources
-				client={client}
-				database={database}
-				config={config}
-				returnTo={returnTo}
-				{...(navigate === undefined ? {} : { navigate })}
-			/>
 			<Devices client={client} database={database} connectionId={bound.connectionId} />
 			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
@@ -1267,15 +1145,6 @@ const Detached = ({
 					</ConnectButton>
 				)
 			}
-			sources={
-				<Sources
-					client={client}
-					database={database}
-					config={config}
-					returnTo={returnTo}
-					{...(navigate === undefined ? {} : { navigate })}
-				/>
-			}
 		/>
 	);
 };
@@ -1306,17 +1175,24 @@ export const AccountPanel = ({
 
 	// A discard takes its source, and its panel, with it: the button the user
 	// pressed is gone and the focus would fall to the page. It goes to the next
-	// panel instead, once that has rendered — to the source list, which is what
-	// is left to choose from, or failing that whatever the panel offers first.
+	// panel instead, once that has rendered — to whatever that panel offers
+	// first, and failing that to the panel itself.
+	//
+	// "Failing that" is the ordinary case now that the source list and the
+	// connect buttons have moved to the tab bar: discard the last source and
+	// what is left here is a sentence. The frame takes `tabIndex={-1}` so there
+	// is somewhere to land that says where the user is, rather than the body,
+	// which says nothing and puts the next Tab back at the top of the page.
+	// Not the bar's `+`: the panel does not own it, and a component reaching
+	// across the screen for someone else's button is how focus ends up fought
+	// over by two of them.
 	const frame = useRef<HTMLDivElement>(null);
 	const landing = useRef(false);
 	const showing = bound?.state?.connectionId ?? null;
 	useEffect(() => {
 		if (!landing.current) return;
 		landing.current = false;
-		const next =
-			frame.current?.querySelector<HTMLElement>('.account-sources button') ??
-			frame.current?.querySelector<HTMLElement>('button');
+		const next = frame.current?.querySelector<HTMLElement>('button') ?? frame.current;
 		next?.focus();
 	}, [showing]);
 	const released = () => {
@@ -1427,5 +1303,12 @@ export const AccountPanel = ({
 			/>
 		);
 	};
-	return <div ref={frame}>{panel()}</div>;
+	// `tabIndex={-1}`: reachable by script, so a discard has somewhere to put
+	// the focus, and never in the tab order, where an empty wrapper would be a
+	// stop that does nothing.
+	return (
+		<div ref={frame} tabIndex={-1}>
+			{panel()}
+		</div>
+	);
 };

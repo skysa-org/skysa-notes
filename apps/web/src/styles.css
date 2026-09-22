@@ -817,14 +817,28 @@ button.row.selected {
 
 /* ---- Storage account ---------------------------------------------------- */
 
-/* The sidebar scrolls as one column, and the account sits at its foot. */
+/* The notebooks scroll; the storage panel does not.
+   `margin-block-start: auto` put the panel at the end of the *content*, which
+   is the foot of the pane only while the content is shorter than the pane.
+   With twenty notebooks it went below the fold, and "Syncing with…" and
+   Disconnect — the two things that have to be reachable without hunting —
+   went with it. The tree takes the slack and scrolls inside it instead. */
 .sidebar {
 	display: flex;
 	flex-direction: column;
+	overflow-y: hidden;
+}
+
+.sidebar .tree {
+	flex: 1;
+	/* Or the tree refuses to be smaller than its content and pushes the panel
+	   back off the bottom, which is the default every flex child has. */
+	min-height: 0;
+	overflow-y: auto;
 }
 
 .account {
-	margin-block-start: auto;
+	flex: none;
 	padding: 0.75rem;
 	font-size: 0.85rem;
 	border-block-start: 1px solid var(--border);
@@ -898,6 +912,19 @@ button.row.selected {
 		border-inline-end: 0;
 		border-block-end: 1px solid var(--border);
 		max-height: 14rem;
+	}
+
+	/* Fourteen rems is not enough to divide. Pinning the storage panel here
+	   would leave the notebooks a couple of rows and the panel most of the
+	   pane, so the column goes back to scrolling as one and the panel to being
+	   the last thing in it. */
+	.sidebar {
+		overflow-y: auto;
+	}
+
+	.sidebar .tree {
+		flex: none;
+		overflow-y: visible;
 	}
 
 	/* Fourteen rems is the right size for a list you glance at beside the note

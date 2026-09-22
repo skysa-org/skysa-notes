@@ -26,3 +26,17 @@ Numbering is derived rather than stamped on at connect time, so sources
 already on a device get names with no backfill and letting the first Dropbox
 go leaves the other one called "Dropbox" instead of a "Dropbox 2" with no 1
 above it. A name the user chose is never moved by that.
+
+The sidebar gives connection management up in return. The source list and the
+"Connect another…" buttons are gone from the storage panel, which now holds
+only what is true of the source in front — how syncing is going, the devices
+holding its credential, and Disconnect. A detached source keeps Reconnect,
+which is how work that was never sent gets home rather than a way to add an
+account. There is one list of sources now instead of two that named them
+differently.
+
+The notebooks scroll inside the sidebar rather than the sidebar scrolling as
+one, so the storage panel sits at the foot of the pane instead of at the end
+of the content, where enough notebooks pushed it below the fold. At phone
+width, where the pane is 14rem and there is nothing to divide, it scrolls as
+one as before.

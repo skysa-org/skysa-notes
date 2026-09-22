@@ -120,6 +120,15 @@ export const sourceName = (
 export const PILE_LABEL = 'This device';
 
 /**
+ * A source whose row no longer says which provider it was: one brought back by
+ * a save landing after the connection went (`ensureDetached`). It is not the
+ * pile — it holds an account's work and can be reconnected — and calling it
+ * "This device" would put two tabs of that name side by side, which is exactly
+ * the state this bar exists to prevent.
+ */
+export const UNKNOWN_LABEL = 'A source';
+
+/**
  * A source in as few words as will do: "Dropbox", or "Dropbox 2" where there
  * is more than one of them.
  *
@@ -148,7 +157,8 @@ export const tabName = (
 	all: readonly Pick<ConnectedSource, 'connectionId' | 'provider' | 'boundAt'>[]
 ): string => {
 	if (source.label !== undefined && source.label !== '') return source.label;
-	if (source.provider === undefined) return PILE_LABEL;
+	if (source.connectionId === LOCAL_CONNECTION_ID) return PILE_LABEL;
+	if (source.provider === undefined) return UNKNOWN_LABEL;
 	const sameProvider = inOrder(all).filter((other) => other.provider === source.provider);
 	const place = sameProvider.findIndex((other) => other.connectionId === source.connectionId);
 	const provider = PROVIDER_LABELS[source.provider];

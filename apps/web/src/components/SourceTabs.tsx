@@ -63,10 +63,13 @@ export const SourceTabs = ({
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
 
-	// Not `sources.length === 0`: the bar is for saying which of several sets of
-	// notes is showing, and the app with nothing connected has one set and a
-	// storage panel already telling the user so.
-	if (sources === undefined || sources.length === 0) return null;
+	// The bar is the only place connections are made or chosen, so it is here
+	// from the start — with nothing connected it is the `+` and nothing else,
+	// which is the whole of what there is to offer. It goes away entirely only
+	// when there is neither anything to show nor anything to offer: a
+	// deployment with no providers, or a server that cannot be reached, where
+	// an empty strip would be furniture standing in for a choice nobody has.
+	if (sources === undefined || (sources.length === 0 && offerable.length === 0)) return null;
 
 	const ordered = inOrder(sources);
 
@@ -160,6 +163,13 @@ const SourceTab = ({
 	<button
 		type="button"
 		className={source.active ? 'source-tab source-tab-active' : 'source-tab'}
+		// Said outright rather than left to be assembled from the two spans
+		// below. The name from contents is not simply their text: it joins the
+		// pieces by its own rules, so "A source" and " — disconnected" came out
+		// as a name no caller could predict — and a test looking for the tab by
+		// what it plainly says could not find it. Exactly the visible words, so
+		// it still satisfies WCAG 2.5.3.
+		aria-label={source.detached === undefined ? name : `${name} — disconnected`}
 		// The tab the user is on, said once. `aria-current` is what a screen
 		// reader announces; "showing" in the text as well would be read twice.
 		{...(source.active ? { 'aria-current': 'true' as const } : {})}
@@ -256,7 +266,7 @@ const AddMenu = ({ children, onClose }: { children: ReactNode; onClose: () => vo
 	}, [onClose]);
 
 	return (
-		<div ref={menu} className="source-add-menu">
+		<div ref={menu} className="source-add-menu" role="group" aria-label="Storage providers">
 			<p className="muted">Connect another account</p>
 			{children}
 		</div>

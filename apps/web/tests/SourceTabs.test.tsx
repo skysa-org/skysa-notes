@@ -235,10 +235,56 @@ describe('the source tabs', () => {
 
 		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
 
-		const menu = await screen.findByText('Connect another account', { selector: 'p' });
-		const inside = within(menu.parentElement ?? document.body);
-		expect(inside.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
-		expect(inside.getByRole('button', { name: 'OneDrive' })).toBeTruthy();
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+		expect(menu.getByRole('button', { name: 'OneDrive' })).toBeTruthy();
+	});
+
+	it('offers the way to connect before there is anything to switch between', async () => {
+		// The bar is the only place a connection is made now — the storage
+		// panel gave that up — so it cannot wait for a first account to appear
+		// before it does.
+		const db = freshDatabase();
+		show(db);
+
+		expect(await screen.findByRole('button', { name: 'Connect another account' })).toBeTruthy();
+		expect(
+			within(screen.getByRole('navigation', { name: 'Sources' })).queryAllByRole('button')
+		).toHaveLength(0);
+	});
+
+	it('does not call a source of unknown provider "This device" as well', async () => {
+		// A save landing after the connection went brings a row back with no
+		// provider on it (`ensureDetached`). It is not the pile — it holds an
+		// account's work and can be reconnected — and two tabs of one name is
+		// the state a bar of names exists to prevent.
+		const db = freshDatabase();
+		await createNote(db, { title: 'Mine' });
+		await db.syncState.put({
+			connectionId: 'c-gone',
+			clientId: 'client',
+			detached: { at: 1, reason: 'interrupted' },
+		});
+		await createNote(db, { connectionId: 'c-gone', title: 'Late' });
+		show(db);
+
+		await waitFor(() => {
+			expect(tabs()).toEqual(['A source — disconnected', 'This device']);
+		});
+	});
+
+	it('names a tab the same way to a screen reader as it does on the screen', async () => {
+		// The name from contents is not simply the text of the two spans: it
+		// joins them by its own rules, and "A source" plus " — disconnected"
+		// came out as something no caller could predict. Said outright now.
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await createNote(db, { connectionId: 'c1', title: 'Never sent' });
+		await detachConnection(db, { connectionId: 'c1' });
+		show(db);
+
+		const found = await screen.findByRole('button', { name: 'Dropbox — disconnected' });
+		expect(found.textContent).toBe('Dropbox — disconnected');
 	});
 
 	it('offers nothing to connect when the server cannot be asked', async () => {
