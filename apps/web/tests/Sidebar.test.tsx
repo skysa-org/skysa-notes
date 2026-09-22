@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -201,5 +201,140 @@ describe('the Loose notes row', () => {
 		await userEvent.type(screen.getByLabelText('New notebook name'), 'Archive{Enter}');
 
 		expect(onCreateFolder).toHaveBeenCalledWith(undefined, 'Archive');
+	});
+});
+
+/**
+ * Re-arranging. The tree is the user's directory structure, so a drag here
+ * moves a directory or a file on the provider; the rules about which drops are
+ * allowed are `store/rearrange.ts`, and what this file is about is that the
+ * rows offer them, refuse the rest, and say which is which in words.
+ */
+
+/** jsdom has no `DataTransfer`, and the row writes to the one it is given. */
+const transfer = () => ({ effectAllowed: 'none', setData: vi.fn() });
+
+const holding = (path: string, name: string) => ({ kind: 'notebook', path, name }) as const;
+
+describe('picking a notebook up', () => {
+	it('hands the row up as what is being moved', () => {
+		const onPickUp = vi.fn();
+		renderSidebar({ onPickUp });
+
+		fireEvent.dragStart(screen.getByRole('button', { name: /work$/ }), {
+			dataTransfer: transfer(),
+		});
+
+		expect(onPickUp).toHaveBeenCalledWith({ kind: 'notebook', path: 'work', name: 'work' });
+	});
+
+	it('puts something on the drag, or Firefox starts no drag at all', () => {
+		const dataTransfer = transfer();
+		renderSidebar();
+
+		fireEvent.dragStart(screen.getByRole('button', { name: /work$/ }), { dataTransfer });
+
+		expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'work');
+		expect(dataTransfer.effectAllowed).toBe('move');
+	});
+
+	it('lets go again when the drag ends nowhere', () => {
+		const onCancelMove = vi.fn();
+		renderSidebar({ onCancelMove, moving: holding('work', 'work') });
+
+		fireEvent.dragEnd(screen.getByRole('button', { name: 'work — cannot go here' }));
+
+		expect(onCancelMove).toHaveBeenCalled();
+	});
+});
+
+describe('while something is being moved', () => {
+	it('says what is in the air, and how to put it down', () => {
+		renderSidebar({ moving: holding('work', 'work') });
+
+		const hint = screen.getByRole('status');
+		expect(hint.textContent).toContain('work');
+		expect(hint.textContent).toContain('Escape');
+	});
+
+	it('names every row for where the thing would land', () => {
+		renderSidebar({ moving: holding('work', 'work') });
+
+		expect(screen.getByRole('button', { name: 'Move “work” into personal' })).toBeDefined();
+	});
+
+	it('refuses the notebook itself and everything inside it', () => {
+		renderSidebar({ moving: holding('work', 'work') });
+
+		const itself = screen.getByRole('button', { name: 'work — cannot go here' });
+		const inside = screen.getByRole('button', { name: 'meetings — cannot go here' });
+		expect(itself.hasAttribute('disabled')).toBe(true);
+		expect(inside.hasAttribute('disabled')).toBe(true);
+	});
+
+	it('refuses the notebook it is already in', () => {
+		renderSidebar({ moving: holding('work/meetings', 'meetings') });
+
+		expect(
+			screen.getByRole('button', { name: 'work — cannot go here' }).hasAttribute('disabled')
+		).toBe(true);
+	});
+
+	it('offers the top level only to something that can come out to it', () => {
+		renderSidebar({ moving: holding('work/meetings', 'meetings') });
+		expect(
+			screen.getByRole('button', { name: 'Move “meetings” to the top level' })
+		).toBeDefined();
+
+		cleanup();
+		// Already there: the row would be a destination with nothing to do.
+		renderSidebar({ moving: holding('work', 'work') });
+		expect(screen.queryByText('Top level')).toBeNull();
+	});
+
+	it('does not offer the top level to a note, which the app never leaves loose', () => {
+		renderSidebar({
+			moving: { kind: 'note', id: 'n1', path: 'work/one.md', name: 'One' },
+			looseNoteCount: 2,
+		});
+
+		expect(screen.queryByText('Top level')).toBeNull();
+		// And the loose notes themselves are not a destination either.
+		expect(
+			screen
+				.getByRole('button', { name: 'Loose notes — cannot go here' })
+				.hasAttribute('disabled')
+		).toBe(true);
+	});
+
+	it('puts it down where the row was clicked, rather than going there', async () => {
+		const user = userEvent.setup();
+		const onDrop = vi.fn();
+		const onSelectFolder = vi.fn();
+		renderSidebar({ onDrop, onSelectFolder, moving: holding('work', 'work') });
+
+		await user.click(screen.getByRole('button', { name: 'Move “work” into personal' }));
+
+		expect(onDrop).toHaveBeenCalledWith('personal');
+		expect(onSelectFolder).not.toHaveBeenCalled();
+	});
+
+	it('drops on the row the pointer is over', () => {
+		const onDrop = vi.fn();
+		renderSidebar({ onDrop, moving: holding('work', 'work') });
+		const target = screen.getByRole('button', { name: 'Move “work” into personal' });
+
+		fireEvent.dragOver(target);
+		fireEvent.drop(target);
+
+		expect(onDrop).toHaveBeenCalledWith('personal');
+	});
+
+	it('takes the new-notebook button away, since the tree is being held', () => {
+		renderSidebar({ moving: holding('work', 'work') });
+
+		expect(screen.getByRole('button', { name: 'New notebook' }).hasAttribute('disabled')).toBe(
+			true
+		);
 	});
 });

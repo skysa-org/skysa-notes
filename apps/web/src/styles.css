@@ -20,6 +20,11 @@
 	--ok: #16a34a;
 	--warn: #b45309;
 	--bad: #dc2626;
+	/* Where a dragged notebook or note would land, and the wash behind the line
+	   saying what is being moved. Its own hue rather than one of the three
+	   above: a drop target is not an outcome, and green over the row under the
+	   pointer would read as "done" before anything has been. */
+	--drop: #2563eb;
 	font-family:
 		ui-sans-serif,
 		system-ui,
@@ -46,6 +51,7 @@
 		--ok: #4ade80;
 		--warn: #fbbf24;
 		--bad: #f87171;
+		--drop: #60a5fa;
 	}
 }
 
@@ -408,6 +414,42 @@ button.row:hover {
 button.row.selected {
 	background: color-mix(in srgb, var(--fg) 11%, transparent);
 	font-weight: 600;
+}
+
+/* A move is on, and this row is not somewhere the thing being moved can go.
+   The rows are `disabled` for the length of it, so this is the same treatment
+   `button.icon:disabled` gets — a control that is there and cannot be used,
+   rather than one that has quietly gone. */
+button.row:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+/* The row being dragged, still in the list it came from. */
+button.row.moving {
+	opacity: 0.5;
+}
+
+/* Where it would land. An inset outline rather than a background, which the
+   hover and the selection already use and which would say "you are here"
+   about a row the user is only passing over. `outline-offset` is negative so
+   it is drawn inside the row and does not overlap the one above. */
+button.row.drop-over {
+	outline: 2px solid var(--drop);
+	outline-offset: -2px;
+	background: color-mix(in srgb, var(--drop) 12%, transparent);
+}
+
+/* What is in the air, said in words under the pane header. It is a live region
+   (`role="status"`), so it is also how a screen-reader user is told the mode
+   has started at all. */
+.move-hint {
+	padding: 0.5rem 0.75rem;
+	margin: 0;
+	font-size: 0.8rem;
+	color: var(--muted);
+	background: color-mix(in srgb, var(--drop) 8%, transparent);
+	border-block-end: 1px solid var(--border);
 }
 
 .row-label {

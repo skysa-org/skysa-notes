@@ -1,4 +1,4 @@
-import { parentPath, ROOT } from '@skysa/core';
+import { basename, isWithin, parentPath, rebasePath, ROOT } from '@skysa/core';
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -14,7 +14,7 @@ import { Sidebar } from '../components/Sidebar.js';
 import { SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
-import { createFolder, FolderExistsError } from '../store/folders.js';
+import { createFolder, FolderExistsError, moveFolder } from '../store/folders.js';
 import {
 	useActiveSource,
 	useFolderTree,
@@ -23,7 +23,8 @@ import {
 	useNoteSearch,
 	useNotesInFolder,
 } from '../store/hooks.js';
-import { createNote, saveNoteBody, undeleteNote } from '../store/notes.js';
+import { createNote, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
+import { dropMove, type Moving } from '../store/rearrange.js';
 import { selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
 import {
@@ -312,6 +313,88 @@ const Home = () => {
 			});
 	};
 
+	/**
+	 * What the user has picked up, by dragging it or by running the command.
+	 *
+	 * One piece of state for both, and it lives here rather than in either pane
+	 * because the two ends of a note's move are in different ones: the row is in
+	 * the note list and every destination is in the sidebar. What is allowed to
+	 * land where is in `store/rearrange.ts`, which knows nothing about React.
+	 */
+	const [moving, setMoving] = useState<Moving | null>(null);
+
+	const cancelMove = useCallback(() => {
+		setMoving(null);
+	}, []);
+
+	/**
+	 * Escape puts down whatever is being moved, from wherever the focus is. On
+	 * the document rather than on the sidebar: a move started from the palette
+	 * leaves the focus where the palette had it, which may be nowhere near the
+	 * destinations, and a mode with no way out is worse than no mode.
+	 */
+	useEffect(() => {
+		if (moving === null) return undefined;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setMoving(null);
+		};
+		document.addEventListener('keydown', onKey);
+		return () => {
+			document.removeEventListener('keydown', onKey);
+		};
+	}, [moving]);
+
+	const onDropInto = (into: string) => {
+		if (moving === null) return;
+		const move = dropMove(moving, into);
+		// Put down first: the move is a round trip through the store and a mode
+		// left standing over it is one the user can drop a second copy of.
+		setMoving(null);
+		if (move === undefined) return;
+		setProblem(null);
+
+		if (move.kind === 'note') {
+			void moveNote(db, move.id, move.into)
+				.then(() => {
+					// Only when it is the note in front. A note dragged out of the
+					// list the user is reading leaves it, which is the whole of what
+					// they asked for; the one they are *writing in* would otherwise
+					// be open beside a sidebar highlighting the notebook it has just
+					// left, which is the disagreement opening a search result also
+					// has to avoid.
+					if (noteIdRef.current === move.id) {
+						select({ folder: folderToSearch(move.into) });
+					}
+				})
+				.catch(() => {
+					setProblem({ message: 'That note could not be moved.', tone: 'error' });
+				});
+			return;
+		}
+
+		void moveFolder(db, move.from, move.to)
+			.then(() => {
+				// The open notebook is named by path in the URL, and the move has
+				// just changed it — for the notebook itself and for everything
+				// under it. Left alone, the URL names a notebook that is no longer
+				// there and `selectedFolderPath` falls back to the first one, so
+				// moving the notebook you are in throws you out of it.
+				if (folder !== undefined && isWithin(folder, move.from)) {
+					select({ folder: folderToSearch(rebasePath(folder, move.from, move.to)) });
+				}
+			})
+			.catch((error: unknown) => {
+				setProblem(
+					error instanceof FolderExistsError
+						? {
+								message: `There is already a notebook called “${error.folderName}” there.`,
+								tone: 'warning',
+							}
+						: { message: 'That notebook could not be moved.', tone: 'error' }
+				);
+			});
+	};
+
 	useCommand({
 		id: 'app.palette',
 		label: 'Show all commands',
@@ -353,6 +436,43 @@ const Home = () => {
 		group: 'Note',
 		enabled: deleted !== null,
 		run: undoDelete,
+	});
+
+	/**
+	 * Picking up without a pointer. Dragging is a pointer gesture, and WCAG 2.2
+	 * SC 2.5.7 asks that whatever it does be doable without one; these two put
+	 * the same thing in the air that `dragstart` does, and the destination rows
+	 * in the sidebar are ordinary buttons, so a click or Enter on one puts it
+	 * down. No chord: they are rare enough to be found in the palette, and every
+	 * chord taken is one a note cannot use.
+	 */
+	useCommand({
+		id: 'notebook.move',
+		label: 'Move notebook',
+		group: 'Notebook',
+		// The root is not a notebook and cannot be moved, and neither can a
+		// second thing while one is already in the air.
+		enabled: folder !== undefined && folder !== ROOT && moving === null,
+		run: () => {
+			if (folder === undefined || folder === ROOT) return;
+			setMoving({ kind: 'notebook', path: folder, name: basename(folder) });
+		},
+	});
+
+	useCommand({
+		id: 'note.move',
+		label: 'Move note to notebook',
+		group: 'Note',
+		enabled: openNote !== undefined && moving === null,
+		run: () => {
+			if (openNote === undefined) return;
+			setMoving({
+				kind: 'note',
+				id: openNote.id,
+				path: openNote.path,
+				name: openNote.title,
+			});
+		},
 	});
 
 	useShortcuts();
@@ -405,6 +525,10 @@ const Home = () => {
 					onCreateFolder={onCreateFolder}
 					looseNoteCount={looseNoteCount}
 					footer={<AccountPanel />}
+					moving={moving}
+					onPickUp={setMoving}
+					onDrop={onDropInto}
+					onCancelMove={cancelMove}
 				/>
 
 				<NoteList
@@ -435,6 +559,11 @@ const Home = () => {
 					// Both queries, not just the tree: the notebooks alone cannot tell
 					// an empty app from one whose notes all sit loose at the root.
 					storeLoaded={tree !== undefined && looseNoteCount !== undefined}
+					onPickUpNote={(note) => {
+						setMoving({ kind: 'note', id: note.id, path: note.path, name: note.title });
+					}}
+					onCancelMove={cancelMove}
+					movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
 				/>
 
 				<NoteView
