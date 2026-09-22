@@ -4,9 +4,10 @@ import { useEffect, useMemo } from 'react';
 
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import { type EditorMode } from '../editor/mode.js';
+import { type ConnectedSource, connectedSources } from './connection.js';
 import { activeConnectionId, db, type NoteRecord, type SyncStateRecord } from './db.js';
 import { folderTree } from './folders.js';
-import { getNote, listNotes } from './notes.js';
+import { getNote, listNotes, listNotesEverywhere } from './notes.js';
 import { getCodeDisplay, getDefaultEditorMode, setCodeDisplay } from './prefs.js';
 import { createNoteSearch, type NoteHit } from './search.js';
 import { buildFolderTree, type FolderNode } from './tree.js';
@@ -26,6 +27,10 @@ import { buildFolderTree, type FolderNode } from './tree.js';
  * device's own pile. For saying what kind of source the notes on screen belong
  * to — a detached one, above all, which looks like any other from its notes.
  */
+/** Every source on this device, in the order they were connected. */
+export const useSources = (): ConnectedSource[] | undefined =>
+	useLiveQuery(() => connectedSources(db), []);
+
 export const useActiveSource = (): SyncStateRecord | null | undefined =>
 	useLiveQuery(async () => (await db.syncState.get(await activeConnectionId(db))) ?? null, []);
 
@@ -157,10 +162,12 @@ export const useNoteSearch = (query: string): NoteHit[] | undefined => {
 	// because another letter was typed. Reading every row again per keystroke
 	// would pull the whole corpus out of IndexedDB at typing speed.
 	//
-	// Every live note, not the open notebook's: a search the user has to be
-	// standing in the right notebook for cannot answer "where did I write that".
+	// Every live note in every source, not the open notebook's and not the
+	// showing source's: a search the user has to be standing in the right place
+	// for cannot answer "where did I write that". Opening a match is what takes
+	// them to the right place.
 	const read = useLiveQuery(
-		async () => ({ searching, notes: searching ? await listNotes(db) : [] }),
+		async () => ({ searching, notes: searching ? await listNotesEverywhere(db) : [] }),
 		[searching, search]
 	);
 

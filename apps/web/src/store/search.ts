@@ -1,10 +1,11 @@
 import { previewText } from '@skysa/core';
 import MiniSearch from 'minisearch';
 
-import { type NoteRecord } from './db.js';
+import { type NoteRecord, noteRef } from './db.js';
 
 /**
- * Full-text search over the notes this device holds, and nothing else: no
+ * Full-text search over every note this device holds, in every source, and
+ * nothing else: no
  * request, no provider API, no server index. The notes are already here — that
  * is what local-first means — so search has to work in a tunnel like the rest of
  * the app (docs/PLAN.md §7).
@@ -24,7 +25,11 @@ import { type NoteRecord } from './db.js';
  * Not `routes/search.ts`, which is the query string.
  */
 
-/** The fields worth matching on. `tags` is a list on the row and a line here. */
+/**
+ * The fields worth matching on. `tags` is a list on the row and a line here.
+ * `id` is the note's `noteRef`, not its own id: the index holds every source's
+ * notes at once, and an id on its own names a note only inside its source.
+ */
 interface Indexed {
 	readonly id: string;
 	readonly title: string;
@@ -33,7 +38,7 @@ interface Indexed {
 }
 
 const indexed = (note: NoteRecord): Indexed => ({
-	id: note.id,
+	id: noteRef(note),
 	title: note.title,
 	tags: note.tags.join(' '),
 	body: note.body,
@@ -266,24 +271,25 @@ export const createNoteSearch = (): NoteSearch => {
 	const rows = new Map<string, NoteRecord>();
 
 	const refresh = (notes: readonly NoteRecord[]): void => {
-		const live = new Set(notes.map((note) => note.id));
+		const live = new Set(notes.map(noteRef));
 		[...held.keys()]
-			.filter((id) => !live.has(id))
-			.forEach((id) => {
-				index.discard(id);
-				held.delete(id);
-				rows.delete(id);
+			.filter((ref) => !live.has(ref))
+			.forEach((ref) => {
+				index.discard(ref);
+				held.delete(ref);
+				rows.delete(ref);
 			});
 		notes.forEach((note) => {
+			const ref = noteRef(note);
 			// Always, even when the indexed fields have not moved: the row carries
 			// things the index does not — whether the note is dirty, when it was
 			// edited — and the results are drawn from these.
-			rows.set(note.id, note);
+			rows.set(ref, note);
 			const now = fingerprint(note);
-			if (held.get(note.id) === now) return;
-			if (held.has(note.id)) index.replace(indexed(note));
+			if (held.get(ref) === now) return;
+			if (held.has(ref)) index.replace(indexed(note));
 			else index.add(indexed(note));
-			held.set(note.id, now);
+			held.set(ref, now);
 		});
 	};
 

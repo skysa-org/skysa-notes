@@ -34,8 +34,8 @@ const renderList = (props: Partial<Parameters<typeof NoteList>[0]> = {}) =>
 			folderPath="work"
 			storeLoaded
 			query=""
-			onQuery={() => undefined}
 			results={[]}
+			onOpenResult={() => undefined}
 			{...props}
 		/>
 	);
@@ -257,11 +257,6 @@ describe('searching', () => {
 		expect(screen.getByRole('status').textContent).toBe('Nothing matches “heron”.');
 	});
 
-	it('offers the field as a landmark to jump to', () => {
-		renderList();
-		expect(screen.getByRole('search')).toBeDefined();
-	});
-
 	it('says when nothing matches, and names what was looked for', () => {
 		renderList({ query: 'heron', results: [] });
 		expect(screen.getByText('Nothing matches “heron”.')).toBeDefined();
@@ -281,21 +276,51 @@ describe('searching', () => {
 		expect(screen.queryByText('Birds')).toBeNull();
 	});
 
-	it('empties the field on Escape, which is the way out', async () => {
-		const onQuery = vi.fn();
-		renderList({ query: 'heron', results: [], onQuery });
-
-		await userEvent.type(screen.getByRole('searchbox', { name: 'Search notes' }), '{Escape}');
-
-		expect(onQuery).toHaveBeenCalledWith('');
+	it('has no field of its own: the search is asked in the sidebar', () => {
+		renderList({ query: 'heron', results: [plain('Birds', 'a heron')] });
+		expect(screen.queryByRole('searchbox')).toBeNull();
 	});
 
-	it('is still possible to type in while a notebook is open', async () => {
-		const onQuery = vi.fn();
-		renderList({ onQuery });
+	it('hands back the note a match is for, not an id, since a match can be in any source', async () => {
+		const onOpenResult = vi.fn();
+		const found = plain('Birds', 'a heron');
+		renderList({ query: 'heron', results: [found], onOpenResult });
 
-		await userEvent.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'h');
+		await userEvent.click(screen.getByRole('button', { name: /Birds/ }));
 
-		expect(onQuery).toHaveBeenCalledWith('h');
+		expect(onOpenResult).toHaveBeenCalledWith(found.note);
+	});
+
+	it('says which source a match is in, when told what to call it', () => {
+		const inDropbox = plain('Birds', 'a heron');
+		renderList({
+			query: 'heron',
+			results: [{ ...inDropbox, note: { ...inDropbox.note, connectionId: 'c1' } }],
+			sourceName: (connectionId) => (connectionId === 'c1' ? 'Dropbox' : undefined),
+		});
+
+		expect(screen.getByText(/^Dropbox · work ·/)).toBeDefined();
+	});
+
+	it('marks a match as the open note only when it is in the showing source', () => {
+		// Two sources can each hold a note of the same id.
+		const here = plain('Birds', 'a heron');
+		const elsewhere = {
+			...here,
+			note: { ...here.note, connectionId: 'c2', title: 'Other birds' },
+		};
+		renderList({
+			query: 'heron',
+			results: [{ ...here, note: { ...here.note, connectionId: 'c1' } }, elsewhere],
+			selectedNoteId: here.note.id,
+			activeConnectionId: 'c1',
+		});
+
+		expect(screen.getByRole('button', { name: /^Birds/ }).getAttribute('aria-current')).toBe(
+			'true'
+		);
+		expect(
+			screen.getByRole('button', { name: /Other birds/ }).getAttribute('aria-current')
+		).toBeNull();
 	});
 });

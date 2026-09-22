@@ -53,7 +53,7 @@ export interface NoteScope {
 }
 
 /** A note still sitting at the fallback filename, with no title of its own. */
-const isUnnamed = (note: NoteRecord): boolean =>
+export const isUnnamed = (note: NoteRecord): boolean =>
 	basename(note.path) === `${UNTITLED_SLUG}${NOTE_EXTENSION}` &&
 	readFrontmatter(note.frontmatter).title === undefined;
 
@@ -241,6 +241,14 @@ export const listNotes = async (
 		)
 		.sort((a, b) => b.updatedAt - a.updatedAt);
 };
+
+/**
+ * Every live note on the device, whichever source it is in. For search, which
+ * is the one question asked across sources: everything else the app lists is
+ * the showing source's, and goes through `listNotes`.
+ */
+export const listNotesEverywhere = (db: NotesDatabase): Promise<NoteRecord[]> =>
+	db.notes.where('deletedLocally').equals(0).toArray();
 
 /**
  * Read, change, write — as one transaction, because it is none of those things

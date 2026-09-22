@@ -10,9 +10,11 @@ import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
+import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
+import { showConnection } from '../store/connection.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
 import {
 	createFolder,
@@ -22,17 +24,19 @@ import {
 	renameFolder,
 } from '../store/folders.js';
 import {
+	useActiveConnectionId,
 	useActiveSource,
 	useFolderTree,
 	useLooseNoteCount,
 	useNote,
 	useNoteSearch,
 	useNotesInFolder,
+	useSources,
 } from '../store/hooks.js';
-import { createNote, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
+import { createNote, listNotes, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { selectedFolderPath } from '../store/tree.js';
-import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
+import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import {
 	type AppSearch,
 	type ConnectOutcome,
@@ -148,6 +152,8 @@ const Home = () => {
 	const connectNotice = connectOutcome === undefined ? undefined : connectMessage(connectOutcome);
 
 	const source = useActiveSource();
+	const activeConnection = useActiveConnectionId();
+	const sources = useSources();
 	const tree = useFolderTree();
 	const looseNoteCount = useLooseNoteCount();
 	// Derived rather than written back to the URL: the URL records the user's
@@ -171,6 +177,15 @@ const Home = () => {
 	 */
 	const [query, setQuery] = useState('');
 	const results = useNoteSearch(query);
+	/**
+	 * What a search result calls the source it is in. Said only when there is
+	 * more than one: with a single source every row would say the same thing.
+	 */
+	const resultSourceName = (connectionId: string): string | undefined => {
+		if (sources === undefined || sources.length < 2) return undefined;
+		const found = sources.find((each) => each.connectionId === connectionId);
+		return found === undefined ? undefined : tabName(found, sources);
+	};
 
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	/**
@@ -195,6 +210,77 @@ const Home = () => {
 		setProblem(null);
 		setConnectOutcome(undefined);
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
+	};
+
+	/**
+	 * Open a notebook. Only a note under the open notebook can be open, so the
+	 * note showing stays only while it is under the one clicked — in it, or in
+	 * a notebook inside it, at any depth. Clicking a parent of the note's own
+	 * notebook used to clear it and leave an empty editor beside a list, which
+	 * was the reported bug. Anywhere else, the notebook's most recent note is
+	 * opened instead, so a notebook with notes in it is never a blank pane.
+	 *
+	 * The root is not a notebook: its row lists what sits loose in it, and a
+	 * note in any notebook is under the root without being one of those.
+	 *
+	 * The notebook switches at once and the note follows once the store has
+	 * answered, rather than the click waiting on a read. The follow-up looks at
+	 * the URL as it is by then, not as it was at the click: the user may have
+	 * clicked another notebook, or a note, in between, and the note this click
+	 * found belongs to neither of those choices.
+	 */
+	const openFolder = (path: string) => {
+		const keep =
+			openNote !== undefined &&
+			(path === ROOT ? parentPath(openNote.path) === ROOT : isWithin(openNote.path, path));
+		if (keep) {
+			select({ folder: folderToSearch(path) });
+			return;
+		}
+		openFirstNoteIn(path);
+	};
+
+	/**
+	 * Show `path` with nothing open, then open its most recent note once the
+	 * store has said which that is. Used by a click on a notebook the open
+	 * note is not in, and by a delete, which is the other way a notebook comes
+	 * to be showing with nothing open beside a list with something in it.
+	 */
+	const openFirstNoteIn = (path: string) => {
+		const wanted = folderToSearch(path);
+		select({ folder: wanted, note: undefined });
+		void listNotes(db, { folderPath: path }).then(([first]) => {
+			if (first === undefined) return;
+			void navigate({
+				search: (current) =>
+					current.folder === wanted && current.note === undefined
+						? { ...current, note: first.id }
+						: current,
+				replace: true,
+			});
+		});
+	};
+
+	/**
+	 * Open a search result. A result can be in any source and any notebook, and
+	 * opening one has to take the user to all of it: the source first, since
+	 * the notebook and the note named in the URL are read inside whichever
+	 * source is showing, and then the notebook and the note together. Left in
+	 * the source or the notebook they were in, the sidebar would highlight one
+	 * place while the note beside it came from another, and clearing the search
+	 * would leave the open note nowhere in the list.
+	 */
+	const openResult = (note: NoteRecord) => {
+		const go = () => {
+			select({ folder: folderToSearch(parentPath(note.path)), note: note.id });
+		};
+		if (note.connectionId === activeConnection) {
+			go();
+			return;
+		}
+		void showConnection(db, note.connectionId).then((shown) => {
+			if (shown) go();
+		});
 	};
 
 	/**
@@ -543,7 +629,10 @@ const Home = () => {
 			 * panes below all mean something different depending on which of
 			 * these is lit.
 			 */}
-			<SourceTabs returnTo={returnPath(href)} />
+			<SourceTabs
+				returnTo={returnPath(href)}
+				search={<SearchField query={query} onQuery={setQuery} fieldRef={searchField} />}
+			/>
 			{/*
 			 * For as long as a detached source is the one showing, and not
 			 * dismissable: its notes look like any others, can be opened and
@@ -571,9 +660,7 @@ const Home = () => {
 				<Sidebar
 					tree={tree}
 					selectedFolder={folder}
-					onSelectFolder={(path) => {
-						select({ folder: folderToSearch(path), note: undefined });
-					}}
+					onSelectFolder={openFolder}
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}
 					onDeleteFolder={onDeleteFolder}
@@ -589,25 +676,15 @@ const Home = () => {
 					notes={notes}
 					selectedNoteId={noteId}
 					onSelectNote={(id) => {
-						// A result can be in any notebook, and opening one has to
-						// take the user there: left in the notebook they were in,
-						// the sidebar would highlight one notebook while the note
-						// beside it came from another, and clearing the search would
-						// leave the open note nowhere in the list.
-						const hit = results?.find((each) => each.note.id === id);
-						select(
-							hit === undefined
-								? { note: id }
-								: {
-										note: id,
-										folder: folderToSearch(parentPath(hit.note.path)),
-									}
-						);
+						select({ note: id });
 					}}
 					query={query}
-					onQuery={setQuery}
-					queryRef={searchField}
 					results={results}
+					onOpenResult={openResult}
+					{...(activeConnection === undefined
+						? {}
+						: { activeConnectionId: activeConnection })}
+					sourceName={resultSourceName}
 					onCreateNote={onCreateNote}
 					folderPath={folder}
 					// Both queries, not just the tree: the notebooks alone cannot tell
@@ -627,7 +704,15 @@ const Home = () => {
 						setBeside(displaced ?? null);
 						// The delete waits for what autosave had out, and the user
 						// may have opened another note by the time it is done.
-						if (noteIdRef.current === note.id) select({ note: undefined });
+						if (noteIdRef.current !== note.id) return;
+						// The next note along rather than an empty pane, while the
+						// notebook has one: the tombstone is in the row by now, so
+						// the read leaves the deleted note out.
+						if (folder === undefined) {
+							select({ note: undefined });
+							return;
+						}
+						openFirstNoteIn(folder);
 					}}
 				/>
 			</div>

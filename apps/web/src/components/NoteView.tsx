@@ -14,6 +14,7 @@ import { useDefaultEditorMode } from '../store/hooks.js';
 import {
 	deleteNote,
 	getNote,
+	isUnnamed,
 	renameNote,
 	saveNoteBody,
 	setNoteEditorMode,
@@ -68,6 +69,17 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 	// the typed value: clearing state and blurring means Escape renames the note
 	// — and the file on disk — to whatever the user was trying to throw away.
 	const cancelled = useRef(false);
+	/**
+	 * Whether the press that is focusing the field should leave the whole name
+	 * selected. "Untitled" is a placeholder, not a name, and the reason to
+	 * click it is to replace it: selecting it on the way in means typing does
+	 * that, where a caret dropped in the middle of it means deleting it first.
+	 * The browser puts a caret where the pointer was released, after focus, so
+	 * the selection made on focus has to survive the release — hence the flag
+	 * read on `mouseup`. A named note is left alone: a click in a real name is
+	 * a click at a place in it.
+	 */
+	const keepSelection = useRef(false);
 
 	const commit = () => {
 		const trimmed = draft?.trim();
@@ -87,7 +99,20 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 			onChange={(event) => {
 				setDraft(event.target.value);
 			}}
-			onBlur={commit}
+			onFocus={(event) => {
+				if (draft !== null || !isUnnamed(note)) return;
+				event.currentTarget.select();
+				keepSelection.current = true;
+			}}
+			onMouseUp={(event) => {
+				if (!keepSelection.current) return;
+				keepSelection.current = false;
+				event.preventDefault();
+			}}
+			onBlur={() => {
+				keepSelection.current = false;
+				commit();
+			}}
 			onKeyDown={(event) => {
 				if (event.key === 'Enter') event.currentTarget.blur();
 				if (event.key === 'Escape') {
