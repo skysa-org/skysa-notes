@@ -177,6 +177,35 @@ describe('a note whose frontmatter has a YAML error', () => {
 	});
 });
 
+describe('naming an unnamed note', () => {
+	it('selects the placeholder on the way in, so typing replaces it', async () => {
+		// "Untitled" is not a name, and nobody clicks it to put a caret in the
+		// middle of it: they click it to type the name over it.
+		const user = userEvent.setup();
+		const note = await createNote(db, { body: '' });
+		show(note.id);
+
+		const field = await screen.findByLabelText<HTMLInputElement>('Note title');
+		await user.click(field);
+
+		expect(field.value).toBe('Untitled');
+		expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'Untitled'.length]);
+		await user.keyboard('Plans');
+		expect(field.value).toBe('Plans');
+	});
+
+	it('leaves a real name alone, since a click in it is a click at a place in it', async () => {
+		const user = userEvent.setup();
+		const note = await createNote(db, { title: 'Original', body: 'body\n' });
+		show(note.id);
+
+		const field = await screen.findByLabelText<HTMLInputElement>('Note title');
+		await user.click(field);
+
+		expect(field.selectionStart).toBe(field.selectionEnd);
+	});
+});
+
 describe('abandoning a rename', () => {
 	it('leaves the note alone when the user presses Escape', async () => {
 		// `blur()` dispatches synchronously, so the blur handler runs against the

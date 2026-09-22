@@ -242,7 +242,10 @@ code {
    sideways instead, so twelve accounts cost the notes no height. */
 .source-tabs {
 	display: flex;
-	align-items: stretch;
+	/* The search field is the tallest thing here and sets the bar's height.
+	   The tabs sit on the bar's bottom edge, where their lit edge meets its
+	   border, rather than being stretched or floated up to the top. */
+	align-items: flex-end;
 	gap: 0.25rem;
 	padding-inline: 0.5rem;
 	border-block-end: 1px solid var(--border);
@@ -250,7 +253,9 @@ code {
 }
 
 .source-tabs nav {
-	flex: 1;
+	/* Not `flex: 1`: the way to another account sits right after the last
+	   tab, with the tabs, and the search takes what is left of the bar. */
+	flex: 0 1 auto;
 	min-width: 0;
 	overflow-x: auto;
 	/* The bar is short and the scrollbar under it would be most of its height. */
@@ -269,15 +274,22 @@ code {
 	list-style: none;
 }
 
+/* The tab and the `+` after it share one line box — `--tab-line` — so that
+   the two sit on the same baseline whatever size their glyphs are. */
+.source-tabs {
+	--tab-line: 1.36rem;
+}
+
 .source-tab {
-	display: block;
+	display: flex;
+	align-items: baseline;
 	max-width: 14rem;
-	overflow: hidden;
+	min-width: 0;
 	padding: 0.5rem 0.75rem;
 	font: inherit;
 	font-size: 0.85rem;
+	line-height: var(--tab-line);
 	white-space: nowrap;
-	text-overflow: ellipsis;
 	color: var(--muted);
 	background: none;
 	border: 0;
@@ -300,7 +312,45 @@ code {
 	border-block-end-color: var(--fg);
 }
 
+/* The name, as wide as it would be in bold whether or not it is. Bold is wider
+   than regular, so a tab that only went bold when lit grew when pressed and
+   shoved every tab after it sideways. A hidden copy of the name, in bold, sits
+   under the visible one in the same grid cell and holds the width; the visible
+   one is what clips with an ellipsis when the tab is at its widest. */
+.source-tab-name {
+	display: inline-grid;
+	/* One track that can shrink to nothing: an `auto` track cannot go below
+	   the widest thing in it, and the hidden copy is exactly as wide as the
+	   name, so a long name could never be clipped. */
+	grid-template-columns: minmax(0, 1fr);
+	flex: 0 1 auto;
+	min-width: 0;
+}
+
+.source-tab-name > span,
+.source-tab-name::after {
+	grid-area: 1 / 1;
+	/* Hidden on both, or the copy's own width is the least the track can be. */
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.source-tab-name > span {
+	text-overflow: ellipsis;
+}
+
+.source-tab-name::after {
+	content: attr(data-name);
+	font-weight: 600;
+	visibility: hidden;
+	pointer-events: none;
+}
+
 .source-tab-detached {
+	flex: none;
+	/* `pre`, not `nowrap`: the text begins with a space, and as a flex item of
+	   its own that space would otherwise be dropped. */
+	white-space: pre;
 	color: var(--warn);
 	font-weight: 400;
 }
@@ -342,18 +392,22 @@ code {
 .source-add {
 	position: relative;
 	display: flex;
-	align-items: center;
+	align-items: flex-end;
 }
 
+/* The same box as a tab — the padding, the line and the transparent edge — so
+   the `+` sits on the tabs' baseline and not somewhere in the bar's middle. */
+/* No radius: the bar is the top of the window, and a rounded corner up against
+   the window's edge reads as a mistake in the rendering. */
 .source-add-button {
-	padding: 0.25rem 0.6rem;
+	padding: 0.5rem 0.6rem;
 	font: inherit;
 	font-size: 1rem;
-	line-height: 1;
+	line-height: var(--tab-line);
 	color: var(--muted);
 	background: none;
 	border: 0;
-	border-radius: 0.25rem;
+	border-block-end: 2px solid transparent;
 	cursor: pointer;
 }
 
@@ -362,26 +416,49 @@ code {
 	background: color-mix(in srgb, var(--fg) 8%, transparent);
 }
 
-.source-add-menu {
-	position: absolute;
-	inset-block-start: 100%;
-	inset-inline-end: 0;
-	z-index: 20;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 0.35rem;
-	min-width: 12rem;
-	padding: 0.6rem 0.75rem;
-	background: var(--surface);
-	border: 1px solid var(--border);
-	border-radius: 0.5rem;
-	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+/* Lit while its menu is open, as a toolbar button is (`.toolbar-button-on`). */
+.source-add-button-on {
+	color: var(--fg);
+	background: color-mix(in srgb, var(--fg) 14%, transparent);
 }
 
-.source-add-menu p {
+/* The menu is a `.toolbar-panel`, hung under the `+`; only the heading and a
+   failure notice are its own. */
+.source-add-heading,
+.source-add-menu .muted {
 	margin: 0;
+	padding: 0.4rem 0.6rem;
 	font-size: 0.75rem;
+	color: var(--muted);
+}
+
+.source-add-heading {
+	padding-block-end: 0.2rem;
+	/* The panel is as wide as its widest row, and this is meant to be it. */
+	white-space: nowrap;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+/* The search, at the right-hand end of the bar. It takes the room the tabs
+   leave and keeps to the right of it, so the field lines up with the notes it
+   answers into rather than running on from the last tab. */
+.source-search {
+	display: flex;
+	flex: 1;
+	justify-content: flex-end;
+	align-items: center;
+	min-width: 0;
+	padding-block: 0.3rem;
+	padding-inline-start: 0.5rem;
+}
+
+.source-search [role='search'] {
+	display: flex;
+	width: 100%;
+	max-width: 20rem;
+	min-width: 6rem;
 }
 
 /* ---- App shell -------------------------------------------------------- */
@@ -712,15 +789,9 @@ button.danger {
 	white-space: nowrap;
 }
 
-/* The search field sits under the pane header, so it stays put while the list
-   under it scrolls — the field is how the user got to that list, and scrolling
-   it away leaves them looking at results with nothing saying what they answer. */
 .note-search {
-	position: sticky;
-	top: 3.25rem;
-	z-index: 1;
-	width: calc(100% - 1.5rem);
-	margin: 0.5rem 0.75rem;
+	flex: 1;
+	min-width: 0;
 	padding: 0.35rem 0.5rem;
 	font: inherit;
 	font-size: 0.85rem;
@@ -780,12 +851,17 @@ button.danger {
 	border-block-end: 1px solid var(--border);
 }
 
+/* The same 1.75rem line box as `button.icon`, which is what sets the height of
+   the two pane headers beside this one. With its own padding on a `normal`
+   line height the field came out two pixels taller, and the three headers'
+   bottom rules did not meet. */
 .note-title-input {
 	flex: 1 1 12rem;
 	min-width: 0;
-	padding: 0.25rem 0;
+	padding: 0;
 	font: inherit;
 	font-size: 1.15rem;
+	line-height: 1.75rem;
 	font-weight: 600;
 	border: 0;
 	background: transparent;

@@ -93,6 +93,27 @@ describe('the source tabs', () => {
 		expect(screen.queryByRole('navigation', { name: 'Sources' })).toBeNull();
 	});
 
+	it('shows the bar for the search it carries even with nothing connected', async () => {
+		// The search lives at the end of the bar, and it is the app's, not any
+		// source's: a device with nothing connected still has its own notes.
+		const db = freshDatabase();
+		render(
+			<SourceTabs
+				db={db}
+				client={clientWith(() => Promise.reject(new Error('down')))}
+				returnTo="/"
+				navigate={() => undefined}
+				search={<input type="search" aria-label="Search notes" />}
+			/>
+		);
+
+		expect(await screen.findByRole('searchbox', { name: 'Search notes' })).toBeDefined();
+		await waitFor(async () => {
+			expect(await connectedSources(db)).toEqual([]);
+		});
+		expect(screen.getByRole('searchbox', { name: 'Search notes' })).toBeDefined();
+	});
+
 	it('shows one connection as one tab, so the way to a second is where it will always be', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });

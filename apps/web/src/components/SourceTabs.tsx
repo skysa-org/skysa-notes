@@ -22,6 +22,13 @@ export interface SourceTabsProps {
 	returnTo: string;
 	/** Seam for tests: jsdom has no navigation. */
 	navigate?: (url: string) => void;
+	/**
+	 * The app's search field, which the route owns and the bar shows at its
+	 * right-hand end: it asks every source, so it belongs beside the sources
+	 * rather than inside any one pane of the source showing. With it given the
+	 * bar is always shown, since there is then always something in it.
+	 */
+	search?: ReactNode;
 }
 
 /**
@@ -51,6 +58,7 @@ export const SourceTabs = ({
 	client = api,
 	returnTo,
 	navigate,
+	search,
 }: SourceTabsProps) => {
 	const sources = useLiveQuery(() => connectedSources(db), [db]);
 	const config = useInstanceConfig(client);
@@ -69,9 +77,10 @@ export const SourceTabs = ({
 	// when there is neither anything to show nor anything to offer: a
 	// deployment with no providers, or a server that cannot be reached, where
 	// an empty strip would be furniture standing in for a choice nobody has.
-	if (sources === undefined || (sources.length === 0 && offerable.length === 0)) return null;
+	const nothingToShow = sources === undefined || (sources.length === 0 && offerable.length === 0);
+	if (nothingToShow && search === undefined) return null;
 
-	const ordered = inOrder(sources);
+	const ordered = inOrder(sources ?? []);
 
 	return (
 		<div className="source-tabs">
@@ -116,8 +125,11 @@ export const SourceTabs = ({
 				<div className="source-add">
 					<button
 						type="button"
-						className="source-add-button"
+						className={
+							adding ? 'source-add-button source-add-button-on' : 'source-add-button'
+						}
 						aria-label="Connect another account"
+						aria-haspopup="true"
 						aria-expanded={adding}
 						onClick={() => {
 							setAdding((open) => !open);
@@ -138,7 +150,7 @@ export const SourceTabs = ({
 									client={client}
 									provider={provider}
 									returnTo={returnTo}
-									className="link"
+									className="toolbar-item"
 									{...(navigate === undefined ? {} : { navigate })}
 								>
 									{PROVIDER_LABELS[provider]}
@@ -148,6 +160,7 @@ export const SourceTabs = ({
 					)}
 				</div>
 			)}
+			{search !== undefined && <div className="source-search">{search}</div>}
 		</div>
 	);
 };
@@ -179,7 +192,11 @@ const SourceTab = ({
 			onShow(event.currentTarget.offsetWidth);
 		}}
 	>
-		<span className="source-tab-name">{name}</span>
+		{/* The name once more on `data-name`, for the hidden bold copy that
+		    holds the tab's width — see `.source-tab-name` in the stylesheet. */}
+		<span className="source-tab-name" data-name={name}>
+			<span>{name}</span>
+		</span>
 		{source.detached !== undefined && (
 			// Not an icon alone: a source that syncs nowhere is the one thing
 			// about this bar a user must not have to infer from a colour.
@@ -281,6 +298,10 @@ const RenameField = ({
  * What the `+` opens. Closes on Escape and on a press anywhere outside it,
  * which is the whole of what a menu this small owes anyone: the buttons inside
  * are ordinary buttons, and each one leaves the page for the provider.
+ *
+ * Dressed as the editor toolbar's menus are (`.toolbar-panel`, `.toolbar-item`
+ * in the stylesheet), so the app has one kind of menu rather than one per
+ * place: a card hung under the control that opened it, with a row per choice.
  */
 const AddMenu = ({ children, onClose }: { children: ReactNode; onClose: () => void }) => {
 	const menu = useRef<HTMLDivElement>(null);
@@ -299,8 +320,13 @@ const AddMenu = ({ children, onClose }: { children: ReactNode; onClose: () => vo
 	}, [onClose]);
 
 	return (
-		<div ref={menu} className="source-add-menu" role="group" aria-label="Storage providers">
-			<p className="muted">Connect another account</p>
+		<div
+			ref={menu}
+			className="toolbar-panel source-add-menu"
+			role="group"
+			aria-label="Storage providers"
+		>
+			<p className="source-add-heading">Connect another account</p>
 			{children}
 		</div>
 	);

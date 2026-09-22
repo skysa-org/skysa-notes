@@ -1,19 +1,21 @@
 import { parentPath, previewLines, ROOT } from '@skysa/core';
-import { type ReactNode, type RefObject } from 'react';
+import { type ReactNode } from 'react';
 
-import { type NoteRecord } from '../store/db.js';
+import { type NoteRecord, noteRef } from '../store/db.js';
 import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
 import { folderLabel } from '../store/tree.js';
 
 /**
  * The middle pane: the notes in the selected notebook, most recently edited
  * first — or, while there is something in the search field, what matches it
- * anywhere in the app.
+ * anywhere on the device, in every source and every notebook.
  *
  * Both are the same list of the same rows, so they are one pane rather than two:
  * searching is a different question about the notes, not a different place to
  * be, and a search that opened a pane of its own would leave the user somewhere
- * they have to find their way back from.
+ * they have to find their way back from. The field itself is in the sidebar's
+ * header, above the notebooks: this pane shows the answers, and says where each
+ * one is.
  */
 
 export interface NoteListProps {
@@ -34,11 +36,24 @@ export interface NoteListProps {
 	storeLoaded: boolean;
 	/** What is in the search field. Empty means the notebook's notes are shown. */
 	query: string;
-	onQuery: (query: string) => void;
 	/** Matches for `query`, or undefined while the first one is being answered. */
 	results: readonly NoteHit[] | undefined;
-	/** So a command can put the cursor in the field without hunting the DOM. */
-	queryRef?: RefObject<HTMLInputElement | null>;
+	/**
+	 * A match was chosen. The note, not its id: a match can be in any source,
+	 * and an id names a note only inside its own.
+	 */
+	onOpenResult: (note: NoteRecord) => void;
+	/**
+	 * The source the app is showing. A result is marked as the open note only
+	 * when it is that note, and `selectedNoteId` alone cannot say: another
+	 * source can hold a note of the same id.
+	 */
+	activeConnectionId?: string;
+	/**
+	 * What to call the source a match is in, or `undefined` to leave it unsaid
+	 * — which is right while there is only one source, when it would be noise.
+	 */
+	sourceName?: (connectionId: string) => string | undefined;
 	/**
 	 * A row can be dragged into a notebook in the sidebar. The note is picked up
 	 * here and put down there, so what is in the air is the route's state and
@@ -221,9 +236,10 @@ export const NoteList = ({
 	folderPath,
 	storeLoaded,
 	query,
-	onQuery,
 	results,
-	queryRef,
+	onOpenResult,
+	activeConnectionId,
+	sourceName,
 	onPickUpNote,
 	onCancelMove,
 	movingNoteId,
@@ -259,31 +275,6 @@ export const NoteList = ({
 				</button>
 			</div>
 
-			{/* The landmark is what lets a screen-reader user jump to the field
-			    rather than walk the pane to find it. */}
-			<div role="search">
-				<input
-					ref={queryRef}
-					// `search` rather than `text`: it is what the field is, and the
-					// browser offers its own way to empty one.
-					type="search"
-					className="note-search"
-					aria-label="Search notes"
-					placeholder="Search notes"
-					value={query}
-					onChange={(event) => {
-						onQuery(event.target.value);
-					}}
-					onKeyDown={(event) => {
-						// Escape puts the user back in the notebook they were in,
-						// which is where they were before they typed. Without it the
-						// only way out is to delete what they wrote, one character at
-						// a time.
-						if (event.key === 'Escape') onQuery('');
-					}}
-				/>
-			</div>
-
 			{/* A search's answer is spoken when it changes: it arrives under a
 			    field the user is still typing into, and "nothing matches" is the
 			    thing a screen-reader user most needs told. While a search is open
@@ -304,15 +295,25 @@ export const NoteList = ({
 				<ul>
 					{results.slice(0, SEARCH_LIMIT).map((hit) => (
 						<NoteRow
-							key={hit.note.id}
+							key={noteRef(hit.note)}
 							note={hit.note}
-							selected={hit.note.id === selectedNoteId}
+							selected={
+								hit.note.id === selectedNoteId &&
+								(activeConnectionId === undefined ||
+									hit.note.connectionId === activeConnectionId)
+							}
 							onSelect={() => {
-								onSelectNote(hit.note.id);
+								onOpenResult(hit.note);
 							}}
-							// Which notebook, because a search crosses all of them and
-							// two notes can share a title.
-							meta={`${folderLabel(parentPath(hit.note.path))} · ${editedAt(hit.note.updatedAt)}`}
+							// Which source and which notebook, because a search
+							// crosses all of them and two notes can share a title.
+							meta={[
+								sourceName?.(hit.note.connectionId),
+								folderLabel(parentPath(hit.note.path)),
+								editedAt(hit.note.updatedAt),
+							]
+								.filter((part) => part !== undefined)
+								.join(' · ')}
 							detail={<Excerpt hit={hit} />}
 							onPickUp={
 								onPickUpNote === undefined

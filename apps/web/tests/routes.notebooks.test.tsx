@@ -37,7 +37,10 @@ const openApp = async () => {
 
 const menu = async (user: ReturnType<typeof userEvent.setup>, name: string, item: string) => {
 	await user.click(await screen.findByRole('button', { name: `Options for “${name}”` }));
-	await user.click(await screen.findByRole('button', { name: item }));
+	// Within the menu: opening a notebook opens a note in it, and the note's
+	// own Delete is on the screen beside the menu's.
+	const items = await screen.findByRole('group', { name: `Notebook “${name}”` });
+	await user.click(within(items).getByRole('button', { name: item }));
 };
 
 describe('making a notebook', () => {

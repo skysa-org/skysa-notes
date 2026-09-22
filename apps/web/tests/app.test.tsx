@@ -253,7 +253,7 @@ describe('the app', () => {
 		// The headline user story. Without the count reaching
 		// `selectedFolderPath`, this click silently does nothing.
 		await createFolder(db, { name: 'Work' });
-		await looseNote('Scratch');
+		const scratch = await looseNote('Scratch');
 		const router = await open('/', 'Work');
 
 		await userEvent.click(screen.getByRole('button', { name: /Loose notes/ }));
@@ -264,7 +264,12 @@ describe('the app', () => {
 		// The heading and the list are separate live queries: the pane can be
 		// renamed a tick before its notes arrive.
 		expect(await screen.findByText('Scratch')).toBeDefined();
-		expect(router.state.location.search).toEqual({ folder: '/' });
+		// The root is spelled `/` in the URL. With nothing open, the row opens
+		// the first loose note as a notebook would, and that arrives a read
+		// after the folder does.
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({ folder: '/', note: scratch.id });
+		});
 	});
 
 	it('comes back to the loose notes after a reload', async () => {
