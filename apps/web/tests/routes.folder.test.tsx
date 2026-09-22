@@ -60,6 +60,25 @@ describe('making a notebook that cannot be made', () => {
 		expect(document.querySelectorAll('.app-shell > *')).toHaveLength(3);
 	});
 
+	it('lets the user put the notice away where doing something else is not the answer', async () => {
+		// A duplicate name is a message about the thing the user was in the
+		// middle of. Moving to another notebook clears it, but that is a change
+		// of subject, not an acknowledgement — and they may want to stay where
+		// they are and try the name again.
+		const user = userEvent.setup();
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Ideas' });
+		await openApp();
+		await nameIt(user, 'Ideas');
+		await screen.findByRole('alert');
+
+		await user.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+		await waitFor(() => {
+			expect(screen.queryByRole('alert')).toBeNull();
+		});
+	});
+
 	it('takes the banner away once the user does something else', async () => {
 		const user = userEvent.setup();
 		await createFolder(db, { parentPath: undefined, name: 'Work' });

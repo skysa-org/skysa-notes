@@ -13,6 +13,13 @@
 	   with Enter, so it is a different hue and not a stronger tint. */
 	--find-match: #fde68a;
 	--find-current: #fdba74;
+	/* What a toast is about. These colour a 4px bar and a 10% wash behind the
+	   card, and never the words themselves — the text stays `--fg` on what is
+	   still very nearly `--surface`, so the contrast of the message does not
+	   depend on the tone it arrives with. */
+	--ok: #16a34a;
+	--warn: #b45309;
+	--bad: #dc2626;
 	font-family:
 		ui-sans-serif,
 		system-ui,
@@ -33,6 +40,12 @@
 		--mark: #4d3f12;
 		--find-match: #4d3f12;
 		--find-current: #7c4a12;
+		/* Lifted off the dark background the way `--mark` is: the light
+		   theme's green and red go muddy against `--surface` here, and the
+		   amber has to stop being brown to read as a warning at all. */
+		--ok: #4ade80;
+		--warn: #fbbf24;
+		--bad: #f87171;
 	}
 }
 
@@ -71,12 +84,13 @@ code {
 	font-size: 0.9em;
 }
 
-.update-prompt {
-	position: fixed;
-	inset-block-end: 1rem;
-	inset-inline: 1rem;
-	margin-inline: auto;
-	max-width: 28rem;
+/* The card every notice floating over the page is made of. The new-version
+   prompt was the first and gave it its name; the undo notice, the stale-tab
+   bar and the toasts are the same shape. The look lives here and the placing
+   lives with each of them, so a notice that joins a stack is not also told
+   where on the viewport to be. */
+.update-prompt,
+.toast {
 	display: flex;
 	gap: 0.5rem;
 	align-items: center;
@@ -87,11 +101,21 @@ code {
 	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
 
-.update-prompt span {
+.update-prompt {
+	position: fixed;
+	inset-block-end: 1rem;
+	inset-inline: 1rem;
+	margin-inline: auto;
+	max-width: 28rem;
+}
+
+.update-prompt span,
+.toast span {
 	flex: 1;
 }
 
-.update-prompt button {
+.update-prompt button,
+.toast button {
 	font: inherit;
 	padding: 0.35rem 0.75rem;
 	border-radius: 0.375rem;
@@ -101,7 +125,8 @@ code {
 	cursor: pointer;
 }
 
-.update-prompt button.ghost {
+.update-prompt button.ghost,
+.toast button.ghost {
 	border-color: transparent;
 	background: transparent;
 	color: var(--muted);
@@ -1114,11 +1139,65 @@ button.row.selected {
 	z-index: 40;
 }
 
-/* ---- A delete that can still be taken back ------------------------------ */
+/* ---- Notices floated over the shell ------------------------------------- */
 
-/* The same corner as the "new version" prompt, which can be up at the same
-   time: this one sits above it rather than on it. */
-.deleted-notice {
+/* Everything this screen floats over the page goes in one stack, so two at
+   once sit above one another rather than on one another. The undo notice used
+   to arrange that by hand with an `inset-block-end` of its own, which worked
+   while it was the only other card there was and does not extend to a third.
+   The bottom 1rem is still left free: the new-version prompt belongs to the
+   root route, outside this tree, and cannot join the stack. */
+.toast-stack {
+	position: fixed;
 	inset-block-end: 5rem;
+	inset-inline: 1rem;
 	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	align-items: center;
+	/* The stack is as wide as the page and usually empty. Without this it takes
+	   the clicks meant for the note underneath it; each card takes its own back
+	   below. */
+	pointer-events: none;
+}
+
+.toast-stack > * {
+	pointer-events: auto;
+	width: 100%;
+	max-width: 28rem;
+}
+
+/* The tone, as a bar down the leading edge and a wash behind the card. Only
+   the toasts take one: the undo notice reports no outcome, and wears the plain
+   card.
+
+   The wash is mixed into `--surface` rather than laid over it, so what the
+   words sit on stays within a few percent of the colour they were designed
+   against — a tinted card and not a coloured one. */
+.toast-success,
+.toast-warning,
+.toast-error {
+	border-inline-start: 4px solid var(--toast-accent);
+	background: color-mix(in srgb, var(--toast-accent) 10%, var(--surface));
+}
+
+.toast-success {
+	--toast-accent: var(--ok);
+}
+
+.toast-warning {
+	--toast-accent: var(--warn);
+}
+
+.toast-error {
+	--toast-accent: var(--bad);
+}
+
+/* Words are at stake, so neither is allowed to read as a footnote — the same
+   reason `.banner-alert` exists. The colour is not carrying this on its own:
+   it is the one thing a reader may not be able to see. */
+.toast-warning span,
+.toast-error span {
+	font-weight: 600;
 }

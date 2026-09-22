@@ -50,7 +50,7 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 
 	return (
 		<div
-			className="update-prompt deleted-notice"
+			className="toast"
 			role="status"
 			onTouchStart={() => {
 				touchedAt.current = Date.now();
