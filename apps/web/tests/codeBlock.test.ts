@@ -255,3 +255,19 @@ describe('how code blocks are shown', () => {
 		expect(editor.root.querySelectorAll('.code-line-number')).toHaveLength(0);
 	});
 });
+
+/**
+ * A note whose only content is the block being deleted. The schema wants at
+ * least one block in a document, so this is the case where a delete that only
+ * knew about its own boundaries would leave the editor holding nothing.
+ */
+describe('deleting the last thing in a note', () => {
+	it('leaves an empty note rather than an invalid one', async () => {
+		const editor = await mount('```js\nconst a = 1;\n```\n');
+
+		editor.press('Delete code block');
+
+		expect(editor.markdown()).toBe('');
+		expect(editor.root.querySelector('.code-block')).toBeNull();
+	});
+});
