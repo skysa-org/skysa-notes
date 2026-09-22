@@ -6,7 +6,7 @@ import { type NoteRecord } from '../store/db.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, useMediaQuery } from './layout.js';
 import { SearchField } from './SearchField.js';
-import { SourcePicker } from './SourceTabs.js';
+import { useShowingSourceName } from './SourceTabs.js';
 
 /**
  * The bar across the top of a compact window, where the sources, the notebooks
@@ -15,7 +15,8 @@ import { SourcePicker } from './SourceTabs.js';
  * Only the triggers are here. What the notebook and note dropdowns open is the
  * sidebar and the note list themselves — the same components a wide window
  * shows as columns, drawn as a panel under the bar (`.app-frame.compact` in the
- * stylesheet). Everything the columns can do, the panels can do: the notebook
+ * stylesheet). The source dropdown opens `SourcePanel`, the tabs drawn as a
+ * list, with the storage panel that a wide window keeps under the notebooks. Everything the columns can do, the panels can do: the notebook
  * menu, the storage panel at the sidebar's foot, a move's destinations. Two
  * copies of the notebook tree, one for each width, would be two places for the
  * next change to be made once.
@@ -26,7 +27,14 @@ import { SourcePicker } from './SourceTabs.js';
  */
 
 /** Which pane is open as a dropdown. */
-export type Pane = 'notebooks' | 'notes';
+export type Pane = 'sources' | 'notebooks' | 'notes';
+
+/** The element each pane is, for telling a press inside it from one outside. */
+const PANE_ELEMENT: Record<Pane, string> = {
+	sources: '.source-panel',
+	notebooks: '.sidebar',
+	notes: '.note-list',
+};
 
 /**
  * Marks what a press may land on without shutting the open panel: the panel's
@@ -50,8 +58,7 @@ export const usePanel = () => {
 		const away = (event: PointerEvent) => {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
-			const within = panel === 'notebooks' ? '.sidebar' : '.note-list';
-			if (target.closest(`${within}, [${KEEPS_PANEL}]`) !== null) return;
+			if (target.closest(`${PANE_ELEMENT[panel]}, [${KEEPS_PANEL}]`) !== null) return;
 			setPanel(null);
 		};
 		document.addEventListener('keydown', onKey);
@@ -104,7 +111,7 @@ const PaneTrigger = ({
 	onPanel,
 }: {
 	pane: Pane;
-	/** What the dropdown chooses, for a screen reader: "Notebook", "Note". */
+	/** What the dropdown chooses, for a screen reader: "Source", "Note". */
 	name: string;
 	/** What is chosen now. Truncated on screen, whole in the tooltip. */
 	value: string;
@@ -129,8 +136,6 @@ const PaneTrigger = ({
 );
 
 export interface CompactBarProps {
-	/** Where the provider's callback should send the browser back to. */
-	returnTo: string;
 	/** The open notebook's path, or undefined when none is. */
 	folder: string | undefined;
 	/** The open note, if there is one. */
@@ -156,7 +161,6 @@ export interface CompactBarProps {
  * a wide window, opened as the notes panel.
  */
 export const CompactBar = ({
-	returnTo,
 	folder,
 	note,
 	panel,
@@ -168,6 +172,7 @@ export const CompactBar = ({
 	fieldRef,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
+	const source = useShowingSourceName();
 
 	// The field appears because the icon was pressed, so the cursor goes into
 	// it; a keyboard user would otherwise have to find what they just opened.
@@ -210,7 +215,13 @@ export const CompactBar = ({
 
 	return (
 		<div className="compact-bar">
-			<SourcePicker returnTo={returnTo} />
+			<PaneTrigger
+				pane="sources"
+				name="Source"
+				value={source}
+				panel={panel}
+				onPanel={onPanel}
+			/>
 			<PaneTrigger
 				pane="notebooks"
 				name="Notebook"

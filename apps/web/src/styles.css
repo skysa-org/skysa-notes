@@ -1653,6 +1653,7 @@ button.danger {
 	grid-template-columns: minmax(0, 1fr);
 }
 
+.compact .source-panel,
 .compact .sidebar,
 .compact .note-list {
 	display: none;
@@ -1668,6 +1669,36 @@ button.danger {
 
 .compact .app-shell[data-panel='notebooks'] > .sidebar {
 	display: flex;
+}
+
+.compact .app-shell[data-panel='sources'] > .source-panel {
+	display: flex;
+}
+
+/* The tabs as a list, then the storage panel, then the way to another
+   account: one column that scrolls as a whole when an account's storage
+   panel has a lot to say. Only ever drawn in a compact window. */
+.source-panel {
+	flex-direction: column;
+	overflow-y: auto;
+	background: var(--surface);
+}
+
+.source-panel ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.source-panel-connect {
+	display: flex;
+	flex-direction: column;
+	padding-block: 0.5rem;
+	border-block-start: 1px solid var(--border);
+}
+
+.source-panel-connect .source-add-heading {
+	padding-inline: 0.75rem;
 }
 
 .compact .app-shell[data-panel='notes'] > .note-list {
@@ -1711,13 +1742,6 @@ button.danger {
 /* The three dropdowns share the bar equally and each truncates what it says
    inside its share: a long notebook name must not take the room the note's
    title needs, and the whole of either is in the tooltip and the panel. */
-.compact-source {
-	position: relative;
-	display: flex;
-	flex: 1 1 0;
-	min-width: 0;
-}
-
 .compact-picker {
 	display: flex;
 	flex: 1 1 0;
@@ -1749,20 +1773,6 @@ button.danger {
 
 .compact-picker .toolbar-icon {
 	color: var(--muted);
-}
-
-/* The source menu is a `.toolbar-panel` like the `+`'s, with room kept for a
-   long account name to be cut rather than to run off the screen. */
-.compact-source-menu {
-	max-width: calc(100vw - 1rem);
-}
-
-.compact-source-name {
-	flex: 1 1 auto;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 .compact-icon {

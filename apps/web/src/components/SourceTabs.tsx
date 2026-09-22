@@ -12,7 +12,6 @@ import {
 
 import { api, type ApiClient } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
-import { Icon } from '../editor/icons.js';
 import {
 	type ConnectedSource,
 	connectedSources,
@@ -327,12 +326,14 @@ const ConnectButtons = ({
 	offerable,
 	returnTo,
 	navigate,
+	className = 'toolbar-item',
 }: {
 	db: NotesDatabase;
 	client: Pick<ApiClient, 'config' | 'startConnect'>;
 	offerable: readonly ProviderKind[];
 	returnTo: string;
 	navigate: ((url: string) => void) | undefined;
+	className?: string;
 }) =>
 	offerable.map((provider) => (
 		<ConnectButton
@@ -341,7 +342,7 @@ const ConnectButtons = ({
 			client={client}
 			provider={provider}
 			returnTo={returnTo}
-			className="toolbar-item"
+			className={className}
 			{...(navigate === undefined ? {} : { navigate })}
 		>
 			{PROVIDER_LABELS[provider]}
@@ -349,8 +350,7 @@ const ConnectButtons = ({
 	));
 
 /**
- * What the `+` opens, and what the compact window's source dropdown opens.
- * Closes on Escape and on a press anywhere outside it, which is the whole of
+ * What the `+` opens. Closes on Escape and on a press anywhere outside it, which is the whole of
  * what a menu this small owes anyone: the buttons inside are ordinary buttons.
  *
  * Dressed as the editor toolbar's menus are (`.toolbar-panel`, `.toolbar-item`
@@ -398,106 +398,119 @@ const Menu = ({
 	);
 };
 
-export interface SourcePickerProps {
+export interface SourcePanelProps {
 	db?: NotesDatabase;
 	client?: Pick<ApiClient, 'config' | 'startConnect'>;
 	/** Where the provider's callback should send the browser back to. */
 	returnTo: string;
 	/** Seam for tests: jsdom has no navigation. */
 	navigate?: (url: string) => void;
+	/**
+	 * The storage panel — what the showing source is syncing with, and the way
+	 * to disconnect it — between the sources and the way to another account.
+	 * A wide window keeps it at the foot of the sidebar; a compact one has no
+	 * sidebar in view, and this is the panel that is about sources.
+	 */
+	account?: ReactNode;
+	/** A source was chosen, so the panel has done its job. */
+	onChosen?: () => void;
 }
 
 /**
- * The tabs and the `+`, as one dropdown, for a window too narrow for a row of
- * tabs beside everything else the bar has to hold.
+ * The tabs and the `+`, as one panel, for a compact window: opened from the
+ * source dropdown in `CompactBar` and laid out as the notebook and note panels
+ * are, across the window under the bar.
  *
  * The same choices in the same order, with the one showing marked by
  * `aria-current` as its tab is. Renaming a source is not offered here: on a
- * tab it is a second press on the name, and a name in a menu row has no room
- * to become a field. It is still there in a wider window.
+ * tab it is a second press on the name, and a row in a panel is a place to go
+ * rather than a name to edit. It is still there in a wider window.
  */
-export const SourcePicker = ({
+export const SourcePanel = ({
 	db = defaultDb,
 	client = api,
 	returnTo,
 	navigate,
-}: SourcePickerProps) => {
-	const { ordered, offerable, nothingToShow } = useSourceChoices(db, client);
-	const [open, setOpen] = useState(false);
-	const frame = useRef<HTMLDivElement>(null);
+	account,
+	onChosen,
+}: SourcePanelProps) => {
+	const { ordered, offerable } = useSourceChoices(db, client);
 	const headingId = useId();
-	const close = useCallback(() => {
-		setOpen(false);
-	}, []);
-
-	if (nothingToShow) return null;
-
-	const showing = ordered.find((source) => source.active);
-	const label = showing === undefined ? 'Sources' : tabName(showing, ordered);
 
 	return (
-		<div className="compact-source" ref={frame}>
-			<button
-				type="button"
-				className="compact-picker"
-				aria-label={`Source: ${label}`}
-				aria-haspopup="true"
-				aria-expanded={open}
-				title={label}
-				onClick={() => {
-					setOpen((was) => !was);
-				}}
-			>
-				<span className="compact-picker-label">{label}</span>
-				<Icon name="chevron" />
-			</button>
-			{open && (
-				<Menu className="compact-source-menu" label="Sources" frame={frame} onClose={close}>
+		<section className="source-panel" aria-label="Sources">
+			<div className="pane-header">
+				<h2>Sources</h2>
+			</div>
+			{ordered.length > 0 && (
+				<ul>
 					{ordered.map((source) => {
 						const name = tabName(source, ordered);
 						return (
-							<button
-								key={source.connectionId}
-								type="button"
-								className="toolbar-item"
-								aria-label={
-									source.detached === undefined ? name : `${name} — disconnected`
-								}
-								{...(source.active ? { 'aria-current': 'true' as const } : {})}
-								onClick={() => {
-									setOpen(false);
-									if (!source.active)
-										void showConnection(db, source.connectionId);
-								}}
-							>
-								<span className="compact-source-name">{name}</span>
-								{source.detached !== undefined && (
-									<span className="source-tab-detached"> — disconnected</span>
-								)}
-								{source.active && <Icon name="check" />}
-							</button>
+							<li key={source.connectionId}>
+								<button
+									type="button"
+									className={source.active ? 'row selected' : 'row'}
+									aria-label={
+										source.detached === undefined
+											? name
+											: `${name} — disconnected`
+									}
+									{...(source.active ? { 'aria-current': 'true' as const } : {})}
+									onClick={() => {
+										onChosen?.();
+										if (!source.active)
+											void showConnection(db, source.connectionId);
+									}}
+								>
+									<span className="row-label">
+										{name}
+										{source.detached !== undefined && (
+											<span className="source-tab-detached">
+												{' '}
+												— disconnected
+											</span>
+										)}
+									</span>
+								</button>
+							</li>
 						);
 					})}
-					{offerable.length > 0 && (
-						// A group of its own, named by its heading: a provider's
-						// name is also the name of a source above it, and "Dropbox"
-						// read out twice is two buttons a screen-reader user cannot
-						// tell apart.
-						<div role="group" aria-labelledby={headingId}>
-							<p className="source-add-heading" id={headingId}>
-								Connect another account
-							</p>
-							<ConnectButtons
-								db={db}
-								client={client}
-								offerable={offerable}
-								returnTo={returnTo}
-								navigate={navigate}
-							/>
-						</div>
-					)}
-				</Menu>
+				</ul>
 			)}
-		</div>
+			{account}
+			{offerable.length > 0 && (
+				// A group of its own, named by its heading: a provider's name is
+				// also the name of a source above it, and "Dropbox" read out twice
+				// is two buttons a screen-reader user cannot tell apart.
+				<div className="source-panel-connect" role="group" aria-labelledby={headingId}>
+					<p className="source-add-heading" id={headingId}>
+						Connect another account
+					</p>
+					<ConnectButtons
+						db={db}
+						client={client}
+						offerable={offerable}
+						returnTo={returnTo}
+						navigate={navigate}
+						className="row"
+					/>
+				</div>
+			)}
+		</section>
 	);
+};
+
+/**
+ * What the compact bar's source dropdown says: the source showing, or plain
+ * "Storage" before there is one — the dropdown is there regardless, because
+ * the storage panel is in it.
+ */
+export const useShowingSourceName = (
+	db: NotesDatabase = defaultDb,
+	client: Pick<ApiClient, 'config' | 'startConnect'> = api
+): string => {
+	const { ordered } = useSourceChoices(db, client);
+	const showing = ordered.find((source) => source.active);
+	return showing === undefined ? 'Storage' : tabName(showing, ordered);
 };

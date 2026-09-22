@@ -133,6 +133,36 @@ describe('the compact bar', () => {
 		expect(panel()).toBeNull();
 	});
 
+	it('keeps the storage panel in the source dropdown, not under the notebooks', async () => {
+		const user = userEvent.setup();
+		await openApp();
+
+		const sidebar = screen.getByRole('navigation', { name: 'Notebooks' });
+		expect(within(sidebar).queryByRole('region', { name: 'Storage' })).toBeNull();
+
+		const source = screen.getByRole('button', { name: /^Source: / });
+		await user.click(source);
+		expect(panel()).toBe('sources');
+		expect(source.getAttribute('aria-expanded')).toBe('true');
+		const sources = screen.getByRole('region', { name: 'Sources' });
+		expect(within(sources).getByRole('region', { name: 'Storage' })).toBeDefined();
+
+		// Pointing at the providers under it, not at a `+` this bar has not got.
+		expect(within(sources).queryByText(/Use \+ above/)).toBeNull();
+
+		// And a press inside it is not a press outside it.
+		fireEvent.pointerDown(within(sources).getByRole('region', { name: 'Storage' }));
+		expect(panel()).toBe('sources');
+	});
+
+	it('keeps the storage panel under the notebooks in a wide window', async () => {
+		await openApp(961);
+
+		const sidebar = screen.getByRole('navigation', { name: 'Notebooks' });
+		expect(await within(sidebar).findByRole('region', { name: 'Storage' })).toBeDefined();
+		expect(screen.queryByRole('region', { name: 'Sources' })).toBeNull();
+	});
+
 	it('swaps one dropdown for the other rather than stacking them', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();

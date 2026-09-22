@@ -13,7 +13,7 @@ import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { SourceTabs } from '../components/SourceTabs.js';
+import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
 import { showConnection } from '../store/connection.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
@@ -128,6 +128,28 @@ const PALETTE = parseChord('Mod+K');
  */
 const NEW_NOTE = parseChord('n');
 const FIND = parseChord('Mod+Shift+F');
+
+/**
+ * What the source dropdown opens, in a compact window only: the sources, the
+ * storage panel a wide window keeps under the notebooks, and the way to
+ * another account.
+ */
+const SourceDropdown = ({
+	compact,
+	returnTo,
+	onChosen,
+}: {
+	compact: boolean;
+	returnTo: string;
+	onChosen: () => void;
+}) =>
+	compact ? (
+		<SourcePanel
+			returnTo={returnTo}
+			account={<AccountPanel connectIs="below" />}
+			onChosen={onChosen}
+		/>
+	) : null;
 
 const Home = () => {
 	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
@@ -660,7 +682,6 @@ const Home = () => {
 			 */}
 			{compact ? (
 				<CompactBar
-					returnTo={returnPath(href)}
 					folder={folder}
 					note={openNote}
 					panel={panel}
@@ -703,6 +724,15 @@ const Home = () => {
 			{/* `data-panel` is which pane a compact window is showing as a
 			    dropdown; the stylesheet ignores it in a wide one. */}
 			<div className="app-shell" {...shellProps}>
+				{/* Positioned, like the two panes in a compact window, so it is
+				    never a grid item and takes no column. */}
+				<SourceDropdown
+					compact={compact}
+					returnTo={returnPath(href)}
+					onChosen={() => {
+						setPanel(null);
+					}}
+				/>
 				<Sidebar
 					tree={tree}
 					selectedFolder={folder}
@@ -714,7 +744,9 @@ const Home = () => {
 					onRenameFolder={onRenameFolder}
 					onDeleteFolder={onDeleteFolder}
 					looseNoteCount={looseNoteCount}
-					footer={<AccountPanel />}
+					// In a compact window it is in the source dropdown instead,
+					// which is where a phone user goes for anything about storage.
+					{...(compact ? {} : { footer: <AccountPanel /> })}
 					moving={moving}
 					onPickUp={setMoving}
 					onDrop={onDropInto}
