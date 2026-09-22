@@ -181,6 +181,27 @@ describe('the source tabs', () => {
 		expect(await screen.findByRole('button', { name: 'Work' })).toBeTruthy();
 	});
 
+	it('puts the field in the tab\u2019s own box rather than a box of its own', async () => {
+		// jsdom lays nothing out, so the width cannot be measured here. What
+		// can be pinned is the structure the sizing rests on: the field wears
+		// the tab\u2019s classes, so it has the tab\u2019s padding, type and lit
+		// edge, and the input inside it is the thing with no box at all.
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await showConnection(db, 'c1');
+		show(db);
+
+		await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
+
+		const field = screen.getByRole('textbox', { name: 'Rename Dropbox' });
+		const box = field.parentElement;
+		expect(box?.className).toContain('source-tab');
+		expect(box?.className).toContain('source-tab-active');
+		expect(box?.className).toContain('source-tab-editing');
+		expect(field.className).toBe('source-tab-rename');
+	});
+
 	it('leaves the name alone when the rename is abandoned', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();

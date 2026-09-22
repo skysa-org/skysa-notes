@@ -54,7 +54,7 @@ export const SourceTabs = ({
 }: SourceTabsProps) => {
 	const sources = useLiveQuery(() => connectedSources(db), [db]);
 	const config = useInstanceConfig(client);
-	const [renaming, setRenaming] = useState<string | null>(null);
+	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
 	const [adding, setAdding] = useState(false);
 
 	const settings = answer(config);
@@ -79,9 +79,10 @@ export const SourceTabs = ({
 				<ul>
 					{ordered.map((source) => (
 						<li key={source.connectionId}>
-							{renaming === source.connectionId ? (
+							{renaming?.id === source.connectionId ? (
 								<RenameField
 									name={tabName(source, ordered)}
+									width={renaming.width}
 									onDone={(chosen) => {
 										setRenaming(null);
 										if (chosen !== undefined)
@@ -92,7 +93,7 @@ export const SourceTabs = ({
 								<SourceTab
 									source={source}
 									name={tabName(source, ordered)}
-									onShow={() => {
+									onShow={(width) => {
 										// A press on the tab already showing is the
 										// way into renaming it, which is what makes
 										// the name feel like part of the tab rather
@@ -103,7 +104,7 @@ export const SourceTabs = ({
 											return;
 										}
 										if (source.connectionId !== LOCAL_CONNECTION_ID)
-											setRenaming(source.connectionId);
+											setRenaming({ id: source.connectionId, width });
 									}}
 								/>
 							)}
@@ -158,7 +159,8 @@ const SourceTab = ({
 }: {
 	source: ConnectedSource;
 	name: string;
-	onShow: () => void;
+	/** With the width the tab is taking, so replacing it moves nothing. */
+	onShow: (width: number) => void;
 }) => (
 	<button
 		type="button"
@@ -173,7 +175,9 @@ const SourceTab = ({
 		// The tab the user is on, said once. `aria-current` is what a screen
 		// reader announces; "showing" in the text as well would be read twice.
 		{...(source.active ? { 'aria-current': 'true' as const } : {})}
-		onClick={onShow}
+		onClick={(event) => {
+			onShow(event.currentTarget.offsetWidth);
+		}}
 	>
 		<span className="source-tab-name">{name}</span>
 		{source.detached !== undefined && (
@@ -187,6 +191,22 @@ const SourceTab = ({
 /**
  * The tab, become its own name.
  *
+ * The field carries no box of its own — no padding, no background, no border,
+ * no focus ring. The tab's own box is still there, around it, so entering a
+ * rename changes nothing about the bar except that there is now a caret in the
+ * name. A field with its own padding and border drew a second, smaller box
+ * inside the tab and shifted the text of it.
+ *
+ * Nor does the tab change width. An `input` is as wide as its `size` attribute
+ * and not as wide as its text, so swapping one in resized the tab and shoved
+ * every tab after it sideways. The tab measures itself on the way in and the
+ * wrapper is pinned to that. The name can then be longer than the room it has,
+ * and scrolls inside it, which is what a tab of fixed width owes a long name
+ * anyway.
+ *
+ * Nothing is measurable in jsdom, where `offsetWidth` is always 0, so a width
+ * of nothing is left unset rather than pinning the field shut in the tests.
+ *
  * Escape abandons it and Enter takes it, which is the pair every rename in
  * this app has. Blur takes it too: a click somewhere else is not "cancel", and
  * a field that threw the name away because the user looked at the note they
@@ -196,7 +216,15 @@ const SourceTab = ({
  * 2" into "Work" — and the alternative is every user clearing the field by
  * hand before they can start.
  */
-const RenameField = ({ name, onDone }: { name: string; onDone: (chosen?: string) => void }) => {
+const RenameField = ({
+	name,
+	width,
+	onDone,
+}: {
+	name: string;
+	width: number;
+	onDone: (chosen?: string) => void;
+}) => {
 	const [draft, setDraft] = useState(name);
 	const field = useRef<HTMLInputElement>(null);
 	const done = useRef(false);
@@ -218,29 +246,34 @@ const RenameField = ({ name, onDone }: { name: string; onDone: (chosen?: string)
 	};
 
 	return (
-		<input
-			ref={field}
-			className="source-tab-rename"
-			aria-label={`Rename ${name}`}
-			value={draft}
-			maxLength={LABEL_LIMIT}
-			onChange={(event) => {
-				setDraft(event.target.value);
-			}}
-			onKeyDown={(event) => {
-				if (event.key === 'Enter') {
-					event.preventDefault();
+		<span
+			className="source-tab source-tab-active source-tab-editing"
+			{...(width > 0 ? { style: { width: `${String(width)}px` } } : {})}
+		>
+			<input
+				ref={field}
+				className="source-tab-rename"
+				aria-label={`Rename ${name}`}
+				value={draft}
+				maxLength={LABEL_LIMIT}
+				onChange={(event) => {
+					setDraft(event.target.value);
+				}}
+				onKeyDown={(event) => {
+					if (event.key === 'Enter') {
+						event.preventDefault();
+						finish(draft);
+					}
+					if (event.key === 'Escape') {
+						event.preventDefault();
+						finish();
+					}
+				}}
+				onBlur={() => {
 					finish(draft);
-				}
-				if (event.key === 'Escape') {
-					event.preventDefault();
-					finish();
-				}
-			}}
-			onBlur={() => {
-				finish(draft);
-			}}
-		/>
+				}}
+			/>
+		</span>
 	);
 };
 

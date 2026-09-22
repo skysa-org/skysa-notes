@@ -202,18 +202,38 @@ code {
 	font-weight: 400;
 }
 
-/* The same box as the tab it replaces, so the bar does not jump as a name
-   becomes editable. */
+/* A name being typed is the tab it replaces: it wears `.source-tab` and
+   `.source-tab-active`, so the padding, the type and the lit edge are the same
+   ones, and the bar cannot move as a name becomes editable. Its width is
+   pinned inline to what the tab measured on the way in, because an `input` is
+   as wide as its `size` and not as wide as its text. */
+.source-tab-editing {
+	cursor: text;
+}
+
+/* The tab under the pointer lights up because pressing it does something.
+   This one is already pressed. */
+.source-tab-editing:hover {
+	background: none;
+}
+
+/* No box of its own: the tab around it is the box. */
 .source-tab-rename {
-	max-width: 14rem;
-	margin-block: 0.25rem;
-	padding: 0.25rem 0.5rem;
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 0;
 	font: inherit;
-	font-size: 0.85rem;
-	color: var(--fg);
-	background: var(--bg);
-	border: 1px solid var(--border);
-	border-radius: 0.25rem;
+	color: inherit;
+	background: none;
+	border: 0;
+}
+
+/* The caret says where the focus is, and the tab it sits in is already lit and
+   bold. A ring here would draw exactly the border this field is not supposed
+   to have, around a field the user reached by pressing it. */
+.source-tab-rename:focus-visible {
+	outline: none;
 }
 
 .source-add {
