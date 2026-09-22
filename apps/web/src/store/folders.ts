@@ -287,9 +287,12 @@ export const moveFolder = async (
 			);
 			if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
-			// Before the rows go: the source directory is left behind by the moves
-			// below, and its id is the only thing that will say which one it was.
-			const left = moving.find((folder) => folder.path === source)?.remoteId;
+			// Before the rows go: the directories they name are left behind by
+			// the moves below, and their ids are the only thing that will say
+			// which ones they were.
+			const leaving = [...moving].sort(
+				(a, b) => a.path.split('/').length - b.path.split('/').length
+			);
 			await db.folders.bulkDelete(moving.map((folder) => [folder.connectionId, folder.path]));
 			const made = await ensureFolder(db, target, { connectionId });
 			// Without their `remoteId`: the folder that id names is still at the old
@@ -383,13 +386,36 @@ export const moveFolder = async (
 			// After the `mkdir`s above, which are about the destination.
 			await withdrawMkdirs(db, connectionId, source);
 
-			// Last, so the notes are out of it before the engine looks: the moves
-			// above are what leave the old directory empty, and the engine refuses
-			// to remove one that still holds a file. Only the outermost — the
-			// subdirectories inside it go with it on every provider. A notebook
-			// moved up into what it was in leaves a directory too: the source is a
-			// subdirectory of the destination, and removing it cannot touch it.
-			await queueRmdir(db, connectionId, source, left);
+			// Last, so the notes are out of them before the engine looks: the
+			// moves above are what leave the old directories empty, and the
+			// engine refuses to remove one that still holds a file. A notebook
+			// moved up into what it was in leaves a directory too: the source is
+			// a subdirectory of the destination, and removing it cannot touch it.
+			//
+			// **Every** directory being left, outermost first, and not only the
+			// outermost — which is all this used to queue, since removing that
+			// one takes the subdirectories with it on every provider. It is not
+			// only about the removal. A sync pulls before it pushes, so between
+			// the move and the push the old directories are still on the remote,
+			// and the rows that named them have been re-pathed and stripped of
+			// their ids: to that pull they are folders nobody owns, and it makes
+			// notebooks of them. The engine already refuses to do that for a
+			// directory whose `rmdir` is queued (`decideFolder`, "a notebook the
+			// user has removed here") — but it matches the op by id *and* path,
+			// which is what keeps it from dropping a folder another device has
+			// moved since, and a subdirectory with no op of its own matched
+			// nothing. So the whole subtree came back: the notebook at the old
+			// path, its ancestors conjured to hold it, and then the `rmdir`
+			// refused because the device held a row there again. One queued op
+			// per directory is what lets that guard see them.
+			//
+			// The extra ops cost almost nothing: the outermost really does take
+			// the rest with it, so each of the others finds nothing where it was
+			// and finishes without sending anything.
+			await leaving.reduce<Promise<void>>(async (pending, folder) => {
+				await pending;
+				await queueRmdir(db, connectionId, folder.path, folder.remoteId);
+			}, Promise.resolve());
 		}
 	);
 };
@@ -399,8 +425,14 @@ export const renameFolder = async (
 	path: string,
 	name: string,
 	options: FolderScope = {}
-): Promise<void> =>
-	moveFolder(db, path, joinPath(parentPath(path), sanitizeFolderName(name)), options);
+): Promise<string> => {
+	// Handed back, because the caller cannot work it out: the name is sanitised
+	// on the way in, and the open notebook is named by path in the URL — which
+	// this has just changed, for the notebook and for everything under it.
+	const to = joinPath(parentPath(path), sanitizeFolderName(name));
+	await moveFolder(db, path, to, options);
+	return to;
+};
 
 /**
  * Delete a folder and tombstone every note beneath it, so each deletion is
@@ -424,11 +456,14 @@ export const deleteFolder = async (
 		async () => {
 			const connectionId = options.connectionId ?? (await activeConnectionId(db));
 			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
-			const gone = folders.find((folder) => folder.path === target)?.remoteId;
+			// Outermost first, and every one of them: see `moveFolder` for why
+			// a subdirectory needs an op of its own even though removing the
+			// notebook above it takes the directory with it.
+			const leaving = folders
+				.filter((folder) => isWithin(folder.path, target))
+				.sort((a, b) => a.path.split('/').length - b.path.split('/').length);
 			await db.folders.bulkDelete(
-				folders
-					.filter((folder) => isWithin(folder.path, target))
-					.map((folder) => [folder.connectionId, folder.path])
+				leaving.map((folder) => [folder.connectionId, folder.path])
 			);
 
 			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
@@ -450,10 +485,13 @@ export const deleteFolder = async (
 			// to have removed, and the next pull would make the notebook again.
 			await withdrawMkdirs(db, connectionId, target);
 
-			// Behind the deletes, which are what empty the directory. The engine
+			// Behind the deletes, which are what empty the directories. The engine
 			// refuses to remove one that still holds a file, so a note another
 			// device wrote into the notebook meanwhile keeps it.
-			await queueRmdir(db, connectionId, target, gone);
+			await leaving.reduce<Promise<void>>(async (pending, folder) => {
+				await pending;
+				await queueRmdir(db, connectionId, folder.path, folder.remoteId);
+			}, Promise.resolve());
 		}
 	);
 };

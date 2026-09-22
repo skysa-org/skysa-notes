@@ -39,6 +39,16 @@ export interface NoteListProps {
 	results: readonly NoteHit[] | undefined;
 	/** So a command can put the cursor in the field without hunting the DOM. */
 	queryRef?: RefObject<HTMLInputElement | null>;
+	/**
+	 * A row can be dragged into a notebook in the sidebar. The note is picked up
+	 * here and put down there, so what is in the air is the route's state and
+	 * not this pane's — see `store/rearrange.ts`.
+	 */
+	onPickUpNote?: (note: NoteRecord) => void;
+	/** The drag ended without a drop. */
+	onCancelMove?: () => void;
+	/** Which of these rows is the one in the air, if any. */
+	movingNoteId?: string;
 }
 
 /**
@@ -131,15 +141,42 @@ interface NoteRowProps {
 	meta: string;
 	/** The line under that: the note's opening, or the match in it. */
 	detail: ReactNode;
+	/** Missing where the pane was rendered without anywhere to drag a note to. */
+	onPickUp?: () => void;
+	onCancelMove?: () => void;
+	/** True while this is the row being moved. */
+	moving: boolean;
 }
 
-const NoteRow = ({ note, selected, onSelect, meta, detail }: NoteRowProps) => (
+const NoteRow = ({
+	note,
+	selected,
+	onSelect,
+	meta,
+	detail,
+	onPickUp,
+	onCancelMove,
+	moving,
+}: NoteRowProps) => (
 	<li>
 		<button
 			type="button"
-			className={selected ? 'row selected' : 'row'}
+			className={[selected ? 'selected' : undefined, moving ? 'moving' : undefined].reduce(
+				(className, extra) => (extra === undefined ? className : `${className} ${extra}`),
+				'row'
+			)}
 			onClick={onSelect}
 			aria-current={selected ? 'true' : undefined}
+			draggable={onPickUp !== undefined}
+			onDragStart={(event) => {
+				if (onPickUp === undefined) return;
+				// Firefox starts no drag without data on it, and the title is what
+				// another application receives if the note is dropped outside.
+				event.dataTransfer.effectAllowed = 'move';
+				event.dataTransfer.setData('text/plain', note.title);
+				onPickUp();
+			}}
+			onDragEnd={onCancelMove}
 		>
 			<span className="note-title">
 				{note.title}
@@ -187,6 +224,9 @@ export const NoteList = ({
 	onQuery,
 	results,
 	queryRef,
+	onPickUpNote,
+	onCancelMove,
+	movingNoteId,
 }: NoteListProps) => {
 	const searching = query.trim() !== '';
 	const placeholder = placeholderFor({ notes, folderPath, storeLoaded, query, results });
@@ -274,6 +314,15 @@ export const NoteList = ({
 							// two notes can share a title.
 							meta={`${folderLabel(parentPath(hit.note.path))} · ${editedAt(hit.note.updatedAt)}`}
 							detail={<Excerpt hit={hit} />}
+							onPickUp={
+								onPickUpNote === undefined
+									? undefined
+									: () => {
+											onPickUpNote(hit.note);
+										}
+							}
+							onCancelMove={onCancelMove}
+							moving={hit.note.id === movingNoteId}
 						/>
 					))}
 				</ul>
@@ -291,6 +340,15 @@ export const NoteList = ({
 							}}
 							meta={editedAt(note.updatedAt)}
 							detail={<Preview note={note} />}
+							onPickUp={
+								onPickUpNote === undefined
+									? undefined
+									: () => {
+											onPickUpNote(note);
+										}
+							}
+							onCancelMove={onCancelMove}
+							moving={note.id === movingNoteId}
 						/>
 					))}
 				</ul>

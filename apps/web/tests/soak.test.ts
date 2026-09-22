@@ -1,4 +1,5 @@
 import {
+	createDropboxProvider,
 	createFakeProvider,
 	createGDriveProvider,
 	createOneDriveProvider,
@@ -10,6 +11,7 @@ import {
 } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createDropboxStub } from '../../../packages/core/tests/providers/dropboxStub.js';
 import { createGDriveStub } from '../../../packages/core/tests/providers/gdriveStub.js';
 import { createOneDriveStub } from '../../../packages/core/tests/providers/onedriveStub.js';
 import { type ApiClient } from '../src/api/client.js';
@@ -30,6 +32,7 @@ import {
 	createFolder,
 	deleteFolder,
 	FolderExistsError,
+	moveFolder,
 	renameFolder,
 } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
@@ -130,6 +133,17 @@ const REMOTES: readonly (readonly [string, () => Remote])[] = [
 			// The fake is the store itself, so both browsers share one — it has no
 			// wire for a `clientId` to travel over.
 			return { backing, adapter: () => backing, provesEmpty: backing.listsEverything };
+		},
+	],
+	[
+		'dropbox over its stub',
+		() => {
+			const stub = createDropboxStub({ startAt: START });
+			return {
+				backing: stub.backing,
+				adapter: (clientId) => over(createDropboxProvider, stub.fetch, clientId),
+				provesEmpty: true,
+			};
 		},
 	],
 	[
@@ -579,6 +593,64 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		expect(folders.map((folder) => folder.path).sort()).toEqual(
 			remote.provesEmpty ? ['Projects'] : ['Projects', 'Work']
 		);
+	});
+
+	it('does not put the old tree back when a notebook is dragged in and then out', async () => {
+		// Re-parenting a notebook is a `mkdir` for the new path, the notes
+		// moving, and an `rmdir` for the old one. A sync pulls before it
+		// pushes, so between the move and the push the old directories are
+		// still on the remote — and the rows that named them have been
+		// re-pathed and stripped of their ids, which is what stops a full scan
+		// reading the id at the old path as a remote rename. To that pull they
+		// are directories nobody owns.
+		//
+		// `decideFolder` already refuses to make a notebook of one whose
+		// `rmdir` is queued, but it matches the op by id *and* path, which is
+		// what keeps it from dropping a folder another device has moved since.
+		// Only the outermost directory had an op, so every subdirectory was
+		// adopted: the notebook came back at its old path, its ancestors were
+		// conjured to hold it, and the `rmdir` was then refused because the
+		// device held a row there again — leaving the whole subtree duplicated
+		// on the remote as well as in the sidebar, for good.
+		const { remote, a, b } = await setUp(make);
+		await createFolder(a.db, { name: 'A' });
+		await createFolder(a.db, { name: 'B' });
+		await createFolder(a.db, { name: 'C' });
+		await createNote(a.db, { title: 'Deep', body: 'one\n', folderPath: 'C' });
+		await quiet(remote, a, b);
+
+		// Built by dragging, which is what makes the subdirectory one this
+		// device created rather than one it only ever read — and one round
+		// each, not `quiet`, because one round is the window: the directory
+		// this device made in the round before is exactly what its own next
+		// pull reports, and a pair of browsers settled to a standstill has
+		// already read it.
+		await moveFolder(a.db, 'C', 'B/C');
+		await sync(a);
+		await moveFolder(a.db, 'B', 'A/B');
+		await sync(a);
+		await moveFolder(a.db, 'A/B', 'B');
+
+		const files = await converged(remote, a, b);
+		// The note is in one place, whatever the notebooks look like.
+		expect(Object.keys(files)).toEqual(['B/C/deep.md']);
+
+		// Every directory the notebook left is removed, and no row anywhere
+		// survives naming one.
+		//
+		// Drive is left out of this half. No listing there can prove a folder
+		// empty, so the directories stay and come back as notebooks on
+		// whichever device pulls them next — the documented cost of
+		// `drive.file` (§7, "A folder is removed only where a listing can
+		// prove it empty"), already covered by the rename and the delete
+		// above, and which device has adopted which leftover at the end is a
+		// matter of when each one last pulled. The bug this is about left the
+		// subtree behind on the providers that *can* prove it.
+		if (remote.provesEmpty) {
+			expect(await notebooks(a)).toEqual(['A', 'B', 'B/C']);
+			expect(await notebooks(b)).toEqual(['A', 'B', 'B/C']);
+			expect(remoteFolders(remote)).toEqual(['A', 'B', 'B/C']);
+		}
 	});
 
 	it('carries a deletion across, and leaves no directory behind', async () => {
