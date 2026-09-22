@@ -237,9 +237,25 @@ if (liveGoogleToken !== '') {
 				cleanup: async () => {
 					const entries = await provider.list('');
 					await Promise.all(entries.map((entry) => provider.delete(entry)));
+					// And wait for Drive to agree that they are gone. Its search
+					// index keeps listing a deleted file for a moment, and the
+					// next scenario's cold-start scan then finds files whose
+					// parent this cleanup has already removed — unplaceable, so
+					// reported as deletions by id, in a scan that is supposed to
+					// report current state and nothing else. That is this
+					// harness emptying a shared folder between scenarios, not
+					// something a user can do to themselves, but it fails the
+					// scenario all the same.
+					for (let round = 0; round < 20; round += 1) {
+						if ((await provider.list('')).length === 0) return;
+						await new Promise((resolve) => setTimeout(resolve, 500));
+					}
 				},
 			};
 		},
-		{ timeout: 60_000 }
+		// Drive's change feed lags a write by a couple of seconds (measured
+		// 1.4–2.8s, docs/PLAN.md §5.1), so every read of it in the suite waits
+		// first. Dropbox's and Graph's are immediate and take the default of 0.
+		{ changesLagMs: 5_000, timeout: 60_000 }
 	);
 }

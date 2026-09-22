@@ -61,6 +61,24 @@ export interface ProviderContractOptions {
 	 * the behaviour it exists to pin went unchecked.
 	 */
 	staleVersion?: string;
+	/**
+	 * How long a provider's change feed may take to catch up with a write, in
+	 * ms. Zero for a feed that is immediate — every stub, and Dropbox and Graph
+	 * against a live account.
+	 *
+	 * Google Drive's is not. Measured against a live account 2026-09-21, a new
+	 * file took 1.4–2.8s to appear in `changes.list`, so a scenario that acts
+	 * and reads the feed in the same breath sees nothing, and one that takes a
+	 * cursor straight after a cleanup sees the cleanup's deletions arrive after
+	 * it. The scenarios below wait this long before every read of the feed.
+	 *
+	 * A settle, deliberately, and not a retry-until-it-appears: "reports
+	 * nothing when nothing has happened" is an assertion about emptiness, and
+	 * polling cannot make an empty answer arrive sooner. The name lookups this
+	 * suite leans on elsewhere need no such wait — Drive answered those in
+	 * 0.3–0.4s (docs/PLAN.md §5.1).
+	 */
+	changesLagMs?: number;
 	/** Live accounts are slow. */
 	timeout?: number;
 }
@@ -103,7 +121,7 @@ export const describeProviderContract = (
 	createHarness: () => ProviderHarness | Promise<ProviderHarness>,
 	options: ProviderContractOptions = {}
 ): void => {
-	const { stableIds = true, staleVersion = 'zzzz-9999', timeout } = options;
+	const { stableIds = true, staleVersion = 'zzzz-9999', changesLagMs = 0, timeout } = options;
 	const config = timeout === undefined ? undefined : { timeout };
 
 	describe(`StorageProvider contract: ${name}`, () => {
@@ -120,6 +138,73 @@ export const describeProviderContract = (
 			path: string,
 			content = 'hello\n'
 		): Promise<RemoteEntry> => provider.write(path, content, {});
+
+		/**
+		 * Read the feed, having first given it `changesLagMs` to catch up. Every
+		 * read of the feed in the scenarios below goes through this, so a
+		 * provider whose feed is eventually consistent is read after it has
+		 * settled rather than mid-flight.
+		 */
+		const drainSettled = async (
+			provider: StorageProvider,
+			from?: string
+		): ReturnType<typeof drainChanges> => {
+			if (changesLagMs > 0) {
+				await new Promise((resolve) => setTimeout(resolve, changesLagMs));
+			}
+			return drainChanges(provider, from);
+		};
+
+		/**
+		 * A cursor taken at a moment the feed has nothing left to say.
+		 *
+		 * Drive reports one file creation **twice**, about two seconds apart and
+		 * with the same version — measured against a live account 2026-09-21 —
+		 * so a cursor taken after the first echo still has the second coming,
+		 * and a scenario that asks what happened next is told about a file that
+		 * did nothing. Draining until a round comes back empty gets past every
+		 * echo owed. On an immediate feed the second round is the empty one, so
+		 * this costs a single extra call.
+		 */
+		/**
+		 * Read the feed until it says what the caller is waiting for, or until
+		 * waiting longer would only be waiting.
+		 *
+		 * A settle cannot do this job. Drive's feed ran 1.4–2.8s behind a write
+		 * when measured on an idle account and further behind under the load of
+		 * a suite run, so any fixed wait is either too short some of the time or
+		 * wasted the rest of it — and "too short" here is a test that fails
+		 * having proved nothing. Polling is sound for an expectation that
+		 * something *appears*: the answer only ever gets more complete. It is
+		 * not sound for emptiness, which is why `quietCursor` exists instead.
+		 *
+		 * Entries accumulate across rounds, because each round advances the
+		 * cursor past what it returned.
+		 */
+		const drainUntil = async (
+			provider: StorageProvider,
+			from: string,
+			enough: (entries: ChangeEntry[]) => boolean
+		): Promise<{ entries: ChangeEntry[]; cursor: string }> => {
+			const entries: ChangeEntry[] = [];
+			let cursor = from;
+			const deadline = Date.now() + Math.max(changesLagMs * 4, 1_000);
+			for (;;) {
+				const round = await drainChanges(provider, cursor);
+				entries.push(...round.entries);
+				cursor = round.cursor;
+				if (enough(entries) || Date.now() >= deadline) return { entries, cursor };
+				await new Promise((resolve) => setTimeout(resolve, 500));
+			}
+		};
+
+		const quietCursor = async (provider: StorageProvider): Promise<string> => {
+			let { entries, cursor } = await drainSettled(provider);
+			for (let round = 0; entries.length > 0 && round < 5; round += 1) {
+				({ entries, cursor } = await drainSettled(provider, cursor));
+			}
+			return cursor;
+		};
 
 		describe('ensureRoot', () => {
 			it('returns a non-empty root id and writes a valid marker', config, async () => {
@@ -421,7 +506,7 @@ export const describeProviderContract = (
 				await provider.createFolder('Work');
 				await seedFile(provider, 'Work/a.md');
 
-				const { entries, cursor } = await drainChanges(provider);
+				const { entries, cursor } = await drainSettled(provider);
 
 				expect(paths(entries)).toEqual([MARKER_FILE, 'Work', 'Work/a.md']);
 				expect(entries.some((entry) => entry.deleted === true)).toBe(false);
@@ -438,7 +523,7 @@ export const describeProviderContract = (
 				await provider.delete(gone);
 				await seedFile(provider, 'here.md');
 
-				const { entries } = await drainChanges(provider);
+				const { entries } = await drainSettled(provider);
 
 				expect(paths(entries)).not.toContain('gone.md');
 				expect(paths(entries)).toContain('here.md');
@@ -447,36 +532,49 @@ export const describeProviderContract = (
 
 			it('reports nothing when nothing has happened since', config, async () => {
 				const provider = await open();
-				const { cursor } = await drainChanges(provider);
-				expect((await drainChanges(provider, cursor)).entries).toEqual([]);
+				const cursor = await quietCursor(provider);
+				expect((await drainSettled(provider, cursor)).entries).toEqual([]);
 			});
 
 			it('survives being persisted and read back', config, async () => {
 				// The cursor lives in IndexedDB between sessions.
 				const provider = await open();
-				const { cursor } = await drainChanges(provider);
+				const { cursor } = await drainSettled(provider);
 				const revived = JSON.parse(JSON.stringify({ cursor })) as { cursor: string };
 
 				await seedFile(provider, 'note.md');
-				expect(paths((await drainChanges(provider, revived.cursor)).entries)).toContain(
-					'note.md'
+				const seen = await drainUntil(provider, revived.cursor, (entries) =>
+					paths(entries).includes('note.md')
 				);
+				expect(paths(seen.entries)).toContain('note.md');
 			});
 
 			it('reflects a write, a move and a delete in turn', config, async () => {
 				const provider = await open();
-				const start = await drainChanges(provider);
+				const start = await drainSettled(provider);
 
 				const created = await seedFile(provider, 'note.md', 'one\n');
-				const afterWrite = await drainChanges(provider, start.cursor);
+				const afterWrite = await drainUntil(
+					provider,
+					start.cursor,
+					(entries) => liveAt(entries, 'note.md') !== undefined
+				);
 				expect(liveAt(afterWrite.entries, 'note.md')?.version).toBe(created.version);
 
 				const moved = await provider.move(created, 'renamed.md');
-				const afterMove = await drainChanges(provider, afterWrite.cursor);
+				const afterMove = await drainUntil(
+					provider,
+					afterWrite.cursor,
+					(entries) => liveAt(entries, 'renamed.md') !== undefined
+				);
 				expect(liveAt(afterMove.entries, 'renamed.md')).toBeDefined();
 
 				await provider.delete(moved);
-				const afterDelete = await drainChanges(provider, afterMove.cursor);
+				const afterDelete = await drainUntil(
+					provider,
+					afterMove.cursor,
+					(entries) => at(entries, 'renamed.md')?.deleted === true
+				);
 				const gone = at(afterDelete.entries, 'renamed.md');
 
 				// A deletion is identified by its path and nothing else: Dropbox's
@@ -491,16 +589,16 @@ export const describeProviderContract = (
 				// say so by id alone, a path feed by path alone; saying nothing
 				// leaves the note on that device for ever.
 				const provider = await open();
-				const start = await drainChanges(provider);
+				const start = await drainSettled(provider);
 
 				const brief = await seedFile(provider, 'brief.md');
 				await provider.delete(brief);
-				const { entries } = await drainChanges(provider, start.cursor);
-				const last = entries
-					.filter(
-						(entry) => entry.path === 'brief.md' || entry.remoteId === brief.remoteId
-					)
-					.at(-1);
+				const mine = (entry: ChangeEntry): boolean =>
+					entry.path === 'brief.md' || entry.remoteId === brief.remoteId;
+				const { entries } = await drainUntil(provider, start.cursor, (seen) =>
+					seen.some((entry) => mine(entry) && entry.deleted === true)
+				);
+				const last = entries.filter(mine).at(-1);
 
 				expect(last?.deleted).toBe(true);
 			});
@@ -511,7 +609,7 @@ export const describeProviderContract = (
 				const provider = await open();
 				await seedFile(provider, 'note.md', 'body\n');
 
-				const { entries } = await drainChanges(provider);
+				const { entries } = await drainSettled(provider);
 				const note = liveAt(entries, 'note.md')!;
 				expect((await provider.read(note)).content).toBe('body\n');
 			});
