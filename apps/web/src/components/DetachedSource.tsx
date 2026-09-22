@@ -40,8 +40,6 @@ export interface DetachedSourceProps {
 	bound: SyncStateRecord;
 	/** Start connecting this source's account again, where the server lets the user. */
 	reconnect: ReactNode;
-	/** The other sources on this device, and the way to connect another. */
-	sources: ReactNode;
 	/** Hand the notes to the user as a file. Injected: jsdom cannot make a blob URL. */
 	download: (notes: readonly NoteRecord[]) => void;
 	/**
@@ -190,7 +188,6 @@ export const DetachedSource = ({
 	database,
 	bound,
 	reconnect,
-	sources,
 	download,
 	onReleased,
 	notice = null,
@@ -412,7 +409,6 @@ export const DetachedSource = ({
 					onCancel={close}
 				/>
 			)}
-			{sources}
 		</section>
 	);
 };

@@ -1,16 +1,17 @@
 import { parentPath, ROOT } from '@skysa/core';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
-import { AccountPanel } from '../components/AccountPanel.js';
+import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { Sidebar } from '../components/Sidebar.js';
+import { SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
 import { createFolder, FolderExistsError } from '../store/folders.js';
@@ -119,6 +120,8 @@ const FIND = parseChord('Mod+Shift+F');
 const Home = () => {
 	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
+	// Where a connect started from the tab bar should come back to.
+	const href = useRouterState({ select: (state) => state.location.href });
 
 	// Read once, as the app opens on the way back from the provider, and taken
 	// out of the URL straight away: left there, a reload or a bookmark would say
@@ -362,6 +365,13 @@ const Home = () => {
 		// not laid out at all — they are fixed to the viewport — but they are
 		// here for the same reason: a stack in the grid would take a column.
 		<div className="app-frame">
+			{/*
+			 * Above everything, because it says which app this is: each source
+			 * is its own notes, its own notebooks and its own sync (§6), so the
+			 * panes below all mean something different depending on which of
+			 * these is lit.
+			 */}
+			<SourceTabs returnTo={returnPath(href)} />
 			{/*
 			 * For as long as a detached source is the one showing, and not
 			 * dismissable: its notes look like any others, can be opened and

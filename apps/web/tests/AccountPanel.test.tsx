@@ -3,14 +3,16 @@ import {
 	createRootRoute,
 	createRouter,
 	RouterProvider,
+	useRouterState,
 } from '@tanstack/react-router';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { AccountPanel } from '../src/components/AccountPanel.js';
+import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
+import { SourceTabs } from '../src/components/SourceTabs.js';
 import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
 import { beginConnect, hashCredential } from '../src/store/credentials.js';
 import {
@@ -167,9 +169,23 @@ const renderPanel = (
 	const went: string[] = [];
 	// And what it would hand the user as a file, by title: no blob URLs either.
 	const downloaded: string[][] = [];
-	const router = createRouter({
-		routeTree: createRootRoute({
-			component: () => (
+	// The bar as well as the panel, because since the tabs arrived the two are
+	// one screen: connecting and switching are the bar's, and everything about
+	// the source in front is the panel's. A harness holding only the panel
+	// could no longer reach half of what these tests are about.
+	const Shell = () => {
+		const href = useRouterState({ select: (state) => state.location.href });
+		return (
+			<>
+				<SourceTabs
+					db={database}
+					client={client}
+					returnTo={returnPath(href)}
+					navigate={(to) => {
+						went.push(to);
+						go(to);
+					}}
+				/>
 				<AccountPanel
 					client={client}
 					database={database}
@@ -182,13 +198,46 @@ const renderPanel = (
 						downloaded.push(notes.map((note) => note.title))
 					}
 				/>
-			),
-		}),
+			</>
+		);
+	};
+	const router = createRouter({
+		routeTree: createRootRoute({ component: Shell }),
 		history: createMemoryHistory({ initialEntries: [url] }),
 	});
 	render(<RouterProvider router={router} />);
 	return { went, downloaded };
 };
+
+/** The `+` menu, opened. Connecting is the bar's now, not the panel's. */
+const openAdd = async (user: ReturnType<typeof userEvent.setup>) => {
+	await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+};
+
+/**
+ * Open the `+` and start a flow for one provider. Scoped to the menu, because
+ * a tab and a menu entry are both called "Dropbox" on a device that already
+ * has one.
+ */
+const connectVia = async (user: ReturnType<typeof userEvent.setup>, provider: string) => {
+	await openAdd(user);
+	const menu = await screen.findByRole('group', { name: 'Storage providers' });
+	await user.click(within(menu).getByRole('button', { name: provider }));
+};
+
+/**
+ * The tab for a source, by the short name the bar gives it. Awaited, because
+ * the bar is a live query over the whole of `connectedSources` and the panel
+ * beside it renders first — a synchronous `getByRole` here found the panel's
+ * words and then no bar at all.
+ */
+const tab = async (name: string): Promise<HTMLElement> =>
+	within(await screen.findByRole('navigation', { name: 'Sources' })).findByRole('button', {
+		name,
+	});
+
+/** Nothing is connected: what the panel says when there is no account. */
+const NOTHING_CONNECTED = /Notes are kept on this device only/;
 
 /** A note the remote has in full, as a sync leaves it. */
 const sentNote = async (db: NotesDatabase, title: string) => {
@@ -217,7 +266,7 @@ describe('AccountPanel, with nothing connected', () => {
 			'/?folder=Work&connect=denied'
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Connect Dropbox' }));
+		await connectVia(user, 'Dropbox');
 
 		await waitFor(() => {
 			expect(went).toEqual(['https://dropbox.example/authorize']);
@@ -248,7 +297,7 @@ describe('AccountPanel, with nothing connected', () => {
 			db
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Connect Dropbox' }));
+		await connectVia(user, 'Dropbox');
 
 		expect(await screen.findByText(/would not start connecting/)).toBeTruthy();
 		expect(went).toEqual([]);
@@ -286,6 +335,7 @@ describe('AccountPanel, with nothing connected', () => {
 	});
 
 	it('offers OneDrive and Google Drive alongside Dropbox', async () => {
+		const user = userEvent.setup();
 		renderPanel(
 			clientWith({
 				config: () =>
@@ -297,9 +347,11 @@ describe('AccountPanel, with nothing connected', () => {
 			freshDatabase()
 		);
 
-		expect(await screen.findByRole('button', { name: 'Connect OneDrive' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Connect Google Drive' })).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
+		await openAdd(user);
+
+		expect(await screen.findByRole('button', { name: 'OneDrive' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Google Drive' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
 	});
 
 	it('says so when the server cannot be reached', async () => {
@@ -334,7 +386,7 @@ describe('AccountPanel, with nothing connected', () => {
 			const user = userEvent.setup();
 			const { went } = renderPanel(clientWith({ startConnect }), freshDatabase());
 
-			await user.click(await screen.findByRole('button', { name: 'Connect Dropbox' }));
+			await connectVia(user, 'Dropbox');
 
 			const problem = await screen.findByText(said);
 			expect(problem.textContent).not.toMatch(/this device went wrong/);
@@ -351,14 +403,13 @@ describe('AccountPanel, with nothing connected', () => {
 			Promise.resolve({ ok: true, value: 'https://dropbox.example/authorize' })
 		);
 		const { went } = renderPanel(clientWith({ startConnect }), db);
-		await screen.findByRole('button', { name: 'Connect Dropbox' });
 		// Written down and awaited before the POST, so a store that refuses here
 		// really does leave nothing connected anywhere.
 		const refused = vi
 			.spyOn(db.credentials, 'put')
 			.mockRejectedValueOnce(new Error('QuotaExceededError'));
 
-		await user.click(screen.getByRole('button', { name: 'Connect Dropbox' }));
+		await connectVia(user, 'Dropbox');
 
 		const problem = await screen.findByText(/on this device went wrong/);
 		expect(problem.textContent).toMatch(/nothing was connected/);
@@ -375,7 +426,7 @@ describe('AccountPanel, with nothing connected', () => {
 			throw new Error('jsdom will not navigate');
 		});
 
-		await user.click(await screen.findByRole('button', { name: 'Connect Dropbox' }));
+		await connectVia(user, 'Dropbox');
 
 		const problem = await screen.findByText(/Something went wrong/);
 		// The server did answer and a flow may well have begun, so neither
@@ -434,7 +485,7 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.queryByText(/have not reached/)).toBeNull();
 		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
 
-		expect(await screen.findByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
 		// Which connection is disconnected is no longer an argument: it is
 		// whichever one the presented credential reaches.
 		expect(disconnect).toHaveBeenCalledTimes(1);
@@ -510,7 +561,7 @@ describe('AccountPanel, with an account connected', () => {
 		).toBeTruthy();
 		await user.click(screen.getByRole('button', { name: 'Discard for good' }));
 
-		expect(await screen.findByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
 		expect(await noteById(db, sent.id)).toBeUndefined();
 		expect(await noteById(db, unsent.id)).toBeUndefined();
 		expect(await db.syncState.count()).toBe(0);
@@ -662,7 +713,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		expect(await screen.findByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
 		// Thrown away rather than kept: the server spends a hash for ever, so
 		// nothing here will ever make it work again.
@@ -939,7 +990,7 @@ describe('AccountPanel, with an account connected', () => {
 		// The same question again, with no server behind it.
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
-		expect(await screen.findByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
+		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
 		expect(disconnect).toHaveBeenCalledTimes(1);
 	});
@@ -1673,7 +1724,8 @@ describe('AccountPanel, with a detached source in front', () => {
 		);
 
 		expect(await screen.findByText('Dropbox · ada@example.com is disconnected')).toBeTruthy();
-		await screen.findByRole('button', { name: 'Connect another OneDrive account' });
+		// Connecting anything at all is the bar's `+`, not this panel's.
+		await screen.findByRole('button', { name: 'Connect another account' });
 		expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
 		// The rest does not need the server at all.
 		expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
@@ -1692,7 +1744,8 @@ describe('AccountPanel, with a detached source in front', () => {
 
 		expect(await screen.findByText('A source is disconnected')).toBeTruthy();
 		expect(screen.getByText(/no longer knows which account it was/)).toBeTruthy();
-		await screen.findByRole('button', { name: 'Connect another Dropbox account' });
+		// Connecting anything at all is the bar's `+`, not this panel's.
+		await screen.findByRole('button', { name: 'Connect another account' });
 		expect(screen.queryByRole('button', { name: 'Reconnect' })).toBeNull();
 	});
 
@@ -1712,21 +1765,18 @@ describe('AccountPanel, with a detached source in front', () => {
 		renderPanel(clientWith(), db);
 
 		expect(await screen.findByText(/Notes are kept on this device only/)).toBeTruthy();
-		expect(await screen.findByText('On this device only · showing')).toBeTruthy();
-		// The first connect is offered, and not "another": the pile is no account.
-		expect(screen.getByRole('button', { name: 'Connect Dropbox' })).toBeTruthy();
-		expect(
-			screen.queryByRole('button', { name: 'Connect another Dropbox account' })
-		).toBeNull();
-
-		await user.click(
-			screen.getByRole('button', { name: 'Show A source — disconnected, 1 not sent' })
-		);
+		// The pile is in front, and is a tab like any other.
+		expect((await tab('This device')).getAttribute('aria-current')).toBe('true');
+		// The way to connect is the bar's `+`, and it is the same `+` whether
+		// this is the first account or the fourth — the panel used to offer
+		// "Connect Dropbox" or "Connect another Dropbox account" depending.
+		expect(screen.getByRole('button', { name: 'Connect another account' })).toBeTruthy();
+		// And the source with no provider is not called "This device" too,
+		// which is what naming every provider-less row after the pile would do.
+		await user.click(await tab('A source — disconnected'));
 
 		expect(await screen.findByText('A source is disconnected')).toBeTruthy();
-		expect(
-			await screen.findByRole('button', { name: 'Show On this device only' })
-		).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'This device' })).toBeTruthy();
 	});
 
 	it('downloads the notes that were never sent', async () => {
@@ -1878,13 +1928,15 @@ describe('AccountPanel, with a detached source in front', () => {
 		await user.click(await enabled('Discard…'));
 		await user.click(await screen.findByRole('button', { name: 'Discard for good' }));
 
-		await screen.findByText(/Notes are kept on this device only/);
-		// Not on the page: on what the panel offers now.
+		const said = await screen.findByText(/Notes are kept on this device only/);
+		// Not on the page. With the source list and the connect buttons moved
+		// to the tab bar there is nothing here to press, so the landing is the
+		// panel itself — which says where the user now is. The bar's `+` is
+		// deliberately not taken: it belongs to another component.
 		await waitFor(() => {
-			expect(document.activeElement).toBe(
-				screen.getByRole('button', { name: 'Connect Dropbox' })
-			);
+			expect(document.activeElement?.contains(said)).toBe(true);
 		});
+		expect(document.activeElement?.tagName).toBe('DIV');
 	});
 
 	it('says plainly that a delete still owed will be carried out on reconnecting', async () => {
@@ -2045,16 +2097,12 @@ describe('AccountPanel, with a detached source in front', () => {
 		);
 		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
 
-		await user.click(
-			await screen.findByRole('button', {
-				name: 'Show Dropbox · ada@example.com — disconnected, 2 not sent',
-			})
-		);
+		await user.click(await screen.findByRole('button', { name: 'Dropbox — disconnected' }));
 
 		expect(await screen.findByText('Dropbox · ada@example.com is disconnected')).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe('c1');
 		// And back again, from the detached source's own panel.
-		expect(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' })).toBeTruthy();
+		expect(await screen.findByRole('button', { name: 'OneDrive' })).toBeTruthy();
 	});
 });
 
@@ -2562,7 +2610,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		renderPanel(client, db);
 		expect(await screen.findByText(/ada@example\.com/)).toBeTruthy();
 
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 
 		expect(await screen.findByText(/ada@work\.example/)).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe('c2');
@@ -2592,13 +2640,18 @@ describe('AccountPanel, with more than one source connected', () => {
 			db
 		);
 
-		// The case the list exists for. "Dropbox", twice, one of them "showing",
-		// is not a choice anyone can act on.
-		expect(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' })).toBeTruthy();
+		// Two accounts at one provider, told apart by a number rather than by
+		// the account id the old list used. That is thinner, and deliberately
+		// so: the number is stable and short enough for a tab, and renaming is
+		// the answer for anyone who needs to know which is which at a glance.
+		// The panel below still names the one in front by its account.
+		expect(await tab('Dropbox')).toBeTruthy();
+		expect(await tab('Dropbox 2')).toBeTruthy();
+		// The second is the one bound last, so it is the one showing.
+		expect((await tab('Dropbox 2')).getAttribute('aria-current')).toBe('true');
+		expect((await tab('Dropbox')).getAttribute('aria-current')).toBeNull();
 		await waitFor(() => {
-			expect(screen.getByRole('list', { name: 'Connected sources' }).textContent).toContain(
-				'Dropbox · dbid:2 · showing'
-			);
+			expect(screen.getByText(/ada@example\.com/)).toBeTruthy();
 		});
 	});
 
@@ -2610,9 +2663,7 @@ describe('AccountPanel, with more than one source connected', () => {
 			db
 		);
 
-		await user.click(
-			await screen.findByRole('button', { name: 'Connect another Dropbox account' })
-		);
+		await connectVia(user, 'Dropbox');
 
 		await waitFor(() => {
 			expect(went.length).toBe(1);
@@ -2647,7 +2698,7 @@ describe('AccountPanel, with more than one source connected', () => {
 			await screen.findByRole('button', { name: 'Stop syncing on this device' })
 		).toBeTruthy();
 
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
 
 		// Dropbox's failure is not OneDrive's. Left on screen, the button would
@@ -2683,17 +2734,17 @@ describe('AccountPanel, with more than one source connected', () => {
 
 		await user.click(await enabled('Disconnect…'));
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
 
 		// Back on Dropbox with its disconnect still out: not one to start again.
-		await user.click(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' }));
+		await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
 		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Disconnect…' }).hasAttribute('disabled')).toBe(
 			true
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
 		await act(async () => {
 			out.fail(new TypeError('offline'));
@@ -2704,7 +2755,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		expect(screen.queryByRole('button', { name: 'Stop syncing on this device' })).toBeNull();
 
 		// But not lost either: it is there when the user comes back to Dropbox.
-		await user.click(await screen.findByRole('button', { name: 'Show Dropbox · dbid:1' }));
+		await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
 		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
 		expect(screen.getByRole('button', { name: 'Stop syncing on this device' })).toBeTruthy();
 		expect(disconnect).toHaveBeenCalledTimes(1);
@@ -2880,7 +2931,7 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(2);
 		});
 
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 
 		// Left alone, the list would still be Dropbox's, under a panel naming
 		// OneDrive — and pressing Remove would send a grant id this connection
@@ -2919,7 +2970,7 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 		});
 		renderPanel(client, db);
 
-		await user.click(await screen.findByRole('button', { name: 'Show OneDrive · ms:1' }));
+		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 		await waitFor(async () => {
 			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(3);
 		});
