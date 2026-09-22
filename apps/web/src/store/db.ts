@@ -127,6 +127,23 @@ export interface SyncStateRecord {
 	 * rows written before it.
 	 */
 	displayName?: string;
+	/**
+	 * What the *user* calls this source, where they have said. Their word beats
+	 * every derived name (`tabName` in `sync/account.ts`), and clearing it puts
+	 * the derived one back rather than leaving the tab blank.
+	 *
+	 * Kept apart from `displayName` because the two answer to different people:
+	 * `displayName` is the server's last word on whose account this is and is
+	 * overwritten whenever the server is asked, which would throw a rename away
+	 * on the next reconcile. This is only ever written from the tab bar.
+	 *
+	 * This device only, deliberately. The credential, the cursor and the pile
+	 * are already per device (docs/PLAN.md §6), and a name is the least of them
+	 * — a laptop calling a connection "Work" does not make it "Work" on a
+	 * phone. Not indexed, so it needs no version of its own, and absent on
+	 * every row until someone renames one.
+	 */
+	label?: string;
 	/** Opaque provider cursor; persisted only after a batch commits. */
 	cursor?: string;
 	rootId?: string;

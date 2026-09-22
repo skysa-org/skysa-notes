@@ -1197,6 +1197,41 @@ export const showConnection = (db: NotesDatabase, connectionId: string): Promise
 		return true;
 	});
 
+/**
+ * Call a source something else on this device, or `undefined` to have the
+ * derived name back (`tabName` in `sync/account.ts`).
+ *
+ * Answers whether there was a row to rename. The device's own pile has none —
+ * it is not a connection, only the notes written before there was one — so it
+ * keeps the name the bar gives it and this refuses rather than inventing a row
+ * to hold a name.
+ *
+ * Blank is not a name. A tab with nothing in it cannot be clicked back into,
+ * and a user who has cleared the field has asked for the default rather than
+ * for emptiness, so both arrive here as `undefined`.
+ */
+export const renameSource = (
+	db: NotesDatabase,
+	connectionId: string,
+	label: string | undefined
+): Promise<boolean> =>
+	inTransaction(db, async () => {
+		const state = await db.syncState.get(connectionId);
+		if (state === undefined) return false;
+		const named = label?.trim();
+		const next =
+			named === undefined || named === ''
+				? withoutLabel(state)
+				: { ...state, label: named.slice(0, LABEL_LIMIT) };
+		await db.syncState.put(next);
+		return true;
+	});
+
+/** Long enough for "Dropbox — the one with the tax receipts in it". */
+export const LABEL_LIMIT = 64;
+
+const withoutLabel = ({ label: _label, ...rest }: SyncStateRecord): SyncStateRecord => rest;
+
 export interface ConnectedSource {
 	connectionId: string;
 	provider?: ProviderKind;
@@ -1204,6 +1239,15 @@ export interface ConnectedSource {
 	accountId?: string;
 	/** What the server last called the account, where it said. */
 	displayName?: string;
+	/** What the user calls it, where they have said (`renameSource`). */
+	label?: string;
+	/**
+	 * When the connection was last bound, so a list can be put in the order the
+	 * user made it rather than in the order IndexedDB hands the rows back —
+	 * which is by connection id, and is a coin toss as far as anyone reading it
+	 * is concerned. Absent on the device's own pile, which was never bound.
+	 */
+	boundAt?: number;
 	/** Whether this is the one the app is showing. */
 	active: boolean;
 	/**
@@ -1245,6 +1289,8 @@ export const connectedSources = async (
 				...(state.provider === undefined ? {} : { provider: state.provider }),
 				...accountOn(state.accountId),
 				...nameOn(state.displayName),
+				...(state.label === undefined ? {} : { label: state.label }),
+				...(state.boundAt === undefined ? {} : { boundAt: state.boundAt }),
 				active: state.connectionId === active,
 				...detached,
 			},

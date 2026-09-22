@@ -10,6 +10,7 @@ import {
 	type InstanceConfig,
 	type Refusal,
 } from '../api/client.js';
+import { answer, type Asked } from '../api/instanceConfig.js';
 import { failedAt, saying } from '../errors/reached.js';
 import { folderToSearch } from '../routes/search.js';
 import { type ConnectedSource, connectedSources, showConnection } from '../store/connection.js';
@@ -86,14 +87,8 @@ export interface AccountPanelProps {
 	download?: (notes: readonly NoteRecord[]) => void;
 }
 
-/** A server answer: still being asked, not reachable, or what it said. */
-type Asked<T> = { kind: 'asking' } | { kind: 'unreachable' } | { kind: 'answered'; value: T };
-
-const answer = <T,>(asked: Asked<T>): T | undefined =>
-	asked.kind === 'answered' ? asked.value : undefined;
-
 /** Back to exactly here, minus the outcome of any connect before this one. */
-const returnPath = (href: string): string => {
+export const returnPath = (href: string): string => {
 	const url = new URL(href, 'http://app.invalid');
 	url.searchParams.delete('connect');
 	return url.pathname + url.search;

@@ -132,6 +132,135 @@ code {
 	color: var(--muted);
 }
 
+/* ---- The sources, across the top --------------------------------------- */
+
+/* A row above the three panes, in the frame rather than in the grid, for the
+   reason `app-shell` gives. It does not scroll the page: the tabs overflow
+   sideways instead, so twelve accounts cost the notes no height. */
+.source-tabs {
+	display: flex;
+	align-items: stretch;
+	gap: 0.25rem;
+	padding-inline: 0.5rem;
+	border-block-end: 1px solid var(--border);
+	background: var(--surface);
+}
+
+.source-tabs nav {
+	flex: 1;
+	min-width: 0;
+	overflow-x: auto;
+	/* The bar is short and the scrollbar under it would be most of its height. */
+	scrollbar-width: none;
+}
+
+.source-tabs nav::-webkit-scrollbar {
+	display: none;
+}
+
+.source-tabs ul {
+	display: flex;
+	gap: 0.25rem;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.source-tab {
+	display: block;
+	max-width: 14rem;
+	overflow: hidden;
+	padding: 0.5rem 0.75rem;
+	font: inherit;
+	font-size: 0.85rem;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	color: var(--muted);
+	background: none;
+	border: 0;
+	/* The lit edge, transparent on the rest, so that a tab does not change
+	   height when it becomes the one showing. */
+	border-block-end: 2px solid transparent;
+	cursor: pointer;
+}
+
+.source-tab:hover {
+	color: var(--fg);
+	background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+/* Not colour alone: the weight and the underline say it too, and the
+   `aria-current` on the button says it to a screen reader. */
+.source-tab-active {
+	color: var(--fg);
+	font-weight: 600;
+	border-block-end-color: var(--fg);
+}
+
+.source-tab-detached {
+	color: var(--warn);
+	font-weight: 400;
+}
+
+/* The same box as the tab it replaces, so the bar does not jump as a name
+   becomes editable. */
+.source-tab-rename {
+	max-width: 14rem;
+	margin-block: 0.25rem;
+	padding: 0.25rem 0.5rem;
+	font: inherit;
+	font-size: 0.85rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.25rem;
+}
+
+.source-add {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.source-add-button {
+	padding: 0.25rem 0.6rem;
+	font: inherit;
+	font-size: 1rem;
+	line-height: 1;
+	color: var(--muted);
+	background: none;
+	border: 0;
+	border-radius: 0.25rem;
+	cursor: pointer;
+}
+
+.source-add-button:hover {
+	color: var(--fg);
+	background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.source-add-menu {
+	position: absolute;
+	inset-block-start: 100%;
+	inset-inline-end: 0;
+	z-index: 20;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.35rem;
+	min-width: 12rem;
+	padding: 0.6rem 0.75rem;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.source-add-menu p {
+	margin: 0;
+	font-size: 0.75rem;
+}
+
 /* ---- App shell -------------------------------------------------------- */
 
 .app,

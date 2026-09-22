@@ -469,6 +469,10 @@ describe('letting a source go', () => {
 				connectionId: BOB.connectionId,
 				provider: 'dropbox',
 				accountId: 'dbid:bob',
+				// A live source says when it was bound, which is what puts the
+				// tabs in the order the user made them. Ada's went with her
+				// binding, which is why she has none here.
+				boundAt: expect.any(Number) as number,
 				active: true,
 			},
 		]);
