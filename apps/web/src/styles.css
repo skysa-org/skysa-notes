@@ -760,15 +760,52 @@ button.danger {
  * like a second application embedded in it.
  */
 
+/*
+ * The editable surface fills the space the editor appears to have, because a
+ * click anywhere in it has to land in the note. Every element between the
+ * editor box and the surface has to pass the height down for that, and one of
+ * them is not the app's: Milkdown puts its own `.milkdown` container between
+ * the root it is given and ProseMirror's element. Left auto-height, that
+ * container is exactly as tall as the words in it, `min-height: 100%` on the
+ * surface resolves against no height at all, and the note ends a line below
+ * the last paragraph — everything under it looks like the editor and is not.
+ *
+ * The toolbar is the one child that does not stretch, and the root below it is
+ * what scrolls, so the toolbar stays put while the note moves under it and a
+ * heading jumped to from the outline lands below the bar rather than behind it.
+ */
+.editor-rich {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
 .editor-rich [data-milkdown-root] {
-	height: 100%;
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.editor-rich [data-milkdown-root],
+.editor-rich .milkdown {
+	display: flex;
+	flex-direction: column;
+}
+
+/* `1 0 auto`: at least the height of the words, and all of the space when
+   there are fewer words than space. */
+.editor-rich .milkdown,
+.editor-rich-surface {
+	flex: 1 0 auto;
 }
 
 .editor-rich-surface {
-	min-height: 100%;
 	padding: 1rem 1.25rem 4rem;
 	line-height: 1.7;
 	outline: none;
+	/* ProseMirror's element is given the class `editor` by Milkdown, so the
+	   scrolling box above would otherwise be claimed here too. */
+	overflow: visible;
 }
 
 .editor-rich-surface > * + * {
@@ -824,18 +861,25 @@ button.danger {
 	position: relative;
 }
 
-.editor-rich-surface li[data-item-type='task']::before {
-	content: '☐';
+/* A real checkbox, put at the head of the item's first line by the editor
+   (`editor/tasks.ts`), because the character that used to be drawn here was a
+   pseudo-element and nothing can press one of those. It is pulled into the
+   margin so the words of a task line up with the words of a plain one. */
+.editor-rich-surface .task-checkbox {
 	position: absolute;
-	inset-inline-start: -1.25rem;
-	color: var(--muted);
+	inset-inline-start: -1.35rem;
+	inset-block-start: 0.35em;
+	width: 0.95rem;
+	height: 0.95rem;
+	margin: 0;
+	accent-color: var(--fg);
+	cursor: pointer;
 }
 
-.editor-rich-surface li[data-item-type='task'][data-checked='true']::before {
-	content: '☑';
-}
-
-.editor-rich-surface li[data-item-type='task'][data-checked='true'] {
+/* The item's own words, not everything under it: `text-decoration` reaches
+   every descendant and no child can take it back, so striking the whole item
+   struck a nested task that is not done. */
+.editor-rich-surface li[data-item-type='task'][data-checked='true'] > p {
 	color: var(--muted);
 	text-decoration: line-through;
 }
@@ -961,8 +1005,188 @@ button.danger {
 	cursor: pointer;
 }
 
-.toolbar-button:hover {
+.toolbar-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	min-height: 1.75rem;
+}
+
+.toolbar-button:hover:not(:disabled) {
 	background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+/* Lit because it is already applied to the text under the cursor, which is a
+   different thing from hover and has to look it. */
+.toolbar-button-on {
+	background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+
+.toolbar-button:disabled {
+	color: var(--muted);
+	opacity: 0.5;
+	cursor: default;
+}
+
+/* ---- The formatting toolbar, across the top of the rich editor --------- */
+
+/*
+ * Grouped the way Atlassian's editor groups it, minus what markdown cannot
+ * hold — there is no colour, no highlight and no alignment in a `.md` file —
+ * and minus insert, which is the slash menu's job here. `FormatToolbar.tsx`
+ * says the rest.
+ *
+ * It wraps rather than scrolling sideways, and that is not a preference: a
+ * scrolling bar is a scroll box, and a scroll box in one axis is a scroll box
+ * in both — `overflow-x: auto` makes the used value of `overflow-y` `auto`
+ * too. Every panel that opens underneath a button then belongs to the bar's
+ * own scrollable overflow instead of hanging over the note, which is to say
+ * the text-style and formatting menus opened and could not be seen. Two rows
+ * on a narrow screen is the price, and it is smaller than a menu that does
+ * not appear.
+ */
+.format-toolbar {
+	display: flex;
+	flex: 0 0 auto;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.25rem 0.5rem;
+	background: var(--surface);
+	border-block-end: 1px solid var(--border);
+}
+
+.toolbar-group {
+	display: flex;
+	align-items: center;
+	gap: 0.125rem;
+	padding-inline: 0.25rem;
+}
+
+.toolbar-group + .toolbar-group {
+	border-inline-start: 1px solid var(--border);
+}
+
+.toolbar-icon {
+	display: block;
+	flex: 0 0 auto;
+}
+
+.toolbar-style {
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
+.toolbar-popover-host {
+	position: relative;
+	display: flex;
+}
+
+.toolbar-panel {
+	position: absolute;
+	inset-block-start: calc(100% + 0.25rem);
+	inset-inline-start: 0;
+	z-index: 20;
+	display: flex;
+	flex-direction: column;
+	min-width: 11rem;
+	padding: 0.25rem;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
+}
+
+.toolbar-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	padding: 0.4rem 0.6rem;
+	font: inherit;
+	font-size: 0.9rem;
+	text-align: start;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+.toolbar-item:hover {
+	background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+/* The tick, which is the only thing in a row that follows the words. */
+.toolbar-item > .toolbar-icon:last-child {
+	margin-inline-start: auto;
+}
+
+/* Each style shown in the style it sets, at a size a menu can hold. */
+.toolbar-sample-1 {
+	font-size: 1.25rem;
+	font-weight: 600;
+}
+
+.toolbar-sample-2 {
+	font-size: 1.1rem;
+	font-weight: 600;
+}
+
+.toolbar-sample-3 {
+	font-size: 1rem;
+	font-weight: 600;
+}
+
+.toolbar-sample-4,
+.toolbar-sample-5,
+.toolbar-sample-6 {
+	font-size: 0.9rem;
+	font-weight: 600;
+}
+
+.toolbar-link {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+	min-width: 15rem;
+	padding: 0.35rem;
+}
+
+.toolbar-link label {
+	font-size: 0.75rem;
+	color: var(--muted);
+}
+
+.toolbar-link input {
+	font: inherit;
+	font-size: 0.9rem;
+	padding: 0.35rem 0.5rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+}
+
+.toolbar-link-actions {
+	display: flex;
+	gap: 0.35rem;
+}
+
+.toolbar-link-actions button {
+	font: inherit;
+	font-size: 0.85rem;
+	padding: 0.3rem 0.7rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+.toolbar-link-actions button:disabled {
+	color: var(--muted);
+	cursor: default;
 }
 
 .banner {

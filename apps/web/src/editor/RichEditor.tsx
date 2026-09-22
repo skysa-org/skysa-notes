@@ -2,12 +2,15 @@ import '@milkdown/kit/prose/view/style/prosemirror.css';
 import '@milkdown/kit/prose/tables/style/tables.css';
 
 import { editorViewCtx } from '@milkdown/kit/core';
+import type { Ctx } from '@milkdown/kit/ctx';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
+import { createFormatStore, type FormatStore, readFormat } from './format.js';
+import { FormatToolbar } from './FormatToolbar.js';
 import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import { adoptBody, createRichEditor, representsFaithfully } from './rich.js';
@@ -40,6 +43,25 @@ export interface RichEditorProps {
 	onAdopted?: () => void;
 }
 
+/**
+ * The toolbar, wired to the editor beneath it.
+ *
+ * Its own component, and reading the store through `useSyncExternalStore`, so
+ * that a keystroke which changes which buttons are lit redraws fourteen buttons
+ * and not the editor's host — whose every render re-runs the effects that watch
+ * for a body arriving from sync.
+ */
+const EditorToolbar = ({
+	store,
+	run,
+}: {
+	store: FormatStore;
+	run: (apply: (ctx: Ctx) => void) => void;
+}) => {
+	const format = useSyncExternalStore(store.subscribe, store.get);
+	return <FormatToolbar format={format} run={run} />;
+};
+
 const EditorBody = ({
 	noteId,
 	body,
@@ -67,6 +89,10 @@ const EditorBody = ({
 	const incoming = useIncomingBody(noteId, body, origin);
 	const pluginView = usePluginViewFactory();
 
+	// One per editor, built with it: a store that outlived the note it describes
+	// would light the toolbar up for a document nobody is looking at.
+	const [format] = useState(createFormatStore);
+
 	// The body the editor was built with. Read once per note: the effect below
 	// keeps a mounted editor in step, and rebuilding it on every keystroke would
 	// throw away the cursor and the undo history.
@@ -85,6 +111,9 @@ const EditorBody = ({
 				onUserEdit: (markdown) => {
 					incoming.emit(markdown);
 					notify.current(markdown, incoming.base());
+				},
+				onStateChange: (state) => {
+					format.set(readFormat(state));
 				},
 				menus: {
 					slash: { view: pluginView({ component: SlashMenu }) },
@@ -149,7 +178,29 @@ const EditorBody = ({
 		});
 	}, [body, origin, get, incoming, loading]);
 
-	return <Milkdown />;
+	// The editor keeps the selection a toolbar press acts on — the press itself
+	// never takes focus away — and is handed focus back afterwards, so that
+	// typing carries on where the user left off rather than in the toolbar.
+	const run = useCallback(
+		(apply: (ctx: Ctx) => void) => {
+			if (loading) return;
+			get()?.action((ctx) => {
+				apply(ctx);
+				ctx.get(editorViewCtx).focus();
+			});
+		},
+		// `get` is a fresh closure on every render and is read when the button is
+		// pressed, not when it is drawn.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[loading]
+	);
+
+	return (
+		<>
+			<EditorToolbar store={format} run={run} />
+			<Milkdown />
+		</>
+	);
 };
 
 /**

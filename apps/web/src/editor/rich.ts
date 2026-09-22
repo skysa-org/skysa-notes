@@ -16,8 +16,9 @@ import { slashFactory } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
+import { keymap } from '@milkdown/kit/prose/keymap';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
-import type { PluginSpec } from '@milkdown/kit/prose/state';
+import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
@@ -25,6 +26,7 @@ import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 import { richWithoutNul } from './noNul.js';
+import { taskPlugin, toggleTaskCommand } from './tasks.js';
 
 /**
  * The rich editor itself, with no React in it.
@@ -51,6 +53,13 @@ export interface RichEditorSetup {
 	body: string;
 	/** Called with the serialized markdown after every user edit, and only those. */
 	onUserEdit: (markdown: string) => void;
+	/**
+	 * Called with the editor's state whenever it changes — on selection as well
+	 * as on text, and on changes the app itself made. This is what the toolbar
+	 * above the editor reads to know which of its buttons are lit; unlike the
+	 * edit callback it is not a claim that anybody typed anything.
+	 */
+	onStateChange?: (state: EditorState) => void;
 	/** Plugin view specs for the slash menu and the formatting toolbar. */
 	menus?: {
 		slash: PluginSpec<unknown>;
@@ -58,7 +67,31 @@ export interface RichEditorSetup {
 	};
 }
 
-export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSetup): Editor =>
+/**
+ * Report the editor's state to whoever asked for it, now and after every
+ * transaction. A plugin rather than a subscription on the view, because a
+ * plugin's view is built with the editor and torn down with it, so the toolbar
+ * cannot outlive the document it describes.
+ */
+const watchState = (report: (state: EditorState) => void) =>
+	new Plugin({
+		view: (view) => {
+			report(view.state);
+			return {
+				update: (updated) => {
+					report(updated.state);
+				},
+			};
+		},
+	});
+
+export const createRichEditor = ({
+	root,
+	body,
+	onUserEdit,
+	onStateChange,
+	menus,
+}: RichEditorSetup): Editor =>
 	Editor.make()
 		.config((ctx) => {
 			ctx.set(rootCtx, root);
@@ -80,6 +113,11 @@ export const createRichEditor = ({ root, body, onUserEdit, menus }: RichEditorSe
 		// Always, since a plugin cannot be added to a running editor and one with
 		// no query costs a string search per block of a note.
 		.use($prose(findPlugin))
+		// A checkbox that can be pressed, and `Mod+Enter` for the keyboard. The
+		// preset draws a task item and offers no way to tick one.
+		.use($prose(() => taskPlugin))
+		.use($prose(() => keymap({ 'Mod-Enter': toggleTaskCommand })))
+		.use(onStateChange === undefined ? [] : $prose(() => watchState(onStateChange)))
 		// Ahead of the plugin that reports edits, though it need not be: an
 		// appended transaction is applied before any view hears of the change.
 		.use($prose(richWithoutNul))
