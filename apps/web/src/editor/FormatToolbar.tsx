@@ -13,6 +13,7 @@ import {
 	clearLink,
 	type EditorCommand,
 	INDENT_COMMANDS,
+	INSERT_COMMANDS,
 	LIST_COMMANDS,
 	MORE_INLINE_COMMANDS,
 	PRIMARY_INLINE_COMMANDS,
@@ -31,8 +32,9 @@ import { Icon, type IconName } from './icons.js';
  * missing from it is missing for one reason: markdown cannot hold it. There is
  * no text colour, no highlight and no alignment in a `.md` file, and a button
  * that wrote one would put something in the user's note that the file format
- * loses on the next save. Insert — tables, code blocks, quotes, dividers — is
- * the slash menu's job here and is deliberately not duplicated.
+ * loses on the next save. Insert — tables, quotes, dividers — is the slash
+ * menu's job here and is deliberately not duplicated; the code block is the one
+ * exception, and `INSERT_COMMANDS` says why it earns a button of its own.
  *
  * Every button is a view of `FormatState` and an action on the editor, and
  * nothing else: the component holds no document state, so it cannot disagree
@@ -51,6 +53,7 @@ const ICONS: Record<string, IconName> = {
 	emphasis: 'italic',
 	strike: 'strike',
 	code: 'code',
+	'code-block': 'code-block',
 	'clear-formatting': 'clear',
 	'bullet-list': 'bullets',
 	'ordered-list': 'numbers',
@@ -67,6 +70,11 @@ const MARKS: Record<string, string> = {
 	code: 'inlineCode',
 };
 
+/** The block a toggle button reports on, where it reports on one. */
+const BLOCKS: Record<string, keyof FormatState> = {
+	'code-block': 'codeBlock',
+};
+
 const LISTS: Record<string, FormatState['list']> = {
 	'bullet-list': 'bullet',
 	'ordered-list': 'ordered',
@@ -79,6 +87,8 @@ const isOn = (command: EditorCommand, format: FormatState): boolean => {
 	if (mark !== undefined) return format.marks.includes(mark);
 	const list = LISTS[command.id];
 	if (list !== undefined) return format.list === list;
+	const block = BLOCKS[command.id];
+	if (block !== undefined) return format[block] === true;
 	return false;
 };
 
@@ -90,6 +100,9 @@ const isOn = (command: EditorCommand, format: FormatState): boolean => {
 const isOff = (command: EditorCommand, format: FormatState): boolean => {
 	if (command.id === 'indent') return !format.canIndent;
 	if (command.id === 'outdent') return !format.canOutdent;
+	// A code block holds no marks — the schema says so — so the buttons that
+	// would add one are grey there rather than lit and inert.
+	if (MARKS[command.id] !== undefined) return format.codeBlock;
 	return false;
 };
 
@@ -536,6 +549,7 @@ export const FormatToolbar = ({ format, run }: FormatToolbarProps) => {
 
 			{group('Lists', LIST_COMMANDS)}
 			{group('Indentation', INDENT_COMMANDS)}
+			{group('Insert', INSERT_COMMANDS)}
 
 			<div className="toolbar-group" role="group" aria-label="Link">
 				<LinkPanel

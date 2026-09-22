@@ -1,5 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
+import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
@@ -7,7 +8,9 @@ import { useEffect, useRef } from 'react';
 import { isUserEdit, programmatic } from './dirty.js';
 import { findExtension, rawFindTarget } from './findRaw.js';
 import { useOfferFindTarget } from './findTarget.js';
+import { CODE_HIGHLIGHTER } from './highlight.js';
 import { useIncomingBody } from './incoming.js';
+import { markdownCodeLanguages } from './languages.js';
 import { rawWithoutNul } from './noNul.js';
 
 /**
@@ -69,7 +72,15 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEd
 					lineNumbers(),
 					undoHistory.of(history()),
 					keymap.of([...defaultKeymap, ...historyKeymap]),
-					markdown(),
+					// The inside of a fence is another language, and raw mode
+					// colours it with the same grammars and the same token
+					// classes rich mode uses — one code block, one look, whichever
+					// mode the note is open in. Markdown's own syntax is left in
+					// black and white: raw mode is the mode where the characters
+					// are the formatting, and `CODE_HIGHLIGHTER` deliberately
+					// names no tag that `lang-markdown` emits.
+					markdown({ codeLanguages: markdownCodeLanguages() }),
+					syntaxHighlighting(CODE_HIGHLIGHTER),
 					findExtension(),
 					rawWithoutNul(),
 					EditorView.lineWrapping,

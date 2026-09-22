@@ -7,6 +7,7 @@ import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
+import { useCodeDisplay } from '../store/hooks.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
@@ -88,6 +89,11 @@ const EditorBody = ({
 
 	const incoming = useIncomingBody(noteId, body, origin);
 	const pluginView = usePluginViewFactory();
+
+	// Wrapping and line numbers, as this device last left them. Here rather than
+	// in the shell because they are of no interest to anything but an open rich
+	// editor, and a note with no code block in it never asks.
+	useCodeDisplay();
 
 	// One per editor, built with it: a store that outlived the note it describes
 	// would light the toolbar up for a document nobody is looking at.

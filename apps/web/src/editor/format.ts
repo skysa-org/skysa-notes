@@ -1,7 +1,7 @@
 import { liftListItem, sinkListItem } from '@milkdown/kit/prose/schema-list';
 import type { EditorState } from '@milkdown/kit/prose/state';
 
-import { LINK_MARK } from './commands.js';
+import { CODE_BLOCK_NODE, LINK_MARK } from './commands.js';
 import { listAround, type ListKind } from './lists.js';
 
 /**
@@ -19,6 +19,11 @@ export interface FormatState {
 	marks: readonly string[];
 	/** The kind of list the selection is in, if it is in one. */
 	list: ListKind | null;
+	/**
+	 * Whether the selection is inside a code block — which is a block with no
+	 * marks in it at all, so it decides more than which button is lit.
+	 */
+	codeBlock: boolean;
 	/** Whether the list item could be nested one deeper. */
 	canIndent: boolean;
 	/** Whether the list item could be lifted one out. */
@@ -32,6 +37,7 @@ export const NO_FORMAT: FormatState = {
 	level: 0,
 	marks: [],
 	list: null,
+	codeBlock: false,
 	canIndent: false,
 	canOutdent: false,
 	link: null,
@@ -105,6 +111,7 @@ export const readFormat = (state: EditorState): FormatState => ({
 	level: headingLevel(state),
 	marks: activeMarks(state),
 	list: listAround(state)?.kind ?? null,
+	codeBlock: state.selection.$from.parent.type.name === CODE_BLOCK_NODE,
 	link: linkAt(state),
 	...indentable(state),
 });
@@ -116,6 +123,7 @@ const sameMarks = (a: readonly string[], b: readonly string[]): boolean =>
 export const sameFormat = (a: FormatState, b: FormatState): boolean =>
 	a.level === b.level &&
 	a.list === b.list &&
+	a.codeBlock === b.codeBlock &&
 	a.link === b.link &&
 	a.canIndent === b.canIndent &&
 	a.canOutdent === b.canOutdent &&

@@ -52,10 +52,9 @@ const harness = async (body: string) => {
 	};
 };
 
-/** Select a word in the document, the way a user would before pressing bold. */
-const selecting = (word: string) => (ctx: Ctx) => {
-	const view = ctx.get(editorViewCtx);
-	const { state } = view;
+/** Where a word is in the document, wherever it is nested. */
+const positionOf = (ctx: Ctx, word: string): number => {
+	const { state } = ctx.get(editorViewCtx);
 	const at = { current: -1 };
 
 	state.doc.descendants((node, pos) => {
@@ -67,8 +66,22 @@ const selecting = (word: string) => (ctx: Ctx) => {
 	});
 
 	if (at.current < 0) throw new Error(`no "${word}" in the document`);
+	return at.current;
+};
+
+/** Put the cursor in a word without selecting it. */
+const cursorIn = (word: string) => (ctx: Ctx) => {
+	const view = ctx.get(editorViewCtx);
+	const at = positionOf(ctx, word) + 1;
+	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
+};
+
+/** Select a word in the document, the way a user would before pressing bold. */
+const selecting = (word: string) => (ctx: Ctx) => {
+	const view = ctx.get(editorViewCtx);
+	const at = positionOf(ctx, word);
 	view.dispatch(
-		state.tr.setSelection(TextSelection.create(state.doc, at.current, at.current + word.length))
+		view.state.tr.setSelection(TextSelection.create(view.state.doc, at, at + word.length))
 	);
 };
 
@@ -84,7 +97,68 @@ describe('FormatToolbar', () => {
 
 		expect(
 			screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))
-		).toEqual(['Text style', 'Text formatting', 'Lists', 'Indentation', 'Link']);
+		).toEqual(['Text style', 'Text formatting', 'Lists', 'Indentation', 'Insert', 'Link']);
+	});
+
+	it('writes a fence when the code block button is pressed', async () => {
+		const editor = await harness('plain\n');
+		editor.withCtx(selecting('plain'));
+
+		await userEvent.click(screen.getByRole('button', { name: 'Code block' }));
+
+		expect(editor.markdown()).toContain('```');
+	});
+
+	/**
+	 * A block made out of text that is already there arrives knowing what it is
+	 * (`editor/detect.ts`) — end to end, because the guess and the block are one
+	 * transaction and it is the command that has to put them together.
+	 */
+	it('guesses the language of the text it turns into a code block', async () => {
+		const editor = await harness('def load(path):\n');
+		editor.withCtx(cursorIn('load'));
+
+		await userEvent.click(screen.getByRole('button', { name: 'Code block' }));
+
+		expect(editor.markdown()).toContain('```python');
+	});
+
+	it('leaves the fence blank when the text says nothing about itself', async () => {
+		const editor = await harness('Ask the provider and see what it says.\n');
+		editor.withCtx(cursorIn('provider'));
+
+		await userEvent.click(screen.getByRole('button', { name: 'Code block' }));
+
+		expect(editor.markdown()).toContain('```\n');
+		expect(editor.markdown()).not.toMatch(/```\w/u);
+	});
+
+	/**
+	 * Lit, because the cursor is in one — and pressing it again is the way out,
+	 * which is the only reason a lit button here is honest.
+	 */
+	it('lights up inside a code block and takes the block off again', async () => {
+		const editor = await harness('```js\ncode\n```\n');
+		editor.withCtx(cursorIn('code'));
+		editor.redraw();
+
+		const button = screen.getByRole('button', { name: 'Code block' });
+		expect(button.getAttribute('aria-pressed')).toBe('true');
+
+		await userEvent.click(button);
+		expect(editor.markdown()).not.toContain('```');
+	});
+
+	/** A code block holds no marks, so a bold button over one would do nothing. */
+	it('greys the mark buttons out inside a code block', async () => {
+		const editor = await harness('```js\ncode\n```\n');
+		editor.withCtx(cursorIn('code'));
+		editor.redraw();
+
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Bold' }).disabled).toBe(true);
+		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Italic' }).disabled).toBe(
+			true
+		);
 	});
 
 	it('marks the selection when bold is pressed', async () => {

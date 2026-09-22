@@ -105,6 +105,19 @@ describe('readFormat', () => {
 		expect(prose(format).list).toBeNull();
 	});
 
+	it('knows when the cursor is in a code block', async () => {
+		const code = await mount('```js\nconst a = 1;\n```\n');
+		code(cursorIn('const'));
+		expect(code(format).codeBlock).toBe(true);
+		// The block is not a heading and not a list, whatever else it is.
+		expect(code(format).level).toBe(0);
+		expect(code(format).list).toBeNull();
+
+		const prose = await mount('plain\n');
+		prose(cursorIn('plain'));
+		expect(prose(format).codeBlock).toBe(false);
+	});
+
 	it('says indentation is possible only where it would do something', async () => {
 		const withCtx = await mount('- one\n- two\n');
 
