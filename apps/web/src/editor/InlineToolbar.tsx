@@ -10,6 +10,11 @@ import { INLINE_COMMANDS } from './commands.js';
  *
  * Only marks the markdown can hold, so there is nothing here that would be lost
  * on the way to the file.
+ *
+ * Named apart from the bar across the top of the editor (`FormatToolbar`),
+ * which is also a toolbar and also formats: two of them answering to
+ * "Formatting" would leave a screen reader with no way to say which one it had
+ * reached.
  */
 
 export const InlineToolbar = () => {
@@ -38,7 +43,7 @@ export const InlineToolbar = () => {
 	});
 
 	return (
-		<div className="inline-toolbar" ref={host} role="toolbar" aria-label="Formatting">
+		<div className="inline-toolbar" ref={host} role="toolbar" aria-label="Selection formatting">
 			{INLINE_COMMANDS.map((command) => (
 				<button
 					type="button"
