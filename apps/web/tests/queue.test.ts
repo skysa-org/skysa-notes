@@ -235,13 +235,45 @@ describe('the push queue a local change leaves behind', () => {
 		await renameFolder(db, 'Work', 'Play', scope);
 
 		const ops = await queued(db);
-		// One `rmdir`, for the outermost: its subdirectories go with it.
+		// One per directory being left, outermost first. Removing the outermost
+		// really does take its subdirectories with it on every provider, so the
+		// inner op sends nothing — it is queued for what the *pull* makes of
+		// the directory in the meantime: a sync pulls before it pushes, the old
+		// directories are still on the remote at that point, and the rows that
+		// named them have been re-pathed and stripped of their ids. The engine
+		// refuses to make a notebook of a directory whose `rmdir` is queued,
+		// but matches the op by id and path together, so a subdirectory with no
+		// op of its own was adopted — and the whole subtree came back beside
+		// the renamed one, with the `rmdir` then refused because the device
+		// held a row there again.
 		expect(ops.filter((op) => op.op === 'rmdir')).toEqual([
 			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+			{ op: 'rmdir', path: 'Work/Inner', remoteId: 'f2' },
 		]);
-		// And last, behind the move that takes the note out of it.
-		expect(ops.at(-1)).toEqual({ op: 'rmdir', path: 'Work', remoteId: 'f1' });
+		// And behind the move that takes the note out of them.
+		expect(ops.at(-1)).toEqual({ op: 'rmdir', path: 'Work/Inner', remoteId: 'f2' });
 		expect(ops.some((op) => op.noteId === note.id && op.op === 'move')).toBe(true);
+	});
+
+	it('queues an rmdir for every directory a deleted notebook leaves', async () => {
+		// The same reason the rename above queues one each: the outermost takes
+		// its subdirectories with it on the provider, but until the push runs
+		// the pull can still see them, and `decideFolder` only lets go of a
+		// directory that has an op naming it by id and path.
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await createFolder(db, { ...scope, name: 'Inner', parentPath: 'Work' });
+		await db.folders.update([CONNECTION, 'Work'], { remoteId: 'f1' });
+		await db.folders.update([CONNECTION, 'Work/Inner'], { remoteId: 'f2' });
+		await pushedNote(db, 'Work/Inner/b.md');
+		await db.opQueue.clear();
+
+		await deleteFolder(db, 'Work', scope);
+
+		expect((await queued(db)).filter((op) => op.op === 'rmdir')).toEqual([
+			{ op: 'rmdir', path: 'Work', remoteId: 'f1' },
+			{ op: 'rmdir', path: 'Work/Inner', remoteId: 'f2' },
+		]);
 	});
 
 	it('withdraws the mkdir of a notebook deleted before it was ever sent', async () => {
