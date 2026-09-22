@@ -33,6 +33,8 @@ const PATHS = {
 	more: 'M5 12h.01M12 12h.01M19 12h.01',
 	chevron: 'm6 9.5 6 6 6-6',
 	check: 'm5 12.5 4.5 4.5L19 7.5',
+	search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+	close: 'M6 6l12 12M18 6 6 18',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;

@@ -13,9 +13,16 @@ export interface SearchFieldProps {
 	onQuery: (query: string) => void;
 	/** So a command can put the cursor in the field without hunting the DOM. */
 	fieldRef?: RefObject<HTMLInputElement | null>;
+	/**
+	 * After Escape has emptied the field. The compact bar puts its dropdowns
+	 * back then: there the field stands in for them only while it is in use.
+	 */
+	onDismiss?: () => void;
+	/** The field was focused — in the compact bar, the answers come back. */
+	onFocus?: () => void;
 }
 
-export const SearchField = ({ query, onQuery, fieldRef }: SearchFieldProps) => (
+export const SearchField = ({ query, onQuery, fieldRef, onDismiss, onFocus }: SearchFieldProps) => (
 	// The landmark is what lets a screen-reader user jump to the field rather
 	// than walk the bar to find it.
 	<div role="search">
@@ -35,8 +42,11 @@ export const SearchField = ({ query, onQuery, fieldRef }: SearchFieldProps) => (
 				// Escape puts the user back in the notebook they were in, which
 				// is where they were before they typed. Without it the only way
 				// out is to delete what they wrote, one character at a time.
-				if (event.key === 'Escape') onQuery('');
+				if (event.key !== 'Escape') return;
+				onQuery('');
+				onDismiss?.();
 			}}
+			onFocus={onFocus}
 		/>
 	</div>
 );

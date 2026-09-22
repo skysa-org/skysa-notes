@@ -11,7 +11,7 @@ import { useCodeDisplay } from '../store/hooks.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
-import { FormatToolbar } from './FormatToolbar.js';
+import { FormatToolbar, type ToolbarPlacement } from './FormatToolbar.js';
 import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import { adoptBody, createRichEditor, representsFaithfully } from './rich.js';
@@ -42,6 +42,13 @@ export interface RichEditorProps {
 	 * another tab. What was typed before is no longer under what is typed next.
 	 */
 	onAdopted?: () => void;
+	/**
+	 * Where the formatting toolbar goes, or `'none'` for no toolbar at all.
+	 * Unmounted rather than hidden when there is none: it reads what the
+	 * selection is from a store that outlives it, so it comes back lit
+	 * correctly, and a toolbar that is not there cannot be tabbed into.
+	 */
+	toolbar?: ToolbarPlacement | 'none';
 }
 
 /**
@@ -55,12 +62,14 @@ export interface RichEditorProps {
 const EditorToolbar = ({
 	store,
 	run,
+	placement,
 }: {
 	store: FormatStore;
 	run: (apply: (ctx: Ctx) => void) => void;
+	placement: ToolbarPlacement;
 }) => {
 	const format = useSyncExternalStore(store.subscribe, store.get);
-	return <FormatToolbar format={format} run={run} />;
+	return <FormatToolbar format={format} run={run} placement={placement} />;
 };
 
 const EditorBody = ({
@@ -70,6 +79,7 @@ const EditorBody = ({
 	onUserEdit,
 	onUnsupported,
 	onAdopted,
+	toolbar = 'top',
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
@@ -203,8 +213,11 @@ const EditorBody = ({
 
 	return (
 		<>
-			<EditorToolbar store={format} run={run} />
+			{toolbar === 'top' && <EditorToolbar store={format} run={run} placement="top" />}
 			<Milkdown />
+			{/* After the note in the document as well as on screen, so the tab
+			    order and what the eye sees agree. */}
+			{toolbar === 'bottom' && <EditorToolbar store={format} run={run} placement="bottom" />}
 		</>
 	);
 };

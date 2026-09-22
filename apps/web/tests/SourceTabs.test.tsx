@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { type ApiClient, type InstanceConfig } from '../src/api/client.js';
-import { SourceTabs } from '../src/components/SourceTabs.js';
+import { SourcePicker, SourceTabs } from '../src/components/SourceTabs.js';
 import {
 	bindConnection,
 	connectedSources,
@@ -376,5 +376,113 @@ describe('the source tabs', () => {
 		await createNote(db, { title: 'Loose' });
 
 		expect(await renameSource(db, LOCAL_CONNECTION_ID, 'Mine')).toBe(false);
+	});
+});
+
+describe('the source dropdown, in a compact window', () => {
+	const showPicker = (db: NotesDatabase, client: Client = clientWith()) =>
+		render(<SourcePicker db={db} client={client} returnTo="/" navigate={() => undefined} />);
+
+	const trigger = () => screen.getByRole('button', { name: /^Source: / });
+
+	it('says which source is showing, and offers the others and the way to another account', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		showPicker(db);
+
+		await waitFor(() => {
+			expect(trigger().textContent).toBe('Dropbox');
+		});
+		expect(trigger().getAttribute('aria-expanded')).toBe('false');
+
+		await user.click(trigger());
+
+		const menu = screen.getByRole('group', { name: 'Sources' });
+		const [dropbox, onedrive] = within(menu).getAllByRole('button');
+		expect(dropbox?.textContent).toBe('Dropbox');
+		expect(dropbox?.getAttribute('aria-current')).toBe('true');
+		expect(onedrive?.textContent).toBe('OneDrive');
+		expect(onedrive?.getAttribute('aria-current')).toBeNull();
+		// The providers are a group of their own, so a provider and a source of
+		// the same name are not two identical buttons side by side.
+		const connect = await within(menu).findByRole('group', {
+			name: 'Connect another account',
+		});
+		expect(within(connect).getByRole('button', { name: 'Dropbox' })).toBeDefined();
+		expect(within(connect).getByRole('button', { name: 'OneDrive' })).toBeDefined();
+	});
+
+	it('shows the source chosen, and shuts', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		showPicker(
+			db,
+			clientWith(() => Promise.resolve({ ...STORAGE_FIRST, providers: [] }))
+		);
+
+		await waitFor(() => {
+			expect(trigger().textContent).toBe('Dropbox');
+		});
+		await user.click(trigger());
+		await user.click(
+			within(screen.getByRole('group', { name: 'Sources' })).getByRole('button', {
+				name: 'OneDrive',
+			})
+		);
+
+		expect(screen.queryByRole('group', { name: 'Sources' })).toBeNull();
+		await waitFor(() => {
+			expect(trigger().textContent).toBe('OneDrive');
+		});
+	});
+
+	it('says a disconnected source is disconnected, in words', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, {
+			connectionId: 'c1',
+			provider: 'dropbox',
+			accountId: 'dbid:ada',
+		});
+		await createNote(db, { connectionId: 'c1', title: 'Kept', body: 'Kept\n' });
+		await detachConnection(db, { connectionId: 'c1' });
+		const user = userEvent.setup();
+		showPicker(db);
+
+		await user.click(await screen.findByRole('button', { name: /^Source: / }));
+
+		expect(
+			within(screen.getByRole('group', { name: 'Sources' })).getByRole('button', {
+				name: /— disconnected$/,
+			})
+		).toBeDefined();
+	});
+
+	it('shuts on Escape and on a press outside it, and a press on itself toggles it', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		const user = userEvent.setup();
+		showPicker(db);
+
+		await user.click(await screen.findByRole('button', { name: /^Source: / }));
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('group', { name: 'Sources' })).toBeNull();
+
+		await user.click(trigger());
+		await user.click(trigger());
+		expect(screen.queryByRole('group', { name: 'Sources' })).toBeNull();
+
+		await user.click(trigger());
+		await user.click(document.body);
+		expect(screen.queryByRole('group', { name: 'Sources' })).toBeNull();
 	});
 });

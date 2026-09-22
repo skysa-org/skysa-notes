@@ -62,6 +62,13 @@ export interface SidebarProps {
 	onDrop?: (into: string) => void;
 	/** The drag ended without a drop, or Escape was pressed. */
 	onCancelMove?: () => void;
+	/**
+	 * Something here has just started that needs the user's eyes — a rename or
+	 * a delete asked for from the palette. In a compact window the sidebar is a
+	 * dropdown and may be shut, and a field focused inside a shut panel takes
+	 * no keystrokes at all.
+	 */
+	onReveal?: () => void;
 }
 
 /**
@@ -585,6 +592,7 @@ export const Sidebar = ({
 	onPickUp,
 	onDrop,
 	onCancelMove,
+	onReveal,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -626,6 +634,7 @@ export const Sidebar = ({
 		enabled: manageable,
 		run: () => {
 			setRenaming(open ?? null);
+			onReveal?.();
 		},
 	});
 
@@ -636,6 +645,7 @@ export const Sidebar = ({
 		enabled: manageable,
 		run: () => {
 			setDeleting(open ?? null);
+			onReveal?.();
 		},
 	});
 

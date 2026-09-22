@@ -482,9 +482,19 @@ code {
 	overflow: hidden;
 }
 
+/* The two side columns are 15rem and 19rem wide down to a 1250px window, and
+   narrow with it below that, in step, so the note keeps the room it would
+   otherwise lose for as long as it can: each `vw` is its column's width over
+   1250px, which is where the two terms of its `clamp` meet. The floors are
+   under anything the columns reach before the window turns compact
+   (`components/layout.ts`); they are for a root font size other than 16px,
+   not a width the layout expects to hit. */
 .app-shell {
 	display: grid;
-	grid-template-columns: 15rem 19rem 1fr;
+	grid-template-columns:
+		clamp(11rem, 19.2vw, 15rem)
+		clamp(14rem, 24.32vw, 19rem)
+		minmax(0, 1fr);
 	overflow: hidden;
 }
 
@@ -880,9 +890,12 @@ button.danger {
 	gap: 0.75rem;
 }
 
+/* 12rem, not wider: with the outline's button beside the mode and the delete,
+   a longer path pushed the header onto a second row at 1300px. The whole path
+   is in the tooltip. */
 .note-actions .path {
 	font-size: 0.75rem;
-	max-width: 18rem;
+	max-width: 12rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -1389,6 +1402,21 @@ button.danger {
 	border-block-end: 1px solid var(--border);
 }
 
+/* Below the note in a compact window (`FormatToolbar`'s `placement`): the rule
+   is on the side that meets the note, the phone's home indicator is kept
+   clear of the buttons, and the menus open upwards — below the bar there is
+   nothing left of the screen for them to hang into. */
+.format-toolbar-bottom {
+	border-block-end: 0;
+	border-block-start: 1px solid var(--border);
+	padding-block-end: max(0.25rem, env(safe-area-inset-bottom));
+}
+
+.format-toolbar-bottom .toolbar-panel {
+	inset-block-start: auto;
+	inset-block-end: calc(100% + 0.25rem);
+}
+
 .toolbar-group {
 	display: flex;
 	align-items: center;
@@ -1607,72 +1635,172 @@ button.danger {
 	flex-basis: 100%;
 }
 
-@media (max-width: 60rem) {
-	.app,
-	.app-frame {
-		height: auto;
-		min-height: 100dvh;
-		overflow: visible;
-	}
+/* ---- Compact window ----------------------------------------------------- */
 
-	.app-shell {
-		grid-template-columns: 1fr;
-		grid-template-rows: auto auto 1fr;
-		height: auto;
-		min-height: 100dvh;
-	}
+/*
+ * Too narrow for three panes. The width is decided once, in
+ * `components/layout.ts`, and arrives here as `.compact` on the frame rather
+ * than as a media query of this file's own: it also decides which bar is
+ * rendered, and two answers to "is this compact" could disagree by a pixel.
+ *
+ * The note takes the window. The sidebar and the note list stay in the grid,
+ * mounted, and become dropdowns — a panel under the bar, shown while the
+ * shell's `data-panel` names it. Positioned either way, so neither is ever a
+ * grid item: the note view is the only one, and has the only column.
+ */
+.compact .app-shell {
+	position: relative;
+	grid-template-columns: minmax(0, 1fr);
+}
 
-	/* The frame already carries the full height. Leaving the shell's own
-	   `min-height` on would make the page `banner + 100dvh` tall and grow a
-	   scrollbar, rather than the shell taking what is left. */
-	.app-frame > .app-shell {
-		min-height: 0;
-	}
+.compact .sidebar,
+.compact .note-list {
+	display: none;
+	position: absolute;
+	inset-block-start: 0;
+	inset-inline: 0;
+	z-index: 15;
+	max-height: 75%;
+	border-inline-end: 0;
+	border-block-end: 1px solid var(--border);
+	box-shadow: 0 0.75rem 1.5rem rgb(0 0 0 / 12%);
+}
 
-	.sidebar,
-	.note-list {
-		border-inline-end: 0;
-		border-block-end: 1px solid var(--border);
-		max-height: 14rem;
-	}
+.compact .app-shell[data-panel='notebooks'] > .sidebar {
+	display: flex;
+}
 
-	/* Fourteen rems is not enough to divide. Pinning the storage panel here
-	   would leave the notebooks a couple of rows and the panel most of the
-	   pane, so the column goes back to scrolling as one and the panel to being
-	   the last thing in it. */
-	.sidebar {
-		overflow-y: auto;
-	}
+.compact .app-shell[data-panel='notes'] > .note-list {
+	display: block;
+}
 
-	.sidebar .tree {
-		flex: none;
-		overflow-y: visible;
-	}
+/* A search's answers are the thing being read rather than a list glanced at on
+   the way to a note, so they take everything under the bar: a panel sized
+   for a notebook's notes left room to compare two results at most. */
+.compact .note-list.searching {
+	inset-block-end: 0;
+	max-height: none;
+}
 
-	/* Fourteen rems is the right size for a list you glance at beside the note
-	   you are writing. A search is not that: it is the thing being read, and at
-	   fourteen rems the header, the field and the live region leave room for a
-	   single answer — a result list you cannot compare anything in. While one is
-	   open the list takes most of the screen and the note keeps the rest. It is
-	   not taken from the note, which is not compressed here but pushed down: the
-	   panes are stacked at this width and the page scrolls, so the editor stays
-	   whole, one scroll away.
+/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
+   push the next answer off. Two lines still carry the match, which is what
+   the excerpt is for. */
+.compact .note-excerpt {
+	-webkit-line-clamp: 2;
+}
 
-	   `dvh`, like everything else in this file: `vh` resolves against the large
-	   viewport, so on a phone with its toolbar showing 60vh is nearer 70% of
-	   what the user can see. Desktop Chrome measures the two identically, which
-	   is exactly why the difference would never show up in a check here. */
-	.note-list.searching {
-		max-height: 60dvh;
-	}
+/* The path is the notebook dropdown's to say, and on a phone it pushed the
+   note's own buttons onto a second row. */
+.compact .note-actions .path {
+	display: none;
+}
 
-	/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
-	   push the next answer off. Two lines still carry the match, which is what
-	   the excerpt is for. Below about 430px is where this earns its keep: it
-	   takes a row from 107px to 89px. */
-	.note-excerpt {
-		-webkit-line-clamp: 2;
-	}
+.compact .note-header {
+	padding: 0.5rem 0.75rem;
+}
+
+.compact-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	padding: 0.375rem 0.5rem;
+	border-block-end: 1px solid var(--border);
+	background: var(--surface);
+}
+
+/* The three dropdowns share the bar equally and each truncates what it says
+   inside its share: a long notebook name must not take the room the note's
+   title needs, and the whole of either is in the tooltip and the panel. */
+.compact-source {
+	position: relative;
+	display: flex;
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.compact-picker {
+	display: flex;
+	flex: 1 1 0;
+	align-items: center;
+	gap: 0.25rem;
+	min-width: 0;
+	padding: 0.35rem 0.5rem;
+	font: inherit;
+	font-size: 0.85rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+.compact-picker[aria-expanded='true'] {
+	background: color-mix(in srgb, var(--fg) 8%, var(--bg));
+}
+
+.compact-picker-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: start;
+}
+
+.compact-picker .toolbar-icon {
+	color: var(--muted);
+}
+
+/* The source menu is a `.toolbar-panel` like the `+`'s, with room kept for a
+   long account name to be cut rather than to run off the screen. */
+.compact-source-menu {
+	max-width: calc(100vw - 1rem);
+}
+
+.compact-source-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.compact-icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 2rem;
+	height: 2rem;
+	padding: 0;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+.compact-icon:hover {
+	background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.compact-search,
+.compact-search [role='search'] {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+}
+
+/* 16px, because Safari on a phone zooms the page into any field smaller than
+   that the moment it is focused, and does not zoom back out. */
+.compact-search .note-search {
+	font-size: 1rem;
+}
+
+/* The close button beside the field empties it as well as shutting it, so the
+   browser's own clear button would be a second × a thumb's width from the
+   first, doing half as much. */
+.compact-search .note-search::-webkit-search-cancel-button {
+	display: none;
 }
 
 .new-folder {
@@ -1848,13 +1976,6 @@ button.danger {
 }
 .outline-h6 button {
 	padding-inline-start: 4rem;
-}
-
-/* Narrow enough and the rail is most of the screen, so it goes. */
-@media (max-width: 60rem) {
-	.outline {
-		display: none;
-	}
 }
 
 /* Find and replace, over whichever editor is open. */

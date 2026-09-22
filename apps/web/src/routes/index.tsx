@@ -6,6 +6,7 @@ import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { CompactBar, useCompactLayout } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
@@ -185,6 +186,20 @@ const Home = () => {
 		if (sources === undefined || sources.length < 2) return undefined;
 		const found = sources.find((each) => each.connectionId === connectionId);
 		return found === undefined ? undefined : tabName(found, sources);
+	};
+
+	/**
+	 * A window too narrow for three panes. The notebooks and the notes become
+	 * dropdowns in the bar and the note takes the rest (`CompactBar`); `panel`
+	 * is which of them is open, and `searchOpen` whether the search has the bar.
+	 */
+	const { compact, panel, setPanel, searchOpen, setSearchOpen, frameClassName, shellProps } =
+		useCompactLayout();
+	const onQuery = (next: string) => {
+		setQuery(next);
+		// The answers are the notes panel, so typing is what opens it — and
+		// emptying the field, what shuts it on the notes it would otherwise show.
+		if (compact) setPanel(next.trim() === '' ? null : 'notes');
 	};
 
 	const [paletteOpen, setPaletteOpen] = useState(false);
@@ -466,6 +481,16 @@ const Home = () => {
 	}, []);
 
 	/**
+	 * Every destination is a sidebar row, and in a compact window the sidebar
+	 * is a dropdown that may be shut — so picking something up opens it, or a
+	 * move begun from the palette would be a mode with nowhere to finish it.
+	 */
+	const pickUp = (what: Moving) => {
+		setMoving(what);
+		if (compact) setPanel('notebooks');
+	};
+
+	/**
 	 * Escape puts down whatever is being moved, from wherever the focus is. On
 	 * the document rather than on the sidebar: a move started from the palette
 	 * leaves the focus where the palette had it, which may be nowhere near the
@@ -488,6 +513,7 @@ const Home = () => {
 		// Put down first: the move is a round trip through the store and a mode
 		// left standing over it is one the user can drop a second copy of.
 		setMoving(null);
+		setPanel(null);
 		if (move === undefined) return;
 		setProblem(null);
 
@@ -563,6 +589,9 @@ const Home = () => {
 		chord: FIND,
 		enabled: true,
 		run: () => {
+			// In a compact window the field is not there until the search is
+			// open; the bar puts the cursor in it as it appears.
+			setSearchOpen(true);
 			searchField.current?.focus();
 			searchField.current?.select();
 		},
@@ -593,7 +622,7 @@ const Home = () => {
 		enabled: folder !== undefined && folder !== ROOT && moving === null,
 		run: () => {
 			if (folder === undefined || folder === ROOT) return;
-			setMoving({ kind: 'notebook', path: folder, name: basename(folder) });
+			pickUp({ kind: 'notebook', path: folder, name: basename(folder) });
 		},
 	});
 
@@ -604,7 +633,7 @@ const Home = () => {
 		enabled: openNote !== undefined && moving === null,
 		run: () => {
 			if (openNote === undefined) return;
-			setMoving({
+			pickUp({
 				kind: 'note',
 				id: openNote.id,
 				path: openNote.path,
@@ -622,17 +651,32 @@ const Home = () => {
 		// above the panes goes in the frame around them instead. The toasts are
 		// not laid out at all — they are fixed to the viewport — but they are
 		// here for the same reason: a stack in the grid would take a column.
-		<div className="app-frame">
+		<div className={frameClassName}>
 			{/*
 			 * Above everything, because it says which app this is: each source
 			 * is its own notes, its own notebooks and its own sync (§6), so the
 			 * panes below all mean something different depending on which of
 			 * these is lit.
 			 */}
-			<SourceTabs
-				returnTo={returnPath(href)}
-				search={<SearchField query={query} onQuery={setQuery} fieldRef={searchField} />}
-			/>
+			{compact ? (
+				<CompactBar
+					returnTo={returnPath(href)}
+					folder={folder}
+					note={openNote}
+					panel={panel}
+					onPanel={setPanel}
+					query={query}
+					onQuery={onQuery}
+					searchOpen={searchOpen}
+					onSearchOpen={setSearchOpen}
+					fieldRef={searchField}
+				/>
+			) : (
+				<SourceTabs
+					returnTo={returnPath(href)}
+					search={<SearchField query={query} onQuery={setQuery} fieldRef={searchField} />}
+				/>
+			)}
 			{/*
 			 * For as long as a detached source is the one showing, and not
 			 * dismissable: its notes look like any others, can be opened and
@@ -656,11 +700,16 @@ const Home = () => {
 				/>
 			)}
 
-			<div className="app-shell">
+			{/* `data-panel` is which pane a compact window is showing as a
+			    dropdown; the stylesheet ignores it in a wide one. */}
+			<div className="app-shell" {...shellProps}>
 				<Sidebar
 					tree={tree}
 					selectedFolder={folder}
-					onSelectFolder={openFolder}
+					onSelectFolder={(path) => {
+						openFolder(path);
+						setPanel(null);
+					}}
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}
 					onDeleteFolder={onDeleteFolder}
@@ -670,6 +719,9 @@ const Home = () => {
 					onPickUp={setMoving}
 					onDrop={onDropInto}
 					onCancelMove={cancelMove}
+					onReveal={() => {
+						if (compact) setPanel('notebooks');
+					}}
 				/>
 
 				<NoteList
@@ -677,15 +729,22 @@ const Home = () => {
 					selectedNoteId={noteId}
 					onSelectNote={(id) => {
 						select({ note: id });
+						setPanel(null);
 					}}
 					query={query}
 					results={results}
-					onOpenResult={openResult}
+					onOpenResult={(note) => {
+						openResult(note);
+						setPanel(null);
+					}}
 					{...(activeConnection === undefined
 						? {}
 						: { activeConnectionId: activeConnection })}
 					sourceName={resultSourceName}
-					onCreateNote={onCreateNote}
+					onCreateNote={() => {
+						onCreateNote();
+						setPanel(null);
+					}}
 					folderPath={folder}
 					// Both queries, not just the tree: the notebooks alone cannot tell
 					// an empty app from one whose notes all sit loose at the root.
