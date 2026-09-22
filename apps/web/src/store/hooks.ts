@@ -1,12 +1,13 @@
 import { ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
+import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import { type EditorMode } from '../editor/mode.js';
 import { activeConnectionId, db, type NoteRecord, type SyncStateRecord } from './db.js';
 import { folderTree } from './folders.js';
 import { getNote, listNotes } from './notes.js';
-import { getDefaultEditorMode } from './prefs.js';
+import { getCodeDisplay, getDefaultEditorMode, setCodeDisplay } from './prefs.js';
 import { createNoteSearch, type NoteHit } from './search.js';
 import { buildFolderTree, type FolderNode } from './tree.js';
 
@@ -91,6 +92,34 @@ export const useNote = (id: string | undefined): NoteRecord | undefined => {
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>
 	useLiveQuery(() => getDefaultEditorMode(db), []);
+
+/**
+ * Keep the code-block display settings and what is stored on this device in
+ * step, in both directions, for as long as an editor is on screen.
+ *
+ * The store is what the editor's plugins read, because they are not React and
+ * cannot wait for a query; the table is what survives a reload. Writing through
+ * a live query rather than into the store alone is what makes a second tab
+ * follow along — and costs nothing when it is the only tab, since a store told
+ * the value it already holds does not tell anybody.
+ */
+export const useCodeDisplay = (store: CodeDisplayStore = codeDisplay): void => {
+	const stored = useLiveQuery(() => getCodeDisplay(db), []);
+
+	useEffect(() => {
+		if (stored !== undefined) store.set(stored);
+	}, [stored, store]);
+
+	// Back the other way. The write re-runs the query above, which hands the
+	// store the value it just set and stops there.
+	useEffect(
+		() =>
+			store.subscribe(() => {
+				void setCodeDisplay(db, store.get());
+			}),
+		[store]
+	);
+};
 
 /**
  * How many notes sit at the root of the app folder, in no notebook. Zero is the

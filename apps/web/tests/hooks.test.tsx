@@ -1,9 +1,11 @@
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createCodeDisplayStore } from '../src/editor/codeDisplay.js';
 import { db } from '../src/store/db.js';
-import { useLooseNoteCount, useNote, useNoteSearch } from '../src/store/hooks.js';
+import { useCodeDisplay, useLooseNoteCount, useNote, useNoteSearch } from '../src/store/hooks.js';
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
+import { getCodeDisplay, setCodeDisplay } from '../src/store/prefs.js';
 
 /**
  * `useLooseNoteCount` is what decides whether the sidebar's "Loose notes" row
@@ -124,6 +126,47 @@ describe('useNoteSearch', () => {
 
 		await waitFor(() => {
 			expect(result.current).toEqual([]);
+		});
+	});
+});
+
+/**
+ * The bridge between the editor's plugins, which are not React and cannot wait
+ * for a query, and the table that outlives the session. Both directions matter:
+ * a setting that is not read back is forgotten on reload, and one that is not
+ * written is forgotten as soon as the note is closed.
+ */
+describe('useCodeDisplay', () => {
+	beforeEach(async () => {
+		await db.prefs.clear();
+	});
+
+	it('starts the editor off where this device left it', async () => {
+		await setCodeDisplay(db, { wrap: true, lineNumbers: true });
+		const store = createCodeDisplayStore();
+
+		renderHook(() => {
+			useCodeDisplay(store);
+		});
+
+		await waitFor(() => {
+			expect(store.get()).toEqual({ wrap: true, lineNumbers: true });
+		});
+	});
+
+	it('writes a change back, so the next session opens the same way', async () => {
+		const store = createCodeDisplayStore();
+		renderHook(() => {
+			useCodeDisplay(store);
+		});
+		await waitFor(() => {
+			expect(store.get()).toEqual({ wrap: false, lineNumbers: false });
+		});
+
+		store.set({ wrap: false, lineNumbers: true });
+
+		await waitFor(async () => {
+			expect(await getCodeDisplay(db)).toEqual({ wrap: false, lineNumbers: true });
 		});
 	});
 });

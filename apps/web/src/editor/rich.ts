@@ -23,9 +23,16 @@ import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose } from '@milkdown/kit/utils';
 import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 
+import { autoLanguagePlugin } from './autoLanguage.js';
+import { codeBlockViewPlugin } from './codeBlock.js';
+import { codeDisplay, type CodeDisplayStore } from './codeDisplay.js';
+import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
+import { codeHighlightPlugin } from './highlight.js';
+import { createLanguageSource } from './languages.js';
 import { richWithoutNul } from './noNul.js';
+import { tailPlugin } from './tail.js';
 import { taskPlugin, toggleTaskCommand } from './tasks.js';
 
 /**
@@ -38,6 +45,13 @@ import { taskPlugin, toggleTaskCommand } from './tasks.js';
  * the component is what lets those suites drive a real editor without a DOM
  * that can pretend to be typed into. See docs/PLAN.md §7.
  */
+
+/**
+ * The grammars, shared by every editor this module builds rather than one set
+ * per note: a grammar is the same wherever it is used, and fetching Python
+ * again because the reader moved to the next note is a download for nothing.
+ */
+const languages = createLanguageSource();
 
 /**
  * The floating menus. Both are ProseMirror plugin views, and both are React
@@ -65,6 +79,12 @@ export interface RichEditorSetup {
 		slash: PluginSpec<unknown>;
 		tooltip: PluginSpec<unknown>;
 	};
+	/**
+	 * How code blocks are shown. The app's own store by default, since the
+	 * setting belongs to the device rather than to a note; a test hands over one
+	 * of its own so it is not reading whatever the last test left behind.
+	 */
+	display?: CodeDisplayStore;
 }
 
 /**
@@ -91,6 +111,7 @@ export const createRichEditor = ({
 	onUserEdit,
 	onStateChange,
 	menus,
+	display = codeDisplay,
 }: RichEditorSetup): Editor =>
 	Editor.make()
 		.config((ctx) => {
@@ -113,6 +134,15 @@ export const createRichEditor = ({
 		// Always, since a plugin cannot be added to a running editor and one with
 		// no query costs a string search per block of a note.
 		.use($prose(findPlugin))
+		// The code block: its tools, the colours, the gutter, and the guess at
+		// what language it is in.
+		.use(codeBlockViewPlugin(display))
+		.use($prose(() => codeHighlightPlugin(languages)))
+		.use($prose(() => codeActivePlugin))
+		.use($prose(() => codeNumbersPlugin(display)))
+		.use($prose(() => autoLanguagePlugin))
+		// A way out of a note that ends in a code block.
+		.use($prose(() => tailPlugin))
 		// A checkbox that can be pressed, and `Mod+Enter` for the keyboard. The
 		// preset draws a task item and offers no way to tick one.
 		.use($prose(() => taskPlugin))

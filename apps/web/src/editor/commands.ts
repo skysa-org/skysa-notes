@@ -17,6 +17,7 @@ import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 
+import { detectLanguage } from './detect.js';
 import { applyList } from './lists.js';
 
 /**
@@ -227,11 +228,50 @@ const QUOTE: EditorCommand = {
 	apply: run(wrapInBlockquoteCommand),
 };
 
+/** The node a code block is, as the commonmark preset names it in the schema. */
+export const CODE_BLOCK_NODE = 'code_block';
+
+/**
+ * The text a code block would be made out of.
+ *
+ * With nothing selected that is the whole paragraph the cursor is in, because
+ * that is what `setBlockType` is about to turn into a block — not the empty
+ * selection. With something selected it is the selection, across blocks if it
+ * spans them.
+ */
+const textToBecomeCode = (state: EditorState): string => {
+	const { from, to, empty, $from } = state.selection;
+	return empty ? $from.parent.textContent : state.doc.textBetween(from, to, '\n');
+};
+
+/**
+ * Into a code block, or back out of it.
+ *
+ * A toggle because the toolbar button is a toggle: it lights up inside a code
+ * block, and a lit button that only ever does the thing it says is already done
+ * is a button with no way back. `turnIntoTextCommand` is the way back — the
+ * same one "Plain text" uses — so the two agree about what leaving a block
+ * means.
+ *
+ * A block made out of text that is already there arrives with a guess at what
+ * language that text is in (`editor/detect.ts`), in the same transaction, so
+ * one undo takes back the block and the guess together. An empty block — `/code`
+ * on a blank line — has nothing to guess from and gets no language.
+ */
+const toggleCodeBlock = (ctx: Ctx): void => {
+	const { state } = ctx.get(editorViewCtx);
+	if (state.selection.$from.parent.type.name === CODE_BLOCK_NODE) {
+		run(turnIntoTextCommand)(ctx);
+		return;
+	}
+	run(createCodeBlockCommand, detectLanguage(textToBecomeCode(state)) ?? '')(ctx);
+};
+
 const CODE_BLOCK: EditorCommand = {
 	id: 'code-block',
 	label: 'Code block',
 	keywords: ['pre', 'fence', 'snippet'],
-	apply: run(createCodeBlockCommand),
+	apply: toggleCodeBlock,
 };
 
 const TABLE: EditorCommand = {
@@ -362,6 +402,16 @@ export const LIST_COMMANDS: readonly EditorCommand[] = [BULLET_LIST, ORDERED_LIS
 export const INDENT_COMMANDS: readonly EditorCommand[] = [OUTDENT, INDENT];
 
 /**
+ * The one thing the toolbar inserts. Everything else a note can hold — tables,
+ * quotes, dividers — is reached from the slash menu, and the code block would
+ * be too if it were only a matter of getting one: it has a button because it is
+ * the one construct people go looking for in a toolbar, and because the block
+ * has more to it than its own existence (a language, and the colours that
+ * follow), so somewhere to press is somewhere to start.
+ */
+export const INSERT_COMMANDS: readonly EditorCommand[] = [CODE_BLOCK];
+
+/**
  * Every command in the catalogue, once each, for the suite that runs them all.
  *
  * Derived from the groups rather than listed again, so a command that is added
@@ -378,5 +428,6 @@ export const ALL_COMMANDS: readonly EditorCommand[] = [
 		...MORE_INLINE_COMMANDS,
 		...LIST_COMMANDS,
 		...INDENT_COMMANDS,
+		...INSERT_COMMANDS,
 	]),
 ];
