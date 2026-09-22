@@ -101,3 +101,34 @@ describe('the side columns', () => {
 		expect(styles).not.toMatch(/@media \((max|min)-width/);
 	});
 });
+
+/** The declarations of every rule whose selector list mentions `selector`. */
+const declarations = (selector: string): string =>
+	styles
+		.split('}')
+		.filter((block) => block.split('{')[0]?.includes(selector) === true)
+		.map((block) => block.split('{')[1] ?? '')
+		.join(' ');
+
+describe('the compact panels', () => {
+	it.each(['.compact .source-panel', '.compact .sidebar', '.compact .note-list'])(
+		'%s fills the window under the bar',
+		(selector) => {
+			// All four edges: a panel sized to its content left a strip of note
+			// under it, too short to read and easy to press by mistake.
+			expect(declarations(selector)).toMatch(/inset: 0;/);
+			expect(declarations(selector)).not.toMatch(/max-height/);
+		}
+	);
+
+	it.each(['.source-panel', '.sidebar .tree', '.note-list'])(
+		'%s scrolls inside itself',
+		(selector) => {
+			expect(declarations(selector)).toMatch(/overflow-y: auto/);
+		}
+	);
+
+	it('keeps the storage panel and the way to connect at the foot of the source panel', () => {
+		expect(declarations('.source-panel-foot')).toContain('margin-block-start: auto');
+	});
+});

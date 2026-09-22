@@ -478,25 +478,27 @@ export const SourcePanel = ({
 					})}
 				</ul>
 			)}
-			{account}
-			{offerable.length > 0 && (
-				// A group of its own, named by its heading: a provider's name is
-				// also the name of a source above it, and "Dropbox" read out twice
-				// is two buttons a screen-reader user cannot tell apart.
-				<div className="source-panel-connect" role="group" aria-labelledby={headingId}>
-					<p className="source-add-heading" id={headingId}>
-						Connect another account
-					</p>
-					<ConnectButtons
-						db={db}
-						client={client}
-						offerable={offerable}
-						returnTo={returnTo}
-						navigate={navigate}
-						className="row"
-					/>
-				</div>
-			)}
+			<div className="source-panel-foot">
+				{account}
+				{offerable.length > 0 && (
+					// A group of its own, named by its heading: a provider's name is
+					// also the name of a source above it, and "Dropbox" read out twice
+					// is two buttons a screen-reader user cannot tell apart.
+					<div className="source-panel-connect" role="group" aria-labelledby={headingId}>
+						<p className="source-add-heading" id={headingId}>
+							Connect another account
+						</p>
+						<ConnectButtons
+							db={db}
+							client={client}
+							offerable={offerable}
+							returnTo={returnTo}
+							navigate={navigate}
+							className="row"
+						/>
+					</div>
+				)}
+			</div>
 		</section>
 	);
 };

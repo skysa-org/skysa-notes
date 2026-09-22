@@ -427,6 +427,9 @@ describe('the source panel, in a compact window', () => {
 		expect(
 			storage.compareDocumentPosition(connect) & Node.DOCUMENT_POSITION_FOLLOWING
 		).toBeTruthy();
+		// Both at the foot of the panel, together (`.source-panel-foot`).
+		expect(storage.parentElement).toBe(connect.parentElement);
+		expect(storage.parentElement?.classList.contains('source-panel-foot')).toBe(true);
 		// A group of its own, so a provider and a source of the same name are
 		// not two identical buttons side by side.
 		expect(within(connect).getByRole('button', { name: 'Dropbox' })).toBeDefined();

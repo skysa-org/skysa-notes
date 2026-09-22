@@ -1653,18 +1653,23 @@ button.danger {
 	grid-template-columns: minmax(0, 1fr);
 }
 
+/* Every panel fills the window under the bar and scrolls inside itself. A
+   panel sized to its content left the note showing beneath it, which on a
+   phone is a strip too short to read and a target for a press that was meant
+   for the panel. `overscroll-behavior` keeps a fling at the end of the list
+   from moving the page behind it. */
 .compact .source-panel,
 .compact .sidebar,
 .compact .note-list {
 	display: none;
 	position: absolute;
-	inset-block-start: 0;
-	inset-inline: 0;
+	inset: 0;
 	z-index: 15;
-	max-height: 75%;
 	border-inline-end: 0;
-	border-block-end: 1px solid var(--border);
-	box-shadow: 0 0.75rem 1.5rem rgb(0 0 0 / 12%);
+	overscroll-behavior: contain;
+	/* The last row clear of a phone's home indicator, which the page runs
+	   under (`viewport-fit=cover`). */
+	padding-block-end: env(safe-area-inset-bottom);
 }
 
 .compact .app-shell[data-panel='notebooks'] > .sidebar {
@@ -1675,13 +1680,20 @@ button.danger {
 	display: flex;
 }
 
-/* The tabs as a list, then the storage panel, then the way to another
-   account: one column that scrolls as a whole when an account's storage
-   panel has a lot to say. Only ever drawn in a compact window. */
+/* The tabs as a list at the top, and the storage panel and the way to another
+   account at the foot, with the room between them — where a sidebar keeps its
+   storage panel, and for the same reason: it is the part a user looks for
+   rather than reads past. One column, and it scrolls as a whole when an
+   account's storage panel has a lot to say. Only ever drawn in a compact
+   window. */
 .source-panel {
 	flex-direction: column;
 	overflow-y: auto;
 	background: var(--surface);
+}
+
+.source-panel-foot {
+	margin-block-start: auto;
 }
 
 .source-panel ul {
@@ -1703,14 +1715,6 @@ button.danger {
 
 .compact .app-shell[data-panel='notes'] > .note-list {
 	display: block;
-}
-
-/* A search's answers are the thing being read rather than a list glanced at on
-   the way to a note, so they take everything under the bar: a panel sized
-   for a notebook's notes left room to compare two results at most. */
-.compact .note-list.searching {
-	inset-block-end: 0;
-	max-height: none;
 }
 
 /* A row narrow enough to wrap a three-line excerpt is a row tall enough to
