@@ -217,7 +217,9 @@ describe('the app', () => {
 			await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
 		});
 		await waitFor(() => {
-			expect(screen.getByRole('button', { name: /Work/ })).toBeTruthy();
+			// Anchored: the pane header's notebook menu is named for the open
+			// notebook too, and the row also carries its note count.
+			expect(screen.getByRole('button', { name: /^Work/ })).toBeTruthy();
 		});
 		expect(await screen.findByText('Standup')).toBeTruthy();
 

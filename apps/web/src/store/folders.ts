@@ -399,8 +399,14 @@ export const renameFolder = async (
 	path: string,
 	name: string,
 	options: FolderScope = {}
-): Promise<void> =>
-	moveFolder(db, path, joinPath(parentPath(path), sanitizeFolderName(name)), options);
+): Promise<string> => {
+	// Handed back, because the caller cannot work it out: the name is sanitised
+	// on the way in, and the open notebook is named by path in the URL — which
+	// this has just changed, for the notebook and for everything under it.
+	const to = joinPath(parentPath(path), sanitizeFolderName(name));
+	await moveFolder(db, path, to, options);
+	return to;
+};
 
 /**
  * Delete a folder and tombstone every note beneath it, so each deletion is

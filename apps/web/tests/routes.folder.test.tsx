@@ -37,10 +37,10 @@ const nameIt = async (user: ReturnType<typeof userEvent.setup>, name: string) =>
 describe('making a notebook that cannot be made', () => {
 	it('tells the user why instead of failing silently', async () => {
 		const user = userEvent.setup();
-		// `Work` is the notebook the app opens on, so `Ideas` is asked for inside
-		// it — and `Work/Ideas` is already taken.
+		// The header's `+` makes a top-level notebook whatever is open, and
+		// `Ideas` is already one.
+		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await createFolder(db, { parentPath: 'Work', name: 'Ideas' });
 		await openApp();
 
 		await nameIt(user, 'Ideas');
@@ -49,7 +49,7 @@ describe('making a notebook that cannot be made', () => {
 		expect(alert.textContent).toContain('Ideas');
 		// The user's words, not the store's: no raw path, and "notebook" as the
 		// rest of the app calls it.
-		expect(alert.textContent).not.toContain('Work/Ideas');
+		expect(alert.textContent).not.toContain('/');
 		expect(alert.textContent).not.toContain('Folder');
 		// `app-shell` is a three-column grid with one child per column. A fourth
 		// child takes the sidebar's column and pushes the note view into a second
@@ -66,8 +66,8 @@ describe('making a notebook that cannot be made', () => {
 		// of subject, not an acknowledgement — and they may want to stay where
 		// they are and try the name again.
 		const user = userEvent.setup();
+		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await createFolder(db, { parentPath: 'Work', name: 'Ideas' });
 		await openApp();
 		await nameIt(user, 'Ideas');
 		await screen.findByRole('alert');
@@ -81,8 +81,8 @@ describe('making a notebook that cannot be made', () => {
 
 	it('takes the banner away once the user does something else', async () => {
 		const user = userEvent.setup();
+		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await createFolder(db, { parentPath: 'Work', name: 'Ideas' });
 		await createFolder(db, { parentPath: undefined, name: 'Zed' });
 		await openApp();
 		await nameIt(user, 'Ideas');

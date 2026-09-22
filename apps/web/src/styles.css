@@ -440,6 +440,109 @@ button.row.drop-over {
 	background: color-mix(in srgb, var(--drop) 12%, transparent);
 }
 
+/* The pane header's controls: the notebook menu and the `+`. */
+.pane-actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.notebook-menu {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+/* The same card `.source-add-menu` is, for the same reason: it hangs off the
+   control that opened it and has to sit over the tree below. */
+.notebook-menu-items {
+	position: absolute;
+	inset-block-start: 100%;
+	inset-inline-end: 0;
+	z-index: 20;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.35rem;
+	min-width: 12rem;
+	padding: 0.6rem 0.75rem;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.notebook-menu-items button {
+	padding: 0.15rem 0;
+	font: inherit;
+	font-size: 0.85rem;
+	text-align: start;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.notebook-menu-items button:hover {
+	text-decoration: underline;
+}
+
+/* Deleting a notebook takes every note beneath it. The colour is the one a
+   toast uses to say something went wrong, because this is the same news. */
+button.danger {
+	color: var(--bad);
+}
+
+/* A name being typed takes the row's own box, so it does not move as it
+   becomes editable — the same shape the source tabs use. `button.row` is
+   button-scoped, so the box is spelled out again here rather than shared. */
+.row-editing {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	cursor: text;
+}
+
+.row-rename {
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	font: inherit;
+	color: inherit;
+	background: none;
+	border: 0;
+}
+
+.row-rename:focus-visible {
+	outline: none;
+}
+
+/* Asked before a notebook goes. Under the header rather than over the pane:
+   it is one question with two answers, and there is nothing behind it that
+   needs focus trapped away from it. */
+.confirm {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	padding: 0.75rem;
+	background: color-mix(in srgb, var(--bad) 8%, transparent);
+	border-block-end: 1px solid var(--border);
+}
+
+.confirm p {
+	flex-basis: 100%;
+	margin: 0;
+	font-size: 0.85rem;
+}
+
+.confirm-answers {
+	display: flex;
+	gap: 0.5rem;
+}
+
 /* What is in the air, said in words under the pane header. It is a live region
    (`role="status"`), so it is also how a screen-reader user is told the mode
    has started at all. */

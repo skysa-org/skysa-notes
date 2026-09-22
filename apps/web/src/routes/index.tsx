@@ -14,7 +14,13 @@ import { Sidebar } from '../components/Sidebar.js';
 import { SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
-import { createFolder, FolderExistsError, moveFolder } from '../store/folders.js';
+import {
+	createFolder,
+	deleteFolder,
+	FolderExistsError,
+	moveFolder,
+	renameFolder,
+} from '../store/folders.js';
 import {
 	useActiveSource,
 	useFolderTree,
@@ -313,6 +319,52 @@ const Home = () => {
 			});
 	};
 
+	const onRenameFolder = (path: string, name: string) => {
+		setProblem(null);
+		void renameFolder(db, path, name)
+			.then((to) => {
+				// Same reason the move below rebases: the URL names the open
+				// notebook by path, and this has changed it.
+				if (folder !== undefined && isWithin(folder, path)) {
+					select({ folder: folderToSearch(rebasePath(folder, path, to)) });
+				}
+			})
+			.catch((error: unknown) => {
+				setProblem(
+					error instanceof FolderExistsError
+						? {
+								message: `There is already a notebook called “${error.folderName}” here.`,
+								tone: 'warning',
+							}
+						: { message: 'That notebook could not be renamed.', tone: 'error' }
+				);
+			});
+	};
+
+	const onDeleteFolder = (path: string) => {
+		setProblem(null);
+		// Asked about before this is called: the sidebar puts the question, with
+		// the count of what goes with it, because everything beneath a notebook
+		// is tombstoned and pushed as a deletion.
+		void deleteFolder(db, path)
+			.then(() => {
+				const goneFolder = folder !== undefined && isWithin(folder, path);
+				const goneNote = openNote !== undefined && isWithin(openNote.path, path);
+				// Both are named in the URL and neither is there any more. Left
+				// alone the app opens a notebook that has gone — `selectedFolderPath`
+				// falls back to the first one, but only once something asks it to.
+				if (goneFolder || goneNote) {
+					select({
+						...(goneFolder ? { folder: undefined } : {}),
+						...(goneNote ? { note: undefined } : {}),
+					});
+				}
+			})
+			.catch(() => {
+				setProblem({ message: 'That notebook could not be deleted.', tone: 'error' });
+			});
+	};
+
 	/**
 	 * What the user has picked up, by dragging it or by running the command.
 	 *
@@ -523,6 +575,8 @@ const Home = () => {
 						select({ folder: folderToSearch(path), note: undefined });
 					}}
 					onCreateFolder={onCreateFolder}
+					onRenameFolder={onRenameFolder}
+					onDeleteFolder={onDeleteFolder}
 					looseNoteCount={looseNoteCount}
 					footer={<AccountPanel />}
 					moving={moving}
