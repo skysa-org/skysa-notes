@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,7 +7,7 @@ import { routeTree } from '../src/routeTree.gen.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import type * as Notes from '../src/store/notes.js';
-import { createNote } from '../src/store/notes.js';
+import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 /**
@@ -227,7 +227,63 @@ describe('opening a notebook', () => {
 		await waitFor(() => {
 			expect(titleField()).toBeNull();
 		});
-		expect(await screen.findByText('Select a note, or create one.')).toBeDefined();
+		const note = await screen.findByRole('region', { name: 'Note' });
+		expect(note.textContent).toBe('Select a note, or create one.');
+
+		// "create one" makes one, in the notebook that is open.
+		await user.click(within(note).getByRole('button', { name: 'create one' }));
+		await waitFor(() => {
+			expect(titleField()?.value).toBe('Untitled');
+		});
+		const notes = await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray();
+		expect(notes.filter((row) => row.deletedLocally === 0).map((row) => row.path)).toEqual([
+			'Work/untitled.md',
+		]);
+	});
+
+	it('deletes a note from a right-click on its row, leaving the open one open', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const open = await createNote(db, { folderPath: 'Work', title: 'Open', body: 'Open\n' });
+		const other = await createNote(db, { folderPath: 'Work', title: 'Other', body: 'Other\n' });
+		const user = userEvent.setup();
+		await openApp(`/?folder=Work&note=${open.id}`);
+		await waitFor(() => {
+			expect(titleField()?.value).toBe('Open');
+		});
+
+		const list = screen.getByRole('region', { name: 'Notes' });
+		fireEvent.contextMenu(within(list).getByRole('button', { name: /^Other/ }), {
+			clientX: 300,
+			clientY: 120,
+		});
+		const menu = screen.getByRole('group', { name: 'Note “Other”' });
+		// The note header's menu, item for item.
+		expect(
+			within(menu)
+				.getAllByRole('button')
+				.map((item) => item.textContent)
+		).toEqual(['Move to notebook…', 'Delete']);
+		await user.click(within(menu).getByRole('button', { name: 'Delete' }));
+
+		// Deleted, with the same way back a delete from the note's own menu has.
+		expect(await screen.findByText('Deleted “Other”.')).toBeDefined();
+		expect((await getNote(db, other.id))?.deletedLocally).toBe(1);
+		expect(titleField()?.value).toBe('Open');
+		expect((await getNote(db, open.id))?.deletedLocally).toBe(0);
+	});
+
+	it('offers the first notebook from the empty note pane', async () => {
+		const user = userEvent.setup();
+		await openApp();
+
+		const note = await screen.findByRole('region', { name: 'Note' });
+		// Found, not got: it is offered once the store has said there are none.
+		await user.click(await within(note).findByRole('button', { name: 'Create a notebook' }));
+		// The sidebar's own field, with the focus in it.
+		expect(document.activeElement).toBe(screen.getByLabelText('New notebook name'));
+		await user.keyboard('Work{Enter}');
+
+		expect(await screen.findByRole('heading', { name: 'Work' })).toBeDefined();
 	});
 
 	it('does not open a note in a notebook the user has since left', async () => {

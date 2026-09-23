@@ -1,4 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { ROOT } from '@skysa/core';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { NoteList } from '../src/components/NoteList.js';
@@ -99,9 +100,26 @@ describe('NoteList', () => {
 		);
 	});
 
-	it('says an open notebook is empty', () => {
-		renderList({ notes: [] });
+	it('says an open notebook is empty, and offers to make its first note', () => {
+		let created = 0;
+		renderList({
+			notes: [],
+			onCreateNote: () => {
+				created += 1;
+			},
+		});
+		expect(screen.getByText(/No notes here yet\./).textContent).toBe(
+			'No notes here yet. Create one.'
+		);
+
+		screen.getByRole('button', { name: 'Create one' }).click();
+		expect(created).toBe(1);
+	});
+
+	it('does not offer to make a note among the loose ones, which are only imported', () => {
+		renderList({ notes: [], folderPath: ROOT });
 		expect(screen.getByText('No notes here yet.')).toBeDefined();
+		expect(screen.queryByRole('button', { name: 'Create one' })).toBeNull();
 	});
 
 	it('waits while the notes load', () => {
@@ -109,9 +127,52 @@ describe('NoteList', () => {
 		expect(screen.getByText('Loading…')).toBeDefined();
 	});
 
+	it('opens the note’s menu on a right-click, about the note clicked', () => {
+		const chosen: string[] = [];
+		renderList({
+			notes: [note('Alpha'), note('Beta')],
+			menuFor: (row) => [
+				{
+					label: 'Delete',
+					onChoose: () => {
+						chosen.push(row.title);
+					},
+				},
+			],
+		});
+
+		fireEvent.contextMenu(screen.getByRole('button', { name: /^Beta/ }), {
+			clientX: 10,
+			clientY: 10,
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+		expect(chosen).toEqual(['Beta']);
+		expect(screen.queryByRole('group', { name: 'Note “Beta”' })).toBeNull();
+	});
+
+	it('leaves the browser its own menu where it is given none', () => {
+		renderList({ notes: [note('Alpha')] });
+		expect(fireEvent.contextMenu(screen.getByRole('button', { name: /^Alpha/ }))).toBe(true);
+	});
+
 	it('asks for a notebook when there are none', () => {
 		renderList({ notes: [], folderPath: undefined });
 		expect(screen.getByText('Create a notebook to start writing.')).toBeDefined();
+	});
+
+	it('makes the ask for a notebook the way to one, where it is given', () => {
+		let asked = 0;
+		renderList({
+			notes: [],
+			folderPath: undefined,
+			onCreateNotebook: () => {
+				asked += 1;
+			},
+		});
+
+		screen.getByRole('button', { name: 'Create a notebook' }).click();
+		expect(asked).toBe(1);
 	});
 
 	it('waits rather than asking for a notebook before the store has loaded', () => {

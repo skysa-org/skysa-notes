@@ -30,7 +30,9 @@ import { getNote } from '../store/notes.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
 	type AccountState,
+	anyConnected,
 	claimConnection,
+	CONNECT_FIRST_LABEL,
 	CONNECTABLE,
 	LEFT_AT_PROVIDER,
 	type LetGoInput,
@@ -350,23 +352,33 @@ interface LocalProps {
 	connectIs?: 'above' | 'below';
 }
 
-const CONNECT_HINTS = {
-	above: ' Use + above to connect storage.',
-	below: ' Connect storage below.',
-} as const;
+/**
+ * Where to go to connect, named as the control there is named. With nothing
+ * connected yet the `+` carries its words (`CONNECT_FIRST_LABEL`), and the
+ * compact panel's list is headed by them.
+ */
+const connectHint = (connectIs: 'above' | 'below', first: boolean): string =>
+	first
+		? ` Use “${CONNECT_FIRST_LABEL}” ${connectIs} to sync them.`
+		: { above: ' Use + above to connect storage.', below: ' Connect storage below.' }[
+				connectIs
+			];
 
-const NotConnected = ({ config, connectIs = 'above' }: LocalProps) => {
+const NotConnected = ({ config, database, connectIs = 'above' }: LocalProps) => {
 	const settings = answer(config);
 	const offerable =
 		settings?.authMode === 'storage-first'
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
+	const sources = useLiveQuery(() => connectedSources(database), [database]);
 
 	return (
 		<section className="account" aria-label="Storage">
 			<p className="muted">
 				Notes are kept on this device only.
-				{offerable.length > 0 && CONNECT_HINTS[connectIs]}
+				{offerable.length > 0 &&
+					sources !== undefined &&
+					connectHint(connectIs, !anyConnected(sources))}
 			</p>
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">

@@ -1,5 +1,13 @@
 import { frontmatterIsEditable, headings, type StructuralDifference } from '@skysa/core';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+	type Ref,
+	useCallback,
+	useEffect,
+	useImperativeHandle,
+	useMemo,
+	useRef,
+	useState,
+} from 'react';
 
 import { parseChord } from '../commands/chord.js';
 import { useCommand } from '../commands/context.js';
@@ -29,6 +37,7 @@ import {
 	useElementWidth,
 	useMediaQuery,
 } from './layout.js';
+import { noteMenuItems } from './noteMenu.js';
 import { OptionsMenu } from './OptionsMenu.js';
 import { Outline } from './Outline.js';
 import { UnsupportedBanner, useUnsupported } from './unsupported.js';
@@ -71,6 +80,25 @@ export interface NoteViewProps {
 	 * while something else already is.
 	 */
 	onMove?: () => void;
+	/**
+	 * Make a note in the open notebook, for the empty pane's "create one". Given
+	 * only while a notebook is open: without somewhere to put a note, the pane
+	 * does not offer to make one.
+	 */
+	onCreateNote?: () => void;
+	/**
+	 * Ask for the first notebook, given while there are none. In a compact
+	 * window this pane is all there is on screen, and "Select a note" with
+	 * nothing anywhere to select is a dead end.
+	 */
+	onCreateNotebook?: () => void;
+	/** For the route, which offers Delete on every note in the list. */
+	ref?: Ref<NoteViewHandle>;
+}
+
+/** What the note pane does for notes other than the one it shows. */
+export interface NoteViewHandle {
+	deleteNote: (note: NoteRecord) => void;
 }
 
 /**
@@ -279,7 +307,43 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 	return { compact, outlineFits, showOutline, toggleOutline, toolbar, toggleToolbar };
 };
 
-export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
+/** What the empty pane says, offering what can be done from here. */
+const NothingOpen = ({
+	onCreateNote,
+	onCreateNotebook,
+}: Pick<NoteViewProps, 'onCreateNote' | 'onCreateNotebook'>) => {
+	if (onCreateNote !== undefined) {
+		return (
+			<>
+				Select a note, or{' '}
+				<button type="button" className="link-button" onClick={onCreateNote}>
+					create one
+				</button>
+				.
+			</>
+		);
+	}
+	if (onCreateNotebook !== undefined) {
+		return (
+			<>
+				<button type="button" className="link-button" onClick={onCreateNotebook}>
+					Create a notebook
+				</button>{' '}
+				to start writing.
+			</>
+		);
+	}
+	return 'Select a note.';
+};
+
+export const NoteView = ({
+	note,
+	onDeleted,
+	onMove,
+	onCreateNote,
+	onCreateNotebook,
+	ref: handle,
+}: NoteViewProps) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
 
@@ -343,43 +407,58 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 		[change, edited]
 	);
 
+	/**
+	 * Delete a note: the one open, from its own menu, or any other from a
+	 * right-click on its row (`NoteViewHandle`). Here either way, because what
+	 * autosave holds is here — for the note open, and for any earlier one whose
+	 * save failed — and what it holds goes with the note, for undo.
+	 */
+	const deleteOne = useCallback(
+		(target: NoteRecord) => {
+			// Written first, so the last words are in the row before it is a
+			// tombstone: restoring it brings them back with it. Only the open note's
+			// editor has any, but the flush is harmless for another.
+			flush();
+			// By the note's own source throughout: an id names a note only there, and
+			// the one showing may have changed by the time a continuation runs.
+			const home = { connectionId: target.connectionId };
+			void deleteNote(db, target.id, home)
+				// Everything out has come back, and what had failed has had one more
+				// try — into the tombstone, which keeps an edit and stays deleted.
+				.then(settle)
+				// Deleted either way; a row that cannot be read is the note as shown.
+				.then(() => getNote(db, target.id, home).catch(() => undefined))
+				.then((row) => {
+					// Only now that it is deleted, and nothing before: a held edit
+					// retried after sync has purged the row would bring the note back
+					// (`saveNoteBody`), here and on the provider. What is let go is
+					// what the store never took, and undo cannot bring back less than
+					// the user had written — so it goes along. Asked of autosave, by
+					// note, rather than remembered here: a save that went into a
+					// conflict copy is stored, and offered again it would be copied
+					// again.
+					const unstored = forget(noteRef(target));
+					const deleted = row ?? target;
+					if (unstored === undefined) {
+						onDeleted(deleted);
+						return;
+					}
+					if (unstored.displaced) {
+						onDeleted(deleted, unstored.value);
+						return;
+					}
+					const { body, origin } = unstored.value;
+					onDeleted({ ...deleted, body, bodyOrigin: origin });
+				});
+		},
+		[flush, forget, onDeleted, settle]
+	);
+
 	const onDelete = useCallback(() => {
-		if (note === undefined) return;
-		// Written first, so the last words are in the row before it is a
-		// tombstone: restoring it brings them back with it.
-		flush();
-		// By the note's own source throughout: an id names a note only there, and
-		// the one showing may have changed by the time a continuation runs.
-		const home = { connectionId: note.connectionId };
-		void deleteNote(db, note.id, home)
-			// Everything out has come back, and what had failed has had one more
-			// try — into the tombstone, which keeps an edit and stays deleted.
-			.then(settle)
-			// Deleted either way; a row that cannot be read is the note as shown.
-			.then(() => getNote(db, note.id, home).catch(() => undefined))
-			.then((row) => {
-				// Only now that it is deleted, and nothing before: a held edit
-				// retried after sync has purged the row would bring the note back
-				// (`saveNoteBody`), here and on the provider. What is let go is
-				// what the store never took, and undo cannot bring back less than
-				// the user had written — so it goes along. Asked of autosave, by
-				// note, rather than remembered here: a save that went into a
-				// conflict copy is stored, and offered again it would be copied
-				// again.
-				const unstored = forget(noteRef(note));
-				const deleted = row ?? note;
-				if (unstored === undefined) {
-					onDeleted(deleted);
-					return;
-				}
-				if (unstored.displaced) {
-					onDeleted(deleted, unstored.value);
-					return;
-				}
-				const { body, origin } = unstored.value;
-				onDeleted({ ...deleted, body, bodyOrigin: origin });
-			});
-	}, [flush, forget, note, onDeleted, settle]);
+		if (note !== undefined) deleteOne(note);
+	}, [deleteOne, note]);
+
+	useImperativeHandle(handle, () => ({ deleteNote: deleteOne }), [deleteOne]);
 
 	const mode: EditorMode | undefined = locked ? 'raw' : (note?.editorMode ?? defaultMode);
 
@@ -435,7 +514,9 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 	if (note === undefined) {
 		return (
 			<section className="note-view empty" aria-label="Note">
-				<p className="muted placeholder">Select a note, or create one.</p>
+				<p className="muted placeholder">
+					<NothingOpen onCreateNote={onCreateNote} onCreateNotebook={onCreateNotebook} />
+				</p>
 			</section>
 		);
 	}
@@ -470,7 +551,9 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 	);
 };
 
-const MODE_ICONS: Record<EditorMode, IconName> = { rich: 'rich-text', raw: 'markdown' };
+// Markdown is drawn as code: the `M↓` mark it had was a box of small strokes
+// that could not be told from the rich text icon beside it at a glance.
+const MODE_ICONS: Record<EditorMode, IconName> = { rich: 'rich-text', raw: 'code' };
 
 const tabTitle = (
 	tab: EditorMode,
@@ -624,13 +707,8 @@ const NoteScreen = ({
 						title="Note options"
 						groupLabel={`Note “${note.title}”`}
 						triggerClassName="note-icon"
-						trigger={<Icon name="more" />}
-						items={[
-							...(onMove === undefined
-								? []
-								: [{ label: 'Move to notebook…', onChoose: onMove }]),
-							{ label: 'Delete', onChoose: onDelete, danger: true },
-						]}
+						trigger={<Icon name="overflow" />}
+						items={noteMenuItems({ onMove, onDelete })}
 					/>
 				</div>
 			</header>

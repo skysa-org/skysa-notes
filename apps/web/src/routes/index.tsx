@@ -10,7 +10,8 @@ import { CompactBar, useCompactLayout } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
-import { type DisplacedText, NoteView } from '../components/NoteView.js';
+import { noteMenuItems } from '../components/noteMenu.js';
+import { type DisplacedText, NoteView, type NoteViewHandle } from '../components/NoteView.js';
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
@@ -178,6 +179,26 @@ const useNoteMove = (
 	return offered ? { onMove: move } : {};
 };
 
+/**
+ * What the empty note pane offers to make. A note where there is a notebook to
+ * put it in, as `note.new` has; and the first notebook while there is none,
+ * since in a compact window this pane is the only one on screen.
+ */
+const emptyPaneOffers = ({
+	folder,
+	nothingYet,
+	onCreateNote,
+	onCreateNotebook,
+}: {
+	folder: string | undefined;
+	nothingYet: boolean;
+	onCreateNote: () => void;
+	onCreateNotebook: () => void;
+}): { onCreateNote?: () => void; onCreateNotebook?: () => void } => {
+	if (folder !== undefined && folder !== ROOT) return { onCreateNote };
+	return nothingYet ? { onCreateNotebook } : {};
+};
+
 const Home = () => {
 	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
@@ -213,6 +234,8 @@ const Home = () => {
 	const notes = useNotesInFolder(folder);
 	const openNote = useNote(noteId);
 	// Read by a continuation that finishes after the user may have moved on.
+	/** The note pane, which deletes a note from the list's menu as from its own. */
+	const noteView = useRef<NoteViewHandle>(null);
 	const noteIdRef = useRef(noteId);
 	useEffect(() => {
 		noteIdRef.current = noteId;
@@ -530,6 +553,18 @@ const Home = () => {
 	}, []);
 
 	/**
+	 * How many times an empty state has asked for a new notebook. The field is
+	 * the sidebar's, so this is a request it answers rather than state it
+	 * shares — and the sidebar is opened for it in a compact window, where it
+	 * is a dropdown the field would otherwise be hidden in.
+	 */
+	const [newNotebookAsked, setNewNotebookAsked] = useState(0);
+	const askNewNotebook = () => {
+		setNewNotebookAsked((times) => times + 1);
+		if (compact) setPanel('notebooks');
+	};
+
+	/**
 	 * Every destination is a sidebar row, and in a compact window the sidebar
 	 * is a dropdown that may be shut — so picking something up opens it, or a
 	 * move begun from the palette would be a mode with nowhere to finish it.
@@ -779,6 +814,7 @@ const Home = () => {
 					onReveal={() => {
 						if (compact) setPanel('notebooks');
 					}}
+					newNotebookAsked={newNotebookAsked}
 				/>
 
 				<NoteList
@@ -792,6 +828,7 @@ const Home = () => {
 						onCreateNote();
 						setPanel(null);
 					}}
+					onCreateNotebook={askNewNotebook}
 					folderPath={folder}
 					// Both queries, not just the tree: the notebooks alone cannot tell
 					// an empty app from one whose notes all sit loose at the root.
@@ -801,11 +838,39 @@ const Home = () => {
 					}}
 					onCancelMove={cancelMove}
 					movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
+					// The note's own menu, about the note right-clicked, which
+					// need not be the one open. Delete goes through the note pane,
+					// which holds what autosave has not stored yet.
+					menuFor={(note) =>
+						noteMenuItems({
+							onMove:
+								moving === null
+									? () => {
+											pickUp({
+												kind: 'note',
+												id: note.id,
+												path: note.path,
+												name: note.title,
+											});
+										}
+									: undefined,
+							onDelete: () => {
+								noteView.current?.deleteNote(note);
+							},
+						})
+					}
 				/>
 
 				<NoteView
+					ref={noteView}
 					note={openNote}
 					{...noteMove}
+					{...emptyPaneOffers({
+						folder,
+						nothingYet: tree?.length === 0 && looseNoteCount === 0,
+						onCreateNote,
+						onCreateNotebook: askNewNotebook,
+					})}
 					onDeleted={(note, displaced) => {
 						setDeleted(note);
 						setBeside(displaced ?? null);

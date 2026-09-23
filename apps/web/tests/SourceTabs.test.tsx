@@ -289,7 +289,9 @@ describe('the source tabs', () => {
 		const db = freshDatabase();
 		show(db);
 
-		expect(await screen.findByRole('button', { name: 'Connect another account' })).toBeTruthy();
+		// In words, since there is no tab beside it to say what a `+` is for.
+		const add = await screen.findByRole('button', { name: 'Connect storage provider' });
+		expect(add.textContent).toBe('+ Connect storage provider');
 		expect(
 			within(screen.getByRole('navigation', { name: 'Sources' })).queryAllByRole('button')
 		).toHaveLength(0);

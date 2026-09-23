@@ -104,6 +104,45 @@ describe('Sidebar', () => {
 
 		expect(onCreateFolder).toHaveBeenCalledWith(undefined, 'Personal');
 	});
+
+	it('makes "Create one" in the empty sidebar the way to the first notebook', async () => {
+		const onCreateFolder = vi.fn();
+		renderSidebar({ tree: [], selectedFolder: undefined, onCreateFolder });
+
+		await userEvent.click(screen.getByRole('button', { name: 'Create one' }));
+		await userEvent.type(screen.getByLabelText('New notebook name'), 'Personal{Enter}');
+
+		expect(onCreateFolder).toHaveBeenCalledWith(undefined, 'Personal');
+	});
+
+	it('opens the field when asked from outside, once per asking', async () => {
+		const onCreateFolder = vi.fn();
+		const props = { tree: [], selectedFolder: undefined, onCreateFolder };
+		const { rerender } = renderSidebar(props);
+		expect(screen.queryByLabelText('New notebook name')).toBeNull();
+
+		const again = (asked: number) => {
+			rerender(
+				<Sidebar
+					{...props}
+					onSelectFolder={() => undefined}
+					looseNoteCount={0}
+					newNotebookAsked={asked}
+				/>
+			);
+		};
+		again(1);
+		expect(document.activeElement).toBe(screen.getByLabelText('New notebook name'));
+		await userEvent.keyboard('{Escape}');
+		expect(screen.queryByLabelText('New notebook name')).toBeNull();
+
+		// The same count again is not a new asking.
+		again(1);
+		expect(screen.queryByLabelText('New notebook name')).toBeNull();
+		again(2);
+		await userEvent.type(screen.getByLabelText('New notebook name'), 'Work{Enter}');
+		expect(onCreateFolder).toHaveBeenCalledWith(undefined, 'Work');
+	});
 });
 
 /**
@@ -436,8 +475,12 @@ describe('deleting a notebook', () => {
 
 		// Three: the two in it and the one in the notebook inside it, which is
 		// the part the user cannot see from here.
-		const asked = screen.getByRole('group', { name: 'Delete notebook' });
-		expect(asked.textContent).toContain('3 notes');
+		const asked = screen.getByRole('alertdialog', { name: 'Delete notebook?' });
+		expect(within(asked).getByText(/will be deleted/).textContent).toBe(
+			'“work” and the 3 notes in it will be deleted.'
+		);
+		// Cancel holds the focus: the answer that deletes is never the default.
+		expect(document.activeElement).toBe(within(asked).getByRole('button', { name: 'Cancel' }));
 		expect(onDeleteFolder).not.toHaveBeenCalled();
 	});
 
@@ -447,9 +490,10 @@ describe('deleting a notebook', () => {
 		await openMenu('personal');
 		await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
-		const asked = screen.getByRole('group', { name: 'Delete notebook' });
-		expect(asked.textContent).toContain('personal');
-		expect(asked.textContent).not.toContain('note');
+		const asked = screen.getByRole('alertdialog', { name: 'Delete notebook?' });
+		expect(within(asked).getByText(/will be deleted/).textContent).toBe(
+			'“personal” will be deleted.'
+		);
 	});
 
 	it('goes through on the second press', async () => {
@@ -459,9 +503,12 @@ describe('deleting a notebook', () => {
 		await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
 		await userEvent.click(
-			within(screen.getByRole('group', { name: 'Delete notebook' })).getByRole('button', {
-				name: 'Delete',
-			})
+			within(screen.getByRole('alertdialog', { name: 'Delete notebook?' })).getByRole(
+				'button',
+				{
+					name: 'Delete',
+				}
+			)
 		);
 
 		expect(onDeleteFolder).toHaveBeenCalledWith('work');
@@ -474,13 +521,13 @@ describe('deleting a notebook', () => {
 		await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
 		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-		expect(screen.queryByRole('group', { name: 'Delete notebook' })).toBeNull();
+		expect(screen.queryByRole('alertdialog', { name: 'Delete notebook?' })).toBeNull();
 
 		await openMenu('work');
 		await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 		await userEvent.keyboard('{Escape}');
 
-		expect(screen.queryByRole('group', { name: 'Delete notebook' })).toBeNull();
+		expect(screen.queryByRole('alertdialog', { name: 'Delete notebook?' })).toBeNull();
 		expect(onDeleteFolder).not.toHaveBeenCalled();
 	});
 });
@@ -514,5 +561,99 @@ describe('the notebook menu', () => {
 		expect(document.activeElement).toBe(
 			screen.getByRole('button', { name: 'Options for “work”' })
 		);
+	});
+});
+
+/**
+ * A right-click on a notebook's row opens the header's menu, about that row:
+ * the same items, acting on the notebook clicked rather than the one open.
+ */
+describe('the notebook right-click menu', () => {
+	const rightClick = (name: RegExp) => {
+		fireEvent.contextMenu(screen.getByRole('button', { name }), { clientX: 40, clientY: 60 });
+	};
+
+	it('offers the header menu’s items, about the notebook clicked', () => {
+		renderSidebar({ selectedFolder: 'work' });
+
+		rightClick(/^personal/);
+
+		const menu = screen.getByRole('group', { name: 'Notebook “personal”' });
+		expect(
+			within(menu)
+				.getAllByRole('button')
+				.map((item) => item.textContent)
+		).toEqual(['New notebook inside “personal”', 'Rename', 'Move', 'Delete']);
+		// Ready for the keyboard: a menu opened with the menu key is used from here.
+		expect(document.activeElement).toBe(within(menu).getAllByRole('button')[0]);
+	});
+
+	it('renames the notebook clicked, not the one open', async () => {
+		const onRenameFolder = vi.fn();
+		renderSidebar({ selectedFolder: 'work', onRenameFolder });
+
+		rightClick(/^personal/);
+		await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+		await userEvent.keyboard('Home{Enter}');
+
+		expect(onRenameFolder).toHaveBeenCalledWith('personal', 'Home');
+	});
+
+	it('asks before deleting the notebook clicked', async () => {
+		const onDeleteFolder = vi.fn();
+		renderSidebar({ tree: counted, selectedFolder: 'personal', onDeleteFolder });
+
+		rightClick(/^work/);
+		await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+		const asked = screen.getByRole('alertdialog', { name: 'Delete notebook?' });
+		expect(within(asked).getByText(/will be deleted/).textContent).toBe(
+			'“work” and the 3 notes in it will be deleted.'
+		);
+		await userEvent.click(within(asked).getByRole('button', { name: 'Delete' }));
+
+		expect(onDeleteFolder).toHaveBeenCalledWith('work');
+	});
+
+	it('picks up the notebook clicked', async () => {
+		const onPickUp = vi.fn();
+		renderSidebar({ selectedFolder: 'work', onPickUp });
+
+		rightClick(/meetings/);
+		await userEvent.click(screen.getByRole('button', { name: 'Move' }));
+
+		expect(onPickUp).toHaveBeenCalledWith({
+			kind: 'notebook',
+			path: 'work/meetings',
+			name: 'meetings',
+		});
+	});
+
+	it('closes on Escape and on a press elsewhere', async () => {
+		renderSidebar({ selectedFolder: 'work' });
+
+		rightClick(/^personal/);
+		await userEvent.keyboard('{Escape}');
+		expect(screen.queryByRole('group', { name: 'Notebook “personal”' })).toBeNull();
+
+		rightClick(/^personal/);
+		await userEvent.click(screen.getByRole('heading', { name: 'Notebooks' }));
+		expect(screen.queryByRole('group', { name: 'Notebook “personal”' })).toBeNull();
+	});
+
+	it('leaves the browser its own menu where there is no notebook to act on', () => {
+		renderSidebar({ looseNoteCount: 2 });
+
+		const loose = screen.getByRole('button', { name: /Loose notes/ });
+		// `fireEvent` answers whether the default went ahead.
+		expect(fireEvent.contextMenu(loose)).toBe(true);
+		expect(screen.queryByRole('group', { name: /^Notebook/ })).toBeNull();
+	});
+
+	it('is not offered while something is being moved', () => {
+		renderSidebar({ moving: { kind: 'note', id: 'n', path: 'personal/n.md', name: 'n' } });
+
+		fireEvent.contextMenu(screen.getByRole('button', { name: /work/ }));
+
+		expect(screen.queryByRole('group', { name: /^Notebook/ })).toBeNull();
 	});
 });
