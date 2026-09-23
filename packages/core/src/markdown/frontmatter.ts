@@ -17,7 +17,7 @@ import { toLf } from './lineEndings.js';
 /**
  * Frontmatter is handled as text, outside the remark pipeline: it is split off
  * before the body reaches either editor and re-attached on save, so the editors
- * never see it. See docs/PLAN.md §7.
+ * never see it. See docs/ARCHITECTURE.md §7.
  */
 
 const FENCE = '---';

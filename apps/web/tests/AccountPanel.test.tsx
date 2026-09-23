@@ -376,7 +376,7 @@ describe('AccountPanel, with nothing connected', () => {
 
 		// The credential is written down and awaited *before* the browser leaves.
 		// A consent given with nothing written down here is a connection on the
-		// server this device cannot reach and cannot revoke (docs/PLAN.md §6).
+		// server this device cannot reach and cannot revoke (docs/ARCHITECTURE.md §6).
 		const pending = await db.credentials.get(PENDING_CREDENTIAL_ID);
 		expect(pending?.credential).toMatch(/^sk1_/);
 		expect(pending?.provider).toBe('dropbox');

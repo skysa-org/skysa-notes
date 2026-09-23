@@ -20,7 +20,7 @@ import { clearFlowState, flowExpiry, readFlowState, setFlowState } from '../sess
  * to act on it is the credential the device generated before it started —
  * committed here as a grant, in the same transaction as the connection itself,
  * so there is no window where consent has been given and nothing can use it.
- * See docs/PLAN.md §6.
+ * See docs/ARCHITECTURE.md §6.
  */
 
 export const redirectUri = (origin: string, provider: string): string =>

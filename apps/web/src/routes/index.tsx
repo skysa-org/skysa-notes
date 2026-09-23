@@ -493,7 +493,7 @@ const Home = () => {
 
 	const onCreateNote = () => {
 		// The root holds loose notes that arrived from the remote folder; the app
-		// does not add to them (docs/PLAN.md §12.6).
+		// does not add to them (docs/ARCHITECTURE.md §12.6).
 		if (folder === undefined || folder === ROOT) return;
 		setProblem(null);
 		void createNote(db, { folderPath: folder })
@@ -698,7 +698,7 @@ const Home = () => {
 		chord: NEW_NOTE,
 		// The root holds loose notes that came from the remote folder and the app
 		// does not add to them, so there is nowhere to put a note until a notebook
-		// is open (docs/PLAN.md §12.6).
+		// is open (docs/ARCHITECTURE.md §12.6).
 		enabled: folder !== undefined && folder !== ROOT,
 		run: onCreateNote,
 	});

@@ -16,7 +16,7 @@ type Asking = Pick<ApiClient, 'config'>;
  *
  * `/api/*` is `NetworkOnly` in the service worker and must stay that way —
  * binding follows what the server says and a cached answer is how a device
- * ends up acting on a connection that has gone (docs/PLAN.md, Phase 2). So
+ * ends up acting on a connection that has gone (docs/ARCHITECTURE.md, Phase 2). So
  * nothing below us de-duplicates this, and two components each asking on mount
  * really are two round trips on every open.
  *

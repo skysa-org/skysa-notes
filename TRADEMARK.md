@@ -1,7 +1,7 @@
 # Trademark policy
 
 > **Draft — not reviewed by counsel.** This states the project's intent. It has
-> not been checked by a lawyer and may change. See `docs/PLAN.md` §13.
+> not been checked by a lawyer and may change. See `docs/ARCHITECTURE.md` §13.
 
 The code in this repository is licensed under [AGPL-3.0](LICENSE). That licence
 covers the **code**. It does not grant any right to the **names and marks** the

@@ -47,7 +47,7 @@ import type {
 } from './store.js';
 
 /**
- * Pull, push, and the queue between them. docs/PLAN.md §7 is the specification;
+ * Pull, push, and the queue between them. docs/ARCHITECTURE.md §7 is the specification;
  * this is it, with the cases it leaves open decided in the direction that
  * cannot lose an edit.
  *
@@ -986,7 +986,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 *
 	 * Only a deletion that names a path. One that names an id alone (Graph's,
 	 * for a folder it can no longer place) says nothing about what was under
-	 * it, and those files stay listed until a re-scan (docs/PLAN.md §7).
+	 * it, and those files stay listed until a re-scan (docs/ARCHITECTURE.md §7).
 	 */
 	const forgetUnderGone = (
 		path: string | undefined,
@@ -1746,7 +1746,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	/**
 	 * What to call a note arriving for the first time. A file this app wrote
-	 * carries its `id` in frontmatter (docs/PLAN.md §3), and adopting it is what
+	 * carries its `id` in frontmatter (docs/ARCHITECTURE.md §3), and adopting it is what
 	 * makes two devices agree about which note a file is; a file written by
 	 * something else needs an id invented for it.
 	 *
@@ -1863,7 +1863,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// rename, or a move, on a provider whose version does not survive one
 		// (OneDrive's `eTag`): nothing was written over there, the local edits
 		// stay dirty and go out against the new version, and there is no copy
-		// for the user to wonder about (docs/PLAN.md §7). A note that has not
+		// for the user to wonder about (docs/ARCHITECTURE.md §7). A note that has not
 		// recorded its bytes cannot say, and takes the conflict as before.
 		//
 		// Only if the bytes are the version the feed named, though: this is the
@@ -1955,7 +1955,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * file holds that file's version, so its next push passes the version check
 	 * and replaces bytes this device never read with text it made up — even a
 	 * push that only adds an `id`. So **no row holds the id of a file the engine
-	 * could not read** (docs/PLAN.md §7), and nothing this decision leaves
+	 * could not read** (docs/ARCHITECTURE.md §7), and nothing this decision leaves
 	 * behind can write, move or delete the file. That is a promise about the
 	 * pull, from the moment it sees the file. A delete already queued and pushed
 	 * before any pull has seen the re-save still removes it, as it would an
@@ -2215,7 +2215,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// A file that is not a note. The app owns the folder but does not own
 		// everything in it — the user may have dropped a PDF beside their notes,
 		// and turning it into a note would corrupt the list and, on push, the
-		// file. See docs/PLAN.md §14.
+		// file. See docs/ARCHITECTURE.md §14.
 		// Folded, like every other question about a name: `Report.MD` from a
 		// Windows tool is a markdown file, and a gate that says otherwise means
 		// the fold in `conflictFilename` below can never be reached by anything
@@ -3195,7 +3195,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 *    already gone.
 	 * 5. Anything at all under it that is a file.
 	 *
-	 * Known gap (docs/PLAN.md §7): a file written between the walk and the
+	 * Known gap (docs/ARCHITECTURE.md §7): a file written between the walk and the
 	 * delete goes with the folder, into the provider's trash or recycle bin.
 	 */
 	const runRmdir = async (op: SyncOp): Promise<void> => {
@@ -3313,7 +3313,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 *
 	 * Not proof on a provider whose listings are not the whole truth: under
 	 * `drive.file` a file the user put there through the Drive UI is invisible
-	 * to a read by path as well (docs/PLAN.md §5.1), and the write that follows
+	 * to a read by path as well (docs/ARCHITECTURE.md §5.1), and the write that follows
 	 * fails as it does today. What it settles is the case this is for — another
 	 * device of this app setting its own edit aside at the same name in the same
 	 * minute — because that file is one this app made.

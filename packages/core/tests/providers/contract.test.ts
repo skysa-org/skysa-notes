@@ -151,7 +151,7 @@ describeProviderContract('gdrive over a stubbed transport', () => {
 /**
  * The same scenarios against a real Dropbox account. Skipped unless asked for,
  * because it needs an app registration and a throwaway account — it empties the
- * app folder between scenarios. See docs/PLAN.md §5.3.
+ * app folder between scenarios. See docs/ARCHITECTURE.md §5.3.
  *
  *   PROVIDER_LIVE_TESTS=1 DROPBOX_TEST_TOKEN=... pnpm test
  */
@@ -183,7 +183,7 @@ if (liveToken !== '') {
 /**
  * The same scenarios against a real OneDrive account, with a Graph access token
  * carrying `Files.ReadWrite.AppFolder`. Empties the app folder between
- * scenarios, so use a throwaway account. See docs/PLAN.md §5.2.
+ * scenarios, so use a throwaway account. See docs/ARCHITECTURE.md §5.2.
  *
  *   PROVIDER_LIVE_TESTS=1 ONEDRIVE_TEST_TOKEN=... pnpm test
  */
@@ -215,7 +215,7 @@ if (liveGraphToken !== '') {
 /**
  * The same scenarios against a real Google Drive account, with an access token
  * carrying `drive.file`. Empties the app folder between scenarios, so use a
- * throwaway account. See docs/PLAN.md §5.1.
+ * throwaway account. See docs/ARCHITECTURE.md §5.1.
  *
  *   PROVIDER_LIVE_TESTS=1 GDRIVE_TEST_TOKEN=... pnpm test
  */
@@ -254,7 +254,7 @@ if (liveGoogleToken !== '') {
 			};
 		},
 		// Drive's change feed lags a write by a couple of seconds (measured
-		// 1.4–2.8s, docs/PLAN.md §5.1), so every read of it in the suite waits
+		// 1.4–2.8s, docs/ARCHITECTURE.md §5.1), so every read of it in the suite waits
 		// first. Dropbox's and Graph's are immediate and take the default of 0.
 		{ changesLagMs: 5_000, timeout: 60_000 }
 	);

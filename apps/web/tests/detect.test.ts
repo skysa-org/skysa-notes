@@ -44,7 +44,7 @@ const RECOGNISED: readonly (readonly [string, string])[] = [
 	['kotlin', 'fun main() {\n    val greeting = "hi"\n    println(greeting)\n}\n'],
 	[
 		'markdown',
-		'# Release notes\n\n- [x] shipped\n- [ ] pending\n\nSee [the plan](docs/PLAN.md) for **why**.\n',
+		'# Release notes\n\n- [x] shipped\n- [ ] pending\n\nSee [the plan](docs/ARCHITECTURE.md) for **why**.\n',
 	],
 	['php', '<?php\n\n$rows = $this->repo->all();\necho count($rows);\n'],
 	[

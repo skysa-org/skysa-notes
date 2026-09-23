@@ -8,9 +8,10 @@ body:
               Two things worth reading first, because they will answer a lot of
               these faster than we can:
 
-              - **`docs/PLAN.md` §10** is the phase order — what is coming and
-                roughly when.
-              - **`docs/PLAN.md` §14** is "not planned", and it gives the
+              - The open [issues](https://github.com/skysa-org/skysa-notes/issues)
+                are what is coming; **`docs/ARCHITECTURE.md`** is why things are
+                the shape they are.
+              - **`docs/ARCHITECTURE.md` §14** is "not planned", and it gives the
                 reasoning for each. If your idea is there, the useful thing is
                 to argue with the reasoning rather than to re-request it.
 

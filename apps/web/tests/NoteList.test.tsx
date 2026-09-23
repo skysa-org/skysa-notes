@@ -52,7 +52,7 @@ describe('NoteList', () => {
 
 		// The heading is the title, already the line above, so the preview starts
 		// after it; the bullet and the break the editor writes for an empty
-		// paragraph are not the user's words and are not shown (docs/PLAN.md §7).
+		// paragraph are not the user's words and are not shown (docs/ARCHITECTURE.md §7).
 		const preview = screen.getByText(/turn the heap/);
 		expect(preview.textContent).toBe('turn the heap every second week');
 	});
@@ -200,7 +200,7 @@ describe('NoteList', () => {
 
 		it('cannot create a note there', () => {
 			// The app never adds to the loose notes; they are what the remote
-			// folder already had. See docs/PLAN.md §12.6.
+			// folder already had. See docs/ARCHITECTURE.md §12.6.
 			renderList({ folderPath: '' });
 			expect(createButton().hasAttribute('disabled')).toBe(true);
 		});

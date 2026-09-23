@@ -7,7 +7,7 @@
  * language is never second-guessed.
  *
  * The bias runs one way throughout, and it is the same bias the note preview
- * has (docs/PLAN.md §7): **when in doubt, say nothing.** A blank picker costs
+ * has (docs/ARCHITECTURE.md §7): **when in doubt, say nothing.** A blank picker costs
  * one click. A confident `python` written into a fence over somebody's
  * pseudocode is a word in their file that they have to notice before they can
  * undo it — and the guess is made in the same transaction as the block, so one

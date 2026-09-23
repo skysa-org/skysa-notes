@@ -3,7 +3,7 @@ import { type ProviderKind } from '../config.js';
 /**
  * The one interface the sync engine talks to. Every provider — Drive, Graph,
  * Dropbox, WebDAV — converts its own conventions to this at its edge, so the
- * engine never learns which one it is driving. See docs/PLAN.md §4.
+ * engine never learns which one it is driving. See docs/ARCHITECTURE.md §4.
  *
  * Paths here are always the normalized, POSIX, root-relative form from
  * `paths.ts`: no leading or trailing separator, and the root itself is `''`.
@@ -108,7 +108,7 @@ export interface WriteOptions {
  * - `rootId` is opaque, non-empty and stable. A provider whose root has no id
  *   of its own — a Dropbox app folder, where the root simply is `/` — returns a
  *   synthetic constant.
- * - Content is UTF-8 text, decoded strictly (`decodeText`). Binary attachments are out of scope (docs/PLAN.md §14).
+ * - Content is UTF-8 text, decoded strictly (`decodeText`). Binary attachments are out of scope (docs/ARCHITECTURE.md §14).
  * - No `AbortSignal`: operations are short, and the engine discards results it
  *   no longer wants. Revisit in Phase 6 if a hung request ever blocks a queue.
  */
@@ -119,7 +119,7 @@ export interface StorageProvider {
 	 *
 	 * False on Google Drive: `drive.file` shows the app only the files it made
 	 * itself, so a file the user dropped into a notebook through drive.google.com
-	 * is invisible here (docs/PLAN.md §5.1), and a listing that comes back empty
+	 * is invisible here (docs/ARCHITECTURE.md §5.1), and a listing that comes back empty
 	 * is no evidence the folder is. The engine removes a folder on the strength
 	 * of a listing (`rmdir`), and will not where this is false, because deleting
 	 * a folder takes everything under it — seen or not.
@@ -151,7 +151,7 @@ export type ProviderErrorCode =
 
 /**
  * The remote moved under us. `remote` is the entry as it exists now, so the
- * conflict rule in docs/PLAN.md §7 can write the local copy aside without a
+ * conflict rule in docs/ARCHITECTURE.md §7 can write the local copy aside without a
  * second round trip.
  */
 export class ConflictError extends Error {

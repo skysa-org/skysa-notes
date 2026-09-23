@@ -12,7 +12,7 @@ import { type Database, schema } from './db/client.js';
  * nothing.
  *
  * What that buys and what it costs is written out in CLAUDE.md and
- * docs/PLAN.md §6 — briefly: CSRF stops being a class of bug, a theft is
+ * docs/ARCHITECTURE.md §6 — briefly: CSRF stops being a class of bug, a theft is
  * limited to one connection, and `httpOnly`'s protection against exfiltration
  * is given up in exchange, which is why `script-src 'self'` is a hard
  * requirement rather than a good idea.

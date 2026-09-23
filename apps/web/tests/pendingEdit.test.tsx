@@ -17,7 +17,7 @@ import { updateNote } from './noteRows.js';
  * The row is clean until the save arrives, so the store is free to replace its
  * body or delete it, and nothing in the database says there is an edit on the
  * way. Whatever the order, neither the edit nor what the sync brought may be
- * lost (CLAUDE.md, docs/PLAN.md §7).
+ * lost (CLAUDE.md, docs/ARCHITECTURE.md §7).
  */
 
 const CONNECTION = 'dropbox-1';

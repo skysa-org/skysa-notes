@@ -372,7 +372,7 @@ describe('the excerpt', () => {
 		// with one in it carries a literal `<br />`. It is the one thing in the
 		// file the user did not type, and an excerpt is the worst place to meet
 		// it: it sits in grey text beside their own words looking like a mistake
-		// they made (docs/PLAN.md §7).
+		// they made (docs/ARCHITECTURE.md §7).
 		const hit = around('the heron stood still\n\n<br />\n\nand then it went', 'heron');
 
 		expect(text(hit)).toContain('the heron stood still and then it went');

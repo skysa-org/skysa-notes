@@ -10,7 +10,7 @@ import { type ManifestOptions, type VitePWAOptions } from 'vite-plugin-pwa';
 
 /**
  * Every origin note content comes from: the provider APIs, and the hosts a
- * OneDrive item's download URL points at, which are not Graph (docs/PLAN.md
+ * OneDrive item's download URL points at, which are not Graph (docs/ARCHITECTURE.md
  * §5.2). Note content must never sit in the HTTP cache.
  */
 const PROVIDER_ORIGINS =

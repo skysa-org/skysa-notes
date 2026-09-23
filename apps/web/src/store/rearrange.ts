@@ -6,7 +6,7 @@ import { basename, isWithin, joinPath, normalizePath, parentPath, ROOT } from '@
  * The tree is the user's actual directory structure, so re-arranging it is
  * moving files and directories on the provider — not reordering a list. There
  * is no manual order to change: notebooks sort by name and notes by when they
- * were last edited (docs/PLAN.md §7, "Re-arranging is moving"), and nothing on
+ * were last edited (docs/ARCHITECTURE.md §7, "Re-arranging is moving"), and nothing on
  * any provider records a position for a directory entry. Dragging therefore
  * answers "where does this live", which is a question the store already has
  * `moveFolder` and `moveNote` for, and this module is only the rules about
@@ -45,7 +45,7 @@ export type Move =
  * - Anything into the folder it is already in. Nothing to do, and the store
  *   would queue a move, an `mkdir` and an `rmdir` for it.
  * - A note onto the top level. Notes outside a notebook exist — a remote folder
- *   can arrive holding them — but the app never *makes* one (docs/PLAN.md
+ *   can arrive holding them — but the app never *makes* one (docs/ARCHITECTURE.md
  *   §12.6), and a drag that did would be the app creating the shape it says it
  *   does not create. So loose notes can be dragged into a notebook and not back
  *   out, which is the direction the user wants anyway.

@@ -10,7 +10,7 @@ import { type FetchLike, isGrantRefused } from '../oauth/types.js';
 
 /**
  * Minting a provider access token for the client, which then talks to the
- * provider directly — no note content ever passes through here (docs/PLAN.md
+ * provider directly — no note content ever passes through here (docs/ARCHITECTURE.md
  * §1). This is the one place a refresh token is decrypted, and it is never
  * returned: only the short-lived access token goes to the browser.
  *
@@ -38,7 +38,7 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 		}
 
 		// The entitlement seam: an operator of a shared instance decides which
-		// accounts may sync here. This repo always says yes. See docs/PLAN.md §6.
+		// accounts may sync here. This repo always says yes. See docs/ARCHITECTURE.md §6.
 		const decision = await c.get('entitlements').check({
 			connectionId: connection.id,
 			provider: connection.provider,

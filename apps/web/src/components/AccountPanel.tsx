@@ -54,7 +54,7 @@ import { useEscape } from './useEscape.js';
  * Where storage is connected, switched between and let go of: the sources this
  * device holds, the one in front, the devices holding that one, and — for a
  * source being let go — what becomes of the work its remote was never sent
- * (docs/PLAN.md §6, "Letting a source go").
+ * (docs/ARCHITECTURE.md §6, "Letting a source go").
  *
  * What the device is bound to is read from the store, so the panel is right
  * offline and the moment a bind lands. What the server says is asked on open —
@@ -271,7 +271,7 @@ const PathList = ({ paths }: { paths: readonly string[] }) => {
 
 /**
  * The files in this source that are not UTF-8 text, which sync leaves alone
- * (docs/PLAN.md §7). Said because nothing else does: such a file is not in the
+ * (docs/ARCHITECTURE.md §7). Said because nothing else does: such a file is not in the
  * list of notes, and a note whose file became one has gone from this device.
  * By path, since that is how the user finds the file in the tool that wrote it,
  * and with what to do about it, since nothing here can do it for them.
@@ -566,7 +566,7 @@ const SyncState = ({
  *
  * The point of it is that a stolen credential is visible and revocable. It is
  * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
- * cannot protect it (docs/PLAN.md §6), so it is asked for on open rather than
+ * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open rather than
  * hidden behind a disclosure the user would never press.
  *
  * Revoking is permanent in a way worth saying: the server spends a credential's
@@ -1193,7 +1193,7 @@ export const AccountPanel = ({
 	// `useLiveQuery` for "not read yet". Unwrapped, the two look the same.
 	// The source the app is showing, not whichever `syncState` row IndexedDB
 	// hands back first. A device may hold several connected sources at once
-	// (docs/PLAN.md §6) and the first row is then a coin toss: the panel would
+	// (docs/ARCHITECTURE.md §6) and the first row is then a coin toss: the panel would
 	// name one account while the notes on screen belong to another, and
 	// switching sources would change nothing here. The live query reads `prefs`
 	// as well as `syncState`, so a switch in another tab re-renders this one.

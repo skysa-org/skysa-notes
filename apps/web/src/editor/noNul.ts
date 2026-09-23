@@ -4,7 +4,7 @@ import { Plugin } from '@milkdown/kit/prose/state';
 /**
  * Neither editor's document ever holds a U+0000.
  *
- * A file holding one is not a note to any device that reads it (docs/PLAN.md
+ * A file holding one is not a note to any device that reads it (docs/ARCHITECTURE.md
  * §7), so the store drops it from a body as it is saved (`saveNoteBody`). That
  * alone is not enough, and is worse than nothing for the user who pasted it:
  * the editor reports the text *with* the NUL, the store keeps it without, and

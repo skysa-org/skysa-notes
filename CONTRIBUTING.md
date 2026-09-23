@@ -3,10 +3,11 @@
 Thanks for looking. This is an early project and the most useful contributions
 right now are bug reports against real use, and small focused pull requests.
 
-Read [`docs/PLAN.md`](docs/PLAN.md) first. It is the source of truth for the
-architecture, the decisions and the phase order, and it explains why a lot of
-things are the shape they are. If a change needs to deviate from it, say so and
-propose the edit to `docs/PLAN.md` in the same pull request.
+Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first. It is the source of truth for the
+architecture and the decisions behind it, and it explains why a lot of things
+are the shape they are. Open work is in the issue tracker; pick an issue or
+open one before starting anything larger than a fix. If a change needs to deviate from it, say so and
+propose the edit to `docs/ARCHITECTURE.md` in the same pull request.
 
 ## Getting it running
 
@@ -56,7 +57,7 @@ What is expected of a change:
 
 - **Tests for new behaviour.** Not coverage for its own sake — a test that fails
   if the thing you fixed comes back.
-- **Tick the checklist item** in `docs/PLAN.md` if the change completes one.
+- **Amend `docs/ARCHITECTURE.md`** if the change alters a decision recorded there.
 - **A changeset**, if the change touches `apps/` or `packages/`:
   `pnpm run changeset` asks which packages moved, how big the change is and for
   a summary, then writes a small file to commit alongside it. CI fails a pull request that changes a package without one. If
@@ -66,7 +67,7 @@ What is expected of a change:
   how a release is cut and why the three packages share one version.
 - **Say why** for a new dependency, in the pull request description, and check
   the licence. Anything that reaches the shipped bundle must be MIT, Apache-2.0
-  or ISC. Build- and test-time tools are held to a looser line — `docs/PLAN.md`
+  or ISC. Build- and test-time tools are held to a looser line — `docs/ARCHITECTURE.md`
   §13 records what is already in the tree and why — but say which it is.
 - **Check the vendor docs** rather than assuming, for anything about a provider
   API — scopes, endpoints, conflict semantics — and put the URL in a comment.

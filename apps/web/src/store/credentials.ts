@@ -8,14 +8,14 @@ import { type CredentialRecord, type NotesDatabase, PENDING_CREDENTIAL_ID } from
  *
  * The device generates it, keeps it here, and sends the server only its
  * SHA-256 — so what the server holds mints nothing, and a dump of D1 is not a
- * set of keys (docs/PLAN.md §6). The plaintext exists in exactly two places:
+ * set of keys (docs/ARCHITECTURE.md §6). The plaintext exists in exactly two places:
  * this table, and the `Authorization` header of a request in flight.
  *
  * IndexedDB and not `localStorage`, which the hard rules forbid for anything
  * like this, and not a cookie, which is the whole point: a bearer is never sent
  * ambiently, so CSRF stops being a class of bug here. The cost is that
  * IndexedDB has no `httpOnly`, which is why `script-src 'self'` is a hard
- * requirement rather than a good default — written out in CLAUDE.md and PLAN §6
+ * requirement rather than a good default — written out in CLAUDE.md and docs/ARCHITECTURE.md §6
  * rather than left for someone to infer.
  *
  * Nothing here is ever logged, put in a URL, or rendered. The device list in
@@ -140,7 +140,7 @@ export const heldCredentials = async (
  * There is nothing to tell the server: it has already stopped honouring the
  * hash, and the hash stays spent there for ever so that a copy of this
  * credential taken before now can never be used to claim a connection of its
- * own (docs/PLAN.md §6).
+ * own (docs/ARCHITECTURE.md §6).
  */
 export const forgetCredential = (
 	db: Pick<NotesDatabase, 'credentials'>,

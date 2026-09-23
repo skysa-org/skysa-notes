@@ -7,7 +7,7 @@ import { fromBase64Url, sign, toBase64Url, verify } from './crypto.js';
  * The short-lived state that carries an OAuth flow from its start to its
  * callback.
  *
- * This is the only cookie left. Sessions are gone (docs/PLAN.md §6): a device
+ * This is the only cookie left. Sessions are gone (docs/ARCHITECTURE.md §6): a device
  * proves its right to a connection with a credential it holds, not with an
  * ambient cookie, so there is nothing to keep signed in. What remains is a flow
  * cookie, and it is `httpOnly` + `sameSite=lax` — lax rather than strict
@@ -46,7 +46,7 @@ const base = (secure: boolean) => ({
 
 /**
  * What an in-flight OAuth request needs to remember. It rides in a signed
- * cookie rather than a table: docs/PLAN.md §9 wants `state` bound to the
+ * cookie rather than a table: docs/ARCHITECTURE.md §9 wants `state` bound to the
  * browser that started the flow, which is exactly what a cookie is, and a
  * cookie needs no row to expire and no job to sweep.
  *

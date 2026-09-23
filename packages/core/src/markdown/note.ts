@@ -13,7 +13,7 @@ import { deriveTitle } from './title.js';
  * truth; this is a view of it, not a replacement. Reading a file never changes
  * it — `parseNoteFile` adds nothing and normalizes nothing, so a note authored
  * elsewhere keeps its own formatting until someone actually edits it.
- * See docs/PLAN.md §7.
+ * See docs/ARCHITECTURE.md §7.
  */
 export interface ParsedNoteFile {
 	/** `id` from frontmatter. Absent for a file written by another tool. */

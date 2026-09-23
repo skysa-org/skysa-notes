@@ -1,7 +1,7 @@
 /**
  * What every storage provider's OAuth module offers the routes, so that
  * `connect`, `token` and `connections` never learn which provider they are
- * talking to. The modules are hand-rolled over `fetch` — docs/PLAN.md §6.
+ * talking to. The modules are hand-rolled over `fetch` — docs/ARCHITECTURE.md §6.
  */
 
 /**

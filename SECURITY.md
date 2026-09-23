@@ -31,10 +31,11 @@ whichever is sooner. Say so in the report if you want to coordinate on a date.
 
 ## Supported versions
 
-There are no releases yet. Only `main` is supported; fixes land there. Anyone
+Releases are tagged `vX.Y.Z`. Fixes land on `main` and go out in the next tag;
+the latest release and `main` are supported, and nothing older is. Anyone
 self-hosting is running their own deployment of some commit, so **the security
 of your instance is the security of the commit you deployed**, and updating is
-on you. Versioning and release tags arrive in Phase 8 (`docs/PLAN.md` §10).
+on you.
 
 ## What is in scope
 
@@ -47,7 +48,7 @@ interesting properties live:
 - **Credentials.** A device proves its right to a connection with a credential
   it generated; the server stores only its SHA-256. Anything that gets a
   credential's plaintext out of the browser, or lets a credential for one
-  connection act on another, is a serious finding. `docs/PLAN.md` §6,
+  connection act on another, is a serious finding. `docs/ARCHITECTURE.md` §6,
   "Per-connection credentials", sets out the model.
 - **The content security policy.** `script-src 'self'` with nothing inline is
   load-bearing, not a nicety: it is what stops an XSS from exfiltrating a

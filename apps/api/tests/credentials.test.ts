@@ -26,7 +26,7 @@ describe('hashCredential', () => {
 		const secret = newCredential().slice(CREDENTIAL_PREFIX.length);
 		expect(await hashCredential(`sk1_${secret}`)).not.toBe(await hashCredential(secret));
 		// The prefix reserves room for a proof-of-possession credential an XSS
-		// cannot copy out (docs/PLAN.md §6). Hashing it in means `sk2_x` can never
+		// cannot copy out (docs/ARCHITECTURE.md §6). Hashing it in means `sk2_x` can never
 		// be replayed as `sk1_x`.
 		expect(await hashCredential(`sk1_${secret}`)).not.toBe(
 			await hashCredential(`sk2_${secret}`)

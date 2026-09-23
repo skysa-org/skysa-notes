@@ -16,7 +16,7 @@ import { outOfAttempts } from './queue.js';
  * Letting a source go removes its notes from the device, and everything the
  * remote already has comes back on connecting again. This is the rest: what
  * exists here and nowhere else, which the user has to be shown and asked about
- * before any of it goes (docs/PLAN.md §6). Read from the rows and the queue
+ * before any of it goes (docs/ARCHITECTURE.md §6). Read from the rows and the queue
  * together, because neither says it alone: a note can be clean and still have a
  * write queued for it, a note that was never pushed need not be dirty, and a
  * rename shows on the row only as the path it already has.

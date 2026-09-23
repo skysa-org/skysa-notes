@@ -211,7 +211,7 @@ export const listFolders = async (
 /**
  * Rename or move a folder, rewriting the path of every folder and note beneath
  * it. A note keeps its pending edits and its dirty flag: the move is metadata
- * only and does not conflict with content changes. See docs/PLAN.md §7.
+ * only and does not conflict with content changes. See docs/ARCHITECTURE.md §7.
  */
 export const moveFolder = async (
 	db: NotesDatabase,

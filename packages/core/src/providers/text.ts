@@ -6,7 +6,7 @@ import { UnreadableError } from './types.js';
  * `response.text()` never fails: a byte that is not UTF-8 comes back as U+FFFD,
  * so a Latin-1 file, a UTF-16 one, or a binary that happens to be named `.md`
  * arrives looking like a note. The first push then writes that text over the
- * original, and the user's bytes are gone with nothing said (docs/PLAN.md §7).
+ * original, and the user's bytes are gone with nothing said (docs/ARCHITECTURE.md §7).
  * So the decode is strict, and what will not decode is not a note.
  *
  * Nor is text holding a U+0000. UTF-16 without a BOM, and most binaries, are

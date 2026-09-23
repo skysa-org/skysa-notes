@@ -148,7 +148,7 @@ describe('Sidebar', () => {
 /**
  * Loose notes are `.md` files sitting at the root of the remote app folder.
  * The app never creates one, and it does not move the user's files to tidy them
- * away — so it has to be able to show them (docs/PLAN.md §12.6).
+ * away — so it has to be able to show them (docs/ARCHITECTURE.md §12.6).
  */
 describe('the Loose notes row', () => {
 	const looseRow = () => screen.queryByRole('button', { name: /Loose notes/ });

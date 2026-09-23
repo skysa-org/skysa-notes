@@ -17,7 +17,7 @@ import type { FetchLike } from '../oauth/types.js';
  * arriving through the back door — and the device unbinds itself on this
  * answer, so "not in the list" and "gone" must not be the same shape. A 404
  * means *this connection is gone*; a 5xx or a network failure means nothing at
- * all, and the device keeps what it has (docs/PLAN.md §6).
+ * all, and the device keeps what it has (docs/ARCHITECTURE.md §6).
  *
  * Secrets never appear in a response — not the ciphertext, not the iv, not the
  * key id, and not another device's credential hash.
@@ -30,7 +30,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 
 	/**
 	 * Withdraw the account's grant at the provider, so it does not linger on the
-	 * user's account (docs/PLAN.md §9). Answers whether the provider took it
+	 * user's account (docs/ARCHITECTURE.md §9). Answers whether the provider took it
 	 * back. Best effort: `false` says only that the grant may still be live —
 	 * the revoke failed, or, Microsoft, there is no revoke to call and the user
 	 * has to remove the app from their account page. From the row as the caller
@@ -71,7 +71,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			// The provider's own id for the account. Not a secret, and the client
 			// needs it: reconnecting the same account after a disconnect gets a new
 			// connection id, and only this says the notes it holds from before
-			// belong to it (docs/PLAN.md, Phase 2).
+			// belong to it (docs/ARCHITECTURE.md, Phase 2).
 			accountId: connection.accountId,
 			rootId: connection.rootId,
 			createdAt: connection.createdAt.getTime(),
@@ -146,7 +146,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 		// here, short of a race with its own expiry, since a caller revoking
 		// another is itself still live; connecting the account again makes a new
 		// row, and the device knows its notes by the account's id, not the row's
-		// (docs/PLAN.md §6).
+		// (docs/ARCHITECTURE.md §6).
 		//
 		// One statement, asking and deleting together. Asked first and deleted
 		// afterwards — with two provider calls in between, up to twenty seconds —

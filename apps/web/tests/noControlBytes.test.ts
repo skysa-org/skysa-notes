@@ -37,7 +37,7 @@ import { describe, expect, it } from 'vitest';
  * This lives in `apps/web` rather than `packages/core` because core must run in
  * the browser and in Workers, and nothing under it may reach for `node:fs` even
  * in a test. The cost is that a repo-wide invariant is checked by one package's
- * suite; `pnpm test` runs them all (docs/PLAN.md §11).
+ * suite; `pnpm test` runs them all (docs/ARCHITECTURE.md §11).
  */
 
 const here = fileURLToPath(import.meta.url);

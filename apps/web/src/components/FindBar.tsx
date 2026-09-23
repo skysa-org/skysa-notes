@@ -6,7 +6,7 @@ import { useFindTarget } from '../editor/findTarget.js';
 /**
  * Find and replace, over whichever editor is open.
  *
- * One bar and one query for both editors (docs/PLAN.md §7). What differs between
+ * One bar and one query for both editors (docs/ARCHITECTURE.md §7). What differs between
  * rich and raw is only how a match is found and drawn, and that lives behind
  * `FindTarget`; everything the user touches is here, once, so the two modes
  * cannot drift into behaving differently or looking different.

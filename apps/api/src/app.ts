@@ -65,7 +65,7 @@ export interface CreateAppOptions {
 	/**
 	 * How long a provider gets to answer. Every call here is one a user is
 	 * waiting on, and `DELETE /api/connections/:id` promises the row goes either
-	 * way — which only holds if the revoke can give up. docs/PLAN.md §6 asks the
+	 * way — which only holds if the revoke can give up. docs/ARCHITECTURE.md §6 asks the
 	 * same of the WebDAV proxy.
 	 */
 	providerTimeoutMs?: number;
@@ -161,7 +161,7 @@ export const createApp = (options: CreateAppOptions) => {
 	 * Defence in depth, not the defence. Nothing is authorized by a cookie any
 	 * more — a bearer is never sent ambiently, so cross-origin requests arrive
 	 * unauthenticated — which is most of why the credential redesign happened
-	 * (docs/PLAN.md §6). What is left to protect is `POST /api/auth/connect/…/start`,
+	 * (docs/ARCHITECTURE.md §6). What is left to protect is `POST /api/auth/connect/…/start`,
 	 * which writes a caller-supplied value into a cookie; it checks `Origin` and
 	 * `Sec-Fetch-Site` itself, because `csrf()` inspects only form and text
 	 * content types and leans on CORS preflight for JSON.
@@ -238,7 +238,7 @@ export type App = ReturnType<typeof createApp>;
  * its message from the failing SQL *and its bound parameters*, and keeps them on
  * an own property besides. Those parameters are session ids, secret ciphertext
  * and IVs. A transient D1 error would be enough to write them all to the log,
- * which `CLAUDE.md` and docs/PLAN.md §6 both forbid.
+ * which `CLAUDE.md` and docs/ARCHITECTURE.md §6 both forbid.
  */
 const summarize = (err: unknown): string => {
 	if (!(err instanceof Error)) return 'non-error thrown';

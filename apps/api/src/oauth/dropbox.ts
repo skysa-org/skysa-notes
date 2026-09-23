@@ -5,10 +5,10 @@ import { type FetchLike, OAuthError, type StorageOAuth, type TokenSet } from './
  * the server so no client secret ever reaches the browser, and so the refresh
  * token can be encrypted at rest rather than held by the client.
  *
- * Deliberately hand-rolled rather than taken from a library — docs/PLAN.md §6
+ * Deliberately hand-rolled rather than taken from a library — docs/ARCHITECTURE.md §6
  * notes the storage flows are small enough that a dependency would carry more
  * risk than it removes. There is no identity sign-in to be a second question:
- * it was dropped on 2026-09-18 (docs/PLAN.md §6).
+ * it was dropped on 2026-09-18 (docs/ARCHITECTURE.md §6).
  *
  * Docs consulted (2026-09-14):
  * https://www.dropbox.com/developers/documentation/http/documentation#oauth2-authorize
@@ -21,7 +21,7 @@ const REVOKE = 'https://api.dropboxapi.com/2/auth/token/revoke';
 /**
  * Storage scopes only, and there are no others to combine them with: the
  * `/auth/login/*` flow these were once kept apart from was dropped along with
- * sign-in (docs/PLAN.md §6).
+ * sign-in (docs/ARCHITECTURE.md §6).
  *
  * `account_info.read` is what names the connection in the UI.
  */
@@ -148,7 +148,7 @@ export const refreshAccessToken = (doFetch: FetchLike, input: RefreshInput): Pro
 
 /**
  * Disconnecting revokes at Dropbox as well as deleting the row, so the grant
- * does not linger on the user's account (docs/PLAN.md §9). Best effort: a
+ * does not linger on the user's account (docs/ARCHITECTURE.md §9). Best effort: a
  * failure here must not stop the disconnect.
  */
 export const revokeToken = async (doFetch: FetchLike, accessToken: string): Promise<boolean> => {

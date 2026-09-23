@@ -168,7 +168,7 @@ describe('binding a connection', () => {
 		// copying one account's notes into another's storage on the strength of a
 		// consent screen. Each connected source is its own silo now: the note
 		// stays where it is, still knowing its file, and the new source starts
-		// empty (docs/PLAN.md §6).
+		// empty (docs/ARCHITECTURE.md §6).
 		const row = await noteById(db, note.id);
 		expect(row).toMatchObject({ connectionId: DROPBOX.connectionId, dirty: 0 });
 		expect(row?.remoteId).toBe('id:1');

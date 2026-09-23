@@ -11,7 +11,7 @@ import { normalize, parse, serialize } from '../../src/markdown/pipeline.js';
 /**
  * The fidelity suite. Because `core` wraps the same remark plugins and options
  * Milkdown is configured with, this exercises the editor's actual pipeline
- * headless. See docs/PLAN.md §7.
+ * headless. See docs/ARCHITECTURE.md §7.
  *
  * The contract, for every fixture:
  *  1. `serialize(parse(md))` equals `md` once both sides pass through the same

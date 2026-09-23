@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { createProviderFactory } from '../src/sync/providers.js';
 
 /**
- * The Content-Security-Policy in `public/_headers` (docs/PLAN.md §9).
+ * The Content-Security-Policy in `public/_headers` (docs/ARCHITECTURE.md §9).
  *
  * The browser enforces it silently: a provider host missing from `connect-src`
  * shows up only as a sync that never reaches the network, and a loosened
@@ -72,7 +72,7 @@ describe('Content-Security-Policy', () => {
 		const directives = policy();
 		expect(directives.get('default-src')).toEqual(["'self'"]);
 		// Not a good default any more: a hard requirement. This shell holds a
-		// long-lived per-connection credential in IndexedDB (docs/PLAN.md §6),
+		// long-lived per-connection credential in IndexedDB (docs/ARCHITECTURE.md §6),
 		// which `httpOnly` used to protect and no longer can. Script that this
 		// policy lets run can read it, post it anywhere, and use it until someone
 		// revokes the device. Nothing may be added to this list.

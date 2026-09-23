@@ -12,7 +12,7 @@ import { type RemoteEntry } from '../providers/types.js';
  * `frontmatter` separately would be re-serializing the user's file on every
  * sync and quietly normalizing notes nobody edited.
  *
- * Writes are **batched, not fine-grained**. docs/PLAN.md §7 requires the pull
+ * Writes are **batched, not fine-grained**. docs/ARCHITECTURE.md §7 requires the pull
  * cursor to be persisted only after the batch it describes has committed; the
  * only way to promise that is to hand the store the whole batch and the cursor
  * together and let it use one transaction. A store that applied changes one at
@@ -33,7 +33,7 @@ export interface SyncNote {
 	 * `contentHash` of the bytes this note and its remote file last agreed on:
 	 * what a pull brought in, or what a push sent. What lets the engine tell a
 	 * remote *edit* from a remote rename on a provider whose version changes on
-	 * a move (OneDrive's `eTag`, docs/PLAN.md §7): a note with unpushed edits
+	 * a move (OneDrive's `eTag`, docs/ARCHITECTURE.md §7): a note with unpushed edits
 	 * whose file comes back under a new version but with these same bytes was
 	 * not edited over there, and needs no conflict copy.
 	 *
@@ -48,7 +48,7 @@ export interface SyncNote {
 
 /**
  * A file the engine found and could not read as UTF-8 text, and so left alone
- * (docs/PLAN.md §7). Kept so the app can say which files it is not showing,
+ * (docs/ARCHITECTURE.md §7). Kept so the app can say which files it is not showing,
  * and for nothing else: **no decision may rest on this list.** No row holds
  * such a file's id, so every mention of it in a feed is read again, and a list
  * that is stale, or lost, costs the user a line of text and never a file.
@@ -202,7 +202,7 @@ export type PullChange =
 			 * The engine never emits one of these for a note whose own rename is
 			 * queued — a `move` in the queue is what tells the user's rename
 			 * from the remote's, and the note is left where the user put it
-			 * (docs/PLAN.md §7) — so this never has to decide what a pending
+			 * (docs/ARCHITECTURE.md §7) — so this never has to decide what a pending
 			 * rename means once the note has moved somewhere else.
 			 */
 			kind: 'move-note';
@@ -242,7 +242,7 @@ export type PullChange =
 			/**
 			 * A note of ours is sitting where a remote one is about to land. Move
 			 * ours aside, keeping its contents and its dirty flag: it is the
-			 * user's writing and the remote keeps the path (docs/PLAN.md §7).
+			 * user's writing and the remote keeps the path (docs/ARCHITECTURE.md §7).
 			 * Two rows at one path is a note the sidebar shows twice, two queued
 			 * writes racing for one file, and — once both have been pushed — one
 			 * `remoteId` between them, after which `noteByRemoteId` only ever
@@ -281,7 +281,7 @@ export type PullChange =
 			/**
 			 * A folder moved. The store rebases every note beneath it *and* every
 			 * queued op that names a path under it, in the same transaction:
-			 * docs/PLAN.md §7 applies a remote folder move unconditionally, even
+			 * docs/ARCHITECTURE.md §7 applies a remote folder move unconditionally, even
 			 * over dirty notes, because it is metadata and cannot conflict with
 			 * an edit to the contents.
 			 *

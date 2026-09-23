@@ -30,7 +30,7 @@ import { type Seen, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { noteById, updateNote } from './noteRows.js';
 
 /**
- * Taking what one source never sent into another one (docs/PLAN.md §10).
+ * Taking what one source never sent into another one (docs/ARCHITECTURE.md §10).
  *
  * The only operation in the app that carries a user's writing from one storage
  * account into another, so what it takes, what it leaves and what it says about

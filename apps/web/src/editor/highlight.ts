@@ -16,7 +16,7 @@ import type { LanguageSource } from './languages.js';
  * looks like would be a bug nobody would ever see in a test.
  *
  * Classes rather than inline styles, because `style-src` allows inline styles
- * only grudgingly (docs/PLAN.md §9) and a stylesheet is where a theme belongs
+ * only grudgingly (docs/ARCHITECTURE.md §9) and a stylesheet is where a theme belongs
  * anyway: the dark palette is a media query over the same names.
  */
 

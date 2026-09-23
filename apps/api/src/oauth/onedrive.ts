@@ -22,7 +22,7 @@ import {
 const AUTHORITY = 'https://login.microsoftonline.com';
 
 /**
- * Storage scopes only (docs/PLAN.md §5.2). `Files.ReadWrite.AppFolder` is a
+ * Storage scopes only (docs/ARCHITECTURE.md §5.2). `Files.ReadWrite.AppFolder` is a
  * Graph scope — a scope with no resource prefix is Graph's. `offline_access` is
  * what yields a refresh token at all; `openid` and `email` yield the ID token
  * that says whose account this is.
@@ -178,7 +178,7 @@ export const onedriveOAuth: StorageOAuth = {
 
 	// No `revokeToken`. The identity platform has no endpoint for an app to
 	// withdraw its own grant; the user removes it from their Microsoft account
-	// (docs/PLAN.md §9).
+	// (docs/ARCHITECTURE.md §9).
 
 	accountName: (_doFetch, tokens) => Promise.resolve(tokens.displayName ?? 'OneDrive'),
 };

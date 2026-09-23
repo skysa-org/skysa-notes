@@ -233,7 +233,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 				// No `name`. A deleted item carries its id, its parent, the
 				// `deleted` facet and a file/folder facet, and nothing else —
 				// on a personal account as much as on Business, verified
-				// against a live personal account 2026-09-21 (docs/PLAN.md
+				// against a live personal account 2026-09-21 (docs/ARCHITECTURE.md
 				// §5.2). The adapter never asks for one; the stub used to send
 				// one anyway, which is a name no caller could ever really have.
 				return {
@@ -406,7 +406,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		// Graph refuses this, so the stub must too: a `POST .../children` whose
 		// parent is addressed by path is a 400, at every depth. Accepting it
 		// here is what let an adapter that could not make a single folder on
-		// OneDrive pass this suite (docs/PLAN.md §5.2).
+		// OneDrive pass this suite (docs/ARCHITECTURE.md §5.2).
 		if (action === 'POST /children') return graphError(400, 'invalidRequest');
 		if (action === 'PUT /content' && path !== '') return uploadByPath(path, url, body);
 		if (action === 'GET ') return path === '' ? json(rootItem()) : found(byPath(path));

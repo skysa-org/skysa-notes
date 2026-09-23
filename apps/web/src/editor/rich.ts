@@ -50,7 +50,7 @@ import { taskPlugin, toggleTaskCommand } from './tasks.js';
  * configured with the same `remark-stringify` options as `core` so the markdown
  * it writes is the markdown the fidelity suites test. Keeping it separate from
  * the component is what lets those suites drive a real editor without a DOM
- * that can pretend to be typed into. See docs/PLAN.md §7.
+ * that can pretend to be typed into. See docs/ARCHITECTURE.md §7.
  */
 
 /**

@@ -2,7 +2,7 @@ import { randomBase64Url, toBase64Url } from '../crypto.js';
 
 /**
  * PKCE (RFC 7636) and the `state` parameter. Both are required on every OAuth
- * flow — docs/PLAN.md §9 — and each stops a different attack: the verifier
+ * flow — docs/ARCHITECTURE.md §9 — and each stops a different attack: the verifier
  * proves the client redeeming the code is the one that asked for it, and
  * `state` proves the callback belongs to a flow this browser started.
  */

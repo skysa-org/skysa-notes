@@ -9,7 +9,7 @@ import { fitBytes, foldName, MAX_NAME_BYTES, utf8Length } from '../markdown/slug
 import { basename, replaceBasename } from '../paths.js';
 
 /**
- * What happens when both sides changed the same note. docs/PLAN.md §7: the
+ * What happens when both sides changed the same note. docs/ARCHITECTURE.md §7: the
  * remote keeps the original path, and the local copy is written beside it as a
  * new note. Nothing is merged and nothing is discarded — the user is shown both
  * and decides, which is the only rule that cannot lose an edit.

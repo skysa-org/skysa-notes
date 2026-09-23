@@ -19,7 +19,7 @@ out this works — and, for a fix, what fails without it?
 
 - [ ] `pnpm verify` passes (format, lint, typecheck, tests)
 - [ ] Tests cover the new behaviour, and fail without the change
-- [ ] `docs/PLAN.md` ticked, or amended in this pull request if the change deviates from it
+- [ ] `docs/ARCHITECTURE.md` amended in this pull request if the change alters a decision recorded there
 
 ## Anything else
 

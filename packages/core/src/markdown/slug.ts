@@ -2,7 +2,7 @@ import { NOTE_EXTENSION } from '../config.js';
 
 /**
  * Filenames are a slug of the title; `id` in frontmatter is the stable identity,
- * so renaming a file is safe. See docs/PLAN.md §3.
+ * so renaming a file is safe. See docs/ARCHITECTURE.md §3.
  */
 
 /** Illegal or hostile in a filename on Windows, macOS, or a provider API. */
@@ -200,7 +200,7 @@ export const normalizeTag = (tag: string): string | undefined => toSlug(tag) || 
  * Folder names are the notebook names the user typed, and every provider
  * accepts spaces and capitals in a directory name — so unlike a note filename,
  * which is derived from a title, this only removes what would actually break.
- * See docs/PLAN.md §3.
+ * See docs/ARCHITECTURE.md §3.
  */
 export const sanitizeFolderName = (name: string): string => {
 	const cleaned = truncate(

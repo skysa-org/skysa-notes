@@ -426,7 +426,7 @@ export const createMemoryStore = (): MemoryStore => {
 			});
 		}
 		// Notes move with the folder even when dirty: the move is metadata and
-		// cannot conflict with an edit to the contents (docs/PLAN.md §7).
+		// cannot conflict with an edit to the contents (docs/ARCHITECTURE.md §7).
 		for (const note of [...notes.values()]) {
 			if (isWithin(note.path, from)) {
 				notes.set(note.id, { ...note, path: rebasePath(note.path, from, to) });

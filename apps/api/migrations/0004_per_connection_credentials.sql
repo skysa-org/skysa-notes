@@ -1,4 +1,4 @@
--- Per-connection credentials (docs/PLAN.md §6).
+-- Per-connection credentials (docs/ARCHITECTURE.md §6).
 --
 -- Hand-written, not `drizzle-kit generate`d. Dropping `connections.user_id`
 -- needs a SQLite table rebuild — the column is named in a foreign key, and

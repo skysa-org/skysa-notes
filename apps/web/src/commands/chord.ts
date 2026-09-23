@@ -4,7 +4,7 @@
  * Written down rather than checked inline at each listener, because a shortcut
  * has to be two things that agree: what the app listens for, and what it tells
  * the user it listens for. Those drifting apart is how a menu ends up promising
- * a key that does nothing (docs/PLAN.md §7).
+ * a key that does nothing (docs/ARCHITECTURE.md §7).
  */
 
 export interface Chord {

@@ -21,7 +21,7 @@ import {
  * Dropbox, over the v2 HTTP API. The app is registered for **App folder**
  * access, so the API root already *is* the app folder and every path here is
  * relative to it — `ensureRoot` has nothing to create and only writes the
- * marker. See docs/PLAN.md §5.3.
+ * marker. See docs/ARCHITECTURE.md §5.3.
  *
  * Docs consulted (2026-09-14, and `files.stone` again 2026-09-16):
  * - Endpoints and payloads: https://www.dropbox.com/developers/documentation/http/documentation
@@ -359,7 +359,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (current !== undefined) throw new ConflictError(current);
 		// `strict_conflict` makes Dropbox answer `conflict` even when the file has
 		// been deleted, so a conflict with nothing there is the "expected a version
-		// of a file that is gone" case. docs/PLAN.md §4 calls that not-found, and
+		// of a file that is gone" case. docs/ARCHITECTURE.md §4 calls that not-found, and
 		// the engine's re-create-on-push path depends on telling them apart.
 		if (opts.expectedVersion !== undefined) throw new NotFoundError(path);
 		return raise(failure, path);
@@ -367,7 +367,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		// With App folder access the root exists by construction and has no id of
-		// its own, so this is a constant — which docs/PLAN.md §4 allows.
+		// its own, so this is a constant — which docs/ARCHITECTURE.md §4 allows.
 		const rootId = 'app-folder';
 		if ((await metadataAt(MARKER_FILE)) !== undefined) return { rootId };
 

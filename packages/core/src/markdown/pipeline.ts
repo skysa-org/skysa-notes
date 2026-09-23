@@ -11,7 +11,7 @@ import { toLf } from './lineEndings.js';
  * `unified` ^11 — the same versions wrapped here — so this module exercises the
  * editor's actual parse/serialize path headless in CI. Change the plugin list or
  * the options here and the editor must be reconfigured to match, or the fidelity
- * suite in tests/markdown stops meaning anything. See docs/PLAN.md §7.
+ * suite in tests/markdown stops meaning anything. See docs/ARCHITECTURE.md §7.
  */
 
 /**

@@ -165,7 +165,7 @@ const folders = (backing: FakeProvider): RemoteEntry[] =>
 /** "café" as Latin-1 writes it: `0xE9` alone is not a UTF-8 sequence. */
 const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
 
-/** The files a device can hold: the ones that are text (docs/PLAN.md §7). */
+/** The files a device can hold: the ones that are text (docs/ARCHITECTURE.md §7). */
 const readable = (backing: FakeProvider): RemoteEntry[] =>
 	files(backing).filter((entry) => backing.contentAt(entry.path) !== undefined);
 

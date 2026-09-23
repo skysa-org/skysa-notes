@@ -4,7 +4,7 @@ import type { ProviderKind } from './config.js';
  * The seam through which an operator restricts who may mint provider tokens or
  * use the WebDAV proxy. This repo ships only `alwaysAllowed`; any real policy
  * (an email allowlist, a billing check) is supplied by the operator through
- * `createApp` rather than living here. See docs/PLAN.md §6.
+ * `createApp` rather than living here. See docs/ARCHITECTURE.md §6.
  */
 export interface EntitlementDecision {
 	allowed: boolean;
@@ -21,7 +21,7 @@ export interface EntitlementDecision {
  * What the decision is about.
  *
  * It used to be a user id, which stopped meaning anything when connections
- * stopped aggregating under a user (docs/PLAN.md §6, "per-connection
+ * stopped aggregating under a user (docs/ARCHITECTURE.md §6, "per-connection
  * credentials"): there is no subject behind a connection but the connected
  * account itself. An operator's allowlist wants the account anyway — "these
  * Google accounts may sync here" is a rule that can be written, where "these
@@ -31,7 +31,7 @@ export interface EntitlementSubject {
 	/**
 	 * The connection the account has on this server. Absent when the account is
 	 * connecting for the first time: the OAuth callback asks before anything is
-	 * stored, so there is no row yet to name (docs/PLAN.md §6).
+	 * stored, so there is no row yet to name (docs/ARCHITECTURE.md §6).
 	 */
 	readonly connectionId?: string;
 	readonly provider: ProviderKind;

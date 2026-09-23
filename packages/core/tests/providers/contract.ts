@@ -45,7 +45,7 @@ export interface ProviderContractOptions {
 	/**
 	 * False for path-based providers, where `remoteId` *is* the path and so
 	 * cannot survive a move. WebDAV re-links renames through frontmatter `id`
-	 * instead (docs/PLAN.md §5.4).
+	 * instead (docs/ARCHITECTURE.md §5.4).
 	 */
 	stableIds?: boolean;
 	/**
@@ -76,7 +76,7 @@ export interface ProviderContractOptions {
 	 * nothing when nothing has happened" is an assertion about emptiness, and
 	 * polling cannot make an empty answer arrive sooner. The name lookups this
 	 * suite leans on elsewhere need no such wait — Drive answered those in
-	 * 0.3–0.4s (docs/PLAN.md §5.1).
+	 * 0.3–0.4s (docs/ARCHITECTURE.md §5.1).
 	 */
 	changesLagMs?: number;
 	/** Live accounts are slow. */
@@ -339,7 +339,7 @@ export const describeProviderContract = (
 				// conflict against and the upload simply creates the file —
 				// verified against a live account, 2026-09-21. Handed the real
 				// former version it answers `conflict`, which the adapter turns
-				// into this (docs/PLAN.md §5.3).
+				// into this (docs/ARCHITECTURE.md §5.3).
 				const provider = await open();
 				const seeded = await seedFile(provider, 'ghost.md', 'one\n');
 				await provider.delete(seeded);
@@ -621,7 +621,7 @@ export const describeProviderContract = (
 		});
 
 		/**
-		 * docs/PLAN.md §4: `read` says when a file is not UTF-8 text, and that
+		 * docs/ARCHITECTURE.md §4: `read` says when a file is not UTF-8 text, and that
 		 * is all that is different about it. The file is still listed, still in
 		 * the feed, and can still be moved and deleted — the engine needs every
 		 * one of those to leave it alone on purpose rather than by accident.

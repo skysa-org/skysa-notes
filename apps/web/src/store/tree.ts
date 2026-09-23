@@ -59,7 +59,7 @@ export const containsPath = (tree: readonly FolderNode[], path: string): boolean
 /**
  * What the root of the app folder is called when it holds notes. A note there
  * belongs to no notebook, which is a shape the remote folder can hand us — the
- * app itself never creates one (docs/PLAN.md §12.6).
+ * app itself never creates one (docs/ARCHITECTURE.md §12.6).
  */
 export const LOOSE_NOTES_LABEL = 'Loose notes';
 
