@@ -251,6 +251,52 @@ describe('an empty paragraph', () => {
 	it('comes back as an empty paragraph, not as literal HTML in the text', async () => {
 		const { withCtx } = await mount('<br />\n\nfirst\n');
 		expect(withCtx(currentMarkdown)).toBe('<br />\n\nfirst\n');
+
+		const first = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild);
+		expect(first?.type.name).toBe('paragraph');
+		expect(first?.childCount).toBe(0);
+	});
+});
+
+/**
+ * Milkdown's own reader for the empty paragraph took every `<br>` it met, in
+ * any spelling and anywhere in the note, and deleted it: `first<br />second`
+ * became `firstsecond`, and the fidelity check sent the note to raw mode. Only
+ * the shape the editor writes is an empty paragraph; every other break is the
+ * author's and comes back as they wrote it.
+ */
+describe('a break the author wrote', () => {
+	it.each([
+		['inside a sentence', 'first<br />second\n'],
+		['between spaces', 'first <br /> second\n'],
+		['without the slash', 'first<br>second\n'],
+		['alone, but not spelled the way the editor writes it', 'first\n\n<br>\n\nsecond\n'],
+		['in a list item', '- one<br />two\n'],
+	])('survives %s, byte for byte', async (_where, body) => {
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => representsFaithfully(ctx, body))).toBe(true);
+		expect(withCtx(currentMarkdown)).toBe(body);
+	});
+
+	it('survives on a line of its own inside a paragraph, the line ending before it a space', async () => {
+		// The serializer's own rule, not the editor's: html at the start of a
+		// line could be read back as a block (`core`'s fidelity.ts). Rendered,
+		// the two are the same.
+		const body = 'first\n<br />\nsecond\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => representsFaithfully(ctx, body))).toBe(true);
+		expect(withCtx(currentMarkdown)).toBe('first <br />\nsecond\n');
+	});
+
+	it('is still a break after the user types elsewhere', async () => {
+		const onUserEdit = vi.fn();
+		const { type } = await mount('first<br />second\n', onUserEdit);
+
+		type('!');
+
+		expect(onUserEdit.mock.calls[0]?.[0]).toBe('first<br />second!\n');
 	});
 });
 
@@ -283,6 +329,7 @@ describe('representsFaithfully', () => {
 		].join('\n');
 
 		const { withCtx } = await mount(body);
+		expect(withCtx(currentMarkdown)).toBe(body);
 		expect(withCtx((ctx) => representsFaithfully(ctx, body))).toBe(true);
 	});
 

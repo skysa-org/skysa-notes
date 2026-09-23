@@ -14,13 +14,13 @@ import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { history } from '@milkdown/kit/plugin/history';
 import { slashFactory } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
-import { commonmark } from '@milkdown/kit/preset/commonmark';
+import { commonmark, remarkPreserveEmptyLinePlugin } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { keymap } from '@milkdown/kit/prose/keymap';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
-import { $prose } from '@milkdown/kit/utils';
+import { $prose, $remark } from '@milkdown/kit/utils';
 import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
 
 import { autoLanguagePlugin } from './autoLanguage.js';
@@ -105,6 +105,63 @@ const watchState = (report: (state: EditorState) => void) =>
 		},
 	});
 
+/**
+ * The `<br />` the editor writes for an empty paragraph, read back as one — and
+ * nothing else.
+ *
+ * Milkdown writes an empty paragraph as a line holding only `<br />` (§7,
+ * "Empty paragraphs become `<br />`"), and its preset reads that back with
+ * `remarkPreserveEmptyLinePlugin`. But that plugin removes *every* html node
+ * spelled `<br />`, `<br>`, `<br/>` or `<br >`, wherever it sits: a break
+ * inside a sentence was deleted outright, `first<br />second` becoming
+ * `firstsecond`, and the fidelity check rightly sent the note to raw mode.
+ * https://github.com/Milkdown/milkdown/blob/v7.22.1/packages/plugins/preset-commonmark/src/plugin/remark-preserve-empty-line.ts
+ *
+ * So the preset's is left out and this one stands in its place, taking only
+ * the shape the editor writes: a paragraph whose one child is exactly `<br />`
+ * (the preset's `remarkHtmlTransformer` has by then wrapped a block of html in
+ * a paragraph). Anything else is the author's own html and stays in the
+ * document as an inline atom, which the serializer writes back as it was — the
+ * rule `previewLines` in `core` follows for the same reason.
+ *
+ * The preset's plugin is left out but its *options* are not: the paragraph
+ * serializer decides whether to write `<br />` for an empty paragraph by
+ * asking for that ctx slice, so removing it would break the other half.
+ */
+const EMPTY_LINE = '<br />';
+
+interface MdastNode {
+	readonly type: string;
+	readonly value?: unknown;
+	readonly children?: readonly MdastNode[];
+}
+
+const emptyEmptyLines = (node: MdastNode): MdastNode => {
+	const children = node.children;
+	if (children === undefined) return node;
+	const [only] = children;
+	if (
+		node.type === 'paragraph' &&
+		children.length === 1 &&
+		only?.type === 'html' &&
+		only.value === EMPTY_LINE
+	) {
+		return { ...node, children: [] };
+	}
+	return { ...node, children: children.map(emptyEmptyLines) };
+};
+
+// A transformer may hand back a new tree in place of the one it was given, and
+// this one is the same tree with some paragraphs emptied: still a root.
+const emptyLinePlugin = $remark(
+	'skysa-empty-line',
+	() => () => (tree) => emptyEmptyLines(tree) as typeof tree
+);
+
+const commonmarkWithoutBreakEater = commonmark.filter(
+	(plugin) => plugin !== remarkPreserveEmptyLinePlugin.plugin
+);
+
 export const createRichEditor = ({
 	root,
 	body,
@@ -126,7 +183,10 @@ export const createRichEditor = ({
 			ctx.set(slash.key, menus.slash);
 			ctx.set(tooltip.key, menus.tooltip);
 		})
-		.use(commonmark)
+		.use(commonmarkWithoutBreakEater)
+		// After the preset, so that its html transformer has already put a
+		// block of html into a paragraph for this to find.
+		.use(emptyLinePlugin)
 		.use(gfm)
 		.use(history)
 		.use(clipboard)
