@@ -1,5 +1,14 @@
 # @skysa/api
 
+## 0.2.1
+
+### Patch Changes
+
+- 977583b: `parseEnv` and `AppConfig` are exported from the package entry beside
+  `createApp`, so an operator writing their own Worker entry can build its
+  config through the same validation the default entry uses.
+- @skysa/core@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes
