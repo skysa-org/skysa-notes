@@ -82,6 +82,12 @@ export interface AccountPanelProps {
 	 * jsdom cannot make a blob URL, so the real one cannot run in a test.
 	 */
 	download?: (notes: readonly NoteRecord[]) => void;
+	/**
+	 * Where the way to connect storage is, from here. Beside the tabs it is the
+	 * `+` above the panel; in a compact window's source dropdown it is the list
+	 * of providers below it, and "above" would send a thumb to nothing.
+	 */
+	connectIs?: 'above' | 'below';
 }
 
 /** Back to exactly here, minus the outcome of any connect before this one. */
@@ -341,9 +347,15 @@ interface LocalProps {
 	config: Asked<InstanceConfig>;
 	returnTo: string;
 	navigate?: (url: string) => void;
+	connectIs?: 'above' | 'below';
 }
 
-const NotConnected = ({ config }: LocalProps) => {
+const CONNECT_HINTS = {
+	above: ' Use + above to connect storage.',
+	below: ' Connect storage below.',
+} as const;
+
+const NotConnected = ({ config, connectIs = 'above' }: LocalProps) => {
 	const settings = answer(config);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -354,7 +366,7 @@ const NotConnected = ({ config }: LocalProps) => {
 		<section className="account" aria-label="Storage">
 			<p className="muted">
 				Notes are kept on this device only.
-				{offerable.length > 0 && ' Use + above to connect storage.'}
+				{offerable.length > 0 && CONNECT_HINTS[connectIs]}
 			</p>
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">
@@ -1155,6 +1167,7 @@ export const AccountPanel = ({
 	sync = syncScheduler,
 	navigate,
 	download = downloadNotes,
+	connectIs = 'above',
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
@@ -1259,6 +1272,7 @@ export const AccountPanel = ({
 					database={database}
 					config={config}
 					returnTo={returnTo}
+					connectIs={connectIs}
 					{...(navigate === undefined ? {} : { navigate })}
 				/>
 			);

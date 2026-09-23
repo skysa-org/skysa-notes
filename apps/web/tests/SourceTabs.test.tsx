@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { type ApiClient, type InstanceConfig } from '../src/api/client.js';
-import { SourceTabs } from '../src/components/SourceTabs.js';
+import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import {
 	bindConnection,
 	connectedSources,
@@ -376,5 +376,111 @@ describe('the source tabs', () => {
 		await createNote(db, { title: 'Loose' });
 
 		expect(await renameSource(db, LOCAL_CONNECTION_ID, 'Mine')).toBe(false);
+	});
+});
+
+describe('the source panel, in a compact window', () => {
+	const showPanel = (
+		db: NotesDatabase,
+		{ client = clientWith(), onChosen = () => undefined } = {}
+	) =>
+		render(
+			<SourcePanel
+				db={db}
+				client={client}
+				returnTo="/"
+				navigate={() => undefined}
+				account={<section aria-label="Storage">Syncing with Dropbox</section>}
+				onChosen={onChosen}
+			/>
+		);
+
+	const panel = () => screen.getByRole('region', { name: 'Sources' });
+
+	it('lists the sources, then the storage panel, then the way to another account', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		showPanel(db);
+
+		const connect = await within(panel()).findByRole('group', {
+			name: 'Connect another account',
+		});
+		// The sources are a live query and the providers the server's answer,
+		// so either can arrive first.
+		const list = await within(panel()).findByRole('list');
+		const [dropbox, onedrive] = within(list).getAllByRole('button');
+		expect(dropbox?.textContent).toBe('Dropbox');
+		expect(dropbox?.getAttribute('aria-current')).toBe('true');
+		expect(onedrive?.textContent).toBe('OneDrive');
+		expect(onedrive?.getAttribute('aria-current')).toBeNull();
+
+		// In that order on the page: what is syncing sits between the sources
+		// and the way to add another.
+		const storage = within(panel()).getByRole('region', { name: 'Storage' });
+		expect(
+			(onedrive as Node).compareDocumentPosition(storage) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect(
+			storage.compareDocumentPosition(connect) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		// Both at the foot of the panel, together (`.source-panel-foot`).
+		expect(storage.parentElement).toBe(connect.parentElement);
+		expect(storage.parentElement?.classList.contains('source-panel-foot')).toBe(true);
+		// A group of its own, so a provider and a source of the same name are
+		// not two identical buttons side by side.
+		expect(within(connect).getByRole('button', { name: 'Dropbox' })).toBeDefined();
+		expect(within(connect).getByRole('button', { name: 'OneDrive' })).toBeDefined();
+	});
+
+	it('shows the source chosen, and says it is done', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		let chosen = 0;
+		showPanel(db, {
+			onChosen: () => {
+				chosen += 1;
+			},
+		});
+
+		const list = await within(panel()).findByRole('list');
+		await user.click(await within(list).findByRole('button', { name: 'OneDrive' }));
+
+		expect(chosen).toBe(1);
+		await waitFor(async () => {
+			const showing = (await connectedSources(db)).find((source) => source.active);
+			expect(showing?.connectionId).toBe('c2');
+		});
+	});
+
+	it('says a disconnected source is disconnected, in words', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, {
+			connectionId: 'c1',
+			provider: 'dropbox',
+			accountId: 'dbid:ada',
+		});
+		await createNote(db, { connectionId: 'c1', title: 'Kept', body: 'Kept\n' });
+		await detachConnection(db, { connectionId: 'c1' });
+		showPanel(db);
+
+		expect(
+			await within(panel()).findByRole('button', { name: /— disconnected$/ })
+		).toBeDefined();
+	});
+
+	it('still holds the storage panel with nothing to connect and nothing connected', () => {
+		const db = freshDatabase();
+		showPanel(db, { client: clientWith(() => Promise.reject(new Error('down'))) });
+
+		expect(within(panel()).getByRole('region', { name: 'Storage' })).toBeDefined();
 	});
 });

@@ -1,5 +1,35 @@
 :root {
 	color-scheme: light dark;
+
+	/*
+	 * Spacing, in the few steps everything is built from, and the three that
+	 * say how dense the layout is. The density three are the ones blocks agree
+	 * on, so that words line up down the screen however many blocks they
+	 * cross — the note's title over its first line, a pane's heading over its
+	 * rows, the tab over the heading. A compact window and a narrow note
+	 * tighten them (`.app-frame.compact`, `@container note`), and everything
+	 * built on them tightens together.
+	 */
+	--space-3xs: 0.125rem;
+	--space-2xs: 0.25rem;
+	--space-xs: 0.375rem;
+	--space-s: 0.5rem;
+	--space-m: 0.75rem;
+	--space-l: 1rem;
+	/* How far a block's words sit in from its sides. */
+	--gutter: var(--space-l);
+	/* Above and below the words of a bar: the pane headers and the note's,
+	   whose bottom rules have to meet across the columns. */
+	--bar-block: var(--space-m);
+	/* Above and below a row of a list. */
+	--row-block: var(--space-s);
+	/* The height of a control in a bar, and the inset of the words or the
+	   glyph inside a borderless one. A bar that starts or ends with such a
+	   control pulls its own padding in by the inset, so the words line up
+	   with the gutter rather than the control's invisible edge. */
+	--control: 1.75rem;
+	--control-inline: var(--space-s);
+
 	--bg: #ffffff;
 	--fg: #111827;
 	--muted: #6b7280;
@@ -44,6 +74,17 @@
 	   above: a drop target is not an outcome, and green over the row under the
 	   pointer would read as "done" before anything has been. */
 	--drop: #2563eb;
+	/* What is on: a pressed toggle, the tab in use, a mark already applied.
+	   A colour of its own rather than a darker grey, because a grey that is
+	   darker than hover is only told apart from hover side by side, and a
+	   toggle is pressed with the pointer still over it. */
+	--accent: #2563eb;
+	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+	--on-fg: var(--accent);
+	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
+	/* Keyboard focus: a ring, drawn outside the control, so it never reads
+	   as the control's own state. */
+	--ring: color-mix(in srgb, var(--accent) 70%, transparent);
 	font-family:
 		ui-sans-serif,
 		system-ui,
@@ -71,6 +112,7 @@
 		--warn: #fbbf24;
 		--bad: #f87171;
 		--drop: #60a5fa;
+		--accent: #60a5fa;
 		/* The light palette's ink is unreadable on a dark slab: every token
 		   colour is the same hue lifted until it reads against `--surface`,
 		   and the slab itself steps away from the page rather than towards
@@ -93,6 +135,46 @@
 
 * {
 	box-sizing: border-box;
+}
+
+/* A compact window is a phone's or a small tablet's: every block tighter. */
+.app-frame.compact {
+	--gutter: var(--space-m);
+	--bar-block: var(--space-s);
+}
+
+/* A note narrower than this beside the columns has the same gutter a phone
+   gives it. The bar's height is left alone: its bottom rule meets the pane
+   headers' beside it. */
+@container note (width < 36rem) {
+	.note-view > * {
+		--gutter: var(--space-m);
+	}
+}
+
+/* One focus ring for every control, shown for the keyboard and not for a tap
+   or a click. Outside the control and in the accent, so a focused toggle
+   still shows plainly whether it is on. */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+/* Inside, for what fills a scrolling list or bar edge to edge: outside, the
+   ring would be cut off by the box that scrolls. */
+button.row:focus-visible,
+.source-tab:focus-visible,
+.toolbar-item:focus-visible {
+	outline-offset: -2px;
+}
+
+/* A tap is answered by the control's own state; the grey flash a phone adds on
+   top of it looked, for a moment, like the toggle staying on. */
+button,
+a {
+	-webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -247,7 +329,9 @@ code {
 	   border, rather than being stretched or floated up to the top. */
 	align-items: flex-end;
 	gap: 0.25rem;
-	padding-inline: 0.5rem;
+	/* The first tab's name over the notebooks' heading, and the search's
+	   right-hand edge on the gutter the note's buttons end on. */
+	padding-inline: calc(var(--gutter) - var(--tab-inline)) var(--gutter);
 	border-block-end: 1px solid var(--border);
 	background: var(--surface);
 }
@@ -278,6 +362,7 @@ code {
    the two sit on the same baseline whatever size their glyphs are. */
 .source-tabs {
 	--tab-line: 1.36rem;
+	--tab-inline: var(--space-m);
 }
 
 .source-tab {
@@ -285,7 +370,7 @@ code {
 	align-items: baseline;
 	max-width: 14rem;
 	min-width: 0;
-	padding: 0.5rem 0.75rem;
+	padding: var(--space-s) var(--tab-inline);
 	font: inherit;
 	font-size: 0.85rem;
 	line-height: var(--tab-line);
@@ -299,9 +384,11 @@ code {
 	cursor: pointer;
 }
 
-.source-tab:hover {
-	color: var(--fg);
-	background: color-mix(in srgb, var(--fg) 6%, transparent);
+@media (hover: hover) {
+	.source-tab:hover {
+		color: var(--fg);
+		background: color-mix(in srgb, var(--fg) 6%, transparent);
+	}
 }
 
 /* Not colour alone: the weight and the underline say it too, and the
@@ -366,8 +453,10 @@ code {
 
 /* The tab under the pointer lights up because pressing it does something.
    This one is already pressed. */
-.source-tab-editing:hover {
-	background: none;
+@media (hover: hover) {
+	.source-tab-editing:hover {
+		background: none;
+	}
 }
 
 /* No box of its own: the tab around it is the box. */
@@ -411,9 +500,11 @@ code {
 	cursor: pointer;
 }
 
-.source-add-button:hover {
-	color: var(--fg);
-	background: color-mix(in srgb, var(--fg) 8%, transparent);
+@media (hover: hover) {
+	.source-add-button:hover {
+		color: var(--fg);
+		background: var(--hover-bg);
+	}
 }
 
 /* Lit while its menu is open, as a toolbar button is (`.toolbar-button-on`). */
@@ -454,11 +545,87 @@ code {
 	padding-inline-start: 0.5rem;
 }
 
-.source-search [role='search'] {
+.source-search .search-box {
+	position: relative;
 	display: flex;
 	width: 100%;
 	max-width: 20rem;
 	min-width: 6rem;
+}
+
+/* ---- Search results ---------------------------------------------------- */
+
+/*
+ * A search's answers hang from the field (`SearchField`) rather than taking a
+ * pane over, so what the user was reading is still where they left it behind
+ * them. On a wide screen they are a card under the field; in a compact window,
+ * everything under the bar, as the other compact panels are.
+ */
+.search-box [role='search'] {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+}
+
+.search-results {
+	position: absolute;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	background: var(--bg);
+}
+
+/* Its right edge on the field's, and wider than the field: a result is a
+   title, where it is, and a few lines of the match. */
+.source-search .search-results {
+	inset-block-start: calc(100% + var(--space-2xs));
+	inset-inline-end: 0;
+	width: min(28rem, calc(100vw - 2 * var(--gutter)));
+	max-height: min(36rem, 70dvh);
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+/* The bar is the top of the window, so under it to the foot is the window
+   less the bar: `100%` of the bar it hangs from. */
+.compact-bar {
+	position: relative;
+}
+
+.compact-bar .search-results {
+	inset-block-start: 100%;
+	inset-inline: 0;
+	height: calc(100dvh - 100%);
+	border-block-start: 1px solid var(--border);
+	padding-block-end: env(safe-area-inset-bottom);
+}
+
+/* A list of its own, though it sits in the source bar, whose list of tabs
+   is a row. */
+.search-results ul {
+	display: block;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.search-result {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	padding: var(--row-block) var(--gutter);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+/* The highlight follows the keyboard, so it is on the row rather than on
+   `:hover`, as the palette's is: with both, the mouse and the arrows would
+   light two rows at once. It starts on the first, which is what Enter opens. */
+.search-result.active {
+	background: var(--hover-bg);
 }
 
 /* ---- App shell -------------------------------------------------------- */
@@ -482,9 +649,19 @@ code {
 	overflow: hidden;
 }
 
+/* The two side columns are 15rem and 19rem wide down to a 1250px window, and
+   narrow with it below that, in step, so the note keeps the room it would
+   otherwise lose for as long as it can: each `vw` is its column's width over
+   1250px, which is where the two terms of its `clamp` meet. The floors are
+   under anything the columns reach before the window turns compact
+   (`components/layout.ts`); they are for a root font size other than 16px,
+   not a width the layout expects to hit. */
 .app-shell {
 	display: grid;
-	grid-template-columns: 15rem 19rem 1fr;
+	grid-template-columns:
+		clamp(11rem, 19.2vw, 15rem)
+		clamp(14rem, 24.32vw, 19rem)
+		minmax(0, 1fr);
 	overflow: hidden;
 }
 
@@ -507,8 +684,8 @@ code {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 0.5rem;
-	padding: 0.75rem;
+	gap: var(--space-s);
+	padding: var(--bar-block) var(--gutter);
 	background: inherit;
 	border-block-end: 1px solid var(--border);
 }
@@ -565,7 +742,7 @@ button.row {
 	flex-direction: column;
 	gap: 0.15rem;
 	width: 100%;
-	padding: 0.5rem 0.75rem;
+	padding: var(--row-block) var(--gutter);
 	font: inherit;
 	text-align: start;
 	border: 0;
@@ -581,8 +758,10 @@ button.row {
 	justify-content: space-between;
 }
 
-button.row:hover {
-	background: color-mix(in srgb, var(--fg) 6%, transparent);
+@media (hover: hover) {
+	button.row:hover {
+		background: color-mix(in srgb, var(--fg) 6%, transparent);
+	}
 }
 
 button.row.selected {
@@ -622,17 +801,17 @@ button.row.drop-over {
 	gap: 0.25rem;
 }
 
-.notebook-menu {
+.options-menu {
 	position: relative;
 	display: flex;
 	align-items: center;
 }
 
 /* The same card `.source-add-menu` is, for the same reason: it hangs off the
-   control that opened it and has to sit over the tree below. */
-.notebook-menu-items {
+   control that opened it and has to sit over what is below. */
+.options-menu-items {
 	position: absolute;
-	inset-block-start: 100%;
+	inset-block-start: calc(100% + var(--space-2xs));
 	inset-inline-end: 0;
 	z-index: 20;
 	display: flex;
@@ -640,14 +819,18 @@ button.row.drop-over {
 	align-items: flex-start;
 	gap: 0.35rem;
 	min-width: 12rem;
-	padding: 0.6rem 0.75rem;
+	padding: var(--space-s) var(--space-m);
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: 0.5rem;
 	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 }
 
-.notebook-menu-items button {
+/* Scoped twice over, so that a bar the menu sits in — the note's header,
+   whose buttons are boxed — does not dress the items as its own buttons. */
+.options-menu .options-menu-items button {
+	width: auto;
+	height: auto;
 	padding: 0.15rem 0;
 	font: inherit;
 	font-size: 0.85rem;
@@ -655,16 +838,21 @@ button.row.drop-over {
 	color: var(--fg);
 	background: none;
 	border: 0;
+	border-radius: 0;
 	cursor: pointer;
 }
 
-.notebook-menu-items button:hover {
-	text-decoration: underline;
+@media (hover: hover) {
+	.options-menu-items button:hover {
+		text-decoration: underline;
+	}
 }
 
-/* Deleting a notebook takes every note beneath it. The colour is the one a
-   toast uses to say something went wrong, because this is the same news. */
-button.danger {
+/* Deleting a notebook takes every note beneath it, and deleting a note takes
+   the note. The colour is the one a toast uses to say something went wrong,
+   because this is the same news. */
+button.danger,
+.options-menu .options-menu-items button.danger {
 	color: var(--bad);
 }
 
@@ -675,7 +863,7 @@ button.danger {
 	display: block;
 	box-sizing: border-box;
 	width: 100%;
-	padding: 0.5rem 0.75rem;
+	padding: var(--row-block) var(--gutter);
 	cursor: text;
 }
 
@@ -700,8 +888,8 @@ button.danger {
 .confirm {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0.5rem;
-	padding: 0.75rem;
+	gap: var(--space-s);
+	padding: var(--space-m) var(--gutter);
 	background: color-mix(in srgb, var(--bad) 8%, transparent);
 	border-block-end: 1px solid var(--border);
 }
@@ -721,12 +909,25 @@ button.danger {
    (`role="status"`), so it is also how a screen-reader user is told the mode
    has started at all. */
 .move-hint {
-	padding: 0.5rem 0.75rem;
+	padding: var(--space-s) var(--gutter);
 	margin: 0;
 	font-size: 0.8rem;
 	color: var(--muted);
 	background: color-mix(in srgb, var(--drop) 8%, transparent);
 	border-block-end: 1px solid var(--border);
+}
+
+/* An action said as a word in a sentence: a button, since it does something
+   rather than going somewhere, dressed as the link it reads as. */
+.link-button {
+	padding: 0;
+	font: inherit;
+	color: var(--accent);
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+	background: none;
+	border: 0;
+	cursor: pointer;
 }
 
 .row-label {
@@ -743,7 +944,7 @@ button.danger {
 }
 
 .placeholder {
-	padding: 0.75rem;
+	padding: var(--space-m) var(--gutter);
 	margin: 0;
 	font-size: 0.85rem;
 }
@@ -829,11 +1030,18 @@ button.danger {
 	color: var(--fg);
 }
 
+/*
+ * A container, so that the note's header and outline are laid out by the room
+ * the note has rather than the room the window has — the same window gives
+ * the note very different room with the columns beside it and without them.
+ * `components/layout.ts` says which widths are decided where.
+ */
 .note-view {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
 	overflow: hidden;
+	container: note / inline-size;
 }
 
 .note-view.empty {
@@ -843,11 +1051,10 @@ button.danger {
 
 .note-header {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: center;
 	justify-content: space-between;
-	gap: 0.5rem;
-	padding: 0.75rem 1rem;
+	gap: var(--space-m);
+	padding: var(--bar-block) var(--gutter);
 	border-block-end: 1px solid var(--border);
 }
 
@@ -856,8 +1063,8 @@ button.danger {
    line height the field came out two pixels taller, and the three headers'
    bottom rules did not meet. */
 .note-title-input {
-	flex: 1 1 12rem;
-	min-width: 0;
+	flex: 1 1 20rem;
+	min-width: 8rem;
 	padding: 0;
 	font: inherit;
 	font-size: 1.15rem;
@@ -868,27 +1075,49 @@ button.danger {
 	color: var(--fg);
 }
 
+/* As wide as the title, where the browser can say how wide that is: then the
+   path beside it gives way to the title and not the other way round. Where it
+   cannot, 20rem holds most titles whole. */
+@supports (field-sizing: content) {
+	.note-title-input {
+		flex-basis: auto;
+		field-sizing: content;
+	}
+}
+
 .note-title-input:focus {
 	outline: 2px solid var(--border);
 	outline-offset: 0.25rem;
 	border-radius: 0.25rem;
 }
 
+/* One row, the title and the buttons keeping their room, and the path — the
+   one thing here that says again what is said elsewhere — giving up its own:
+   it narrows first, and goes altogether when the note is too narrow for it
+   (below). The whole path is in the tooltip.
+
+   The path and the buttons are laid out as the header's own items, not in a
+   row of their own: a row's least width is its content's, and the content of
+   a path that does not wrap is the whole path, so a row of them would not
+   narrow and the title would give way instead. */
 .note-actions {
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
+	display: contents;
 }
 
 .note-actions .path {
+	/* Shrinks a thousand times as fast as the title, which is to say first:
+	   the title is what the note is, the path only where it is. */
+	flex: 0 1000 auto;
+	min-width: 4rem;
+	max-width: 24rem;
 	font-size: 0.75rem;
-	max-width: 18rem;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
 .note-actions button {
+	flex: none;
 	font: inherit;
 	font-size: 0.85rem;
 	padding: 0.3rem 0.7rem;
@@ -897,6 +1126,101 @@ button.danger {
 	background: var(--bg);
 	color: var(--fg);
 	cursor: pointer;
+}
+
+/* The header's controls are icons, each named for a screen reader and in a
+   tooltip, so the row costs the title as little as it can. 1.75rem high, the
+   title's line box, so the header's bottom rule still meets the pane headers'
+   beside it. */
+.note-actions .note-icon,
+.mode-tabs button {
+	display: grid;
+	place-items: center;
+	height: var(--control);
+	padding: 0;
+	color: var(--muted);
+}
+
+/* As wide as the glyph and the inset either side of it, so that the last one
+   can be pulled out by the inset and put its glyph on the gutter. */
+.note-actions .note-icon {
+	width: calc(1rem + 2 * var(--control-inline));
+	border-color: transparent;
+	background: none;
+}
+
+.note-actions > :last-child {
+	margin-inline-end: calc(-1 * var(--control-inline));
+}
+
+/* Its menu's edge back on the gutter, where the glyph that opened it is. */
+.note-actions > .options-menu:last-child .options-menu-items {
+	inset-inline-end: var(--control-inline);
+}
+
+.note-actions .note-icon[aria-pressed='true'],
+.mode-tabs button[aria-pressed='true'] {
+	color: var(--on-fg);
+	background: var(--on-bg);
+}
+
+/* Hover only where there is a pointer that hovers. On a touch screen `:hover`
+   sticks to whatever was last tapped, and a toggle just turned off would stay
+   lit with it. */
+@media (hover: hover) {
+	.note-actions .note-icon:not([aria-pressed='true']):hover,
+	.mode-tabs button:not(:disabled, [aria-pressed='true']):hover {
+		color: var(--fg);
+		background: var(--hover-bg);
+	}
+}
+
+/* Two tabs in one outline, the one in use filled. */
+.mode-tabs {
+	display: flex;
+	flex: none;
+	padding: 1px;
+	gap: 1px;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+}
+
+.note-actions .mode-tabs button {
+	width: 1.5rem;
+	height: 1.5rem;
+	border: 0;
+	border-radius: 0.375rem;
+	background: none;
+}
+
+.note-actions .mode-tabs button[aria-pressed='true'] {
+	background: var(--on-bg);
+}
+
+.mode-tabs button:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+/* The note's own width, not the window's: a phone and a note squeezed beside
+   the columns get the same header. */
+@container note (width < 36rem) {
+	.note-actions .path {
+		display: none;
+	}
+}
+
+/* Too narrow for a title of any length beside the buttons: the title takes a
+   row of its own, rather than an inch of one. */
+@container note (width < 20rem) {
+	.note-header {
+		flex-wrap: wrap;
+		justify-content: flex-start;
+	}
+
+	.note-title-input {
+		flex-basis: 100%;
+	}
 }
 
 .editor {
@@ -917,6 +1241,13 @@ button.danger {
 
 .editor .cm-focused {
 	outline: none;
+}
+
+/* The first line as far below the header as the rich editor's is. The words
+   themselves sit after the line numbers, so there is no lining them up with
+   the title; what can line up is where the note starts. */
+.editor .cm-content {
+	padding-block: var(--gutter);
 }
 
 .editor .cm-gutters {
@@ -973,7 +1304,8 @@ button.danger {
 }
 
 .editor-rich-surface {
-	padding: 1rem 1.25rem 4rem;
+	/* The gutter both ways: the first line's words under the title's. */
+	padding: var(--gutter) var(--gutter) 4rem;
 	line-height: 1.7;
 	outline: none;
 	/* ProseMirror's element is given the class `editor` by Milkdown, so the
@@ -1148,10 +1480,16 @@ button.danger {
 	cursor: pointer;
 }
 
-.code-tool-language:hover,
 .code-tool-language:focus-visible {
 	border-color: var(--border);
 	color: var(--fg);
+}
+
+@media (hover: hover) {
+	.code-tool-language:hover {
+		border-color: var(--border);
+		color: var(--fg);
+	}
 }
 
 .code-tool {
@@ -1165,16 +1503,18 @@ button.danger {
 	cursor: pointer;
 }
 
-.code-tool:hover {
-	background: color-mix(in srgb, var(--fg) 8%, transparent);
-	color: var(--fg);
+@media (hover: hover) {
+	.code-tool:hover {
+		background: var(--hover-bg);
+		color: var(--fg);
+	}
 }
 
 /* Lit because the setting is on, which is a different thing from hover — the
    same distinction the formatting toolbar draws. */
 .code-tool[aria-pressed='true'] {
-	background: color-mix(in srgb, var(--fg) 14%, transparent);
-	color: var(--fg);
+	background: var(--on-bg);
+	color: var(--on-fg);
 }
 
 /* Said with colour rather than with a word, because the word would resize the
@@ -1234,8 +1574,10 @@ button.danger {
 	cursor: text;
 }
 
-.editor-rich-surface .editor-tail:hover {
-	border-color: var(--border);
+@media (hover: hover) {
+	.editor-rich-surface .editor-tail:hover {
+		border-color: var(--border);
+	}
 }
 
 .editor-rich-surface .editor-tail:focus-visible {
@@ -1330,7 +1672,7 @@ button.danger {
 .toolbar-button {
 	font: inherit;
 	font-size: 0.8rem;
-	padding: 0.3rem 0.55rem;
+	padding: 0.3rem var(--control-inline);
 	border: 0;
 	border-radius: 0.375rem;
 	background: none;
@@ -1345,14 +1687,17 @@ button.danger {
 	min-height: 1.75rem;
 }
 
-.toolbar-button:hover:not(:disabled) {
-	background: color-mix(in srgb, var(--fg) 8%, transparent);
+@media (hover: hover) {
+	.toolbar-button:hover:not(:disabled) {
+		background: var(--hover-bg);
+	}
 }
 
 /* Lit because it is already applied to the text under the cursor, which is a
    different thing from hover and has to look it. */
 .toolbar-button-on {
-	background: color-mix(in srgb, var(--fg) 14%, transparent);
+	color: var(--on-fg);
+	background: var(--on-bg);
 }
 
 .toolbar-button:disabled {
@@ -1369,31 +1714,70 @@ button.danger {
  * and minus insert, which is the slash menu's job here. `FormatToolbar.tsx`
  * says the rest.
  *
- * It wraps rather than scrolling sideways, and that is not a preference: a
- * scrolling bar is a scroll box, and a scroll box in one axis is a scroll box
+ * One row, always. What does not fit goes into the overflow menu at the end,
+ * least used first, measured against the bar's own width (`useToolbarFit`).
+ *
+ * Neither wrapping nor scrolling sideways: it used to wrap, which cost a
+ * second row of the note on a phone, and it cannot scroll, because a
+ * scrolling bar is a scroll box and a scroll box in one axis is a scroll box
  * in both — `overflow-x: auto` makes the used value of `overflow-y` `auto`
- * too. Every panel that opens underneath a button then belongs to the bar's
- * own scrollable overflow instead of hanging over the note, which is to say
- * the text-style and formatting menus opened and could not be seen. Two rows
- * on a narrow screen is the price, and it is smaller than a menu that does
- * not appear.
+ * too. Every panel that opens underneath a button would then belong to the
+ * bar's own scrollable overflow instead of hanging over the note, which is to
+ * say the menus would open and could not be seen.
  */
 .format-toolbar {
 	display: flex;
 	flex: 0 0 auto;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
+	min-width: 0;
 	align-items: center;
-	gap: 0.25rem;
-	padding: 0.25rem 0.5rem;
+	gap: var(--space-2xs);
+	/* The first control's words on the gutter — "Plain text" over the note's
+	   first line — and the More tools glyph on it at the other end. */
+	padding: var(--space-2xs) calc(var(--gutter) - var(--space-2xs) - var(--control-inline));
 	background: var(--surface);
 	border-block-end: 1px solid var(--border);
+}
+
+/* Below the note in a compact window (`FormatToolbar`'s `placement`): the rule
+   is on the side that meets the note, the phone's home indicator is kept
+   clear of the buttons, and the menus open upwards — below the bar there is
+   nothing left of the screen for them to hang into. */
+.format-toolbar-bottom {
+	border-block-end: 0;
+	border-block-start: 1px solid var(--border);
+	padding-block-end: max(0.25rem, env(safe-area-inset-bottom));
+}
+
+.format-toolbar-bottom .toolbar-panel {
+	inset-block-start: auto;
+	inset-block-end: calc(100% + 0.25rem);
 }
 
 .toolbar-group {
 	display: flex;
 	align-items: center;
+	gap: var(--space-3xs);
+	padding-inline: var(--space-2xs);
+}
+
+/* A slot is what goes into the overflow menu as one — usually a single
+   button, a pair for indentation — and is measured as one. */
+.toolbar-slot {
+	display: flex;
+	align-items: center;
 	gap: 0.125rem;
-	padding-inline: 0.25rem;
+}
+
+/* At the far end, and its panel hung from its right-hand edge so that it
+   opens back over the bar rather than off the side of the window. */
+.toolbar-overflow {
+	margin-inline-start: auto;
+}
+
+.toolbar-overflow .toolbar-panel {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
 }
 
 .toolbar-group + .toolbar-group {
@@ -1446,8 +1830,10 @@ button.danger {
 	cursor: pointer;
 }
 
-.toolbar-item:hover {
-	background: color-mix(in srgb, var(--fg) 8%, transparent);
+@media (hover: hover) {
+	.toolbar-item:hover {
+		background: var(--hover-bg);
+	}
 }
 
 /* The tick, which is the only thing in a row that follows the words. */
@@ -1524,7 +1910,7 @@ button.danger {
 
 .banner {
 	margin: 0;
-	padding: 0.6rem 1.25rem;
+	padding: var(--space-s) var(--gutter);
 	font-size: 0.85rem;
 	color: var(--muted);
 	border-block-end: 1px solid var(--border);
@@ -1561,7 +1947,7 @@ button.danger {
 
 .account {
 	flex: none;
-	padding: 0.75rem;
+	padding: var(--space-m) var(--gutter);
 	font-size: 0.85rem;
 	border-block-start: 1px solid var(--border);
 	display: flex;
@@ -1607,77 +1993,193 @@ button.danger {
 	flex-basis: 100%;
 }
 
-@media (max-width: 60rem) {
-	.app,
-	.app-frame {
-		height: auto;
-		min-height: 100dvh;
-		overflow: visible;
-	}
+/* ---- Compact window ----------------------------------------------------- */
 
-	.app-shell {
-		grid-template-columns: 1fr;
-		grid-template-rows: auto auto 1fr;
-		height: auto;
-		min-height: 100dvh;
-	}
+/*
+ * Too narrow for three panes. The width is decided once, in
+ * `components/layout.ts`, and arrives here as `.compact` on the frame rather
+ * than as a media query of this file's own: it also decides which bar is
+ * rendered, and two answers to "is this compact" could disagree by a pixel.
+ *
+ * The note takes the window. The sidebar and the note list stay in the grid,
+ * mounted, and become dropdowns — a panel under the bar, shown while the
+ * shell's `data-panel` names it. Positioned either way, so neither is ever a
+ * grid item: the note view is the only one, and has the only column.
+ */
+.compact .app-shell {
+	position: relative;
+	grid-template-columns: minmax(0, 1fr);
+}
 
-	/* The frame already carries the full height. Leaving the shell's own
-	   `min-height` on would make the page `banner + 100dvh` tall and grow a
-	   scrollbar, rather than the shell taking what is left. */
-	.app-frame > .app-shell {
-		min-height: 0;
-	}
+/* Every panel fills the window under the bar and scrolls inside itself. A
+   panel sized to its content left the note showing beneath it, which on a
+   phone is a strip too short to read and a target for a press that was meant
+   for the panel. `overscroll-behavior` keeps a fling at the end of the list
+   from moving the page behind it. */
+.compact .source-panel,
+.compact .sidebar,
+.compact .note-list {
+	display: none;
+	position: absolute;
+	inset: 0;
+	z-index: 15;
+	border-inline-end: 0;
+	overscroll-behavior: contain;
+	/* The last row clear of a phone's home indicator, which the page runs
+	   under (`viewport-fit=cover`). */
+	padding-block-end: env(safe-area-inset-bottom);
+}
 
-	.sidebar,
-	.note-list {
-		border-inline-end: 0;
-		border-block-end: 1px solid var(--border);
-		max-height: 14rem;
-	}
+.compact .app-shell[data-panel='notebooks'] > .sidebar {
+	display: flex;
+}
 
-	/* Fourteen rems is not enough to divide. Pinning the storage panel here
-	   would leave the notebooks a couple of rows and the panel most of the
-	   pane, so the column goes back to scrolling as one and the panel to being
-	   the last thing in it. */
-	.sidebar {
-		overflow-y: auto;
-	}
+.compact .app-shell[data-panel='sources'] > .source-panel {
+	display: flex;
+}
 
-	.sidebar .tree {
-		flex: none;
-		overflow-y: visible;
-	}
+/* The tabs as a list at the top, and the storage panel and the way to another
+   account at the foot, with the room between them — where a sidebar keeps its
+   storage panel, and for the same reason: it is the part a user looks for
+   rather than reads past. One column, and it scrolls as a whole when an
+   account's storage panel has a lot to say. Only ever drawn in a compact
+   window. */
+.source-panel {
+	flex-direction: column;
+	overflow-y: auto;
+	background: var(--surface);
+}
 
-	/* Fourteen rems is the right size for a list you glance at beside the note
-	   you are writing. A search is not that: it is the thing being read, and at
-	   fourteen rems the header, the field and the live region leave room for a
-	   single answer — a result list you cannot compare anything in. While one is
-	   open the list takes most of the screen and the note keeps the rest. It is
-	   not taken from the note, which is not compressed here but pushed down: the
-	   panes are stacked at this width and the page scrolls, so the editor stays
-	   whole, one scroll away.
+.source-panel-foot {
+	margin-block-start: auto;
+}
 
-	   `dvh`, like everything else in this file: `vh` resolves against the large
-	   viewport, so on a phone with its toolbar showing 60vh is nearer 70% of
-	   what the user can see. Desktop Chrome measures the two identically, which
-	   is exactly why the difference would never show up in a check here. */
-	.note-list.searching {
-		max-height: 60dvh;
-	}
+.source-panel ul {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
 
-	/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
-	   push the next answer off. Two lines still carry the match, which is what
-	   the excerpt is for. Below about 430px is where this earns its keep: it
-	   takes a row from 107px to 89px. */
-	.note-excerpt {
-		-webkit-line-clamp: 2;
+.source-panel-connect {
+	display: flex;
+	flex-direction: column;
+	padding-block: 0.5rem;
+	border-block-start: 1px solid var(--border);
+}
+
+.source-panel-connect .source-add-heading {
+	padding-inline: var(--gutter);
+}
+
+.compact .app-shell[data-panel='notes'] > .note-list {
+	display: block;
+}
+
+/* A row narrow enough to wrap a three-line excerpt is a row tall enough to
+   push the next answer off. Two lines still carry the match, which is what
+   the excerpt is for. */
+.compact .note-excerpt {
+	-webkit-line-clamp: 2;
+}
+
+.compact-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-xs);
+	/* The first dropdown's words over the note's title, and the search glyph
+	   over the note's last button. */
+	padding: var(--space-xs) calc(var(--gutter) - var(--control-inline));
+	border-block-end: 1px solid var(--border);
+	background: var(--surface);
+}
+
+/* The three dropdowns share the bar equally and each truncates what it says
+   inside its share: a long notebook name must not take the room the note's
+   title needs, and the whole of either is in the tooltip and the panel. */
+.compact-picker {
+	display: flex;
+	flex: 1 1 0;
+	align-items: center;
+	gap: 0.25rem;
+	min-width: 0;
+	/* Less its border, so the words and not the border are on the gutter. */
+	padding: 0.35rem calc(var(--control-inline) - 1px);
+	font: inherit;
+	font-size: 0.85rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+.compact-picker[aria-expanded='true'] {
+	background: color-mix(in srgb, var(--fg) 8%, var(--bg));
+}
+
+.compact-picker-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: start;
+}
+
+.compact-picker .toolbar-icon {
+	color: var(--muted);
+}
+
+.compact-icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: calc(1rem + 2 * var(--control-inline));
+	height: 2rem;
+	padding: 0;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.compact-icon:hover {
+		background: var(--hover-bg);
 	}
 }
 
+.compact-search,
+.compact-search .search-box {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+}
+
+/* Beside the dropdowns, on a bar with the room: a field's worth, and the rest
+   is theirs. */
+.compact-search-beside {
+	flex: 0 1 16rem;
+	min-width: 10rem;
+}
+
+/* 16px, because Safari on a phone zooms the page into any field smaller than
+   that the moment it is focused, and does not zoom back out. */
+.compact-search .note-search {
+	font-size: 1rem;
+}
+
+/* The close button beside the field empties it as well as shutting it, so the
+   browser's own clear button would be a second × a thumb's width from the
+   first, doing half as much. */
+.compact-search .note-search::-webkit-search-cancel-button {
+	display: none;
+}
+
 .new-folder {
-	width: calc(100% - 1.5rem);
-	margin: 0.5rem 0.75rem;
+	width: calc(100% - 2 * var(--gutter));
+	margin: var(--space-s) var(--gutter);
 	padding: 0.35rem 0.5rem;
 	font: inherit;
 	font-size: 0.85rem;
@@ -1795,7 +2297,9 @@ button.danger {
 	flex: 0 0 13rem;
 	overflow: auto;
 	border-inline-start: 1px solid var(--border);
-	padding: 0.75rem 0.5rem;
+	/* Its words start on the gutter, as the note's do, less the entries' own
+	   padding. */
+	padding: calc(var(--gutter) - 0.2rem) calc(var(--gutter) - 0.35rem);
 }
 
 .outline ol {
@@ -1823,10 +2327,16 @@ button.danger {
 	white-space: nowrap;
 }
 
-.outline button:hover,
 .outline button:focus-visible {
 	background: var(--surface);
 	color: var(--fg);
+}
+
+@media (hover: hover) {
+	.outline button:hover {
+		background: var(--surface);
+		color: var(--fg);
+	}
 }
 
 /* Depth as indentation, which is the whole of the structure a rail can show. */
@@ -1850,19 +2360,12 @@ button.danger {
 	padding-inline-start: 4rem;
 }
 
-/* Narrow enough and the rail is most of the screen, so it goes. */
-@media (max-width: 60rem) {
-	.outline {
-		display: none;
-	}
-}
-
 /* Find and replace, over whichever editor is open. */
 .find-bar {
 	display: flex;
 	flex-direction: column;
 	gap: 0.35rem;
-	padding: 0.5rem 0.75rem;
+	padding: var(--space-s) var(--gutter);
 	border-block-end: 1px solid var(--border);
 	background: var(--surface);
 }

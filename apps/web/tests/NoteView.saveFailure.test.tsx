@@ -147,6 +147,7 @@ describe('NoteView, deleting a note whose last save was refused', () => {
 		flushAutosave();
 		await screen.findByRole('alert');
 
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 		await waitFor(() => {
 			expect(deletions.length).toBe(1);
@@ -239,6 +240,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 			expect((await getNote(db, note.id))?.body).toBe('from the other tab\ntyped after\n');
 		});
 
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 		await waitFor(() => {
 			expect(deletions.length).toBe(1);
@@ -259,6 +261,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 			expect(editorText()).toBe('pulled\n');
 		});
 
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 		await waitFor(() => {
 			expect(deletions.length).toBe(1);

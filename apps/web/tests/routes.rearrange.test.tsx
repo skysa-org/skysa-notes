@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -200,5 +200,64 @@ describe('moving without a pointer', () => {
 
 		// Back to being somewhere to go rather than somewhere to put something.
 		expect(await screen.findByRole('button', { name: 'Archive' })).toBeDefined();
+	});
+
+	it('gives the tree back when Cancel is pressed', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(await screen.findByRole('button', { name: 'Work' }));
+
+		await user.keyboard('{Control>}k{/Control}');
+		await user.click(await screen.findByRole('option', { name: /Move notebook/ }));
+		await screen.findByRole('button', { name: 'Move “Work” into Archive' });
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(await screen.findByRole('button', { name: 'Archive' })).toBeDefined();
+		expect(screen.queryByRole('status', { name: /Moving/ })).toBeNull();
+	});
+});
+
+describe('the note’s own menu', () => {
+	const openMinutes = async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const note = await createNote(db, {
+			folderPath: 'Archive',
+			title: 'Minutes',
+			body: 'Minutes\n',
+		});
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(await screen.findByRole('button', { name: /^Minutes/ }));
+		await screen.findByDisplayValue('Minutes');
+		return { note, user };
+	};
+
+	it('picks the note up, as dragging its row does', async () => {
+		const { note, user } = await openMinutes();
+
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
+		await user.click(screen.getByRole('button', { name: 'Move to notebook…' }));
+		await user.click(await screen.findByRole('button', { name: 'Move “Minutes” into Work' }));
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.path).toBe('Work/minutes.md');
+		});
+	});
+
+	it('does not offer a move while something else is being moved', async () => {
+		const { user } = await openMinutes();
+
+		await user.keyboard('{Control>}k{/Control}');
+		await user.click(await screen.findByRole('option', { name: /Move notebook/ }));
+		await screen.findByRole('button', { name: 'Move “Archive” into Work' });
+
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
+		const items = screen.getByRole('group', { name: 'Note “Minutes”' });
+		expect(within(items).queryByRole('button', { name: 'Move to notebook…' })).toBeNull();
+		expect(within(items).getByRole('button', { name: 'Delete' })).toBeDefined();
 	});
 });

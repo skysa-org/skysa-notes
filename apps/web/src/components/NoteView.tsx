@@ -1,12 +1,13 @@
-import { frontmatterIsEditable } from '@skysa/core';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { frontmatterIsEditable, headings } from '@skysa/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { parseChord } from '../commands/chord.js';
 import { useCommand } from '../commands/context.js';
 import { FindTargetProvider } from '../editor/findTarget.js';
+import { Icon, type IconName } from '../editor/icons.js';
 import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
-import { RichEditor } from '../editor/RichEditor.js';
+import { RichEditor, type RichEditorProps } from '../editor/RichEditor.js';
 import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { beforeClosing } from '../store/heldEdits.js';
@@ -20,6 +21,15 @@ import {
 	setNoteEditorMode,
 } from '../store/notes.js';
 import { FindBar } from './FindBar.js';
+import {
+	COMPACT,
+	OUTLINE_FITS_AT,
+	OUTLINE_OPENS_AT,
+	rems,
+	useElementWidth,
+	useMediaQuery,
+} from './layout.js';
+import { OptionsMenu } from './OptionsMenu.js';
 import { Outline } from './Outline.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
@@ -54,6 +64,12 @@ export interface NoteViewProps {
 	 * keeps it beside the note; as the body it would undo that later edit.
 	 */
 	onDeleted: (deleted: NoteRecord, beside?: DisplacedText) => void;
+	/**
+	 * Pick the note up to put it down in another notebook, as dragging its row
+	 * does. Offered in the note's menu only when given: nothing can be moved
+	 * while something else already is.
+	 */
+	onMove?: () => void;
 }
 
 /**
@@ -152,20 +168,32 @@ const NoteBody = ({
 	note,
 	mode,
 	showOutline,
+	toolbar,
 	onUserEdit,
 	onUnsupported,
 	onAdopted,
+	onBody,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
 	showOutline: boolean;
+	toolbar: RichEditorProps['toolbar'];
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
 	onAdopted: () => void;
+	/** The element, for whoever sizes the outline by its width. */
+	onBody: (element: HTMLDivElement | null) => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
+	const attach = useCallback(
+		(element: HTMLDivElement | null) => {
+			body.current = element;
+			onBody(element);
+		},
+		[onBody]
+	);
 	return (
-		<div className="note-body" ref={body}>
+		<div className="note-body" ref={attach}>
 			{mode === 'raw' && (
 				<RawEditor
 					noteId={note.id}
@@ -183,6 +211,7 @@ const NoteBody = ({
 					onUserEdit={onUserEdit}
 					onUnsupported={onUnsupported}
 					onAdopted={onAdopted}
+					toolbar={toolbar}
 				/>
 			)}
 			{showOutline && (
@@ -199,7 +228,57 @@ const NoteBody = ({
 	);
 };
 
-export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
+/**
+ * What of the note's furniture there is room for: the outline beside it, and
+ * where the formatting toolbar goes.
+ *
+ * **The outline** is sized by the note's own width, not the window's — the
+ * same window gives the note very different room with the columns beside it
+ * and without them. At 53.5rem and wider it starts open (`OUTLINE_OPENS_AT`),
+ * below that it starts collapsed and is a press away, and below 36rem it is
+ * not offered at all (`OUTLINE_FITS_AT`), since the rail would leave the note
+ * narrower than itself. Once pressed it stays as the user left it for as long
+ * as the app is open, whatever the room does. Unmounted rather than hidden
+ * when it is not shown: the headings are re-read when it comes back, which is
+ * one parse of one note, and a rail that is not there cannot be tabbed
+ * through.
+ *
+ * **The toolbar** is across the top in a wide window, as it always was. In a
+ * compact one it is hidden until asked for and then sits at the bottom of the
+ * editor, under the thumb: the screen is too short to spend a row of buttons
+ * above every note, and the inline toolbar and the slash menu are still there
+ * without it.
+ */
+const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
+	const compact = useMediaQuery(COMPACT);
+	const width = useElementWidth(body);
+	const outlineFits = width === undefined || width >= rems(OUTLINE_FITS_AT);
+	const outlineOpens = width === undefined || width >= rems(OUTLINE_OPENS_AT);
+
+	const [outlineChoice, setOutlineChoice] = useState<boolean | null>(null);
+	const showOutline = outlineFits && (outlineChoice ?? outlineOpens);
+	const toggleOutline = useCallback(() => {
+		setOutlineChoice(!showOutline);
+	}, [showOutline]);
+	useCommand({
+		id: 'note.outline',
+		label: showOutline ? 'Hide outline' : 'Show outline',
+		group: 'Note',
+		enabled: noteId !== undefined && outlineFits,
+		run: toggleOutline,
+	});
+
+	const [toolbarShown, setToolbarShown] = useState(false);
+	const bottom = toolbarShown ? 'bottom' : 'none';
+	const toolbar: RichEditorProps['toolbar'] = compact ? bottom : 'top';
+	const toggleToolbar = useCallback(() => {
+		setToolbarShown((shown) => !shown);
+	}, []);
+
+	return { compact, outlineFits, showOutline, toggleOutline, toolbar, toggleToolbar };
+};
+
+export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
 
@@ -311,20 +390,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		void setNoteEditorMode(db, noteId, otherMode(mode), { connectionId: note?.connectionId });
 	}, [rebased, mode, noteId, note?.connectionId, unsupported]);
 
-	// Shown by default, and unmounted rather than hidden when it is not: the
-	// headings are re-read when it comes back, which is one parse of one note,
-	// and a rail that is not there cannot be tabbed through. It costs nothing
-	// when a note has no headings either, since `Outline` renders nothing then.
-	const [showOutline, setShowOutline] = useState(true);
-	useCommand({
-		id: 'note.outline',
-		label: showOutline ? 'Hide outline' : 'Show outline',
-		group: 'Note',
-		enabled: noteId !== undefined,
-		run: () => {
-			setShowOutline((shown) => !shown);
-		},
-	});
+	// The element the outline shares the room of, as state rather than a ref:
+	// a note opening mounts it, and the width has to be asked of the new one.
+	const [body, setBody] = useState<HTMLDivElement | null>(null);
+	const layout = useNoteLayout(noteId, body);
 
 	// A count of askings rather than a boolean: asking again with the bar already
 	// open re-focuses and selects its field, which is what `Mod+F` does
@@ -370,12 +439,14 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				unsupported={unsupported}
 				unsaved={autosave.failing}
 				finding={finding}
-				showOutline={showOutline}
+				layout={layout}
+				onBody={setBody}
 				toggleMode={toggleMode}
 				onClose={() => {
 					setFinding(0);
 				}}
 				onDelete={onDelete}
+				onMove={onMove}
 				onUserEdit={onUserEdit}
 				onUnsupported={() => {
 					// The raw editor takes over, built from the stored body.
@@ -393,6 +464,55 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	);
 };
 
+const MODE_ICONS: Record<EditorMode, IconName> = { rich: 'rich-text', raw: 'markdown' };
+
+const tabTitle = (tab: EditorMode, current: boolean, unsupported: boolean): string => {
+	const name = MODE_LABELS[tab].toLowerCase();
+	if (current) return `Editing as ${name}`;
+	if (unsupported) return 'This note has to stay in markdown mode';
+	return `Switch to ${name} (Ctrl/Cmd+E)`;
+};
+
+/**
+ * The two editors as a pair of tabs, the one in use pressed. Two buttons
+ * rather than one that names the mode it is in: a single toggle labelled with
+ * where you are reads as where it will take you, and an icon cannot carry the
+ * difference at all.
+ *
+ * Pressing the tab already in use does nothing. A note the rich editor cannot
+ * represent keeps its markdown tab, pressed, and the rich one is disabled.
+ */
+const ModeTabs = ({
+	mode,
+	unsupported,
+	toggleMode,
+}: {
+	mode: EditorMode;
+	unsupported: boolean;
+	toggleMode: () => void;
+}) => (
+	<div className="mode-tabs" role="group" aria-label="Editor">
+		{(['rich', 'raw'] as const).map((tab) => {
+			const current = tab === mode;
+			return (
+				<button
+					key={tab}
+					type="button"
+					aria-label={MODE_LABELS[tab]}
+					aria-pressed={current}
+					disabled={!current && unsupported}
+					title={tabTitle(tab, current, unsupported)}
+					onClick={() => {
+						if (!current) toggleMode();
+					}}
+				>
+					<Icon name={MODE_ICONS[tab]} />
+				</button>
+			);
+		})}
+	</div>
+);
+
 /**
  * Everything below the provider.
  *
@@ -406,10 +526,12 @@ const NoteScreen = ({
 	unsupported,
 	unsaved,
 	finding,
-	showOutline,
+	layout,
+	onBody,
 	toggleMode,
 	onClose,
 	onDelete,
+	onMove,
 	onUserEdit,
 	onUnsupported,
 	onAdopted,
@@ -420,92 +542,128 @@ const NoteScreen = ({
 	/** A save was rejected, and what it held is still only in this tab. */
 	unsaved: boolean;
 	finding: number;
-	showOutline: boolean;
+	layout: ReturnType<typeof useNoteLayout>;
+	onBody: (element: HTMLDivElement | null) => void;
 	toggleMode: () => void;
 	onClose: () => void;
 	onDelete: () => void;
+	onMove: (() => void) | undefined;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
 	onAdopted: () => void;
-}) => (
-	<section className="note-view" aria-label="Note">
-		<header className="note-header">
-			<TitleField key={noteRef(note)} note={note} />
-			<div className="note-actions">
-				<span className="muted path" title={note.path}>
-					{note.path}
-				</span>
-				{mode !== undefined && (
-					<button
-						type="button"
-						onClick={toggleMode}
-						disabled={unsupported}
-						aria-pressed={mode === 'raw'}
-						title={
-							unsupported
-								? 'This note has to stay in markdown mode'
-								: `Switch to ${MODE_LABELS[otherMode(mode)].toLowerCase()} (Ctrl/Cmd+E)`
-						}
-					>
-						{MODE_LABELS[mode]}
-					</button>
-				)}
-				<button type="button" onClick={onDelete}>
-					Delete
-				</button>
-			</div>
-		</header>
+}) => {
+	// Whether there is an outline to open. A button for a rail that would be
+	// empty is a button that does nothing when pressed.
+	const outlined = useMemo(() => headings(note.body).length > 0, [note.body]);
 
-		{/*
-		 * An alert, and it stays for as long as it is true. It does not say "this
-		 * note": a held edit may be to the note that was open before this one.
-		 * Nor what went wrong, which the app cannot tell — only what is safe to
-		 * do about it.
-		 */}
-		{unsaved && (
-			<p className="banner banner-alert" role="alert">
-				Changes are not being saved on this device. Copy your text somewhere safe, then
-				reload.
-			</p>
-		)}
+	return (
+		<section className="note-view" aria-label="Note">
+			<header className="note-header">
+				<TitleField key={noteRef(note)} note={note} />
+				<div className="note-actions">
+					<span className="muted path" title={note.path}>
+						{note.path}
+					</span>
+					{layout.outlineFits && outlined && (
+						<button
+							type="button"
+							className="note-icon"
+							onClick={layout.toggleOutline}
+							aria-label="Outline"
+							aria-pressed={layout.showOutline}
+							title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
+						>
+							<Icon name="outline" />
+						</button>
+					)}
+					{layout.compact && mode === 'rich' && (
+						<button
+							type="button"
+							className="note-icon"
+							onClick={layout.toggleToolbar}
+							aria-label="Format"
+							aria-pressed={layout.toolbar === 'bottom'}
+							title={
+								layout.toolbar === 'bottom'
+									? 'Hide the formatting toolbar'
+									: 'Show the formatting toolbar'
+							}
+						>
+							<Icon name="format" />
+						</button>
+					)}
+					{mode !== undefined && (
+						<ModeTabs mode={mode} unsupported={unsupported} toggleMode={toggleMode} />
+					)}
+					<OptionsMenu
+						label="Note options"
+						title="Note options"
+						groupLabel={`Note “${note.title}”`}
+						triggerClassName="note-icon"
+						trigger={<Icon name="more" />}
+						items={[
+							...(onMove === undefined
+								? []
+								: [{ label: 'Move to notebook…', onChoose: onMove }]),
+							{ label: 'Delete', onChoose: onDelete, danger: true },
+						]}
+					/>
+				</div>
+			</header>
 
-		{unsupported && (
-			<p className="banner" role="status">
-				This note uses markdown the rich editor has no way to show, so it stays in markdown
-				mode. Nothing in it has been changed.
-			</p>
-		)}
+			{/*
+			 * An alert, and it stays for as long as it is true. It does not say "this
+			 * note": a held edit may be to the note that was open before this one.
+			 * Nor what went wrong, which the app cannot tell — only what is safe to
+			 * do about it.
+			 */}
+			{unsaved && (
+				<p className="banner banner-alert" role="alert">
+					Changes are not being saved on this device. Copy your text somewhere safe, then
+					reload.
+				</p>
+			)}
 
-		{/*
-		 * A rename or a tag edit cannot reach a file whose frontmatter has a
-		 * YAML error in it: the app will not rewrite a block it had to guess
-		 * at, so the change lands in the app and not in the file, and the next
-		 * sync reads the old values back over it. Saying so is the difference
-		 * between a limitation and a note that quietly refuses to be renamed.
-		 */}
-		{/*
-		 * `role="note"`, not `status`: this is true of the note from the moment
-		 * it opens, so it is a standing remark rather than something that has
-		 * just happened — and two live regions announcing at once is one too
-		 * many when a note is also in the rich editor's unsupported state.
-		 */}
-		{!frontmatterIsEditable(note.frontmatter) && (
-			<p className="banner" role="note">
-				There is a YAML error in this note’s frontmatter, so its title and tags cannot be
-				saved back to the file — the text is left exactly as it is rather than guessed at.
-				Everything else about the note works as usual.
-			</p>
-		)}
+			{unsupported && (
+				<p className="banner" role="status">
+					This note uses markdown the rich editor has no way to show, so it stays in
+					markdown mode. Nothing in it has been changed.
+				</p>
+			)}
 
-		{finding > 0 && <FindBar focusToken={finding} onClose={onClose} />}
+			{/*
+			 * A rename or a tag edit cannot reach a file whose frontmatter has a
+			 * YAML error in it: the app will not rewrite a block it had to guess
+			 * at, so the change lands in the app and not in the file, and the next
+			 * sync reads the old values back over it. Saying so is the difference
+			 * between a limitation and a note that quietly refuses to be renamed.
+			 */}
+			{/*
+			 * `role="note"`, not `status`: this is true of the note from the moment
+			 * it opens, so it is a standing remark rather than something that has
+			 * just happened — and two live regions announcing at once is one too
+			 * many when a note is also in the rich editor's unsupported state.
+			 */}
+			{!frontmatterIsEditable(note.frontmatter) && (
+				<p className="banner" role="note">
+					There is a YAML error in this note’s frontmatter, so its title and tags cannot
+					be saved back to the file — the text is left exactly as it is rather than
+					guessed at. Everything else about the note works as usual.
+				</p>
+			)}
 
-		<NoteBody
-			note={note}
-			mode={mode}
-			showOutline={showOutline}
-			onUserEdit={onUserEdit}
-			onUnsupported={onUnsupported}
-			onAdopted={onAdopted}
-		/>
-	</section>
-);
+			{finding > 0 && <FindBar focusToken={finding} onClose={onClose} />}
+
+			<NoteBody
+				note={note}
+				mode={mode}
+				showOutline={layout.showOutline}
+				toolbar={layout.toolbar}
+				onUserEdit={onUserEdit}
+				onUnsupported={onUnsupported}
+				onAdopted={onAdopted}
+				onBody={onBody}
+			/>
+		</section>
+	);
+};

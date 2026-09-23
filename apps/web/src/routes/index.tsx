@@ -6,13 +6,14 @@ import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
+import { CompactBar, useCompactLayout } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { NoteList } from '../components/NoteList.js';
 import { type DisplacedText, NoteView } from '../components/NoteView.js';
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
-import { SourceTabs } from '../components/SourceTabs.js';
+import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
 import { showConnection } from '../store/connection.js';
 import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
@@ -128,6 +129,55 @@ const PALETTE = parseChord('Mod+K');
 const NEW_NOTE = parseChord('n');
 const FIND = parseChord('Mod+Shift+F');
 
+/**
+ * What the source dropdown opens, in a compact window only: the sources, the
+ * storage panel a wide window keeps under the notebooks, and the way to
+ * another account.
+ */
+const SourceDropdown = ({
+	compact,
+	returnTo,
+	onChosen,
+}: {
+	compact: boolean;
+	returnTo: string;
+	onChosen: () => void;
+}) =>
+	compact ? (
+		<SourcePanel
+			returnTo={returnTo}
+			account={<AccountPanel connectIs="below" />}
+			onChosen={onChosen}
+		/>
+	) : null;
+
+/**
+ * Picking the open note up to move it, from the palette or from the note's
+ * own menu — offered in both only while nothing else is in the air. What it
+ * returns is spread onto `NoteView`, which offers the move when it is there.
+ */
+const useNoteMove = (
+	openNote: NoteRecord | undefined,
+	moving: Moving | null,
+	pickUp: (what: Moving) => void
+): { onMove?: () => void } => {
+	const offered = openNote !== undefined && moving === null;
+	const move = () => {
+		if (openNote === undefined) return;
+		pickUp({ kind: 'note', id: openNote.id, path: openNote.path, name: openNote.title });
+	};
+
+	useCommand({
+		id: 'note.move',
+		label: 'Move note to notebook',
+		group: 'Note',
+		enabled: offered,
+		run: move,
+	});
+
+	return offered ? { onMove: move } : {};
+};
+
 const Home = () => {
 	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
@@ -185,6 +235,20 @@ const Home = () => {
 		if (sources === undefined || sources.length < 2) return undefined;
 		const found = sources.find((each) => each.connectionId === connectionId);
 		return found === undefined ? undefined : tabName(found, sources);
+	};
+
+	/**
+	 * A window too narrow for three panes. The notebooks and the notes become
+	 * dropdowns in the bar and the note takes the rest (`CompactBar`); `panel`
+	 * is which of them is open, and `searchOpen` whether the search has the bar.
+	 */
+	const { compact, panel, setPanel, searchOpen, setSearchOpen, frameClassName, shellProps } =
+		useCompactLayout();
+	// The answers hang from the field, over whatever else is open; a dropdown
+	// left open under them would be a second list behind the first.
+	const onQuery = (next: string) => {
+		setQuery(next);
+		setPanel(null);
 	};
 
 	const [paletteOpen, setPaletteOpen] = useState(false);
@@ -271,6 +335,10 @@ const Home = () => {
 	 * would leave the open note nowhere in the list.
 	 */
 	const openResult = (note: NoteRecord) => {
+		// Done with: the field has emptied itself, and in a compact window the
+		// bar goes back to its dropdowns rather than staying a search.
+		setSearchOpen(false);
+		setPanel(null);
 		const go = () => {
 			select({ folder: folderToSearch(parentPath(note.path)), note: note.id });
 		};
@@ -370,10 +438,6 @@ const Home = () => {
 		setProblem(null);
 		void createNote(db, { folderPath: folder })
 			.then((created) => {
-				// And out of the search: the new note is in the open notebook, and
-				// the pane is showing matches for a query it does not answer. Left
-				// there, the user has just made a note that appears in no list.
-				setQuery('');
 				select({ note: created.id });
 			})
 			// Rarer than a duplicate notebook name — this one needs the store
@@ -466,6 +530,16 @@ const Home = () => {
 	}, []);
 
 	/**
+	 * Every destination is a sidebar row, and in a compact window the sidebar
+	 * is a dropdown that may be shut — so picking something up opens it, or a
+	 * move begun from the palette would be a mode with nowhere to finish it.
+	 */
+	const pickUp = (what: Moving) => {
+		setMoving(what);
+		if (compact) setPanel('notebooks');
+	};
+
+	/**
 	 * Escape puts down whatever is being moved, from wherever the focus is. On
 	 * the document rather than on the sidebar: a move started from the palette
 	 * leaves the focus where the palette had it, which may be nowhere near the
@@ -488,6 +562,7 @@ const Home = () => {
 		// Put down first: the move is a round trip through the store and a mode
 		// left standing over it is one the user can drop a second copy of.
 		setMoving(null);
+		setPanel(null);
 		if (move === undefined) return;
 		setProblem(null);
 
@@ -563,6 +638,9 @@ const Home = () => {
 		chord: FIND,
 		enabled: true,
 		run: () => {
+			// In a compact window the field is not there until the search is
+			// open; the bar puts the cursor in it as it appears.
+			setSearchOpen(true);
 			searchField.current?.focus();
 			searchField.current?.select();
 		},
@@ -593,25 +671,11 @@ const Home = () => {
 		enabled: folder !== undefined && folder !== ROOT && moving === null,
 		run: () => {
 			if (folder === undefined || folder === ROOT) return;
-			setMoving({ kind: 'notebook', path: folder, name: basename(folder) });
+			pickUp({ kind: 'notebook', path: folder, name: basename(folder) });
 		},
 	});
 
-	useCommand({
-		id: 'note.move',
-		label: 'Move note to notebook',
-		group: 'Note',
-		enabled: openNote !== undefined && moving === null,
-		run: () => {
-			if (openNote === undefined) return;
-			setMoving({
-				kind: 'note',
-				id: openNote.id,
-				path: openNote.path,
-				name: openNote.title,
-			});
-		},
-	});
+	const noteMove = useNoteMove(openNote, moving, pickUp);
 
 	useShortcuts();
 
@@ -622,17 +686,43 @@ const Home = () => {
 		// above the panes goes in the frame around them instead. The toasts are
 		// not laid out at all — they are fixed to the viewport — but they are
 		// here for the same reason: a stack in the grid would take a column.
-		<div className="app-frame">
+		<div className={frameClassName}>
 			{/*
 			 * Above everything, because it says which app this is: each source
 			 * is its own notes, its own notebooks and its own sync (§6), so the
 			 * panes below all mean something different depending on which of
 			 * these is lit.
 			 */}
-			<SourceTabs
-				returnTo={returnPath(href)}
-				search={<SearchField query={query} onQuery={setQuery} fieldRef={searchField} />}
-			/>
+			{compact ? (
+				<CompactBar
+					folder={folder}
+					note={openNote}
+					panel={panel}
+					onPanel={setPanel}
+					query={query}
+					onQuery={onQuery}
+					results={results}
+					onChoose={openResult}
+					sourceName={resultSourceName}
+					searchOpen={searchOpen}
+					onSearchOpen={setSearchOpen}
+					fieldRef={searchField}
+				/>
+			) : (
+				<SourceTabs
+					returnTo={returnPath(href)}
+					search={
+						<SearchField
+							query={query}
+							onQuery={setQuery}
+							results={results}
+							onChoose={openResult}
+							sourceName={resultSourceName}
+							fieldRef={searchField}
+						/>
+					}
+				/>
+			)}
 			{/*
 			 * For as long as a detached source is the one showing, and not
 			 * dismissable: its notes look like any others, can be opened and
@@ -656,20 +746,39 @@ const Home = () => {
 				/>
 			)}
 
-			<div className="app-shell">
+			{/* `data-panel` is which pane a compact window is showing as a
+			    dropdown; the stylesheet ignores it in a wide one. */}
+			<div className="app-shell" {...shellProps}>
+				{/* Positioned, like the two panes in a compact window, so it is
+				    never a grid item and takes no column. */}
+				<SourceDropdown
+					compact={compact}
+					returnTo={returnPath(href)}
+					onChosen={() => {
+						setPanel(null);
+					}}
+				/>
 				<Sidebar
 					tree={tree}
 					selectedFolder={folder}
-					onSelectFolder={openFolder}
+					onSelectFolder={(path) => {
+						openFolder(path);
+						setPanel(null);
+					}}
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}
 					onDeleteFolder={onDeleteFolder}
 					looseNoteCount={looseNoteCount}
-					footer={<AccountPanel />}
+					// In a compact window it is in the source dropdown instead,
+					// which is where a phone user goes for anything about storage.
+					{...(compact ? {} : { footer: <AccountPanel /> })}
 					moving={moving}
 					onPickUp={setMoving}
 					onDrop={onDropInto}
 					onCancelMove={cancelMove}
+					onReveal={() => {
+						if (compact) setPanel('notebooks');
+					}}
 				/>
 
 				<NoteList
@@ -677,15 +786,12 @@ const Home = () => {
 					selectedNoteId={noteId}
 					onSelectNote={(id) => {
 						select({ note: id });
+						setPanel(null);
 					}}
-					query={query}
-					results={results}
-					onOpenResult={openResult}
-					{...(activeConnection === undefined
-						? {}
-						: { activeConnectionId: activeConnection })}
-					sourceName={resultSourceName}
-					onCreateNote={onCreateNote}
+					onCreateNote={() => {
+						onCreateNote();
+						setPanel(null);
+					}}
 					folderPath={folder}
 					// Both queries, not just the tree: the notebooks alone cannot tell
 					// an empty app from one whose notes all sit loose at the root.
@@ -699,6 +805,7 @@ const Home = () => {
 
 				<NoteView
 					note={openNote}
+					{...noteMove}
 					onDeleted={(note, displaced) => {
 						setDeleted(note);
 						setBeside(displaced ?? null);

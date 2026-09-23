@@ -62,10 +62,15 @@ describe('NoteView mode toggle', () => {
 		await waitFor(() => {
 			expect(richSurface()).not.toBeNull();
 		});
-		expect(screen.getByRole('button', { name: 'Rich text' })).toBeDefined();
+		expect(screen.getByRole('button', { name: 'Rich text' }).getAttribute('aria-pressed')).toBe(
+			'true'
+		);
+		expect(screen.getByRole('button', { name: 'Markdown' }).getAttribute('aria-pressed')).toBe(
+			'false'
+		);
 	});
 
-	it('switches to markdown when the toggle is pressed', async () => {
+	it('does nothing when the tab already in use is pressed', async () => {
 		const user = userEvent.setup();
 		await openNote();
 		await waitFor(() => {
@@ -74,15 +79,31 @@ describe('NoteView mode toggle', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Rich text' }));
 
+		expect(richSurface()).not.toBeNull();
+		expect(screen.queryByTestId('raw-editor')).toBeNull();
+	});
+
+	it('switches to markdown when its tab is pressed', async () => {
+		const user = userEvent.setup();
+		await openNote();
+		await waitFor(() => {
+			expect(richSurface()).not.toBeNull();
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Markdown' }));
+
 		expect(await screen.findByTestId('raw-editor')).toBeDefined();
 		expect(richSurface()).toBeNull();
+		expect(screen.getByRole('button', { name: 'Markdown' }).getAttribute('aria-pressed')).toBe(
+			'true'
+		);
 	});
 
 	it('remembers the mode for that note', async () => {
 		const user = userEvent.setup();
 		const note = await openNote();
 
-		await user.click(await screen.findByRole('button', { name: 'Rich text' }));
+		await user.click(await screen.findByRole('button', { name: 'Markdown' }));
 		await screen.findByTestId('raw-editor');
 
 		await waitFor(async () => {
@@ -95,7 +116,7 @@ describe('NoteView mode toggle', () => {
 		const note = await openNote();
 		await updateNote(db, note.id, { dirty: 0 });
 
-		await user.click(await screen.findByRole('button', { name: 'Rich text' }));
+		await user.click(await screen.findByRole('button', { name: 'Markdown' }));
 		await screen.findByTestId('raw-editor');
 
 		const stored = await noteById(db, note.id);
@@ -127,7 +148,9 @@ describe('NoteView mode toggle', () => {
 		await openNote();
 
 		expect(await screen.findByTestId('raw-editor')).toBeDefined();
-		expect(screen.getByRole('button', { name: 'Markdown' })).toBeDefined();
+		expect(screen.getByRole('button', { name: 'Markdown' }).getAttribute('aria-pressed')).toBe(
+			'true'
+		);
 	});
 
 	it('keeps the note’s own mode over the default', async () => {

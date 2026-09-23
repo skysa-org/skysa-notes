@@ -1,21 +1,18 @@
-import { parentPath, previewLines, ROOT } from '@skysa/core';
+import { previewLines, ROOT } from '@skysa/core';
 import { type ReactNode } from 'react';
 
-import { type NoteRecord, noteRef } from '../store/db.js';
-import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
+import { type NoteRecord } from '../store/db.js';
 import { folderLabel } from '../store/tree.js';
+import { editedAt } from './editedAt.js';
 
 /**
  * The middle pane: the notes in the selected notebook, most recently edited
- * first — or, while there is something in the search field, what matches it
- * anywhere on the device, in every source and every notebook.
+ * first.
  *
- * Both are the same list of the same rows, so they are one pane rather than two:
- * searching is a different question about the notes, not a different place to
- * be, and a search that opened a pane of its own would leave the user somewhere
- * they have to find their way back from. The field itself is in the sidebar's
- * header, above the notebooks: this pane shows the answers, and says where each
- * one is.
+ * It used to show a search's answers too, in place of the notebook's notes.
+ * They hang from the search field now (`SearchField`), so the notebook the user
+ * was reading stays where it was behind them and there is no pane to find the
+ * way back from.
  */
 
 export interface NoteListProps {
@@ -34,26 +31,6 @@ export interface NoteListProps {
 	 * one and told to create a notebook it may already have notes outside of.
 	 */
 	storeLoaded: boolean;
-	/** What is in the search field. Empty means the notebook's notes are shown. */
-	query: string;
-	/** Matches for `query`, or undefined while the first one is being answered. */
-	results: readonly NoteHit[] | undefined;
-	/**
-	 * A match was chosen. The note, not its id: a match can be in any source,
-	 * and an id names a note only inside its own.
-	 */
-	onOpenResult: (note: NoteRecord) => void;
-	/**
-	 * The source the app is showing. A result is marked as the open note only
-	 * when it is that note, and `selectedNoteId` alone cannot say: another
-	 * source can hold a note of the same id.
-	 */
-	activeConnectionId?: string;
-	/**
-	 * What to call the source a match is in, or `undefined` to leave it unsaid
-	 * — which is right while there is only one source, when it would be noise.
-	 */
-	sourceName?: (connectionId: string) => string | undefined;
 	/**
 	 * A row can be dragged into a notebook in the sidebar. The note is picked up
 	 * here and put down there, so what is in the air is the route's state and
@@ -68,28 +45,14 @@ export interface NoteListProps {
 
 /**
  * What to show instead of the list. Pulled out of the markup because it is the
- * only place the empty states — still loading, nowhere to put a note, an empty
- * notebook, and a search nothing answers — have to be told apart.
+ * only place the empty states — still loading, nowhere to put a note, and an
+ * empty notebook — have to be told apart.
  */
 const placeholderFor = ({
 	notes,
 	folderPath,
 	storeLoaded,
-	query,
-	results,
-}: Pick<NoteListProps, 'notes' | 'folderPath' | 'storeLoaded' | 'query' | 'results'>):
-	string | undefined => {
-	if (query.trim() !== '') {
-		if (results === undefined) return 'Searching…';
-		if (results.length === 0) return `Nothing matches “${query}”.`;
-		// Cut short, so say so: the note they want may be the one not shown, and
-		// the way to it is another word rather than a scrollbar. `find` hands
-		// back one more than is shown for exactly this, so a search that matched
-		// fifty notes exactly is not told that some were left out.
-		return results.length <= SEARCH_LIMIT
-			? undefined
-			: `Showing the first ${String(SEARCH_LIMIT)}. Add a word to narrow the search.`;
-	}
+}: Pick<NoteListProps, 'notes' | 'folderPath' | 'storeLoaded'>): string | undefined => {
 	if (folderPath === undefined) {
 		return storeLoaded ? 'Create a notebook to start writing.' : 'Loading…';
 	}
@@ -140,13 +103,6 @@ const Preview = ({ note }: { note: NoteRecord }) => {
 	const text = preview(note.body, note.title);
 	return text === '' ? null : <span className="note-preview">{text}</span>;
 };
-
-const editedAt = (timestamp: number): string =>
-	new Date(timestamp).toLocaleDateString(undefined, {
-		year: 'numeric',
-		month: 'short',
-		day: 'numeric',
-	});
 
 interface NoteRowProps {
 	note: NoteRecord;
@@ -205,29 +161,6 @@ const NoteRow = ({
 	</li>
 );
 
-/**
- * The matched words are marked in place. `<mark>` rather than a span of our own
- * colour: it is the element for exactly this, and it survives a forced-colours
- * mode where a background of ours would be thrown away. It is not *announced* —
- * no screen reader in common use says anything about a bare `mark` — so nothing
- * here depends on the user hearing it: the excerpt reads the same without the
- * marks, and what the pane says about the search it says in words.
- */
-const Excerpt = ({ hit }: { hit: NoteHit }) => (
-	<span className="note-excerpt">
-		{/* The runs of one excerpt have no identity of their own: they are one
-		    string decomposed, in order, and decomposed again whenever the query
-		    changes. Where they sit in it is the only key there is. */}
-		{hit.excerpt.map((run, index) =>
-			run.hit ? (
-				<mark key={`${String(index)}:${run.text}`}>{run.text}</mark>
-			) : (
-				<span key={`${String(index)}:${run.text}`}>{run.text}</span>
-			)
-		)}
-	</span>
-);
-
 export const NoteList = ({
 	notes,
 	selectedNoteId,
@@ -235,31 +168,17 @@ export const NoteList = ({
 	onCreateNote,
 	folderPath,
 	storeLoaded,
-	query,
-	results,
-	onOpenResult,
-	activeConnectionId,
-	sourceName,
 	onPickUpNote,
 	onCancelMove,
 	movingNoteId,
 }: NoteListProps) => {
-	const searching = query.trim() !== '';
-	const placeholder = placeholderFor({ notes, folderPath, storeLoaded, query, results });
+	const placeholder = placeholderFor({ notes, folderPath, storeLoaded });
 	const heading = folderPath === undefined ? 'Notes' : folderLabel(folderPath);
 
 	return (
-		// Named for what it is listing: a screen reader announcing "Notes" over
-		// a list of search results describes the pane the user left.
-		<section
-			// `searching` is on the element as well as in the label because the
-			// narrow layout gives an open search more of the screen than a list
-			// read beside a note needs (see `.note-list.searching`).
-			className={searching ? 'note-list searching' : 'note-list'}
-			aria-label={searching ? 'Search results' : 'Notes'}
-		>
+		<section className="note-list" aria-label="Notes">
 			<div className="pane-header">
-				<h2>{searching ? 'Search' : heading}</h2>
+				<h2>{heading}</h2>
 				<button
 					type="button"
 					className="icon"
@@ -275,61 +194,9 @@ export const NoteList = ({
 				</button>
 			</div>
 
-			{/* A search's answer is spoken when it changes: it arrives under a
-			    field the user is still typing into, and "nothing matches" is the
-			    thing a screen-reader user most needs told. While a search is open
-			    the region is always here, empty when there is nothing to say —
-			    VoiceOver often stays silent about one that appears with its words
-			    already in it. The notebook's own empty states get no region: they
-			    follow a deliberate move to another notebook, which is announced
-			    already, and one here would read the pane out on every click. */}
-			{searching ? (
-				<p className="muted placeholder" role="status">
-					{placeholder ?? ''}
-				</p>
-			) : (
-				placeholder !== undefined && <p className="muted placeholder">{placeholder}</p>
-			)}
+			{placeholder !== undefined && <p className="muted placeholder">{placeholder}</p>}
 
-			{searching && results !== undefined && results.length > 0 && (
-				<ul>
-					{results.slice(0, SEARCH_LIMIT).map((hit) => (
-						<NoteRow
-							key={noteRef(hit.note)}
-							note={hit.note}
-							selected={
-								hit.note.id === selectedNoteId &&
-								(activeConnectionId === undefined ||
-									hit.note.connectionId === activeConnectionId)
-							}
-							onSelect={() => {
-								onOpenResult(hit.note);
-							}}
-							// Which source and which notebook, because a search
-							// crosses all of them and two notes can share a title.
-							meta={[
-								sourceName?.(hit.note.connectionId),
-								folderLabel(parentPath(hit.note.path)),
-								editedAt(hit.note.updatedAt),
-							]
-								.filter((part) => part !== undefined)
-								.join(' · ')}
-							detail={<Excerpt hit={hit} />}
-							onPickUp={
-								onPickUpNote === undefined
-									? undefined
-									: () => {
-											onPickUpNote(hit.note);
-										}
-							}
-							onCancelMove={onCancelMove}
-							moving={hit.note.id === movingNoteId}
-						/>
-					))}
-				</ul>
-			)}
-
-			{!searching && notes !== undefined && notes.length > 0 && (
+			{notes !== undefined && notes.length > 0 && (
 				<ul>
 					{notes.map((note) => (
 						<NoteRow

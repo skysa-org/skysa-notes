@@ -62,6 +62,13 @@ export interface SidebarProps {
 	onDrop?: (into: string) => void;
 	/** The drag ended without a drop, or Escape was pressed. */
 	onCancelMove?: () => void;
+	/**
+	 * Something here has just started that needs the user's eyes — a rename or
+	 * a delete asked for from the palette. In a compact window the sidebar is a
+	 * dropdown and may be shut, and a field focused inside a shut panel takes
+	 * no keystrokes at all.
+	 */
+	onReveal?: () => void;
 }
 
 /**
@@ -140,9 +147,15 @@ const NewFolderField = ({ parentPath, onCancel, onSubmit }: NewFolderFieldProps)
  * two: `moving` is set by the command or by `dragstart`, and read here and by
  * every row below without either of them knowing which it was.
  */
-const MoveHint = ({ moving }: { moving: Moving }) => (
-	<p className="move-hint" role="status">
-		{`Moving “${moving.name}”. Choose where to put it, or press Escape.`}
+const MoveHint = ({ moving, onCancel }: { moving: Moving; onCancel: () => void }) => (
+	<p className="move-hint">
+		{/* The live region is the sentence alone: the way out is a control to
+		    reach, not news to be read out every time the hint changes. Escape
+		    still puts the thing down too (the route listens for it). */}
+		<span role="status">{`Moving “${moving.name}”. Choose where to put it.`}</span>{' '}
+		<button type="button" className="link-button" onClick={onCancel}>
+			Cancel
+		</button>
 	</p>
 );
 
@@ -197,7 +210,7 @@ const RenameRow = ({
 	return (
 		<span
 			className="row-editing"
-			style={{ paddingInlineStart: `${String(0.75 + depth * 0.85)}rem` }}
+			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
 		>
 			<input
 				ref={field}
@@ -331,7 +344,7 @@ const Row = ({
 		<button
 			type="button"
 			className={classes.join(' ')}
-			style={{ paddingInlineStart: `${String(0.75 + depth * 0.85)}rem` }}
+			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
 			// A row nothing can land on is not a destination, and saying so with
 			// `disabled` also takes it out of the tab order for the length of the
 			// move — a keyboard user stepping through destinations should not have
@@ -585,6 +598,7 @@ export const Sidebar = ({
 	onPickUp,
 	onDrop,
 	onCancelMove,
+	onReveal,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -626,6 +640,7 @@ export const Sidebar = ({
 		enabled: manageable,
 		run: () => {
 			setRenaming(open ?? null);
+			onReveal?.();
 		},
 	});
 
@@ -636,6 +651,7 @@ export const Sidebar = ({
 		enabled: manageable,
 		run: () => {
 			setDeleting(open ?? null);
+			onReveal?.();
 		},
 	});
 
@@ -682,7 +698,7 @@ export const Sidebar = ({
 				</div>
 			</div>
 
-			{moving !== null && <MoveHint moving={moving} />}
+			{moving !== null && <MoveHint moving={moving} onCancel={cancel} />}
 
 			{creating !== null && (
 				<NewFolderField

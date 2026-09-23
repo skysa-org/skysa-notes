@@ -1,5 +1,14 @@
+import { type ProviderKind } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+	type ReactNode,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+} from 'react';
 
 import { api, type ApiClient } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
@@ -53,17 +62,17 @@ export interface SourceTabsProps {
  * one you are at marked, is what this actually is, and it costs a screen
  * reader user nothing.
  */
-export const SourceTabs = ({
-	db = defaultDb,
-	client = api,
-	returnTo,
-	navigate,
-	search,
-}: SourceTabsProps) => {
+/**
+ * What the bar offers: the sources in the order they are shown, and the
+ * providers another account can be connected from. Shared by the tabs and the
+ * compact window's dropdown, which are the same choice drawn two ways.
+ */
+const useSourceChoices = (
+	db: NotesDatabase,
+	client: Pick<ApiClient, 'config' | 'startConnect'>
+) => {
 	const sources = useLiveQuery(() => connectedSources(db), [db]);
 	const config = useInstanceConfig(client);
-	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
-	const [adding, setAdding] = useState(false);
 
 	const settings = answer(config);
 	const offerable =
@@ -71,16 +80,36 @@ export const SourceTabs = ({
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
 
-	// The bar is the only place connections are made or chosen, so it is here
-	// from the start — with nothing connected it is the `+` and nothing else,
-	// which is the whole of what there is to offer. It goes away entirely only
-	// when there is neither anything to show nor anything to offer: a
-	// deployment with no providers, or a server that cannot be reached, where
-	// an empty strip would be furniture standing in for a choice nobody has.
-	const nothingToShow = sources === undefined || (sources.length === 0 && offerable.length === 0);
-	if (nothingToShow && search === undefined) return null;
+	return {
+		ordered: inOrder(sources ?? []),
+		offerable,
+		// The bar is the only place connections are made or chosen, so it is
+		// here from the start — with nothing connected it is the `+` and nothing
+		// else, which is the whole of what there is to offer. It goes away
+		// entirely only when there is neither anything to show nor anything to
+		// offer: a deployment with no providers, or a server that cannot be
+		// reached, where an empty strip would be furniture standing in for a
+		// choice nobody has.
+		nothingToShow: sources === undefined || (sources.length === 0 && offerable.length === 0),
+	};
+};
 
-	const ordered = inOrder(sources ?? []);
+export const SourceTabs = ({
+	db = defaultDb,
+	client = api,
+	returnTo,
+	navigate,
+	search,
+}: SourceTabsProps) => {
+	const { ordered, offerable, nothingToShow } = useSourceChoices(db, client);
+	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
+	const [adding, setAdding] = useState(false);
+	const addFrame = useRef<HTMLDivElement>(null);
+	const stopAdding = useCallback(() => {
+		setAdding(false);
+	}, []);
+
+	if (nothingToShow && search === undefined) return null;
 
 	return (
 		<div className="source-tabs">
@@ -122,7 +151,7 @@ export const SourceTabs = ({
 				</ul>
 			</nav>
 			{offerable.length > 0 && (
-				<div className="source-add">
+				<div className="source-add" ref={addFrame}>
 					<button
 						type="button"
 						className={
@@ -138,25 +167,21 @@ export const SourceTabs = ({
 						+
 					</button>
 					{adding && (
-						<AddMenu
-							onClose={() => {
-								setAdding(false);
-							}}
+						<Menu
+							className="source-add-menu"
+							label="Storage providers"
+							frame={addFrame}
+							onClose={stopAdding}
 						>
-							{offerable.map((provider) => (
-								<ConnectButton
-									key={provider}
-									db={db}
-									client={client}
-									provider={provider}
-									returnTo={returnTo}
-									className="toolbar-item"
-									{...(navigate === undefined ? {} : { navigate })}
-								>
-									{PROVIDER_LABELS[provider]}
-								</ConnectButton>
-							))}
-						</AddMenu>
+							<p className="source-add-heading">Connect another account</p>
+							<ConnectButtons
+								db={db}
+								client={client}
+								offerable={offerable}
+								returnTo={returnTo}
+								navigate={navigate}
+							/>
+						</Menu>
 					)}
 				</div>
 			)}
@@ -294,40 +319,200 @@ const RenameField = ({
 	);
 };
 
+/** A button per provider another account can be connected from. */
+const ConnectButtons = ({
+	db,
+	client,
+	offerable,
+	returnTo,
+	navigate,
+	className = 'toolbar-item',
+}: {
+	db: NotesDatabase;
+	client: Pick<ApiClient, 'config' | 'startConnect'>;
+	offerable: readonly ProviderKind[];
+	returnTo: string;
+	navigate: ((url: string) => void) | undefined;
+	className?: string;
+}) =>
+	offerable.map((provider) => (
+		<ConnectButton
+			key={provider}
+			db={db}
+			client={client}
+			provider={provider}
+			returnTo={returnTo}
+			className={className}
+			{...(navigate === undefined ? {} : { navigate })}
+		>
+			{PROVIDER_LABELS[provider]}
+		</ConnectButton>
+	));
+
 /**
- * What the `+` opens. Closes on Escape and on a press anywhere outside it,
- * which is the whole of what a menu this small owes anyone: the buttons inside
- * are ordinary buttons, and each one leaves the page for the provider.
+ * What the `+` opens. Closes on Escape and on a press anywhere outside it, which is the whole of
+ * what a menu this small owes anyone: the buttons inside are ordinary buttons.
  *
  * Dressed as the editor toolbar's menus are (`.toolbar-panel`, `.toolbar-item`
  * in the stylesheet), so the app has one kind of menu rather than one per
  * place: a card hung under the control that opened it, with a row per choice.
+ *
+ * `frame` is the element around both the menu and the control that opened it,
+ * and it is what "inside" means. A press on the control is not a press outside:
+ * the control closes the menu itself, and letting this close it first had the
+ * control's own click open it straight back up. And Escape is heard from the
+ * control as well as from the menu, since the control is where the focus is
+ * when a menu has just been opened with the keyboard.
  */
-const AddMenu = ({ children, onClose }: { children: ReactNode; onClose: () => void }) => {
-	const menu = useRef<HTMLDivElement>(null);
-	useEscape(menu, true, onClose);
+const Menu = ({
+	children,
+	className,
+	label,
+	frame,
+	onClose,
+}: {
+	children: ReactNode;
+	className: string;
+	label: string;
+	frame: RefObject<HTMLElement | null>;
+	onClose: () => void;
+}) => {
+	useEscape(frame, true, onClose);
 
 	useEffect(() => {
 		const away = (event: PointerEvent) => {
 			const target = event.target;
-			if (target instanceof Node && menu.current?.contains(target) === true) return;
+			if (target instanceof Node && frame.current?.contains(target) === true) return;
 			onClose();
 		};
 		document.addEventListener('pointerdown', away);
 		return () => {
 			document.removeEventListener('pointerdown', away);
 		};
-	}, [onClose]);
+	}, [onClose, frame]);
 
 	return (
-		<div
-			ref={menu}
-			className="toolbar-panel source-add-menu"
-			role="group"
-			aria-label="Storage providers"
-		>
-			<p className="source-add-heading">Connect another account</p>
+		<div className={`toolbar-panel ${className}`} role="group" aria-label={label}>
 			{children}
 		</div>
 	);
+};
+
+export interface SourcePanelProps {
+	db?: NotesDatabase;
+	client?: Pick<ApiClient, 'config' | 'startConnect'>;
+	/** Where the provider's callback should send the browser back to. */
+	returnTo: string;
+	/** Seam for tests: jsdom has no navigation. */
+	navigate?: (url: string) => void;
+	/**
+	 * The storage panel — what the showing source is syncing with, and the way
+	 * to disconnect it — between the sources and the way to another account.
+	 * A wide window keeps it at the foot of the sidebar; a compact one has no
+	 * sidebar in view, and this is the panel that is about sources.
+	 */
+	account?: ReactNode;
+	/** A source was chosen, so the panel has done its job. */
+	onChosen?: () => void;
+}
+
+/**
+ * The tabs and the `+`, as one panel, for a compact window: opened from the
+ * source dropdown in `CompactBar` and laid out as the notebook and note panels
+ * are, across the window under the bar.
+ *
+ * The same choices in the same order, with the one showing marked by
+ * `aria-current` as its tab is. Renaming a source is not offered here: on a
+ * tab it is a second press on the name, and a row in a panel is a place to go
+ * rather than a name to edit. It is still there in a wider window.
+ */
+export const SourcePanel = ({
+	db = defaultDb,
+	client = api,
+	returnTo,
+	navigate,
+	account,
+	onChosen,
+}: SourcePanelProps) => {
+	const { ordered, offerable } = useSourceChoices(db, client);
+	const headingId = useId();
+
+	return (
+		<section className="source-panel" aria-label="Sources">
+			<div className="pane-header">
+				<h2>Sources</h2>
+			</div>
+			{ordered.length > 0 && (
+				<ul>
+					{ordered.map((source) => {
+						const name = tabName(source, ordered);
+						return (
+							<li key={source.connectionId}>
+								<button
+									type="button"
+									className={source.active ? 'row selected' : 'row'}
+									aria-label={
+										source.detached === undefined
+											? name
+											: `${name} — disconnected`
+									}
+									{...(source.active ? { 'aria-current': 'true' as const } : {})}
+									onClick={() => {
+										onChosen?.();
+										if (!source.active)
+											void showConnection(db, source.connectionId);
+									}}
+								>
+									<span className="row-label">
+										{name}
+										{source.detached !== undefined && (
+											<span className="source-tab-detached">
+												{' '}
+												— disconnected
+											</span>
+										)}
+									</span>
+								</button>
+							</li>
+						);
+					})}
+				</ul>
+			)}
+			<div className="source-panel-foot">
+				{account}
+				{offerable.length > 0 && (
+					// A group of its own, named by its heading: a provider's name is
+					// also the name of a source above it, and "Dropbox" read out twice
+					// is two buttons a screen-reader user cannot tell apart.
+					<div className="source-panel-connect" role="group" aria-labelledby={headingId}>
+						<p className="source-add-heading" id={headingId}>
+							Connect another account
+						</p>
+						<ConnectButtons
+							db={db}
+							client={client}
+							offerable={offerable}
+							returnTo={returnTo}
+							navigate={navigate}
+							className="row"
+						/>
+					</div>
+				)}
+			</div>
+		</section>
+	);
+};
+
+/**
+ * What the compact bar's source dropdown says: the source showing, or plain
+ * "Storage" before there is one — the dropdown is there regardless, because
+ * the storage panel is in it.
+ */
+export const useShowingSourceName = (
+	db: NotesDatabase = defaultDb,
+	client: Pick<ApiClient, 'config' | 'startConnect'> = api
+): string => {
+	const { ordered } = useSourceChoices(db, client);
+	const showing = ordered.find((source) => source.active);
+	return showing === undefined ? 'Storage' : tabName(showing, ordered);
 };

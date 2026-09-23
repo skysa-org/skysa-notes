@@ -5,9 +5,11 @@ import {
 	type RefObject,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useState,
 } from 'react';
+import { flushSync } from 'react-dom';
 
 import {
 	clearLink,
@@ -22,6 +24,7 @@ import {
 } from './commands.js';
 import type { FormatState } from './format.js';
 import { Icon, type IconName } from './icons.js';
+import { fitToolbar, sameFit } from './toolbarFit.js';
 
 /**
  * The formatting toolbar across the top of the rich editor.
@@ -110,6 +113,160 @@ const isOff = (command: EditorCommand, format: FormatState): boolean => {
 const FIRST_STOP = 'text-style';
 
 /**
+ * The bar's slots, in the order they are drawn, and the group each is drawn
+ * in. A slot is what goes into the overflow menu as one: a button, a menu, or
+ * — for indentation — the pair, since either without the other is half a
+ * control.
+ */
+const SLOTS: readonly { id: string; group: string }[] = [
+	{ id: 'text-style', group: 'Text style' },
+	{ id: 'strong', group: 'Text formatting' },
+	{ id: 'emphasis', group: 'Text formatting' },
+	{ id: 'more-formatting', group: 'Text formatting' },
+	{ id: 'bullet-list', group: 'Lists' },
+	{ id: 'ordered-list', group: 'Lists' },
+	{ id: 'task-list', group: 'Lists' },
+	{ id: 'indentation', group: 'Indentation' },
+	{ id: 'code-block', group: 'Insert' },
+	{ id: 'link', group: 'Link' },
+];
+
+/** The slot a tab stop is in, where it is not a slot of its own. */
+const SLOT_OF_STOP: Record<string, string> = { outdent: 'indentation', indent: 'indentation' };
+
+/**
+ * What goes into the overflow menu first, when the bar is too narrow for all
+ * of it: least used first. Indentation is mostly done with Tab and a code
+ * block with three backticks; strikethrough, inline code and clearing are
+ * already a menu of their own. Bold and italic go last of all, and the text
+ * style never does — it is the widest control, but it is also the one that
+ * says what the cursor is in.
+ */
+const GIVE_UP_ORDER: readonly string[] = [
+	'code-block',
+	'indentation',
+	'more-formatting',
+	'task-list',
+	'link',
+	'ordered-list',
+	'bullet-list',
+	'emphasis',
+	'strong',
+];
+
+const COMMANDS_BY_ID = new Map(
+	[...PRIMARY_INLINE_COMMANDS, ...LIST_COMMANDS, ...INSERT_COMMANDS].map((command) => [
+		command.id,
+		command,
+	])
+);
+
+/**
+ * Which slots fit, measured.
+ *
+ * Every slot's width is taken from the screen while it is on it and kept once
+ * it has gone, so the bar can tell when one would fit again without drawing it
+ * to find out. Measured after every render as well as on a resize, because a
+ * render can change a width: the text style reads "Plain text" in one
+ * paragraph and "Heading 1" in the next.
+ *
+ * A bar with no width — jsdom, where nothing is laid out, or a toolbar not on
+ * screen — is left alone, with everything in it.
+ */
+/** What the bar has measured, kept between renders. */
+interface FitMemory {
+	widths: Map<string, number>;
+	groupCost: Map<string, number>;
+	overflowWidth: number | undefined;
+}
+
+const pixels = (value: string): number => Number.parseFloat(value) || 0;
+
+/** Measure what is on the bar, and work out what fits. */
+const measureFit = (
+	bar: HTMLElement | null,
+	memory: FitMemory
+): ReadonlySet<string> | undefined => {
+	if (bar === null || bar.clientWidth === 0) return undefined;
+	const style = getComputedStyle(bar);
+
+	bar.querySelectorAll<HTMLElement>('[data-slot]').forEach((slot) => {
+		memory.widths.set(slot.dataset.slot ?? '', slot.offsetWidth);
+	});
+	bar.querySelectorAll<HTMLElement>('[data-group]').forEach((group) => {
+		const inside = [...group.querySelectorAll<HTMLElement>('[data-slot]')].reduce(
+			(sum, slot) => sum + slot.offsetWidth,
+			0
+		);
+		memory.groupCost.set(group.dataset.group ?? '', group.offsetWidth - inside);
+	});
+	const overflow = bar.querySelector<HTMLElement>('[data-overflow]');
+	if (overflow !== null) memory.overflowWidth = overflow.offsetWidth;
+
+	return fitToolbar({
+		slots: SLOTS.map((slot) => ({ ...slot, width: memory.widths.get(slot.id) ?? 0 })),
+		groupCost: memory.groupCost,
+		gap: pixels(style.columnGap),
+		available:
+			bar.clientWidth - pixels(style.paddingInlineStart) - pixels(style.paddingInlineEnd),
+		// Until it has been drawn, as wide as the bold button, which is drawn
+		// in the same style.
+		overflowWidth: memory.overflowWidth ?? memory.widths.get('strong') ?? 0,
+		order: GIVE_UP_ORDER,
+	});
+};
+
+/**
+ * Which slots fit, measured.
+ *
+ * Every slot's width is taken from the screen while it is on it and kept once
+ * it has gone, so the bar can tell when one would fit again without drawing it
+ * to find out. Measured after every render as well as on a resize, because a
+ * render can change a width: the text style reads "Plain text" in one
+ * paragraph and "Heading 1" in the next.
+ *
+ * A bar with no width — jsdom, where nothing is laid out, or a toolbar not on
+ * screen — is left alone, with everything in it.
+ */
+const useToolbarFit = (root: RefObject<HTMLDivElement | null>): ReadonlySet<string> => {
+	const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+	const memory = useRef<FitMemory>({
+		widths: new Map(),
+		groupCost: new Map(),
+		overflowWidth: undefined,
+	});
+
+	// After every render, on purpose: see above. It settles on the second
+	// pass — the answer is the same, and `sameFit` hands back the same set, so
+	// React has nothing to render again.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	useLayoutEffect(() => {
+		const next = measureFit(root.current, memory.current);
+		if (next !== undefined) setHidden((current) => (sameFit(current, next) ? current : next));
+	});
+
+	useEffect(() => {
+		const bar = root.current;
+		if (bar === null || typeof ResizeObserver === 'undefined') return undefined;
+		// Synchronously, so a window being dragged narrower never shows a
+		// frame with the bar running off its end.
+		const observer = new ResizeObserver(() => {
+			const next = measureFit(bar, memory.current);
+			if (next === undefined) return;
+			flushSync(() => {
+				setHidden((current) => (sameFit(current, next) ? current : next));
+			});
+		});
+		observer.observe(bar);
+		return () => {
+			observer.disconnect();
+		};
+	}, [root]);
+
+	return hidden;
+};
+
+/**
  * One tab stop for the whole bar, arrow keys within it.
  *
  * A toolbar of fourteen buttons between the note's title and its text would
@@ -118,8 +275,11 @@ const FIRST_STOP = 'text-style';
  * DOM rather than from a list kept beside it, so the order on screen and the
  * order the arrows follow are the same thing.
  */
-const useRoving = (root: RefObject<HTMLDivElement | null>) => {
-	const [at, setAt] = useState<string>(FIRST_STOP);
+const useRoving = (root: RefObject<HTMLDivElement | null>, hidden: ReadonlySet<string>) => {
+	const [chosen, setAt] = useState<string>(FIRST_STOP);
+	// The control holding the stop can go into the overflow menu when the bar
+	// narrows, and a bar whose one tab stop is not drawn is a bar Tab skips.
+	const at = hidden.has(SLOT_OF_STOP[chosen] ?? chosen) ? FIRST_STOP : chosen;
 
 	const move = (delta: number, from: 'here' | 'edge') => {
 		const stops = [
@@ -238,11 +398,16 @@ const ToolbarPopover = ({
 	setOpen,
 	stop,
 	children,
+	chevron = true,
+	className,
 }: {
 	id: string;
 	label: string;
 	/** What a screen reader hears, where the visible text says more than `label`. */
 	announce?: string;
+	/** Whether the trigger carries the chevron that says it opens something. */
+	chevron?: boolean;
+	className?: string;
 	trigger: ReactNode;
 	open: boolean;
 	setOpen: (open: boolean) => void;
@@ -262,7 +427,15 @@ const ToolbarPopover = ({
 	useDismiss(open, close, host);
 
 	return (
-		<div className="toolbar-popover-host" ref={host}>
+		<div
+			className={
+				className === undefined
+					? 'toolbar-popover-host'
+					: `toolbar-popover-host ${className}`
+			}
+			ref={host}
+			{...(id === 'overflow' ? { 'data-overflow': '' } : {})}
+		>
 			<button
 				type="button"
 				ref={button}
@@ -281,7 +454,7 @@ const ToolbarPopover = ({
 				{...stop}
 			>
 				{trigger}
-				<Icon name="chevron" />
+				{chevron && <Icon name="chevron" />}
 			</button>
 			{open && (
 				<div className="toolbar-panel" id={`${id}-panel`} aria-label={label}>
@@ -340,6 +513,32 @@ const TextStyleMenu = ({
 	);
 };
 
+/** A command as a row in a menu: its icon, its name, and whether it is on. */
+const MenuCommand = ({
+	command,
+	format,
+	run,
+	close,
+}: FormatToolbarProps & { command: EditorCommand; close: () => void }) => {
+	const icon = ICONS[command.id];
+	return (
+		<button
+			type="button"
+			className="toolbar-item"
+			aria-pressed={isOn(command, format)}
+			disabled={isOff(command, format)}
+			onMouseDown={(event) => {
+				event.preventDefault();
+				run(command.apply);
+				close();
+			}}
+		>
+			{icon !== undefined && <Icon name={icon} />}
+			<span>{command.label}</span>
+		</button>
+	);
+};
+
 /** Strikethrough, code, and taking it all off again. */
 const MoreFormatting = ({
 	format,
@@ -360,25 +559,17 @@ const MoreFormatting = ({
 		setOpen={setOpen}
 		stop={stop}
 	>
-		{MORE_INLINE_COMMANDS.map((command) => {
-			const icon = ICONS[command.id];
-			return (
-				<button
-					type="button"
-					key={command.id}
-					className="toolbar-item"
-					aria-pressed={isOn(command, format)}
-					onMouseDown={(event) => {
-						event.preventDefault();
-						run(command.apply);
-						setOpen(false);
-					}}
-				>
-					{icon !== undefined && <Icon name={icon} />}
-					<span>{command.label}</span>
-				</button>
-			);
-		})}
+		{MORE_INLINE_COMMANDS.map((command) => (
+			<MenuCommand
+				key={command.id}
+				command={command}
+				format={format}
+				run={run}
+				close={() => {
+					setOpen(false);
+				}}
+			/>
+		))}
 	</ToolbarPopover>
 );
 
@@ -486,80 +677,197 @@ const LinkPanel = ({
 	</ToolbarPopover>
 );
 
-export const FormatToolbar = ({ format, run }: FormatToolbarProps) => {
+/**
+ * Where the bar sits. Above the note in a wide window; below it in a compact
+ * one, where it is under the thumb and out of the way of the title — and its
+ * menus open upwards, since below it there is nothing left of the screen.
+ */
+export type ToolbarPlacement = 'top' | 'bottom';
+
+/** The commands a slot stands for, as rows in the overflow menu. */
+const commandsIn = (slot: string): readonly EditorCommand[] => {
+	if (slot === 'more-formatting') return MORE_INLINE_COMMANDS;
+	if (slot === 'indentation') return INDENT_COMMANDS;
+	const command = COMMANDS_BY_ID.get(slot);
+	return command === undefined ? [] : [command];
+};
+
+/**
+ * What did not fit on the bar, in the order it would have been drawn.
+ *
+ * A menu that was a slot of its own — "more formatting" — is spread out here
+ * rather than nested: a menu inside a menu is two presses and a hover-target
+ * for what was one press on a wider screen. The link is the one control that
+ * is more than a press, so choosing it swaps the rows for the link's own form,
+ * in the same panel.
+ *
+ * Mounted with the panel, so the form is gone again the next time it opens.
+ */
+const OverflowItems = ({
+	hidden,
+	format,
+	run,
+	close,
+}: FormatToolbarProps & { hidden: ReadonlySet<string>; close: () => void }) => {
+	const [linking, setLinking] = useState(false);
+	if (linking) return <LinkForm href={format.link} run={run} close={close} />;
+
+	return SLOTS.filter((slot) => hidden.has(slot.id)).flatMap((slot) =>
+		slot.id === 'link' ? (
+			<button
+				key={slot.id}
+				type="button"
+				className="toolbar-item"
+				aria-pressed={format.link !== null}
+				onMouseDown={(event) => {
+					event.preventDefault();
+					setLinking(true);
+				}}
+			>
+				<Icon name="link" />
+				<span>Link…</span>
+			</button>
+		) : (
+			commandsIn(slot.id).map((command) => (
+				<MenuCommand
+					key={command.id}
+					command={command}
+					format={format}
+					run={run}
+					close={close}
+				/>
+			))
+		)
+	);
+};
+
+/**
+ * One line, always. When the bar is too narrow for everything on it, what is
+ * least used goes into a menu at the end (`GIVE_UP_ORDER`) and comes back as
+ * soon as there is room for it — measured against the bar's own width rather
+ * than the window's, since the same window gives the editor very different
+ * room depending on what is beside it.
+ */
+export const FormatToolbar = ({
+	format,
+	run,
+	placement = 'top',
+}: FormatToolbarProps & { placement?: ToolbarPlacement }) => {
 	const root = useRef<HTMLDivElement>(null);
-	const { onKeyDown, stop } = useRoving(root);
+	const hidden = useToolbarFit(root);
+	const { onKeyDown, stop } = useRoving(root, hidden);
 	/** At most one panel is open, so which one is the whole of the state. */
 	const [open, setOpen] = useState<string | null>(null);
 	const opener = (id: string) => (wanted: boolean) => {
 		setOpen(wanted ? id : null);
 	};
+	// A panel whose button has gone into the menu goes with it, and the menu's
+	// own panel goes when there is nothing left in it.
+	const drawn = open === 'overflow' ? hidden.size > 0 : open === null || !hidden.has(open);
+	const openNow = drawn ? open : null;
 
-	const group = (label: string, commands: readonly EditorCommand[]) => (
-		<div className="toolbar-group" role="group" aria-label={label}>
-			{commands.map((command) => (
-				<ToolbarButton
-					key={command.id}
-					command={command}
-					format={format}
-					run={run}
-					stop={stop(command.id)}
-				/>
-			))}
-		</div>
+	const button = (command: EditorCommand) => (
+		<ToolbarButton
+			key={command.id}
+			command={command}
+			format={format}
+			run={run}
+			stop={stop(command.id)}
+		/>
+	);
+
+	const slot = (id: string): ReactNode => {
+		switch (id) {
+			case 'text-style':
+				return (
+					<TextStyleMenu
+						format={format}
+						run={run}
+						open={openNow === id}
+						setOpen={opener(id)}
+						stop={stop(FIRST_STOP)}
+					/>
+				);
+			case 'more-formatting':
+				return (
+					<MoreFormatting
+						format={format}
+						run={run}
+						open={openNow === id}
+						setOpen={opener(id)}
+						stop={stop(id)}
+					/>
+				);
+			case 'link':
+				return (
+					<LinkPanel
+						format={format}
+						run={run}
+						open={openNow === id}
+						setOpen={opener(id)}
+						stop={stop(id)}
+					/>
+				);
+			default:
+				return commandsIn(id).map(button);
+		}
+	};
+
+	// The slots still on the bar, grouped; a group with nothing left in it is
+	// not drawn, and its separator goes with it.
+	const groups = SLOTS.filter(({ id }) => !hidden.has(id)).reduce(
+		(drawn, { id, group }) => drawn.set(group, [...(drawn.get(group) ?? []), id]),
+		new Map<string, string[]>()
 	);
 
 	return (
 		<div
-			className="format-toolbar"
+			className={
+				placement === 'bottom' ? 'format-toolbar format-toolbar-bottom' : 'format-toolbar'
+			}
 			ref={root}
 			role="toolbar"
 			aria-label="Formatting"
 			aria-orientation="horizontal"
 			onKeyDown={onKeyDown}
 		>
-			<div className="toolbar-group" role="group" aria-label="Text style">
-				<TextStyleMenu
-					format={format}
-					run={run}
-					open={open === 'text-style'}
-					setOpen={opener('text-style')}
-					stop={stop(FIRST_STOP)}
-				/>
-			</div>
+			{[...groups].map(([group, ids]) => (
+				<div
+					key={group}
+					className="toolbar-group"
+					role="group"
+					aria-label={group}
+					data-group={group}
+				>
+					{ids.map((id) => (
+						<span key={id} className="toolbar-slot" data-slot={id}>
+							{slot(id)}
+						</span>
+					))}
+				</div>
+			))}
 
-			<div className="toolbar-group" role="group" aria-label="Text formatting">
-				{PRIMARY_INLINE_COMMANDS.map((command) => (
-					<ToolbarButton
-						key={command.id}
-						command={command}
+			{hidden.size > 0 && (
+				<ToolbarPopover
+					id="overflow"
+					label="More tools"
+					trigger={<Icon name="overflow" />}
+					chevron={false}
+					className="toolbar-overflow"
+					open={openNow === 'overflow'}
+					setOpen={opener('overflow')}
+					stop={stop('overflow')}
+				>
+					<OverflowItems
+						hidden={hidden}
 						format={format}
 						run={run}
-						stop={stop(command.id)}
+						close={() => {
+							setOpen(null);
+						}}
 					/>
-				))}
-				<MoreFormatting
-					format={format}
-					run={run}
-					open={open === 'more-formatting'}
-					setOpen={opener('more-formatting')}
-					stop={stop('more-formatting')}
-				/>
-			</div>
-
-			{group('Lists', LIST_COMMANDS)}
-			{group('Indentation', INDENT_COMMANDS)}
-			{group('Insert', INSERT_COMMANDS)}
-
-			<div className="toolbar-group" role="group" aria-label="Link">
-				<LinkPanel
-					format={format}
-					run={run}
-					open={open === 'link'}
-					setOpen={opener('link')}
-					stop={stop('link')}
-				/>
-			</div>
+				</ToolbarPopover>
+			)}
 		</div>
 	);
 };

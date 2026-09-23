@@ -344,7 +344,7 @@ describe('the app', () => {
  * without a single unit test noticing.
  */
 describe('searching', () => {
-	const field = () => screen.getByRole('searchbox', { name: 'Search notes' });
+	const field = () => screen.getByRole('combobox', { name: 'Search notes' });
 
 	const type = async (what: string) => {
 		await userEvent.type(field(), what);
@@ -370,10 +370,11 @@ describe('searching', () => {
 
 		await type('heap');
 
-		expect(await screen.findByText('Compost')).toBeDefined();
+		expect(await screen.findByRole('option', { name: /Compost/ })).toBeDefined();
 		expect(screen.getByText(/^Garden ·/)).toBeDefined();
-		// The notebook the user is standing in is not what is listed.
-		expect(screen.queryByText('Standup')).toBeNull();
+		expect(screen.queryByRole('option', { name: /Standup/ })).toBeNull();
+		// Over the notebook the user is standing in, which is still there.
+		expect(screen.getByRole('button', { name: /^Standup/ })).toBeDefined();
 	});
 
 	it('marks the word it matched inside the note', async () => {
@@ -391,7 +392,7 @@ describe('searching', () => {
 		// open beside it, and emptying the field leaves that note in no list.
 		const router = await open('/?folder=Work', 'Work');
 		await type('heap');
-		const match = await screen.findByText('Compost');
+		const match = await screen.findByRole('option', { name: /Compost/ });
 
 		await userEvent.click(match);
 
@@ -402,16 +403,26 @@ describe('searching', () => {
 		expect(router.state.location.search).toMatchObject({ note: compost?.id });
 	});
 
-	it('gives the notebook back when the field is emptied', async () => {
+	it('ends the search when a match is chosen: the field empties and the list goes', async () => {
 		await open('/?folder=Work', 'Work');
 		await type('heap');
-		expect(await screen.findByText('Compost')).toBeDefined();
+
+		await userEvent.click(await screen.findByRole('option', { name: /Compost/ }));
+
+		expect(field()).toHaveProperty('value', '');
+		expect(screen.queryByRole('listbox', { name: 'Search results' })).toBeNull();
+		expect(document.activeElement).not.toBe(field());
+	});
+
+	it('takes the list away when the field is emptied', async () => {
+		await open('/?folder=Work', 'Work');
+		await type('heap');
+		expect(await screen.findByRole('option', { name: /Compost/ })).toBeDefined();
 
 		await userEvent.clear(field());
 
-		expect(await screen.findByText('Standup')).toBeDefined();
 		await waitFor(() => {
-			expect(screen.queryByText('Compost')).toBeNull();
+			expect(screen.queryByRole('option', { name: /Compost/ })).toBeNull();
 		});
 	});
 
@@ -427,22 +438,7 @@ describe('searching', () => {
 			await saveNoteBody(db, standup?.id ?? '', 'a kingfisher on the wire\n');
 		});
 
-		expect(await screen.findByText('Standup')).toBeDefined();
-	});
-
-	it('leaves the search when a note is created, so the new note is in the list', async () => {
-		// The `+` button stays live while a search is open. Without leaving the
-		// search, the note is created, opened in the editor — and shown in no
-		// list at all, because the pane is still answering a query it does not
-		// match.
-		await open('/?folder=Work', 'Work');
-		await type('heap');
-		expect(await screen.findByText('Compost')).toBeDefined();
-
-		await userEvent.click(screen.getByRole('button', { name: 'New note' }));
-
-		expect(await screen.findByText('Untitled')).toBeDefined();
-		expect(field()).toHaveProperty('value', '');
+		expect(await screen.findByRole('option', { name: /Standup/ })).toBeDefined();
 	});
 
 	it('says plainly when nothing matches', async () => {
@@ -493,7 +489,7 @@ describe('the command palette', () => {
 
 		await waitFor(() => {
 			expect(document.activeElement).toBe(
-				screen.getByRole('searchbox', { name: 'Search notes' })
+				screen.getByRole('combobox', { name: 'Search notes' })
 			);
 		});
 	});
@@ -519,7 +515,7 @@ describe('the command palette', () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work', 'Work');
 
-		const search = screen.getByRole('searchbox', { name: 'Search notes' });
+		const search = screen.getByRole('combobox', { name: 'Search notes' });
 		await userEvent.type(search, 'n');
 		expect(screen.queryByDisplayValue('Untitled')).toBeNull();
 		expect((search as HTMLInputElement).value).toBe('n');
