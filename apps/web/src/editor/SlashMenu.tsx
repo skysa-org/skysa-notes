@@ -4,13 +4,7 @@ import { usePluginViewContext } from '@prosemirror-adapter/react';
 import { useEffect, useRef, useState } from 'react';
 
 import { BLOCK_COMMANDS } from './commands.js';
-import {
-	matchCommands,
-	moveHighlight,
-	slashKeyAction,
-	slashQuery,
-	textBeforeCursor,
-} from './slash.js';
+import { moveHighlight, slashItems, slashKeyAction, textBeforeCursor } from './slash.js';
 
 /**
  * The `/` menu. `slash.ts` decides what the query matches and what a keypress
@@ -34,9 +28,10 @@ export const SlashMenu = () => {
 		index: 0,
 	});
 
-	const query = slashQuery(textBeforeCursor(view));
-	const items = query === undefined ? [] : matchCommands(query, BLOCK_COMMANDS);
-	const open = query !== undefined && items.length > 0;
+	const menu = slashItems(textBeforeCursor(view), BLOCK_COMMANDS);
+	const query = menu?.query;
+	const items = menu?.items ?? [];
+	const open = menu !== undefined;
 	const index = highlight.query === query ? Math.min(highlight.index, items.length - 1) : 0;
 
 	useEffect(() => {
@@ -49,7 +44,11 @@ export const SlashMenu = () => {
 			// a debounce here would only make the frame it is drawn in disagree
 			// with the keys the user is pressing.
 			debounce: 0,
-			shouldShow: (current) => slashQuery(textBeforeCursor(current)) !== undefined,
+			// The same rule as `open` above. Asking only whether there is a query
+			// would re-show the menu after the render hid it for having nothing
+			// to offer — `/nothing` would leave an empty box under the cursor.
+			shouldShow: (current) =>
+				slashItems(textBeforeCursor(current), BLOCK_COMMANDS) !== undefined,
 		});
 		provider.current = instance;
 
@@ -82,8 +81,8 @@ export const SlashMenu = () => {
 	};
 
 	useEffect(() => {
-		// `open` is false unless there is a query, which narrows it for the rest.
-		if (!open) return;
+		if (menu === undefined) return;
+		const { query } = menu;
 
 		const onKeyDown = (event: KeyboardEvent) => {
 			const action = slashKeyAction(event.key);
