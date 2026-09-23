@@ -301,6 +301,43 @@ describe('a break the author wrote', () => {
 	});
 });
 
+/**
+ * An empty cell is a cell holding an empty paragraph, and the paragraph's
+ * writer spells an empty paragraph `<br />` without asking where it is. In a
+ * cell that is not a blank line kept but a break added, and a table with one
+ * empty cell — an index with no "Modified" date — was sent to raw mode.
+ */
+describe('an empty table cell', () => {
+	it.each([
+		['in a row', '| a | b |\n| - | - |\n| 1 |   |\n'],
+		['in the header', '| a |   |\n| - | - |\n| 1 | 2 |\n'],
+	])('stays empty %s', async (_where, body) => {
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).not.toContain('<br');
+	});
+
+	it('stays empty after the user types elsewhere', async () => {
+		const onUserEdit = vi.fn();
+		// `type` writes at the end of the note, so the empty cell is not there.
+		const { type } = await mount('| a | b |\n| - | - |\n|   | 1 |\n\nlast\n', onUserEdit);
+
+		type('!');
+
+		expect(onUserEdit.mock.calls[0]?.[0]).toContain('last!');
+		expect(onUserEdit.mock.calls[0]?.[0]).not.toContain('<br');
+	});
+
+	it('keeps a break the author put in one', async () => {
+		const body = '| a | b |\n| - | - |\n| 1 | <br /> |\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toContain('<br />');
+	});
+});
+
 describe('representsFaithfully', () => {
 	it('passes a note that uses everything the editor supports', async () => {
 		const body = [

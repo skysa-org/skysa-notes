@@ -15,11 +15,12 @@ import { history } from '@milkdown/kit/plugin/history';
 import { slashFactory } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
 import { commonmark, remarkPreserveEmptyLinePlugin } from '@milkdown/kit/preset/commonmark';
-import { gfm } from '@milkdown/kit/preset/gfm';
+import { gfm, tableCellSchema, tableHeaderSchema } from '@milkdown/kit/preset/gfm';
 import { keymap } from '@milkdown/kit/prose/keymap';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
+import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $prose, $remark } from '@milkdown/kit/utils';
 import {
 	firstStructuralDifference,
@@ -168,6 +169,36 @@ const commonmarkWithoutBreakEater = commonmark.filter(
 	(plugin) => plugin !== remarkPreserveEmptyLinePlugin.plugin
 );
 
+/**
+ * An empty table cell written as one, not as `<br />`.
+ *
+ * A cell holds exactly one paragraph, so an empty cell holds an empty one, and
+ * the paragraph's writer spells that `<br />` (above) without asking where it
+ * is. Between blocks that keeps a blank line; in a cell it adds a break that
+ * was never there, the fidelity check finds the cell changed, and a table with
+ * one gap in it — an index with no "Modified" date — could not be opened in
+ * rich text at all. So the cell asks instead, and writes nothing for an empty
+ * paragraph. A `<br />` the author wrote in a cell is an inline atom in a
+ * paragraph that is not empty, and is written back as it was.
+ * https://github.com/Milkdown/milkdown/blob/v7.22.1/packages/plugins/preset-gfm/src/node/table/schema.ts
+ */
+const cellWithoutEmptyLine =
+	(schema: (ctx: Ctx) => NodeSchema) =>
+	(ctx: Ctx): NodeSchema => {
+		const spec = schema(ctx);
+		return {
+			...spec,
+			toMarkdown: {
+				...spec.toMarkdown,
+				runner: (state, node) => {
+					state.openNode('tableCell');
+					if (node.firstChild?.content.size !== 0) state.next(node.content);
+					state.closeNode();
+				},
+			},
+		};
+	};
+
 export const createRichEditor = ({
 	root,
 	body,
@@ -181,6 +212,8 @@ export const createRichEditor = ({
 			ctx.set(rootCtx, root);
 			ctx.set(defaultValueCtx, body);
 			ctx.set(remarkStringifyOptionsCtx, STRINGIFY_OPTIONS);
+			ctx.update(tableCellSchema.key, cellWithoutEmptyLine);
+			ctx.update(tableHeaderSchema.key, cellWithoutEmptyLine);
 			ctx.update(editorViewOptionsCtx, (options) => ({
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': 'Note body' },
