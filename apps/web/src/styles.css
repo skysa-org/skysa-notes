@@ -79,9 +79,11 @@
 	   darker than hover is only told apart from hover side by side, and a
 	   toggle is pressed with the pointer still over it. */
 	--accent: #2563eb;
-	/* Text on a slab of `--accent`: white on the light theme's blue, and the
-	   page's own dark on the dark theme's, which is too light to carry white. */
-	--on-accent: #fff;
+	/* The blue behind the app's icon (`public/README.md`): the answer a
+	   question expects, filled, and every link. The same in both themes, as
+	   the icon is. */
+	--brand: #007aff;
+	--on-brand: #fff;
 	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 	--on-fg: var(--accent);
 	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
@@ -116,7 +118,6 @@
 		--bad: #f87171;
 		--drop: #60a5fa;
 		--accent: #60a5fa;
-		--on-accent: #0b0f19;
 		/* The light palette's ink is unreadable on a dark slab: every token
 		   colour is the same hue lifted until it reads against `--surface`,
 		   and the slab itself steps away from the page rather than towards
@@ -179,6 +180,10 @@ button.row:focus-visible,
 button,
 a {
 	-webkit-tap-highlight-color: transparent;
+}
+
+a {
+	color: var(--brand);
 }
 
 body {
@@ -904,7 +909,7 @@ button.danger {
 .link-button {
 	padding: 0;
 	font: inherit;
-	color: var(--accent);
+	color: var(--brand);
 	text-decoration: underline;
 	text-underline-offset: 0.15em;
 	background: none;
@@ -2516,9 +2521,9 @@ button.danger {
 /* The answer the question expects, filled, so it is the one the eye lands on.
    Cancel keeps the focus all the same. */
 .modal button.primary {
-	color: var(--on-accent);
-	background: var(--accent);
-	border-color: var(--accent);
+	color: var(--on-brand);
+	background: var(--brand);
+	border-color: var(--brand);
 }
 
 /* An answer that deletes, in the colour a toast uses to say something went
