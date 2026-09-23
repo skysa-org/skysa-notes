@@ -59,6 +59,29 @@ describe('sameMarkdownStructure', () => {
 	it('notices a code fence losing its language, which changes how it renders', () => {
 		expect(sameMarkdownStructure('```js\nx\n```\n', '```\nx\n```\n')).toBe(false);
 	});
+
+	/**
+	 * The serializer writes a line ending before inline html as a space, so the
+	 * html cannot be read back as a block. Both render the same; without this a
+	 * `<br />` on a line of its own sent the note to raw mode.
+	 */
+	it('reads a line ending before inline html as the space it is written as', () => {
+		const body = 'first\n<br />\nsecond\n';
+		expect(sameMarkdownStructure(body, 'first <br />\nsecond\n')).toBe(true);
+		expect(roundTripsLosslessly(body)).toBe(true);
+		expect(roundTripsLosslessly('first\n<span>x</span> second\n')).toBe(true);
+	});
+
+	it('still notices the other line endings around inline html', () => {
+		// After it, the serializer keeps the line ending, so a space there is not it.
+		expect(sameMarkdownStructure('first <br />\nsecond\n', 'first <br /> second\n')).toBe(
+			false
+		);
+		// A hard break before it is written as a backslash and a space: a loss.
+		expect(sameMarkdownStructure('first\\\n<br />\n', 'first\\ <br />\n')).toBe(false);
+		// And in plain text a line ending is still not a space.
+		expect(sameMarkdownStructure('first\nsecond\n', 'first second\n')).toBe(false);
+	});
 });
 
 describe('roundTripsLosslessly', () => {

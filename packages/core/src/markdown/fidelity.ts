@@ -60,6 +60,42 @@ const sameStructure = (a: unknown, b: unknown): boolean => {
 	);
 };
 
+interface Tree {
+	readonly type: string;
+	readonly value?: unknown;
+	readonly children?: readonly Tree[];
+}
+
+/**
+ * A line ending just before inline html, read the way the serializer writes it:
+ * as a space.
+ *
+ * `mdast-util-to-markdown` does this on purpose — html at the start of a line
+ * could be read back as an html *block*, and there is no way to escape it — so
+ * `first\n<br />\nsecond` is written `first <br />\nsecond` by `core` and by
+ * the editor alike. CommonMark renders a soft line break and a space the same,
+ * so it is a change of layout of the kind a list marker is, and without this
+ * every note with a line that opens on inline html failed the fidelity check.
+ * Only a text node's own line ending is folded: a hard break before html is
+ * written as a backslash and a space, which *is* a loss, and still shows as one.
+ * https://github.com/syntax-tree/mdast-util-to-markdown/blob/2.1.2/lib/util/container-phrasing.js
+ */
+const foldEndingsBeforeHtml = (node: Tree): Tree => {
+	if (node.children === undefined) return node;
+	return {
+		...node,
+		children: node.children.map((child, index, siblings) =>
+			child.type === 'text' &&
+			typeof child.value === 'string' &&
+			siblings[index + 1]?.type === 'html'
+				? { ...child, value: child.value.replace(/\n$/, ' ') }
+				: foldEndingsBeforeHtml(child)
+		),
+	};
+};
+
+const comparable = (markdown: string): Tree => foldEndingsBeforeHtml(parse(markdown));
+
 /**
  * True when two markdown strings mean the same document — same nodes, same
  * order, same content — regardless of how either is formatted. Different list
@@ -67,7 +103,7 @@ const sameStructure = (a: unknown, b: unknown): boolean => {
  * missing table, footnote, or HTML block does.
  */
 export const sameMarkdownStructure = (a: string, b: string): boolean =>
-	sameStructure(parse(a), parse(b));
+	sameStructure(comparable(a), comparable(b));
 
 /** True when nothing in the body is lost by this package's own serialize/parse cycle. */
 export const roundTripsLosslessly = (markdown: string): boolean =>
