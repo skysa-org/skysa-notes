@@ -3,10 +3,12 @@ import { type ProviderKind } from '@skysa/core';
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';
 import {
+	abandonImport,
 	bindConnection,
 	bindingCount,
 	type ConnectedSource,
 	detachConnection,
+	importStanding,
 	type MoveOutcome,
 	moveUnsyncedTo,
 	releaseConnection,
@@ -27,6 +29,7 @@ import {
 } from '../store/db.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { type Seen } from '../store/unsynced.js';
+import { type SyncScheduler } from './scheduler.js';
 
 /**
  * The storage account, as the server knows it, reconciled with the device.
@@ -503,6 +506,74 @@ export const disconnectAccount = async (
  */
 export const stopSyncingHere = async (db: NotesDatabase, connectionId: string): Promise<void> => {
 	await letGo(db, connectionId, 'disconnected');
+};
+
+export type CancelImportResult =
+	{ ok: true; outcome: 'cancelled' | 'imported' | 'written' } | { ok: false; refusal: Refusal };
+
+/**
+ * Asks the server to let an importing connection go, and answers with its
+ * refusal, or nothing once it is gone there: a connection the server no
+ * longer has, or whose credential it no longer takes, is as gone as one it
+ * has just disconnected.
+ */
+const serverRefuses = async (
+	db: NotesDatabase,
+	client: Pick<ApiClient, 'withCredential'>,
+	connectionId: string
+): Promise<{ ok: false; refusal: Refusal } | undefined> => {
+	const held = await credentialFor(db, connectionId);
+	if (held === undefined) return undefined;
+	const result = await failedAt('server', () =>
+		client.withCredential(held.credential).disconnect()
+	);
+	if (result.ok || result.refusal === 'not_found' || result.refusal === 'credential_revoked') {
+		return undefined;
+	}
+	return result;
+};
+
+/**
+ * A source's first import, cancelled: the sync stops, the server lets go of
+ * the account, and the source and everything it brought are thrown away here
+ * (`abandonImport`) — so the device is as it was before Connect was pressed.
+ *
+ * The sync is held first, so the import stops when the user presses the
+ * button and not when the server answers; a server that refuses, or cannot be
+ * reached, lets it go again and the import carries on. Then the order is
+ * `disconnectAccount`'s, and for its reason: the server before the device, or a
+ * failure leaves a live refresh token nothing here can name. `onServer: false`
+ * is "cancel here anyway", for a server that cannot be reached: the account may
+ * live on there, as it does after "stop syncing here".
+ *
+ * Whether it can be thrown away at all is asked before the server is: an
+ * import that finished meanwhile is an ordinary source now, with the user's
+ * notes in it, and one written in since is a disconnect's to decide about.
+ * Neither is touched. Should one of those turn up after the server has let go
+ * after all, the source is detached as a disconnect would leave it, which keeps
+ * whatever it was never sent.
+ */
+export const cancelImport = async (
+	db: NotesDatabase,
+	client: Pick<ApiClient, 'withCredential'>,
+	sync: Pick<SyncScheduler, 'halt'>,
+	input: { connectionId: string; onServer: boolean }
+): Promise<CancelImportResult> => {
+	const { connectionId } = input;
+	const release = await sync.halt(connectionId);
+	try {
+		const standing = await importStanding(db, connectionId);
+		if (standing !== 'importing') return { ok: true, outcome: standing };
+		const refused = input.onServer ? await serverRefuses(db, client, connectionId) : undefined;
+		if (refused !== undefined) return refused;
+		await forgetCredential(db, connectionId);
+		const outcome = await abandonImport(db, connectionId);
+		if (outcome === 'abandoned') return { ok: true, outcome: 'cancelled' };
+		await letGo(db, connectionId, 'disconnected');
+		return { ok: true, outcome };
+	} finally {
+		release();
+	}
 };
 
 /** What the user answered about the work the remote was never sent. */

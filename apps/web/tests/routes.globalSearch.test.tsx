@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
-import { bindConnection, showConnection } from '../src/store/connection.js';
+import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import { activeConnectionId, db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
@@ -42,6 +42,7 @@ const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title')
 /** Two sources, a note about herons in each, and the device's pile showing. */
 const twoSources = async () => {
 	await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
+	await finishImport(db, DROPBOX);
 	await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Work' });
 	await createNote(db, {
 		connectionId: DROPBOX,

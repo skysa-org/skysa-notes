@@ -15,6 +15,7 @@ import {
 } from '../paths.js';
 import {
 	type ChangeEntry,
+	type ChangeSet,
 	type DeletedEntry,
 	type EntryRef,
 	isAuthError,
@@ -95,12 +96,32 @@ export interface SyncEngineOptions {
 	 * a token is obtained, so the caller supplies it.
 	 */
 	reauthorize?: () => Promise<void>;
+	/**
+	 * Told how far a long run has got: a full scan, as notes are found and
+	 * read, and a push, op by op. Nothing is reported for a round from a stored
+	 * cursor, which is short. Called synchronously, as often as every file, so
+	 * a caller that draws from it decides how often to.
+	 */
+	onProgress?: (progress: SyncProgress) => void;
 	/** Injected so conflict filenames are deterministic in tests. */
 	now?: () => Date;
 	/** Injected for the same reason. Must be unique; `crypto.randomUUID` is. */
 	newId?: () => string;
 	maxAttempts?: number;
 }
+
+/**
+ * How far a long run has got. A scan lists every page before it reads a note,
+ * so while `listing` it knows only how many it has `found` so far; after that
+ * `found` is the whole of it and `done` counts up to it — a note read, or one
+ * this device already holds at that version and so never read, which keeps a
+ * scan resumed after an interruption from claiming to fetch it all again.
+ * A push knows its queue before it starts, so it gives a total. `path` is the
+ * file just read, or the one about to be sent, for a caller that shows it.
+ */
+export type SyncProgress =
+	| { stage: 'scanning'; found: number; done: number; listing: boolean; path?: string }
+	| { stage: 'uploading'; done: number; total: number; path?: string };
 
 export interface SyncEngine {
 	readonly pull: () => Promise<SyncOutcome>;
@@ -127,6 +148,25 @@ const waitFor = (error: unknown): { retryAfterMs?: number } =>
 		? { retryAfterMs: error.retryAfterMs }
 		: {};
 
+/**
+ * A scan's count, as it goes: the notes it has listed, those on pages already
+ * applied, those read so far on the page being applied, and whether it is
+ * still listing.
+ */
+interface ScanCount {
+	notes: Set<string>;
+	settled: number;
+	reading: number;
+	listing: boolean;
+}
+
+/** A file the pull would make a note of, by the rule `decide` applies. */
+const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
+	entry.deleted !== true &&
+	entry.kind === 'file' &&
+	!isHidden(entry.path) &&
+	foldName(entry.path).endsWith(NOTE_EXTENSION);
+
 /** The message of an unknown throw, without letting a non-Error crash the log. */
 const messageOf = (error: unknown): string =>
 	error instanceof Error ? error.message : String(error);
@@ -139,7 +179,28 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		now = () => new Date(),
 		newId = () => crypto.randomUUID(),
 		maxAttempts = MAX_ATTEMPTS,
+		onProgress = () => undefined,
 	} = options;
+
+	/**
+	 * The scan under way, for `onProgress`, and none during a round. Kept here
+	 * rather than threaded through every decision to the one place a note is
+	 * read; a scheduler runs one pull at a time per engine.
+	 */
+	const scans = new Map<'current', ScanCount>();
+
+	const reportScan = (path?: string) => {
+		const scanning = scans.get('current');
+		if (scanning === undefined) return;
+		const found = scanning.notes.size;
+		onProgress({
+			stage: 'scanning',
+			found,
+			done: Math.min(found, scanning.settled + scanning.reading),
+			listing: scanning.listing,
+			...(path === undefined ? {} : { path }),
+		});
+	};
 
 	// ---------------------------------------------------------------- pull
 
@@ -2073,6 +2134,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			if (isUnreadableError(error)) return 'unreadable' as const;
 			throw error;
 		});
+		const scanning = scans.get('current');
+		if (scanning !== undefined) {
+			scans.set('current', { ...scanning, reading: scanning.reading + 1 });
+			reportScan(entry.path);
+		}
 		// Gone, and so not an unreadable file either, if it was listed as one. A
 		// file moved into a folder that was then deleted is told, on a feed that
 		// reports folders alone, as this entry and the folder's deletion: no
@@ -2630,14 +2696,32 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
+	 * A scan's pages, all of them, before any is decided. Pages of a scan carry
+	 * no cursor (below), so an interrupted scan starts from the top whether or
+	 * not it had read ahead — and reading ahead is what lets it say how many
+	 * notes there are before it downloads the first.
+	 */
+	const listScan = async (
+		cursor: string | undefined,
+		pages: readonly ChangeSet[]
+	): Promise<readonly ChangeSet[]> => {
+		const set = await provider.changes(cursor);
+		const scanning = scans.get('current');
+		if (scanning !== undefined) {
+			set.entries.filter(isNoteEntry).forEach((entry) => scanning.notes.add(entry.remoteId));
+			reportScan();
+		}
+		const all = [...pages, set];
+		return set.more ? listScan(set.cursor, all) : all;
+	};
+
+	/**
 	 * A scan, page by page. It reports what exists and never what was removed
 	 * until `reconcile` on its last page, so the cascade a round is read whole
 	 * to avoid cannot happen here, and applying as it goes keeps a first sync of
 	 * many notes visible as it arrives rather than all at the end.
 	 */
 	const drainScan = async (
-		cursor: string | undefined,
-		progress: PullProgress,
 		/**
 		 * This scan is the recovery from a reset the provider said may have lost
 		 * something of its own, so what it does not return is sent back up
@@ -2646,7 +2730,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		 */
 		upload = false
 	): Promise<SyncOutcome> => {
-		const set = await provider.changes(cursor);
+		const pages = await listScan(undefined, []);
+		const listed = scans.get('current');
+		if (listed !== undefined) {
+			scans.set('current', { ...listed, listing: false });
+			reportScan();
+		}
+		return applyScan(pages, { pulled: 0, conflicts: [], seen: new Set() }, upload);
+	};
+
+	const applyScan = async (
+		pages: readonly ChangeSet[],
+		progress: PullProgress,
+		upload: boolean
+	): Promise<SyncOutcome> => {
+		const [set, ...rest] = pages;
+		if (set === undefined)
+			return ok({ pulled: progress.pulled, conflicts: progress.conflicts });
+		const more = rest.length > 0;
 		const queue = await store.pendingOps();
 		const unread = unreadMap(await store.unreadable());
 		const changes = await decideAll(set.entries, true, queue, unread);
@@ -2659,19 +2760,28 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		// A scan is one logical batch: its pages carry no cursor, and the last
 		// one carries both the cursor and whatever the scan proved was deleted.
-		const tail = set.more
+		const tail = more
 			? []
 			: await reconcile(seen, changes, renamesQueued(queue), upload, unread);
 		const batch = [...changes, ...tail];
-		await store.applyPull({ changes: batch, ...(set.more ? {} : { cursor: set.cursor }) });
+		await store.applyPull({ changes: batch, ...(more ? {} : { cursor: set.cursor }) });
 
-		const next: PullProgress = {
-			pulled: progress.pulled + batch.length,
-			conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
-			seen,
-		};
-		if (set.more) return drainScan(set.cursor, next, upload);
-		return ok({ pulled: next.pulled, conflicts: next.conflicts });
+		// Every note on the page is dealt with now, read or already held.
+		const scanning = scans.get('current');
+		if (scanning !== undefined) {
+			const settled = scanning.settled + set.entries.filter(isNoteEntry).length;
+			scans.set('current', { ...scanning, settled, reading: 0 });
+			reportScan();
+		}
+		return applyScan(
+			rest,
+			{
+				pulled: progress.pulled + batch.length,
+				conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
+				seen,
+			},
+			upload
+		);
 	};
 
 	/**
@@ -2690,9 +2800,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	const runPull = async (): Promise<SyncOutcome> => {
 		const stored = await store.cursor();
-		const empty: PullProgress = { pulled: 0, conflicts: [], seen: new Set() };
+		/** A scan from the top, counted from nothing. */
+		const scan = (upload = false): Promise<SyncOutcome> => {
+			scans.set('current', { notes: new Set(), settled: 0, reading: 0, listing: true });
+			return drainScan(upload).finally(() => {
+				scans.delete('current');
+			});
+		};
 		const attempt = (): Promise<SyncOutcome> =>
-			stored === undefined ? drainScan(undefined, empty) : drainRound(stored);
+			stored === undefined ? scan() : drainRound(stored);
 
 		return attempt().catch(async (error: unknown) => {
 			// The cursor is dead rather than the request. Discarding it and
@@ -2702,7 +2818,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// what keeps `uploadDifferences` across an interruption, since the
 			// same cursor meets the same refusal and is told the same thing.
 			if (isCursorResetError(error)) {
-				return drainScan(undefined, empty, error.uploadDifferences === true);
+				return scan(error.uploadDifferences === true);
 			}
 			if (isAuthError(error)) return authRetry(attempt);
 			throw error;
@@ -3511,12 +3627,26 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		conflicts: readonly string[];
 	}
 
+	/** The push under way, for `onProgress`: how long its queue was. */
+	const pushes = new Map<'current', number>();
+
 	const drainOps = async (
 		ops: readonly SyncOp[],
 		progress: PushProgress,
 		retriedAuth: boolean
 	): Promise<SyncOutcome> => {
+		// Every call is handed what is left, so how far it has got is the rest:
+		// an op passed over, given up on or resolved is as done as one sent.
+		const total = pushes.get('current') ?? 0;
 		const [held, ...rest] = ops;
+		if (total > 0) {
+			onProgress({
+				stage: 'uploading',
+				done: total - ops.length,
+				total,
+				...(held === undefined ? {} : { path: held.targetPath ?? held.path }),
+			});
+		}
 		if (held === undefined) {
 			return ok({ pushed: progress.pushed, conflicts: progress.conflicts });
 		}
@@ -3639,8 +3769,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		});
 	};
 
-	const runPush = async (): Promise<SyncOutcome> =>
-		drainOps(await store.pendingOps(), { pushed: 0, conflicts: [] }, false);
+	const runPush = async (): Promise<SyncOutcome> => {
+		const ops = await store.pendingOps();
+		pushes.set('current', ops.length);
+		return drainOps(ops, { pushed: 0, conflicts: [] }, false).finally(() => {
+			pushes.delete('current');
+		});
+	};
 
 	// Same reasoning as `pull`: reading the queue, recording a failure and
 	// completing an op are all store calls, and a store that cannot answer is

@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import { type Heading, headings } from '@skysa/core';
-import { useMemo } from 'react';
+import { type RefObject, useEffect, useMemo, useRef } from 'react';
 
 /**
  * The note's headings, down the side, as somewhere to jump to.
@@ -55,13 +55,24 @@ export interface OutlineProps {
 	body: string;
 	/** The element holding whichever editor is open. */
 	editor: () => Element | null;
+	/**
+	 * Given, the outline is a flyout over the editor rather than a rail beside
+	 * it (`useNoteLayout`), and this shuts it: once a heading is chosen, on
+	 * Escape, and on a press anywhere but the flyout and its toggle.
+	 */
+	onClose?: () => void;
+	/**
+	 * Whether a jump puts the caret in the editor. Not on a touch screen, where
+	 * focusing the editor raises the keyboard over the heading just jumped to.
+	 */
+	focusEditor?: boolean;
 }
 
 /** A top-level heading, as ProseMirror renders one. */
 const HEADING_CHILD =
 	':scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6';
 
-const jumpRaw = (editor: Element, heading: Heading): void => {
+const jumpRaw = (editor: Element, heading: Heading, focus: boolean): void => {
 	const view = EditorView.findFromDOM(editor as HTMLElement);
 	if (view === null) return;
 
@@ -73,15 +84,16 @@ const jumpRaw = (editor: Element, heading: Heading): void => {
 		selection: { anchor: line.from },
 		effects: EditorView.scrollIntoView(line.from, { y: 'start' }),
 	});
-	view.focus();
+	if (focus) view.focus();
 };
 
-const jumpRich = (editor: Element, heading: Heading): void => {
+const jumpRich = (editor: Element, heading: Heading, focus: boolean): void => {
 	const prose = editor.querySelector<HTMLElement>('.ProseMirror');
 	const target = prose?.querySelectorAll(HEADING_CHILD)[heading.ordinal];
 	if (prose === null || target === undefined) return;
 
 	target.scrollIntoView({ block: 'start' });
+	if (!focus) return;
 
 	// Put the caret in the heading, the way the raw jump does, so that a reader
 	// who arrived by keyboard carries on reading with the arrow keys instead of
@@ -108,22 +120,61 @@ const jumpRich = (editor: Element, heading: Heading): void => {
 	selection?.addRange(range);
 };
 
-const jump = (editor: Element | null, heading: Heading): void => {
+const jump = (editor: Element | null, heading: Heading, focus: boolean): void => {
 	if (editor === null) return;
-	if (editor.classList.contains('editor-raw')) jumpRaw(editor, heading);
-	else jumpRich(editor, heading);
+	if (editor.classList.contains('editor-raw')) jumpRaw(editor, heading, focus);
+	else jumpRich(editor, heading, focus);
 };
 
-export const Outline = ({ body, editor }: OutlineProps) => {
+/** The button that opens and shuts the flyout, which a press outside may be. */
+const TOGGLE = '[data-outline-toggle]';
+
+/**
+ * A flyout's ways of shutting besides choosing a heading, and its first heading
+ * focused as it opens, as a menu's first item is.
+ */
+const useFlyout = (nav: RefObject<HTMLElement | null>, onClose: (() => void) | undefined) => {
+	useEffect(() => {
+		const element = nav.current;
+		if (onClose === undefined || element === null) return undefined;
+		element.querySelector('button')?.focus({ preventScroll: true });
+		const onPress = (event: PointerEvent) => {
+			const target = event.target as Element | null;
+			if (target === null || element.contains(target) || target.closest(TOGGLE) !== null)
+				return;
+			onClose();
+		};
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape') return;
+			event.stopPropagation();
+			onClose();
+			document.querySelector<HTMLElement>(TOGGLE)?.focus();
+		};
+		document.addEventListener('pointerdown', onPress, true);
+		element.addEventListener('keydown', onKey);
+		return () => {
+			document.removeEventListener('pointerdown', onPress, true);
+			element.removeEventListener('keydown', onKey);
+		};
+	}, [nav, onClose]);
+};
+
+export const Outline = ({ body, editor, onClose, focusEditor = true }: OutlineProps) => {
 	// Recomputed when the body changes, which is what it is a view of. This is a
 	// parse (`packages/core/src/markdown/outline.ts`) rather than the pass over
 	// the string a preview uses, so it is one note and not fifty.
 	const found = useMemo(() => headings(body), [body]);
+	const nav = useRef<HTMLElement>(null);
+	useFlyout(nav, onClose);
 
 	if (found.length === 0) return null;
 
 	return (
-		<nav className="outline" aria-label="Outline">
+		<nav
+			ref={nav}
+			className={onClose === undefined ? 'outline' : 'outline outline-flyout'}
+			aria-label="Outline"
+		>
 			<ol>
 				{found.map((heading) => (
 					<li
@@ -136,7 +187,10 @@ export const Outline = ({ body, editor }: OutlineProps) => {
 						<button
 							type="button"
 							onClick={() => {
-								jump(editor(), heading);
+								// Shut first: a jump that finds nothing to jump to
+								// still leaves the note uncovered.
+								onClose?.();
+								jump(editor(), heading, focusEditor);
 							}}
 						>
 							{heading.text}

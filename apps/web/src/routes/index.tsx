@@ -9,6 +9,7 @@ import { CommandPalette } from '../components/CommandPalette.js';
 import { CompactBar, useCompactLayout } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
+import { HeldImport } from '../components/ImportProgress.js';
 import { NoteList } from '../components/NoteList.js';
 import { noteMenuItems } from '../components/noteMenu.js';
 import { type DisplacedText, NoteView, type NoteViewHandle } from '../components/NoteView.js';
@@ -17,7 +18,13 @@ import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastTone } from '../components/Toast.js';
 import { showConnection } from '../store/connection.js';
-import { activeConnectionId, db, type NoteRecord, noteRef } from '../store/db.js';
+import {
+	activeConnectionId,
+	db,
+	type NoteRecord,
+	noteRef,
+	type SyncStateRecord,
+} from '../store/db.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -28,7 +35,9 @@ import {
 import {
 	useActiveConnectionId,
 	useActiveSource,
+	useClaimingConnection,
 	useFolderTree,
+	useHeldImport,
 	useLooseNoteCount,
 	useNote,
 	useNoteSearch,
@@ -199,16 +208,26 @@ const emptyPaneOffers = ({
 	return nothingYet ? { onCreateNotebook } : {};
 };
 
-const Home = () => {
-	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
+/**
+ * The toast for how a connect went, read once as the app opens on the way back
+ * from the provider and taken out of the URL straight away: left there, a
+ * reload or a bookmark would say "connected" again about a connection that may
+ * since have gone.
+ *
+ * Except that a first source's "connected" is the import dialog's to say, and
+ * a toast behind it — under a held app, where it cannot be dismissed — says it
+ * twice. Whether the app will be held is not known on arrival: the bind that
+ * decides it comes after a round trip to the server (`claimConnection`), so
+ * "connected" waits while the credential brought back is still being taken up,
+ * and is dropped once an import holds the app. Every other outcome says
+ * something went wrong, and is shown at once.
+ */
+const useConnectNotice = (
+	connect: ConnectOutcome | undefined,
+	held: SyncStateRecord | undefined
+) => {
 	const navigate = useNavigate({ from: Route.fullPath });
-	// Where a connect started from the tab bar should come back to.
-	const href = useRouterState({ select: (state) => state.location.href });
-
-	// Read once, as the app opens on the way back from the provider, and taken
-	// out of the URL straight away: left there, a reload or a bookmark would say
-	// "connected" again about a connection that may since have gone.
-	const [connectOutcome, setConnectOutcome] = useState(connect);
+	const [outcome, setOutcome] = useState(connect);
 	useEffect(() => {
 		if (connect === undefined) return;
 		void navigate({
@@ -217,12 +236,33 @@ const Home = () => {
 		});
 	}, [connect, navigate]);
 
-	// Worked out once: whether there is a message at all decides whether a toast
-	// is rendered, and `connectMessage` answers `undefined` for an outcome this
-	// build has no words for (see above).
-	const connectNotice = connectOutcome === undefined ? undefined : connectMessage(connectOutcome);
+	const claiming = useClaimingConnection();
+	// Dropped for good, in render rather than an effect (React's "adjusting
+	// state when a prop changes"): the import finishing must not bring it back.
+	if (outcome === 'ok' && held !== undefined) setOutcome(undefined);
+
+	const dismissConnect = useCallback(() => {
+		setOutcome(undefined);
+	}, []);
+	// Whether there is a message at all decides whether a toast is rendered, and
+	// `connectMessage` answers `undefined` for an outcome this build has no
+	// words for (see above).
+	const waiting = outcome === 'ok' && (claiming || held !== undefined);
+	const connectNotice = outcome === undefined || waiting ? undefined : connectMessage(outcome);
+	return { connectNotice, dismissConnect };
+};
+
+const Home = () => {
+	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
+	const navigate = useNavigate({ from: Route.fullPath });
+	// Where a connect started from the tab bar should come back to.
+	const href = useRouterState({ select: (state) => state.location.href });
 
 	const source = useActiveSource();
+	// The first source's import holds the app: the device's notes are being
+	// moved into it, and nothing may be done to them until it is through.
+	const held = useHeldImport();
+	const { connectNotice, dismissConnect } = useConnectNotice(connect, held);
 	const activeConnection = useActiveConnectionId();
 	const sources = useSources();
 	const tree = useFolderTree();
@@ -295,7 +335,7 @@ const Home = () => {
 		// just tried, not about the app, and leaving it up means a message about a
 		// notebook they have since moved on from sits there for the session.
 		setProblem(null);
-		setConnectOutcome(undefined);
+		dismissConnect();
 		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
 	};
 
@@ -390,9 +430,6 @@ const Home = () => {
 	}, []);
 	const dismissProblem = useCallback(() => {
 		setProblem(null);
-	}, []);
-	const dismissConnect = useCallback(() => {
-		setConnectOutcome(undefined);
 	}, []);
 
 	const undoDelete = () => {
@@ -721,7 +758,7 @@ const Home = () => {
 		// above the panes goes in the frame around them instead. The toasts are
 		// not laid out at all — they are fixed to the viewport — but they are
 		// here for the same reason: a stack in the grid would take a column.
-		<div className={frameClassName}>
+		<div className={frameClassName} inert={held !== undefined}>
 			{/*
 			 * Above everything, because it says which app this is: each source
 			 * is its own notes, its own notebooks and its own sync (§6), so the
@@ -898,6 +935,7 @@ const Home = () => {
 			 * The undo notice is here rather than placing itself, which is what
 			 * it did while it was the only other card on the screen.
 			 */}
+			<HeldImport source={held} />
 			<div className="toast-stack">
 				{deleted !== null && (
 					<DeletedNotice

@@ -221,7 +221,13 @@ const moveRowsTo = async (
 	target: string,
 	mode: Mode,
 	from: string,
-	only?: Only
+	only?: Only,
+	/**
+	 * Leave `from`'s rows where they are as well: the pile during a first
+	 * import, which a cancel goes back to (`abandonImport`) and a finished
+	 * import clears (`finishImport`).
+	 */
+	keep = false
 ): Promise<Moved> => {
 	if (from === target) return { notes: [], folders: [], linked: false };
 	const ops = (await db.opQueue.toArray()).filter((op) => op.connectionId === from);
@@ -230,7 +236,7 @@ const moveRowsTo = async (
 	const folders = await db.folders.toArray();
 	const foldersLeaving = folders.filter((folder) => folder.connectionId === from);
 	const spelling = spellingsOn(folders.filter((folder) => folder.connectionId === target));
-	if (only === undefined) {
+	if (only === undefined && !keep) {
 		await db.folders.bulkDelete(
 			foldersLeaving.map((folder): [string, string] => [folder.connectionId, folder.path])
 		);
@@ -335,7 +341,7 @@ const moveRowsTo = async (
 	// Every one of them, placed or not: the connection is half of the key, so a
 	// row that moves is a row deleted and a row added. Only the rows being taken,
 	// where the caller named them: the rest are its to dispose of.
-	await db.notes.bulkDelete(leaving.filter(taking).map(noteKey));
+	if (!keep) await db.notes.bulkDelete(leaving.filter(taking).map(noteKey));
 	if (notesPlaced.length > 0) await db.notes.bulkAdd(notesPlaced.map((placed) => placed.row));
 	// For an editor open on one of them, whose next save names the old key — and
 	// for an undo of a delete whose tombstone this drops rather than carries,
@@ -364,7 +370,11 @@ const moveRowsTo = async (
 			(mode === 'copy' ||
 				(op.noteId !== undefined && (owed.has(idNow(op.noteId)) || yielded.has(op.noteId))))
 	);
-	await db.opQueue.bulkDelete(dropped.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
+	if (!keep) {
+		await db.opQueue.bulkDelete(
+			dropped.flatMap((op) => (op.seq === undefined ? [] : [op.seq]))
+		);
+	}
 	const carried = ops.filter((op) => left(op) && !dropped.includes(op));
 	if (carried.length > 0) {
 		await db.opQueue.bulkPut(
@@ -547,6 +557,20 @@ const owedInPlace = async (db: Scope, connectionId: string): Promise<Moved> => {
  * under it are left as they are, cursor included, and queue nothing. Answers
  * whether it bound.
  */
+/**
+ * A live source whose first import is holding the device's pile: copied into
+ * it, and kept here as well until the import is done or cancelled.
+ */
+export const holdsPile = (state: SyncStateRecord): boolean =>
+	state.importing !== undefined && state.detached === undefined;
+
+/** A source with no row of its own and nothing detached to resume: new here. */
+const firstBinding = (
+	states: readonly SyncStateRecord[],
+	connectionId: string,
+	resuming: readonly string[]
+): boolean => resuming.length === 0 && !states.some((state) => state.connectionId === connectionId);
+
 export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boolean> =>
 	inTransaction(db, async () => {
 		if (!(await unchangedSince(db, input))) return false;
@@ -575,7 +599,33 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		// Only the device's own rows besides. A source already connected keeps
 		// everything of its own, whichever source is being connected now, and so
 		// does a detached source of any other account: nobody was asked.
-		const copied = await moveRowsTo(db, input.connectionId, 'copy', LOCAL_CONNECTION_ID);
+		// A source this device has not seen is imported, which the user watches
+		// and can cancel. The first one holds the app while it runs, and keeps
+		// the pile as it was until it is done, so a cancel has it to go back to.
+		const importing = firstBinding(states, input.connectionId, from)
+			? {
+					lock: !states.some(
+						(state) =>
+							state.connectionId !== input.connectionId &&
+							state.detached === undefined
+					),
+					returnTo: await activeConnectionId(db),
+				}
+			: undefined;
+		// Not while an import holds the pile: it is already copied into that
+		// source, and is only still here for a cancel to go back to. Copied
+		// again — the same bind run twice, another tab connecting something
+		// else — every note would arrive a second time under a new name.
+		const copied = states.some(holdsPile)
+			? NOTHING_MOVED
+			: await moveRowsTo(
+					db,
+					input.connectionId,
+					'copy',
+					LOCAL_CONNECTION_ID,
+					undefined,
+					importing !== undefined
+				);
 		const moved = together(together(resumed, waiting), copied);
 
 		// Every other connected source keeps its `syncState` row, and with it its
@@ -603,6 +653,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 			// tab remembers of the source as it was bound before is stale from here
 			// (`store/deletedHere.ts`).
 			boundAt: Date.now(),
+			...(importing === undefined ? {} : { importing }),
 		};
 		await db.syncState.put(state);
 		// Connecting a source is choosing it, which is the only moment the app can
@@ -841,6 +892,136 @@ const forgetSource = async (db: NotesDatabase, connectionId: string): Promise<vo
 	await db.credentials.delete(connectionId);
 	const chosen = (await db.prefs.get(ACTIVE_CONNECTION_KEY))?.value;
 	if (chosen === connectionId) await db.prefs.delete(ACTIVE_CONNECTION_KEY);
+};
+
+/**
+ * A source's first import is done: its first pull reached the end and its first
+ * push went through the queue. The device's pile it was holding is let go —
+ * every row of it is in the source now, sent or owed — and the source is an
+ * ordinary one from here. Nothing, for a source that is not importing or has
+ * gone.
+ *
+ * Except a pile note written in since the bind. The app is held while the
+ * import runs, but an editor in another tab can still land a save it had
+ * pending, and a save to a pile note goes to the pile's own row, which the bind
+ * kept. That text is in no source, so it goes in as a note of its own — beside
+ * the copy, under a free name, owed a write — rather than going with the pile.
+ */
+export const finishImport = (db: NotesDatabase, connectionId: string): Promise<void> =>
+	inTransaction(db, async () => {
+		const state = await db.syncState.get(connectionId);
+		if (state?.importing === undefined || state.detached !== undefined) return;
+		const since = state.boundAt ?? 0;
+		const late = (await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray())
+			.filter((note) => note.deletedLocally === 0 && note.updatedAt > since)
+			.map((note) => note.id);
+		if (late.length > 0) {
+			const carried = await moveRowsTo(db, connectionId, 'copy', LOCAL_CONNECTION_ID, {
+				notes: new Set(late),
+				folders: new Set(),
+			});
+			await queueOwed(db, connectionId, carried);
+		}
+		await clearPile(db);
+		const { importing: _done, ...rest } = state;
+		await db.syncState.put(rest);
+	});
+
+const clearPile = async (db: Scope): Promise<void> => {
+	await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).delete();
+	await db.folders.where('connectionId').equals(LOCAL_CONNECTION_ID).delete();
+	await db.opQueue.where('connectionId').equals(LOCAL_CONNECTION_ID).delete();
+};
+
+/**
+ * A first import cancelled: the source and everything it brought are thrown
+ * away here, and the device is as it was before the user pressed Connect. The
+ * pile was never touched (`bindConnection` kept it), so there is nothing to put
+ * back but the source that was in front. Nothing on the remote is touched —
+ * what the import had already sent stays there — and nothing is asked of the
+ * server: that is the caller's (`cancelImport` in `sync/account.ts`).
+ *
+ * Only a source that is still importing. One that finished meanwhile is an
+ * ordinary source, with the pile gone into it, and throwing it away now would
+ * take the user's notes with it; that is a disconnect, and asks its own
+ * question. Answers whether it did.
+ */
+export type AbandonOutcome =
+	| 'abandoned'
+	/** Not importing any more, or gone: nothing was thrown away. */
+	| 'imported'
+	/** Written in since it was connected, which only a disconnect may decide about. */
+	| 'written';
+
+export const abandonImport = (db: NotesDatabase, connectionId: string): Promise<AbandonOutcome> =>
+	inTransaction(db, async (): Promise<{ outcome: AbandonOutcome; gone?: SyncStateRecord }> => {
+		const state = await db.syncState.get(connectionId);
+		if (state?.importing === undefined) return { outcome: 'imported' };
+		// Held, nothing can have been; not held, the user could have gone on
+		// writing in it meanwhile, and a cancel is not the place to lose that.
+		if (!state.importing.lock && (await writtenSince(db, connectionId))) {
+			return { outcome: 'written' };
+		}
+		await countBinding(db);
+		await db.notes.where('connectionId').equals(connectionId).delete();
+		await db.folders.where('connectionId').equals(connectionId).delete();
+		await db.opQueue.where('connectionId').equals(connectionId).delete();
+		await forgetSource(db, connectionId);
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: state.importing.returnTo });
+		return { outcome: 'abandoned', gone: state };
+	}).then(({ outcome, gone }) => {
+		remember(gone);
+		return outcome;
+	});
+
+/**
+ * Whether a cancel could throw `connectionId` away now, asked before the server
+ * is: once it has disconnected the account there is no taking that back, and
+ * finding only then that the import had finished, or had been written in,
+ * would leave a source here the server no longer serves.
+ */
+export const importStanding = async (
+	db: NotesDatabase,
+	connectionId: string
+): Promise<'importing' | 'imported' | 'written'> => {
+	const state = await db.syncState.get(connectionId);
+	if (state?.importing === undefined || state.detached !== undefined) return 'imported';
+	if (!state.importing.lock && (await writtenSince(db, connectionId))) return 'written';
+	return 'importing';
+};
+
+/**
+ * Anything in an importing source the user did there, rather than the import:
+ * a note or notebook the pile never had, a note of the pile's that is not as it
+ * was, anything deleted, anything queued about a row that is not the pile's.
+ * Timid where the import itself moved a row — a conflict copy of a pile note
+ * reads as a change — since the answer only ever decides whether to throw
+ * rows away.
+ */
+const writtenSince = async (db: Scope, connectionId: string): Promise<boolean> => {
+	const pile = new Map(
+		(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray()).map((note) => [
+			note.id,
+			note,
+		])
+	);
+	const pileFolders = new Set(
+		(await db.folders.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray()).map(
+			(folder) => folder.path
+		)
+	);
+	const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
+	const changed = notes.some((note) => {
+		if (note.deletedLocally === 1) return true;
+		const was = pile.get(note.id);
+		if (was === undefined) return note.dirty === 1;
+		return was.body !== note.body || was.path !== note.path;
+	});
+	if (changed) return true;
+	const ops = await db.opQueue.where('connectionId').equals(connectionId).toArray();
+	return ops.some((op) =>
+		op.noteId === undefined ? !pileFolders.has(op.path) : !pile.has(op.noteId)
+	);
 };
 
 /**
@@ -1264,15 +1445,22 @@ export interface ConnectedSource {
  * theirs to keep.
  */
 export const pileContents = async (
-	db: Pick<NotesDatabase, 'notes' | 'folders'>
-): Promise<{ notebooks: number; notes: number }> => ({
-	notebooks: await db.folders.where('connectionId').equals(LOCAL_CONNECTION_ID).count(),
-	notes: await db.notes
-		.where('connectionId')
-		.equals(LOCAL_CONNECTION_ID)
-		.filter((note) => note.deletedLocally === 0)
-		.count(),
-});
+	db: Pick<NotesDatabase, 'notes' | 'folders' | 'syncState'>
+): Promise<{ notebooks: number; notes: number }> =>
+	// Held by an import, it goes nowhere else (`bindConnection`).
+	(await db.syncState.toArray()).some(holdsPile)
+		? { notebooks: 0, notes: 0 }
+		: {
+				notebooks: await db.folders
+					.where('connectionId')
+					.equals(LOCAL_CONNECTION_ID)
+					.count(),
+				notes: await db.notes
+					.where('connectionId')
+					.equals(LOCAL_CONNECTION_ID)
+					.filter((note) => note.deletedLocally === 0)
+					.count(),
+			};
 
 /**
  * Every source on this device, in the order they were connected: the live ones
@@ -1289,8 +1477,11 @@ export const connectedSources = async (
 	const states = await db.syncState.toArray();
 	const own = async (table: 'notes' | 'folders') =>
 		db[table].where('connectionId').equals(LOCAL_CONNECTION_ID).count();
+	// Not while an import holds it: it is already in that source, and is only
+	// still here for a cancel to go back to.
+	const held = states.some(holdsPile);
 	const pile =
-		(await own('notes')) + (await own('folders')) > 0
+		!held && (await own('notes')) + (await own('folders')) > 0
 			? [{ connectionId: LOCAL_CONNECTION_ID, active: active === LOCAL_CONNECTION_ID }]
 			: [];
 	const connected = await states.reduce<Promise<ConnectedSource[]>>(async (sofar, state) => {

@@ -30,6 +30,7 @@ import {
 } from '../store/notes.js';
 import { FindBar } from './FindBar.js';
 import {
+	COARSE_POINTER,
 	COMPACT,
 	OUTLINE_FITS_AT,
 	OUTLINE_OPENS_AT,
@@ -197,6 +198,9 @@ const NoteBody = ({
 	note,
 	mode,
 	showOutline,
+	flyout,
+	focusEditor,
+	onCloseOutline,
 	toolbar,
 	onUserEdit,
 	onUnsupported,
@@ -206,6 +210,11 @@ const NoteBody = ({
 	note: NoteRecord;
 	mode: EditorMode | undefined;
 	showOutline: boolean;
+	/** Over the editor rather than beside it (`useNoteLayout`). */
+	flyout: boolean;
+	/** Whether jumping to a heading puts the caret there (`OutlineProps`). */
+	focusEditor: boolean;
+	onCloseOutline: () => void;
 	toolbar: RichEditorProps['toolbar'];
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: (lost: StructuralDifference) => void;
@@ -251,6 +260,8 @@ const NoteBody = ({
 					// so a reference taken at render time is stale the moment the
 					// mode changes.
 					editor={() => body.current?.querySelector('.editor') ?? null}
+					focusEditor={focusEditor}
+					{...(flyout ? { onClose: onCloseOutline } : {})}
 				/>
 			)}
 		</div>
@@ -264,10 +275,14 @@ const NoteBody = ({
  * **The outline** is sized by the note's own width, not the window's — the
  * same window gives the note very different room with the columns beside it
  * and without them. At 53.5rem and wider it starts open (`OUTLINE_OPENS_AT`),
- * below that it starts collapsed and is a press away, and below 36rem it is
- * not offered at all (`OUTLINE_FITS_AT`), since the rail would leave the note
- * narrower than itself. Once pressed it stays as the user left it for as long
- * as the app is open, whatever the room does. Unmounted rather than hidden
+ * below that it starts collapsed and is a press away. Once pressed it stays as
+ * the user left it for as long as the app is open, whatever the room does.
+ * Below 36rem (`OUTLINE_FITS_AT`), where a rail would leave the note narrower
+ * than itself, and in a compact window on a touch screen — a phone on its side,
+ * a small tablet — it is a **flyout** over the editor instead: shut until asked for, and shut
+ * again once a heading is chosen, on Escape, on a press anywhere else, and on
+ * opening another note — it covers what it is for, so it goes once used.
+ * Unmounted rather than hidden
  * when it is not shown: the headings are re-read when it comes back, which is
  * one parse of one note, and a rail that is not there cannot be tabbed
  * through.
@@ -284,16 +299,27 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 	const outlineFits = width === undefined || width >= rems(OUTLINE_FITS_AT);
 	const outlineOpens = width === undefined || width >= rems(OUTLINE_OPENS_AT);
 
+	const touch = useMediaQuery(COARSE_POINTER);
+	const flyout = !outlineFits || (compact && touch);
+
 	const [outlineChoice, setOutlineChoice] = useState<boolean | null>(null);
-	const showOutline = outlineFits && (outlineChoice ?? outlineOpens);
+	// Which note the flyout is open over, so that opening another closes it
+	// without an effect to notice the change.
+	const [flyoutOver, setFlyoutOver] = useState<string | undefined>(undefined);
+	const flyoutOpen = noteId !== undefined && flyoutOver === noteId;
+	const showOutline = flyout ? flyoutOpen : (outlineChoice ?? outlineOpens);
 	const toggleOutline = useCallback(() => {
-		setOutlineChoice(!showOutline);
-	}, [showOutline]);
+		if (flyout) setFlyoutOver(flyoutOpen ? undefined : noteId);
+		else setOutlineChoice(!showOutline);
+	}, [flyout, flyoutOpen, noteId, showOutline]);
+	const closeOutline = useCallback(() => {
+		setFlyoutOver(undefined);
+	}, []);
 	useCommand({
 		id: 'note.outline',
 		label: showOutline ? 'Hide outline' : 'Show outline',
 		group: 'Note',
-		enabled: noteId !== undefined && outlineFits,
+		enabled: noteId !== undefined,
 		run: toggleOutline,
 	});
 
@@ -304,7 +330,16 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 		setToolbarShown((shown) => !shown);
 	}, []);
 
-	return { compact, outlineFits, showOutline, toggleOutline, toolbar, toggleToolbar };
+	return {
+		compact,
+		flyout,
+		touch,
+		showOutline,
+		toggleOutline,
+		closeOutline,
+		toolbar,
+		toggleToolbar,
+	};
 };
 
 /** What the empty pane says, offering what can be done from here. */
@@ -666,18 +701,6 @@ const NoteScreen = ({
 					<span className="muted path" title={note.path}>
 						{note.path}
 					</span>
-					{layout.outlineFits && outlined && (
-						<button
-							type="button"
-							className="note-icon"
-							onClick={layout.toggleOutline}
-							aria-label="Outline"
-							aria-pressed={layout.showOutline}
-							title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
-						>
-							<Icon name="outline" />
-						</button>
-					)}
 					{layout.compact && mode === 'rich' && (
 						<button
 							type="button"
@@ -701,6 +724,23 @@ const NoteScreen = ({
 							retryable={retryable}
 							toggleMode={toggleMode}
 						/>
+					)}
+					{/* Between the editor's mode and the note's menu: the rail it
+					    opens is the note's, at the right-hand edge like the menu. */}
+					{outlined && (
+						<button
+							type="button"
+							className="note-icon"
+							onClick={layout.toggleOutline}
+							aria-label="Outline"
+							aria-pressed={layout.showOutline}
+							// Pressing it while the flyout is open closes it, so a
+							// press outside the flyout that lands here is not one.
+							data-outline-toggle=""
+							title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
+						>
+							<Icon name="outline" />
+						</button>
 					)}
 					<OptionsMenu
 						label="Note options"
@@ -755,6 +795,9 @@ const NoteScreen = ({
 				note={note}
 				mode={mode}
 				showOutline={layout.showOutline}
+				flyout={layout.flyout}
+				focusEditor={!layout.touch}
+				onCloseOutline={layout.closeOutline}
 				toolbar={layout.toolbar}
 				onUserEdit={onUserEdit}
 				onUnsupported={onUnsupported}

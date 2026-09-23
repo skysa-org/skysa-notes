@@ -1857,3 +1857,102 @@ describe('following the connection', () => {
 		expect(h.env.pending()).toEqual([]);
 	});
 });
+
+/**
+ * A source's first import (`SyncStateRecord.importing`): how far it has got,
+ * when it is over, and a cancel's way of holding it still.
+ */
+describe('a first import', () => {
+	/** A device used before it was connected, now bound for the first time. */
+	const boundWithPile = async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Mine', body: 'mine\n' });
+		await bindConnection(db, ACCOUNT);
+		await holdCredential(db, ACCOUNT.connectionId);
+		return db;
+	};
+
+	it('says how far it has got while it syncs, and nothing once it is done', async () => {
+		const db = await boundWithPile();
+		const said: SchedulerStatus[] = [];
+		const env = fakeEnvironment();
+		const theRemote = remote();
+		await theRemote.fake.ensureRoot();
+		await theRemote.fake.write('theirs.md', 'theirs\n', {});
+		const h = started(db, { createProvider: theRemote.factory, environment: env.environment });
+		cleanups.unshift(h.scheduler.subscribe((status) => said.push(status)));
+
+		await reaches(h.scheduler, 'idle');
+
+		const shown = said.flatMap((status) => (status.progress === undefined ? [] : [status]));
+		expect(shown.length).toBeGreaterThan(0);
+		expect(shown.every((status) => status.phase === 'syncing')).toBe(true);
+		expect(shown[0]?.progress?.stage).toBe('scanning');
+		expect(h.scheduler.status().progress).toBeUndefined();
+		expect(env.pending().filter((ms) => ms < INTERVAL)).toEqual([]);
+	});
+
+	it('is finished once its first sync is through, and the pile let go', async () => {
+		const db = await boundWithPile();
+		const h = started(db);
+
+		await reaches(h.scheduler, 'idle');
+
+		await vi.waitFor(async () => {
+			expect((await db.syncState.get(ACCOUNT.connectionId))?.importing).toBeUndefined();
+		});
+		expect(await db.notes.where('connectionId').equals('local').count()).toBe(0);
+		expect(h.remote.fake.contentAt('mine.md')).toContain('mine');
+	});
+
+	it('is not finished while what it owes will be tried again', async () => {
+		const db = await boundWithPile();
+		const theRemote = remote();
+		const failing: ProviderFactory = (input) => {
+			const provider = theRemote.factory(input);
+			return provider === undefined
+				? undefined
+				: { ...provider, write: () => Promise.reject(new Error('the disk is full')) };
+		};
+		const h = started(db, { createProvider: failing });
+
+		await reaches(h.scheduler, 'retrying');
+
+		expect((await db.syncState.get(ACCOUNT.connectionId))?.importing).toBeDefined();
+		expect(await db.notes.where('connectionId').equals('local').count()).toBe(1);
+	});
+
+	it('is held still by a cancel, its requests aborted, until it is let go', async () => {
+		const db = await boundWithPile();
+		const signals: (AbortSignal | undefined)[] = [];
+		const theRemote = remote();
+		const held = deferred();
+		theRemote.gate.set('changes', held.promise);
+		const h = started(db, {
+			createProvider: (input) => {
+				signals.push(input.signal);
+				return theRemote.factory(input);
+			},
+		});
+		await vi.waitFor(() => {
+			expect(theRemote.gated()).toBe(1);
+		});
+
+		const halting = h.scheduler.halt(ACCOUNT.connectionId);
+		expect(signals[0]?.aborted).toBe(true);
+		theRemote.gate.delete('changes');
+		held.resolve();
+		const release = await halting;
+
+		// Nothing starts for it while it is held, whatever asks.
+		const pulls = theRemote.pulls();
+		h.env.fire('focus');
+		await quiet();
+		expect(theRemote.pulls()).toBe(pulls);
+
+		release();
+		await vi.waitFor(() => {
+			expect(theRemote.pulls()).toBeGreaterThan(pulls);
+		});
+	});
+});

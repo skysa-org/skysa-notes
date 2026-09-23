@@ -30,7 +30,7 @@ const workbox = PWA_WORKBOX;
 
 describe('the web app manifest', () => {
 	it('names the app, for the install prompt and the home screen', () => {
-		expect(manifest.name).toBe('skysa-notes');
+		expect(manifest.name).toBe('Skysa Notes');
 		// Truncated under an icon, so it has to be short enough to survive.
 		expect(manifest.short_name).toBeDefined();
 		expect((manifest.short_name ?? '').length).toBeLessThanOrEqual(12);

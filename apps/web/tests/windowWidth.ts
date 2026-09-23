@@ -12,7 +12,9 @@
 
 const REM = 16;
 
-const answers = (query: string, width: number): boolean => {
+const answers = (query: string, width: number, touch: boolean): boolean => {
+	// A finger or a mouse, which the note asks about beside its width.
+	if (query === '(pointer: coarse)') return touch;
 	const max = /^\(max-width: ([\d.]+)(px|rem)\)$/.exec(query);
 	if (max !== null) {
 		const [, value = '', unit] = max;
@@ -31,7 +33,11 @@ export interface FakeWindow {
 	restore: () => void;
 }
 
-export const windowWidth = (initial: number): FakeWindow => {
+export const windowWidth = (
+	initial: number,
+	/** A touch screen, which the app is told a finger drives. */
+	{ touch = false }: { touch?: boolean } = {}
+): FakeWindow => {
 	let width = initial;
 	const lists: { query: string; matches: boolean; listeners: Set<() => void> }[] = [];
 
@@ -41,7 +47,7 @@ export const windowWidth = (initial: number): FakeWindow => {
 		value: (query: string) => {
 			const entry = {
 				query,
-				matches: answers(query, width),
+				matches: answers(query, width, touch),
 				listeners: new Set<() => void>(),
 			};
 			lists.push(entry);
@@ -64,7 +70,7 @@ export const windowWidth = (initial: number): FakeWindow => {
 		resize: (next) => {
 			width = next;
 			for (const entry of lists) {
-				const matches = answers(entry.query, width);
+				const matches = answers(entry.query, width, touch);
 				if (matches === entry.matches) continue;
 				entry.matches = matches;
 				entry.listeners.forEach((listener) => {

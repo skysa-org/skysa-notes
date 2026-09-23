@@ -1,7 +1,7 @@
 import Dexie from 'dexie';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { bindConnection, detachConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import {
 	createDatabase,
 	LOCAL_CONNECTION_ID,
@@ -383,6 +383,7 @@ describe('a note whose rows another tab moved, of which this tab was told nothin
 		const deleted = (await getNote(db, note.id))!;
 		// Copy mode leaves a tombstone behind, so there is no row to follow.
 		await bindConnection(db, { connectionId: 'c-new', provider: 'dropbox', accountId: 'n' });
+		await finishImport(db, 'c-new');
 		expect(await db.notes.count()).toBe(0);
 
 		expect((await undeleteNote(db, deleted)).connectionId).toBe('c-new');

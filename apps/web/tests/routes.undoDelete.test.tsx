@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeletedNotice, UNDO_WINDOW_MS } from '../src/components/DeletedNotice.js';
 import { routeTree } from '../src/routeTree.gen.js';
-import { bindConnection, detachConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, getNote, purgeNote } from '../src/store/notes.js';
@@ -150,6 +150,7 @@ describe('deleting a note', () => {
 			accountId: 'dbid:ada',
 			displayName: 'ada@example.com',
 		});
+		await finishImport(db, 'c-ada');
 		const { notes } = await openApp('Alpha');
 		const id = notes[0]?.id ?? '';
 		// The remote has it, so its delete is owed — which is what keeps the
@@ -164,6 +165,7 @@ describe('deleting a note', () => {
 				provider: 'dropbox',
 				accountId: 'dbid:bob',
 			});
+			await finishImport(db, 'c-bob');
 			await detachConnection(db, { connectionId: 'c-ada' });
 		});
 

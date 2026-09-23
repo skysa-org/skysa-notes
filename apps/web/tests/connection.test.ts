@@ -5,7 +5,9 @@ import {
 	bindConnection,
 	bindingCount,
 	bindingMode,
+	connectedSources,
 	detachConnection,
+	finishImport,
 	RESUME_SAMPLE_COUNT,
 	showConnection,
 	verifyResume,
@@ -95,6 +97,15 @@ describe('binding a connection', () => {
 			[plan.id, deep.id].sort()
 		);
 		expect(await folderTree(db)).toEqual(['Work', 'Work/Inner']);
+		// Kept while the import runs, for a cancel to go back to, and not
+		// offered as a source of its own meanwhile.
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(2);
+		expect((await connectedSources(db)).map((source) => source.connectionId)).toEqual([
+			DROPBOX.connectionId,
+		]);
+
+		await finishImport(db, DROPBOX.connectionId);
+
 		expect(await db.notes.where('connectionId').notEqual(DROPBOX.connectionId).count()).toBe(0);
 		expect(await db.folders.where('connectionId').notEqual(DROPBOX.connectionId).count()).toBe(
 			0
@@ -107,7 +118,7 @@ describe('binding a connection', () => {
 
 		await bindConnection(db, DROPBOX);
 
-		expect(await queued(db)).toEqual([
+		expect((await queued(db)).filter(([to]) => to === DROPBOX.connectionId)).toEqual([
 			['dropbox-1', 'mkdir', 'Work'],
 			['dropbox-1', 'mkdir', 'Work/Inner'],
 			['dropbox-1', 'write', deep.path],
@@ -179,11 +190,12 @@ describe('binding a connection', () => {
 		expect(await db.notes.where('connectionId').equals('dropbox-2').count()).toBe(0);
 	});
 
-	it('drops the queue of the connection it replaces', async () => {
+	it('drops the queue of the connection it replaces, once the import is done', async () => {
 		const { db } = await usedLocally();
 		expect((await db.opQueue.toArray()).length).toBeGreaterThan(0);
 
 		await bindConnection(db, DROPBOX);
+		await finishImport(db, DROPBOX.connectionId);
 
 		expect(
 			(await db.opQueue.toArray()).filter((op) => op.connectionId !== DROPBOX.connectionId)
@@ -195,6 +207,7 @@ describe('binding a connection', () => {
 		await deleteNote(db, plan.id);
 
 		await bindConnection(db, DROPBOX);
+		await finishImport(db, DROPBOX.connectionId);
 
 		expect(await noteById(db, plan.id)).toBeUndefined();
 		expect((await db.opQueue.toArray()).filter((op) => op.noteId === plan.id)).toEqual([]);
@@ -284,6 +297,7 @@ describe('binding a connection', () => {
 		await db.opQueue.clear();
 
 		await bindConnection(db, { connectionId: 'stale', provider: 'dropbox' });
+		await finishImport(db, 'stale');
 
 		expect(await folderTree(db)).toEqual(['Work', 'Work/Inner']);
 		const moved = `Work/Inner/${deep.path.split('/').at(-1) ?? ''}`;
@@ -390,6 +404,7 @@ describe('connecting an account', () => {
 		// A bind puts them under one connection, where a key can name only one.
 		const db = freshDatabase();
 		await bindConnection(db, { ...DROPBOX, accountId: 'dbid:1' });
+		await finishImport(db, DROPBOX.connectionId);
 		const hers = await createNote(db, { title: 'Plan', body: 'hers\n' });
 		await updateNote(db, hers.id, { remoteId: 'ada:1', dirty: 0 });
 		await db.opQueue.clear();
@@ -1206,6 +1221,8 @@ describe('a device used before connecting, then connected', () => {
 		});
 
 		expect((await engine.sync()).status).toBe('ok');
+		// What the scheduler does once a first sync is through.
+		await finishImport(db, DROPBOX.connectionId);
 
 		const files = Object.fromEntries(
 			fake

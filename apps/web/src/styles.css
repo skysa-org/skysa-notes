@@ -2277,6 +2277,8 @@ button.danger {
  * its own, and disappears with the note that has no headings in it.
  */
 .note-body {
+	/* What the outline's flyout is placed over. */
+	position: relative;
 	display: flex;
 	flex: 1;
 	min-height: 0;
@@ -2327,6 +2329,29 @@ button.danger {
 		background: var(--surface);
 		color: var(--fg);
 	}
+}
+
+/* Where a rail would leave the note too narrow, or on a phone, the outline
+   flies out over the editor from the right instead (`useNoteLayout`): a card,
+   as the menus are, as tall as its headings and no taller than the note. */
+.outline.outline-flyout {
+	position: absolute;
+	inset-block-start: 0.5rem;
+	inset-inline-end: 0.5rem;
+	z-index: 20;
+	width: min(18rem, 100% - 2rem);
+	max-height: calc(100% - 1rem);
+	padding: 0.35rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--bg);
+	box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
+}
+
+/* Room for a finger, where the rail's rows are sized for a pointer. */
+.outline-flyout button {
+	padding-block: 0.45rem;
+	font-size: 0.95rem;
 }
 
 /* Depth as indentation, which is the whole of the structure a rail can show. */
@@ -2526,9 +2551,60 @@ button.danger {
 	border-color: var(--brand);
 }
 
+/* A source's first import (`ImportProgress.tsx`): as wide as the card allows,
+   so the counts do not reflow the card as they grow. Against the viewport, not
+   `100%`: the backdrop's grid track is as wide as its content, and a long path
+   on one line made that — and so the card — wider than a phone. */
+.import-dialog {
+	width: min(28rem, 100vw - 2rem);
+}
+
+.import-body p {
+	margin: 0 0 0.75rem;
+}
+
+/* The bar in the app's own blue. A `progress` with no value is the browser's
+   own "cannot say how far" animation, which is kept: it is the honest drawing
+   of a scan still listing what there is to download. */
+.import-bar {
+	display: block;
+	width: 100%;
+	height: 0.5rem;
+	margin: 0 0 0.25rem;
+	accent-color: var(--brand);
+}
+
+/* The file it is on, lightly, under the bar: one line, a path longer than
+   the card cut in the middle (`MiddleCut`) — the start gives way to an
+   ellipsis, and the end, which names the file, stays whole. */
+.import-body .import-file {
+	display: flex;
+	min-width: 0;
+	margin: 0 0 1rem;
+	color: var(--muted);
+	font-size: 0.8125rem;
+	white-space: nowrap;
+}
+
+.import-file-start {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.import-file-end {
+	flex: none;
+}
+
+.import-problem {
+	color: var(--bad);
+}
+
 /* An answer that deletes, in the colour a toast uses to say something went
-   wrong; `.modal button` would otherwise have it the colour of the text. */
-.modal button.danger {
+   wrong; `.modal button` would otherwise have it the colour of the text. The
+   storage panel's Disconnect is the same news, so it is drawn the same way. */
+.modal button.danger,
+.account button.danger {
 	color: var(--bad);
 	border-color: color-mix(in srgb, var(--bad) 50%, var(--border));
 }
