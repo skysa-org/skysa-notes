@@ -201,6 +201,23 @@ describe('moving without a pointer', () => {
 		// Back to being somewhere to go rather than somewhere to put something.
 		expect(await screen.findByRole('button', { name: 'Archive' })).toBeDefined();
 	});
+
+	it('gives the tree back when Cancel is pressed', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(await screen.findByRole('button', { name: 'Work' }));
+
+		await user.keyboard('{Control>}k{/Control}');
+		await user.click(await screen.findByRole('option', { name: /Move notebook/ }));
+		await screen.findByRole('button', { name: 'Move “Work” into Archive' });
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(await screen.findByRole('button', { name: 'Archive' })).toBeDefined();
+		expect(screen.queryByRole('status', { name: /Moving/ })).toBeNull();
+	});
 });
 
 describe('the note’s own menu', () => {

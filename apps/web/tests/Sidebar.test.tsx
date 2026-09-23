@@ -274,7 +274,19 @@ describe('while something is being moved', () => {
 
 		const hint = screen.getByRole('status');
 		expect(hint.textContent).toContain('work');
-		expect(hint.textContent).toContain('Escape');
+		// The way out is beside it rather than in it, so it is not announced
+		// as part of the news.
+		expect(hint.textContent).not.toContain('Cancel');
+		expect(screen.getByRole('button', { name: 'Cancel' })).toBeDefined();
+	});
+
+	it('puts it down when Cancel is pressed', async () => {
+		const onCancelMove = vi.fn();
+		renderSidebar({ onCancelMove, moving: holding('work', 'work') });
+
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		expect(onCancelMove).toHaveBeenCalled();
 	});
 
 	it('names every row for where the thing would land', () => {

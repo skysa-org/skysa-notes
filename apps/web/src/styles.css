@@ -841,6 +841,19 @@ button.danger,
 	border-block-end: 1px solid var(--border);
 }
 
+/* An action said as a word in a sentence: a button, since it does something
+   rather than going somewhere, dressed as the link it reads as. */
+.link-button {
+	padding: 0;
+	font: inherit;
+	color: var(--accent);
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
 .row-label {
 	overflow: hidden;
 	text-overflow: ellipsis;

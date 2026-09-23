@@ -147,9 +147,15 @@ const NewFolderField = ({ parentPath, onCancel, onSubmit }: NewFolderFieldProps)
  * two: `moving` is set by the command or by `dragstart`, and read here and by
  * every row below without either of them knowing which it was.
  */
-const MoveHint = ({ moving }: { moving: Moving }) => (
-	<p className="move-hint" role="status">
-		{`Moving “${moving.name}”. Choose where to put it, or press Escape.`}
+const MoveHint = ({ moving, onCancel }: { moving: Moving; onCancel: () => void }) => (
+	<p className="move-hint">
+		{/* The live region is the sentence alone: the way out is a control to
+		    reach, not news to be read out every time the hint changes. Escape
+		    still puts the thing down too (the route listens for it). */}
+		<span role="status">{`Moving “${moving.name}”. Choose where to put it.`}</span>{' '}
+		<button type="button" className="link-button" onClick={onCancel}>
+			Cancel
+		</button>
 	</p>
 );
 
@@ -692,7 +698,7 @@ export const Sidebar = ({
 				</div>
 			</div>
 
-			{moving !== null && <MoveHint moving={moving} />}
+			{moving !== null && <MoveHint moving={moving} onCancel={cancel} />}
 
 			{creating !== null && (
 				<NewFolderField

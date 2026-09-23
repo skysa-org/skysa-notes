@@ -20,6 +20,7 @@ the note's title lines up with its first line and the toolbar's first
 label, pane headings with their rows — and tightens in a compact window. A
 toggle that is on shows it in the accent colour, and no longer looks on
 after being tapped off on a touch screen. The formatting toolbar keeps to one line too: what does not fit moves
-into a More tools menu at its end, least used first. Pressing Escape on the
+into a More tools menu at its end, least used first. While a notebook or note is being moved, the hint above the notebooks has a
+Cancel link, and Escape still works. Pressing Escape on the
 `+` beside the tabs now closes its menu, and a second press on the `+` closes
 it rather than reopening it.
