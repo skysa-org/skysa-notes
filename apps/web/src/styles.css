@@ -1294,6 +1294,14 @@ button.danger {
 	margin-block-start: 0.85em;
 }
 
+/* The surface's padding is the space above the note, so whatever the note
+   opens with — a heading, a paragraph — adds none of its own and its first
+   line sits where it would in the markdown editor. Two classes, to outrank
+   the headings' margins below. */
+.editor-rich-surface > :first-child {
+	margin-block-start: 0;
+}
+
 .editor-rich-surface h1,
 .editor-rich-surface h2,
 .editor-rich-surface h3,
