@@ -73,7 +73,7 @@ describe('the compact bar', () => {
 		expect(noteTrigger().textContent).toBe('Notes');
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 		expect(screen.queryByRole('navigation', { name: 'Sources' })).toBeNull();
-		expect(screen.queryByRole('searchbox', { name: 'Search notes' })).toBeNull();
+		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
 		expect(document.querySelector('.app-frame')?.classList.contains('compact')).toBe(true);
 		expect(panel()).toBeNull();
 	});
@@ -82,7 +82,7 @@ describe('the compact bar', () => {
 		await openApp(961);
 
 		expect(screen.queryByRole('button', { name: /^Notebook: / })).toBeNull();
-		expect(screen.getByRole('searchbox', { name: 'Search notes' })).toBeDefined();
+		expect(screen.getByRole('combobox', { name: 'Search notes' })).toBeDefined();
 		expect(document.querySelector('.app-frame')?.classList.contains('compact')).toBe(false);
 	});
 
@@ -198,31 +198,41 @@ describe('the compact bar', () => {
 });
 
 describe('searching in a compact window', () => {
-	it('takes the bar over from the icon, answers in the notes panel, and gives the bar back', async () => {
+	it('takes the bar over from the icon, answers under it, and gives the bar back on a choice', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();
 		await openApp();
 
 		await user.click(screen.getByRole('button', { name: 'Search notes' }));
-		const field = screen.getByRole('searchbox', { name: 'Search notes' });
+		const field = screen.getByRole('combobox', { name: 'Search notes' });
 		expect(document.activeElement).toBe(field);
 		expect(screen.queryByRole('button', { name: /^Notebook: / })).toBeNull();
 
 		await user.type(field, 'heron');
-		expect(panel()).toBe('notes');
-		await user.click(await screen.findByRole('button', { name: /Minutes/ }));
-
-		// The answer is open and the list is out of its way; the query is kept,
-		// so the next answer is a tap on the field away.
+		// Under the field, not in the notes panel, which stays shut.
+		expect(await screen.findByRole('listbox', { name: 'Search results' })).toBeDefined();
 		expect(panel()).toBeNull();
+		await user.click(await screen.findByRole('option', { name: /Minutes/ }));
+
+		// The answer is open and the search is over: the bar is the dropdowns
+		// again, so the field is not left active over the note.
 		await screen.findByDisplayValue('Minutes');
-		expect(screen.getByRole('searchbox', { name: 'Search notes' })).toBeDefined();
-
-		await user.click(screen.getByRole('button', { name: 'Close search' }));
-
-		expect(screen.queryByRole('searchbox', { name: 'Search notes' })).toBeNull();
+		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 		expect(notebookTrigger().textContent).toBe('Work');
 		expect(noteTrigger().textContent).toBe('Minutes');
+	});
+
+	it('gives the bar back on Close', async () => {
+		const user = userEvent.setup();
+		await openApp();
+
+		await user.click(screen.getByRole('button', { name: 'Search notes' }));
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'x');
+		await user.click(screen.getByRole('button', { name: 'Close search' }));
+
+		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 	});
 
 	it('gives the bar back on Escape', async () => {
@@ -230,9 +240,9 @@ describe('searching in a compact window', () => {
 		await openApp();
 
 		await user.click(screen.getByRole('button', { name: 'Search notes' }));
-		await user.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'x{Escape}');
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'x{Escape}');
 
-		expect(screen.queryByRole('searchbox', { name: 'Search notes' })).toBeNull();
+		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 	});
 
@@ -245,26 +255,33 @@ describe('searching in a compact window', () => {
 		await openApp(900);
 
 		expect(screen.queryByRole('button', { name: 'Search notes' })).toBeNull();
-		const field = screen.getByRole('searchbox', { name: 'Search notes' });
+		const field = screen.getByRole('combobox', { name: 'Search notes' });
 
 		await user.type(field, 'heron');
 
-		// Typing into it does not take the bar over: the dropdowns stay.
-		expect(panel()).toBe('notes');
+		// Typing into it does not take the bar over: the dropdowns stay, and
+		// the answers hang from the field.
+		expect(await screen.findByRole('option', { name: /Minutes/ })).toBeDefined();
 		expect(notebookTrigger()).toBeDefined();
 		expect(screen.queryByRole('button', { name: 'Close search' })).toBeNull();
+
+		await user.click(screen.getByRole('option', { name: /Minutes/ }));
+
+		// Emptied, and still beside the dropdowns, where it lives on this bar.
+		await screen.findByDisplayValue('Minutes');
+		expect(screen.getByRole('combobox', { name: 'Search notes' })).toHaveProperty('value', '');
 	});
 
 	it('goes back to the icon when the bar narrows under it', async () => {
 		widths = elementWidths({ '.compact-bar': 900 });
 		await openApp(900);
-		expect(screen.getByRole('searchbox', { name: 'Search notes' })).toBeDefined();
+		expect(screen.getByRole('combobox', { name: 'Search notes' })).toBeDefined();
 
 		act(() => {
 			widths?.resize('.compact-bar', 500);
 		});
 
-		expect(screen.queryByRole('searchbox', { name: 'Search notes' })).toBeNull();
+		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 	});
 });

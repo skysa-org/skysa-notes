@@ -5,7 +5,7 @@ import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
-import { SearchField } from './SearchField.js';
+import { SearchField, type SearchFieldProps } from './SearchField.js';
 import { useShowingSourceName } from './SourceTabs.js';
 
 /**
@@ -47,8 +47,7 @@ const PANE_ELEMENT: Record<Pane, string> = {
 
 /**
  * Marks what a press may land on without shutting the open panel: the panel's
- * own triggers, which toggle it themselves, and the search field, which is
- * where the results in the notes panel are being asked for.
+ * own triggers, which toggle it themselves.
  */
 const KEEPS_PANEL = 'data-keeps-panel';
 
@@ -153,6 +152,9 @@ export interface CompactBarProps {
 	onPanel: (panel: Pane | null) => void;
 	query: string;
 	onQuery: (query: string) => void;
+	results: SearchFieldProps['results'];
+	onChoose: SearchFieldProps['onChoose'];
+	sourceName: SearchFieldProps['sourceName'];
 	/**
 	 * Whether the search icon has been pressed. A query still in the field
 	 * keeps the search in the bar too: a window narrowed mid-search should not
@@ -165,9 +167,10 @@ export interface CompactBarProps {
 
 /**
  * The search takes the whole bar while it is open — there is no room for a
- * field beside three dropdowns — and gives it back when it is closed, by the
- * button beside it or by Escape. Its answers are the note list, as they are in
- * a wide window, opened as the notes panel.
+ * field beside three dropdowns — and gives it back when it is closed: by the
+ * button beside it, by Escape, or by choosing an answer. Its answers hang from
+ * the field (`SearchField`) and, in a compact window, fill everything under the
+ * bar.
  */
 export const CompactBar = ({
 	folder,
@@ -176,6 +179,9 @@ export const CompactBar = ({
 	onPanel,
 	query,
 	onQuery,
+	results,
+	onChoose,
+	sourceName,
 	searchOpen,
 	onSearchOpen,
 	fieldRef,
@@ -201,18 +207,15 @@ export const CompactBar = ({
 	};
 
 	const field = (
-		<div
-			className={fieldFits ? 'compact-search compact-search-beside' : 'compact-search'}
-			{...{ [KEEPS_PANEL]: '' }}
-		>
+		<div className={fieldFits ? 'compact-search compact-search-beside' : 'compact-search'}>
 			<SearchField
 				query={query}
 				onQuery={onQuery}
+				results={results}
+				onChoose={onChoose}
+				sourceName={sourceName}
 				fieldRef={fieldRef}
 				onDismiss={closeSearch}
-				onFocus={() => {
-					if (query.trim() !== '') onPanel('notes');
-				}}
 			/>
 		</div>
 	);

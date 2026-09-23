@@ -545,11 +545,87 @@ code {
 	padding-inline-start: 0.5rem;
 }
 
-.source-search [role='search'] {
+.source-search .search-box {
+	position: relative;
 	display: flex;
 	width: 100%;
 	max-width: 20rem;
 	min-width: 6rem;
+}
+
+/* ---- Search results ---------------------------------------------------- */
+
+/*
+ * A search's answers hang from the field (`SearchField`) rather than taking a
+ * pane over, so what the user was reading is still where they left it behind
+ * them. On a wide screen they are a card under the field; in a compact window,
+ * everything under the bar, as the other compact panels are.
+ */
+.search-box [role='search'] {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+}
+
+.search-results {
+	position: absolute;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	background: var(--bg);
+}
+
+/* Its right edge on the field's, and wider than the field: a result is a
+   title, where it is, and a few lines of the match. */
+.source-search .search-results {
+	inset-block-start: calc(100% + var(--space-2xs));
+	inset-inline-end: 0;
+	width: min(28rem, calc(100vw - 2 * var(--gutter)));
+	max-height: min(36rem, 70dvh);
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+/* The bar is the top of the window, so under it to the foot is the window
+   less the bar: `100%` of the bar it hangs from. */
+.compact-bar {
+	position: relative;
+}
+
+.compact-bar .search-results {
+	inset-block-start: 100%;
+	inset-inline: 0;
+	height: calc(100dvh - 100%);
+	border-block-start: 1px solid var(--border);
+	padding-block-end: env(safe-area-inset-bottom);
+}
+
+/* A list of its own, though it sits in the source bar, whose list of tabs
+   is a row. */
+.search-results ul {
+	display: block;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.search-result {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	padding: var(--row-block) var(--gutter);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+/* The highlight follows the keyboard, so it is on the row rather than on
+   `:hover`, as the palette's is: with both, the mouse and the arrows would
+   light two rows at once. It starts on the first, which is what Enter opens. */
+.search-result.active {
+	background: var(--hover-bg);
 }
 
 /* ---- App shell -------------------------------------------------------- */
@@ -2075,7 +2151,7 @@ button.danger,
 }
 
 .compact-search,
-.compact-search [role='search'] {
+.compact-search .search-box {
 	display: flex;
 	flex: 1;
 	min-width: 0;

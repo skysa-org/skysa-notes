@@ -244,11 +244,11 @@ const Home = () => {
 	 */
 	const { compact, panel, setPanel, searchOpen, setSearchOpen, frameClassName, shellProps } =
 		useCompactLayout();
+	// The answers hang from the field, over whatever else is open; a dropdown
+	// left open under them would be a second list behind the first.
 	const onQuery = (next: string) => {
 		setQuery(next);
-		// The answers are the notes panel, so typing is what opens it — and
-		// emptying the field, what shuts it on the notes it would otherwise show.
-		if (compact) setPanel(next.trim() === '' ? null : 'notes');
+		setPanel(null);
 	};
 
 	const [paletteOpen, setPaletteOpen] = useState(false);
@@ -335,6 +335,10 @@ const Home = () => {
 	 * would leave the open note nowhere in the list.
 	 */
 	const openResult = (note: NoteRecord) => {
+		// Done with: the field has emptied itself, and in a compact window the
+		// bar goes back to its dropdowns rather than staying a search.
+		setSearchOpen(false);
+		setPanel(null);
 		const go = () => {
 			select({ folder: folderToSearch(parentPath(note.path)), note: note.id });
 		};
@@ -434,10 +438,6 @@ const Home = () => {
 		setProblem(null);
 		void createNote(db, { folderPath: folder })
 			.then((created) => {
-				// And out of the search: the new note is in the open notebook, and
-				// the pane is showing matches for a query it does not answer. Left
-				// there, the user has just made a note that appears in no list.
-				setQuery('');
 				select({ note: created.id });
 			})
 			// Rarer than a duplicate notebook name — this one needs the store
@@ -701,6 +701,9 @@ const Home = () => {
 					onPanel={setPanel}
 					query={query}
 					onQuery={onQuery}
+					results={results}
+					onChoose={openResult}
+					sourceName={resultSourceName}
 					searchOpen={searchOpen}
 					onSearchOpen={setSearchOpen}
 					fieldRef={searchField}
@@ -708,7 +711,16 @@ const Home = () => {
 			) : (
 				<SourceTabs
 					returnTo={returnPath(href)}
-					search={<SearchField query={query} onQuery={setQuery} fieldRef={searchField} />}
+					search={
+						<SearchField
+							query={query}
+							onQuery={setQuery}
+							results={results}
+							onChoose={openResult}
+							sourceName={resultSourceName}
+							fieldRef={searchField}
+						/>
+					}
 				/>
 			)}
 			{/*
@@ -776,16 +788,6 @@ const Home = () => {
 						select({ note: id });
 						setPanel(null);
 					}}
-					query={query}
-					results={results}
-					onOpenResult={(note) => {
-						openResult(note);
-						setPanel(null);
-					}}
-					{...(activeConnection === undefined
-						? {}
-						: { activeConnectionId: activeConnection })}
-					sourceName={resultSourceName}
 					onCreateNote={() => {
 						onCreateNote();
 						setPanel(null);

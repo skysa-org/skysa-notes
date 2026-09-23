@@ -238,3 +238,21 @@ describe('toggles', () => {
 		expect(declarations('button:focus-visible')).toContain('outline: 2px solid var(--ring)');
 	});
 });
+
+describe('the search results', () => {
+	it('fill everything under the bar in a compact window, as the panels do', () => {
+		expect(declarations('.compact-bar .search-results')).toContain(
+			'height: calc(100dvh - 100%)'
+		);
+		expect(declarations('.compact-bar')).toContain('position: relative');
+	});
+
+	it('are a card under the field on a wide screen, and scroll inside it', () => {
+		expect(declarations('.source-search .search-results')).toMatch(/max-height:/);
+		expect(declarations('.search-results')).toContain('overflow-y: auto');
+	});
+
+	it('are a column, though they sit in the bar whose tabs are a row', () => {
+		expect(declarations('.search-results ul')).toContain('display: block');
+	});
+});

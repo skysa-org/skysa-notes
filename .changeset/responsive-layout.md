@@ -24,3 +24,8 @@ into a More tools menu at its end, least used first. While a notebook or note is
 Cancel link, and Escape still works. Pressing Escape on the
 `+` beside the tabs now closes its menu, and a second press on the `+` closes
 it rather than reopening it.
+
+Search results now drop from the search field — a card under it on a wide
+screen, everything under the bar on a phone — instead of taking over the notes
+column. Arrow keys move through them and Enter opens one. Choosing a result
+opens the note, empties the field and, on a phone, closes the search.

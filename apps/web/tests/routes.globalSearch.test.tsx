@@ -71,10 +71,10 @@ describe('searching across sources', () => {
 		const user = userEvent.setup();
 		await openApp();
 
-		await user.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'heron');
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'heron');
 
-		expect(await screen.findByRole('button', { name: /Minutes/ })).toBeDefined();
-		expect(screen.getByRole('button', { name: /Sketch/ })).toBeDefined();
+		expect(await screen.findByRole('option', { name: /Minutes/ })).toBeDefined();
+		expect(screen.getByRole('option', { name: /Sketch/ })).toBeDefined();
 		expect(screen.getByText(/^Dropbox · Work ·/)).toBeDefined();
 		expect(screen.getByText(/^This device · Ideas ·/)).toBeDefined();
 	});
@@ -83,9 +83,9 @@ describe('searching across sources', () => {
 		await twoSources();
 		const user = userEvent.setup();
 		await openApp();
-		await user.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'heron');
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'heron');
 
-		await user.click(await screen.findByRole('button', { name: /Minutes/ }));
+		await user.click(await screen.findByRole('option', { name: /Minutes/ }));
 
 		await waitFor(async () => {
 			expect(await activeConnectionId(db)).toBe(DROPBOX);
@@ -99,8 +99,9 @@ describe('searching across sources', () => {
 				screen.getByRole('button', { name: 'Dropbox' }).getAttribute('aria-current')
 			).toBe('true');
 		});
-		// The notebook too: with the search cleared, the note is in the list.
-		await user.clear(screen.getByRole('searchbox', { name: 'Search notes' }));
+		// The notebook too, so the note is in the list beside it; and the search
+		// is over.
+		expect(screen.getByRole('combobox', { name: 'Search notes' })).toHaveProperty('value', '');
 		expect(await screen.findByRole('heading', { name: 'Work' })).toBeDefined();
 		expect(await screen.findByRole('button', { name: /^Minutes/ })).toBeDefined();
 		expect(titleField()?.value).toBe('Minutes');
@@ -110,9 +111,9 @@ describe('searching across sources', () => {
 		await twoSources();
 		const user = userEvent.setup();
 		await openApp();
-		await user.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'heron');
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'heron');
 
-		await user.click(await screen.findByRole('button', { name: /Sketch/ }));
+		await user.click(await screen.findByRole('option', { name: /Sketch/ }));
 
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Sketch');
@@ -126,9 +127,9 @@ describe('searching across sources', () => {
 		const user = userEvent.setup();
 		await openApp();
 
-		await user.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'heron');
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'heron');
 
-		expect(await screen.findByRole('button', { name: /Sketch/ })).toBeDefined();
+		expect(await screen.findByRole('option', { name: /Sketch/ })).toBeDefined();
 		expect(screen.getByText(/^Ideas ·/)).toBeDefined();
 		expect(screen.queryByText(/^This device ·/)).toBeNull();
 	});
