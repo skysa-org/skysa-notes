@@ -92,6 +92,25 @@ export const matchCommands = (
 		.map((entry) => entry.command);
 };
 
+/**
+ * What the menu should list, or nothing when it should not be open at all.
+ *
+ * A query that matches no command closes the menu rather than leaving an empty
+ * box under the cursor: `/nothing` is the user writing, not choosing. This is
+ * the one answer to "is the menu open", so the component and the provider's
+ * `shouldShow` cannot disagree about it.
+ */
+export const slashItems = (
+	textBeforeCursor: string | undefined,
+	commands: readonly EditorCommand[]
+): { query: string; items: readonly EditorCommand[] } | undefined => {
+	const query = slashQuery(textBeforeCursor);
+	if (query === undefined) return undefined;
+
+	const items = matchCommands(query, commands);
+	return items.length === 0 ? undefined : { query, items };
+};
+
 /** Keeps the highlight inside the list, wrapping at both ends. */
 export const moveHighlight = (index: number, delta: number, count: number): number => {
 	if (count === 0) return 0;

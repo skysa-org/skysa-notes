@@ -9,6 +9,7 @@ import {
 	createRichEditor,
 	currentMarkdown,
 	representsFaithfully,
+	whatIsLost,
 } from '../src/editor/rich.js';
 
 /**
@@ -424,6 +425,33 @@ describe('representsFaithfully', () => {
 
 		expect(edits[0]).not.toContain('\r');
 		expect(edits[0]).toContain('<p>x</p>');
+	});
+});
+
+/**
+ * What the raw-mode banner names. Against the real editor, with the one thing
+ * it still drops: a reference-style link, which it writes back inlined, the
+ * definition gone.
+ */
+describe('whatIsLost', () => {
+	it('names what the editor would drop, and where it is in the note', async () => {
+		const body = 'Intro.\n\nSee [the docs][docs].\n\n[docs]: https://example.com\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toEqual({ type: 'definition', line: 5 });
+		expect(withCtx((ctx) => representsFaithfully(ctx, body))).toBe(false);
+	});
+
+	it('finds nothing in a note the editor can show', async () => {
+		const body = '# Title\n\nfirst<br />second\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+	});
+
+	it('finds nothing in an empty note', async () => {
+		const { withCtx } = await mount('');
+		expect(withCtx((ctx) => whatIsLost(ctx, '\n\n'))).toBeUndefined();
 	});
 });
 

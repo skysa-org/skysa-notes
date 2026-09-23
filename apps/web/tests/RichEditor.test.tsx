@@ -1,7 +1,7 @@
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { adoptBody, representsFaithfully, type RichEditorSetup } from '../src/editor/rich.js';
+import { adoptBody, type RichEditorSetup, whatIsLost } from '../src/editor/rich.js';
 import { RichEditor } from '../src/editor/RichEditor.js';
 
 /**
@@ -32,8 +32,11 @@ vi.mock('../src/editor/rich.js', () => ({
 		};
 	},
 	adoptBody: vi.fn(() => true),
-	representsFaithfully: vi.fn(() => true),
+	whatIsLost: vi.fn(() => undefined),
 }));
+
+/** What the check answers for a note it cannot represent, handed on to the banner. */
+const LOST = { type: 'html', line: 1, value: '<exotic>' };
 
 const mounted = async () => {
 	await waitFor(() => {
@@ -42,14 +45,14 @@ const mounted = async () => {
 	// The fidelity check runs as soon as the editor exists, so it is the signal
 	// that the effects have caught up with it.
 	await waitFor(() => {
-		expect(representsFaithfully).toHaveBeenCalled();
+		expect(whatIsLost).toHaveBeenCalled();
 	});
 };
 
 beforeEach(() => {
 	setup = undefined;
 	vi.mocked(adoptBody).mockClear();
-	vi.mocked(representsFaithfully).mockClear();
+	vi.mocked(whatIsLost).mockClear();
 });
 
 afterEach(cleanup);
@@ -208,7 +211,7 @@ describe('RichEditor', () => {
 	});
 
 	it('reports a note the editor cannot represent', async () => {
-		vi.mocked(representsFaithfully).mockReturnValueOnce(false);
+		vi.mocked(whatIsLost).mockReturnValueOnce(LOST);
 		const onUnsupported = vi.fn();
 
 		render(
@@ -221,7 +224,7 @@ describe('RichEditor', () => {
 		);
 
 		await waitFor(() => {
-			expect(onUnsupported).toHaveBeenCalled();
+			expect(onUnsupported).toHaveBeenCalledWith(LOST);
 		});
 	});
 
@@ -237,15 +240,15 @@ describe('RichEditor', () => {
 
 		const { rerender } = render(<RichEditor {...props} body="ordinary enough" />);
 		await waitFor(() => {
-			expect(representsFaithfully).toHaveBeenCalled();
+			expect(whatIsLost).toHaveBeenCalled();
 		});
 		expect(onUnsupported).not.toHaveBeenCalled();
 
-		vi.mocked(representsFaithfully).mockReturnValueOnce(false);
+		vi.mocked(whatIsLost).mockReturnValueOnce(LOST);
 		rerender(<RichEditor {...props} body="something exotic from the remote" />);
 
 		await waitFor(() => {
-			expect(onUnsupported).toHaveBeenCalled();
+			expect(onUnsupported).toHaveBeenCalledWith(LOST);
 		});
 	});
 });

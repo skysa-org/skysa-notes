@@ -8,6 +8,7 @@ import { createRichEditor } from '../src/editor/rich.js';
 import {
 	matchCommands,
 	moveHighlight,
+	slashItems,
 	slashKeyAction,
 	slashQuery,
 	textBeforeCursor,
@@ -82,6 +83,27 @@ describe('matchCommands', () => {
 
 	it('returns nothing when nothing matches, so the menu can close', () => {
 		expect(labels('zzz')).toEqual([]);
+	});
+});
+
+describe('slashItems', () => {
+	it('is open with every command for a bare slash', () => {
+		expect(slashItems('/', BLOCK_COMMANDS)).toEqual({ query: '', items: BLOCK_COMMANDS });
+	});
+
+	it('lists what the query matches', () => {
+		expect(slashItems('/quote', BLOCK_COMMANDS)?.items.map((item) => item.label)).toEqual([
+			'Quote',
+		]);
+	});
+
+	it('is closed when the query matches nothing, rather than an empty menu', () => {
+		expect(slashItems('/nothing', BLOCK_COMMANDS)).toBeUndefined();
+	});
+
+	it('is closed when there is no query at all', () => {
+		expect(slashItems('and/or', BLOCK_COMMANDS)).toBeUndefined();
+		expect(slashItems(undefined, BLOCK_COMMANDS)).toBeUndefined();
 	});
 });
 

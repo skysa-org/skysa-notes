@@ -64,6 +64,7 @@ interface Tree {
 	readonly type: string;
 	readonly value?: unknown;
 	readonly children?: readonly Tree[];
+	readonly position?: Readonly<{ start: Readonly<{ line: number }> }>;
 }
 
 /**
@@ -108,3 +109,89 @@ export const sameMarkdownStructure = (a: string, b: string): boolean =>
 /** True when nothing in the body is lost by this package's own serialize/parse cycle. */
 export const roundTripsLosslessly = (markdown: string): boolean =>
 	sameMarkdownStructure(markdown, normalize(markdown));
+
+/**
+ * The first thing in `original` that `other` does not have, or has differently.
+ * What the rich editor's banner names, so the user knows what to look for in a
+ * note it has sent to raw mode.
+ */
+export interface StructuralDifference {
+	/** The mdast type of the node, e.g. `html`, `definition`, `table`. */
+	readonly type: string;
+	/** The line in `original` it starts on, counting from 1. */
+	readonly line?: number;
+	/** For html, the html itself, shortened: it is what the user will search for. */
+	readonly value?: string;
+}
+
+/** Enough of a piece of html to find it by; a banner is not the place for a whole block. */
+const SHOWN_HTML = 40;
+
+const described = (node: Tree): StructuralDifference => {
+	const line = node.position?.start.line;
+	const html =
+		node.type === 'html' && typeof node.value === 'string' ? node.value.trim() : undefined;
+	return {
+		type: node.type,
+		...(line === undefined ? {} : { line }),
+		...(html === undefined
+			? {}
+			: { value: html.length > SHOWN_HTML ? `${html.slice(0, SHOWN_HTML)}…` : html }),
+	};
+};
+
+const countTypes = (nodes: readonly Tree[]): Map<string, number> =>
+	nodes.reduce(
+		(counts, node) => counts.set(node.type, (counts.get(node.type) ?? 0) + 1),
+		new Map<string, number>()
+	);
+
+/**
+ * Of two lists of children that no longer line up, the child the second list
+ * lost: the first whose type it has fewer of. Not text where anything else will
+ * do, because text is what closes over a gap — drop the `<br />` from
+ * `first<br />second` and what is left is one text node where there were two,
+ * which says nothing about what went.
+ */
+const lostChild = (original: readonly Tree[], other: readonly Tree[]): Tree | undefined => {
+	const had = countTypes(original);
+	const has = countTypes(other);
+	const lost = original.filter((node) => (had.get(node.type) ?? 0) > (has.get(node.type) ?? 0));
+	return lost.find((node) => node.type !== 'text') ?? lost[0];
+};
+
+/**
+ * Walked like `sameStructure`, with `original`'s side of the difference kept.
+ * `sameStructure` itself stays as it is: it is on the path of every keystroke
+ * through `adoptBody`, and this is asked only once a note has already failed.
+ */
+const differenceIn = (original: Tree, other: Tree): Tree | undefined => {
+	const { children: had, ...originalOwn } = original;
+	const { children: has, ...otherOwn } = other;
+	if (!sameStructure(originalOwn, otherOwn)) return original;
+	if (had === undefined || has === undefined) return had === has ? undefined : original;
+
+	const lineUp =
+		had.length === has.length && had.every((child, index) => child.type === has[index]?.type);
+	if (!lineUp) return lostChild(had, has) ?? original;
+
+	// The first difference, and nothing asked of the children after it.
+	return had.reduce<Tree | undefined>((found, child, index) => {
+		if (found !== undefined) return found;
+		const counterpart = has[index];
+		return counterpart === undefined ? child : differenceIn(child, counterpart);
+	}, undefined);
+};
+
+/**
+ * Where `other` first departs from `original`, by the same measure as
+ * `sameMarkdownStructure` — `undefined` exactly when that says they are the
+ * same — described by the node of `original` that is missing or changed.
+ */
+export const firstStructuralDifference = (
+	original: string,
+	other: string
+): StructuralDifference | undefined => {
+	const found = differenceIn(comparable(original), comparable(other));
+	return found === undefined ? undefined : described(found);
+};

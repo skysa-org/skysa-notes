@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { roundTripsLosslessly, sameMarkdownStructure } from '../../src/markdown/fidelity.js';
+import {
+	firstStructuralDifference,
+	roundTripsLosslessly,
+	sameMarkdownStructure,
+} from '../../src/markdown/fidelity.js';
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const fixtures = readdirSync(fixturesDir)
@@ -81,6 +85,74 @@ describe('sameMarkdownStructure', () => {
 		expect(sameMarkdownStructure('first\\\n<br />\n', 'first\\ <br />\n')).toBe(false);
 		// And in plain text a line ending is still not a space.
 		expect(sameMarkdownStructure('first\nsecond\n', 'first second\n')).toBe(false);
+	});
+});
+
+/**
+ * What the raw-mode banner names. The node reported is always the original's:
+ * it is the user's file the banner is pointing into.
+ */
+describe('firstStructuralDifference', () => {
+	it('finds nothing where sameMarkdownStructure finds nothing', () => {
+		expect(firstStructuralDifference('* a\n* b\n', '- a\n- b\n')).toBeUndefined();
+		expect(
+			firstStructuralDifference('first\n<br />\nsecond\n', 'first <br />\nsecond\n')
+		).toBeUndefined();
+		expect(firstStructuralDifference('', '')).toBeUndefined();
+	});
+
+	it('names inline html that was dropped, not the text that closed over it', () => {
+		expect(
+			firstStructuralDifference('intro\n\nfirst<br />second\n', 'intro\n\nfirstsecond\n')
+		).toEqual({
+			type: 'html',
+			line: 3,
+			value: '<br />',
+		});
+	});
+
+	it('names a block that was dropped', () => {
+		const withTable = 'text\n\n| a | b |\n| - | - |\n| 1 | 2 |\n';
+		expect(firstStructuralDifference(withTable, 'text\n')).toEqual({ type: 'table', line: 3 });
+	});
+
+	it('names the definition a reference link was inlined out of', () => {
+		// What the rich editor does to a reference-style link today.
+		expect(firstStructuralDifference('[a][ref]\n\n[ref]: /url\n', '[a](/url)\n')).toEqual({
+			type: 'definition',
+			line: 3,
+		});
+	});
+
+	it('names html whose spelling changed', () => {
+		expect(firstStructuralDifference('a\n\n<br>\n', 'a\n\n<br />\n')).toEqual({
+			type: 'html',
+			line: 3,
+			value: '<br>',
+		});
+	});
+
+	it('goes down into lists to the item that changed', () => {
+		const original = '- one\n- two\n  - ~~three~~\n';
+		expect(firstStructuralDifference(original, '- one\n- two\n  - three\n')).toEqual({
+			type: 'delete',
+			line: 3,
+		});
+	});
+
+	it('shortens long html, since it is shown in a sentence', () => {
+		const long = `<div class="${'x'.repeat(80)}">y</div>`;
+		const found = firstStructuralDifference(`${long}\n`, 'y\n');
+		expect(found?.type).toBe('html');
+		expect(found?.value).toHaveLength(41);
+		expect(found?.value?.endsWith('…')).toBe(true);
+	});
+
+	it('names a changed link target, the node itself', () => {
+		expect(firstStructuralDifference('see [a](/one)\n', 'see [a](/two)\n')).toEqual({
+			type: 'link',
+			line: 1,
+		});
 	});
 });
 

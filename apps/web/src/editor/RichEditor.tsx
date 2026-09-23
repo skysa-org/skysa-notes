@@ -5,6 +5,7 @@ import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
+import type { StructuralDifference } from '@skysa/core';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useCodeDisplay } from '../store/hooks.js';
@@ -14,7 +15,7 @@ import { createFormatStore, type FormatStore, readFormat } from './format.js';
 import { FormatToolbar, type ToolbarPlacement } from './FormatToolbar.js';
 import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
-import { adoptBody, createRichEditor, representsFaithfully } from './rich.js';
+import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
 import { SlashMenu } from './SlashMenu.js';
 
 /**
@@ -34,9 +35,10 @@ export interface RichEditorProps {
 	/**
 	 * Called when this note cannot survive the editor's document model — some
 	 * construct in it would be dropped the moment the user typed. The note
-	 * belongs in raw mode instead.
+	 * belongs in raw mode instead. Handed the first thing that would go, which
+	 * is what the banner in raw mode names.
 	 */
-	onUnsupported: () => void;
+	onUnsupported: (lost: StructuralDifference) => void;
 	/**
 	 * The editor's text has been replaced by a body from outside — a sync pull,
 	 * another tab. What was typed before is no longer under what is typed next.
@@ -164,8 +166,8 @@ const EditorBody = ({
 	useEffect(() => {
 		if (loading) return;
 		get()?.action((ctx) => {
-			if (representsFaithfully(ctx, initial.current)) return;
-			unsupported.current();
+			const lost = whatIsLost(ctx, initial.current);
+			if (lost !== undefined) unsupported.current(lost);
 		});
 		// `get` is intentionally absent; see above.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,7 +192,8 @@ const EditorBody = ({
 			// that arrived from somewhere else. A sync pull can bring in markdown
 			// this editor cannot show, and since the check above runs once, this
 			// is the only place left to notice.
-			if (!representsFaithfully(ctx, body)) unsupported.current();
+			const lost = whatIsLost(ctx, body);
+			if (lost !== undefined) unsupported.current(lost);
 		});
 	}, [body, origin, get, incoming, loading]);
 

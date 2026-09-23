@@ -1,4 +1,4 @@
-import { frontmatterIsEditable, headings } from '@skysa/core';
+import { frontmatterIsEditable, headings, type StructuralDifference } from '@skysa/core';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { parseChord } from '../commands/chord.js';
@@ -31,6 +31,7 @@ import {
 } from './layout.js';
 import { OptionsMenu } from './OptionsMenu.js';
 import { Outline } from './Outline.js';
+import { UnsupportedBanner, useUnsupported } from './unsupported.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
 
@@ -179,7 +180,7 @@ const NoteBody = ({
 	showOutline: boolean;
 	toolbar: RichEditorProps['toolbar'];
 	onUserEdit: (body: string, origin: string) => void;
-	onUnsupported: () => void;
+	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 	/** The element, for whoever sizes the outline by its width. */
 	onBody: (element: HTMLDivElement | null) => void;
@@ -282,15 +283,9 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
 
-	/**
-	 * The note the rich editor reported it could not represent. Held by id rather
-	 * than as a boolean so moving to another note clears it without an effect.
-	 */
-	const [unsupportedId, setUnsupportedId] = useState<string | null>(null);
 	// By source as well as id, like everything else held here across renders:
 	// another source's note of the same id is another note.
 	const ref = note === undefined ? undefined : noteRef(note);
-	const unsupported = ref !== undefined && unsupportedId === ref;
 
 	// The note as last shown. An edit carries it: a copy of the edit is written
 	// from it, and a note a sync deleted is brought back as it.
@@ -333,11 +328,19 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 	// A newer build in another tab closes this one's database; what is held
 	// here goes in first.
 	useEffect(() => beforeClosing(settle), [settle]);
+
+	// A note the rich editor could not represent, held in raw mode until the
+	// user has changed it and asks for the rich editor again.
+	const unsupported = useUnsupported(note, { rebased, settle, failing: autosave.failing });
+	const locked = unsupported.lost !== undefined;
+	const { edited } = unsupported;
+
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
 			change({ body, origin, note: shown.current });
+			edited();
 		},
-		[change]
+		[change, edited]
 	);
 
 	const onDelete = useCallback(() => {
@@ -378,17 +381,23 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 			});
 	}, [flush, forget, note, onDeleted, settle]);
 
-	const mode: EditorMode | undefined = unsupported ? 'raw' : (note?.editorMode ?? defaultMode);
+	const mode: EditorMode | undefined = locked ? 'raw' : (note?.editorMode ?? defaultMode);
 
+	const { retry, retryable } = unsupported;
 	const toggleMode = useCallback(() => {
-		if (noteId === undefined || mode === undefined || unsupported) return;
+		if (noteId === undefined || mode === undefined) return;
+		// Held in raw mode: the only way out is the rich editor's check, run again.
+		if (locked) {
+			retry();
+			return;
+		}
 		// Write the pending edit first: the incoming editor loads from the note
 		// record, and the mode switch itself must never be what saves — or lose —
 		// what the user typed. `rebased` flushes, and says the editor that comes
 		// next starts from the stored body rather than from what this one held.
 		rebased();
 		void setNoteEditorMode(db, noteId, otherMode(mode), { connectionId: note?.connectionId });
-	}, [rebased, mode, noteId, note?.connectionId, unsupported]);
+	}, [rebased, mode, noteId, note?.connectionId, locked, retry]);
 
 	// The element the outline shares the room of, as state rather than a ref:
 	// a note opening mounts it, and the width has to be asked of the new one.
@@ -419,7 +428,7 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 		label: `Edit as ${MODE_LABELS[otherMode(mode ?? 'rich')].toLowerCase()}`,
 		group: 'Note',
 		chord: MODE_TOGGLE,
-		enabled: noteId !== undefined && mode !== undefined && !unsupported,
+		enabled: noteId !== undefined && mode !== undefined && (!locked || retryable),
 		run: toggleMode,
 	});
 
@@ -436,7 +445,8 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 			<NoteScreen
 				note={note}
 				mode={mode}
-				unsupported={unsupported}
+				lost={unsupported.lost}
+				retryable={retryable}
 				unsaved={autosave.failing}
 				finding={finding}
 				layout={layout}
@@ -448,11 +458,7 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 				onDelete={onDelete}
 				onMove={onMove}
 				onUserEdit={onUserEdit}
-				onUnsupported={() => {
-					// The raw editor takes over, built from the stored body.
-					rebased();
-					setUnsupportedId(noteRef(note));
-				}}
+				onUnsupported={unsupported.report}
 				// A body from outside is on screen now. What was typed before it
 				// is not under whatever is typed next — a new sitting, so the next
 				// edit cannot stand for a held one — and what is still pending was
@@ -466,10 +472,16 @@ export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 
 const MODE_ICONS: Record<EditorMode, IconName> = { rich: 'rich-text', raw: 'markdown' };
 
-const tabTitle = (tab: EditorMode, current: boolean, unsupported: boolean): string => {
+const tabTitle = (
+	tab: EditorMode,
+	current: boolean,
+	locked: boolean,
+	retryable: boolean
+): string => {
 	const name = MODE_LABELS[tab].toLowerCase();
 	if (current) return `Editing as ${name}`;
-	if (unsupported) return 'This note has to stay in markdown mode';
+	if (locked && retryable) return `Try the ${name} editor again (Ctrl/Cmd+E)`;
+	if (locked) return 'This note has to stay in markdown mode until it is changed';
 	return `Switch to ${name} (Ctrl/Cmd+E)`;
 };
 
@@ -480,15 +492,18 @@ const tabTitle = (tab: EditorMode, current: boolean, unsupported: boolean): stri
  * difference at all.
  *
  * Pressing the tab already in use does nothing. A note the rich editor cannot
- * represent keeps its markdown tab, pressed, and the rich one is disabled.
+ * represent keeps its markdown tab, pressed, and the rich one is disabled until
+ * the note has been changed, when pressing it asks the rich editor again.
  */
 const ModeTabs = ({
 	mode,
-	unsupported,
+	locked,
+	retryable,
 	toggleMode,
 }: {
 	mode: EditorMode;
-	unsupported: boolean;
+	locked: boolean;
+	retryable: boolean;
 	toggleMode: () => void;
 }) => (
 	<div className="mode-tabs" role="group" aria-label="Editor">
@@ -500,8 +515,8 @@ const ModeTabs = ({
 					type="button"
 					aria-label={MODE_LABELS[tab]}
 					aria-pressed={current}
-					disabled={!current && unsupported}
-					title={tabTitle(tab, current, unsupported)}
+					disabled={!current && locked && !retryable}
+					title={tabTitle(tab, current, locked, retryable)}
 					onClick={() => {
 						if (!current) toggleMode();
 					}}
@@ -523,7 +538,8 @@ const ModeTabs = ({
 const NoteScreen = ({
 	note,
 	mode,
-	unsupported,
+	lost,
+	retryable,
 	unsaved,
 	finding,
 	layout,
@@ -538,7 +554,10 @@ const NoteScreen = ({
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
-	unsupported: boolean;
+	/** What the rich editor could not show, while the note is held in raw mode. */
+	lost: StructuralDifference | undefined;
+	/** The note has changed since, and the rich editor may be asked again. */
+	retryable: boolean;
 	/** A save was rejected, and what it held is still only in this tab. */
 	unsaved: boolean;
 	finding: number;
@@ -549,7 +568,7 @@ const NoteScreen = ({
 	onDelete: () => void;
 	onMove: (() => void) | undefined;
 	onUserEdit: (body: string, origin: string) => void;
-	onUnsupported: () => void;
+	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 }) => {
 	// Whether there is an outline to open. A button for a rail that would be
@@ -593,7 +612,12 @@ const NoteScreen = ({
 						</button>
 					)}
 					{mode !== undefined && (
-						<ModeTabs mode={mode} unsupported={unsupported} toggleMode={toggleMode} />
+						<ModeTabs
+							mode={mode}
+							locked={lost !== undefined}
+							retryable={retryable}
+							toggleMode={toggleMode}
+						/>
 					)}
 					<OptionsMenu
 						label="Note options"
@@ -624,12 +648,7 @@ const NoteScreen = ({
 				</p>
 			)}
 
-			{unsupported && (
-				<p className="banner" role="status">
-					This note uses markdown the rich editor has no way to show, so it stays in
-					markdown mode. Nothing in it has been changed.
-				</p>
-			)}
+			{lost !== undefined && <UnsupportedBanner lost={lost} retryable={retryable} />}
 
 			{/*
 			 * A rename or a tag edit cannot reach a file whose frontmatter has a

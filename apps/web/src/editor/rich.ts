@@ -21,7 +21,13 @@ import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { $prose, $remark } from '@milkdown/kit/utils';
-import { sameMarkdownStructure, STRINGIFY_OPTIONS, toLf } from '@skysa/core';
+import {
+	firstStructuralDifference,
+	sameMarkdownStructure,
+	STRINGIFY_OPTIONS,
+	type StructuralDifference,
+	toLf,
+} from '@skysa/core';
 
 import { autoLanguagePlugin } from './autoLanguage.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
@@ -330,4 +336,13 @@ export const adoptBody = (ctx: Ctx, body: string): boolean => {
  * editor's own parser and serializer, and sent to raw mode if it fails.
  */
 export const representsFaithfully = (ctx: Ctx, body: string): boolean =>
-	body.trim() === '' || sameMarkdownStructure(body, currentMarkdown(ctx));
+	whatIsLost(ctx, body) === undefined;
+
+/**
+ * The same question, answered with *what* did not survive: the first thing in
+ * the body the editor's document does not have. `undefined` when the note is
+ * safe to edit here. It is what the raw-mode banner names, so the user has
+ * something to look for rather than only being told there is something.
+ */
+export const whatIsLost = (ctx: Ctx, body: string): StructuralDifference | undefined =>
+	body.trim() === '' ? undefined : firstStructuralDifference(body, currentMarkdown(ctx));
