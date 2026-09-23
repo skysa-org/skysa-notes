@@ -13,6 +13,13 @@ import { type Bearer, bearerFrom, grantHolder } from './credentials.js';
 import { importSecretKey, type SecretKey, signingKey } from './crypto.js';
 import { createDb, type Database } from './db/client.js';
 import type { AppConfig } from './env.js';
+
+/**
+ * Re-exported so a second Worker entry can build its config through the same
+ * validation `src/worker.ts` uses, rather than reading env by hand. Together
+ * with `createApp` this is the whole of what another deployment needs.
+ */
+export { type AppConfig, parseEnv } from './env.js';
 import type { FetchLike } from './oauth/types.js';
 import { connectRoutes } from './routes/connect.js';
 import { connectionRoutes } from './routes/connections.js';
