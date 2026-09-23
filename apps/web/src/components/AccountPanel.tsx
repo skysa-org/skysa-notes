@@ -46,6 +46,7 @@ import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
+import { ImportPanel } from './ImportProgress.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { useEscape } from './useEscape.js';
 
@@ -67,7 +68,7 @@ import { useEscape } from './useEscape.js';
 
 type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
 
-type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow' | 'resync'>;
+type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt'>;
 
 export interface AccountPanelProps {
 	client?: Client;
@@ -453,6 +454,13 @@ const SyncState = ({
 	const reconnect = needsReconnect(status);
 	const [rescanning, setRescanning] = useState(false);
 
+	// A later source's first import, which does not hold the app: how it is
+	// going, and the way out of it, in place of how syncing is going. The
+	// first source's is a dialog over everything (`routes/index.tsx`).
+	if (bound.importing !== undefined && !bound.importing.lock) {
+		return <ImportPanel source={bound} database={database} client={client} sync={sync} />;
+	}
+
 	return (
 		<>
 			{/* Said even where there is no link to offer: sync has stopped. */}
@@ -541,7 +549,6 @@ const SyncState = ({
 				) : (
 					<button
 						type="button"
-						className="ghost"
 						disabled={status.phase === 'syncing'}
 						onClick={() => {
 							setRescanning(true);
@@ -1091,7 +1098,7 @@ const Connected = ({
 				<button
 					ref={openButton}
 					type="button"
-					className="ghost"
+					className="danger"
 					// Not while the server is still being asked on open: its
 					// answer could bind the device again right after. Nor while a
 					// disconnect of this source is still out, which may have been

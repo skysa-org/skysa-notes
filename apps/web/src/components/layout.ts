@@ -36,6 +36,9 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react';
  */
 export const COMPACT = '(max-width: 60rem)';
 
+/** A finger rather than a mouse: where focusing an editor raises a keyboard. */
+export const COARSE_POINTER = '(pointer: coarse)';
+
 /**
  * The note's own width, in rems, at which the outline starts open: a 13rem
  * rail beside a note of 40rem or so. It is the room the note had beside the

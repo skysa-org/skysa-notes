@@ -85,6 +85,7 @@ export {
 	type SyncEngine,
 	type SyncEngineOptions,
 	type SyncOutcome,
+	type SyncProgress,
 	type SyncStatus,
 } from './sync/engine.js';
 

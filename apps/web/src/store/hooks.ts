@@ -4,8 +4,14 @@ import { useEffect, useMemo } from 'react';
 
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import { type EditorMode } from '../editor/mode.js';
-import { type ConnectedSource, connectedSources } from './connection.js';
-import { activeConnectionId, db, type NoteRecord, type SyncStateRecord } from './db.js';
+import { type ConnectedSource, connectedSources, holdsPile } from './connection.js';
+import {
+	activeConnectionId,
+	db,
+	type NoteRecord,
+	PENDING_CREDENTIAL_ID,
+	type SyncStateRecord,
+} from './db.js';
 import { folderTree } from './folders.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
 import { getCodeDisplay, getDefaultEditorMode, setCodeDisplay } from './prefs.js';
@@ -30,6 +36,32 @@ import { buildFolderTree, type FolderNode } from './tree.js';
 /** Every source on this device, in the order they were connected. */
 export const useSources = (): ConnectedSource[] | undefined =>
 	useLiveQuery(() => connectedSources(db), []);
+
+/**
+ * The source whose first import is under way, or `null` for none. One at a
+ * time: a bind while one is running copies nothing (`bindConnection`).
+ */
+/**
+ * Whether a credential brought back from a provider's consent page is still
+ * waiting to be taken up (`claimConnection`), and so whether the connection it
+ * is for is bound yet. True until it is known.
+ */
+export const useClaimingConnection = (): boolean =>
+	useLiveQuery(
+		async () => (await db.credentials.get(PENDING_CREDENTIAL_ID)) !== undefined,
+		[],
+		true
+	);
+
+/** The first source's import, while it holds the app; nothing otherwise. */
+export const useHeldImport = (): SyncStateRecord | undefined =>
+	useLiveQuery(
+		async () =>
+			(await db.syncState.toArray()).find(
+				(state) => holdsPile(state) && state.importing?.lock === true
+			),
+		[]
+	);
 
 export const useActiveSource = (): SyncStateRecord | null | undefined =>
 	useLiveQuery(async () => (await db.syncState.get(await activeConnectionId(db))) ?? null, []);

@@ -203,6 +203,25 @@ export interface SyncStateRecord {
 	 * of its own, and absent means none.
 	 */
 	unreadable?: { remoteId: string; path: string; movedAside?: string[] }[];
+	/**
+	 * Bound for the first time and not yet through its first sync: the import
+	 * the user watches and can cancel (`components/ImportProgress.tsx`). Set by
+	 * `bindConnection` for a source it has not seen, cleared by `finishImport`
+	 * once a pull has reached the end and a push has gone through the queue,
+	 * and the whole source thrown away by `abandonImport` on a cancel.
+	 */
+	importing?: Importing;
+}
+
+export interface Importing {
+	/**
+	 * No other source was connected, so the device's own pile was copied in and
+	 * the app is held while the import runs. The pile is kept as it was until
+	 * the import finishes, which is what a cancel goes back to.
+	 */
+	lock: boolean;
+	/** The source that was in front before, which a cancel puts back. */
+	returnTo: string;
 }
 
 export interface Detached {

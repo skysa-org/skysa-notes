@@ -3,9 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createProviderFactory, timedFetch } from '../src/sync/providers.js';
 
-/** A request the network never answers, until it is aborted. */
+/** A request the network never answers, until it is aborted — or already was. */
 const hanging: FetchLike = (_url, init) =>
 	new Promise((_resolve, reject) => {
+		if (init.signal?.aborted === true) reject(new Error('aborted'));
 		init.signal?.addEventListener('abort', () => {
 			reject(new Error('aborted', { cause: init.signal?.reason }));
 		});
@@ -27,6 +28,23 @@ describe('provider requests', () => {
 		const provider = factory({ ...input, provider: 'dropbox' });
 
 		await expect(provider?.list('')).rejects.toThrow();
+	});
+
+	it('are given up on as soon as the sync they were for has ended', async () => {
+		// A cancel, a disconnect, another source brought to the front: a minute's
+		// deadline is a minute the connection's lock is held for nothing.
+		const session = new AbortController();
+		const factory = createProviderFactory({
+			appVersion: '1.2.3',
+			fetch: hanging,
+			timeoutMs: 60_000,
+		});
+		const provider = factory({ ...input, provider: 'dropbox', signal: session.signal });
+
+		const listing = provider?.list('');
+		session.abort();
+
+		await expect(listing).rejects.toThrow();
 	});
 
 	it('keep a signal the caller brought', async () => {

@@ -13,7 +13,7 @@ import {
 	type StorageProvider,
 } from '../../src/providers/types.js';
 import { conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
-import { createSyncEngine, type SyncEngine } from '../../src/sync/engine.js';
+import { createSyncEngine, type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
@@ -8049,5 +8049,114 @@ describe('a file that is not UTF-8 text', () => {
 			expect(store.notes()).toEqual([]);
 			expect(await listed()).toEqual([`${file.remoteId} a.md`]);
 		});
+	});
+});
+
+/**
+ * What a long run says of itself (`onProgress`). The import dialog draws from
+ * it, so what matters is that the counts only climb, that a note already held
+ * is not counted as fetched, and that a short round says nothing at all.
+ */
+describe('progress', () => {
+	const reporting = (base: StorageProvider) => {
+		const said: SyncProgress[] = [];
+		const counted = createSyncEngine({
+			provider: base,
+			store,
+			now: () => AT,
+			onProgress: (progress) => said.push(progress),
+		});
+		return { said, counted };
+	};
+
+	it('lists every page before it reads, then counts up to what it found', async () => {
+		provider = createFakeProvider({ pageSize: 1 });
+		await provider.ensureRoot();
+		await provider.write('a.md', '1\n', {});
+		await provider.write('b.md', '2\n', {});
+		await provider.createFolder('Work');
+		await provider.write('notes.txt', 'not a note\n', {});
+		const reads: string[] = [];
+		const { said, counted } = reporting({
+			...provider,
+			read: (entry) => {
+				reads.push(entry.path);
+				return provider.read(entry);
+			},
+		});
+
+		await counted.pull();
+
+		const scans = said.filter((p) => p.stage === 'scanning');
+		const listing = scans.filter((p) => p.listing);
+		// While listing: a count so far, and nothing read yet.
+		expect(listing.length).toBeGreaterThan(1);
+		expect(listing.every((p) => p.done === 0 && p.path === undefined)).toBe(true);
+		// Then the whole of it, and a count up to it, naming each file read.
+		const reading = scans.filter((p) => !p.listing);
+		expect(reading.every((p) => p.found === 2)).toBe(true);
+		expect(reading[0]).toEqual({ stage: 'scanning', found: 2, done: 0, listing: false });
+		expect(reading.flatMap((p) => (p.path === undefined ? [] : [p.path])).sort()).toEqual([
+			'a.md',
+			'b.md',
+		]);
+		expect(reading.at(-1)).toEqual({ stage: 'scanning', found: 2, done: 2, listing: false });
+		scans.slice(1).forEach((p, at) => {
+			expect(p.done).toBeGreaterThanOrEqual(scans[at]?.done ?? 0);
+		});
+		expect(reads.sort()).toEqual(['a.md', 'b.md']);
+	});
+
+	it('counts a note it already holds as done without reading it', async () => {
+		const held = await remoteFile('a.md', '1\n');
+		await remoteFile('b.md', '2\n');
+		store.put({
+			id: 'n1',
+			path: 'a.md',
+			content: '1\n',
+			remoteId: held.remoteId,
+			remoteVersion: held.version,
+			dirty: false,
+		});
+		const { said, counted } = reporting(provider);
+
+		await counted.pull();
+
+		const named = said.flatMap((p) => (p.path === undefined ? [] : [p.path]));
+		expect(named).toEqual(['b.md']);
+		expect(said.at(-1)).toEqual({ stage: 'scanning', found: 2, done: 2, listing: false });
+	});
+
+	it('says nothing for a round from a stored cursor', async () => {
+		await remoteFile('a.md', '1\n');
+		await engine.pull();
+		await remoteFile('b.md', '2\n');
+		const { said, counted } = reporting(provider);
+
+		await counted.pull();
+
+		expect(said).toEqual([]);
+	});
+
+	it('counts a push against its queue', async () => {
+		store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
+		store.put({ id: 'n2', path: 'b.md', content: 'two\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
+		const { said, counted } = reporting(provider);
+
+		await counted.push();
+
+		expect(said).toEqual([
+			{ stage: 'uploading', done: 0, total: 2, path: 'a.md' },
+			{ stage: 'uploading', done: 1, total: 2, path: 'b.md' },
+			{ stage: 'uploading', done: 2, total: 2 },
+		]);
+	});
+
+	it('says nothing for a push with nothing to send', async () => {
+		const { said, counted } = reporting(provider);
+		await counted.push();
+		expect(said).toEqual([]);
 	});
 });

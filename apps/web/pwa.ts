@@ -17,7 +17,7 @@ const PROVIDER_ORIGINS =
 	/^https:\/\/(www\.googleapis\.com|graph\.microsoft\.com|[a-z]+\.dropboxapi\.com|(?:[a-z0-9-]+\.)+files\.1drv\.com|my\.microsoftpersonalcontent\.com|(?:[a-z0-9-]+\.)+sharepoint\.com)\//;
 
 export const PWA_MANIFEST: Partial<ManifestOptions> = {
-	name: 'skysa-notes',
+	name: 'Skysa Notes',
 	short_name: 'Notes',
 	description: 'Local-first markdown notes that sync to your own cloud storage.',
 	theme_color: '#111827',

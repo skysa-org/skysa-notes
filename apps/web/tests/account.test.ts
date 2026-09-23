@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
-import { bindConnection, detachConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
 import { beginConnect } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
@@ -15,6 +15,7 @@ import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createNote, deleteNote, getNote, saveNoteBody } from '../src/store/notes.js';
 import {
+	cancelImport,
 	claimConnection,
 	disconnectAccount,
 	reconcileAccount,
@@ -207,7 +208,17 @@ describe('claiming a connection the user has just consented to', () => {
 		expect((await db.credentials.get('c9'))?.credential).toBe(credential);
 		expect(await activeConnectionId(db)).toBe('c9');
 		expect((await getNote(db, note.id))?.connectionId).toBe('c9');
+		// Kept until the import is through, for a cancel to go back to.
+		expect((await db.syncState.get('c9'))?.importing).toEqual({
+			lock: true,
+			returnTo: LOCAL_CONNECTION_ID,
+		});
+		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(1);
+
+		await finishImport(db, 'c9');
+
 		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(0);
+		expect((await getNote(db, note.id))?.connectionId).toBe('c9');
 	});
 
 	it('does not ask about another source’s notes, which binding will not move', async () => {
@@ -896,5 +907,120 @@ describe('disconnecting', () => {
 
 		expect(await activeConnectionId(db)).toBe('c1');
 		expect(await db.credentials.get('c1')).toBeDefined();
+	});
+});
+
+/**
+ * A first import, cancelled (`cancelImport`): the sync held, the server asked
+ * to let go, and the source thrown away here — in that order, and none of it
+ * for an import that has finished.
+ */
+describe('cancelling an import', () => {
+	const disconnecting = (answer: () => Promise<Result<{ revoked: boolean }>>) => {
+		const disconnect = vi.fn<ApiClient['disconnect']>(answer);
+		const withCredential = vi.fn(
+			() => ({ disconnect }) as unknown as ReturnType<ApiClient['withCredential']>
+		);
+		return { withCredential, disconnect };
+	};
+
+	/** A scheduler that records being held, and being let go. */
+	const holdable = () => {
+		const log: string[] = [];
+		return {
+			log,
+			halt: vi.fn((id: string) => {
+				log.push(`halt ${id}`);
+				return Promise.resolve(() => {
+					log.push(`release ${id}`);
+				});
+			}),
+		};
+	};
+
+	/** A device used before connecting, part-way through its first import. */
+	const importing = async () => {
+		const db = freshDatabase();
+		const mine = await createNote(db, { title: 'Mine', body: 'mine\n' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		return { db, mine };
+	};
+
+	it('holds the sync, lets go on the server, and puts the device back', async () => {
+		const { db, mine } = await importing();
+		const sync = holdable();
+		const client = disconnecting(() => {
+			sync.log.push('server');
+			return Promise.resolve({ ok: true, value: { revoked: true } });
+		});
+
+		expect(
+			await cancelImport(db, client, sync, { connectionId: 'c1', onServer: true })
+		).toEqual({
+			ok: true,
+			outcome: 'cancelled',
+		});
+
+		expect(sync.log).toEqual(['halt c1', 'server', 'release c1']);
+		expect(await db.syncState.get('c1')).toBeUndefined();
+		expect(await db.credentials.get('c1')).toBeUndefined();
+		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
+		expect((await getNote(db, mine.id))?.connectionId).toBe(LOCAL_CONNECTION_ID);
+	});
+
+	it('changes nothing when the server will not let go, and lets the sync go on', async () => {
+		const { db } = await importing();
+		const sync = holdable();
+		const client = disconnecting(() => Promise.resolve({ ok: false, refusal: 'not_entitled' }));
+
+		expect(
+			await cancelImport(db, client, sync, { connectionId: 'c1', onServer: true })
+		).toEqual({
+			ok: false,
+			refusal: 'not_entitled',
+		});
+
+		expect(sync.log).toEqual(['halt c1', 'release c1']);
+		expect((await db.syncState.get('c1'))?.importing).toBeDefined();
+		expect(await db.credentials.get('c1')).toBeDefined();
+	});
+
+	it('throws, having changed nothing, when the server cannot be reached', async () => {
+		const { db } = await importing();
+		const sync = holdable();
+		const client = disconnecting(() => Promise.reject(new TypeError('offline')));
+
+		await expect(
+			cancelImport(db, client, sync, { connectionId: 'c1', onServer: true })
+		).rejects.toThrow();
+
+		expect(sync.log).toEqual(['halt c1', 'release c1']);
+		expect((await db.syncState.get('c1'))?.importing).toBeDefined();
+	});
+
+	it('cancels here alone when asked to, without the server', async () => {
+		const { db } = await importing();
+		const client = disconnecting(() => Promise.reject(new TypeError('offline')));
+
+		expect(
+			await cancelImport(db, client, holdable(), { connectionId: 'c1', onServer: false })
+		).toEqual({ ok: true, outcome: 'cancelled' });
+
+		expect(client.disconnect).not.toHaveBeenCalled();
+		expect(await db.syncState.get('c1')).toBeUndefined();
+	});
+
+	it('asks the server nothing for an import that has already finished', async () => {
+		const { db, mine } = await importing();
+		await finishImport(db, 'c1');
+		const client = disconnecting(() => Promise.resolve({ ok: true, value: { revoked: true } }));
+
+		expect(
+			await cancelImport(db, client, holdable(), { connectionId: 'c1', onServer: true })
+		).toEqual({ ok: true, outcome: 'imported' });
+
+		expect(client.disconnect).not.toHaveBeenCalled();
+		expect((await getNote(db, mine.id))?.connectionId).toBe('c1');
 	});
 });

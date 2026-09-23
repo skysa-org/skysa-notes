@@ -7,11 +7,12 @@ import {
 	type StorageProvider,
 	type SyncEngine,
 	type SyncOutcome,
+	type SyncProgress,
 } from '@skysa/core';
 import { liveQuery } from 'dexie';
 
 import { type ApiClient, type Refusal } from '../api/client.js';
-import { bindingCount, verifyResume } from '../store/connection.js';
+import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
 import {
 	activeConnectionId,
 	type NotesDatabase,
@@ -87,6 +88,11 @@ export interface SchedulerStatus {
 	readonly conflicts: readonly string[];
 	/** Which op is stuck, when one is: `attention` without this is about a token. */
 	readonly stuck?: StuckOp;
+	/**
+	 * How far a long run has got — a full scan, a push — while it is `syncing`,
+	 * and only then (`onProgress` in the engine). What the import dialog shows.
+	 */
+	readonly progress?: SyncProgress;
 }
 
 export type SchedulerEvent = 'focus' | 'visibilitychange' | 'online' | 'offline';
@@ -136,6 +142,12 @@ export interface ProviderInput {
 	/** The install's id, which the marker file reports. */
 	readonly clientId: string;
 	readonly getAccessToken: () => Promise<string>;
+	/**
+	 * Aborted when the session the adapter serves ends — a cancel, a
+	 * disconnect, another source brought to the front — so a request it has
+	 * out stops there rather than at its deadline.
+	 */
+	readonly signal?: AbortSignal;
 }
 
 /** The adapter for a connection, or `undefined` for a provider this build cannot sync. */
@@ -157,6 +169,8 @@ export interface SyncSchedulerOptions {
 	maxAttempts?: number;
 	/** How long an op is left `blocked` before it is tried again on its own. */
 	blockedRetryMs?: number;
+	/** How often, at most, progress is published: it can arrive every file. */
+	progressMs?: number;
 }
 
 export interface SyncScheduler {
@@ -181,6 +195,14 @@ export interface SyncScheduler {
 	readonly status: () => SchedulerStatus;
 	/** Called with every status change. Returns the way to unsubscribe. */
 	readonly subscribe: (listener: (status: SchedulerStatus) => void) => () => void;
+	/**
+	 * Stop syncing `connectionId` now, and start nothing for it until the
+	 * returned release is called: what a cancel does before it asks the server
+	 * anything, so the import stops as the user presses the button rather than
+	 * when the server answers. Resolves once the run it was in has let go of the
+	 * store, which its requests being aborted makes quick.
+	 */
+	readonly halt: (connectionId: string) => Promise<() => void>;
 }
 
 /**
@@ -213,6 +235,8 @@ interface Session {
 	 * connection that is bound now.
 	 */
 	readonly stuck: Map<'op', StuckOp>;
+	/** Aborted when the session ends, and every provider request with it. */
+	readonly abort: AbortController;
 }
 
 /** What one run came to, before it is turned into a status. */
@@ -256,6 +280,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const maxBackoffMs = options.maxBackoffMs ?? 5 * 60_000;
 	const maxAttempts = options.maxAttempts ?? MAX_OP_ATTEMPTS;
 	const blockedRetryMs = options.blockedRetryMs ?? 15 * 60_000;
+	const progressMs = options.progressMs ?? 150;
 
 	const current = new Map<'session', Session>();
 	const generations = new Map<'count', number>([['count', 0]]);
@@ -278,9 +303,16 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * the app says `syncing`, or after the op went through.
 	 */
 	const publish = (next: SchedulerStatus) => {
-		const { stuck: _carried, ...rest } = next;
+		const { stuck: _carried, progress, ...rest } = next;
 		const stuck = current.get('session')?.stuck.get('op');
-		const full: SchedulerStatus = { ...rest, ...(stuck === undefined ? {} : { stuck }) };
+		// Progress is about the run under way and nothing else: carried into
+		// `idle` by a `{ ...status() }`, the dialog would go on saying "318
+		// downloaded" about a run that has finished.
+		const full: SchedulerStatus = {
+			...rest,
+			...(stuck === undefined ? {} : { stuck }),
+			...(progress === undefined || rest.phase !== 'syncing' ? {} : { progress }),
+		};
 		statusBox.set('status', full);
 		listeners.forEach((listener) => {
 			listener(full);
@@ -349,6 +381,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// As above: only while the device still syncs it.
 		await updateLive(db, session.connectionId, (live) => ({ ...live, lastSyncAt: pulledAt }));
 		const pushed = await engine.push();
+		// The first import is done once the queue has been through: sent, or
+		// stuck on an op the panel will name. Not on a push that will be tried
+		// again — the pile is still the only whole copy of anything it owes.
+		if (pushed.status === 'ok' || pushed.status === 'blocked') {
+			await finishImport(db, session.connectionId);
+		}
 		return {
 			outcome: {
 				...pushed,
@@ -636,6 +674,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					: Promise.resolve<RunResult>({ kind: 'superseded' })
 			)
 			.catch((error: unknown): RunResult => ({ kind: 'failed', error }));
+		// Whatever it had still to say is about a run that has ended.
+		cancelProgress();
 		if (isCurrent(session)) {
 			await settle(session, result).catch((error: unknown) => {
 				failed(session, messageOf(error));
@@ -655,8 +695,48 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		sessionUnsubscribers.clear();
 		cancel('next');
 		cancel('debounce');
+		cancelProgress();
+		current.get('session')?.abort.abort();
 		current.delete('session');
 	};
+
+	// ----------------------------------------------------------- progress
+
+	const pendingProgress = new Map<'at', SyncProgress>();
+	const progressTimer = new Map<'timer', () => void>();
+
+	const cancelProgress = () => {
+		progressTimer.get('timer')?.();
+		progressTimer.delete('timer');
+		pendingProgress.delete('at');
+	};
+
+	/**
+	 * The engine says how far it has got as often as every file. Published at
+	 * most every `progressMs`, and always the latest: the first straight away,
+	 * so a dialog does not sit on "getting ready" through a slow first page.
+	 */
+	const reportProgress = (session: Session, progress: SyncProgress) => {
+		if (!isCurrent(session)) return;
+		pendingProgress.set('at', progress);
+		if (progressTimer.has('timer')) return;
+		const flush = () => {
+			const latest = pendingProgress.get('at');
+			pendingProgress.delete('at');
+			if (latest === undefined || !isCurrent(session) || status().phase !== 'syncing') {
+				progressTimer.delete('timer');
+				return;
+			}
+			publish({ ...status(), progress: latest });
+			progressTimer.set('timer', environment.setTimer(flush, progressMs));
+		};
+		flush();
+	};
+
+	/** Connections a cancel is holding still: no session starts for them. */
+	const halted = new Set<string>();
+	/** The row the app last showed, for `follow` to be asked again about. */
+	const shown = new Map<'state', SyncStateRecord | undefined>();
 
 	/** A local edit queues an op, so a new highest seq is an edit to push. */
 	const watchEdits = (session: Session) => {
@@ -688,7 +768,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// the user to connect again about a source that already says so. Asked
 		// here, on every change of the row, so a session running when its source
 		// is detached ends there, and one starts when it is connected again.
-		const state = showing?.detached === undefined ? showing : undefined;
+		const live = showing?.detached === undefined ? showing : undefined;
+		// Held by a cancel, which is about to ask the server to let it go.
+		const state = live !== undefined && halted.has(live.connectionId) ? undefined : live;
 		const active = current.get('session');
 		if (state?.connectionId === active?.connectionId && active !== undefined) return;
 		endSession();
@@ -701,6 +783,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		generations.set('count', generation);
 		const { connectionId } = state;
 		const tokens = createTokenSource({ db, client, connectionId, now: environment.now });
+		const abort = new AbortController();
 		const provider =
 			state.provider === undefined
 				? undefined
@@ -709,6 +792,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 						provider: state.provider,
 						clientId: state.clientId,
 						getAccessToken: tokens.get,
+						signal: abort.signal,
 					});
 		const session: Session = {
 			generation,
@@ -723,6 +807,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 							store: createDexieSyncStore(db, { connectionId }),
 							reauthorize: () => reauthorize(tokens),
 							maxAttempts,
+							onProgress: (progress) => {
+								reportProgress(session, progress);
+							},
 						}),
 			flags: new Set(),
 			failures: new Map(),
@@ -730,6 +817,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			inFlight: new Map(),
 			blockedSince: new Map(),
 			stuck: new Map(),
+			abort,
 		};
 		current.set('session', session);
 		publish({ phase: 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
@@ -754,7 +842,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			const subscription = liveQuery(async () =>
 				db.syncState.get(await activeConnectionId(db))
 			).subscribe({
-				next: follow,
+				next: (state) => {
+					shown.set('state', state);
+					follow(state);
+				},
 			});
 			unsubscribers.add(() => {
 				subscription.unsubscribe();
@@ -842,6 +933,19 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			await run(session);
 		},
 		status,
+
+		halt: async (connectionId) => {
+			halted.add(connectionId);
+			const session = current.get('session');
+			const running =
+				session?.connectionId === connectionId ? session.inFlight.get('run') : undefined;
+			follow(shown.get('state'));
+			await running?.catch(() => undefined);
+			return () => {
+				if (!halted.delete(connectionId)) return;
+				follow(shown.get('state'));
+			};
+		},
 
 		subscribe: (listener) => {
 			listeners.add(listener);
