@@ -2677,3 +2677,133 @@ button.danger {
 .toast-error span {
 	font-weight: 600;
 }
+
+/* ---- Touch ---------------------------------------------------------------- */
+
+/*
+ * A finger is not a pointer. Every control above is sized for a mouse, from
+ * the 1.5rem editor tabs to the 30px rows of a menu, and on a touch screen
+ * that is a row of targets a thumb covers two of. Here, and only where the
+ * primary pointer is coarse, each one is at least `--tap` both ways: 2.75rem,
+ * 44px, the size Apple's guidelines and WCAG 2.5.5 give. A mouse keeps the
+ * denser layout it was drawn for, whatever the window's width — a touch
+ * laptop's trackpad is the primary pointer, and it stays as it was.
+ *
+ * Grown in place rather than with an invisible hit area around the old box:
+ * most of these sit shoulder to shoulder, where a hit area bigger than what is
+ * drawn lands on its neighbour's. The bars are thinner around them instead
+ * (`--bar-block`), so a header is not the sum of both.
+ */
+@media (pointer: coarse) {
+	:root {
+		--tap: 2.75rem;
+		--control: var(--tap);
+		/* The inset either side of a glyph that makes an icon button `--tap`
+		   wide: the glyph is 1rem. */
+		--control-inline: calc((var(--tap) - 1rem) / 2);
+	}
+
+	.app-frame,
+	.app-frame.compact {
+		--bar-block: var(--space-2xs);
+	}
+
+	/* The bars' icons. */
+	button.icon,
+	.compact-icon {
+		width: var(--tap);
+		height: var(--tap);
+	}
+
+	/* The editor's pair of tabs: their outline and its padding are inside the
+	   `--tap` the pair is tall, and each is as wide as the rest. */
+	.note-actions .mode-tabs button {
+		width: var(--tap);
+		height: calc(var(--tap) - 4px);
+		min-height: 0;
+	}
+
+	/* The buttons are the spacing now: at 44px, the gaps a mouse needed
+	   between 28px ones would push the last off the side of a phone. */
+	.note-header {
+		gap: var(--space-2xs);
+	}
+
+	.note-title-input {
+		min-height: var(--tap);
+	}
+
+	/* Rows: the notebooks, the notes, the sources, the answers to a search. */
+	button.row {
+		justify-content: center;
+		min-height: var(--tap);
+	}
+
+	.tree button.row {
+		justify-content: space-between;
+	}
+
+	.source-tab,
+	.source-add-button {
+		align-items: center;
+		min-height: var(--tap);
+	}
+
+	.compact-picker,
+	.toolbar-button,
+	.toolbar-item,
+	.slash-item,
+	.outline button,
+	.code-tool-language,
+	.toolbar-link-actions button,
+	.toolbar-link input,
+	.note-actions button,
+	.account a.button,
+	.account button,
+	.toast button,
+	.update-prompt button,
+	.tab-notice button,
+	.modal button,
+	.error-actions button,
+	.find-row button,
+	.find-input,
+	.note-search,
+	.compact-search .note-search,
+	.editor-rich-surface .editor-tail {
+		min-height: var(--tap);
+	}
+
+	.toolbar-button {
+		min-width: var(--tap);
+		justify-content: center;
+	}
+
+	.code-tool {
+		justify-content: center;
+		min-width: var(--tap);
+		min-height: var(--tap);
+	}
+
+	/* Below 16px, iOS zooms the page into a field as it is focused, and does
+	   not zoom back out. */
+	.note-search,
+	.find-input,
+	.toolbar-link input {
+		font-size: 1rem;
+	}
+
+	/* A task's box at the 24px WCAG's own minimum asks, not `--tap`: the
+	   lines of a list are closer together than 44px, and a box that big would
+	   overlap the one below. It fills the list's margin, so the words of a
+	   task step in a little to clear it. */
+	.editor-rich-surface li[data-item-type='task'] {
+		padding-inline-start: var(--space-xs);
+	}
+
+	.editor-rich-surface .task-checkbox {
+		inset-inline-start: -1.5rem;
+		inset-block-start: 0.1em;
+		width: 1.5rem;
+		height: 1.5rem;
+	}
+}
