@@ -204,7 +204,7 @@ const RenameRow = ({
 	return (
 		<span
 			className="row-editing"
-			style={{ paddingInlineStart: `${String(0.75 + depth * 0.85)}rem` }}
+			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
 		>
 			<input
 				ref={field}
@@ -338,7 +338,7 @@ const Row = ({
 		<button
 			type="button"
 			className={classes.join(' ')}
-			style={{ paddingInlineStart: `${String(0.75 + depth * 0.85)}rem` }}
+			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
 			// A row nothing can land on is not a destination, and saying so with
 			// `disabled` also takes it out of the tab order for the length of the
 			// move — a keyboard user stepping through destinations should not have

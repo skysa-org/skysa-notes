@@ -14,8 +14,12 @@ wide note and collapsed beside a narrower one, with an Outline button in the
 note's header to open it, going by the note's own width rather than the
 window's. The note's header keeps to one line, the path giving way before the
 title, and its controls are icons: rich text and markdown as a pair of tabs,
-a trash can for delete, and Outline and Format toggles that show when they
-are on. The formatting toolbar keeps to one line too: what does not fit moves
+Outline and Format toggles that show when they are on, and a Note options
+menu to move or delete the note. Spacing is consistent across the screen —
+the note's title lines up with its first line and the toolbar's first
+label, pane headings with their rows — and tightens in a compact window. A
+toggle that is on shows it in the accent colour, and no longer looks on
+after being tapped off on a touch screen. The formatting toolbar keeps to one line too: what does not fit moves
 into a More tools menu at its end, least used first. Pressing Escape on the
 `+` beside the tabs now closes its menu, and a second press on the `+` closes
 it rather than reopening it.

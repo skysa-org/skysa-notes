@@ -84,6 +84,7 @@ describe('undoing the delete of a note the editor held an older edit to', () => 
 			expect((await getNote(db, note.id))?.body).toBe('from the other tab\ntyped after\n');
 		});
 
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 		const notice = await screen.findByRole('status');
 		store.refusingText = undefined;

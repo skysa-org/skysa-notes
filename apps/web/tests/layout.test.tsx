@@ -175,3 +175,66 @@ describe('the note header', () => {
 		);
 	});
 });
+
+describe('the spacing', () => {
+	// jsdom lays nothing out, so what is pinned is that the blocks whose words
+	// have to line up down the screen take their inset from the one variable,
+	// and that the densities are set on it rather than block by block.
+	it.each([
+		'.pane-header',
+		'.note-header',
+		'button.row',
+		'.editor-rich-surface',
+		'.banner',
+		'.find-bar',
+		'.account',
+	])('%s takes its inset from the gutter', (selector) => {
+		expect(declarations(selector)).toMatch(/padding: var\(--[\w-]+\) var\(--gutter\)/);
+	});
+
+	it('gives the pane headers and the note header the same height, so their rules meet', () => {
+		expect(declarations('.pane-header')).toContain('padding: var(--bar-block) var(--gutter)');
+		expect(declarations('.note-header')).toContain('padding: var(--bar-block) var(--gutter)');
+	});
+
+	it('tightens in a compact window and beside a narrow note, in one place each', () => {
+		expect(declarations('.app-frame.compact')).toMatch(/--gutter: var\(--space-m\)/);
+		expect(styles).toMatch(
+			/@container note \(width < [\d.]+rem\) \{\s*\.note-view > \* \{\s*--gutter:/
+		);
+		expect(styles).not.toMatch(/\.compact \.note-header/);
+	});
+
+	it('pulls the bars that start with a control in by its inset', () => {
+		for (const selector of ['.format-toolbar', '.compact-bar']) {
+			expect(declarations(selector)).toMatch(
+				/calc\(var\(--gutter\) - [^;]*var\(--control-inline\)\)/
+			);
+		}
+	});
+});
+
+describe('toggles', () => {
+	it('show that they are on in the accent, not a darker grey than hover', () => {
+		for (const selector of [
+			".note-actions .note-icon[aria-pressed='true']",
+			'.toolbar-button-on',
+			".code-tool[aria-pressed='true']",
+		]) {
+			expect(declarations(selector)).toContain('background: var(--on-bg)');
+		}
+	});
+
+	it('light on hover only where the pointer can hover', () => {
+		// On a touch screen `:hover` sticks to the last thing tapped, and a
+		// toggle just turned off would stay lit.
+		const outside = styles
+			.replace(/\/\*[\s\S]*?\*\//g, '')
+			.replace(/@media \(hover: hover\) \{(?:[^{}]*\{[^}]*\})*\s*\}/g, '');
+		expect(outside).not.toMatch(/:hover/);
+	});
+
+	it('show keyboard focus as a ring, apart from the state', () => {
+		expect(declarations('button:focus-visible')).toContain('outline: 2px solid var(--ring)');
+	});
+});

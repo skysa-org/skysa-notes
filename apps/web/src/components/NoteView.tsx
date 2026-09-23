@@ -29,6 +29,7 @@ import {
 	useElementWidth,
 	useMediaQuery,
 } from './layout.js';
+import { OptionsMenu } from './OptionsMenu.js';
 import { Outline } from './Outline.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
@@ -63,6 +64,12 @@ export interface NoteViewProps {
 	 * keeps it beside the note; as the body it would undo that later edit.
 	 */
 	onDeleted: (deleted: NoteRecord, beside?: DisplacedText) => void;
+	/**
+	 * Pick the note up to put it down in another notebook, as dragging its row
+	 * does. Offered in the note's menu only when given: nothing can be moved
+	 * while something else already is.
+	 */
+	onMove?: () => void;
 }
 
 /**
@@ -271,7 +278,7 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 	return { compact, outlineFits, showOutline, toggleOutline, toolbar, toggleToolbar };
 };
 
-export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
+export const NoteView = ({ note, onDeleted, onMove }: NoteViewProps) => {
 	const noteId = note?.id;
 	const defaultMode = useDefaultEditorMode();
 
@@ -439,6 +446,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 					setFinding(0);
 				}}
 				onDelete={onDelete}
+				onMove={onMove}
 				onUserEdit={onUserEdit}
 				onUnsupported={() => {
 					// The raw editor takes over, built from the stored body.
@@ -523,6 +531,7 @@ const NoteScreen = ({
 	toggleMode,
 	onClose,
 	onDelete,
+	onMove,
 	onUserEdit,
 	onUnsupported,
 	onAdopted,
@@ -538,6 +547,7 @@ const NoteScreen = ({
 	toggleMode: () => void;
 	onClose: () => void;
 	onDelete: () => void;
+	onMove: (() => void) | undefined;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
 	onAdopted: () => void;
@@ -585,15 +595,19 @@ const NoteScreen = ({
 					{mode !== undefined && (
 						<ModeTabs mode={mode} unsupported={unsupported} toggleMode={toggleMode} />
 					)}
-					<button
-						type="button"
-						className="note-icon"
-						onClick={onDelete}
-						aria-label="Delete"
-						title="Delete this note"
-					>
-						<Icon name="trash" />
-					</button>
+					<OptionsMenu
+						label="Note options"
+						title="Note options"
+						groupLabel={`Note “${note.title}”`}
+						triggerClassName="note-icon"
+						trigger={<Icon name="more" />}
+						items={[
+							...(onMove === undefined
+								? []
+								: [{ label: 'Move to notebook…', onChoose: onMove }]),
+							{ label: 'Delete', onChoose: onDelete, danger: true },
+						]}
+					/>
 				</div>
 			</header>
 

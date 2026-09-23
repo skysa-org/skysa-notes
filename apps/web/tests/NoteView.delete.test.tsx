@@ -59,6 +59,7 @@ describe('deleting a note with an edit still pending', () => {
 		render(<Harness id={note.id} />);
 
 		await user.click(await screen.findByTestId('rich-editor'));
+		await user.click(screen.getByRole('button', { name: 'Note options' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(async () => {

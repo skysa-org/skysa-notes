@@ -49,6 +49,7 @@ const openApp = async (...titles: string[]) => {
 const openAndDelete = async (user: ReturnType<typeof userEvent.setup>, title: string) => {
 	await user.click(await screen.findByRole('button', { name: new RegExp(title) }));
 	await screen.findByDisplayValue(title);
+	await user.click(screen.getByRole('button', { name: 'Note options' }));
 	await user.click(screen.getByRole('button', { name: 'Delete' }));
 	return screen.findByRole('status');
 };

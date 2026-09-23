@@ -151,6 +151,33 @@ const SourceDropdown = ({
 		/>
 	) : null;
 
+/**
+ * Picking the open note up to move it, from the palette or from the note's
+ * own menu — offered in both only while nothing else is in the air. What it
+ * returns is spread onto `NoteView`, which offers the move when it is there.
+ */
+const useNoteMove = (
+	openNote: NoteRecord | undefined,
+	moving: Moving | null,
+	pickUp: (what: Moving) => void
+): { onMove?: () => void } => {
+	const offered = openNote !== undefined && moving === null;
+	const move = () => {
+		if (openNote === undefined) return;
+		pickUp({ kind: 'note', id: openNote.id, path: openNote.path, name: openNote.title });
+	};
+
+	useCommand({
+		id: 'note.move',
+		label: 'Move note to notebook',
+		group: 'Note',
+		enabled: offered,
+		run: move,
+	});
+
+	return offered ? { onMove: move } : {};
+};
+
 const Home = () => {
 	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
@@ -648,21 +675,7 @@ const Home = () => {
 		},
 	});
 
-	useCommand({
-		id: 'note.move',
-		label: 'Move note to notebook',
-		group: 'Note',
-		enabled: openNote !== undefined && moving === null,
-		run: () => {
-			if (openNote === undefined) return;
-			pickUp({
-				kind: 'note',
-				id: openNote.id,
-				path: openNote.path,
-				name: openNote.title,
-			});
-		},
-	});
+	const noteMove = useNoteMove(openNote, moving, pickUp);
 
 	useShortcuts();
 
@@ -790,6 +803,7 @@ const Home = () => {
 
 				<NoteView
 					note={openNote}
+					{...noteMove}
 					onDeleted={(note, displaced) => {
 						setDeleted(note);
 						setBeside(displaced ?? null);
