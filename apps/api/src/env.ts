@@ -4,7 +4,7 @@ import { z } from 'zod';
 /**
  * Validation for the operator's environment. This module never reads the
  * environment itself — `src/worker.ts` is the only place that touches it and
- * passes the result into `createApp`. See docs/PLAN.md §6.
+ * passes the result into `createApp`. See docs/ARCHITECTURE.md §6.
  */
 
 const booleanish = z
@@ -121,7 +121,7 @@ const missingCredentialIssues = (raw: Record<string, unknown>): string[] => {
 };
 
 /**
- * `account-first` is not built and is **not going to be** (docs/PLAN.md §6, "No
+ * `account-first` is not built and is **not going to be** (docs/ARCHITECTURE.md §6, "No
  * sign-in separate from storage"). It used to be accepted and then behave
  * exactly like `storage-first`, which is the worst of the three possibilities:
  * an operator who set it believed connections were gated behind a sign-in they
@@ -129,13 +129,13 @@ const missingCredentialIssues = (raw: Record<string, unknown>): string[] => {
  * cannot be misread.
  *
  * The whole variable goes in a change of its own — removing it is breaking for
- * anyone with it in a `wrangler.toml` (docs/PLAN.md §10 lists every site).
+ * anyone with it in a `wrangler.toml` (issue #118 lists every site).
  * Until then this refusal is what keeps the setting from meaning anything.
  */
 const unbuiltAuthModeIssues = (raw: Record<string, unknown>): string[] =>
 	raw.AUTH_MODE === 'account-first'
 		? [
-				'AUTH_MODE: account-first is not implemented and will not be (docs/PLAN.md §6). ' +
+				'AUTH_MODE: account-first is not implemented and will not be (docs/ARCHITECTURE.md §6). ' +
 					'Use storage-first, where each connected account is its own silo.',
 			]
 		: [];

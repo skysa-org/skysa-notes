@@ -10,7 +10,7 @@ import { connectedName, sourceName } from '../sync/account.js';
  *
  * The one place in the app where a user's writing crosses from one storage
  * account into another, so it is two steps and both of them name the account it
- * is going to (docs/PLAN.md §10). The first offers it; the second says exactly
+ * is going to (docs/ARCHITECTURE.md §10). The first offers it; the second says exactly
  * what will be in each account afterwards, including the two things people are
  * entitled to be surprised by — a note that was pushed once is left behind in
  * an older version as well as copied, and an unsent rename or delete is not

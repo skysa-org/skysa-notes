@@ -97,7 +97,7 @@ interface Remote {
 	 * Whether a listing sees everything a delete would remove. False on Google
 	 * Drive, where `drive.file` hides files the user put in the folder
 	 * themselves — so no listing can prove it empty, and the app leaves the
-	 * directory rather than trash what it cannot see (PLAN §7, "A folder is
+	 * directory rather than trash what it cannot see (docs/ARCHITECTURE.md §7, "A folder is
 	 * removed only where a listing can prove it empty").
 	 */
 	readonly provesEmpty: boolean;
@@ -874,7 +874,7 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		// search is still worth running wider, so `SOAK_SEEDS` widens it —
 		// `SOAK_SEEDS=600 pnpm --filter @skysa/web exec vitest run tests/soak`
 		// — and what a wider run has already found is written down in
-		// docs/PLAN.md §7 rather than left for the next person to rediscover.
+		// docs/ARCHITECTURE.md §7 rather than left for the next person to rediscover.
 		// Seeds 578 and 461 were a rename adopting the version of bytes nobody
 		// had read — a stale note, and lost edits — and turned on timing, so
 		// what holds the fix is scripted, in core's `overProviders.test.ts`, and
@@ -1057,7 +1057,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
 		// Drawn before the early return, as it always was. Every run is one
 		// stream from one seed, so a draw that stops happening shifts every
 		// draw after it and quietly changes what each seed means — including
-		// the seeds written down in docs/PLAN.md as having found something.
+		// the seeds written down in docs/ARCHITECTURE.md as having found something.
 		const from = pick(held);
 		const free = NOTEBOOKS.filter((path) => !held.includes(path));
 		if (free.length === 0) return;
@@ -1171,7 +1171,7 @@ const createSoak = (seed: number, remote: Remote, browsers: readonly Browser[]) 
  * queue and its own cursor, switching between them moves nothing, and nothing
  * one source holds can reach the other's storage — which is the whole of what
  * makes holding several safe, since the two remotes may belong to different
- * people (docs/PLAN.md §6).
+ * people (docs/ARCHITECTURE.md §6).
  */
 describe('one browser over two sources', () => {
 	/** A device holding both, with the first one in front. */

@@ -5,7 +5,7 @@
  * and Dropbox derive their app-folder name from the provider registration, so
  * those registrations must be named to match. Dropbox's app name is immutable
  * after creation — changing this constant means re-creating the Dropbox app.
- * See docs/PLAN.md §12.1.
+ * See docs/ARCHITECTURE.md §12.1.
  */
 export const APP_FOLDER_NAME = 'skysa-notes';
 
@@ -22,7 +22,7 @@ export const MARKER_FILE = '.notesapp.json';
 export const MARKER_SCHEMA_VERSION = 1;
 
 /** Storage providers this codebase knows. `dropbox`, `onedrive` and `gdrive`
- * have adapters; `webdav` is deferred indefinitely (docs/PLAN.md §5.4). */
+ * have adapters; `webdav` is deferred indefinitely (docs/ARCHITECTURE.md §5.4). */
 export const PROVIDER_KINDS = ['gdrive', 'onedrive', 'dropbox', 'webdav'] as const;
 
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];

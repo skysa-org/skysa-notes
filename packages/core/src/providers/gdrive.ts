@@ -37,7 +37,7 @@ import {
  * Google Drive, over the Drive API v3 with the `drive.file` scope: the app sees
  * only files it created, so everything lives in one folder it makes at the top
  * of the user's Drive and finds again by a private `appProperties` tag rather
- * than by name. See docs/PLAN.md §5.1.
+ * than by name. See docs/ARCHITECTURE.md §5.1.
  *
  * Docs consulted (2026-09-17):
  * - Files: https://developers.google.com/workspace/drive/api/reference/rest/v3/files
@@ -68,7 +68,7 @@ import {
  *   here, since the feed will not say what is inside it.
  *
  * Not in the reference pages, and so still to be confirmed against a live
- * account (docs/PLAN.md, Phase 4): what an unusable page token answers; whether
+ * account (docs/ARCHITECTURE.md, Phase 4): what an unusable page token answers; whether
  * trashing or renaming a folder lists its descendants; that files this app made
  * on one device are visible from another under `drive.file`; that a name search
  * finds a file created a moment before (verify-after-create and every path walk
@@ -176,7 +176,7 @@ const RATE_LIMITED = new Set([
  * fires only for a shape that page does not document. It is there because the shared
  * Google error model puts the condition in `error.status`, and a quota read as
  * an ordinary failure blocks the queue over something that will pass. Whether
- * Drive ever sends it is on the live-check list (docs/PLAN.md, Phase 4).
+ * Drive ever sends it is on the live-check list (docs/ARCHITECTURE.md, Phase 4).
  */
 const throttled = (failure: DriveFailure): boolean =>
 	failure.status === 429 ||

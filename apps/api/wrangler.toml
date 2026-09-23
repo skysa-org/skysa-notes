@@ -2,7 +2,7 @@
 # and sets every secret with `wrangler secret put` (see .dev.vars.example).
 name = "skysa-notes"
 main = "src/worker.ts"
-# No nodejs_compat: the Worker uses only Web Crypto and fetch (docs/PLAN.md §6).
+# No nodejs_compat: the Worker uses only Web Crypto and fetch (docs/ARCHITECTURE.md §6).
 compatibility_date = "2026-09-14"
 
 # The SPA is served from this same Worker so /api/* and the app share an origin
@@ -23,7 +23,7 @@ migrations_dir = "migrations"
 [vars]
 AUTH_MODE = "storage-first"
 # Only what this deployment can actually do. Dropbox, OneDrive and Google
-# Drive are implemented; WebDAV is deferred (docs/PLAN.md §5.4).
+# Drive are implemented; WebDAV is deferred (docs/ARCHITECTURE.md §5.4).
 #
 # Listing a provider commits the deployment to having its credentials —
 # `parseEnv` refuses to boot without them — so a clean clone answers 500 until

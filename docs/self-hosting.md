@@ -3,7 +3,7 @@
 Everything in this repository is meant to run on your own Cloudflare account.
 There is no hosted instance to fall back to and nothing withheld from the open
 source: `wrangler.toml` carries placeholders, `.dev.vars.example` lists every
-key, and no operator-specific behaviour exists outside the seams `docs/PLAN.md`
+key, and no operator-specific behaviour exists outside the seams `docs/ARCHITECTURE.md`
 §6 describes.
 
 Budget about fifteen minutes, plus however long the provider app registration
@@ -209,9 +209,10 @@ pnpm --filter @skysa/api exec wrangler d1 migrations apply skysa-notes --remote
 pnpm run deploy
 ```
 
-There are no release tags yet, so `main` is what you get and the security of
-your instance is the security of the commit you deployed. See
-[`SECURITY.md`](../SECURITY.md).
+Deploy from a release tag rather than from `main` (`git tag --list 'v*'`,
+then `git checkout vX.Y.Z`); each release's notes say whether it carries a
+migration. The security of your instance is the security of the commit you
+deployed. See [`SECURITY.md`](../SECURITY.md).
 
 ## When it will not boot
 
@@ -230,4 +231,4 @@ implemented and will not be"*. Sign-in separate from storage was dropped in
 September 2026: on this instance a person **is** their storage account, and
 accepting the setting would leave you believing connections were gated behind a
 sign-in when they were not. `storage-first` is the only value, and the variable
-itself will go (`docs/PLAN.md` §10).
+itself will go ([#118](https://github.com/skysa-org/skysa-notes/issues/118)).

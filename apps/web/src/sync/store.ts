@@ -391,7 +391,7 @@ export const createDexieSyncStore = (
 		);
 
 		// Notes move with the folder even when dirty: the move is metadata and
-		// cannot conflict with an edit to the contents (docs/PLAN.md §7).
+		// cannot conflict with an edit to the contents (docs/ARCHITECTURE.md §7).
 		const notes = (await notesOf(scope)).filter((note) => isWithin(note.path, from));
 		await scope.notes.bulkPut(
 			notes.map((note) => ({ ...note, path: rebasePath(note.path, from, to) }))

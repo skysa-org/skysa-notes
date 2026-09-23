@@ -38,7 +38,7 @@ import { createDexieSyncStore, UnboundConnectionError } from '../src/sync/store.
  * Letting a source go. The remote is the source of truth, so what it has leaves
  * the device; what it was never sent stays, under the source it was written in,
  * detached and in sight; and nothing a disconnect does fills the device's own
- * pile or reaches another account (docs/PLAN.md §6, §10).
+ * pile or reaches another account (docs/ARCHITECTURE.md §6, §10).
  */
 
 const ADA = { connectionId: 'c-ada', provider: 'dropbox', accountId: 'dbid:ada' } as const;

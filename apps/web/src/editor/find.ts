@@ -5,7 +5,7 @@ import { Text } from '@codemirror/state';
  * What "find" means, in one place, so that both editors mean the same thing by
  * it.
  *
- * The bar is shared between rich and raw (docs/PLAN.md §7), and a shared bar
+ * The bar is shared between rich and raw (docs/ARCHITECTURE.md §7), and a shared bar
  * whose two halves disagree about what matches is worse than two bars: the user
  * sees a count change when they switch modes and has no way to tell which
  * reading is right. So the *query* is one object from `@codemirror/search` —

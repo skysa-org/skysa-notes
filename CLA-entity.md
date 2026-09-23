@@ -4,7 +4,7 @@
 > Software Foundation Corporate Contributor License Agreement v2.0, with the
 > same two Harmony clauses as the individual agreement. It is prepared in
 > advance and will only be requested the first time someone contributes on
-> behalf of an employer. See `docs/PLAN.md` §13.
+> behalf of an employer. See `docs/ARCHITECTURE.md` §13.
 
 Thank you for your interest in Skysa (the "Project"). This agreement clarifies
 the intellectual property licence granted with Contributions from a corporation

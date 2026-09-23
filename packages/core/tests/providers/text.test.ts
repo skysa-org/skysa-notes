@@ -15,7 +15,7 @@ import { createGDriveStub } from './gdriveStub.js';
 import { createOneDriveStub } from './onedriveStub.js';
 
 /**
- * docs/PLAN.md §4: content is UTF-8 text, and `read` says when it is not. A
+ * docs/ARCHITECTURE.md §4: content is UTF-8 text, and `read` says when it is not. A
  * lossy decode looks like a note, and the first push from it writes U+FFFD over
  * every byte that would not read — so these pin the refusal, and that nothing
  * which *is* UTF-8 is refused with it.

@@ -18,7 +18,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
  * writing a secret down and then posting a body — neither of which a navigation
  * can do. The server refuses a `GET` here for the same reason it has to: a link
  * carrying a caller-supplied hash, followed by a victim, would hand whoever
- * wrote the link a live credential to the victim's storage (docs/PLAN.md §6).
+ * wrote the link a live credential to the victim's storage (docs/ARCHITECTURE.md §6).
  *
  * The order is load-bearing and is the one thing to be careful of when editing
  * this. The credential is written to IndexedDB and **awaited** before the POST,

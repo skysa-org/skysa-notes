@@ -14,7 +14,7 @@ import { createOneDriveStub } from '../providers/onedriveStub.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
 /**
- * docs/PLAN.md §7's conflict rule, and the engine as a whole, over every
+ * docs/ARCHITECTURE.md §7's conflict rule, and the engine as a whole, over every
  * provider: the in-memory fake in both of its folder modes and each adapter
  * over its wire stub. `engine.test.ts` pins every branch against the fake; this
  * asks whether the answers survive what each provider actually reports — a
@@ -352,7 +352,7 @@ const quiet = async (a: Device, b: Device, trace: () => string): Promise<void> =
 
 /**
  * The notes the remote holds. A file that is not text (`writeBytes`) is not one
- * of them: no device can read it, so none may hold it (docs/PLAN.md §7).
+ * of them: no device can read it, so none may hold it (docs/ARCHITECTURE.md §7).
  */
 const remoteFiles = (remote: Remote): Record<string, string> =>
 	Object.fromEntries(
@@ -367,7 +367,7 @@ const remoteFiles = (remote: Remote): Record<string, string> =>
 
 /**
  * The files the remote holds that no device can read, which each device lists
- * for its user instead (docs/PLAN.md §7). Only what would have been a note.
+ * for its user instead (docs/ARCHITECTURE.md §7). Only what would have been a note.
  */
 const remoteUnreadable = (remote: Remote): string[] =>
 	remote.backing

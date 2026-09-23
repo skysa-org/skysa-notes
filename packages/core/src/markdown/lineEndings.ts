@@ -17,7 +17,7 @@
  * note written on Windows, or arriving through a provider that stores CRLF, was
  * shown a banner saying so and locked into raw mode.
  *
- * See docs/PLAN.md §7. https://spec.commonmark.org/0.31.2/#line-ending
+ * See docs/ARCHITECTURE.md §7. https://spec.commonmark.org/0.31.2/#line-ending
  */
 
 /** The three spellings, which are one thing to a reader and three to a writer. */

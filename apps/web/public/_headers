@@ -4,10 +4,10 @@
 #
 # Not applied to what the Worker answers (/api/*, `run_worker_first` in
 # apps/api/wrangler.toml): those responses are JSON or redirects, never a page.
-# A WebDAV proxy, if ever built (deferred, docs/PLAN.md §5.4), would set its
+# A WebDAV proxy, if ever built (deferred, docs/ARCHITECTURE.md §5.4), would set its
 # own headers.
 #
-# The policy (docs/PLAN.md §9), checked by tests/csp.test.ts:
+# The policy (docs/ARCHITECTURE.md §9), checked by tests/csp.test.ts:
 # - script-src 'self' only. zod would probe for `new Function` at startup and
 #   report a violation even though it catches the refusal, so src/jitless.ts
 #   turns the probe off before any schema is built.
@@ -20,13 +20,13 @@
 #   OneDrive: graph.microsoft.com for everything but file bytes, which come
 #   from the item's pre-authenticated download URL on another host —
 #   *.files.1drv.com or my.microsoftpersonalcontent.com for personal accounts,
-#   *.sharepoint.com for work and school ones (docs/PLAN.md §5.2).
+#   *.sharepoint.com for work and school ones (docs/ARCHITECTURE.md §5.2).
 #   Google Drive: www.googleapis.com, the one host the adapter asks — file
-#   bytes (`alt=media`) and uploads included (docs/PLAN.md §5.1). Whether
+#   bytes (`alt=media`) and uploads included (docs/ARCHITECTURE.md §5.1). Whether
 #   Google redirects a download elsewhere waits on the live check; don't add
 #   *.googleusercontent.com ahead of it, as it takes in Apps Script web apps.
 # Strict-Transport-Security: the shell holds the device's per-connection
-# credentials in IndexedDB (docs/PLAN.md §6), so an origin an attacker can
+# credentials in IndexedDB (docs/ARCHITECTURE.md §6), so an origin an attacker can
 # answer for once is an origin they can read them from. Two years, for this
 # host alone. `includeSubDomains` and `preload` are deliberately absent: each
 # is a commitment on behalf of whoever self-hosts this — served from an apex

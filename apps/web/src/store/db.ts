@@ -7,7 +7,7 @@ import { watchForNewerTab } from './staleTab.js';
 /**
  * The local store. The app boots and renders from here before any network call,
  * and every read and write works offline; sync is a separate concern layered on
- * top. See docs/PLAN.md §7.
+ * top. See docs/ARCHITECTURE.md §7.
  */
 
 /**
@@ -138,7 +138,7 @@ export interface SyncStateRecord {
 	 * on the next reconcile. This is only ever written from the tab bar.
 	 *
 	 * This device only, deliberately. The credential, the cursor and the pile
-	 * are already per device (docs/PLAN.md §6), and a name is the least of them
+	 * are already per device (docs/ARCHITECTURE.md §6), and a name is the least of them
 	 * — a laptop calling a connection "Work" does not make it "Work" on a
 	 * phone. Not indexed, so it needs no version of its own, and absent on
 	 * every row until someone renames one.
@@ -152,7 +152,7 @@ export interface SyncStateRecord {
 	clientId: string;
 	/**
 	 * The provider access token `apps/api` last minted, so a reload does not
-	 * need a round trip (docs/PLAN.md §8). Short-lived; never a refresh token,
+	 * need a round trip (docs/ARCHITECTURE.md §8). Short-lived; never a refresh token,
 	 * which never leaves the server. Never in localStorage.
 	 */
 	accessToken?: string;
@@ -195,7 +195,7 @@ export interface SyncStateRecord {
 	detached?: Detached;
 	/**
 	 * The files in this source that are not UTF-8 text, which the engine leaves
-	 * alone and the storage panel lists (docs/PLAN.md §7). Here, beside the
+	 * alone and the storage panel lists (docs/ARCHITECTURE.md §7). Here, beside the
 	 * cursor, because they are written with it: one row, one `put`, so the list
 	 * never names a file from a batch that did not land. Keyed by `remoteId`
 	 * by whoever writes it (`sync/store.ts`). A notice and nothing else —
@@ -375,7 +375,7 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// whenever a folder has been copied from one account to another, since the
 	// id travels in the file. The second source then either failed to sync at
 	// all or was handed a made-up id for a file that names its own, and wrote it
-	// back over the real one. Each source is its own silo (docs/PLAN.md §6);
+	// back over the real one. Each source is its own silo (docs/ARCHITECTURE.md §6);
 	// the key now says so, as `folders` always has.
 	//
 	// IndexedDB cannot change a store's key, and Dexie refuses to try, so the
@@ -423,7 +423,7 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
  *
  * An explicit, persisted choice since Phase 7. A device may hold several
  * connected sources at once, each its own silo — its own notes, its own queue,
- * its own credential — and the app shows one at a time (docs/PLAN.md §6). Until
+ * its own credential — and the app shows one at a time (docs/ARCHITECTURE.md §6). Until
  * Phase 7 this was `syncState.first()`, which is a coin toss once there are two
  * rows, and would have shown a different source depending on IndexedDB's
  * ordering.

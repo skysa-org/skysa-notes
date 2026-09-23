@@ -2,7 +2,7 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
 
 /**
  * D1 holds tokens and connection metadata only. No note content is ever stored
- * here — see docs/PLAN.md §6.
+ * here — see docs/ARCHITECTURE.md §6.
  */
 
 /**
@@ -11,9 +11,9 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
  * There are no users here: a connection is reached by the credential the device
  * that made it holds, and nothing aggregates connections under a subject. These
  * two were kept for `account-first`, which was **dropped** on 2026-09-18 —
- * identity and storage are coupled deliberately (docs/PLAN.md §6, "No sign-in
- * separate from storage"). So they are now dead rather than early, and §10
- * tracks dropping them: a hand-written migration, `identities` before `users`
+ * identity and storage are coupled deliberately (docs/ARCHITECTURE.md §6, "No sign-in
+ * separate from storage"). So they are now dead rather than early, and issue
+ * #118 tracks dropping them: a hand-written migration, `identities` before `users`
  * because of the foreign key.
  *
  * Nothing in `src/` reads either one. Do not start.
@@ -27,7 +27,7 @@ export const users = sqliteTable(
 		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 	},
 	// Deliberately not unique: an unverified sign-in with an existing address must
-	// create a separate user rather than merge into one. See docs/PLAN.md §6.
+	// create a separate user rather than merge into one. See docs/ARCHITECTURE.md §6.
 	(t) => [index('users_email_idx').on(t.email)]
 );
 
@@ -55,7 +55,7 @@ export const identities = sqliteTable(
 
 /**
  * One connected storage account. Auth and data are coupled: a connection is its
- * own silo, and the device switches between them (docs/PLAN.md §6).
+ * own silo, and the device switches between them (docs/ARCHITECTURE.md §6).
  *
  * The SQL name is `storage_connections`, not `connections`. The old table
  * carried a `NOT NULL` foreign key to `users`, and SQLite can neither drop a
@@ -110,7 +110,7 @@ export const connections = sqliteTable(
  * constant-time comparison: `crypto.subtle.timingSafeEqual` is a Workers
  * extension that Node's webcrypto lacks, and the test suite runs on Node.
  *
- * See docs/PLAN.md §6, and CLAUDE.md on what holding a bearer in IndexedDB
+ * See docs/ARCHITECTURE.md §6, and CLAUDE.md on what holding a bearer in IndexedDB
  * costs.
  */
 export const grants = sqliteTable(

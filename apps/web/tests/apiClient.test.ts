@@ -246,7 +246,7 @@ describe('the API client', () => {
 		// A POST, and the hash in the body rather than the URL. A GET carrying a
 		// caller-supplied hash is a session-fixation hole: a link with the
 		// attacker's hash, followed by the victim, hands the attacker a live
-		// credential to the victim's storage (docs/PLAN.md §6).
+		// credential to the victim's storage (docs/ARCHITECTURE.md §6).
 		expect(calls[0]?.init?.method).toBe('POST');
 		expect(calls[0]?.url).not.toContain('A'.repeat(43));
 		expect(calls[0]?.init?.body).toBe(

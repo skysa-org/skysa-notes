@@ -9,7 +9,7 @@ import { Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
  * switch, or re-serialization. Getting this wrong means the app rewrites files
  * it was only ever asked to display, so the decision lives here as one pure
  * function with its own tests, rather than scattered through the editors.
- * See docs/PLAN.md §7.
+ * See docs/ARCHITECTURE.md §7.
  */
 
 /**

@@ -16,7 +16,7 @@ import { sameMarkdownStructure, STRINGIFY_OPTIONS } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The second fidelity layer from docs/PLAN.md §7.
+ * The second fidelity layer from docs/ARCHITECTURE.md §7.
  *
  * `core`'s round-trip suite proves the remark pipeline keeps everything. This
  * one proves the *editor* does: the same corpus is loaded into a real Milkdown

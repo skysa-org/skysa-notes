@@ -8,7 +8,7 @@ import { updateLive } from '../store/detached.js';
 /**
  * Provider access tokens for one connection, minted by `apps/api` and held in
  * memory with a copy in the connection's `syncState` row, so a reload does not
- * need a round trip (docs/PLAN.md §8). Never localStorage (CLAUDE.md).
+ * need a round trip (docs/ARCHITECTURE.md §8). Never localStorage (CLAUDE.md).
  *
  * The provider adapter asks `get` before every request. A token about to expire
  * is replaced before it is used rather than after the provider refuses it,

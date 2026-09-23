@@ -21,7 +21,7 @@ import { isUserTransaction } from './dirty.js';
  *
  * **Only when the user typed it.** A body arriving from sync, a mode switch or
  * the initial load is the app putting text in, and a note nobody edited must
- * come back byte for byte (docs/PLAN.md §7). Detection on a load would rewrite
+ * come back byte for byte (docs/ARCHITECTURE.md §7). Detection on a load would rewrite
  * fences in files that were only ever opened.
  *
  * **Only while the block has no language.** A block that names one — because

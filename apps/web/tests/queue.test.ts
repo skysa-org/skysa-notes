@@ -774,7 +774,7 @@ describe('local changes made while a push is in flight', () => {
 		await createNote(db, { ...scope, folderPath: 'Work', title: 'Plan' });
 		await engineOver(fake).sync();
 		// Twice, so the pull has had the echo of the first push. Pulled after
-		// the rename, it would put `Work` back — see docs/PLAN.md, Phase 6.
+		// the rename, it would put `Work` back — see docs/ARCHITECTURE.md, Phase 6.
 		await engineOver(fake).sync();
 		await renameFolder(db, 'Work', 'Play', scope);
 		const engine = engineOver(

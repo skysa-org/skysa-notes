@@ -8,7 +8,7 @@ import { type NoteRecord, noteRef } from './db.js';
  * nothing else: no
  * request, no provider API, no server index. The notes are already here — that
  * is what local-first means — so search has to work in a tunnel like the rest of
- * the app (docs/PLAN.md §7).
+ * the app (docs/ARCHITECTURE.md §7).
  *
  * Not a Dexie query. IndexedDB indexes whole keys and their prefixes, so it can
  * find a note whose title *starts with* what was typed and nothing else: a word
@@ -20,7 +20,7 @@ import { type NoteRecord, noteRef } from './db.js';
  * It is handed every note the user can see and told to make the index agree with
  * them. That is what lets the caller decide *when* — the app builds an index
  * only while a search is open, and drops it when the search closes, rather than
- * carrying one for a feature nobody is using (docs/PLAN.md §7).
+ * carrying one for a feature nobody is using (docs/ARCHITECTURE.md §7).
  *
  * Not `routes/search.ts`, which is the query string.
  */

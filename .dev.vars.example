@@ -6,12 +6,12 @@ APP_ORIGIN="http://localhost:5173"
 
 # storage-first — the only value. `account-first` refuses to boot: sign-in
 # separate from storage was dropped, and here a person *is* their storage
-# account (docs/PLAN.md §6). The variable itself goes next (§10).
+# account (docs/ARCHITECTURE.md §6). The variable itself is going (issue #118).
 AUTH_MODE="storage-first"
 
 # Any of: gdrive,onedrive,dropbox,webdav. `dropbox`, `onedrive` and `gdrive`
 # are implemented — webdav is deferred indefinitely, and listing it connects
-# nothing (docs/PLAN.md §5.4) — and each OAuth provider listed here must have
+# nothing (docs/ARCHITECTURE.md §5.4) — and each OAuth provider listed here must have
 # its credentials below or the app refuses to boot.
 ENABLED_PROVIDERS="dropbox"
 
@@ -22,7 +22,7 @@ SECRETS_KEY=""
 # Names the current key so rows encrypted with an older one stay readable.
 SECRETS_KEY_ID="k1"
 
-# Reserved for the deferred WebDAV proxy (docs/PLAN.md §5.4); has no effect
+# Reserved for the deferred WebDAV proxy (docs/ARCHITECTURE.md §5.4); has no effect
 # today.
 WEBDAV_ALLOW_PRIVATE="false"
 

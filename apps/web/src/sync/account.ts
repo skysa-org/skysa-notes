@@ -46,7 +46,7 @@ import { type SyncScheduler } from './scheduler.js';
  * disconnected) and on nothing else. Offline, a 5xx or a body it cannot read
  * throws, and the device keeps what it has — which is the fix for the reconcile
  * race arriving from the other side, since there is no longer a list that can
- * fail to mention a connection (docs/PLAN.md §6).
+ * fail to mention a connection (docs/ARCHITECTURE.md §6).
  *
  * Letting go is `detachConnection` on every path, the server's and the user's
  * alike: what the remote has leaves the device, and what it was never sent
@@ -69,7 +69,7 @@ export interface RevokePlace {
 /**
  * What disconnecting leaves behind at the provider, where it leaves anything.
  * Dropbox lets the server withdraw the app's access; Microsoft gives an app no
- * way to withdraw its own, so the user has to (docs/PLAN.md §5.2). A grant an
+ * way to withdraw its own, so the user has to (docs/ARCHITECTURE.md §5.2). A grant an
  * administrator consented to cannot be removed by the user at all.
  * https://support.microsoft.com/en-us/account-billing/edit-or-revoke-application-permissions-in-the-my-apps-portal-169be2b4-ee26-4338-aea8-d19bb2f329ee
  * https://learn.microsoft.com/en-us/answers/questions/4375979/article-managing-apps-and-services-connected-to-ou
@@ -458,7 +458,7 @@ export type DisconnectOutcome = { ok: true } | { ok: false; refusal: Refusal };
  * The credential is thrown away with the binding. There is nothing to tell the
  * server: its hash is already spent there, and spent for ever, so a copy of
  * this credential taken before now can never claim a connection of its own
- * (docs/PLAN.md §6).
+ * (docs/ARCHITECTURE.md §6).
  *
  * Here, the source's synced notes leave the device and anything it was never
  * sent stays under it, detached (`detachConnection`). Nothing on the remote is

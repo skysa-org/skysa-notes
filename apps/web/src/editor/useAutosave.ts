@@ -33,7 +33,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * - an edit that is still held when something newer has been issued for its
  *   note is handed to `save` as `displaced`, to be kept beside the note rather
  *   than written over it.
- * Edits of different origins are never merged by any of this (docs/PLAN.md §7):
+ * Edits of different origins are never merged by any of this (docs/ARCHITECTURE.md §7):
  * neither stands for the other, and each is attempted on its own.
  */
 

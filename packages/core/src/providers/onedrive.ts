@@ -31,7 +31,7 @@ import {
 /**
  * OneDrive, over Microsoft Graph. The app asks for `Files.ReadWrite.AppFolder`,
  * so everything lives under the drive's `special/approot` folder, which Graph
- * creates the first time it is addressed. See docs/PLAN.md §5.2.
+ * creates the first time it is addressed. See docs/ARCHITECTURE.md §5.2.
  *
  * Docs consulted (2026-09-17):
  * - App folder: https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/special-folders-appfolder
@@ -47,7 +47,7 @@ import {
  * one place: the delta feed carries no paths at all. See `changes` below.
  *
  * Not in the Graph reference pages, and so still to be confirmed against a live
- * account (docs/PLAN.md, Phase 3): that an upload by path answers
+ * account (docs/ARCHITECTURE.md, Phase 3): that an upload by path answers
  * `@microsoft.graph.conflictBehavior=fail` with `409 nameAlreadyExists`, that an
  * upload by id answers a stale `If-Match` with `412`, that a move honours the
  * same `conflictBehavior` (the move page documents only `if-match`), and that
@@ -726,7 +726,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		// ancestor of what it listed is in the tree or was listed too — which is
 		// what `settlePage` asks. It does not list what is inside a folder moved
 		// in from elsewhere; `arrivals` could say which, and that waits on the
-		// live check (docs/PLAN.md §5.2).
+		// live check (docs/ARCHITECTURE.md §5.2).
 		const roundEnds = next === undefined;
 		const settled = settlePage(page, roundEnds);
 		const anchored =

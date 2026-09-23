@@ -80,9 +80,9 @@ describe('parseEnv', () => {
 		// were not. Configuring a sign-in provider does not make it true either.
 		//
 		// Since 2026-09-18 the refusal is permanent rather than an interim: there
-		// is no sign-in layer coming (docs/PLAN.md §6). The variable outlives the
+		// is no sign-in layer coming (docs/ARCHITECTURE.md §6). The variable outlives the
 		// decision only because removing it is breaking for anyone who has it
-		// set, which is a change of its own (§10).
+		// set, which is a change of its own (issue #118).
 		for (const extra of [
 			{},
 			{ MICROSOFT_CLIENT_ID: 'm', MICROSOFT_CLIENT_SECRET: 'ms' },

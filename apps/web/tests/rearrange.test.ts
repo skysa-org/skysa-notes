@@ -89,7 +89,7 @@ describe('dropping a note', () => {
 
 	it('refuses the top level, which the app does not put notes at', () => {
 		// Loose notes exist because a remote folder can arrive holding them, and
-		// the app never makes one (docs/PLAN.md §12.6). A drag out of a notebook
+		// the app never makes one (docs/ARCHITECTURE.md §12.6). A drag out of a notebook
 		// would be the app making one.
 		expect(dropMove(note('Work/one.md'), ROOT)).toBeUndefined();
 	});

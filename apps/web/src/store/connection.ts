@@ -46,7 +46,7 @@ import {
  *
  * Every row carries a `connectionId`, and the app shows and syncs exactly one
  * connection's rows (`activeConnectionId` in `db.ts`). The remote is the source
- * of truth, and each connected source is its own silo (docs/PLAN.md §6), so
+ * of truth, and each connected source is its own silo (docs/ARCHITECTURE.md §6), so
  * rows change connection in two cases only, each in one transaction — a note is
  * never left behind under a connection nothing shows, and never half-moved:
  *
@@ -66,7 +66,7 @@ import {
  * other source, and nothing is carried into another account.
  *
  * Two things the sync store relies on, and so are guaranteed here
- * (docs/PLAN.md, Phase 2 UI item):
+ * (docs/ARCHITECTURE.md, Phase 2 UI item):
  *
  * - **A row's key is its connection and its id**, so a row that moves is
  *   deleted and added, two notes of one id can meet where they land, and an
@@ -188,7 +188,7 @@ interface Only {
  * reading while a device could hold one connection at a time. It is now the
  * wrong one: connecting a second source would take the first source's notes
  * with it, into a stranger's storage, and the user would be told nothing. Each
- * connected source is its own silo (docs/PLAN.md §6), so the only rows that
+ * connected source is its own silo (docs/ARCHITECTURE.md §6), so the only rows that
  * move are the device's own — `LOCAL_CONNECTION_ID` — and a detached source's,
  * to the connection its own account came back under.
  *
@@ -1240,7 +1240,7 @@ export type MoveOutcome = ReleaseOutcome | 'no-target' | 'unverified' | 'nothing
  * This is the one operation in the app that carries a user's writing from one
  * storage account into another, so nothing about it is inferred. The target is
  * named, the rows are the ones the user was shown, and the button that asks for
- * it names the account it is going to (docs/PLAN.md §10).
+ * it names the account it is going to (docs/ARCHITECTURE.md §10).
  *
  * What moves is what could be anywhere: the notes the remote was never sent in
  * full, and the notebooks around them. Each arrives as new writing — no file,

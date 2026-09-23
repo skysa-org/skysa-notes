@@ -42,7 +42,7 @@ import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
  * The one rule that governs this module: a note becomes dirty only on a real
  * user edit. Loading, importing, or re-serializing a note must never set the
  * flag, or the app would rewrite files it was only ever asked to display.
- * See docs/PLAN.md §7.
+ * See docs/ARCHITECTURE.md §7.
  */
 
 /** What `deriveTitle` returns when a note has nothing to take a name from. */
@@ -62,7 +62,7 @@ export const isUnnamed = (note: NoteRecord): boolean =>
  *
  * Never a U+0000, wherever in the note one got to — a title, a tag, frontmatter
  * imported from a file on disk. A file holding one is not a note to any device
- * that reads it (`decodeText`, docs/PLAN.md §7), so a note pushed with one
+ * that reads it (`decodeText`, docs/ARCHITECTURE.md §7), so a note pushed with one
  * would go from every device, this one included. Every file the app originates
  * is made here. The other thing a push can send is a `source` kept verbatim
  * (`noteFile`), and neither door a source comes through lets one in: a pulled

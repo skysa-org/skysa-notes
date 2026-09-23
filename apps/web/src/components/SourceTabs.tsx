@@ -51,7 +51,7 @@ export interface SourceTabsProps {
  * Every set of notes on this device, across the top of the app.
  *
  * A device can hold several storage accounts at once, each its own silo — its
- * own notes, notebooks, queue and cursor (docs/PLAN.md §6) — and until now the
+ * own notes, notebooks, queue and cursor (docs/ARCHITECTURE.md §6) — and until now the
  * only way between them was a list inside the storage panel at the foot of the
  * sidebar. That is a long way to go for something a user with two accounts
  * does all day, and it gave no standing answer to "which of these am I

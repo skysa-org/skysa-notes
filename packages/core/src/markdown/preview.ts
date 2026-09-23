@@ -22,7 +22,7 @@
  * search can ask for. Cached per `contentHash` that would be the cost of opening
  * a search rather than of every letter, but it is still the wrong price for a
  * line of grey text, and it grows with the note: 10.6 ms each for a 3000-word
- * one. So the cheap pass stays, and its limits are written down (docs/PLAN.md
+ * one. So the cheap pass stays, and its limits are written down (docs/ARCHITECTURE.md
  * §7).
  *
  * What it is lossy about, deliberately: inline syntax is left alone. `**bold**`
@@ -56,7 +56,7 @@ const RULE = /^\s*(?:(?:[-*_]\s*){3,}|=+)\s*$/;
 /**
  * A line that is nothing but the break Milkdown writes for an empty paragraph.
  * Markdown cannot say "a blank paragraph here" — blank lines are separators, not
- * content — so the editor writes an HTML break and reads it back (docs/PLAN.md
+ * content — so the editor writes an HTML break and reads it back (docs/ARCHITECTURE.md
  * §7). It is the one thing in a note the user did not type, which is exactly why
  * it must not be the thing they read in a list.
  *

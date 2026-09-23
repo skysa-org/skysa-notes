@@ -20,7 +20,7 @@ import { inOrder, tabName } from '../src/sync/account.js';
  * others are called, and the way to another account.
  *
  * A device can hold several storage accounts at once, each its own silo
- * (docs/PLAN.md §6), and a name is the only thing standing between the user
+ * (docs/ARCHITECTURE.md §6), and a name is the only thing standing between the user
  * and writing into the wrong one.
  */
 

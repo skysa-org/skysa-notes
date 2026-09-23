@@ -589,7 +589,7 @@ describe('noteFileContents', () => {
 });
 
 /**
- * docs/PLAN.md §7: a file holding a U+0000 is not a note to any device that
+ * docs/ARCHITECTURE.md §7: a file holding a U+0000 is not a note to any device that
  * reads it, and is left alone. A note this app pushed with one would go from
  * every device, the one that wrote it included — so it never writes one.
  */

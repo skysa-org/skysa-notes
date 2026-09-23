@@ -96,7 +96,7 @@ describe('the app', () => {
 	it('ignores an outcome the server cannot send', async () => {
 		// `conflict`, `signin` and `occupied` were real until Phase 7 retired
 		// them server-side, and `signin` outlived its own product — there is no
-		// sign-in to send anyone to (docs/PLAN.md §6). A stale bookmark, or a
+		// sign-in to send anyone to (docs/ARCHITECTURE.md §6). A stale bookmark, or a
 		// hand-typed query, must not resurrect the message.
 		await createFolder(db, { name: 'Work' });
 		await open('/?connect=signin', 'Work');

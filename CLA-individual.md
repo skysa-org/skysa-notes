@@ -3,7 +3,7 @@
 > **Draft — not reviewed by counsel.** Adapted from the Apache Software
 > Foundation Individual Contributor License Agreement v2.0, with two clauses
 > borrowed from the Harmony Agreements. It has not been checked by a lawyer and
-> may change before it is enforced. See `docs/PLAN.md` §13.
+> may change before it is enforced. See `docs/ARCHITECTURE.md` §13.
 
 Thank you for your interest in Skysa (the "Project"). This agreement clarifies
 the intellectual property licence granted with Contributions from any person or

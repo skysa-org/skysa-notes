@@ -47,7 +47,7 @@ describe('the break the editor writes for an empty paragraph', () => {
 	/**
 	 * Milkdown has no other way to say "a blank paragraph here", so this is the
 	 * one thing in a note the user did not type — which is exactly why it must
-	 * not be the thing they read in a list (docs/PLAN.md §7).
+	 * not be the thing they read in a list (docs/ARCHITECTURE.md §7).
 	 */
 	it('is gone, in every spelling a file carries it in', () => {
 		expect(previewLines('one\n\n<br />\n\ntwo\n\n<br>\n\nthree\n\n<BR/>\n\nfour\n')).toEqual([

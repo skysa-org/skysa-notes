@@ -17,7 +17,7 @@ import {
 /**
  * An in-memory `StorageProvider`. It is what the contract suite runs against in
  * CI, and what every sync-engine test drives, so it is deliberately the
- * strictest provider in the repo: where docs/PLAN.md §4 leaves a case open, the
+ * strictest provider in the repo: where docs/ARCHITECTURE.md §4 leaves a case open, the
  * fake takes the least forgiving reading. A lenient fake would let the engine
  * grow assumptions that only fail against a real account.
  *

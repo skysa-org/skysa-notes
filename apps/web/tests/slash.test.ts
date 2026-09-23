@@ -41,7 +41,7 @@ describe('slashQuery', () => {
 	it('does not open on a slash inside a word, where it means something else', () => {
 		expect(slashQuery('and/or')).toBeUndefined();
 		expect(slashQuery('https://example.com')).toBeUndefined();
-		expect(slashQuery('docs/PLAN.md')).toBeUndefined();
+		expect(slashQuery('docs/ARCHITECTURE.md')).toBeUndefined();
 	});
 
 	it('closes on a second slash', () => {

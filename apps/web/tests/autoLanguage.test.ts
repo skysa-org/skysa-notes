@@ -100,7 +100,7 @@ describe('working out a code block’s language', () => {
 	});
 
 	/**
-	 * A note nobody edited has to come back byte for byte (docs/PLAN.md §7).
+	 * A note nobody edited has to come back byte for byte (docs/ARCHITECTURE.md §7).
 	 * Text arriving from sync or from raw mode is the app putting it there, and
 	 * a fence it fills in would be a word written into a file nobody typed in.
 	 */

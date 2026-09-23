@@ -13,7 +13,7 @@ import { PWA_MANIFEST, PWA_OPTIONS, PWA_WORKBOX } from '../pwa.js';
  * reports on: no name, no 192px icon, no `display`, an icon that 404s — and the
  * option simply never appears, with nothing in the build output to explain it.
  * These are those rules, plus the ones that make the app work with no network.
- * See docs/PLAN.md §8.
+ * See docs/ARCHITECTURE.md §8.
  */
 
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '../public');

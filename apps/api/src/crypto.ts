@@ -1,7 +1,7 @@
 /**
  * AES-256-GCM over the secrets in D1: an OAuth refresh token, or a set of
  * WebDAV credentials. Web Crypto only — the Worker runs without `nodejs_compat`
- * (docs/PLAN.md §6) — and the key never leaves the server environment.
+ * (docs/ARCHITECTURE.md §6) — and the key never leaves the server environment.
  *
  * Every sealed value records which key sealed it, so a key can be rotated by
  * re-encrypting rows rather than by invalidating every connection at once.

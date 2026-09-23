@@ -24,7 +24,7 @@ import { useEscape } from './useEscape.js';
  * another connected source; download it; or discard it. Nothing here happens on
  * its own, and the move is a separate, explicit act that names the account it
  * is going to, since it is the one thing here that crosses between two people's
- * storage (docs/PLAN.md §10).
+ * storage (docs/ARCHITECTURE.md §10).
  *
  * Discarding takes two steps, and the second one names what goes. These notes
  * are the only copies there are, so "Discard…" is not the button that does it:
@@ -80,7 +80,7 @@ const alsoGoing = (unsynced: Unsynced): string | null => {
 /**
  * A delete the source still owes is carried out on reconnecting, however long
  * that takes and whatever has been done to the file meanwhile: the delete wins
- * (docs/PLAN.md §7). Over weeks rather than seconds that is worth saying
+ * (docs/ARCHITECTURE.md §7). Over weeks rather than seconds that is worth saying
  * plainly, with the way to withdraw it, which is Discard.
  */
 const stillOwed = (unsynced: Unsynced, bound: SyncStateRecord): string | null => {

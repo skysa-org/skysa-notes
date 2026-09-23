@@ -149,7 +149,7 @@ const NewFolderField = ({ parentPath, onCancel, onSubmit }: NewFolderFieldProps)
  * doable with a single pointer that does not drag (SC 2.5.7) — a keyboard user
  * and a user with a tremor both need the same moves. The answer here is that
  * picking up is a *command* (`notebook.move`, `note.move` in the route, so they
- * are in the palette like everything else — docs/PLAN.md §7, "Commands are
+ * are in the palette like everything else — docs/ARCHITECTURE.md §7, "Commands are
  * declared, not collected") and putting down is a click on the destination row.
  * That is the same mode a drag enters, so there is one implementation and not
  * two: `moving` is set by the command or by `dragstart`, and read here and by
@@ -248,7 +248,7 @@ const RenameRow = ({
 
 /**
  * Asked before a notebook goes, and not told afterwards — the rule the
- * disconnect confirm exists for (docs/PLAN.md §10), and the reason a notebook
+ * disconnect confirm exists for (docs/ARCHITECTURE.md §10), and the reason a notebook
  * needs one where a note does not: a note comes back from the notice that
  * follows it, and a notebook takes every note beneath it with it. So the count
  * is in the question, because that is the part the user may not know.

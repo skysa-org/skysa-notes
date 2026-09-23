@@ -6,7 +6,7 @@ import { foldName } from './slug.js';
 
 /**
  * Title is frontmatter `title`, else the first heading, else the filename.
- * See docs/PLAN.md §7.
+ * See docs/ARCHITECTURE.md §7.
  */
 export interface DeriveTitleInput {
 	frontmatterTitle?: string | undefined;

@@ -27,7 +27,7 @@ import { createTokenSource, type TokenSource } from './tokens.js';
 /**
  * When to sync, and what the last attempt came to. The engine decides nothing
  * about time (`packages/core/src/sync/engine.ts`); this is the part that does,
- * with the triggers docs/PLAN.md §7 lists: app open, the tab regaining focus or
+ * with the triggers docs/ARCHITECTURE.md §7 lists: app open, the tab regaining focus or
  * becoming visible, `online`, every minute while visible, and shortly after a
  * local edit. Background Sync is not here: it needs the service worker to reach
  * the store and a token, which is its own piece of work.
@@ -834,7 +834,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		start: () => {
 			if (unsubscribers.size > 0) return;
 			// The source the app is showing, not whichever row comes back first.
-			// A device may hold several connected sources (docs/PLAN.md §6), each
+			// A device may hold several connected sources (docs/ARCHITECTURE.md §6), each
 			// with its own queue and cursor, and the scheduler syncs the one in
 			// front of the user — otherwise the notes on screen and the notes
 			// being synced belong to different accounts. `activeConnectionId`

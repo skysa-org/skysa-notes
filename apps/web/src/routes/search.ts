@@ -27,7 +27,7 @@ export interface AppSearch {
  * `conflict`, `signin` and `occupied` were here until 2026-09-18. Phase 7
  * retired all three on the server when connections stopped aggregating under a
  * user, and the last of them cannot come back: `signin` rendered "Sign in
- * before connecting storage", and there is no sign-in (docs/PLAN.md §6). A
+ * before connecting storage", and there is no sign-in (docs/ARCHITECTURE.md §6). A
  * message the server has no way to ask for is one nobody can be shown and
  * nobody can test, and this one described a product that does not exist.
  */

@@ -13,7 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
  * migrations and the schema all real; only the process hosting SQLite differs.
  * No new dependency: `node:sqlite` ships with Node 22.
  *
- * Swap this for the pool as soon as it supports Vitest 5 (docs/PLAN.md §6).
+ * Swap this for the pool as soon as it supports Vitest 5 (docs/ARCHITECTURE.md §6).
  */
 
 type Param = null | number | bigint | string | Uint8Array;

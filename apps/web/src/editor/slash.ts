@@ -43,7 +43,7 @@ export const textBeforeCursor = (view: EditorView): string | undefined => {
  * The text between a `/` and the cursor, if the cursor is in a slash query at
  * all.
  *
- * The slash has to start a word — `and/or`, `https://` and `docs/PLAN.md` are
+ * The slash has to start a word — `and/or`, `https://` and `docs/ARCHITECTURE.md` are
  * not someone reaching for the menu. One space is allowed after that, so "task
  * list" finds something; any more and the user is plainly writing prose that
  * happens to follow a slash, and the menu should be out of the way.

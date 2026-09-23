@@ -4,7 +4,7 @@
  * Both modes are views over the same markdown string, so the mode is never part
  * of the note's file — it is a local preference about how to show it. Rich text
  * is the default; a note the rich editor would damage is forced to raw.
- * See docs/PLAN.md §7.
+ * See docs/ARCHITECTURE.md §7.
  */
 
 export type EditorMode = 'rich' | 'raw';

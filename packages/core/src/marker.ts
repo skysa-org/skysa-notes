@@ -4,7 +4,7 @@ import { APP_NAME, MARKER_SCHEMA_VERSION, PROVIDER_KINDS } from './config.js';
 
 /**
  * Debug-only provenance: which install created this folder, with what version.
- * Deliberately carries no account identifiers. See docs/PLAN.md §3.
+ * Deliberately carries no account identifiers. See docs/ARCHITECTURE.md §3.
  */
 const createdBySchema = z.object({
 	appVersion: z.string().min(1),
@@ -74,7 +74,7 @@ export type MarkerParseResult =
 
 /**
  * Parse `.notesapp.json`. Applies the read-only-on-newer-version rule from
- * docs/PLAN.md §3.
+ * docs/ARCHITECTURE.md §3.
  */
 export const parseMarker = (text: string): MarkerParseResult => {
 	const json = readJson(text);

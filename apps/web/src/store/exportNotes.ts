@@ -10,7 +10,7 @@ import { noteFile } from './notes.js';
  * For the one position sync cannot help with: text that exists only on this
  * device, in a source that is being let go or can no longer be reached, where
  * the choice would otherwise be between losing it and never leaving
- * (docs/PLAN.md §6). Each note is written as the file a push would have sent,
+ * (docs/ARCHITECTURE.md §6). Each note is written as the file a push would have sent,
  * at the path it would have had, so what comes out can be dropped into the
  * folder of any account and be the same notes.
  *

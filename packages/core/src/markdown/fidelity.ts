@@ -11,7 +11,7 @@ import { normalize, parse } from './pipeline.js';
  * round-trip" — it does — but "does the *editor's* document still contain
  * everything the file did". Comparing the two markdown strings structurally
  * answers that, and ignores the normalization that is expected and harmless.
- * See docs/PLAN.md §7.
+ * See docs/ARCHITECTURE.md §7.
  */
 
 /** Source positions differ between a parse of the original and of a re-serialized form. */

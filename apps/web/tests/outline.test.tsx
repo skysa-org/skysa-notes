@@ -15,7 +15,7 @@ import { RawEditor } from '../src/editor/RawEditor.js';
  * and that it does not report an edit. What jsdom cannot answer is whether the
  * viewport actually moved, since scrolling needs layout, and the rich editor
  * cannot be typed into at all; both are checked in a browser instead
- * (docs/PLAN.md §7).
+ * (docs/ARCHITECTURE.md §7).
  */
 
 afterEach(cleanup);
@@ -85,7 +85,7 @@ describe('the outline', () => {
 		});
 
 		/**
-		 * The hard rule (`editor/dirty.ts`, docs/PLAN.md §7): a note becomes dirty
+		 * The hard rule (`editor/dirty.ts`, docs/ARCHITECTURE.md §7): a note becomes dirty
 		 * only on a user editing transaction. An outline reads a note; adding a
 		 * `changes` to that dispatch would rewrite files the user only looked at.
 		 */

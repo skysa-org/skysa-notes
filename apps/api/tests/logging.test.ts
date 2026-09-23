@@ -4,7 +4,7 @@ import { hashCredential } from '../src/credentials.js';
 import { buildApp } from './harness.js';
 
 /**
- * What reaches the Worker log. `CLAUDE.md` and docs/PLAN.md §6 both say secrets
+ * What reaches the Worker log. `CLAUDE.md` and docs/ARCHITECTURE.md §6 both say secrets
  * never do, and the failure mode is quiet: an error object that looks harmless
  * carries the failing query's bound parameters, which are credential hashes and
  * secret ciphertext.

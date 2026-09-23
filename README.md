@@ -1,6 +1,6 @@
 # skysa-notes
 
-**skysa-notes** is a local-first markdown notes PWA that syncs to a dedicated, app-owned folder on your own Google Drive, OneDrive, or Dropbox. Every note is a plain `.md` file in an ordinary directory tree, so your notes stay readable, portable, and editable by any other tool, and folders are simply notebooks. The app reads and writes entirely from IndexedDB, so it works fully offline and syncs in the background when a connection returns; when you connect an OAuth provider your note content goes straight from the browser to that provider and never passes through the server, which stores only encrypted refresh tokens and connection metadata. It is built as a pnpm workspace — a Vite + React client, a Hono API on Cloudflare Workers backed by D1, and a framework-free core package holding the provider adapters, sync engine, and markdown pipeline — and it is designed to be self-hosted end to end on your own Cloudflare account. The project is in early development; [`docs/PLAN.md`](docs/PLAN.md) is the source of truth for the architecture, decisions, and phase order. Licensed under [AGPL-3.0](LICENSE).
+**skysa-notes** is a local-first markdown notes PWA that syncs to a dedicated, app-owned folder on your own Google Drive, OneDrive, or Dropbox. Every note is a plain `.md` file in an ordinary directory tree, so your notes stay readable, portable, and editable by any other tool, and folders are simply notebooks. The app reads and writes entirely from IndexedDB, so it works fully offline and syncs in the background when a connection returns; when you connect an OAuth provider your note content goes straight from the browser to that provider and never passes through the server, which stores only encrypted refresh tokens and connection metadata. It is built as a pnpm workspace — a Vite + React client, a Hono API on Cloudflare Workers backed by D1, and a framework-free core package holding the provider adapters, sync engine, and markdown pipeline — and it is designed to be self-hosted end to end on your own Cloudflare account. The project is young; [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is the source of truth for the architecture and the decisions behind it. Licensed under [AGPL-3.0](LICENSE).
 
 ## Contributing
 
@@ -40,7 +40,7 @@ API share an origin, matching production where one Worker serves both.
 
 Every provider that syncs needs its own app registration (Dropbox, Microsoft
 Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
-`.dev.vars.example`. WebDAV support is deferred indefinitely (`docs/PLAN.md`
+`.dev.vars.example`. WebDAV support is deferred indefinitely (`docs/ARCHITECTURE.md`
 §5.4).
 
 | Command | What it does |
@@ -57,8 +57,8 @@ Entra or Google Cloud) and credentials in `apps/api/.dev.vars`; see
 | `pnpm run setup` | Prompt for credentials and write `apps/api/.dev.vars` |
 | `pnpm run deploy` | Build core, SPA and Worker, then `wrangler deploy` |
 
-Current status: **Phase 7 — it syncs.** Notes and notebooks live in IndexedDB and work fully offline; connecting a Dropbox, OneDrive or Google Drive account syncs them to an app-owned folder, two-way, with conflicts resolved by keeping both copies. Both editors are in — rich text with a slash menu and formatting toolbar, and raw markdown — with full-text search, a command palette, a document outline, and find-and-replace across both. A device can hold several connected accounts at once and switch between them; each is its own silo, with its own notes, its own queue and its own credential.
+Current status: **it syncs.** Notes and notebooks live in IndexedDB and work fully offline; connecting a Dropbox, OneDrive or Google Drive account syncs them to an app-owned folder, two-way, with conflicts resolved by keeping both copies. Both editors are in — rich text with a slash menu and formatting toolbar, and raw markdown — with full-text search, a command palette, a document outline, and find-and-replace across both. A device can hold several connected accounts at once and switch between them; each is its own silo, with its own notes, its own queue and its own credential.
 
-What is not done: the one Phase 8 thing that cannot be checked from inside the repository — that a clean clone deploys end to end on a fresh Cloudflare account. There is no sign-in and there will not be one: identity and storage are coupled deliberately, so each connected account is its own silo and nothing on the server knows that two of them belong to one person (`docs/PLAN.md` §6). WebDAV is deferred indefinitely (§5.4).
+What is not done: the one thing that cannot be checked from inside the repository — that a clean clone deploys end to end on a fresh Cloudflare account ([#119](https://github.com/skysa-org/skysa-notes/issues/119)). Everything else that is open is in the [issue tracker](https://github.com/skysa-org/skysa-notes/issues). There is no sign-in and there will not be one: identity and storage are coupled deliberately, so each connected account is its own silo and nothing on the server knows that two of them belong to one person (`docs/ARCHITECTURE.md` §6). WebDAV is deferred indefinitely (§5.4).
 
-Self-hosting it on your own Cloudflare account is [`docs/self-hosting.md`](docs/self-hosting.md). The architecture, the decisions and the phase order are in [`docs/PLAN.md`](docs/PLAN.md).
+Self-hosting it on your own Cloudflare account is [`docs/self-hosting.md`](docs/self-hosting.md). The architecture and the decisions behind it are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).

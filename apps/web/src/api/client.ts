@@ -123,7 +123,7 @@ export interface ApiClientOptions {
  * sent nothing — it has to connect. `credential_revoked` is the server saying
  * this credential reaches nothing at all: revoked from another device, or the
  * account disconnected. Either way the credential is spent for ever and the
- * only answer is to throw it away (docs/PLAN.md §6).
+ * only answer is to throw it away (docs/ARCHITECTURE.md §6).
  */
 export type Refusal =
 	| 'credential_required'

@@ -18,7 +18,7 @@ import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
 
 /**
- * docs/PLAN.md §7's branch table, one test per branch, plus the cases §7 leaves
+ * docs/ARCHITECTURE.md §7's branch table, one test per branch, plus the cases §7 leaves
  * open. The rule every one of them is really checking is the one in
  * `CLAUDE.md`: never lose user data. A sync that drops an edit is worse than a
  * sync that does nothing, so where a branch could go either way these assert
@@ -1853,7 +1853,7 @@ describe('a path that has been reused', () => {
 
 describe('a note that carries its own id', () => {
 	it('adopts the id in the frontmatter rather than inventing one', async () => {
-		// docs/PLAN.md §3: the id in the file is what makes two devices agree
+		// docs/ARCHITECTURE.md §3: the id in the file is what makes two devices agree
 		// which note a file is. Inventing one instead means the same file is a
 		// different note on every device, and every link between them breaks.
 		await remoteFile('a.md', '---\nid: from-the-file\n---\n\nbody\n');
@@ -2732,7 +2732,7 @@ describe('a write whose file is not where it was', () => {
 		// version on a move, as OneDrive's eTag does and Dropbox's rev does not,
 		// but the file still holds the bytes this note last synced — so it was
 		// renamed, not edited, and the note follows it with its edit, which then
-		// goes out to the new name. No copy (docs/PLAN.md §7).
+		// goes out to the new name. No copy (docs/ARCHITECTURE.md §7).
 		const synced = await engine.sync();
 
 		expect(synced.status).toBe('ok');
@@ -6889,7 +6889,7 @@ describe('two devices at random', () => {
 });
 
 /**
- * docs/PLAN.md §7, "A file that is not UTF-8 is left alone". One test per place
+ * docs/ARCHITECTURE.md §7, "A file that is not UTF-8 is left alone". One test per place
  * the engine reads a file, and the same three things asked after each: the pull
  * or push went through, the file holds the bytes it held, and no note is left
  * pointing at it — a note that is can push over bytes this device never read.
@@ -7382,7 +7382,7 @@ describe('a file that is not UTF-8 text', () => {
 	});
 
 	/**
-	 * docs/PLAN.md §7: the files left alone are listed, so the user is told what
+	 * docs/ARCHITECTURE.md §7: the files left alone are listed, so the user is told what
 	 * the app is not showing them. One test per way a file gets onto the list,
 	 * and per way it comes off. The list is a notice and no decision reads it,
 	 * so nothing here asks more of it than that it is right.
@@ -7724,7 +7724,7 @@ describe('a file that is not UTF-8 text', () => {
 
 			it('but not by a deletion that names an id and no path, which says nothing of what was inside', async () => {
 				// Graph, for a folder it can no longer place. The notice waits
-				// for a re-scan (docs/PLAN.md §7).
+				// for a re-scan (docs/ARCHITECTURE.md §7).
 				const folder = await provider.createFolder('Work');
 				const file = provider.writeBytes('Work/a.md', LATIN1);
 				await engine.pull();

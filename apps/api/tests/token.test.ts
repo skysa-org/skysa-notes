@@ -8,7 +8,7 @@ import { buildApp, newCredential, SECRETS_KEY, testConfig, tokenResponse } from 
 /**
  * `/api/token` is the only place a refresh token is decrypted, and the only
  * thing it hands back is a short-lived access token. No note content passes
- * through here — the client takes the token to Dropbox itself (docs/PLAN.md §1).
+ * through here — the client takes the token to Dropbox itself (docs/ARCHITECTURE.md §1).
  *
  * There is no body: the credential says which connection. A connection id in
  * the request would be a second answer to a question already settled, and the

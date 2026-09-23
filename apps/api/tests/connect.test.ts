@@ -23,7 +23,7 @@ import {
 /**
  * The OAuth round trip, end to end over a real database and a scripted Dropbox.
  * The only thing not exercised here is Dropbox itself, which is not registered
- * yet — see docs/PLAN.md §4.
+ * yet — see docs/ARCHITECTURE.md §4.
  *
  * What the flow produces is a *grant*: the device generated a credential before
  * it started, wrote it down, and sent only its hash. Nothing below ever sends
@@ -768,7 +768,7 @@ describe('what the server is allowed to know', () => {
 /**
  * What the connection is, now that it is not a user's. Each connected account is
  * its own silo; a device reaches one by the credential it holds, and holding one
- * says nothing about any other (docs/PLAN.md §6).
+ * says nothing about any other (docs/ARCHITECTURE.md §6).
  */
 describe('one row per account, many devices per row', () => {
 	it('reconnecting the same account keeps the row, its id and its root', async () => {
