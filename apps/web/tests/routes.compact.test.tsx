@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -8,6 +8,7 @@ import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { elementWidths, type FakeWidths } from './elementWidth.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -21,11 +22,14 @@ import { type FakeWindow, windowWidth } from './windowWidth.js';
  */
 
 let fake: FakeWindow | undefined;
+let widths: FakeWidths | undefined;
 
 afterEach(async () => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
+	widths?.restore();
+	widths = undefined;
 	await db.notes.clear();
 	await db.folders.clear();
 	await db.opQueue.clear();
@@ -227,6 +231,38 @@ describe('searching in a compact window', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Search notes' }));
 		await user.type(screen.getByRole('searchbox', { name: 'Search notes' }), 'x{Escape}');
+
+		expect(screen.queryByRole('searchbox', { name: 'Search notes' })).toBeNull();
+		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
+	});
+
+	it('is a field beside the dropdowns on a bar with the room for one', async () => {
+		// A tablet: compact, and still room for the field and three dropdowns
+		// that say something.
+		widths = elementWidths({ '.compact-bar': 900 });
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp(900);
+
+		expect(screen.queryByRole('button', { name: 'Search notes' })).toBeNull();
+		const field = screen.getByRole('searchbox', { name: 'Search notes' });
+
+		await user.type(field, 'heron');
+
+		// Typing into it does not take the bar over: the dropdowns stay.
+		expect(panel()).toBe('notes');
+		expect(notebookTrigger()).toBeDefined();
+		expect(screen.queryByRole('button', { name: 'Close search' })).toBeNull();
+	});
+
+	it('goes back to the icon when the bar narrows under it', async () => {
+		widths = elementWidths({ '.compact-bar': 900 });
+		await openApp(900);
+		expect(screen.getByRole('searchbox', { name: 'Search notes' })).toBeDefined();
+
+		act(() => {
+			widths?.resize('.compact-bar', 500);
+		});
 
 		expect(screen.queryByRole('searchbox', { name: 'Search notes' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();

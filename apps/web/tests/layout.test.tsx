@@ -3,22 +3,27 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { COMPACT, OUTLINE_CRAMPED, useMediaQuery } from '../src/components/layout.js';
+import { COMPACT, useElementWidth, useMediaQuery } from '../src/components/layout.js';
+import { elementWidths, type FakeWidths } from './elementWidth.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
- * The window's width, as the components ask for it, and the one width the
- * stylesheet keeps for itself.
+ * The window's width and an element's, as the components ask for them, and
+ * the widths the stylesheet keeps for itself.
  */
 
 let fake: FakeWindow | undefined;
+let widths: FakeWidths | undefined;
 
 afterEach(() => {
 	cleanup();
 	fake?.restore();
 	fake = undefined;
+	widths?.restore();
+	widths = undefined;
 });
 
 const Probe = ({ query }: { query: string }) => (
@@ -39,23 +44,7 @@ describe('useMediaQuery', () => {
 		expect(screen.getByText('matches')).toBeDefined();
 	});
 
-	it('follows the window as it is resized', () => {
-		fake = windowWidth(1500);
-		render(<Probe query={OUTLINE_CRAMPED} />);
-		expect(screen.getByText('does not match')).toBeDefined();
-
-		act(() => {
-			fake?.resize(1399);
-		});
-		expect(screen.getByText('matches')).toBeDefined();
-
-		act(() => {
-			fake?.resize(1400);
-		});
-		expect(screen.getByText('does not match')).toBeDefined();
-	});
-
-	it('turns compact at 960px and not before', () => {
+	it('turns compact at 960px and not before, following the window', () => {
 		fake = windowWidth(961);
 		render(<Probe query={COMPACT} />);
 		expect(screen.getByText('does not match')).toBeDefined();
@@ -64,6 +53,41 @@ describe('useMediaQuery', () => {
 			fake?.resize(960);
 		});
 		expect(screen.getByText('matches')).toBeDefined();
+
+		act(() => {
+			fake?.resize(961);
+		});
+		expect(screen.getByText('does not match')).toBeDefined();
+	});
+});
+
+const Measured = () => {
+	const [element, setElement] = useState<HTMLDivElement | null>(null);
+	const width = useElementWidth(element);
+	return (
+		<div className="measured" ref={setElement}>
+			{width === undefined ? 'unmeasured' : `${String(width)}px`}
+		</div>
+	);
+};
+
+describe('useElementWidth', () => {
+	it('reports nothing where nothing is laid out', () => {
+		// jsdom, again: every element is 0px, and 0px is not a width anything
+		// should be fitted to.
+		render(<Measured />);
+		expect(screen.getByText('unmeasured')).toBeDefined();
+	});
+
+	it('reports the width, and follows it as it changes', () => {
+		widths = elementWidths({ '.measured': 700 });
+		render(<Measured />);
+		expect(screen.getByText('700px')).toBeDefined();
+
+		act(() => {
+			widths?.resize('.measured', 420);
+		});
+		expect(screen.getByText('420px')).toBeDefined();
 	});
 });
 
@@ -98,7 +122,7 @@ describe('the side columns', () => {
 		// The compact layout is `.compact` on the frame, set by the route from
 		// `COMPACT`; a media query here would be a second answer to the same
 		// question, free to disagree with the first by a pixel.
-		expect(styles).not.toMatch(/@media \((max|min)-width/);
+		expect(styles).not.toMatch(/@media \([^)]*width/);
 	});
 });
 
@@ -130,5 +154,24 @@ describe('the compact panels', () => {
 
 	it('keeps the storage panel and the way to connect at the foot of the source panel', () => {
 		expect(declarations('.source-panel-foot')).toContain('margin-block-start: auto');
+	});
+});
+
+describe('the note header', () => {
+	it('is laid out by the note, not the window', () => {
+		// The same window gives the note very different room with the columns
+		// beside it and without them.
+		expect(declarations('.note-view')).toMatch(/container: note \/ inline-size;/);
+		expect(styles).toMatch(
+			/@container note \(width < [\d.]+rem\) \{\s*\.note-actions \.path \{\s*display: none;/
+		);
+		expect(styles).not.toMatch(/\.compact \.note-actions/);
+	});
+
+	it('keeps to one row until the note is too narrow for a title beside the buttons', () => {
+		expect(declarations('.note-header')).not.toContain('flex-wrap');
+		expect(styles).toMatch(
+			/@container note \(width < [\d.]+rem\) \{\s*\.note-header \{\s*flex-wrap: wrap;/
+		);
 	});
 });

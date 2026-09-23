@@ -43,8 +43,12 @@ describe('a note the rich editor cannot represent', () => {
 		expect(await screen.findByTestId('raw-editor')).toBeDefined();
 		expect(screen.getByRole('status').textContent).toContain('stays in markdown mode');
 
-		const toggle = screen.getByRole('button', { name: 'Markdown' });
-		expect(toggle.getAttribute('disabled')).not.toBeNull();
+		expect(screen.getByRole('button', { name: 'Markdown' }).getAttribute('aria-pressed')).toBe(
+			'true'
+		);
+		expect(
+			screen.getByRole('button', { name: 'Rich text' }).getAttribute('disabled')
+		).not.toBeNull();
 
 		await user.keyboard('{Control>}e{/Control}');
 

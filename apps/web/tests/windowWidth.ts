@@ -4,7 +4,7 @@
  *
  * jsdom has no `matchMedia` at all, which the app reads as a wide window — so
  * every other test gets the layout it always had, and only a test that wants
- * a narrower one installs this. It understands exactly the two shapes of query
+ * a narrower one installs this. It understands exactly the one shape of query
  * the layout asks, and throws on any other question about width rather than
  * answering one it cannot read: a new breakpoint should fail here loudly, not
  * be told "no" and test the wide layout under a narrow name.
@@ -18,8 +18,6 @@ const answers = (query: string, width: number): boolean => {
 		const [, value = '', unit] = max;
 		return width <= Number(value) * (unit === 'rem' ? REM : 1);
 	}
-	const under = /^\(width < ([\d.]+)px\)$/.exec(query);
-	if (under !== null) return width < Number(under[1]);
 	// Other code asks other questions — CodeMirror asks about `print` — and a
 	// screen is not print, nor anything else that is not about its width.
 	if (!query.includes('width')) return false;

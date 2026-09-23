@@ -4,13 +4,14 @@ import { type RefObject, useEffect, useState } from 'react';
 import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
 import { folderLabel } from '../store/tree.js';
-import { COMPACT, useMediaQuery } from './layout.js';
+import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
 import { SearchField } from './SearchField.js';
 import { useShowingSourceName } from './SourceTabs.js';
 
 /**
  * The bar across the top of a compact window, where the sources, the notebooks
- * and the notes are each a dropdown and the search is an icon.
+ * and the notes are each a dropdown and the search is an icon — or, on a bar
+ * with the room for it (`SEARCH_FITS_AT`), the search field itself.
  *
  * Only the triggers are here. What the notebook and note dropdowns open is the
  * sidebar and the note list themselves — the same components a wide window
@@ -25,6 +26,14 @@ import { useShowingSourceName } from './SourceTabs.js';
  * commands in the palette, and a notebook rename asked for from there has to
  * find the sidebar that holds it.
  */
+
+/**
+ * The bar's own width, in rems, from which the search is a field beside the
+ * dropdowns rather than an icon that swaps them for one: room for the field
+ * and for three dropdowns that still say something. A compact window can be
+ * a tablet as easily as a phone, and on a tablet the field has the room.
+ */
+const SEARCH_FITS_AT = 40;
 
 /** Which pane is open as a dropdown. */
 export type Pane = 'sources' | 'notebooks' | 'notes';
@@ -173,6 +182,11 @@ export const CompactBar = ({
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const source = useShowingSourceName();
+	// Measured rather than a container query, since it changes what is drawn.
+	// Unmeasured — jsdom — is the icon: the one that fits any bar.
+	const [bar, setBar] = useState<HTMLDivElement | null>(null);
+	const width = useElementWidth(bar);
+	const fieldFits = width !== undefined && width >= rems(SEARCH_FITS_AT);
 
 	// The field appears because the icon was pressed, so the cursor goes into
 	// it; a keyboard user would otherwise have to find what they just opened.
@@ -186,20 +200,27 @@ export const CompactBar = ({
 		onPanel(null);
 	};
 
-	if (searching) {
+	const field = (
+		<div
+			className={fieldFits ? 'compact-search compact-search-beside' : 'compact-search'}
+			{...{ [KEEPS_PANEL]: '' }}
+		>
+			<SearchField
+				query={query}
+				onQuery={onQuery}
+				fieldRef={fieldRef}
+				onDismiss={closeSearch}
+				onFocus={() => {
+					if (query.trim() !== '') onPanel('notes');
+				}}
+			/>
+		</div>
+	);
+
+	if (searching && !fieldFits) {
 		return (
-			<div className="compact-bar">
-				<div className="compact-search" {...{ [KEEPS_PANEL]: '' }}>
-					<SearchField
-						query={query}
-						onQuery={onQuery}
-						fieldRef={fieldRef}
-						onDismiss={closeSearch}
-						onFocus={() => {
-							if (query.trim() !== '') onPanel('notes');
-						}}
-					/>
-				</div>
+			<div className="compact-bar" ref={setBar}>
+				{field}
 				<button
 					type="button"
 					className="compact-icon"
@@ -214,7 +235,7 @@ export const CompactBar = ({
 	}
 
 	return (
-		<div className="compact-bar">
+		<div className="compact-bar" ref={setBar}>
 			<PaneTrigger
 				pane="sources"
 				name="Source"
@@ -236,17 +257,21 @@ export const CompactBar = ({
 				panel={panel}
 				onPanel={onPanel}
 			/>
-			<button
-				type="button"
-				className="compact-icon"
-				aria-label="Search notes"
-				title="Search notes"
-				onClick={() => {
-					onSearchOpen(true);
-				}}
-			>
-				<Icon name="search" />
-			</button>
+			{fieldFits ? (
+				field
+			) : (
+				<button
+					type="button"
+					className="compact-icon"
+					aria-label="Search notes"
+					title="Search notes"
+					onClick={() => {
+						onSearchOpen(true);
+					}}
+				>
+					<Icon name="search" />
+				</button>
+			)}
 		</div>
 	);
 };

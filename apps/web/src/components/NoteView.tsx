@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseChord } from '../commands/chord.js';
 import { useCommand } from '../commands/context.js';
 import { FindTargetProvider } from '../editor/findTarget.js';
+import { Icon, type IconName } from '../editor/icons.js';
 import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor, type RichEditorProps } from '../editor/RichEditor.js';
@@ -20,7 +21,14 @@ import {
 	setNoteEditorMode,
 } from '../store/notes.js';
 import { FindBar } from './FindBar.js';
-import { COMPACT, OUTLINE_CRAMPED, useMediaQuery } from './layout.js';
+import {
+	COMPACT,
+	OUTLINE_FITS_AT,
+	OUTLINE_OPENS_AT,
+	rems,
+	useElementWidth,
+	useMediaQuery,
+} from './layout.js';
 import { Outline } from './Outline.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
@@ -157,6 +165,7 @@ const NoteBody = ({
 	onUserEdit,
 	onUnsupported,
 	onAdopted,
+	onBody,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -165,10 +174,19 @@ const NoteBody = ({
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: () => void;
 	onAdopted: () => void;
+	/** The element, for whoever sizes the outline by its width. */
+	onBody: (element: HTMLDivElement | null) => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
+	const attach = useCallback(
+		(element: HTMLDivElement | null) => {
+			body.current = element;
+			onBody(element);
+		},
+		[onBody]
+	);
 	return (
-		<div className="note-body" ref={body}>
+		<div className="note-body" ref={attach}>
 			{mode === 'raw' && (
 				<RawEditor
 					noteId={note.id}
@@ -204,31 +222,34 @@ const NoteBody = ({
 };
 
 /**
- * What of the note's furniture the window has room for: the outline beside it,
- * and where the formatting toolbar goes.
+ * What of the note's furniture there is room for: the outline beside it, and
+ * where the formatting toolbar goes.
  *
- * **The outline** follows the window until the user says otherwise. Below
- * 1400px a 13rem rail costs the note more than it gives, so it starts
- * collapsed there and open above it; either way it is a press away, and once
- * pressed it stays as the user left it for as long as the app is open,
- * whatever the window does. Unmounted rather than hidden when it is not
- * shown: the headings are re-read when it comes back, which is one parse of
- * one note, and a rail that is not there cannot be tabbed through. In a
- * compact window it is not offered at all — the rail would be most of the
- * screen.
+ * **The outline** is sized by the note's own width, not the window's — the
+ * same window gives the note very different room with the columns beside it
+ * and without them. At 53.5rem and wider it starts open (`OUTLINE_OPENS_AT`),
+ * below that it starts collapsed and is a press away, and below 36rem it is
+ * not offered at all (`OUTLINE_FITS_AT`), since the rail would leave the note
+ * narrower than itself. Once pressed it stays as the user left it for as long
+ * as the app is open, whatever the room does. Unmounted rather than hidden
+ * when it is not shown: the headings are re-read when it comes back, which is
+ * one parse of one note, and a rail that is not there cannot be tabbed
+ * through.
  *
  * **The toolbar** is across the top in a wide window, as it always was. In a
  * compact one it is hidden until asked for and then sits at the bottom of the
- * editor, under the thumb: the screen is too short to spend two rows of
- * buttons above every note, and the inline toolbar and the slash menu are
- * still there without it.
+ * editor, under the thumb: the screen is too short to spend a row of buttons
+ * above every note, and the inline toolbar and the slash menu are still there
+ * without it.
  */
-const useNoteLayout = (noteId: string | undefined) => {
+const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 	const compact = useMediaQuery(COMPACT);
-	const cramped = useMediaQuery(OUTLINE_CRAMPED);
+	const width = useElementWidth(body);
+	const outlineFits = width === undefined || width >= rems(OUTLINE_FITS_AT);
+	const outlineOpens = width === undefined || width >= rems(OUTLINE_OPENS_AT);
 
 	const [outlineChoice, setOutlineChoice] = useState<boolean | null>(null);
-	const showOutline = !compact && (outlineChoice ?? !cramped);
+	const showOutline = outlineFits && (outlineChoice ?? outlineOpens);
 	const toggleOutline = useCallback(() => {
 		setOutlineChoice(!showOutline);
 	}, [showOutline]);
@@ -236,7 +257,7 @@ const useNoteLayout = (noteId: string | undefined) => {
 		id: 'note.outline',
 		label: showOutline ? 'Hide outline' : 'Show outline',
 		group: 'Note',
-		enabled: noteId !== undefined && !compact,
+		enabled: noteId !== undefined && outlineFits,
 		run: toggleOutline,
 	});
 
@@ -247,7 +268,7 @@ const useNoteLayout = (noteId: string | undefined) => {
 		setToolbarShown((shown) => !shown);
 	}, []);
 
-	return { compact, showOutline, toggleOutline, toolbar, toggleToolbar };
+	return { compact, outlineFits, showOutline, toggleOutline, toolbar, toggleToolbar };
 };
 
 export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
@@ -362,7 +383,10 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 		void setNoteEditorMode(db, noteId, otherMode(mode), { connectionId: note?.connectionId });
 	}, [rebased, mode, noteId, note?.connectionId, unsupported]);
 
-	const layout = useNoteLayout(noteId);
+	// The element the outline shares the room of, as state rather than a ref:
+	// a note opening mounts it, and the width has to be asked of the new one.
+	const [body, setBody] = useState<HTMLDivElement | null>(null);
+	const layout = useNoteLayout(noteId, body);
 
 	// A count of askings rather than a boolean: asking again with the bar already
 	// open re-focuses and selects its field, which is what `Mod+F` does
@@ -409,6 +433,7 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 				unsaved={autosave.failing}
 				finding={finding}
 				layout={layout}
+				onBody={setBody}
 				toggleMode={toggleMode}
 				onClose={() => {
 					setFinding(0);
@@ -431,6 +456,55 @@ export const NoteView = ({ note, onDeleted }: NoteViewProps) => {
 	);
 };
 
+const MODE_ICONS: Record<EditorMode, IconName> = { rich: 'rich-text', raw: 'markdown' };
+
+const tabTitle = (tab: EditorMode, current: boolean, unsupported: boolean): string => {
+	const name = MODE_LABELS[tab].toLowerCase();
+	if (current) return `Editing as ${name}`;
+	if (unsupported) return 'This note has to stay in markdown mode';
+	return `Switch to ${name} (Ctrl/Cmd+E)`;
+};
+
+/**
+ * The two editors as a pair of tabs, the one in use pressed. Two buttons
+ * rather than one that names the mode it is in: a single toggle labelled with
+ * where you are reads as where it will take you, and an icon cannot carry the
+ * difference at all.
+ *
+ * Pressing the tab already in use does nothing. A note the rich editor cannot
+ * represent keeps its markdown tab, pressed, and the rich one is disabled.
+ */
+const ModeTabs = ({
+	mode,
+	unsupported,
+	toggleMode,
+}: {
+	mode: EditorMode;
+	unsupported: boolean;
+	toggleMode: () => void;
+}) => (
+	<div className="mode-tabs" role="group" aria-label="Editor">
+		{(['rich', 'raw'] as const).map((tab) => {
+			const current = tab === mode;
+			return (
+				<button
+					key={tab}
+					type="button"
+					aria-label={MODE_LABELS[tab]}
+					aria-pressed={current}
+					disabled={!current && unsupported}
+					title={tabTitle(tab, current, unsupported)}
+					onClick={() => {
+						if (!current) toggleMode();
+					}}
+				>
+					<Icon name={MODE_ICONS[tab]} />
+				</button>
+			);
+		})}
+	</div>
+);
+
 /**
  * Everything below the provider.
  *
@@ -445,6 +519,7 @@ const NoteScreen = ({
 	unsaved,
 	finding,
 	layout,
+	onBody,
 	toggleMode,
 	onClose,
 	onDelete,
@@ -459,6 +534,7 @@ const NoteScreen = ({
 	unsaved: boolean;
 	finding: number;
 	layout: ReturnType<typeof useNoteLayout>;
+	onBody: (element: HTMLDivElement | null) => void;
 	toggleMode: () => void;
 	onClose: () => void;
 	onDelete: () => void;
@@ -478,20 +554,24 @@ const NoteScreen = ({
 					<span className="muted path" title={note.path}>
 						{note.path}
 					</span>
-					{!layout.compact && outlined && (
+					{layout.outlineFits && outlined && (
 						<button
 							type="button"
+							className="note-icon"
 							onClick={layout.toggleOutline}
+							aria-label="Outline"
 							aria-pressed={layout.showOutline}
 							title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
 						>
-							Outline
+							<Icon name="outline" />
 						</button>
 					)}
 					{layout.compact && mode === 'rich' && (
 						<button
 							type="button"
+							className="note-icon"
 							onClick={layout.toggleToolbar}
+							aria-label="Format"
 							aria-pressed={layout.toolbar === 'bottom'}
 							title={
 								layout.toolbar === 'bottom'
@@ -499,26 +579,20 @@ const NoteScreen = ({
 									: 'Show the formatting toolbar'
 							}
 						>
-							Format
+							<Icon name="format" />
 						</button>
 					)}
 					{mode !== undefined && (
-						<button
-							type="button"
-							onClick={toggleMode}
-							disabled={unsupported}
-							aria-pressed={mode === 'raw'}
-							title={
-								unsupported
-									? 'This note has to stay in markdown mode'
-									: `Switch to ${MODE_LABELS[otherMode(mode)].toLowerCase()} (Ctrl/Cmd+E)`
-							}
-						>
-							{MODE_LABELS[mode]}
-						</button>
+						<ModeTabs mode={mode} unsupported={unsupported} toggleMode={toggleMode} />
 					)}
-					<button type="button" onClick={onDelete}>
-						Delete
+					<button
+						type="button"
+						className="note-icon"
+						onClick={onDelete}
+						aria-label="Delete"
+						title="Delete this note"
+					>
+						<Icon name="trash" />
 					</button>
 				</div>
 			</header>
@@ -574,6 +648,7 @@ const NoteScreen = ({
 				onUserEdit={onUserEdit}
 				onUnsupported={onUnsupported}
 				onAdopted={onAdopted}
+				onBody={onBody}
 			/>
 		</section>
 	);

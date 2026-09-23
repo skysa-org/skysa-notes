@@ -31,10 +31,16 @@ const PATHS = {
 	copy: 'M9 9h10v11H9zM15 9V4H5v11h4',
 	trash: 'M4 7h16M10 4h4M6.5 7 7.5 20h9l1-13M10 11v5M14 11v5',
 	more: 'M5 12h.01M12 12h.01M19 12h.01',
+	overflow: 'M12 5h.01M12 12h.01M12 19h.01',
 	chevron: 'm6 9.5 6 6 6-6',
 	check: 'm5 12.5 4.5 4.5L19 7.5',
 	search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
 	close: 'M6 6l12 12M18 6 6 18',
+	// The note's header: the two editors, the toolbar, and the outline.
+	'rich-text': 'M5 7V5h14v2M12 5v14M9 19h6',
+	markdown: 'M3 6h18v12H3zM6.5 15V9l2.5 3 2.5-3v6M17 9v6M14.5 12.5 17 15l2.5-2.5',
+	format: 'M6 16 12 4l6 12M8 12h8M4 20h16',
+	outline: 'M4 6h16M8 12h12M12 18h8',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;
