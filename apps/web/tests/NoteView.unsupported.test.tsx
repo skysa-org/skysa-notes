@@ -128,7 +128,11 @@ describe('a note the rich editor cannot represent', () => {
 		await user.click(richTab());
 
 		expect(await screen.findByTestId('rich-editor')).toBeDefined();
-		expect(mounted.bodies).toEqual(['keep\nEXOTIC\n', 'keep\n']);
+		// Waited for: the retry switches after an awaited write, outside `act`,
+		// so the editor can be on the page before its mount effect has run.
+		await waitFor(() => {
+			expect(mounted.bodies).toEqual(['keep\nEXOTIC\n', 'keep\n']);
+		});
 		expect(screen.queryByRole('status')).toBeNull();
 		expect(await noteById(db, note.id)).toMatchObject({ body: 'keep\n', editorMode: 'rich' });
 	});
