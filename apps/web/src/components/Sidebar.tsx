@@ -4,8 +4,9 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useCommand } from '../commands/context.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
-import { NotebookMenu } from './NotebookMenu.js';
-import { useEscape } from './useEscape.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
+import { type NotebookActions, NotebookMenu, notebookMenuItems } from './NotebookMenu.js';
+import { FloatingMenu, type MenuPoint, menuPoint } from './OptionsMenu.js';
 
 /**
  * The notebook tree. Folders are real directories on the provider, so this is a
@@ -69,6 +70,13 @@ export interface SidebarProps {
 	 * no keystrokes at all.
 	 */
 	onReveal?: () => void;
+	/**
+	 * Counts the times something outside the sidebar asked for a new top-level
+	 * notebook: the note list's "Create a notebook", for one. A count, not a
+	 * flag, so asking twice opens the field twice. The field and what it
+	 * holds stay the sidebar's own.
+	 */
+	newNotebookAsked?: number;
 }
 
 /**
@@ -245,9 +253,8 @@ const RenameRow = ({
  * follows it, and a notebook takes every note beneath it with it. So the count
  * is in the question, because that is the part the user may not know.
  *
- * A group of buttons and not a dialog: it is one question with two answers and
- * nothing behind it to trap focus against. Cancel holds the focus, as it does
- * everywhere else the app asks something it cannot undo.
+ * Over the page rather than wedged under the pane header, where it pushed the
+ * tree down and read as a row of it (`ConfirmDialog`).
  */
 const DeleteConfirm = ({
 	name,
@@ -259,36 +266,21 @@ const DeleteConfirm = ({
 	noteCount: number;
 	onConfirm: () => void;
 	onCancel: () => void;
-}) => {
-	const frame = useRef<HTMLDivElement>(null);
-	const cancel = useRef<HTMLButtonElement>(null);
-
-	useEscape(frame, true, onCancel);
-
-	useEffect(() => {
-		cancel.current?.focus();
-	}, []);
-
-	return (
-		<div ref={frame} className="confirm" role="group" aria-label="Delete notebook">
-			<p>
-				{noteCount === 0
-					? `Delete \u201c${name}\u201d?`
-					: `Delete \u201c${name}\u201d and the ${String(noteCount)} ${
-							noteCount === 1 ? 'note' : 'notes'
-						} in it?`}
-			</p>
-			<div className="confirm-answers">
-				<button type="button" className="danger" onClick={onConfirm}>
-					Delete
-				</button>
-				<button type="button" ref={cancel} onClick={onCancel}>
-					Cancel
-				</button>
-			</div>
-		</div>
-	);
-};
+}) => (
+	<ConfirmDialog
+		title="Delete notebook?"
+		confirmLabel="Delete"
+		tone="danger"
+		onConfirm={onConfirm}
+		onCancel={onCancel}
+	>
+		{noteCount === 0
+			? `\u201c${name}\u201d will be deleted.`
+			: `\u201c${name}\u201d and the ${String(noteCount)} ${
+					noteCount === 1 ? 'note' : 'notes'
+				} in it will be deleted.`}
+	</ConfirmDialog>
+);
 
 interface RowProps {
 	/** `ROOT` for the top level and for the loose notes. */
@@ -310,6 +302,8 @@ interface RowProps {
 	/** Missing on a row that stands for a place rather than for a notebook. */
 	onPickUp?: () => void;
 	onCancelMove: () => void;
+	/** A right-click: the notebook's menu, where it has one. */
+	onMenu?: (at: MenuPoint) => void;
 }
 
 /**
@@ -331,6 +325,7 @@ const Row = ({
 	onDrop,
 	onPickUp,
 	onCancelMove,
+	onMenu,
 }: RowProps) => {
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
@@ -355,6 +350,13 @@ const Row = ({
 			}
 			aria-current={selected && moving === null ? 'true' : undefined}
 			draggable={onPickUp !== undefined}
+			onContextMenu={(event) => {
+				// The browser's own menu where this row has none of its own: the
+				// loose notes, the top level, and every row while a move is on.
+				if (onMenu === undefined || moving !== null) return;
+				event.preventDefault();
+				onMenu(menuPoint(event));
+			}}
 			onClick={() => {
 				if (moving === null) onSelect();
 				else onDrop(path);
@@ -406,6 +408,8 @@ interface FolderRowsProps {
 	/** The notebook whose name is being typed, if one is. */
 	renaming: string | null;
 	onRenamed: (path: string, chosen?: string) => void;
+	/** A notebook's row was right-clicked. */
+	onMenu: (path: string, at: MenuPoint) => void;
 }
 
 const FolderRows = ({
@@ -421,6 +425,7 @@ const FolderRows = ({
 	onCancelMove,
 	renaming,
 	onRenamed,
+	onMenu,
 }: FolderRowsProps) => (
 	<>
 		{nodes.map((node) => (
@@ -451,6 +456,9 @@ const FolderRows = ({
 							onPickUp({ kind: 'notebook', path: node.path, name: node.name });
 						}}
 						onCancelMove={onCancelMove}
+						onMenu={(at) => {
+							onMenu(node.path, at);
+						}}
 					/>
 				)}
 				{node.children.length > 0 && (
@@ -468,6 +476,7 @@ const FolderRows = ({
 							onCancelMove={onCancelMove}
 							renaming={renaming}
 							onRenamed={onRenamed}
+							onMenu={onMenu}
 						/>
 					</ul>
 				)}
@@ -492,6 +501,8 @@ const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefi
 interface TreeBodyProps extends Omit<FolderRowsProps, 'nodes' | 'depth'> {
 	tree: FolderNode[] | undefined;
 	looseNoteCount: number | undefined;
+	/** Open the field for a new top-level notebook, as the header's `+` does. */
+	onCreate: () => void;
 }
 
 /**
@@ -502,6 +513,7 @@ interface TreeBodyProps extends Omit<FolderRowsProps, 'nodes' | 'depth'> {
 const TreeBody = ({
 	tree,
 	looseNoteCount,
+	onCreate,
 	selectedFolder,
 	onSelectFolder,
 	moving,
@@ -512,6 +524,7 @@ const TreeBody = ({
 	onCancelMove,
 	renaming,
 	onRenamed,
+	onMenu,
 }: TreeBodyProps) => (
 	<ul className="tree">
 		{/* With no notebooks and the loose notes not yet counted there is
@@ -521,7 +534,13 @@ const TreeBody = ({
 			<li className="muted placeholder">Loading…</li>
 		)}
 		{tree?.length === 0 && looseNoteCount === 0 && (
-			<li className="muted placeholder">No notebooks yet. Create one to start.</li>
+			<li className="muted placeholder">
+				No notebooks yet.{' '}
+				<button type="button" className="link-button" onClick={onCreate}>
+					Create one
+				</button>{' '}
+				to start.
+			</li>
 		)}
 		{/* The only way to bring a nested notebook back out, and so it
 			appears exactly when something can land there — which is never
@@ -561,6 +580,7 @@ const TreeBody = ({
 				onCancelMove={onCancelMove}
 				renaming={renaming}
 				onRenamed={onRenamed}
+				onMenu={onMenu}
 			/>
 		)}
 		{looseNoteCount !== undefined && looseNoteCount > 0 && (
@@ -599,11 +619,24 @@ export const Sidebar = ({
 	onDrop,
 	onCancelMove,
 	onReveal,
+	newNotebookAsked = 0,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
+
+	// Asked for from outside: the field opens as it does for the header's `+`.
+	// Adjusted during render rather than in an effect, as React has it for state
+	// that follows a prop.
+	// https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+	const [answeredAsk, setAnsweredAsk] = useState(newNotebookAsked);
+	if (newNotebookAsked !== answeredAsk) {
+		setAnsweredAsk(newNotebookAsked);
+		if (moving === null) setCreating({ parent: undefined });
+	}
 	const [renaming, setRenaming] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<string | null>(null);
+	/** A notebook's row right-clicked, and where: its menu is open there. */
+	const [menu, setMenu] = useState<{ path: string; at: MenuPoint } | null>(null);
 	/** Which row the pointer is over, for the highlight and nothing else. */
 	const [over, setOver] = useState<string | null>(null);
 
@@ -621,6 +654,26 @@ export const Sidebar = ({
 	const manageable = open !== undefined && moving === null;
 	const openName = open === undefined ? '' : basename(open);
 	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
+
+	/**
+	 * What the menu does to a notebook: the open one from the header's `⋯`, any
+	 * one from a right-click on its row. One set of actions, so the two menus
+	 * cannot drift.
+	 */
+	const actionsFor = (path: string): NotebookActions => ({
+		onNewInside: () => {
+			setCreating({ parent: path });
+		},
+		onRename: () => {
+			setRenaming(path);
+		},
+		onMove: () => {
+			pickUp({ kind: 'notebook', path, name: basename(path) });
+		},
+		onDelete: () => {
+			setDeleting(path);
+		},
+	});
 
 	const renamed = (path: string, chosen?: string) => {
 		setRenaming(null);
@@ -662,21 +715,10 @@ export const Sidebar = ({
 				<div className="pane-actions">
 					<NotebookMenu
 						name={openName}
+						// Disabled with nothing open, so the root stands in for a
+						// notebook these are never run on.
 						disabled={!manageable}
-						onNewInside={() => {
-							setCreating({ parent: open });
-						}}
-						onRename={() => {
-							setRenaming(open ?? null);
-						}}
-						onMove={() => {
-							if (open !== undefined) {
-								pickUp({ kind: 'notebook', path: open, name: openName });
-							}
-						}}
-						onDelete={() => {
-							setDeleting(open ?? null);
-						}}
+						{...actionsFor(open ?? ROOT)}
 					/>
 					<button
 						type="button"
@@ -731,6 +773,9 @@ export const Sidebar = ({
 			<TreeBody
 				tree={tree}
 				looseNoteCount={looseNoteCount}
+				onCreate={() => {
+					setCreating({ parent: undefined });
+				}}
 				selectedFolder={selectedFolder}
 				onSelectFolder={onSelectFolder}
 				moving={moving}
@@ -741,7 +786,21 @@ export const Sidebar = ({
 				onCancelMove={cancel}
 				renaming={renaming}
 				onRenamed={renamed}
+				onMenu={(path, at) => {
+					setMenu({ path, at });
+				}}
 			/>
+
+			{menu !== null && (
+				<FloatingMenu
+					at={menu.at}
+					label={`Notebook “${basename(menu.path)}”`}
+					items={notebookMenuItems(basename(menu.path), actionsFor(menu.path))}
+					onClose={() => {
+						setMenu(null);
+					}}
+				/>
+			)}
 
 			{footer}
 		</nav>

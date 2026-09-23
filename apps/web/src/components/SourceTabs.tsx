@@ -20,7 +20,14 @@ import {
 	showConnection,
 } from '../store/connection.js';
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
-import { CONNECTABLE, inOrder, PROVIDER_LABELS, tabName } from '../sync/account.js';
+import {
+	anyConnected,
+	CONNECT_FIRST_LABEL,
+	CONNECTABLE,
+	inOrder,
+	PROVIDER_LABELS,
+	tabName,
+} from '../sync/account.js';
 import { ConnectButton } from './ConnectButton.js';
 import { useEscape } from './useEscape.js';
 
@@ -80,9 +87,14 @@ const useSourceChoices = (
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
 
+	const ordered = inOrder(sources ?? []);
+
 	return {
-		ordered: inOrder(sources ?? []),
+		ordered,
 		offerable,
+		// "Connect another account" once there is one; before that, what
+		// connecting is (`CONNECT_FIRST_LABEL`).
+		connectLabel: anyConnected(ordered) ? 'Connect another account' : CONNECT_FIRST_LABEL,
 		// The bar is the only place connections are made or chosen, so it is
 		// here from the start — with nothing connected it is the `+` and nothing
 		// else, which is the whole of what there is to offer. It goes away
@@ -101,7 +113,8 @@ export const SourceTabs = ({
 	navigate,
 	search,
 }: SourceTabsProps) => {
-	const { ordered, offerable, nothingToShow } = useSourceChoices(db, client);
+	const { ordered, offerable, connectLabel, nothingToShow } = useSourceChoices(db, client);
+	const first = connectLabel === CONNECT_FIRST_LABEL;
 	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
 	const [adding, setAdding] = useState(false);
 	const addFrame = useRef<HTMLDivElement>(null);
@@ -157,14 +170,23 @@ export const SourceTabs = ({
 						className={
 							adding ? 'source-add-button source-add-button-on' : 'source-add-button'
 						}
-						aria-label="Connect another account"
+						// Named by its words where it has them, which is when nothing is
+						// connected; a bare `+` beside the tabs is named for what it does.
+						{...(first ? {} : { 'aria-label': connectLabel })}
 						aria-haspopup="true"
 						aria-expanded={adding}
 						onClick={() => {
 							setAdding((open) => !open);
 						}}
 					>
-						+
+						{first ? (
+							<>
+								<span aria-hidden="true">+</span>{' '}
+								<span className="source-add-label">{CONNECT_FIRST_LABEL}</span>
+							</>
+						) : (
+							'+'
+						)}
 					</button>
 					{adding && (
 						<Menu
@@ -173,7 +195,9 @@ export const SourceTabs = ({
 							frame={addFrame}
 							onClose={stopAdding}
 						>
-							<p className="source-add-heading">Connect another account</p>
+							<p className="source-add-heading">
+								{first ? 'Choose a storage provider' : connectLabel}
+							</p>
 							<ConnectButtons
 								db={db}
 								client={client}
@@ -383,6 +407,10 @@ const Menu = ({
 		const away = (event: PointerEvent) => {
 			const target = event.target;
 			if (target instanceof Node && frame.current?.contains(target) === true) return;
+			// A dialog is over everything, this menu included, and one opened from
+			// in here is drawn at the end of the page (`ConnectButton`): a press in
+			// it is an answer to it, not a press outside.
+			if (target instanceof Element && target.closest('[aria-modal="true"]') !== null) return;
 			onClose();
 		};
 		document.addEventListener('pointerdown', away);
@@ -434,7 +462,7 @@ export const SourcePanel = ({
 	account,
 	onChosen,
 }: SourcePanelProps) => {
-	const { ordered, offerable } = useSourceChoices(db, client);
+	const { ordered, offerable, connectLabel } = useSourceChoices(db, client);
 	const headingId = useId();
 
 	return (
@@ -486,7 +514,7 @@ export const SourcePanel = ({
 					// is two buttons a screen-reader user cannot tell apart.
 					<div className="source-panel-connect" role="group" aria-labelledby={headingId}>
 						<p className="source-add-heading" id={headingId}>
-							Connect another account
+							{connectLabel}
 						</p>
 						<ConnectButtons
 							db={db}

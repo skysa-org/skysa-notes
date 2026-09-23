@@ -120,9 +120,12 @@ describe('deleting a notebook', () => {
 
 		await menu(user, 'Work', 'Delete');
 		await user.click(
-			within(screen.getByRole('group', { name: 'Delete notebook' })).getByRole('button', {
-				name: 'Delete',
-			})
+			within(screen.getByRole('alertdialog', { name: 'Delete notebook?' })).getByRole(
+				'button',
+				{
+					name: 'Delete',
+				}
+			)
 		);
 
 		await waitFor(async () => {

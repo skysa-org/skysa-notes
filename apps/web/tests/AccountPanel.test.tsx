@@ -209,9 +209,17 @@ const renderPanel = (
 	return { went, downloaded };
 };
 
-/** The `+` menu, opened. Connecting is the bar's now, not the panel's. */
+/**
+ * The `+` menu, opened. Connecting is the bar's now, not the panel's. The `+`
+ * says what it is while nothing is connected, and is named for "another" once
+ * something is.
+ */
 const openAdd = async (user: ReturnType<typeof userEvent.setup>) => {
-	await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+	await user.click(
+		await screen.findByRole('button', {
+			name: /^(Connect another account|Connect storage provider)$/,
+		})
+	);
 };
 
 /**
@@ -248,6 +256,93 @@ const sentNote = async (db: NotesDatabase, title: string) => {
 };
 
 describe('AccountPanel, with nothing connected', () => {
+	it('says the way to connect by the name the `+` has while nothing is connected', async () => {
+		renderPanel(clientWith(), freshDatabase());
+
+		// Waited for: the hint needs the server's providers and the sources both.
+		await waitFor(() => {
+			expect(screen.getByText(NOTHING_CONNECTED).textContent).toBe(
+				'Notes are kept on this device only. Use “Connect storage provider” above to sync them.'
+			);
+		});
+		expect(screen.getByRole('button', { name: 'Connect storage provider' })).toBeTruthy();
+	});
+
+	it('asks before moving the notes on this device into the account, and can stay', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await createNote(db, { title: 'List', folderPath: 'Work' });
+		const started: string[] = [];
+		const { went } = renderPanel(
+			clientWith({
+				startConnect: (provider) => {
+					started.push(provider);
+					return Promise.resolve({
+						ok: true,
+						value: 'https://dropbox.example/authorize',
+					});
+				},
+			}),
+			db
+		);
+
+		await connectVia(user, 'Dropbox');
+
+		const question = await screen.findByRole('alertdialog', {
+			name: 'Move your notes to Dropbox?',
+		});
+		expect(within(question).getByText(/will move/).textContent).toBe(
+			'Your 1 notebook and 2 notes on this device will move into Dropbox and sync there. Cancel to keep them on this device only.'
+		);
+		// Cancel has the focus, as in every question this app asks.
+		expect(document.activeElement).toBe(
+			within(question).getByRole('button', { name: 'Cancel' })
+		);
+		// Nothing has been started while the question is out.
+		expect(started).toEqual([]);
+		expect(await db.credentials.get(PENDING_CREDENTIAL_ID)).toBeUndefined();
+
+		await user.click(within(question).getByRole('button', { name: 'Cancel' }));
+
+		expect(screen.queryByRole('alertdialog')).toBeNull();
+		const menu = screen.getByRole('group', { name: 'Storage providers' });
+		const dropbox = within(menu).getByRole('button', { name: 'Dropbox' });
+		expect(document.activeElement).toBe(dropbox);
+
+		// Escape is Cancel too, and closes the question rather than the menu.
+		await user.click(dropbox);
+		await screen.findByRole('alertdialog');
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('alertdialog')).toBeNull();
+		expect(screen.getByRole('group', { name: 'Storage providers' })).toBeTruthy();
+
+		expect(started).toEqual([]);
+		expect(went).toEqual([]);
+		expect(await db.credentials.get(PENDING_CREDENTIAL_ID)).toBeUndefined();
+	});
+
+	it('connects once the move is agreed to', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		const { went } = renderPanel(
+			clientWith({
+				startConnect: () =>
+					Promise.resolve({ ok: true, value: 'https://dropbox.example/authorize' }),
+			}),
+			db
+		);
+
+		await connectVia(user, 'Dropbox');
+		await user.click(await screen.findByRole('button', { name: 'Connect and move' }));
+
+		await waitFor(() => {
+			expect(went).toEqual(['https://dropbox.example/authorize']);
+		});
+		expect((await db.credentials.get(PENDING_CREDENTIAL_ID))?.provider).toBe('dropbox');
+	});
+
 	it('writes a credential down before it leaves, and sends the user back to where they were', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();

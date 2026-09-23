@@ -1258,6 +1258,23 @@ export interface ConnectedSource {
 }
 
 /**
+ * What the device's own pile holds, which is what connecting any account moves
+ * into it (`bindConnection`) — and so what the user is told before they do.
+ * Live notes only: one deleted here is not something they would recognise as
+ * theirs to keep.
+ */
+export const pileContents = async (
+	db: Pick<NotesDatabase, 'notes' | 'folders'>
+): Promise<{ notebooks: number; notes: number }> => ({
+	notebooks: await db.folders.where('connectionId').equals(LOCAL_CONNECTION_ID).count(),
+	notes: await db.notes
+		.where('connectionId')
+		.equals(LOCAL_CONNECTION_ID)
+		.filter((note) => note.deletedLocally === 0)
+		.count(),
+});
+
+/**
  * Every source on this device, in the order they were connected: the live ones
  * and the detached ones alike, since a detached source is listed precisely so
  * that what it holds is not forgotten. And the device's own pile, last, when it

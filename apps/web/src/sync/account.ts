@@ -129,6 +129,20 @@ export const PILE_LABEL = 'This device';
 export const UNKNOWN_LABEL = 'A source';
 
 /**
+ * What the way to connect is called while nothing is connected. Beside a tab
+ * the `+` alone says "another account", but in a bar with nothing in it a bare
+ * `+` is a control nobody can name, and it is the one thing to do there.
+ */
+export const CONNECT_FIRST_LABEL = 'Connect storage provider';
+
+/**
+ * Whether any account has been connected here, live or detached. The device's
+ * own pile is listed with them and is not one.
+ */
+export const anyConnected = (sources: readonly Pick<ConnectedSource, 'connectionId'>[]): boolean =>
+	sources.some((source) => source.connectionId !== LOCAL_CONNECTION_ID);
+
+/**
  * A source in as few words as will do: "Dropbox", or "Dropbox 2" where there
  * is more than one of them.
  *

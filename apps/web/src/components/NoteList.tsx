@@ -1,9 +1,10 @@
 import { previewLines, ROOT } from '@skysa/core';
-import { type ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
 import { folderLabel } from '../store/tree.js';
 import { editedAt } from './editedAt.js';
+import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
  * The middle pane: the notes in the selected notebook, most recently edited
@@ -20,6 +21,11 @@ export interface NoteListProps {
 	selectedNoteId: string | undefined;
 	onSelectNote: (id: string) => void;
 	onCreateNote: () => void;
+	/**
+	 * Ask the sidebar for a new notebook, for the empty state's "Create a
+	 * notebook". Without it the words are plain text.
+	 */
+	onCreateNotebook?: () => void;
 	/**
 	 * The open folder, or undefined when nothing is open. The root is a folder
 	 * like any other here — it just holds the loose notes rather than a notebook.
@@ -41,23 +47,56 @@ export interface NoteListProps {
 	onCancelMove?: () => void;
 	/** Which of these rows is the one in the air, if any. */
 	movingNoteId?: string;
+	/**
+	 * What a right-click on a note's row offers: the note's own menu
+	 * (`noteMenuItems`), about that note. Without it the browser's menu opens.
+	 */
+	menuFor?: (note: NoteRecord) => readonly OptionsMenuItem[];
 }
 
 /**
  * What to show instead of the list. Pulled out of the markup because it is the
  * only place the empty states — still loading, nowhere to put a note, and an
  * empty notebook — have to be told apart.
+ *
+ * An empty state that says what to do next offers to do it: a press on the
+ * words, not a hunt for the `+` they describe. The root is not one of those
+ * places — loose notes are imported, never created here.
  */
 const placeholderFor = ({
 	notes,
 	folderPath,
 	storeLoaded,
-}: Pick<NoteListProps, 'notes' | 'folderPath' | 'storeLoaded'>): string | undefined => {
+	onCreateNote,
+	onCreateNotebook,
+}: Pick<
+	NoteListProps,
+	'notes' | 'folderPath' | 'storeLoaded' | 'onCreateNote' | 'onCreateNotebook'
+>): ReactNode => {
 	if (folderPath === undefined) {
-		return storeLoaded ? 'Create a notebook to start writing.' : 'Loading…';
+		if (!storeLoaded) return 'Loading…';
+		if (onCreateNotebook === undefined) return 'Create a notebook to start writing.';
+		return (
+			<>
+				<button type="button" className="link-button" onClick={onCreateNotebook}>
+					Create a notebook
+				</button>{' '}
+				to start writing.
+			</>
+		);
 	}
 	if (notes === undefined) return 'Loading…';
-	return notes.length === 0 ? 'No notes here yet.' : undefined;
+	if (notes.length > 0) return undefined;
+	if (folderPath === ROOT) return 'No notes here yet.';
+	return (
+		<>
+			No notes here yet.{' '}
+			<button type="button" className="link-button" onClick={onCreateNote}>
+				Create one
+			</button>
+			.
+		</>
+	);
 };
 
 /**
@@ -117,6 +156,8 @@ interface NoteRowProps {
 	onCancelMove?: () => void;
 	/** True while this is the row being moved. */
 	moving: boolean;
+	/** A right-click, where the note has a menu. */
+	onMenu?: (at: MenuPoint) => void;
 }
 
 const NoteRow = ({
@@ -128,6 +169,7 @@ const NoteRow = ({
 	onPickUp,
 	onCancelMove,
 	moving,
+	onMenu,
 }: NoteRowProps) => (
 	<li>
 		<button
@@ -137,6 +179,11 @@ const NoteRow = ({
 				'row'
 			)}
 			onClick={onSelect}
+			onContextMenu={(event) => {
+				if (onMenu === undefined) return;
+				event.preventDefault();
+				onMenu(menuPoint(event));
+			}}
 			aria-current={selected ? 'true' : undefined}
 			draggable={onPickUp !== undefined}
 			onDragStart={(event) => {
@@ -166,13 +213,23 @@ export const NoteList = ({
 	selectedNoteId,
 	onSelectNote,
 	onCreateNote,
+	onCreateNotebook,
 	folderPath,
 	storeLoaded,
 	onPickUpNote,
 	onCancelMove,
 	movingNoteId,
+	menuFor,
 }: NoteListProps) => {
-	const placeholder = placeholderFor({ notes, folderPath, storeLoaded });
+	/** A row right-clicked, and where: the note's menu is open there. */
+	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
+	const placeholder = placeholderFor({
+		notes,
+		folderPath,
+		storeLoaded,
+		onCreateNote,
+		onCreateNotebook,
+	});
 	const heading = folderPath === undefined ? 'Notes' : folderLabel(folderPath);
 
 	return (
@@ -217,9 +274,27 @@ export const NoteList = ({
 							}
 							onCancelMove={onCancelMove}
 							moving={note.id === movingNoteId}
+							{...(menuFor === undefined
+								? {}
+								: {
+										onMenu: (at: MenuPoint) => {
+											setMenu({ note, at });
+										},
+									})}
 						/>
 					))}
 				</ul>
+			)}
+
+			{menu !== null && menuFor !== undefined && (
+				<FloatingMenu
+					at={menu.at}
+					label={`Note “${menu.note.title}”`}
+					items={menuFor(menu.note)}
+					onClose={() => {
+						setMenu(null);
+					}}
+				/>
 			)}
 		</section>
 	);

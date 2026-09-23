@@ -79,6 +79,9 @@
 	   darker than hover is only told apart from hover side by side, and a
 	   toggle is pressed with the pointer still over it. */
 	--accent: #2563eb;
+	/* Text on a slab of `--accent`: white on the light theme's blue, and the
+	   page's own dark on the dark theme's, which is too light to carry white. */
+	--on-accent: #fff;
 	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 	--on-fg: var(--accent);
 	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
@@ -113,6 +116,7 @@
 		--bad: #f87171;
 		--drop: #60a5fa;
 		--accent: #60a5fa;
+		--on-accent: #0b0f19;
 		/* The light palette's ink is unreadable on a dark slab: every token
 		   colour is the same hue lifted until it reads against `--surface`,
 		   and the slab itself steps away from the page rather than towards
@@ -507,6 +511,13 @@ code {
 	}
 }
 
+/* Its words, while nothing is connected: sized as a tab's name is, beside
+   the `+` that keeps the size it has everywhere else. */
+.source-add-label {
+	font-size: 0.85rem;
+	white-space: nowrap;
+}
+
 /* Lit while its menu is open, as a toolbar button is (`.toolbar-button-on`). */
 .source-add-button-on {
 	color: var(--fg);
@@ -702,10 +713,17 @@ code {
 	white-space: nowrap;
 }
 
+/* Its glyph centred both ways, as a flex box. A button's own centring is for
+   text: an icon in one was drawn from its left edge, and the `⋯` character it
+   replaced sat on its font's baseline, low and to one side. */
 button.icon {
+	display: flex;
 	flex: none;
+	align-items: center;
+	justify-content: center;
 	width: 1.75rem;
 	height: 1.75rem;
+	padding: 0;
 	font: inherit;
 	font-size: 1.1rem;
 	line-height: 1;
@@ -714,6 +732,22 @@ button.icon {
 	background: var(--bg);
 	color: var(--fg);
 	cursor: pointer;
+}
+
+/* An options button, drawn as the note's own is (`.note-icon`): no box, the
+   glyph in the muted colour, and the hover wash for where the button is. The
+   `+` beside it keeps its box — it is the one thing in the header to press. */
+button.icon.icon-quiet {
+	color: var(--muted);
+	background: none;
+	border-color: transparent;
+}
+
+@media (hover: hover) {
+	button.icon.icon-quiet:not(:disabled):hover {
+		color: var(--fg);
+		background: var(--hover-bg);
+	}
 }
 
 /* "New note" is disabled wherever a note cannot be created — no notebook open,
@@ -807,52 +841,20 @@ button.row.drop-over {
 	align-items: center;
 }
 
-/* The same card `.source-add-menu` is, for the same reason: it hangs off the
-   control that opened it and has to sit over what is below. */
-.options-menu-items {
-	position: absolute;
-	inset-block-start: calc(100% + var(--space-2xs));
-	inset-inline-end: 0;
-	z-index: 20;
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 0.35rem;
-	min-width: 12rem;
-	padding: var(--space-s) var(--space-m);
-	background: var(--surface);
-	border: 1px solid var(--border);
-	border-radius: 0.5rem;
-	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
-}
-
-/* Scoped twice over, so that a bar the menu sits in — the note's header,
-   whose buttons are boxed — does not dress the items as its own buttons. */
-.options-menu .options-menu-items button {
-	width: auto;
-	height: auto;
-	padding: 0.15rem 0;
-	font: inherit;
-	font-size: 0.85rem;
-	text-align: start;
-	color: var(--fg);
-	background: none;
-	border: 0;
-	border-radius: 0;
-	cursor: pointer;
-}
-
-@media (hover: hover) {
-	.options-menu-items button:hover {
-		text-decoration: underline;
-	}
+/* The card is `.toolbar-panel`, the rows `.toolbar-item`, as in the `+` menu,
+   but fixed to the window rather than hung inside the bar that opened it: the
+   sidebar cuts off what goes past its edge (`FloatingMenu`). Over the notices,
+   which it is opened on top of. */
+.toolbar-panel.options-menu-items {
+	position: fixed;
+	inset: auto;
+	z-index: 40;
 }
 
 /* Deleting a notebook takes every note beneath it, and deleting a note takes
    the note. The colour is the one a toast uses to say something went wrong,
    because this is the same news. */
-button.danger,
-.options-menu .options-menu-items button.danger {
+button.danger {
 	color: var(--bad);
 }
 
@@ -885,26 +887,6 @@ button.danger,
 /* Asked before a notebook goes. Under the header rather than over the pane:
    it is one question with two answers, and there is nothing behind it that
    needs focus trapped away from it. */
-.confirm {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--space-s);
-	padding: var(--space-m) var(--gutter);
-	background: color-mix(in srgb, var(--bad) 8%, transparent);
-	border-block-end: 1px solid var(--border);
-}
-
-.confirm p {
-	flex-basis: 100%;
-	margin: 0;
-	font-size: 0.85rem;
-}
-
-.confirm-answers {
-	display: flex;
-	gap: 0.5rem;
-}
-
 /* What is in the air, said in words under the pane header. It is a live region
    (`role="status"`), so it is also how a screen-reader user is told the mode
    has started at all. */
@@ -1151,11 +1133,6 @@ button.danger,
 
 .note-actions > :last-child {
 	margin-inline-end: calc(-1 * var(--control-inline));
-}
-
-/* Its menu's edge back on the gutter, where the glyph that opened it is. */
-.note-actions > .options-menu:last-child .options-menu-items {
-	inset-inline-end: var(--control-inline);
 }
 
 .note-actions .note-icon[aria-pressed='true'],
@@ -2473,7 +2450,8 @@ button.danger,
 	display: contents;
 }
 
-.tab-notice-backdrop {
+.tab-notice-backdrop,
+.modal-backdrop {
 	position: fixed;
 	inset: 0;
 	z-index: 100;
@@ -2483,7 +2461,8 @@ button.danger,
 	background: rgb(0 0 0 / 0.4);
 }
 
-.tab-notice {
+.tab-notice,
+.modal {
 	max-width: 28rem;
 	padding: 1.25rem 1.5rem;
 	border: 1px solid var(--border);
@@ -2493,12 +2472,14 @@ button.danger,
 	line-height: 1.6;
 }
 
-.tab-notice h2 {
+.tab-notice h2,
+.modal h2 {
 	margin: 0 0 0.5rem;
 	font-size: 1.1rem;
 }
 
-.tab-notice button {
+.tab-notice button,
+.modal button {
 	font: inherit;
 	padding: 0.35rem 0.75rem;
 	border-radius: 0.375rem;
@@ -2508,10 +2489,35 @@ button.danger,
 	cursor: pointer;
 }
 
-.tab-notice-actions {
+.tab-notice-actions,
+.modal-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
+}
+
+/* A question the app asks over everything: the stale-tab notice's card. */
+.modal {
+	font-size: 0.9rem;
+}
+
+.modal p {
+	margin: 0 0 1rem;
+}
+
+/* The answer the question expects, filled, so it is the one the eye lands on.
+   Cancel keeps the focus all the same. */
+.modal button.primary {
+	color: var(--on-accent);
+	background: var(--accent);
+	border-color: var(--accent);
+}
+
+/* An answer that deletes, in the colour a toast uses to say something went
+   wrong; `.modal button` would otherwise have it the colour of the text. */
+.modal button.danger {
+	color: var(--bad);
+	border-color: color-mix(in srgb, var(--bad) 50%, var(--border));
 }
 
 /* Above the other corner notices: it is the one that says nothing here saves. */
