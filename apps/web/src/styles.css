@@ -308,11 +308,6 @@ code {
 	flex: 1;
 }
 
-/* A link out, beside the words it is about: never broken across lines. */
-.toast a {
-	white-space: nowrap;
-}
-
 .update-prompt button,
 .toast button {
 	font: inherit;

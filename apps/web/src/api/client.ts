@@ -34,7 +34,9 @@ const gateSchema = z.object({
 	message: z.string().min(1).max(500),
 	action: z.object({
 		label: z.string().min(1).max(40),
-		url: z.url({ protocol: /^https$/ }).max(2048),
+		// Normalized for the reason `apps/api/src/gate.ts` gives: an
+		// `https:example.com` would otherwise be a link into this app.
+		url: z.url({ protocol: /^https$/, normalize: true }).max(2048),
 	}),
 });
 

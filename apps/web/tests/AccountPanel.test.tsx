@@ -1607,6 +1607,35 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(screen.queryByRole('link')).toBeNull();
 	});
 
+	it('says a reason only beside the line it explains', async () => {
+		// Not while the phase is past it, and not for a provider this build
+		// cannot sync, where the line says that instead.
+		await connected(
+			fakeSync({
+				phase: 'idle',
+				refusal: 'not_entitled',
+				denial: { reason: 'Not on the list.' },
+			})
+		);
+		expect(screen.queryByText('Not on the list.')).toBeNull();
+		cleanup();
+
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'webdav' });
+		renderPanel(
+			clientWith({ connection: () => Promise.reject(new TypeError('offline')) }),
+			db,
+			'/',
+			fakeSync({
+				phase: 'attention',
+				refusal: 'not_entitled',
+				denial: { reason: 'Not on the list.' },
+			})
+		);
+		expect(await screen.findByText('This app cannot sync with WebDAV yet.')).toBeTruthy();
+		expect(screen.queryByText('Not on the list.')).toBeNull();
+	});
+
 	it('does not say an old reason once the refusal is over', async () => {
 		const sync = fakeSync({
 			phase: 'attention',

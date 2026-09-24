@@ -44,11 +44,13 @@ describe('the connect gate', () => {
 		});
 	});
 
-	it('is served trimmed', async () => {
+	it('is served trimmed, and its link as the browser will read it', async () => {
 		const app = buildApp({
 			entitlements: gated({
 				message: '  Ask for access.\n',
-				action: { label: ' Ask ', url: 'https://example.com/ask' },
+				// Without the slashes: in an `href` this would be a path inside
+				// the app, not the site the operator meant.
+				action: { label: ' Ask ', url: 'https:example.com/ask' },
 			}),
 		});
 
@@ -88,6 +90,16 @@ describe('the connect gate', () => {
 			/https/,
 		],
 		['linking relatively', { ...GATE, action: { ...GATE.action, url: '/plans' } }, /https/],
+		[
+			'with a blank label',
+			{ ...GATE, action: { ...GATE.action, label: ' ' } },
+			/label: must not be blank/,
+		],
+		[
+			'with a link too long',
+			{ ...GATE, action: { ...GATE.action, url: `https://example.com/${'x'.repeat(2048)}` } },
+			/url: must be at most 2048/,
+		],
 	])('stops the app being built %s', (_, gate, problem) => {
 		expect(build(gate)).toThrow(problem);
 	});

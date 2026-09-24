@@ -832,10 +832,17 @@ describe('failures', () => {
 			refusal: 'not_entitled',
 			denial: { code: 'limit_reached', reason: 'This plan syncs two accounts.' },
 		});
+		const syncing: SchedulerStatus[] = [];
+		h.scheduler.subscribe((status) => {
+			if (status.phase === 'syncing') syncing.push(status);
+		});
 
 		h.env.fire('focus');
 		await reaches(h.scheduler, 'idle');
 		expect(h.scheduler.status().denial).toBeUndefined();
+		// Nor while it tries: cleared with the refusal, never after it.
+		expect(syncing.length).toBeGreaterThan(0);
+		expect(syncing.filter((status) => status.denial !== undefined)).toEqual([]);
 	});
 
 	it('asks for attention when even a fresh token is refused', async () => {

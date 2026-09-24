@@ -317,7 +317,8 @@ const useConnectNotice = (
 	const [refusedAs] = useState(code);
 	// The operator's gate, whose action is the one thing a refused toast can
 	// offer to do. The same request the connect buttons make (`instanceConfig`).
-	const gate = answer(useInstanceConfig(api))?.connectGate;
+	const config = useInstanceConfig(api);
+	const gate = answer(config)?.connectGate;
 	useEffect(() => {
 		if (connect === undefined && code === undefined) return;
 		void navigate({
@@ -337,7 +338,14 @@ const useConnectNotice = (
 	// Whether there is a message at all decides whether a toast is rendered, and
 	// `connectMessage` answers `undefined` for an outcome this build has no
 	// words for (see above).
-	const waiting = outcome === 'ok' && (claiming || held !== undefined);
+	//
+	// A refusal waits for the instance's config, answered or not: its link is
+	// part of the message, and an alert that grows a link a moment after it
+	// appears is an alert a screen reader reads twice. Never for long — the
+	// server has only just sent the browser here.
+	const waiting =
+		(outcome === 'ok' && (claiming || held !== undefined)) ||
+		(outcome === 'refused' && config.kind === 'asking');
 	const connectNotice =
 		outcome === undefined || waiting ? undefined : connectMessage(outcome, refusedAs, gate);
 	return { connectNotice, dismissConnect };

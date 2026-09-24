@@ -411,8 +411,8 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
  * (docs/ARCHITECTURE.md §6).
  *
  * Rendered inside the group each caller already names — the `+` menu's, and
- * the storage panel's by its heading — so the gate is read out as part of
- * connecting, as the buttons are.
+ * the compact source panel's by its heading — so the gate is read out as part
+ * of connecting, as the buttons are.
  */
 const ConnectChoice = ({
 	gate,

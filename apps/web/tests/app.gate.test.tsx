@@ -53,6 +53,14 @@ const open = async (url: string) => {
 	return router;
 };
 
+/** The alerts a node that went into the page is or holds. */
+const alertsIn = (node: Node): HTMLElement[] => {
+	if (!(node instanceof HTMLElement)) return [];
+	return node.matches('[role="alert"]')
+		? [node]
+		: [...node.querySelectorAll<HTMLElement>('[role="alert"]')];
+};
+
 describe('a refused connect, on an instance with a gate', () => {
 	it("offers the operator's way forward beside the refusal", async () => {
 		await createFolder(db, { name: 'Work' });
@@ -62,10 +70,34 @@ describe('a refused connect, on an instance with a gate', () => {
 		expect(toast.textContent).toMatch(
 			/not allowed to sync on this server, so storage was not connected/
 		);
-		const link = await within(toast).findByRole('link', { name: 'See plans' });
+		// There from the first moment the alert is: a link added after it would
+		// have the whole alert read out again.
+		const link = within(toast).getByRole('link', { name: 'See plans' });
 		expect(link.getAttribute('href')).toBe(GATE.action.url);
 		expect(link.getAttribute('target')).toBe('_blank');
 		expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+	});
+
+	it('holds the toast until it has its link, so the alert is never read without it', async () => {
+		// Whether each alert had its link at the moment it went into the page.
+		// Polling for it cannot tell: by the next poll a late link has arrived.
+		const atInsertion: boolean[] = [];
+		const observer = new MutationObserver((records) => {
+			records
+				.flatMap((record) => [...record.addedNodes])
+				.flatMap(alertsIn)
+				.forEach((alert) => {
+					atInsertion.push(alert.querySelector('a') !== null);
+				});
+		});
+		observer.observe(document.body, { childList: true, subtree: true });
+		await createFolder(db, { name: 'Work' });
+
+		await open('/?folder=Work&connect=refused&code=lapsed');
+		await within(await screen.findByRole('alert')).findByRole('link', { name: 'See plans' });
+		observer.disconnect();
+
+		expect(atInsertion).toEqual([true]);
 	});
 
 	it('offers it for a refusal whose kind the policy did not say', async () => {
@@ -74,7 +106,7 @@ describe('a refused connect, on an instance with a gate', () => {
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(/cannot sync on this server/);
-		expect(await within(toast).findByRole('link', { name: 'See plans' })).toBeTruthy();
+		expect(within(toast).getByRole('link', { name: 'See plans' })).toBeTruthy();
 	});
 
 	it('offers nothing beside an outcome that is not a refusal', async () => {

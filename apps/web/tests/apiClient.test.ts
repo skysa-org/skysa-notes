@@ -58,6 +58,14 @@ describe('the API client', () => {
 			{ message: 'Paid plan.', action: { label: 'Plans', url: 'data:text/html,hi' } },
 		],
 		['without an action', { message: 'Paid plan.' }],
+		[
+			'with a blank message',
+			{ message: '', action: { label: 'Plans', url: 'https://x.com/' } },
+		],
+		[
+			'with a label too long',
+			{ message: 'Paid plan.', action: { label: 'x'.repeat(41), url: 'https://x.com/' } },
+		],
 		['as a string', 'Paid plan.'],
 	])('drops a gate linking %s, and keeps the rest of the config', async (_, connectGate) => {
 		const { fetch } = answering(200, {
@@ -70,6 +78,33 @@ describe('the API client', () => {
 
 		expect(config).toEqual({ authMode: 'storage-first', providers: ['dropbox'] });
 		expect(config.connectGate).toBeUndefined();
+	});
+
+	it('reads the gate link as the browser will, not as it was written', async () => {
+		// In an `href`, `https:example.com` resolves against the page, into a
+		// path inside this app.
+		const { fetch } = answering(200, {
+			authMode: 'storage-first',
+			providers: ['dropbox'],
+			connectGate: {
+				message: 'Paid plan.',
+				action: { label: 'Plans', url: 'https:example.com' },
+			},
+		});
+
+		const config = await createApiClient({ fetch }).config();
+
+		expect(config.connectGate?.action.url).toBe('https://example.com/');
+	});
+
+	it('drops a reason that is only space, which would say nothing', async () => {
+		const { fetch } = answering(403, { error: 'not_entitled', reason: '  \n ' });
+
+		expect(await createApiClient({ fetch }).token()).toEqual({
+			ok: false,
+			refusal: 'not_entitled',
+			denial: {},
+		});
 	});
 
 	it("carries what the operator's policy said beside a not_entitled", async () => {

@@ -206,8 +206,14 @@ By default every account that connects may sync. To choose which ones, give
 `createApp` an `EntitlementProvider` of your own. It is asked when an account
 connects and each time a device mints a token. It can say no with a `reason`
 in your words and a `code` from a fixed list: `not_allowed`, `lapsed` or
-`limit_reached`. The app words the refusal by the code and shows the reason
-beside it. `docs/ARCHITECTURE.md` §6, "Entitlement seam", has the details.
+`limit_reached`.
+
+The app words a refusal by its code in both places it can come. Your `reason`
+reaches only one of them: the storage panel, for an account that is already
+connected and refused a token later. An account refused as it first connects
+sees only the code's wording, because that refusal comes back in a URL, and a
+URL does not carry free text. `docs/ARCHITECTURE.md` §6, "Entitlement seam",
+has the details.
 
 Give it a `gate` too, and people see your message and one link where the
 connect buttons are, before a provider's consent screen ends in a refusal. A
@@ -237,11 +243,21 @@ export const entitlements: EntitlementProvider = {
 
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
 its one `createApp({ config: parseEnv(env) })` to pass `entitlements` as well,
-and point `main` in `wrangler.toml` at your copy. The stock entry never sets a
-gate. Keep the copy's `try`/`catch`: `createApp` checks the gate and throws on
-a message that is blank or over 500 characters, a label over 40, or a link
-that is not an absolute `https:` URL. The entry then logs that and answers
-`server_misconfigured`, rather than showing a broken link to your users.
+and point `main` in `wrangler.toml` at your copy. Beside the original in
+`apps/api/src`, its relative imports work as they are. Anywhere else, import
+`createApp` and `parseEnv` from `@skysa/api` instead. The stock entry never
+sets a gate.
+
+Keep the copy's `try`/`catch`. `createApp` checks the gate and throws on any of
+these:
+
+- a message that is blank or over 500 characters;
+- a label that is blank or over 40 characters;
+- a link that is not an `https:` URL, or is over 2048 characters.
+
+The entry then logs the problem and answers `server_misconfigured`, rather
+than showing a broken link to your users. The link is served in its
+normalized form, so `https:example.com` goes out as `https://example.com/`.
 
 ## Updating
 

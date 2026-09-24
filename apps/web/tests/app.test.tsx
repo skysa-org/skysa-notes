@@ -133,6 +133,19 @@ describe('the app', () => {
 		);
 	});
 
+	it('takes a stray kind of refusal out of the URL, with no outcome beside it', async () => {
+		// A hand-edited or half-copied link. Harmless where it stays — a
+		// connect starts from a path without it (`returnPath`) — but the URL is
+		// meant to say only where the user is.
+		await createFolder(db, { name: 'Work' });
+		const router = await open('/?folder=Work&code=lapsed', 'Work');
+
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({ folder: 'Work' });
+		});
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
 	it('says which kind of refusal it was, and takes that out of the URL too', async () => {
 		await createFolder(db, { name: 'Work' });
 		const router = await open('/?folder=Work&connect=refused&code=lapsed', 'Work');

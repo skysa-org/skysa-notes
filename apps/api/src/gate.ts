@@ -22,13 +22,18 @@ const text = (max: number) =>
  * `javascript:` URL there is script on the page — the property `script-src
  * 'self'` exists to protect (CLAUDE.md). `http:` is refused as well: a link out
  * of an app served over TLS has no reason to leave it.
+ *
+ * Served as the parser reads it (`normalize`), not as written. With a protocol
+ * of its own zod no longer insists on `//`, so `https:example.com` parses — and
+ * in an `href` a browser resolves that against the page, into a path inside
+ * the app. Normalized, it is `https://example.com/`, which is what was meant.
  */
 const gateSchema = z.object({
 	message: text(500),
 	action: z.object({
 		label: text(40),
 		url: z
-			.url({ protocol: /^https$/, error: 'must be an absolute https: URL' })
+			.url({ protocol: /^https$/, normalize: true, error: 'must be an absolute https: URL' })
 			.max(2048, 'must be at most 2048 characters'),
 	}),
 });

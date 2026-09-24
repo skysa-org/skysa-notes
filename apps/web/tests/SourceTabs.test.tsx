@@ -575,6 +575,24 @@ describe('the way to connect, on an instance whose operator gates it', () => {
 		expect(menu.getByRole('button', { name: /Already have access/ })).toBeTruthy();
 	});
 
+	it('does not count the notes kept on this device as an account syncing here', async () => {
+		// The common case: someone writes before they connect. Their notes are a
+		// tab of their own, and still nothing the operator has let in.
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Written first' });
+		show(db, gated());
+		await waitFor(() => {
+			expect(tabs()).toEqual(['This device']);
+		});
+
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+	});
+
 	it('is the buttons and nothing else where the instance has no gate', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
