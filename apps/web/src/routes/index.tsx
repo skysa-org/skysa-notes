@@ -25,6 +25,7 @@ import {
 	noteRef,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { downloadProblem, downloadSource } from '../store/exportNotes.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -186,6 +187,39 @@ const useNoteMove = (
 	});
 
 	return offered ? { onMove: move } : {};
+};
+
+/**
+ * The source showing, whole, as an archive of markdown (docs/ARCHITECTURE.md
+ * §14). For a device with nothing connected it is the one copy of the notes
+ * that can leave this browser; for a source that syncs it is its folder,
+ * without a trip to the provider's own client. Unavailable only while the
+ * source holds nothing, which would be an empty archive.
+ */
+const useDownloadCommand = ({
+	connectionId,
+	notebooks = 0,
+	looseNotes = 0,
+	onProblem,
+}: {
+	connectionId: string | undefined;
+	/** How many notebooks are at the top of the source; every other note is in one. */
+	notebooks: number | undefined;
+	looseNotes: number | undefined;
+	onProblem: (notice: Notice) => void;
+}) => {
+	useCommand({
+		id: 'app.download',
+		label: 'Download all notes',
+		group: 'App',
+		enabled: connectionId !== undefined && notebooks + looseNotes > 0,
+		run: () => {
+			if (connectionId === undefined) return;
+			void downloadSource(db, connectionId).catch((error: unknown) => {
+				onProblem({ message: downloadProblem(error), tone: 'error' });
+			});
+		},
+	});
 };
 
 /**
@@ -716,6 +750,13 @@ const Home = () => {
 			searchField.current?.focus();
 			searchField.current?.select();
 		},
+	});
+
+	useDownloadCommand({
+		connectionId: activeConnection,
+		notebooks: tree?.length,
+		looseNotes: looseNoteCount,
+		onProblem: setProblem,
 	});
 
 	useCommand({

@@ -529,6 +529,75 @@ describe('the command palette', () => {
 		expect(await screen.findByDisplayValue('Untitled')).toBeDefined();
 	});
 
+	it('lists downloading every note, and has it unavailable while there is nothing to download', async () => {
+		const router = createRouter({
+			routeTree,
+			history: createMemoryHistory({ initialEntries: ['/'] }),
+		});
+		render(<RouterProvider router={router} />);
+		await screen.findByRole('heading', { name: 'Notebooks' });
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		});
+
+		await openPalette();
+
+		expect(
+			screen.getByRole('option', { name: /Download all notes/ }).getAttribute('aria-disabled')
+		).toBe('true');
+	});
+
+	it('hands the source showing to the browser as one archive when run', async () => {
+		const archives: Blob[] = [];
+		// jsdom has no blob URLs. A subclass rather than a stand-in object,
+		// because the router builds URLs of its own.
+		vi.stubGlobal(
+			'URL',
+			class extends URL {
+				static override createObjectURL(blob: Blob) {
+					archives.push(blob);
+					return 'blob:skysa/app';
+				}
+
+				static override revokeObjectURL() {
+					return undefined;
+				}
+			}
+		);
+		const names: (string | null)[] = [];
+		const onClick = (event: Event) => {
+			if (!(event.target instanceof HTMLAnchorElement)) return;
+			event.preventDefault();
+			names.push(event.target.getAttribute('download'));
+		};
+		document.addEventListener('click', onClick);
+		try {
+			await createFolder(db, { name: 'Work' });
+			await createFolder(db, { name: 'Ideas' });
+			const plan = await createNote(db, {
+				folderPath: 'Work',
+				title: 'Plan',
+				body: '# Plan\n',
+			});
+			await open('/?folder=Work', 'Work');
+
+			await openPalette();
+			await userEvent.keyboard('download all{Enter}');
+
+			await waitFor(() => {
+				expect(names).toHaveLength(1);
+			});
+			expect(names[0]).toMatch(/^notes-\d{4}-\d{2}-\d{2}\.zip$/);
+			// The names are in the archive as they are: stored, not compressed.
+			const bytes = new TextDecoder().decode(await archives[0]?.arrayBuffer());
+			expect(plan.path.startsWith('Work/')).toBe(true);
+			expect(bytes).toContain(plan.path);
+			expect(bytes).toContain('Ideas/');
+		} finally {
+			document.removeEventListener('click', onClick);
+		}
+	});
+
 	it('offers the note commands as unavailable when there is no note open', async () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work', 'Work');

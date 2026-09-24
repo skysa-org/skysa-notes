@@ -18,13 +18,21 @@ import { credentialFor } from '../store/credentials.js';
 import {
 	activeConnectionId,
 	db as defaultDb,
+	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	type NotesDatabase,
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
 import { holdsTextFor } from '../store/detached.js';
-import { downloadNotes } from '../store/exportNotes.js';
+import {
+	downloadLibrary,
+	downloadNotes,
+	downloadProblem,
+	downloadSource,
+	holdsAnything,
+	type Library,
+} from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { getNote } from '../store/notes.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
@@ -85,6 +93,8 @@ export interface AccountPanelProps {
 	 * jsdom cannot make a blob URL, so the real one cannot run in a test.
 	 */
 	download?: (notes: readonly NoteRecord[]) => void;
+	/** How a whole source is handed to the user as a file, for the same reason. */
+	downloadAll?: (library: Library) => void;
 	/**
 	 * Where the way to connect storage is, from here. Beside the tabs it is the
 	 * `+` above the panel; in a compact window's source dropdown it is the list
@@ -365,7 +375,66 @@ const connectHint = (connectIs: 'above' | 'below', first: boolean): string =>
 				connectIs
 			];
 
-const NotConnected = ({ config, database, connectIs = 'above' }: LocalProps) => {
+/**
+ * The whole of one source, as one archive of markdown files: the tree a push
+ * would make in its folder (docs/ARCHITECTURE.md §14). Offered once there is
+ * something to put in it, and not before, when all it could make is an empty
+ * archive.
+ *
+ * What went wrong is said here, where it was asked for. None of it reached the
+ * browser, and a download that fails without a word is one the user goes on
+ * waiting for.
+ */
+const DownloadAll = ({
+	database,
+	connectionId,
+	downloadAll,
+}: {
+	database: NotesDatabase;
+	connectionId: string;
+	downloadAll: (library: Library) => void;
+}) => {
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	const holds = useLiveQuery(
+		() => holdsAnything(database, connectionId),
+		[database, connectionId]
+	);
+	if (holds !== true) return null;
+	return (
+		<>
+			<button
+				type="button"
+				disabled={busy}
+				onClick={() => {
+					setBusy(true);
+					setProblem(null);
+					void downloadSource(database, connectionId, downloadAll)
+						.catch((error: unknown) => {
+							setProblem(downloadProblem(error));
+						})
+						.finally(() => {
+							setBusy(false);
+						});
+				}}
+			>
+				Download all notes
+			</button>
+			{problem !== null && (
+				<p className="muted" role="alert">
+					{problem}
+				</p>
+			)}
+		</>
+	);
+};
+
+const NotConnected = ({
+	config,
+	database,
+	connectIs = 'above',
+	downloadAll,
+}: LocalProps & { downloadAll: (library: Library) => void }) => {
 	const settings = answer(config);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -391,6 +460,11 @@ const NotConnected = ({ config, database, connectIs = 'above' }: LocalProps) => 
 					Connecting storage needs the server, which cannot be reached.
 				</p>
 			)}
+			<DownloadAll
+				database={database}
+				connectionId={LOCAL_CONNECTION_ID}
+				downloadAll={downloadAll}
+			/>
 		</section>
 	);
 };
@@ -786,6 +860,8 @@ interface ConnectedProps {
 	onDisconnect: (connectionId: string, answer: Omit<LetGoInput, 'connectionId'>) => Promise<void>;
 	/** Hand the notes that were never sent to the user as a file. */
 	download: (notes: readonly NoteRecord[]) => void;
+	/** Hand the whole source to the user as a file. */
+	downloadAll: (library: Library) => void;
 	returnTo: string;
 	navigate?: (url: string) => void;
 }
@@ -940,6 +1016,7 @@ const Connected = ({
 	disconnects,
 	onDisconnect,
 	download,
+	downloadAll,
 	returnTo,
 	navigate,
 }: ConnectedProps) => {
@@ -1047,6 +1124,18 @@ const Connected = ({
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
 			/>
+			{/*
+			 * Not while an import is filling the source, when the archive would be
+			 * whatever part of it had arrived; nor while the disconnect question
+			 * is open, which offers its own download of what was never sent.
+			 */}
+			{bound.importing === undefined && !open && (
+				<DownloadAll
+					database={database}
+					connectionId={connectionId}
+					downloadAll={downloadAll}
+				/>
+			)}
 			<Devices client={client} database={database} connectionId={bound.connectionId} />
 			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
@@ -1186,6 +1275,7 @@ export const AccountPanel = ({
 	sync = syncScheduler,
 	navigate,
 	download = downloadNotes,
+	downloadAll = downloadLibrary,
 	connectIs = 'above',
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -1292,6 +1382,7 @@ export const AccountPanel = ({
 					config={config}
 					returnTo={returnTo}
 					connectIs={connectIs}
+					downloadAll={downloadAll}
 					{...(navigate === undefined ? {} : { navigate })}
 				/>
 			);
@@ -1325,6 +1416,7 @@ export const AccountPanel = ({
 				disconnects={disconnects}
 				onDisconnect={disconnect}
 				download={download}
+				downloadAll={downloadAll}
 				client={client}
 				database={database}
 				sync={sync}
