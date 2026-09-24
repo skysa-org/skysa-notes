@@ -238,9 +238,10 @@ const useDownloadCommand = ({
 };
 
 /**
- * Installing the app is what Chromium weighs most when it decides whether to
- * keep a site's storage, so the question is put again then, whatever it said
- * before (`store/keeping.ts`). Silent there; the event is Chromium's alone.
+ * Installing the app is one of the things Chromium weighs when it decides
+ * whether to keep a site's storage, so the question is put again then,
+ * whatever it said before (`store/keeping.ts`). Silent there; the event is
+ * Chromium's alone.
  */
 const useKeepOnInstall = () => {
 	useEffect(() => {
@@ -565,9 +566,9 @@ const Home = () => {
 		void createNote(db, { folderPath: folder })
 			.then((created) => {
 				select({ note: created.id });
-				// The first thing on a device with nothing connected that exists
-				// nowhere else, and a click: the one moment the browser can be
-				// asked to keep it, prompt and all (`store/keeping.ts`).
+				// A note in the device's own library exists nowhere else, and this
+				// was a click: the moment the browser can be asked to keep it,
+				// prompt and all, once per device (`store/keeping.ts`).
 				if (created.connectionId === LOCAL_CONNECTION_ID) {
 					void keeping.ask(db, 'first-note');
 				}

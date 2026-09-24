@@ -442,11 +442,22 @@ const DownloadAll = ({
  * What the browser has said about keeping this device's notes, asked on sight
  * — `persisted()` never prompts — and followed as it changes, since the request
  * that changes it is made from somewhere else (a note being created).
+ *
+ * Asked again whenever the tab comes back into view: the answer can change
+ * where this tab cannot hear it, in another tab's request or in the browser's
+ * own site settings.
  */
 const useKept = (keep: Keeping) => {
 	const kept = useSyncExternalStore(keep.subscribe, keep.state);
 	useEffect(() => {
 		void keep.check();
+		const shown = () => {
+			if (document.visibilityState === 'visible') void keep.check();
+		};
+		document.addEventListener('visibilitychange', shown);
+		return () => {
+			document.removeEventListener('visibilitychange', shown);
+		};
 	}, [keep]);
 	return kept;
 };
@@ -488,15 +499,19 @@ const NotConnected = ({
 			{/*
 			 * The one place the notes here are all there is, so the one place it
 			 * is said. Not before the browser has answered, and not once it has
-			 * said it will keep them. What helps is each of: installing, which
-			 * browsers weigh when they decide and which lifts Safari's seven-day
-			 * rule; connecting, which makes a second copy; and the button below,
-			 * which makes one now.
+			 * said it will keep them. What helps is connecting, which makes a
+			 * second copy, and the button below, which makes one now.
+			 *
+			 * Not installing, though the app asks again when it is installed.
+			 * It is advice that holds only in Chromium: Firefox on a desktop has
+			 * nothing to install, and in Safari a Home Screen app keeps its data
+			 * apart from Safari's, so the installed app opens empty and the
+			 * notes stay where they were (docs/ARCHITECTURE.md §8).
 			 */}
 			{holds === true && kept === 'not-kept' && (
 				<p className="muted">
-					This browser may clear them to free up space. To keep them, install the app,
-					connect storage, or download them.
+					This browser may clear them without warning. To keep them, connect storage or
+					download them.
 				</p>
 			)}
 			<DownloadAll

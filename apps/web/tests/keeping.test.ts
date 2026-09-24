@@ -18,6 +18,7 @@ const opened: NotesDatabase[] = [];
 
 afterEach(async () => {
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
@@ -105,6 +106,31 @@ describe('asking the browser to keep the store', () => {
 		expect(await db.prefs.get(KEEP_ASKED_KEY)).toBeUndefined();
 	});
 
+	it('does not spend the first-note request on an install', async () => {
+		const db = freshDatabase();
+		const keeper = browser(false, false);
+		const keeping = createKeeping(() => keeper);
+
+		await keeping.ask(db, 'installed');
+		expect(await db.prefs.get(KEEP_ASKED_KEY)).toBeUndefined();
+		await keeping.ask(db, 'first-note');
+
+		expect(keeper.persist).toHaveBeenCalledTimes(2);
+	});
+
+	it('counts a store that cannot read or write the pref as not kept, and does not throw', async () => {
+		const db = freshDatabase();
+		const keeper = browser(false, true);
+		const keeping = createKeeping(() => keeper);
+		// A full disk: the case this whole module is about.
+		vi.spyOn(db.prefs, 'put').mockRejectedValue(new DOMException('full', 'QuotaExceededError'));
+
+		await expect(keeping.ask(db, 'first-note')).resolves.toBeUndefined();
+
+		expect(keeping.state()).toBe('not-kept');
+		expect(keeper.persist).not.toHaveBeenCalled();
+	});
+
 	it('counts a browser that fails to answer as not keeping it', async () => {
 		const db = freshDatabase();
 		const keeping = createKeeping(() => ({
@@ -160,13 +186,22 @@ describe("the browser's own", () => {
 		expect(browserKeeper()).toBeUndefined();
 	});
 
-	it("is the browser's storage manager where it can", async () => {
+	it("calls through to the browser's storage manager where it can, on the manager", async () => {
 		const storage = {
-			persisted: () => Promise.resolve(true),
-			persist: () => Promise.resolve(true),
+			persisted: vi.fn(() => Promise.resolve(true)),
+			persist: vi.fn(() => Promise.resolve(false)),
 		};
 		vi.stubGlobal('navigator', { storage });
-		expect(browserKeeper()).toBe(storage);
-		expect(await browserKeeper()?.persisted()).toBe(true);
+		const keeper = browserKeeper();
+		expect(keeper).toBeDefined();
+		// Taken off the keeper and called alone, as a caller is free to: the
+		// real `StorageManager` throws "Illegal invocation" unless called on
+		// itself.
+		const { persisted, persist } = keeper ?? expect.unreachable();
+
+		expect(await persisted()).toBe(true);
+		expect(await persist()).toBe(false);
+		expect(storage.persisted.mock.contexts[0]).toBe(storage);
+		expect(storage.persist.mock.contexts[0]).toBe(storage);
 	});
 });

@@ -668,7 +668,7 @@ describe('AccountPanel, downloading every note', () => {
 
 describe('AccountPanel, when the notes here are the only copy', () => {
 	const MAY_BE_CLEARED =
-		'This browser may clear them to free up space. To keep them, install the app, connect storage, or download them.';
+		'This browser may clear them without warning. To keep them, connect storage or download them.';
 
 	/** A browser that has decided `kept`, and can be told to change its mind. */
 	const browserSaying = (kept: boolean) => {
@@ -746,19 +746,49 @@ describe('AccountPanel, when the notes here are the only copy', () => {
 	it('says nothing where the browser already keeps the store', async () => {
 		const db = freshDatabase();
 		await createNote(db, { title: 'Plan' });
-		renderPanel(
-			clientWith(),
-			db,
-			'/',
-			undefined,
-			undefined,
-			undefined,
-			browserSaying(true).keeping
-		);
+		const { keeping } = browserSaying(true);
+		renderPanel(clientWith(), db, '/', undefined, undefined, undefined, keeping);
+
+		await enabled('Download all notes');
+		// Asked, and answered: silence from an answer, not from not having asked.
+		await waitFor(() => {
+			expect(keeping.state()).toBe('kept');
+		});
+		expect(screen.queryByText(MAY_BE_CLEARED)).toBeNull();
+	});
+
+	it('says nothing before the browser has answered', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		// A browser that never says: the line must not flash up and go again.
+		const keeping = createKeeping(() => ({
+			persisted: () => new Promise<boolean>(() => undefined),
+			persist: () => new Promise<boolean>(() => undefined),
+		}));
+		renderPanel(clientWith(), db, '/', undefined, undefined, undefined, keeping);
 
 		await enabled('Download all notes');
 		await settled();
+		expect(keeping.state()).toBe('unknown');
 		expect(screen.queryByText(MAY_BE_CLEARED)).toBeNull();
+	});
+
+	it('asks the browser again when the tab comes back into view', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		const { keeping, box } = browserSaying(false);
+		renderPanel(clientWith(), db, '/', undefined, undefined, undefined, keeping);
+		await screen.findByText(MAY_BE_CLEARED);
+
+		// Granted somewhere this tab cannot hear: another tab, or site settings.
+		box.kept = true;
+		act(() => {
+			document.dispatchEvent(new Event('visibilitychange'));
+		});
+
+		await waitFor(() => {
+			expect(screen.queryByText(MAY_BE_CLEARED)).toBeNull();
+		});
 	});
 });
 
