@@ -32,6 +32,7 @@ import {
 import { ArchiveLimitError, type Library } from '../src/store/exportNotes.js';
 import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
+import { createKeeping, type Keeping } from '../src/store/keeping.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
@@ -173,7 +174,9 @@ const renderPanel = (
 	/** What leaving does, for a test about a navigation that does not work. */
 	go: (url: string) => void = () => undefined,
 	/** What handing a whole source over does, for a test about one that fails. */
-	saveAll: (library: Library) => void = () => undefined
+	saveAll: (library: Library) => void = () => undefined,
+	/** What the browser says about keeping the store: by default, as jsdom, nothing. */
+	keep: Keeping = createKeeping(() => undefined)
 ) => {
 	// Where the panel would send the browser. jsdom has no navigation, so
 	// without this seam a connect test could only prove the button renders.
@@ -210,6 +213,7 @@ const renderPanel = (
 					download={(notes: readonly NoteRecord[]) =>
 						downloaded.push(notes.map((note) => note.title))
 					}
+					keeping={keep}
 					downloadAll={(library) => {
 						saveAll(library);
 						downloadedAll.push({
@@ -659,6 +663,102 @@ describe('AccountPanel, downloading every note', () => {
 
 		await finishImport(db, 'c1');
 		expect(await enabled('Download all notes')).toBeTruthy();
+	});
+});
+
+describe('AccountPanel, when the notes here are the only copy', () => {
+	const MAY_BE_CLEARED =
+		'This browser may clear them to free up space. To keep them, install the app, connect storage, or download them.';
+
+	/** A browser that has decided `kept`, and can be told to change its mind. */
+	const browserSaying = (kept: boolean) => {
+		const box = { kept };
+		const keeping = createKeeping(() => ({
+			persisted: () => Promise.resolve(box.kept),
+			persist: () => Promise.resolve(box.kept),
+		}));
+		return { keeping, box };
+	};
+
+	it('says the browser may clear them, and what keeps them, while it has not agreed to keep them', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		renderPanel(
+			clientWith(),
+			db,
+			'/',
+			undefined,
+			undefined,
+			undefined,
+			browserSaying(false).keeping
+		);
+
+		expect(await screen.findByText(MAY_BE_CLEARED)).toBeTruthy();
+		// And the download it points at is right there.
+		expect(await enabled('Download all notes')).toBeTruthy();
+	});
+
+	it('counts a browser that cannot say as one that has not agreed', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		renderPanel(clientWith(), db);
+
+		expect(await screen.findByText(MAY_BE_CLEARED)).toBeTruthy();
+	});
+
+	it('says nothing once the browser keeps the store, and stops saying it when it agrees', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		const { keeping, box } = browserSaying(false);
+		renderPanel(clientWith(), db, '/', undefined, undefined, undefined, keeping);
+		await screen.findByText(MAY_BE_CLEARED);
+
+		// Asked from elsewhere — a note being created — and heard here.
+		box.kept = true;
+		await act(() => keeping.ask(db, 'installed'));
+
+		await waitFor(() => {
+			expect(screen.queryByText(MAY_BE_CLEARED)).toBeNull();
+		});
+		expect(screen.getByText(NOTHING_CONNECTED)).toBeTruthy();
+	});
+
+	it('says nothing on a device that holds nothing, until it holds something', async () => {
+		const db = freshDatabase();
+		renderPanel(
+			clientWith(),
+			db,
+			'/',
+			undefined,
+			undefined,
+			undefined,
+			browserSaying(false).keeping
+		);
+
+		await screen.findByText(NOTHING_CONNECTED);
+		await settled();
+		expect(screen.queryByText(MAY_BE_CLEARED)).toBeNull();
+
+		await createNote(db, { title: 'First' });
+		expect(await screen.findByText(MAY_BE_CLEARED)).toBeTruthy();
+	});
+
+	it('says nothing where the browser already keeps the store', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		renderPanel(
+			clientWith(),
+			db,
+			'/',
+			undefined,
+			undefined,
+			undefined,
+			browserSaying(true).keeping
+		);
+
+		await enabled('Download all notes');
+		await settled();
+		expect(screen.queryByText(MAY_BE_CLEARED)).toBeNull();
 	});
 });
 

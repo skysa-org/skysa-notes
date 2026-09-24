@@ -1,7 +1,7 @@
 import { parentPath, type ProviderKind } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import {
 	api,
@@ -35,6 +35,7 @@ import {
 	type Library,
 } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
+import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
 import { getNote } from '../store/notes.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
@@ -96,6 +97,11 @@ export interface AccountPanelProps {
 	download?: (notes: readonly NoteRecord[]) => void;
 	/** How a whole source is handed to the user as a file, for the same reason. */
 	downloadAll?: (library: Library) => void;
+	/**
+	 * Whether the browser keeps this device's notes. Injected for the same
+	 * reason again: jsdom has no `navigator.storage`.
+	 */
+	keeping?: Keeping;
 	/**
 	 * Where the way to connect storage is, from here. Beside the tabs it is the
 	 * `+` above the panel; in a compact window's source dropdown it is the list
@@ -389,18 +395,17 @@ const connectHint = (connectIs: 'above' | 'below', first: boolean): string =>
 const DownloadAll = ({
 	database,
 	connectionId,
+	holds,
 	downloadAll,
 }: {
 	database: NotesDatabase;
 	connectionId: string;
+	/** `holdsAnything`, as the panel has read it: undefined until it has. */
+	holds: boolean | undefined;
 	downloadAll: (library: Library) => void;
 }) => {
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
-	const holds = useLiveQuery(
-		() => holdsAnything(database, connectionId),
-		[database, connectionId]
-	);
 	if (holds !== true) return null;
 	return (
 		<>
@@ -433,13 +438,29 @@ const DownloadAll = ({
 	);
 };
 
+/**
+ * What the browser has said about keeping this device's notes, asked on sight
+ * — `persisted()` never prompts — and followed as it changes, since the request
+ * that changes it is made from somewhere else (a note being created).
+ */
+const useKept = (keep: Keeping) => {
+	const kept = useSyncExternalStore(keep.subscribe, keep.state);
+	useEffect(() => {
+		void keep.check();
+	}, [keep]);
+	return kept;
+};
+
 const NotConnected = ({
 	config,
 	database,
 	connectIs = 'above',
 	downloadAll,
-}: LocalProps & { downloadAll: (library: Library) => void }) => {
+	keep,
+}: LocalProps & { downloadAll: (library: Library) => void; keep: Keeping }) => {
 	const settings = answer(config);
+	const holds = useLiveQuery(() => holdsAnything(database, LOCAL_CONNECTION_ID), [database]);
+	const kept = useKept(keep);
 	const offerable =
 		settings?.authMode === 'storage-first'
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
@@ -464,9 +485,24 @@ const NotConnected = ({
 					Connecting storage needs the server, which cannot be reached.
 				</p>
 			)}
+			{/*
+			 * The one place the notes here are all there is, so the one place it
+			 * is said. Not before the browser has answered, and not once it has
+			 * said it will keep them. What helps is each of: installing, which
+			 * browsers weigh when they decide and which lifts Safari's seven-day
+			 * rule; connecting, which makes a second copy; and the button below,
+			 * which makes one now.
+			 */}
+			{holds === true && kept === 'not-kept' && (
+				<p className="muted">
+					This browser may clear them to free up space. To keep them, install the app,
+					connect storage, or download them.
+				</p>
+			)}
 			<DownloadAll
 				database={database}
 				connectionId={LOCAL_CONNECTION_ID}
+				holds={holds}
 				downloadAll={downloadAll}
 			/>
 		</section>
@@ -1030,6 +1066,10 @@ const Connected = ({
 	// Only ever this source's. Named once per render, so the click below is
 	// about the source the user was looking at when they pressed it.
 	const connectionId = bound.connectionId;
+	const holds = useLiveQuery(
+		() => holdsAnything(database, connectionId),
+		[database, connectionId]
+	);
 	// The other live sources, which what this one never sent could go to.
 	const sources = useLiveQuery(() => connectedSources(database), [database]);
 	const targets = otherLiveSources(sources, connectionId);
@@ -1137,6 +1177,7 @@ const Connected = ({
 				<DownloadAll
 					database={database}
 					connectionId={connectionId}
+					holds={holds}
 					downloadAll={downloadAll}
 				/>
 			)}
@@ -1280,6 +1321,7 @@ export const AccountPanel = ({
 	navigate,
 	download = downloadNotes,
 	downloadAll = downloadLibrary,
+	keeping = browserKeeping,
 	connectIs = 'above',
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -1387,6 +1429,7 @@ export const AccountPanel = ({
 					returnTo={returnTo}
 					connectIs={connectIs}
 					downloadAll={downloadAll}
+					keep={keeping}
 					{...(navigate === undefined ? {} : { navigate })}
 				/>
 			);
