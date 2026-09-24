@@ -1,21 +1,45 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createFakeProvider, createSyncEngine, isHidden } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import { bindConnection } from '../src/store/connection.js';
 import {
+	createDatabase,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	noteRef,
+	type NotesDatabase,
+} from '../src/store/db.js';
+import {
+	ArchiveLimitError,
 	crc32,
 	DOWNLOAD_GRACE_MS,
+	downloadLibrary,
 	downloadNotes,
+	downloadProblem,
+	downloadSource,
 	entryName,
 	filesOf,
+	holdsAnything,
+	type Library,
+	libraryOf,
 	type ZipFile,
 	zipOf,
 } from '../src/store/exportNotes.js';
-import { createNote, importNoteFile, noteFile } from '../src/store/notes.js';
+import { createFolder } from '../src/store/folders.js';
+import { beforeClosing } from '../src/store/heldEdits.js';
+import {
+	createNote,
+	deleteNote,
+	importNoteFile,
+	noteFile,
+	saveNoteBody,
+} from '../src/store/notes.js';
+import { createDexieSyncStore } from '../src/sync/store.js';
 
 /**
  * The archive is written by hand, so it is read back by hand: a reader here
@@ -97,9 +121,11 @@ const readZip = (bytes: Uint8Array): { entries: ReadEntry[]; directoryOffset: nu
 		expect(u16(at + 32)).toBe(0); // comment
 		expect(u16(at + 34)).toBe(0); // disk
 		expect(u16(at + 36)).toBe(0); // internal attributes
-		expect(u32(at + 38)).toBe(0); // external attributes
 		const offset = u32(at + 42);
 		const name = bytes.slice(at + 46, at + 46 + nameLength);
+		// External attributes: MS-DOS's directory bit on a folder's entry, and
+		// nothing on a file's.
+		expect(u32(at + 38)).toBe(text(name).endsWith('/') ? 0x10 : 0);
 
 		// Entries sit back to back from the start of the file.
 		expect(offset).toBe(local);
@@ -319,6 +345,23 @@ describe('a store-only ZIP', () => {
 			expect(() => zipOf(empties(0xffff))).toThrow(RangeError);
 		});
 
+		it('counts an empty notebook as an entry, since it is one', () => {
+			expect(countIn(zipOf(empties(0xfffd), [{ path: 'one more' }]))).toBe(0xfffe);
+			expect(() => zipOf(empties(0xfffe), [{ path: 'one more' }])).toThrow(RangeError);
+		});
+
+		it('says which limit it met, so the user can be told in words', () => {
+			expect(() => zipOf(empties(0xffff))).toThrow(
+				expect.objectContaining({ name: 'ArchiveLimitError', limit: 'entries' })
+			);
+			expect(() => zipOf(empties(0xfffe), [{ path: 'one more' }])).toThrow(
+				expect.objectContaining({ limit: 'entries' })
+			);
+			expect(() => zipOf([{ path: `${'a'.repeat(0xffff)}.md`, content: '' }])).toThrow(
+				expect.objectContaining({ limit: 'name' })
+			);
+		});
+
 		it('writes a name of 65,535 bytes, and refuses one of 65,536 rather than wrap its length', () => {
 			const longest = `${'a'.repeat(0xffff - 3)}.md`;
 
@@ -407,6 +450,55 @@ describe('a store-only ZIP', () => {
 				{ path: 'untitled.md', content: 'fourth' },
 				{ path: 'untitled (2).md', content: 'fifth' },
 			]);
+		});
+	});
+
+	describe('a notebook with nothing in it', () => {
+		const written = (files: readonly ZipFile[], folders: { path: string }[]) =>
+			readZip(zipOf(files, folders)).entries.map(({ path, size }) => ({ path, size }));
+
+		it('is an entry of its own: its name and a slash, no bytes, and marked a folder', () => {
+			expect(
+				written(
+					[{ path: 'work/plan.md', content: 'x' }],
+					[{ path: 'ideas' }, { path: 'work' }]
+				)
+			).toEqual([
+				{ path: 'ideas/', size: 0 },
+				{ path: 'work/plan.md', size: 1 },
+			]);
+		});
+
+		it('is written once under any spelling, and never for the root or a folder a file is in', () => {
+			expect(
+				written(
+					[{ path: 'a/b/c.md', content: '' }],
+					[
+						{ path: '' },
+						{ path: '..' },
+						{ path: 'a' },
+						{ path: 'A/B' },
+						{ path: 'Empty' },
+						{ path: 'empty/' },
+						{ path: 'x\\..\\y' },
+					]
+				).map(({ path }) => path)
+			).toEqual(['Empty/', 'x_.._y/', 'a/b/c.md']);
+		});
+
+		it('takes its name before any file does, so the file of that name is the numbered one', () => {
+			expect(
+				written([{ path: 'Plan.md', content: 'file' }], [{ path: 'plan.md' }]).map(
+					({ path }) => path
+				)
+			).toEqual(['plan.md/', 'Plan (2).md']);
+		});
+
+		it('changes nothing about an archive where every notebook holds a note', () => {
+			const files = [{ path: 'w/a.md', content: 'a' }];
+
+			expect(zipOf(files, [{ path: 'w' }])).toEqual(zipOf(files));
+			expect(zipOf(files, [])).toEqual(zipOf(files));
 		});
 	});
 
@@ -528,6 +620,47 @@ describe('a store-only ZIP', () => {
 		} finally {
 			rmSync(folder, { recursive: true, force: true });
 		}
+	});
+
+	it.skipIf(!unzip)('unpacks an empty notebook as an empty folder', () => {
+		const folder = mkdtempSync(join(tmpdir(), 'skysa-export-'));
+		try {
+			const archive = join(folder, 'notes.zip');
+			writeFileSync(
+				archive,
+				zipOf([{ path: 'work/plan.md', content: 'x' }], [{ path: 'ideas/later' }])
+			);
+
+			execFileSync('unzip', ['-q', archive, '-d', join(folder, 'out')]);
+
+			expect(statSync(join(folder, 'out', 'ideas', 'later')).isDirectory()).toBe(true);
+			expect(statSync(join(folder, 'out', 'work', 'plan.md')).isFile()).toBe(true);
+		} finally {
+			rmSync(folder, { recursive: true, force: true });
+		}
+	});
+});
+
+describe('what the user is told when there is no download', () => {
+	it('names the limit that was met, and that nothing was downloaded', () => {
+		expect(downloadProblem(new ArchiveLimitError('entries', ''))).toBe(
+			'There are too many notes and notebooks here for one archive, which holds at most 65,534. Nothing was downloaded.'
+		);
+		expect(downloadProblem(new ArchiveLimitError('bytes', ''))).toBe(
+			'These notes come to more than one archive can hold, which is 4 GB. Nothing was downloaded.'
+		);
+		expect(downloadProblem(new ArchiveLimitError('name', ''))).toBe(
+			'A note or notebook here has a path too long to put in an archive. Nothing was downloaded.'
+		);
+	});
+
+	it('asks for another try when it was anything else', () => {
+		expect(downloadProblem(new Error('The database connection is closing.'))).toBe(
+			'The notes could not be downloaded. Try again.'
+		);
+		expect(downloadProblem(new RangeError('not ours'))).toBe(
+			'The notes could not be downloaded. Try again.'
+		);
 	});
 });
 
@@ -728,5 +861,228 @@ describe('exporting notes', () => {
 		downloadNotes([]);
 
 		expect(names[0]).toMatch(/^notes-\d{4}-\d{2}-\d{2}\.zip$/);
+	});
+
+	it('hands a whole source over as one archive, its empty notebooks with it', () => {
+		const made: Blob[] = [];
+		vi.stubGlobal('URL', {
+			createObjectURL: (blob: Blob) => {
+				made.push(blob);
+				return 'blob:skysa/3';
+			},
+			revokeObjectURL: () => undefined,
+		});
+		const onClick = (event: Event) => {
+			event.preventDefault();
+		};
+		document.addEventListener('click', onClick);
+		listening.push(() => {
+			document.removeEventListener('click', onClick);
+		});
+		const note: NoteRecord = {
+			id: '1111',
+			connectionId: LOCAL_CONNECTION_ID,
+			path: 'Work/a.md',
+			title: 'A',
+			body: 'a',
+			frontmatter: null,
+			tags: [],
+			contentHash: 'h',
+			source: 'a',
+			dirty: 1,
+			deletedLocally: 0,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		const library: Library = { notes: [note], folders: [{ path: 'Ideas' }, { path: 'Work' }] };
+
+		downloadLibrary(library);
+
+		expect(made).toHaveLength(1);
+		expect(made[0]?.size).toBe(zipOf(filesOf([note]), library.folders).length);
+	});
+});
+
+describe('a whole source', () => {
+	const opened: NotesDatabase[] = [];
+	const withdrawn: (() => void)[] = [];
+
+	afterEach(async () => {
+		withdrawn.splice(0).forEach((withdraw) => {
+			withdraw();
+		});
+		await Promise.all(opened.splice(0).map((db) => db.delete()));
+	});
+
+	const freshDatabase = (): NotesDatabase => {
+		const db = createDatabase(`library-${crypto.randomUUID()}`);
+		opened.push(db);
+		return db;
+	};
+
+	it("is its live notes and every notebook, and nothing of another source's", async () => {
+		const db = freshDatabase();
+		const scope = { connectionId: 'dropbox-1' };
+		await createFolder(db, { ...scope, name: 'Work' });
+		await createFolder(db, { ...scope, name: 'Empty' });
+		const kept = await createNote(db, {
+			...scope,
+			folderPath: 'Work',
+			title: 'Kept',
+			body: 'k\n',
+		});
+		const gone = await createNote(db, {
+			...scope,
+			folderPath: 'Work',
+			title: 'Gone',
+			body: 'g\n',
+		});
+		await deleteNote(db, gone.id, scope);
+		await createFolder(db, { connectionId: 'dropbox-2', name: 'Theirs' });
+		await createNote(db, { connectionId: 'dropbox-2', title: 'Theirs', body: 't\n' });
+
+		const library = await libraryOf(db, scope.connectionId);
+
+		expect(library.notes.map((note) => note.id)).toEqual([kept.id]);
+		expect(library.folders.map((folder) => folder.path)).toEqual(['Empty', 'Work']);
+	});
+
+	it('holds something once it has a notebook or a note, and not for a deleted one', async () => {
+		const db = freshDatabase();
+		const scope = { connectionId: LOCAL_CONNECTION_ID };
+
+		expect(await holdsAnything(db, LOCAL_CONNECTION_ID)).toBe(false);
+		const note = await createNote(db, { ...scope, title: 'Loose', body: 'x\n' });
+		expect(await holdsAnything(db, LOCAL_CONNECTION_ID)).toBe(true);
+		await deleteNote(db, note.id, scope);
+		expect(await holdsAnything(db, LOCAL_CONNECTION_ID)).toBe(false);
+		await createFolder(db, { ...scope, name: 'Work' });
+		expect(await holdsAnything(db, LOCAL_CONNECTION_ID)).toBe(true);
+		expect(await holdsAnything(db, 'dropbox-1')).toBe(false);
+	});
+
+	it('is read after the editors have written what they were holding', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { title: 'Typing', body: 'before\n' });
+		withdrawn.push(
+			beforeClosing(async () => {
+				await saveNoteBody(db, note.id, 'typed a moment ago\n');
+			})
+		);
+		const given: Library[] = [];
+
+		await downloadSource(db, LOCAL_CONNECTION_ID, (library) => {
+			given.push(library);
+		});
+
+		expect(given).toHaveLength(1);
+		expect(given[0]?.notes.map((each) => each.body)).toEqual(['typed a moment ago\n']);
+	});
+
+	it('comes out of a device with nothing connected as the files a push puts in the folder', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Deep' });
+		await createFolder(db, { name: 'Ideas' });
+		await createFolder(db, { parentPath: 'Ideas', name: 'Later' });
+		await createNote(db, {
+			folderPath: 'Work',
+			title: 'Plan',
+			body: '# Plan\n\n- [ ] ship it\n',
+		});
+		await createNote(db, {
+			folderPath: 'Work/Deep',
+			title: 'Überschrift 日本語',
+			body: 'naïve\n',
+		});
+		await createNote(db, { title: 'Loose', body: 'at the root\n' });
+		// A file another tool wrote, with no frontmatter: pushed as it came, so
+		// exported as it came. Re-serializing it would give it a block.
+		await importNoteFile(db, {
+			path: 'Work/From elsewhere.md',
+			source: '# From elsewhere\n\nno frontmatter, and none added\n',
+		});
+		// And one edited here since, which is re-serialized by the edit.
+		const edited = await importNoteFile(db, {
+			path: 'Work/Edited here.md',
+			source: '# Edited here\n\nas it came\n',
+		});
+		await saveNoteBody(db, edited.id, '# Edited here\n\nedited here\n');
+
+		const library = await libraryOf(db, LOCAL_CONNECTION_ID);
+		const archived = readZip(zipOf(filesOf(library.notes), library.folders)).entries;
+
+		// The same library, pushed to a folder by the engine that syncs it.
+		await bindConnection(db, {
+			connectionId: 'dropbox-1',
+			provider: 'dropbox',
+			accountId: 'dbid:1',
+		});
+		const provider = createFakeProvider();
+		await provider.ensureRoot();
+		await createSyncEngine({
+			provider,
+			store: createDexieSyncStore(db, { connectionId: 'dropbox-1' }),
+		}).sync();
+		const pushed = provider.snapshot().filter((entry) => !isHidden(entry.path));
+		const files = pushed.filter((entry) => entry.kind === 'file');
+		const byPath = (a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path);
+
+		expect(
+			archived
+				.filter((entry) => !entry.path.endsWith('/'))
+				.map(({ path, content }) => ({ path, content }))
+				.sort(byPath)
+		).toEqual(
+			files
+				.map((entry) => ({ path: entry.path, content: provider.contentAt(entry.path) }))
+				.sort(byPath)
+		);
+		// And each folder the push made with nothing in it is a folder of the
+		// archive's own; every other one is there by the files inside it.
+		expect(
+			archived
+				.filter((entry) => entry.path.endsWith('/'))
+				.map((entry) => entry.path)
+				.sort()
+		).toEqual(
+			pushed
+				.filter(
+					(entry) =>
+						entry.kind === 'folder' &&
+						!files.some((file) => file.path.startsWith(`${entry.path}/`))
+				)
+				.map((entry) => `${entry.path}/`)
+				.sort()
+		);
+		expect(files).toHaveLength(5);
+		expect(provider.contentAt('Work/From elsewhere.md')).toBe(
+			'# From elsewhere\n\nno frontmatter, and none added\n'
+		);
+	});
+
+	it('says the archive is incomplete where an editor holds text the store would not take', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { title: 'Held', body: 'stored\n' });
+		withdrawn.push(beforeClosing(() => Promise.resolve([noteRef(note)])));
+
+		const answer = await downloadSource(db, LOCAL_CONNECTION_ID, () => undefined);
+
+		expect(answer).toEqual({ incomplete: true });
+	});
+
+	it("does not call it incomplete for another source's unsaved text", async () => {
+		const db = freshDatabase();
+		const elsewhere = await createNote(db, { connectionId: 'dropbox-1', title: 'Other' });
+		await createNote(db, { title: 'Here' });
+		withdrawn.push(beforeClosing(() => Promise.resolve([noteRef(elsewhere)])));
+		const given: Library[] = [];
+
+		const answer = await downloadSource(db, LOCAL_CONNECTION_ID, (library) => {
+			given.push(library);
+		});
+
+		expect(answer).toEqual({ incomplete: false });
+		expect(given[0]?.notes.map((each) => each.title)).toEqual(['Here']);
 	});
 });

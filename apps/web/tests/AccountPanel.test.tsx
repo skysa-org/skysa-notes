@@ -29,6 +29,8 @@ import {
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
+import { ArchiveLimitError, type Library } from '../src/store/exportNotes.js';
+import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
@@ -169,13 +171,17 @@ const renderPanel = (
 	url = '/',
 	sync: FakeSync = fakeSync({ phase: 'local' }),
 	/** What leaving does, for a test about a navigation that does not work. */
-	go: (url: string) => void = () => undefined
+	go: (url: string) => void = () => undefined,
+	/** What handing a whole source over does, for a test about one that fails. */
+	saveAll: (library: Library) => void = () => undefined
 ) => {
 	// Where the panel would send the browser. jsdom has no navigation, so
 	// without this seam a connect test could only prove the button renders.
 	const went: string[] = [];
 	// And what it would hand the user as a file, by title: no blob URLs either.
 	const downloaded: string[][] = [];
+	// And a whole source, by its notes' titles and its notebooks' paths.
+	const downloadedAll: { notes: string[]; folders: string[] }[] = [];
 	// The bar as well as the panel, because since the tabs arrived the two are
 	// one screen: connecting and switching are the bar's, and everything about
 	// the source in front is the panel's. A harness holding only the panel
@@ -204,6 +210,13 @@ const renderPanel = (
 					download={(notes: readonly NoteRecord[]) =>
 						downloaded.push(notes.map((note) => note.title))
 					}
+					downloadAll={(library) => {
+						saveAll(library);
+						downloadedAll.push({
+							notes: library.notes.map((note) => note.title).sort(),
+							folders: library.folders.map((folder) => folder.path),
+						});
+					}}
 				/>
 			</>
 		);
@@ -213,7 +226,7 @@ const renderPanel = (
 		history: createMemoryHistory({ initialEntries: [url] }),
 	});
 	render(<RouterProvider router={router} />);
-	return { went, downloaded };
+	return { went, downloaded, downloadedAll };
 };
 
 /**
@@ -534,6 +547,118 @@ describe('AccountPanel, with nothing connected', () => {
 		// The server did answer and a flow may well have begun, so neither
 		// "nothing was connected" nor a word about this device is true here.
 		expect(problem.textContent).not.toMatch(/server|reach|this device|nothing was/i);
+	});
+});
+
+/**
+ * Long enough for the panel's live queries to have answered. An absence checked
+ * sooner proves only that they had not, which is true of any panel whatever it
+ * goes on to show.
+ */
+const settled = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+describe('AccountPanel, downloading every note', () => {
+	it('offers nothing to download on a device that holds nothing, until it does', async () => {
+		const db = freshDatabase();
+		renderPanel(clientWith(), db);
+
+		await screen.findByText(NOTHING_CONNECTED);
+		await settled();
+		expect(screen.queryByRole('button', { name: 'Download all notes' })).toBeNull();
+
+		await createNote(db, { title: 'First' });
+		expect(await enabled('Download all notes')).toBeTruthy();
+	});
+
+	it('hands over everything on a device with nothing connected, empty notebooks too', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createFolder(db, { name: 'Ideas' });
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await createNote(db, { title: 'Loose' });
+		const { downloadedAll } = renderPanel(clientWith(), db);
+
+		await user.click(await enabled('Download all notes'));
+
+		await waitFor(() => {
+			expect(downloadedAll).toEqual([
+				{ notes: ['Loose', 'Plan'], folders: ['Ideas', 'Work'] },
+			]);
+		});
+	});
+
+	it("hands over the source in front, and nothing of the device's own or another's", async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'On this device', connectionId: LOCAL_CONNECTION_ID });
+		await bindConnection(db, { connectionId: 'c2', provider: 'dropbox', accountId: 'dbid:2' });
+		await finishImport(db, 'c2');
+		await createNote(db, { title: 'In the other', connectionId: 'c2' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await finishImport(db, 'c1');
+		await showConnection(db, 'c1');
+		await holding(db, 'c1');
+		await createNote(db, { title: 'In front', connectionId: 'c1' });
+		const { downloadedAll } = renderPanel(clientWith(), db, '/', fakeSync());
+
+		await screen.findByText(/Syncing with Dropbox/);
+		await user.click(await enabled('Download all notes'));
+
+		await waitFor(() => {
+			expect(downloadedAll).toEqual([{ notes: ['In front'], folders: [] }]);
+		});
+	});
+
+	it('says why, where it was asked, when the notes will not go in one archive', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Plan' });
+		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'local' }), undefined, () => {
+			throw new ArchiveLimitError('entries', 'Too many notes for one archive');
+		});
+
+		await user.click(await enabled('Download all notes'));
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'There are too many notes and notebooks here for one archive, which holds at most 65,534. Nothing was downloaded.'
+		);
+		// And the button is there to try again.
+		expect(await enabled('Download all notes')).toBeTruthy();
+	});
+
+	it('is put away while the disconnect question is open, which has a download of its own', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		await sentNote(db, 'Sent');
+		renderPanel(clientWith(), db, '/', fakeSync());
+
+		await enabled('Download all notes');
+		await user.click(await enabled('Disconnect…'));
+
+		await screen.findByRole('button', { name: 'Disconnect' });
+		expect(screen.queryByRole('button', { name: 'Download all notes' })).toBeNull();
+	});
+
+	it('is not offered while a later source is still importing, when it would be half of one', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c2', provider: 'dropbox', accountId: 'dbid:2' });
+		await finishImport(db, 'c2');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await showConnection(db, 'c1');
+		await holding(db, 'c1');
+		await createNote(db, { title: 'Arrived so far', connectionId: 'c1' });
+		renderPanel(clientWith(), db, '/', fakeSync());
+
+		expect((await db.syncState.get('c1'))?.importing?.lock).toBe(false);
+		await screen.findByText(/Syncing with Dropbox/);
+		await settled();
+		expect(screen.queryByRole('button', { name: 'Download all notes' })).toBeNull();
+
+		await finishImport(db, 'c1');
+		expect(await enabled('Download all notes')).toBeTruthy();
 	});
 });
 

@@ -25,6 +25,7 @@ import {
 	noteRef,
 	type SyncStateRecord,
 } from '../store/db.js';
+import { downloadProblem, downloadSource, INCOMPLETE_DOWNLOAD } from '../store/exportNotes.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -186,6 +187,52 @@ const useNoteMove = (
 	});
 
 	return offered ? { onMove: move } : {};
+};
+
+/**
+ * The source showing, whole, as an archive of markdown (docs/ARCHITECTURE.md
+ * §7, "Getting a library out"). For a device with nothing connected it is the
+ * one copy of the notes that can leave this browser; for a source that syncs it
+ * is what this device holds of its folder, without a trip to the provider's
+ * own client. Unavailable while the source holds nothing, which would be an
+ * empty archive, and while a later source's first import is still filling it,
+ * which would be whatever part had arrived under a name that says "all" — the
+ * storage panel holds its button back then too.
+ */
+const useDownloadCommand = ({
+	connectionId,
+	source,
+	notebooks = 0,
+	looseNotes = 0,
+	onProblem,
+}: {
+	connectionId: string | undefined;
+	/** The source showing: `null` for the device's own, `undefined` until read. */
+	source: SyncStateRecord | null | undefined;
+	/** How many notebooks are at the top of the source; every other note is in one. */
+	notebooks: number | undefined;
+	looseNotes: number | undefined;
+	onProblem: (notice: Notice) => void;
+}) => {
+	useCommand({
+		id: 'app.download',
+		label: 'Download all notes',
+		group: 'App',
+		enabled:
+			connectionId !== undefined &&
+			source?.importing === undefined &&
+			notebooks + looseNotes > 0,
+		run: () => {
+			if (connectionId === undefined) return;
+			void downloadSource(db, connectionId)
+				.then(({ incomplete }) => {
+					if (incomplete) onProblem({ message: INCOMPLETE_DOWNLOAD, tone: 'warning' });
+				})
+				.catch((error: unknown) => {
+					onProblem({ message: downloadProblem(error), tone: 'error' });
+				});
+		},
+	});
 };
 
 /**
@@ -716,6 +763,14 @@ const Home = () => {
 			searchField.current?.focus();
 			searchField.current?.select();
 		},
+	});
+
+	useDownloadCommand({
+		connectionId: activeConnection,
+		source,
+		notebooks: tree?.length,
+		looseNotes: looseNoteCount,
+		onProblem: setProblem,
 	});
 
 	useCommand({

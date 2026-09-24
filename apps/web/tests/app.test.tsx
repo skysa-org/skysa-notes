@@ -4,7 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
-import { bindConnection, detachConnection } from '../src/store/connection.js';
+import {
+	bindConnection,
+	detachConnection,
+	finishImport,
+	showConnection,
+} from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -527,6 +532,100 @@ describe('the command palette', () => {
 		await userEvent.keyboard('n');
 
 		expect(await screen.findByDisplayValue('Untitled')).toBeDefined();
+	});
+
+	it('lists downloading every note, and has it unavailable while there is nothing to download', async () => {
+		const router = createRouter({
+			routeTree,
+			history: createMemoryHistory({ initialEntries: ['/'] }),
+		});
+		render(<RouterProvider router={router} />);
+		await screen.findByRole('heading', { name: 'Notebooks' });
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		});
+
+		await openPalette();
+
+		expect(
+			screen.getByRole('option', { name: /Download all notes/ }).getAttribute('aria-disabled')
+		).toBe('true');
+	});
+
+	it('has downloading every note unavailable while a later source is still importing', async () => {
+		await bindConnection(db, { connectionId: 'c2', provider: 'dropbox', accountId: 'dbid:2' });
+		await finishImport(db, 'c2');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await showConnection(db, 'c1');
+		// Held as connecting leaves it. Without one, the storage panel lets the
+		// source go as one this device can no longer reach (`reconcileAccount`),
+		// and its import with it.
+		await db.credentials.put({
+			id: 'c1',
+			credential: 'sk1_held',
+			provider: 'dropbox',
+			createdAt: Date.now(),
+		});
+		await createFolder(db, { connectionId: 'c1', name: 'Work' });
+		await open('/?folder=Work', 'Work');
+		expect((await db.syncState.get('c1'))?.importing?.lock).toBe(false);
+
+		await openPalette();
+
+		expect(
+			screen.getByRole('option', { name: /Download all notes/ }).getAttribute('aria-disabled')
+		).toBe('true');
+	});
+
+	it('hands the source showing to the browser as one archive when run', async () => {
+		const archives: Blob[] = [];
+		// jsdom has no blob URLs. A subclass rather than a stand-in object,
+		// because the router builds URLs of its own.
+		vi.stubGlobal(
+			'URL',
+			class extends URL {
+				static override createObjectURL(blob: Blob) {
+					archives.push(blob);
+					return 'blob:skysa/app';
+				}
+
+				static override revokeObjectURL() {
+					return undefined;
+				}
+			}
+		);
+		const names: (string | null)[] = [];
+		const onClick = (event: Event) => {
+			if (!(event.target instanceof HTMLAnchorElement)) return;
+			event.preventDefault();
+			names.push(event.target.getAttribute('download'));
+		};
+		document.addEventListener('click', onClick);
+		try {
+			await createFolder(db, { name: 'Work' });
+			await createFolder(db, { name: 'Ideas' });
+			const plan = await createNote(db, {
+				folderPath: 'Work',
+				title: 'Plan',
+				body: '# Plan\n',
+			});
+			await open('/?folder=Work', 'Work');
+
+			await openPalette();
+			await userEvent.keyboard('download all{Enter}');
+
+			await waitFor(() => {
+				expect(names).toHaveLength(1);
+			});
+			expect(names[0]).toMatch(/^notes-\d{4}-\d{2}-\d{2}\.zip$/);
+			// The names are in the archive as they are: stored, not compressed.
+			const bytes = new TextDecoder().decode(await archives[0]?.arrayBuffer());
+			expect(plan.path.startsWith('Work/')).toBe(true);
+			expect(bytes).toContain(plan.path);
+			expect(bytes).toContain('Ideas/');
+		} finally {
+			document.removeEventListener('click', onClick);
+		}
 	});
 
 	it('offers the note commands as unavailable when there is no note open', async () => {

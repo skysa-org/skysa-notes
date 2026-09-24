@@ -1,18 +1,24 @@
-import { ancestorPaths, basename, normalizePath, parentPath } from '@skysa/core';
+import { ancestorPaths, basename, normalizePath, parentPath, ROOT } from '@skysa/core';
 
-import { type NoteRecord } from './db.js';
+import { type NoteRecord, type NotesDatabase } from './db.js';
+import { holdsTextFor } from './detached.js';
+import { settleEditors } from './heldEdits.js';
 import { foldPath } from './naming.js';
 import { noteFile } from './notes.js';
 
 /**
  * Notes out of the app as files, with no provider involved.
  *
- * For the one position sync cannot help with: text that exists only on this
+ * For the positions sync cannot help with. Text that exists only on this
  * device, in a source that is being let go or can no longer be reached, where
  * the choice would otherwise be between losing it and never leaving
- * (docs/ARCHITECTURE.md §6). Each note is written as the file a push would have sent,
- * at the path it would have had, so what comes out can be dropped into the
- * folder of any account and be the same notes.
+ * (docs/ARCHITECTURE.md §6). And a library that has never had a provider at
+ * all: a device with nothing connected keeps its notes in this browser alone,
+ * with no provider client to zip the folder for it and no other copy if the
+ * browser clears its storage (docs/ARCHITECTURE.md §14). Each note is written
+ * as the file a push would have sent, at the path it would have had, so what
+ * comes out can be dropped into the folder of any account and be the same
+ * notes.
  *
  * A ZIP written by hand, stored and not compressed. Notes are small, DEFLATE is
  * a dependency or a few hundred lines, and a stored archive is a header, the
@@ -37,6 +43,41 @@ export interface ZipFile {
 	modifiedAt?: number;
 }
 
+/**
+ * A notebook, which is a folder on every provider and in the archive.
+ *
+ * Only one that holds nothing needs an entry of its own: `a/b.md` makes `a` a
+ * folder wherever it is unpacked, and says so without help. An empty notebook
+ * has no file to say it, and left out, it would be the one thing the user made
+ * that the archive does not give back — the folder a push would have made
+ * (`mkdir`), missing.
+ */
+export interface ZipFolder {
+	/** POSIX, relative, as the provider has it, with no trailing slash. */
+	path: string;
+	modifiedAt?: number;
+}
+
+/**
+ * Why an archive was not written: more entries than the format can count, more
+ * bytes than its offsets can reach, or a name longer than a header can say.
+ *
+ * A `RangeError`, as the refusal always was, for callers that only need to know
+ * it failed. `limit` is for the one that has to tell the user which, in words
+ * (`downloadProblem`): a download that silently does nothing is the one failure
+ * a user cannot tell from a download that has not started yet.
+ */
+export class ArchiveLimitError extends RangeError {
+	override readonly name = 'ArchiveLimitError';
+
+	constructor(
+		readonly limit: 'entries' | 'bytes' | 'name',
+		message: string
+	) {
+		super(message);
+	}
+}
+
 const LOCAL_HEADER = 0x04034b50;
 const CENTRAL_HEADER = 0x02014b50;
 const END_RECORD = 0x06054b50;
@@ -45,6 +86,13 @@ const VERSION = 20;
 /** Bit 11: the name is UTF-8. Without it a reader is entitled to assume code page 437. */
 const UTF8_NAMES = 0x0800;
 const STORED = 0;
+/**
+ * The MS-DOS directory attribute, in the low byte of the external attributes,
+ * which is where a writer "made by" host 0 puts them (APPNOTE §4.4.15). The
+ * trailing slash is what most readers go by; this is for the ones that go by
+ * the attribute instead.
+ */
+const DIRECTORY = 0x10;
 /**
  * What a 16-bit count and a 32-bit size cannot say. The all-ones value of each
  * field is not a number in it: it is how ZIP64 says "look in the extra record"
@@ -133,9 +181,12 @@ const UNNAMED = 'untitled.md';
  * comparison folds.
  */
 export const entryName = (path: string): string => {
-	const name = normalizePath(path.replace(/\\/g, '_'));
+	const name = safeName(path);
 	return name === '' ? UNNAMED : name;
 };
+
+/** `entryName` without the stand-in: a folder named nothing is the root, and is no entry. */
+const safeName = (path: string): string => normalizePath(path.replace(/\\/g, '_'));
 
 /** `name (2).md`, `name (3).md`: the extension kept, so the file still opens as what it is. */
 const numbered = (path: string, n: number): string => {
@@ -162,20 +213,33 @@ const numbered = (path: string, n: number): string => {
  * why it cannot matter which of the two came first, and it is the file that
  * gives way: renaming the folder would move every note inside it.
  *
+ * An empty notebook is a folder with no file to imply it (`ZipFolder`), so it
+ * is written as an entry of its own and takes its name, and every name above
+ * it, in the same way and just as early.
+ *
  * The two collections below are written to as it goes, and nothing outside
  * this function ever sees them. Built the immutable way — a new set and a new
  * array per file — this was quadratic, and an export is asked for at the one
  * moment the user most needs it to finish: ten thousand notes took four
  * seconds of a frozen tab, twenty thousand took seventeen.
  */
-const apart = (files: readonly ZipFile[]): ZipFile[] => {
+const apart = (
+	files: readonly ZipFile[],
+	folders: readonly ZipFolder[]
+): { files: ZipFile[]; folders: ZipFolder[] } => {
 	const named = files.map((file) => ({ ...file, path: entryName(file.path) }));
-	const taken = new Set(named.flatMap((file) => ancestorPaths(file.path).map(foldPath)));
+	const empty = emptyFolders(folders, named);
+	const taken = new Set(
+		[
+			...named.flatMap((file) => ancestorPaths(file.path)),
+			...empty.flatMap((folder) => [...ancestorPaths(folder.path), folder.path]),
+		].map(foldPath)
+	);
 	// Where the numbering of each contested name has got to, so the thousandth
 	// file at one path starts looking at 1001 and not at 2.
 	const reached = new Map<string, number>();
 
-	return named.map((file) => {
+	const placed = named.map((file) => {
 		const folded = foldPath(file.path);
 		if (!taken.has(folded)) {
 			taken.add(folded);
@@ -193,6 +257,28 @@ const apart = (files: readonly ZipFile[]): ZipFile[] => {
 		taken.add(foldPath(path));
 		return { ...file, path };
 	});
+	return { files: placed, folders: empty };
+};
+
+/**
+ * The folders that need an entry of their own: each one given that no file is
+ * in, once under any spelling. Named by the rule a file's path is, so the check
+ * and the writer agree; the root is not a folder anything unpacks into, and so
+ * is not one.
+ *
+ * `seen` is written to as it goes, for the reason `apart` gives.
+ */
+const emptyFolders = (folders: readonly ZipFolder[], files: readonly ZipFile[]): ZipFolder[] => {
+	const filled = new Set(files.flatMap((file) => ancestorPaths(file.path).map(foldPath)));
+	const seen = new Set<string>();
+	return folders
+		.map((folder) => ({ ...folder, path: safeName(folder.path) }))
+		.filter((folder) => {
+			const folded = foldPath(folder.path);
+			if (folder.path === ROOT || filled.has(folded) || seen.has(folded)) return false;
+			seen.add(folded);
+			return true;
+		});
 };
 
 interface Entry {
@@ -200,12 +286,15 @@ interface Entry {
 	central: Bytes;
 }
 
-const entryFor = (file: ZipFile, offset: number): Entry => {
+/** `attributes` is the external attributes field: `DIRECTORY` for a folder, nothing for a file. */
+const entryFor = (file: ZipFile, offset: number, attributes = 0): Entry => {
 	const name = new TextEncoder().encode(file.path);
 	// Written into sixteen bits. One byte over, and the field wraps: the header
 	// says the name is short, and everything after it is read from the wrong
 	// place — by a reader that reports a corrupt archive, if the user is lucky.
-	if (name.length > MAX_NAME_BYTES) throw new RangeError("A note's path is too long to archive");
+	if (name.length > MAX_NAME_BYTES) {
+		throw new ArchiveLimitError('name', "A note's path is too long to archive");
+	}
 	const data = new TextEncoder().encode(file.content);
 	const { time, date } = dosStamp(file.modifiedAt);
 	// The part the two headers share, in the order both have it. Stored, so the
@@ -234,11 +323,11 @@ const entryFor = (file: ZipFile, offset: number): Entry => {
 				...u16(VERSION),
 				...u16(VERSION),
 				...described,
-				// No comment, disk 0, no internal attributes, no external ones.
+				// No comment, disk 0, no internal attributes.
 				...u16(0),
 				...u16(0),
 				...u16(0),
-				...u32(0),
+				...u32(attributes),
 				...u32(offset),
 			]),
 			name,
@@ -247,31 +336,49 @@ const entryFor = (file: ZipFile, offset: number): Entry => {
 };
 
 /**
- * A ZIP archive of `files`, stored. Pure: the same files give the same bytes.
- * Linear in the number of files and in their size.
+ * A ZIP archive of `files`, stored, with an entry for each of `folders` that
+ * no file is in. Pure: the same files give the same bytes. Linear in the number
+ * of files and in their size.
  *
- * Throws a `RangeError` rather than write an archive a reader would misread:
- * at the entry count and the total size where the format's fields stop being
- * numbers (`ZIP64_ENTRIES`), and past the longest name a header can describe.
- * All far beyond any folder of notes, and a wrong number in a header is a file
- * that silently will not open.
+ * The folders come first, as `apart` takes their names first. With none, the
+ * archive is exactly what it was before folders could be given.
+ *
+ * Throws an `ArchiveLimitError`, which is a `RangeError`, rather than write an
+ * archive a reader would misread: at the entry count and the total size where
+ * the format's fields stop being numbers (`ZIP64_ENTRIES`), and past the
+ * longest name a header can describe. All far beyond any folder of notes, and a
+ * wrong number in a header is a file that silently will not open.
  */
-export const zipOf = (files: readonly ZipFile[]): Bytes => {
-	if (files.length >= ZIP64_ENTRIES) throw new RangeError('Too many notes for one archive');
+export const zipOf = (files: readonly ZipFile[], folders: readonly ZipFolder[] = []): Bytes => {
+	// Before any work, where the files alone are already too many; the folders
+	// can only add to them.
+	if (files.length >= ZIP64_ENTRIES) {
+		throw new ArchiveLimitError('entries', 'Too many notes for one archive');
+	}
+	const placed = apart(files, folders);
+	if (placed.files.length + placed.folders.length >= ZIP64_ENTRIES) {
+		throw new ArchiveLimitError('entries', 'Too many notes for one archive');
+	}
 
 	// Where the next local header goes: each entry's offset is the sum of those
 	// before it, kept as it goes rather than added up again for every file.
 	const size = { current: 0 };
-	const entries = apart(files).map((file) => {
-		const entry = entryFor(file, size.current);
+	const next = (file: ZipFile, attributes?: number): Entry => {
+		const entry = entryFor(file, size.current, attributes);
 		size.current += entry.local.length;
 		return entry;
-	});
+	};
+	const entries = [
+		...placed.folders.map((folder) =>
+			next({ ...folder, path: `${folder.path}/`, content: '' }, DIRECTORY)
+		),
+		...placed.files.map((file) => next(file)),
+	];
 	const directory = joined(entries.map((entry) => entry.central));
 	// Every 32-bit field in the archive — each offset, each size, the
 	// directory's own — is smaller than this sum, so one check covers them all.
 	if (size.current + directory.length >= ZIP64_BYTES) {
-		throw new RangeError('Too much for one archive');
+		throw new ArchiveLimitError('bytes', 'Too much for one archive');
 	}
 
 	return joined([
@@ -320,7 +427,7 @@ const today = (): string => {
 };
 
 /**
- * Save `notes` to the user's disk as one archive.
+ * Hand an archive to the user's disk.
  *
  * Through a link that is clicked and taken away again, which is the only way a
  * page names the file it is handing over. The blob's URL is let go afterwards,
@@ -330,13 +437,13 @@ const today = (): string => {
  * Both are let go whatever the click does. A link left in the page is a hidden
  * element for ever, and a URL never revoked keeps every exported note in
  * memory for as long as the tab lives.
+ *
+ * Handed bytes, not notes, so every caller writes the archive before it gets
+ * here: `zipOf` can throw, and nothing is to be made that would need letting go
+ * until it has not.
  */
-export const downloadNotes = (
-	notes: readonly NoteRecord[],
-	filename = `notes-${today()}.zip`
-): void => {
-	// Before anything is made that would need letting go: `zipOf` can throw.
-	const archive = new Blob([zipOf(filesOf(notes))], { type: 'application/zip' });
+const save = (bytes: Bytes, filename: string): void => {
+	const archive = new Blob([bytes], { type: 'application/zip' });
 	const url = URL.createObjectURL(archive);
 	const link = document.createElement('a');
 	try {
@@ -350,5 +457,113 @@ export const downloadNotes = (
 		setTimeout(() => {
 			URL.revokeObjectURL(url);
 		}, DOWNLOAD_GRACE_MS);
+	}
+};
+
+/** Save `notes` to the user's disk as one archive. */
+export const downloadNotes = (
+	notes: readonly NoteRecord[],
+	filename = `notes-${today()}.zip`
+): void => {
+	save(zipOf(filesOf(notes)), filename);
+};
+
+/** Everything one source holds that a push would put in its folder. */
+export interface Library {
+	notes: NoteRecord[];
+	folders: ZipFolder[];
+}
+
+/**
+ * Every live note and every notebook in one source. One transaction, so the two
+ * agree: a notebook deleted between two reads would otherwise leave its notes
+ * in the archive, in a folder of their own making.
+ *
+ * Not the tombstones: a deleted note is one a push would delete, and is not in
+ * the folder the archive stands for.
+ */
+export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Library> =>
+	db.transaction('r', db.notes, db.folders, async () => {
+		const [notes, folders] = await Promise.all([
+			db.notes
+				.where('connectionId')
+				.equals(connectionId)
+				.filter((note) => note.deletedLocally === 0)
+				.toArray(),
+			db.folders.where('connectionId').equals(connectionId).sortBy('path'),
+		]);
+		return {
+			notes,
+			folders: folders.map((folder) => ({ path: folder.path, modifiedAt: folder.createdAt })),
+		};
+	});
+
+/**
+ * Whether one source holds anything to download: a notebook, or a note that has
+ * not been deleted. It stops at the first note it finds, since the panel asks
+ * it again every time a note is saved.
+ */
+export const holdsAnything = async (db: NotesDatabase, connectionId: string): Promise<boolean> =>
+	(await db.folders.where('connectionId').equals(connectionId).count()) > 0 ||
+	(await db.notes
+		.where('connectionId')
+		.equals(connectionId)
+		.filter((note) => note.deletedLocally === 0)
+		.first()) !== undefined;
+
+/** Save a whole source to the user's disk as one archive, empty notebooks and all. */
+export const downloadLibrary = (library: Library, filename = `notes-${today()}.zip`): void => {
+	save(zipOf(filesOf(library.notes), library.folders), filename);
+};
+
+/**
+ * One source, whole, to the user's disk (docs/ARCHITECTURE.md §7, "Getting a
+ * library out").
+ *
+ * What the editors are holding is written first. The store alone would leave
+ * out the sentence typed a second ago, in the note the user most likely had in
+ * mind when they asked.
+ *
+ * An editor can hold text the store would not take (a full disk, say), and
+ * then the archive does not have it. It is made anyway — a download takes
+ * nothing away, and what the store does have may be most of what matters,
+ * at the moment storage is failing — and the answer says it is incomplete, so
+ * the user is told rather than left to find out from the file. (A discard asks
+ * the same question and refuses instead, because it would destroy what it had
+ * not listed: `DetachedSource`.)
+ *
+ * `download` is the seam a test replaces, since jsdom cannot make a blob URL.
+ */
+export const downloadSource = async (
+	db: NotesDatabase,
+	connectionId: string,
+	download: (library: Library) => void = downloadLibrary
+): Promise<{ incomplete: boolean }> => {
+	const settled = await settleEditors();
+	download(await libraryOf(db, connectionId));
+	return { incomplete: holdsTextFor(settled, connectionId) };
+};
+
+/** Said once an incomplete archive has been handed over (`downloadSource`). */
+export const INCOMPLETE_DOWNLOAD =
+	'Downloaded, but a note here has text that could not be saved, and the archive does not have it. Copy that text somewhere safe; the note says how.';
+
+/**
+ * What to tell the user when a download did not happen, in their words rather
+ * than the format's. Every one of these was thrown before the browser was
+ * handed anything, so each can say that nothing was downloaded.
+ */
+export const downloadProblem = (error: unknown): string => {
+	if (!(error instanceof ArchiveLimitError)) {
+		return 'The notes could not be downloaded. Try again.';
+	}
+	switch (error.limit) {
+		case 'entries':
+			// In English's digits, as every other word of it is.
+			return `There are too many notes and notebooks here for one archive, which holds at most ${(ZIP64_ENTRIES - 1).toLocaleString('en')}. Nothing was downloaded.`;
+		case 'bytes':
+			return 'These notes come to more than one archive can hold, which is 4 GB. Nothing was downloaded.';
+		case 'name':
+			return 'A note or notebook here has a path too long to put in an archive. Nothing was downloaded.';
 	}
 };
