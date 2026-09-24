@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -131,6 +131,34 @@ describe('the app', () => {
 		expect((await screen.findByRole('alert')).textContent).toMatch(
 			/cannot sync on this server/
 		);
+	});
+
+	it('takes a stray kind of refusal out of the URL, with no outcome beside it', async () => {
+		// A hand-edited or half-copied link. Harmless where it stays — a
+		// connect starts from a path without it (`returnPath`) — but the URL is
+		// meant to say only where the user is.
+		await createFolder(db, { name: 'Work' });
+		const router = await open('/?folder=Work&code=lapsed', 'Work');
+
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({ folder: 'Work' });
+		});
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it('says which kind of refusal it was, and takes that out of the URL too', async () => {
+		await createFolder(db, { name: 'Work' });
+		const router = await open('/?folder=Work&connect=refused&code=lapsed', 'Work');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(
+			/access to sync on this server has lapsed, so storage was not connected/
+		);
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({ folder: 'Work' });
+		});
+		// Nothing to follow where the instance has no gate — and this one cannot
+		// even be asked.
+		expect(within(screen.getByRole('alert')).queryByRole('link')).toBeNull();
 	});
 
 	it('puts the connect outcome away once the user moves on', async () => {

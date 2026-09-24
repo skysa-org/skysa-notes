@@ -1,4 +1,9 @@
-import { PROVIDER_KINDS, type ProviderKind } from '@skysa/core';
+import {
+	ENTITLEMENT_CODES,
+	type EntitlementCode,
+	PROVIDER_KINDS,
+	type ProviderKind,
+} from '@skysa/core';
 import { z } from 'zod';
 
 /**
@@ -16,6 +21,25 @@ import { z } from 'zod';
 
 const AUTH_MODES = ['storage-first', 'account-first'] as const;
 
+/**
+ * What the operator shows in place of the connect buttons (`ConnectGate` in
+ * `@skysa/core`). The server checks it before it will serve it; it is checked
+ * again here because its URL becomes a link on this page, and a link is the
+ * one place a value from the server turns into something the browser follows.
+ * `https:` only — never `javascript:` or `data:`, which would be script in the
+ * page `script-src 'self'` protects (CLAUDE.md; issue #89 asks the same of the
+ * connect flow's URL).
+ */
+const gateSchema = z.object({
+	message: z.string().min(1).max(500),
+	action: z.object({
+		label: z.string().min(1).max(40),
+		// Normalized for the reason `apps/api/src/gate.ts` gives: an
+		// `https:example.com` would otherwise be a link into this app.
+		url: z.url({ protocol: /^https$/, normalize: true }).max(2048),
+	}),
+});
+
 const configSchema = z.object({
 	authMode: z.enum(AUTH_MODES),
 	// A provider this build has never heard of is dropped rather than failing
@@ -27,6 +51,10 @@ const configSchema = z.object({
 				(PROVIDER_KINDS as readonly string[]).includes(kind)
 			)
 		),
+	// Absent on an instance without one. One that does not pass is dropped
+	// rather than failing the config: the app then offers the buttons, which
+	// grants nothing — the server still decides at the callback.
+	connectGate: gateSchema.optional().catch(undefined),
 });
 
 export type InstanceConfig = z.infer<typeof configSchema>;
@@ -86,7 +114,28 @@ const onDeviceClock = (token: AccessToken, response: Response): AccessToken => {
 		: { ...token, expiresAt: token.expiresAt - served + Date.now() };
 };
 
-const errorSchema = z.object({ error: z.string() });
+/**
+ * A refusal, with what an operator's policy said beside a `not_entitled`:
+ * which kind of no, from the fixed list the app has words for, and why, in
+ * the operator's own words. Either is dropped, not the refusal, when it is not
+ * something this app can show.
+ */
+const errorSchema = z.object({
+	error: z.string(),
+	code: z.enum(ENTITLEMENT_CODES).optional().catch(undefined),
+	reason: z.string().max(500).optional().catch(undefined),
+});
+
+/** What the operator's policy said about a `not_entitled`, where it said anything. */
+export interface Denial {
+	readonly code?: EntitlementCode;
+	readonly reason?: string;
+}
+
+const denialOf = ({ code, reason }: z.infer<typeof errorSchema>): Denial => ({
+	...(code === undefined ? {} : { code }),
+	...(reason === undefined || reason.trim() === '' ? {} : { reason: reason.trim() }),
+});
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -142,7 +191,8 @@ const REFUSALS: readonly Refusal[] = [
 	'forbidden_origin',
 ];
 
-export type Result<T> = { ok: true; value: T } | { ok: false; refusal: Refusal };
+export type Result<T> =
+	{ ok: true; value: T } | { ok: false; refusal: Refusal; denial?: Denial | undefined };
 
 export class ApiError extends Error {
 	override readonly name = 'ApiError';
@@ -242,7 +292,9 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 		if (!response.ok) {
 			const refusal = errorSchema.safeParse(body);
 			if (refusal.success && (REFUSALS as readonly string[]).includes(refusal.data.error)) {
-				return { ok: false, refusal: refusal.data.error as Refusal };
+				return refusal.data.error === 'not_entitled'
+					? { ok: false, refusal: 'not_entitled', denial: denialOf(refusal.data) }
+					: { ok: false, refusal: refusal.data.error as Refusal };
 			}
 			throw new ApiError(
 				`${init.method ?? 'GET'} ${path} failed with ${String(response.status)}`,

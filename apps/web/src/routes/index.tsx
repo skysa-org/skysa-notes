@@ -1,7 +1,17 @@
-import { basename, isWithin, parentPath, rebasePath, ROOT } from '@skysa/core';
+import {
+	basename,
+	type ConnectGate,
+	type EntitlementCode,
+	isWithin,
+	parentPath,
+	rebasePath,
+	ROOT,
+} from '@skysa/core';
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { api } from '../api/client.js';
+import { answer, useInstanceConfig } from '../api/instanceConfig.js';
 import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
@@ -16,7 +26,7 @@ import { type DisplacedText, NoteView, type NoteViewHandle } from '../components
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
-import { Toast, type ToastTone } from '../components/Toast.js';
+import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
 import { showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -50,7 +60,7 @@ import { keeping } from '../store/keeping.js';
 import { createNote, listNotes, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { selectedFolderPath } from '../store/tree.js';
-import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
+import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
 	type AppSearch,
 	type ConnectOutcome,
@@ -73,6 +83,8 @@ import {
 interface Notice {
 	readonly message: string;
 	readonly tone: ToastTone;
+	/** Somewhere to go about it, when there is somewhere. */
+	readonly action?: ToastAction | undefined;
 }
 
 /**
@@ -91,7 +103,11 @@ interface Notice {
  * three outcomes Phase 7 retired server-side — which is when a value outside
  * the union first became reachable.
  */
-const connectMessage = (outcome: ConnectOutcome): Notice | undefined => {
+const connectMessage = (
+	outcome: ConnectOutcome,
+	code?: EntitlementCode,
+	gate?: ConnectGate
+): Notice | undefined => {
 	switch (outcome) {
 		case 'ok':
 			return { message: 'Storage connected. Your notes will sync with it.', tone: 'success' };
@@ -114,10 +130,12 @@ const connectMessage = (outcome: ConnectOutcome): Notice | undefined => {
 				tone: 'warning',
 			};
 		// Trying again will not help: this server will not have the account.
+		// What might is whatever its operator offers instead, when they do.
 		case 'refused':
 			return {
-				message: 'This account cannot sync on this server, so storage was not connected.',
+				message: `${refusedMessage(code)}, so storage was not connected.`,
 				tone: 'error',
+				action: gate?.action,
 			};
 		default:
 			return undefined;
@@ -291,17 +309,23 @@ const emptyPaneOffers = ({
  */
 const useConnectNotice = (
 	connect: ConnectOutcome | undefined,
+	code: EntitlementCode | undefined,
 	held: SyncStateRecord | undefined
 ) => {
 	const navigate = useNavigate({ from: Route.fullPath });
 	const [outcome, setOutcome] = useState(connect);
+	const [refusedAs] = useState(code);
+	// The operator's gate, whose action is the one thing a refused toast can
+	// offer to do. The same request the connect buttons make (`instanceConfig`).
+	const config = useInstanceConfig(api);
+	const gate = answer(config)?.connectGate;
 	useEffect(() => {
-		if (connect === undefined) return;
+		if (connect === undefined && code === undefined) return;
 		void navigate({
-			search: ({ connect: _outcome, ...rest }) => rest,
+			search: ({ connect: _outcome, code: _code, ...rest }) => rest,
 			replace: true,
 		});
-	}, [connect, navigate]);
+	}, [connect, code, navigate]);
 
 	const claiming = useClaimingConnection();
 	// Dropped for good, in render rather than an effect (React's "adjusting
@@ -314,13 +338,21 @@ const useConnectNotice = (
 	// Whether there is a message at all decides whether a toast is rendered, and
 	// `connectMessage` answers `undefined` for an outcome this build has no
 	// words for (see above).
-	const waiting = outcome === 'ok' && (claiming || held !== undefined);
-	const connectNotice = outcome === undefined || waiting ? undefined : connectMessage(outcome);
+	//
+	// A refusal waits for the instance's config, answered or not: its link is
+	// part of the message, and an alert that grows a link a moment after it
+	// appears is an alert a screen reader reads twice. Never for long — the
+	// server has only just sent the browser here.
+	const waiting =
+		(outcome === 'ok' && (claiming || held !== undefined)) ||
+		(outcome === 'refused' && config.kind === 'asking');
+	const connectNotice =
+		outcome === undefined || waiting ? undefined : connectMessage(outcome, refusedAs, gate);
 	return { connectNotice, dismissConnect };
 };
 
 const Home = () => {
-	const { folder: requestedFolder, note: noteId, connect } = Route.useSearch();
+	const { folder: requestedFolder, note: noteId, connect, code } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -329,7 +361,7 @@ const Home = () => {
 	// The first source's import holds the app: the device's notes are being
 	// moved into it, and nothing may be done to them until it is through.
 	const held = useHeldImport();
-	const { connectNotice, dismissConnect } = useConnectNotice(connect, held);
+	const { connectNotice, dismissConnect } = useConnectNotice(connect, code, held);
 	const activeConnection = useActiveConnectionId();
 	const sources = useSources();
 	const tree = useFolderTree();
@@ -1034,6 +1066,7 @@ const Home = () => {
 					<Toast
 						message={connectNotice.message}
 						tone={connectNotice.tone}
+						action={connectNotice.action}
 						onDismiss={dismissConnect}
 					/>
 				)}

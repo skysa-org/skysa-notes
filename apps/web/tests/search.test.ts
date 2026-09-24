@@ -34,6 +34,18 @@ describe('parseSearch', () => {
 		expect(parseSearch({ connect: ['ok'] })).toEqual({});
 	});
 
+	it('takes the kind of refusal only when it is one a policy can give', () => {
+		expect(parseSearch({ connect: 'refused', code: 'lapsed' })).toEqual({
+			connect: 'refused',
+			code: 'lapsed',
+		});
+		// Free text is exactly what the code exists to keep out of the URL.
+		expect(parseSearch({ connect: 'refused', code: 'Your plan ended' })).toEqual({
+			connect: 'refused',
+		});
+		expect(parseSearch({ code: ['lapsed'] })).toEqual({});
+	});
+
 	/**
 	 * `toEqual` cannot see this, which is why the tests above passed while the
 	 * app was handed raw values: the router spreads this result over the raw
@@ -41,8 +53,13 @@ describe('parseSearch', () => {
 	 * `tests/routes.search.test.tsx` holds the same line through the real router.
 	 */
 	it('overrides what it refuses instead of leaving it out', () => {
-		const refused = parseSearch({ folder: [1], note: { a: 1 }, connect: 'signin' });
-		expect(refused).toStrictEqual({ folder: undefined, note: undefined, connect: undefined });
+		const refused = parseSearch({ folder: [1], note: { a: 1 }, connect: 'signin', code: 'x' });
+		expect(refused).toStrictEqual({
+			folder: undefined,
+			note: undefined,
+			connect: undefined,
+			code: undefined,
+		});
 		expect({ note: { a: 1 }, ...refused }.note).toBeUndefined();
 	});
 });

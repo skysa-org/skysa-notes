@@ -172,6 +172,28 @@ describe('provider access tokens', () => {
 		expect(tokens.refusal()).toBe('reauthorize_required');
 	});
 
+	it("keeps what the operator's policy said beside a refusal, and forgets it with the refusal", async () => {
+		const db = await bound();
+		const token = vi
+			.fn<ApiClient['token']>()
+			.mockResolvedValueOnce({
+				ok: false,
+				refusal: 'not_entitled',
+				denial: { code: 'lapsed', reason: 'Your plan ended.' },
+			})
+			.mockResolvedValue({ ok: false, refusal: 'reauthorize_required' });
+		const tokens = createTokenSource({ db, client: presenting(token), connectionId: 'c1' });
+
+		await tokens.get().catch(() => undefined);
+		expect(tokens.refusal()).toBe('not_entitled');
+		expect(tokens.denial()).toEqual({ code: 'lapsed', reason: 'Your plan ended.' });
+
+		// A different refusal is not the same denial.
+		await tokens.refresh().catch(() => undefined);
+		expect(tokens.refusal()).toBe('reauthorize_required');
+		expect(tokens.denial()).toBeUndefined();
+	});
+
 	it('forgets a refusal when another tab has minted a token since', async () => {
 		const db = await bound();
 		const token = vi

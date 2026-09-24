@@ -49,6 +49,7 @@ import {
 	letGoOfSource,
 	type LetGoResult,
 	PROVIDER_LABELS,
+	refusedMessage,
 	type UnsentAnswer,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
@@ -114,6 +115,7 @@ export interface AccountPanelProps {
 export const returnPath = (href: string): string => {
 	const url = new URL(href, 'http://app.invalid');
 	url.searchParams.delete('connect');
+	url.searchParams.delete('code');
 	return url.pathname + url.search;
 };
 
@@ -213,7 +215,7 @@ const attentionMessage = (
 	// Said as what to do, with the link, instead.
 	if (needsReconnect(status)) return null;
 	if (!syncable) return `This app cannot sync with ${label} yet.`;
-	if (status.refusal === 'not_entitled') return 'This account cannot sync on this server.';
+	if (status.refusal === 'not_entitled') return `${refusedMessage(status.denial?.code)}.`;
 	if (status.refusal === 'not_found') return `The server no longer has this ${label} connection.`;
 	if (status.stuck !== undefined) return stuckMessage(status.stuck, label);
 	return `Some changes could not be sent to ${label}. They will be tried again (${status.error ?? 'unknown error'}).`;
@@ -550,6 +552,39 @@ const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: stri
 	);
 };
 
+/**
+ * Under "this account cannot sync on this server": the operator's own words
+ * for why, as the server passed them on with its refusal, and the one thing
+ * their gate offers to do about it. Nothing when there is neither — the line
+ * above is then the whole of what is known.
+ */
+const Denied = ({
+	status,
+	syncable,
+	config,
+}: {
+	status: SchedulerStatus;
+	/** Said only where the line above it is (`attentionMessage`). */
+	syncable: boolean;
+	config: Asked<InstanceConfig>;
+}) => {
+	if (!syncable || status.phase !== 'attention' || status.refusal !== 'not_entitled') return null;
+	const reason = status.denial?.reason;
+	const gate = answer(config)?.connectGate;
+	if (reason === undefined && gate === undefined) return null;
+	return (
+		<p className="muted">
+			{reason}
+			{reason !== undefined && gate !== undefined && ' '}
+			{gate !== undefined && (
+				<a href={gate.action.url} target="_blank" rel="noopener noreferrer">
+					{gate.action.label}
+				</a>
+			)}
+		</p>
+	);
+};
+
 interface SyncStateProps {
 	client: Client;
 	database: NotesDatabase;
@@ -558,6 +593,8 @@ interface SyncStateProps {
 	label: string;
 	/** This server lets the user connect storage from here. */
 	reconnectable: boolean;
+	/** What this server offers, which includes what its operator says to an account it will not sync. */
+	config: Asked<InstanceConfig>;
 	returnTo: string;
 	navigate?: (url: string) => void;
 }
@@ -574,6 +611,7 @@ const SyncState = ({
 	bound,
 	label,
 	reconnectable,
+	config,
 	returnTo,
 	navigate,
 }: SyncStateProps) => {
@@ -617,6 +655,7 @@ const SyncState = ({
 				</p>
 			)}
 			{message !== null && <p className="muted">{message}</p>}
+			<Denied status={status} syncable={syncable} config={config} />
 			{/*
 			 * Beside the message that names the op, and only there: `stuck`
 			 * outlives the run that found it, and an offer to open a note under
@@ -1180,6 +1219,7 @@ const Connected = ({
 				bound={bound}
 				label={label}
 				reconnectable={answer(config)?.authMode === 'storage-first'}
+				config={config}
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
 			/>

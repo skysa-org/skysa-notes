@@ -486,3 +486,142 @@ describe('the source panel, in a compact window', () => {
 		expect(within(panel()).getByRole('region', { name: 'Storage' })).toBeDefined();
 	});
 });
+
+/**
+ * An instance whose operator gates connecting (issue #131): a message and one
+ * link where the provider buttons are, and a way past it for an account the
+ * operator's policy lets in — which is still the policy's to decide, at the
+ * callback, whatever is shown here.
+ */
+describe('the way to connect, on an instance whose operator gates it', () => {
+	const GATE = {
+		message: 'Sync on this server is part of the paid plan.',
+		action: { label: 'See plans', url: 'https://example.com/plans' },
+	};
+	const gated = () => clientWith(() => Promise.resolve({ ...STORAGE_FIRST, connectGate: GATE }));
+
+	const expectLinkOut = (link: HTMLElement) => {
+		expect(link.getAttribute('href')).toBe(GATE.action.url);
+		expect(link.getAttribute('target')).toBe('_blank');
+		expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+	};
+
+	it('shows the gate in place of the buttons to a device with no account syncing here', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		show(db, gated());
+
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+
+		// In the group connecting is named by, so it is read out as part of it.
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+		expectLinkOut(menu.getByRole('link', { name: 'See plans' }));
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(menu.queryByRole('button', { name: 'OneDrive' })).toBeNull();
+	});
+
+	it('shows the buttons after all to someone who has access, and moves to the first of them', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		show(db, gated());
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+
+		await user.click(
+			menu.getByRole('button', { name: 'Already have access? Connect storage' })
+		);
+
+		const dropbox = menu.getByRole('button', { name: 'Dropbox' });
+		expect(menu.getByRole('button', { name: 'OneDrive' })).toBeTruthy();
+		// The control pressed has gone; the focus goes where it went.
+		expect(menu.queryByRole('button', { name: /Already have access/ })).toBeNull();
+		await waitFor(() => {
+			expect(document.activeElement).toBe(dropbox);
+		});
+		// And the gate is still said, beside them now.
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+	});
+
+	it('shows a device with an account syncing here the buttons, with the gate beside them', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		show(db, gated());
+
+		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+		expect(menu.getByRole('button', { name: 'OneDrive' })).toBeTruthy();
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+		expectLinkOut(menu.getByRole('link', { name: 'See plans' }));
+		expect(menu.queryByRole('button', { name: /Already have access/ })).toBeNull();
+	});
+
+	it('does not count a source that syncs nowhere as an account syncing here', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await createNote(db, { connectionId: 'c1', title: 'Never sent' });
+		await detachConnection(db, { connectionId: 'c1' });
+		show(db, gated());
+
+		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(menu.getByRole('button', { name: /Already have access/ })).toBeTruthy();
+	});
+
+	it('does not count the notes kept on this device as an account syncing here', async () => {
+		// The common case: someone writes before they connect. Their notes are a
+		// tab of their own, and still nothing the operator has let in.
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Written first' });
+		show(db, gated());
+		await waitFor(() => {
+			expect(tabs()).toEqual(['This device']);
+		});
+
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+	});
+
+	it('is the buttons and nothing else where the instance has no gate', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		show(db);
+
+		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+
+		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+		expect(menu.queryByRole('link')).toBeNull();
+		expect(menu.queryByRole('button', { name: /Already have access/ })).toBeNull();
+	});
+
+	it('says the same in the source panel of a compact window', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		render(<SourcePanel db={db} client={gated()} returnTo="/" navigate={() => undefined} />);
+
+		const connect = within(
+			await screen.findByRole('group', { name: 'Connect storage provider' })
+		);
+		expect(connect.getByText(GATE.message)).toBeTruthy();
+		expectLinkOut(connect.getByRole('link', { name: 'See plans' }));
+		expect(connect.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+
+		await user.click(connect.getByRole('button', { name: /Already have access/ }));
+
+		await waitFor(() => {
+			expect(document.activeElement).toBe(connect.getByRole('button', { name: 'Dropbox' }));
+		});
+	});
+});

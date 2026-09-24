@@ -23,10 +23,22 @@ const ROLE: Record<ToastTone, 'alert' | 'status'> = {
 	error: 'alert',
 };
 
+/**
+ * Somewhere to go about it: a link out, to a page the operator named (the
+ * connect gate's action, `@skysa/core`'s `ConnectGate`). Only ever an `https:`
+ * URL the client has already checked (`api/client.ts`).
+ */
+export interface ToastAction {
+	readonly label: string;
+	readonly url: string;
+}
+
 export interface ToastProps {
 	/** What happened, in the user's words. */
 	message: string;
 	tone: ToastTone;
+	/** What the user can do about it somewhere else, when there is something. */
+	action?: ToastAction | undefined;
 	/**
 	 * Stable across renders: it is a dependency of the listener below, and an
 	 * arrow made fresh each time would tear that down and rebuild it on every
@@ -62,7 +74,7 @@ export interface ToastProps {
  * click anywhere taking away the only route back from a delete would lose
  * work. It keeps its own clock, which stops while it is hovered or focused.
  */
-export const Toast = ({ message, tone, onDismiss }: ToastProps) => {
+export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 	const card = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -85,6 +97,14 @@ export const Toast = ({ message, tone, onDismiss }: ToastProps) => {
 	return (
 		<div ref={card} className={`toast toast-${tone}`} role={ROLE[tone]}>
 			<span>{message}</span>
+			{action !== undefined && (
+				// A new tab, so the app — and this toast — are still here to come
+				// back to; `noopener` so the page it opens cannot reach back into
+				// this one, and `noreferrer` so it is not told where from.
+				<a href={action.url} target="_blank" rel="noopener noreferrer">
+					{action.label}
+				</a>
+			)}
 			<button type="button" className="ghost" onClick={onDismiss}>
 				Dismiss
 			</button>

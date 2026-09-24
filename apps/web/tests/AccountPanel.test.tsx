@@ -1552,6 +1552,104 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(screen.getByText(text)).toBeTruthy();
 	});
 
+	it.each([
+		['not_allowed', 'This account is not allowed to sync on this server.'],
+		['lapsed', "This account's access to sync on this server has lapsed."],
+		['limit_reached', 'This server is at its limit for syncing accounts.'],
+	] as const)('says which kind of refusal a %s is', async (code, text) => {
+		await connected(
+			fakeSync({ phase: 'attention', refusal: 'not_entitled', denial: { code } })
+		);
+
+		expect(screen.getByText(text)).toBeTruthy();
+	});
+
+	it("says why in the operator's words, and what their gate offers, under a refusal", async () => {
+		await connected(
+			fakeSync({
+				phase: 'attention',
+				refusal: 'not_entitled',
+				denial: { code: 'lapsed', reason: 'Your plan ended on 3 May.' },
+			}),
+			{
+				config: () =>
+					Promise.resolve({
+						...STORAGE_FIRST,
+						connectGate: {
+							message: 'Sync here is part of the paid plan.',
+							action: { label: 'Renew', url: 'https://example.com/renew' },
+						},
+					}),
+			}
+		);
+
+		expect(
+			screen.getByText("This account's access to sync on this server has lapsed.")
+		).toBeTruthy();
+		const link = await screen.findByRole('link', { name: 'Renew' });
+		expect(link.getAttribute('href')).toBe('https://example.com/renew');
+		expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+		expect(link.parentElement?.textContent).toBe('Your plan ended on 3 May. Renew');
+	});
+
+	it('says the reason alone where the instance has no gate, and nothing more where there is neither', async () => {
+		await connected(
+			fakeSync({
+				phase: 'attention',
+				refusal: 'not_entitled',
+				denial: { reason: 'Not on the list.' },
+			})
+		);
+
+		expect(screen.getByText('This account cannot sync on this server.')).toBeTruthy();
+		expect(screen.getByText('Not on the list.')).toBeTruthy();
+		await settled();
+		expect(screen.queryByRole('link')).toBeNull();
+	});
+
+	it('says a reason only beside the line it explains', async () => {
+		// Not while the phase is past it, and not for a provider this build
+		// cannot sync, where the line says that instead.
+		await connected(
+			fakeSync({
+				phase: 'idle',
+				refusal: 'not_entitled',
+				denial: { reason: 'Not on the list.' },
+			})
+		);
+		expect(screen.queryByText('Not on the list.')).toBeNull();
+		cleanup();
+
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'webdav' });
+		renderPanel(
+			clientWith({ connection: () => Promise.reject(new TypeError('offline')) }),
+			db,
+			'/',
+			fakeSync({
+				phase: 'attention',
+				refusal: 'not_entitled',
+				denial: { reason: 'Not on the list.' },
+			})
+		);
+		expect(await screen.findByText('This app cannot sync with WebDAV yet.')).toBeTruthy();
+		expect(screen.queryByText('Not on the list.')).toBeNull();
+	});
+
+	it('does not say an old reason once the refusal is over', async () => {
+		const sync = fakeSync({
+			phase: 'attention',
+			refusal: 'not_entitled',
+			denial: { reason: 'Not on the list.' },
+		});
+		await connected(sync);
+		expect(screen.getByText('Not on the list.')).toBeTruthy();
+
+		sync.say({ phase: 'idle' });
+
+		expect(screen.queryByText('Not on the list.')).toBeNull();
+	});
+
 	it('says when changes could not be sent', async () => {
 		await connected(fakeSync({ phase: 'attention', error: 'write a.md failed 8 times' }));
 
@@ -3390,5 +3488,15 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 		cleanup();
 		await connected({ grants: () => Promise.reject(new TypeError('offline')) });
 		expect(screen.queryByRole('list', { name: 'Devices' })).toBeNull();
+	});
+});
+
+describe('returnPath', () => {
+	it('comes back to exactly here, without the outcome of a connect before this one', () => {
+		// The kind of refusal too: carried back onto a later connect, it would
+		// be a refusal saying so about a connect that has not happened.
+		expect(
+			returnPath('https://notes.example.com/?folder=Work&connect=refused&code=lapsed')
+		).toBe('/?folder=Work');
 	});
 });

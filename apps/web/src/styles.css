@@ -548,6 +548,51 @@ code {
 	letter-spacing: 0.04em;
 }
 
+/* What an operator says in front of the connect buttons (`ConnectChoice`):
+   the whole of the menu while it stands in front of them, a muted line while
+   it sits beside them. Wrapped, and held to a measure, so a long message does
+   not stretch the menu to its own width. */
+.connect-gate,
+.connect-gate-note {
+	margin: 0;
+	padding: 0.4rem 0.6rem;
+	max-width: 18rem;
+	font-size: 0.8rem;
+}
+
+.connect-gate {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.4rem;
+}
+
+.connect-gate p {
+	margin: 0;
+}
+
+/* A button, so it centres its words by default; this one reads as the line of
+   text it sits among. */
+.connect-gate .link-button {
+	text-align: start;
+}
+
+.connect-gate-note {
+	color: var(--muted);
+}
+
+/* Only a place to find the first button in; the buttons are laid out by the
+   menu or the panel as they are without a gate. */
+.connect-choices {
+	display: contents;
+}
+
+.source-panel-connect .connect-gate,
+.source-panel-connect .connect-gate-note {
+	max-width: none;
+	padding-inline: var(--gutter);
+}
+
 /* The search, at the right-hand end of the bar. It takes the room the tabs
    leave and keeps to the right of it, so the field lines up with the notes it
    answers into rather than running on from the last tab. */

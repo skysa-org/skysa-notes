@@ -26,6 +26,124 @@ describe('the API client', () => {
 		});
 	});
 
+	it("reads the operator's connect gate, where the instance has one", async () => {
+		const connectGate = {
+			message: 'Sync here is part of the paid plan.',
+			action: { label: 'See plans', url: 'https://example.com/plans' },
+		};
+		const { fetch } = answering(200, {
+			authMode: 'storage-first',
+			providers: ['dropbox'],
+			connectGate,
+		});
+
+		expect(await createApiClient({ fetch }).config()).toEqual({
+			authMode: 'storage-first',
+			providers: ['dropbox'],
+			connectGate,
+		});
+	});
+
+	it.each([
+		[
+			'over http',
+			{ message: 'Paid plan.', action: { label: 'Plans', url: 'http://example.com/' } },
+		],
+		[
+			'to script',
+			{ message: 'Paid plan.', action: { label: 'Plans', url: 'javascript:alert(1)' } },
+		],
+		[
+			'to data',
+			{ message: 'Paid plan.', action: { label: 'Plans', url: 'data:text/html,hi' } },
+		],
+		['without an action', { message: 'Paid plan.' }],
+		[
+			'with a blank message',
+			{ message: '', action: { label: 'Plans', url: 'https://x.com/' } },
+		],
+		[
+			'with a label too long',
+			{ message: 'Paid plan.', action: { label: 'x'.repeat(41), url: 'https://x.com/' } },
+		],
+		['as a string', 'Paid plan.'],
+	])('drops a gate linking %s, and keeps the rest of the config', async (_, connectGate) => {
+		const { fetch } = answering(200, {
+			authMode: 'storage-first',
+			providers: ['dropbox'],
+			connectGate,
+		});
+
+		const config = await createApiClient({ fetch }).config();
+
+		expect(config).toEqual({ authMode: 'storage-first', providers: ['dropbox'] });
+		expect(config.connectGate).toBeUndefined();
+	});
+
+	it('reads the gate link as the browser will, not as it was written', async () => {
+		// In an `href`, `https:example.com` resolves against the page, into a
+		// path inside this app.
+		const { fetch } = answering(200, {
+			authMode: 'storage-first',
+			providers: ['dropbox'],
+			connectGate: {
+				message: 'Paid plan.',
+				action: { label: 'Plans', url: 'https:example.com' },
+			},
+		});
+
+		const config = await createApiClient({ fetch }).config();
+
+		expect(config.connectGate?.action.url).toBe('https://example.com/');
+	});
+
+	it('drops a reason that is only space, which would say nothing', async () => {
+		const { fetch } = answering(403, { error: 'not_entitled', reason: '  \n ' });
+
+		expect(await createApiClient({ fetch }).token()).toEqual({
+			ok: false,
+			refusal: 'not_entitled',
+			denial: {},
+		});
+	});
+
+	it("carries what the operator's policy said beside a not_entitled", async () => {
+		const { fetch } = answering(403, {
+			error: 'not_entitled',
+			code: 'lapsed',
+			reason: ' Your plan ended on 3 May. ',
+		});
+
+		expect(await createApiClient({ fetch }).token()).toEqual({
+			ok: false,
+			refusal: 'not_entitled',
+			denial: { code: 'lapsed', reason: 'Your plan ended on 3 May.' },
+		});
+	});
+
+	it('drops a code it has no words for, and a reason it would not show, but not the refusal', async () => {
+		const { fetch } = answering(403, {
+			error: 'not_entitled',
+			code: 'seats',
+			reason: 'x'.repeat(501),
+		});
+
+		expect(await createApiClient({ fetch }).token()).toEqual({
+			ok: false,
+			refusal: 'not_entitled',
+			denial: {},
+		});
+	});
+
+	it('says nothing of a denial beside any other refusal', async () => {
+		const { fetch } = answering(401, { error: 'credential_revoked', code: 'lapsed' });
+
+		expect(await createApiClient({ fetch }).token()).toEqual({
+			ok: false,
+			refusal: 'credential_revoked',
+		});
+	});
+
 	it('asks after the one connection its credential reaches, presenting it', async () => {
 		const { fetch, calls } = answering(200, {
 			id: 'c1',

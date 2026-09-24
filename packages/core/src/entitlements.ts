@@ -10,11 +10,52 @@ export interface EntitlementDecision {
 	allowed: boolean;
 	/**
 	 * Why not, for the client: `/api/token` returns it with its `not_entitled`.
-	 * Never include internal detail. The OAuth callback reports only that the
-	 * account was refused — it answers with a redirect, and free text in a URL is
-	 * text anyone can put in a link.
+	 * Never include internal detail. The OAuth callback does not carry it — it
+	 * answers with a redirect, and free text in a URL is text anyone can put in
+	 * a link. It carries `code` instead.
 	 */
 	reason?: string;
+	/**
+	 * What kind of no, from a fixed list the app has words for. Unlike `reason`
+	 * it can go in the callback's redirect: a value from a closed set says
+	 * nothing a link-maker can choose. A code outside the list is dropped on the
+	 * way out, and the refusal reads as one with none.
+	 */
+	code?: EntitlementCode;
+}
+
+/**
+ * The kinds of refusal the app words differently.
+ *
+ * - `not_allowed`: this instance does not serve the account — an allowlist
+ *   without it, or no plan.
+ * - `lapsed`: it was allowed, and is not any more — a plan that ended.
+ * - `limit_reached`: it would be allowed, but a limit is full — seats, or
+ *   connections.
+ */
+export const ENTITLEMENT_CODES = ['not_allowed', 'lapsed', 'limit_reached'] as const;
+
+export type EntitlementCode = (typeof ENTITLEMENT_CODES)[number];
+
+/**
+ * What an operator says in place of the provider buttons, before anyone is
+ * sent through a consent screen that will end in a refusal: a message and one
+ * thing to do about it — "Sync is part of the paid plan", with a link to it.
+ *
+ * Per instance, not per person: before a connect the server cannot know who is
+ * about to connect (docs/ARCHITECTURE.md §6). The app still offers the buttons
+ * behind it, since an account the policy allows needs a way in, and revealing
+ * them grants nothing — the policy decides at the callback either way.
+ *
+ * Plain text and an `https:` link, checked when `createApp` is built: a gate
+ * that does not pass stops the app from starting rather than rendering wrong.
+ */
+export interface ConnectGate {
+	readonly message: string;
+	readonly action: Readonly<{
+		label: string;
+		url: string;
+	}>;
 }
 
 /**
@@ -43,6 +84,13 @@ export interface EntitlementSubject {
 
 export interface EntitlementProvider {
 	readonly check: (subject: EntitlementSubject) => Promise<EntitlementDecision>;
+	/**
+	 * Shown where the connect buttons are, when set. Beside the policy rather
+	 * than in the environment, because it means nothing without one: a gate on
+	 * an instance that lets every account in would turn people away from a
+	 * door that is open.
+	 */
+	readonly gate?: ConnectGate;
 }
 
 export const alwaysAllowed: EntitlementProvider = {

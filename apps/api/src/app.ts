@@ -13,6 +13,7 @@ import { type Bearer, bearerFrom, grantHolder } from './credentials.js';
 import { importSecretKey, type SecretKey, signingKey } from './crypto.js';
 import { createDb, type Database } from './db/client.js';
 import type { AppConfig } from './env.js';
+import { checkGate } from './gate.js';
 
 /**
  * Re-exported so a second Worker entry can build its config through the same
@@ -54,6 +55,9 @@ export interface CreateAppOptions {
 	/**
 	 * Who may mint tokens or use the WebDAV proxy. Defaults to `alwaysAllowed`;
 	 * operators of a shared instance substitute their own here instead of forking.
+	 * Its `gate`, when it has one, is what `/config` tells the app to show in
+	 * place of the connect buttons, and it is checked here: a gate that is not
+	 * plain text and an `https:` link makes this throw.
 	 */
 	entitlements?: EntitlementProvider;
 	/**
@@ -89,6 +93,7 @@ export const createApp = (options: CreateAppOptions) => {
 		rateLimiter = neverLimited,
 		providerTimeoutMs = 10_000,
 	} = options;
+	const gate = checkGate(entitlements.gate);
 
 	/** Every provider call gets a deadline, so no call site has to remember one. */
 	const doFetch: FetchLike = (url, init) =>
@@ -182,12 +187,15 @@ export const createApp = (options: CreateAppOptions) => {
 
 	/**
 	 * What this instance offers. The client uses it to decide which connect
-	 * buttons to show. Contains no secrets.
+	 * buttons to show, and what to say in front of them. Contains no secrets.
+	 * Without a gate the answer is exactly what it was before there could be
+	 * one.
 	 */
 	app.get('/config', (c) =>
 		c.json({
 			authMode: config.authMode,
 			providers: config.enabledProviders,
+			...(gate === undefined ? {} : { connectGate: gate }),
 		})
 	);
 
