@@ -12,6 +12,7 @@ import {
 } from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import { KEEP_ASKED_KEY } from '../src/store/keeping.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
 
 /**
@@ -639,5 +640,61 @@ describe('the command palette', () => {
 		expect(screen.getByRole('option', { name: /Edit as/ }).getAttribute('aria-disabled')).toBe(
 			'true'
 		);
+	});
+});
+
+describe('asking the browser to keep the notes', () => {
+	/** `navigator.storage` as a browser that has not agreed, and says no when asked. */
+	const standIn = () => {
+		const keeper = {
+			persisted: vi.fn(() => Promise.resolve(false)),
+			persist: vi.fn(() => Promise.resolve(false)),
+		};
+		Object.defineProperty(navigator, 'storage', { configurable: true, value: keeper });
+		return keeper;
+	};
+
+	afterEach(async () => {
+		Reflect.deleteProperty(navigator, 'storage');
+		await db.prefs.delete(KEEP_ASKED_KEY);
+	});
+
+	it('asks once, when the first note is made on a device with nothing connected', async () => {
+		const keeper = standIn();
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+		// Not on load: in Firefox the request is a prompt.
+		expect(keeper.persist).not.toHaveBeenCalled();
+
+		await userEvent.keyboard('n');
+		await screen.findByDisplayValue('Untitled');
+		await waitFor(() => {
+			expect(keeper.persist).toHaveBeenCalledTimes(1);
+		});
+
+		act(() => {
+			(document.activeElement as HTMLElement | null)?.blur();
+		});
+		await userEvent.keyboard('n');
+		await waitFor(() => {
+			expect(screen.getAllByText('Untitled').length).toBeGreaterThan(1);
+		});
+		expect(keeper.persist).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not ask for a note made in a source that syncs', async () => {
+		const keeper = standIn();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await finishImport(db, 'c1');
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work', 'Work');
+
+		await userEvent.keyboard('n');
+		await screen.findByDisplayValue('Untitled');
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		});
+
+		expect(keeper.persist).not.toHaveBeenCalled();
 	});
 });

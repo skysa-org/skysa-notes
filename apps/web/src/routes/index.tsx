@@ -21,6 +21,7 @@ import { showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
 	db,
+	LOCAL_CONNECTION_ID,
 	type NoteRecord,
 	noteRef,
 	type SyncStateRecord,
@@ -45,6 +46,7 @@ import {
 	useNotesInFolder,
 	useSources,
 } from '../store/hooks.js';
+import { keeping } from '../store/keeping.js';
 import { createNote, listNotes, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { selectedFolderPath } from '../store/tree.js';
@@ -233,6 +235,24 @@ const useDownloadCommand = ({
 				});
 		},
 	});
+};
+
+/**
+ * Installing the app is one of the things Chromium weighs when it decides
+ * whether to keep a site's storage, so the question is put again then,
+ * whatever it said before (`store/keeping.ts`). Silent there; the event is
+ * Chromium's alone.
+ */
+const useKeepOnInstall = () => {
+	useEffect(() => {
+		const installed = () => {
+			void keeping.ask(db, 'installed');
+		};
+		window.addEventListener('appinstalled', installed);
+		return () => {
+			window.removeEventListener('appinstalled', installed);
+		};
+	}, []);
 };
 
 /**
@@ -546,6 +566,12 @@ const Home = () => {
 		void createNote(db, { folderPath: folder })
 			.then((created) => {
 				select({ note: created.id });
+				// A note in the device's own library exists nowhere else, and this
+				// was a click: the moment the browser can be asked to keep it,
+				// prompt and all, once per device (`store/keeping.ts`).
+				if (created.connectionId === LOCAL_CONNECTION_ID) {
+					void keeping.ask(db, 'first-note');
+				}
 			})
 			// Rarer than a duplicate notebook name — this one needs the store
 			// itself to refuse — but the same silence if it happens: the button
@@ -803,6 +829,7 @@ const Home = () => {
 	});
 
 	const noteMove = useNoteMove(openNote, moving, pickUp);
+	useKeepOnInstall();
 
 	useShortcuts();
 
