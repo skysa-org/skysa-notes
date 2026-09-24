@@ -1,5 +1,39 @@
 # @skysa/web
 
+## 0.3.0
+
+### Minor Changes
+
+- 8176135: An operator can gate connecting. `EntitlementProvider` takes an optional
+  `gate` — a message and one `https:` link — which `createApp` checks when it is
+  built and `/api/config` serves as `connectGate`. The app shows it where the
+  provider buttons are: a device with an account syncing on the instance sees the
+  buttons with the gate beside them, and any other sees the gate with an "Already
+  have access? Connect storage" control that shows them.
+  
+  A refusal can say which kind it was: `EntitlementDecision.code` is one of
+  `ENTITLEMENT_CODES` (`not_allowed`, `lapsed`, `limit_reached`), carried by the
+  callback as `?connect=refused&code=…` and by `/token` beside `reason`; any other
+  value is dropped. The refused toast and the storage panel word the refusal by
+  it, the panel shows the operator's reason, and both offer the gate's link.
+- 13f0fec: "Download all notes", in the command palette and the storage panel, saves the
+  source showing as one zip of markdown: every note as the file a push would
+  send, at the path it would have, and every empty notebook as a folder. On a
+  device with nothing connected it is the one way to get the notes out of the
+  browser. An archive past the format's limits (65,534 entries, 4 GiB) is refused
+  in words rather than handed over broken.
+- 25c4653: The app asks the browser to keep this device's notes
+  (`navigator.storage.persist()`): once, when the first note is made in the
+  device's own library, and again when the app is installed. While the browser
+  has not agreed and the notes here are the only copy, the storage panel says
+  the browser may clear them without warning, and that connecting storage or
+  downloading them keeps them.
+
+### Patch Changes
+
+- Updated dependencies [8176135]
+  - @skysa/core@0.3.0
+
 ## 0.2.1
 
 ### Patch Changes
