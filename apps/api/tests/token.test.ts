@@ -1,3 +1,4 @@
+import { type EntitlementCode } from '@skysa/core';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -164,6 +165,38 @@ describe('POST /api/token', () => {
 		]);
 		// And it must not have gone anywhere near Dropbox.
 		expect(app.stub.calls.some((call) => call.form.grant_type === 'refresh_token')).toBe(false);
+	});
+
+	it('says what kind of refusal it was beside why, from the fixed list only', async () => {
+		const decision = {
+			code: 'limit_reached' as EntitlementCode,
+			reason: 'This plan syncs two accounts',
+		};
+		const app = buildApp({
+			entitlements: {
+				check: (subject) =>
+					Promise.resolve(
+						subject.connectionId === undefined
+							? { allowed: true }
+							: { allowed: false, ...decision }
+					),
+			},
+		});
+		const { credential } = await app.connect();
+
+		const known = await post(app.request, credential);
+		expect(await known.json()).toEqual({
+			error: 'not_entitled',
+			reason: 'This plan syncs two accounts',
+			code: 'limit_reached',
+		});
+
+		decision.code = 'seats' as unknown as EntitlementCode;
+		const unknown = await post(app.request, credential);
+		expect(await unknown.json()).toEqual({
+			error: 'not_entitled',
+			reason: 'This plan syncs two accounts',
+		});
 	});
 
 	it("will not mint a token for another connection's credential", async () => {

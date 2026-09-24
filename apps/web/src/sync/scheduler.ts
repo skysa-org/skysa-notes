@@ -11,7 +11,7 @@ import {
 } from '@skysa/core';
 import { liveQuery } from 'dexie';
 
-import { type ApiClient, type Refusal } from '../api/client.js';
+import { type ApiClient, type Denial, type Refusal } from '../api/client.js';
 import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -84,6 +84,11 @@ export interface SchedulerStatus {
 	readonly error?: string;
 	/** Why the server would not mint a token, when that is the problem. */
 	readonly refusal?: Refusal;
+	/**
+	 * What the operator's policy said, beside a `not_entitled` refusal: which
+	 * kind, and why. Set and cleared with `refusal`, never on its own.
+	 */
+	readonly denial?: Denial;
 	/** Conflict copies the last sync wrote, for the banner in §7. */
 	readonly conflicts: readonly string[];
 	/** Which op is stuck, when one is: `attention` without this is about a token. */
@@ -517,7 +522,14 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		if (refusal !== undefined) {
 			// Nothing to retry until the account is connected again, which comes
 			// back through a reload; focus and edits still try.
-			publish({ ...status(), phase: 'attention', error, refusal, conflicts: seen });
+			publish({
+				...status(),
+				phase: 'attention',
+				error,
+				refusal,
+				denial: session.tokens.denial(),
+				conflicts: seen,
+			});
 			return;
 		}
 		if (!environment.isOnline()) {
@@ -526,11 +538,19 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				phase: 'offline',
 				error: undefined,
 				refusal: undefined,
+				denial: undefined,
 				conflicts: seen,
 			});
 			return;
 		}
-		publish({ ...status(), phase: 'retrying', error, refusal: undefined, conflicts: seen });
+		publish({
+			...status(),
+			phase: 'retrying',
+			error,
+			refusal: undefined,
+			denial: undefined,
+			conflicts: seen,
+		});
 		// Edits and focus wait for this too. Each failed push is an attempt
 		// against its op, so running on every keystroke's debounce would spend
 		// all of them in seconds and block the queue behind an outage the
@@ -587,6 +607,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				phase: 'attention',
 				error: outcome.error,
 				refusal: session.tokens.refusal(),
+				denial: session.tokens.denial(),
 				conflicts,
 			});
 			return;
@@ -613,7 +634,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 	const settle = async (session: Session, result: RunResult) => {
 		if (result.kind === 'offline') {
-			publish({ ...status(), phase: 'offline', error: undefined, refusal: undefined });
+			publish({
+				...status(),
+				phase: 'offline',
+				error: undefined,
+				refusal: undefined,
+				denial: undefined,
+			});
 			return;
 		}
 		if (result.kind === 'superseded') {
@@ -664,7 +691,13 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		cancel('debounce');
 		// Whatever started this run, the backoff it was waiting on is over.
 		session.flags.delete('backingOff');
-		publish({ ...status(), phase: 'syncing', error: undefined, refusal: undefined });
+		publish({
+			...status(),
+			phase: 'syncing',
+			error: undefined,
+			refusal: undefined,
+			denial: undefined,
+		});
 		// One engine at a time per connection, across sessions and tabs: a
 		// session ended mid-run, or another tab, may still be at the network.
 		const result = await environment
@@ -874,6 +907,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 						phase: 'offline',
 						error: undefined,
 						refusal: undefined,
+						denial: undefined,
 					});
 				})
 			);

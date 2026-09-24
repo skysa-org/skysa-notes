@@ -1,6 +1,6 @@
 import { AuthError } from '@skysa/core';
 
-import { type AccessToken, type ApiClient, type Refusal } from '../api/client.js';
+import { type AccessToken, type ApiClient, type Denial, type Refusal } from '../api/client.js';
 import { credentialFor } from '../store/credentials.js';
 import { type NotesDatabase } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
@@ -36,13 +36,15 @@ export interface TokenSource {
 	 * how the scheduler says "reconnect" rather than "retrying".
 	 */
 	readonly refusal: () => Refusal | undefined;
+	/** What the operator's policy said beside that refusal, when it was `not_entitled`. */
+	readonly denial: () => Denial | undefined;
 }
 
 export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 	const { db, client, connectionId } = options;
 	const now = options.now ?? Date.now;
 	const cached = new Map<'token', AccessToken>();
-	const refused = new Map<'refusal', Refusal>();
+	const refused = new Map<'refusal', { refusal: Refusal; denial?: Denial | undefined }>();
 
 	const usable = (token: AccessToken | undefined): token is AccessToken =>
 		token !== undefined && token.expiresAt - EXPIRY_MARGIN_MS > now();
@@ -60,7 +62,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 		// stop minting rather than go on presenting a credential that is gone.
 		const held = await credentialFor(db, connectionId);
 		if (held === undefined) {
-			refused.set('refusal', 'credential_required');
+			refused.set('refusal', { refusal: 'credential_required' });
 			cached.delete('token');
 			throw new AuthError('This device holds no credential for that connection');
 		}
@@ -75,7 +77,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 				throw error;
 			});
 		if (!result.ok) {
-			refused.set('refusal', result.refusal);
+			refused.set('refusal', { refusal: result.refusal, denial: result.denial });
 			cached.delete('token');
 			// An `AuthError`, so the provider call it was for fails as one.
 			throw new AuthError(`The server would not mint a token: ${result.refusal}`);
@@ -102,7 +104,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			// one, so this is for a run that was already going when it was let go:
 			// it stops here rather than at the server.
 			if (state?.detached !== undefined) {
-				refused.set('refusal', 'credential_required');
+				refused.set('refusal', { refusal: 'credential_required' });
 				cached.delete('token');
 				throw new AuthError('This device no longer syncs that connection');
 			}
@@ -127,6 +129,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 			await mint();
 		},
 
-		refusal: () => refused.get('refusal'),
+		refusal: () => refused.get('refusal')?.refusal,
+		denial: () => refused.get('refusal')?.denial,
 	};
 };

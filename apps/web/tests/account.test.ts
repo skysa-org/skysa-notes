@@ -19,6 +19,7 @@ import {
 	claimConnection,
 	disconnectAccount,
 	reconcileAccount,
+	refusedMessage,
 	stopSyncingHere,
 } from '../src/sync/account.js';
 import { updateNote } from './noteRows.js';
@@ -1022,5 +1023,23 @@ describe('cancelling an import', () => {
 
 		expect(client.disconnect).not.toHaveBeenCalled();
 		expect((await getNote(db, mine.id))?.connectionId).toBe('c1');
+	});
+});
+
+describe('refusedMessage', () => {
+	it('says which kind of refusal it was, for every kind a policy can give', () => {
+		expect(refusedMessage('not_allowed')).toBe(
+			'This account is not allowed to sync on this server'
+		);
+		expect(refusedMessage('lapsed')).toBe(
+			"This account's access to sync on this server has lapsed"
+		);
+		expect(refusedMessage('limit_reached')).toBe(
+			'This server is at its limit for syncing accounts'
+		);
+	});
+
+	it('says what it always said where the policy did not say which', () => {
+		expect(refusedMessage(undefined)).toBe('This account cannot sync on this server');
 	});
 });

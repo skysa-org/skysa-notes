@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../app.js';
 import { openOAuthSecret, sealOAuthSecret } from '../crypto.js';
 import { schema } from '../db/client.js';
+import { knownCode } from '../gate.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import { type FetchLike, isGrantRefused } from '../oauth/types.js';
@@ -46,7 +47,17 @@ export const tokenRoutes = (doFetch: FetchLike) => {
 			displayName: connection.displayName,
 		});
 		if (!decision.allowed) {
-			return c.json({ error: 'not_entitled', reason: decision.reason }, 403);
+			// The code on the same terms as at the callback, so the app words a
+			// refusal the same way wherever it hears of it.
+			const code = knownCode(decision.code);
+			return c.json(
+				{
+					error: 'not_entitled',
+					reason: decision.reason,
+					...(code === undefined ? {} : { code }),
+				},
+				403
+			);
 		}
 
 		// A connection to a provider the operator has since turned off cannot be

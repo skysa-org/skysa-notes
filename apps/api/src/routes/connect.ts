@@ -1,3 +1,4 @@
+import { type EntitlementCode } from '@skysa/core';
 import { and, desc, eq, notInArray } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
@@ -6,6 +7,7 @@ import type { AppEnv } from '../app.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
+import { knownCode } from '../gate.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
@@ -39,11 +41,15 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 	return url.origin !== new URL(origin).origin || path.startsWith('//') ? '/' : path;
 };
 
-/** `returnTo` may already carry a query of its own, so the separator varies. */
+/**
+ * `returnTo` may already carry a query of its own, so the separator varies.
+ * `code` is only ever one of `ENTITLEMENT_CODES` (`knownCode`): a fixed word,
+ * never the policy's free text.
+ */
 type Outcome = 'ok' | 'denied' | 'failed' | 'partial' | 'refused';
 
-const back = (returnTo: string, outcome: Outcome): string =>
-	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}`;
+const back = (returnTo: string, outcome: Outcome, code?: EntitlementCode): string =>
+	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}${code === undefined ? '' : `&code=${code}`}`;
 
 /**
  * A provider with no flow here, or one this deployment does not offer, is a
@@ -250,7 +256,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			if (known === undefined) {
 				await client.revokeToken?.(doFetch, tokens.accessToken).catch(() => false);
 			}
-			return c.redirect(back(flow.returnTo, 'refused'));
+			return c.redirect(back(flow.returnTo, 'refused', knownCode(decision.code)));
 		}
 
 		const committed = await commit(db, {

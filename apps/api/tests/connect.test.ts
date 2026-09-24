@@ -1,3 +1,4 @@
+import { type EntitlementCode } from '@skysa/core';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -536,6 +537,42 @@ describe('callback, on a server whose operator chooses who may sync', () => {
 		expect(await drizzle.select().from(schema.connections)).toEqual([]);
 		// Nor the grant: a hash bound to nothing would be spent for good.
 		expect(await drizzle.select().from(schema.grants)).toEqual([]);
+	});
+
+	it('says what kind of refusal it was, from the fixed list, and never why', async () => {
+		const { connect } = buildApp({
+			entitlements: {
+				check: () =>
+					Promise.resolve({
+						allowed: false,
+						reason: 'Your plan ended on 3 May',
+						code: 'lapsed' as const,
+					}),
+			},
+		});
+
+		// Onto a `returnTo` with a query of its own, as a refusal always was.
+		const { callback } = await connect({ returnTo: '/?folder=Work' });
+
+		expect(callback.headers.get('location')).toBe('/?folder=Work&connect=refused&code=lapsed');
+	});
+
+	it('drops a code the app has no words for, and refuses as if there were none', async () => {
+		const { connect } = buildApp({
+			entitlements: {
+				// The policy is the operator's code, and nothing makes it keep to
+				// the type: what it hands back is checked on the way into a URL.
+				check: () =>
+					Promise.resolve({
+						allowed: false,
+						code: '"><script>' as unknown as EntitlementCode,
+					}),
+			},
+		});
+
+		const { callback } = await connect();
+
+		expect(callback.headers.get('location')).toBe('/?connect=refused');
 	});
 
 	it('withdraws the consent the user has just given, where the provider has a call for it', async () => {

@@ -1,4 +1,4 @@
-import { type ProviderKind } from '@skysa/core';
+import { type ConnectGate, type ProviderKind } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type ReactNode,
@@ -92,6 +92,14 @@ const useSourceChoices = (
 	return {
 		ordered,
 		offerable,
+		gate: settings?.connectGate,
+		// This device has an account syncing here now, which the operator's
+		// policy let in at least once: it is shown the buttons, with the gate
+		// beside them rather than in front of them. A detached source does not
+		// count — it syncs nowhere.
+		live: ordered.some(
+			(source) => source.connectionId !== LOCAL_CONNECTION_ID && source.detached === undefined
+		),
 		// "Connect another account" once there is one; before that, what
 		// connecting is (`CONNECT_FIRST_LABEL`).
 		connectLabel: anyConnected(ordered) ? 'Connect another account' : CONNECT_FIRST_LABEL,
@@ -113,7 +121,10 @@ export const SourceTabs = ({
 	navigate,
 	search,
 }: SourceTabsProps) => {
-	const { ordered, offerable, connectLabel, nothingToShow } = useSourceChoices(db, client);
+	const { ordered, offerable, gate, live, connectLabel, nothingToShow } = useSourceChoices(
+		db,
+		client
+	);
 	const first = connectLabel === CONNECT_FIRST_LABEL;
 	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
 	const [adding, setAdding] = useState(false);
@@ -198,7 +209,9 @@ export const SourceTabs = ({
 							<p className="source-add-heading">
 								{first ? 'Choose a storage provider' : connectLabel}
 							</p>
-							<ConnectButtons
+							<ConnectChoice
+								gate={gate}
+								live={live}
 								db={db}
 								client={client}
 								offerable={offerable}
@@ -343,6 +356,15 @@ const RenameField = ({
 	);
 };
 
+interface ConnectButtonsProps {
+	db: NotesDatabase;
+	client: Pick<ApiClient, 'config' | 'startConnect'>;
+	offerable: readonly ProviderKind[];
+	returnTo: string;
+	navigate: ((url: string) => void) | undefined;
+	className?: string;
+}
+
 /** A button per provider another account can be connected from. */
 const ConnectButtons = ({
 	db,
@@ -351,14 +373,7 @@ const ConnectButtons = ({
 	returnTo,
 	navigate,
 	className = 'toolbar-item',
-}: {
-	db: NotesDatabase;
-	client: Pick<ApiClient, 'config' | 'startConnect'>;
-	offerable: readonly ProviderKind[];
-	returnTo: string;
-	navigate: ((url: string) => void) | undefined;
-	className?: string;
-}) =>
+}: ConnectButtonsProps) =>
 	offerable.map((provider) => (
 		<ConnectButton
 			key={provider}
@@ -372,6 +387,79 @@ const ConnectButtons = ({
 			{PROVIDER_LABELS[provider]}
 		</ConnectButton>
 	));
+
+/** The operator's link out. A new tab, so the app is still here to come back to. */
+const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
+	<a href={action.url} target="_blank" rel="noopener noreferrer">
+		{action.label}
+	</a>
+);
+
+/**
+ * The connect buttons, or what the operator of this instance says in front of
+ * them (`ConnectGate` in `@skysa/core`, served from `/api/config`): "sync here
+ * is part of the paid plan", and where to go about it. Without a gate this is
+ * the buttons and nothing else.
+ *
+ * With one, a device that already has an account syncing here sees the
+ * buttons anyway, with the gate as a line above them: its account was let in
+ * at least once, and a notice standing between it and a second account would
+ * be a wall in front of someone already inside. A device with none sees the
+ * gate instead, and one more control that shows the buttons after all —
+ * someone the policy allows has to have a way in, and showing them grants
+ * nothing, since the server decides at the callback either way
+ * (docs/ARCHITECTURE.md §6).
+ *
+ * Rendered inside the group each caller already names — the `+` menu's, and
+ * the storage panel's by its heading — so the gate is read out as part of
+ * connecting, as the buttons are.
+ */
+const ConnectChoice = ({
+	gate,
+	live,
+	...buttons
+}: ConnectButtonsProps & { gate: ConnectGate | undefined; live: boolean }) => {
+	const [shown, setShown] = useState(false);
+	const choices = useRef<HTMLDivElement>(null);
+	// The control that was pressed is gone once they are shown, and the focus
+	// with it, so it goes to the first of what took its place.
+	useEffect(() => {
+		if (shown) choices.current?.querySelector('button')?.focus();
+	}, [shown]);
+
+	if (gate === undefined) return <ConnectButtons {...buttons} />;
+	if (!live && !shown) {
+		return (
+			<div className="connect-gate">
+				<p>{gate.message}</p>
+				<p>
+					<GateLink action={gate.action} />
+				</p>
+				<button
+					type="button"
+					className="link-button"
+					onClick={() => {
+						setShown(true);
+					}}
+				>
+					Already have access? Connect storage
+				</button>
+			</div>
+		);
+	}
+	return (
+		<>
+			<p className="connect-gate-note">
+				{gate.message} <GateLink action={gate.action} />
+			</p>
+			{/* No box of its own (`display: contents`): only somewhere to find
+			    the first button in. */}
+			<div ref={choices} className="connect-choices">
+				<ConnectButtons {...buttons} />
+			</div>
+		</>
+	);
+};
 
 /**
  * What the `+` opens. Closes on Escape and on a press anywhere outside it, which is the whole of
@@ -462,7 +550,7 @@ export const SourcePanel = ({
 	account,
 	onChosen,
 }: SourcePanelProps) => {
-	const { ordered, offerable, connectLabel } = useSourceChoices(db, client);
+	const { ordered, offerable, gate, live, connectLabel } = useSourceChoices(db, client);
 	const headingId = useId();
 
 	return (
@@ -516,7 +604,9 @@ export const SourcePanel = ({
 						<p className="source-add-heading" id={headingId}>
 							{connectLabel}
 						</p>
-						<ConnectButtons
+						<ConnectChoice
+							gate={gate}
+							live={live}
 							db={db}
 							client={client}
 							offerable={offerable}

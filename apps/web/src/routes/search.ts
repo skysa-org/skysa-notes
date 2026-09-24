@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { ENTITLEMENT_CODES, type EntitlementCode, ROOT } from '@skysa/core';
 
 /**
  * What the URL says about which folder and note are open. Split out from the
@@ -18,6 +18,12 @@ export interface AppSearch {
 	 * from the provider. Read once and removed.
 	 */
 	connect?: ConnectOutcome;
+	/**
+	 * Beside a `refused`, which kind of refusal it was, from the fixed list the
+	 * operator's policy chooses from (`ENTITLEMENT_CODES`). Read and removed
+	 * with `connect`.
+	 */
+	code?: EntitlementCode;
 }
 
 /**
@@ -62,4 +68,5 @@ export const parseSearch = (search: Record<string, unknown>): AppSearch => ({
 	folder: typeof search.folder === 'string' && search.folder !== '' ? search.folder : undefined,
 	note: typeof search.note === 'string' && search.note !== '' ? search.note : undefined,
 	connect: CONNECT_OUTCOMES.find((outcome) => outcome === search.connect),
+	code: ENTITLEMENT_CODES.find((code) => code === search.code),
 });

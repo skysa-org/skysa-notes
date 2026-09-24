@@ -812,6 +812,32 @@ describe('failures', () => {
 		expect(h.remote.fake.callLog()).toEqual([]);
 	});
 
+	it("says what the operator's policy said, beside a not_entitled, and stops saying it once a token is had", async () => {
+		const db = await bound();
+		const token = vi
+			.fn<ApiClient['token']>()
+			.mockResolvedValueOnce({
+				ok: false,
+				refusal: 'not_entitled',
+				denial: { code: 'limit_reached', reason: 'This plan syncs two accounts.' },
+			})
+			.mockResolvedValue({
+				ok: true,
+				value: { accessToken: 'ok', expiresAt: Date.now() + HOUR },
+			});
+		const h = started(db, { client: presenting(token) });
+
+		await reaches(h.scheduler, 'attention');
+		expect(h.scheduler.status()).toMatchObject({
+			refusal: 'not_entitled',
+			denial: { code: 'limit_reached', reason: 'This plan syncs two accounts.' },
+		});
+
+		h.env.fire('focus');
+		await reaches(h.scheduler, 'idle');
+		expect(h.scheduler.status().denial).toBeUndefined();
+	});
+
 	it('asks for attention when even a fresh token is refused', async () => {
 		const db = await bound();
 		const h = started(db);

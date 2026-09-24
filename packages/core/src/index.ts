@@ -21,6 +21,9 @@ export {
 
 export {
 	alwaysAllowed,
+	type ConnectGate,
+	ENTITLEMENT_CODES,
+	type EntitlementCode,
 	type EntitlementDecision,
 	type EntitlementProvider,
 	type EntitlementSubject,
