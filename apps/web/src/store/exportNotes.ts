@@ -1,6 +1,7 @@
 import { ancestorPaths, basename, normalizePath, parentPath, ROOT } from '@skysa/core';
 
 import { type NoteRecord, type NotesDatabase } from './db.js';
+import { holdsTextFor } from './detached.js';
 import { settleEditors } from './heldEdits.js';
 import { foldPath } from './naming.js';
 import { noteFile } from './notes.js';
@@ -482,7 +483,7 @@ export interface Library {
  * the folder the archive stands for.
  */
 export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Library> =>
-	db.transaction('r', [db.notes, db.folders], async () => {
+	db.transaction('r', db.notes, db.folders, async () => {
 		const [notes, folders] = await Promise.all([
 			db.notes
 				.where('connectionId')
@@ -516,11 +517,20 @@ export const downloadLibrary = (library: Library, filename = `notes-${today()}.z
 };
 
 /**
- * One source, whole, to the user's disk (docs/ARCHITECTURE.md §14).
+ * One source, whole, to the user's disk (docs/ARCHITECTURE.md §7, "Getting a
+ * library out").
  *
  * What the editors are holding is written first. The store alone would leave
  * out the sentence typed a second ago, in the note the user most likely had in
  * mind when they asked.
+ *
+ * An editor can hold text the store would not take (a full disk, say), and
+ * then the archive does not have it. It is made anyway — a download takes
+ * nothing away, and what the store does have may be most of what matters,
+ * at the moment storage is failing — and the answer says it is incomplete, so
+ * the user is told rather than left to find out from the file. (A discard asks
+ * the same question and refuses instead, because it would destroy what it had
+ * not listed: `DetachedSource`.)
  *
  * `download` is the seam a test replaces, since jsdom cannot make a blob URL.
  */
@@ -528,10 +538,15 @@ export const downloadSource = async (
 	db: NotesDatabase,
 	connectionId: string,
 	download: (library: Library) => void = downloadLibrary
-): Promise<void> => {
-	await settleEditors();
+): Promise<{ incomplete: boolean }> => {
+	const settled = await settleEditors();
 	download(await libraryOf(db, connectionId));
+	return { incomplete: holdsTextFor(settled, connectionId) };
 };
+
+/** Said once an incomplete archive has been handed over (`downloadSource`). */
+export const INCOMPLETE_DOWNLOAD =
+	'Downloaded, but a note here has text that could not be saved, and the archive does not have it. Copy that text somewhere safe; the note says how.';
 
 /**
  * What to tell the user when a download did not happen, in their words rather
@@ -544,10 +559,11 @@ export const downloadProblem = (error: unknown): string => {
 	}
 	switch (error.limit) {
 		case 'entries':
-			return `There are too many notes and notebooks here for one archive, which holds at most ${(ZIP64_ENTRIES - 1).toLocaleString()}. Nothing was downloaded.`;
+			// In English's digits, as every other word of it is.
+			return `There are too many notes and notebooks here for one archive, which holds at most ${(ZIP64_ENTRIES - 1).toLocaleString('en')}. Nothing was downloaded.`;
 		case 'bytes':
 			return 'These notes come to more than one archive can hold, which is 4 GB. Nothing was downloaded.';
 		case 'name':
-			return 'A note here has a path too long to put in an archive. Nothing was downloaded.';
+			return 'A note or notebook here has a path too long to put in an archive. Nothing was downloaded.';
 	}
 };

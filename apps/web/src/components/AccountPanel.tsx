@@ -31,6 +31,7 @@ import {
 	downloadProblem,
 	downloadSource,
 	holdsAnything,
+	INCOMPLETE_DOWNLOAD,
 	type Library,
 } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
@@ -381,9 +382,9 @@ const connectHint = (connectIs: 'above' | 'below', first: boolean): string =>
  * something to put in it, and not before, when all it could make is an empty
  * archive.
  *
- * What went wrong is said here, where it was asked for. None of it reached the
- * browser, and a download that fails without a word is one the user goes on
- * waiting for.
+ * What went wrong is said here, where it was asked for: a download that fails
+ * without a word is one the user goes on waiting for. So is an archive handed
+ * over without the text an editor could not save (`downloadSource`).
  */
 const DownloadAll = ({
 	database,
@@ -410,6 +411,9 @@ const DownloadAll = ({
 					setBusy(true);
 					setProblem(null);
 					void downloadSource(database, connectionId, downloadAll)
+						.then(({ incomplete }) => {
+							if (incomplete) setProblem(INCOMPLETE_DOWNLOAD);
+						})
 						.catch((error: unknown) => {
 							setProblem(downloadProblem(error));
 						})

@@ -4,7 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
-import { bindConnection, detachConnection } from '../src/store/connection.js';
+import {
+	bindConnection,
+	detachConnection,
+	finishImport,
+	showConnection,
+} from '../src/store/connection.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
@@ -539,6 +544,31 @@ describe('the command palette', () => {
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		});
+
+		await openPalette();
+
+		expect(
+			screen.getByRole('option', { name: /Download all notes/ }).getAttribute('aria-disabled')
+		).toBe('true');
+	});
+
+	it('has downloading every note unavailable while a later source is still importing', async () => {
+		await bindConnection(db, { connectionId: 'c2', provider: 'dropbox', accountId: 'dbid:2' });
+		await finishImport(db, 'c2');
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await showConnection(db, 'c1');
+		// Held as connecting leaves it. Without one, the storage panel lets the
+		// source go as one this device can no longer reach (`reconcileAccount`),
+		// and its import with it.
+		await db.credentials.put({
+			id: 'c1',
+			credential: 'sk1_held',
+			provider: 'dropbox',
+			createdAt: Date.now(),
+		});
+		await createFolder(db, { connectionId: 'c1', name: 'Work' });
+		await open('/?folder=Work', 'Work');
+		expect((await db.syncState.get('c1'))?.importing?.lock).toBe(false);
 
 		await openPalette();
 

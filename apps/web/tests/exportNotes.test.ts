@@ -11,6 +11,7 @@ import {
 	createDatabase,
 	LOCAL_CONNECTION_ID,
 	type NoteRecord,
+	noteRef,
 	type NotesDatabase,
 } from '../src/store/db.js';
 import {
@@ -649,7 +650,7 @@ describe('what the user is told when there is no download', () => {
 			'These notes come to more than one archive can hold, which is 4 GB. Nothing was downloaded.'
 		);
 		expect(downloadProblem(new ArchiveLimitError('name', ''))).toBe(
-			'A note here has a path too long to put in an archive. Nothing was downloaded.'
+			'A note or notebook here has a path too long to put in an archive. Nothing was downloaded.'
 		);
 	});
 
@@ -995,11 +996,18 @@ describe('a whole source', () => {
 			body: 'naïve\n',
 		});
 		await createNote(db, { title: 'Loose', body: 'at the root\n' });
-		const pulled = await importNoteFile(db, {
+		// A file another tool wrote, with no frontmatter: pushed as it came, so
+		// exported as it came. Re-serializing it would give it a block.
+		await importNoteFile(db, {
 			path: 'Work/From elsewhere.md',
 			source: '# From elsewhere\n\nno frontmatter, and none added\n',
 		});
-		await saveNoteBody(db, pulled.id, '# From elsewhere\n\nedited here\n');
+		// And one edited here since, which is re-serialized by the edit.
+		const edited = await importNoteFile(db, {
+			path: 'Work/Edited here.md',
+			source: '# Edited here\n\nas it came\n',
+		});
+		await saveNoteBody(db, edited.id, '# Edited here\n\nedited here\n');
 
 		const library = await libraryOf(db, LOCAL_CONNECTION_ID);
 		const archived = readZip(zipOf(filesOf(library.notes), library.folders)).entries;
@@ -1047,6 +1055,34 @@ describe('a whole source', () => {
 				.map((entry) => `${entry.path}/`)
 				.sort()
 		);
-		expect(files).toHaveLength(4);
+		expect(files).toHaveLength(5);
+		expect(provider.contentAt('Work/From elsewhere.md')).toBe(
+			'# From elsewhere\n\nno frontmatter, and none added\n'
+		);
+	});
+
+	it('says the archive is incomplete where an editor holds text the store would not take', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { title: 'Held', body: 'stored\n' });
+		withdrawn.push(beforeClosing(() => Promise.resolve([noteRef(note)])));
+
+		const answer = await downloadSource(db, LOCAL_CONNECTION_ID, () => undefined);
+
+		expect(answer).toEqual({ incomplete: true });
+	});
+
+	it("does not call it incomplete for another source's unsaved text", async () => {
+		const db = freshDatabase();
+		const elsewhere = await createNote(db, { connectionId: 'dropbox-1', title: 'Other' });
+		await createNote(db, { title: 'Here' });
+		withdrawn.push(beforeClosing(() => Promise.resolve([noteRef(elsewhere)])));
+		const given: Library[] = [];
+
+		const answer = await downloadSource(db, LOCAL_CONNECTION_ID, (library) => {
+			given.push(library);
+		});
+
+		expect(answer).toEqual({ incomplete: false });
+		expect(given[0]?.notes.map((each) => each.title)).toEqual(['Here']);
 	});
 });
