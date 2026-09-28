@@ -581,6 +581,55 @@ code {
 	color: var(--muted);
 }
 
+/* The gate's code field (`ConnectCodeField`): its label over it, as the
+   editor toolbar's link field has. In front of the buttons it sits in a row
+   with the button that uses it; beside them it is a line of its own. */
+.connect-code {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	gap: 0.25rem;
+	min-width: 0;
+}
+
+.connect-code label {
+	color: var(--muted);
+}
+
+.connect-code input {
+	font: inherit;
+	font-size: 0.9rem;
+	padding: 0.35rem 0.5rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+}
+
+.connect-code-form {
+	display: flex;
+	align-items: flex-end;
+	gap: 0.4rem;
+	align-self: stretch;
+}
+
+.connect-code-form button {
+	font: inherit;
+	padding: 0.35rem 0.7rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+.connect-gate-field {
+	display: flex;
+	padding: 0.4rem 0.6rem;
+	max-width: 18rem;
+	font-size: 0.8rem;
+}
+
 /* Only a place to find the first button in; the buttons are laid out by the
    menu or the panel as they are without a gate. */
 .connect-choices {
@@ -588,7 +637,8 @@ code {
 }
 
 .source-panel-connect .connect-gate,
-.source-panel-connect .connect-gate-note {
+.source-panel-connect .connect-gate-note,
+.source-panel-connect .connect-gate-field {
 	max-width: none;
 	padding-inline: var(--gutter);
 }
@@ -2802,6 +2852,8 @@ button.danger {
 	.code-tool-language,
 	.toolbar-link-actions button,
 	.toolbar-link input,
+	.connect-code input,
+	.connect-code-form button,
 	.note-actions button,
 	.account a.button,
 	.account button,
@@ -2833,7 +2885,8 @@ button.danger {
 	   not zoom back out. */
 	.note-search,
 	.find-input,
-	.toolbar-link input {
+	.toolbar-link input,
+	.connect-code input {
 		font-size: 1rem;
 	}
 

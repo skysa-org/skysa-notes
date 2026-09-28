@@ -7,7 +7,7 @@ import type { AppEnv } from '../app.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
-import { knownCode } from '../gate.js';
+import { connectCodeSchema, knownCode } from '../gate.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
@@ -66,6 +66,8 @@ const startBody = z.object({
 	// Bounded: it goes into a cookie, and a cookie a browser refuses to store is
 	// a flow that cannot complete. Far longer than any route this app has.
 	returnTo: z.string().max(512).optional(),
+	/** What was typed into the gate's code field, for the policy at the callback. */
+	connectCode: connectCodeSchema,
 });
 
 /**
@@ -120,6 +122,9 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				returnTo: safeReturnTo(parsed.data.returnTo, config.appOrigin),
 				expiresAt: flowExpiry(),
 				credentialHash: parsed.data.credentialHash,
+				...(parsed.data.connectCode === undefined
+					? {}
+					: { connectCode: parsed.data.connectCode }),
 			},
 			cookies
 		);
@@ -213,6 +218,9 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		// yes, so nothing is stored then either — and nor has a read that failed,
 		// which goes back to the app like every other failure after the exchange
 		// rather than leaving raw JSON in the address bar.
+		//
+		// Only here is the gate's code passed on. `/token` has none to pass: a
+		// policy that wants one decides as the account connects, and remembers.
 		const known = await db.query.connections
 			.findFirst({
 				columns: { id: true },
@@ -228,12 +236,15 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		if (known === null) return c.redirect(back(flow.returnTo, 'failed'));
 		const decision = await c
 			.get('entitlements')
-			.check({
-				...(known === undefined ? {} : { connectionId: known.id }),
-				provider,
-				accountId: tokens.accountId,
-				displayName,
-			})
+			.check(
+				{
+					...(known === undefined ? {} : { connectionId: known.id }),
+					provider,
+					accountId: tokens.accountId,
+					displayName,
+				},
+				flow.connectCode === undefined ? {} : { connectCode: flow.connectCode }
+			)
 			.catch((error: unknown) => {
 				logFailure('the entitlement check failed', error);
 				return undefined;

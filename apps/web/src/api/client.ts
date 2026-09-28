@@ -1,6 +1,7 @@
 import {
 	ENTITLEMENT_CODES,
 	type EntitlementCode,
+	MAX_CONNECT_CODE,
 	PROVIDER_KINDS,
 	type ProviderKind,
 } from '@skysa/core';
@@ -38,6 +39,13 @@ const gateSchema = z.object({
 		// `https:example.com` would otherwise be a link into this app.
 		url: z.url({ protocol: /^https$/, normalize: true }).max(2048),
 	}),
+	// A field beside the gate for a code the operator's policy reads. Dropped on
+	// its own when it does not parse, leaving the gate: without the field the
+	// app is as it was before there could be one.
+	connectCode: z
+		.object({ label: z.string().min(1).max(40) })
+		.optional()
+		.catch(undefined),
 });
 
 const configSchema = z.object({
@@ -232,11 +240,16 @@ export interface ApiClient {
 	 * a link with the attacker's hash, consented to by the victim, hands the
 	 * attacker a live credential to the victim's storage. A navigation cannot
 	 * carry a body, and the body is what keeps the hash out of the URL.
+	 *
+	 * `connectCode` is what was typed into the gate's code field, when the
+	 * instance asks for one. The server carries it to the operator's policy at
+	 * the callback; it means nothing here.
 	 */
 	readonly startConnect: (
 		provider: ProviderKind,
 		credentialHash: string,
-		returnTo: string
+		returnTo: string,
+		connectCode?: string
 	) => Promise<Result<string>>;
 	/**
 	 * The same client presenting one particular credential.
@@ -344,14 +357,22 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 
 		withCredential: rebind,
 
-		startConnect: async (provider, credentialHash, returnTo) => {
+		startConnect: async (provider, credentialHash, returnTo, connectCode) => {
+			// Trimmed and bounded as the server takes it, and never sent blank: a
+			// field left empty is no code, and one over the bound would be a start
+			// the server refuses outright.
+			const code = connectCode?.trim().slice(0, MAX_CONNECT_CODE);
 			const result = await call(
 				`/auth/connect/${encodeURIComponent(provider)}/start`,
 				authorizeSchema,
 				{
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ credentialHash, returnTo }),
+					body: JSON.stringify({
+						credentialHash,
+						returnTo,
+						...(code === undefined || code === '' ? {} : { connectCode: code }),
+					}),
 				}
 			);
 			return result.ok ? { ok: true, value: result.value.authorizeUrl } : result;

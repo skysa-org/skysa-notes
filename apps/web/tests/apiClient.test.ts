@@ -80,6 +80,33 @@ describe('the API client', () => {
 		expect(config.connectGate).toBeUndefined();
 	});
 
+	it('reads the code field a gate asks for, and drops only the field when it is wrong', async () => {
+		const gate = {
+			message: 'Sync here is part of the paid plan.',
+			action: { label: 'Get a code', url: 'https://example.com/code' },
+		};
+		const read = (connectCode: unknown) =>
+			createApiClient({
+				fetch: answering(200, {
+					authMode: 'storage-first',
+					providers: ['dropbox'],
+					connectGate: { ...gate, connectCode },
+				}).fetch,
+			}).config();
+
+		expect((await read({ label: 'Connect code' })).connectGate).toEqual({
+			...gate,
+			connectCode: { label: 'Connect code' },
+		});
+		// The gate stands without it: the app is then as it was before a gate
+		// could ask for a code.
+		for (const wrong of [{ label: '' }, { label: 'x'.repeat(41) }, 'Connect code']) {
+			const config = await read(wrong);
+			expect(config.connectGate).toMatchObject(gate);
+			expect(config.connectGate?.connectCode).toBeUndefined();
+		}
+	});
+
 	it('reads the gate link as the browser will, not as it was written', async () => {
 		// In an `href`, `https:example.com` resolves against the page, into a
 		// path inside this app.
@@ -370,6 +397,23 @@ describe('the API client', () => {
 		expect(calls[0]?.init?.body).toBe(
 			JSON.stringify({ credentialHash: 'A'.repeat(43), returnTo: '/?folder=Work' })
 		);
+	});
+
+	it("sends the gate's code with the start, trimmed, when there is one", async () => {
+		const { fetch, calls } = answering(200, { authorizeUrl: 'https://dropbox.example/a' });
+		const client = createApiClient({ fetch });
+
+		await client.startConnect('dropbox', 'A'.repeat(43), '/', '  K7QM-2XRD\n');
+		await client.startConnect('dropbox', 'A'.repeat(43), '/', '   ');
+		await client.startConnect('dropbox', 'A'.repeat(43), '/', 'x'.repeat(80));
+
+		expect(calls.map((call) => JSON.parse(call.init?.body as string) as unknown)).toEqual([
+			{ credentialHash: 'A'.repeat(43), returnTo: '/', connectCode: 'K7QM-2XRD' },
+			// Blank is no code, and the body is as it was before there could be one.
+			{ credentialHash: 'A'.repeat(43), returnTo: '/' },
+			// Held to the server's bound, so the start is not refused outright.
+			{ credentialHash: 'A'.repeat(43), returnTo: '/', connectCode: 'x'.repeat(64) },
+		]);
 	});
 
 	it('answers a start the server would not make as a refusal', async () => {

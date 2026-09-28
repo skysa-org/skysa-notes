@@ -286,6 +286,8 @@ export interface ConnectOptions {
 	/** Reuse a credential to test what happens when a hash repeats. */
 	credential?: string;
 	returnTo?: string;
+	/** What the device typed into the gate's code field, if anything. */
+	connectCode?: string;
 	/** Skip the POST and forge a flow cookie some other way. */
 	start?: (jar: Jar, credentialHash: string) => Promise<Response>;
 }
@@ -339,15 +341,21 @@ export const buildApp = (
 	/** Start a flow the way the PWA does: a same-origin POST carrying the hash. */
 	const startConnect = (
 		provider: string,
-		options: { jar?: Jar; credentialHash?: string; returnTo?: string } = {}
+		options: {
+			jar?: Jar;
+			credentialHash?: string;
+			returnTo?: string;
+			connectCode?: string;
+		} = {}
 	): Promise<Response> => {
-		const { credentialHash = ANY_HASH, returnTo } = options;
+		const { credentialHash = ANY_HASH, returnTo, connectCode } = options;
 		return request(`/api/auth/connect/${provider}/start`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({
 				credentialHash,
 				...(returnTo === undefined ? {} : { returnTo }),
+				...(connectCode === undefined ? {} : { connectCode }),
 			}),
 			...(options.jar === undefined ? {} : { cookies: options.jar }),
 		});
@@ -365,13 +373,14 @@ export const buildApp = (
 			jar = createJar(),
 			credential = newCredential(),
 			returnTo,
+			connectCode,
 		} = options;
 		stub.as(account);
 
 		const hash = await hashCredential(credential);
 		const start = jar.absorb(
 			await (options.start?.(jar, hash) ??
-				startConnect(provider, { jar, credentialHash: hash, returnTo }))
+				startConnect(provider, { jar, credentialHash: hash, returnTo, connectCode }))
 		);
 
 		const state = flowStateOf(jar);

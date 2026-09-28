@@ -56,6 +56,17 @@ export interface ConnectGate {
 		label: string;
 		url: string;
 	}>;
+	/**
+	 * Ask for a code before connecting, under this label: an invite, an access
+	 * code, a code the operator's own page sent to someone who paid. What it is
+	 * and what it proves is the policy's business. The app only carries it, from
+	 * the field beside the gate to `check` at the OAuth callback
+	 * (`EntitlementContext`).
+	 *
+	 * It proves nothing to the app, which shows the buttons whatever is typed:
+	 * the policy decides at the callback, as it does without one.
+	 */
+	readonly connectCode?: Readonly<{ label: string }>;
 }
 
 /**
@@ -82,8 +93,44 @@ export interface EntitlementSubject {
 	readonly displayName: string;
 }
 
+/**
+ * What the device said beside the account, where it said anything. Only the
+ * OAuth callback has any of it: `/token` and the WebDAV proxy ask with none, so
+ * a policy that needs it decides once, as the account connects, and remembers
+ * the answer itself.
+ */
+export interface EntitlementContext {
+	/**
+	 * What was typed into the gate's `connectCode` field, trimmed, at most
+	 * `MAX_CONNECT_CODE` characters and never blank. Absent when nothing was.
+	 *
+	 * Typed by the person connecting, so it is a claim, not a fact: a policy
+	 * that accepts one checks it against something it issued itself. It reaches
+	 * the callback inside the signed flow cookie, so it cannot be changed between
+	 * the two, but it is not a secret from the browser that holds that cookie.
+	 */
+	readonly connectCode?: string;
+}
+
+/**
+ * The longest `connectCode` the server will carry. It shares a cookie with
+ * the flow's verifier, and a cookie a browser refuses to store is a flow that
+ * cannot complete. Here so the app's field and the server's check are one
+ * number.
+ */
+export const MAX_CONNECT_CODE = 64;
+
 export interface EntitlementProvider {
-	readonly check: (subject: EntitlementSubject) => Promise<EntitlementDecision>;
+	/**
+	 * A policy that records something on a yes (linking the account to the
+	 * code it came with, say) must not take the yes as a stored connection. The
+	 * callback can still fail after it, and nothing is stored then, so the same
+	 * account can connect again later and be asked again.
+	 */
+	readonly check: (
+		subject: EntitlementSubject,
+		context?: EntitlementContext
+	) => Promise<EntitlementDecision>;
 	/**
 	 * Shown where the connect buttons are, when set. Beside the policy rather
 	 * than in the environment, because it means nothing without one: a gate on

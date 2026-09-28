@@ -1,4 +1,9 @@
-import { type ConnectGate, ENTITLEMENT_CODES, type EntitlementCode } from '@skysa/core';
+import {
+	type ConnectGate,
+	ENTITLEMENT_CODES,
+	type EntitlementCode,
+	MAX_CONNECT_CODE,
+} from '@skysa/core';
 import { z } from 'zod';
 
 /**
@@ -36,6 +41,7 @@ const gateSchema = z.object({
 			.url({ protocol: /^https$/, normalize: true, error: 'must be an absolute https: URL' })
 			.max(2048, 'must be at most 2048 characters'),
 	}),
+	connectCode: z.object({ label: text(40) }).optional(),
 });
 
 /**
@@ -59,6 +65,23 @@ export const checkGate = (gate: ConnectGate | undefined): ConnectGate | undefine
 	}
 	return result.data;
 };
+
+/**
+ * What `/start` takes as the gate's code (`EntitlementContext.connectCode`),
+ * on its way into the flow cookie and from there to the policy.
+ *
+ * Bounded (`MAX_CONNECT_CODE`), because it rides in the flow cookie. Printable,
+ * because it is something a person typed, and a policy should not have to
+ * wonder what a control character in it means. Blank is the same as none: a
+ * field left empty is not a code.
+ */
+export const connectCodeSchema = z
+	.string()
+	.trim()
+	.max(MAX_CONNECT_CODE)
+	.regex(/^\P{C}*$/u, 'must be printable')
+	.transform((code) => (code === '' ? undefined : code))
+	.optional();
 
 /**
  * A refusal's code, if it is one the app has words for. Anything else is
