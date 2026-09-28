@@ -14,6 +14,7 @@ import {
 	cookieNames,
 	createJar,
 	DEFAULT_ACCOUNT,
+	flowPayload,
 	flowStateOf,
 	type Jar,
 	newCredential,
@@ -710,6 +711,99 @@ describe('callback, on a server whose operator chooses who may sync', () => {
 			expect.stringContaining('the entitlement check failed')
 		);
 		logged.mockRestore();
+	});
+});
+
+describe("the gate's connect code", () => {
+	/** A policy that writes down what it was asked, both halves of it. */
+	const recording = (seen: { subject: unknown; context: unknown }[]) => ({
+		check: (subject: unknown, context?: unknown) => {
+			seen.push({ subject, context });
+			return Promise.resolve({ allowed: true });
+		},
+	});
+
+	it('reaches the policy at the callback, beside the account', async () => {
+		const seen: { subject: unknown; context: unknown }[] = [];
+		const { connect } = buildApp({ entitlements: recording(seen) });
+
+		const { callback } = await connect({ connectCode: 'K7QM-2XRD' });
+
+		expect(callback.headers.get('location')).toBe('/?connect=ok');
+		expect(seen).toEqual([
+			{
+				subject: {
+					provider: 'dropbox',
+					accountId: DEFAULT_ACCOUNT,
+					displayName: 'user@example.com',
+				},
+				context: { connectCode: 'K7QM-2XRD' },
+			},
+		]);
+	});
+
+	it('is absent when nothing was typed, or only spaces', async () => {
+		const seen: { subject: unknown; context: unknown }[] = [];
+		const { connect } = buildApp({ entitlements: recording(seen) });
+
+		await connect();
+		await connect({ connectCode: '   ' });
+
+		expect(seen.map(({ context }) => context)).toEqual([{}, {}]);
+	});
+
+	it('is passed on trimmed', async () => {
+		const seen: { subject: unknown; context: unknown }[] = [];
+		const { connect } = buildApp({ entitlements: recording(seen) });
+
+		await connect({ connectCode: '  K7QM-2XRD\n' });
+
+		expect(seen[0]?.context).toEqual({ connectCode: 'K7QM-2XRD' });
+	});
+
+	it('rides in the signed flow cookie, and never in the URL sent to the provider', async () => {
+		const { request } = buildApp();
+		const jar = createJar();
+
+		const response = jar.absorb(
+			await start(request, { credentialHash: HASH, connectCode: 'K7QM-2XRD' }, { jar })
+		);
+
+		expect(flowPayload(jar).connectCode).toBe('K7QM-2XRD');
+		expect((await authorizeUrl(response)).toString()).not.toContain('K7QM');
+	});
+
+	it('is dropped with the flow, whatever the callback decides', async () => {
+		const { connect } = buildApp({
+			entitlements: { check: () => Promise.resolve({ allowed: false }) },
+		});
+
+		const { jar } = await connect({ connectCode: 'K7QM-2XRD' });
+
+		expect(jar.get(cookieNames.flow)).toBeUndefined();
+	});
+
+	it('takes 64 characters, which is the most a cookie is asked to carry', async () => {
+		const { request } = buildApp();
+		const response = await start(request, {
+			credentialHash: HASH,
+			connectCode: 'A'.repeat(64),
+		});
+		expect(response.status).toBe(200);
+	});
+
+	it.each([
+		['too long', 'A'.repeat(65)],
+		['not a string', 12_345_678],
+		['a control character', 'K7QM\u00002XRD'],
+		['a line break inside it', 'K7QM\n2XRD'],
+	])('refuses a code that is %s', async (_name, connectCode) => {
+		const { request } = buildApp();
+
+		const response = await start(request, { credentialHash: HASH, connectCode });
+
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: 'invalid_request' });
 	});
 });
 

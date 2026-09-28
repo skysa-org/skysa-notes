@@ -64,6 +64,18 @@ describe('the connect gate', () => {
 		});
 	});
 
+	it('serves the code field it asks for, labelled as the operator labels it', async () => {
+		const app = buildApp({
+			entitlements: gated({ ...GATE, connectCode: { label: ' Invite code ' } }),
+		});
+
+		const response = await app.request('/api/config');
+
+		expect(await response.json()).toMatchObject({
+			connectGate: { ...GATE, connectCode: { label: 'Invite code' } },
+		});
+	});
+
 	it.each([
 		['without an action', { message: GATE.message }, /action/],
 		['without a message', { action: GATE.action }, /message/],
@@ -99,6 +111,17 @@ describe('the connect gate', () => {
 			'with a link too long',
 			{ ...GATE, action: { ...GATE.action, url: `https://example.com/${'x'.repeat(2048)}` } },
 			/url: must be at most 2048/,
+		],
+		['asking for a code under no label', { ...GATE, connectCode: {} }, /connectCode\.label/],
+		[
+			'asking for a code under a blank label',
+			{ ...GATE, connectCode: { label: '  ' } },
+			/connectCode\.label: must not be blank/,
+		],
+		[
+			'asking for a code under a label too long',
+			{ ...GATE, connectCode: { label: 'x'.repeat(41) } },
+			/connectCode\.label: must be at most 40/,
 		],
 	])('stops the app being built %s', (_, gate, problem) => {
 		expect(build(gate)).toThrow(problem);

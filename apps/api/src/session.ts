@@ -71,6 +71,14 @@ export interface FlowState {
 	 * origin check stop it being *planted*.
 	 */
 	credentialHash: string;
+	/**
+	 * What the device typed into the gate's code field, for the entitlement
+	 * check at the callback (`EntitlementContext` in `@skysa/core`). Here rather
+	 * than asked for again at the callback, which is a navigation from the
+	 * provider and carries nothing of the app's; signed with the rest, so it is
+	 * the code the flow was started with.
+	 */
+	connectCode?: string;
 }
 
 export const setFlowState = async (

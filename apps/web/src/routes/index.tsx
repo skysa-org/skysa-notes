@@ -27,6 +27,7 @@ import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
+import { dropConnectCode, heldConnectCode } from '../store/connectCode.js';
 import { showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -102,11 +103,15 @@ interface Notice {
  * Found on 2026-09-18 by removing `signin`, `conflict` and `occupied` — the
  * three outcomes Phase 7 retired server-side — which is when a value outside
  * the union first became reachable.
+ *
+ * `codeRefused` is a plain no to a connect that carried the gate's code
+ * (`codeWasRefused`), which is said to be about the code.
  */
 const connectMessage = (
 	outcome: ConnectOutcome,
 	code?: EntitlementCode,
-	gate?: ConnectGate
+	gate?: ConnectGate,
+	codeRefused = false
 ): Notice | undefined => {
 	switch (outcome) {
 		case 'ok':
@@ -133,7 +138,7 @@ const connectMessage = (
 		// What might is whatever its operator offers instead, when they do.
 		case 'refused':
 			return {
-				message: `${refusedMessage(code)}, so storage was not connected.`,
+				message: `${codeRefused ? 'The code you entered was not accepted' : refusedMessage(code)}, so storage was not connected.`,
 				tone: 'error',
 				action: gate?.action,
 			};
@@ -294,6 +299,22 @@ const emptyPaneOffers = ({
 };
 
 /**
+ * Whether a refusal is the operator's policy turning down the code typed into
+ * its gate (`ConnectGate.connectCode`): a plain no — `not_allowed`, or no code
+ * at all — to a connect made while this tab held one. The code is what the
+ * person offered, and what they can put right. A `lapsed` or a `limit_reached`
+ * is about the account or the instance, whatever was typed, and is said as it
+ * is.
+ */
+const codeWasRefused = (
+	connect: ConnectOutcome | undefined,
+	code: EntitlementCode | undefined
+): boolean =>
+	connect === 'refused' &&
+	(code === undefined || code === 'not_allowed') &&
+	heldConnectCode() !== undefined;
+
+/**
  * The toast for how a connect went, read once as the app opens on the way back
  * from the provider and taken out of the URL straight away: left there, a
  * reload or a bookmark would say "connected" again about a connection that may
@@ -315,6 +336,12 @@ const useConnectNotice = (
 	const navigate = useNavigate({ from: Route.fullPath });
 	const [outcome, setOutcome] = useState(connect);
 	const [refusedAs] = useState(code);
+	const [codeRefused] = useState(() => codeWasRefused(connect, code));
+	// So the field is empty for the next code, rather than offering again the one
+	// just turned down.
+	useEffect(() => {
+		if (codeRefused) dropConnectCode();
+	}, [codeRefused]);
 	// The operator's gate, whose action is the one thing a refused toast can
 	// offer to do. The same request the connect buttons make (`instanceConfig`).
 	const config = useInstanceConfig(api);
@@ -347,7 +374,9 @@ const useConnectNotice = (
 		(outcome === 'ok' && (claiming || held !== undefined)) ||
 		(outcome === 'refused' && config.kind === 'asking');
 	const connectNotice =
-		outcome === undefined || waiting ? undefined : connectMessage(outcome, refusedAs, gate);
+		outcome === undefined || waiting
+			? undefined
+			: connectMessage(outcome, refusedAs, gate, codeRefused);
 	return { connectNotice, dismissConnect };
 };
 

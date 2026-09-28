@@ -1,4 +1,4 @@
-import { type ConnectGate, type ProviderKind } from '@skysa/core';
+import { type ConnectGate, MAX_CONNECT_CODE, type ProviderKind } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type ReactNode,
@@ -12,6 +12,7 @@ import {
 
 import { api, type ApiClient } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
+import { heldConnectCode, holdConnectCode } from '../store/connectCode.js';
 import {
 	type ConnectedSource,
 	connectedSources,
@@ -396,6 +397,40 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
 );
 
 /**
+ * The gate's field for a code (`ConnectGate.connectCode`), under the operator's
+ * label. What is typed is held for the tab (`store/connectCode.ts`) and goes
+ * with whichever connect is pressed next. It unlocks nothing here: the buttons
+ * are the same whatever it holds, and the operator's policy reads it at the
+ * callback.
+ *
+ * A one-time code to the browser, so a code the operator sent by email or text
+ * can be offered from there. Taken as typed, with nothing capitalised or
+ * corrected: whether case matters is the policy's to say.
+ */
+const ConnectCodeField = ({ label }: { label: string }) => {
+	const id = useId();
+	const [code, setCode] = useState(() => heldConnectCode() ?? '');
+	return (
+		<span className="connect-code">
+			<label htmlFor={id}>{label}</label>
+			<input
+				id={id}
+				value={code}
+				maxLength={MAX_CONNECT_CODE}
+				autoComplete="one-time-code"
+				autoCapitalize="off"
+				autoCorrect="off"
+				spellCheck={false}
+				onChange={(event) => {
+					setCode(event.target.value);
+					holdConnectCode(event.target.value);
+				}}
+			/>
+		</span>
+	);
+};
+
+/**
  * The connect buttons, or what the operator of this instance says in front of
  * them (`ConnectGate` in `@skysa/core`, served from `/api/config`): "sync here
  * is part of the paid plan", and where to go about it. Without a gate this is
@@ -413,6 +448,11 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
  * Rendered inside the group each caller already names — the `+` menu's, and
  * the compact source panel's by its heading — so the gate is read out as part
  * of connecting, as the buttons are.
+ *
+ * A gate that asks for a code has its field in both states: a device with an
+ * account syncing here may be adding one the operator has not seen. In front
+ * of the buttons it is a form, and using the code shows them, as "Already have
+ * access?" does for someone the policy knows already.
  */
 const ConnectChoice = ({
 	gate,
@@ -435,6 +475,18 @@ const ConnectChoice = ({
 				<p>
 					<GateLink action={gate.action} />
 				</p>
+				{gate.connectCode !== undefined && (
+					<form
+						className="connect-code-form"
+						onSubmit={(event) => {
+							event.preventDefault();
+							setShown(true);
+						}}
+					>
+						<ConnectCodeField label={gate.connectCode.label} />
+						<button type="submit">Use code</button>
+					</form>
+				)}
 				<button
 					type="button"
 					className="link-button"
@@ -452,6 +504,11 @@ const ConnectChoice = ({
 			<p className="connect-gate-note">
 				{gate.message} <GateLink action={gate.action} />
 			</p>
+			{gate.connectCode !== undefined && (
+				<div className="connect-gate-field">
+					<ConnectCodeField label={gate.connectCode.label} />
+				</div>
+			)}
 			{/* No box of its own (`display: contents`): only somewhere to find
 			    the first button in. */}
 			<div ref={choices} className="connect-choices">

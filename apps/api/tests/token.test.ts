@@ -167,6 +167,23 @@ describe('POST /api/token', () => {
 		expect(app.stub.calls.some((call) => call.form.grant_type === 'refresh_token')).toBe(false);
 	});
 
+	it("is never handed the gate's connect code, which only the callback has", async () => {
+		const contexts: unknown[] = [];
+		const app = buildApp({
+			entitlements: {
+				check: (_subject, context) => {
+					contexts.push(context);
+					return Promise.resolve({ allowed: true });
+				},
+			},
+		});
+		const { credential } = await app.connect({ connectCode: 'K7QM-2XRD' });
+
+		expect((await post(app.request, credential)).status).toBe(200);
+		// The callback's, then the token's.
+		expect(contexts).toEqual([{ connectCode: 'K7QM-2XRD' }, undefined]);
+	});
+
 	it('says what kind of refusal it was beside why, from the fixed list only', async () => {
 		const decision = {
 			code: 'limit_reached' as EntitlementCode,

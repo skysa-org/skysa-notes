@@ -241,6 +241,36 @@ export const entitlements: EntitlementProvider = {
 };
 ```
 
+A gate can ask for a code as well, when your policy lets accounts in by
+something other than the account itself: an invite, or a code your own page
+sends to someone who has paid. Give it `connectCode: { label: 'Invite code' }`
+and the app shows a field under that label where the gate is. Whatever is typed
+reaches your policy once, at the callback, as `check(subject, { connectCode })`.
+It is trimmed, at most 64 characters, and never blank. `/token` does not pass
+it, so a policy that accepts a code has to remember the account it let in:
+
+```ts
+export const entitlements: EntitlementProvider = {
+	check: async ({ provider, accountId }, context) => {
+		if (await admitted(provider, accountId)) return { allowed: true };
+		if (context?.connectCode !== undefined && (await redeem(context.connectCode))) {
+			await admit(provider, accountId);
+			return { allowed: true };
+		}
+		return { allowed: false, code: 'not_allowed' };
+	},
+	gate: {
+		message: 'This server syncs invited accounts only.',
+		action: { label: 'Ask for an invite', url: 'https://example.com/invite' },
+		connectCode: { label: 'Invite code' },
+	},
+};
+```
+
+`admitted`, `redeem` and `admit` are yours: somewhere your Worker keeps what it
+has let in. The app words a plain refusal to a connect that carried a code as
+"The code you entered was not accepted".
+
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
 its one `createApp({ config: parseEnv(env) })` to pass `entitlements` as well,
 and point `main` in `wrangler.toml` at your copy. Beside the original in
@@ -253,7 +283,8 @@ these:
 
 - a message that is blank or over 500 characters;
 - a label that is blank or over 40 characters;
-- a link that is not an `https:` URL, or is over 2048 characters.
+- a link that is not an `https:` URL, or is over 2048 characters;
+- a code field whose label is blank or over 40 characters.
 
 The entry then logs the problem and answers `server_misconfigured`, rather
 than showing a broken link to your users. The link is served in its

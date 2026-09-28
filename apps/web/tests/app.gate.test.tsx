@@ -3,6 +3,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen';
+import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 
@@ -41,6 +42,7 @@ beforeEach(async () => {
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
+	dropConnectCode();
 });
 
 const open = async (url: string) => {
@@ -119,5 +121,47 @@ describe('a refused connect, on an instance with a gate', () => {
 		// not offered, since trying again is the answer to a failure.
 		await screen.findByRole('button', { name: /Connect storage provider/ });
 		expect(within(toast).queryByRole('link')).toBeNull();
+	});
+});
+
+describe("a refused connect that carried the gate's code", () => {
+	it('says the code was not accepted, and lets go of it for the next one', async () => {
+		holdConnectCode('K7QM-2XRD');
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work&connect=refused&code=not_allowed');
+
+		const toast = await screen.findByRole('alert');
+		expect(toast.textContent).toMatch(
+			/The code you entered was not accepted, so storage was not connected/
+		);
+		// The operator's way to another code, beside it.
+		expect(within(toast).getByRole('link', { name: 'See plans' })).toBeTruthy();
+		expect(heldConnectCode()).toBeUndefined();
+	});
+
+	it('says the same where the policy did not say which kind of no', async () => {
+		holdConnectCode('K7QM-2XRD');
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work&connect=refused');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/code you entered/);
+	});
+
+	it('says a lapse as a lapse, and keeps the code, which may be good', async () => {
+		holdConnectCode('K7QM-2XRD');
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work&connect=refused&code=lapsed');
+
+		const toast = await screen.findByRole('alert');
+		expect(toast.textContent).toMatch(/access to sync on this server has lapsed/);
+		expect(toast.textContent).not.toMatch(/code you entered/);
+		expect(heldConnectCode()).toBe('K7QM-2XRD');
+	});
+
+	it('says nothing of a code when none was held', async () => {
+		await createFolder(db, { name: 'Work' });
+		await open('/?folder=Work&connect=refused&code=not_allowed');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/not allowed to sync/);
 	});
 });
