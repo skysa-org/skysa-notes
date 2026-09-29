@@ -10,9 +10,9 @@ import {
 	useState,
 } from 'react';
 
-import { api, type ApiClient } from '../api/client.js';
+import { api, type ApiClient, ApiError } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
-import { heldConnectCode, holdConnectCode } from '../store/connectCode.js';
+import { connectCodeHeldUntil, heldConnectCode, holdConnectCode } from '../store/connectCode.js';
 import {
 	type ConnectedSource,
 	connectedSources,
@@ -34,7 +34,7 @@ import { useEscape } from './useEscape.js';
 
 export interface SourceTabsProps {
 	db?: NotesDatabase;
-	client?: Pick<ApiClient, 'config' | 'startConnect'>;
+	client?: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 	/** Where the provider's callback should send the browser back to. */
 	returnTo: string;
 	/** Seam for tests: jsdom has no navigation. */
@@ -77,7 +77,7 @@ export interface SourceTabsProps {
  */
 const useSourceChoices = (
 	db: NotesDatabase,
-	client: Pick<ApiClient, 'config' | 'startConnect'>
+	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>
 ) => {
 	const sources = useLiveQuery(() => connectedSources(db), [db]);
 	const config = useInstanceConfig(client);
@@ -359,7 +359,7 @@ const RenameField = ({
 
 interface ConnectButtonsProps {
 	db: NotesDatabase;
-	client: Pick<ApiClient, 'config' | 'startConnect'>;
+	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 	offerable: readonly ProviderKind[];
 	returnTo: string;
 	navigate: ((url: string) => void) | undefined;
@@ -396,39 +396,198 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
 	</a>
 );
 
+/** What is said under the field when the code could not be asked about. */
+const NOT_CHECKED = 'The code could not be checked. Try again.';
+
 /**
- * The gate's field for a code (`ConnectGate.connectCode`), under the operator's
- * label. What is typed is held for the tab (`store/connectCode.ts`) and goes
- * with whichever connect is pressed next. It unlocks nothing here: the buttons
- * are the same whatever it holds, and the operator's policy reads it at the
- * callback.
+ * Asks the operator's policy about a code, and holds it for as long as the
+ * policy says where it is accepted. Otherwise, what to say under the field:
+ * the policy's reason, or this app's words for a refusal without one, a limit
+ * reached, or no answer at all.
+ */
+const askAbout = async (
+	client: Pick<ApiClient, 'checkConnectCode'>,
+	code: string
+): Promise<string | undefined> => {
+	try {
+		const result = await client.checkConnectCode(code);
+		if (!result.ok) return NOT_CHECKED;
+		if (!result.value.accepted) return result.value.reason ?? 'That code was not accepted.';
+		holdConnectCode(code, result.value.expiresIn);
+		return undefined;
+	} catch (error) {
+		return error instanceof ApiError && error.status === 429
+			? 'Too many tries from here. Wait a minute, then try again.'
+			: NOT_CHECKED;
+	}
+};
+
+/**
+ * The code held for the gate. Read at every render rather than kept, since the
+ * hold ends by the clock and another tab can take or drop one, with a render
+ * when it ends, so a gate showing it goes back to asking. `onLapse` is told
+ * which code it was.
+ */
+const useHeldCode = (
+	onLapse: (code: string) => void
+): { code: string; until: number } | undefined => {
+	const until = connectCodeHeldUntil();
+	const code = until === undefined ? undefined : heldConnectCode();
+	const [, setLapsed] = useState(0);
+	useEffect(() => {
+		if (code === undefined || until === undefined) return;
+		const timer = setTimeout(
+			() => {
+				setLapsed((n) => n + 1);
+				onLapse(code);
+			},
+			Math.max(0, until - Date.now()) + 50
+		);
+		return () => {
+			clearTimeout(timer);
+		};
+	}, [code, until, onLapse]);
+	return code === undefined || until === undefined ? undefined : { code, until };
+};
+
+/**
+ * Which step `ConnectChoice` has open: the one picked, where the gate allows
+ * a pick, and until then the buttons for a device that is in already and the
+ * gate for any other. A gate whose code is required is open whenever no code
+ * is held, whatever was picked.
+ */
+const openStep = (
+	asked: ConnectGate['connectCode'],
+	picked: 'gate' | 'buttons' | undefined,
+	holding: boolean,
+	live: boolean
+): 'gate' | 'buttons' => {
+	if (asked === undefined) return picked ?? (live ? 'buttons' : 'gate');
+	if (asked.required === true) return holding ? (picked ?? 'buttons') : 'gate';
+	return picked ?? (holding || live ? 'buttons' : 'gate');
+};
+
+/**
+ * The gate's code step (`ConnectGate.connectCode`): the field under the
+ * operator's label and the button that uses it, which asks the operator's
+ * policy whether the code will do (`checkCode`) before anything is connected.
+ * Before the policy could be asked, any code at all looked accepted until the
+ * provider sent the person back. Under them, after a refusal, why: in the
+ * policy's words where it gave some. A live region, since the answer comes
+ * after the press that asked for it; the button says it is asking meanwhile,
+ * and stays pressable so the focus is not lost from under it.
  *
  * A one-time code to the browser, so a code the operator sent by email or text
  * can be offered from there. Taken as typed, with nothing capitalised or
- * corrected: whether case matters is the policy's to say.
+ * corrected: whether case matters is the policy's to say. A blank one cannot
+ * be used, since there is nothing to ask about.
  */
-const ConnectCodeField = ({ label }: { label: string }) => {
+const ConnectCodeForm = ({
+	label,
+	code,
+	field,
+	checking,
+	problem,
+	onChange,
+	onUse,
+}: {
+	label: string;
+	code: string;
+	field: RefObject<HTMLInputElement | null>;
+	checking: boolean;
+	problem: string | undefined;
+	onChange: (typed: string) => void;
+	onUse: () => void;
+}) => {
 	const id = useId();
-	const [code, setCode] = useState(() => heldConnectCode() ?? '');
+	const blank = code.trim() === '';
 	return (
-		<span className="connect-code">
+		<form
+			className="connect-code-form"
+			onSubmit={(event) => {
+				event.preventDefault();
+				if (!blank && !checking) onUse();
+			}}
+		>
 			<label htmlFor={id}>{label}</label>
-			<input
-				id={id}
-				value={code}
-				maxLength={MAX_CONNECT_CODE}
-				autoComplete="one-time-code"
-				autoCapitalize="off"
-				autoCorrect="off"
-				spellCheck={false}
-				onChange={(event) => {
-					setCode(event.target.value);
-					holdConnectCode(event.target.value);
-				}}
-			/>
-		</span>
+			<span className="connect-code-row">
+				<input
+					ref={field}
+					id={id}
+					value={code}
+					maxLength={MAX_CONNECT_CODE}
+					autoComplete="one-time-code"
+					autoCapitalize="off"
+					autoCorrect="off"
+					spellCheck={false}
+					aria-invalid={problem === undefined ? undefined : true}
+					aria-describedby={`${id}-said`}
+					onChange={(event) => {
+						onChange(event.target.value);
+					}}
+				/>
+				{/* Both words, one of them hidden, so the button is as wide as the
+				    longer and the menu does not change width while it asks. */}
+				<button type="submit" className="connect-code-use" disabled={blank}>
+					<span aria-hidden={checking}>Use code</span>
+					<span aria-hidden={!checking}>Checking…</span>
+				</button>
+			</span>
+			<span className="connect-code-said" id={`${id}-said`} role="status">
+				{problem}
+			</span>
+		</form>
 	);
 };
+
+/** The time a held code stops being good, with the day where it is not today. */
+const untilFormat = (until: number, now = Date.now()): string =>
+	new Intl.DateTimeFormat(undefined, {
+		...(new Date(until).toDateString() === new Date(now).toDateString()
+			? {}
+			: { weekday: 'short', month: 'short', day: 'numeric' }),
+		hour: 'numeric',
+		minute: '2-digit',
+	}).format(until);
+
+/**
+ * The code step folded while the buttons are open: the code they will send and
+ * until when the policy said it is good, or, where a code is not required,
+ * that they will send none. Its control opens the step again, which hides the
+ * buttons, so the code and the buttons are never both open and what is on
+ * screen is only ever the next thing to do.
+ */
+const ConnectCodeLine = ({
+	label,
+	held,
+	onOpen,
+}: {
+	label: string;
+	held: { code: string; until: number } | undefined;
+	onOpen: () => void;
+}) =>
+	held === undefined ? (
+		<p className="connect-code-line">
+			<button type="button" className="link-button" onClick={onOpen}>
+				Have a code? Enter it
+			</button>
+		</p>
+	) : (
+		<p className="connect-code-line">
+			<span>
+				{label}: <code title={held.code}>{held.code}</code>{' '}
+				<button
+					type="button"
+					className="link-button"
+					aria-label={`Change ${label}`}
+					onClick={onOpen}
+				>
+					Change
+				</button>
+			</span>
+			<span className="connect-code-until">Good until {untilFormat(held.until)}</span>
+		</p>
+	);
 
 /**
  * The connect buttons, or what the operator of this instance says in front of
@@ -449,65 +608,118 @@ const ConnectCodeField = ({ label }: { label: string }) => {
  * the compact source panel's by its heading — so the gate is read out as part
  * of connecting, as the buttons are.
  *
- * A gate that asks for a code has its field in both states: a device with an
- * account syncing here may be adding one the operator has not seen. In front
- * of the buttons it is a form, and using the code shows them, as "Already have
- * access?" does for someone the policy knows already.
+ * A gate that asks for a code is two steps, one open at a time: the gate with
+ * its code field, then the buttons. A code the policy accepts is held for as
+ * long as it said (`store/connectCode.ts`), and while it is, the gate is folded
+ * to a line naming it (`ConnectCodeLine`), from which it opens again and the
+ * buttons close. When the hold ends, here or while the app was closed, the gate
+ * asks again. Where the operator made the code `required`, that is the only
+ * way to the buttons, for every device. Where not, "Already have access?"
+ * shows them without one, and a device with an account syncing here starts on
+ * them, since it is there already.
  */
 const ConnectChoice = ({
 	gate,
 	live,
 	...buttons
 }: ConnectButtonsProps & { gate: ConnectGate | undefined; live: boolean }) => {
-	const [shown, setShown] = useState(false);
+	const [picked, setPicked] = useState<'gate' | 'buttons'>();
+	const [code, setCode] = useState(() => heldConnectCode() ?? '');
+	const [checking, setChecking] = useState(false);
+	const [problem, setProblem] = useState<string>();
+	// Where the focus goes next, counted so that the same place twice moves it
+	// twice: the control pressed is gone once the other step opens, and the
+	// focus with it.
+	const [focus, setFocus] = useState<{ on: 'buttons' | 'field'; n: number }>();
+	const move = (on: 'buttons' | 'field') => {
+		setFocus((last) => ({ on, n: (last?.n ?? 0) + 1 }));
+	};
 	const choices = useRef<HTMLDivElement>(null);
-	// The control that was pressed is gone once they are shown, and the focus
-	// with it, so it goes to the first of what took its place.
+	const field = useRef<HTMLInputElement>(null);
 	useEffect(() => {
-		if (shown) choices.current?.querySelector('button')?.focus();
-	}, [shown]);
+		if (focus?.on === 'buttons') choices.current?.querySelector('button')?.focus();
+		if (focus?.on === 'field') field.current?.focus();
+	}, [focus]);
+
+	// A code the policy has stopped taking is no use in the field.
+	const held = useHeldCode(
+		useCallback((lapsed: string) => {
+			setCode((typed) => (typed.trim() === lapsed ? '' : typed));
+		}, [])
+	);
 
 	if (gate === undefined) return <ConnectButtons {...buttons} />;
-	if (!live && !shown) {
+
+	const asked = gate.connectCode;
+	const open = openStep(asked, picked, held !== undefined, live);
+
+	const use = async () => {
+		setChecking(true);
+		setProblem(undefined);
+		const said = await askAbout(buttons.client, code);
+		setChecking(false);
+		setProblem(said);
+		if (said !== undefined) {
+			move('field');
+			return;
+		}
+		setPicked('buttons');
+		move('buttons');
+	};
+
+	if (open === 'gate') {
 		return (
 			<div className="connect-gate">
 				<p>{gate.message}</p>
 				<p>
 					<GateLink action={gate.action} />
 				</p>
-				{gate.connectCode !== undefined && (
-					<form
-						className="connect-code-form"
-						onSubmit={(event) => {
-							event.preventDefault();
-							setShown(true);
+				{asked !== undefined && (
+					<ConnectCodeForm
+						label={asked.label}
+						code={code}
+						field={field}
+						checking={checking}
+						problem={problem}
+						onChange={(typed) => {
+							setCode(typed);
+							setProblem(undefined);
+						}}
+						onUse={() => {
+							void use();
+						}}
+					/>
+				)}
+				{asked?.required !== true && (
+					<button
+						type="button"
+						className="link-button"
+						onClick={() => {
+							setPicked('buttons');
+							move('buttons');
 						}}
 					>
-						<ConnectCodeField label={gate.connectCode.label} />
-						<button type="submit">Use code</button>
-					</form>
+						Already have access? Connect storage
+					</button>
 				)}
-				<button
-					type="button"
-					className="link-button"
-					onClick={() => {
-						setShown(true);
-					}}
-				>
-					Already have access? Connect storage
-				</button>
 			</div>
 		);
 	}
 	return (
 		<>
-			<p className="connect-gate-note">
-				{gate.message} <GateLink action={gate.action} />
-			</p>
-			{gate.connectCode !== undefined && (
-				<div className="connect-gate-field">
-					<ConnectCodeField label={gate.connectCode.label} />
-				</div>
+			{asked === undefined ? (
+				<p className="connect-gate-note">
+					{gate.message} <GateLink action={gate.action} />
+				</p>
+			) : (
+				<ConnectCodeLine
+					label={asked.label}
+					held={held}
+					onOpen={() => {
+						setPicked('gate');
+						move('field');
+					}}
+				/>
 			)}
 			{/* No box of its own (`display: contents`): only somewhere to find
 			    the first button in. */}
@@ -573,7 +785,7 @@ const Menu = ({
 
 export interface SourcePanelProps {
 	db?: NotesDatabase;
-	client?: Pick<ApiClient, 'config' | 'startConnect'>;
+	client?: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 	/** Where the provider's callback should send the browser back to. */
 	returnTo: string;
 	/** Seam for tests: jsdom has no navigation. */
@@ -685,7 +897,7 @@ export const SourcePanel = ({
  */
 export const useShowingSourceName = (
 	db: NotesDatabase = defaultDb,
-	client: Pick<ApiClient, 'config' | 'startConnect'> = api
+	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'> = api
 ): string => {
 	const { ordered } = useSourceChoices(db, client);
 	const showing = ordered.find((source) => source.active);

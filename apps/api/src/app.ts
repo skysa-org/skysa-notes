@@ -93,7 +93,7 @@ export const createApp = (options: CreateAppOptions) => {
 		rateLimiter = neverLimited,
 		providerTimeoutMs = 10_000,
 	} = options;
-	const gate = checkGate(entitlements.gate);
+	const gate = checkGate(entitlements.gate, entitlements.checkCode !== undefined);
 
 	/** Every provider call gets a deadline, so no call site has to remember one. */
 	const doFetch: FetchLike = (url, init) =>

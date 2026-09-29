@@ -581,22 +581,32 @@ code {
 	color: var(--muted);
 }
 
-/* The gate's code field (`ConnectCodeField`): its label over it, as the
-   editor toolbar's link field has. In front of the buttons it sits in a row
-   with the button that uses it; beside them it is a line of its own. */
-.connect-code {
+/* The gate's code step (`ConnectCodeForm`): its label over the field, the
+   button that uses it beside the field, and under both why a code was
+   refused, as the editor toolbar's link field has its label over it. */
+.connect-code-form {
 	display: flex;
-	flex: 1;
 	flex-direction: column;
 	gap: 0.25rem;
-	min-width: 0;
+	align-self: stretch;
 }
 
-.connect-code label {
+.connect-code-form label {
 	color: var(--muted);
 }
 
-.connect-code input {
+.connect-code-said {
+	color: var(--bad);
+}
+
+.connect-code-row {
+	display: flex;
+	gap: 0.4rem;
+}
+
+.connect-code-form input {
+	flex: 1;
+	min-width: 0;
 	font: inherit;
 	font-size: 0.9rem;
 	padding: 0.35rem 0.5rem;
@@ -604,13 +614,6 @@ code {
 	background: var(--bg);
 	border: 1px solid var(--border);
 	border-radius: 0.375rem;
-}
-
-.connect-code-form {
-	display: flex;
-	align-items: flex-end;
-	gap: 0.4rem;
-	align-self: stretch;
 }
 
 .connect-code-form button {
@@ -623,11 +626,50 @@ code {
 	cursor: pointer;
 }
 
-.connect-gate-field {
+/* Its two words in one cell, the one not said hidden, so it is as wide as the
+   longer: the menu is only as wide as it has to be, and would otherwise
+   widen while the code is asked about. */
+.connect-code-use {
+	display: grid;
+}
+
+.connect-code-use > span {
+	grid-area: 1 / 1;
+}
+
+.connect-code-use > [aria-hidden='true'] {
+	visibility: hidden;
+}
+
+/* Blank, there is nothing to ask about. */
+.connect-code-form button:disabled {
+	color: var(--muted);
+	cursor: default;
+}
+
+/* The code step folded while the buttons are open (`ConnectCodeLine`): the
+   code with "Change" on one line and until when on the next. Each holds
+   together, since the menu is only as wide as it has to be and would
+   otherwise put the label, the code and "Change" on three; an operator's long
+   code is cut short rather than widening it. */
+.connect-code-line {
 	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	margin: 0;
 	padding: 0.4rem 0.6rem;
-	max-width: 18rem;
 	font-size: 0.8rem;
+	color: var(--muted);
+	white-space: nowrap;
+}
+
+.connect-code-line code {
+	display: inline-block;
+	max-width: 10rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	vertical-align: bottom;
+	color: var(--fg);
 }
 
 /* Only a place to find the first button in; the buttons are laid out by the
@@ -638,7 +680,7 @@ code {
 
 .source-panel-connect .connect-gate,
 .source-panel-connect .connect-gate-note,
-.source-panel-connect .connect-gate-field {
+.source-panel-connect .connect-code-line {
 	max-width: none;
 	padding-inline: var(--gutter);
 }
@@ -2852,7 +2894,7 @@ button.danger {
 	.code-tool-language,
 	.toolbar-link-actions button,
 	.toolbar-link input,
-	.connect-code input,
+	.connect-code-form input,
 	.connect-code-form button,
 	.note-actions button,
 	.account a.button,
@@ -2886,7 +2928,7 @@ button.danger {
 	.note-search,
 	.find-input,
 	.toolbar-link input,
-	.connect-code input {
+	.connect-code-form input {
 		font-size: 1rem;
 	}
 

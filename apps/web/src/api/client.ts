@@ -1,6 +1,8 @@
 import {
 	ENTITLEMENT_CODES,
 	type EntitlementCode,
+	MAX_CODE_HOLD_SECONDS,
+	MAX_CODE_REASON,
 	MAX_CONNECT_CODE,
 	PROVIDER_KINDS,
 	type ProviderKind,
@@ -43,7 +45,12 @@ const gateSchema = z.object({
 	// its own when it does not parse, leaving the gate: without the field the
 	// app is as it was before there could be one.
 	connectCode: z
-		.object({ label: z.string().min(1).max(40) })
+		.object({
+			label: z.string().min(1).max(40),
+			// Nothing past the field without a code the policy accepted. Anything
+			// but a yes is a no, which offers the buttons as before there was one.
+			required: z.boolean().optional().catch(undefined),
+		})
 		.optional()
 		.catch(undefined),
 });
@@ -101,6 +108,25 @@ export type Grant = z.infer<typeof grantSchema>;
 const grantsSchema = z.object({ grants: z.array(grantSchema) });
 
 const authorizeSchema = z.object({ authorizeUrl: z.url() });
+
+/**
+ * The policy's word on a code as it is used (`ConnectCodeCheck` in
+ * `@skysa/core`): how many seconds to keep it, or why not, in words the server
+ * has already held to plain text. A reason this app cannot show is dropped and
+ * the refusal kept.
+ */
+const codeCheckSchema = z.discriminatedUnion('accepted', [
+	z.object({
+		accepted: z.literal(true),
+		expiresIn: z.number().positive().max(MAX_CODE_HOLD_SECONDS),
+	}),
+	z.object({
+		accepted: z.literal(false),
+		reason: z.string().min(1).max(MAX_CODE_REASON).optional().catch(undefined),
+	}),
+]);
+
+export type CodeCheck = z.infer<typeof codeCheckSchema>;
 
 const tokenSchema = z.object({ accessToken: z.string().min(1), expiresAt: z.number() });
 
@@ -252,6 +278,13 @@ export interface ApiClient {
 		connectCode?: string
 	) => Promise<Result<string>>;
 	/**
+	 * Whether the operator's policy will take a code typed into the gate, and
+	 * for how long, asked as it is used rather than after a consent screen.
+	 * `not_found` where the instance asks for no code; throws, with the status,
+	 * for a limit reached (429) or a server that could not say.
+	 */
+	readonly checkConnectCode: (code: string) => Promise<Result<CodeCheck>>;
+	/**
 	 * The same client presenting one particular credential.
 	 *
 	 * For the two callers that know which credential they mean rather than
@@ -377,6 +410,13 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 			);
 			return result.ok ? { ok: true, value: result.value.authorizeUrl } : result;
 		},
+
+		checkConnectCode: (code) =>
+			call('/connect-code', codeCheckSchema, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ code: code.trim().slice(0, MAX_CONNECT_CODE) }),
+			}),
 	};
 };
 

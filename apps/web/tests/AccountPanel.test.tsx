@@ -62,7 +62,7 @@ const dropbox = {
 	grantId: 'g1',
 };
 
-type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
+type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect' | 'checkConnectCode'>;
 
 /**
  * What the panel is handed.
@@ -83,6 +83,9 @@ const clientWith = (answers: Answers = {}): Client & { asked: string[] } => {
 	return {
 		asked,
 		config: answers.config ?? (() => Promise.resolve(STORAGE_FIRST)),
+		checkConnectCode:
+			answers.checkConnectCode ??
+			(() => Promise.resolve({ ok: true, value: { accepted: true, expiresIn: 900 } })),
 		startConnect:
 			answers.startConnect ??
 			((_provider, _hash, returnTo) =>

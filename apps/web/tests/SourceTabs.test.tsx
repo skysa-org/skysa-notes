@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type ApiClient, type InstanceConfig } from '../src/api/client.js';
+import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
 import {
@@ -43,13 +43,14 @@ const freshDatabase = (): NotesDatabase => {
 	return db;
 };
 
-type Client = Pick<ApiClient, 'config' | 'startConnect'>;
+type Client = Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
 
 const clientWith = (config: () => Promise<InstanceConfig> = () => Promise.resolve(STORAGE_FIRST)) =>
 	({
 		config,
 		startConnect: (_provider: unknown, _hash: unknown, returnTo: string) =>
 			Promise.resolve({ ok: true, value: `https://provider.example/go?rt=${returnTo}` }),
+		checkConnectCode: () => Promise.resolve({ ok: false, refusal: 'not_found' }),
 	}) as unknown as Client;
 
 /**
@@ -639,47 +640,71 @@ describe('the way to connect, on an instance whose operator gates it', () => {
 	});
 });
 
-describe("the gate's code field, on an instance that asks for one", () => {
+describe("the gate's code, on an instance that asks for one", () => {
 	const GATE = {
 		message: 'Sync on this server is part of the paid plan.',
 		action: { label: 'Get a connect code', url: 'https://example.com/code' },
 		connectCode: { label: 'Connect code' },
 	};
+	const REQUIRED = { ...GATE, connectCode: { label: 'Connect code', required: true } };
 
 	afterEach(() => {
 		dropConnectCode();
 	});
 
-	/** A gated client whose starts are written down, so a test can see the code go. */
-	const coded = () => {
+	const ACCEPTED = () =>
+		Promise.resolve({ ok: true as const, value: { accepted: true as const, expiresIn: 900 } });
+
+	/**
+	 * A gated client whose code checks and starts are written down, so a test
+	 * can see what was asked and what went.
+	 */
+	const coded = (gate: object = GATE, check: ApiClient['checkConnectCode'] = ACCEPTED) => {
 		const startConnect = vi.fn<ApiClient['startConnect']>(() =>
 			Promise.resolve({ ok: true, value: 'https://provider.example/go' })
 		);
+		const checkConnectCode = vi.fn<ApiClient['checkConnectCode']>(check);
 		const client = {
-			config: () => Promise.resolve({ ...STORAGE_FIRST, connectGate: GATE }),
+			config: () => Promise.resolve({ ...STORAGE_FIRST, connectGate: gate }),
 			startConnect,
+			checkConnectCode,
 		} as unknown as Client;
-		return { client, startConnect };
+		return { client, startConnect, checkConnectCode };
 	};
 
-	it('asks for the code in front of the buttons, and shows them once it is used', async () => {
+	const openMenu = async (
+		user: ReturnType<typeof userEvent.setup>,
+		client: Client,
+		options: { db?: NotesDatabase; name?: string } = {}
+	) => {
+		show(options.db ?? freshDatabase(), client);
+		await user.click(
+			await screen.findByRole('button', { name: options.name ?? 'Connect storage provider' })
+		);
+		return within(await screen.findByRole('group', { name: 'Storage providers' }));
+	};
+
+	it('asks the policy about the code as it is used, and folds away once it is accepted', async () => {
 		const user = userEvent.setup();
-		const db = freshDatabase();
-		const { client, startConnect } = coded();
-		show(db, client);
-		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
-		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		const { client, startConnect, checkConnectCode } = coded();
+		const menu = await openMenu(user, client);
 		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
 
 		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD');
 		await user.click(menu.getByRole('button', { name: 'Use code' }));
 
-		const dropbox = menu.getByRole('button', { name: 'Dropbox' });
+		expect(checkConnectCode).toHaveBeenCalledWith('K7QM-2XRD');
+		const dropbox = await menu.findByRole('button', { name: 'Dropbox' });
 		await waitFor(() => {
 			expect(document.activeElement).toBe(dropbox);
 		});
-		// Still there beside them, holding what was typed.
-		expect(menu.getByLabelText<HTMLInputElement>('Connect code').value).toBe('K7QM-2XRD');
+		// The step is a line now, naming the code the buttons will send and how
+		// long the policy said it is good for.
+		expect(menu.queryByRole('textbox')).toBeNull();
+		expect(menu.queryByText(GATE.message)).toBeNull();
+		expect(menu.getByText('K7QM-2XRD')).toBeTruthy();
+		expect(menu.getByText(/^Good until /)).toBeTruthy();
+		expect(heldConnectCode()).toBe('K7QM-2XRD');
 
 		await user.click(dropbox);
 
@@ -693,27 +718,203 @@ describe("the gate's code field, on an instance that asks for one", () => {
 		});
 	});
 
-	it('uses the code on Enter, as a form does', async () => {
+	it('says it is asking while it asks', async () => {
 		const user = userEvent.setup();
-		const db = freshDatabase();
-		show(db, coded().client);
-		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
-		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		let answer: (value: Awaited<ReturnType<ApiClient['checkConnectCode']>>) => void = () =>
+			undefined;
+		const { client } = coded(
+			GATE,
+			() =>
+				new Promise((resolve) => {
+					answer = resolve;
+				})
+		);
+		const menu = await openMenu(user, client);
+
+		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD');
+		await user.click(menu.getByRole('button', { name: 'Use code' }));
+
+		expect(menu.getByRole('button', { name: 'Checking…' })).toBeTruthy();
+		answer({ ok: true, value: { accepted: true, expiresIn: 900 } });
+		expect(await menu.findByRole('button', { name: 'Dropbox' })).toBeTruthy();
+	});
+
+	it("says why a code was refused, in the policy's words, and stays on the field", async () => {
+		const user = userEvent.setup();
+		const { client } = coded(GATE, () =>
+			Promise.resolve({
+				ok: true,
+				value: { accepted: false, reason: 'That code has expired. Get a new one.' },
+			})
+		);
+		const menu = await openMenu(user, client);
+		const field = menu.getByRole('textbox', { name: 'Connect code' });
+
+		await user.type(field, 'K7QM-2XRD{Enter}');
+
+		const said = await menu.findByText('That code has expired. Get a new one.');
+		expect(said.getAttribute('role')).toBe('status');
+		expect(field.getAttribute('aria-describedby')).toBe(said.id);
+		expect(field.getAttribute('aria-invalid')).toBe('true');
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(heldConnectCode()).toBeUndefined();
+		await waitFor(() => {
+			expect(document.activeElement).toBe(field);
+		});
+
+		// Put right as it is typed over.
+		await user.type(field, 'X');
+		expect(menu.queryByText('That code has expired. Get a new one.')).toBeNull();
+		expect(field.getAttribute('aria-invalid')).toBeNull();
+	});
+
+	it('says a refusal in its own words where the policy gave none', async () => {
+		const user = userEvent.setup();
+		const { client } = coded(GATE, () =>
+			Promise.resolve({ ok: true, value: { accepted: false } })
+		);
+		const menu = await openMenu(user, client);
 
 		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD{Enter}');
 
-		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+		expect(await menu.findByText('That code was not accepted.')).toBeTruthy();
 	});
 
-	it('still offers the way in without a code, for an account the operator knows', async () => {
+	it.each([
+		[
+			'the server fails',
+			new ApiError('POST /connect-code failed with 500', 500),
+			/could not be checked/,
+		],
+		[
+			'the limit is reached',
+			new ApiError('POST /connect-code failed with 429', 429),
+			/Too many tries/,
+		],
+		['the network is down', new TypeError('Failed to fetch'), /could not be checked/],
+	])('says so when %s, and keeps nothing', async (_name, failure, words) => {
+		const user = userEvent.setup();
+		const { client } = coded(GATE, () => Promise.reject(failure));
+		const menu = await openMenu(user, client);
+
+		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD{Enter}');
+
+		expect(await menu.findByText(words)).toBeTruthy();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(heldConnectCode()).toBeUndefined();
+	});
+
+	it('opens the code again from its line, and hides the buttons while it is open', async () => {
+		const user = userEvent.setup();
+		const { client, startConnect, checkConnectCode } = coded();
+		const menu = await openMenu(user, client);
+		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRX{Enter}');
+		await menu.findByRole('button', { name: 'Dropbox' });
+
+		await user.click(menu.getByRole('button', { name: 'Change Connect code' }));
+
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(menu.getByText(GATE.message)).toBeTruthy();
+		const field = menu.getByRole<HTMLInputElement>('textbox', { name: 'Connect code' });
+		expect(field.value).toBe('K7QM-2XRX');
+		await waitFor(() => {
+			expect(document.activeElement).toBe(field);
+		});
+
+		await user.clear(field);
+		await user.type(field, 'K7QM-2XRD{Enter}');
+		expect(checkConnectCode).toHaveBeenLastCalledWith('K7QM-2XRD');
+		await user.click(await menu.findByRole('button', { name: 'Dropbox' }));
+
+		await waitFor(() => {
+			expect(startConnect).toHaveBeenCalledWith(
+				'dropbox',
+				expect.any(String),
+				'/',
+				'K7QM-2XRD'
+			);
+		});
+	});
+
+	it('will not use a blank code, since there is nothing to ask about', async () => {
+		const user = userEvent.setup();
+		const { client, checkConnectCode } = coded();
+		const menu = await openMenu(user, client);
+
+		const use = menu.getByRole<HTMLButtonElement>('button', { name: 'Use code' });
+		expect(use.disabled).toBe(true);
+		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), '   {Enter}');
+
+		expect(use.disabled).toBe(true);
+		expect(checkConnectCode).not.toHaveBeenCalled();
+	});
+
+	it('keeps an accepted code for as long as it is good, and opens folded on it', async () => {
+		// The round trip through the provider, or the app closed and opened again.
+		const user = userEvent.setup();
+		holdConnectCode('K7QM-2XRD', 900);
+		const { client, checkConnectCode } = coded(REQUIRED);
+
+		const menu = await openMenu(user, client);
+
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+		expect(menu.getByText('K7QM-2XRD')).toBeTruthy();
+		expect(checkConnectCode).not.toHaveBeenCalled();
+		await user.click(menu.getByRole('button', { name: 'Change Connect code' }));
+		expect(menu.getByRole<HTMLInputElement>('textbox', { name: 'Connect code' }).value).toBe(
+			'K7QM-2XRD'
+		);
+	});
+
+	it('asks again once the code is no longer good, with the field empty', async () => {
+		const user = userEvent.setup();
+		holdConnectCode('K7QM-2XRD', 0.4);
+		const { client } = coded(REQUIRED);
+		const menu = await openMenu(user, client);
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+
+		const field = await menu.findByRole<HTMLInputElement>(
+			'textbox',
+			{ name: 'Connect code' },
+			{ timeout: 3000 }
+		);
+
+		expect(field.value).toBe('');
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(heldConnectCode()).toBeUndefined();
+	});
+
+	it('offers no way past the field without a code where one is required', async () => {
+		const user = userEvent.setup();
+		const menu = await openMenu(user, coded(REQUIRED).client);
+
+		expect(menu.getByRole('textbox', { name: 'Connect code' })).toBeTruthy();
+		expect(menu.queryByRole('button', { name: /Already have access/ })).toBeNull();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+	});
+
+	it('asks a device with an account syncing here for a code too, where one is required', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+
+		const menu = await openMenu(user, coded(REQUIRED).client, {
+			db,
+			name: 'Connect another account',
+		});
+
+		expect(menu.getByRole('textbox', { name: 'Connect code' })).toBeTruthy();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+	});
+
+	it('still offers the way in without a code where one is not required', async () => {
+		const user = userEvent.setup();
 		const { client, startConnect } = coded();
-		show(db, client);
-		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
-		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+		const menu = await openMenu(user, client);
 
 		await user.click(menu.getByRole('button', { name: /Already have access/ }));
+		// No code to name, so the line offers to take one.
+		expect(menu.getByRole('button', { name: 'Have a code? Enter it' })).toBeTruthy();
 		await user.click(menu.getByRole('button', { name: 'Dropbox' }));
 
 		// No code, so nothing where one would be: the start is as it always was.
@@ -722,48 +923,28 @@ describe("the gate's code field, on an instance that asks for one", () => {
 		});
 	});
 
-	it('offers the field beside the buttons to a device with an account syncing here', async () => {
+	it('offers a device with an account syncing here the code as a line, where not required', async () => {
 		// Adding an account the operator has not seen yet is what the code is for.
 		const user = userEvent.setup();
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
-		holdConnectCode('K7QM-2XRD');
-		show(db, coded().client);
 
-		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
+		const menu = await openMenu(user, coded().client, { db, name: 'Connect another account' });
 
-		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
 		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
-		// Holding the code typed before the round trip through the provider.
-		expect(menu.getByLabelText<HTMLInputElement>('Connect code').value).toBe('K7QM-2XRD');
-	});
+		expect(menu.queryByRole('textbox')).toBeNull();
 
-	it('holds what is typed for the tab, and lets go of it when it is cleared', async () => {
-		const user = userEvent.setup();
-		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
-		show(db, coded().client);
-		await user.click(await screen.findByRole('button', { name: 'Connect another account' }));
-		const field = within(
-			await screen.findByRole('group', { name: 'Storage providers' })
-		).getByRole('textbox', { name: 'Connect code' });
+		await user.click(menu.getByRole('button', { name: 'Have a code? Enter it' }));
 
-		await user.type(field, 'K7QM-2XRD');
-		expect(heldConnectCode()).toBe('K7QM-2XRD');
-
-		await user.clear(field);
-		expect(heldConnectCode()).toBeUndefined();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		expect(menu.getByRole('textbox', { name: 'Connect code' })).toBeTruthy();
 	});
 
 	it('takes no more than the server will carry', async () => {
 		const user = userEvent.setup();
-		const db = freshDatabase();
-		show(db, coded().client);
-		await user.click(await screen.findByRole('button', { name: 'Connect storage provider' }));
+		const menu = await openMenu(user, coded().client);
 
-		const field = within(
-			await screen.findByRole('group', { name: 'Storage providers' })
-		).getByRole('textbox', { name: 'Connect code' });
+		const field = menu.getByRole('textbox', { name: 'Connect code' });
 
 		expect(field.getAttribute('maxlength')).toBe('64');
 		expect(field.getAttribute('autocomplete')).toBe('one-time-code');
@@ -772,9 +953,8 @@ describe("the gate's code field, on an instance that asks for one", () => {
 	it('asks the same in the source panel of a compact window', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
-		render(
-			<SourcePanel db={db} client={coded().client} returnTo="/" navigate={() => undefined} />
-		);
+		const { client, checkConnectCode } = coded(REQUIRED);
+		render(<SourcePanel db={db} client={client} returnTo="/" navigate={() => undefined} />);
 		const connect = within(
 			await screen.findByRole('group', { name: 'Connect storage provider' })
 		);
@@ -782,6 +962,7 @@ describe("the gate's code field, on an instance that asks for one", () => {
 		await user.type(connect.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD');
 		await user.click(connect.getByRole('button', { name: 'Use code' }));
 
+		expect(checkConnectCode).toHaveBeenCalledWith('K7QM-2XRD');
 		await waitFor(() => {
 			expect(document.activeElement).toBe(connect.getByRole('button', { name: 'Dropbox' }));
 		});

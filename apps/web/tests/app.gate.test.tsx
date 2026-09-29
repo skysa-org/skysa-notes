@@ -126,13 +126,13 @@ describe('a refused connect, on an instance with a gate', () => {
 
 describe("a refused connect that carried the gate's code", () => {
 	it('says the code was not accepted, and lets go of it for the next one', async () => {
-		holdConnectCode('K7QM-2XRD');
+		holdConnectCode('K7QM-2XRD', 900);
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work&connect=refused&code=not_allowed');
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(
-			/The code you entered was not accepted, so storage was not connected/
+			/The code you entered was not accepted or has expired, so storage was not connected/
 		);
 		// The operator's way to another code, beside it.
 		expect(within(toast).getByRole('link', { name: 'See plans' })).toBeTruthy();
@@ -140,7 +140,7 @@ describe("a refused connect that carried the gate's code", () => {
 	});
 
 	it('says the same where the policy did not say which kind of no', async () => {
-		holdConnectCode('K7QM-2XRD');
+		holdConnectCode('K7QM-2XRD', 900);
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work&connect=refused');
 
@@ -148,7 +148,7 @@ describe("a refused connect that carried the gate's code", () => {
 	});
 
 	it('says a lapse as a lapse, and keeps the code, which may be good', async () => {
-		holdConnectCode('K7QM-2XRD');
+		holdConnectCode('K7QM-2XRD', 900);
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work&connect=refused&code=lapsed');
 
