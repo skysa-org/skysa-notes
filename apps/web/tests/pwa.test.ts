@@ -2,9 +2,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createRouter } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 
 import { PWA_MANIFEST, PWA_OPTIONS, PWA_WORKBOX } from '../pwa.js';
+import { routeTree } from '../src/routeTree.gen';
 
 /**
  * The installability checklist.
@@ -27,6 +29,15 @@ const pngSize = (file: string): { width: number; height: number } => {
 
 const manifest = PWA_MANIFEST;
 const workbox = PWA_WORKBOX;
+
+/**
+ * Whether the worker answers a navigation to `pathAndSearch` with the shell,
+ * decided as Workbox's `NavigationRoute` decides it: the denylist first, then
+ * the allowlist.
+ */
+const shellAnswers = (pathAndSearch: string): boolean =>
+	!(workbox.navigateFallbackDenylist ?? []).some((pattern) => pattern.test(pathAndSearch)) &&
+	(workbox.navigateFallbackAllowlist ?? []).some((pattern) => pattern.test(pathAndSearch));
 
 describe('the web app manifest', () => {
 	it('names the app, for the install prompt and the home screen', () => {
@@ -87,6 +98,28 @@ describe('the service worker', () => {
 		const denied = workbox.navigateFallbackDenylist ?? [];
 		expect(denied.some((pattern) => pattern.test('/api/token'))).toBe(true);
 		expect(denied.some((pattern) => pattern.test('/'))).toBe(false);
+		expect(shellAnswers('/api/token')).toBe(false);
+	});
+
+	it('answers a deep link into the app with the shell', () => {
+		expect(shellAnswers('/')).toBe(true);
+		expect(shellAnswers('/?folder=Work&note=3f2a')).toBe(true);
+	});
+
+	it("leaves any other page on the origin to the network, such as an operator's", () => {
+		// A gate's action may link a page served beside the app. Answered with
+		// the shell, it would open as the app's "Not found".
+		expect(shellAnswers('/subscribe')).toBe(false);
+		expect(shellAnswers('/about?x=1')).toBe(false);
+	});
+
+	it('answers every route the router has with the shell', () => {
+		// So a route added under `src/routes` cannot be left out of the allowlist.
+		const paths = Object.keys(createRouter({ routeTree }).routesByPath);
+		expect(paths).not.toHaveLength(0);
+		paths.forEach((path) => {
+			expect(shellAnswers(path), path).toBe(true);
+		});
 	});
 
 	it.each([
