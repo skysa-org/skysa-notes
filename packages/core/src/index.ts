@@ -21,6 +21,7 @@ export {
 
 export {
 	alwaysAllowed,
+	type ConnectCodeCheck,
 	type ConnectGate,
 	ENTITLEMENT_CODES,
 	type EntitlementCode,
@@ -28,6 +29,8 @@ export {
 	type EntitlementDecision,
 	type EntitlementProvider,
 	type EntitlementSubject,
+	MAX_CODE_HOLD_SECONDS,
+	MAX_CODE_REASON,
 	MAX_CONNECT_CODE,
 	neverLimited,
 	type RateLimitDecision,

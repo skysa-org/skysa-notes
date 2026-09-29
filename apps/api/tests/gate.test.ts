@@ -15,7 +15,12 @@ const GATE: ConnectGate = {
 	action: { label: 'See plans', url: 'https://example.com/plans' },
 };
 
-const gated = (gate: unknown) => ({ ...alwaysAllowed, gate: gate as ConnectGate });
+/** A policy with this gate, and a code check whenever the gate asks for a code. */
+const gated = (gate: unknown) => ({
+	...alwaysAllowed,
+	gate: gate as ConnectGate,
+	checkCode: () => Promise.resolve({ accepted: false as const }),
+});
 
 const build = (gate: unknown) => () =>
 	createApp({ config: testConfig(), entitlements: gated(gate) });
@@ -76,6 +81,35 @@ describe('the connect gate', () => {
 		});
 	});
 
+	it('serves a code field that is required, so the app shows nothing past it without one', async () => {
+		const app = buildApp({
+			entitlements: gated({
+				...GATE,
+				connectCode: { label: 'Connect code', required: true },
+			}),
+		});
+
+		const response = await app.request('/api/config');
+
+		expect(await response.json()).toMatchObject({
+			connectGate: { connectCode: { label: 'Connect code', required: true } },
+		});
+	});
+
+	it('stops the app being built asking for a code the policy cannot check', () => {
+		// The app asks as a code is used; with nothing to answer, every code
+		// there is would be refused.
+		expect(() =>
+			createApp({
+				config: testConfig(),
+				entitlements: {
+					...alwaysAllowed,
+					gate: { ...GATE, connectCode: { label: 'Code' } },
+				},
+			})
+		).toThrow(/connectCode: needs the policy to have checkCode/);
+	});
+
 	it.each([
 		['without an action', { message: GATE.message }, /action/],
 		['without a message', { action: GATE.action }, /message/],
@@ -122,6 +156,11 @@ describe('the connect gate', () => {
 			'asking for a code under a label too long',
 			{ ...GATE, connectCode: { label: 'x'.repeat(41) } },
 			/connectCode\.label: must be at most 40/,
+		],
+		[
+			'asking for a code with a required that is not a yes or a no',
+			{ ...GATE, connectCode: { label: 'Code', required: 'yes' } },
+			/connectCode\.required/,
 		],
 	])('stops the app being built %s', (_, gate, problem) => {
 		expect(build(gate)).toThrow(problem);

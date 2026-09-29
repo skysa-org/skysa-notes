@@ -7,7 +7,7 @@ import type { AppEnv } from '../app.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
-import { connectCodeSchema, knownCode } from '../gate.js';
+import { connectCodeSchema, knownCode, readCodeCheck } from '../gate.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
@@ -86,6 +86,8 @@ const startBody = z.object({
 const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
 	c.req.header('sec-fetch-site') === 'same-origin' || c.req.header('origin') === appOrigin;
 
+const codeBody = z.object({ code: connectCodeSchema });
+
 /** Who to throttle. The address, never anything derived from the credential. */
 const callerKey = (c: Context<AppEnv>, what: string): string =>
 	`${what}:${c.req.header('cf-connecting-ip') ?? 'unknown'}`;
@@ -138,6 +140,55 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				challenge,
 			}),
 		});
+	});
+
+	/**
+	 * Whether a code typed into the gate will do, asked by the app as the code
+	 * is used (`EntitlementProvider.checkCode`), so that a wrong one is said to
+	 * be wrong at once rather than after a consent screen, and a right one is
+	 * kept only as long as the policy says it is good. Advice: the callback asks
+	 * `check` with the code all the same, and decides.
+	 *
+	 * An answer to "is this a code" is worth guessing at, so it is same-origin,
+	 * like `/start`, and throttled per address before the policy is asked. The
+	 * code is never logged. A policy that throws, or says something that is not
+	 * an answer, is the operator's fault and a 500, never passed on.
+	 */
+	app.post('/connect-code', async (c) => {
+		const config = c.get('config');
+		if (!sameOrigin(c, config.appOrigin)) return c.json({ error: 'forbidden_origin' }, 403);
+
+		const entitlements = c.get('entitlements');
+		const checkCode = entitlements.checkCode;
+		if (entitlements.gate?.connectCode === undefined || checkCode === undefined) {
+			return c.json({ error: 'not_found' }, 404);
+		}
+
+		const limit = await c.get('rateLimiter').check(callerKey(c, 'connect-code'));
+		if (!limit.allowed) return tooMany(c, limit.retryAfter);
+
+		const parsed = codeBody.safeParse(await c.req.json().catch(() => undefined));
+		if (!parsed.success || parsed.data.code === undefined) {
+			return c.json({ error: 'invalid_request' }, 400);
+		}
+
+		const answer = await checkCode(parsed.data.code).then(
+			(said: unknown) => {
+				const check = readCodeCheck(said);
+				if (check === undefined) {
+					logFailure(
+						'the code check failed',
+						new Error('its answer is not a ConnectCodeCheck')
+					);
+				}
+				return check;
+			},
+			(error: unknown) => {
+				logFailure('the code check failed', error);
+				return undefined;
+			}
+		);
+		return answer === undefined ? c.json({ error: 'internal_error' }, 500) : c.json(answer);
 	});
 
 	app.get('/auth/connect/:provider/callback', async (c) => {

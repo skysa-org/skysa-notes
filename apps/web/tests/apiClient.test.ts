@@ -107,6 +107,74 @@ describe('the API client', () => {
 		}
 	});
 
+	it("reads whether a gate's code is required, and anything but a yes as a no", async () => {
+		const read = (connectCode: unknown) =>
+			createApiClient({
+				fetch: answering(200, {
+					authMode: 'storage-first',
+					providers: ['dropbox'],
+					connectGate: {
+						message: 'Sync here is part of the paid plan.',
+						action: { label: 'Get a code', url: 'https://example.com/code' },
+						connectCode,
+					},
+				}).fetch,
+			}).config();
+
+		expect((await read({ label: 'Code', required: true })).connectGate?.connectCode).toEqual({
+			label: 'Code',
+			required: true,
+		});
+		expect(
+			(await read({ label: 'Code', required: 'yes' })).connectGate?.connectCode?.required
+		).toBeUndefined();
+	});
+
+	it('asks the policy about a code, trimmed and bounded, and reads its answer', async () => {
+		const { fetch, calls } = answering(200, { accepted: true, expiresIn: 840 });
+
+		const result = await createApiClient({ fetch }).checkConnectCode(`  ${'x'.repeat(80)}\n`);
+
+		expect(result).toEqual({ ok: true, value: { accepted: true, expiresIn: 840 } });
+		expect(calls[0]?.url).toBe('/api/connect-code');
+		expect(calls[0]?.init?.method).toBe('POST');
+		expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({ code: 'x'.repeat(64) });
+	});
+
+	it('reads a refusal, dropping a reason it cannot show and keeping the refusal', async () => {
+		const ask = (body: unknown) =>
+			createApiClient({ fetch: answering(200, body).fetch }).checkConnectCode('K7QM-2XRD');
+
+		expect(await ask({ accepted: false, reason: 'Expired.' })).toEqual({
+			ok: true,
+			value: { accepted: false, reason: 'Expired.' },
+		});
+		expect(await ask({ accepted: false, reason: 'x'.repeat(201) })).toEqual({
+			ok: true,
+			value: { accepted: false },
+		});
+	});
+
+	it('throws, with the status, where the code could not be asked about', async () => {
+		for (const [status, body] of [
+			[429, { error: 'rate_limited' }],
+			[500, { error: 'internal_error' }],
+			[200, { accepted: true }],
+		] as const) {
+			const failure = await createApiClient({ fetch: answering(status, body).fetch })
+				.checkConnectCode('K7QM-2XRD')
+				.catch((error: unknown) => error);
+			expect(failure).toBeInstanceOf(ApiError);
+			expect((failure as ApiError).status).toBe(status);
+		}
+		// And `not_found` where the instance asks for no code, which is an answer.
+		expect(
+			await createApiClient({
+				fetch: answering(404, { error: 'not_found' }).fetch,
+			}).checkConnectCode('K7QM-2XRD')
+		).toEqual({ ok: false, refusal: 'not_found' });
+	});
+
 	it('reads the gate link as the browser will, not as it was written', async () => {
 		// In an `href`, `https:example.com` resolves against the page, into a
 		// path inside this app.

@@ -138,7 +138,7 @@ const connectMessage = (
 		// What might is whatever its operator offers instead, when they do.
 		case 'refused':
 			return {
-				message: `${codeRefused ? 'The code you entered was not accepted' : refusedMessage(code)}, so storage was not connected.`,
+				message: `${codeRefused ? 'The code you entered was not accepted or has expired' : refusedMessage(code)}, so storage was not connected.`,
 				tone: 'error',
 				action: gate?.action,
 			};

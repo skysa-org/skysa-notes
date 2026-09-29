@@ -1,7 +1,10 @@
 import {
+	type ConnectCodeCheck,
 	type ConnectGate,
 	ENTITLEMENT_CODES,
 	type EntitlementCode,
+	MAX_CODE_HOLD_SECONDS,
+	MAX_CODE_REASON,
 	MAX_CONNECT_CODE,
 } from '@skysa/core';
 import { z } from 'zod';
@@ -41,7 +44,7 @@ const gateSchema = z.object({
 			.url({ protocol: /^https$/, normalize: true, error: 'must be an absolute https: URL' })
 			.max(2048, 'must be at most 2048 characters'),
 	}),
-	connectCode: z.object({ label: text(40) }).optional(),
+	connectCode: z.object({ label: text(40), required: z.boolean().optional() }).optional(),
 });
 
 /**
@@ -54,16 +57,70 @@ const gateSchema = z.object({
  *
  * The message names the field and never repeats the value.
  */
-export const checkGate = (gate: ConnectGate | undefined): ConnectGate | undefined => {
+export const checkGate = (
+	gate: ConnectGate | undefined,
+	checksCodes: boolean
+): ConnectGate | undefined => {
 	if (gate === undefined) return undefined;
 	const result = gateSchema.safeParse(gate);
-	if (!result.success) {
-		const issues = result.error.issues.map(
-			(issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`
-		);
+	const issues = [
+		...(result.success
+			? []
+			: result.error.issues.map(
+					(issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`
+				)),
+		// The app asks as a code is used, and a gate that asks for one with
+		// nothing to answer would refuse every code there is.
+		...(result.success && result.data.connectCode !== undefined && !checksCodes
+			? ['connectCode: needs the policy to have checkCode']
+			: []),
+	];
+	if (!result.success || issues.length > 0) {
 		throw new Error(`Invalid connect gate:\n${issues.map((issue) => `  ${issue}`).join('\n')}`);
 	}
 	return result.data;
+};
+
+/**
+ * What `checkCode` said, as the app will be told it, or nothing when it said
+ * something that is not a `ConnectCodeCheck`.
+ *
+ * Its reason is the policy's words in front of the person typing, so it is
+ * held to what the gate's own text is: plain, printable and bounded. A reason
+ * that is not is dropped rather than failing the answer, since the refusal is
+ * still a refusal and the app has words of its own for one. A hold longer than
+ * a day is cut to a day, and a fraction of a second is rounded up; a hold of
+ * nothing, or of a number that is not one, is no answer at all.
+ */
+const codeCheckSchema = z.discriminatedUnion('accepted', [
+	z.object({
+		accepted: z.literal(true),
+		expiresIn: z
+			.number()
+			.positive()
+			.transform((seconds) => Math.min(Math.ceil(seconds), MAX_CODE_HOLD_SECONDS)),
+	}),
+	z.object({
+		accepted: z.literal(false),
+		reason: z
+			.string()
+			.trim()
+			.min(1)
+			.max(MAX_CODE_REASON)
+			.regex(/^\P{C}*$/u)
+			.optional()
+			.catch(undefined),
+	}),
+]);
+
+export const readCodeCheck = (answer: unknown): ConnectCodeCheck | undefined => {
+	const result = codeCheckSchema.safeParse(answer);
+	if (!result.success) return undefined;
+	const check = result.data;
+	if (check.accepted) return { accepted: true, expiresIn: check.expiresIn };
+	return check.reason === undefined
+		? { accepted: false }
+		: { accepted: false, reason: check.reason };
 };
 
 /**

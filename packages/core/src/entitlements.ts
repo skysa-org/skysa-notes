@@ -45,7 +45,8 @@ export type EntitlementCode = (typeof ENTITLEMENT_CODES)[number];
  * Per instance, not per person: before a connect the server cannot know who is
  * about to connect (docs/ARCHITECTURE.md §6). The app still offers the buttons
  * behind it, since an account the policy allows needs a way in, and revealing
- * them grants nothing — the policy decides at the callback either way.
+ * them grants nothing — the policy decides at the callback either way. Only a
+ * gate whose code is `required` keeps them back until a code is accepted.
  *
  * Plain text and an `https:` link, checked when `createApp` is built: a gate
  * that does not pass stops the app from starting rather than rendering wrong.
@@ -59,15 +60,37 @@ export interface ConnectGate {
 	/**
 	 * Ask for a code before connecting, under this label: an invite, an access
 	 * code, a code the operator's own page sent to someone who paid. What it is
-	 * and what it proves is the policy's business. The app only carries it, from
-	 * the field beside the gate to `check` at the OAuth callback
-	 * (`EntitlementContext`).
+	 * and what it proves is the policy's business. A gate that asks for one
+	 * needs `EntitlementProvider.checkCode`, which the app asks as the code is
+	 * used; the app then carries the code to `check` at the OAuth callback
+	 * (`EntitlementContext`), which is still where the policy decides.
 	 *
-	 * It proves nothing to the app, which shows the buttons whatever is typed:
-	 * the policy decides at the callback, as it does without one.
+	 * `required`: the app offers no way to the buttons without a code the policy
+	 * has accepted. Without it, the gate also offers to show them to someone the
+	 * policy knows already ("Already have access?").
 	 */
-	readonly connectCode?: Readonly<{ label: string }>;
+	readonly connectCode?: Readonly<{ label: string; required?: boolean }>;
 }
+
+/**
+ * The policy's answer about a code as it is used in the app, before anything
+ * is connected (`EntitlementProvider.checkCode`).
+ *
+ * Accepted, for how many seconds the app should keep it: seconds from now,
+ * not a time, so a device whose clock is wrong keeps it as long as meant. At
+ * most `MAX_CODE_HOLD_SECONDS`. Refused, with a reason the app shows under the
+ * field: plain text, at most `MAX_CODE_REASON` characters, and never anything
+ * the person typing should not see (an address the code was sent to, say).
+ */
+export type ConnectCodeCheck =
+	| Readonly<{ accepted: true; expiresIn: number }>
+	| Readonly<{ accepted: false; reason?: string }>;
+
+/** The longest the app keeps an accepted code: a day. */
+export const MAX_CODE_HOLD_SECONDS = 86_400;
+
+/** The longest reason `checkCode` may give for a refusal. */
+export const MAX_CODE_REASON = 200;
 
 /**
  * What the decision is about.
@@ -138,6 +161,19 @@ export interface EntitlementProvider {
 	 * door that is open.
 	 */
 	readonly gate?: ConnectGate;
+	/**
+	 * Whether a code typed into the gate will do, asked as it is used
+	 * (`POST /api/connect-code`), so the app can say so at once rather than
+	 * after a consent screen, and keep it only as long as it is good. Required
+	 * when the gate asks for a code.
+	 *
+	 * Advice, not the decision: `check` at the callback is still asked with the
+	 * code, and a code that expires between the two is refused there. Given the
+	 * code as `check` is, trimmed and bounded; the route is same-origin and
+	 * rate-limited, since an answer to "is this a code" is one worth guessing
+	 * at.
+	 */
+	readonly checkCode?: (code: string) => Promise<ConnectCodeCheck>;
 }
 
 export const alwaysAllowed: EntitlementProvider = {
