@@ -41,6 +41,12 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 	globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
 	// Every route is the SPA shell, so a deep link opens offline too.
 	navigateFallback: 'index.html',
+	// Only the app's own routes, though. It has one, `/`, and what it opens is
+	// in the search. Any other path on the origin belongs to whoever serves it,
+	// such as an operator's page a gate's action links to (docs/ARCHITECTURE.md
+	// §8), and answered with the shell it is the app's "Not found". A route
+	// added under `src/routes` is added here too; `tests/pwa.test.ts` checks.
+	navigateFallbackAllowlist: [/^\/(?:\?|$)/],
 	// /api/* is the Worker, never the shell.
 	navigateFallbackDenylist: [/^\/api\//],
 	runtimeCaching: [
