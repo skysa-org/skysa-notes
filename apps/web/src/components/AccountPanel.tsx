@@ -852,7 +852,6 @@ const Devices = ({
 						{!grant.current && (
 							<button
 								type="button"
-								className="link"
 								disabled={busy !== null}
 								onClick={() => {
 									revoke(grant.id);
