@@ -12,7 +12,14 @@ import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
 import { type FetchLike, ScopeNotGrantedError } from '../oauth/types.js';
-import { clearFlowState, flowExpiry, readFlowState, setFlowState } from '../session.js';
+import {
+	clearFlowState,
+	flowExpiry,
+	readFlowAnswer,
+	readFlowState,
+	setFlowAnswer,
+	setFlowState,
+} from '../session.js';
 
 /**
  * Connecting a storage account. Two routes: one the device asks for an
@@ -44,9 +51,11 @@ const safeReturnTo = (value: string | undefined, origin: string): string => {
 /**
  * `returnTo` may already carry a query of its own, so the separator varies.
  * `code` is only ever one of `ENTITLEMENT_CODES` (`knownCode`): a fixed word,
- * never the policy's free text.
+ * never the policy's free text. `expired` is a callback with no flow of this
+ * browser's behind it, which the callback cannot tell from a forged one and so
+ * says nothing more about.
  */
-type Outcome = 'ok' | 'denied' | 'failed' | 'partial' | 'refused';
+type Outcome = 'ok' | 'denied' | 'failed' | 'partial' | 'refused' | 'expired';
 
 const back = (returnTo: string, outcome: Outcome, code?: EntitlementCode): string =>
 	`${returnTo}${returnTo.includes('?') ? '&' : '?'}connect=${outcome}${code === undefined ? '' : `&code=${code}`}`;
@@ -195,12 +204,21 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const config = c.get('config');
 		const db = c.get('db');
 		const cookies = { secure: config.cookiesSecure };
+		const key = c.get('signingKey');
+		const state = c.req.query('state');
+
+		// The same callback asked for again, after this browser was answered: sent
+		// where it was sent the first time, and nothing else is touched — not the
+		// answer, which a second asking may need as well, nor a flow started since
+		// (`FlowAnswer`).
+		const answered = await readFlowAnswer(c, key, state, cookies);
+		if (answered !== undefined) return c.redirect(answered);
 
 		// Whatever happens below, this flow is over: clearing here rather than on
 		// the success path means even the refusals drop the cookie carrying the
 		// verifier, and a cookie that cannot be parsed does not survive to poison
 		// the next attempt.
-		const flow = await readFlowState(c, c.get('signingKey'), cookies);
+		const flow = await readFlowState(c, key, cookies);
 		clearFlowState(c);
 
 		const resolved = oauthFor(config, c.req.param('provider'));
@@ -208,12 +226,22 @@ export const connectRoutes = (doFetch: FetchLike) => {
 		const { provider, client, credentials } = resolved;
 
 		// A callback with no flow, or one whose state does not match, did not come
-		// from a flow this browser started.
-		if (flow === undefined) return c.json({ error: 'flow_expired' }, 400);
-		if (c.req.query('state') !== flow.state) return c.json({ error: 'state_mismatch' }, 400);
+		// from a flow this browser started — or came from one that took too long,
+		// or was answered too long ago to remember. It is still a page a browser
+		// is on, so it goes back to the app, which says to connect again if
+		// nothing is connected, rather than being left looking at raw JSON.
+		if (flow === undefined || state !== flow.state) return c.redirect(back('/', 'expired'));
+
+		// Every answer from here on is kept, so the browser that asks again is
+		// told the same.
+		const answer = async (outcome: Outcome, refusedAs?: EntitlementCode): Promise<Response> => {
+			const location = back(flow.returnTo, outcome, refusedAs);
+			await setFlowAnswer(c, key, { state: flow.state, location }, cookies);
+			return c.redirect(location);
+		};
 
 		const denied = c.req.query('error');
-		if (denied !== undefined) return c.redirect(back(flow.returnTo, 'denied'));
+		if (denied !== undefined) return answer('denied');
 
 		const code = c.req.query('code');
 		if (code === undefined) return c.json({ error: 'missing_code' }, 400);
@@ -246,18 +274,18 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				logFailure(`${provider} code exchange failed`, error);
 				return { outcome: 'failed' as const };
 			});
-		if (!('tokens' in exchanged)) return c.redirect(back(flow.returnTo, exchanged.outcome));
+		if (!('tokens' in exchanged)) return answer(exchanged.outcome);
 		const { tokens } = exchanged;
 
 		// Without a refresh token the connection would stop working in a few
 		// hours with no way to recover, so this is a failure, not a warning.
-		if (tokens.refreshToken === undefined) return c.redirect(back(flow.returnTo, 'failed'));
+		if (tokens.refreshToken === undefined) return answer('failed');
 
 		// The account id *is* the connection's identity: it is the upsert target,
 		// and it is what tells a reconnect to the same account from a reconnect to
 		// a different one. Dropbox always sends it; a response without one is a
 		// failure, not something to paper over.
-		if (tokens.accountId === undefined) return c.redirect(back(flow.returnTo, 'failed'));
+		if (tokens.accountId === undefined) return answer('failed');
 
 		const displayName = await client.accountName(doFetch, tokens);
 
@@ -284,7 +312,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				logFailure('reading the connection failed', error);
 				return null;
 			});
-		if (known === null) return c.redirect(back(flow.returnTo, 'failed'));
+		if (known === null) return answer('failed');
 		const decision = await c
 			.get('entitlements')
 			.check(
@@ -300,7 +328,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				logFailure('the entitlement check failed', error);
 				return undefined;
 			});
-		if (decision === undefined) return c.redirect(back(flow.returnTo, 'failed'));
+		if (decision === undefined) return answer('failed');
 		if (!decision.allowed) {
 			// The consent the user just gave is withdrawn where the provider has a
 			// call for it, so it does not linger on their account for a server that
@@ -318,7 +346,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			if (known === undefined) {
 				await client.revokeToken?.(doFetch, tokens.accessToken).catch(() => false);
 			}
-			return c.redirect(back(flow.returnTo, 'refused', knownCode(decision.code)));
+			return answer('refused', knownCode(decision.code));
 		}
 
 		const committed = await commit(db, {
@@ -332,7 +360,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			now: Date.now(),
 		});
 
-		return c.redirect(back(flow.returnTo, committed ? 'ok' : 'failed'));
+		return answer(committed ? 'ok' : 'failed');
 	});
 
 	return app;

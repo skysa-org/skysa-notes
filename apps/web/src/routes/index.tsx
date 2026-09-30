@@ -142,6 +142,16 @@ const connectMessage = (
 				tone: 'error',
 				action: gate?.action,
 			};
+		// The browser came back from the provider with no flow of its own for the
+		// server to finish: one that took too long, or a callback opened again
+		// long after it was answered. Whether anything was connected by then is
+		// not known there, and the storage tabs already say, so it is not guessed.
+		case 'expired':
+			return {
+				message:
+					'Connecting storage did not finish. If it is not connected, connect it again.',
+				tone: 'warning',
+			};
 		default:
 			return undefined;
 	}

@@ -5,17 +5,19 @@ import { fromBase64Url, sign, toBase64Url, verify } from './crypto.js';
 
 /**
  * The short-lived state that carries an OAuth flow from its start to its
- * callback.
+ * callback, and the callback's answer to it.
  *
- * This is the only cookie left. Sessions are gone (docs/ARCHITECTURE.md §6): a device
- * proves its right to a connection with a credential it holds, not with an
- * ambient cookie, so there is nothing to keep signed in. What remains is a flow
- * cookie, and it is `httpOnly` + `sameSite=lax` — lax rather than strict
- * because the OAuth callback is a top-level navigation arriving from the
- * provider, and a strict cookie would not be sent with it.
+ * These are the only cookies left. Sessions are gone (docs/ARCHITECTURE.md §6): a
+ * device proves its right to a connection with a credential it holds, not with
+ * an ambient cookie, so there is nothing to keep signed in. What remains is a
+ * flow cookie, and after the callback a record of where it sent the browser.
+ * Both are `httpOnly` + `sameSite=lax` — lax rather than strict because the
+ * OAuth callback is a top-level navigation arriving from the provider, and a
+ * strict cookie would not be sent with it.
  */
 
 const FLOW_NAME = 'skysa_flow';
+const ANSWER_NAME = 'skysa_flow_answer';
 
 /**
  * `__Host-` tells the browser to accept the cookie only from an exactly-matching
@@ -27,8 +29,19 @@ const FLOW_NAME = 'skysa_flow';
 export const flowCookieName = (secure: boolean): string =>
 	secure ? `__Host-${FLOW_NAME}` : FLOW_NAME;
 
+/** The same prefix, for the same reason (`FlowAnswer`). */
+export const answerCookieName = (secure: boolean): string =>
+	secure ? `__Host-${ANSWER_NAME}` : ANSWER_NAME;
+
 /** Long enough for a slow consent screen, short enough to be worthless later. */
 const FLOW_SECONDS = 600;
+
+/**
+ * Long enough to read a browser's warning page and go on past it, and not so
+ * long that a callback opened from history hours later is told "connected"
+ * about a connection that may since have gone.
+ */
+const ANSWER_SECONDS = 300;
 
 export interface SessionCookieOptions {
 	/** Off only for plain-HTTP local development. */
@@ -81,44 +94,129 @@ export interface FlowState {
 	connectCode?: string;
 }
 
-export const setFlowState = async (
+/**
+ * Where the callback sent the browser, kept for a few minutes so that the same
+ * callback asked for again is sent there too.
+ *
+ * A callback can only be answered once: reading it clears the flow cookie, and
+ * the provider's authorization code is spent in the exchange. But a browser
+ * can ask for it twice. Chrome's Safe Browsing check runs beside the request,
+ * not before it, so its warning page can cover a callback the server has
+ * already answered, and going on past the warning asks again (2026-09-30,
+ * issue #149). A reload, or the back button onto the callback, does the same.
+ * The second asking finds no flow, and was told `flow_expired` in raw JSON
+ * over a connection the first had already stored.
+ *
+ * Nothing in it is secret: `location` is a path in this app with the outcome
+ * in its query, `?connect=ok` and the like. It is signed all the same, since
+ * a redirect taken from a cookie anyone could write would be an open one.
+ */
+export interface FlowAnswer {
+	/** The `state` of the flow answered, which a callback must carry to be the same one. */
+	state: string;
+	location: string;
+	expiresAt: number;
+}
+
+const writeSigned = async (
 	c: Context,
 	key: CryptoKey,
-	flow: FlowState,
-	options: SessionCookieOptions
+	name: string,
+	payload: FlowState | FlowAnswer,
+	options: SessionCookieOptions & { maxAge: number }
 ): Promise<void> => {
-	const encoded = toBase64Url(new TextEncoder().encode(JSON.stringify(flow)));
-	setCookie(c, flowCookieName(options.secure), `${encoded}.${await sign(key, encoded)}`, {
+	const encoded = toBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
+	setCookie(c, name, `${encoded}.${await sign(key, encoded)}`, {
 		...base(options.secure),
-		maxAge: FLOW_SECONDS,
+		maxAge: options.maxAge,
 	});
 };
 
-export const readFlowState = async (
+/**
+ * A cookie's payload, if it is one this server signed and it has not passed
+ * its `expiresAt`. A signed cookie can still be a replayed one, so the payload
+ * carries its own expiry rather than trusting the browser to have dropped it.
+ */
+const readSigned = async (
 	c: Context,
 	key: CryptoKey,
-	options: SessionCookieOptions,
-	now = Date.now()
-): Promise<FlowState | undefined> => {
-	const cookie = getCookie(c, flowCookieName(options.secure));
+	name: string,
+	now: number
+): Promise<Record<string, unknown> | undefined> => {
+	const cookie = getCookie(c, name);
 	if (cookie === undefined) return undefined;
 
 	const [encoded, signature] = cookie.split('.');
 	if (encoded === undefined || signature === undefined) return undefined;
 	if (!(await verify(key, encoded, signature))) return undefined;
 
-	const flow = ((): FlowState | undefined => {
+	const payload = ((): unknown => {
 		try {
-			return JSON.parse(new TextDecoder().decode(fromBase64Url(encoded))) as FlowState;
+			return JSON.parse(new TextDecoder().decode(fromBase64Url(encoded)));
 		} catch {
 			return undefined;
 		}
 	})();
+	if (typeof payload !== 'object' || payload === null) return undefined;
+	const { expiresAt } = payload as Record<string, unknown>;
+	if (typeof expiresAt !== 'number' || expiresAt < now) return undefined;
+	return payload as Record<string, unknown>;
+};
 
-	// A signed cookie can still be a replayed one, so the payload carries its own
-	// expiry rather than trusting the browser to have dropped it.
-	if (flow === undefined || flow.expiresAt < now) return undefined;
-	return flow;
+export const setFlowState = (
+	c: Context,
+	key: CryptoKey,
+	flow: FlowState,
+	options: SessionCookieOptions
+): Promise<void> =>
+	writeSigned(c, key, flowCookieName(options.secure), flow, {
+		...options,
+		maxAge: FLOW_SECONDS,
+	});
+
+export const readFlowState = async (
+	c: Context,
+	key: CryptoKey,
+	options: SessionCookieOptions,
+	now = Date.now()
+): Promise<FlowState | undefined> =>
+	(await readSigned(c, key, flowCookieName(options.secure), now)) as FlowState | undefined;
+
+/** Kept over any earlier answer: there is one flow at a time, and so one answer. */
+export const setFlowAnswer = (
+	c: Context,
+	key: CryptoKey,
+	answer: Omit<FlowAnswer, 'expiresAt'>,
+	options: SessionCookieOptions,
+	now = Date.now()
+): Promise<void> =>
+	writeSigned(
+		c,
+		key,
+		answerCookieName(options.secure),
+		{ ...answer, expiresAt: now + ANSWER_SECONDS * 1000 },
+		{ ...options, maxAge: ANSWER_SECONDS }
+	);
+
+/**
+ * The answer given to the flow a callback carries the `state` of, if it was
+ * given in the last few minutes. Only a path in this app is taken, however it
+ * came to be signed.
+ */
+export const readFlowAnswer = async (
+	c: Context,
+	key: CryptoKey,
+	state: string | undefined,
+	options: SessionCookieOptions,
+	now = Date.now()
+): Promise<string | undefined> => {
+	if (state === undefined) return undefined;
+	const answer = await readSigned(c, key, answerCookieName(options.secure), now);
+	if (answer === undefined || answer.state !== state) return undefined;
+	const { location } = answer;
+	return typeof location === 'string' && location.startsWith('/') && !location.startsWith('//')
+		? location
+		: undefined;
 };
 
 export const clearFlowState = (c: Context): void => {

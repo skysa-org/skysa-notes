@@ -30,6 +30,7 @@ describe('parseSearch', () => {
 	it('takes the outcome of connecting storage only when it is one the API sends', () => {
 		expect(parseSearch({ connect: 'ok' })).toEqual({ connect: 'ok' });
 		expect(parseSearch({ connect: 'denied' })).toEqual({ connect: 'denied' });
+		expect(parseSearch({ connect: 'expired' })).toEqual({ connect: 'expired' });
 		expect(parseSearch({ connect: 'pwned' })).toEqual({});
 		expect(parseSearch({ connect: ['ok'] })).toEqual({});
 	});

@@ -115,6 +115,18 @@ describe('the app', () => {
 		expect(screen.queryByText(/Sign in/)).toBeNull();
 	});
 
+	it('says to connect again when the server had no flow of this browser to finish', async () => {
+		// A connect that took longer than its flow lasts, or a callback opened
+		// again long after it was answered: nothing to say it worked, and nothing
+		// to say it did not (docs/ARCHITECTURE.md §6).
+		await createFolder(db, { name: 'Work' });
+		await open('/?connect=expired', 'Work');
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(
+			/did not finish\. If it is not connected, connect it again/
+		);
+	});
+
 	it('says to leave the files permission ticked when the user took it away', async () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/?connect=partial', 'Work');
