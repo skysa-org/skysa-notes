@@ -48,6 +48,20 @@ const start = (
 		...(options.jar === undefined ? {} : { cookies: options.jar }),
 	});
 
+/**
+ * A callback with no flow of this browser's behind it: sent back to the app,
+ * which says to connect again if nothing is connected. Never raw JSON, since
+ * it is a page the browser is on.
+ */
+const expectExpired = (response: Response): void => {
+	expect(response.status).toBe(302);
+	expect(response.headers.get('location')).toBe('/?connect=expired');
+};
+
+/** The authorization codes the scripted provider was asked to exchange. */
+const exchanges = (stub: ReturnType<typeof buildApp>['stub']) =>
+	stub.calls.filter((call) => call.form.grant_type === 'authorization_code');
+
 const authorizeUrl = async (response: Response): Promise<URL> => {
 	const body: { authorizeUrl: string } = await response.json();
 	return new URL(body.authorizeUrl);
@@ -329,27 +343,27 @@ describe('callback', () => {
 		expect(secret.refreshToken).toBe('refresh-1');
 	});
 
-	it('rejects a callback this browser never started', async () => {
-		const { request } = buildApp();
+	it('sends a callback this browser never started back to the app, exchanging nothing', async () => {
+		const { request, stub } = buildApp();
 		const response = await request('/api/auth/connect/dropbox/callback?code=c&state=s');
 
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: 'flow_expired' });
+		expectExpired(response);
+		expect(exchanges(stub)).toHaveLength(0);
 	});
 
-	it('rejects a state that is not the one this browser was given', async () => {
-		const { request } = buildApp();
+	it('sends a state that is not the one this browser was given back to the app', async () => {
+		const { request, stub } = buildApp();
 		const jar = createJar();
 		jar.absorb(await start(request, { credentialHash: HASH }, { jar }));
 
 		const response = await request('/api/auth/connect/dropbox/callback?code=c&state=wrong', {
 			cookies: jar,
 		});
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: 'state_mismatch' });
+		expectExpired(response);
+		expect(exchanges(stub)).toHaveLength(0);
 	});
 
-	it('rejects a flow cookie whose payload was rewritten', async () => {
+	it('does not take a flow cookie whose payload was rewritten', async () => {
 		const { request } = buildApp();
 		const jar = createJar();
 		jar.absorb(await start(request, { credentialHash: HASH }, { jar }));
@@ -373,11 +387,10 @@ describe('callback', () => {
 		const response = await request('/api/auth/connect/dropbox/callback?code=c&state=attacker', {
 			cookies: jar,
 		});
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: 'flow_expired' });
+		expectExpired(response);
 	});
 
-	it('rejects a correctly signed cookie that has aged out', async () => {
+	it('does not take a correctly signed cookie that has aged out', async () => {
 		const { request } = buildApp();
 		const jar = createJar();
 
@@ -396,8 +409,7 @@ describe('callback', () => {
 		const response = await request('/api/auth/connect/dropbox/callback?code=c&state=s', {
 			cookies: jar,
 		});
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: 'flow_expired' });
+		expectExpired(response);
 	});
 
 	it('takes a refusal at the consent screen back to the app, not to an error page', async () => {
@@ -514,6 +526,122 @@ describe('callback', () => {
  * The property the whole redesign exists for: the credential is generated on
  * the device and the server is only ever told its hash.
  */
+describe('a callback asked for again', () => {
+	/**
+	 * What a browser does after a warning page covered a callback the server had
+	 * already answered, or on a reload or the back button: the same URL, with
+	 * whatever cookies the first answer left.
+	 */
+	const again = (
+		request: ReturnType<typeof buildApp>['request'],
+		jar: Jar,
+		state: string,
+		provider = 'dropbox'
+	) =>
+		request(`/api/auth/connect/${provider}/callback?code=the-code&state=${state}`, {
+			cookies: jar,
+		});
+
+	it('is sent where the first asking was, and nothing is exchanged or stored again', async () => {
+		const { connect, request, stub, db } = buildApp();
+		const { jar, callback, state } = await connect({ returnTo: '/?folder=Work' });
+		expect(callback.headers.get('location')).toBe('/?folder=Work&connect=ok');
+
+		// Twice, as Chrome asked on going past its warning.
+		for (const response of [
+			await again(request, jar, state),
+			await again(request, jar, state),
+		]) {
+			expect(response.status).toBe(302);
+			expect(response.headers.get('location')).toBe('/?folder=Work&connect=ok');
+			// Touches no cookie, so the next asking finds the same answer.
+			expect(response.headers.getSetCookie()).toEqual([]);
+		}
+		expect(exchanges(stub)).toHaveLength(1);
+		expect(await createDb(db).select().from(schema.grants)).toHaveLength(1);
+	});
+
+	it('is told a refusal again, with its code', async () => {
+		const { connect, request } = buildApp({
+			entitlements: {
+				check: () => Promise.resolve({ allowed: false, code: 'lapsed' as const }),
+			},
+		});
+		const { jar, state } = await connect();
+
+		const response = await again(request, jar, state);
+
+		expect(response.headers.get('location')).toBe('/?connect=refused&code=lapsed');
+	});
+
+	it('is told a failure again, rather than trying a spent code', async () => {
+		const { connect, request, stub } = buildApp({
+			script: { exchange: () => new Response('{"error":"invalid_grant"}', { status: 400 }) },
+		});
+		vi.spyOn(console, 'error').mockImplementation(() => undefined);
+		const { jar, state, callback } = await connect();
+		expect(callback.headers.get('location')).toBe('/?connect=failed');
+
+		expect((await again(request, jar, state)).headers.get('location')).toBe('/?connect=failed');
+		expect(exchanges(stub)).toHaveLength(1);
+	});
+
+	it('leaves a flow started since alone, so it can still finish', async () => {
+		const { connect, request } = buildApp();
+		const first = await connect();
+		const { jar } = first;
+		// The next account, started before the first callback is asked for again.
+		jar.absorb(await start(request, { credentialHash: 'B'.repeat(43) }, { jar }));
+		const next = flowStateOf(jar);
+
+		expect((await again(request, jar, first.state)).headers.get('location')).toBe(
+			'/?connect=ok'
+		);
+
+		const finished = jar.absorb(await again(request, jar, next));
+		expect(finished.headers.get('location')).toBe('/?connect=ok');
+		// One flow at a time, and so one answer: the first is no longer remembered.
+		expectExpired(await again(request, jar, first.state));
+	});
+
+	it('is not remembered past five minutes', async () => {
+		const { connect, request } = buildApp();
+		const { jar, state } = await connect();
+
+		vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 5 * 60_000 + 1 });
+		try {
+			expectExpired(await again(request, jar, state));
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('is not the answer to another flow, even one of the same browser', async () => {
+		const { connect, request } = buildApp();
+		const { jar } = await connect();
+
+		expectExpired(await again(request, jar, 'another-state'));
+	});
+
+	it('takes no answer this server did not sign, and no way off this app', async () => {
+		const { request } = buildApp();
+		const key = await signingKey(SECRETS_KEY);
+		const answer = async (location: string, signed: boolean) => {
+			const encoded = btoa(
+				JSON.stringify({ state: 's', location, expiresAt: Date.now() + 60_000 })
+			);
+			const jar = createJar();
+			jar.set(cookieNames.answer, `${encoded}.${signed ? await sign(key, encoded) : 'x'}`);
+			return jar;
+		};
+
+		expectExpired(await again(request, await answer('/?connect=ok', false), 's'));
+		// Signed, as only this server could, and still only ever a path here.
+		expectExpired(await again(request, await answer('//evil.example/', true), 's'));
+		expectExpired(await again(request, await answer('https://evil.example/', true), 's'));
+	});
+});
+
 describe('callback, on a server whose operator chooses who may sync', () => {
 	const refusing = (seen: unknown[] = []) => ({
 		check: (subject: unknown) => {
@@ -1229,8 +1357,7 @@ describe('what earlier drafts got wrong', () => {
 			await request('/api/auth/connect/dropbox/callback?code=c&state=s', { cookies: jar })
 		);
 
-		expect(response.status).toBe(400);
-		expect(await response.json()).toEqual({ error: 'flow_expired' });
+		expectExpired(response);
 		expect(jar.get(cookieNames.flow)).toBeUndefined();
 	});
 

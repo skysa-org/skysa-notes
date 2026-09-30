@@ -8,7 +8,7 @@ import {
 	toBase64Url,
 } from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
-import { flowCookieName } from '../src/session.js';
+import { answerCookieName, flowCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
 
 /**
@@ -402,7 +402,8 @@ export const buildApp = (
  */
 export const cookieNames = {
 	flow: flowCookieName(true),
-	insecure: { flow: flowCookieName(false) },
+	answer: answerCookieName(true),
+	insecure: { flow: flowCookieName(false), answer: answerCookieName(false) },
 };
 
 /** The flow cookie's payload, decoded the way `readFlowState` decodes it. */
