@@ -1,5 +1,49 @@
 # @skysa/web
 
+## 0.6.1
+
+### Patch Changes
+
+- 4d583cb: On a phone, the source, notebook and note dropdowns are their words and a
+  chevron, without a box around them. The chevron points right while a dropdown
+  is shut and turns down as it opens, and its panel opens out of the dropdown
+  that was pressed and shuts back into it. With reduced motion asked for, the
+  panel simply appears.
+  
+  A menu or a question opened from inside a dropdown — the notebook's `⋯`
+  menu, its Delete confirmation — no longer shuts the dropdown when it is
+  pressed, so Rename puts the name field where it can be typed into, rather than
+  in a dropdown that has to be opened again to find it.
+- 4d583cb: The note list says what is being typed as it is typed: a row's title and
+  preview follow an edit to its note at the keystroke, not when autosave stores
+  it two seconds later, and so does a name being typed into the name field. A
+  heading typed into a note not named yet names its row as it is typed, as the
+  save will name it.
+- 4d583cb: A new note opens with its name selected, ready to be typed over, and Enter in
+  the name moves to the text. It is stored only once something is written in it
+  — a name given, or a keystroke in its text — so a note opened and left blank
+  leaves no file behind. A notebook with no notes in it begins one when it opens,
+  the same as `+`; the loose notes and a source still being imported do not. On
+  a phone the note is what shows, not the notebooks or notes dropdown it was
+  begun from.
+- 4d583cb: The note list is ordered by when each note was made, newest first, rather than
+  by when it was last edited, so editing a note no longer moves it to the top.
+- 4d583cb: The app remembers, on this device and per source, which notebook was open and
+  which note was open in each notebook, and goes back there: when it opens at its
+  start URL, when a source is shown again, and when a notebook is clicked. Where
+  nothing is remembered, or what was has gone, it opens the first notebook and
+  its newest note — including for a notebook the app opened by itself, which
+  used to show an empty pane beside its list.
+- 4d583cb: Renaming a notebook changes only its name into a field: the row keeps its
+  height, its highlight and its note count while the new name is typed.
+- 4d583cb: A note's preview in the list, and its excerpt in search answers, are the text
+  the rich editor shows — `**bold**` reads "bold", a link reads as its words
+  without its URL — rather than the markdown with only its line markers removed.
+  In the list, a pipe stands where one line of the note ends and the next
+  begins, so two lines no longer read as one sentence.
+- Updated dependencies [4d583cb]
+  - @skysa/core@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes
