@@ -97,6 +97,13 @@ export const usePanel = () => {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
 			if (target.closest(`${PANE_ELEMENT[panel]}, [${KEEPS_PANEL}]`) !== null) return;
+			// Not in the app at all, but over it: a menu or a dialog, drawn on
+			// the page's body (`createPortal`). Nothing outside the panel can be
+			// pressed to open one without shutting the panel first, so one that
+			// is open came from the panel — the notebook's `⋯`, a right-click
+			// on a row — and what is chosen in it, a rename or a delete, happens
+			// in the panel, which has to stay open for it. Each shuts itself.
+			if (target.closest('.app-frame') === null) return;
 			setPanel(null);
 		};
 		document.addEventListener('keydown', onKey);

@@ -186,6 +186,33 @@ describe('the compact bar', () => {
 		expect(shell().style.getPropertyValue('--notes-right')).toBe('480px');
 	});
 
+	it('stays open for what is chosen from a menu drawn over it', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Home');
+		});
+
+		// The menu is drawn on the page's body, not in the panel, and so is the
+		// dialog a choice in it asks; a press on either is still not a press
+		// away from the panel.
+		await user.click(notebookTrigger());
+		await user.click(screen.getByRole('button', { name: 'Options for “Home”' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+		expect(panel()).toBe('notebooks');
+
+		await user.click(screen.getByRole('button', { name: 'Options for “Home”' }));
+		await user.click(screen.getByRole('button', { name: 'Rename' }));
+		expect(panel()).toBe('notebooks');
+		// With the cursor in it, so the new name can be typed straight away.
+		expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Rename Home' }));
+
+		fireEvent.pointerDown(screen.getByRole('region', { name: 'Note' }));
+		expect(panel()).toBeNull();
+	});
+
 	it('swaps one dropdown for the other rather than stacking them', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();
@@ -245,8 +272,7 @@ describe('a note begun in a compact window', () => {
 		});
 		await user.click(noteTrigger());
 		fireEvent.contextMenu(await screen.findByRole('button', { name: /^Groceries/ }));
-		// A click and no press: a press outside the dropdown shuts it by itself.
-		fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+		await user.click(await screen.findByRole('button', { name: 'Delete' }));
 		expect(panel()).toBe('notes');
 
 		await waitFor(() => {
