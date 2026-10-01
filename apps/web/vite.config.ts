@@ -5,9 +5,14 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-import { PWA_OPTIONS } from './pwa.js';
+import { brandPlugin, loadBrand } from './brand.js';
+import { pwaOptions } from './pwa.js';
 
 const API_DEV_ORIGIN = 'http://localhost:8787';
+
+// What the app is called and how it looks (docs/ARCHITECTURE.md §8, "Brand"): a
+// deployment's own `brand.json` when `NOTES_BRAND` names one, else `brand/`'s.
+const brand = loadBrand(process.env.NOTES_BRAND);
 
 const { version } = JSON.parse(
 	readFileSync(new URL('./package.json', import.meta.url), 'utf8')
@@ -21,7 +26,8 @@ export default defineConfig({
 	plugins: [
 		tanstackRouter({ target: 'react', autoCodeSplitting: true }),
 		react(),
-		VitePWA(PWA_OPTIONS),
+		brandPlugin(brand),
+		VitePWA(pwaOptions(brand)),
 	],
 	server: {
 		port: 5173,

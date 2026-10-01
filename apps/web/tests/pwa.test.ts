@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { createRouter } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 
-import { PWA_MANIFEST, PWA_OPTIONS, PWA_WORKBOX } from '../pwa.js';
+import { loadBrand } from '../brand.js';
+import { PWA_WORKBOX, pwaManifest, pwaOptions } from '../pwa.js';
 import { routeTree } from '../src/routeTree.gen';
 
 /**
@@ -18,16 +17,19 @@ import { routeTree } from '../src/routeTree.gen';
  * See docs/ARCHITECTURE.md §8.
  */
 
-const publicDir = join(dirname(fileURLToPath(import.meta.url)), '../public');
+const brand = loadBrand();
 
 /** Width and height out of a PNG's IHDR chunk, which is always the first one. */
 const pngSize = (file: string): { width: number; height: number } => {
-	const bytes = readFileSync(join(publicDir, file));
+	const icon = brand.icons.find((given) => given.file === file);
+	expect(icon, `the brand has no ${file}`).toBeDefined();
+	const bytes = readFileSync(icon?.path ?? '');
 	expect(bytes.subarray(1, 4).toString('ascii')).toBe('PNG');
 	return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 };
 
-const manifest = PWA_MANIFEST;
+const manifest = pwaManifest(brand);
+const options = pwaOptions(brand);
 const workbox = PWA_WORKBOX;
 
 /**
@@ -41,7 +43,9 @@ const shellAnswers = (pathAndSearch: string): boolean =>
 
 describe('the web app manifest', () => {
 	it('names the app, for the install prompt and the home screen', () => {
-		expect(manifest.name).toBe('Skysa Notes');
+		// The default brand's: a deployment names it in its own (brand.ts).
+		expect(manifest.name).toBe('Notes');
+		expect(options.manifest).toEqual(manifest);
 		// Truncated under an icon, so it has to be short enough to survive.
 		expect(manifest.short_name).toBeDefined();
 		expect((manifest.short_name ?? '').length).toBeLessThanOrEqual(12);
@@ -147,11 +151,11 @@ describe('the service worker', () => {
 	it('waits to be told before taking over a page', () => {
 		// A worker that claimed the page mid-edit could swap the app out from
 		// under a note that has not been written yet.
-		expect(PWA_OPTIONS.registerType).toBe('prompt');
+		expect(options.registerType).toBe('prompt');
 	});
 
 	it('is registered by the app, not by a script written into the page', () => {
 		// `'inline'` would be refused by the Content-Security-Policy.
-		expect(PWA_OPTIONS.injectRegister).toBe(false);
+		expect(options.injectRegister).toBe(false);
 	});
 });

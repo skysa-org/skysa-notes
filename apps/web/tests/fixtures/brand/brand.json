@@ -1,0 +1,25 @@
+{
+	"$schema": "../../../brand/brand.schema.json",
+	"name": "Field & Notes",
+	"shortName": "Field",
+	"description": "A fixture brand for tests/brand.test.ts.",
+	"colors": {
+		"light": { "brand": "#0F766E", "onBrand": "#FFFFFF", "theme": "#F0FDFA" },
+		"dark": { "brand": "#5EEAD4", "onBrand": "#042F2E", "theme": "#042F2E" },
+		"background": "#F0FDFA"
+	},
+	"icons": "../../../brand/icons",
+	"fonts": {
+		"sans": {
+			"family": "Fixture Sans",
+			"files": [
+				{
+					"src": "fonts/sans-400.woff2",
+					"weight": 400,
+					"unicodeRange": "U+0000-00FF, U+2019"
+				},
+				{ "src": "fonts/sans-700.woff2", "weight": 700 }
+			]
+		}
+	}
+}

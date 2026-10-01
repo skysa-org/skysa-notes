@@ -1,0 +1,12 @@
+{
+	"$schema": "./brand.schema.json",
+	"name": "Notes",
+	"shortName": "Notes",
+	"description": "Local-first markdown notes that sync to your own cloud storage.",
+	"colors": {
+		"light": { "brand": "#4B5563", "onBrand": "#FFFFFF", "theme": "#FFFFFF" },
+		"dark": { "brand": "#9CA3AF", "onBrand": "#111827", "theme": "#111827" },
+		"background": "#FFFFFF"
+	},
+	"icons": "icons"
+}

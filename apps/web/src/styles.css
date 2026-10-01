@@ -79,23 +79,17 @@
 	   darker than hover is only told apart from hover side by side, and a
 	   toggle is pressed with the pointer still over it. */
 	--accent: #2563eb;
-	/* The blue behind the app's icon (`public/README.md`): the answer a
-	   question expects, filled, and every link. The same in both themes, as
-	   the icon is. */
-	--brand: #007aff;
-	--on-brand: #fff;
+	/* `--brand` and `--on-brand`, the colour behind the app's icon: the
+	   answer a question expects, filled, and every link. Set for each theme by
+	   the brand's stylesheet, with `--font-sans` and `--font-mono` (`brand.ts`,
+	   docs/ARCHITECTURE.md §8). */
 	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 	--on-fg: var(--accent);
 	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
 	/* Keyboard focus: a ring, drawn outside the control, so it never reads
 	   as the control's own state. */
 	--ring: color-mix(in srgb, var(--accent) 70%, transparent);
-	font-family:
-		ui-sans-serif,
-		system-ui,
-		-apple-system,
-		'Segoe UI',
-		sans-serif;
+	font-family: var(--font-sans);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -216,7 +210,7 @@ body {
    an inline span for a highlighter to use, and guessing at one would colour
    English prose as if it were code. */
 code {
-	font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+	font-family: var(--font-mono);
 	background: var(--code-surface);
 	border: 1px solid var(--border);
 	border-radius: 0.25rem;
@@ -1353,7 +1347,7 @@ button.danger {
 }
 
 .editor .cm-scroller {
-	font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+	font-family: var(--font-mono);
 	font-size: 0.9rem;
 	line-height: 1.6;
 }

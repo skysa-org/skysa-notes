@@ -1,0 +1,201 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"properties": {
+		"$schema": {
+			"type": "string"
+		},
+		"name": {
+			"type": "string",
+			"minLength": 1,
+			"description": "The app's name: the page title and the install prompt."
+		},
+		"shortName": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 12,
+			"description": "The name under the icon on a home screen, 12 characters at most."
+		},
+		"description": {
+			"type": "string",
+			"minLength": 1,
+			"description": "The page's and the manifest's description."
+		},
+		"colors": {
+			"type": "object",
+			"properties": {
+				"light": {
+					"type": "object",
+					"properties": {
+						"brand": {
+							"type": "string",
+							"pattern": "^#[0-9a-fA-F]{6}$",
+							"description": "Filled buttons, links and the progress bar."
+						},
+						"onBrand": {
+							"type": "string",
+							"pattern": "^#[0-9a-fA-F]{6}$",
+							"description": "Text on `brand`."
+						},
+						"theme": {
+							"type": "string",
+							"pattern": "^#[0-9a-fA-F]{6}$",
+							"description": "The browser's and the installed app's title bar."
+						}
+					},
+					"required": ["brand", "onBrand", "theme"],
+					"additionalProperties": false
+				},
+				"dark": {
+					"type": "object",
+					"properties": {
+						"brand": {
+							"type": "string",
+							"pattern": "^#[0-9a-fA-F]{6}$",
+							"description": "Filled buttons, links and the progress bar."
+						},
+						"onBrand": {
+							"type": "string",
+							"pattern": "^#[0-9a-fA-F]{6}$",
+							"description": "Text on `brand`."
+						},
+						"theme": {
+							"type": "string",
+							"pattern": "^#[0-9a-fA-F]{6}$",
+							"description": "The browser's and the installed app's title bar."
+						}
+					},
+					"required": ["brand", "onBrand", "theme"],
+					"additionalProperties": false
+				},
+				"background": {
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"description": "The splash screen behind the icon while the app opens."
+				}
+			},
+			"required": ["light", "dark", "background"],
+			"additionalProperties": false
+		},
+		"icons": {
+			"type": "string",
+			"minLength": 1,
+			"description": "A folder, relative to this file, holding favicon-16x16.png, favicon-32x32.png, apple-touch-icon.png (180), pwa-192x192.png, pwa-512x512.png and pwa-maskable-512x512.png."
+		},
+		"fonts": {
+			"description": "Either, both or neither; a family left out keeps the system stack.",
+			"type": "object",
+			"properties": {
+				"sans": {
+					"type": "object",
+					"properties": {
+						"family": {
+							"type": "string",
+							"pattern": "^[\\w ]+$",
+							"description": "The family name the files are declared under."
+						},
+						"files": {
+							"minItems": 1,
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"src": {
+										"type": "string",
+										"pattern": "\\.woff2$",
+										"description": "The .woff2 file, relative to this file."
+									},
+									"weight": {
+										"default": 400,
+										"description": "A weight, or a variable font's range such as \"100 900\".",
+										"anyOf": [
+											{
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 1000
+											},
+											{
+												"type": "string",
+												"pattern": "^\\d{1,4} \\d{1,4}$"
+											}
+										]
+									},
+									"style": {
+										"default": "normal",
+										"type": "string",
+										"enum": ["normal", "italic"]
+									},
+									"unicodeRange": {
+										"description": "The characters this file covers, as CSS writes it.",
+										"type": "string",
+										"pattern": "^[Uu]\\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?(,\\s*[Uu]\\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?)*$"
+									}
+								},
+								"required": ["src"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": ["family", "files"],
+					"additionalProperties": false
+				},
+				"mono": {
+					"type": "object",
+					"properties": {
+						"family": {
+							"type": "string",
+							"pattern": "^[\\w ]+$",
+							"description": "The family name the files are declared under."
+						},
+						"files": {
+							"minItems": 1,
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"src": {
+										"type": "string",
+										"pattern": "\\.woff2$",
+										"description": "The .woff2 file, relative to this file."
+									},
+									"weight": {
+										"default": 400,
+										"description": "A weight, or a variable font's range such as \"100 900\".",
+										"anyOf": [
+											{
+												"type": "integer",
+												"minimum": 1,
+												"maximum": 1000
+											},
+											{
+												"type": "string",
+												"pattern": "^\\d{1,4} \\d{1,4}$"
+											}
+										]
+									},
+									"style": {
+										"default": "normal",
+										"type": "string",
+										"enum": ["normal", "italic"]
+									},
+									"unicodeRange": {
+										"description": "The characters this file covers, as CSS writes it.",
+										"type": "string",
+										"pattern": "^[Uu]\\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?(,\\s*[Uu]\\+[0-9A-Fa-f?]+(-[0-9A-Fa-f]+)?)*$"
+									}
+								},
+								"required": ["src"],
+								"additionalProperties": false
+							}
+						}
+					},
+					"required": ["family", "files"],
+					"additionalProperties": false
+				}
+			},
+			"additionalProperties": false
+		}
+	},
+	"required": ["name", "shortName", "description", "colors", "icons"],
+	"additionalProperties": false
+}
