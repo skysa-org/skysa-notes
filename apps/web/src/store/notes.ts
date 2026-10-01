@@ -498,6 +498,22 @@ const whereShown = async (
 	return candidates.length === 1 ? candidates[0] : undefined;
 };
 
+/** The name a note just begun takes from its body: its first heading, once it has one. */
+const nameFromHeading = (body: string): string | undefined => {
+	const heading = deriveTitle({ body });
+	return heading === UNTITLED_TITLE ? undefined : heading;
+};
+
+/**
+ * The title `note` has once `body` is saved into it, as `applyBody` gives it.
+ * Asked by the note list too, of what is being typed and not yet saved
+ * (`store/liveEdits.ts`), so the two cannot disagree about what a heading does.
+ */
+export const titleAfterEdit = (note: NoteRecord, body: string): string =>
+	isUnnamed(note)
+		? (nameFromHeading(body) ?? note.title)
+		: titleFor(note.frontmatter, body, note.path);
+
 const applyBody = (
 	db: NotesDatabase,
 	id: string,
@@ -513,12 +529,10 @@ const applyBody = (
 		db,
 		id,
 		async (note) => {
-			if (!isUnnamed(note)) {
-				return { body, title: titleFor(note.frontmatter, body, note.path) };
-			}
+			if (!isUnnamed(note)) return { body, title: titleAfterEdit(note, body) };
 
-			const heading = deriveTitle({ body });
-			if (heading === UNTITLED_TITLE) return { body };
+			const heading = nameFromHeading(body);
+			if (heading === undefined) return { body };
 
 			const folderPath = parentPath(note.path);
 			const taken = await takenNamesIn(db, note.connectionId, folderPath, id);

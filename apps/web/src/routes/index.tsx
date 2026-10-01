@@ -67,6 +67,7 @@ import {
 } from '../store/hooks.js';
 import { keeping } from '../store/keeping.js';
 import { type LastOpen, noteIsUnder, pickNote, rememberOpen } from '../store/lastOpen.js';
+import { createLiveEdits } from '../store/liveEdits.js';
 import {
 	createNote,
 	draftNote,
@@ -808,6 +809,8 @@ const Home = () => {
 	 * put this the user acts and the app shows nothing at all.
 	 */
 	const [problem, setProblem] = useState<Notice | null>(null);
+	/** What is typed into the open note before it is saved, for the list to show. */
+	const [liveEdits] = useState(createLiveEdits);
 	// Rarer than a duplicate notebook name — this one needs the store itself to
 	// refuse — but the same silence if it happens: the user types into a note
 	// that is nowhere, and the failure goes to the console.
@@ -1292,6 +1295,7 @@ const Home = () => {
 				<CompactBar
 					folder={folder}
 					note={openNote}
+					liveEdits={liveEdits}
 					panel={panel}
 					onPanel={setPanel}
 					query={query}
@@ -1399,6 +1403,7 @@ const Home = () => {
 					onCancelMove={cancelMove}
 					movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
 					unsavedNoteId={unsavedNoteId}
+					liveEdits={liveEdits}
 					// The note's own menu, about the note right-clicked, which
 					// need not be the one open. Delete goes through the note pane,
 					// which holds what autosave has not stored yet.
@@ -1426,6 +1431,7 @@ const Home = () => {
 					ref={noteView}
 					note={openNote}
 					draft={place.noteDraft}
+					liveEdits={liveEdits}
 					{...noteMove}
 					{...emptyPaneOffers({
 						folder,

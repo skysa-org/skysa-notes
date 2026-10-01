@@ -1,8 +1,9 @@
 import { basename, ROOT } from '@skysa/core';
-import { type RefObject, useEffect, useState } from 'react';
+import { type RefObject, useDeferredValue, useEffect, useState } from 'react';
 
 import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
 import { SearchField, type SearchFieldProps } from './SearchField.js';
@@ -148,6 +149,8 @@ export interface CompactBarProps {
 	folder: string | undefined;
 	/** The open note, if there is one. */
 	note: NoteRecord | undefined;
+	/** Its name as it is being typed, as the list says it (`NoteList`). */
+	liveEdits?: LiveEdits;
 	panel: Pane | null;
 	onPanel: (panel: Pane | null) => void;
 	query: string;
@@ -175,6 +178,7 @@ export interface CompactBarProps {
 export const CompactBar = ({
 	folder,
 	note,
+	liveEdits,
 	panel,
 	onPanel,
 	query,
@@ -188,6 +192,8 @@ export const CompactBar = ({
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const source = useShowingSourceName();
+	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
+	const title = note === undefined ? 'Notes' : shownNote(note, edit).title;
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);
@@ -253,13 +259,7 @@ export const CompactBar = ({
 				panel={panel}
 				onPanel={onPanel}
 			/>
-			<PaneTrigger
-				pane="notes"
-				name="Note"
-				value={note?.title ?? 'Notes'}
-				panel={panel}
-				onPanel={onPanel}
-			/>
+			<PaneTrigger pane="notes" name="Note" value={title} panel={panel} onPanel={onPanel} />
 			{fieldFits ? (
 				field
 			) : (

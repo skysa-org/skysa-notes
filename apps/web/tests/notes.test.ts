@@ -19,6 +19,7 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 	setNoteTags,
+	titleAfterEdit,
 } from '../src/store/notes.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -175,6 +176,24 @@ describe('naming an untitled note by its first heading', () => {
 
 		expect(edited.title).toBe('Chosen');
 		expect(edited.path).toBe('chosen.md');
+	});
+	// The note list shows it as it is typed, before it is saved, by asking
+	// `titleAfterEdit`; saved, it must be the same.
+	it.each<[string, { title?: string; first?: string }, string]>([
+		['a note begun, given a heading', {}, '# Groceries\n'],
+		['a note begun, with no heading yet', {}, 'milk\n'],
+		['a note named by its heading, the heading edited', { first: '# Plans\n' }, '# Roadmap\n'],
+		['a note named by the user', { title: 'Chosen' }, '# Something Else\n'],
+	])('is the title the list showed while it was typed: %s', async (_, { title, first }, body) => {
+		const note = await createNote(db, {
+			folderPath: 'work',
+			...(title === undefined ? {} : { title }),
+		});
+		const shown = first === undefined ? note : await saveNoteBody(db, note.id, first);
+
+		const before = titleAfterEdit(shown, body);
+
+		expect((await saveNoteBody(db, note.id, body)).title).toBe(before);
 	});
 });
 

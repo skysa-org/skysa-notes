@@ -3,6 +3,7 @@ import { frontmatterIsEditable, headings, type StructuralDifference } from '@sky
 import {
 	type Ref,
 	useCallback,
+	useDeferredValue,
 	useEffect,
 	useImperativeHandle,
 	useMemo,
@@ -21,6 +22,7 @@ import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { beforeClosing } from '../store/heldEdits.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import {
 	deleteNote,
 	getNote,
@@ -99,6 +101,12 @@ export interface NoteViewProps {
 	 * it is edited (`draftNote`). Leaving it unedited leaves nothing behind.
 	 */
 	draft?: NoteDraft | undefined;
+	/**
+	 * Where what is typed is said before it is saved, so the note list can show
+	 * it as it is typed (`store/liveEdits.ts`). Without it nothing else on
+	 * screen hears of an edit until autosave has stored it.
+	 */
+	liveEdits?: LiveEdits;
 	/** For the route, which offers Delete on every note in the list. */
 	ref?: Ref<NoteViewHandle>;
 }
@@ -125,15 +133,20 @@ export interface NoteViewHandle {
 /**
  * `draft` is null except while the user is actually typing in the field, so a
  * title that changes underneath — a rename from sync, or a heading edit in the
- * body — shows through without any state to keep in step.
+ * body — shows through without any state to keep in step. A heading being
+ * typed into a note not named yet shows through as it is typed, as it does in
+ * the list (`shownNote`).
  */
 const TitleField = ({
 	note,
+	liveEdits,
 	startFocused,
 	onRename,
 	onDone,
 }: {
 	note: NoteRecord;
+	/** Where the name is said as it is typed, for the list to show it. */
+	liveEdits: LiveEdits | undefined;
 	/**
 	 * In the field as it mounts, with the whole name selected: a note just
 	 * begun has no name yet, and naming it is the first thing to do.
@@ -145,6 +158,10 @@ const TitleField = ({
 }) => {
 	const [draft, setDraft] = useState<string | null>(null);
 	const field = useRef<HTMLInputElement>(null);
+	// Deferred: the title a body gives is a parse of it, and the keystroke in
+	// the body comes first.
+	const shown = shownNote(note, useDeferredValue(useLiveEdit(liveEdits, note)));
+	const ref = noteRef(note);
 	// Escape has to reach `commit` through something `commit` can read
 	// synchronously. `blur()` dispatches the blur event before React has
 	// re-rendered, so `commit` runs against the render in which `draft` is still
@@ -180,9 +197,12 @@ const TitleField = ({
 		const abandoned = cancelled.current;
 		cancelled.current = false;
 		setDraft(null);
-		if (abandoned) return;
-		if (trimmed === undefined || trimmed === '' || trimmed === note.title) return;
-		onRename(trimmed);
+		const given =
+			!abandoned && trimmed !== undefined && trimmed !== '' && trimmed !== note.title;
+		// Said as given, trimmed, until the row has it; or let go, and the row's
+		// name is the one shown again.
+		liveEdits?.naming(ref, given ? trimmed : undefined);
+		if (given) onRename(trimmed);
 	};
 
 	return (
@@ -190,9 +210,10 @@ const TitleField = ({
 			ref={field}
 			className="note-title-input"
 			aria-label="Note title"
-			value={draft ?? note.title}
+			value={draft ?? shown.title}
 			onChange={(event) => {
 				setDraft(event.target.value);
+				liveEdits?.naming(ref, event.target.value);
 			}}
 			onFocus={(event) => {
 				if (draft !== null || !isUnnamed(note)) return;
@@ -471,6 +492,7 @@ export const NoteView = ({
 	onCreateNote,
 	onCreateNotebook,
 	draft,
+	liveEdits,
 	ref: handle,
 }: NoteViewProps) => {
 	const noteId = note?.id;
@@ -505,9 +527,13 @@ export const NoteView = ({
 				base !== undefined && context?.displaced === true
 					? { ...base, displaced: true }
 					: base
-			);
+			).then((saved) => {
+				// The list shows the row again once the row has this.
+				if (ref !== undefined) liveEdits?.landed(ref, 'body', body, saved.updatedAt);
+				return saved;
+			});
 		},
-		[noteId, ref]
+		[noteId, ref, liveEdits]
 	);
 
 	const autosave = useAutosave<Edit>({
@@ -533,25 +559,36 @@ export const NoteView = ({
 			// Stored before the edit is held: the save that follows opens its
 			// write after this one, and so finds the note there to write into.
 			if (draft !== undefined) void draft.store();
-			change({ body, origin, note: shown.current });
+			const typedInto = shown.current;
+			if (typedInto !== undefined) liveEdits?.typed(noteRef(typedInto), body, origin);
+			change({ body, origin, note: typedInto });
 			edited();
 		},
-		[change, edited, draft]
+		[change, edited, draft, liveEdits]
 	);
 
 	const rename = useCallback(
 		(title: string) => {
 			if (note === undefined) return;
 			const { id, connectionId } = note;
-			const named = () => renameNote(db, id, title, { connectionId });
+			const at = noteRef(note);
+			// Shown as given until the row has it, and the row's own again if it
+			// never does.
+			const landed = (row?: NoteRecord) => {
+				liveEdits?.landed(at, 'title', title, row?.updatedAt);
+			};
+			const named = () =>
+				renameNote(db, id, title, { connectionId }).then(landed, () => {
+					landed();
+				});
 			if (draft === undefined) {
 				void named();
 				return;
 			}
 			// A name is an edit: the draft is stored, and then named.
-			void draft.store().then((stored) => (stored ? named() : undefined));
+			void draft.store().then((stored) => (stored ? named() : landed()));
 		},
-		[draft, note]
+		[draft, note, liveEdits]
 	);
 
 	/**
@@ -692,6 +729,7 @@ export const NoteView = ({
 				onDelete={onDelete}
 				onMove={onMove}
 				begun={draft !== undefined}
+				liveEdits={liveEdits}
 				onRename={rename}
 				onTitleDone={() => {
 					focusEditor(body);
@@ -790,6 +828,7 @@ const NoteScreen = ({
 	onDelete,
 	onMove,
 	begun,
+	liveEdits,
 	onRename,
 	onTitleDone,
 	onUserEdit,
@@ -813,6 +852,7 @@ const NoteScreen = ({
 	onMove: (() => void) | undefined;
 	/** A draft: begun just now, stored nowhere yet (`NoteViewProps.draft`). */
 	begun: boolean;
+	liveEdits: LiveEdits | undefined;
 	onRename: (title: string) => void;
 	onTitleDone: () => void;
 	onUserEdit: (body: string, origin: string) => void;
@@ -829,6 +869,7 @@ const NoteScreen = ({
 				<TitleField
 					key={noteRef(note)}
 					note={note}
+					liveEdits={liveEdits}
 					startFocused={begun}
 					onRename={onRename}
 					onDone={onTitleDone}

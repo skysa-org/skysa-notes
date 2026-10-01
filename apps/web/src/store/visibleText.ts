@@ -19,7 +19,13 @@ const LIMIT = 400;
 
 const seen = new Map<string, readonly string[]>();
 
-export const visibleLines = (body: string): readonly string[] => {
+/**
+ * `keep: false` for a body being typed (`store/liveEdits.ts`), which is asked
+ * once and never again: one kept per keystroke would push every other note's
+ * answer out within a paragraph, and the whole list would be parsed again the
+ * next time it drew.
+ */
+export const visibleLines = (body: string, { keep = true } = {}): readonly string[] => {
 	const known = seen.get(body);
 	if (known !== undefined) {
 		// To the back of the queue: asked again, so kept longest.
@@ -28,6 +34,7 @@ export const visibleLines = (body: string): readonly string[] => {
 		return known;
 	}
 	const lines = previewLines(body);
+	if (!keep) return lines;
 	seen.set(body, lines);
 	if (seen.size > LIMIT) {
 		const oldest = seen.keys().next();
@@ -55,8 +62,8 @@ const OPENING = 2_000;
  * one thing it can hide is a reference link's definition further down, and
  * then the link shows as the brackets the user typed.
  */
-export const openingLines = (body: string): readonly string[] => {
-	if (body.length <= OPENING) return visibleLines(body);
+export const openingLines = (body: string, options: { keep?: boolean } = {}): readonly string[] => {
+	if (body.length <= OPENING) return visibleLines(body, options);
 	const end = body.indexOf('\n', OPENING);
-	return visibleLines(end === -1 ? body : body.slice(0, end));
+	return visibleLines(end === -1 ? body : body.slice(0, end), options);
 };

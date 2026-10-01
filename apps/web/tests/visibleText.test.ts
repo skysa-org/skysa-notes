@@ -38,3 +38,13 @@ describe("a note's opening", () => {
 		expect(lines[0]?.startsWith('word word')).toBe(true);
 	});
 });
+
+describe('a body being typed', () => {
+	it('is read without being kept, so it pushes no other note out', () => {
+		const typed = 'Typed once, and typed past.\n';
+		const first = visibleLines(typed, { keep: false });
+		expect(first).toEqual(['Typed once, and typed past.']);
+		// Not the same answer a second time: nothing was kept to give back.
+		expect(visibleLines(typed, { keep: false })).not.toBe(first);
+	});
+});
