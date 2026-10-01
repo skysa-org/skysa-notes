@@ -150,6 +150,13 @@ const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 				listeners.delete(listener);
 			};
 		},
+		/**
+		 * Whether the panel is listening yet. It mounts when the store's
+		 * answer lands, outside `act`, and React subscribes it in an effect run
+		 * on a later task: a status said before then reaches no one until that
+		 * effect catches up, after whatever the test checked next.
+		 */
+		listening: () => listeners.size > 0,
 		syncNow: vi.fn(() => Promise.resolve()),
 		resync: vi.fn(() => Promise.resolve()),
 		// Nothing to stop: resolves straight away with a release that does nothing.
@@ -1426,6 +1433,9 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			sync
 		);
 		await screen.findByText(/Syncing with Dropbox/);
+		await waitFor(() => {
+			expect(sync.listening()).toBe(true);
+		});
 		return db;
 	};
 
