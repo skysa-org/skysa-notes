@@ -924,9 +924,37 @@ button.row,
 }
 
 @media (hover: hover) {
-	button.row:hover {
+	button.row:hover,
+	.row-item:hover > button.row:not(:disabled) {
 		background: color-mix(in srgb, var(--fg) 6%, transparent);
 	}
+}
+
+/* A row with a `⋯` of its own at its end (`RowOptions`): the row's button
+   keeps the whole width, so its highlight, its drop outline and its hit area
+   are what they were, and leaves the end free for the `⋯`, which is drawn over
+   it. The `⋯` is the size of the header's `+` and as far from the pane's end,
+   so the two stand in one column. That keeps it inside the list, too: placed
+   by its glyph, a phone's tap-sized one poked 2px out, and the list scrolled
+   sideways as it took the focus, which shut the menu it was opening. A row
+   with no `⋯` — the loose notes, a name being typed — leaves the same room, so
+   a count is where its neighbours' are. */
+.row-item {
+	--row-options: 1.75rem;
+	position: relative;
+}
+
+.row-item > button.row,
+.row-item > .row-editing {
+	padding-inline-end: calc(var(--gutter) + var(--row-options) + var(--space-xs));
+}
+
+.row-options {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-end: var(--gutter);
+	display: flex;
+	align-items: center;
 }
 
 button.row.selected,
@@ -973,12 +1001,6 @@ button.row.drop-over {
 	inset-inline-start: auto;
 	inset-inline-end: 0;
 	max-width: calc(100vw - 2 * var(--gutter));
-}
-
-/* Only where the storage panel draws its `⋯` (`AccountPanel`'s `menuIn`): the
-   button is laid out by the header as the notebook menu is. */
-.source-panel-options {
-	display: contents;
 }
 
 .options-menu {
@@ -2984,6 +3006,11 @@ button.danger {
 	.tree button.row,
 	.tree .row-editing {
 		justify-content: space-between;
+	}
+
+	/* As wide as `button.icon` is here. */
+	.row-item {
+		--row-options: var(--tap);
 	}
 
 	.source-tab,

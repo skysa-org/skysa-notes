@@ -3531,7 +3531,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				client={client}
 				returnTo="/"
 				navigate={() => undefined}
-				account={(menuIn) => (
+				account={(slot) => (
 					<AccountPanel
 						client={client}
 						database={database}
@@ -3541,7 +3541,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 						downloadAll={() => undefined}
 						keeping={createKeeping(() => undefined)}
 						connectIs="header"
-						menuIn={menuIn}
+						slot={slot}
 					/>
 				)}
 			/>
@@ -3553,51 +3553,95 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		render(<RouterProvider router={router} />);
 	};
 
+	const onedrive = {
+		...dropbox,
+		id: 'c2',
+		provider: 'onedrive' as const,
+		displayName: 'bo@example.com',
+		accountId: 'live:bo',
+		grantId: 'g2',
+	};
+
+	/**
+	 * Dropbox showing, and OneDrive beside it, each holding a note, and a server
+	 * that answers each credential with its own account.
+	 */
 	const connected = async (sync: FakeSync) => {
 		const db = freshDatabase();
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await bindConnection(db, {
+			connectionId: 'c2',
+			provider: 'onedrive',
+			accountId: 'live:bo',
+		});
+		await finishImport(db, 'c2');
+		await holding(db, 'c2', 'sk1_c2');
+		await createNote(db, { title: 'Elsewhere', connectionId: 'c2' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		await finishImport(db, 'c1');
-		await holding(db, 'c1');
+		await holding(db, 'c1', 'sk1_c1');
 		await createNote(db, { title: 'Kept', connectionId: 'c1' });
-		renderDropdown(
-			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
-			db,
-			sync
-		);
+		await showConnection(db, 'c1');
+		const base = clientWith();
+		const client: Client = {
+			...base,
+			withCredential: (credential: string) =>
+				({
+					...base.withCredential(credential),
+					connection: () =>
+						Promise.resolve({
+							ok: true,
+							value: credential === 'sk1_c2' ? onedrive : dropbox,
+						}),
+				}) as unknown as ApiClient,
+		};
+		renderDropdown(client, db, sync);
 		await screen.findByText(/Syncing with Dropbox/);
 		return db;
 	};
 
-	const header = () =>
-		screen
-			.getByRole('region', { name: 'Sources' })
-			.querySelector('.pane-header') as HTMLElement;
+	const sources = () => screen.getByRole('region', { name: 'Sources' });
 
-	const openOptions = async (user: ReturnType<typeof userEvent.setup>) => {
-		await user.click(await within(header()).findByRole('button', { name: 'Storage options' }));
-		return within(await screen.findByRole('group', { name: 'Storage' }));
+	/** A source's row's `⋯`, once it can be pressed. */
+	const rowOptions = async (name: string) => {
+		const button = await within(sources()).findByRole('button', {
+			name: `Options for “${name}”`,
+		});
+		await waitFor(() => {
+			expect(button.hasAttribute('disabled')).toBe(false);
+		});
+		return button;
+	};
+
+	const openOptions = async (user: ReturnType<typeof userEvent.setup>, name = 'Dropbox') => {
+		await user.click(await rowOptions(name));
+		return within(await screen.findByRole('group', { name: `Source “${name}”` }));
 	};
 
 	/** What the open `⋯` offers, in order. */
-	const labels = () =>
-		within(screen.getByRole('group', { name: 'Storage' }))
+	const labels = (name = 'Dropbox') =>
+		within(screen.getByRole('group', { name: `Source “${name}”` }))
 			.getAllByRole('button')
 			.map((button) => button.textContent);
 
-	it('offers syncing, the download and disconnecting in the `⋯`, and not as buttons', async () => {
+	it('offers syncing, the download and disconnecting in the `⋯` at the end of the showing source’s row', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle' });
 		await connected(sync);
 		const storage = screen.getByRole('region', { name: 'Storage' });
-		await waitFor(() => {
-			expect(within(header()).getByRole('button', { name: 'Storage options' })).toBeTruthy();
-		});
 
+		const options = await rowOptions('Dropbox');
 		expect(within(storage).queryByRole('button')).toBeNull();
-		// Beside the `+`, as the notebook menu is beside the notebooks'.
-		const [options, add] = within(header()).getAllByRole('button');
-		expect(options?.getAttribute('aria-label')).toBe('Storage options');
-		expect(add?.textContent).toBe('+');
+		// On the row, as every notebook's and note's is: the header has only
+		// its `+`.
+		const row = within(sources()).getByRole('button', { name: 'Dropbox' });
+		expect(row.getAttribute('aria-current')).toBe('true');
+		expect(options.closest('.row-item')).toBe(row.parentElement);
+		const header = sources().querySelector('.pane-header') as HTMLElement;
+		expect(
+			within(header)
+				.getAllByRole('button')
+				.map((each) => each.textContent)
+		).toEqual(['+']);
 
 		const menu = await openOptions(user);
 		await waitFor(() => {
@@ -3612,7 +3656,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 
 		await user.click(menu.getByRole('button', { name: 'Sync now' }));
 		expect(sync.syncNow).toHaveBeenCalledTimes(1);
-		expect(screen.queryByRole('group', { name: 'Storage' })).toBeNull();
+		expect(screen.queryByRole('group', { name: 'Source “Dropbox”' })).toBeNull();
 	});
 
 	it('asks about a re-scan and a disconnect in the panel, once chosen from the `⋯`', async () => {
@@ -3661,6 +3705,51 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		);
 	});
 
+	it('offers another source’s actions on its own row, and shows that source to do them', async () => {
+		const user = userEvent.setup();
+		const db = await connected(fakeSync({ phase: 'idle' }));
+
+		await openOptions(user, 'OneDrive');
+		await waitFor(() => {
+			expect(labels('OneDrive')).toEqual([
+				'Sync now',
+				'Re-scan from scratch',
+				'Download all notes',
+				'Disconnect…',
+			]);
+		});
+
+		// Showing it is what syncs it: the scheduler syncs the source in front.
+		await user.click(screen.getByRole('button', { name: 'Sync now' }));
+		await waitFor(async () => {
+			expect(await activeConnectionId(db)).toBe('c2');
+		});
+		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+	});
+
+	it('asks another source’s questions in its own panel, once it is showing', async () => {
+		const user = userEvent.setup();
+		const db = await connected(fakeSync({ phase: 'idle' }));
+
+		await openOptions(user, 'OneDrive');
+		await user.click(screen.getByRole('button', { name: 'Re-scan from scratch' }));
+		expect(await screen.findByText(/Read everything in OneDrive again\?/)).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe('c2');
+
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
+		await openOptions(user, 'Dropbox');
+		await user.click(screen.getByRole('button', { name: 'Disconnect…' }));
+		// Dropbox is showing now, in a panel of its own, and asks about the note
+		// it never sent.
+		await waitFor(async () => {
+			expect(await activeConnectionId(db)).toBe('c1');
+		});
+		expect(await screen.findByRole('button', { name: 'Download them' })).toBeTruthy();
+		expect(
+			within(screen.getByRole('region', { name: 'Storage' })).getByText('Kept')
+		).toBeTruthy();
+	});
+
 	it('points at the `+` above with nothing connected, and has the download in the `⋯`', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
@@ -3671,15 +3760,11 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Notes are kept on this device only. Use + above to connect storage.'
 			);
 		});
-		// Nothing to download yet, so nothing in it.
-		const options = within(header()).getByRole('button', { name: 'Storage options' });
-		expect(options.hasAttribute('disabled')).toBe(true);
 
 		await createNote(db, { title: 'Loose' });
-		await waitFor(() => {
-			expect(options.hasAttribute('disabled')).toBe(false);
-		});
-		await openOptions(user);
-		expect(labels()).toEqual(['Download all notes']);
+		const options = await rowOptions('This device');
+		await user.click(options);
+		await screen.findByRole('group', { name: 'Source “This device”' });
+		expect(labels('This device')).toEqual(['Download all notes']);
 	});
 });

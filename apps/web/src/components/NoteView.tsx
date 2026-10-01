@@ -118,8 +118,8 @@ export interface NoteDraft {
 }
 
 /**
- * What the note pane does for a note from elsewhere: the `⋯` in the note
- * list's header, about the note open, and a right-click on any row.
+ * What the note pane does for a note from elsewhere: the `⋯` at the end of a
+ * row in the note list, or a right-click on one.
  */
 export interface NoteViewHandle {
 	deleteNote: (note: NoteRecord) => void;
@@ -586,8 +586,8 @@ export const NoteView = ({
 	);
 
 	/**
-	 * Delete a note: the one open, from the `⋯` beside the list's `+`, or any
-	 * other from a right-click on its row (`NoteViewHandle`). Here either way, because what
+	 * Delete a note, from its row's `⋯` or a right-click on the row, the one
+	 * open or any other (`NoteViewHandle`). Here either way, because what
 	 * autosave holds is here — for the note open, and for any earlier one whose
 	 * save failed — and what it holds goes with the note, for undo.
 	 */

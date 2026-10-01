@@ -21,6 +21,7 @@ import {
 	showConnection,
 } from '../store/connection.js';
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
+import { holdsAnything } from '../store/exportNotes.js';
 import {
 	anyConnected,
 	CONNECT_FIRST_LABEL,
@@ -30,6 +31,8 @@ import {
 	tabName,
 } from '../sync/account.js';
 import { ConnectButton } from './ConnectButton.js';
+import { type OptionsMenuItem } from './OptionsMenu.js';
+import { RowOptions } from './RowOptions.js';
 import { useEscape } from './useEscape.js';
 
 export interface SourceTabsProps {
@@ -783,6 +786,33 @@ const Menu = ({
 	);
 };
 
+/**
+ * A choice made from the `⋯` of a source that is not the one showing. The
+ * storage panel acts only on the source showing — the scheduler syncs only
+ * that one, and its questions are asked in its panel — so the choice shows the
+ * source first, and its panel carries this out once it is there
+ * (`AccountPanel`'s `asked`). Sync now needs no asking: showing a source syncs
+ * it.
+ */
+export interface SourceAsk {
+	connectionId: string;
+	action: 'rescan' | 'download' | 'disconnect';
+}
+
+/** What the source panel hands the storage panel under it. */
+export interface AccountSlot {
+	/**
+	 * Where the showing source's `⋯` goes: the end of its row, as every other
+	 * source's is (`AccountPanel`'s `menuIn`). Null until the row is drawn.
+	 */
+	menuIn: HTMLElement | null;
+	/** What the showing source's row calls it, for its `⋯`. */
+	name: string;
+	asked: SourceAsk | null;
+	/** The ask has been carried out, or cannot be. */
+	onAsked: () => void;
+}
+
 export interface SourcePanelProps {
 	db?: NotesDatabase;
 	client?: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
@@ -794,12 +824,8 @@ export interface SourcePanelProps {
 	 * The storage panel — what the showing source is syncing with — under the
 	 * sources. A wide window keeps it at the foot of the sidebar; a compact one
 	 * has no sidebar in view, and this is the panel that is about sources.
-	 *
-	 * Given where its actions go: the panel's header, as one `⋯` menu beside
-	 * the `+`, as the notebooks' header has its own (`AccountPanel`'s
-	 * `menuIn`). Null until the header is drawn.
 	 */
-	account?: (menuIn: HTMLElement | null) => ReactNode;
+	account?: (slot: AccountSlot) => ReactNode;
 	/** A source was chosen, so the panel has done its job. */
 	onChosen?: () => void;
 }
@@ -809,10 +835,12 @@ export interface SourcePanelProps {
  * source dropdown in `CompactBar` and laid out as the notebook and note panels
  * are, across the window under the bar.
  *
- * Its header is the notebooks' header (`Sidebar`): a `⋯` for what can be done
- * to the source showing, and a `+` for another, which opens the same list of
- * providers the `+` beside the tabs does. There even with nothing to offer,
- * disabled, so the header keeps its shape.
+ * Its header is the notebooks' header (`Sidebar`): a `+` for another source,
+ * which opens the same list of providers the `+` beside the tabs does, there
+ * even with nothing to offer, disabled, so the header keeps its shape. Each
+ * source's row ends in a `⋯` for what can be done to it, as each notebook's
+ * and note's does: the showing source's is the storage panel's own; another's
+ * shows that source and then does what was chosen (`SourceAsk`).
  *
  * The same choices in the same order, with the one showing marked by
  * `aria-current` as its tab is. Renaming a source is not offered here: on a
@@ -837,13 +865,49 @@ export const SourcePanel = ({
 	// State rather than a ref: the storage panel draws its menu into this, and
 	// has to be drawn again once it is there.
 	const [actions, setActions] = useState<HTMLDivElement | null>(null);
+	const [asked, setAsked] = useState<SourceAsk | null>(null);
+	const onAsked = useCallback(() => {
+		setAsked(null);
+	}, []);
+	const ids = ordered.map((source) => source.connectionId);
+	// Which sources hold anything, so another's `⋯` offers a download only
+	// where there is something to download, as the showing one's does.
+	const holding = useLiveQuery(async () => {
+		const holds = await Promise.all(ids.map((id) => holdsAnything(db, id)));
+		return new Set(ids.filter((_, index) => holds[index] === true));
+	}, [db, ids.join(' ')]);
+	const showing = ordered.find((source) => source.active);
+
+	/** Another source's `⋯`: what its panel would offer once it is showing. */
+	const itemsFor = (source: ConnectedSource): OptionsMenuItem[] => {
+		if (source.detached !== undefined) return [];
+		const show = (action?: SourceAsk['action']) => () => {
+			setAsked(action === undefined ? null : { connectionId: source.connectionId, action });
+			void showConnection(db, source.connectionId);
+		};
+		const download =
+			holding?.has(source.connectionId) === true
+				? [{ label: 'Download all notes', onChoose: show('download') }]
+				: [];
+		const syncable = source.provider !== undefined && CONNECTABLE.includes(source.provider);
+		if (source.connectionId === LOCAL_CONNECTION_ID) return download;
+		return [
+			...(syncable
+				? [
+						{ label: 'Sync now', onChoose: show() },
+						{ label: 'Re-scan from scratch', onChoose: show('rescan') },
+					]
+				: []),
+			...download,
+			{ label: 'Disconnect…', onChoose: show('disconnect'), danger: true },
+		];
+	};
 
 	return (
 		<section className="source-panel" aria-label="Sources">
 			<div className="pane-header">
 				<h2>Sources</h2>
 				<div className="pane-actions">
-					<div className="source-panel-options" ref={setActions} />
 					<div className="source-add" ref={addFrame}>
 						<button
 							type="button"
@@ -888,7 +952,7 @@ export const SourcePanel = ({
 					{ordered.map((source) => {
 						const name = tabName(source, ordered);
 						return (
-							<li key={source.connectionId}>
+							<li key={source.connectionId} className="row-item">
 								<button
 									type="button"
 									className={source.active ? 'row selected' : 'row'}
@@ -914,12 +978,28 @@ export const SourcePanel = ({
 										)}
 									</span>
 								</button>
+								{source.active ? (
+									<div className="row-options" ref={setActions} />
+								) : (
+									<RowOptions
+										name={name}
+										kind="Source"
+										items={itemsFor(source)}
+									/>
+								)}
 							</li>
 						);
 					})}
 				</ul>
 			)}
-			<div className="source-panel-foot">{account?.(actions)}</div>
+			<div className="source-panel-foot">
+				{account?.({
+					menuIn: actions,
+					name: showing === undefined ? '' : tabName(showing, ordered),
+					asked,
+					onAsked,
+				})}
+			</div>
 		</section>
 	);
 };

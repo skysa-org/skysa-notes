@@ -209,7 +209,7 @@ describe('opening a notebook', () => {
 			expect(titleField()?.value).toBe('Going');
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
+		await user.click(screen.getByRole('button', { name: 'Options for “Going”' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		// The most recent of what is left, not an empty pane.
@@ -227,7 +227,7 @@ describe('opening a notebook', () => {
 			expect(titleField()?.value).toBe('Only');
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
+		await user.click(screen.getByRole('button', { name: 'Options for “Only”' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => {

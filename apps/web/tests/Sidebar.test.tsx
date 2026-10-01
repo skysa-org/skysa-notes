@@ -35,7 +35,7 @@ describe('Sidebar', () => {
 		// Anchored: the pane header's menu is named for the open notebook too.
 		expect(screen.getByRole('button', { name: /^personal/ })).toBeDefined();
 		expect(screen.getByRole('button', { name: /work$/ })).toBeDefined();
-		expect(screen.getByRole('button', { name: /meetings/ })).toBeDefined();
+		expect(screen.getByRole('button', { name: /^meetings/ })).toBeDefined();
 	});
 
 	it('has no "All notes" row', () => {
@@ -50,7 +50,7 @@ describe('Sidebar', () => {
 			'true'
 		);
 		expect(
-			screen.getByRole('button', { name: /personal/ }).getAttribute('aria-current')
+			screen.getByRole('button', { name: /^personal/ }).getAttribute('aria-current')
 		).toBeNull();
 	});
 
@@ -220,7 +220,7 @@ describe('the Loose notes row', () => {
 			screen.getByRole('button', { name: /Loose notes/ }).getAttribute('aria-current')
 		).toBe('true');
 		expect(
-			screen.getByRole('button', { name: /personal/ }).getAttribute('aria-current')
+			screen.getByRole('button', { name: /^personal/ }).getAttribute('aria-current')
 		).toBeNull();
 	});
 
@@ -562,8 +562,34 @@ describe('the notebook menu', () => {
 	it('has nothing to act on at the loose notes, which are not a notebook', () => {
 		renderSidebar({ selectedFolder: '', looseNoteCount: 2 });
 
+		expect(screen.queryByRole('button', { name: 'Options for “Loose notes”' })).toBeNull();
+		// Nor is there one in the header, about whatever is open.
+		expect(screen.queryByRole('button', { name: 'Notebook options' })).toBeNull();
+	});
+
+	it('is at the end of every notebook’s row, after its count', () => {
+		renderSidebar({ selectedFolder: 'work' });
+
+		for (const name of ['work', 'personal']) {
+			const options = screen.getByRole('button', { name: `Options for “${name}”` });
+			const row = screen.getByRole('button', { name: new RegExp(`^${name}`) });
+			// Beside the row's button, not in it, which HTML does not allow.
+			expect(row.contains(options)).toBe(false);
+			expect(options.closest('.row-item')).toBe(row.parentElement);
+			expect(
+				row.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING
+			).toBeTruthy();
+		}
+	});
+
+	it('is there, disabled, while something is being moved', () => {
+		renderSidebar({
+			selectedFolder: 'work',
+			moving: { kind: 'note', id: 'n1', path: 'work/a.md', name: 'A' },
+		});
+
 		expect(
-			screen.getByRole('button', { name: 'Notebook options' }).hasAttribute('disabled')
+			screen.getByRole('button', { name: 'Options for “personal”' }).hasAttribute('disabled')
 		).toBe(true);
 	});
 
@@ -581,15 +607,15 @@ describe('the notebook menu', () => {
 });
 
 /**
- * A right-click on a notebook's row opens the header's menu, about that row:
- * the same items, acting on the notebook clicked rather than the one open.
+ * A right-click on a notebook's row opens its `⋯`'s menu: the same items,
+ * acting on the notebook clicked rather than the one open.
  */
 describe('the notebook right-click menu', () => {
 	const rightClick = (name: RegExp) => {
 		fireEvent.contextMenu(screen.getByRole('button', { name }), { clientX: 40, clientY: 60 });
 	};
 
-	it('offers the header menu’s items, about the notebook clicked', () => {
+	it('offers its `⋯`’s items, about the notebook clicked', () => {
 		renderSidebar({ selectedFolder: 'work' });
 
 		rightClick(/^personal/);
@@ -634,7 +660,7 @@ describe('the notebook right-click menu', () => {
 		const onPickUp = vi.fn();
 		renderSidebar({ selectedFolder: 'work', onPickUp });
 
-		rightClick(/meetings/);
+		rightClick(/^meetings/);
 		await userEvent.click(screen.getByRole('button', { name: 'Move' }));
 
 		expect(onPickUp).toHaveBeenCalledWith({
@@ -668,7 +694,7 @@ describe('the notebook right-click menu', () => {
 	it('is not offered while something is being moved', () => {
 		renderSidebar({ moving: { kind: 'note', id: 'n', path: 'personal/n.md', name: 'n' } });
 
-		fireEvent.contextMenu(screen.getByRole('button', { name: /work/ }));
+		fireEvent.contextMenu(screen.getByRole('button', { name: /into work$/ }));
 
 		expect(screen.queryByRole('group', { name: /^Notebook/ })).toBeNull();
 	});

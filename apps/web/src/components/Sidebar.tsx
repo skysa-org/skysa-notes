@@ -5,8 +5,9 @@ import { useCommand } from '../commands/context.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
-import { type NotebookActions, NotebookMenu, notebookMenuItems } from './NotebookMenu.js';
-import { FloatingMenu, type MenuPoint, menuPoint } from './OptionsMenu.js';
+import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
+import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
+import { RowOptions } from './RowOptions.js';
 
 /**
  * The notebook tree. Folders are real directories on the provider, so this is a
@@ -417,6 +418,8 @@ interface FolderRowsProps {
 	onRenamed: (path: string, chosen?: string) => void;
 	/** A notebook's row was right-clicked. */
 	onMenu: (path: string, at: MenuPoint) => void;
+	/** What its `⋯` and its right-click offer. */
+	itemsFor: (path: string) => OptionsMenuItem[];
 }
 
 const FolderRows = ({
@@ -433,43 +436,61 @@ const FolderRows = ({
 	renaming,
 	onRenamed,
 	onMenu,
+	itemsFor,
 }: FolderRowsProps) => (
 	<>
 		{nodes.map((node) => (
 			<li key={node.path}>
-				{node.path === renaming ? (
-					<RenameRow
-						name={node.name}
-						depth={depth}
-						selected={node.path === selectedFolder}
-						count={node.noteCount}
-						onDone={(chosen) => {
-							onRenamed(node.path, chosen);
-						}}
-					/>
-				) : (
-					<Row
-						path={node.path}
-						name={node.name}
-						selected={node.path === selectedFolder}
-						depth={depth}
-						count={node.noteCount}
-						moving={moving}
-						over={over}
-						onOver={onOver}
-						onSelect={() => {
-							onSelectFolder(node.path);
-						}}
-						onDrop={onDrop}
-						onPickUp={() => {
-							onPickUp({ kind: 'notebook', path: node.path, name: node.name });
-						}}
-						onCancelMove={onCancelMove}
-						onMenu={(at) => {
-							onMenu(node.path, at);
-						}}
-					/>
-				)}
+				<div className="row-item">
+					{node.path === renaming ? (
+						<RenameRow
+							name={node.name}
+							depth={depth}
+							selected={node.path === selectedFolder}
+							count={node.noteCount}
+							onDone={(chosen) => {
+								onRenamed(node.path, chosen);
+							}}
+						/>
+					) : (
+						<Row
+							path={node.path}
+							name={node.name}
+							selected={node.path === selectedFolder}
+							depth={depth}
+							count={node.noteCount}
+							moving={moving}
+							over={over}
+							onOver={onOver}
+							onSelect={() => {
+								onSelectFolder(node.path);
+							}}
+							onDrop={onDrop}
+							onPickUp={() => {
+								onPickUp({ kind: 'notebook', path: node.path, name: node.name });
+							}}
+							onCancelMove={onCancelMove}
+							onMenu={(at) => {
+								onMenu(node.path, at);
+							}}
+						/>
+					)}
+					{/* Not while its name is being typed, when the row is a field;
+				    nor while something is being moved, when the rows are only
+				    places to put it. */}
+					{node.path !== renaming && (
+						<RowOptions
+							name={node.name}
+							kind="Notebook"
+							items={itemsFor(node.path)}
+							disabled={moving !== null}
+							// Rightwards, over the note list: the sidebar is at the
+							// window's left edge, and a card opened leftwards from its
+							// end has a sidebar's width to fit in.
+							align="start"
+						/>
+					)}
+				</div>
 				{node.children.length > 0 && (
 					<ul>
 						<FolderRows
@@ -486,6 +507,7 @@ const FolderRows = ({
 							renaming={renaming}
 							onRenamed={onRenamed}
 							onMenu={onMenu}
+							itemsFor={itemsFor}
 						/>
 					</ul>
 				)}
@@ -534,6 +556,7 @@ const TreeBody = ({
 	renaming,
 	onRenamed,
 	onMenu,
+	itemsFor,
 }: TreeBodyProps) => (
 	<ul className="tree">
 		{/* With no notebooks and the loose notes not yet counted there is
@@ -559,7 +582,7 @@ const TreeBody = ({
 			is where notebooks live, which is the distinction the root has
 			always had here. */}
 		{moving !== null && canDrop(moving, ROOT) && (
-			<li>
+			<li className="row-item">
 				<Row
 					path={ROOT}
 					name={TOP_LEVEL_LABEL}
@@ -590,10 +613,14 @@ const TreeBody = ({
 				renaming={renaming}
 				onRenamed={onRenamed}
 				onMenu={onMenu}
+				itemsFor={itemsFor}
 			/>
 		)}
+		{/* A row like the notebooks', the room for a `⋯` and all, so its count
+		    lines up with theirs; it has none, since it is not a notebook and
+		    cannot be renamed, moved or deleted. */}
 		{looseNoteCount !== undefined && looseNoteCount > 0 && (
-			<li>
+			<li className="row-item">
 				<Row
 					path={ROOT}
 					name={LOOSE_NOTES_LABEL}
@@ -654,20 +681,18 @@ export const Sidebar = ({
 	const cancel = onCancelMove ?? (() => undefined);
 
 	/**
-	 * The notebook everything in the menu is about. The root is selectable while
+	 * The notebook the palette's commands are about. The root is selectable while
 	 * it holds loose notes and is not a notebook: it cannot be renamed, moved or
 	 * deleted, and a notebook made "inside" it is a top-level one anyway.
 	 */
 	const open =
 		selectedFolder === undefined || selectedFolder === ROOT ? undefined : selectedFolder;
 	const manageable = open !== undefined && moving === null;
-	const openName = open === undefined ? '' : basename(open);
 	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
 
 	/**
-	 * What the menu does to a notebook: the open one from the header's `⋯`, any
-	 * one from a right-click on its row. One set of actions, so the two menus
-	 * cannot drift.
+	 * What the menu does to a notebook, from its row's `⋯` or a right-click on
+	 * the row. One set of actions, so the two menus cannot drift.
 	 */
 	const actionsFor = (path: string): NotebookActions => ({
 		onNewInside: () => {
@@ -722,13 +747,6 @@ export const Sidebar = ({
 			<div className="pane-header">
 				<h2>Notebooks</h2>
 				<div className="pane-actions">
-					<NotebookMenu
-						name={openName}
-						// Disabled with nothing open, so the root stands in for a
-						// notebook these are never run on.
-						disabled={!manageable}
-						{...actionsFor(open ?? ROOT)}
-					/>
 					<button
 						type="button"
 						className="icon"
@@ -798,6 +816,7 @@ export const Sidebar = ({
 				onMenu={(path, at) => {
 					setMenu({ path, at });
 				}}
+				itemsFor={(path) => notebookMenuItems(basename(path), actionsFor(path))}
 			/>
 
 			{menu !== null && (

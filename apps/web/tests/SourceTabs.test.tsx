@@ -1,9 +1,9 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
+import { type AccountSlot, SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
 import {
 	bindConnection,
@@ -462,29 +462,79 @@ describe('the source panel, in a compact window', () => {
 		expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();
 	});
 
-	it('hands the storage panel its header, for the `⋯` beside the `+`', async () => {
+	it('hands the storage panel the end of the showing source’s row, for its `⋯`', async () => {
 		const db = freshDatabase();
-		const given: (HTMLElement | null)[] = [];
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const given: AccountSlot[] = [];
 		render(
 			<SourcePanel
 				db={db}
 				client={clientWith()}
 				returnTo="/"
 				navigate={() => undefined}
-				account={(menuIn) => {
-					given.push(menuIn);
+				account={(slot) => {
+					given.push(slot);
 					return null;
 				}}
 			/>
 		);
 
 		await waitFor(() => {
-			expect(given.at(-1)).toBeInstanceOf(HTMLElement);
+			expect(given.at(-1)?.menuIn).toBeInstanceOf(HTMLElement);
 		});
-		const actions = panel().querySelector('.pane-actions');
-		expect(given.at(-1)?.parentElement).toBe(actions);
-		// Before the `+`, as the notebook menu is before the notebooks' `+`.
-		expect(given.at(-1)?.nextElementSibling?.querySelector('button')?.textContent).toBe('+');
+		const showing = within(panel()).getByRole('button', { name: 'Dropbox' });
+		expect(given.at(-1)?.menuIn?.parentElement).toBe(showing.parentElement);
+		expect(given.at(-1)?.name).toBe('Dropbox');
+		// Every other row has a `⋯` of its own, and the header none.
+		expect(
+			within(panel()).getByRole('button', { name: 'Options for “OneDrive”' })
+		).toBeTruthy();
+		const header = panel().querySelector('.pane-header') as HTMLElement;
+		expect(within(header).queryByRole('button', { name: /options/i })).toBeNull();
+	});
+
+	it('asks the storage panel to do what another source’s `⋯` chose, once it shows it', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		const given: AccountSlot[] = [];
+		render(
+			<SourcePanel
+				db={db}
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>
+		);
+
+		await user.click(
+			await within(panel()).findByRole('button', { name: 'Options for “OneDrive”' })
+		);
+		await user.click(screen.getByRole('button', { name: 'Disconnect…' }));
+
+		await waitFor(async () => {
+			expect((await connectedSources(db)).find((source) => source.active)?.connectionId).toBe(
+				'c2'
+			);
+		});
+		expect(given.at(-1)?.asked).toEqual({ connectionId: 'c2', action: 'disconnect' });
+		// Let go once the panel says it is done.
+		act(() => {
+			given.at(-1)?.onAsked();
+		});
+		expect(given.at(-1)?.asked).toBeNull();
 	});
 
 	it('shows the source chosen, and says it is done', async () => {

@@ -178,6 +178,39 @@ describe('NoteList', () => {
 		expect(screen.queryByRole('group', { name: 'Note “Beta”' })).toBeNull();
 	});
 
+	it('ends every row in a `⋯` with the same menu, about that row’s note', () => {
+		const chosen: string[] = [];
+		renderList({
+			notes: [note('Alpha'), note('Beta'), note('Draft')],
+			unsavedNoteId: 'Draft',
+			menuFor: (row) => [
+				{
+					label: 'Delete',
+					onChoose: () => {
+						chosen.push(row.title);
+					},
+				},
+			],
+		});
+
+		const beta = screen.getByRole('button', { name: 'Options for “Beta”' });
+		// Beside the row's button rather than in it, at the row's end.
+		expect(screen.getByRole('button', { name: /^Beta/ }).contains(beta)).toBe(false);
+		expect(beta.closest('.row-item')).toBe(
+			screen.getByRole('button', { name: /^Beta/ }).parentElement
+		);
+		fireEvent.click(beta);
+		fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+		expect(chosen).toEqual(['Beta']);
+
+		// A note not stored yet has nothing to move or delete.
+		expect(
+			screen.getByRole('button', { name: 'Options for “Draft”' }).hasAttribute('disabled')
+		).toBe(true);
+		// And the header has only its `+`.
+		expect(screen.queryByRole('button', { name: 'Note options' })).toBeNull();
+	});
+
 	it('leaves the browser its own menu where it is given none', () => {
 		renderList({ notes: [note('Alpha')] });
 		expect(fireEvent.contextMenu(screen.getByRole('button', { name: /^Alpha/ }))).toBe(true);
