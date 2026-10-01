@@ -75,6 +75,21 @@ const open = async (url: string, pane: string) => {
 	return router;
 };
 
+/**
+ * What the URL says, less the note open. An empty notebook begins a note, and
+ * the URL names it, so a test about the rest of the URL leaves it out.
+ */
+const besideTheNote = (router: { state: { location: { search: object } } }) => {
+	const { note: _note, ...rest } = router.state.location.search as Record<string, unknown>;
+	return rest;
+};
+
+/** A notebook with a note in it, which opens on that note and begins none. */
+const workWithANote = async () => {
+	await createFolder(db, { name: 'Work' });
+	await createNote(db, { folderPath: 'Work', title: 'Plans', body: 'Plans\n' });
+};
+
 /** Is there a row in the sidebar for the loose notes? */
 const looseRow = () => screen.queryByRole('button', { name: /Loose notes/ });
 
@@ -88,7 +103,7 @@ describe('the app', () => {
 
 		expect((await screen.findByRole('status')).textContent).toMatch(/Storage connected/);
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: 'Work' });
+			expect(besideTheNote(router)).toEqual({ folder: 'Work' });
 		});
 	});
 
@@ -153,7 +168,7 @@ describe('the app', () => {
 		const router = await open('/?folder=Work&code=lapsed', 'Work');
 
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: 'Work' });
+			expect(besideTheNote(router)).toEqual({ folder: 'Work' });
 		});
 		expect(screen.queryByRole('alert')).toBeNull();
 	});
@@ -166,7 +181,7 @@ describe('the app', () => {
 			/access to sync on this server has lapsed, so storage was not connected/
 		);
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: 'Work' });
+			expect(besideTheNote(router)).toEqual({ folder: 'Work' });
 		});
 		// Nothing to follow where the instance has no gate — and this one cannot
 		// even be asked.
@@ -375,7 +390,7 @@ describe('the app', () => {
 		await userEvent.type(screen.getByLabelText('New notebook name'), 'Work{Enter}');
 
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: 'Work' });
+			expect(besideTheNote(router)).toEqual({ folder: 'Work' });
 		});
 		expect((await db.folders.toArray()).map((folder) => folder.path)).toEqual(['Work']);
 	});
@@ -516,8 +531,9 @@ describe('the command palette', () => {
 	});
 
 	it('makes a note when the command is run, and opens it', async () => {
-		await createFolder(db, { name: 'Work' });
+		await workWithANote();
 		await open('/?folder=Work', 'Work');
+		await screen.findByDisplayValue('Plans');
 
 		await openPalette();
 		await userEvent.keyboard('new note{Enter}');
@@ -527,7 +543,7 @@ describe('the command palette', () => {
 	});
 
 	it('puts the cursor in the search field when asked to search', async () => {
-		await createFolder(db, { name: 'Work' });
+		await workWithANote();
 		await open('/?folder=Work', 'Work');
 
 		await openPalette();
@@ -541,8 +557,9 @@ describe('the command palette', () => {
 	});
 
 	it('closes on Escape without doing anything', async () => {
-		await createFolder(db, { name: 'Work' });
+		await workWithANote();
 		await open('/?folder=Work', 'Work');
+		await screen.findByDisplayValue('Plans');
 
 		await openPalette();
 		await userEvent.keyboard('{Escape}');
@@ -558,8 +575,9 @@ describe('the command palette', () => {
 		// Chrome, Edge and Safari alike, and the page is never asked — so a bare
 		// key is what is left. That is what `reachable` is for: in the search
 		// field the same key is the letter the user typed.
-		await createFolder(db, { name: 'Work' });
+		await workWithANote();
 		await open('/?folder=Work', 'Work');
+		await screen.findByDisplayValue('Plans');
 
 		const search = screen.getByRole('combobox', { name: 'Search notes' });
 		await userEvent.type(search, 'n');
@@ -670,8 +688,8 @@ describe('the command palette', () => {
 	});
 
 	it('offers the note commands as unavailable when there is no note open', async () => {
-		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work', 'Work');
+		// Nowhere to begin one: an empty notebook would.
+		await open('/', 'Notes');
 
 		await openPalette();
 
@@ -703,11 +721,16 @@ describe('asking the browser to keep the notes', () => {
 		const keeper = standIn();
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work', 'Work');
-		// Not on load: in Firefox the request is a prompt.
+		// Not on load, and not for a note begun and not written in: in Firefox
+		// the request is a prompt, and nothing is stored yet to keep.
+		await screen.findByDisplayValue('Untitled');
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+		});
 		expect(keeper.persist).not.toHaveBeenCalled();
 
-		await userEvent.keyboard('n');
-		await screen.findByDisplayValue('Untitled');
+		// Named: written in, and so stored.
+		await userEvent.keyboard('Plans{Enter}');
 		await waitFor(() => {
 			expect(keeper.persist).toHaveBeenCalledTimes(1);
 		});
@@ -716,8 +739,10 @@ describe('asking the browser to keep the notes', () => {
 			(document.activeElement as HTMLElement | null)?.blur();
 		});
 		await userEvent.keyboard('n');
-		await waitFor(() => {
-			expect(screen.getAllByText('Untitled').length).toBeGreaterThan(1);
+		await screen.findByDisplayValue('Untitled');
+		await userEvent.keyboard('Agenda{Enter}');
+		await waitFor(async () => {
+			expect(await db.notes.count()).toBe(2);
 		});
 		expect(keeper.persist).toHaveBeenCalledTimes(1);
 	});
@@ -729,8 +754,11 @@ describe('asking the browser to keep the notes', () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/?folder=Work', 'Work');
 
-		await userEvent.keyboard('n');
 		await screen.findByDisplayValue('Untitled');
+		await userEvent.keyboard('Plans{Enter}');
+		await waitFor(async () => {
+			expect(await db.notes.count()).toBe(1);
+		});
 		await act(async () => {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		});

@@ -126,80 +126,112 @@ export interface CreateNoteInput {
 	folderPath?: string;
 	title?: string;
 	body?: string;
+	/**
+	 * Who the note is and when it was begun, for a draft being stored on its
+	 * first edit (`draftNote`): the same note, so the edit that stores it — and
+	 * any saved after — finds it as the note that was on screen
+	 * (`saveNoteBody`'s `whereShown`).
+	 */
+	id?: string;
+	createdAt?: number;
+	editorMode?: EditorMode;
 }
 
 /**
+ * A note's row, as a note is begun: everything but the file it will be. The
+ * filename is chosen against `taken`, the names already in its folder.
+ */
+const begunNote = (
+	input: CreateNoteInput & { connectionId: string; taken: Iterable<string> }
+): NoteRecord => {
+	const folderPath = input.folderPath ?? '';
+	// As `saveNoteBody`: the row holds what its file will.
+	const body = withoutNul(input.body ?? '');
+	const title = input.title === undefined ? deriveTitle({ body }) : withoutNul(input.title);
+	const id = input.id ?? crypto.randomUUID();
+	const now = input.createdAt ?? Date.now();
+	return {
+		id,
+		connectionId: input.connectionId,
+		path: joinPath(folderPath, uniqueFilename(title, input.taken)),
+		title,
+		body,
+		frontmatter: writeFrontmatter(null, {
+			id,
+			// Only pin a title in frontmatter when the user actually chose one.
+			// Writing "Untitled" here would stop the first heading from ever
+			// naming the note.
+			...(input.title === undefined ? {} : { title }),
+			created: new Date(now).toISOString(),
+			updated: new Date(now).toISOString(),
+		}),
+		tags: [],
+		contentHash: '',
+		dirty: 1,
+		deletedLocally: 0,
+		createdAt: now,
+		updatedAt: now,
+		...(input.editorMode === undefined ? {} : { editorMode: input.editorMode }),
+	};
+};
+
+/**
+ * A new note that is not stored: what the app shows when a note is begun, and
+ * keeps only in memory until the user edits it (`createNote` then stores it, as
+ * it is). A note nobody wrote anything in is not a note — stored, it would be
+ * an "Untitled" file in the user's folder for every notebook they opened and
+ * every `+` they pressed, synced to every device they own.
+ *
+ * Clean, because nothing about it is owed to the remote yet: the row in the
+ * list carries no "not yet synced" mark for a note that does not exist.
+ */
+export const draftNote = (input: {
+	connectionId: string;
+	folderPath: string;
+	/** The names already in the folder, so it is shown as it would be stored. */
+	taken: Iterable<string>;
+}): NoteRecord => ({ ...begunNote(input), dirty: 0 });
+
+/**
  * Create a note. This is a user action, so the note starts dirty and will be
- * pushed on the next sync.
+ * pushed on the next sync. A note begun in the app is stored here only at the
+ * user's first edit to it (`draftNote`); that edit is the action.
+ *
+ * Nothing is awaited before the transaction opens, and that is relied on: a
+ * draft is stored from the keystroke that edits it, and the save of that
+ * keystroke, made later, must reach IndexedDB after the note it is saved into.
+ * IndexedDB runs transactions over the same store in the order they were
+ * opened.
  */
 export const createNote = async (
 	db: NotesDatabase,
 	input: CreateNoteInput = {}
-): Promise<NoteRecord> => {
-	const folderPath = input.folderPath ?? '';
-	// As `saveNoteBody`: the row holds what its file will.
-	const body = withoutNul(input.body ?? '');
-	const now = Date.now();
-
+): Promise<NoteRecord> =>
 	// One transaction, for the same reason `applyEdit` is one: the filename is
 	// chosen from the names already taken, and the digest between that read and
 	// the `add` is long enough for a second "New note" click to choose the very
 	// same name. Two rows at one path is one file on the remote and a note lost.
-	return db.transaction(
-		'rw',
-		db.notes,
-		db.folders,
-		db.opQueue,
-		db.syncState,
-		db.prefs,
-		async () => {
-			const connectionId = input.connectionId ?? (await activeConnectionId(db));
-			const title =
-				input.title === undefined ? deriveTitle({ body }) : withoutNul(input.title);
-			const filename = uniqueFilename(
-				title,
-				await takenNamesIn(db, connectionId, folderPath)
-			);
-			const path = joinPath(folderPath, filename);
-			const id = crypto.randomUUID();
+	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+		const connectionId = input.connectionId ?? (await activeConnectionId(db));
+		const folderPath = input.folderPath ?? '';
+		const record = begunNote({
+			...input,
+			connectionId,
+			taken: await takenNamesIn(db, connectionId, folderPath),
+		});
 
-			const record: NoteRecord = {
-				id,
-				connectionId,
-				path,
-				title,
-				body,
-				frontmatter: writeFrontmatter(null, {
-					id,
-					// Only pin a title in frontmatter when the user actually chose one.
-					// Writing "Untitled" here would stop the first heading from ever
-					// naming the note.
-					...(input.title === undefined ? {} : { title }),
-					created: new Date(now).toISOString(),
-					updated: new Date(now).toISOString(),
-				}),
-				tags: [],
-				contentHash: '',
-				dirty: 1,
-				deletedLocally: 0,
-				createdAt: now,
-				updatedAt: now,
-			};
+		const source = noteFileContents(record);
+		const withHash: NoteRecord = {
+			...record,
+			source,
+			contentHash: await Dexie.waitFor(contentHash(source)),
+		};
 
-			const source = noteFileContents(record);
-			const withHash: NoteRecord = {
-				...record,
-				source,
-				contentHash: await Dexie.waitFor(contentHash(source)),
-			};
-
-			if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
-			await db.notes.add(withHash);
-			await queueWrite(db, withHash);
-			return withHash;
-		}
-	);
-};
+		if (folderPath !== '') await ensureFolder(db, folderPath, { connectionId });
+		await db.notes.add(withHash);
+		await queueWrite(db, withHash);
+		return withHash;
+	});
 
 /**
  * A note's key: the source named, or the one showing, and its id within it.

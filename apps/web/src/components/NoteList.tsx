@@ -50,6 +50,12 @@ export interface NoteListProps {
 	/** Which of these rows is the one in the air, if any. */
 	movingNoteId?: string;
 	/**
+	 * The row for a note begun and not stored yet (`draftNote`). It cannot be
+	 * dragged or deleted: there is nothing yet to move, and leaving it unedited
+	 * is what deleting it would do.
+	 */
+	unsavedNoteId?: string | undefined;
+	/**
 	 * What a right-click on a note's row offers: the note's own menu
 	 * (`noteMenuItems`), about that note. Without it the browser's menu opens.
 	 */
@@ -220,6 +226,7 @@ export const NoteList = ({
 	onPickUpNote,
 	onCancelMove,
 	movingNoteId,
+	unsavedNoteId,
 	menuFor,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
@@ -256,34 +263,37 @@ export const NoteList = ({
 
 			{notes !== undefined && notes.length > 0 && (
 				<ul>
-					{notes.map((note) => (
-						<NoteRow
-							key={note.id}
-							note={note}
-							selected={note.id === selectedNoteId}
-							onSelect={() => {
-								onSelectNote(note.id);
-							}}
-							meta={editedAt(note.updatedAt)}
-							detail={<Preview note={note} />}
-							onPickUp={
-								onPickUpNote === undefined
-									? undefined
-									: () => {
-											onPickUpNote(note);
-										}
-							}
-							onCancelMove={onCancelMove}
-							moving={note.id === movingNoteId}
-							{...(menuFor === undefined
-								? {}
-								: {
-										onMenu: (at: MenuPoint) => {
-											setMenu({ note, at });
-										},
-									})}
-						/>
-					))}
+					{notes.map((note) => {
+						const stored = note.id !== unsavedNoteId;
+						return (
+							<NoteRow
+								key={note.id}
+								note={note}
+								selected={note.id === selectedNoteId}
+								onSelect={() => {
+									onSelectNote(note.id);
+								}}
+								meta={editedAt(note.updatedAt)}
+								detail={<Preview note={note} />}
+								onPickUp={
+									onPickUpNote === undefined || !stored
+										? undefined
+										: () => {
+												onPickUpNote(note);
+											}
+								}
+								onCancelMove={onCancelMove}
+								moving={note.id === movingNoteId}
+								{...(menuFor === undefined || !stored
+									? {}
+									: {
+											onMenu: (at: MenuPoint) => {
+												setMenu({ note, at });
+											},
+										})}
+							/>
+						);
+					})}
 				</ul>
 			)}
 

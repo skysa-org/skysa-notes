@@ -89,17 +89,6 @@ describe('a notebook the app opens by itself', () => {
 
 		await showing('Kept');
 	});
-
-	it('opens a note that arrives in it while it is showing', async () => {
-		// What a first import filling a source looks like from here.
-		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await openApp();
-		await screen.findByRole('heading', { name: 'Work' });
-
-		await noteAt('Work', 'Arrived', 1_000);
-
-		await showing('Arrived');
-	});
 });
 
 describe('where the user was, on this device', () => {
