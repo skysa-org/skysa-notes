@@ -200,6 +200,63 @@ Running an instance for other people, two things to know:
 
 Pricing verified 2026-09; check Cloudflare's own pages before relying on it.
 
+## Your own brand
+
+The app builds as "Notes", in gray, with generic icons and the system's fonts.
+To give your instance its own name and look, write a `brand.json` of your own,
+outside this repository, and point `NOTES_BRAND` at it when you build:
+
+```bash
+NOTES_BRAND="$PWD/../my-brand/brand.json" pnpm run deploy
+```
+
+```jsonc
+{
+	"$schema": "<path to this repo>/apps/web/brand/brand.schema.json",
+	"name": "Acme Notes",
+	"shortName": "Acme Notes", // under a home-screen icon: 12 characters at most
+	"description": "Acme's notes, in your own storage.",
+	"colors": {
+		"light": { "brand": "#B91C1C", "onBrand": "#FFFFFF", "theme": "#FFFFFF" },
+		"dark": { "brand": "#F87171", "onBrand": "#1F2937", "theme": "#111827" },
+		"background": "#FFFFFF",
+	},
+	"icons": "icons", // a folder beside this file
+	"fonts": {
+		// optional: either, both or neither
+		"sans": {
+			"family": "Inter",
+			"files": [
+				{ "src": "fonts/inter-latin-400.woff2", "weight": 400, "unicodeRange": "U+0000-00FF" },
+				{ "src": "fonts/inter-latin-700.woff2", "weight": 700, "unicodeRange": "U+0000-00FF" },
+			],
+		},
+	},
+}
+```
+
+(The file itself is plain JSON; the comments are only for this page.)
+
+- `brand` fills buttons and colours links, `onBrand` is the text on it, and
+  `theme` colours the browser's and the installed app's title bar. Pick
+  `brand` and `onBrand` with enough contrast between them, and `brand`
+  against the page, in each theme.
+- The icon folder holds six PNGs at these names and sizes: `favicon-16x16.png`,
+  `favicon-32x32.png`, `apple-touch-icon.png` (180), `pwa-192x192.png`,
+  `pwa-512x512.png` and `pwa-maskable-512x512.png`, which keeps its artwork
+  inside the central 80% circle. To put the default artwork on your own
+  colour, see `apps/web/brand/recolour.mjs`.
+- Fonts are `.woff2` files served from your instance, never from a font CDN,
+  which the Content-Security-Policy would refuse.
+- A relative `NOTES_BRAND` is resolved from the directory the build runs in;
+  an absolute path avoids the question.
+
+The build stops with the file and the problem if anything in it is wrong.
+The brand changes what people see and nothing about their data: the folder in
+their storage and the app's local database keep their names, so changing the
+brand later keeps every connected library. On names and marks, see
+[`TRADEMARK.md`](../TRADEMARK.md).
+
 ## Restricting who can sync
 
 By default every account that connects may sync. To choose which ones, give

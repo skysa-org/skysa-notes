@@ -9,8 +9,8 @@ project goes by:
 
 - **Skysa**
 - **skysa-notes**
-- the app's logo and wordmark, and the app icons shipped with it
-  (`apps/web/public/`)
+- the Skysa logo and wordmark, and the Skysa Notes app icons (the curled page
+  on Skysa blue)
 - names close enough to be confused with these (`Skysa Notes Pro`,
   `skysanotes`, `skysa-notes-plus`, …)
 
@@ -33,6 +33,16 @@ name.
   you received under AGPL-3.0. Renaming them is not required, and nothing here
   asks you to. This is about what a *user* sees: the app's own name, its icons,
   and how you describe it.
+
+## The default brand
+
+The app as this repository builds it is called **Notes**, in gray, with the
+curled-page icons on that gray (`apps/web/brand/`). None of that is a mark this
+policy claims: it is part of the code you received, and you may ship it as it
+is. To give your instance its own name, colours, icons and fonts, set
+`NOTES_BRAND` when you build (`docs/self-hosting.md`, "Your own brand"); that
+is how the project's own hosted service, Skysa Notes, gets its name and look,
+so a deployment never has to edit the code to rebrand.
 
 ## What needs a different name
 

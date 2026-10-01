@@ -1,5 +1,7 @@
 import { type ManifestOptions, type VitePWAOptions } from 'vite-plugin-pwa';
 
+import { type Brand } from './brand.js';
+
 /**
  * The PWA configuration, kept out of `vite.config.ts` so it can be tested.
  *
@@ -16,12 +18,15 @@ import { type ManifestOptions, type VitePWAOptions } from 'vite-plugin-pwa';
 const PROVIDER_ORIGINS =
 	/^https:\/\/(www\.googleapis\.com|graph\.microsoft\.com|[a-z]+\.dropboxapi\.com|(?:[a-z0-9-]+\.)+files\.1drv\.com|my\.microsoftpersonalcontent\.com|(?:[a-z0-9-]+\.)+sharepoint\.com)\//;
 
-export const PWA_MANIFEST: Partial<ManifestOptions> = {
-	name: 'Skysa Notes',
-	short_name: 'Notes',
-	description: 'Local-first markdown notes that sync to your own cloud storage.',
-	theme_color: '#111827',
-	background_color: '#ffffff',
+/** The manifest, named and coloured by the brand (`brand.ts`). */
+export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
+	name: brand.name,
+	short_name: brand.shortName,
+	description: brand.description,
+	// One value only: the manifest has no dark variant. The page's two
+	// `theme-color` tags take over once it is open.
+	theme_color: brand.colors.light.theme,
+	background_color: brand.colors.background,
 	display: 'standalone',
 	start_url: '/',
 	scope: '/',
@@ -35,7 +40,7 @@ export const PWA_MANIFEST: Partial<ManifestOptions> = {
 			purpose: 'maskable',
 		},
 	],
-};
+});
 
 export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 	globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
@@ -68,7 +73,7 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 	],
 };
 
-export const PWA_OPTIONS: Partial<VitePWAOptions> = {
+export const pwaOptions = (brand: Brand): Partial<VitePWAOptions> => ({
 	// A new build never swaps itself in underneath a half-written note.
 	registerType: 'prompt',
 	// Registered by `UpdatePrompt` through `virtual:pwa-register/react`, never
@@ -78,9 +83,10 @@ export const PWA_OPTIONS: Partial<VitePWAOptions> = {
 	// The service worker runs in dev too: this app boots from IndexedDB and is
 	// meant to be exercised offline while it is being built.
 	devOptions: { enabled: true, type: 'module' },
-	// No `includeAssets`: the glob below already matches every icon. (The plugin
+	// No `includeAssets`: the glob below already matches every icon, which
+	// `brand.ts` writes into the build beside the app. (The plugin
 	// still injects the manifest's own icons, so the build's entry count reads a
 	// little higher than the number of distinct files; Workbox caches each once.)
-	manifest: PWA_MANIFEST,
+	manifest: pwaManifest(brand),
 	workbox: PWA_WORKBOX,
-};
+});
