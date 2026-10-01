@@ -169,6 +169,23 @@ describe('the compact bar', () => {
 		expect(screen.queryByRole('region', { name: 'Sources' })).toBeNull();
 	});
 
+	it('tells each panel where its trigger is, to open out of and shut back into', async () => {
+		widths = elementWidths({ '.compact-bar': 500, ".compact-picker[data-pane='notes']": 120 });
+		await openApp(500);
+
+		// jsdom puts every box at the left edge, so what is measured here is
+		// the trigger's width, as its distance from the bar's right edge.
+		expect(shell().style.getPropertyValue('--notes-left')).toBe('0px');
+		expect(shell().style.getPropertyValue('--notes-right')).toBe('380px');
+
+		// And measured again when the bar's width changes, before a panel can
+		// open out of where its trigger used to be.
+		act(() => {
+			widths?.resize('.compact-bar', 600);
+		});
+		expect(shell().style.getPropertyValue('--notes-right')).toBe('480px');
+	});
+
 	it('swaps one dropdown for the other rather than stacking them', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();

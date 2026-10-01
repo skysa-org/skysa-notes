@@ -874,8 +874,16 @@ const Home = () => {
 	 * dropdowns in the bar and the note takes the rest (`CompactBar`); `panel`
 	 * is which of them is open, and `searchOpen` whether the search has the bar.
 	 */
-	const { compact, panel, setPanel, searchOpen, setSearchOpen, frameClassName, shellProps } =
-		useCompactLayout();
+	const {
+		compact,
+		panel,
+		setPanel,
+		searchOpen,
+		setSearchOpen,
+		setOrigins,
+		frameClassName,
+		shellProps,
+	} = useCompactLayout();
 	useBegunInView(place.begun, setPanel);
 	// The answers hang from the field, over whatever else is open; a dropdown
 	// left open under them would be a second list behind the first.
@@ -1321,6 +1329,7 @@ const Home = () => {
 					searchOpen={searchOpen}
 					onSearchOpen={setSearchOpen}
 					fieldRef={searchField}
+					onOrigins={setOrigins}
 				/>
 			) : (
 				<SourceTabs
