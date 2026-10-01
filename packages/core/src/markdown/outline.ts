@@ -5,10 +5,8 @@ import { parse } from './pipeline.js';
 /**
  * A note's headings, in the order they appear: what an outline is drawn from.
  *
- * This is a parse, not a pass over the string like `previewLines`, and the
- * choice is the opposite one for the opposite reason. A preview runs over every
- * note on screen at typing speed, so it cannot afford a parse; an outline is one
- * note, redrawn when that note changes, so it cannot afford to be *wrong*. The
+ * This is a parse, as `previewLines` now is too: an outline is one note, redrawn
+ * when that note changes, so it cannot afford to be *wrong*. The
  * cheap version of this — a regular expression for `^#{1,6} ` — reads the `#` in
  * a fenced shell script as a heading, and an outline that invents sections out
  * of code comments is worse than no outline. So it reads the same markdown the

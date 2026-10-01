@@ -57,6 +57,21 @@ describe('NoteList', () => {
 		expect(preview.textContent).toBe('turn the heap every second week');
 	});
 
+	it('shows the words the rich editor shows, and none of the syntax around them', () => {
+		renderList({
+			notes: [
+				note(
+					'Alpha',
+					'# Alpha\n\nA **bold** plan, a [link](https://example.com) and `code`.\n\n- [ ] a task\n'
+				),
+			],
+		});
+
+		expect(screen.getByText(/bold plan/).textContent).toBe(
+			'A bold plan, a link and code. a task'
+		);
+	});
+
 	it('keeps the first line when the note does not open with its title', () => {
 		// This body is what Milkdown writes when the user presses Enter at the
 		// very start of a note (pinned in tests/rich.test.ts). Dropping the first

@@ -1,8 +1,9 @@
-import { previewLines, ROOT } from '@skysa/core';
+import { ROOT } from '@skysa/core';
 import { type ReactNode, useState } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
 import { folderLabel } from '../store/tree.js';
+import { openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 
@@ -103,15 +104,13 @@ const placeholderFor = ({
 /**
  * Whether a line is the note's title written out again.
  *
- * Emphasis is ignored on both sides. The title is derived from the *parsed*
- * heading, so `# **Alpha**` gives a title of "Alpha" while the line still reads
- * `**Alpha**` — the same heading, spelled two ways, and comparing them
- * character for character would print it twice.
- *
- * Both sides, because the parse removes only the characters that *were*
- * emphasis and leaves the rest: a title of `setup_guide` keeps its underscore,
- * so stripping the line alone left "setupguide" against "setup_guide" and the
- * heading was printed twice after all.
+ * The line is parsed text, and a title derived from a heading is too, so the
+ * two usually agree as they stand. Emphasis characters are still ignored on
+ * both sides, for a title that was *written* rather than derived — `title:` in
+ * frontmatter, spelled `**Alpha**` above a `# Alpha` — and on both sides
+ * because the parse removes only the characters that were emphasis: a title of
+ * `setup_guide` keeps its underscore, and stripping one side alone would leave
+ * "setupguide" against "setup_guide" and print the heading twice.
  */
 const bare = (text: string): string => text.replaceAll(/[*_`]/g, '').trim();
 
@@ -120,8 +119,9 @@ const isTitle = (line: string | undefined, title: string): boolean =>
 
 /**
  * The note's opening, after its title. `previewLines` decides what a readable
- * line is — the same rule the search excerpt is cut by — and the title is
- * dropped from the front of them so the row does not say it twice.
+ * line is — the visible text, as the rich editor shows it, and the same rule
+ * the search excerpt is cut by — and the title is dropped from the front of
+ * them so the row does not say it twice.
  *
  * Dropped by *identity*, not by position. Taking the first line on the
  * assumption that it is the heading was wrong in both directions: a note
@@ -132,7 +132,7 @@ const isTitle = (line: string | undefined, title: string): boolean =>
  * displaying is the question actually being asked.
  */
 const preview = (body: string, title: string): string => {
-	const lines = previewLines(body);
+	const lines = openingLines(body);
 	const opening = isTitle(lines[0], title) ? lines.slice(1) : lines;
 	const text = opening.join(' ');
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;

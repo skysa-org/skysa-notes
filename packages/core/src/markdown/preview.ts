@@ -1,133 +1,116 @@
+import type { Paragraph, PhrasingContent, RootContent } from 'mdast';
+
+import { parse } from './pipeline.js';
+
 /**
- * A note's body as the lines a list can show: no line-leading markdown, no blank
- * lines, and not the break the editor writes for an empty paragraph.
+ * A note's body as the lines a list can show: the text the rich editor puts on
+ * screen, with none of the markdown that put it there.
  *
- * What it removes is what a *line* is made of and not what a sentence is:
- * heading hashes, quote carets, bullets and list numbers, task checkboxes,
- * thematic breaks and setext underlines, and a line that is only a `<br />`.
- * Everything else survives — emphasis keeps its asterisks, a link keeps its
- * brackets and its URL, a table keeps its pipes, and a line inside a fenced code
- * block keeps every marker it has, because inside a fence none of them is
- * markdown. Its indentation does not survive — whitespace is collapsed there as
- * everywhere else, this being one line of grey text and not a listing.
+ * Heading hashes, quote carets, bullets and list numbers, task checkboxes, and
+ * thematic breaks all go. So does inline syntax: `**bold**` reads "bold", and a
+ * link reads as its words without its URL. A code block keeps every character it
+ * holds, because inside one nothing is markdown, and that is also what the
+ * editor shows there. Whitespace is collapsed throughout, this being one line of
+ * grey text and not a listing.
  *
- * This is not a renderer and must not become one. It is what the note list's
- * preview and the search excerpt are built from, and both run over every note
- * on screen at typing speed — so it is a pass over a string, not a parse.
+ * It is what the note list's preview and the search excerpt are both cut from,
+ * so neither can find different words in a note than the other.
  *
- * The honest alternative was measured rather than guessed at: `parse` from the
- * pipeline, with `mdast-util-to-string` over the top-level nodes, is the same
- * markdown the editor reads and gets every case right. It also costs about a
- * millisecond for a 300-word note — about 52 ms for the fifty-one excerpts a
- * search can ask for. Cached per `contentHash` that would be the cost of opening
- * a search rather than of every letter, but it is still the wrong price for a
- * line of grey text, and it grows with the note: 10.6 ms each for a 3000-word
- * one. So the cheap pass stays, and its limits are written down (docs/ARCHITECTURE.md
- * §7).
+ * **It is a parse, and that reverses what this module used to be (2026-10-01).**
+ * It was a pass over the string, removing only what a *line* is made of, because
+ * the parse was measured at about a millisecond for a 300-word note and judged
+ * the wrong price for a line of grey text. A preview full of asterisks, brackets
+ * and URLs was the cost of that, and it was the wrong one: the rich editor shows
+ * none of them, so the list described a different note from the one beside it.
+ * The price is paid once per body rather than per render — the app memoises it
+ * (`apps/web/src/store/visibleText.ts`) and gives the list only a note's opening
+ * to parse (docs/ARCHITECTURE.md §7).
  *
- * What it is lossy about, deliberately: inline syntax is left alone. `**bold**`
- * keeps its asterisks and a link keeps its brackets and its URL, because
- * removing those without a parser means guessing at the user's own punctuation.
- * Two smaller things go the same way — a marker is stripped once, so `> > deep`
- * reads as `> deep`, and a lone `=` line is read as a setext underline wherever
- * it is. The bias runs one way throughout: when in doubt, *show* the characters.
- * A preview with a little syntax in it is a smaller wrong than one that has
- * quietly deleted a word the user wrote.
+ * Reading the same markdown the editor reads is also what retires the guesses a
+ * pass over the string had to make about the user's punctuation. A `#hashtag`,
+ * a hyphen inside a sentence and a `1984` that opens one are text because the
+ * parser says so, not because a regular expression was careful.
  */
 
 /**
- * What only means something at the start of a line: heading hashes, quote
- * carets, bullets, and the numbers of an ordered list. `1.` and `1)` are both
- * ordered lists to CommonMark.
+ * The break Milkdown writes for an empty paragraph, which is the one thing in a
+ * note the user did not type. Markdown has no way to say "a blank paragraph
+ * here", so the editor writes an HTML break and reads it back
+ * (docs/ARCHITECTURE.md §7), and it must not be what the user reads in a list.
  *
- * A task checkbox goes with the list marker carrying it, and only there — GFM
- * has task lists in list items and nowhere else, so `# [x] done already` is a
- * heading about a checkbox rather than a checked one.
+ * Only a block that is nothing else, which is the only shape Milkdown writes. A
+ * `<br>` in the middle of a sentence is the user's own text — in prose, or in a
+ * note about HTML — and is kept, as are two in a row, which nothing but a person
+ * writes.
  */
-const BLOCK_MARKER = /^\s*(?:(?:#{1,6}|>+)\s+|(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)/;
+const EDITOR_BREAK = /^\s*<br\s*\/?>\s*$/i;
 
-/**
- * A line that is only a thematic break, or the underline of a setext heading:
- * three or more of `-`, `*` or `_`, or a run of `=`. It is punctuation standing
- * for a rule across the page, and a rule reads as line noise in a preview.
- */
-const RULE = /^\s*(?:(?:[-*_]\s*){3,}|=+)\s*$/;
+/** What a run of inline content looks like on screen. */
+const inline = (node: PhrasingContent): string => {
+	switch (node.type) {
+		// Inline html is shown as written, as the rich editor shows it: an atom
+		// holding the tag.
+		case 'text':
+		case 'inlineCode':
+		case 'html':
+			return node.value;
+		case 'break':
+			return '\n';
+		case 'image':
+		case 'imageReference':
+			return node.alt ?? '';
+		// The rich editor cannot show a footnote at all, and sends the note to raw
+		// mode (§7) — where this is what is on screen.
+		case 'footnoteReference':
+			return `[^${node.label ?? node.identifier}]`;
+		case 'emphasis':
+		case 'strong':
+		case 'delete':
+		case 'link':
+		case 'linkReference':
+			return node.children.map(inline).join('');
+		default:
+			return '';
+	}
+};
 
-/**
- * A line that is nothing but the break Milkdown writes for an empty paragraph.
- * Markdown cannot say "a blank paragraph here" — blank lines are separators, not
- * content — so the editor writes an HTML break and reads it back (docs/ARCHITECTURE.md
- * §7). It is the one thing in a note the user did not type, which is exactly why
- * it must not be the thing they read in a list.
- *
- * A *whole line*, and not the tag wherever it appears, because the two are not
- * the same thing at all. Milkdown only ever writes it alone on its line, while a
- * `<br>` in the middle of a sentence is the user's own text — in prose, in
- * `` `<br>` `` in a note about HTML — and deleting that is the failure this
- * module exists to avoid. Matching the tag anywhere turned "She wrote `<br>` in
- * her HTML lesson" into "She wrote in her HTML lesson", which is precisely the
- * quiet deletion the comment below promises not to do.
- *
- * One of them, too. Milkdown writes exactly one per line, so a line holding
- * two is a line somebody typed, and the same argument applies to it.
- *
- * Removed here and nowhere else: the file keeps it, because stripping it on
- * save would delete a `<br />` that came from the user's own document.
- */
-const BREAK_LINE = /^\s*<br\s*\/?>\s*$/i;
+const isEditorBreak = (paragraph: Paragraph): boolean => {
+	const [only, ...rest] = paragraph.children;
+	return rest.length === 0 && only?.type === 'html' && EDITOR_BREAK.test(only.value);
+};
 
-/**
- * The line that opens or closes a fenced code block, with whatever language sits
- * on the end of it.
- *
- * Splitting the body on these is what tells inside from outside without keeping
- * any state: the pieces alternate, starting outside, so a piece's position says
- * which it is. A fence that is never closed leaves its piece "inside", and the
- * rest of the note is then shown with its syntax intact — which is the right way
- * for this to fail, since showing a character is always the smaller wrong.
- *
- * A backtick fence's info string cannot itself contain a backtick, which is what
- * `[^`\r\n]` is for: without it a paragraph opening with an inline code span —
- * "``` ``` is inline here" — reads as a fence, so the line is dropped *and* the
- * parity flips and the rest of the note is read as code. And the newlines in
- * that class are load-bearing: `[^`]` matches them, and the regular expression
- * then swallows the whole document as a single fence line.
- */
-const FENCE_LINE = /^[ \t]*(?:`{3,}[^`\r\n]*|~{3,}.*)$/m;
+/** The lines a block puts on screen, before whitespace is collapsed. */
+const blockLines = (node: RootContent): string[] => {
+	switch (node.type) {
+		case 'paragraph':
+			return isEditorBreak(node) ? [] : node.children.map(inline).join('').split('\n');
+		case 'heading':
+			return node.children.map(inline).join('').split('\n');
+		case 'code':
+			return node.value.split('\n');
+		case 'html':
+			return EDITOR_BREAK.test(node.value) ? [] : node.value.split('\n');
+		case 'table':
+			return node.children.map((row) =>
+				row.children.map((cell) => cell.children.map(inline).join('')).join(' ')
+			);
+		case 'blockquote':
+		case 'list':
+		case 'listItem':
+		case 'footnoteDefinition':
+			return node.children.flatMap(blockLines);
+		// A thematic break, a link definition: nothing a reader sees as words.
+		default:
+			return [];
+	}
+};
 
-/** All three line endings, with the ones holding nothing dropped. */
-const linesOf = (text: string): string[] =>
-	text.split(/\r\n|\n|\r/).filter((line) => line.trim() !== '');
-
-const readable = (line: string): string =>
-	// Whole-line shapes are recognised before the markers are stripped, not
-	// after: `* * *` and `- - -` are thematic breaks whose first two characters
-	// are also a bullet, and stripping the bullet first leaves too little to
-	// recognise.
-	RULE.test(line) || BREAK_LINE.test(line)
-		? ''
-		: line.replace(BLOCK_MARKER, '').replace(/\s+/g, ' ').trim();
-
-/**
- * The readable lines of a body, in order: markers gone, whitespace collapsed,
- * blank lines dropped.
- *
- * A line inside a fence keeps its markers — though not its indentation, which
- * is collapsed like all other whitespace. Every rule here is about
- * markdown, and inside a fence there is no markdown: a `# comment` in a shell
- * example is a comment, a `---` in a YAML sample is a document separator, and a
- * `<br />` in an HTML example is the thing being written about. Stripping those
- * is the same failure as deleting a `<br>` from a sentence, and it was the last
- * place this module still did it.
- */
+/** The readable lines of a body, in order, whitespace collapsed and blanks dropped. */
 export const previewLines = (body: string): string[] =>
-	body.split(FENCE_LINE).flatMap((piece, index) =>
-		index % 2 === 0
-			? linesOf(piece)
-					.map(readable)
-					.filter((line) => line !== '')
-			: linesOf(piece).map((line) => line.replace(/\s+/g, ' ').trim())
-	);
+	parse(body)
+		.children.flatMap(blockLines)
+		.map((line) => line.replace(/\s+/g, ' ').trim())
+		.filter((line) => line !== '');
 
 /**
  * One line of readable text for the whole body, which is what an excerpt is cut

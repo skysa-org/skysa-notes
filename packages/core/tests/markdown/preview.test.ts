@@ -4,8 +4,8 @@ import { previewLines, previewText } from '../../src/markdown/preview.js';
 
 /**
  * What a note list and a search excerpt are allowed to show. The rule these all
- * serve: nothing on screen that the user did not type, and nothing removed that
- * they did.
+ * serve: the words the rich editor puts on screen, none of the markdown that put
+ * them there, and nothing removed that the user wrote.
  */
 
 describe('the readable lines of a body', () => {
@@ -66,7 +66,8 @@ describe('the break the editor writes for an empty paragraph', () => {
 		expect(previewText('She wrote <br> in her HTML lesson\n')).toBe(
 			'She wrote <br> in her HTML lesson'
 		);
-		expect(previewText('Use `<br>` for a line break\n')).toBe('Use `<br>` for a line break');
+		// Code reads as its text, which is what the editor shows.
+		expect(previewText('Use `<br>` for a line break\n')).toBe('Use <br> for a line break');
 	});
 
 	it('does not touch a word that merely contains the letters', () => {
@@ -77,16 +78,57 @@ describe('the break the editor writes for an empty paragraph', () => {
 	});
 });
 
-describe('what it is deliberately lossy about', () => {
+describe('inline syntax', () => {
 	/**
-	 * Inline syntax stays. Removing it without a parser means guessing at the
-	 * user's own punctuation, and a preview showing a little syntax is a smaller
-	 * wrong than one quietly deleting a word.
+	 * Gone, as it is in the rich editor. Until 2026-10-01 it stayed, because
+	 * removing it without a parser meant guessing at the user's punctuation; it
+	 * is a parse now, so nothing is guessed.
 	 */
-	it('leaves emphasis and links as written', () => {
-		expect(previewText('a **bold** word and a [link](https://example.com)\n')).toBe(
-			'a **bold** word and a [link](https://example.com)'
+	it('reads emphasis, strikethrough and code as their words', () => {
+		expect(previewText('a **bold**, *slanted*, ~~struck~~ and `coded` word\n')).toBe(
+			'a bold, slanted, struck and coded word'
 		);
+	});
+
+	it('reads a link as its words, without its URL', () => {
+		expect(previewText('a [link](https://example.com) and <https://bare.example>\n')).toBe(
+			'a link and https://bare.example'
+		);
+	});
+
+	it('reads a reference link as its words, and its definition as nothing', () => {
+		expect(previewLines('see [the docs][docs]\n\n[docs]: https://example.com\n')).toEqual([
+			'see the docs',
+		]);
+	});
+
+	it('reads an image as what it says it shows', () => {
+		expect(previewText('before ![a heap of compost](heap.png) after\n')).toBe(
+			'before a heap of compost after'
+		);
+	});
+
+	it('keeps punctuation the user escaped, and reads an entity as its character', () => {
+		expect(previewText('\\*not emphasis\\* &amp; 2 \\< 3\n')).toBe('*not emphasis* & 2 < 3');
+	});
+
+	it('reads a hard break as the end of a line', () => {
+		expect(previewLines('line one\\\nline two\n')).toEqual(['line one', 'line two']);
+	});
+
+	it('reads a table a row at a time', () => {
+		expect(previewLines('| Fruit | Count |\n| --- | --- |\n| **Apples** | 3 |\n')).toEqual([
+			'Fruit Count',
+			'Apples 3',
+		]);
+	});
+
+	it('keeps a block of HTML as written, which is how the editor shows one', () => {
+		expect(previewLines('<details>\n<summary>More</summary>\n</details>\n')).toEqual([
+			'<details>',
+			'<summary>More</summary>',
+			'</details>',
+		]);
 	});
 });
 
@@ -113,7 +155,7 @@ describe('a list is still a list', () => {
 
 	it('leaves brackets that are not a checkbox', () => {
 		expect(previewLines('- [a link](https://example.com) to follow\n')).toEqual([
-			'[a link](https://example.com) to follow',
+			'a link to follow',
 		]);
 	});
 });
@@ -144,10 +186,10 @@ describe('a fenced code block is not markdown', () => {
 
 	it('does not read a paragraph opening with an inline code span as a fence', () => {
 		// A backtick fence's info string cannot contain a backtick, so this is a
-		// paragraph. Reading it as a fence lost the line *and* flipped the
-		// parity, so the rest of the note was read as code.
+		// paragraph. Reading it as a fence lost the line *and* read the rest of
+		// the note as code, back when this was a pass over the string.
 		expect(previewLines('```code``` is inline here\n\n# heading\n')).toEqual([
-			'```code``` is inline here',
+			'code is inline here',
 			'heading',
 		]);
 	});
@@ -167,8 +209,8 @@ describe('a fenced code block is not markdown', () => {
 	});
 
 	it('shows the rest of the note as written when a fence is never closed', () => {
-		// The wrong way to fail would be to strip it; showing a character is
-		// always the smaller wrong.
+		// CommonMark runs an unclosed fence to the end of the document, and the
+		// editor shows it that way too.
 		expect(previewLines('intro\n\n```\n# still open\n- and so is this\n')).toEqual([
 			'intro',
 			'# still open',
