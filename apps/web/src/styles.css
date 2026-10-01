@@ -907,7 +907,8 @@ button.icon:disabled {
 	padding: 0;
 }
 
-button.row {
+button.row,
+.row-editing {
 	display: flex;
 	flex-direction: column;
 	gap: 0.15rem;
@@ -922,7 +923,8 @@ button.row {
 	cursor: pointer;
 }
 
-.tree button.row {
+.tree button.row,
+.tree .row-editing {
 	flex-direction: row;
 	align-items: center;
 	justify-content: space-between;
@@ -934,7 +936,8 @@ button.row {
 	}
 }
 
-button.row.selected {
+button.row.selected,
+.row-editing.selected {
 	background: color-mix(in srgb, var(--fg) 11%, transparent);
 	font-weight: 600;
 }
@@ -994,20 +997,17 @@ button.danger {
 	color: var(--bad);
 }
 
-/* A name being typed takes the row's own box, so it does not move as it
-   becomes editable — the same shape the source tabs use. `button.row` is
-   button-scoped, so the box is spelled out again here rather than shared. */
+/* A name being typed is drawn as the row it is in — `button.row`'s rules are
+   its rules too, highlight and count and all — and the field takes the name's
+   place and no more, so nothing moves as it becomes editable. */
 .row-editing {
-	display: block;
-	box-sizing: border-box;
-	width: 100%;
-	padding: var(--row-block) var(--gutter);
 	cursor: text;
 }
 
 .row-rename {
 	display: block;
-	width: 100%;
+	flex: 1 1 0;
+	min-width: 0;
 	margin: 0;
 	padding: 0;
 	font: inherit;
@@ -2985,12 +2985,14 @@ button.danger {
 	}
 
 	/* Rows: the notebooks, the notes, the sources, the answers to a search. */
-	button.row {
+	button.row,
+	.row-editing {
 		justify-content: center;
 		min-height: var(--tap);
 	}
 
-	.tree button.row {
+	.tree button.row,
+	.tree .row-editing {
 		justify-content: space-between;
 	}
 
