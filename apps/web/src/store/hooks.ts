@@ -13,6 +13,7 @@ import {
 	type SyncStateRecord,
 } from './db.js';
 import { folderTree } from './folders.js';
+import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
 import { getCodeDisplay, getDefaultEditorMode, setCodeDisplay } from './prefs.js';
 import { createNoteSearch, type NoteHit } from './search.js';
@@ -125,6 +126,59 @@ export const useNote = (id: string | undefined): NoteRecord | undefined => {
 		return note?.deletedLocally === 1 ? undefined : note;
 	}, [id, connectionId]);
 };
+
+/**
+ * Where the user was in a source, on this device (`store/lastOpen.ts`).
+ * `undefined` until it has been read, for this source: a value read for the
+ * source showing a moment ago is another source's place.
+ */
+export const useLastOpen = (connectionId: string | undefined): LastOpen | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined
+				? undefined
+				: { connectionId, lastOpen: await getLastOpen(db, connectionId) },
+		[connectionId]
+	);
+	return result?.connectionId === connectionId ? result?.lastOpen : undefined;
+};
+
+export interface NoteToOpen {
+	/** What was asked about, so an answer to an earlier question can be told apart. */
+	readonly folder: string;
+	readonly open: string | undefined;
+	/** The note that should be open, or `null` for an empty notebook. */
+	readonly pick: string | null;
+}
+
+/**
+ * Which note should be open in the notebook showing (`pickNote`). Live, so a
+ * note arriving in an empty notebook — a first import filling it, a sync — is
+ * opened as it lands, and the open note going — deleted here, in another tab,
+ * on another device — is followed by the next one along.
+ *
+ * `undefined` while there is no notebook, while the source or its remembered
+ * place is still being read, and until the store has answered.
+ */
+export const useNoteToOpen = ({
+	connectionId,
+	folder,
+	open,
+	remembered,
+	ready,
+}: {
+	connectionId: string | undefined;
+	folder: string | undefined;
+	open: string | undefined;
+	remembered: string | undefined;
+	/** The remembered place has been read; until then `remembered` means nothing. */
+	ready: boolean;
+}): NoteToOpen | undefined =>
+	useLiveQuery(async () => {
+		if (connectionId === undefined || folder === undefined || !ready) return undefined;
+		const pick = await pickNote(db, { connectionId, folderPath: folder, open, remembered });
+		return { folder, open, pick };
+	}, [connectionId, folder, open, remembered, ready]);
 
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>

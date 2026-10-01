@@ -8,7 +8,7 @@ import {
 	ROOT,
 } from '@skysa/core';
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
@@ -22,7 +22,12 @@ import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
 import { NoteList } from '../components/NoteList.js';
 import { noteMenuItems } from '../components/noteMenu.js';
-import { type DisplacedText, NoteView, type NoteViewHandle } from '../components/NoteView.js';
+import {
+	type DisplacedText,
+	type NoteDraft,
+	NoteView,
+	type NoteViewHandle,
+} from '../components/NoteView.js';
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
@@ -46,21 +51,33 @@ import {
 	renameFolder,
 } from '../store/folders.js';
 import {
+	type NoteToOpen,
 	useActiveConnectionId,
 	useActiveSource,
 	useClaimingConnection,
 	useFolderTree,
 	useHeldImport,
+	useLastOpen,
 	useLooseNoteCount,
 	useNote,
 	useNoteSearch,
 	useNotesInFolder,
+	useNoteToOpen,
 	useSources,
 } from '../store/hooks.js';
 import { keeping } from '../store/keeping.js';
-import { createNote, listNotes, moveNote, saveNoteBody, undeleteNote } from '../store/notes.js';
+import { type LastOpen, noteIsUnder, pickNote, rememberOpen } from '../store/lastOpen.js';
+import { createLiveEdits } from '../store/liveEdits.js';
+import {
+	createNote,
+	draftNote,
+	moveNote,
+	saveNoteBody,
+	setNoteEditorMode,
+	undeleteNote,
+} from '../store/notes.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
-import { selectedFolderPath } from '../store/tree.js';
+import { type FolderNode, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
 	type AppSearch,
@@ -72,8 +89,9 @@ import {
 
 /**
  * The app. Which folder and note are open lives in the URL rather than in
- * component state, so reloading, going back, or reopening the PWA lands the user
- * where they were.
+ * component state, so reloading or following a link lands the user where it
+ * says; and on the device (`store/lastOpen.ts`), so reopening the PWA at its
+ * start URL, or showing a source again, lands them where they were.
  */
 
 /**
@@ -390,8 +408,400 @@ const useConnectNotice = (
 	return { connectNotice, dismissConnect };
 };
 
+/**
+ * Whether the notebook and note in the URL were chosen in another source than
+ * the one showing — true from the moment the source changes until they have
+ * been taken out of the URL.
+ *
+ * Each source is its own notebooks and its own notes (§6), so a path or an id
+ * from one names nothing in another, or worse, names something: a notebook
+ * called "Inbox" in both would open the new source's "Inbox", not where the
+ * user last was in it. So the URL is emptied of both when the source changes,
+ * however it changed — a tab, a search answer in another source, a connect,
+ * a disconnect — and the source's remembered place takes over.
+ *
+ * The first source known is the one the URL was opened in. A URL naming
+ * nothing belongs to whichever source is showing.
+ */
+const useUrlFromElsewhere = (
+	activeConnection: string | undefined,
+	search: Pick<AppSearch, 'folder' | 'note'>
+): boolean => {
+	const navigate = useNavigate({ from: Route.fullPath });
+	const [urlSource, setUrlSource] = useState<string | undefined>(undefined);
+	const placed = search.folder !== undefined || search.note !== undefined;
+	const elsewhere =
+		urlSource !== undefined && activeConnection !== undefined && urlSource !== activeConnection;
+	// In render rather than an effect (React's "adjusting state when a prop
+	// changes"), so that no render reads the URL as the wrong source's.
+	if (
+		activeConnection !== undefined &&
+		urlSource !== activeConnection &&
+		(urlSource === undefined || !placed)
+	) {
+		setUrlSource(activeConnection);
+	}
+	useEffect(() => {
+		if (!elsewhere) return;
+		void navigate({
+			search: ({ folder: _folder, note: _note, ...rest }) => rest,
+			replace: true,
+		});
+	}, [elsewhere, navigate]);
+	return elsewhere;
+};
+
+/** The remembered notebook as `selectedFolderPath` takes it: `null` for none. */
+const rememberedFolder = (lastOpen: LastOpen | undefined): string | null | undefined =>
+	lastOpen === undefined ? undefined : (lastOpen.folder ?? null);
+
+/**
+ * Keep the device's memory of where the user is (`store/lastOpen.ts`) in step
+ * with what is open: the notebook, and the note while it is one of that
+ * notebook's. Written only once the memory has been read, so a place is never
+ * remembered over one that was about to be restored.
+ */
+const useRememberOpen = ({
+	connectionId,
+	folder,
+	noteId,
+	openNote,
+	lastOpen,
+}: {
+	connectionId: string | undefined;
+	folder: string | undefined;
+	noteId: string | undefined;
+	openNote: NoteRecord | undefined;
+	lastOpen: LastOpen | undefined;
+}) => {
+	// The note in the URL, by id: `useNote` keeps the note it last found while
+	// it looks for the next one, and that one is not open.
+	const note =
+		openNote !== undefined &&
+		openNote.id === noteId &&
+		folder !== undefined &&
+		noteIsUnder(openNote.path, folder)
+			? openNote.id
+			: undefined;
+	useEffect(() => {
+		if (connectionId === undefined || folder === undefined || lastOpen === undefined) return;
+		const known =
+			lastOpen.folder === folder && (note === undefined || lastOpen.notes[folder] === note);
+		if (known) return;
+		void rememberOpen(db, connectionId, folder, note);
+	}, [connectionId, folder, note, lastOpen]);
+};
+
+/**
+ * The note begun and not yet stored, if one is open (`draftNote`), and what the
+ * note pane may do with it (`NoteDraft`).
+ *
+ * In memory and nowhere else until the user edits it: a keystroke in its body
+ * or a name given to it stores it, as it is, and from then on it is a note like
+ * any other. Left unedited it simply stops being open, and nothing was written
+ * — not to the device, and so not to the user's folder either.
+ */
+const useDrafts = ({
+	connectionId,
+	noteId,
+	storedNote,
+	onStoreFailed,
+}: {
+	connectionId: string | undefined;
+	noteId: string | undefined;
+	/** The stored note the URL names, which a draft becomes once it is stored. */
+	storedNote: NoteRecord | undefined;
+	onStoreFailed: () => void;
+}) => {
+	const [draft, setDraft] = useState<NoteRecord | null>(null);
+	/** Each draft is stored once, however many edits ask. */
+	const storing = useRef(new Map<string, Promise<boolean>>());
+
+	// Stored, and a note now: let it go, in render rather than an effect, so no
+	// render shows the draft over its own row.
+	if (draft !== null && storedNote?.id === draft.id) setDraft(null);
+
+	const open =
+		draft !== null && draft.id === noteId && draft.connectionId === connectionId
+			? draft
+			: undefined;
+
+	/** Begin a note in `folderPath`, beside notes already called `taken`. */
+	const begin = useCallback(
+		(folderPath: string, taken: readonly string[]): NoteRecord | undefined => {
+			if (connectionId === undefined) return undefined;
+			const made = draftNote({ connectionId, folderPath, taken });
+			setDraft(made);
+			return made;
+		},
+		[connectionId]
+	);
+
+	const store = useCallback(
+		(note: NoteRecord): Promise<boolean> => {
+			const known = storing.current.get(note.id);
+			if (known !== undefined) return known;
+			const stored = createNote(db, {
+				connectionId: note.connectionId,
+				folderPath: parentPath(note.path),
+				id: note.id,
+				createdAt: note.createdAt,
+				...(note.editorMode === undefined ? {} : { editorMode: note.editorMode }),
+			}).then(
+				(created) => {
+					// A note in the device's own library exists nowhere else, and
+					// the user has just written in it: the moment the browser can
+					// be asked to keep it, prompt and all, once per device
+					// (`store/keeping.ts`).
+					if (created.connectionId === LOCAL_CONNECTION_ID) {
+						void keeping.ask(db, 'first-note');
+					}
+					return true;
+				},
+				() => {
+					onStoreFailed();
+					return false;
+				}
+			);
+			storing.current.set(note.id, stored);
+			return stored;
+		},
+		[onStoreFailed]
+	);
+
+	const noteDraft = useMemo((): NoteDraft | undefined => {
+		if (open === undefined) return undefined;
+		return {
+			store: () => store(open),
+			setMode: (mode) => {
+				setDraft((current) =>
+					current?.id === open.id ? { ...current, editorMode: mode } : current
+				);
+				// An edit may have begun storing it with the mode it had.
+				void storing.current.get(open.id)?.then((stored) =>
+					stored
+						? setNoteEditorMode(db, open.id, mode, {
+								connectionId: open.connectionId,
+							})
+						: undefined
+				);
+			},
+		};
+	}, [open, store]);
+
+	return { draft, open, begin, noteDraft };
+};
+
+/**
+ * Which notebook and note are open.
+ *
+ * The notebook is the URL's, else the one open last on this device, else the
+ * first (`selectedFolderPath`). The note is the URL's while it is there to
+ * show, else the one open last in that notebook, else the notebook's first
+ * (`pickNote`) — and that answer is written to the URL, so the note list, the
+ * editor and a reload all agree on it. A notebook with no notes in it starts
+ * one (`useDrafts`), unless it is the loose notes, where the app makes none
+ * (§12.6), or `startable` says notes are still arriving.
+ *
+ * One path for every way a notebook comes to be showing: clicked, restored at
+ * start, fallen back to after a delete, or a source's first notebook as a
+ * first import fills it. Opening a note used to follow a click on a notebook
+ * and nothing else, so a notebook the app opened by itself showed a list
+ * beside an empty pane.
+ */
+const useOpenPlace = ({
+	search,
+	activeConnection,
+	tree,
+	looseNoteCount,
+	startable,
+	onStoreFailed,
+}: {
+	search: AppSearch;
+	activeConnection: string | undefined;
+	tree: FolderNode[] | undefined;
+	looseNoteCount: number | undefined;
+	/**
+	 * Whether an empty notebook may start a note. Not while a source's first
+	 * import is filling it: the notebook is empty only because its notes have
+	 * not arrived yet.
+	 */
+	startable: boolean;
+	onStoreFailed: () => void;
+}) => {
+	const navigate = useNavigate({ from: Route.fullPath });
+	const elsewhere = useUrlFromElsewhere(activeConnection, search);
+	const requestedFolder = elsewhere ? undefined : search.folder;
+	const noteId = elsewhere ? undefined : search.note;
+	const lastOpen = useLastOpen(activeConnection);
+	const folder = selectedFolderPath(
+		tree,
+		folderFromSearch(requestedFolder),
+		looseNoteCount,
+		rememberedFolder(lastOpen)
+	);
+	const remembered = folder === undefined ? undefined : lastOpen?.notes[folder];
+	const toOpen = useNoteToOpen({
+		connectionId: activeConnection,
+		folder,
+		open: noteId,
+		remembered,
+		ready: lastOpen !== undefined && !elsewhere,
+	});
+
+	const found = useNote(noteId);
+	// By id: `useNote` keeps the note it last found while it looks for the next.
+	const storedNote = found?.id === noteId ? found : undefined;
+	const drafts = useDrafts({
+		connectionId: activeConnection,
+		noteId,
+		storedNote,
+		onStoreFailed,
+	});
+	const { draft, begin } = drafts;
+	const begun = drafts.open;
+
+	useEffect(() => {
+		// A note begun is open, though it is not in the store to be found.
+		if (begun !== undefined || activeConnection === undefined) return undefined;
+		// The note the URL names is there to show, so there is nothing to choose
+		// (`pickNote` answers the same). Asked here, not left to that answer: it
+		// can be one worked out while the note was still begun and not stored —
+		// when the notebook's remembered note was the answer — and arrive after
+		// the note it was about has been stored.
+		if (storedNote?.deletedLocally === 0) return undefined;
+		// An answer to the question as it stands, not to one asked a click ago.
+		if (toOpen === undefined || toOpen.folder !== folder || toOpen.open !== noteId) {
+			return undefined;
+		}
+		const show = (pick: string | undefined) => {
+			if (pick === noteId) return;
+			void navigate({
+				// And only onto the URL it was worked out from: the user may have
+				// clicked somewhere else while the store was answering.
+				search: (current) =>
+					current.folder === requestedFolder && current.note === noteId
+						? { ...current, folder: folderToSearch(toOpen.folder), note: pick }
+						: current,
+				replace: true,
+			});
+		};
+		if (!beginsHere(toOpen, startable)) {
+			show(toOpen.pick ?? undefined);
+			return undefined;
+		}
+		// One already begun here and left is the same blank page, so it is
+		// opened again rather than another made beside it.
+		const blank = () =>
+			draft !== null &&
+			draft.connectionId === activeConnection &&
+			parentPath(draft.path) === toOpen.folder
+				? draft
+				: begin(toOpen.folder, []);
+		// Empty by a read that may already be behind: an undo or a pull can put
+		// a note in the notebook between that read and this, and a note opened
+		// over it would hide the one that arrived. So the store is asked again,
+		// now, and nothing is opened for a question that has moved on meanwhile.
+		const asking = { current: true };
+		void pickNote(db, {
+			connectionId: activeConnection,
+			folderPath: toOpen.folder,
+			open: noteId,
+			remembered,
+		}).then((again) => {
+			if (asking.current) show(again ?? blank()?.id);
+		});
+		return () => {
+			asking.current = false;
+		};
+	}, [
+		toOpen,
+		folder,
+		noteId,
+		requestedFolder,
+		remembered,
+		navigate,
+		begun,
+		storedNote,
+		startable,
+		draft,
+		activeConnection,
+		begin,
+	]);
+
+	useRememberOpen({
+		connectionId: activeConnection,
+		folder,
+		noteId,
+		openNote: storedNote,
+		lastOpen,
+	});
+
+	return {
+		folder,
+		noteId,
+		/** The note open: stored, or begun and not yet. */
+		openNote: storedNote ?? begun,
+		storedNote,
+		begun,
+		begin,
+		noteDraft: drafts.noteDraft,
+	};
+};
+
+/**
+ * Whether the store's answer is a notebook with nothing in it, where
+ * `useOpenPlace` begins a note: not the loose notes, which the app never adds
+ * to, and not while `startable` says notes are still arriving.
+ */
+const beginsHere = ({ folder, pick }: NoteToOpen, startable: boolean): boolean =>
+	pick === null && startable && folder !== ROOT;
+
+/**
+ * Whether an empty notebook may begin a note (`useOpenPlace`): once the source
+ * is known, and not while its first import is still bringing its notes in.
+ */
+const canBegin = (
+	source: SyncStateRecord | null | undefined,
+	held: SyncStateRecord | undefined
+): boolean => source !== undefined && source?.importing === undefined && held === undefined;
+
+/**
+ * The open notebook's notes, and the note begun in it at the top, as the
+ * newest, though the store has no row for it yet.
+ */
+const useListedNotes = (folder: string | undefined, begun: NoteRecord | undefined) => {
+	const stored = useNotesInFolder(folder);
+	const notes = useMemo(
+		() =>
+			stored === undefined ||
+			begun === undefined ||
+			parentPath(begun.path) !== folder ||
+			stored.some((note) => note.id === begun.id)
+				? stored
+				: [begun, ...stored],
+		[stored, begun, folder]
+	);
+	return { stored, notes, unsavedNoteId: begun?.id };
+};
+
+/**
+ * A note begun is named next, and the cursor goes to its name, so in a compact
+ * window it is the note that shows and not a dropdown over it. Choosing a
+ * notebook or pressing `+` shut the dropdown already; making a notebook —
+ * always one with nothing in it — and deleting a notebook's last note did not,
+ * and left the cursor in a field nobody could see.
+ */
+const useBegunInView = (begun: NoteRecord | undefined, shut: (panel: null) => void) => {
+	const id = begun?.id;
+	useEffect(() => {
+		if (id !== undefined) shut(null);
+	}, [id, shut]);
+};
+
 const Home = () => {
-	const { folder: requestedFolder, note: noteId, connect, code } = Route.useSearch();
+	const search = Route.useSearch();
+	const { connect, code } = search;
 	const navigate = useNavigate({ from: Route.fullPath });
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -405,12 +815,33 @@ const Home = () => {
 	const sources = useSources();
 	const tree = useFolderTree();
 	const looseNoteCount = useLooseNoteCount();
-	// Derived rather than written back to the URL: the URL records the user's
-	// choice, and opening the first notebook is a default, not a choice. Writing
-	// it would also mean redirecting from an effect on the very first render.
-	const folder = selectedFolderPath(tree, folderFromSearch(requestedFolder), looseNoteCount);
-	const notes = useNotesInFolder(folder);
-	const openNote = useNote(noteId);
+
+	/**
+	 * Why the last thing the user asked for did not happen. Creating a notebook
+	 * or a note can reject — a duplicate name is the everyday case — and by then
+	 * the name field has closed and the click is over, so without somewhere to
+	 * put this the user acts and the app shows nothing at all.
+	 */
+	const [problem, setProblem] = useState<Notice | null>(null);
+	/** What is typed into the open note before it is saved, for the list to show. */
+	const [liveEdits] = useState(createLiveEdits);
+	// Rarer than a duplicate notebook name — this one needs the store itself to
+	// refuse — but the same silence if it happens: the user types into a note
+	// that is nowhere, and the failure goes to the console.
+	const noteNotMade = useCallback(() => {
+		setProblem({ message: 'That note could not be made.', tone: 'error' });
+	}, []);
+
+	const place = useOpenPlace({
+		search,
+		activeConnection,
+		tree,
+		looseNoteCount,
+		startable: canBegin(source, held),
+		onStoreFailed: noteNotMade,
+	});
+	const { folder, noteId, openNote, storedNote } = place;
+	const { stored, notes, unsavedNoteId } = useListedNotes(folder, place.begun);
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
 	const noteView = useRef<NoteViewHandle>(null);
@@ -443,8 +874,17 @@ const Home = () => {
 	 * dropdowns in the bar and the note takes the rest (`CompactBar`); `panel`
 	 * is which of them is open, and `searchOpen` whether the search has the bar.
 	 */
-	const { compact, panel, setPanel, searchOpen, setSearchOpen, frameClassName, shellProps } =
-		useCompactLayout();
+	const {
+		compact,
+		panel,
+		setPanel,
+		searchOpen,
+		setSearchOpen,
+		setOrigins,
+		frameClassName,
+		shellProps,
+	} = useCompactLayout();
+	useBegunInView(place.begun, setPanel);
 	// The answers hang from the field, over whatever else is open; a dropdown
 	// left open under them would be a second list behind the first.
 	const onQuery = (next: string) => {
@@ -460,14 +900,6 @@ const Home = () => {
 	 */
 	const searchField = useRef<HTMLInputElement>(null);
 
-	/**
-	 * Why the last thing the user asked for did not happen. Creating a notebook
-	 * or a note can reject — a duplicate name is the everyday case — and by then
-	 * the name field has closed and the click is over, so without somewhere to
-	 * put this the user acts and the app shows nothing at all.
-	 */
-	const [problem, setProblem] = useState<Notice | null>(null);
-
 	const select = (next: Partial<AppSearch>) => {
 		// Anything else the user does answers the banner: it is about the name they
 		// just tried, not about the app, and leaving it up means a message about a
@@ -480,50 +912,19 @@ const Home = () => {
 	/**
 	 * Open a notebook. Only a note under the open notebook can be open, so the
 	 * note showing stays only while it is under the one clicked — in it, or in
-	 * a notebook inside it, at any depth. Clicking a parent of the note's own
-	 * notebook used to clear it and leave an empty editor beside a list, which
-	 * was the reported bug. Anywhere else, the notebook's most recent note is
-	 * opened instead, so a notebook with notes in it is never a blank pane.
-	 *
-	 * The root is not a notebook: its row lists what sits loose in it, and a
-	 * note in any notebook is under the root without being one of those.
-	 *
-	 * The notebook switches at once and the note follows once the store has
-	 * answered, rather than the click waiting on a read. The follow-up looks at
-	 * the URL as it is by then, not as it was at the click: the user may have
-	 * clicked another notebook, or a note, in between, and the note this click
-	 * found belongs to neither of those choices.
+	 * a notebook inside it, at any depth (`noteIsUnder`). Clicking a parent of
+	 * the note's own notebook used to clear it and leave an empty editor beside
+	 * a list, which was the reported bug. Anywhere else the note is let go, and
+	 * the notebook's own opens in its place (`useOpenPlace`): the one open last
+	 * in it on this device, or its first.
 	 */
 	const openFolder = (path: string) => {
-		const keep =
-			openNote !== undefined &&
-			(path === ROOT ? parentPath(openNote.path) === ROOT : isWithin(openNote.path, path));
-		if (keep) {
-			select({ folder: folderToSearch(path) });
-			return;
-		}
-		openFirstNoteIn(path);
-	};
-
-	/**
-	 * Show `path` with nothing open, then open its most recent note once the
-	 * store has said which that is. Used by a click on a notebook the open
-	 * note is not in, and by a delete, which is the other way a notebook comes
-	 * to be showing with nothing open beside a list with something in it.
-	 */
-	const openFirstNoteIn = (path: string) => {
-		const wanted = folderToSearch(path);
-		select({ folder: wanted, note: undefined });
-		void listNotes(db, { folderPath: path }).then(([first]) => {
-			if (first === undefined) return;
-			void navigate({
-				search: (current) =>
-					current.folder === wanted && current.note === undefined
-						? { ...current, note: first.id }
-						: current,
-				replace: true,
-			});
-		});
+		const keep = openNote !== undefined && noteIsUnder(openNote.path, path);
+		select(
+			keep
+				? { folder: folderToSearch(path) }
+				: { folder: folderToSearch(path), note: undefined }
+		);
 	};
 
 	/**
@@ -540,16 +941,18 @@ const Home = () => {
 		// bar goes back to its dropdowns rather than staying a search.
 		setSearchOpen(false);
 		setPanel(null);
-		const go = () => {
-			select({ folder: folderToSearch(parentPath(note.path)), note: note.id });
-		};
 		if (note.connectionId === activeConnection) {
-			go();
+			select({ folder: folderToSearch(parentPath(note.path)), note: note.id });
 			return;
 		}
-		void showConnection(db, note.connectionId).then((shown) => {
-			if (shown) go();
-		});
+		// Another source: the URL is emptied as the source changes
+		// (`useUrlFromElsewhere`), so the way to arrive somewhere in it is to be
+		// remembered there first.
+		setProblem(null);
+		dismissConnect();
+		void rememberOpen(db, note.connectionId, parentPath(note.path), note.id).then(() =>
+			showConnection(db, note.connectionId)
+		);
 	};
 
 	/**
@@ -629,27 +1032,19 @@ const Home = () => {
 			});
 	};
 
+	/**
+	 * Begin a note in the open notebook: on screen, named "Untitled" with the
+	 * name selected, and stored only once the user writes in it (`useDrafts`).
+	 */
 	const onCreateNote = () => {
 		// The root holds loose notes that arrived from the remote folder; the app
 		// does not add to them (docs/ARCHITECTURE.md §12.6).
 		if (folder === undefined || folder === ROOT) return;
-		setProblem(null);
-		void createNote(db, { folderPath: folder })
-			.then((created) => {
-				select({ note: created.id });
-				// A note in the device's own library exists nowhere else, and this
-				// was a click: the moment the browser can be asked to keep it,
-				// prompt and all, once per device (`store/keeping.ts`).
-				if (created.connectionId === LOCAL_CONNECTION_ID) {
-					void keeping.ask(db, 'first-note');
-				}
-			})
-			// Rarer than a duplicate notebook name — this one needs the store
-			// itself to refuse — but the same silence if it happens: the button
-			// does nothing and the failure goes to the console.
-			.catch(() => {
-				setProblem({ message: 'That note could not be made.', tone: 'error' });
-			});
+		const made = place.begin(
+			folder,
+			(stored ?? []).map((note) => basename(note.path))
+		);
+		if (made !== undefined) select({ folder: folderToSearch(folder), note: made.id });
 	};
 
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
@@ -659,7 +1054,7 @@ const Home = () => {
 		setProblem(null);
 		void createFolder(db, { parentPath, name })
 			.then((created) => {
-				select({ folder: folderToSearch(created.path) });
+				openFolder(created.path);
 			})
 			.catch((error: unknown) => {
 				setProblem(
@@ -899,7 +1294,8 @@ const Home = () => {
 		},
 	});
 
-	const noteMove = useNoteMove(openNote, moving, pickUp);
+	// A note begun and not stored has nowhere to move from yet.
+	const noteMove = useNoteMove(storedNote, moving, pickUp);
 	useKeepOnInstall();
 
 	useShortcuts();
@@ -922,6 +1318,7 @@ const Home = () => {
 				<CompactBar
 					folder={folder}
 					note={openNote}
+					liveEdits={liveEdits}
 					panel={panel}
 					onPanel={setPanel}
 					query={query}
@@ -932,6 +1329,7 @@ const Home = () => {
 					searchOpen={searchOpen}
 					onSearchOpen={setSearchOpen}
 					fieldRef={searchField}
+					onOrigins={setOrigins}
 				/>
 			) : (
 				<SourceTabs
@@ -1028,6 +1426,8 @@ const Home = () => {
 					}}
 					onCancelMove={cancelMove}
 					movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
+					unsavedNoteId={unsavedNoteId}
+					liveEdits={liveEdits}
 					// The note's own menu, about the note right-clicked, which
 					// need not be the one open. Delete goes through the note pane,
 					// which holds what autosave has not stored yet.
@@ -1054,6 +1454,8 @@ const Home = () => {
 				<NoteView
 					ref={noteView}
 					note={openNote}
+					draft={place.noteDraft}
+					liveEdits={liveEdits}
 					{...noteMove}
 					{...emptyPaneOffers({
 						folder,
@@ -1061,20 +1463,12 @@ const Home = () => {
 						onCreateNote,
 						onCreateNotebook: askNewNotebook,
 					})}
+					// The next note along follows by itself: a tombstone is not a note
+					// to show, so the one open last in the notebook, or its first,
+					// takes its place (`useOpenPlace`).
 					onDeleted={(note, displaced) => {
 						setDeleted(note);
 						setBeside(displaced ?? null);
-						// The delete waits for what autosave had out, and the user
-						// may have opened another note by the time it is done.
-						if (noteIdRef.current !== note.id) return;
-						// The next note along rather than an empty pane, while the
-						// notebook has one: the tombstone is in the row by now, so
-						// the read leaves the deleted note out.
-						if (folder === undefined) {
-							select({ note: undefined });
-							return;
-						}
-						openFirstNoteIn(folder);
 					}}
 				/>
 			</div>

@@ -1,7 +1,9 @@
+import { EditorView } from '@codemirror/view';
 import { frontmatterIsEditable, headings, type StructuralDifference } from '@skysa/core';
 import {
 	type Ref,
 	useCallback,
+	useDeferredValue,
 	useEffect,
 	useImperativeHandle,
 	useMemo,
@@ -20,6 +22,7 @@ import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { beforeClosing } from '../store/heldEdits.js';
 import { useDefaultEditorMode } from '../store/hooks.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import {
 	deleteNote,
 	getNote,
@@ -93,8 +96,33 @@ export interface NoteViewProps {
 	 * nothing anywhere to select is a dead end.
 	 */
 	onCreateNotebook?: () => void;
+	/**
+	 * Given while `note` is a draft: begun, on screen, and stored nowhere until
+	 * it is edited (`draftNote`). Leaving it unedited leaves nothing behind.
+	 */
+	draft?: NoteDraft | undefined;
+	/**
+	 * Where what is typed is said before it is saved, so the note list can show
+	 * it as it is typed (`store/liveEdits.ts`). Without it nothing else on
+	 * screen hears of an edit until autosave has stored it.
+	 */
+	liveEdits?: LiveEdits;
 	/** For the route, which offers Delete on every note in the list. */
 	ref?: Ref<NoteViewHandle>;
+}
+
+/** What the note pane can do with a note that is not stored yet. */
+export interface NoteDraft {
+	/**
+	 * Store it, as it is, because it has just been edited. Called again for the
+	 * same draft, it answers the same promise. Resolves to whether it was stored.
+	 *
+	 * It must open its write before it returns: the edit that called it is saved
+	 * after, and has to land in the note rather than find nothing there.
+	 */
+	store: () => Promise<boolean>;
+	/** The other editor, which is a way of looking at it and not an edit. */
+	setMode: (mode: EditorMode) => void;
 }
 
 /** What the note pane does for notes other than the one it shows. */
@@ -105,10 +133,35 @@ export interface NoteViewHandle {
 /**
  * `draft` is null except while the user is actually typing in the field, so a
  * title that changes underneath — a rename from sync, or a heading edit in the
- * body — shows through without any state to keep in step.
+ * body — shows through without any state to keep in step. A heading being
+ * typed into a note not named yet shows through as it is typed, as it does in
+ * the list (`shownNote`).
  */
-const TitleField = ({ note }: { note: NoteRecord }) => {
+const TitleField = ({
+	note,
+	liveEdits,
+	startFocused,
+	onRename,
+	onDone,
+}: {
+	note: NoteRecord;
+	/** Where the name is said as it is typed, for the list to show it. */
+	liveEdits: LiveEdits | undefined;
+	/**
+	 * In the field as it mounts, with the whole name selected: a note just
+	 * begun has no name yet, and naming it is the first thing to do.
+	 */
+	startFocused: boolean;
+	onRename: (title: string) => void;
+	/** Enter: the name is done, and the writing comes next. */
+	onDone: () => void;
+}) => {
 	const [draft, setDraft] = useState<string | null>(null);
+	const field = useRef<HTMLInputElement>(null);
+	// Deferred: the title a body gives is a parse of it, and the keystroke in
+	// the body comes first.
+	const shown = shownNote(note, useDeferredValue(useLiveEdit(liveEdits, note)));
+	const ref = noteRef(note);
 	// Escape has to reach `commit` through something `commit` can read
 	// synchronously. `blur()` dispatches the blur event before React has
 	// re-rendered, so `commit` runs against the render in which `draft` is still
@@ -127,23 +180,40 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 	 */
 	const keepSelection = useRef(false);
 
+	// On mount only: the field is keyed by note, and a draft that is stored as
+	// it is edited stays mounted, so this never takes the cursor back.
+	useEffect(() => {
+		const input = field.current;
+		if (!startFocused || input === null || typingElsewhere()) return;
+		input.focus();
+		input.select();
+		// The selection is made; there is no press whose release could undo it.
+		keepSelection.current = false;
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
 	const commit = () => {
 		const trimmed = draft?.trim();
 		const abandoned = cancelled.current;
 		cancelled.current = false;
 		setDraft(null);
-		if (abandoned) return;
-		if (trimmed === undefined || trimmed === '' || trimmed === note.title) return;
-		void renameNote(db, note.id, trimmed, { connectionId: note.connectionId });
+		const given =
+			!abandoned && trimmed !== undefined && trimmed !== '' && trimmed !== note.title;
+		// Said as given, trimmed, until the row has it; or let go, and the row's
+		// name is the one shown again.
+		liveEdits?.naming(ref, given ? trimmed : undefined);
+		if (given) onRename(trimmed);
 	};
 
 	return (
 		<input
+			ref={field}
 			className="note-title-input"
 			aria-label="Note title"
-			value={draft ?? note.title}
+			value={draft ?? shown.title}
 			onChange={(event) => {
 				setDraft(event.target.value);
+				liveEdits?.naming(ref, event.target.value);
 			}}
 			onFocus={(event) => {
 				if (draft !== null || !isUnnamed(note)) return;
@@ -160,13 +230,41 @@ const TitleField = ({ note }: { note: NoteRecord }) => {
 				commit();
 			}}
 			onKeyDown={(event) => {
-				if (event.key === 'Enter') event.currentTarget.blur();
+				if (event.key === 'Enter') {
+					// Kept from going any further: the editor takes the focus while
+					// the key is still down, and an Enter that followed it there
+					// would be a new paragraph at the top of the note — an edit
+					// nobody made, which stores a note nobody wrote in.
+					event.preventDefault();
+					event.currentTarget.blur();
+					onDone();
+				}
 				if (event.key === 'Escape') {
 					cancelled.current = true;
 					event.currentTarget.blur();
 				}
 			}}
 		/>
+	);
+};
+
+/**
+ * Whether the user is already typing somewhere else — the search field, the
+ * command palette, another note's text — which a note begun by the app rather
+ * than by them must not take the cursor out of. A note begins on its own a
+ * moment after a notebook opens, and a key pressed in that moment belongs where
+ * it was pressed. A button the user has just pressed — the `+`, a notebook — is
+ * not typing, and the cursor goes to the new note's name as it should.
+ */
+const typingElsewhere = (): boolean => {
+	const active = document.activeElement;
+	if (!(active instanceof HTMLElement)) return false;
+	if (active.closest('[role="dialog"]') !== null) return true;
+	if (active.isContentEditable || active instanceof HTMLTextAreaElement) return true;
+	if (active instanceof HTMLSelectElement) return true;
+	return (
+		active instanceof HTMLInputElement &&
+		!['button', 'checkbox', 'radio', 'submit', 'reset'].includes(active.type)
 	);
 };
 
@@ -371,12 +469,30 @@ const NothingOpen = ({
 	return 'Select a note.';
 };
 
+/**
+ * Put the cursor in whichever editor is open, where it was — at the start, in
+ * a note just opened. By the same lookups the outline jumps with
+ * (`Outline.tsx`). A rich editor still being built has nothing to focus yet,
+ * and is left alone.
+ */
+const focusEditor = (body: Element | null): void => {
+	const editor = body?.querySelector<HTMLElement>('.editor');
+	if (editor === null || editor === undefined) return;
+	if (editor.classList.contains('editor-raw')) {
+		EditorView.findFromDOM(editor)?.focus();
+		return;
+	}
+	editor.querySelector<HTMLElement>('.ProseMirror')?.focus();
+};
+
 export const NoteView = ({
 	note,
 	onDeleted,
 	onMove,
 	onCreateNote,
 	onCreateNotebook,
+	draft,
+	liveEdits,
 	ref: handle,
 }: NoteViewProps) => {
 	const noteId = note?.id;
@@ -411,9 +527,13 @@ export const NoteView = ({
 				base !== undefined && context?.displaced === true
 					? { ...base, displaced: true }
 					: base
-			);
+			).then((saved) => {
+				// The list shows the row again once the row has this.
+				if (ref !== undefined) liveEdits?.landed(ref, 'body', body, saved.updatedAt);
+				return saved;
+			});
 		},
-		[noteId, ref]
+		[noteId, ref, liveEdits]
 	);
 
 	const autosave = useAutosave<Edit>({
@@ -436,10 +556,39 @@ export const NoteView = ({
 
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
-			change({ body, origin, note: shown.current });
+			// Stored before the edit is held: the save that follows opens its
+			// write after this one, and so finds the note there to write into.
+			if (draft !== undefined) void draft.store();
+			const typedInto = shown.current;
+			if (typedInto !== undefined) liveEdits?.typed(noteRef(typedInto), body, origin);
+			change({ body, origin, note: typedInto });
 			edited();
 		},
-		[change, edited]
+		[change, edited, draft, liveEdits]
+	);
+
+	const rename = useCallback(
+		(title: string) => {
+			if (note === undefined) return;
+			const { id, connectionId } = note;
+			const at = noteRef(note);
+			// Shown as given until the row has it, and the row's own again if it
+			// never does.
+			const landed = (row?: NoteRecord) => {
+				liveEdits?.landed(at, 'title', title, row?.updatedAt);
+			};
+			const named = () =>
+				renameNote(db, id, title, { connectionId }).then(landed, () => {
+					landed();
+				});
+			if (draft === undefined) {
+				void named();
+				return;
+			}
+			// A name is an edit: the draft is stored, and then named.
+			void draft.store().then((stored) => (stored ? named() : landed()));
+		},
+		[draft, note, liveEdits]
 	);
 
 	/**
@@ -505,13 +654,19 @@ export const NoteView = ({
 			retry();
 			return;
 		}
+		// Nothing typed yet, so nothing to write first, and no row to remember
+		// the mode on.
+		if (draft !== undefined) {
+			draft.setMode(otherMode(mode));
+			return;
+		}
 		// Write the pending edit first: the incoming editor loads from the note
 		// record, and the mode switch itself must never be what saves — or lose —
 		// what the user typed. `rebased` flushes, and says the editor that comes
 		// next starts from the stored body rather than from what this one held.
 		rebased();
 		void setNoteEditorMode(db, noteId, otherMode(mode), { connectionId: note?.connectionId });
-	}, [rebased, mode, noteId, note?.connectionId, locked, retry]);
+	}, [rebased, mode, noteId, note?.connectionId, locked, retry, draft]);
 
 	// The element the outline shares the room of, as state rather than a ref:
 	// a note opening mounts it, and the width has to be asked of the new one.
@@ -573,6 +728,12 @@ export const NoteView = ({
 				}}
 				onDelete={onDelete}
 				onMove={onMove}
+				begun={draft !== undefined}
+				liveEdits={liveEdits}
+				onRename={rename}
+				onTitleDone={() => {
+					focusEditor(body);
+				}}
 				onUserEdit={onUserEdit}
 				onUnsupported={unsupported.report}
 				// A body from outside is on screen now. What was typed before it
@@ -666,6 +827,10 @@ const NoteScreen = ({
 	onClose,
 	onDelete,
 	onMove,
+	begun,
+	liveEdits,
+	onRename,
+	onTitleDone,
 	onUserEdit,
 	onUnsupported,
 	onAdopted,
@@ -685,6 +850,11 @@ const NoteScreen = ({
 	onClose: () => void;
 	onDelete: () => void;
 	onMove: (() => void) | undefined;
+	/** A draft: begun just now, stored nowhere yet (`NoteViewProps.draft`). */
+	begun: boolean;
+	liveEdits: LiveEdits | undefined;
+	onRename: (title: string) => void;
+	onTitleDone: () => void;
 	onUserEdit: (body: string, origin: string) => void;
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
@@ -696,7 +866,14 @@ const NoteScreen = ({
 	return (
 		<section className="note-view" aria-label="Note">
 			<header className="note-header">
-				<TitleField key={noteRef(note)} note={note} />
+				<TitleField
+					key={noteRef(note)}
+					note={note}
+					liveEdits={liveEdits}
+					startFocused={begun}
+					onRename={onRename}
+					onDone={onTitleDone}
+				/>
 				<div className="note-actions">
 					<span className="muted path" title={note.path}>
 						{note.path}
@@ -742,14 +919,18 @@ const NoteScreen = ({
 							<Icon name="outline" />
 						</button>
 					)}
-					<OptionsMenu
-						label="Note options"
-						title="Note options"
-						groupLabel={`Note “${note.title}”`}
-						triggerClassName="note-icon"
-						trigger={<Icon name="overflow" />}
-						items={noteMenuItems({ onMove, onDelete })}
-					/>
+					{/* Nothing to move or delete until there is a note: leaving a
+					    draft unedited is what deleting it would do. */}
+					{!begun && (
+						<OptionsMenu
+							label="Note options"
+							title="Note options"
+							groupLabel={`Note “${note.title}”`}
+							triggerClassName="note-icon"
+							trigger={<Icon name="overflow" />}
+							items={noteMenuItems({ onMove, onDelete })}
+						/>
+					)}
 				</div>
 			</header>
 

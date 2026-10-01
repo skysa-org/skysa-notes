@@ -1,8 +1,16 @@
 import { basename, ROOT } from '@skysa/core';
-import { type RefObject, useEffect, useState } from 'react';
+import {
+	type CSSProperties,
+	type RefObject,
+	useDeferredValue,
+	useEffect,
+	useLayoutEffect,
+	useState,
+} from 'react';
 
 import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
 import { SearchField, type SearchFieldProps } from './SearchField.js';
@@ -38,6 +46,28 @@ const SEARCH_FITS_AT = 40;
 /** Which pane is open as a dropdown. */
 export type Pane = 'sources' | 'notebooks' | 'notes';
 
+const PANES: readonly Pane[] = ['sources', 'notebooks', 'notes'];
+
+/**
+ * Where each pane's trigger sits across the bar, in pixels in from the bar's
+ * left and right edges: the strip a panel opens out of and shuts back into.
+ * The bar and the shell under it are both the frame's width, so the same
+ * numbers mark the same strip across the top of the panel.
+ */
+export type Origins = Readonly<Record<Pane, Readonly<{ left: number; right: number }>>>;
+
+/**
+ * The origins as the stylesheet reads them, on the shell the panels are in:
+ * `--notebooks-left` and the like, each panel taking its own pane's pair.
+ */
+const originStyle = (origins: Origins): CSSProperties =>
+	Object.fromEntries(
+		PANES.flatMap((pane) => [
+			[`--${pane}-left`, `${String(origins[pane].left)}px`],
+			[`--${pane}-right`, `${String(origins[pane].right)}px`],
+		])
+	);
+
 /** The element each pane is, for telling a press inside it from one outside. */
 const PANE_ELEMENT: Record<Pane, string> = {
 	sources: '.source-panel',
@@ -67,6 +97,13 @@ export const usePanel = () => {
 			const target = event.target;
 			if (!(target instanceof Element)) return;
 			if (target.closest(`${PANE_ELEMENT[panel]}, [${KEEPS_PANEL}]`) !== null) return;
+			// Not in the app at all, but over it: a menu or a dialog, drawn on
+			// the page's body (`createPortal`). Nothing outside the panel can be
+			// pressed to open one without shutting the panel first, so one that
+			// is open came from the panel — the notebook's `⋯`, a right-click
+			// on a row — and what is chosen in it, a rename or a delete, happens
+			// in the panel, which has to stay open for it. Each shuts itself.
+			if (target.closest('.app-frame') === null) return;
 			setPanel(null);
 		};
 		document.addEventListener('keydown', onKey);
@@ -90,6 +127,7 @@ export const useCompactLayout = () => {
 	const compact = useMediaQuery(COMPACT);
 	const [open, setPanel] = usePanel();
 	const [searchOpen, setSearchOpen] = useState(false);
+	const [origins, setOrigins] = useState<Origins>();
 	// Nothing is a dropdown in a wide window, and one left open there is not
 	// one to find open again when the window is next narrowed.
 	const panel = compact ? open : null;
@@ -100,8 +138,12 @@ export const useCompactLayout = () => {
 		setPanel,
 		searchOpen,
 		setSearchOpen,
+		setOrigins,
 		frameClassName: compact ? 'app-frame compact' : 'app-frame',
-		shellProps: panel === null ? {} : { 'data-panel': panel },
+		shellProps: {
+			...(panel === null ? {} : { 'data-panel': panel }),
+			...(compact && origins !== undefined ? { style: originStyle(origins) } : {}),
+		},
 	};
 };
 
@@ -129,6 +171,7 @@ const PaneTrigger = ({
 	<button
 		type="button"
 		className="compact-picker"
+		data-pane={pane}
 		{...{ [KEEPS_PANEL]: '' }}
 		aria-label={`${name}: ${value}`}
 		aria-haspopup="true"
@@ -148,6 +191,8 @@ export interface CompactBarProps {
 	folder: string | undefined;
 	/** The open note, if there is one. */
 	note: NoteRecord | undefined;
+	/** Its name as it is being typed, as the list says it (`NoteList`). */
+	liveEdits?: LiveEdits;
 	panel: Pane | null;
 	onPanel: (panel: Pane | null) => void;
 	query: string;
@@ -163,6 +208,8 @@ export interface CompactBarProps {
 	searchOpen: boolean;
 	onSearchOpen: (open: boolean) => void;
 	fieldRef: RefObject<HTMLInputElement | null>;
+	/** Where the triggers are, for the panels to open out of (`Origins`). */
+	onOrigins?: (origins: Origins) => void;
 }
 
 /**
@@ -175,6 +222,7 @@ export interface CompactBarProps {
 export const CompactBar = ({
 	folder,
 	note,
+	liveEdits,
 	panel,
 	onPanel,
 	query,
@@ -185,14 +233,37 @@ export const CompactBar = ({
 	searchOpen,
 	onSearchOpen,
 	fieldRef,
+	onOrigins,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const source = useShowingSourceName();
+	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
+	const title = note === undefined ? 'Notes' : shownNote(note, edit).title;
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);
 	const width = useElementWidth(bar);
 	const fieldFits = width !== undefined && width >= rems(SEARCH_FITS_AT);
+
+	// The triggers share the bar in equal parts whatever they say, so they move
+	// only when the bar's width does — and measured then, rather than when a
+	// panel opens, a panel never starts out of where its trigger used to be.
+	// Not while the search has the whole bar, when the triggers are not there;
+	// measured again as they come back, in case the window changed meanwhile.
+	useLayoutEffect(() => {
+		if (bar === null || onOrigins === undefined) return;
+		const trigger = (pane: Pane) => bar.querySelector(`.compact-picker[data-pane='${pane}']`);
+		const sources = trigger('sources');
+		const notebooks = trigger('notebooks');
+		const notes = trigger('notes');
+		if (sources === null || notebooks === null || notes === null) return;
+		const across = bar.getBoundingClientRect();
+		const from = (each: Element) => {
+			const box = each.getBoundingClientRect();
+			return { left: box.left - across.left, right: across.right - box.right };
+		};
+		onOrigins({ sources: from(sources), notebooks: from(notebooks), notes: from(notes) });
+	}, [bar, width, searching, onOrigins]);
 
 	// The field appears because the icon was pressed, so the cursor goes into
 	// it; a keyboard user would otherwise have to find what they just opened.
@@ -253,13 +324,7 @@ export const CompactBar = ({
 				panel={panel}
 				onPanel={onPanel}
 			/>
-			<PaneTrigger
-				pane="notes"
-				name="Note"
-				value={note?.title ?? 'Notes'}
-				panel={panel}
-				onPanel={onPanel}
-			/>
+			<PaneTrigger pane="notes" name="Note" value={title} panel={panel} onPanel={onPanel} />
 			{fieldFits ? (
 				field
 			) : (

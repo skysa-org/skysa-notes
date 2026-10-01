@@ -106,8 +106,11 @@ describe('making a notebook that cannot be made', () => {
 			const user = userEvent.setup();
 			await createFolder(db, { parentPath: undefined, name: 'Work' });
 			await openApp();
+			// Begun, which stores nothing and so cannot fail; it is made when it
+			// is first written in, and that is where the store refuses.
+			await screen.findByDisplayValue('Untitled');
 
-			await user.click(await screen.findByRole('button', { name: 'New note' }));
+			await user.keyboard('Plans{Enter}');
 
 			expect((await screen.findByRole('alert')).textContent).toContain('note');
 		} finally {

@@ -1,7 +1,7 @@
-import { previewText } from '@skysa/core';
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord, noteRef } from './db.js';
+import { visibleText } from './visibleText.js';
 
 /**
  * Full-text search over every note this device holds, in every source, and
@@ -219,7 +219,7 @@ const excerptOf = (body: string, terms: readonly string[]): Excerpt[] => {
 	// so the two never disagree about what a note says. It happens before
 	// anything is measured, so every offset the window is cut at is an offset
 	// into what the user will actually see.
-	const line = previewText(body);
+	const line = visibleText(body);
 	if (line === '') return [];
 
 	const found = matchesIn(line, terms);

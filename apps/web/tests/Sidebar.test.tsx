@@ -439,6 +439,22 @@ describe('renaming a notebook', () => {
 		expect(onRenameFolder).toHaveBeenCalledWith('work', 'Projects');
 	});
 
+	it('changes only the name: the row keeps its highlight and its count', async () => {
+		renderSidebar({ tree: counted, selectedFolder: 'work' });
+		const row = screen.getByRole('button', { name: /^work/ });
+		expect(row.classList.contains('selected')).toBe(true);
+		expect(within(row).getByText('2')).toBeDefined();
+
+		await openMenu('work');
+		await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
+
+		// jsdom draws nothing, so what is asserted is what the stylesheet reads
+		// to draw the row as it was: the highlight's class, and the count.
+		const editing = screen.getByRole('textbox', { name: 'Rename work' }).parentElement;
+		expect(editing?.classList.contains('selected')).toBe(true);
+		expect(within(editing as HTMLElement).getByText('2')).toBeDefined();
+	});
+
 	it('is abandoned by Escape, and the row comes back', async () => {
 		const onRenameFolder = vi.fn();
 		renderSidebar({ selectedFolder: 'work', onRenameFolder });

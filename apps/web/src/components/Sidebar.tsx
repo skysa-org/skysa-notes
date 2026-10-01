@@ -181,17 +181,23 @@ const destinationLabel = (
 	allowed ? `Move “${moving.name}” ${landing ?? `into ${name}`}` : `${name} — cannot go here`;
 
 /**
- * A notebook's name, being typed. The same shape the source tabs use: the field
- * takes the row's own box rather than appearing in one of its own, so the name
- * does not move when it becomes editable.
+ * A notebook's name, being typed. The same shape the source tabs use: the row
+ * stays as it was — its box, its highlight, its count — and only the name in
+ * it becomes a field, so nothing moves when it becomes editable. Not the row's
+ * own button with a field in it, which HTML does not allow, but a box drawn as
+ * the row is (`.row-editing`).
  */
 const RenameRow = ({
 	name,
 	depth,
+	selected,
+	count,
 	onDone,
 }: {
 	name: string;
 	depth: number;
+	selected: boolean;
+	count?: number;
 	/** The chosen name, or nothing at all when the rename was abandoned. */
 	onDone: (chosen?: string) => void;
 }) => {
@@ -217,7 +223,7 @@ const RenameRow = ({
 
 	return (
 		<span
-			className="row-editing"
+			className={selected ? 'row-editing selected' : 'row-editing'}
 			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
 		>
 			<input
@@ -242,6 +248,7 @@ const RenameRow = ({
 					finish(draft);
 				}}
 			/>
+			{count !== undefined && count > 0 && <span className="count">{count}</span>}
 		</span>
 	);
 };
@@ -434,6 +441,8 @@ const FolderRows = ({
 					<RenameRow
 						name={node.name}
 						depth={depth}
+						selected={node.path === selectedFolder}
+						count={node.noteCount}
 						onDone={(chosen) => {
 							onRenamed(node.path, chosen);
 						}}

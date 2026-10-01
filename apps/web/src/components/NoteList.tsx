@@ -1,14 +1,19 @@
-import { previewLines, ROOT } from '@skysa/core';
-import { type ReactNode, useState } from 'react';
+import { ROOT } from '@skysa/core';
+import { type ReactNode, useDeferredValue, useState } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
+import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { folderLabel } from '../store/tree.js';
+import { openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
- * The middle pane: the notes in the selected notebook, most recently edited
- * first.
+ * The middle pane: the notes in the selected notebook, newest first by when
+ * each was made (`listNotes`). Each row still says when its note was last
+ * edited; that is what it says, not where it sits. A row says what is being
+ * typed into its note as it is typed, not once autosave has stored it
+ * (`store/liveEdits.ts`), so the list and the editor beside it never disagree.
  *
  * It used to show a search's answers too, in place of the notebook's notes.
  * They hang from the search field now (`SearchField`), so the notebook the user
@@ -47,6 +52,14 @@ export interface NoteListProps {
 	onCancelMove?: () => void;
 	/** Which of these rows is the one in the air, if any. */
 	movingNoteId?: string;
+	/**
+	 * The row for a note begun and not stored yet (`draftNote`). It cannot be
+	 * dragged or deleted: there is nothing yet to move, and leaving it unedited
+	 * is what deleting it would do.
+	 */
+	unsavedNoteId?: string | undefined;
+	/** What is being typed into a note and not saved yet, to show in its row. */
+	liveEdits?: LiveEdits;
 	/**
 	 * What a right-click on a note's row offers: the note's own menu
 	 * (`noteMenuItems`), about that note. Without it the browser's menu opens.
@@ -102,15 +115,13 @@ const placeholderFor = ({
 /**
  * Whether a line is the note's title written out again.
  *
- * Emphasis is ignored on both sides. The title is derived from the *parsed*
- * heading, so `# **Alpha**` gives a title of "Alpha" while the line still reads
- * `**Alpha**` — the same heading, spelled two ways, and comparing them
- * character for character would print it twice.
- *
- * Both sides, because the parse removes only the characters that *were*
- * emphasis and leaves the rest: a title of `setup_guide` keeps its underscore,
- * so stripping the line alone left "setupguide" against "setup_guide" and the
- * heading was printed twice after all.
+ * The line is parsed text, and a title derived from a heading is too, so the
+ * two usually agree as they stand. Emphasis characters are still ignored on
+ * both sides, for a title that was *written* rather than derived — `title:` in
+ * frontmatter, spelled `**Alpha**` above a `# Alpha` — and on both sides
+ * because the parse removes only the characters that were emphasis: a title of
+ * `setup_guide` keeps its underscore, and stripping one side alone would leave
+ * "setupguide" against "setup_guide" and print the heading twice.
  */
 const bare = (text: string): string => text.replaceAll(/[*_`]/g, '').trim();
 
@@ -118,9 +129,19 @@ const isTitle = (line: string | undefined, title: string): boolean =>
 	line !== undefined && bare(line) === bare(title);
 
 /**
- * The note's opening, after its title. `previewLines` decides what a readable
- * line is — the same rule the search excerpt is cut by — and the title is
- * dropped from the front of them so the row does not say it twice.
+ * What stands between two lines of a note in its row. The row is one line of
+ * text, and a space there made two lines read as one sentence: "Buy milk" over
+ * "Call the bank" came out as "Buy milk Call the bank". A line is whatever the
+ * note shows as one — a paragraph, a heading, a list item, a line broken inside
+ * a paragraph (`previewLines`).
+ */
+const LINE_BREAK = ' | ';
+
+/**
+ * The note's opening, after its title, its lines kept apart (`LINE_BREAK`).
+ * `previewLines` decides what a readable line is — the visible text, as the rich editor shows it, and the same rule
+ * the search excerpt is cut by — and the title is dropped from the front of
+ * them so the row does not say it twice.
  *
  * Dropped by *identity*, not by position. Taking the first line on the
  * assumption that it is the heading was wrong in both directions: a note
@@ -130,16 +151,19 @@ const isTitle = (line: string | undefined, title: string): boolean =>
  * and the heading shown. Comparing against the title the row is already
  * displaying is the question actually being asked.
  */
-const preview = (body: string, title: string): string => {
-	const lines = previewLines(body);
+const preview = (body: string, title: string, keep: boolean): string => {
+	const lines = openingLines(body, { keep });
 	const opening = isTitle(lines[0], title) ? lines.slice(1) : lines;
-	const text = opening.join(' ');
+	const text = opening.join(LINE_BREAK);
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 };
 
-/** The opening of a note, or nothing at all when it has none to show. */
-const Preview = ({ note }: { note: NoteRecord }) => {
-	const text = preview(note.body, note.title);
+/**
+ * The opening of a note, or nothing at all when it has none to show. `typing`
+ * for a body being typed, which is read once and not kept (`visibleLines`).
+ */
+const Preview = ({ note, typing }: { note: NoteRecord; typing: boolean }) => {
+	const text = preview(note.body, note.title, !typing);
 	return text === '' ? null : <span className="note-preview">{text}</span>;
 };
 
@@ -147,10 +171,9 @@ interface NoteRowProps {
 	note: NoteRecord;
 	selected: boolean;
 	onSelect: () => void;
-	/** The line under the title: when it was edited, and for a result, where. */
+	/** The line under the title: when it was edited. */
 	meta: string;
-	/** The line under that: the note's opening, or the match in it. */
-	detail: ReactNode;
+	liveEdits: LiveEdits | undefined;
 	/** Missing where the pane was rendered without anywhere to drag a note to. */
 	onPickUp?: () => void;
 	onCancelMove?: () => void;
@@ -161,52 +184,61 @@ interface NoteRowProps {
 }
 
 const NoteRow = ({
-	note,
+	note: row,
 	selected,
 	onSelect,
 	meta,
-	detail,
+	liveEdits,
 	onPickUp,
 	onCancelMove,
 	moving,
 	onMenu,
-}: NoteRowProps) => (
-	<li>
-		<button
-			type="button"
-			className={[selected ? 'selected' : undefined, moving ? 'moving' : undefined].reduce(
-				(className, extra) => (extra === undefined ? className : `${className} ${extra}`),
-				'row'
-			)}
-			onClick={onSelect}
-			onContextMenu={(event) => {
-				if (onMenu === undefined) return;
-				event.preventDefault();
-				onMenu(menuPoint(event));
-			}}
-			aria-current={selected ? 'true' : undefined}
-			draggable={onPickUp !== undefined}
-			onDragStart={(event) => {
-				if (onPickUp === undefined) return;
-				// Firefox starts no drag without data on it, and the title is what
-				// another application receives if the note is dropped outside.
-				event.dataTransfer.effectAllowed = 'move';
-				event.dataTransfer.setData('text/plain', note.title);
-				onPickUp();
-			}}
-			onDragEnd={onCancelMove}
-		>
-			<span className="note-title">
-				{note.title}
-				{note.dirty === 1 && (
-					<span className="dot" title="Not yet synced" aria-label="Not yet synced" />
+}: NoteRowProps) => {
+	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
+	// preview is a parse.
+	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
+	return (
+		<li>
+			<button
+				type="button"
+				className={[
+					selected ? 'selected' : undefined,
+					moving ? 'moving' : undefined,
+				].reduce(
+					(className, extra) =>
+						extra === undefined ? className : `${className} ${extra}`,
+					'row'
 				)}
-			</span>
-			<span className="note-meta">{meta}</span>
-			{detail}
-		</button>
-	</li>
-);
+				onClick={onSelect}
+				onContextMenu={(event) => {
+					if (onMenu === undefined) return;
+					event.preventDefault();
+					onMenu(menuPoint(event));
+				}}
+				aria-current={selected ? 'true' : undefined}
+				draggable={onPickUp !== undefined}
+				onDragStart={(event) => {
+					if (onPickUp === undefined) return;
+					// Firefox starts no drag without data on it, and the title is what
+					// another application receives if the note is dropped outside.
+					event.dataTransfer.effectAllowed = 'move';
+					event.dataTransfer.setData('text/plain', note.title);
+					onPickUp();
+				}}
+				onDragEnd={onCancelMove}
+			>
+				<span className="note-title">
+					{note.title}
+					{note.dirty === 1 && (
+						<span className="dot" title="Not yet synced" aria-label="Not yet synced" />
+					)}
+				</span>
+				<span className="note-meta">{meta}</span>
+				<Preview note={note} typing={note.body !== row.body} />
+			</button>
+		</li>
+	);
+};
 
 export const NoteList = ({
 	notes,
@@ -219,6 +251,8 @@ export const NoteList = ({
 	onPickUpNote,
 	onCancelMove,
 	movingNoteId,
+	unsavedNoteId,
+	liveEdits,
 	menuFor,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
@@ -255,34 +289,37 @@ export const NoteList = ({
 
 			{notes !== undefined && notes.length > 0 && (
 				<ul>
-					{notes.map((note) => (
-						<NoteRow
-							key={note.id}
-							note={note}
-							selected={note.id === selectedNoteId}
-							onSelect={() => {
-								onSelectNote(note.id);
-							}}
-							meta={editedAt(note.updatedAt)}
-							detail={<Preview note={note} />}
-							onPickUp={
-								onPickUpNote === undefined
-									? undefined
-									: () => {
-											onPickUpNote(note);
-										}
-							}
-							onCancelMove={onCancelMove}
-							moving={note.id === movingNoteId}
-							{...(menuFor === undefined
-								? {}
-								: {
-										onMenu: (at: MenuPoint) => {
-											setMenu({ note, at });
-										},
-									})}
-						/>
-					))}
+					{notes.map((note) => {
+						const stored = note.id !== unsavedNoteId;
+						return (
+							<NoteRow
+								key={note.id}
+								note={note}
+								selected={note.id === selectedNoteId}
+								onSelect={() => {
+									onSelectNote(note.id);
+								}}
+								meta={editedAt(note.updatedAt)}
+								liveEdits={liveEdits}
+								onPickUp={
+									onPickUpNote === undefined || !stored
+										? undefined
+										: () => {
+												onPickUpNote(note);
+											}
+								}
+								onCancelMove={onCancelMove}
+								moving={note.id === movingNoteId}
+								{...(menuFor === undefined || !stored
+									? {}
+									: {
+											onMenu: (at: MenuPoint) => {
+												setMenu({ note, at });
+											},
+										})}
+							/>
+						);
+					})}
 				</ul>
 			)}
 

@@ -69,8 +69,10 @@ describe('the compact bar', () => {
 		await waitFor(() => {
 			expect(notebookTrigger().textContent).toBe('Home');
 		});
-		// Nothing is open until something is chosen, as in a wide window.
-		expect(noteTrigger().textContent).toBe('Notes');
+		// The notebook's newest note opens with it, as in a wide window.
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Groceries');
+		});
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 		expect(screen.queryByRole('navigation', { name: 'Sources' })).toBeNull();
 		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
@@ -167,6 +169,50 @@ describe('the compact bar', () => {
 		expect(screen.queryByRole('region', { name: 'Sources' })).toBeNull();
 	});
 
+	it('tells each panel where its trigger is, to open out of and shut back into', async () => {
+		widths = elementWidths({ '.compact-bar': 500, ".compact-picker[data-pane='notes']": 120 });
+		await openApp(500);
+
+		// jsdom puts every box at the left edge, so what is measured here is
+		// the trigger's width, as its distance from the bar's right edge.
+		expect(shell().style.getPropertyValue('--notes-left')).toBe('0px');
+		expect(shell().style.getPropertyValue('--notes-right')).toBe('380px');
+
+		// And measured again when the bar's width changes, before a panel can
+		// open out of where its trigger used to be.
+		act(() => {
+			widths?.resize('.compact-bar', 600);
+		});
+		expect(shell().style.getPropertyValue('--notes-right')).toBe('480px');
+	});
+
+	it('stays open for what is chosen from a menu drawn over it', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Home');
+		});
+
+		// The menu is drawn on the page's body, not in the panel, and so is the
+		// dialog a choice in it asks; a press on either is still not a press
+		// away from the panel.
+		await user.click(notebookTrigger());
+		await user.click(screen.getByRole('button', { name: 'Options for “Home”' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+		expect(panel()).toBe('notebooks');
+
+		await user.click(screen.getByRole('button', { name: 'Options for “Home”' }));
+		await user.click(screen.getByRole('button', { name: 'Rename' }));
+		expect(panel()).toBe('notebooks');
+		// With the cursor in it, so the new name can be typed straight away.
+		expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Rename Home' }));
+
+		fireEvent.pointerDown(screen.getByRole('region', { name: 'Note' }));
+		expect(panel()).toBeNull();
+	});
+
 	it('swaps one dropdown for the other rather than stacking them', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();
@@ -193,6 +239,45 @@ describe('the compact bar', () => {
 
 		expect(panel()).toBe('notebooks');
 		await user.click(screen.getByRole('button', { name: /Move “Groceries” into Work/ }));
+		expect(panel()).toBeNull();
+	});
+});
+
+describe('a note begun in a compact window', () => {
+	it('is what shows once a notebook is made from the dropdown, with its name to type', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+		await user.click(screen.getByRole('button', { name: 'New notebook' }));
+
+		await user.keyboard('Ideas{Enter}');
+
+		// A new notebook has nothing in it, so a note begins there and takes
+		// the cursor — which it cannot do from under the dropdown.
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Untitled');
+		});
+		expect(panel()).toBeNull();
+		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('false');
+		expect(document.activeElement).toBe(screen.getByLabelText('Note title'));
+	});
+
+	it('is what shows once the last note in the notebook is deleted from the dropdown', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Groceries');
+		});
+		await user.click(noteTrigger());
+		fireEvent.contextMenu(await screen.findByRole('button', { name: /^Groceries/ }));
+		await user.click(await screen.findByRole('button', { name: 'Delete' }));
+		expect(panel()).toBe('notes');
+
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Untitled');
+		});
 		expect(panel()).toBeNull();
 	});
 });

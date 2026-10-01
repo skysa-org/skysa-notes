@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
-import { db } from '../src/store/db.js';
+import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder, listFolders } from '../src/store/folders.js';
 import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
@@ -52,13 +52,23 @@ describe('dragging a note into a notebook', () => {
 	it('moves the file, and leaves the user reading the list it left', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Archive' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		// The app opens on the first notebook, which is `Archive`.
+		// The app opens on the first notebook, which is `Archive`, and on its
+		// newest note, which is `Agenda` — so `Minutes` is a row being read
+		// past, not the note being written in.
 		const note = await createNote(db, {
 			folderPath: 'Archive',
 			title: 'Minutes',
 			body: 'Minutes\n',
 		});
+		const agenda = await createNote(db, {
+			folderPath: 'Archive',
+			title: 'Agenda',
+			body: 'Agenda\n',
+		});
+		await db.notes.update([LOCAL_CONNECTION_ID, note.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, agenda.id], { createdAt: 2_000 });
 		await openApp();
+		await screen.findByDisplayValue('Agenda');
 
 		await dragOnto(
 			await screen.findByRole('button', { name: /Minutes/ }),

@@ -19,6 +19,7 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 	setNoteTags,
+	titleAfterEdit,
 } from '../src/store/notes.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -176,6 +177,24 @@ describe('naming an untitled note by its first heading', () => {
 		expect(edited.title).toBe('Chosen');
 		expect(edited.path).toBe('chosen.md');
 	});
+	// The note list shows it as it is typed, before it is saved, by asking
+	// `titleAfterEdit`; saved, it must be the same.
+	it.each<[string, { title?: string; first?: string }, string]>([
+		['a note begun, given a heading', {}, '# Groceries\n'],
+		['a note begun, with no heading yet', {}, 'milk\n'],
+		['a note named by its heading, the heading edited', { first: '# Plans\n' }, '# Roadmap\n'],
+		['a note named by the user', { title: 'Chosen' }, '# Something Else\n'],
+	])('is the title the list showed while it was typed: %s', async (_, { title, first }, body) => {
+		const note = await createNote(db, {
+			folderPath: 'work',
+			...(title === undefined ? {} : { title }),
+		});
+		const shown = first === undefined ? note : await saveNoteBody(db, note.id, first);
+
+		const before = titleAfterEdit(shown, body);
+
+		expect((await saveNoteBody(db, note.id, body)).title).toBe(before);
+	});
 });
 
 describe('renameNote', () => {
@@ -226,12 +245,33 @@ describe('moveNote', () => {
 });
 
 describe('listNotes', () => {
-	it('lists only live notes, newest edit first', async () => {
+	it('lists only live notes', async () => {
 		const first = await createNote(db, { title: 'First' });
 		const second = await createNote(db, { title: 'Second' });
 		await deleteNote(db, first.id);
 
 		expect((await listNotes(db)).map((n) => n.id)).toEqual([second.id]);
+	});
+
+	it('lists the newest note first, and an edit does not move one', async () => {
+		const older = await createNote(db, { title: 'Older' });
+		const newer = await createNote(db, { title: 'Newer' });
+		// Two creates can land in one millisecond, so the order is made explicit.
+		await updateNote(db, older.id, { createdAt: 1_000 });
+		await updateNote(db, newer.id, { createdAt: 2_000 });
+
+		await saveNoteBody(db, older.id, 'Edited since.\n');
+
+		expect((await listNotes(db)).map((n) => n.title)).toEqual(['Newer', 'Older']);
+	});
+
+	it('lists notes made in the same millisecond by path', async () => {
+		const zed = await createNote(db, { title: 'Zed' });
+		const alpha = await createNote(db, { title: 'Alpha' });
+		await updateNote(db, zed.id, { createdAt: 1_000 });
+		await updateNote(db, alpha.id, { createdAt: 1_000 });
+
+		expect((await listNotes(db)).map((n) => n.title)).toEqual(['Alpha', 'Zed']);
 	});
 
 	it('can be restricted to one folder', async () => {

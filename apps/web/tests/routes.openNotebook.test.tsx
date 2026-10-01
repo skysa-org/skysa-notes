@@ -64,13 +64,16 @@ describe('opening a notebook', () => {
 		const newer = await createNote(db, { folderPath: 'Work', title: 'Newer', body: 'Newer\n' });
 		// The list is most-recent first, and two creates can land in one
 		// millisecond, so the order is made explicit.
-		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { updatedAt: 1_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { updatedAt: 2_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
 		const user = userEvent.setup();
-		// The app opens the first notebook, `Archive`, with nothing in it.
+		// The app opens the first notebook, `Archive`, with nothing in it — and
+		// so begins a note there.
 		await openApp();
 		await screen.findByRole('heading', { name: 'Archive' });
-		expect(titleField()).toBeNull();
+		await waitFor(() => {
+			expect(titleField()?.value).toBe('Untitled');
+		});
 
 		await user.click(screen.getByRole('button', { name: /^Work/ }));
 
@@ -84,8 +87,8 @@ describe('opening a notebook', () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		const older = await createNote(db, { folderPath: 'Work', title: 'Older', body: 'Older\n' });
 		const newer = await createNote(db, { folderPath: 'Work', title: 'Newer', body: 'Newer\n' });
-		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { updatedAt: 1_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { updatedAt: 2_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
 		const user = userEvent.setup();
 		await openApp(`/?folder=Work&note=${older.id}`);
 		await waitFor(() => {
@@ -145,7 +148,7 @@ describe('opening a notebook', () => {
 		});
 	});
 
-	it('shows an empty notebook empty, whatever was open', async () => {
+	it('begins a note in an empty notebook, whatever was open', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Archive' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		const reading = await createNote(db, {
@@ -162,8 +165,11 @@ describe('opening a notebook', () => {
 		await user.click(screen.getByRole('button', { name: /^Work/ }));
 
 		await screen.findByRole('heading', { name: 'Work' });
-		await new Promise((resolve) => setTimeout(resolve, 50));
-		expect(titleField()).toBeNull();
+		await waitFor(() => {
+			expect(titleField()?.value).toBe('Untitled');
+		});
+		// Begun, not made: nothing is stored until it is written in.
+		expect((await db.notes.toArray()).map((row) => row.title)).toEqual(['Reading']);
 	});
 
 	it('treats the loose notes row as holding only what sits loose', async () => {
@@ -194,9 +200,9 @@ describe('opening a notebook', () => {
 		const older = await createNote(db, { folderPath: 'Work', title: 'Older', body: 'Older\n' });
 		const newer = await createNote(db, { folderPath: 'Work', title: 'Newer', body: 'Newer\n' });
 		const going = await createNote(db, { folderPath: 'Work', title: 'Going', body: 'Going\n' });
-		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { updatedAt: 1_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { updatedAt: 2_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, going.id], { updatedAt: 3_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, going.id], { createdAt: 3_000 });
 		const user = userEvent.setup();
 		await openApp(`/?folder=Work&note=${going.id}`);
 		await waitFor(() => {
@@ -212,7 +218,7 @@ describe('opening a notebook', () => {
 		});
 	});
 
-	it('shows the notebook empty when the last note in it is deleted', async () => {
+	it('begins a note when the last one in the notebook is deleted', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		const only = await createNote(db, { folderPath: 'Work', title: 'Only', body: 'Only\n' });
 		const user = userEvent.setup();
@@ -225,20 +231,22 @@ describe('opening a notebook', () => {
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => {
-			expect(titleField()).toBeNull();
-		});
-		const note = await screen.findByRole('region', { name: 'Note' });
-		expect(note.textContent).toBe('Select a note, or create one.');
-
-		// "create one" makes one, in the notebook that is open.
-		await user.click(within(note).getByRole('button', { name: 'create one' }));
-		await waitFor(() => {
 			expect(titleField()?.value).toBe('Untitled');
 		});
-		const notes = await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).toArray();
-		expect(notes.filter((row) => row.deletedLocally === 0).map((row) => row.path)).toEqual([
-			'Work/untitled.md',
-		]);
+		// And the delete can still be taken back.
+		expect(await screen.findByText('Deleted “Only”.')).toBeDefined();
+
+		// Named, it is made, in the notebook that is open.
+		await user.keyboard('Next{Enter}');
+		await waitFor(async () => {
+			const notes = await db.notes
+				.where('connectionId')
+				.equals(LOCAL_CONNECTION_ID)
+				.toArray();
+			expect(notes.filter((row) => row.deletedLocally === 0).map((row) => row.path)).toEqual([
+				'Work/next.md',
+			]);
+		});
 	});
 
 	it('deletes a note from a right-click on its row, leaving the open one open', async () => {
@@ -309,6 +317,7 @@ describe('opening a notebook', () => {
 
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		expect(screen.getByRole('heading', { name: 'Zed' })).toBeDefined();
-		expect(titleField()).toBeNull();
+		// Zed's own: a note begun there, not `Work`'s.
+		expect(titleField()?.value).toBe('Untitled');
 	});
 });
