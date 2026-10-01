@@ -785,6 +785,20 @@ const useListedNotes = (folder: string | undefined, begun: NoteRecord | undefine
 	return { stored, notes, unsavedNoteId: begun?.id };
 };
 
+/**
+ * A note begun is named next, and the cursor goes to its name, so in a compact
+ * window it is the note that shows and not a dropdown over it. Choosing a
+ * notebook or pressing `+` shut the dropdown already; making a notebook —
+ * always one with nothing in it — and deleting a notebook's last note did not,
+ * and left the cursor in a field nobody could see.
+ */
+const useBegunInView = (begun: NoteRecord | undefined, shut: (panel: null) => void) => {
+	const id = begun?.id;
+	useEffect(() => {
+		if (id !== undefined) shut(null);
+	}, [id, shut]);
+};
+
 const Home = () => {
 	const search = Route.useSearch();
 	const { connect, code } = search;
@@ -862,6 +876,7 @@ const Home = () => {
 	 */
 	const { compact, panel, setPanel, searchOpen, setSearchOpen, frameClassName, shellProps } =
 		useCompactLayout();
+	useBegunInView(place.begun, setPanel);
 	// The answers hang from the field, over whatever else is open; a dropdown
 	// left open under them would be a second list behind the first.
 	const onQuery = (next: string) => {

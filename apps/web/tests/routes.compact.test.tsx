@@ -69,8 +69,10 @@ describe('the compact bar', () => {
 		await waitFor(() => {
 			expect(notebookTrigger().textContent).toBe('Home');
 		});
-		// Nothing is open until something is chosen, as in a wide window.
-		expect(noteTrigger().textContent).toBe('Notes');
+		// The notebook's newest note opens with it, as in a wide window.
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Groceries');
+		});
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 		expect(screen.queryByRole('navigation', { name: 'Sources' })).toBeNull();
 		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
@@ -193,6 +195,46 @@ describe('the compact bar', () => {
 
 		expect(panel()).toBe('notebooks');
 		await user.click(screen.getByRole('button', { name: /Move “Groceries” into Work/ }));
+		expect(panel()).toBeNull();
+	});
+});
+
+describe('a note begun in a compact window', () => {
+	it('is what shows once a notebook is made from the dropdown, with its name to type', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+		await user.click(screen.getByRole('button', { name: 'New notebook' }));
+
+		await user.keyboard('Ideas{Enter}');
+
+		// A new notebook has nothing in it, so a note begins there and takes
+		// the cursor — which it cannot do from under the dropdown.
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Untitled');
+		});
+		expect(panel()).toBeNull();
+		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('false');
+		expect(document.activeElement).toBe(screen.getByLabelText('Note title'));
+	});
+
+	it('is what shows once the last note in the notebook is deleted from the dropdown', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Groceries');
+		});
+		await user.click(noteTrigger());
+		fireEvent.contextMenu(await screen.findByRole('button', { name: /^Groceries/ }));
+		// A click and no press: a press outside the dropdown shuts it by itself.
+		fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+		expect(panel()).toBe('notes');
+
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Untitled');
+		});
 		expect(panel()).toBeNull();
 	});
 });
