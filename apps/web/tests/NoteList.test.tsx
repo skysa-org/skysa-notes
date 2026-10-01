@@ -54,7 +54,19 @@ describe('NoteList', () => {
 		// after it; the bullet and the break the editor writes for an empty
 		// paragraph are not the user's words and are not shown (docs/ARCHITECTURE.md §7).
 		const preview = screen.getByText(/turn the heap/);
-		expect(preview.textContent).toBe('turn the heap every second week');
+		expect(preview.textContent).toBe('turn the heap | every second week');
+	});
+
+	it('marks where one line of the note ends and the next begins', () => {
+		renderList({
+			notes: [note('Alpha', '# Alpha\n\nBuy milk\nCall the bank\n\nThen   lunch.\n')],
+		});
+
+		// Broken inside a paragraph or between two, it is a line on screen; the
+		// spaces inside a line are still only spaces.
+		expect(screen.getByText(/Buy milk/).textContent).toBe(
+			'Buy milk | Call the bank | Then lunch.'
+		);
 	});
 
 	it('shows the words the rich editor shows, and none of the syntax around them', () => {
@@ -68,7 +80,7 @@ describe('NoteList', () => {
 		});
 
 		expect(screen.getByText(/bold plan/).textContent).toBe(
-			'A bold plan, a link and code. a task'
+			'A bold plan, a link and code. | a task'
 		);
 	});
 
@@ -82,7 +94,7 @@ describe('NoteList', () => {
 		});
 
 		expect(screen.getByText(/turn the heap/).textContent).toBe(
-			'turn the heap every second week'
+			'turn the heap | every second week'
 		);
 	});
 
@@ -111,7 +123,7 @@ describe('NoteList', () => {
 		renderList({ notes: [note('Alpha', 'a word first\n\n# Alpha\n\nthen the body\n')] });
 
 		expect(screen.getByText(/a word first/).textContent).toBe(
-			'a word first Alpha then the body'
+			'a word first | Alpha | then the body'
 		);
 	});
 

@@ -129,8 +129,17 @@ const isTitle = (line: string | undefined, title: string): boolean =>
 	line !== undefined && bare(line) === bare(title);
 
 /**
- * The note's opening, after its title. `previewLines` decides what a readable
- * line is — the visible text, as the rich editor shows it, and the same rule
+ * What stands between two lines of a note in its row. The row is one line of
+ * text, and a space there made two lines read as one sentence: "Buy milk" over
+ * "Call the bank" came out as "Buy milk Call the bank". A line is whatever the
+ * note shows as one — a paragraph, a heading, a list item, a line broken inside
+ * a paragraph (`previewLines`).
+ */
+const LINE_BREAK = ' | ';
+
+/**
+ * The note's opening, after its title, its lines kept apart (`LINE_BREAK`).
+ * `previewLines` decides what a readable line is — the visible text, as the rich editor shows it, and the same rule
  * the search excerpt is cut by — and the title is dropped from the front of
  * them so the row does not say it twice.
  *
@@ -145,7 +154,7 @@ const isTitle = (line: string | undefined, title: string): boolean =>
 const preview = (body: string, title: string, keep: boolean): string => {
 	const lines = openingLines(body, { keep });
 	const opening = isTitle(lines[0], title) ? lines.slice(1) : lines;
-	const text = opening.join(' ');
+	const text = opening.join(LINE_BREAK);
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 };
 

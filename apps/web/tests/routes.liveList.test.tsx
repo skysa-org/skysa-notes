@@ -77,7 +77,7 @@ describe('the note list, as a note is typed into', () => {
 		typeInText('Added.');
 
 		await waitFor(() => {
-			expect(row(/^Plans/).textContent).toContain('Before. Added.');
+			expect(row(/^Plans/).textContent).toContain('Before. | Added.');
 		});
 		expect(await stored()).toEqual([{ title: 'Plans', body: '# Plans\n\nBefore.\n' }]);
 		// Owed to the remote from the keystroke, not from the save.
@@ -88,7 +88,7 @@ describe('the note list, as a note is typed into', () => {
 		await waitFor(async () => {
 			expect((await stored())[0]?.body).toBe('# Plans\n\nBefore.\nAdded.');
 		});
-		expect(row(/^Plans/).textContent).toContain('Before. Added.');
+		expect(row(/^Plans/).textContent).toContain('Before. | Added.');
 	});
 
 	it('renames the row as a heading is typed, and the name above the text with it', async () => {
