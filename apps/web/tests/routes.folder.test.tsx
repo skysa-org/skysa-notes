@@ -106,8 +106,10 @@ describe('making a notebook that cannot be made', () => {
 			const user = userEvent.setup();
 			await createFolder(db, { parentPath: undefined, name: 'Work' });
 			await openApp();
+			// Open, so there is somewhere to put a note and the button is live.
+			await screen.findByRole('heading', { name: 'Work' });
 
-			await user.click(await screen.findByRole('button', { name: 'New note' }));
+			await user.click(screen.getByRole('button', { name: 'New note' }));
 
 			expect((await screen.findByRole('alert')).textContent).toContain('note');
 		} finally {

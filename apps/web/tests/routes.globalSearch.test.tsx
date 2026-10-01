@@ -25,6 +25,7 @@ afterEach(async () => {
 	await db.opQueue.clear();
 	await db.prefs.clear();
 	await db.syncState.clear();
+	await db.credentials.clear();
 });
 
 const openApp = async () => {
@@ -41,6 +42,14 @@ const titleField = () => screen.queryByLabelText<HTMLInputElement>('Note title')
 
 /** Two sources, a note about herons in each, and the device's pile showing. */
 const twoSources = async () => {
+	// Held, as a connected source's credential is: one bound without any is
+	// let go the moment it is shown, as a source nothing here can reach.
+	await db.credentials.put({
+		id: DROPBOX,
+		credential: `sk1_${DROPBOX}`,
+		provider: 'dropbox',
+		createdAt: 0,
+	});
 	await bindConnection(db, { connectionId: DROPBOX, provider: 'dropbox', accountId: 'acct' });
 	await finishImport(db, DROPBOX);
 	await createFolder(db, { connectionId: DROPBOX, parentPath: undefined, name: 'Work' });

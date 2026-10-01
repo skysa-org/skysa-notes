@@ -10,7 +10,11 @@ import { ENTITLEMENT_CODES, type EntitlementCode, ROOT } from '@skysa/core';
  */
 
 export interface AppSearch {
-	/** Absent until the user picks a notebook; the first one is opened instead. */
+	/**
+	 * Absent until a notebook is picked — by the user, or by the app once it has
+	 * opened a note: the one open last on this device, or the first
+	 * (`useOpenPlace`).
+	 */
 	folder?: string;
 	note?: string;
 	/**
