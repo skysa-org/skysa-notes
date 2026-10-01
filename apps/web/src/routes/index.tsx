@@ -195,8 +195,8 @@ const FIND = parseChord('Mod+Shift+F');
 
 /**
  * What the source dropdown opens, in a compact window only: the sources, the
- * storage panel a wide window keeps under the notebooks, and the way to
- * another account.
+ * way to another account, and the storage panel a wide window keeps under the
+ * notebooks, with its actions in the dropdown's `⋯`.
  */
 const SourceDropdown = ({
 	compact,
@@ -210,21 +210,21 @@ const SourceDropdown = ({
 	compact ? (
 		<SourcePanel
 			returnTo={returnTo}
-			account={<AccountPanel connectIs="below" />}
+			account={(menuIn) => <AccountPanel connectIs="header" menuIn={menuIn} />}
 			onChosen={onChosen}
 		/>
 	) : null;
 
 /**
- * Picking the open note up to move it, from the palette or from the note's
- * own menu — offered in both only while nothing else is in the air. What it
- * returns is spread onto `NoteView`, which offers the move when it is there.
+ * Picking the open note up to move it, from the palette — offered only while
+ * nothing else is in the air. The note's menu offers it through `menuFor`, as
+ * a right-click on its row does.
  */
 const useNoteMove = (
 	openNote: NoteRecord | undefined,
 	moving: Moving | null,
 	pickUp: (what: Moving) => void
-): { onMove?: () => void } => {
+): void => {
 	const offered = openNote !== undefined && moving === null;
 	const move = () => {
 		if (openNote === undefined) return;
@@ -238,8 +238,6 @@ const useNoteMove = (
 		enabled: offered,
 		run: move,
 	});
-
-	return offered ? { onMove: move } : {};
 };
 
 /**
@@ -1295,7 +1293,7 @@ const Home = () => {
 	});
 
 	// A note begun and not stored has nowhere to move from yet.
-	const noteMove = useNoteMove(storedNote, moving, pickUp);
+	useNoteMove(storedNote, moving, pickUp);
 	useKeepOnInstall();
 
 	useShortcuts();
@@ -1449,6 +1447,10 @@ const Home = () => {
 							},
 						})
 					}
+					// And the open one's, for the `⋯` in the header. None for a
+					// note begun and not stored: there is nothing yet to move, and
+					// leaving it unedited is what deleting it would do.
+					openNote={storedNote}
 				/>
 
 				<NoteView
@@ -1456,7 +1458,6 @@ const Home = () => {
 					note={openNote}
 					draft={place.noteDraft}
 					liveEdits={liveEdits}
-					{...noteMove}
 					{...emptyPaneOffers({
 						folder,
 						nothingYet: tree?.length === 0 && looseNoteCount === 0,

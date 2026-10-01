@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
-import { SourceTabs } from '../src/components/SourceTabs.js';
+import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import {
 	bindConnection,
 	detachConnection,
@@ -3501,5 +3501,175 @@ describe('returnPath', () => {
 		expect(
 			returnPath('https://notes.example.com/?folder=Work&connect=refused&code=lapsed')
 		).toBe('/?folder=Work');
+	});
+});
+
+/**
+ * In a compact window's source dropdown the panel's actions are the header's
+ * `⋯`, as the notebooks' are, and the panel says how syncing is going and
+ * nothing more (`SourcePanel`'s `account`).
+ */
+describe('AccountPanel, in the source dropdown of a compact window', () => {
+	const renderDropdown = (
+		client: Client,
+		database: NotesDatabase,
+		sync: FakeSync = fakeSync({ phase: 'local' })
+	) => {
+		const Shell = () => (
+			<SourcePanel
+				db={database}
+				client={client}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(menuIn) => (
+					<AccountPanel
+						client={client}
+						database={database}
+						sync={sync}
+						navigate={() => undefined}
+						download={() => undefined}
+						downloadAll={() => undefined}
+						keeping={createKeeping(() => undefined)}
+						connectIs="header"
+						menuIn={menuIn}
+					/>
+				)}
+			/>
+		);
+		const router = createRouter({
+			routeTree: createRootRoute({ component: Shell }),
+			history: createMemoryHistory({ initialEntries: ['/'] }),
+		});
+		render(<RouterProvider router={router} />);
+	};
+
+	const connected = async (sync: FakeSync) => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		await createNote(db, { title: 'Kept', connectionId: 'c1' });
+		renderDropdown(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db,
+			sync
+		);
+		await screen.findByText(/Syncing with Dropbox/);
+		return db;
+	};
+
+	const header = () =>
+		screen
+			.getByRole('region', { name: 'Sources' })
+			.querySelector('.pane-header') as HTMLElement;
+
+	const openOptions = async (user: ReturnType<typeof userEvent.setup>) => {
+		await user.click(await within(header()).findByRole('button', { name: 'Storage options' }));
+		return within(await screen.findByRole('group', { name: 'Storage' }));
+	};
+
+	/** What the open `⋯` offers, in order. */
+	const labels = () =>
+		within(screen.getByRole('group', { name: 'Storage' }))
+			.getAllByRole('button')
+			.map((button) => button.textContent);
+
+	it('offers syncing, the download and disconnecting in the `⋯`, and not as buttons', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'idle' });
+		await connected(sync);
+		const storage = screen.getByRole('region', { name: 'Storage' });
+		await waitFor(() => {
+			expect(within(header()).getByRole('button', { name: 'Storage options' })).toBeTruthy();
+		});
+
+		expect(within(storage).queryByRole('button')).toBeNull();
+		// Beside the `+`, as the notebook menu is beside the notebooks'.
+		const [options, add] = within(header()).getAllByRole('button');
+		expect(options?.getAttribute('aria-label')).toBe('Storage options');
+		expect(add?.textContent).toBe('+');
+
+		const menu = await openOptions(user);
+		await waitFor(() => {
+			expect(labels()).toEqual([
+				'Sync now',
+				'Re-scan from scratch',
+				'Download all notes',
+				'Disconnect…',
+			]);
+		});
+		expect(menu.getByRole('button', { name: 'Disconnect…' }).className).toContain('danger');
+
+		await user.click(menu.getByRole('button', { name: 'Sync now' }));
+		expect(sync.syncNow).toHaveBeenCalledTimes(1);
+		expect(screen.queryByRole('group', { name: 'Storage' })).toBeNull();
+	});
+
+	it('asks about a re-scan and a disconnect in the panel, once chosen from the `⋯`', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'idle' });
+		await connected(sync);
+
+		await user.click(
+			(await openOptions(user)).getByRole('button', { name: 'Re-scan from scratch' })
+		);
+		expect(screen.getByText(/Read everything in Dropbox again\?/)).toBeTruthy();
+		// Asked once: the menu does not offer it again while it is being asked.
+		await openOptions(user);
+		expect(labels()).not.toContain('Re-scan from scratch');
+		await user.keyboard('{Escape}');
+		await user.click(screen.getByRole('button', { name: 'Re-scan' }));
+		expect(sync.resync).toHaveBeenCalledTimes(1);
+
+		const menu = await openOptions(user);
+		await waitFor(() => {
+			expect(menu.getByRole('button', { name: 'Disconnect…' }).hasAttribute('disabled')).toBe(
+				false
+			);
+		});
+		await user.click(menu.getByRole('button', { name: 'Disconnect…' }));
+		// The note here was never sent, so the question is what becomes of it.
+		const storage = within(screen.getByRole('region', { name: 'Storage' }));
+		expect(await storage.findByRole('button', { name: 'Download them' })).toBeTruthy();
+	});
+
+	it('shows what cannot be chosen while it is syncing, and starts at what can', async () => {
+		const user = userEvent.setup();
+		await connected(fakeSync({ phase: 'syncing' }));
+
+		// Once the panel knows there is something to download, which it reads.
+		await (await openOptions(user)).findByRole('button', { name: 'Download all notes' });
+		await user.keyboard('{Escape}');
+
+		const menu = await openOptions(user);
+		expect(menu.getByRole('button', { name: 'Sync now' }).hasAttribute('disabled')).toBe(true);
+		expect(
+			menu.getByRole('button', { name: 'Re-scan from scratch' }).hasAttribute('disabled')
+		).toBe(true);
+		expect(document.activeElement).toBe(
+			menu.getByRole('button', { name: 'Download all notes' })
+		);
+	});
+
+	it('points at the `+` above with nothing connected, and has the download in the `⋯`', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		renderDropdown(clientWith(), db);
+
+		await waitFor(() => {
+			expect(screen.getByText(NOTHING_CONNECTED).textContent).toBe(
+				'Notes are kept on this device only. Use + above to connect storage.'
+			);
+		});
+		// Nothing to download yet, so nothing in it.
+		const options = within(header()).getByRole('button', { name: 'Storage options' });
+		expect(options.hasAttribute('disabled')).toBe(true);
+
+		await createNote(db, { title: 'Loose' });
+		await waitFor(() => {
+			expect(options.hasAttribute('disabled')).toBe(false);
+		});
+		await openOptions(user);
+		expect(labels()).toEqual(['Download all notes']);
 	});
 });

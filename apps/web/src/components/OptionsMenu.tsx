@@ -34,6 +34,8 @@ export interface OptionsMenuItem {
 	onChoose: () => void;
 	/** Said in the colour of bad news, for what cannot be taken back. */
 	danger?: boolean;
+	/** Shown but not offered, for now: a sync already running, say. */
+	disabled?: boolean;
 }
 
 export interface OptionsMenuProps {
@@ -145,6 +147,7 @@ const MenuCard = ({
 				key={item.label}
 				type="button"
 				className={item.danger === true ? 'toolbar-item danger' : 'toolbar-item'}
+				disabled={item.disabled === true}
 				onClick={() => {
 					onChosen();
 					item.onChoose();
@@ -205,7 +208,7 @@ export interface FloatingMenuProps {
  * measured, so a menu opened near an edge — the notebook's `⋯`, a sidebar's
  * width from the left of a narrow window — is never hung off it.
  *
- * The first item takes the focus, so a menu opened from the keyboard can be
+ * The first item it offers takes the focus, so a menu opened from the keyboard can be
  * used from it, and Escape or a choice hands it back — to the button, or to
  * whatever had it. A press anywhere else closes it without taking the focus
  * back, as does anything that would leave it pointing at something that has
@@ -237,7 +240,7 @@ export const FloatingMenu = ({
 
 	useEffect(() => {
 		const before = anchor?.current ?? document.activeElement;
-		card.current?.querySelector('button')?.focus();
+		card.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 		return () => {
 			if (handBack.current && before instanceof HTMLElement && before.isConnected) {
 				before.focus();

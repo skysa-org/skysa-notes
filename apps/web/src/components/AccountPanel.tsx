@@ -1,7 +1,16 @@
 import { parentPath, type ProviderKind } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+	Fragment,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from 'react';
+import { createPortal } from 'react-dom';
 
 import {
 	api,
@@ -11,6 +20,7 @@ import {
 	type Refusal,
 } from '../api/client.js';
 import { answer, type Asked } from '../api/instanceConfig.js';
+import { Icon } from '../editor/icons.js';
 import { failedAt, saying } from '../errors/reached.js';
 import { folderToSearch } from '../routes/search.js';
 import { connectedSources } from '../store/connection.js';
@@ -59,6 +69,7 @@ import { DetachedSource } from './DetachedSource.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
 import { ImportPanel } from './ImportProgress.js';
 import { otherLiveSources } from './MoveUnsent.js';
+import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
 import { useEscape } from './useEscape.js';
 
 /**
@@ -105,10 +116,19 @@ export interface AccountPanelProps {
 	keeping?: Keeping;
 	/**
 	 * Where the way to connect storage is, from here. Beside the tabs it is the
-	 * `+` above the panel; in a compact window's source dropdown it is the list
-	 * of providers below it, and "above" would send a thumb to nothing.
+	 * `+` above the panel, which has words while nothing is connected; in a
+	 * compact window's source dropdown it is the `+` in the dropdown's header,
+	 * which never has.
 	 */
-	connectIs?: 'above' | 'below';
+	connectIs?: 'above' | 'header';
+	/**
+	 * Where the panel's actions go as one `⋯` menu, rather than as buttons in
+	 * it: the header of a compact window's source dropdown, which offers them as
+	 * the notebooks' header offers its own (`SourcePanel`, `NotebookMenu`).
+	 * Null until that header is drawn. Left out, they are buttons in the panel,
+	 * as at the foot of the sidebar.
+	 */
+	menuIn?: HTMLElement | null;
 }
 
 /** Back to exactly here, minus the outcome of any connect before this one. */
@@ -369,7 +389,8 @@ interface LocalProps {
 	config: Asked<InstanceConfig>;
 	returnTo: string;
 	navigate?: (url: string) => void;
-	connectIs?: 'above' | 'below';
+	connectIs?: 'above' | 'header';
+	menuIn?: HTMLElement | null;
 }
 
 /**
@@ -377,12 +398,37 @@ interface LocalProps {
  * connected yet the `+` carries its words (`CONNECT_FIRST_LABEL`), and the
  * compact panel's list is headed by them.
  */
-const connectHint = (connectIs: 'above' | 'below', first: boolean): string =>
-	first
-		? ` Use “${CONNECT_FIRST_LABEL}” ${connectIs} to sync them.`
-		: { above: ' Use + above to connect storage.', below: ' Connect storage below.' }[
-				connectIs
-			];
+const connectHint = (connectIs: 'above' | 'header', first: boolean): string =>
+	first && connectIs === 'above'
+		? ` Use “${CONNECT_FIRST_LABEL}” above to sync them.`
+		: ' Use + above to connect storage.';
+
+/**
+ * The panel's actions as one `⋯` menu, drawn into `menuIn` as the notebook
+ * menu is drawn into the notebooks' header (`NotebookMenu`). There with nothing
+ * in it too, disabled, so the header keeps its shape from source to source.
+ */
+const ActionsMenu = ({
+	into,
+	items,
+}: {
+	into: HTMLElement | null;
+	items: readonly OptionsMenuItem[];
+}) =>
+	into === null
+		? null
+		: createPortal(
+				<OptionsMenu
+					label="Storage options"
+					title="Storage options"
+					groupLabel="Storage"
+					triggerClassName="icon icon-quiet"
+					trigger={<Icon name="overflow" />}
+					disabled={items.length === 0}
+					items={items}
+				/>,
+				into
+			);
 
 /**
  * The whole of one source, as one archive of markdown files: the tree a push
@@ -394,51 +440,65 @@ const connectHint = (connectIs: 'above' | 'below', first: boolean): string =>
  * without a word is one the user goes on waiting for. So is an archive handed
  * over without the text an editor could not save (`downloadSource`).
  */
-const DownloadAll = ({
-	database,
-	connectionId,
-	holds,
-	downloadAll,
-}: {
-	database: NotesDatabase;
-	connectionId: string;
-	/** `holdsAnything`, as the panel has read it: undefined until it has. */
-	holds: boolean | undefined;
-	downloadAll: (library: Library) => void;
-}) => {
+const useDownloadAll = (
+	database: NotesDatabase,
+	connectionId: string,
+	downloadAll: (library: Library) => void
+) => {
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
+	const start = () => {
+		setBusy(true);
+		setProblem(null);
+		void downloadSource(database, connectionId, downloadAll)
+			.then(({ incomplete }) => {
+				if (incomplete) setProblem(INCOMPLETE_DOWNLOAD);
+			})
+			.catch((error: unknown) => {
+				setProblem(downloadProblem(error));
+			})
+			.finally(() => {
+				setBusy(false);
+			});
+	};
+	return { busy, problem, start };
+};
+
+type Downloading = ReturnType<typeof useDownloadAll>;
+
+const DownloadAll = ({
+	holds,
+	downloading,
+	button,
+}: {
+	/** `holdsAnything`, as the panel has read it: undefined until it has. */
+	holds: boolean | undefined;
+	downloading: Downloading;
+	/** Drawn as a button here, rather than offered in the `⋯` menu. */
+	button: boolean;
+}) => {
 	if (holds !== true) return null;
 	return (
 		<>
-			<button
-				type="button"
-				disabled={busy}
-				onClick={() => {
-					setBusy(true);
-					setProblem(null);
-					void downloadSource(database, connectionId, downloadAll)
-						.then(({ incomplete }) => {
-							if (incomplete) setProblem(INCOMPLETE_DOWNLOAD);
-						})
-						.catch((error: unknown) => {
-							setProblem(downloadProblem(error));
-						})
-						.finally(() => {
-							setBusy(false);
-						});
-				}}
-			>
-				Download all notes
-			</button>
-			{problem !== null && (
+			{button && (
+				<button type="button" disabled={downloading.busy} onClick={downloading.start}>
+					Download all notes
+				</button>
+			)}
+			{downloading.problem !== null && (
 				<p className="muted" role="alert">
-					{problem}
+					{downloading.problem}
 				</p>
 			)}
 		</>
 	);
 };
+
+/** The same, as an item of the `⋯` menu. */
+const downloadItem = (holds: boolean | undefined, downloading: Downloading): OptionsMenuItem[] =>
+	holds === true
+		? [{ label: 'Download all notes', onChoose: downloading.start, disabled: downloading.busy }]
+		: [];
 
 /**
  * What the browser has said about keeping this device's notes, asked on sight
@@ -470,9 +530,11 @@ const NotConnected = ({
 	connectIs = 'above',
 	downloadAll,
 	keep,
+	menuIn,
 }: LocalProps & { downloadAll: (library: Library) => void; keep: Keeping }) => {
 	const settings = answer(config);
 	const holds = useLiveQuery(() => holdsAnything(database, LOCAL_CONNECTION_ID), [database]);
+	const downloading = useDownloadAll(database, LOCAL_CONNECTION_ID, downloadAll);
 	const kept = useKept(keep);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -516,12 +578,10 @@ const NotConnected = ({
 					download them.
 				</p>
 			)}
-			<DownloadAll
-				database={database}
-				connectionId={LOCAL_CONNECTION_ID}
-				holds={holds}
-				downloadAll={downloadAll}
-			/>
+			<DownloadAll holds={holds} downloading={downloading} button={menuIn === undefined} />
+			{menuIn !== undefined && (
+				<ActionsMenu into={menuIn} items={downloadItem(holds, downloading)} />
+			)}
 		</section>
 	);
 };
@@ -585,6 +645,18 @@ const Denied = ({
 	);
 };
 
+/** A source the app can sync, and so re-scan: one at a provider it can still connect. */
+const isSyncable = (bound: SyncStateRecord): boolean =>
+	bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
+
+/**
+ * A later source's first import, which does not hold the app: the panel shows
+ * how it is going in place of how syncing is (`ImportPanel`), and offers
+ * nothing about syncing until it is done.
+ */
+const importingHere = (bound: SyncStateRecord): boolean =>
+	bound.importing !== undefined && !bound.importing.lock;
+
 interface SyncStateProps {
 	client: Client;
 	database: NotesDatabase;
@@ -597,6 +669,11 @@ interface SyncStateProps {
 	config: Asked<InstanceConfig>;
 	returnTo: string;
 	navigate?: (url: string) => void;
+	/** Whether the re-scan is being asked about, which the panel holds. */
+	rescanning: boolean;
+	onRescanning: (asking: boolean) => void;
+	/** Drawn as buttons here, rather than offered in the `⋯` menu. */
+	buttons: boolean;
 }
 
 /**
@@ -614,17 +691,19 @@ const SyncState = ({
 	config,
 	returnTo,
 	navigate,
+	rescanning,
+	onRescanning: setRescanning,
+	buttons,
 }: SyncStateProps) => {
 	const status = useSyncStatus(sync);
-	const syncable = bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
+	const syncable = isSyncable(bound);
 	const message = statusMessage(status, label, syncable);
 	const reconnect = needsReconnect(status);
-	const [rescanning, setRescanning] = useState(false);
 
 	// A later source's first import, which does not hold the app: how it is
 	// going, and the way out of it, in place of how syncing is going. The
 	// first source's is a dialog over everything (`routes/index.tsx`).
-	if (bound.importing !== undefined && !bound.importing.lock) {
+	if (importingHere(bound)) {
 		return <ImportPanel source={bound} database={database} client={client} sync={sync} />;
 	}
 
@@ -669,7 +748,7 @@ const SyncState = ({
 				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
 			)}
 			<UnreadableNotice files={bound.unreadable} label={label} />
-			{status.phase !== 'local' && (
+			{buttons && status.phase !== 'local' && (
 				<button
 					type="button"
 					disabled={status.phase === 'syncing'}
@@ -715,15 +794,17 @@ const SyncState = ({
 						</button>
 					</div>
 				) : (
-					<button
-						type="button"
-						disabled={status.phase === 'syncing'}
-						onClick={() => {
-							setRescanning(true);
-						}}
-					>
-						Re-scan from scratch
-					</button>
+					buttons && (
+						<button
+							type="button"
+							disabled={status.phase === 'syncing'}
+							onClick={() => {
+								setRescanning(true);
+							}}
+						>
+							Re-scan from scratch
+						</button>
+					)
 				))}
 		</>
 	);
@@ -957,6 +1038,7 @@ interface ConnectedProps {
 	downloadAll: (library: Library) => void;
 	returnTo: string;
 	navigate?: (url: string) => void;
+	menuIn?: HTMLElement | null;
 }
 
 /** A disconnect that is under way, or that the server would not or could not do. */
@@ -1086,6 +1168,107 @@ const stoppedBy = (status: SchedulerStatus, listed: Unsynced): 'offline' | 'bloc
 };
 
 /**
+ * What can be done to a connected source, beyond what its status offers: as
+ * the `⋯` menu where the panel has one (`menuIn`), in the order its buttons
+ * would be drawn and disabled where they would be, and otherwise as the
+ * buttons at the panel's foot. Neither button while the disconnect question is
+ * open, which is the way on from either.
+ */
+const StorageActions = ({
+	menuIn,
+	bound,
+	phase,
+	rescanning,
+	onRescan,
+	download,
+	stranded,
+	open,
+	disconnectBlocked,
+	syncNow,
+	ask,
+	openButton,
+}: {
+	menuIn: HTMLElement | null | undefined;
+	bound: SyncStateRecord;
+	phase: SchedulerStatus['phase'];
+	rescanning: boolean;
+	onRescan: () => void;
+	download: readonly OptionsMenuItem[];
+	stranded: boolean;
+	/** Whether the disconnect question is open. */
+	open: boolean;
+	disconnectBlocked: boolean;
+	syncNow: () => void;
+	ask: (onServer: boolean) => void;
+	/** Where the focus goes back to once the question is put away. */
+	openButton: RefObject<HTMLButtonElement | null>;
+}) => {
+	if (menuIn !== undefined) {
+		const syncing = phase === 'syncing';
+		const syncs = !importingHere(bound) && phase !== 'local';
+		const items: OptionsMenuItem[] = [
+			...(syncs ? [{ label: 'Sync now', onChoose: syncNow, disabled: syncing }] : []),
+			...(syncs && isSyncable(bound) && !rescanning
+				? [{ label: 'Re-scan from scratch', onChoose: onRescan, disabled: syncing }]
+				: []),
+			...download,
+			...(stranded && !open
+				? [
+						{
+							label: 'Stop syncing on this device',
+							onChoose: () => {
+								ask(false);
+							},
+						},
+					]
+				: []),
+			...(open
+				? []
+				: [
+						{
+							label: 'Disconnect…',
+							onChoose: () => {
+								ask(true);
+							},
+							danger: true,
+							disabled: disconnectBlocked,
+						},
+					]),
+		];
+		return <ActionsMenu into={menuIn} items={items} />;
+	}
+	if (open) return null;
+	return (
+		<>
+			{stranded && (
+				<button
+					type="button"
+					className="ghost"
+					onClick={() => {
+						// The same question again, and nothing asked of the server:
+						// it has already refused, and nothing on it is touched.
+						ask(false);
+					}}
+				>
+					Stop syncing on this device
+				</button>
+			)}
+			<button
+				ref={openButton}
+				type="button"
+				className="danger"
+				disabled={disconnectBlocked}
+				onClick={() => {
+					ask(true);
+				}}
+			>
+				Disconnect…
+			</button>
+		</>
+	);
+};
+
+/**
  * Where the disconnect has got to. Closed; sending what is left, which can take
  * as long as a provider takes; or asking, holding the list the question is
  * about and the record of it the answer will be held to.
@@ -1112,8 +1295,11 @@ const Connected = ({
 	downloadAll,
 	returnTo,
 	navigate,
+	menuIn,
 }: ConnectedProps) => {
 	const [step, setStep] = useState<Step>({ kind: 'closed' });
+	const [rescanning, setRescanning] = useState(false);
+	const buttons = menuIn === undefined;
 	const [trouble, setTrouble] = useState<string | null>(null);
 	const status = useSyncStatus(sync);
 	// Only ever this source's. Named once per render, so the click below is
@@ -1123,6 +1309,7 @@ const Connected = ({
 		() => holdsAnything(database, connectionId),
 		[database, connectionId]
 	);
+	const downloading = useDownloadAll(database, connectionId, downloadAll);
 	// The other live sources, which what this one never sent could go to.
 	const sources = useLiveQuery(() => connectedSources(database), [database]);
 	const targets = otherLiveSources(sources, connectionId);
@@ -1205,6 +1392,13 @@ const Connected = ({
 		});
 	};
 
+	const downloadable = bound.importing === undefined && !open;
+	// Not while the server is still being asked on open: its answer could bind
+	// the device again right after. Nor while a disconnect of this source is
+	// still out, which may have been started before the user looked at another
+	// source and back.
+	const disconnectBlocked = account.kind === 'asking' || busy;
+
 	return (
 		<section ref={panel} className="account" aria-label="Storage">
 			<p>
@@ -1221,38 +1415,23 @@ const Connected = ({
 				config={config}
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
+				rescanning={rescanning}
+				onRescanning={setRescanning}
+				buttons={buttons}
 			/>
 			{/*
 			 * Not while an import is filling the source, when the archive would be
 			 * whatever part of it had arrived; nor while the disconnect question
 			 * is open, which offers its own download of what was never sent.
 			 */}
-			{bound.importing === undefined && !open && (
-				<DownloadAll
-					database={database}
-					connectionId={connectionId}
-					holds={holds}
-					downloadAll={downloadAll}
-				/>
+			{downloadable && (
+				<DownloadAll holds={holds} downloading={downloading} button={buttons} />
 			)}
 			<Devices client={client} database={database} connectionId={bound.connectionId} />
 			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
 					{problem ?? trouble}
 				</p>
-			)}
-			{stranded && !open && (
-				<button
-					type="button"
-					className="ghost"
-					onClick={() => {
-						// The same question again, and nothing asked of the server:
-						// it has already refused, and nothing on it is touched.
-						ask(false);
-					}}
-				>
-					Stop syncing on this device
-				</button>
 			)}
 			{step.kind === 'pushing' && (
 				<div
@@ -1282,23 +1461,24 @@ const Connected = ({
 					cancelRef={cancelButton}
 				/>
 			)}
-			{!open && (
-				<button
-					ref={openButton}
-					type="button"
-					className="danger"
-					// Not while the server is still being asked on open: its
-					// answer could bind the device again right after. Nor while a
-					// disconnect of this source is still out, which may have been
-					// started before the user looked at another source and back.
-					disabled={account.kind === 'asking' || busy}
-					onClick={() => {
-						ask(true);
-					}}
-				>
-					Disconnect…
-				</button>
-			)}
+			<StorageActions
+				menuIn={menuIn}
+				bound={bound}
+				phase={status.phase}
+				rescanning={rescanning}
+				onRescan={() => {
+					setRescanning(true);
+				}}
+				download={downloadable ? downloadItem(holds, downloading) : []}
+				stranded={stranded}
+				open={open}
+				disconnectBlocked={disconnectBlocked}
+				syncNow={() => {
+					void sync.syncNow();
+				}}
+				ask={ask}
+				openButton={openButton}
+			/>
 		</section>
 	);
 };
@@ -1336,6 +1516,7 @@ const Detached = ({
 	notice,
 	returnTo,
 	navigate,
+	menuIn,
 }: DetachedProps) => {
 	const settings = answer(config);
 	const provider = bound.provider;
@@ -1345,26 +1526,34 @@ const Detached = ({
 		settings?.authMode === 'storage-first' &&
 		settings.providers.includes(provider);
 	return (
-		<DetachedSource
-			database={database}
-			bound={bound}
-			download={download}
-			onReleased={onReleased}
-			notice={notice}
-			reconnect={
-				reconnectable && (
-					<ConnectButton
-						db={database}
-						client={client}
-						provider={provider}
-						returnTo={returnTo}
-						{...(navigate === undefined ? {} : { navigate })}
-					>
-						Reconnect
-					</ConnectButton>
-				)
-			}
-		/>
+		<>
+			{/*
+			 * Its own choices are what to do with what it holds, each a question
+			 * with its answers beside it, and they stay in the panel; the menu is
+			 * there, empty, so the header does not change shape.
+			 */}
+			{menuIn !== undefined && <ActionsMenu into={menuIn} items={[]} />}
+			<DetachedSource
+				database={database}
+				bound={bound}
+				download={download}
+				onReleased={onReleased}
+				notice={notice}
+				reconnect={
+					reconnectable && (
+						<ConnectButton
+							db={database}
+							client={client}
+							provider={provider}
+							returnTo={returnTo}
+							{...(navigate === undefined ? {} : { navigate })}
+						>
+							Reconnect
+						</ConnectButton>
+					)
+				}
+			/>
+		</>
 	);
 };
 
@@ -1377,6 +1566,7 @@ export const AccountPanel = ({
 	downloadAll = downloadLibrary,
 	keeping = browserKeeping,
 	connectIs = 'above',
+	menuIn,
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
@@ -1485,6 +1675,7 @@ export const AccountPanel = ({
 					downloadAll={downloadAll}
 					keep={keeping}
 					{...(navigate === undefined ? {} : { navigate })}
+					{...(menuIn === undefined ? {} : { menuIn })}
 				/>
 			);
 		}
@@ -1502,6 +1693,7 @@ export const AccountPanel = ({
 					notice={disconnects[bound.state.connectionId]?.problem ?? null}
 					returnTo={returnTo}
 					{...(navigate === undefined ? {} : { navigate })}
+					{...(menuIn === undefined ? {} : { menuIn })}
 				/>
 			);
 		}
@@ -1526,6 +1718,7 @@ export const AccountPanel = ({
 				account={account}
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
+				{...(menuIn === undefined ? {} : { menuIn })}
 			/>
 		);
 	};

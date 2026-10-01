@@ -1,9 +1,9 @@
 import { EditorView } from '@codemirror/view';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { type DisplacedText, NoteView } from '../src/components/NoteView.js';
+import { type DisplacedText, NoteView, type NoteViewHandle } from '../src/components/NoteView.js';
 import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import type * as Notes from '../src/store/notes.js';
@@ -43,10 +43,21 @@ vi.mock('../src/store/notes.js', async (importOriginal) => {
 const deletions: NoteRecord[] = [];
 const besides: (DisplacedText | undefined)[] = [];
 
+/** The pane, as the route holds it: what the note list's `⋯` deletes through. */
+const pane = createRef<NoteViewHandle>();
+
+/** Delete the open note as the `⋯` beside the list's `+` does. */
+const deleteOpen = (note: NoteRecord) => {
+	act(() => {
+		pane.current?.deleteNote(note);
+	});
+};
+
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
 	return (
 		<NoteView
+			ref={pane}
 			note={note}
 			onDeleted={(deleted, beside) => {
 				deletions.push(deleted);
@@ -140,15 +151,13 @@ describe('NoteView, when a save is refused', () => {
 describe('NoteView, deleting a note whose last save was refused', () => {
 	/** Type, have it refused, and delete: the note as `onDeleted` was handed it. */
 	const typeRefusedAndDelete = async () => {
-		const user = userEvent.setup();
 		const { note, type } = await open();
 		store.refusing = true;
 		type('typed and never stored\n');
 		flushAutosave();
 		await screen.findByRole('alert');
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
-		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		deleteOpen(note);
 		await waitFor(() => {
 			expect(deletions.length).toBe(1);
 		});
@@ -224,7 +233,6 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 	});
 
 	it('hands an edit still held from before it over apart, so undo cannot put it over the later one', async () => {
-		const user = userEvent.setup();
 		const { note, type } = await open();
 		store.refusingText = 'held';
 		type('held\n');
@@ -240,8 +248,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 			expect((await getNote(db, note.id))?.body).toBe('from the other tab\ntyped after\n');
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
-		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		deleteOpen(note);
 		await waitFor(() => {
 			expect(deletions.length).toBe(1);
 		});
@@ -252,7 +259,6 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 	});
 
 	it('does not offer an undo text that a save already kept beside the note', async () => {
-		const user = userEvent.setup();
 		const { note, type } = await open();
 		type('typed into the old body\n');
 		// A sync pull lands before the autosave does.
@@ -261,8 +267,7 @@ describe('NoteView, when a body from outside replaces what is on screen', () => 
 			expect(editorText()).toBe('pulled\n');
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
-		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		deleteOpen(note);
 		await waitFor(() => {
 			expect(deletions.length).toBe(1);
 		});

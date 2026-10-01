@@ -383,6 +383,20 @@ describe('the source tabs', () => {
 	});
 });
 
+/**
+ * The source panel's `+`, pressed once it can be, and the providers it opens:
+ * the same menu the `+` beside the tabs opens.
+ */
+const openPanelAdd = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+	const panel = screen.getByRole('region', { name: 'Sources' });
+	const add = await within(panel).findByRole('button', { name });
+	await waitFor(() => {
+		expect(add.hasAttribute('disabled')).toBe(false);
+	});
+	await user.click(add);
+	return within(await within(panel).findByRole('group', { name: 'Storage providers' }));
+};
+
 describe('the source panel, in a compact window', () => {
 	const showPanel = (
 		db: NotesDatabase,
@@ -394,14 +408,14 @@ describe('the source panel, in a compact window', () => {
 				client={client}
 				returnTo="/"
 				navigate={() => undefined}
-				account={<section aria-label="Storage">Syncing with Dropbox</section>}
+				account={() => <section aria-label="Storage">Syncing with Dropbox</section>}
 				onChosen={onChosen}
 			/>
 		);
 
 	const panel = () => screen.getByRole('region', { name: 'Sources' });
 
-	it('lists the sources, then the storage panel, then the way to another account', async () => {
+	it('lists the sources, then the storage panel', async () => {
 		const db = freshDatabase();
 		await bindInOrder(db, [
 			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
@@ -410,11 +424,6 @@ describe('the source panel, in a compact window', () => {
 		await showConnection(db, 'c1');
 		showPanel(db);
 
-		const connect = await within(panel()).findByRole('group', {
-			name: 'Connect another account',
-		});
-		// The sources are a live query and the providers the server's answer,
-		// so either can arrive first.
 		const list = await within(panel()).findByRole('list');
 		const [dropbox, onedrive] = within(list).getAllByRole('button');
 		expect(dropbox?.textContent).toBe('Dropbox');
@@ -422,22 +431,60 @@ describe('the source panel, in a compact window', () => {
 		expect(onedrive?.textContent).toBe('OneDrive');
 		expect(onedrive?.getAttribute('aria-current')).toBeNull();
 
-		// In that order on the page: what is syncing sits between the sources
-		// and the way to add another.
 		const storage = within(panel()).getByRole('region', { name: 'Storage' });
 		expect(
 			(onedrive as Node).compareDocumentPosition(storage) & Node.DOCUMENT_POSITION_FOLLOWING
 		).toBeTruthy();
-		expect(
-			storage.compareDocumentPosition(connect) & Node.DOCUMENT_POSITION_FOLLOWING
-		).toBeTruthy();
-		// Both at the foot of the panel, together (`.source-panel-foot`).
-		expect(storage.parentElement).toBe(connect.parentElement);
 		expect(storage.parentElement?.classList.contains('source-panel-foot')).toBe(true);
-		// A group of its own, so a provider and a source of the same name are
-		// not two identical buttons side by side.
-		expect(within(connect).getByRole('button', { name: 'Dropbox' })).toBeDefined();
-		expect(within(connect).getByRole('button', { name: 'OneDrive' })).toBeDefined();
+		// The way to another account is the header's `+`, not a list down here.
+		expect(within(storage.parentElement as HTMLElement).queryByRole('group')).toBeNull();
+	});
+
+	it('connects another account from the `+` in its header, as the notebooks make one', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' }]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		showPanel(db);
+
+		const header = panel().querySelector('.pane-header') as HTMLElement;
+		const add = await within(header).findByRole('button', { name: 'Connect another account' });
+		expect(add.textContent).toBe('+');
+		expect(add.getAttribute('aria-expanded')).toBe('false');
+
+		const menu = await openPanelAdd(user, 'Connect another account');
+		expect(add.getAttribute('aria-expanded')).toBe('true');
+		expect(menu.getByText('Connect another account')).toBeTruthy();
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeDefined();
+		expect(menu.getByRole('button', { name: 'OneDrive' })).toBeDefined();
+
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();
+	});
+
+	it('hands the storage panel its header, for the `⋯` beside the `+`', async () => {
+		const db = freshDatabase();
+		const given: (HTMLElement | null)[] = [];
+		render(
+			<SourcePanel
+				db={db}
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(menuIn) => {
+					given.push(menuIn);
+					return null;
+				}}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(given.at(-1)).toBeInstanceOf(HTMLElement);
+		});
+		const actions = panel().querySelector('.pane-actions');
+		expect(given.at(-1)?.parentElement).toBe(actions);
+		// Before the `+`, as the notebook menu is before the notebooks' `+`.
+		expect(given.at(-1)?.nextElementSibling?.querySelector('button')?.textContent).toBe('+');
 	});
 
 	it('shows the source chosen, and says it is done', async () => {
@@ -486,6 +533,12 @@ describe('the source panel, in a compact window', () => {
 		showPanel(db, { client: clientWith(() => Promise.reject(new Error('down'))) });
 
 		expect(within(panel()).getByRole('region', { name: 'Storage' })).toBeDefined();
+		// And keeps its `+`, which has nothing to open.
+		expect(
+			within(panel())
+				.getByRole('button', { name: 'Connect storage provider' })
+				.hasAttribute('disabled')
+		).toBe(true);
 	});
 });
 
@@ -625,9 +678,7 @@ describe('the way to connect, on an instance whose operator gates it', () => {
 		const db = freshDatabase();
 		render(<SourcePanel db={db} client={gated()} returnTo="/" navigate={() => undefined} />);
 
-		const connect = within(
-			await screen.findByRole('group', { name: 'Connect storage provider' })
-		);
+		const connect = await openPanelAdd(user, 'Connect storage provider');
 		expect(connect.getByText(GATE.message)).toBeTruthy();
 		expectLinkOut(connect.getByRole('link', { name: 'See plans' }));
 		expect(connect.queryByRole('button', { name: 'Dropbox' })).toBeNull();
@@ -955,9 +1006,7 @@ describe("the gate's code, on an instance that asks for one", () => {
 		const db = freshDatabase();
 		const { client, checkConnectCode } = coded(REQUIRED);
 		render(<SourcePanel db={db} client={client} returnTo="/" navigate={() => undefined} />);
-		const connect = within(
-			await screen.findByRole('group', { name: 'Connect storage provider' })
-		);
+		const connect = await openPanelAdd(user, 'Connect storage provider');
 
 		await user.type(connect.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD');
 		await user.click(connect.getByRole('button', { name: 'Use code' }));
