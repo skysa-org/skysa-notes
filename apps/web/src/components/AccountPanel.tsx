@@ -70,6 +70,7 @@ import { DisconnectDialog } from './DisconnectDialog.js';
 import { ImportPanel } from './ImportProgress.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
+import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
 import { useEscape } from './useEscape.js';
 
 /**
@@ -123,12 +124,13 @@ export interface AccountPanelProps {
 	connectIs?: 'above' | 'header';
 	/**
 	 * Where the panel's actions go as one `⋯` menu, rather than as buttons in
-	 * it: the header of a compact window's source dropdown, which offers them as
-	 * the notebooks' header offers its own (`SourcePanel`, `NotebookMenu`).
-	 * Null until that header is drawn. Left out, they are buttons in the panel,
-	 * as at the foot of the sidebar.
+	 * it: the end of the showing source's row in a compact window's source
+	 * dropdown, as every notebook's and note's row ends in its own
+	 * (`SourcePanel`, `RowOptions`), with what another source's `⋯` asked of
+	 * this one once it is showing. Left out, they are buttons in the panel, as
+	 * at the foot of the sidebar.
 	 */
-	menuIn?: HTMLElement | null;
+	slot?: AccountSlot;
 }
 
 /** Back to exactly here, minus the outcome of any connect before this one. */
@@ -390,7 +392,7 @@ interface LocalProps {
 	returnTo: string;
 	navigate?: (url: string) => void;
 	connectIs?: 'above' | 'header';
-	menuIn?: HTMLElement | null;
+	slot?: AccountSlot;
 }
 
 /**
@@ -404,31 +406,47 @@ const connectHint = (connectIs: 'above' | 'header', first: boolean): string =>
 		: ' Use + above to connect storage.';
 
 /**
- * The panel's actions as one `⋯` menu, drawn into `menuIn` as the notebook
- * menu is drawn into the notebooks' header (`NotebookMenu`). There with nothing
- * in it too, disabled, so the header keeps its shape from source to source.
+ * The panel's actions as one `⋯` menu, drawn into the end of the showing
+ * source's row as every other row's is drawn into its own (`RowOptions`, whose
+ * names it takes). There with nothing in it too, disabled, so the rows keep
+ * their shape from source to source.
  */
-const ActionsMenu = ({
-	into,
-	items,
-}: {
-	into: HTMLElement | null;
-	items: readonly OptionsMenuItem[];
-}) =>
-	into === null
+const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly OptionsMenuItem[] }) =>
+	slot.menuIn === null
 		? null
 		: createPortal(
 				<OptionsMenu
-					label="Storage options"
-					title="Storage options"
-					groupLabel="Storage"
+					label={`Options for “${slot.name}”`}
+					title="Source options"
+					groupLabel={`Source “${slot.name}”`}
 					triggerClassName="icon icon-quiet"
 					trigger={<Icon name="overflow" />}
 					disabled={items.length === 0}
 					items={items}
 				/>,
-				into
+				slot.menuIn
 			);
+
+/**
+ * What another source's `⋯` asked of this one (`SourceAsk`), once this one is
+ * showing and can do it: `act` is told it and answers whether it is done, and
+ * the ask is let go once it is, or once it cannot be — the panel offers no
+ * such thing for this source after all. Asked again on every render until
+ * then, since what it waits for (the server's answer, a count of the notes
+ * here) arrives as a render.
+ */
+const useAsked = (
+	slot: AccountSlot | undefined,
+	connectionId: string,
+	act: (action: SourceAsk['action']) => boolean
+) => {
+	const wanted = slot?.asked?.connectionId === connectionId ? slot.asked.action : undefined;
+	const onAsked = slot?.onAsked;
+	useEffect(() => {
+		if (wanted === undefined || onAsked === undefined) return;
+		if (act(wanted)) onAsked();
+	});
+};
 
 /**
  * The whole of one source, as one archive of markdown files: the tree a push
@@ -530,11 +548,17 @@ const NotConnected = ({
 	connectIs = 'above',
 	downloadAll,
 	keep,
-	menuIn,
+	slot,
 }: LocalProps & { downloadAll: (library: Library) => void; keep: Keeping }) => {
 	const settings = answer(config);
 	const holds = useLiveQuery(() => holdsAnything(database, LOCAL_CONNECTION_ID), [database]);
 	const downloading = useDownloadAll(database, LOCAL_CONNECTION_ID, downloadAll);
+	useAsked(slot, LOCAL_CONNECTION_ID, (action) => {
+		if (action !== 'download') return true;
+		if (holds === undefined) return false;
+		if (holds) downloading.start();
+		return true;
+	});
 	const kept = useKept(keep);
 	const offerable =
 		settings?.authMode === 'storage-first'
@@ -578,9 +602,9 @@ const NotConnected = ({
 					download them.
 				</p>
 			)}
-			<DownloadAll holds={holds} downloading={downloading} button={menuIn === undefined} />
-			{menuIn !== undefined && (
-				<ActionsMenu into={menuIn} items={downloadItem(holds, downloading)} />
+			<DownloadAll holds={holds} downloading={downloading} button={slot === undefined} />
+			{slot !== undefined && (
+				<ActionsMenu slot={slot} items={downloadItem(holds, downloading)} />
 			)}
 		</section>
 	);
@@ -1038,7 +1062,7 @@ interface ConnectedProps {
 	downloadAll: (library: Library) => void;
 	returnTo: string;
 	navigate?: (url: string) => void;
-	menuIn?: HTMLElement | null;
+	slot?: AccountSlot;
 }
 
 /** A disconnect that is under way, or that the server would not or could not do. */
@@ -1169,13 +1193,13 @@ const stoppedBy = (status: SchedulerStatus, listed: Unsynced): 'offline' | 'bloc
 
 /**
  * What can be done to a connected source, beyond what its status offers: as
- * the `⋯` menu where the panel has one (`menuIn`), in the order its buttons
+ * the `⋯` menu where the panel has one (`slot`), in the order its buttons
  * would be drawn and disabled where they would be, and otherwise as the
  * buttons at the panel's foot. Neither button while the disconnect question is
  * open, which is the way on from either.
  */
 const StorageActions = ({
-	menuIn,
+	slot,
 	bound,
 	phase,
 	rescanning,
@@ -1188,7 +1212,7 @@ const StorageActions = ({
 	ask,
 	openButton,
 }: {
-	menuIn: HTMLElement | null | undefined;
+	slot: AccountSlot | undefined;
 	bound: SyncStateRecord;
 	phase: SchedulerStatus['phase'];
 	rescanning: boolean;
@@ -1203,7 +1227,7 @@ const StorageActions = ({
 	/** Where the focus goes back to once the question is put away. */
 	openButton: RefObject<HTMLButtonElement | null>;
 }) => {
-	if (menuIn !== undefined) {
+	if (slot !== undefined) {
 		const syncing = phase === 'syncing';
 		const syncs = !importingHere(bound) && phase !== 'local';
 		const items: OptionsMenuItem[] = [
@@ -1235,7 +1259,7 @@ const StorageActions = ({
 						},
 					]),
 		];
-		return <ActionsMenu into={menuIn} items={items} />;
+		return <ActionsMenu slot={slot} items={items} />;
 	}
 	if (open) return null;
 	return (
@@ -1295,11 +1319,11 @@ const Connected = ({
 	downloadAll,
 	returnTo,
 	navigate,
-	menuIn,
+	slot,
 }: ConnectedProps) => {
 	const [step, setStep] = useState<Step>({ kind: 'closed' });
 	const [rescanning, setRescanning] = useState(false);
-	const buttons = menuIn === undefined;
+	const buttons = slot === undefined;
 	const [trouble, setTrouble] = useState<string | null>(null);
 	const status = useSyncStatus(sync);
 	// Only ever this source's. Named once per render, so the click below is
@@ -1398,6 +1422,27 @@ const Connected = ({
 	// still out, which may have been started before the user looked at another
 	// source and back.
 	const disconnectBlocked = account.kind === 'asking' || busy;
+	// Asked from this source's row before it was showing: done as its own
+	// item here would do it, once it can be, and dropped where it would not
+	// be offered.
+	useAsked(slot, connectionId, (action) => {
+		if (action === 'download') {
+			if (!downloadable) return true;
+			if (holds === undefined) return false;
+			if (holds) downloading.start();
+			return true;
+		}
+		if (action === 'rescan') {
+			if (!isSyncable(bound) || importingHere(bound)) return true;
+			if (status.phase === 'local') return false;
+			setRescanning(true);
+			return true;
+		}
+		if (open) return true;
+		if (disconnectBlocked) return false;
+		ask(true);
+		return true;
+	});
 
 	return (
 		<section ref={panel} className="account" aria-label="Storage">
@@ -1462,7 +1507,7 @@ const Connected = ({
 				/>
 			)}
 			<StorageActions
-				menuIn={menuIn}
+				slot={slot}
 				bound={bound}
 				phase={status.phase}
 				rescanning={rescanning}
@@ -1516,7 +1561,7 @@ const Detached = ({
 	notice,
 	returnTo,
 	navigate,
-	menuIn,
+	slot,
 }: DetachedProps) => {
 	const settings = answer(config);
 	const provider = bound.provider;
@@ -1530,9 +1575,9 @@ const Detached = ({
 			{/*
 			 * Its own choices are what to do with what it holds, each a question
 			 * with its answers beside it, and they stay in the panel; the menu is
-			 * there, empty, so the header does not change shape.
+			 * there, empty, so its row has the shape the others have.
 			 */}
-			{menuIn !== undefined && <ActionsMenu into={menuIn} items={[]} />}
+			{slot !== undefined && <ActionsMenu slot={slot} items={[]} />}
 			<DetachedSource
 				database={database}
 				bound={bound}
@@ -1566,7 +1611,7 @@ export const AccountPanel = ({
 	downloadAll = downloadLibrary,
 	keeping = browserKeeping,
 	connectIs = 'above',
-	menuIn,
+	slot,
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
 	// Wrapped: `first()` answers `undefined` for "no connection", and so does
@@ -1675,7 +1720,7 @@ export const AccountPanel = ({
 					downloadAll={downloadAll}
 					keep={keeping}
 					{...(navigate === undefined ? {} : { navigate })}
-					{...(menuIn === undefined ? {} : { menuIn })}
+					{...(slot === undefined ? {} : { slot })}
 				/>
 			);
 		}
@@ -1693,7 +1738,7 @@ export const AccountPanel = ({
 					notice={disconnects[bound.state.connectionId]?.problem ?? null}
 					returnTo={returnTo}
 					{...(navigate === undefined ? {} : { navigate })}
-					{...(menuIn === undefined ? {} : { menuIn })}
+					{...(slot === undefined ? {} : { slot })}
 				/>
 			);
 		}
@@ -1718,7 +1763,7 @@ export const AccountPanel = ({
 				account={account}
 				returnTo={returnTo}
 				{...(navigate === undefined ? {} : { navigate })}
-				{...(menuIn === undefined ? {} : { menuIn })}
+				{...(slot === undefined ? {} : { slot })}
 			/>
 		);
 	};

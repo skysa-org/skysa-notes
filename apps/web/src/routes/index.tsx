@@ -210,7 +210,7 @@ const SourceDropdown = ({
 	compact ? (
 		<SourcePanel
 			returnTo={returnTo}
-			account={(menuIn) => <AccountPanel connectIs="header" menuIn={menuIn} />}
+			account={(slot) => <AccountPanel connectIs="header" slot={slot} />}
 			onChosen={onChosen}
 		/>
 	) : null;
@@ -1426,8 +1426,8 @@ const Home = () => {
 					movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
 					unsavedNoteId={unsavedNoteId}
 					liveEdits={liveEdits}
-					// The note's own menu, about the note right-clicked, which
-					// need not be the one open. Delete goes through the note pane,
+					// The note's own menu, about the note on the row its `⋯` or
+					// a right-click is on, which need not be the one open. Delete goes through the note pane,
 					// which holds what autosave has not stored yet.
 					menuFor={(note) =>
 						noteMenuItems({
@@ -1447,10 +1447,6 @@ const Home = () => {
 							},
 						})
 					}
-					// And the open one's, for the `⋯` in the header. None for a
-					// note begun and not stored: there is nothing yet to move, and
-					// leaving it unedited is what deleting it would do.
-					openNote={storedNote}
 				/>
 
 				<NoteView

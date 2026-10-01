@@ -169,13 +169,11 @@ describe('a notebook with nothing in it', () => {
 		await openApp();
 		await begun();
 
-		// The `⋯` beside the `+` is there, as the notebooks' is with nothing
-		// open, and offers nothing.
-		const options = screen.getByRole('button', { name: 'Note options' });
+		// Its row's `⋯` is there, as every row's is, and offers nothing.
+		const options = within(list()).getByRole('button', { name: 'Options for “Untitled”' });
 		expect(options.hasAttribute('disabled')).toBe(true);
-		// In the list's header, before its `+`, and not in the note's own.
-		const actions = within(list()).getByRole('button', { name: 'New note' }).parentElement;
-		expect(actions?.contains(options)).toBe(true);
+		// On the row, and in neither header.
+		expect(options.closest('.pane-header')).toBeNull();
 		expect(options.closest('.note-header')).toBeNull();
 		fireEvent.contextMenu(within(list()).getByRole('button', { name: /^Untitled/ }));
 		expect(screen.queryByRole('group', { name: 'Note “Untitled”' })).toBeNull();
@@ -188,7 +186,11 @@ describe('a notebook with nothing in it', () => {
 		await user.keyboard('Groceries{Enter}');
 
 		await waitFor(() => {
-			expect(options.hasAttribute('disabled')).toBe(false);
+			expect(
+				within(list())
+					.getByRole('button', { name: 'Options for “Groceries”' })
+					.hasAttribute('disabled')
+			).toBe(false);
 		});
 	});
 

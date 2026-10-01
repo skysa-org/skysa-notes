@@ -1,19 +1,13 @@
 import { ROOT } from '@skysa/core';
 import { type ReactNode, useDeferredValue, useState } from 'react';
 
-import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { folderLabel } from '../store/tree.js';
 import { openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
-import {
-	FloatingMenu,
-	type MenuPoint,
-	menuPoint,
-	OptionsMenu,
-	type OptionsMenuItem,
-} from './OptionsMenu.js';
+import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
+import { RowOptions } from './RowOptions.js';
 
 /**
  * The middle pane: the notes in the selected notebook, newest first by when
@@ -68,20 +62,11 @@ export interface NoteListProps {
 	/** What is being typed into a note and not saved yet, to show in its row. */
 	liveEdits?: LiveEdits;
 	/**
-	 * What a right-click on a note's row offers: the note's own menu
-	 * (`noteMenuItems`), about that note. Without it the browser's menu opens.
+	 * What a note's row offers, from its `⋯` and from a right-click: the
+	 * note's own menu (`noteMenuItems`), about that note. Without it the `⋯` is
+	 * disabled and a right-click opens the browser's menu.
 	 */
 	menuFor?: (note: NoteRecord) => readonly OptionsMenuItem[];
-	/**
-	 * The note open, for the `⋯` beside the `+`, which offers its menu
-	 * (`menuFor`) as the notebooks' header offers the open notebook's
-	 * (`NotebookMenu`). It need not be one of these rows: a note opened from the
-	 * search can be anywhere. Left out while there is none to offer it about —
-	 * nothing open, or a note begun and not stored, which leaving unedited is
-	 * what deleting does — and the `⋯` is there disabled, so the header keeps
-	 * its shape.
-	 */
-	openNote?: NoteRecord | undefined;
 }
 
 /**
@@ -198,6 +183,8 @@ interface NoteRowProps {
 	moving: boolean;
 	/** A right-click, where the note has a menu. */
 	onMenu?: (at: MenuPoint) => void;
+	/** What its `⋯` and its right-click offer: none for a note not stored yet. */
+	items: readonly OptionsMenuItem[];
 }
 
 const NoteRow = ({
@@ -210,12 +197,13 @@ const NoteRow = ({
 	onCancelMove,
 	moving,
 	onMenu,
+	items,
 }: NoteRowProps) => {
 	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
 	// preview is a parse.
 	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
 	return (
-		<li>
+		<li className="row-item">
 			<button
 				type="button"
 				className={[
@@ -253,6 +241,7 @@ const NoteRow = ({
 				<span className="note-meta">{meta}</span>
 				<Preview note={note} typing={note.body !== row.body} />
 			</button>
+			<RowOptions name={note.title} kind="Note" items={items} />
 		</li>
 	);
 };
@@ -271,7 +260,6 @@ export const NoteList = ({
 	unsavedNoteId,
 	liveEdits,
 	menuFor,
-	openNote,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
@@ -289,15 +277,6 @@ export const NoteList = ({
 			<div className="pane-header">
 				<h2>{heading}</h2>
 				<div className="pane-actions">
-					<OptionsMenu
-						label="Note options"
-						title="Note options"
-						groupLabel={openNote === undefined ? 'Note' : `Note “${openNote.title}”`}
-						triggerClassName="icon icon-quiet"
-						trigger={<Icon name="overflow" />}
-						disabled={openNote === undefined || menuFor === undefined}
-						items={openNote === undefined ? [] : (menuFor?.(openNote) ?? [])}
-					/>
 					<button
 						type="button"
 						className="icon"
@@ -339,6 +318,7 @@ export const NoteList = ({
 								}
 								onCancelMove={onCancelMove}
 								moving={note.id === movingNoteId}
+								items={menuFor === undefined || !stored ? [] : menuFor(note)}
 								{...(menuFor === undefined || !stored
 									? {}
 									: {

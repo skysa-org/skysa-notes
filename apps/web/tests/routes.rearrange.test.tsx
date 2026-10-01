@@ -71,7 +71,7 @@ describe('dragging a note into a notebook', () => {
 		await screen.findByDisplayValue('Agenda');
 
 		await dragOnto(
-			await screen.findByRole('button', { name: /Minutes/ }),
+			await screen.findByRole('button', { name: /^Minutes/ }),
 			'Move “Minutes” into Work'
 		);
 
@@ -92,11 +92,11 @@ describe('dragging a note into a notebook', () => {
 		});
 		const user = userEvent.setup();
 		await openApp();
-		await user.click(await screen.findByRole('button', { name: /Minutes/ }));
+		await user.click(await screen.findByRole('button', { name: /^Minutes/ }));
 		await screen.findByDisplayValue('Minutes');
 
 		await dragOnto(
-			await screen.findByRole('button', { name: /Minutes/ }),
+			await screen.findByRole('button', { name: /^Minutes/ }),
 			'Move “Minutes” into Work'
 		);
 
@@ -249,7 +249,7 @@ describe('the note’s own menu', () => {
 	it('picks the note up, as dragging its row does', async () => {
 		const { note, user } = await openMinutes();
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
+		await user.click(screen.getByRole('button', { name: 'Options for “Minutes”' }));
 		await user.click(screen.getByRole('button', { name: 'Move to notebook…' }));
 		await user.click(await screen.findByRole('button', { name: 'Move “Minutes” into Work' }));
 
@@ -265,7 +265,7 @@ describe('the note’s own menu', () => {
 		await user.click(await screen.findByRole('option', { name: /Move notebook/ }));
 		await screen.findByRole('button', { name: 'Move “Archive” into Work' });
 
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
+		await user.click(screen.getByRole('button', { name: 'Options for “Minutes”' }));
 		const items = screen.getByRole('group', { name: 'Note “Minutes”' });
 		expect(within(items).queryByRole('button', { name: 'Move to notebook…' })).toBeNull();
 		expect(within(items).getByRole('button', { name: 'Delete' })).toBeDefined();

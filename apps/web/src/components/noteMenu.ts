@@ -1,8 +1,8 @@
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
- * What can be done to a note, wherever it is offered from: the `⋯` beside
- * the note list's `+`, about the note open, and a right-click on its row. Move is offered
+ * What can be done to a note, wherever it is offered from: the `⋯` at the
+ * end of its row in the list, and a right-click on the row. Move is offered
  * only when given — nothing can be picked up while something else already is.
  */
 export const noteMenuItems = ({
