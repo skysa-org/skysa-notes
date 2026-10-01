@@ -41,8 +41,6 @@ import {
 	useElementWidth,
 	useMediaQuery,
 } from './layout.js';
-import { noteMenuItems } from './noteMenu.js';
-import { OptionsMenu } from './OptionsMenu.js';
 import { Outline } from './Outline.js';
 import { UnsupportedBanner, useUnsupported } from './unsupported.js';
 
@@ -78,12 +76,6 @@ export interface NoteViewProps {
 	 * keeps it beside the note; as the body it would undo that later edit.
 	 */
 	onDeleted: (deleted: NoteRecord, beside?: DisplacedText) => void;
-	/**
-	 * Pick the note up to put it down in another notebook, as dragging its row
-	 * does. Offered in the note's menu only when given: nothing can be moved
-	 * while something else already is.
-	 */
-	onMove?: () => void;
 	/**
 	 * Make a note in the open notebook, for the empty pane's "create one". Given
 	 * only while a notebook is open: without somewhere to put a note, the pane
@@ -125,7 +117,10 @@ export interface NoteDraft {
 	setMode: (mode: EditorMode) => void;
 }
 
-/** What the note pane does for notes other than the one it shows. */
+/**
+ * What the note pane does for a note from elsewhere: the `⋯` in the note
+ * list's header, about the note open, and a right-click on any row.
+ */
 export interface NoteViewHandle {
 	deleteNote: (note: NoteRecord) => void;
 }
@@ -488,7 +483,6 @@ const focusEditor = (body: Element | null): void => {
 export const NoteView = ({
 	note,
 	onDeleted,
-	onMove,
 	onCreateNote,
 	onCreateNotebook,
 	draft,
@@ -592,8 +586,8 @@ export const NoteView = ({
 	);
 
 	/**
-	 * Delete a note: the one open, from its own menu, or any other from a
-	 * right-click on its row (`NoteViewHandle`). Here either way, because what
+	 * Delete a note: the one open, from the `⋯` beside the list's `+`, or any
+	 * other from a right-click on its row (`NoteViewHandle`). Here either way, because what
 	 * autosave holds is here — for the note open, and for any earlier one whose
 	 * save failed — and what it holds goes with the note, for undo.
 	 */
@@ -637,10 +631,6 @@ export const NoteView = ({
 		},
 		[flush, forget, onDeleted, settle]
 	);
-
-	const onDelete = useCallback(() => {
-		if (note !== undefined) deleteOne(note);
-	}, [deleteOne, note]);
 
 	useImperativeHandle(handle, () => ({ deleteNote: deleteOne }), [deleteOne]);
 
@@ -726,8 +716,6 @@ export const NoteView = ({
 				onClose={() => {
 					setFinding(0);
 				}}
-				onDelete={onDelete}
-				onMove={onMove}
 				begun={draft !== undefined}
 				liveEdits={liveEdits}
 				onRename={rename}
@@ -825,8 +813,6 @@ const NoteScreen = ({
 	onBody,
 	toggleMode,
 	onClose,
-	onDelete,
-	onMove,
 	begun,
 	liveEdits,
 	onRename,
@@ -848,8 +834,6 @@ const NoteScreen = ({
 	onBody: (element: HTMLDivElement | null) => void;
 	toggleMode: () => void;
 	onClose: () => void;
-	onDelete: () => void;
-	onMove: (() => void) | undefined;
 	/** A draft: begun just now, stored nowhere yet (`NoteViewProps.draft`). */
 	begun: boolean;
 	liveEdits: LiveEdits | undefined;
@@ -902,8 +886,8 @@ const NoteScreen = ({
 							toggleMode={toggleMode}
 						/>
 					)}
-					{/* Between the editor's mode and the note's menu: the rail it
-					    opens is the note's, at the right-hand edge like the menu. */}
+					{/* At the right-hand edge: the rail it opens is the note's, and
+					    is drawn there. */}
 					{outlined && (
 						<button
 							type="button"
@@ -918,18 +902,6 @@ const NoteScreen = ({
 						>
 							<Icon name="outline" />
 						</button>
-					)}
-					{/* Nothing to move or delete until there is a note: leaving a
-					    draft unedited is what deleting it would do. */}
-					{!begun && (
-						<OptionsMenu
-							label="Note options"
-							title="Note options"
-							groupLabel={`Note “${note.title}”`}
-							triggerClassName="note-icon"
-							trigger={<Icon name="overflow" />}
-							items={noteMenuItems({ onMove, onDelete })}
-						/>
 					)}
 				</div>
 			</header>

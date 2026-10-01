@@ -791,12 +791,15 @@ export interface SourcePanelProps {
 	/** Seam for tests: jsdom has no navigation. */
 	navigate?: (url: string) => void;
 	/**
-	 * The storage panel — what the showing source is syncing with, and the way
-	 * to disconnect it — between the sources and the way to another account.
-	 * A wide window keeps it at the foot of the sidebar; a compact one has no
-	 * sidebar in view, and this is the panel that is about sources.
+	 * The storage panel — what the showing source is syncing with — under the
+	 * sources. A wide window keeps it at the foot of the sidebar; a compact one
+	 * has no sidebar in view, and this is the panel that is about sources.
+	 *
+	 * Given where its actions go: the panel's header, as one `⋯` menu beside
+	 * the `+`, as the notebooks' header has its own (`AccountPanel`'s
+	 * `menuIn`). Null until the header is drawn.
 	 */
-	account?: ReactNode;
+	account?: (menuIn: HTMLElement | null) => ReactNode;
 	/** A source was chosen, so the panel has done its job. */
 	onChosen?: () => void;
 }
@@ -805,6 +808,11 @@ export interface SourcePanelProps {
  * The tabs and the `+`, as one panel, for a compact window: opened from the
  * source dropdown in `CompactBar` and laid out as the notebook and note panels
  * are, across the window under the bar.
+ *
+ * Its header is the notebooks' header (`Sidebar`): a `⋯` for what can be done
+ * to the source showing, and a `+` for another, which opens the same list of
+ * providers the `+` beside the tabs does. There even with nothing to offer,
+ * disabled, so the header keeps its shape.
  *
  * The same choices in the same order, with the one showing marked by
  * `aria-current` as its tab is. Renaming a source is not offered here: on a
@@ -820,12 +828,60 @@ export const SourcePanel = ({
 	onChosen,
 }: SourcePanelProps) => {
 	const { ordered, offerable, gate, live, connectLabel } = useSourceChoices(db, client);
-	const headingId = useId();
+	const first = connectLabel === CONNECT_FIRST_LABEL;
+	const [adding, setAdding] = useState(false);
+	const addFrame = useRef<HTMLDivElement>(null);
+	const stopAdding = useCallback(() => {
+		setAdding(false);
+	}, []);
+	// State rather than a ref: the storage panel draws its menu into this, and
+	// has to be drawn again once it is there.
+	const [actions, setActions] = useState<HTMLDivElement | null>(null);
 
 	return (
 		<section className="source-panel" aria-label="Sources">
 			<div className="pane-header">
 				<h2>Sources</h2>
+				<div className="pane-actions">
+					<div className="source-panel-options" ref={setActions} />
+					<div className="source-add" ref={addFrame}>
+						<button
+							type="button"
+							className="icon"
+							title={connectLabel}
+							aria-label={connectLabel}
+							aria-haspopup="true"
+							aria-expanded={adding}
+							disabled={offerable.length === 0}
+							onClick={() => {
+								setAdding((open) => !open);
+							}}
+						>
+							+
+						</button>
+						{adding && offerable.length > 0 && (
+							<Menu
+								className="source-add-menu"
+								label="Storage providers"
+								frame={addFrame}
+								onClose={stopAdding}
+							>
+								<p className="source-add-heading">
+									{first ? 'Choose a storage provider' : connectLabel}
+								</p>
+								<ConnectChoice
+									gate={gate}
+									live={live}
+									db={db}
+									client={client}
+									offerable={offerable}
+									returnTo={returnTo}
+									navigate={navigate}
+								/>
+							</Menu>
+						)}
+					</div>
+				</div>
 			</div>
 			{ordered.length > 0 && (
 				<ul>
@@ -863,29 +919,7 @@ export const SourcePanel = ({
 					})}
 				</ul>
 			)}
-			<div className="source-panel-foot">
-				{account}
-				{offerable.length > 0 && (
-					// A group of its own, named by its heading: a provider's name is
-					// also the name of a source above it, and "Dropbox" read out twice
-					// is two buttons a screen-reader user cannot tell apart.
-					<div className="source-panel-connect" role="group" aria-labelledby={headingId}>
-						<p className="source-add-heading" id={headingId}>
-							{connectLabel}
-						</p>
-						<ConnectChoice
-							gate={gate}
-							live={live}
-							db={db}
-							client={client}
-							offerable={offerable}
-							returnTo={returnTo}
-							navigate={navigate}
-							className="row"
-						/>
-					</div>
-				)}
-			</div>
+			<div className="source-panel-foot">{account?.(actions)}</div>
 		</section>
 	);
 };

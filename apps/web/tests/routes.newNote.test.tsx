@@ -169,7 +169,14 @@ describe('a notebook with nothing in it', () => {
 		await openApp();
 		await begun();
 
-		expect(screen.queryByRole('button', { name: 'Note options' })).toBeNull();
+		// The `⋯` beside the `+` is there, as the notebooks' is with nothing
+		// open, and offers nothing.
+		const options = screen.getByRole('button', { name: 'Note options' });
+		expect(options.hasAttribute('disabled')).toBe(true);
+		// In the list's header, before its `+`, and not in the note's own.
+		const actions = within(list()).getByRole('button', { name: 'New note' }).parentElement;
+		expect(actions?.contains(options)).toBe(true);
+		expect(options.closest('.note-header')).toBeNull();
 		fireEvent.contextMenu(within(list()).getByRole('button', { name: /^Untitled/ }));
 		expect(screen.queryByRole('group', { name: 'Note “Untitled”' })).toBeNull();
 		expect(
@@ -180,7 +187,9 @@ describe('a notebook with nothing in it', () => {
 
 		await user.keyboard('Groceries{Enter}');
 
-		expect(await screen.findByRole('button', { name: 'Note options' })).toBeDefined();
+		await waitFor(() => {
+			expect(options.hasAttribute('disabled')).toBe(false);
+		});
 	});
 
 	it('changes editor without storing anything, and is stored in the one chosen', async () => {

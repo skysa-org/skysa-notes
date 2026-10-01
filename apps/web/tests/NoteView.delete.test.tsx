@@ -1,9 +1,10 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { NoteView } from '../src/components/NoteView.js';
-import { db } from '../src/store/db.js';
+import { NoteView, type NoteViewHandle } from '../src/components/NoteView.js';
+import { db, type NoteRecord } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote, deleteNote, getNote } from '../src/store/notes.js';
 
@@ -35,9 +36,19 @@ vi.mock('../src/editor/RichEditor.js', () => ({
 	),
 }));
 
+/** The pane, as the route holds it: what the note list's `⋯` deletes through. */
+const pane = createRef<NoteViewHandle>();
+
+/** Delete the open note as the `⋯` beside the list's `+` does. */
+const deleteOpen = (note: NoteRecord) => {
+	act(() => {
+		pane.current?.deleteNote(note);
+	});
+};
+
 const Harness = ({ id }: { id: string }) => {
 	const note = useNote(id);
-	return <NoteView note={note} onDeleted={() => undefined} />;
+	return <NoteView ref={pane} note={note} onDeleted={() => undefined} />;
 };
 
 afterEach(async () => {
@@ -59,8 +70,7 @@ describe('deleting a note with an edit still pending', () => {
 		render(<Harness id={note.id} />);
 
 		await user.click(await screen.findByTestId('rich-editor'));
-		await user.click(screen.getByRole('button', { name: 'Note options' }));
-		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		deleteOpen(note);
 
 		await waitFor(async () => {
 			const stored = await getNote(db, note.id);
