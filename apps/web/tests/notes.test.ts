@@ -226,12 +226,33 @@ describe('moveNote', () => {
 });
 
 describe('listNotes', () => {
-	it('lists only live notes, newest edit first', async () => {
+	it('lists only live notes', async () => {
 		const first = await createNote(db, { title: 'First' });
 		const second = await createNote(db, { title: 'Second' });
 		await deleteNote(db, first.id);
 
 		expect((await listNotes(db)).map((n) => n.id)).toEqual([second.id]);
+	});
+
+	it('lists the newest note first, and an edit does not move one', async () => {
+		const older = await createNote(db, { title: 'Older' });
+		const newer = await createNote(db, { title: 'Newer' });
+		// Two creates can land in one millisecond, so the order is made explicit.
+		await updateNote(db, older.id, { createdAt: 1_000 });
+		await updateNote(db, newer.id, { createdAt: 2_000 });
+
+		await saveNoteBody(db, older.id, 'Edited since.\n');
+
+		expect((await listNotes(db)).map((n) => n.title)).toEqual(['Newer', 'Older']);
+	});
+
+	it('lists notes made in the same millisecond by path', async () => {
+		const zed = await createNote(db, { title: 'Zed' });
+		const alpha = await createNote(db, { title: 'Alpha' });
+		await updateNote(db, zed.id, { createdAt: 1_000 });
+		await updateNote(db, alpha.id, { createdAt: 1_000 });
+
+		expect((await listNotes(db)).map((n) => n.title)).toEqual(['Alpha', 'Zed']);
 	});
 
 	it('can be restricted to one folder', async () => {

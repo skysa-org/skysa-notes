@@ -226,6 +226,18 @@ export interface ListNotesOptions extends NoteScope {
 	includeDeleted?: boolean;
 }
 
+/**
+ * Newest first by when each note was made, not by when it was last edited:
+ * editing a note must not move it, or the row being typed into jumps to the top
+ * of the list under the user and every row above it shifts down one. Notes made
+ * in the same millisecond — a batch read in by one import, whose files said
+ * nothing about when they were made (`noteRecordFromFile`) — fall back to their
+ * path, so the order is the same on every render rather than whatever order
+ * IndexedDB handed them back in.
+ */
+const newestFirst = (a: NoteRecord, b: NoteRecord): number =>
+	b.createdAt - a.createdAt || a.path.localeCompare(b.path);
+
 export const listNotes = async (
 	db: NotesDatabase,
 	options: ListNotesOptions = {}
@@ -239,7 +251,7 @@ export const listNotes = async (
 			(note) =>
 				options.folderPath === undefined || parentPath(note.path) === options.folderPath
 		)
-		.sort((a, b) => b.updatedAt - a.updatedAt);
+		.sort(newestFirst);
 };
 
 /**

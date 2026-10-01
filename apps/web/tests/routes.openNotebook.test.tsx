@@ -64,8 +64,8 @@ describe('opening a notebook', () => {
 		const newer = await createNote(db, { folderPath: 'Work', title: 'Newer', body: 'Newer\n' });
 		// The list is most-recent first, and two creates can land in one
 		// millisecond, so the order is made explicit.
-		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { updatedAt: 1_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { updatedAt: 2_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
 		const user = userEvent.setup();
 		// The app opens the first notebook, `Archive`, with nothing in it.
 		await openApp();
@@ -84,8 +84,8 @@ describe('opening a notebook', () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		const older = await createNote(db, { folderPath: 'Work', title: 'Older', body: 'Older\n' });
 		const newer = await createNote(db, { folderPath: 'Work', title: 'Newer', body: 'Newer\n' });
-		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { updatedAt: 1_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { updatedAt: 2_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
 		const user = userEvent.setup();
 		await openApp(`/?folder=Work&note=${older.id}`);
 		await waitFor(() => {
@@ -194,9 +194,9 @@ describe('opening a notebook', () => {
 		const older = await createNote(db, { folderPath: 'Work', title: 'Older', body: 'Older\n' });
 		const newer = await createNote(db, { folderPath: 'Work', title: 'Newer', body: 'Newer\n' });
 		const going = await createNote(db, { folderPath: 'Work', title: 'Going', body: 'Going\n' });
-		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { updatedAt: 1_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { updatedAt: 2_000 });
-		await db.notes.update([LOCAL_CONNECTION_ID, going.id], { updatedAt: 3_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
+		await db.notes.update([LOCAL_CONNECTION_ID, going.id], { createdAt: 3_000 });
 		const user = userEvent.setup();
 		await openApp(`/?folder=Work&note=${going.id}`);
 		await waitFor(() => {

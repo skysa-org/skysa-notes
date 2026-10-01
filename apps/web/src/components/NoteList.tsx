@@ -7,8 +7,9 @@ import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
- * The middle pane: the notes in the selected notebook, most recently edited
- * first.
+ * The middle pane: the notes in the selected notebook, newest first by when
+ * each was made (`listNotes`). Each row still says when its note was last
+ * edited; that is what it says, not where it sits.
  *
  * It used to show a search's answers too, in place of the notebook's notes.
  * They hang from the search field now (`SearchField`), so the notebook the user
