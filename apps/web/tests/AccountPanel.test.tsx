@@ -3317,13 +3317,51 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			grants: () => Promise.resolve({ ok: true, value: GRANTS }),
 		});
 
-		const devices = await screen.findByRole('list', { name: 'Devices' });
+		const devices = await screen.findByRole('list', { name: 'Other devices' });
 
-		expect(devices.querySelectorAll('li').length).toBe(2);
-		expect(screen.getByText(/This device/)).toBeTruthy();
+		// This one is not listed: it cannot be removed from itself, which is
+		// what disconnecting is.
+		expect(devices.querySelectorAll('li').length).toBe(1);
+		expect(screen.queryByText(/This device/)).toBeNull();
 		expect(client.asked).toContain('sk1_here');
-		// This one cannot be removed from itself: disconnecting is that.
 		expect(screen.getAllByRole('button', { name: 'Remove' }).length).toBe(1);
+	});
+
+	it('folds them behind how many there are, which is said either way', async () => {
+		const user = userEvent.setup();
+		const third = { id: 'g3', createdAt: 3, lastUsedAt: 3, expired: false, current: false };
+		await connected({
+			grants: () => Promise.resolve({ ok: true, value: [...GRANTS, third] }),
+		});
+
+		const summary = await screen.findByText('2 other devices signed in on this account');
+		const details = summary.closest('details') as HTMLDetailsElement;
+		expect(details.open).toBe(false);
+
+		await user.click(summary);
+		expect(details.open).toBe(true);
+		expect(within(details).getAllByRole('button', { name: 'Remove' })).toHaveLength(2);
+	});
+
+	it('says one other device as one', async () => {
+		await connected({ grants: () => Promise.resolve({ ok: true, value: GRANTS }) });
+		expect(await screen.findByText('1 other device signed in on this account')).toBeTruthy();
+	});
+
+	it('names each by what its browser said it was, and an older one plainly', async () => {
+		const named = { ...GRANTS[1]!, device: 'Safari on iPhone' };
+		const older = { id: 'g3', createdAt: 3, lastUsedAt: 3, expired: true, current: false };
+		await connected({
+			grants: () => Promise.resolve({ ok: true, value: [GRANTS[0]!, named, older] }),
+		});
+
+		const rows = (await screen.findByRole('list', { name: 'Other devices' })).querySelectorAll(
+			'li > span'
+		);
+		expect([...rows].map((row) => row.textContent)).toEqual([
+			expect.stringMatching(/^Safari on iPhone, last used /),
+			expect.stringMatching(/^A device, last used .* · signed out for being idle$/),
+		]);
 	});
 
 	it('removes a device and asks again, so the list is what the server has', async () => {
@@ -3336,12 +3374,12 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			.mockResolvedValueOnce({ ok: true, value: GRANTS })
 			.mockResolvedValue({ ok: true, value: [GRANTS[0]!] });
 		await connected({ grants, revokeGrant });
-		await screen.findByRole('list', { name: 'Devices' });
+		await screen.findByRole('list', { name: 'Other devices' });
 
 		await user.click(screen.getByRole('button', { name: 'Remove' }));
 
 		await waitFor(() => {
-			expect(screen.queryByRole('list', { name: 'Devices' })).toBeNull();
+			expect(screen.queryByRole('list', { name: 'Other devices' })).toBeNull();
 		});
 		expect(revokeGrant).toHaveBeenCalledWith('g2');
 	});
@@ -3352,12 +3390,14 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			grants: () => Promise.resolve({ ok: true, value: GRANTS }),
 			revokeGrant: () => Promise.resolve({ ok: false, refusal: 'not_found' }),
 		});
-		await screen.findByRole('list', { name: 'Devices' });
+		await screen.findByRole('list', { name: 'Other devices' });
 
 		await user.click(screen.getByRole('button', { name: 'Remove' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/would not remove it/);
-		expect(screen.getByRole('list', { name: 'Devices' }).querySelectorAll('li').length).toBe(2);
+		expect(
+			screen.getByRole('list', { name: 'Other devices' }).querySelectorAll('li').length
+		).toBe(1);
 	});
 
 	it.each([
@@ -3377,7 +3417,7 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			grants: () => Promise.resolve({ ok: true, value: GRANTS }),
 			revokeGrant,
 		});
-		await screen.findByRole('list', { name: 'Devices' });
+		await screen.findByRole('list', { name: 'Other devices' });
 
 		await user.click(screen.getByRole('button', { name: 'Remove' }));
 
@@ -3394,7 +3434,7 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			grants: () => Promise.resolve({ ok: true, value: GRANTS }),
 			revokeGrant,
 		});
-		await screen.findByRole('list', { name: 'Devices' });
+		await screen.findByRole('list', { name: 'Other devices' });
 		// The credential is read from this device before anything is asked of
 		// the server, so this failure is strictly before the revoke.
 		//
@@ -3439,7 +3479,9 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 		});
 		renderPanel(client, db);
 		await waitFor(async () => {
-			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(2);
+			expect(
+				(await screen.findByRole('list', { name: 'Other devices' })).children.length
+			).toBe(1);
 		});
 
 		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
@@ -3448,7 +3490,9 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 		// OneDrive — and pressing Remove would send a grant id this connection
 		// has never heard of.
 		await waitFor(async () => {
-			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(3);
+			expect(
+				(await screen.findByRole('list', { name: 'Other devices' })).children.length
+			).toBe(2);
 		});
 	});
 
@@ -3483,7 +3527,9 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 
 		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 		await waitFor(async () => {
-			expect((await screen.findByRole('list', { name: 'Devices' })).children.length).toBe(3);
+			expect(
+				(await screen.findByRole('list', { name: 'Other devices' })).children.length
+			).toBe(2);
 		});
 
 		await act(async () => {
@@ -3491,16 +3537,16 @@ describe('AccountPanel, listing the devices holding a connection', () => {
 			await held;
 		});
 
-		expect(screen.getByRole('list', { name: 'Devices' }).children.length).toBe(3);
+		expect(screen.getByRole('list', { name: 'Other devices' }).children.length).toBe(2);
 	});
 
 	it('says nothing where this is the only device, or the server cannot be asked', async () => {
 		await connected({ grants: () => Promise.resolve({ ok: true, value: [GRANTS[0]!] }) });
-		expect(screen.queryByRole('list', { name: 'Devices' })).toBeNull();
+		expect(screen.queryByRole('list', { name: 'Other devices' })).toBeNull();
 
 		cleanup();
 		await connected({ grants: () => Promise.reject(new TypeError('offline')) });
-		expect(screen.queryByRole('list', { name: 'Devices' })).toBeNull();
+		expect(screen.queryByRole('list', { name: 'Other devices' })).toBeNull();
 	});
 });
 

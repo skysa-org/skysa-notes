@@ -43,6 +43,13 @@
       "when": 1789432699005,
       "tag": "0005_drop_user_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790942114996,
+      "tag": "0006_grant_device",
+      "breakpoints": true
     }
   ]
 }

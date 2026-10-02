@@ -253,3 +253,18 @@ describe('0004_per_connection_credentials', () => {
 		]);
 	});
 });
+
+describe('0006_grant_device', () => {
+	it('keeps every grant, naming none of them until they next connect', () => {
+		const db = open('0005_drop_user_connections.sql');
+		db.prepare(
+			'INSERT INTO grants (id, connection_id, secret_hash, created_at, last_used_at) VALUES (?, NULL, ?, 0, 0)'
+		).run('g', 'h');
+
+		apply(db, '0006_grant_device.sql');
+
+		expect(db.prepare('SELECT id, secret_hash, device FROM grants').all()).toEqual([
+			{ id: 'g', secret_hash: 'h', device: null },
+		]);
+	});
+});

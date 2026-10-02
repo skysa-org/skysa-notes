@@ -148,6 +148,15 @@ export const grants = sqliteTable(
 		 * never sync again.
 		 */
 		lastUsedAt: integer('last_used_at', { mode: 'timestamp_ms' }).notNull(),
+		/**
+		 * What the device is, as its browser said when it signed in: "Safari on
+		 * iPhone" (`deviceLabel`). So the device list names each one, the way
+		 * every account's list of signed-in devices does, rather than "a device".
+		 * The label only — never the User-Agent itself, and no address or place —
+		 * and null for a grant made before it was kept, or by a browser it could
+		 * not name.
+		 */
+		device: text('device'),
 	},
 	(t) => [
 		// Unique, and over every row including the tombstones: it is what makes a

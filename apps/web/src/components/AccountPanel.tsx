@@ -846,8 +846,13 @@ const SyncState = ({
  *
  * The point of it is that a stolen credential is visible and revocable. It is
  * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
- * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open rather than
- * hidden behind a disclosure the user would never press.
+ * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
+ * how many other devices there are is said whether or not the list is open:
+ * one more than the user has is what a theft looks like from here. The rows
+ * fold behind that count (2026-10-02), each naming the device as its browser
+ * did at sign-in ("Safari on iPhone"), since a row that says only "a device"
+ * cannot be told from the one in the user's pocket. This one is not among
+ * them.
  *
  * Revoking is permanent in a way worth saying: the server spends a credential's
  * hash for ever, so the device that held it cannot be talked back into this
@@ -906,8 +911,10 @@ const Devices = ({
 		};
 	}, [ask]);
 
-	const listed = answer(grants);
-	if (listed === undefined || listed.length < 2) return null;
+	// This one is not listed: it cannot be removed from itself (disconnecting
+	// is that), and "this device" is the one thing about it the user knows.
+	const others = (answer(grants) ?? []).filter((grant) => !grant.current);
+	if (others.length === 0) return null;
 
 	const revoke = (grantId: string) => {
 		setBusy(grantId);
@@ -951,17 +958,23 @@ const Devices = ({
 
 	return (
 		<div className="account-devices">
-			<p className="muted">Devices signed in to this account:</p>
-			<ul aria-label="Devices">
-				{listed.map((grant) => (
-					<li key={grant.id}>
-						<span className="muted">
-							{grant.current
-								? 'This device'
-								: `A device, last used ${when(grant.lastUsedAt)}`}
-							{grant.expired && ' · signed out for being idle'}
-						</span>
-						{!grant.current && (
+			{/* Shut until asked for: it is there to check now and then, and open
+			    it is a row per device under everything the panel says. */}
+			<details>
+				<summary className="muted">
+					<Icon name="chevron" />
+					{others.length === 1
+						? '1 other device'
+						: `${String(others.length)} other devices`}{' '}
+					signed in on this account
+				</summary>
+				<ul aria-label="Other devices">
+					{others.map((grant) => (
+						<li key={grant.id}>
+							<span className="muted">
+								{`${grant.device ?? 'A device'}, last used ${when(grant.lastUsedAt)}`}
+								{grant.expired && ' · signed out for being idle'}
+							</span>
 							<button
 								type="button"
 								disabled={busy !== null}
@@ -971,10 +984,10 @@ const Devices = ({
 							>
 								Remove
 							</button>
-						)}
-					</li>
-				))}
-			</ul>
+						</li>
+					))}
+				</ul>
+			</details>
 			{problem !== null && (
 				<p className="muted" role="alert">
 					{problem}

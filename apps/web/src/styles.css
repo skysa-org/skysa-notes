@@ -2156,6 +2156,37 @@ button.danger {
 	gap: 0.35rem;
 }
 
+/* Its count, and the way into the rows: as tall as anything else pressed in
+   the panel, its marker the app's chevron rather than the browser's
+   triangle, turned down while it is open. */
+.account-devices summary {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	min-height: var(--control);
+	cursor: pointer;
+	list-style: none;
+}
+
+.account-devices summary::-webkit-details-marker {
+	display: none;
+}
+
+.account-devices summary .toolbar-icon {
+	flex: none;
+	transform: rotate(-90deg);
+}
+
+.account-devices details[open] > summary .toolbar-icon {
+	transform: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.account-devices summary .toolbar-icon {
+		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+}
+
 .account-devices ul {
 	margin: 0;
 	padding: 0;
