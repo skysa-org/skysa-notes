@@ -50,7 +50,21 @@ export interface DisconnectDialogProps {
 	/** Why nothing here can be sent right now, where something is in the way. */
 	stopped: 'offline' | 'blocked' | null;
 	busy: boolean;
-	/** Where the provider leaves the app's access behind, where it does. */
+	/**
+	 * How many other devices are signed in to the account and stay so, or
+	 * `undefined` where the server has not said. Disconnecting signs this
+	 * device out and no other, and the last one out disconnects the account.
+	 * Not asked for at all with `onServer: false`, which tells the server
+	 * nothing.
+	 */
+	others: number | undefined;
+	/** Whether the server is asked, rather than this device stopping alone. */
+	onServer: boolean;
+	/**
+	 * Where the provider leaves the app's access behind, where it does. Said
+	 * only where the account may be about to go: with other devices still in
+	 * it, the app's access is meant to stay.
+	 */
 	leftAtProvider: ReactNode;
 	download: (notes: readonly NoteRecord[]) => void;
 	onAnswer: (answer: UnsentAnswer) => void;
@@ -107,6 +121,23 @@ const headline = (listed: Unsynced, label: string): string => {
 	return `${counted(countOf(listed), 'change', 'changes')} on this device ${countOf(listed) === 1 ? 'has' : 'have'} not reached ${label}, and cannot once it is disconnected.`;
 };
 
+/**
+ * What becomes of the account, which depends on who else is in it: other
+ * devices keep syncing, and the last one out takes the account with it. Said
+ * before the user answers, since the two are different things to agree to.
+ */
+const elsewhere = (others: number | undefined): string => {
+	if (others === undefined) {
+		return 'Other devices connected to it stay connected. If this is the last one, the account is disconnected too.';
+	}
+	if (others === 0) {
+		return 'This is the only device connected to it, so the account is disconnected too.';
+	}
+	return others === 1
+		? 'The other device connected to it stays connected and keeps syncing.'
+		: `The ${String(others)} other devices connected to it stay connected and keep syncing.`;
+};
+
 const Titles = ({ notes }: { notes: readonly NoteRecord[] }) => {
 	const named = notes.slice(0, NAMED);
 	const rest = notes.slice(NAMED);
@@ -140,6 +171,8 @@ export const DisconnectDialog = ({
 	failing,
 	stopped,
 	busy,
+	others,
+	onServer,
 	leftAtProvider,
 	download,
 	onAnswer,
@@ -148,6 +181,14 @@ export const DisconnectDialog = ({
 }: DisconnectDialogProps) => {
 	const [discarding, setDiscarding] = useState(false);
 	const named = displayName === null ? label : `${label} · ${displayName}`;
+	// Nothing about other devices without the server: it is not asked, so the
+	// account is wherever it was.
+	const after = onServer ? (
+		<>
+			<p className="muted">{elsewhere(others)}</p>
+			{(others === undefined || others === 0) && leftAtProvider}
+		</>
+	) : null;
 	useEffect(() => {
 		// The button that was pressed has gone with the step, and the focus would
 		// fall to the page — where Escape reaches nothing, since it is listened for
@@ -168,9 +209,9 @@ export const DisconnectDialog = ({
 		return (
 			<div className="account-confirm" role="group" aria-label="Disconnect">
 				<p className="muted">
-					{`Disconnect ${named}? Its notes are removed from this device. Nothing is deleted from ${label}; connect it again to get them back.`}
+					{`Disconnect ${named} from this device? Its notes are removed from this device. Nothing is deleted from ${label}; connect it again to get them back.`}
 				</p>
-				{leftAtProvider}
+				{after}
 				<button
 					type="button"
 					disabled={busy}
@@ -244,7 +285,7 @@ export const DisconnectDialog = ({
 					it somewhere safe first; the note says how.
 				</p>
 			)}
-			{leftAtProvider}
+			{after}
 			<MoveUnsent
 				listed={listed}
 				from={label}

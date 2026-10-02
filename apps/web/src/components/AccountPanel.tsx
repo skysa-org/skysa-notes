@@ -842,43 +842,12 @@ const SyncState = ({
 };
 
 /**
- * The devices holding this connection, and the way to take one away.
- *
- * The point of it is that a stolen credential is visible and revocable. It is
- * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
- * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
- * how many other devices there are is said whether or not the list is open:
- * one more than the user has is what a theft looks like from here. The rows
- * fold behind that count (2026-10-02), each naming the device as its browser
- * did at sign-in ("Safari on iPhone"), since a row that says only "a device"
- * cannot be told from the one in the user's pocket. This one is not among
- * them.
- *
- * Revoking is permanent in a way worth saying: the server spends a credential's
- * hash for ever, so the device that held it cannot be talked back into this
- * connection — it has to be connected again from scratch.
+ * The devices holding a source's connection, as the server lists them. The
+ * device list shows them; the disconnect question counts them, since what it
+ * does depends on whether this is the last.
  */
-const Devices = ({
-	client,
-	database,
-	connectionId,
-}: {
-	client: Client;
-	database: NotesDatabase;
-	/**
-	 * Which source these are the devices of. Named rather than looked up, for
-	 * two reasons: it is what makes the effect re-run on a switch — without it
-	 * the list stays on the previous source's devices while the panel above
-	 * names the new one, and pressing Remove sends a grant id the new
-	 * connection has never heard of — and it pins every call in this component
-	 * to one source, rather than re-reading "whichever is in front" between
-	 * asking and revoking.
-	 */
-	connectionId: string;
-}) => {
+const useGrants = (client: Client, database: NotesDatabase, connectionId: string) => {
 	const [grants, setGrants] = useState<Asked<Grant[]>>({ kind: 'asking' });
-	const [busy, setBusy] = useState<string | null>(null);
-	const [problem, setProblem] = useState<string | null>(null);
 
 	// Only the newest question's answer is kept, and none once the source has
 	// changed or the panel has gone. A slow answer about one source landing under
@@ -911,6 +880,63 @@ const Devices = ({
 		};
 	}, [ask]);
 
+	return { grants, ask };
+};
+
+/**
+ * How many other devices a disconnect here would leave connected, or
+ * `undefined` where the server has not said. One signed out for being idle is
+ * not counted: the server does not count it either, and disconnecting the last
+ * live device takes the account with it (`signOut`).
+ */
+const stillSignedIn = (grants: Asked<Grant[]>): number | undefined =>
+	answer(grants)?.filter((grant) => !grant.current && !grant.expired).length;
+
+/**
+ * The devices holding this connection, and the way to take one away.
+ *
+ * The point of it is that a stolen credential is visible and revocable. It is
+ * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
+ * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
+ * how many other devices there are is said whether or not the list is open:
+ * one more than the user has is what a theft looks like from here. The rows
+ * fold behind that count (2026-10-02), each naming the device as its browser
+ * did at sign-in ("Safari on iPhone"), since a row that says only "a device"
+ * cannot be told from the one in the user's pocket. This one is not among
+ * them.
+ *
+ * Revoking is permanent in a way worth saying: the server spends a credential's
+ * hash for ever, so the device that held it cannot be talked back into this
+ * connection — it has to be connected again from scratch.
+ */
+const Devices = ({
+	client,
+	database,
+	connectionId,
+	grants,
+	onChanged,
+}: {
+	client: Client;
+	database: NotesDatabase;
+	/**
+	 * Which source these are the devices of. Named rather than looked up: it
+	 * pins every call in this component to one source, rather than re-reading
+	 * "whichever is in front" between asking and revoking.
+	 */
+	connectionId: string;
+	/**
+	 * Asked by the panel (`useGrants`), keyed by the same source, which is what
+	 * keeps the list from staying on the previous source's devices after a
+	 * switch, with a Remove sending a grant id the new connection has never
+	 * heard of. The panel's because the disconnect question counts them too.
+	 */
+	grants: Asked<Grant[]>;
+	/** A device was removed: ask again. */
+	onChanged: () => void;
+}) => {
+	const [busy, setBusy] = useState<string | null>(null);
+	const [problem, setProblem] = useState<string | null>(null);
+
 	// This one is not listed: it cannot be removed from itself (disconnecting
 	// is that), and "this device" is the one thing about it the user knows.
 	const others = (answer(grants) ?? []).filter((grant) => !grant.current);
@@ -932,7 +958,7 @@ const Devices = ({
 			)
 			.then((result) => {
 				if (result?.ok === true) {
-					ask();
+					onChanged();
 					return;
 				}
 				setProblem('That device is still signed in: the server would not remove it.');
@@ -1357,6 +1383,8 @@ const Connected = ({
 	// The other live sources, which what this one never sent could go to.
 	const sources = useLiveQuery(() => connectedSources(database), [database]);
 	const targets = otherLiveSources(sources, connectionId);
+	// Here rather than in the list, because the question counts them too.
+	const devices = useGrants(client, database, connectionId);
 	const disconnecting = disconnects[connectionId];
 	const busy = disconnecting?.busy === true;
 	const problem = disconnecting?.problem ?? null;
@@ -1408,6 +1436,9 @@ const Connected = ({
 		focusNext.current = 'cancel';
 		setTrouble(null);
 		setStep({ kind: 'pushing', onServer });
+		// Again, for the question's sake: whether this is the last device decides
+		// what it says, and a device may have joined since the panel opened.
+		if (onServer) devices.ask();
 		void prepare(database, connectionId, pushable ? () => sync.syncNow() : undefined)
 			.then((ready) => {
 				if (asking.current !== mine) return;
@@ -1492,7 +1523,13 @@ const Connected = ({
 			{downloadable && (
 				<DownloadAll holds={holds} downloading={downloading} button={buttons} />
 			)}
-			<Devices client={client} database={database} connectionId={bound.connectionId} />
+			<Devices
+				client={client}
+				database={database}
+				connectionId={connectionId}
+				grants={devices.grants}
+				onChanged={devices.ask}
+			/>
 			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
 					{problem ?? trouble}
@@ -1518,6 +1555,8 @@ const Connected = ({
 					targets={targets}
 					failing={step.failing}
 					busy={busy}
+					others={stillSignedIn(devices.grants)}
+					onServer={step.onServer}
 					leftAtProvider={<LeftAtProvider provider={bound.provider} />}
 					stopped={stoppedBy(status, step.listed)}
 					download={download}

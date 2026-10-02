@@ -455,6 +455,14 @@ export type DisconnectOutcome = { ok: true } | { ok: false; refusal: Refusal };
  * would leave the account connected there — with a live refresh token — and
  * nothing on this device able to name it.
  *
+ * On the server, this device is signed out and no other (`signOut`): an
+ * account connected on a phone and a laptop is still connected on the laptop
+ * once the phone has disconnected it. The last device out takes the account
+ * with it, and the app's access at the provider is withdrawn then, so a
+ * disconnect never leaves a refresh token behind that no device can reach.
+ * Another device is signed out from the device list (`Devices`), which is the
+ * answer to one that was stolen (docs/ARCHITECTURE.md §6).
+ *
  * The credential is thrown away with the binding. There is nothing to tell the
  * server: its hash is already spent there, and spent for ever, so a copy of
  * this credential taken before now can never claim a connection of its own
@@ -482,7 +490,7 @@ export const disconnectAccount = async (
 		// caller reporting a failure has two different true things to say and no
 		// other way to tell which (`errors/reached.ts`).
 		const result = await failedAt('server', () =>
-			client.withCredential(held.credential).disconnect()
+			client.withCredential(held.credential).signOut()
 		);
 		// Already gone on the server is what was asked for. So is a credential it
 		// no longer honours: whatever removed it did the disconnecting.
@@ -512,10 +520,11 @@ export type CancelImportResult =
 	{ ok: true; outcome: 'cancelled' | 'imported' | 'written' } | { ok: false; refusal: Refusal };
 
 /**
- * Asks the server to let an importing connection go, and answers with its
- * refusal, or nothing once it is gone there: a connection the server no
- * longer has, or whose credential it no longer takes, is as gone as one it
- * has just disconnected.
+ * Asks the server to sign this device out of an importing connection, and
+ * answers with its refusal, or nothing once it is gone there: a connection the
+ * server no longer has, or whose credential it no longer takes, is as gone as
+ * one it has just let go. Only this device, as a disconnect is: the account
+ * being imported here may be one another device was already syncing.
  */
 const serverRefuses = async (
 	db: NotesDatabase,
@@ -524,9 +533,7 @@ const serverRefuses = async (
 ): Promise<{ ok: false; refusal: Refusal } | undefined> => {
 	const held = await credentialFor(db, connectionId);
 	if (held === undefined) return undefined;
-	const result = await failedAt('server', () =>
-		client.withCredential(held.credential).disconnect()
-	);
+	const result = await failedAt('server', () => client.withCredential(held.credential).signOut());
 	if (result.ok || result.refusal === 'not_found' || result.refusal === 'credential_revoked') {
 		return undefined;
 	}
@@ -534,9 +541,10 @@ const serverRefuses = async (
 };
 
 /**
- * A source's first import, cancelled: the sync stops, the server lets go of
- * the account, and the source and everything it brought are thrown away here
- * (`abandonImport`) — so the device is as it was before Connect was pressed.
+ * A source's first import, cancelled: the sync stops, the server signs this
+ * device out of the account, and the source and everything it brought are
+ * thrown away here (`abandonImport`) — so the device is as it was before
+ * Connect was pressed.
  *
  * The sync is held first, so the import stops when the user presses the
  * button and not when the server answers; a server that refuses, or cannot be
