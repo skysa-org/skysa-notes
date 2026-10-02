@@ -11,6 +11,7 @@ import {
 import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
+import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
 import { SearchField, type SearchFieldProps } from './SearchField.js';
@@ -193,6 +194,8 @@ export interface CompactBarProps {
 	note: NoteRecord | undefined;
 	/** Its name as it is being typed, as the list says it (`NoteList`). */
 	liveEdits?: LiveEdits;
+	/** A notebook or source being renamed, so its dropdown says what is typed. */
+	renamings?: Renamings;
 	panel: Pane | null;
 	onPanel: (panel: Pane | null) => void;
 	query: string;
@@ -223,6 +226,7 @@ export const CompactBar = ({
 	folder,
 	note,
 	liveEdits,
+	renamings,
 	panel,
 	onPanel,
 	query,
@@ -236,7 +240,8 @@ export const CompactBar = ({
 	onOrigins,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
-	const source = useShowingSourceName();
+	const renaming = useRenaming(renamings);
+	const source = useShowingSourceName(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
 	const title = note === undefined ? 'Notes' : shownNote(note, edit).title;
 	// Measured rather than a container query, since it changes what is drawn.
@@ -320,7 +325,7 @@ export const CompactBar = ({
 			<PaneTrigger
 				pane="notebooks"
 				name="Notebook"
-				value={notebookLabel(folder)}
+				value={notebookLabel(folder === undefined ? folder : shownFolder(folder, renaming))}
 				panel={panel}
 				onPanel={onPanel}
 			/>

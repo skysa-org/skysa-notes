@@ -77,6 +77,7 @@ import {
 	undeleteNote,
 } from '../store/notes.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
+import { createRenamings, type Renamings } from '../store/renaming.js';
 import { type FolderNode, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
@@ -202,14 +203,17 @@ const SourceDropdown = ({
 	compact,
 	returnTo,
 	onChosen,
+	renamings,
 }: {
 	compact: boolean;
 	returnTo: string;
 	onChosen: () => void;
+	renamings: Renamings;
 }) =>
 	compact ? (
 		<SourcePanel
 			returnTo={returnTo}
+			renamings={renamings}
 			account={(slot) => <AccountPanel connectIs="header" slot={slot} />}
 			onChosen={onChosen}
 		/>
@@ -823,6 +827,8 @@ const Home = () => {
 	const [problem, setProblem] = useState<Notice | null>(null);
 	/** What is typed into the open note before it is saved, for the list to show. */
 	const [liveEdits] = useState(createLiveEdits);
+	/** A notebook or source being renamed, for everything else that names it. */
+	const [renamings] = useState(createRenamings);
 	// Rarer than a duplicate notebook name — this one needs the store itself to
 	// refuse — but the same silence if it happens: the user types into a note
 	// that is nowhere, and the failure goes to the console.
@@ -1066,9 +1072,29 @@ const Home = () => {
 			});
 	};
 
+	// A notebook's new name, given, is shown until the open notebook is no
+	// longer at the old path: then the URL names it by the new one, and the
+	// store does too (`store/renaming.ts`). Listened to rather than read, so a
+	// keystroke in the field does not redraw the route.
+	useEffect(() => {
+		const settle = () => {
+			const renaming = renamings.get();
+			if (renaming?.kind !== 'notebook' || renaming.given === undefined) return;
+			if (folder === undefined || !isWithin(folder, renaming.key))
+				renamings.clear('notebook', renaming.key);
+		};
+		settle();
+		return renamings.subscribe(settle);
+	}, [renamings, folder]);
+
 	const onRenameFolder = (path: string, name: string) => {
 		setProblem(null);
 		void renameFolder(db, path, name)
+			.catch((error: unknown) => {
+				// Not renamed: the name it had is the one to show.
+				renamings.clear('notebook', path);
+				throw error;
+			})
 			.then((to) => {
 				// Same reason the move below rebases: the URL names the open
 				// notebook by path, and this has changed it.
@@ -1317,6 +1343,7 @@ const Home = () => {
 					folder={folder}
 					note={openNote}
 					liveEdits={liveEdits}
+					renamings={renamings}
 					panel={panel}
 					onPanel={setPanel}
 					query={query}
@@ -1374,6 +1401,7 @@ const Home = () => {
 				    never a grid item and takes no column. */}
 				<SourceDropdown
 					compact={compact}
+					renamings={renamings}
 					returnTo={returnPath(href)}
 					onChosen={() => {
 						setPanel(null);
@@ -1389,6 +1417,7 @@ const Home = () => {
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}
 					onDeleteFolder={onDeleteFolder}
+					renamings={renamings}
 					looseNoteCount={looseNoteCount}
 					// In a compact window it is in the source dropdown instead,
 					// which is where a phone user goes for anything about storage.
@@ -1405,6 +1434,7 @@ const Home = () => {
 
 				<NoteList
 					notes={notes}
+					renamings={renamings}
 					selectedNoteId={noteId}
 					onSelectNote={(id) => {
 						select({ note: id });
@@ -1454,6 +1484,7 @@ const Home = () => {
 					note={openNote}
 					draft={place.noteDraft}
 					liveEdits={liveEdits}
+					renamings={renamings}
 					{...emptyPaneOffers({
 						folder,
 						nothingYet: tree?.length === 0 && looseNoteCount === 0,

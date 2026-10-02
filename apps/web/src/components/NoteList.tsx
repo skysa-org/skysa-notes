@@ -3,6 +3,7 @@ import { type ReactNode, useDeferredValue, useState } from 'react';
 
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
+import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { folderLabel } from '../store/tree.js';
 import { openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
@@ -67,6 +68,8 @@ export interface NoteListProps {
 	 * disabled and a right-click opens the browser's menu.
 	 */
 	menuFor?: (note: NoteRecord) => readonly OptionsMenuItem[];
+	/** A notebook being renamed, so the heading says what is typed. */
+	renamings?: Renamings;
 }
 
 /**
@@ -246,6 +249,21 @@ const NoteRow = ({
 	);
 };
 
+/**
+ * The open notebook's name, as it is being typed when it is being renamed.
+ * Its own component, so a keystroke redraws the heading and not the list.
+ */
+const Heading = ({
+	folderPath,
+	renamings,
+}: {
+	folderPath: string | undefined;
+	renamings: Renamings | undefined;
+}) => {
+	const renaming = useRenaming(renamings);
+	return folderPath === undefined ? 'Notes' : folderLabel(shownFolder(folderPath, renaming));
+};
+
 export const NoteList = ({
 	notes,
 	selectedNoteId,
@@ -260,6 +278,7 @@ export const NoteList = ({
 	unsavedNoteId,
 	liveEdits,
 	menuFor,
+	renamings,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
@@ -270,12 +289,13 @@ export const NoteList = ({
 		onCreateNote,
 		onCreateNotebook,
 	});
-	const heading = folderPath === undefined ? 'Notes' : folderLabel(folderPath);
 
 	return (
 		<section className="note-list" aria-label="Notes">
 			<div className="pane-header">
-				<h2>{heading}</h2>
+				<h2>
+					<Heading folderPath={folderPath} renamings={renamings} />
+				</h2>
 				<div className="pane-actions">
 					<button
 						type="button"

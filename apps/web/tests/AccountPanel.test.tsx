@@ -3646,6 +3646,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		const menu = await openOptions(user);
 		await waitFor(() => {
 			expect(labels()).toEqual([
+				'Rename',
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
@@ -3700,9 +3701,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(
 			menu.getByRole('button', { name: 'Re-scan from scratch' }).hasAttribute('disabled')
 		).toBe(true);
-		expect(document.activeElement).toBe(
-			menu.getByRole('button', { name: 'Download all notes' })
-		);
+		// Renaming it is never held up by a sync.
+		expect(document.activeElement).toBe(menu.getByRole('button', { name: 'Rename' }));
 	});
 
 	it('offers another source’s actions on its own row, and shows that source to do them', async () => {
@@ -3712,6 +3712,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		await openOptions(user, 'OneDrive');
 		await waitFor(() => {
 			expect(labels('OneDrive')).toEqual([
+				'Rename',
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',

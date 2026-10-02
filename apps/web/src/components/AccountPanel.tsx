@@ -411,8 +411,14 @@ const connectHint = (connectIs: 'above' | 'header', first: boolean): string =>
  * names it takes). There with nothing in it too, disabled, so the rows keep
  * their shape from source to source.
  */
-const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly OptionsMenuItem[] }) =>
-	slot.menuIn === null
+const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly OptionsMenuItem[] }) => {
+	// First, as a notebook's menu has it: what the source is called, then what
+	// can be done with it.
+	const all =
+		slot.onRename === undefined
+			? items
+			: [{ label: 'Rename', onChoose: slot.onRename }, ...items];
+	return slot.menuIn === null
 		? null
 		: createPortal(
 				<OptionsMenu
@@ -421,11 +427,12 @@ const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly Optio
 					groupLabel={`Source “${slot.name}”`}
 					triggerClassName="icon icon-quiet"
 					trigger={<Icon name="overflow" />}
-					disabled={items.length === 0}
-					items={items}
+					disabled={all.length === 0}
+					items={all}
 				/>,
 				slot.menuIn
 			);
+};
 
 /**
  * What another source's `⋯` asked of this one (`SourceAsk`), once this one is

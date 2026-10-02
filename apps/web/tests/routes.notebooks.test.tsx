@@ -87,6 +87,31 @@ describe('renaming a notebook', () => {
 		expect(await screen.findByRole('heading', { name: 'Projects' })).toBeDefined();
 	});
 
+	it('names it by what is typed everywhere it is named, before the name is given', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', title: 'Minutes', body: 'Minutes\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await screen.findByRole('heading', { name: 'Work' });
+		const path = () => document.querySelector('.note-actions .path')?.textContent;
+		await waitFor(() => {
+			expect(path()).toBe('Work/minutes.md');
+		});
+
+		await menu(user, 'Work', 'Rename');
+		await user.keyboard('Proj');
+
+		// The list's heading and the open note's path, as it is typed.
+		expect(screen.getByRole('heading', { name: 'Proj' })).toBeDefined();
+		expect(path()).toBe('Proj/minutes.md');
+
+		// Given up: the name it had, everywhere, and nothing renamed.
+		await user.keyboard('{Escape}');
+		expect(screen.getByRole('heading', { name: 'Work' })).toBeDefined();
+		expect(path()).toBe('Work/minutes.md');
+		expect((await listFolders(db)).map((folder) => folder.path)).toEqual(['Work']);
+	});
+
 	it('says so in the user’s words when the name is already taken', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Archive' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
@@ -99,8 +124,9 @@ describe('renaming a notebook', () => {
 		const alert = await screen.findByRole('alert');
 		expect(alert.textContent).toContain('Work');
 		expect(alert.textContent).not.toContain('Folder');
-		// And nothing moved.
+		// And nothing moved, and nothing says it did.
 		expect((await listFolders(db)).map((folder) => folder.path)).toEqual(['Archive', 'Work']);
+		expect(await screen.findByRole('heading', { name: 'Archive' })).toBeDefined();
 	});
 });
 

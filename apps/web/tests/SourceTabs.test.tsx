@@ -14,6 +14,7 @@ import {
 } from '../src/store/connection.js';
 import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
+import { createRenamings, shownSourceName } from '../src/store/renaming.js';
 import { inOrder, tabName } from '../src/sync/account.js';
 
 /**
@@ -535,6 +536,87 @@ describe('the source panel, in a compact window', () => {
 			given.at(-1)?.onAsked();
 		});
 		expect(given.at(-1)?.asked).toBeNull();
+	});
+
+	it('renames a source from its `⋯`, telling the bar what is typed until it is stored', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		const renamings = createRenamings();
+		render(
+			<SourcePanel
+				db={db}
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				renamings={renamings}
+				account={() => null}
+			/>
+		);
+
+		await user.click(
+			await within(panel()).findByRole('button', { name: 'Options for “OneDrive”' })
+		);
+		await user.click(
+			within(screen.getByRole('group', { name: 'Source “OneDrive”' })).getByRole('button', {
+				name: 'Rename',
+			})
+		);
+		// Its row is the field, with the name in it to type over.
+		const field = within(panel()).getByRole('textbox', { name: 'Rename OneDrive' });
+		expect(document.activeElement).toBe(field);
+		await user.keyboard('Work');
+		expect(shownSourceName('c2', 'OneDrive', renamings.get())).toBe('Work');
+
+		await user.keyboard('{Enter}');
+		expect(await within(panel()).findByRole('button', { name: 'Work' })).toBeDefined();
+		expect((await connectedSources(db)).find((each) => each.connectionId === 'c2')?.label).toBe(
+			'Work'
+		);
+		// Let go of once the store says it.
+		await waitFor(() => {
+			expect(renamings.get()).toBeUndefined();
+		});
+	});
+
+	it('gives the storage panel a way to rename the showing source, and keeps the name on Escape', async () => {
+		const db = freshDatabase();
+		await bindInOrder(db, [{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' }]);
+		await showConnection(db, 'c1');
+		const user = userEvent.setup();
+		const renamings = createRenamings();
+		const given: AccountSlot[] = [];
+		render(
+			<SourcePanel
+				db={db}
+				client={clientWith()}
+				returnTo="/"
+				navigate={() => undefined}
+				renamings={renamings}
+				account={(slot) => {
+					given.push(slot);
+					return null;
+				}}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(given.at(-1)?.onRename).toBeTypeOf('function');
+		});
+		act(() => {
+			given.at(-1)?.onRename?.();
+		});
+		await user.keyboard('Elsewhere');
+		expect(renamings.get()?.text).toBe('Elsewhere');
+		await user.keyboard('{Escape}');
+
+		expect(within(panel()).getByRole('button', { name: 'Dropbox' })).toBeDefined();
+		expect(renamings.get()).toBeUndefined();
+		expect((await connectedSources(db))[0]?.label).toBeUndefined();
 	});
 
 	it('shows the source chosen, and says it is done', async () => {

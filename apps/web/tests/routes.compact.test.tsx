@@ -213,6 +213,31 @@ describe('the compact bar', () => {
 		expect(panel()).toBeNull();
 	});
 
+	it('names the notebook in its dropdown by what is typed while it is renamed', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Home');
+		});
+
+		await user.click(notebookTrigger());
+		await user.click(screen.getByRole('button', { name: 'Options for “Home”' }));
+		await user.click(
+			within(screen.getByRole('group', { name: 'Notebook “Home”' })).getByRole('button', {
+				name: 'Rename',
+			})
+		);
+		await user.keyboard('House');
+		expect(notebookTrigger().textContent).toBe('House');
+
+		await user.keyboard('{Enter}');
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('House');
+		});
+		expect(await screen.findByRole('heading', { name: 'House' })).toBeDefined();
+	});
+
 	it('swaps one dropdown for the other rather than stacking them', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();
