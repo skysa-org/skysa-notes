@@ -600,17 +600,12 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		// everything of its own, whichever source is being connected now, and so
 		// does a detached source of any other account: nobody was asked.
 		// A source this device has not seen is imported, which the user watches
-		// and can cancel. The first one holds the app while it runs, and keeps
-		// the pile as it was until it is done, so a cancel has it to go back to.
+		// and can cancel. It holds the app while it runs, the first and every
+		// one after (2026-10-02): shown before its notes are in, a later source
+		// was an empty one offering to make notebooks in it. It keeps the pile
+		// as it was until it is done, so a cancel has it to go back to.
 		const importing = firstBinding(states, input.connectionId, from)
-			? {
-					lock: !states.some(
-						(state) =>
-							state.connectionId !== input.connectionId &&
-							state.detached === undefined
-					),
-					returnTo: await activeConnectionId(db),
-				}
+			? { lock: true, returnTo: await activeConnectionId(db) }
 			: undefined;
 		// Not while an import holds the pile: it is already copied into that
 		// source, and is only still here for a cancel to go back to. Copied

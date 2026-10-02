@@ -67,7 +67,6 @@ import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
-import { ImportPanel } from './ImportProgress.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
@@ -682,12 +681,10 @@ const isSyncable = (bound: SyncStateRecord): boolean =>
 	bound.provider !== undefined && CONNECTABLE.includes(bound.provider);
 
 /**
- * A later source's first import, which does not hold the app: the panel shows
- * how it is going in place of how syncing is (`ImportPanel`), and offers
- * nothing about syncing until it is done.
+ * A source's first import, which holds the app behind its own dialog
+ * (`ImportDialog`): the panel offers nothing about syncing until it is done.
  */
-const importingHere = (bound: SyncStateRecord): boolean =>
-	bound.importing !== undefined && !bound.importing.lock;
+const importingHere = (bound: SyncStateRecord): boolean => bound.importing !== undefined;
 
 interface SyncStateProps {
 	client: Client;
@@ -731,13 +728,6 @@ const SyncState = ({
 	const syncable = isSyncable(bound);
 	const message = statusMessage(status, label, syncable);
 	const reconnect = needsReconnect(status);
-
-	// A later source's first import, which does not hold the app: how it is
-	// going, and the way out of it, in place of how syncing is going. The
-	// first source's is a dialog over everything (`routes/index.tsx`).
-	if (importingHere(bound)) {
-		return <ImportPanel source={bound} database={database} client={client} sync={sync} />;
-	}
 
 	return (
 		<>

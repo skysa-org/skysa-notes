@@ -666,7 +666,6 @@ describe('AccountPanel, downloading every note', () => {
 		await createNote(db, { title: 'Arrived so far', connectionId: 'c1' });
 		renderPanel(clientWith(), db, '/', fakeSync());
 
-		expect((await db.syncState.get('c1'))?.importing?.lock).toBe(false);
 		await screen.findByText(/Syncing with Dropbox/);
 		await settled();
 		expect(screen.queryByRole('button', { name: 'Download all notes' })).toBeNull();
@@ -3173,39 +3172,6 @@ describe('AccountPanel, with more than one source connected', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		return db;
 	};
-
-	it('says how a later source’s import is going, and can cancel it, holding nothing else', async () => {
-		const user = userEvent.setup();
-		const db = freshDatabase();
-		await holding(db, 'c2', 'sk1_onedrive');
-		await bindConnection(db, { connectionId: 'c2', provider: 'onedrive', accountId: 'ms:1' });
-		await finishImport(db, 'c2');
-		await holding(db, 'c1', 'sk1_dropbox');
-		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
-		const sync = fakeSync({
-			phase: 'syncing',
-			progress: { stage: 'scanning', found: 30, done: 4, listing: false },
-		});
-		const signOut = vi.fn<ApiClient['signOut']>(() =>
-			Promise.resolve({ ok: true, value: { disconnected: false } })
-		);
-		renderPanel(clientWith({ signOut }), db, '/', sync);
-
-		expect(await screen.findByText('Downloading notes from Dropbox: 4 of 30.')).toBeTruthy();
-		// Inline, not over the app: the other source can still be switched to.
-		expect(screen.queryByRole('dialog')).toBeNull();
-		expect((await tab('OneDrive')).hasAttribute('disabled')).toBe(false);
-
-		await user.click(screen.getByRole('button', { name: 'Cancel' }));
-
-		await waitFor(async () => {
-			expect(await db.syncState.get('c1')).toBeUndefined();
-		});
-		expect(sync.halt).toHaveBeenCalledWith('c1');
-		expect(signOut).toHaveBeenCalledTimes(1);
-		// Back to the source that was in front before the connect.
-		expect(await activeConnectionId(db)).toBe('c2');
-	});
 
 	it('names the other source and shows it when asked, moving nothing', async () => {
 		const user = userEvent.setup();

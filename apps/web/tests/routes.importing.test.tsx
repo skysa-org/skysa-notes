@@ -10,8 +10,8 @@ import { createFolder } from '../src/store/folders.js';
 import { createNote } from '../src/store/notes.js';
 
 /**
- * The first source's import holds the app: its notes are being moved into the
- * source, so nothing behind the dialog can be pressed until it is through.
+ * A source's first import holds the app, the first source's and every one
+ * after: nothing behind the dialog can be pressed until it is through.
  */
 
 beforeEach(() => {
@@ -62,7 +62,7 @@ describe('the first import', () => {
 		expect(frame()).toBeNull();
 	});
 
-	it('does not hold the app for a later source', async () => {
+	it('holds the app for a later source too, rather than show it empty', async () => {
 		await openApp();
 		await act(async () => {
 			await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
@@ -71,9 +71,28 @@ describe('the first import', () => {
 
 		await act(() => bindConnection(db, { connectionId: 'c2', provider: 'gdrive' }));
 
-		expect((await db.syncState.get('c2'))?.importing?.lock).toBe(false);
-		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(await screen.findByRole('dialog', { name: 'Connecting Google Drive' })).toBeTruthy();
+		expect(frame()).not.toBeNull();
+
+		await act(() => finishImport(db, 'c2'));
+
+		await waitFor(() => {
+			expect(screen.queryByRole('dialog')).toBeNull();
+		});
 		expect(frame()).toBeNull();
+	});
+
+	it('holds it for one an earlier build began without holding', async () => {
+		await openApp();
+		await act(async () => {
+			await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+			await finishImport(db, 'c1');
+			await bindConnection(db, { connectionId: 'c2', provider: 'gdrive' });
+			await db.syncState.update('c2', { importing: { lock: false, returnTo: 'c1' } });
+		});
+
+		expect(await screen.findByRole('dialog', { name: 'Connecting Google Drive' })).toBeTruthy();
+		expect(frame()).not.toBeNull();
 	});
 });
 
@@ -110,7 +129,7 @@ describe('"storage connected", on the way back from the provider', () => {
 		expect(screen.queryByText(/Storage connected/)).toBeNull();
 	});
 
-	it('is said for a later source once it is bound', async () => {
+	it('is left to the import dialog for a later source too', async () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await finishImport(db, 'c1');
 		await beginConnect(db, 'gdrive');
@@ -119,6 +138,19 @@ describe('"storage connected", on the way back from the provider', () => {
 		expect(screen.queryByText(/Storage connected/)).toBeNull();
 
 		await claimed('c2', 'gdrive');
+
+		await screen.findByRole('dialog', { name: 'Connecting Google Drive' });
+		expect(screen.queryByText(/Storage connected/)).toBeNull();
+	});
+
+	it('is said for a source connected again, which has nothing to import', async () => {
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await beginConnect(db, 'dropbox');
+		await openApp('/?connect=ok');
+		await settle();
+
+		await claimed('c1', 'dropbox');
 
 		expect(await screen.findByText(/Storage connected/)).toBeTruthy();
 		expect(screen.queryByRole('dialog')).toBeNull();

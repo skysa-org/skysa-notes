@@ -74,7 +74,7 @@ describe('binding a source the device has not seen', () => {
 		expect(await pileContents(db)).toEqual({ notebooks: 0, notes: 0 });
 	});
 
-	it('does not hold the app for a later one, and remembers which was in front', async () => {
+	it('holds the app for a later one too, and remembers which was in front', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, DROPBOX);
 		await finishImport(db, DROPBOX.connectionId);
@@ -82,7 +82,7 @@ describe('binding a source the device has not seen', () => {
 		await bindConnection(db, DRIVE);
 
 		expect((await db.syncState.get(DRIVE.connectionId))?.importing).toEqual({
-			lock: false,
+			lock: true,
 			returnTo: DROPBOX.connectionId,
 		});
 	});
@@ -206,13 +206,17 @@ describe('abandoning an import', () => {
 		expect((await rowsOf(db, DROPBOX.connectionId)).notes).toHaveLength(2);
 	});
 
-	it('throws nothing away from a later source that has been written in', async () => {
+	it('throws nothing away from a later source an earlier build left writable, and written in', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, DROPBOX);
 		await finishImport(db, DROPBOX.connectionId);
 		await bindConnection(db, DRIVE);
+		// Before 2026-10-02 a later source's import did not hold the app, and
+		// its row says so: the user could have gone on writing in it.
+		await db.syncState.update(DRIVE.connectionId, {
+			importing: { lock: false, returnTo: DROPBOX.connectionId },
+		});
 		expect(await importStanding(db, DRIVE.connectionId)).toBe('importing');
-		// Not held, so the user can go on writing in it while it imports.
 		await createNote(db, { connectionId: DRIVE.connectionId, title: 'Mine' });
 
 		expect(await importStanding(db, DRIVE.connectionId)).toBe('written');

@@ -19,10 +19,11 @@ import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
  * know; once it has the whole count, and while it uploads, the bar is a
  * fraction, with the file it is on written faintly beneath.
  *
- * The first source gets it as a dialog over the app, which is held for as long
- * as it runs (`ImportDialog`, `routes/index.tsx`): the device's notes are being
- * moved into the source, and nothing may be done to them meanwhile. A later
- * source gets it in the storage panel instead, and the app carries on.
+ * A dialog over the app, which is held for as long as it runs (`ImportDialog`,
+ * `routes/index.tsx`): for the first source the device's notes are being moved
+ * into it, and nothing may be done to them meanwhile. For a later one too
+ * (2026-10-02): it was shown in the storage panel and the app carried on,
+ * into a source with nothing in it yet that offered to make a notebook.
  */
 
 const count = (n: number): string => n.toLocaleString();
@@ -230,13 +231,7 @@ const ImportBody = ({
 };
 
 /**
- * In the storage panel, for a source that is not the first: the app is not
- * held, and this is only where the import says how it is going.
- */
-export const ImportPanel = (props: ImportPanelProps) => <ImportBody {...props} />;
-
-/**
- * Over everything, for the first source: the app behind it is `inert`
+ * Over everything: the app behind it is `inert`
  * (`routes/index.tsx`), so this is all there is to press. Cancel has the focus,
  * Tab stays in the dialog, and the shortcuts are held, as for any modal
  * question (`ConfirmDialog`). Escape does nothing: an import of many minutes
@@ -289,6 +284,6 @@ export const ImportDialog = (props: ImportPanelProps) => {
 	);
 };
 
-/** The dialog while the first source's import holds the app, and nothing after. */
+/** The dialog while a source's first import holds the app, and nothing after. */
 export const HeldImport = ({ source }: { source: SyncStateRecord | undefined }) =>
 	source === undefined ? null : <ImportDialog source={source} />;

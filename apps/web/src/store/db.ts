@@ -215,9 +215,13 @@ export interface SyncStateRecord {
 
 export interface Importing {
 	/**
-	 * No other source was connected, so the device's own pile was copied in and
-	 * the app is held while the import runs. The pile is kept as it was until
-	 * the import finishes, which is what a cancel goes back to.
+	 * The app is held while the import runs, and nothing can be written in the
+	 * source meanwhile. True for every import since 2026-10-02. It was true
+	 * only for the first source, the one the device's own pile is copied into,
+	 * so a row from before that may say `false`: that source could have been
+	 * written in, which a cancel still asks about (`writtenSince`). Held either
+	 * way now (`useHeldImport`). The pile is kept as it was until the import
+	 * finishes, which is what a cancel goes back to.
 	 */
 	lock: boolean;
 	/** The source that was in front before, which a cancel puts back. */

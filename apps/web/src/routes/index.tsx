@@ -282,7 +282,7 @@ const useNoteMove = (
  * one copy of the notes that can leave this browser; for a source that syncs it
  * is what this device holds of its folder, without a trip to the provider's
  * own client. Unavailable while the source holds nothing, which would be an
- * empty archive, and while a later source's first import is still filling it,
+ * empty archive, and while a source's first import is still filling it,
  * which would be whatever part had arrived under a name that says "all" — the
  * storage panel holds its button back then too.
  */
@@ -382,7 +382,7 @@ const codeWasRefused = (
  * reload or a bookmark would say "connected" again about a connection that may
  * since have gone.
  *
- * Except that a first source's "connected" is the import dialog's to say, and
+ * Except that a new source's "connected" is the import dialog's to say, and
  * a toast behind it — under a held app, where it cannot be dismissed — says it
  * twice. Whether the app will be held is not known on arrival: the bind that
  * decides it comes after a round trip to the server (`claimConnection`), so
@@ -841,8 +841,9 @@ const Home = () => {
 	const href = useRouterState({ select: (state) => state.location.href });
 
 	const source = useActiveSource();
-	// The first source's import holds the app: the device's notes are being
-	// moved into it, and nothing may be done to them until it is through.
+	// A new source's import holds the app, the first's and every one after:
+	// nothing may be done in it, or to the notes being moved into it, until
+	// it is through.
 	const held = useHeldImport();
 	const { connectNotice, dismissConnect } = useConnectNotice(connect, code, held);
 	const activeConnection = useActiveConnectionId();

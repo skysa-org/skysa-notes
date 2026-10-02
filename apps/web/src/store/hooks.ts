@@ -54,15 +54,12 @@ export const useClaimingConnection = (): boolean =>
 		true
 	);
 
-/** The first source's import, while it holds the app; nothing otherwise. */
+/**
+ * A source's first import, which holds the app while it runs; nothing
+ * otherwise. Every one, whatever its row's `lock` says (`Importing.lock`).
+ */
 export const useHeldImport = (): SyncStateRecord | undefined =>
-	useLiveQuery(
-		async () =>
-			(await db.syncState.toArray()).find(
-				(state) => holdsPile(state) && state.importing?.lock === true
-			),
-		[]
-	);
+	useLiveQuery(async () => (await db.syncState.toArray()).find(holdsPile), []);
 
 export const useActiveSource = (): SyncStateRecord | null | undefined =>
 	useLiveQuery(async () => (await db.syncState.get(await activeConnectionId(db))) ?? null, []);
