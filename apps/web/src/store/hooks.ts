@@ -15,7 +15,12 @@ import {
 import { folderTree } from './folders.js';
 import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
-import { getCodeDisplay, getDefaultEditorMode, setCodeDisplay } from './prefs.js';
+import {
+	getCodeDisplay,
+	getDefaultEditorMode,
+	getFormatToolbarShown,
+	setCodeDisplay,
+} from './prefs.js';
 import { createNoteSearch, type NoteHit } from './search.js';
 import { buildFolderTree, type FolderNode } from './tree.js';
 
@@ -180,6 +185,13 @@ export const useNoteToOpen = ({
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>
 	useLiveQuery(() => getDefaultEditorMode(db), []);
+
+/**
+ * Whether a compact window shows the formatting toolbar, as it was last left
+ * on this device — across a reload, and in step with another tab.
+ */
+export const useFormatToolbarShown = (): boolean | undefined =>
+	useLiveQuery(() => getFormatToolbarShown(db), []);
 
 /**
  * Keep the code-block display settings and what is stored on this device in

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { shouldShowInlineToolbar } from '../src/editor/InlineToolbar.js';
 import { createRichEditor } from '../src/editor/rich.js';
+import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
  * Whether the floating formatting toolbar appears at all.
@@ -42,7 +43,11 @@ const mount = async (body: string) => {
 	};
 };
 
+let fake: FakeWindow | undefined;
+
 afterEach(async () => {
+	fake?.restore();
+	fake = undefined;
 	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
 	document.body.replaceChildren();
 });
@@ -61,6 +66,28 @@ describe('the floating formatting toolbar', () => {
 	 * top greys its mark buttons inside one. A floating bar has no grey to show,
 	 * so it stays away rather than offering five buttons that do nothing.
 	 */
+	/**
+	 * The system draws its own menu over a selection on a touch screen, and
+	 * the formatting there is the bar under the note.
+	 */
+	it('stays away on a touch screen, which has a selection menu of its own', async () => {
+		fake = windowWidth(800, { touch: true });
+		const editor = await mount('Words to bold.\n');
+
+		editor.select(1, 6);
+
+		expect(editor.shows()).toBe(false);
+	});
+
+	it('still appears where the pointer is a mouse', async () => {
+		fake = windowWidth(1300, { touch: false });
+		const editor = await mount('Words to bold.\n');
+
+		editor.select(1, 6);
+
+		expect(editor.shows()).toBe(true);
+	});
+
 	it('stays away from a selection inside a code block', async () => {
 		const editor = await mount('```js\nconst a = 1;\n```\n');
 

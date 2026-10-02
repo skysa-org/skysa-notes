@@ -78,7 +78,7 @@ import {
 } from '../store/notes.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
-import { type FolderNode, selectedFolderPath } from '../store/tree.js';
+import { findFolder, type FolderNode, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
 	type AppSearch,
@@ -1187,6 +1187,23 @@ const Home = () => {
 	}, []);
 
 	/**
+	 * What a compact window shows once a notebook is chosen: its notes, to
+	 * choose one from next, as a source chosen goes on to its notebooks. Not
+	 * for a notebook with no notes, where a note begins and is what shows
+	 * (`useBegunInView`) — the notes would be opened only to be shut on it.
+	 */
+	const afterFolder = (path: string): Pane | null =>
+		compact &&
+		!(
+			path !== ROOT &&
+			tree !== undefined &&
+			findFolder(tree, path)?.noteCount === 0 &&
+			canBegin(source, held)
+		)
+			? 'notes'
+			: null;
+
+	/**
 	 * How many times an empty state has asked for a new notebook. The field is
 	 * the sidebar's, so this is a request it answers rather than state it
 	 * shares — and the sidebar is opened for it in a compact window, where it
@@ -1440,7 +1457,7 @@ const Home = () => {
 					renamings={renamings}
 					returnTo={returnPath(href)}
 					onChosen={() => {
-						setPanel(null);
+						setPanel('notebooks');
 					}}
 				/>
 				<Sidebar
@@ -1448,7 +1465,7 @@ const Home = () => {
 					selectedFolder={folder}
 					onSelectFolder={(path) => {
 						openFolder(path);
-						setPanel(null);
+						setPanel(afterFolder(path));
 					}}
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}

@@ -30,6 +30,21 @@ export const setDefaultEditorMode = async (db: NotesDatabase, mode: EditorMode):
 	await setPreference(db, DEFAULT_EDITOR_MODE_KEY, mode);
 };
 
+export const FORMAT_TOOLBAR_KEY = 'formatToolbarShown';
+
+/**
+ * Whether a compact window shows the formatting toolbar under the note, on
+ * this device, as the `Format` button last left it. Hidden unless it was
+ * shown: it costs a row of a short screen, and the inline toolbar and the
+ * slash menu are there without it.
+ */
+export const getFormatToolbarShown = async (db: NotesDatabase): Promise<boolean> =>
+	(await getPreference(db, FORMAT_TOOLBAR_KEY)) === 'true';
+
+export const setFormatToolbarShown = async (db: NotesDatabase, shown: boolean): Promise<void> => {
+	await setPreference(db, FORMAT_TOOLBAR_KEY, String(shown));
+};
+
 export const CODE_BLOCK_WRAP_KEY = 'codeBlockWrap';
 export const CODE_BLOCK_LINE_NUMBERS_KEY = 'codeBlockLineNumbers';
 

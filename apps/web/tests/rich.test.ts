@@ -338,6 +338,83 @@ describe('an empty table cell', () => {
 	});
 });
 
+/**
+ * An item begins with a paragraph, so the item Enter makes after another holds
+ * an empty one, and the paragraph's writer spelled it `- <br />`. CommonMark
+ * spells an empty item as its marker alone, and reads that back as an item the
+ * schema fills with the empty paragraph it begins with.
+ */
+describe('an empty list item', () => {
+	/** Enter at the end of an item's words: the item split after them. */
+	const enterAfter = (withCtx: Awaited<ReturnType<typeof mount>>['withCtx'], words: string) => {
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			const at = view.state.doc.textContent.indexOf(words) + words.length;
+			// One for the list and one for the item, ahead of the words.
+			view.dispatch(view.state.tr.split(at + 3, 2));
+		});
+	};
+
+	it.each([
+		['bullet', '- first\n', '- first\n-\n'],
+		['numbered', '1. first\n', '1. first\n2.\n'],
+	])('is its marker alone in a %s list, after Enter', async (_kind, body, after) => {
+		const { withCtx } = await mount(body);
+
+		enterAfter(withCtx, 'first');
+
+		const items = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild);
+		expect(items?.childCount).toBe(2);
+		expect(withCtx(currentMarkdown)).toBe(after);
+	});
+
+	it.each([
+		['at the end', '- first\n-\n'],
+		['between two', '- first\n-\n- third\n'],
+		['numbered', '1. first\n2.\n'],
+		['before a list inside it', '- - nested\n'],
+	])('reads its marker alone back as an empty item, %s', async (_where, body) => {
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+	});
+
+	it('keeps the break in a task item, whose box is written only before a paragraph', async () => {
+		// `- [ ]` with nothing after it is not a task but the words "[ ]".
+		const body = '- [ ] first\n- [ ] <br />\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+		const second = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild?.child(1));
+		expect(second?.firstChild?.childCount).toBe(0);
+	});
+
+	it('keeps the break before a paragraph, which would otherwise be read as the first', async () => {
+		const body = '- <br />\n\n  second\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+		const item = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild?.firstChild);
+		expect(item?.childCount).toBe(2);
+		expect(item?.firstChild?.childCount).toBe(0);
+	});
+
+	it('keeps a break the author put in one, since the editor does not write it there', async () => {
+		const body = '- <br />\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+		const paragraph = withCtx(
+			(ctx) => ctx.get(editorViewCtx).state.doc.firstChild?.firstChild?.firstChild
+		);
+		expect(paragraph?.childCount).toBe(1);
+	});
+});
+
 describe('representsFaithfully', () => {
 	it('passes a note that uses everything the editor supports', async () => {
 		const body = [

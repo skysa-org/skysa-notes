@@ -267,13 +267,15 @@ describe('the item after a task', () => {
 		expect(withCtx(currentMarkdown)).toBe('- [ ] one\n  - [ ] two\n- [ ] <br />\n');
 	});
 
+	// No box, and so no `<br />`: an empty item that is not a task is its
+	// marker alone (`itemWithoutEmptyLine` in rich.ts).
 	it('is a plain item after a plain one', async () => {
 		const { withCtx } = await mount('- one\n');
 		withCtx(afterWord('one'));
 
 		withCtx(enter);
 
-		expect(withCtx(currentMarkdown)).toBe('- one\n- <br />\n');
+		expect(withCtx(currentMarkdown)).toBe('- one\n-\n');
 	});
 
 	// Emptying a finished task is not making a new one: the tick stays.

@@ -88,7 +88,7 @@ describe('the compact bar', () => {
 		expect(document.querySelector('.app-frame')?.classList.contains('compact')).toBe(false);
 	});
 
-	it('opens the notebooks as a dropdown and shuts it on the one chosen', async () => {
+	it('opens the notebooks as a dropdown, and the notes of the one chosen', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();
 		await openApp();
@@ -99,12 +99,52 @@ describe('the compact bar', () => {
 
 		await user.click(screen.getByRole('button', { name: /^Work/ }));
 
-		expect(panel()).toBeNull();
+		// Its notes, to choose one from next.
+		expect(panel()).toBe('notes');
+		expect(noteTrigger().getAttribute('aria-expanded')).toBe('true');
 		expect(notebookTrigger().textContent).toBe('Work');
 		// The notebook's first note comes with it, as it does in a wide window.
 		await waitFor(() => {
 			expect(noteTrigger().textContent).toBe('Minutes');
 		});
+		expect(await screen.findByRole('button', { name: /^Minutes/ })).toBeDefined();
+	});
+
+	it('opens the notebooks once a source is chosen', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+
+		await user.click(screen.getByRole('button', { name: /^Source: / }));
+		const sources = screen.getByRole('region', { name: 'Sources' });
+		await user.click(await within(sources).findByRole('button', { name: 'This device' }));
+
+		expect(panel()).toBe('notebooks');
+		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('slides from one dropdown to the next along the bar, and back', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		const slide = () => [shell().dataset.from, shell().dataset.slide];
+
+		// Opened from shut, it comes out of its trigger: nothing to slide from.
+		await user.click(notebookTrigger());
+		expect(slide()).toEqual([undefined, undefined]);
+
+		await user.click(screen.getByRole('button', { name: /^Work/ }));
+		expect(panel()).toBe('notes');
+		expect(slide()).toEqual(['notebooks', 'onward']);
+
+		await user.click(screen.getByRole('button', { name: /^Source: / }));
+		expect(panel()).toBe('sources');
+		expect(slide()).toEqual(['notes', 'back']);
+
+		// Shut, it goes back into its trigger.
+		await user.keyboard('{Escape}');
+		expect(panel()).toBeNull();
+		expect(slide()).toEqual([undefined, undefined]);
 	});
 
 	it('opens the notes as a dropdown and shuts it on the one chosen', async () => {
@@ -286,6 +326,22 @@ describe('a note begun in a compact window', () => {
 		expect(panel()).toBeNull();
 		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('false');
 		expect(document.activeElement).toBe(screen.getByLabelText('Note title'));
+	});
+
+	it('is what shows once a notebook with nothing in it is chosen, not its empty notes', async () => {
+		await twoNotebooks();
+		await createFolder(db, { parentPath: undefined, name: 'Ideas' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+
+		await user.click(await screen.findByRole('button', { name: /^Ideas/ }));
+
+		expect(panel()).toBeNull();
+		await waitFor(() => {
+			expect(noteTrigger().textContent).toBe('Untitled');
+		});
+		expect(panel()).toBeNull();
 	});
 
 	it('is what shows once the last note in the notebook is deleted from the dropdown', async () => {
