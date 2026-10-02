@@ -1,5 +1,12 @@
 # @skysa/api
 
+## 0.8.0
+
+### Patch Changes
+
+- 88872bf: A device is named from the app's own request to start connecting, not from the browser's return from the provider. A Chrome on a Mac whose User-Agent was rewritten for Google's pages was listed as "Safari on iPhone".
+- @skysa/core@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes

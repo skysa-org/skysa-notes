@@ -1,5 +1,17 @@
 # @skysa/web
 
+## 0.8.0
+
+### Minor Changes
+
+- 5250b0e: Disconnect signs out only the device it is pressed on. Other devices connected to the same account keep syncing, and the last device out disconnects the account and withdraws its access at the provider, as before. The disconnect question says which of the two it will be. Cancelling a first import signs out the same way. The API client's `disconnect()` is replaced by `signOut()`.
+- ed3ac35: The connect gate's link ("Get a connect code") opens in the same window, as connecting storage does, instead of a new tab. In an installed app on a phone the new tab was a second window with no way back. The app opens at the code field when it is loaded with `?enter=code`, which is where an operator's page should link back to.
+
+### Patch Changes
+
+- 78833ed: Connecting an account again replaces the source this device still had for it under an old connection, rather than adding a second one ("Google Drive 2") beside it. "Connect again" is now a button under its message, spaced like the panel's other buttons, rather than an unstyled one wrapped against the text on a phone.
+- @skysa/core@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes
