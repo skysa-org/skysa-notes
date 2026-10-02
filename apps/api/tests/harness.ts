@@ -290,8 +290,13 @@ export interface ConnectOptions {
 	connectCode?: string;
 	/** Skip the POST and forge a flow cookie some other way. */
 	start?: (jar: Jar, credentialHash: string) => Promise<Response>;
-	/** What the browser that comes back to the callback says it is. */
+	/** What the device's browser says it is, to the app's own start request. */
 	userAgent?: string;
+	/**
+	 * What the browser says it is on the way back from the provider, where it
+	 * is something else: a User-Agent rewritten for the provider's pages.
+	 */
+	callbackUserAgent?: string;
 }
 
 export const buildApp = (
@@ -348,12 +353,16 @@ export const buildApp = (
 			credentialHash?: string;
 			returnTo?: string;
 			connectCode?: string;
+			userAgent?: string;
 		} = {}
 	): Promise<Response> => {
-		const { credentialHash = ANY_HASH, returnTo, connectCode } = options;
+		const { credentialHash = ANY_HASH, returnTo, connectCode, userAgent } = options;
 		return request(`/api/auth/connect/${provider}/start`, {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: {
+				'content-type': 'application/json',
+				...(userAgent === undefined ? {} : { 'user-agent': userAgent }),
+			},
 			body: JSON.stringify({
 				credentialHash,
 				...(returnTo === undefined ? {} : { returnTo }),
@@ -377,20 +386,29 @@ export const buildApp = (
 			returnTo,
 			connectCode,
 			userAgent,
+			callbackUserAgent = userAgent,
 		} = options;
 		stub.as(account);
 
 		const hash = await hashCredential(credential);
 		const start = jar.absorb(
 			await (options.start?.(jar, hash) ??
-				startConnect(provider, { jar, credentialHash: hash, returnTo, connectCode }))
+				startConnect(provider, {
+					jar,
+					credentialHash: hash,
+					returnTo,
+					connectCode,
+					userAgent,
+				}))
 		);
 
 		const state = flowStateOf(jar);
 		const callback = jar.absorb(
 			await request(`/api/auth/connect/${provider}/callback?code=the-code&state=${state}`, {
 				cookies: jar,
-				...(userAgent === undefined ? {} : { headers: { 'user-agent': userAgent } }),
+				...(callbackUserAgent === undefined
+					? {}
+					: { headers: { 'user-agent': callbackUserAgent } }),
 			})
 		);
 

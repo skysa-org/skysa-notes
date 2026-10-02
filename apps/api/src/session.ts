@@ -92,6 +92,16 @@ export interface FlowState {
 	 * the code the flow was started with.
 	 */
 	connectCode?: string;
+	/**
+	 * What the device that started this flow is, as a label (`deviceLabel`),
+	 * for its grant in the device list. Worked out from the start's own request,
+	 * which the app makes itself, and not from the callback's, which is a
+	 * navigation back from the provider: anything that rewrites the browser's
+	 * User-Agent for the provider's pages — an extension, a site setting — sends
+	 * it here rewritten, and a Chrome on a Mac was listed as Safari on an
+	 * iPhone. The label only, never the header.
+	 */
+	device?: string;
 }
 
 /**
