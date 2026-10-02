@@ -56,6 +56,13 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 export const containsPath = (tree: readonly FolderNode[], path: string): boolean =>
 	tree.some((node) => node.path === path || containsPath(node.children, path));
 
+/** The folder at `path` in this tree, at any depth, if it is there. */
+export const findFolder = (tree: readonly FolderNode[], path: string): FolderNode | undefined =>
+	tree.reduce<FolderNode | undefined>(
+		(found, node) => found ?? (node.path === path ? node : findFolder(node.children, path)),
+		undefined
+	);
+
 /**
  * What the root of the app folder is called when it holds notes. A note there
  * belongs to no notebook, which is a shape the remote folder can hand us — the

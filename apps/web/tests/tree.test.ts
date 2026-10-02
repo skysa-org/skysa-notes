@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildFolderTree,
 	containsPath,
+	findFolder,
 	folderLabel,
 	selectedFolderPath,
 } from '../src/store/tree.js';
@@ -94,6 +95,23 @@ describe('containsPath', () => {
 
 	it('does not find the root, which is not a notebook', () => {
 		expect(containsPath(tree, '')).toBe(false);
+	});
+});
+
+describe('findFolder', () => {
+	const tree = buildFolderTree({
+		paths: ['personal', 'work', 'work/meetings'],
+		notePaths: ['work/meetings/minutes.md', 'work/meetings/agenda.md'],
+	});
+
+	it('finds a nested folder, with its own notes counted', () => {
+		expect(findFolder(tree, 'work/meetings')?.noteCount).toBe(2);
+		expect(findFolder(tree, 'work')?.noteCount).toBe(0);
+	});
+
+	it('finds nothing for a folder that is not there, or the root', () => {
+		expect(findFolder(tree, 'archive')).toBeUndefined();
+		expect(findFolder(tree, ROOT)).toBeUndefined();
 	});
 });
 

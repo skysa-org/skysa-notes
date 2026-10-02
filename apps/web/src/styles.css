@@ -2317,6 +2317,7 @@ button.danger {
 		transition:
 			clip-path 0.18s cubic-bezier(0.4, 0, 1, 1),
 			opacity 0.18s cubic-bezier(0.4, 0, 1, 1),
+			transform 0.18s cubic-bezier(0.4, 0, 1, 1),
 			display 0.18s allow-discrete;
 	}
 
@@ -2332,6 +2333,34 @@ button.danger {
 		transition:
 			clip-path 0.3s cubic-bezier(0.3, 0.7, 0.2, 1),
 			opacity 0.12s linear,
+			transform 0.3s cubic-bezier(0.3, 0.7, 0.2, 1),
+			display 0.3s allow-discrete;
+	}
+
+	/* Straight from one panel to the next — a source chosen opens its
+	   notebooks, a notebook its notes, or another trigger is pressed — the
+	   two go along together as their triggers are, in a row: onward, the one
+	   left goes off to the left and the next comes in from the right, and
+	   back, the other way. Neither is drawn into its trigger, since neither
+	   is opening or shutting the dropdown. */
+	.compact .app-shell[data-slide='onward'] {
+		--slide-in: 100%;
+		--slide-out: -100%;
+	}
+
+	.compact .app-shell[data-slide='back'] {
+		--slide-in: -100%;
+		--slide-out: 100%;
+	}
+
+	.compact .app-shell[data-from='sources'] > .source-panel,
+	.compact .app-shell[data-from='notebooks'] > .sidebar,
+	.compact .app-shell[data-from='notes'] > .note-list {
+		clip-path: inset(0 round 0);
+		opacity: 1;
+		transform: translateX(var(--slide-out));
+		transition:
+			transform 0.3s cubic-bezier(0.3, 0.7, 0.2, 1),
 			display 0.3s allow-discrete;
 	}
 
@@ -2343,6 +2372,14 @@ button.danger {
 		.compact .app-shell[data-panel='notes'] > .note-list {
 			clip-path: inset(0 var(--from-right) 100% var(--from-left) round 0.5rem);
 			opacity: 0;
+		}
+
+		.compact .app-shell[data-from][data-panel='sources'] > .source-panel,
+		.compact .app-shell[data-from][data-panel='notebooks'] > .sidebar,
+		.compact .app-shell[data-from][data-panel='notes'] > .note-list {
+			clip-path: inset(0 round 0);
+			opacity: 1;
+			transform: translateX(var(--slide-in));
 		}
 	}
 }

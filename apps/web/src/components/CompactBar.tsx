@@ -2,6 +2,7 @@ import { basename, ROOT } from '@skysa/core';
 import {
 	type CSSProperties,
 	type RefObject,
+	useCallback,
 	useDeferredValue,
 	useEffect,
 	useLayoutEffect,
@@ -83,11 +84,30 @@ const PANE_ELEMENT: Record<Pane, string> = {
 const KEEPS_PANEL = 'data-keeps-panel';
 
 /**
- * The pane open as a dropdown, and the ways it shuts: Escape, and a press
- * anywhere that is neither in it nor on something that keeps it.
+ * Which way along the bar a panel is left for another: onward, from the
+ * sources towards the notes, or back.
+ */
+export type Slide = 'onward' | 'back';
+
+const slide = (from: Pane, to: Pane): Slide =>
+	PANES.indexOf(to) > PANES.indexOf(from) ? 'onward' : 'back';
+
+/**
+ * The pane open as a dropdown, the one it took the place of if it went
+ * straight from one to the other (`from`, for the stylesheet to slide them
+ * along), and the ways it shuts: Escape, and a press anywhere that is neither
+ * in it nor on something that keeps it.
  */
 export const usePanel = () => {
-	const [panel, setPanel] = useState<Pane | null>(null);
+	const [{ panel, from }, setShown] = useState<{ panel: Pane | null; from: Pane | null }>({
+		panel: null,
+		from: null,
+	});
+	const setPanel = useCallback((next: Pane | null) => {
+		setShown((shown) =>
+			next === shown.panel ? shown : { panel: next, from: next === null ? null : shown.panel }
+		);
+	}, []);
 
 	useEffect(() => {
 		if (panel === null) return undefined;
@@ -113,9 +133,9 @@ export const usePanel = () => {
 			document.removeEventListener('keydown', onKey);
 			document.removeEventListener('pointerdown', away);
 		};
-	}, [panel]);
+	}, [panel, setPanel]);
 
-	return [panel, setPanel] as const;
+	return [panel, setPanel, from] as const;
 };
 
 /**
@@ -126,12 +146,13 @@ export const usePanel = () => {
  */
 export const useCompactLayout = () => {
 	const compact = useMediaQuery(COMPACT);
-	const [open, setPanel] = usePanel();
+	const [open, setPanel, openedFrom] = usePanel();
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [origins, setOrigins] = useState<Origins>();
 	// Nothing is a dropdown in a wide window, and one left open there is not
 	// one to find open again when the window is next narrowed.
 	const panel = compact ? open : null;
+	const from = panel === null ? null : openedFrom;
 
 	return {
 		compact,
@@ -143,6 +164,9 @@ export const useCompactLayout = () => {
 		frameClassName: compact ? 'app-frame compact' : 'app-frame',
 		shellProps: {
 			...(panel === null ? {} : { 'data-panel': panel }),
+			...(panel === null || from === null
+				? {}
+				: { 'data-from': from, 'data-slide': slide(from, panel) }),
 			...(compact && origins !== undefined ? { style: originStyle(origins) } : {}),
 		},
 	};
