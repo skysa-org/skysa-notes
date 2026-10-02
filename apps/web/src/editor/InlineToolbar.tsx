@@ -5,6 +5,7 @@ import { useInstance } from '@milkdown/react';
 import { usePluginViewContext } from '@prosemirror-adapter/react';
 import { useEffect, useRef } from 'react';
 
+import { COARSE_POINTER, mediaMatches } from '../components/layout.js';
 import { codeBlockAround } from './codeTools.js';
 import { INLINE_COMMANDS } from './commands.js';
 
@@ -23,10 +24,15 @@ import { INLINE_COMMANDS } from './commands.js';
 /**
  * When the toolbar is worth showing.
  *
- * The first rule is this app's: a code block holds no marks, so selecting a few
- * words of a code sample brings up nothing that could be pressed — the bar
- * across the top greys those buttons for the same reason, and one that floats
- * over the words has no way to say "not here" except by not appearing.
+ * The first rules are this app's. A touch screen has a menu of its own for a
+ * selection — copy, look up, share — drawn by the system over the words, and
+ * this one came up beside it, the two crowding the selection; the formatting
+ * there is the bar under the note (`Format`). Asked each time, not once, so a
+ * tablet given a keyboard and a trackpad gets it back. And a code block holds
+ * no marks, so selecting a few words of a code sample brings up nothing that
+ * could be pressed — the bar across the top greys those buttons for the same
+ * reason, and one that floats over the words has no way to say "not here"
+ * except by not appearing.
  *
  * The rest is Milkdown's own answer, restated rather than extended, because a
  * `shouldShow` passed to the provider *replaces* its predicate instead of
@@ -42,6 +48,7 @@ export const shouldShowInlineToolbar =
 		const { state } = view;
 		const { selection } = state;
 
+		if (mediaMatches(COARSE_POINTER)) return false;
 		if (codeBlockAround(state) !== null) return false;
 
 		if (!view.editable) return false;

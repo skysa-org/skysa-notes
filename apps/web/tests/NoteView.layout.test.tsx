@@ -219,17 +219,56 @@ describe('the formatting toolbar', () => {
 
 		await user.click(format);
 
-		const bar = toolbar();
-		expect(bar).not.toBeNull();
-		expect(bar?.classList.contains('format-toolbar-bottom')).toBe(true);
+		const bar = await screen.findByRole('toolbar', { name: 'Formatting' });
+		expect(bar.classList.contains('format-toolbar-bottom')).toBe(true);
 		// Below the note in the document too, so tabbing reaches it where the
 		// eye does: after the text, not before it.
 		const surface = document.querySelector('.ProseMirror') as Node;
 		expect(
-			surface.compareDocumentPosition(bar as Node) & Node.DOCUMENT_POSITION_FOLLOWING
+			surface.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING
 		).toBeTruthy();
 
 		await user.click(screen.getByRole('button', { name: 'Format' }));
+		await waitFor(() => {
+			expect(toolbar()).toBeNull();
+		});
+	});
+
+	it('stays shown on this device once asked for, across a reload, until asked away', async () => {
+		const user = userEvent.setup();
+		await openNote(800);
+		await user.click(screen.getByRole('button', { name: 'Format' }));
+		await screen.findByRole('toolbar', { name: 'Formatting' });
+
+		// The app again, from nothing but what this device has stored.
+		const id = (await db.notes.toArray())[0]?.id as string;
+		cleanup();
+		render(
+			<CommandsProvider>
+				<Harness id={id} />
+			</CommandsProvider>
+		);
+		const bar = await screen.findByRole('toolbar', { name: 'Formatting' });
+		expect(bar.classList.contains('format-toolbar-bottom')).toBe(true);
+		expect(screen.getByRole('button', { name: 'Format' }).getAttribute('aria-pressed')).toBe(
+			'true'
+		);
+
+		// And hidden is kept the same way.
+		await user.click(screen.getByRole('button', { name: 'Format' }));
+		await waitFor(() => {
+			expect(toolbar()).toBeNull();
+		});
+		cleanup();
+		render(
+			<CommandsProvider>
+				<Harness id={id} />
+			</CommandsProvider>
+		);
+		await screen.findByDisplayValue('A note');
+		await waitFor(() => {
+			expect(document.querySelector('.ProseMirror')).not.toBeNull();
+		});
 		expect(toolbar()).toBeNull();
 	});
 
@@ -237,6 +276,7 @@ describe('the formatting toolbar', () => {
 		const user = userEvent.setup();
 		await openNote(800);
 		await user.click(screen.getByRole('button', { name: 'Format' }));
+		await screen.findByRole('toolbar', { name: 'Formatting' });
 
 		act(() => {
 			fake?.resize(1300);

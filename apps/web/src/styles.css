@@ -1966,6 +1966,19 @@ button.danger {
 	box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
 }
 
+/* In the top layer (`usePanelPlacement`), which places it and caps its height
+   to the room it has: none of the browser's centring, and what does not fit
+   scrolls inside it rather than the note behind it. After the placements
+   hung from the bar above, which are as specific, so that it replaces them. */
+.toolbar-panel[popover] {
+	position: fixed;
+	inset: auto;
+	margin: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	color: var(--fg);
+}
+
 .toolbar-item {
 	display: flex;
 	align-items: center;

@@ -21,7 +21,7 @@ import { RichEditor, type RichEditorProps } from '../editor/RichEditor.js';
 import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { beforeClosing } from '../store/heldEdits.js';
-import { useDefaultEditorMode } from '../store/hooks.js';
+import { useDefaultEditorMode, useFormatToolbarShown } from '../store/hooks.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import {
 	deleteNote,
@@ -31,6 +31,7 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 } from '../store/notes.js';
+import { setFormatToolbarShown } from '../store/prefs.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { FindBar } from './FindBar.js';
 import {
@@ -387,7 +388,8 @@ const NoteBody = ({
  * compact one it is hidden until asked for and then sits at the bottom of the
  * editor, under the thumb: the screen is too short to spend a row of buttons
  * above every note, and the inline toolbar and the slash menu are still there
- * without it.
+ * without it. Once asked for it stays, on this device, until it is asked away
+ * again — a reload included (`FORMAT_TOOLBAR_KEY`).
  */
 const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 	const compact = useMediaQuery(COMPACT);
@@ -419,12 +421,14 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 		run: toggleOutline,
 	});
 
-	const [toolbarShown, setToolbarShown] = useState(false);
+	// Hidden until the store has answered, which is before the note has: both
+	// are reads of the same database, and the note's is the larger.
+	const toolbarShown = useFormatToolbarShown() ?? false;
 	const bottom = toolbarShown ? 'bottom' : 'none';
 	const toolbar: RichEditorProps['toolbar'] = compact ? bottom : 'top';
 	const toggleToolbar = useCallback(() => {
-		setToolbarShown((shown) => !shown);
-	}, []);
+		void setFormatToolbarShown(db, !toolbarShown);
+	}, [toolbarShown]);
 
 	return {
 		compact,

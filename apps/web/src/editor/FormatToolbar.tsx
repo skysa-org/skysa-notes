@@ -1,9 +1,11 @@
 import type { Ctx } from '@milkdown/kit/ctx';
 import {
+	createContext,
 	type KeyboardEvent as ReactKeyboardEvent,
 	type ReactNode,
 	type RefObject,
 	useCallback,
+	useContext,
 	useEffect,
 	useLayoutEffect,
 	useRef,
@@ -384,6 +386,83 @@ const ToolbarButton = ({
 	);
 };
 
+/** Where the bar sits, for its panels to open away from the edge it is on. */
+const Placement = createContext<ToolbarPlacement>('top');
+
+/** Between a panel and its button, as the stylesheet hangs it: 0.25rem. */
+const PANEL_GAP = 4;
+/** Between a panel and the edge of what can be seen. */
+const PANEL_MARGIN = 8;
+
+/**
+ * An open panel in the top layer (`popover`), placed against its button and
+ * no taller than the room on its side of it. The top layer is over everything
+ * and clipped by nothing: the editor, the note and the shell each hide what
+ * overflows them, so a panel hung upwards from the bar at the foot of a phone,
+ * with the keyboard up, was cut off under the note's title and its first items
+ * could not be reached. The room is measured to the edge of the visual
+ * viewport — what the keyboard leaves, wherever the phone has panned it to —
+ * and what does not fit in it scrolls inside the panel. Measured again as the
+ * keyboard comes and goes. `manual`, so it is shut by `useDismiss` as before
+ * and not by the browser's own light dismiss. Where there is no top layer
+ * (jsdom, an old browser) the stylesheet's own placement stands.
+ */
+const usePanelPlacement = (
+	open: boolean,
+	end: boolean,
+	host: RefObject<HTMLElement | null>
+): RefObject<HTMLDivElement | null> => {
+	const placement = useContext(Placement);
+	const panel = useRef<HTMLDivElement>(null);
+
+	useLayoutEffect(() => {
+		const element = panel.current;
+		const anchor = host.current;
+		if (!open || element === null || anchor === null) return undefined;
+		if (typeof element.showPopover !== 'function') return undefined;
+
+		const place = () => {
+			const view = window.visualViewport;
+			const top = view?.offsetTop ?? 0;
+			const left = view?.offsetLeft ?? 0;
+			const bottom = top + (view?.height ?? window.innerHeight);
+			const right = left + (view?.width ?? window.innerWidth);
+			const at = anchor.getBoundingClientRect();
+			const up = placement === 'bottom';
+			const room = up
+				? at.top - PANEL_GAP - (top + PANEL_MARGIN)
+				: bottom - PANEL_MARGIN - (at.bottom + PANEL_GAP);
+			element.style.maxHeight = `${String(Math.max(room, 0))}px`;
+			const { offsetWidth: width, offsetHeight: height } = element;
+			// Hung from the button's own edge, as the stylesheet hangs it, and
+			// kept inside what can be seen.
+			const from = end ? at.right - width : at.left;
+			const x = Math.max(left + PANEL_MARGIN, Math.min(from, right - PANEL_MARGIN - width));
+			element.style.left = `${String(x)}px`;
+			element.style.top = `${String(up ? at.top - PANEL_GAP - height : at.bottom + PANEL_GAP)}px`;
+		};
+
+		// Made a popover here rather than in the markup, where a browser
+		// without a top layer would still hide it as one that is not showing.
+		element.setAttribute('popover', 'manual');
+		element.showPopover();
+		place();
+		const view = window.visualViewport;
+		window.addEventListener('resize', place);
+		view?.addEventListener('resize', place);
+		view?.addEventListener('scroll', place);
+		return () => {
+			window.removeEventListener('resize', place);
+			view?.removeEventListener('resize', place);
+			view?.removeEventListener('scroll', place);
+			if (element.isConnected && element.matches(':popover-open')) element.hidePopover();
+			element.removeAttribute('popover');
+		};
+	}, [open, end, host, placement]);
+
+	return panel;
+};
+
 /**
  * A button with a panel under it. Not `role="menu"`: the panels hold ordinary
  * buttons and a text field, Tab moves through them as it would anywhere else,
@@ -416,6 +495,8 @@ const ToolbarPopover = ({
 }) => {
 	const host = useRef<HTMLDivElement>(null);
 	const button = useRef<HTMLButtonElement>(null);
+	// The menu at the end of the bar opens back over it, from its right edge.
+	const panel = usePanelPlacement(open, id === 'overflow', host);
 
 	const close = useCallback(
 		(restoreFocus: boolean) => {
@@ -457,7 +538,7 @@ const ToolbarPopover = ({
 				{chevron && <Icon name="chevron" />}
 			</button>
 			{open && (
-				<div className="toolbar-panel" id={`${id}-panel`} aria-label={label}>
+				<div className="toolbar-panel" ref={panel} id={`${id}-panel`} aria-label={label}>
 					{children}
 				</div>
 			)}
@@ -821,53 +902,57 @@ export const FormatToolbar = ({
 	);
 
 	return (
-		<div
-			className={
-				placement === 'bottom' ? 'format-toolbar format-toolbar-bottom' : 'format-toolbar'
-			}
-			ref={root}
-			role="toolbar"
-			aria-label="Formatting"
-			aria-orientation="horizontal"
-			onKeyDown={onKeyDown}
-		>
-			{[...groups].map(([group, ids]) => (
-				<div
-					key={group}
-					className="toolbar-group"
-					role="group"
-					aria-label={group}
-					data-group={group}
-				>
-					{ids.map((id) => (
-						<span key={id} className="toolbar-slot" data-slot={id}>
-							{slot(id)}
-						</span>
-					))}
-				</div>
-			))}
+		<Placement.Provider value={placement}>
+			<div
+				className={
+					placement === 'bottom'
+						? 'format-toolbar format-toolbar-bottom'
+						: 'format-toolbar'
+				}
+				ref={root}
+				role="toolbar"
+				aria-label="Formatting"
+				aria-orientation="horizontal"
+				onKeyDown={onKeyDown}
+			>
+				{[...groups].map(([group, ids]) => (
+					<div
+						key={group}
+						className="toolbar-group"
+						role="group"
+						aria-label={group}
+						data-group={group}
+					>
+						{ids.map((id) => (
+							<span key={id} className="toolbar-slot" data-slot={id}>
+								{slot(id)}
+							</span>
+						))}
+					</div>
+				))}
 
-			{hidden.size > 0 && (
-				<ToolbarPopover
-					id="overflow"
-					label="More tools"
-					trigger={<Icon name="overflow" />}
-					chevron={false}
-					className="toolbar-overflow"
-					open={openNow === 'overflow'}
-					setOpen={opener('overflow')}
-					stop={stop('overflow')}
-				>
-					<OverflowItems
-						hidden={hidden}
-						format={format}
-						run={run}
-						close={() => {
-							setOpen(null);
-						}}
-					/>
-				</ToolbarPopover>
-			)}
-		</div>
+				{hidden.size > 0 && (
+					<ToolbarPopover
+						id="overflow"
+						label="More tools"
+						trigger={<Icon name="overflow" />}
+						chevron={false}
+						className="toolbar-overflow"
+						open={openNow === 'overflow'}
+						setOpen={opener('overflow')}
+						stop={stop('overflow')}
+					>
+						<OverflowItems
+							hidden={hidden}
+							format={format}
+							run={run}
+							close={() => {
+								setOpen(null);
+							}}
+						/>
+					</ToolbarPopover>
+				)}
+			</div>
+		</Placement.Provider>
 	);
 };

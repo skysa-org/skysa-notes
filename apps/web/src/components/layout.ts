@@ -96,6 +96,15 @@ export const useElementWidth = (element: Element | null): number | undefined => 
 };
 
 /**
+ * Whether `query` matches now, for code outside React that asks each time it
+ * needs to know rather than following the answer.
+ */
+export const mediaMatches = (query: string): boolean =>
+	typeof window !== 'undefined' &&
+	typeof window.matchMedia === 'function' &&
+	window.matchMedia(query).matches;
+
+/**
  * Whether `query` matches, and a re-render whenever that changes.
  *
  * Read synchronously on the first render, so the first frame is already the
