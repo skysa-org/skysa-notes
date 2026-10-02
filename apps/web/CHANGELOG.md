@@ -1,5 +1,15 @@
 # @skysa/web
 
+## 0.9.0
+
+### Minor Changes
+
+- de2df01: Connecting another account covers the app with the same progress dialog as the first, until its notes have arrived. It used to open the new source straight away, empty, offering to make notebooks while the import ran. Cancel goes back to the account that was showing.
+
+### Patch Changes
+
+- @skysa/core@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes
