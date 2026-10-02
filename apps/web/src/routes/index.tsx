@@ -16,7 +16,7 @@ import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
-import { CompactBar, useCompactLayout } from '../components/CompactBar.js';
+import { CompactBar, type Pane, useCompactLayout } from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
@@ -204,20 +204,52 @@ const SourceDropdown = ({
 	returnTo,
 	onChosen,
 	renamings,
+	enterCode,
 }: {
 	compact: boolean;
 	returnTo: string;
 	onChosen: () => void;
 	renamings: Renamings;
+	enterCode: number;
 }) =>
 	compact ? (
 		<SourcePanel
 			returnTo={returnTo}
 			renamings={renamings}
+			enterCode={enterCode}
 			account={(slot) => <AccountPanel connectIs="header" slot={slot} />}
 			onChosen={onChosen}
 		/>
 	) : null;
+
+/**
+ * `?enter=code`, from an operator's page once the user has a code: the way to
+ * connect storage, opened at the gate's code field. Counted, so that each
+ * arrival opens it once (`useAdding` in `SourceTabs.tsx`), and taken out of
+ * the URL at once, so that a reload does not open it again. In a compact
+ * window the `+` is in the sources dropdown, which opens first.
+ */
+const useEnterCode = (
+	enter: AppSearch['enter'],
+	compact: boolean,
+	setPanel: (pane: Pane | null) => void
+): number => {
+	const navigate = useNavigate({ from: Route.fullPath });
+	const [asked, setAsked] = useState(0);
+	// Counted in render, as React has state follow a prop: the URL arriving
+	// with it is the change, and the effect below takes it out again.
+	const [seen, setSeen] = useState<AppSearch['enter']>();
+	if (enter !== seen) {
+		setSeen(enter);
+		if (enter !== undefined) setAsked(asked + 1);
+	}
+	useEffect(() => {
+		if (enter === undefined) return;
+		if (compact) setPanel('sources');
+		void navigate({ search: ({ enter: _enter, ...rest }) => rest, replace: true });
+	}, [enter, compact, setPanel, navigate]);
+	return asked;
+};
 
 /**
  * Picking the open note up to move it, from the palette — offered only while
@@ -803,7 +835,7 @@ const useBegunInView = (begun: NoteRecord | undefined, shut: (panel: null) => vo
 
 const Home = () => {
 	const search = Route.useSearch();
-	const { connect, code } = search;
+	const { connect, code, enter } = search;
 	const navigate = useNavigate({ from: Route.fullPath });
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -889,6 +921,7 @@ const Home = () => {
 		shellProps,
 	} = useCompactLayout();
 	useBegunInView(place.begun, setPanel);
+	const enterCode = useEnterCode(enter, compact, setPanel);
 	// The answers hang from the field, over whatever else is open; a dropdown
 	// left open under them would be a second list behind the first.
 	const onQuery = (next: string) => {
@@ -1359,6 +1392,7 @@ const Home = () => {
 			) : (
 				<SourceTabs
 					returnTo={returnPath(href)}
+					enterCode={enterCode}
 					search={
 						<SearchField
 							query={query}
@@ -1401,6 +1435,7 @@ const Home = () => {
 				    never a grid item and takes no column. */}
 				<SourceDropdown
 					compact={compact}
+					enterCode={enterCode}
 					renamings={renamings}
 					returnTo={returnPath(href)}
 					onChosen={() => {

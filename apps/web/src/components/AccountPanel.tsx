@@ -668,7 +668,8 @@ const Denied = ({
 			{reason}
 			{reason !== undefined && gate !== undefined && ' '}
 			{gate !== undefined && (
-				<a href={gate.action.url} target="_blank" rel="noopener noreferrer">
+				// In this window, as the `+` menu's is (`GateLink`).
+				<a href={gate.action.url} rel="noreferrer">
 					{gate.action.label}
 				</a>
 			)}
