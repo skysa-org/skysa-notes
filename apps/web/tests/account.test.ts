@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Connection, type Result } from '../src/api/client.js';
 import { bindConnection, detachConnection, finishImport } from '../src/store/connection.js';
-import { beginConnect } from '../src/store/credentials.js';
+import { beginConnect, credentialFor, keepCredential } from '../src/store/credentials.js';
 import {
 	activeConnectionId,
 	createDatabase,
@@ -600,6 +600,79 @@ describe('the account a detached source belongs to', () => {
 
 		expect(await db.notes.get(['c1', note.id])).toMatchObject({ deletedLocally: 1 });
 		expect(await db.opQueue.where('connectionId').equals('c1').count()).toBe(1);
+	});
+
+	describe('still bound, when the account is connected again under another id', () => {
+		/**
+		 * Account `dbid:1` as connection `c1`, bound and holding a credential, as
+		 * a device is when the account is disconnected from another one: nothing
+		 * here has asked the server since, and "Connect again" is on offer.
+		 */
+		const stillBound = async () => {
+			const db = freshDatabase();
+			await bindConnection(db, {
+				connectionId: 'c1',
+				provider: 'dropbox',
+				accountId: 'dbid:1',
+			});
+			await keepCredential(db, 'c1', {
+				id: 'c1',
+				credential: 'sk1_old',
+				provider: 'dropbox',
+				createdAt: Date.now(),
+			});
+			const sent = await createNote(db, { title: 'Sent' });
+			await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
+			const unsent = await createNote(db, { title: 'Unsent' });
+			await db.opQueue.clear();
+			return { db, sent, unsent };
+		};
+
+		it('takes the place of the old source rather than standing beside it', async () => {
+			const { db, sent, unsent } = await stillBound();
+			await beginConnect(db, 'dropbox');
+
+			const state = await claimConnection(
+				db,
+				answering({ ok: true, value: connection('c2') })
+			);
+
+			expect(state).toEqual({ kind: 'connected', connection: connection('c2') });
+			// One source for the account, not "Dropbox" and "Dropbox 2".
+			expect((await db.syncState.toArray()).map((row) => row.connectionId)).toEqual(['c2']);
+			expect(await activeConnectionId(db)).toBe('c2');
+			// What the old one never sent comes with it; what it had sent is the
+			// remote's, and comes back from there.
+			expect(await getNote(db, unsent.id)).toMatchObject({ connectionId: 'c2' });
+			expect(await db.notes.get(['c1', sent.id])).toBeUndefined();
+			// And the credential that reaches nothing any more is gone with it.
+			expect(await credentialFor(db, 'c1')).toBeUndefined();
+		});
+
+		it('leaves a source of another account bound beside it', async () => {
+			const { db } = await stillBound();
+			await beginConnect(db, 'dropbox');
+
+			await claimConnection(
+				db,
+				answering({ ok: true, value: connection('c9', 'dropbox', 'dbid:2') })
+			);
+
+			expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
+			expect(await credentialFor(db, 'c1')).toBeDefined();
+		});
+
+		it('leaves it bound where the API does not say whose the new one is', async () => {
+			const { db } = await stillBound();
+			await beginConnect(db, 'dropbox');
+
+			await claimConnection(
+				db,
+				answering({ ok: true, value: connection('c2', 'dropbox', null) })
+			);
+
+			expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
+		});
 	});
 
 	it('does not call an account the API does not name the same one', async () => {

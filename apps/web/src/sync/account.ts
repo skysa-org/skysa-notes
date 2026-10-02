@@ -4,6 +4,7 @@ import { type ApiClient, type Connection, type Refusal } from '../api/client.js'
 import { failedAt } from '../errors/reached.js';
 import {
 	abandonImport,
+	accountKey,
 	bindConnection,
 	bindingCount,
 	type ConnectedSource,
@@ -400,6 +401,7 @@ export const claimConnection = async (
 	const connection = result.value;
 	const previous = await credentialFor(db, connection.id);
 	await keepCredential(db, connection.id, pending);
+	await supersede(db, connection);
 	await bindConnection(db, {
 		connectionId: connection.id,
 		provider: connection.provider,
@@ -414,6 +416,41 @@ export const claimConnection = async (
 		await retire(client, previous.credential, connection.id);
 	}
 	return { kind: 'connected', connection };
+};
+
+/**
+ * Let go of any source here that is the same account as `connection` under
+ * another connection id, before `connection` is bound: it is the account as it
+ * was connected before, and this is it connected again.
+ *
+ * The server keeps one connection per account, so another id for the same
+ * account is one it has deleted — the account was disconnected from another
+ * device, and the credential here reaches nothing. Nothing on this device
+ * finds that out until the source is asked about (`reconcileAccount`), and
+ * "Connect again" is offered as soon as a sync is refused. Bound as it was,
+ * the new connection was a second source beside the old one, "Google Drive 2",
+ * until the old one was next opened and let itself go.
+ *
+ * Let go as the server would have it let go (`revoked`), which keeps what it
+ * never sent, detached; the bind that follows then finds it detached and of
+ * this account, and resumes it here (`bindingMode`). A source of an account
+ * the API does not name is left alone: nothing says whose it is.
+ */
+const supersede = async (db: NotesDatabase, connection: Connection): Promise<void> => {
+	const key = accountKey(connection.provider, connection.accountId);
+	if (key === undefined) return;
+	const stale = (await db.syncState.toArray()).filter(
+		(state) =>
+			state.detached === undefined &&
+			state.connectionId !== connection.id &&
+			state.provider !== undefined &&
+			accountKey(state.provider, state.accountId) === key
+	);
+	await stale.reduce(async (before, state) => {
+		await before;
+		await forgetCredential(db, state.connectionId);
+		await letGo(db, state.connectionId, 'revoked');
+	}, Promise.resolve());
 };
 
 /**
