@@ -31,6 +31,7 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 } from '../store/notes.js';
+import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { FindBar } from './FindBar.js';
 import {
 	COARSE_POINTER,
@@ -99,6 +100,8 @@ export interface NoteViewProps {
 	 * screen hears of an edit until autosave has stored it.
 	 */
 	liveEdits?: LiveEdits;
+	/** A notebook being renamed, so the note's path says what is typed. */
+	renamings?: Renamings;
 	/** For the route, which offers Delete on every note in the list. */
 	ref?: Ref<NoteViewHandle>;
 }
@@ -487,6 +490,7 @@ export const NoteView = ({
 	onCreateNotebook,
 	draft,
 	liveEdits,
+	renamings,
 	ref: handle,
 }: NoteViewProps) => {
 	const noteId = note?.id;
@@ -718,6 +722,7 @@ export const NoteView = ({
 				}}
 				begun={draft !== undefined}
 				liveEdits={liveEdits}
+				renamings={renamings}
 				onRename={rename}
 				onTitleDone={() => {
 					focusEditor(body);
@@ -802,6 +807,19 @@ const ModeTabs = ({
  * `FindTargetProvider` — the editor offers itself to it and the bar reads it —
  * and because `NoteView` is at the complexity limit without it.
  */
+/**
+ * Where the note is, with its notebook under the name being typed while it is
+ * renamed. Its own component, so a keystroke redraws the path and not the note.
+ */
+const NotePath = ({ path, renamings }: { path: string; renamings: Renamings | undefined }) => {
+	const shown = shownFolder(path, useRenaming(renamings));
+	return (
+		<span className="muted path" title={shown}>
+			{shown}
+		</span>
+	);
+};
+
 const NoteScreen = ({
 	note,
 	mode,
@@ -815,6 +833,7 @@ const NoteScreen = ({
 	onClose,
 	begun,
 	liveEdits,
+	renamings,
 	onRename,
 	onTitleDone,
 	onUserEdit,
@@ -837,6 +856,7 @@ const NoteScreen = ({
 	/** A draft: begun just now, stored nowhere yet (`NoteViewProps.draft`). */
 	begun: boolean;
 	liveEdits: LiveEdits | undefined;
+	renamings: Renamings | undefined;
 	onRename: (title: string) => void;
 	onTitleDone: () => void;
 	onUserEdit: (body: string, origin: string) => void;
@@ -859,9 +879,7 @@ const NoteScreen = ({
 					onDone={onTitleDone}
 				/>
 				<div className="note-actions">
-					<span className="muted path" title={note.path}>
-						{note.path}
-					</span>
+					<NotePath path={note.path} renamings={renamings} />
 					{layout.compact && mode === 'rich' && (
 						<button
 							type="button"

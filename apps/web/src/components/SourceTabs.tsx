@@ -22,6 +22,7 @@ import {
 } from '../store/connection.js';
 import { db as defaultDb, LOCAL_CONNECTION_ID, type NotesDatabase } from '../store/db.js';
 import { holdsAnything } from '../store/exportNotes.js';
+import { type Renaming, type Renamings, shownSourceName } from '../store/renaming.js';
 import {
 	anyConnected,
 	CONNECT_FIRST_LABEL,
@@ -33,6 +34,7 @@ import {
 import { ConnectButton } from './ConnectButton.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 import { RowOptions } from './RowOptions.js';
+import { RowRename } from './RowRename.js';
 import { useEscape } from './useEscape.js';
 
 export interface SourceTabsProps {
@@ -801,6 +803,8 @@ export interface SourceAsk {
 
 /** What the source panel hands the storage panel under it. */
 export interface AccountSlot {
+	/** Rename the showing source, where it can be: its row becomes the field. */
+	onRename?: () => void;
 	/**
 	 * Where the showing source's `⋯` goes: the end of its row, as every other
 	 * source's is (`AccountPanel`'s `menuIn`). Null until the row is drawn.
@@ -828,6 +832,8 @@ export interface SourcePanelProps {
 	account?: (slot: AccountSlot) => ReactNode;
 	/** A source was chosen, so the panel has done its job. */
 	onChosen?: () => void;
+	/** Where a name being typed is told, for the bar's dropdown above. */
+	renamings?: Renamings;
 }
 
 /**
@@ -843,9 +849,10 @@ export interface SourcePanelProps {
  * shows that source and then does what was chosen (`SourceAsk`).
  *
  * The same choices in the same order, with the one showing marked by
- * `aria-current` as its tab is. Renaming a source is not offered here: on a
- * tab it is a second press on the name, and a row in a panel is a place to go
- * rather than a name to edit. It is still there in a wider window.
+ * `aria-current` as its tab is. A source is renamed from its `⋯`, its row
+ * becoming the field as a notebook's does: on a tab it is a second press on
+ * the name, but a row in a panel is a place to go, and pressing it again would
+ * be how to shut the panel.
  */
 export const SourcePanel = ({
 	db = defaultDb,
@@ -854,6 +861,7 @@ export const SourcePanel = ({
 	navigate,
 	account,
 	onChosen,
+	renamings,
 }: SourcePanelProps) => {
 	const { ordered, offerable, gate, live, connectLabel } = useSourceChoices(db, client);
 	const first = connectLabel === CONNECT_FIRST_LABEL;
@@ -877,10 +885,55 @@ export const SourcePanel = ({
 		return new Set(ids.filter((_, index) => holds[index] === true));
 	}, [db, ids.join(' ')]);
 	const showing = ordered.find((source) => source.active);
+	/** The source whose name is being typed, if one is. */
+	const [renaming, setRenaming] = useState<string | null>(null);
+
+	// A name given is shown until the store calls the source something other
+	// than it did (`shownSourceName`), and let go of then.
+	useEffect(() => {
+		const settle = () => {
+			const named = renamings?.get();
+			if (named?.kind !== 'source' || named.given === undefined) return;
+			const source = ordered.find((each) => each.connectionId === named.key);
+			if (source === undefined || tabName(source, ordered) !== named.given.was)
+				renamings?.clear('source', named.key);
+		};
+		settle();
+		return renamings?.subscribe(settle);
+	}, [renamings, ordered]);
+
+	const renamed = (connectionId: string, was: string, chosen?: string) => {
+		setRenaming(null);
+		const trimmed = chosen?.trim();
+		// Escape, or nothing changed: nothing to store, and nothing to wait for.
+		// Nothing typed is a name given — the source's own, back again — but one
+		// the dropdown already says, since an empty name shows what is stored.
+		if (trimmed === undefined || trimmed === was || trimmed === '') {
+			renamings?.clear('source', connectionId);
+		} else {
+			renamings?.give('source', connectionId, was);
+		}
+		if (chosen === undefined || trimmed === was) return;
+		void renameSource(db, connectionId, chosen).catch(() => {
+			renamings?.clear('source', connectionId);
+		});
+	};
+	/** Every source but this device's has a name of the user's to give it. */
+	const renameItem = (source: ConnectedSource): OptionsMenuItem[] =>
+		source.connectionId === LOCAL_CONNECTION_ID
+			? []
+			: [
+					{
+						label: 'Rename',
+						onChoose: () => {
+							setRenaming(source.connectionId);
+						},
+					},
+				];
 
 	/** Another source's `⋯`: what its panel would offer once it is showing. */
 	const itemsFor = (source: ConnectedSource): OptionsMenuItem[] => {
-		if (source.detached !== undefined) return [];
+		if (source.detached !== undefined) return renameItem(source);
 		const show = (action?: SourceAsk['action']) => () => {
 			setAsked(action === undefined ? null : { connectionId: source.connectionId, action });
 			void showConnection(db, source.connectionId);
@@ -892,6 +945,7 @@ export const SourcePanel = ({
 		const syncable = source.provider !== undefined && CONNECTABLE.includes(source.provider);
 		if (source.connectionId === LOCAL_CONNECTION_ID) return download;
 		return [
+			...renameItem(source),
 			...(syncable
 				? [
 						{ label: 'Sync now', onChoose: show() },
@@ -951,6 +1005,23 @@ export const SourcePanel = ({
 				<ul>
 					{ordered.map((source) => {
 						const name = tabName(source, ordered);
+						if (renaming === source.connectionId) {
+							return (
+								<li key={source.connectionId} className="row-item">
+									<RowRename
+										name={name}
+										selected={source.active}
+										maxLength={LABEL_LIMIT}
+										onDraft={(text) => {
+											renamings?.typed('source', source.connectionId, text);
+										}}
+										onDone={(chosen) => {
+											renamed(source.connectionId, name, chosen);
+										}}
+									/>
+								</li>
+							);
+						}
 						return (
 							<li key={source.connectionId} className="row-item">
 								<button
@@ -994,6 +1065,13 @@ export const SourcePanel = ({
 			)}
 			<div className="source-panel-foot">
 				{account?.({
+					...(showing === undefined || showing.connectionId === LOCAL_CONNECTION_ID
+						? {}
+						: {
+								onRename: () => {
+									setRenaming(showing.connectionId);
+								},
+							}),
 					menuIn: actions,
 					name: showing === undefined ? '' : tabName(showing, ordered),
 					asked,
@@ -1010,10 +1088,13 @@ export const SourcePanel = ({
  * the storage panel is in it.
  */
 export const useShowingSourceName = (
+	renaming?: Renaming,
 	db: NotesDatabase = defaultDb,
 	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'> = api
 ): string => {
 	const { ordered } = useSourceChoices(db, client);
 	const showing = ordered.find((source) => source.active);
-	return showing === undefined ? 'Storage' : tabName(showing, ordered);
+	return showing === undefined
+		? 'Storage'
+		: shownSourceName(showing.connectionId, tabName(showing, ordered), renaming);
 };

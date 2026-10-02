@@ -3,11 +3,13 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useCommand } from '../commands/context.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
+import { type Renamings } from '../store/renaming.js';
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 import { RowOptions } from './RowOptions.js';
+import { RowRename } from './RowRename.js';
 
 /**
  * The notebook tree. Folders are real directories on the provider, so this is a
@@ -46,6 +48,8 @@ export interface SidebarProps {
 	onRenameFolder?: (path: string, name: string) => void;
 	/** Delete the notebook and everything in it. Asked about first. */
 	onDeleteFolder?: (path: string) => void;
+	/** Where a name being typed is told, for what else on screen shows it. */
+	renamings?: Renamings;
 	/**
 	 * Notes sitting at the root, in no notebook. Undefined while loading; zero
 	 * in the normal case, and then there is no row.
@@ -180,79 +184,6 @@ const destinationLabel = (
 	allowed: boolean
 ): string =>
 	allowed ? `Move “${moving.name}” ${landing ?? `into ${name}`}` : `${name} — cannot go here`;
-
-/**
- * A notebook's name, being typed. The same shape the source tabs use: the row
- * stays as it was — its box, its highlight, its count — and only the name in
- * it becomes a field, so nothing moves when it becomes editable. Not the row's
- * own button with a field in it, which HTML does not allow, but a box drawn as
- * the row is (`.row-editing`).
- */
-const RenameRow = ({
-	name,
-	depth,
-	selected,
-	count,
-	onDone,
-}: {
-	name: string;
-	depth: number;
-	selected: boolean;
-	count?: number;
-	/** The chosen name, or nothing at all when the rename was abandoned. */
-	onDone: (chosen?: string) => void;
-}) => {
-	const [draft, setDraft] = useState(name);
-	const field = useRef<HTMLInputElement>(null);
-	const done = useRef(false);
-
-	useEffect(() => {
-		// Focus first, and not `select()` alone: `select()` focuses as a side
-		// effect in a browser and does not everywhere, which leaves a field that
-		// looks ready and swallows the first thing typed into it.
-		field.current?.focus();
-		field.current?.select();
-	}, []);
-
-	// Once. Escape blurs the field, and a blur handler that had not been told
-	// the rename was abandoned would put the typed name back in.
-	const finish = (chosen?: string) => {
-		if (done.current) return;
-		done.current = true;
-		onDone(chosen);
-	};
-
-	return (
-		<span
-			className={selected ? 'row-editing selected' : 'row-editing'}
-			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
-		>
-			<input
-				ref={field}
-				className="row-rename"
-				aria-label={`Rename ${name}`}
-				value={draft}
-				onChange={(event) => {
-					setDraft(event.target.value);
-				}}
-				onKeyDown={(event) => {
-					if (event.key === 'Enter') {
-						event.preventDefault();
-						finish(draft);
-					}
-					if (event.key === 'Escape') {
-						event.preventDefault();
-						finish();
-					}
-				}}
-				onBlur={() => {
-					finish(draft);
-				}}
-			/>
-			{count !== undefined && count > 0 && <span className="count">{count}</span>}
-		</span>
-	);
-};
 
 /**
  * Asked before a notebook goes, and not told afterwards — the rule the
@@ -415,6 +346,8 @@ interface FolderRowsProps {
 	onCancelMove: () => void;
 	/** The notebook whose name is being typed, if one is. */
 	renaming: string | null;
+	/** Each keystroke in its name, for what else shows it. */
+	onDraft: (path: string, text: string) => void;
 	onRenamed: (path: string, chosen?: string) => void;
 	/** A notebook's row was right-clicked. */
 	onMenu: (path: string, at: MenuPoint) => void;
@@ -434,6 +367,7 @@ const FolderRows = ({
 	onDrop,
 	onCancelMove,
 	renaming,
+	onDraft,
 	onRenamed,
 	onMenu,
 	itemsFor,
@@ -443,11 +377,14 @@ const FolderRows = ({
 			<li key={node.path}>
 				<div className="row-item">
 					{node.path === renaming ? (
-						<RenameRow
+						<RowRename
 							name={node.name}
 							depth={depth}
 							selected={node.path === selectedFolder}
 							count={node.noteCount}
+							onDraft={(text) => {
+								onDraft(node.path, text);
+							}}
 							onDone={(chosen) => {
 								onRenamed(node.path, chosen);
 							}}
@@ -505,6 +442,7 @@ const FolderRows = ({
 							onDrop={onDrop}
 							onCancelMove={onCancelMove}
 							renaming={renaming}
+							onDraft={onDraft}
 							onRenamed={onRenamed}
 							onMenu={onMenu}
 							itemsFor={itemsFor}
@@ -554,6 +492,7 @@ const TreeBody = ({
 	onDrop,
 	onCancelMove,
 	renaming,
+	onDraft,
 	onRenamed,
 	onMenu,
 	itemsFor,
@@ -611,6 +550,7 @@ const TreeBody = ({
 				onDrop={onDrop}
 				onCancelMove={onCancelMove}
 				renaming={renaming}
+				onDraft={onDraft}
 				onRenamed={onRenamed}
 				onMenu={onMenu}
 				itemsFor={itemsFor}
@@ -656,6 +596,7 @@ export const Sidebar = ({
 	onCancelMove,
 	onReveal,
 	newNotebookAsked = 0,
+	renamings,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -716,8 +657,18 @@ export const Sidebar = ({
 		// user changing their mind, and none of them is worth a move on the
 		// provider — `moveFolder` answers a rename to the same name with nothing
 		// at all, but the queue and the toast are cheaper not to reach.
-		if (trimmed === undefined || trimmed === '' || trimmed === basename(path)) return;
-		onRenameFolder?.(path, trimmed);
+		if (
+			trimmed === undefined ||
+			trimmed === '' ||
+			trimmed === basename(path) ||
+			onRenameFolder === undefined
+		) {
+			renamings?.clear('notebook', path);
+			return;
+		}
+		// Shown as given until the route has the notebook at its new path.
+		renamings?.give('notebook', path, path);
+		onRenameFolder(path, trimmed);
 	};
 
 	useCommand({
@@ -812,6 +763,9 @@ export const Sidebar = ({
 				onDrop={drop}
 				onCancelMove={cancel}
 				renaming={renaming}
+				onDraft={(path, text) => {
+					renamings?.typed('notebook', path, text);
+				}}
 				onRenamed={renamed}
 				onMenu={(path, at) => {
 					setMenu({ path, at });

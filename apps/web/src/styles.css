@@ -625,6 +625,8 @@ code {
    widen while the code is asked about. */
 .connect-code-use {
 	display: grid;
+	/* In the middle of a button made taller than its words, as on a phone. */
+	align-items: center;
 }
 
 .connect-code-use > span {
@@ -818,9 +820,14 @@ code {
 	background: var(--surface);
 }
 
+/* Above the rows it is stuck over. A sticky box is a stacking context of its
+   own, and a row with a `⋯` is positioned (`.row-item`), so without a level the
+   rows scrolled under the header — and the menu its `+` opens, inside it —
+   were drawn over both. */
 .pane-header {
 	position: sticky;
 	top: 0;
+	z-index: 1;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
