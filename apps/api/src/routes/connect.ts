@@ -125,6 +125,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 
 		const { verifier, challenge } = await createPkcePair();
 		const state = createState();
+		const device = deviceLabel(c.req.header('user-agent'));
 		await setFlowState(
 			c,
 			c.get('signingKey'),
@@ -137,6 +138,7 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				...(parsed.data.connectCode === undefined
 					? {}
 					: { connectCode: parsed.data.connectCode }),
+				...(device === undefined ? {} : { device }),
 			},
 			cookies
 		);
@@ -358,9 +360,10 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				refreshToken: tokens.refreshToken,
 			}),
 			credentialHash: flow.credentialHash,
-			// The device's own browser is what arrives here, sent back by the
-			// provider: what it says it is names the device in the device list.
-			device: deviceLabel(c.req.header('user-agent')),
+			// What the device said it was when it started the flow, which is the
+			// app asking, rather than what arrives here, which is whatever the
+			// provider's pages were told (`FlowState.device`).
+			device: flow.device,
 			now: Date.now(),
 		});
 

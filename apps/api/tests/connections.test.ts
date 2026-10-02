@@ -14,6 +14,8 @@ import { bothProvidersConfig, buildApp, dropboxStub, newCredential, secretOf } f
 
 const SAFARI_ON_IPHONE =
 	'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+const CHROME_ON_MAC =
+	'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
 const CHROME_ON_IPHONE =
 	'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1';
 
@@ -191,6 +193,22 @@ describe('GET /api/connection/grants', () => {
 		const stored = JSON.stringify(await createDb(app.db).select().from(schema.grants));
 		expect(stored).not.toContain('17_5');
 		expect(stored).not.toContain('AppleWebKit');
+	});
+
+	it('names the device that started the flow, whatever the provider sends back', async () => {
+		// As a Chrome on a Mac was seen to arrive (2026-10-02): its own request
+		// to start said what it was, and the navigation back from Google said
+		// it was an iPhone.
+		const app = buildApp();
+		const mine = await app.connect({
+			userAgent: CHROME_ON_MAC,
+			callbackUserAgent: SAFARI_ON_IPHONE,
+		});
+
+		const body: { grants: Record<string, unknown>[] } = await (
+			await app.request('/api/connection/grants', { credential: mine.credential })
+		).json();
+		expect(body.grants.map((grant) => grant.device)).toEqual(['Chrome on Mac']);
 	});
 
 	it('names the device again when it reconnects from another browser', async () => {
