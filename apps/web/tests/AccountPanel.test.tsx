@@ -75,7 +75,7 @@ interface Answers extends Partial<Client> {
 	connection?: ApiClient['connection'];
 	grants?: ApiClient['grants'];
 	revokeGrant?: ApiClient['revokeGrant'];
-	disconnect?: ApiClient['disconnect'];
+	signOut?: ApiClient['signOut'];
 }
 
 const clientWith = (answers: Answers = {}): Client & { asked: string[] } => {
@@ -102,9 +102,9 @@ const clientWith = (answers: Answers = {}): Client & { asked: string[] } => {
 				revokeGrant:
 					answers.revokeGrant ??
 					(() => Promise.resolve({ ok: true, value: { ok: true } })),
-				disconnect:
-					answers.disconnect ??
-					(() => Promise.resolve({ ok: true, value: { revoked: true } })),
+				signOut:
+					answers.signOut ??
+					(() => Promise.resolve({ ok: true, value: { disconnected: false } })),
 			} as unknown as ApiClient;
 		},
 	};
@@ -831,21 +831,27 @@ describe('AccountPanel, with an account connected', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1', 'sk1_for-c1');
 		const sent = await sentNote(db, 'Sent');
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
-			Promise.resolve({ ok: true, value: { revoked: true } })
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
+			Promise.resolve({ ok: true, value: { disconnected: false } })
 		);
 		const client = clientWith({
 			connection: () => Promise.resolve({ ok: true, value: dropbox }),
-			disconnect,
+			signOut,
 		});
 		renderPanel(client, db);
 
 		await user.click(await enabled('Disconnect…'));
-		expect(disconnect).not.toHaveBeenCalled();
+		expect(signOut).not.toHaveBeenCalled();
 		// What it says is what happens, and by the account's name.
 		expect(
 			await screen.findByText(
-				'Disconnect Dropbox · ada@example.com? Its notes are removed from this device. Nothing is deleted from Dropbox; connect it again to get them back.'
+				'Disconnect Dropbox · ada@example.com from this device? Its notes are removed from this device. Nothing is deleted from Dropbox; connect it again to get them back.'
+			)
+		).toBeTruthy();
+		// No other device holds it, so the account goes too, and is said to.
+		expect(
+			screen.getByText(
+				'This is the only device connected to it, so the account is disconnected too.'
 			)
 		).toBeTruthy();
 		// Everything here has been sent, so there is nothing to decide about.
@@ -855,7 +861,7 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
 		// Which connection is disconnected is no longer an argument: it is
 		// whichever one the presented credential reaches.
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 		expect(client.asked).toContain('sk1_for-c1');
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
 		expect(await noteById(db, sent.id)).toBeUndefined();
@@ -870,13 +876,13 @@ describe('AccountPanel, with an account connected', () => {
 		await holding(db, 'c1');
 		await sentNote(db, 'Sent');
 		await createNote(db, { title: 'Unsent' });
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
-			Promise.resolve({ ok: true, value: { revoked: true } })
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
+			Promise.resolve({ ok: true, value: { disconnected: false } })
 		);
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -902,7 +908,7 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.getByRole('button', { name: 'Download them' })).toBeTruthy();
 		// A stray Enter answers no, and nothing has been asked of the server.
 		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
-		expect(disconnect).not.toHaveBeenCalled();
+		expect(signOut).not.toHaveBeenCalled();
 		expect(await db.credentials.get('c1')).toBeDefined();
 	});
 
@@ -966,11 +972,11 @@ describe('AccountPanel, with an account connected', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
 		const unsent = await createNote(db, { title: 'Unsent' });
-		const disconnect = vi.fn<ApiClient['disconnect']>();
+		const signOut = vi.fn<ApiClient['signOut']>();
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -980,7 +986,7 @@ describe('AccountPanel, with an account connected', () => {
 		await user.keyboard('{Escape}');
 
 		expect(await screen.findByRole('button', { name: 'Disconnect…' })).toBeTruthy();
-		expect(disconnect).not.toHaveBeenCalled();
+		expect(signOut).not.toHaveBeenCalled();
 		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
 		expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
 	});
@@ -1009,6 +1015,94 @@ describe('AccountPanel, with an account connected', () => {
 		);
 	});
 
+	describe('with other devices in the account', () => {
+		const onedrive = { ...dropbox, provider: 'onedrive' as const, accountId: 'ms-sub' };
+		const here = { id: 'g1', createdAt: 1, lastUsedAt: 1, expired: false, current: true };
+		const other = (id: string, expired = false) => ({
+			id,
+			createdAt: 2,
+			lastUsedAt: 2,
+			expired,
+			current: false,
+		});
+		const disconnecting = async (grants: ApiClient['grants']) => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			await bindConnection(db, { connectionId: 'c1', provider: 'onedrive' });
+			await holding(db, 'c1');
+			const signOut = vi.fn<ApiClient['signOut']>(() =>
+				Promise.resolve({ ok: true, value: { disconnected: false } })
+			);
+			renderPanel(
+				clientWith({
+					connection: () => Promise.resolve({ ok: true, value: onedrive }),
+					grants,
+					signOut,
+				}),
+				db
+			);
+			await user.click(await enabled('Disconnect…'));
+			await screen.findByRole('button', { name: 'Disconnect' });
+			return { user, db, signOut };
+		};
+
+		it('says they keep syncing, and sends nobody to withdraw the access they use', async () => {
+			const { user, db, signOut } = await disconnecting(() =>
+				Promise.resolve({ ok: true, value: [here, other('g2')] })
+			);
+
+			expect(
+				await screen.findByText(
+					'The other device connected to it stays connected and keeps syncing.'
+				)
+			).toBeTruthy();
+			expect(screen.queryByText(/only device/)).toBeNull();
+			expect(screen.queryByRole('link', { name: 'microsoft.com/consent' })).toBeNull();
+
+			await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+			expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
+			// This device, and only this one, is signed out.
+			expect(signOut).toHaveBeenCalledTimes(1);
+			expect(await db.credentials.get('c1')).toBeUndefined();
+		});
+
+		it('counts them', async () => {
+			await disconnecting(() =>
+				Promise.resolve({ ok: true, value: [here, other('g2'), other('g3')] })
+			);
+
+			expect(
+				await screen.findByText(
+					'The 2 other devices connected to it stay connected and keep syncing.'
+				)
+			).toBeTruthy();
+		});
+
+		it('does not count one signed out for being idle, which the server does not', async () => {
+			await disconnecting(() =>
+				Promise.resolve({ ok: true, value: [here, other('g2', true)] })
+			);
+
+			expect(
+				await screen.findByText(
+					'This is the only device connected to it, so the account is disconnected too.'
+				)
+			).toBeTruthy();
+			expect(screen.getByRole('link', { name: 'microsoft.com/consent' })).toBeTruthy();
+		});
+
+		it('says both outcomes where the server has not said which', async () => {
+			await disconnecting(() => Promise.reject(new TypeError('offline')));
+
+			expect(
+				await screen.findByText(
+					'Other devices connected to it stay connected. If this is the last one, the account is disconnected too.'
+				)
+			).toBeTruthy();
+			expect(screen.getByRole('link', { name: 'microsoft.com/consent' })).toBeTruthy();
+		});
+	});
+
 	it('does not send a Dropbox user to remove access by hand', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
@@ -1027,14 +1121,14 @@ describe('AccountPanel, with an account connected', () => {
 
 	it('can be talked out of disconnecting', async () => {
 		const user = userEvent.setup();
-		const disconnect = vi.fn<ApiClient['disconnect']>();
+		const signOut = vi.fn<ApiClient['signOut']>();
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -1044,7 +1138,7 @@ describe('AccountPanel, with an account connected', () => {
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(screen.getByRole('button', { name: 'Disconnect…' })).toBeTruthy();
-		expect(disconnect).not.toHaveBeenCalled();
+		expect(signOut).not.toHaveBeenCalled();
 	});
 
 	it('stays connected and says why when the server will not disconnect', async () => {
@@ -1055,7 +1149,7 @@ describe('AccountPanel, with an account connected', () => {
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect: () => Promise.resolve({ ok: false, refusal: 'not_entitled' }),
+				signOut: () => Promise.resolve({ ok: false, refusal: 'not_entitled' }),
 			}),
 			db
 		);
@@ -1095,7 +1189,7 @@ describe('AccountPanel, with an account connected', () => {
 		renderPanel(
 			clientWith({
 				connection: () => Promise.reject(new TypeError('offline')),
-				disconnect: () => Promise.reject(new TypeError('offline')),
+				signOut: () => Promise.reject(new TypeError('offline')),
 			}),
 			db
 		);
@@ -1145,7 +1239,7 @@ describe('AccountPanel, with an account connected', () => {
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect: () =>
+				signOut: () =>
 					new Promise((_resolve, reject) => {
 						answer.set('fail', () => {
 							reject(new TypeError('offline'));
@@ -1175,7 +1269,7 @@ describe('AccountPanel, with an account connected', () => {
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect: () => Promise.reject(new ApiError('DELETE failed with 500', 500)),
+				signOut: () => Promise.reject(new ApiError('DELETE failed with 500', 500)),
 			}),
 			db
 		);
@@ -1200,7 +1294,7 @@ describe('AccountPanel, with an account connected', () => {
 		],
 	] as const)(
 		'still names the server where the server is what failed, and it %s',
-		async (_, disconnect, said) => {
+		async (_, signOut, said) => {
 			const user = userEvent.setup();
 			const db = freshDatabase();
 			await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
@@ -1208,7 +1302,7 @@ describe('AccountPanel, with an account connected', () => {
 			renderPanel(
 				clientWith({
 					connection: () => Promise.resolve({ ok: true, value: dropbox }),
-					disconnect,
+					signOut,
 				}),
 				db
 			);
@@ -1229,13 +1323,13 @@ describe('AccountPanel, with an account connected', () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
-			Promise.resolve({ ok: true, value: { revoked: true } })
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
+			Promise.resolve({ ok: true, value: { disconnected: false } })
 		);
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -1253,7 +1347,7 @@ describe('AccountPanel, with an account connected', () => {
 		// the old wording — "the account was not disconnected" — was a plain lie.
 		expect(problem.textContent).toMatch(/may already be disconnected/);
 		expect(problem.textContent).not.toMatch(/was not disconnected|still connected/);
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 		expect(refused).toHaveBeenCalledTimes(1);
 		// And the proof that the two halves really did come apart.
 		expect(await db.credentials.get('c1')).toBeTruthy();
@@ -1272,7 +1366,7 @@ describe('AccountPanel, with an account connected', () => {
 				// Not what the real client does — `call` is async — but `client` is
 				// an injected seam, and a label that only holds for promises is a
 				// label the signature does not keep.
-				disconnect: () => {
+				signOut: () => {
 					throw new TypeError('the seam refused');
 				},
 			}),
@@ -1293,13 +1387,13 @@ describe('AccountPanel, with an account connected', () => {
 		await holding(db, 'c1');
 		// Refused, which is what puts "Stop syncing on this device" on offer — and
 		// that asks the server nothing at all.
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
 			Promise.resolve({ ok: false, refusal: 'not_entitled' })
 		);
 		renderPanel(
 			clientWith({
 				connection: () => Promise.resolve({ ok: true, value: dropbox }),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -1326,7 +1420,7 @@ describe('AccountPanel, with an account connected', () => {
 		expect(refused).toHaveBeenCalledTimes(1);
 		// The claim the message makes, pinned: one call to disconnect the account
 		// (the first attempt, which was refused) and none for this one.
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 		// Still here to try again, and still syncing meanwhile.
 		expect(await activeConnectionId(db)).toBe('c1');
 		refused.mockRestore();
@@ -1337,13 +1431,13 @@ describe('AccountPanel, with an account connected', () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		await holding(db, 'c1');
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
 			Promise.resolve({ ok: false, refusal: 'not_entitled' })
 		);
 		renderPanel(
 			clientWith({
 				connection: () => Promise.reject(new TypeError('offline')),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -1359,7 +1453,7 @@ describe('AccountPanel, with an account connected', () => {
 
 		expect(await screen.findByText(NOTHING_CONNECTED)).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe(LOCAL_CONNECTION_ID);
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 	});
 
 	it('offers to connect again only where the server lets it', async () => {
@@ -2624,10 +2718,10 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 	it('offers to move it to the one other source, by the name the list gives it', async () => {
 		const user = userEvent.setup();
 		const { db, unsent } = await withSomewhereToPutIt();
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
-			Promise.resolve({ ok: true, value: { revoked: true } })
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
+			Promise.resolve({ ok: true, value: { disconnected: false } })
 		);
-		renderPanel(answering(db, { disconnect }), db);
+		renderPanel(answering(db, { signOut }), db);
 
 		await user.click(await enabled('Disconnect…'));
 		await user.click(
@@ -2637,12 +2731,12 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		// A second step, which says what will be in each account afterwards, and
 		// still nothing asked of the server.
 		expect(await screen.findByText('1 note will be uploaded to OneDrive · ms:1.')).toBeTruthy();
-		expect(disconnect).not.toHaveBeenCalled();
+		expect(signOut).not.toHaveBeenCalled();
 
 		await user.click(screen.getByRole('button', { name: 'Move them' }));
 
 		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 		// The note is in the other account now, as new writing, and Dropbox is gone.
 		const landed = await noteById(db, unsent.id);
 		expect(landed?.connectionId).toBe('c2');
@@ -3086,10 +3180,10 @@ describe('AccountPanel, with more than one source connected', () => {
 			phase: 'syncing',
 			progress: { stage: 'scanning', found: 30, done: 4, listing: false },
 		});
-		const disconnect = vi.fn<ApiClient['disconnect']>(() =>
-			Promise.resolve({ ok: true, value: { revoked: true } })
+		const signOut = vi.fn<ApiClient['signOut']>(() =>
+			Promise.resolve({ ok: true, value: { disconnected: false } })
 		);
-		renderPanel(clientWith({ disconnect }), db, '/', sync);
+		renderPanel(clientWith({ signOut }), db, '/', sync);
 
 		expect(await screen.findByText('Downloading notes from Dropbox: 4 of 30.')).toBeTruthy();
 		// Inline, not over the app: the other source can still be switched to.
@@ -3102,7 +3196,7 @@ describe('AccountPanel, with more than one source connected', () => {
 			expect(await db.syncState.get('c1')).toBeUndefined();
 		});
 		expect(sync.halt).toHaveBeenCalledWith('c1');
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 		// Back to the source that was in front before the connect.
 		expect(await activeConnectionId(db)).toBe('c2');
 	});
@@ -3198,7 +3292,7 @@ describe('AccountPanel, with more than one source connected', () => {
 					ok: true as const,
 					value: (await activeConnectionId(db)) === 'c1' ? dropbox : onedrive,
 				}),
-				disconnect: () => Promise.reject(new TypeError('offline')),
+				signOut: () => Promise.reject(new TypeError('offline')),
 			}),
 			db
 		);
@@ -3226,7 +3320,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		const user = userEvent.setup();
 		const db = await twoSources();
 		const out: { fail: (error: Error) => void } = { fail: () => undefined };
-		const disconnect = vi.fn<ApiClient['disconnect']>(
+		const signOut = vi.fn<ApiClient['signOut']>(
 			() =>
 				new Promise((_resolve, reject) => {
 					out.fail = reject;
@@ -3238,7 +3332,7 @@ describe('AccountPanel, with more than one source connected', () => {
 					ok: true as const,
 					value: (await activeConnectionId(db)) === 'c1' ? dropbox : onedrive,
 				}),
-				disconnect,
+				signOut,
 			}),
 			db
 		);
@@ -3269,7 +3363,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		await user.click(await screen.findByRole('button', { name: 'Dropbox' }));
 		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
 		expect(screen.getByRole('button', { name: 'Stop syncing on this device' })).toBeTruthy();
-		expect(disconnect).toHaveBeenCalledTimes(1);
+		expect(signOut).toHaveBeenCalledTimes(1);
 
 		await user.click(screen.getByRole('button', { name: 'Stop syncing on this device' }));
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));

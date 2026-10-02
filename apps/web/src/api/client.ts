@@ -256,8 +256,14 @@ export interface ApiClient {
 	readonly grants: () => Promise<Result<Grant[]>>;
 	/** Sign one device out, this one included. */
 	readonly revokeGrant: (grantId: string) => Promise<Result<{ ok: boolean }>>;
-	/** Disconnect the account this credential reaches. No id: the credential says which. */
-	readonly disconnect: () => Promise<Result<{ revoked: boolean }>>;
+	/**
+	 * Sign this device out of the account its credential reaches, and only this
+	 * one: the other devices connected to it keep syncing. The last one out takes
+	 * the account with it — the server disconnects it and withdraws the app's
+	 * access at the provider — and `disconnected` says which this was. No id: the
+	 * credential says which grant is this device's (`connection().grantId`).
+	 */
+	readonly signOut: () => Promise<Result<{ disconnected: boolean }>>;
 	/** Mint a provider access token. No id, for the same reason. */
 	readonly token: () => Promise<Result<AccessToken>>;
 	/**
@@ -385,8 +391,21 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 				}
 			),
 
-		disconnect: () =>
-			call('/connection', z.object({ revoked: z.boolean() }), { method: 'DELETE' }),
+		signOut: async () => {
+			// Asked, not remembered: which grant is this device's is the server's to
+			// say, and a grant id kept from before would be somebody else's to sign
+			// out once the connection had been made again.
+			const seen = await call('/connection', connectionSchema);
+			if (!seen.ok) return seen;
+			const result = await call(
+				`/connection/grants/${encodeURIComponent(seen.value.grantId)}`,
+				z.object({ disconnected: z.boolean().default(false) }),
+				{ method: 'DELETE' }
+			);
+			return result.ok
+				? { ok: true, value: { disconnected: result.value.disconnected } }
+				: result;
+		},
 
 		token: () => call('/token', tokenSchema, { method: 'POST' }, onDeviceClock),
 

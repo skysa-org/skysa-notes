@@ -189,8 +189,10 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 	/**
 	 * Disconnect the account. The connection row goes; its grants stay as
 	 * tombstones with a null `connectionId`, which is both what makes them
-	 * unusable and what keeps their hashes from ever being claimed again. This is
-	 * the button for a credential the user believes is stolen.
+	 * unusable and what keeps their hashes from ever being claimed again. Every
+	 * device at once: the web app's Disconnect signs out only its own device
+	 * (`DELETE /connection/grants/:id`, which takes the account with the last),
+	 * and a stolen credential is one device to Remove from the list.
 	 */
 	app.delete('/connection', async (c) => {
 		const { connection } = c.get('bearer');

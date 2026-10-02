@@ -401,15 +401,65 @@ describe('the API client', () => {
 		}
 	});
 
-	it('disconnects without naming anything', async () => {
-		const { fetch, calls } = answering(200, { ok: true, revoked: false });
+	describe('signing this device out', () => {
+		const connection = {
+			id: 'c1',
+			provider: 'dropbox',
+			displayName: null,
+			accountId: null,
+			createdAt: 1,
+			lastUsedAt: null,
+			grantId: 'g/1',
+		};
+		/** The connection on a GET, `revoke` on anything else. */
+		const server = (revoke: { status: number; body: unknown }) => {
+			const calls: { url: string; init?: RequestInit }[] = [];
+			const fetch: FetchLike = (url, init) => {
+				calls.push({ url, init });
+				const { status, body } =
+					init?.method === 'DELETE' ? revoke : { status: 200, body: connection };
+				return Promise.resolve(new Response(JSON.stringify(body), { status }));
+			};
+			return { fetch, calls };
+		};
 
-		expect(await createApiClient({ fetch }).withCredential('sk1_mine').disconnect()).toEqual({
-			ok: true,
-			value: { revoked: false },
+		it("revokes this device's own grant, as the server names it, and nothing else", async () => {
+			const { fetch, calls } = server({
+				status: 200,
+				body: { ok: true, disconnected: false },
+			});
+
+			expect(await createApiClient({ fetch }).withCredential('sk1_mine').signOut()).toEqual({
+				ok: true,
+				value: { disconnected: false },
+			});
+			expect(calls.map(({ url, init }) => `${init?.method ?? 'GET'} ${url}`)).toEqual([
+				'GET /api/connection',
+				'DELETE /api/connection/grants/g%2F1',
+			]);
 		});
-		expect(calls[0]?.url).toBe('/api/connection');
-		expect(calls[0]?.init?.method).toBe('DELETE');
+
+		it('says when it was the last device out, and the account went with it', async () => {
+			const { fetch } = server({
+				status: 200,
+				body: { ok: true, disconnected: true, revoked: true },
+			});
+
+			expect(await createApiClient({ fetch }).withCredential('sk1_mine').signOut()).toEqual({
+				ok: true,
+				value: { disconnected: true },
+			});
+		});
+
+		it('revokes nothing when the server will not say which grant is this one', async () => {
+			const { fetch, calls } = answering(401, { error: 'credential_revoked' });
+
+			expect(await createApiClient({ fetch }).withCredential('sk1_mine').signOut()).toEqual({
+				ok: false,
+				refusal: 'credential_revoked',
+			});
+			expect(calls).toHaveLength(1);
+		});
 	});
 
 	it('lists the devices holding the connection, and revokes one by id, escaped', async () => {

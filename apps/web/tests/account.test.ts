@@ -704,16 +704,16 @@ describe('what the account is called', () => {
 });
 
 describe('disconnecting', () => {
-	const disconnecting = (result: Result<{ revoked: boolean }>, order?: string[]) => {
-		const disconnect = vi.fn<ApiClient['disconnect']>(() => {
+	const disconnecting = (result: Result<{ disconnected: boolean }>, order?: string[]) => {
+		const signOut = vi.fn<ApiClient['signOut']>(() => {
 			order?.push('server');
 			return Promise.resolve(result);
 		});
 		const withCredential = vi.fn(
 			(credential: string) =>
-				({ disconnect, credential }) as unknown as ReturnType<ApiClient['withCredential']>
+				({ signOut, credential }) as unknown as ReturnType<ApiClient['withCredential']>
 		);
-		return { withCredential, disconnect };
+		return { withCredential, signOut };
 	};
 
 	it('lets go on the server first, then here, and forgets the credential', async () => {
@@ -721,7 +721,7 @@ describe('disconnecting', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
 		const credential = await holding(db, 'c1');
 		const order: string[] = [];
-		const client = disconnecting({ ok: true, value: { revoked: true } }, order);
+		const client = disconnecting({ ok: true, value: { disconnected: false } }, order);
 
 		expect(await disconnectAccount(db, client, 'c1')).toEqual({ ok: true });
 
@@ -751,7 +751,7 @@ describe('disconnecting', () => {
 	it('lets go without asking when there is no credential to ask with', async () => {
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
-		const client = disconnecting({ ok: true, value: { revoked: true } });
+		const client = disconnecting({ ok: true, value: { disconnected: false } });
 
 		expect(await disconnectAccount(db, client, 'c1')).toEqual({ ok: true });
 
@@ -782,10 +782,10 @@ describe('disconnecting', () => {
 		const answer: { now: () => void } = { now: notYet };
 		const client = {
 			withCredential: () => ({
-				disconnect: () =>
-					new Promise<{ ok: true; value: { revoked: boolean } }>((resolve) => {
+				signOut: () =>
+					new Promise<{ ok: true; value: { disconnected: boolean } }>((resolve) => {
 						answer.now = () => {
-							resolve({ ok: true, value: { revoked: true } });
+							resolve({ ok: true, value: { disconnected: false } });
 						};
 					}),
 			}),
@@ -825,7 +825,7 @@ describe('disconnecting', () => {
 		// An editor whose save of `sent` has been failing: its text is in no row,
 		// and the row is clean. It says so when asked to write.
 		const withdraw = beforeClosing(() => Promise.resolve([noteRef(sent)]));
-		const client = disconnecting({ ok: true, value: { revoked: true } });
+		const client = disconnecting({ ok: true, value: { disconnected: false } });
 
 		expect(await disconnectAccount(db, client, 'c1')).toEqual({ ok: true });
 		withdraw();
@@ -845,7 +845,7 @@ describe('disconnecting', () => {
 		await updateNote(db, sent.id, { remoteId: 'id:1', remoteVersion: 'v1', dirty: 0 });
 		await db.opQueue.clear();
 		const unsent = await createNote(db, { title: 'Unsent' });
-		const client = disconnecting({ ok: true, value: { revoked: true } });
+		const client = disconnecting({ ok: true, value: { disconnected: false } });
 
 		expect(await disconnectAccount(db, client, 'c1')).toEqual({ ok: true });
 
@@ -899,7 +899,7 @@ describe('disconnecting', () => {
 				{
 					withCredential: () =>
 						({
-							disconnect: () => Promise.reject(new TypeError('offline')),
+							signOut: () => Promise.reject(new TypeError('offline')),
 						}) as unknown as ReturnType<ApiClient['withCredential']>,
 				},
 				'c1'
@@ -917,12 +917,12 @@ describe('disconnecting', () => {
  * for an import that has finished.
  */
 describe('cancelling an import', () => {
-	const disconnecting = (answer: () => Promise<Result<{ revoked: boolean }>>) => {
-		const disconnect = vi.fn<ApiClient['disconnect']>(answer);
+	const disconnecting = (answer: () => Promise<Result<{ disconnected: boolean }>>) => {
+		const signOut = vi.fn<ApiClient['signOut']>(answer);
 		const withCredential = vi.fn(
-			() => ({ disconnect }) as unknown as ReturnType<ApiClient['withCredential']>
+			() => ({ signOut }) as unknown as ReturnType<ApiClient['withCredential']>
 		);
-		return { withCredential, disconnect };
+		return { withCredential, signOut };
 	};
 
 	/** A scheduler that records being held, and being let go. */
@@ -953,7 +953,7 @@ describe('cancelling an import', () => {
 		const sync = holdable();
 		const client = disconnecting(() => {
 			sync.log.push('server');
-			return Promise.resolve({ ok: true, value: { revoked: true } });
+			return Promise.resolve({ ok: true, value: { disconnected: false } });
 		});
 
 		expect(
@@ -1008,20 +1008,22 @@ describe('cancelling an import', () => {
 			await cancelImport(db, client, holdable(), { connectionId: 'c1', onServer: false })
 		).toEqual({ ok: true, outcome: 'cancelled' });
 
-		expect(client.disconnect).not.toHaveBeenCalled();
+		expect(client.signOut).not.toHaveBeenCalled();
 		expect(await db.syncState.get('c1')).toBeUndefined();
 	});
 
 	it('asks the server nothing for an import that has already finished', async () => {
 		const { db, mine } = await importing();
 		await finishImport(db, 'c1');
-		const client = disconnecting(() => Promise.resolve({ ok: true, value: { revoked: true } }));
+		const client = disconnecting(() =>
+			Promise.resolve({ ok: true, value: { disconnected: false } })
+		);
 
 		expect(
 			await cancelImport(db, client, holdable(), { connectionId: 'c1', onServer: true })
 		).toEqual({ ok: true, outcome: 'imported' });
 
-		expect(client.disconnect).not.toHaveBeenCalled();
+		expect(client.signOut).not.toHaveBeenCalled();
 		expect((await getNote(db, mine.id))?.connectionId).toBe('c1');
 	});
 });

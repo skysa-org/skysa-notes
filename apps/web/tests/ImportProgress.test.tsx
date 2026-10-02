@@ -75,12 +75,11 @@ const fakeSync = (initial: SchedulerStatus) => {
 	};
 };
 
-const server = (answer: () => Promise<Result<{ revoked: boolean }>>) => {
-	const disconnect = vi.fn<ApiClient['disconnect']>(answer);
+const server = (answer: () => Promise<Result<{ disconnected: boolean }>>) => {
+	const signOut = vi.fn<ApiClient['signOut']>(answer);
 	return {
-		disconnect,
-		withCredential: () =>
-			({ disconnect }) as unknown as ReturnType<ApiClient['withCredential']>,
+		signOut,
+		withCredential: () => ({ signOut }) as unknown as ReturnType<ApiClient['withCredential']>,
 	};
 };
 
@@ -151,7 +150,7 @@ describe('the import dialog', () => {
 		const user = userEvent.setup();
 		const { db, source } = await importing();
 		const sync = fakeSync(syncing());
-		const client = server(() => Promise.resolve({ ok: true, value: { revoked: true } }));
+		const client = server(() => Promise.resolve({ ok: true, value: { disconnected: false } }));
 		render(
 			<CommandsProvider>
 				<ImportDialog source={source} database={db} client={client} sync={sync} />
@@ -164,7 +163,7 @@ describe('the import dialog', () => {
 			expect(await db.syncState.get('c1')).toBeUndefined();
 		});
 		expect(sync.halt).toHaveBeenCalledWith('c1');
-		expect(client.disconnect).toHaveBeenCalledTimes(1);
+		expect(client.signOut).toHaveBeenCalledTimes(1);
 		expect(await db.notes.where('connectionId').equals(LOCAL_CONNECTION_ID).count()).toBe(1);
 	});
 
@@ -193,7 +192,7 @@ describe('the import dialog', () => {
 		await waitFor(async () => {
 			expect(await db.syncState.get('c1')).toBeUndefined();
 		});
-		expect(client.disconnect).toHaveBeenCalledTimes(1);
+		expect(client.signOut).toHaveBeenCalledTimes(1);
 	});
 
 	it('goes on importing when the user says so', async () => {

@@ -1447,10 +1447,10 @@ describe('one browser over two sources', () => {
 		const answer: { now: () => void } = { now: notYet };
 		const client = {
 			withCredential: () => ({
-				disconnect: () =>
-					new Promise<{ ok: true; value: { revoked: boolean } }>((resolve) => {
+				signOut: () =>
+					new Promise<{ ok: true; value: { disconnected: boolean } }>((resolve) => {
 						answer.now = () => {
-							resolve({ ok: true, value: { revoked: true } });
+							resolve({ ok: true, value: { disconnected: false } });
 						};
 					}),
 			}),
