@@ -1,5 +1,18 @@
 # @skysa/web
 
+## 0.10.0
+
+### Minor Changes
+
+- 4b9a9d9: In a narrow window, the storage, notebook and note dropdowns at the top sit together as a path — each as wide as its name, with its chevron midway to the next — instead of in three equal thirds of the bar. A short name keeps all of its width; only the long ones are cut short, sharing what room is left. The chevron of the dropdown that is open is lit.
+- 4b9a9d9: In a narrow window, choosing in one dropdown opens the next: a source chosen opens its notebooks, and a notebook its notes, so a phone goes from an account to a note in one pass. Going from one dropdown straight to another slides them along together — the one left goes off to the side and the next comes in from the other — in the order their names sit in the bar. A notebook with nothing in it still goes straight to the new note begun in it, and a user who has asked for reduced motion gets each panel at once.
+- 4b9a9d9: Formatting on a phone. The formatting bar shown with `Format` stays shown on this device after a reload, until it is turned off. Its menus — the text style, `More tools`, the link field — now open over everything, including the note's title and the top bar, and are never taller than the room the keyboard leaves, scrolling inside themselves past that; with the keyboard up, the first items of `More tools` used to be cut off out of reach. And on a touch screen the floating formatting bar no longer comes up over selected text, where the system's own selection menu already does.
+
+### Patch Changes
+
+- 4b9a9d9: An empty list item is written as its marker alone — `-`, `2.` — instead of `- <br />`. Pressing Enter after a list item and switching to the markdown showed a `<br />` nobody had typed; and a note with an empty item in it (`-` on a line of its own) opened in the markdown editor, with the banner saying the rich editor could not show it. An empty task item still needs `- [ ] <br />`, since `- [ ]` alone is not a task.
+- @skysa/core@0.10.0
+
 ## 0.9.0
 
 ### Minor Changes
