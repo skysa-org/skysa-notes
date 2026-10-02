@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, type Result } from '../src/api/client.js';
 import { CommandsProvider } from '../src/commands/context.js';
-import { ImportDialog, importMessage, ImportPanel } from '../src/components/ImportProgress.js';
+import { ImportDialog, importMessage } from '../src/components/ImportProgress.js';
 import { bindConnection } from '../src/store/connection.js';
 import {
 	createDatabase,
@@ -201,7 +201,7 @@ describe('the import dialog', () => {
 		const client = server(() => Promise.reject(new TypeError('offline')));
 		render(
 			<CommandsProvider>
-				<ImportPanel
+				<ImportDialog
 					source={source}
 					database={db}
 					client={client}
