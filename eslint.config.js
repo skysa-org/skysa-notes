@@ -11,68 +11,11 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 /**
- * Google's style rules. Most of the formatting entries are switched back off by
- * `prettierConfig` at the bottom; they are kept because the set also carries
- * real correctness rules (`guard-for-in`, `no-invalid-this`, `no-throw-literal`,
- * ...) and splitting the two apart would make it harder to compare this file
- * against the config it was ported from.
- */
-const googleRules = {
-	'no-cond-assign': 0, // eslint:recommended
-	'no-irregular-whitespace': 2, // eslint:recommended
-	'no-unexpected-multiline': 2, // eslint:recommended
-	curly: [2, 'multi-line'],
-	'guard-for-in': 2,
-	'no-caller': 2,
-	'no-extend-native': 2,
-	'no-extra-bind': 2,
-	'no-invalid-this': 2,
-	'no-multi-spaces': 2,
-	'no-multi-str': 2,
-	'no-new-wrappers': 2,
-	'no-throw-literal': 2, // eslint:recommended
-	'no-with': 2,
-	'prefer-promise-reject-errors': 2,
-	'no-unused-vars': [2, { args: 'none' }], // eslint:recommended
-	'array-bracket-newline': 0, // eslint:recommended
-	'array-bracket-spacing': [2, 'never'],
-	'array-element-newline': 0, // eslint:recommended
-	'block-spacing': [2, 'never'],
-	'brace-style': 2,
-	'comma-spacing': 2,
-	'comma-style': 2,
-	'computed-property-spacing': 2,
-	'eol-last': 2,
-	'key-spacing': 2,
-	'keyword-spacing': 2,
-	'linebreak-style': 2,
-	'no-array-constructor': 2,
-	'no-multiple-empty-lines': [2, { max: 2 }],
-	'no-trailing-spaces': 2,
-	'one-var': [2, { var: 'never', let: 'never', const: 'never' }],
-	'padded-blocks': [2, 'never'],
-	quotes: [2, 'single', { allowTemplateLiterals: true }],
-	semi: 2,
-	'semi-spacing': 2,
-	'space-before-blocks': 2,
-	'spaced-comment': [2, 'always'],
-	'switch-colon-spacing': 2,
-	'arrow-parens': [2, 'always'],
-	'constructor-super': 2, // eslint:recommended
-	'generator-star-spacing': [2, 'after'],
-	'no-this-before-super': 2, // eslint:recommended
-	'no-var': 2,
-	'prefer-const': [2, { destructuring: 'all' }],
-	'prefer-rest-params': 2,
-	'prefer-spread': 2,
-	'rest-spread-spacing': 2,
-	'yield-star-spacing': [2, 'after'],
-};
-
-/**
- * The TypeScript and functional-style baseline. Shared verbatim between the
- * `.ts` and `.tsx` blocks so component code is held to the same standard as the
- * rest of the repo, rather than a looser one.
+ * Syntax refused everywhere. A named list because flat config *replaces* a
+ * rule's options rather than merging them: a block that sets
+ * `no-restricted-syntax` without spreading these turns both of them off for
+ * every file it covers, and no existing file violates them, so nothing would
+ * ever say so.
  */
 const RESTRICTED_SYNTAX = [
 	{
@@ -86,36 +29,62 @@ const RESTRICTED_SYNTAX = [
 	},
 ];
 
+/**
+ * What every TypeScript file is held to, `.ts` and `.tsx` alike, so component
+ * code meets the same standard as the rest of the repo rather than a looser
+ * one. On top of `eslint:recommended` and typescript-eslint's
+ * `recommendedTypeChecked`. Formatting is Prettier's: `prettierConfig`, last
+ * in the list below, switches off every rule that would fight it.
+ */
 const typescriptRules = {
-	'object-shorthand': 'error',
-	'no-param-reassign': 'error',
+	// Mistakes JavaScript lets through.
 	eqeqeq: 'error',
-	'prefer-arrow-callback': 'error',
-	'arrow-body-style': ['error', 'as-needed'],
-	complexity: ['error', 20],
-	'max-depth': ['error', 2],
-	'no-else-return': 'error',
+	'guard-for-in': 'error',
+	'no-caller': 'error',
+	'no-extend-native': 'error',
+	'no-extra-bind': 'error',
+	'no-invalid-this': 'error',
+	'no-irregular-whitespace': 'error',
+	'no-multi-str': 'error',
+	'no-new-wrappers': 'error',
+	'no-param-reassign': 'error',
+	// Allowed, though `eslint:recommended` refuses it.
+	'no-cond-assign': 'off',
+
+	// Nothing left behind from debugging, and no browser dialogs.
 	'no-console': 'error',
 	'no-debugger': 'error',
 	'no-alert': 'error',
+
+	// Shallow, flat code: early returns rather than nesting.
+	complexity: ['error', 20],
+	'max-depth': ['error', 2],
+	'no-else-return': 'error',
+	'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX],
+
+	// Declarations, names and comments.
+	'no-var': 'error',
+	'prefer-const': ['error', { destructuring: 'all' }],
+	'one-var': ['error', { var: 'never', let: 'never', const: 'never' }],
+	'object-shorthand': 'error',
+	'prefer-rest-params': 'error',
+	'prefer-spread': 'error',
 	camelcase: [
 		'error',
 		{ ignoreDestructuring: true, ignoreImports: true, ignoreGlobals: true, allow: [''] },
 	],
+	'spaced-comment': ['error', 'always'],
+
+	// Functions are arrow functions held in consts.
 	'func-style': ['error', 'expression'],
+	'prefer-arrow-callback': 'error',
+	'arrow-body-style': ['error', 'as-needed'],
 	'prefer-arrow-functions/prefer-arrow-functions': [
 		'error',
 		{ disallowPrototype: true, singleReturnOnly: false, classPropertiesAllowed: false },
 	],
-	// Kept in a named list because flat config *replaces* a rule's options
-	// rather than merging them: an override that sets `no-restricted-syntax`
-	// without spreading these turns both of them off for every file it covers,
-	// and no existing file violates them, so nothing would ever say so.
-	'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX],
 
-	'unused-imports/no-unused-imports': 'error',
-	'simple-import-sort/imports': 'error',
-
+	// Functional style. `functional/immutable-data` is added below, for `.ts` only.
 	'functional/no-this-expressions': 'error',
 	'functional/no-loop-statements': 'error',
 	'functional/no-let': 'error',
@@ -127,6 +96,13 @@ const typescriptRules = {
 	'functional/readonly-type': 'error',
 	'functional/prefer-property-signatures': 'error',
 
+	// Imports: sorted, types imported as types, and none left unused.
+	'simple-import-sort/imports': 'error',
+	'unused-imports/no-unused-imports': 'error',
+	'@typescript-eslint/consistent-type-imports': 'error',
+
+	// Where typescript-eslint has a type-aware version of a core rule, the core
+	// one is off and that one is on.
 	'no-unused-vars': 'off',
 	'@typescript-eslint/no-unused-vars': [
 		'error',
@@ -137,32 +113,33 @@ const typescriptRules = {
 			ignoreRestSiblings: true,
 		},
 	],
-	'@typescript-eslint/no-explicit-any': 'off',
-	'@typescript-eslint/restrict-template-expressions': 'error',
-	'@typescript-eslint/restrict-plus-operands': 'error',
-	'@typescript-eslint/no-redundant-type-constituents': 'error',
-	'@typescript-eslint/no-extra-non-null-assertion': 'error',
-	'@typescript-eslint/no-duplicate-enum-values': 'error',
-	'@typescript-eslint/no-duplicate-type-constituents': 'error',
-	'@typescript-eslint/no-array-delete': 'error',
-	'@typescript-eslint/no-base-to-string': 'error',
-	'@typescript-eslint/no-for-in-array': 'error',
-	'@typescript-eslint/no-this-alias': 'error',
-	'@typescript-eslint/no-unnecessary-condition': 'error',
-	'@typescript-eslint/no-unnecessary-type-assertion': 'error',
-	'@typescript-eslint/no-unnecessary-type-constraint': 'error',
-	'@typescript-eslint/triple-slash-reference': 'error',
-	'@typescript-eslint/no-empty-function': 'error',
-	'@typescript-eslint/no-wrapper-object-types': 'error',
-	'@typescript-eslint/consistent-type-imports': 'error',
-	'@typescript-eslint/no-deprecated': 'error',
 	'no-throw-literal': 'off',
 	'@typescript-eslint/only-throw-error': 'error',
-	'@typescript-eslint/prefer-as-const': 'error',
 	'prefer-promise-reject-errors': 'off',
 	'@typescript-eslint/prefer-promise-reject-errors': 'error',
 	'require-await': 'off',
 	'@typescript-eslint/require-await': 'error',
+
+	// The rest of TypeScript.
+	'@typescript-eslint/no-explicit-any': 'off',
+	'@typescript-eslint/no-array-delete': 'error',
+	'@typescript-eslint/no-base-to-string': 'error',
+	'@typescript-eslint/no-deprecated': 'error',
+	'@typescript-eslint/no-duplicate-enum-values': 'error',
+	'@typescript-eslint/no-duplicate-type-constituents': 'error',
+	'@typescript-eslint/no-empty-function': 'error',
+	'@typescript-eslint/no-extra-non-null-assertion': 'error',
+	'@typescript-eslint/no-for-in-array': 'error',
+	'@typescript-eslint/no-redundant-type-constituents': 'error',
+	'@typescript-eslint/no-this-alias': 'error',
+	'@typescript-eslint/no-unnecessary-condition': 'error',
+	'@typescript-eslint/no-unnecessary-type-assertion': 'error',
+	'@typescript-eslint/no-unnecessary-type-constraint': 'error',
+	'@typescript-eslint/no-wrapper-object-types': 'error',
+	'@typescript-eslint/prefer-as-const': 'error',
+	'@typescript-eslint/restrict-plus-operands': 'error',
+	'@typescript-eslint/restrict-template-expressions': 'error',
+	'@typescript-eslint/triple-slash-reference': 'error',
 };
 
 export default tseslint.config(
@@ -184,13 +161,13 @@ export default tseslint.config(
 			'apps/api/migrations/**',
 		],
 	},
+
 	js.configs.recommended,
+
+	// ---- TypeScript ---------------------------------------------------------
+
 	{
-		files: ['packages/**/*.ts', 'apps/**/*.{ts,tsx}'],
-		rules: googleRules,
-	},
-	{
-		files: ['packages/**/*.ts', 'apps/**/*.ts'],
+		files: ['packages/**/*.ts', 'apps/**/*.ts', 'apps/web/**/*.tsx'],
 		extends: [...tseslint.configs.recommendedTypeChecked],
 		languageOptions: {
 			parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
@@ -201,33 +178,31 @@ export default tseslint.config(
 			'unused-imports': unusedImports,
 			'simple-import-sort': simpleImportSort,
 		},
+		rules: typescriptRules,
+	},
+	{
+		// Not in components: it flags ordinary useState setter patterns that the
+		// accessor carve-out does not quite cover.
+		files: ['packages/**/*.ts', 'apps/**/*.ts'],
 		rules: {
-			...typescriptRules,
 			'functional/immutable-data': [
 				'error',
 				{ ignoreMapsAndSets: true, ignoreAccessorPattern: ['**.current', 'window.**'] },
 			],
 		},
 	},
+
+	// ---- React --------------------------------------------------------------
+
 	{
 		files: ['apps/web/**/*.tsx'],
 		extends: [
-			...tseslint.configs.recommendedTypeChecked,
 			react.configs.flat.recommended,
 			react.configs.flat['jsx-runtime'], // new JSX transform — no `React` import needed
 			jsxA11y.flatConfigs.recommended,
 		],
-		languageOptions: {
-			parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
-			globals: globals.browser,
-		},
-		plugins: {
-			'prefer-arrow-functions': preferArrowFunctions,
-			functional,
-			'unused-imports': unusedImports,
-			'simple-import-sort': simpleImportSort,
-			'react-hooks': reactHooks,
-		},
+		languageOptions: { globals: globals.browser },
+		plugins: { 'react-hooks': reactHooks },
 		settings: {
 			// Explicit rather than 'detect': eslint-plugin-react 7.37.5's version
 			// detection calls an API ESLint 10's flat-config rule context no longer
@@ -237,14 +212,13 @@ export default tseslint.config(
 		},
 		rules: {
 			...reactHooks.configs['recommended-latest'].rules,
-			...typescriptRules,
-			// `functional/immutable-data` is deliberately not enabled here: it flags
-			// ordinary useState setter patterns that the accessor carve-out does not
-			// quite cover.
 			'react/react-in-jsx-scope': 'off', // React 19 automatic JSX runtime
 			'react/prop-types': 'off', // types come from TypeScript
 		},
 	},
+
+	// ---- Boundaries ---------------------------------------------------------
+
 	{
 		// packages/core must stay framework-free and portable: browser, Node, Workers.
 		files: ['packages/core/src/**/*.ts'],
@@ -287,55 +261,12 @@ export default tseslint.config(
 		},
 	},
 	{
-		// Only worker.ts may read *configuration*. Per-request bindings still
-		// arrive on the Hono context — `c.env.DB` in app.ts is the one of those
-		// that cannot be handed over at createApp time, because there is no
-		// request yet when the app is built.
-		files: ['apps/api/src/**/*.ts'],
-		ignores: ['apps/api/src/worker.ts'],
-		languageOptions: { globals: globals.node },
-		rules: {
-			'no-restricted-globals': [
-				'error',
-				{
-					name: 'process',
-					message:
-						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
-				},
-			],
-			// The bare identifier is only one of the three ways in. This covers
-			// the member expression; the import is covered below.
-			'no-restricted-syntax': [
-				'error',
-				...RESTRICTED_SYNTAX,
-				{
-					selector: "MemberExpression[object.name='globalThis'][property.name='process']",
-					message:
-						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
-				},
-			],
-			'no-restricted-imports': [
-				'error',
-				{
-					patterns: [
-						{
-							group: ['node:process'],
-							message:
-								'apps/api reads env only in src/worker.ts; take config via createApp(options).',
-						},
-					],
-				},
-			],
-		},
-	},
-	{
-		// Separate from the block above because that one exempts `worker.ts`,
-		// and this rule must not: the entry module is the likeliest place for a
-		// Node builtin to appear, and nothing else in the gate would notice.
-		// `pnpm typecheck` passes (apps/api's src and tests are one TypeScript
-		// program and the tests legitimately pull @types/node in) and so does
-		// `wrangler deploy --dry-run` — the import goes straight into the
-		// bundle, and only the deployed Worker finds out.
+		// No Node built-ins anywhere in the Worker, `worker.ts` included: the
+		// entry module is the likeliest place for one to appear, and nothing else
+		// in the gate would notice. `pnpm typecheck` passes (apps/api's src and
+		// tests are one TypeScript program and the tests legitimately pull
+		// @types/node in) and so does `wrangler deploy --dry-run` — the import
+		// goes straight into the bundle, and only the deployed Worker finds out.
 		files: ['apps/api/src/**/*.ts'],
 		languageOptions: { globals: globals.node },
 		rules: {
@@ -356,12 +287,50 @@ export default tseslint.config(
 		},
 	},
 	{
+		// Only worker.ts may read *configuration*. Per-request bindings still
+		// arrive on the Hono context — `c.env.DB` in app.ts is the one of those
+		// that cannot be handed over at createApp time, because there is no
+		// request yet when the app is built.
+		//
+		// There are three ways in. This block refuses two: the bare `process`
+		// and `globalThis.process`. The third, importing `node:process`, is a
+		// Node built-in, which the block above already refuses everywhere in
+		// apps/api/src. Setting `no-restricted-imports` here would replace that
+		// block's list for these files rather than add to it, so this one sets
+		// none.
+		files: ['apps/api/src/**/*.ts'],
+		ignores: ['apps/api/src/worker.ts'],
+		languageOptions: { globals: globals.node },
+		rules: {
+			'no-restricted-globals': [
+				'error',
+				{
+					name: 'process',
+					message:
+						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+				},
+			],
+			'no-restricted-syntax': [
+				'error',
+				...RESTRICTED_SYNTAX,
+				{
+					selector: "MemberExpression[object.name='globalThis'][property.name='process']",
+					message:
+						'apps/api reads env only in src/worker.ts; take config via createApp(options).',
+				},
+			],
+		},
+	},
+	{
 		// Workers has no logger binding and no stdout: `console` is the only sink
 		// Cloudflare's observability and `wrangler tail` read. Scoped to the two
 		// places that report an error, not opened up across the API.
 		files: ['apps/api/src/worker.ts', 'apps/api/src/app.ts', 'apps/api/src/log.ts'],
 		rules: { 'no-console': 'off' },
 	},
+
+	// ---- Relaxations --------------------------------------------------------
+
 	{
 		// Vitest's `describe`/`it` callbacks are inherently imperative — shared setup
 		// captured in a closure, table-driven loops over fixtures read from disk.
@@ -383,7 +352,7 @@ export default tseslint.config(
 			'functional/immutable-data': 'off',
 		},
 	},
-	// Must stay last: turns off every rule that would fight Prettier, including the
-	// formatting entries in googleRules above.
+
+	// Must stay last: turns off every rule that would fight Prettier.
 	prettierConfig
 );
