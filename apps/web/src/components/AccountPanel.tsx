@@ -747,22 +747,26 @@ const SyncState = ({
 					status.refusal === 'credential_required'
 						? `This device can no longer reach ${label}.`
 						: `${label} needs to be connected again.`}
-					{reconnectable && bound.provider !== undefined && (
-						<>
-							{' '}
-							<ConnectButton
-								db={database}
-								client={client}
-								provider={bound.provider}
-								returnTo={returnTo}
-								className="link"
-								{...(navigate === undefined ? {} : { navigate })}
-							>
-								Connect again
-							</ConnectButton>
-						</>
-					)}
 				</p>
+			)}
+			{/*
+			 * A button of the panel's, under what it answers, rather than a word
+			 * in the sentence: it was one, dressed as nothing, that a phone's
+			 * taller button wrapped onto the line under the text with no space
+			 * between them. And what it renders besides — its own error, the
+			 * question about the device's notes — is not something a paragraph
+			 * may hold.
+			 */}
+			{reconnect && reconnectable && bound.provider !== undefined && (
+				<ConnectButton
+					db={database}
+					client={client}
+					provider={bound.provider}
+					returnTo={returnTo}
+					{...(navigate === undefined ? {} : { navigate })}
+				>
+					Connect again
+				</ConnectButton>
 			)}
 			{message !== null && <p className="muted">{message}</p>}
 			<Denied status={status} syncable={syncable} config={config} />

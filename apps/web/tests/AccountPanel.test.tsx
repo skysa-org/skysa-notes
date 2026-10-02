@@ -1497,7 +1497,11 @@ describe('AccountPanel, with an account connected', () => {
 			fakeSync({ phase: 'attention', refusal: 'credential_revoked' })
 		);
 
-		await user.click(await screen.findByRole('button', { name: 'Connect again' }));
+		const again = await screen.findByRole('button', { name: 'Connect again' });
+		// A button of the panel's under the message, not a word inside it,
+		// which a phone's taller button wrapped against the text.
+		expect(again.closest('p')).toBeNull();
+		await user.click(again);
 
 		await waitFor(() => {
 			expect(went).toEqual(['https://dropbox.example/authorize']);
