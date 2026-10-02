@@ -12,6 +12,11 @@ import { bothProvidersConfig, buildApp, dropboxStub, newCredential, secretOf } f
  * is unreachable — and one device's credential is the whole of what it reaches.
  */
 
+const SAFARI_ON_IPHONE =
+	'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+const CHROME_ON_IPHONE =
+	'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1';
+
 const rows = (db: D1Database) => createDb(db).select().from(schema.connections);
 
 /** Every key in a response, however deep, since a secret can be nested. */
@@ -166,6 +171,41 @@ describe('GET /api/connection/grants', () => {
 		}
 		const grants = await createDb(app.db).select().from(schema.grants);
 		for (const grant of grants) expect(serialized).not.toContain(grant.secretHash);
+	});
+
+	it('names each device by what its browser said at sign-in, and keeps no more than that', async () => {
+		const app = buildApp();
+		const mine = await app.connect({ userAgent: SAFARI_ON_IPHONE });
+		await app.connect();
+
+		const body: { grants: Record<string, unknown>[] } = await (
+			await app.request('/api/connection/grants', { credential: mine.credential })
+		).json();
+		const devices = body.grants.map((grant) => grant.device);
+		expect(devices).toContain('Safari on iPhone');
+		// Made by a browser that said nothing: no label, rather than a guess.
+		expect(body.grants.filter((grant) => !('device' in grant))).toHaveLength(1);
+
+		// The label is what is stored. The header says which iOS and which
+		// WebKit, which the device list has no use for.
+		const stored = JSON.stringify(await createDb(app.db).select().from(schema.grants));
+		expect(stored).not.toContain('17_5');
+		expect(stored).not.toContain('AppleWebKit');
+	});
+
+	it('names the device again when it reconnects from another browser', async () => {
+		const app = buildApp();
+		const first = await app.connect({ userAgent: SAFARI_ON_IPHONE });
+		await app.connect({
+			credential: first.credential,
+			jar: first.jar,
+			userAgent: CHROME_ON_IPHONE,
+		});
+
+		const body: { grants: Record<string, unknown>[] } = await (
+			await app.request('/api/connection/grants', { credential: first.credential })
+		).json();
+		expect(body.grants.map((grant) => grant.device)).toEqual(['Chrome on iPhone']);
 	});
 
 	it('shows only the devices on the caller’s own connection', async () => {

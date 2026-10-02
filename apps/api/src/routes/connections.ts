@@ -108,6 +108,9 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 				lastUsedAt: row.lastUsedAt.getTime(),
 				expired: row.lastUsedAt.getTime() <= idleBefore,
 				current: row.id === grant.id,
+				// Absent for a grant made before it was kept (0006), or by a
+				// browser `deviceLabel` could not name.
+				...(row.device === null ? {} : { device: row.device }),
 			})),
 		});
 	});

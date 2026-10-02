@@ -101,6 +101,8 @@ const grantSchema = z.object({
 	/** Past the server's idle limit: still listed, but it no longer works. */
 	expired: z.boolean().default(false),
 	current: z.boolean(),
+	/** What the device is, as "Safari on iPhone", where the server knows. */
+	device: z.string().optional(),
 });
 
 export type Grant = z.infer<typeof grantSchema>;

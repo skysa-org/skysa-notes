@@ -290,6 +290,8 @@ export interface ConnectOptions {
 	connectCode?: string;
 	/** Skip the POST and forge a flow cookie some other way. */
 	start?: (jar: Jar, credentialHash: string) => Promise<Response>;
+	/** What the browser that comes back to the callback says it is. */
+	userAgent?: string;
 }
 
 export const buildApp = (
@@ -374,6 +376,7 @@ export const buildApp = (
 			credential = newCredential(),
 			returnTo,
 			connectCode,
+			userAgent,
 		} = options;
 		stub.as(account);
 
@@ -387,6 +390,7 @@ export const buildApp = (
 		const callback = jar.absorb(
 			await request(`/api/auth/connect/${provider}/callback?code=the-code&state=${state}`, {
 				cookies: jar,
+				...(userAgent === undefined ? {} : { headers: { 'user-agent': userAgent } }),
 			})
 		);
 

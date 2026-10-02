@@ -7,6 +7,7 @@ import type { AppEnv } from '../app.js';
 import { isCredentialHash, MAX_GRANTS_PER_CONNECTION } from '../credentials.js';
 import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.js';
 import { type Database, schema } from '../db/client.js';
+import { deviceLabel } from '../device.js';
 import { connectCodeSchema, knownCode, readCodeCheck } from '../gate.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
@@ -357,6 +358,9 @@ export const connectRoutes = (doFetch: FetchLike) => {
 				refreshToken: tokens.refreshToken,
 			}),
 			credentialHash: flow.credentialHash,
+			// The device's own browser is what arrives here, sent back by the
+			// provider: what it says it is names the device in the device list.
+			device: deviceLabel(c.req.header('user-agent')),
 			now: Date.now(),
 		});
 
@@ -377,6 +381,8 @@ interface CommitInput {
 	displayName: string;
 	sealed: SealedSecret;
 	credentialHash: string;
+	/** What the device is, as a label (`deviceLabel`); not every browser says. */
+	device: string | undefined;
 	now: number;
 }
 
@@ -424,7 +430,7 @@ const attempt = async (db: Database, input: CommitInput, whenItFails: string): P
 	});
 
 const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
-	const { provider, accountId, displayName, sealed, credentialHash, now } = input;
+	const { provider, accountId, displayName, sealed, credentialHash, device, now } = input;
 
 	const existing = await db.query.connections.findFirst({
 		where: and(
@@ -494,13 +500,15 @@ const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
 					secretHash: credentialHash,
 					createdAt: new Date(now),
 					lastUsedAt: new Date(now),
+					device: device ?? null,
 				})
 			: // This device reconnecting with the credential it already holds. Its
 				// row is already pointed at this connection; all that changes is that
 				// it counts as recently used, so the prune below keeps it.
 				db
 					.update(schema.grants)
-					.set({ lastUsedAt: new Date(now) })
+					// And it may be another browser on it than signed in before.
+					.set({ lastUsedAt: new Date(now), ...(device === undefined ? {} : { device }) })
 					.where(eq(schema.grants.id, held.id)),
 
 		// A cap, so a connection cannot accumulate grants without limit — every
