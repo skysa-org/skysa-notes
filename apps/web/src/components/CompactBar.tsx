@@ -183,7 +183,9 @@ const PaneTrigger = ({
 		}}
 	>
 		<span className="compact-picker-label">{value}</span>
-		<Icon name="chevron" />
+		<span className="compact-picker-chevron">
+			<Icon name="chevron" />
+		</span>
 	</button>
 );
 
@@ -250,11 +252,14 @@ export const CompactBar = ({
 	const width = useElementWidth(bar);
 	const fieldFits = width !== undefined && width >= rems(SEARCH_FITS_AT);
 
-	// The triggers share the bar in equal parts whatever they say, so they move
-	// only when the bar's width does — and measured then, rather than when a
-	// panel opens, a panel never starts out of where its trigger used to be.
-	// Not while the search has the whole bar, when the triggers are not there;
-	// measured again as they come back, in case the window changed meanwhile.
+	const notebook = notebookLabel(folder === undefined ? folder : shownFolder(folder, renaming));
+
+	// The triggers are as wide as what they say, so they move when the bar's
+	// width does or when any of them says something else — and measured then,
+	// rather than when a panel opens, a panel never starts out of where its
+	// trigger used to be. Not while the search has the whole bar, when the
+	// triggers are not there; measured again as they come back, in case the
+	// window changed meanwhile.
 	useLayoutEffect(() => {
 		if (bar === null || onOrigins === undefined) return;
 		const trigger = (pane: Pane) => bar.querySelector(`.compact-picker[data-pane='${pane}']`);
@@ -268,7 +273,7 @@ export const CompactBar = ({
 			return { left: box.left - across.left, right: across.right - box.right };
 		};
 		onOrigins({ sources: from(sources), notebooks: from(notebooks), notes: from(notes) });
-	}, [bar, width, searching, onOrigins]);
+	}, [bar, width, searching, onOrigins, source, notebook, title]);
 
 	// The field appears because the icon was pressed, so the cursor goes into
 	// it; a keyboard user would otherwise have to find what they just opened.
@@ -315,21 +320,29 @@ export const CompactBar = ({
 
 	return (
 		<div className="compact-bar" ref={setBar}>
-			<PaneTrigger
-				pane="sources"
-				name="Source"
-				value={source}
-				panel={panel}
-				onPanel={onPanel}
-			/>
-			<PaneTrigger
-				pane="notebooks"
-				name="Notebook"
-				value={notebookLabel(folder === undefined ? folder : shownFolder(folder, renaming))}
-				panel={panel}
-				onPanel={onPanel}
-			/>
-			<PaneTrigger pane="notes" name="Note" value={title} panel={panel} onPanel={onPanel} />
+			<div className="compact-pickers">
+				<PaneTrigger
+					pane="sources"
+					name="Source"
+					value={source}
+					panel={panel}
+					onPanel={onPanel}
+				/>
+				<PaneTrigger
+					pane="notebooks"
+					name="Notebook"
+					value={notebook}
+					panel={panel}
+					onPanel={onPanel}
+				/>
+				<PaneTrigger
+					pane="notes"
+					name="Note"
+					value={title}
+					panel={panel}
+					onPanel={onPanel}
+				/>
+			</div>
 			{fieldFits ? (
 				field
 			) : (

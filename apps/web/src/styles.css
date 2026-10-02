@@ -2365,19 +2365,34 @@ button.danger {
 	background: var(--surface);
 }
 
-/* The three dropdowns share the bar equally and each truncates what it says
-   inside its share: a long notebook name must not take the room the note's
-   title needs, and the whole of either is in the tooltip and the panel. Words
-   and a chevron, without a box: the chevron is what says each one opens
-   something, and whether it is open. */
+/* The three dropdowns are as wide as what they say, side by side. Once the
+   bar is full, one that says little keeps all of it, and the ones that say
+   more share what is left equally, each truncating inside its share: a long
+   notebook name must not take the room the note's title needs, and the whole
+   of either is in the tooltip and the panel. A grid rather than a row, since
+   a row would shrink every one of them in proportion to its words, the short
+   ones with the long. `start`, so a share is never wider than its words. */
+.compact-pickers {
+	/* Either side of each chevron, so the three read as a path. */
+	--crumb: var(--space-xs);
+
+	display: grid;
+	flex: 0 1 auto;
+	grid-template-columns: repeat(3, minmax(0, auto));
+	justify-content: start;
+	min-width: 0;
+}
+
+/* Words and a chevron, without a box: the chevron is what says each one opens
+   something, and whether it is open. The room after it is half this one's and
+   half the next one's, so the chevron is as far from the next words as from
+   its own, and a press anywhere between two lands on one or the other. */
 .compact-picker {
 	display: flex;
-	flex: 1 1 0;
 	align-items: center;
-	gap: 0.25rem;
+	gap: var(--crumb);
 	min-width: 0;
-	/* None after the chevron, which is room the words can use instead. */
-	padding: 0.35rem 0 0.35rem var(--control-inline);
+	padding: 0.35rem calc(var(--crumb) / 2);
 	font: inherit;
 	font-size: 0.85rem;
 	color: var(--fg);
@@ -2385,6 +2400,11 @@ button.danger {
 	border: 0;
 	border-radius: 0.375rem;
 	cursor: pointer;
+}
+
+/* The first one's words over the note's title. */
+.compact-picker:first-child {
+	padding-inline-start: var(--control-inline);
 }
 
 @media (hover: hover) {
@@ -2404,6 +2424,23 @@ button.danger {
 	text-align: start;
 }
 
+/* Lit while its panel is open, in the colour of what is on. The tile is
+   outside the glyph's box by as much as it is pulled back in, so opening a
+   panel moves nothing along the bar; and it is on the glyph's holder rather
+   than the glyph, which turns, so the tile stays square. */
+.compact-picker-chevron {
+	display: grid;
+	flex: none;
+	place-items: center;
+	margin: -0.125rem;
+	padding: 0.125rem;
+	border-radius: 0.25rem;
+}
+
+.compact-picker[aria-expanded='true'] .compact-picker-chevron {
+	background: var(--on-bg);
+}
+
 /* Pointing along the bar while the panel is shut, and turned down at it while
    it is open. */
 .compact-picker .toolbar-icon {
@@ -2412,6 +2449,7 @@ button.danger {
 }
 
 .compact-picker[aria-expanded='true'] .toolbar-icon {
+	color: var(--on-fg);
 	transform: none;
 }
 
@@ -2439,6 +2477,13 @@ button.danger {
 	.compact-icon:hover {
 		background: var(--hover-bg);
 	}
+}
+
+/* The search, glyph or field, at the far end of the bar from the dropdowns,
+   however little they say. */
+.compact-pickers ~ .compact-icon,
+.compact-pickers ~ .compact-search {
+	margin-inline-start: auto;
 }
 
 .compact-search,
