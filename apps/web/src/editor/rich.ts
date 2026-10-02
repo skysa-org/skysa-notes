@@ -15,7 +15,12 @@ import { history } from '@milkdown/kit/plugin/history';
 import { slashFactory } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
 import { commonmark, remarkPreserveEmptyLinePlugin } from '@milkdown/kit/preset/commonmark';
-import { gfm, tableCellSchema, tableHeaderSchema } from '@milkdown/kit/preset/gfm';
+import {
+	extendListItemSchemaForTask,
+	gfm,
+	tableCellSchema,
+	tableHeaderSchema,
+} from '@milkdown/kit/preset/gfm';
 import { keymap } from '@milkdown/kit/prose/keymap';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
@@ -140,20 +145,44 @@ const EMPTY_LINE = '<br />';
 interface MdastNode {
 	readonly type: string;
 	readonly value?: unknown;
+	readonly checked?: unknown;
 	readonly children?: readonly MdastNode[];
 }
+
+const isEmptyLine = (node: MdastNode): boolean => {
+	const [only] = node.children ?? [];
+	return (
+		node.type === 'paragraph' &&
+		node.children?.length === 1 &&
+		only?.type === 'html' &&
+		only.value === EMPTY_LINE
+	);
+};
+
+/**
+ * Whether a list item whose first paragraph is empty is written as its marker
+ * alone (`itemWithoutEmptyLine`), asked the same way of the item the editor
+ * writes and of the one it reads. Not a task item, whose box GFM writes only
+ * before a paragraph, and not one whose next block is a paragraph, which
+ * would be read back as the item's first.
+ */
+const markerAlone = (checked: unknown, next: string | undefined): boolean =>
+	(checked === null || checked === undefined) && next !== 'paragraph';
 
 const emptyEmptyLines = (node: MdastNode): MdastNode => {
 	const children = node.children;
 	if (children === undefined) return node;
-	const [only] = children;
+	if (isEmptyLine(node)) return { ...node, children: [] };
+	// Where the editor writes an empty item as its marker alone, it never
+	// writes `<br />` for one, so a `<br />` there is the author's own.
+	const [first, ...rest] = children;
 	if (
-		node.type === 'paragraph' &&
-		children.length === 1 &&
-		only?.type === 'html' &&
-		only.value === EMPTY_LINE
+		node.type === 'listItem' &&
+		first !== undefined &&
+		isEmptyLine(first) &&
+		markerAlone(node.checked, rest[0]?.type)
 	) {
-		return { ...node, children: [] };
+		return { ...node, children: [first, ...rest.map(emptyEmptyLines)] };
 	}
 	return { ...node, children: children.map(emptyEmptyLines) };
 };
@@ -199,6 +228,61 @@ const cellWithoutEmptyLine =
 		};
 	};
 
+/**
+ * An empty list item written as its marker alone — `-`, `2.` — and not as
+ * `- <br />`.
+ *
+ * An item begins with a paragraph, so an empty item holds an empty one, and
+ * Enter after an item leaves the cursor in exactly that: switching to the
+ * markdown then showed `- <br />` for an item the user had not written
+ * anything in. CommonMark has a word for an empty item, which is its marker
+ * with nothing after it, and reads it back as an item with no content — which
+ * the schema fills with the empty paragraph an item begins with. So the two
+ * are each other's, and a `-` the author wrote, which the editor could not
+ * show before (it came back as `- <br />`, and the fidelity check sent the
+ * note to raw mode), opens in rich text now. Where the marker alone would say
+ * something else, the item keeps the `<br />` (`markerAlone`).
+ *
+ * The task item's schema, since GFM's is the one the editor has: it wraps
+ * commonmark's own rather than reading it from the ctx.
+ * https://github.com/Milkdown/milkdown/blob/v7.22.1/packages/plugins/preset-gfm/src/node/task-list-item.ts
+ */
+const itemWithoutEmptyLine =
+	(schema: (ctx: Ctx) => NodeSchema) =>
+	(ctx: Ctx): NodeSchema => {
+		const spec = schema(ctx);
+		const write = spec.toMarkdown.runner;
+		return {
+			...spec,
+			toMarkdown: {
+				...spec.toMarkdown,
+				runner: (state, node) => {
+					const first = node.firstChild;
+					const alone =
+						first?.type.name === 'paragraph' &&
+						first.content.size === 0 &&
+						markerAlone(node.attrs.checked, node.maybeChild(1)?.type.name);
+					if (!alone) {
+						write(state, node);
+						return;
+					}
+					const rest = node.content.cut(first.nodeSize);
+					if (rest.size > 0) {
+						write(state, node.copy(rest));
+						return;
+					}
+					// With no children at all, rather than with none written into
+					// it: an item opened and shut has no list of children, and
+					// GFM's writer reads the first of them. The one attribute the
+					// item that is not a task writes.
+					state.addNode('listItem', [], undefined, {
+						spread: node.attrs.spread === true,
+					});
+				},
+			},
+		};
+	};
+
 export const createRichEditor = ({
 	root,
 	body,
@@ -214,6 +298,7 @@ export const createRichEditor = ({
 			ctx.set(remarkStringifyOptionsCtx, STRINGIFY_OPTIONS);
 			ctx.update(tableCellSchema.key, cellWithoutEmptyLine);
 			ctx.update(tableHeaderSchema.key, cellWithoutEmptyLine);
+			ctx.update(extendListItemSchemaForTask.key, itemWithoutEmptyLine);
 			ctx.update(editorViewOptionsCtx, (options) => ({
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': 'Note body' },
