@@ -28,6 +28,13 @@ export interface AppSearch {
 	 * with `connect`.
 	 */
 	code?: EntitlementCode;
+	/**
+	 * Open the way to connect storage at the gate's code field: where an
+	 * operator's page sends someone back to once they have a code
+	 * (`ConnectGate`), the gate's link having taken them there in this same
+	 * window. `code` is the only value. Read once and removed, as `connect` is.
+	 */
+	enter?: 'code';
 }
 
 /**
@@ -80,4 +87,5 @@ export const parseSearch = (search: Record<string, unknown>): AppSearch => ({
 	note: typeof search.note === 'string' && search.note !== '' ? search.note : undefined,
 	connect: CONNECT_OUTCOMES.find((outcome) => outcome === search.connect),
 	code: ENTITLEMENT_CODES.find((code) => code === search.code),
+	enter: search.enter === 'code' ? 'code' : undefined,
 });

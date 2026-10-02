@@ -98,10 +98,11 @@ export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 		<div ref={card} className={`toast toast-${tone}`} role={ROLE[tone]}>
 			<span>{message}</span>
 			{action !== undefined && (
-				// A new tab, so the app — and this toast — are still here to come
-				// back to; `noopener` so the page it opens cannot reach back into
-				// this one, and `noreferrer` so it is not told where from.
-				<a href={action.url} target="_blank" rel="noopener noreferrer">
+				// In this window, as connecting storage is: a new one, in an app
+				// installed on a phone, had no way back but closing the app. The
+				// operator's page links back (`?enter=code`). `noreferrer` so it is
+				// not told where from.
+				<a href={action.url} rel="noreferrer">
 					{action.label}
 				</a>
 			)}

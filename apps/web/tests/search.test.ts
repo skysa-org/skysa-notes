@@ -35,6 +35,12 @@ describe('parseSearch', () => {
 		expect(parseSearch({ connect: ['ok'] })).toEqual({});
 	});
 
+	it('takes a request for the code field, and nothing else under its name', () => {
+		expect(parseSearch({ enter: 'code' })).toEqual({ enter: 'code' });
+		expect(parseSearch({ enter: 'note' })).toEqual({});
+		expect(parseSearch({ enter: ['code'] })).toEqual({});
+	});
+
 	it('takes the kind of refusal only when it is one a policy can give', () => {
 		expect(parseSearch({ connect: 'refused', code: 'lapsed' })).toEqual({
 			connect: 'refused',
@@ -54,12 +60,19 @@ describe('parseSearch', () => {
 	 * `tests/routes.search.test.tsx` holds the same line through the real router.
 	 */
 	it('overrides what it refuses instead of leaving it out', () => {
-		const refused = parseSearch({ folder: [1], note: { a: 1 }, connect: 'signin', code: 'x' });
+		const refused = parseSearch({
+			folder: [1],
+			note: { a: 1 },
+			connect: 'signin',
+			code: 'x',
+			enter: 'x',
+		});
 		expect(refused).toStrictEqual({
 			folder: undefined,
 			note: undefined,
 			connect: undefined,
 			code: undefined,
+			enter: undefined,
 		});
 		expect({ note: { a: 1 }, ...refused }.note).toBeUndefined();
 	});

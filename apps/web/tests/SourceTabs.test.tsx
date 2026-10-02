@@ -689,8 +689,10 @@ describe('the way to connect, on an instance whose operator gates it', () => {
 
 	const expectLinkOut = (link: HTMLElement) => {
 		expect(link.getAttribute('href')).toBe(GATE.action.url);
-		expect(link.getAttribute('target')).toBe('_blank');
-		expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+		// In this window, as the buttons go to the provider: a new one, in an
+		// installed app, had no way back but closing the app.
+		expect(link.getAttribute('target')).toBeNull();
+		expect(link.getAttribute('rel')).toBe('noreferrer');
 	};
 
 	it('shows the gate in place of the buttons to a device with no account syncing here', async () => {
@@ -866,6 +868,87 @@ describe("the gate's code, on an instance that asks for one", () => {
 		);
 		return within(await screen.findByRole('group', { name: 'Storage providers' }));
 	};
+
+	describe('asked for by the app on the way back from getting one', () => {
+		it('opens the menu at the code field', async () => {
+			const { client } = coded();
+			const db = freshDatabase();
+			const { rerender } = render(
+				<SourceTabs db={db} client={client} returnTo="/" enterCode={0} />
+			);
+			await screen.findByRole('button', { name: 'Connect storage provider' });
+			expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();
+
+			rerender(<SourceTabs db={db} client={client} returnTo="/" enterCode={1} />);
+
+			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+			await waitFor(() => {
+				expect(document.activeElement).toBe(
+					menu.getByRole('textbox', { name: 'Connect code' })
+				);
+			});
+		});
+
+		it('waits for the config to say what there is to offer', async () => {
+			let answer: (config: object) => void = () => undefined;
+			const client = {
+				...coded().client,
+				config: () =>
+					new Promise((resolve) => {
+						answer = resolve;
+					}),
+			} as unknown as Client;
+			render(<SourceTabs db={freshDatabase()} client={client} returnTo="/" enterCode={1} />);
+
+			answer({ ...STORAGE_FIRST, connectGate: GATE });
+
+			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+			await waitFor(() => {
+				expect(document.activeElement).toBe(
+					menu.getByRole('textbox', { name: 'Connect code' })
+				);
+			});
+		});
+
+		it('opens at the field even with a code held, since a new one is what was fetched', async () => {
+			holdConnectCode('K7QM-2XRD', 900);
+			const { client } = coded(REQUIRED);
+			render(<SourceTabs db={freshDatabase()} client={client} returnTo="/" enterCode={1} />);
+
+			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+			expect(await menu.findByRole('textbox', { name: 'Connect code' })).toBeTruthy();
+			expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+		});
+
+		it('opens as it always has when opened again by hand', async () => {
+			const user = userEvent.setup();
+			holdConnectCode('K7QM-2XRD', 900);
+			const { client } = coded(REQUIRED);
+			render(<SourceTabs db={freshDatabase()} client={client} returnTo="/" enterCode={1} />);
+			const plus = await screen.findByRole('button', { name: 'Connect storage provider' });
+			await screen.findByRole('group', { name: 'Storage providers' });
+
+			await user.click(plus);
+			await user.click(plus);
+
+			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+			// The code is held, so the buttons, with the code folded to a line.
+			expect(await menu.findByRole('button', { name: 'Dropbox' })).toBeTruthy();
+			expect(menu.queryByRole('textbox')).toBeNull();
+		});
+
+		it('opens the compact panel’s menu at the field too', async () => {
+			const { client } = coded();
+			render(<SourcePanel db={freshDatabase()} client={client} returnTo="/" enterCode={1} />);
+
+			const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
+			await waitFor(() => {
+				expect(document.activeElement).toBe(
+					menu.getByRole('textbox', { name: 'Connect code' })
+				);
+			});
+		});
+	});
 
 	it('asks the policy about the code as it is used, and folds away once it is accepted', async () => {
 		const user = userEvent.setup();

@@ -51,6 +51,8 @@ export interface SourceTabsProps {
 	 * bar is always shown, since there is then always something in it.
 	 */
 	search?: ReactNode;
+	/** How many times the app's URL has asked for the code field (`useEnterCode`). */
+	enterCode?: number;
 }
 
 /**
@@ -126,6 +128,7 @@ export const SourceTabs = ({
 	returnTo,
 	navigate,
 	search,
+	enterCode,
 }: SourceTabsProps) => {
 	const { ordered, offerable, gate, live, connectLabel, nothingToShow } = useSourceChoices(
 		db,
@@ -133,11 +136,8 @@ export const SourceTabs = ({
 	);
 	const first = connectLabel === CONNECT_FIRST_LABEL;
 	const [renaming, setRenaming] = useState<{ id: string; width: number } | null>(null);
-	const [adding, setAdding] = useState(false);
+	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offerable.length > 0);
 	const addFrame = useRef<HTMLDivElement>(null);
-	const stopAdding = useCallback(() => {
-		setAdding(false);
-	}, []);
 
 	if (nothingToShow && search === undefined) return null;
 
@@ -192,9 +192,7 @@ export const SourceTabs = ({
 						{...(first ? {} : { 'aria-label': connectLabel })}
 						aria-haspopup="true"
 						aria-expanded={adding}
-						onClick={() => {
-							setAdding((open) => !open);
-						}}
+						onClick={toggle}
 					>
 						{first ? (
 							<>
@@ -218,6 +216,7 @@ export const SourceTabs = ({
 							<ConnectChoice
 								gate={gate}
 								live={live}
+								openAt={openAt}
 								db={db}
 								client={client}
 								offerable={offerable}
@@ -362,6 +361,37 @@ const RenameField = ({
 	);
 };
 
+/**
+ * Whether the `+` menu is open, and whether it was opened by the app's URL
+ * asking for the code field (`?enter=code`), when `openAt` says which time.
+ *
+ * `enterCode` is the route's count of those asks, so each is taken once, and
+ * only once there is something to offer: that is not known until the
+ * instance's config has answered, which on the way back from the operator's
+ * page is after the first render. Opened by hand, the menu opens as it always
+ * has, wherever it was asked for before.
+ */
+const useAdding = (enterCode: number | undefined, offering: boolean) => {
+	const [adding, setAdding] = useState(false);
+	const [openAt, setOpenAt] = useState<number>();
+	// In render, as React has state follow a prop.
+	const [taken, setTaken] = useState(0);
+	if (enterCode !== undefined && enterCode > taken && offering) {
+		setTaken(enterCode);
+		setAdding(true);
+		setOpenAt(enterCode);
+	}
+	const stopAdding = useCallback(() => {
+		setAdding(false);
+		setOpenAt(undefined);
+	}, []);
+	const toggle = useCallback(() => {
+		setAdding((open) => !open);
+		setOpenAt(undefined);
+	}, []);
+	return { adding, openAt, toggle, stopAdding };
+};
+
 interface ConnectButtonsProps {
 	db: NotesDatabase;
 	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'>;
@@ -394,9 +424,15 @@ const ConnectButtons = ({
 		</ConnectButton>
 	));
 
-/** The operator's link out. A new tab, so the app is still here to come back to. */
+/**
+ * The operator's link out. In this window, as connecting storage is: a new
+ * one, in an app installed on a phone, was a second window with no way back
+ * from it but closing the app. The operator's page sends the user back here
+ * with `?enter=code` (`routes/search.ts`), which opens the code field.
+ * `noreferrer`, so the page is not told which note was open.
+ */
 const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
-	<a href={action.url} target="_blank" rel="noopener noreferrer">
+	<a href={action.url} rel="noreferrer">
 		{action.label}
 	</a>
 );
@@ -626,8 +662,14 @@ const ConnectCodeLine = ({
 const ConnectChoice = ({
 	gate,
 	live,
+	openAt,
 	...buttons
-}: ConnectButtonsProps & { gate: ConnectGate | undefined; live: boolean }) => {
+}: ConnectButtonsProps & {
+	gate: ConnectGate | undefined;
+	live: boolean;
+	/** Asked for by the app's URL, at the code field (`useAdding`): changed, it opens there. */
+	openAt: number | undefined;
+}) => {
 	const [picked, setPicked] = useState<'gate' | 'buttons'>();
 	const [code, setCode] = useState(() => heldConnectCode() ?? '');
 	const [checking, setChecking] = useState(false);
@@ -645,6 +687,16 @@ const ConnectChoice = ({
 		if (focus?.on === 'buttons') choices.current?.querySelector('button')?.focus();
 		if (focus?.on === 'field') field.current?.focus();
 	}, [focus]);
+
+	// Back from the operator's page for a code: the gate, whatever step was
+	// open, with the focus in its field. Even with a code held — a new one is
+	// what the user went for. In render, as React has state follow a prop.
+	const [openedAt, setOpenedAt] = useState<number>();
+	if (openAt !== undefined && openAt !== openedAt) {
+		setOpenedAt(openAt);
+		setPicked('gate');
+		setFocus((last) => ({ on: 'field', n: (last?.n ?? 0) + 1 }));
+	}
 
 	// A code the policy has stopped taking is no use in the field.
 	const held = useHeldCode(
@@ -834,6 +886,8 @@ export interface SourcePanelProps {
 	onChosen?: () => void;
 	/** Where a name being typed is told, for the bar's dropdown above. */
 	renamings?: Renamings;
+	/** How many times the app's URL has asked for the code field (`useEnterCode`). */
+	enterCode?: number;
 }
 
 /**
@@ -862,14 +916,12 @@ export const SourcePanel = ({
 	account,
 	onChosen,
 	renamings,
+	enterCode,
 }: SourcePanelProps) => {
 	const { ordered, offerable, gate, live, connectLabel } = useSourceChoices(db, client);
 	const first = connectLabel === CONNECT_FIRST_LABEL;
-	const [adding, setAdding] = useState(false);
+	const { adding, openAt, toggle, stopAdding } = useAdding(enterCode, offerable.length > 0);
 	const addFrame = useRef<HTMLDivElement>(null);
-	const stopAdding = useCallback(() => {
-		setAdding(false);
-	}, []);
 	// State rather than a ref: the storage panel draws its menu into this, and
 	// has to be drawn again once it is there.
 	const [actions, setActions] = useState<HTMLDivElement | null>(null);
@@ -971,9 +1023,7 @@ export const SourcePanel = ({
 							aria-haspopup="true"
 							aria-expanded={adding}
 							disabled={offerable.length === 0}
-							onClick={() => {
-								setAdding((open) => !open);
-							}}
+							onClick={toggle}
 						>
 							+
 						</button>
@@ -990,6 +1040,7 @@ export const SourcePanel = ({
 								<ConnectChoice
 									gate={gate}
 									live={live}
+									openAt={openAt}
 									db={db}
 									client={client}
 									offerable={offerable}

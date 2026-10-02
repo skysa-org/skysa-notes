@@ -1699,7 +1699,9 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		).toBeTruthy();
 		const link = await screen.findByRole('link', { name: 'Renew' });
 		expect(link.getAttribute('href')).toBe('https://example.com/renew');
-		expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+		// In this window, as the `+` menu's gate link is.
+		expect(link.getAttribute('target')).toBeNull();
+		expect(link.getAttribute('rel')).toBe('noreferrer');
 		expect(link.parentElement?.textContent).toBe('Your plan ended on 3 May. Renew');
 	});
 

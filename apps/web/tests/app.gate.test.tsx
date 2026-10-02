@@ -76,8 +76,10 @@ describe('a refused connect, on an instance with a gate', () => {
 		// have the whole alert read out again.
 		const link = within(toast).getByRole('link', { name: 'See plans' });
 		expect(link.getAttribute('href')).toBe(GATE.action.url);
-		expect(link.getAttribute('target')).toBe('_blank');
-		expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+		// In this window, as connecting storage is: a new one, in an installed
+		// app, had no way back.
+		expect(link.getAttribute('target')).toBeNull();
+		expect(link.getAttribute('rel')).toBe('noreferrer');
 	});
 
 	it('holds the toast until it has its link, so the alert is never read without it', async () => {
