@@ -5,9 +5,16 @@ import {
 	type FakeProvider,
 	isHidden,
 	MAX_ATTACHMENT_BYTES,
+	type StorageProvider,
 } from '@skysa/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+	abandonImport,
+	bindConnection,
+	detachConnection,
+	releaseConnection,
+} from '../src/store/connection.js';
 import {
 	createDatabase,
 	type FileRecord,
@@ -19,6 +26,7 @@ import {
 	type AddAttachmentInput,
 	AttachmentRefusedError,
 	fileForLink,
+	listFilePaths,
 } from '../src/store/files.js';
 import { createFolder, deleteFolder, FolderExistsError, moveFolder } from '../src/store/folders.js';
 import {
@@ -30,6 +38,7 @@ import {
 	saveNoteBody,
 } from '../src/store/notes.js';
 import { queueDeleteFile, queueMoveFile } from '../src/store/queue.js';
+import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -189,6 +198,23 @@ describe('adding a file to a note', () => {
 		expect(again.fileId).toBe(first.fileId);
 		expect(await db.files.count()).toBe(1);
 		expect((await queued(db)).filter((op) => op.op === 'upload')).toHaveLength(1);
+	});
+
+	it('sends the note behind the file already there when it is not up yet', async () => {
+		// Typing in One, with its write queued, and the picture already added
+		// to Two: One's write would go up first, linking a file not there.
+		const db = freshDatabase();
+		const one = await createNote(db, { ...scope, folderPath: 'Work', title: 'One' });
+		const two = await createNote(db, { ...scope, folderPath: 'Work', title: 'Two' });
+		const first = await attach(db, two.id, 'a.png', 'same');
+
+		const again = await attach(db, one.id, 'a.png', 'same');
+
+		expect(again.fileId).toBe(first.fileId);
+		const ops = await queued(db);
+		expect(ops.findIndex((op) => op.op === 'upload')).toBeLessThan(
+			ops.findIndex((op) => op.op === 'write' && op.noteId === one.id)
+		);
 	});
 
 	it('finds the file already there under another spelling of its name', async () => {
@@ -573,6 +599,64 @@ describe('moving a note takes the files it links', () => {
 		expect((await queued(db)).map((op) => op.op)).toEqual(['write', 'move']);
 	});
 
+	it('carries a file beside one of that name and another size, which the note then shows', async () => {
+		// Left behind, it would be linked by nothing in a notebook whose delete
+		// takes it. The note is not rewritten to rename it.
+		const db = freshDatabase();
+		const note = await linking(db, 'One', 'diagram.png');
+		const mine = await boundFile(db, 'Work/diagram.png', 5);
+		const theirs = await boundFile(db, 'Play/diagram.png', 9);
+
+		await moveNote(db, note.id, 'Play', scope);
+
+		const [row] = (await fileRows(db)).filter((file) => file.id === mine.id);
+		expect(row?.path).toMatch(/^Play\/diagram \(conflict .+\)\.png$/);
+		expect(
+			await fileForLink(db, {
+				connectionId: CONNECTION,
+				notePath: 'Play/One.md',
+				href: 'diagram.png',
+			})
+		).toEqual(theirs);
+		await deleteFolder(db, 'Work', scope);
+		expect(await db.files.get([CONNECTION, mine.id])).toEqual(row);
+	});
+
+	it('sends the note behind a file of that name there that is not up yet', async () => {
+		const db = freshDatabase();
+		const note = await linking(db);
+		await boundFile(db, 'Work/a.png');
+		await saveNoteBody(db, note.id, '# One\n\n![a](a.png) again\n', undefined, scope);
+		await db.files.put({ connectionId: CONNECTION, id: 'x1', path: 'Play/a.png', size: 5 });
+		await db.opQueue.add({
+			connectionId: CONNECTION,
+			op: 'upload',
+			fileId: 'x1',
+			path: 'Play/a.png',
+			attempts: 0,
+			queuedAt: 0,
+		});
+
+		await moveNote(db, note.id, 'Play', scope);
+
+		expect((await queued(db)).map((op) => op.op)).toEqual(['upload', 'write', 'move']);
+	});
+
+	it('copies a file the note links in other spellings of its name, once', async () => {
+		const db = freshDatabase();
+		const note = await linking(db, 'One', 'A.PNG');
+		await saveNoteBody(db, note.id, '# One\n\n![a](a.png) and ![a](A.PNG)\n', undefined, scope);
+		await pushedNote(db, 'Work/Two.md', '# Two\n\n![a](a.png)\n');
+		const file = await boundFile(db, 'Work/a.png');
+
+		await moveNote(db, note.id, 'Play', scope);
+
+		expect((await fileRows(db)).map((each) => each.path)).toEqual(['Play/a.png', file.path]);
+		expect((await queued(db)).filter((op) => op.op === 'upload')).toEqual([
+			expect.objectContaining({ path: 'Play/a.png', copyOf: file.remoteId }),
+		]);
+	});
+
 	it('leaves a file the note links in another notebook where it is', async () => {
 		const db = freshDatabase();
 		await createFolder(db, { ...scope, name: 'Play' });
@@ -634,6 +718,21 @@ describe('a notebook moved or deleted takes its files', () => {
 		expect(ops.map((op) => op.op).at(-1)).toBe('rmdir');
 		expect(ops.findIndex((op) => op.op === 'move-file')).toBeLessThan(
 			ops.findIndex((op) => op.op === 'rmdir')
+		);
+	});
+
+	it('moves the files ahead of the notes that link them', async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		const note = await pushedNote(db, 'Work/One.md', '![a](a.png)\n');
+		const file = await boundFile(db, 'Work/a.png');
+		await db.opQueue.clear();
+
+		await moveFolder(db, 'Work', 'Play', scope);
+
+		const ops = await queued(db);
+		expect(ops.findIndex((op) => op.fileId === file.id)).toBeLessThan(
+			ops.findIndex((op) => op.op === 'move' && op.noteId === note.id)
 		);
 	});
 
@@ -802,19 +901,41 @@ describe('a notebook moved or deleted takes its files', () => {
 
 // ---------------------------------------------------------------------------
 
-/** The app's writers, the Dexie store and the engine, over the fake provider. */
+/**
+ * The app's writers, the Dexie store and the engine, over the fake provider.
+ * `whileUploading`, once set, runs once while the next file's bytes are on
+ * their way, for what the user does meanwhile.
+ */
 const connected = async () => {
 	const db = freshDatabase();
 	await db.syncState.put({ connectionId: CONNECTION, clientId: 'this-browser' });
 	const store = createDexieSyncStore(db, scope);
 	const fake = createFakeProvider();
 	await fake.ensureRoot();
+	const meanwhile: { whileUploading?: () => Promise<unknown> } = {};
+	const provider: StorageProvider = {
+		...fake,
+		createFile: async (...args) => {
+			const during = meanwhile.whileUploading;
+			meanwhile.whileUploading = undefined;
+			if (during !== undefined) await during();
+			return fake.createFile(...args);
+		},
+	};
 	const engine = createSyncEngine({
-		provider: fake,
+		provider,
 		store,
 		now: () => new Date('2026-10-03T10:00:00Z'),
 	});
-	return { db, fake, engine };
+	return { db, fake, engine, meanwhile };
+};
+
+/** As though the cursor were lost: the next pull is a full scan. */
+const forgetCursor = async (db: NotesDatabase) => {
+	const state = await db.syncState.get(CONNECTION);
+	if (state === undefined) throw new Error('no state');
+	const { cursor: _cursor, ...rest } = state;
+	await db.syncState.put(rest);
 };
 
 /** Every file on the remote that is not a note, by path, as its text. */
@@ -927,6 +1048,54 @@ describe('files beside notes, pushed', () => {
 		expect(await db.folders.count()).toBe(0);
 	});
 
+	it.each([
+		['deleted', (db: NotesDatabase) => deleteFolder(db, 'Work', scope), false],
+		['moved', (db: NotesDatabase) => moveFolder(db, 'Work', 'Play', scope), true],
+	])(
+		'leaves no directory behind a notebook %s while its file was on its way',
+		async (_how, change, moved) => {
+			// The `rmdir` is queued first, and the file's delete or move only
+			// once the upload lands: run first, it found the file there.
+			const { db, fake, engine, meanwhile } = await connected();
+			const note = await createNote(db, { ...scope, folderPath: 'Work', title: 'One' });
+			await engine.sync();
+			await engine.sync();
+			const added = await attach(db, note.id, 'a.png', 'a');
+			await saveNoteBody(db, note.id, `${added.markdown}\n`, undefined, scope);
+			meanwhile.whileUploading = () => change(db);
+
+			await engine.sync();
+			await engine.sync();
+
+			expect(await remoteAttachments(fake)).toEqual(
+				moved ? { [`Play/${added.href}`]: 'a' } : {}
+			);
+			expect(remoteFolders(fake)).not.toContain('Work');
+			expect(await db.opQueue.count()).toBe(0);
+			await forgetCursor(db);
+			expect((await engine.sync()).status).toBe('ok');
+			expect((await db.folders.toArray()).map((folder) => folder.path)).not.toContain('Work');
+		}
+	);
+
+	it('sends a note up after a file it links that another note added first', async () => {
+		const { db, fake, engine, meanwhile } = await connected();
+		const one = await createNote(db, { ...scope, folderPath: 'Work', title: 'One' });
+		const two = await createNote(db, { ...scope, folderPath: 'Work', title: 'Two' });
+		await attach(db, two.id, 'a.png', 'same');
+		const again = await attach(db, one.id, 'a.png', 'same');
+		await saveNoteBody(db, one.id, `# One\n\n${again.markdown}\n`, undefined, scope);
+		const seen: { text?: string } = {};
+		meanwhile.whileUploading = async () => {
+			seen.text = fake.contentAt((await noteById(db, one.id))?.path ?? '');
+		};
+
+		expect((await engine.sync()).status).toBe('ok');
+
+		expect(seen.text ?? '').not.toContain(again.href);
+		expect(fake.contentAt(one.path)).toContain(again.href);
+	});
+
 	it('moves a notebook and its files, and leaves no directory behind', async () => {
 		const { db, fake, engine } = await connected();
 		const note = await createNote(db, { ...scope, folderPath: 'Work', title: 'One' });
@@ -942,5 +1111,188 @@ describe('files beside notes, pushed', () => {
 		expect(remoteFolders(fake)).not.toContain('Work');
 		expect((await engine.sync()).status).toBe('ok');
 		expect((await fileRows(db)).map((file) => file.path)).toEqual([`Play/${added.href}`]);
+	});
+});
+
+describe('a source let go with a file not uploaded', () => {
+	const ADA = { connectionId: CONNECTION, provider: 'dropbox', accountId: 'dbid:ada' } as const;
+
+	it('keeps its upload while detached, and sends it once connected again', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, ADA);
+		const note = await createNote(db, { ...scope, title: 'A' });
+		const added = await attach(db, note.id, 'a.png', 'a');
+
+		await detachConnection(db, { connectionId: CONNECTION });
+
+		expect((await unsyncedIn(db, CONNECTION)).files).toHaveLength(1);
+		expect(await queued(db)).toContainEqual({
+			op: 'upload',
+			path: added.path,
+			fileId: added.fileId,
+		});
+		await bindConnection(db, ADA);
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		const store = createDexieSyncStore(db, scope);
+		expect((await createSyncEngine({ provider: fake, store }).sync()).status).toBe('ok');
+		expect(await remoteAttachments(fake)).toEqual({ [added.path]: 'a' });
+		expect((await unsyncedIn(db, CONNECTION)).files).toEqual([]);
+	});
+
+	it('keeps a file delete owed while detached', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, ADA);
+		await createNote(db, { ...scope, title: 'A' });
+		const file = await boundFile(db, 'Work/a.png');
+		await db.files.delete([CONNECTION, file.id]);
+		await queueDeleteFile(db, file);
+
+		await detachConnection(db, { connectionId: CONNECTION });
+
+		expect(await queued(db)).toContainEqual({
+			op: 'delete-file',
+			path: 'Work/a.png',
+			remoteId: file.remoteId,
+		});
+	});
+
+	it('forgets it, row and bytes, with a source the user discards', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, ADA);
+		const note = await createNote(db, { ...scope, title: 'A' });
+		await attach(db, note.id, 'a.png', 'a');
+		await detachConnection(db, { connectionId: CONNECTION });
+		const seen = seenIn(await unsyncedIn(db, CONNECTION));
+
+		expect(
+			await releaseConnection(db, { connectionId: CONNECTION, unsynced: 'discard', seen })
+		).toBe('released');
+
+		expect(await db.files.count()).toBe(0);
+		expect(await db.fileBytes.count()).toBe(0);
+	});
+
+	it('forgets the files of an import the user cancels', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, ADA);
+		await db.files.put({ connectionId: CONNECTION, id: 'x1', path: 'a.png', size: 1 });
+		await db.fileBytes.put({
+			connectionId: CONNECTION,
+			id: 'x1',
+			bytes: bytesOf('a'),
+			pinned: 1,
+			lastUsedAt: 0,
+		});
+
+		expect(await abandonImport(db, CONNECTION)).toBe('abandoned');
+
+		expect(await db.files.count()).toBe(0);
+		expect(await db.fileBytes.count()).toBe(0);
+	});
+});
+
+describe("one source's files, and never another's at the same paths", () => {
+	const OTHER = 'onedrive-1';
+
+	/** A file the other source's remote has. */
+	const theirs = async (db: NotesDatabase, path: string, size = 5): Promise<FileRecord> => {
+		const file: FileRecord = {
+			connectionId: OTHER,
+			id: `o-${path}`,
+			path,
+			remoteId: `ro-${path}`,
+			remoteVersion: 'v1',
+			size,
+		};
+		await db.files.put(file);
+		return file;
+	};
+	const filesOf = (db: NotesDatabase, connectionId: string) =>
+		db.files.where('connectionId').equals(connectionId).sortBy('path');
+	const opsOf = (db: NotesDatabase, connectionId: string) =>
+		db.opQueue.where('connectionId').equals(connectionId).toArray();
+
+	it('adds a file of its own beside one the other has at that name', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { ...scope, folderPath: 'Work', title: 'One' });
+		const other = await theirs(db, `Work/${await stamped('a', 'a', 'png')}`, 1);
+
+		const added = await attach(db, note.id, 'a.png', 'a');
+
+		expect(added.fileId).not.toBe(other.id);
+		expect(textOf((await heldFor(db, { id: added.fileId }))?.bytes)).toBe('a');
+	});
+
+	it("moves and deletes a notebook's files, and none of the other's", async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		const mine = await boundFile(db, 'Work/a.png');
+		const others = [await theirs(db, 'Work/a.png'), await theirs(db, 'Play/x.png')];
+
+		await moveFolder(db, 'Work', 'Play', scope);
+
+		expect(await filesOf(db, CONNECTION)).toEqual([{ ...mine, path: 'Play/a.png' }]);
+		await deleteFolder(db, 'Play', scope);
+		expect(await filesOf(db, CONNECTION)).toEqual([]);
+		expect(await filesOf(db, OTHER)).toEqual(
+			[...others].sort((a, b) => a.path.localeCompare(b.path))
+		);
+		expect(await opsOf(db, OTHER)).toEqual([]);
+	});
+
+	it("carries a note's file past the other's notes and files", async () => {
+		const db = freshDatabase();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await createFolder(db, { ...scope, name: 'Play' });
+		const note = await pushedNote(db, 'Work/One.md', '# One\n\n![a](a.png)\n');
+		const mine = await boundFile(db, 'Work/a.png');
+		await theirs(db, 'Play/a.png');
+		await importNoteFile(db, {
+			connectionId: OTHER,
+			path: 'Work/Two.md',
+			source: '# Two\n\n![a](a.png)\n',
+		});
+		await db.opQueue.clear();
+
+		await moveNote(db, note.id, 'Play', scope);
+
+		expect(await filesOf(db, CONNECTION)).toEqual([{ ...mine, path: 'Play/a.png' }]);
+	});
+
+	it('hands the bytes of a file going to its own copies only', async () => {
+		const db = freshDatabase();
+		const going = await boundFile(db, 'Work/a.png');
+		await db.fileBytes.put({
+			connectionId: CONNECTION,
+			id: going.id,
+			bytes: bytesOf('a'),
+			version: 'v1',
+			pinned: 0,
+			lastUsedAt: 1,
+		});
+		await db.files.put({ connectionId: OTHER, id: 'copy', path: 'Play/a.png', size: 5 });
+		await db.opQueue.add({
+			connectionId: OTHER,
+			op: 'upload',
+			fileId: 'copy',
+			path: 'Play/a.png',
+			copyOf: going.remoteId,
+			attempts: 0,
+			queuedAt: 0,
+		});
+
+		await deleteFolder(db, 'Work', scope);
+
+		expect(await db.fileBytes.get([OTHER, 'copy'])).toBeUndefined();
+		expect((await opsOf(db, OTHER)).map((op) => op.copyOf)).toEqual([going.remoteId]);
+	});
+
+	it('lists its own paths only', async () => {
+		const db = freshDatabase();
+		await boundFile(db, 'Work/a.png');
+		await theirs(db, 'Play/b.png');
+
+		expect(await listFilePaths(db, scope)).toEqual(['Work/a.png']);
 	});
 });

@@ -1,3 +1,4 @@
+import { foldName } from '../../src/markdown/slug.js';
 import { isWithin, normalizePath, parentPath, rebasePath, ROOT } from '../../src/paths.js';
 import { conflictContent } from '../../src/sync/conflicts.js';
 import type {
@@ -691,6 +692,18 @@ export const createMemoryStore = (): MemoryStore => {
 		}
 	};
 
+	/** The `rmdir`s over `path`, behind the op just queued to take the file out of it. */
+	const rmdirsBehind = (path: string): void => {
+		const fold = (each: string): string => foldName(normalizePath(each));
+		[...ops.values()]
+			.filter((op) => op.op === 'rmdir' && isWithin(fold(path), fold(op.path)))
+			.sort((a, b) => a.seq - b.seq)
+			.forEach(({ seq, ...op }) => {
+				ops.delete(seq);
+				queue(op);
+			});
+	};
+
 	const settleUpload = (outcome: Extract<OpOutcome, { kind: 'uploaded' }>): void => {
 		const file = files.get(outcome.fileId);
 		// Deleted while its bytes were on the way: what they made goes too.
@@ -700,6 +713,7 @@ export const createMemoryStore = (): MemoryStore => {
 				path: outcome.remote.path,
 				remoteId: outcome.remote.remoteId,
 			});
+			rmdirsBehind(outcome.remote.path);
 			return;
 		}
 		refuseTwin(file.id, outcome.remote.remoteId);
@@ -719,6 +733,7 @@ export const createMemoryStore = (): MemoryStore => {
 				path: outcome.remote.path,
 				targetPath: file.path,
 			});
+			rmdirsBehind(outcome.remote.path);
 		}
 	};
 

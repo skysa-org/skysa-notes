@@ -61,8 +61,10 @@ import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecor
  *   the remote has the file, which is the first withdrawn move's origin.
  * - **A file reaches the remote before the note that links it.** `queueWrite`
  *   adds nothing while a write is queued, so a write queued before the file was
- *   added would run first; the writer that adds the file sends that write to
- *   the back (`requeueWriteBehind`).
+ *   added would run first; the writer that adds or carries the file sends
+ *   that write to the back (`requeueWriteBehind`), and so does one that finds
+ *   the file already there and not up yet. A notebook's move queues its files'
+ *   moves ahead of its notes'.
  */
 
 type QueueDb = Pick<NotesDatabase, 'opQueue'>;

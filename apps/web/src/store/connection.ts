@@ -875,6 +875,9 @@ const keepOnly = async (
 	const unmade = new Set(unsynced.folders.map((folder) => foldPath(folder.path)));
 	const stays = (op: OpQueueRecord): boolean => {
 		if (op.op === 'rmdir') return true;
+		// Every file row stays here, and so does every op about one: a file kept
+		// with its upload dropped would never be sent (#187, #195).
+		if (op.fileId !== undefined || op.op === 'delete-file') return true;
 		if (op.op === 'mkdir') return unmade.has(foldPath(op.path));
 		return op.noteId !== undefined && stayingIds.has(op.noteId);
 	};
@@ -972,6 +975,8 @@ export const abandonImport = (db: NotesDatabase, connectionId: string): Promise<
 		await db.notes.where('connectionId').equals(connectionId).delete();
 		await db.folders.where('connectionId').equals(connectionId).delete();
 		await db.opQueue.where('connectionId').equals(connectionId).delete();
+		await db.files.where('connectionId').equals(connectionId).delete();
+		await db.fileBytes.where('connectionId').equals(connectionId).delete();
 		await forgetSource(db, connectionId);
 		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: state.importing.returnTo });
 		return { outcome: 'abandoned', gone: state };
@@ -1214,6 +1219,9 @@ export const releaseConnection = (
 		await db.notes.where('connectionId').equals(connectionId).delete();
 		await db.folders.where('connectionId').equals(connectionId).delete();
 		await db.opQueue.where('connectionId').equals(connectionId).delete();
+		// The files the user was told would be forgotten with it, and the rest.
+		await db.files.where('connectionId').equals(connectionId).delete();
+		await db.fileBytes.where('connectionId').equals(connectionId).delete();
 		await forgetSource(db, connectionId);
 		return { outcome: 'released', gone: state };
 	}).then(({ outcome, gone }) => {

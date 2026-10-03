@@ -31,6 +31,7 @@ import {
 } from '../store/db.js';
 import { deletedHere } from '../store/deletedHere.js';
 import { heldBytesAreCurrent } from '../store/files.js';
+import { foldPath } from '../store/naming.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 
@@ -786,6 +787,24 @@ export const createDexieSyncStore = (
 		await forgetFile(scope, outcome.fileId);
 	};
 
+	/**
+	 * Every `rmdir` over `path`, sent to the back of the queue, behind the op
+	 * just queued to take the file out of it. The directory was let go while
+	 * the file's bytes were on their way, so its `rmdir` was queued first; run
+	 * first, it would find the file there, leave the directory standing, and
+	 * be done, and the notebook would come back on every device.
+	 */
+	const rmdirsBehind = async (scope: Scope, path: string): Promise<void> => {
+		const ops = await scope.opQueue.where('connectionId').equals(connectionId).sortBy('seq');
+		const over = ops.filter(
+			(op) => op.op === 'rmdir' && isWithin(foldPath(path), foldPath(op.path))
+		);
+		await scope.opQueue.bulkDelete(
+			over.flatMap((op) => (op.seq === undefined ? [] : [op.seq]))
+		);
+		await scope.opQueue.bulkAdd(over.map(({ seq: _seq, ...op }) => op));
+	};
+
 	const settleUpload = async (
 		scope: Scope,
 		outcome: Extract<OpOutcome, { kind: 'uploaded' }>
@@ -798,6 +817,7 @@ export const createDexieSyncStore = (
 				path: outcome.remote.path,
 				remoteId: outcome.remote.remoteId,
 			});
+			await rmdirsBehind(scope, outcome.remote.path);
 			return;
 		}
 		await refuseTwin(scope, file.id, outcome.remote.remoteId);
@@ -819,6 +839,7 @@ export const createDexieSyncStore = (
 				path: outcome.remote.path,
 				targetPath: file.path,
 			});
+			await rmdirsBehind(scope, outcome.remote.path);
 		}
 	};
 

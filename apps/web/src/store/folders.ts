@@ -384,17 +384,11 @@ export const moveFolder = async (
 					return [...done, { ...note, path }];
 				}, buried);
 
-			if (relocated.length > 0) await db.notes.bulkPut(relocated);
-			const from = new Map(inside.map((note) => [note.id, note.path]));
-			await relocated.reduce<Promise<void>>(async (pending, note) => {
-				await pending;
-				await queueMove(db, note, from.get(note.id) ?? note.path);
-			}, Promise.resolve());
-
 			// The files beside the notes go with them, under the names they have,
-			// which the notes' links say. Moved one by one, as the notes are, and
-			// ahead of the `rmdir`s, which a file still in the old directory
-			// would keep standing.
+			// which the notes' links say. Moved one by one, as the notes are:
+			// ahead of them, so no note arrives anywhere before the files it
+			// links, and ahead of the `rmdir`s, which a file still in the old
+			// directory would keep standing.
 			const rebased = carried.map((file): FileRecord => ({
 				...file,
 				path: rebasePath(file.path, source, target),
@@ -403,6 +397,13 @@ export const moveFolder = async (
 			await rebased.reduce<Promise<void>>(async (pending, file, at) => {
 				await pending;
 				await queueMoveFile(db, file, carried[at]?.path ?? file.path);
+			}, Promise.resolve());
+
+			if (relocated.length > 0) await db.notes.bulkPut(relocated);
+			const from = new Map(inside.map((note) => [note.id, note.path]));
+			await relocated.reduce<Promise<void>>(async (pending, note) => {
+				await pending;
+				await queueMove(db, note, from.get(note.id) ?? note.path);
 			}, Promise.resolve());
 
 			// A notebook whose `mkdir` never went up leaves no directory to remove,

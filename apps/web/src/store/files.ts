@@ -6,6 +6,7 @@ import {
 	attachmentName,
 	basename,
 	bytesHash,
+	conflictFilePath,
 	joinPath,
 	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
@@ -173,7 +174,12 @@ export const addAttachment = async (
 				[short, long],
 				size
 			);
-			if (place.existing !== undefined) return place.existing;
+			if (place.existing !== undefined) {
+				// Not up yet, and the note is about to link it: its write goes
+				// behind the upload, as for a file added new.
+				if (place.existing.remoteId === undefined) await requeueWriteBehind(db, note);
+				return place.existing;
+			}
 			const added: FileRecord = {
 				connectionId,
 				id: crypto.randomUUID(),
@@ -318,8 +324,13 @@ const moveFileTo = async (db: CarryDb, file: FileRecord, path: string): Promise<
  *   deleted (a deletion can be undone), since moving it would take that note's
  *   picture;
  * - **moved** otherwise;
- * - left alone where the folder already has a file of that name, which, named
- *   by content, is the same file.
+ * - left alone where the folder already has a file of that name and size,
+ *   which is the same file by the rule an upload adopts one by;
+ * - carried beside one of that name and another size, under a conflict name
+ *   that keeps its extension, as an upload goes beside it (#195). The note
+ *   still links the name, and shows the file there: its body is never
+ *   rewritten to rename a file. Its own goes with it all the same, and is not
+ *   left in the old folder linked by nothing, for a notebook's delete to take.
  *
  * A file elsewhere — a link climbing to another notebook — stays where it is:
  * the user put it there, and the link to it is theirs to mend.
@@ -327,7 +338,7 @@ const moveFileTo = async (db: CarryDb, file: FileRecord, path: string): Promise<
  * Inside the note's move, ahead of its own ops, and decided against every note
  * in the folder in the same transaction, so a note edited in between cannot be
  * missed. The note's write goes behind what is queued here, as for an added
- * file.
+ * file, and behind the upload of a file it links there that is not up yet.
  */
 export const carryLinkedFiles = async (
 	db: CarryDb,
@@ -336,9 +347,14 @@ export const carryLinkedFiles = async (
 ): Promise<void> => {
 	const from = foldPath(parentPath(note.path));
 	if (from === foldPath(folder)) return;
-	const own = linkedFiles(note.body, note.path).filter(
-		(path) => foldPath(parentPath(path)) === from
-	);
+	// Once each, however many spellings of its name the note links it by.
+	const own = [
+		...new Map(
+			linkedFiles(note.body, note.path)
+				.filter((path) => foldPath(parentPath(path)) === from)
+				.map((path) => [foldPath(path), path])
+		).values(),
+	];
 	if (own.length === 0) return;
 
 	const files = await db.files.where('connectionId').equals(note.connectionId).toArray();
@@ -350,22 +366,32 @@ export const carryLinkedFiles = async (
 	const shared = new Set(
 		neighbours.flatMap((each) => linkedFiles(each.body, each.path).map(foldPath))
 	);
-	const there = new Set(
+	const there = new Map(
 		files
 			.filter((file) => foldPath(parentPath(file.path)) === foldPath(folder))
-			.map((file) => foldPath(basename(file.path)))
+			.map((file) => [foldPath(basename(file.path)), file])
 	);
 
-	const carried = await own.reduce<Promise<boolean>>(async (sofar, path) => {
+	const behind = await own.reduce<Promise<boolean>>(async (sofar, path) => {
 		const done = await sofar;
-		const file = files.find((each) => each.path === path);
-		const name = basename(path);
-		if (file === undefined || there.has(foldPath(name))) return done;
-		const target = joinPath(folder, name);
+		const file = files.find((each) => foldPath(each.path) === foldPath(path));
+		if (file === undefined) return done;
+		// Its own name, whichever spelling of it the note links it by.
+		const wanted = joinPath(folder, basename(file.path));
+		const occupant = there.get(foldPath(basename(file.path)));
+		if (occupant?.size === file.size) return done || occupant.remoteId === undefined;
+		const target =
+			occupant === undefined
+				? wanted
+				: conflictFilePath(
+						wanted,
+						new Date(),
+						[...there.values()].map((each) => basename(each.path))
+					);
 		const queued = shared.has(foldPath(path))
 			? await copyFileTo(db, file, target)
 			: await moveFileTo(db, file, target);
 		return done || queued;
 	}, Promise.resolve(false));
-	if (carried) await requeueWriteBehind(db, note);
+	if (behind) await requeueWriteBehind(db, note);
 };
