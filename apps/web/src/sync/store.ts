@@ -30,6 +30,7 @@ import {
 	type SyncStateRecord,
 } from '../store/db.js';
 import { deletedHere } from '../store/deletedHere.js';
+import { heldBytesAreCurrent } from '../store/files.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 
@@ -133,14 +134,6 @@ const toSyncFile = (file: FileRecord): SyncFile => ({
 	...(file.remoteVersion === undefined ? {} : { remoteVersion: file.remoteVersion }),
 	size: file.size,
 });
-
-/**
- * Whether bytes held for a file are still the file's: held because they are
- * not uploaded yet, or cached under the version the row is bound to
- * (`SyncStore.fileBytes`).
- */
-const current = (file: FileRecord, held: FileBytesRecord): boolean =>
-	held.pinned === 1 || (held.version !== undefined && held.version === file.remoteVersion);
 
 type FileChange = Extract<
 	PullChange,
@@ -316,7 +309,8 @@ export const createDexieSyncStore = (
 	 */
 	const handOver = async (scope: Scope, file: FileRecord): Promise<void> => {
 		const held = await scope.fileBytes.get(fileKey(file.id));
-		if (held === undefined || !current(file, held) || file.remoteId === undefined) return;
+		if (held === undefined || !heldBytesAreCurrent(file, held) || file.remoteId === undefined)
+			return;
 		const { version: _version, ...bytes } = held;
 		const copies = (await opsOf(scope)).filter(
 			(op) => op.op === 'upload' && op.copyOf === file.remoteId
@@ -769,7 +763,7 @@ export const createDexieSyncStore = (
 		const held = await scope.fileBytes.get(fileKey(file.id));
 		await forgetFile(scope, file.id);
 		await scope.files.put({ connectionId, id: file.id, path: file.path, size: file.size });
-		if (held !== undefined && current(file, held)) {
+		if (held !== undefined && heldBytesAreCurrent(file, held)) {
 			const { version: _version, ...bytes } = held;
 			await scope.fileBytes.put({ ...bytes, pinned: 1 });
 		}
@@ -845,7 +839,7 @@ export const createDexieSyncStore = (
 		if (held !== undefined && held.pinned === 0 && !same) {
 			await scope.fileBytes.delete(fileKey(file.id));
 		}
-		if (held !== undefined && held.pinned === 0 && same && current(file, held)) {
+		if (held !== undefined && held.pinned === 0 && same && heldBytesAreCurrent(file, held)) {
 			await scope.fileBytes.put(cachedAs(held, outcome.remote.version));
 		}
 		const landed: FileRecord = {
@@ -1246,7 +1240,7 @@ export const createDexieSyncStore = (
 			db.transaction('r', db.files, db.fileBytes, async () => {
 				const file = await ownFile(db, id);
 				const held = await db.fileBytes.get(fileKey(id));
-				if (file === undefined || held === undefined || !current(file, held)) {
+				if (file === undefined || held === undefined || !heldBytesAreCurrent(file, held)) {
 					return undefined;
 				}
 				return new Uint8Array(held.bytes);

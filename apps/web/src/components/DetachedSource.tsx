@@ -73,6 +73,9 @@ const alsoGoing = (unsynced: Unsynced): string | null => {
 		...(unsynced.rmdirs.length > 0
 			? [counted(unsynced.rmdirs.length, 'notebook delete', 'notebook deletes')]
 			: []),
+		...(unsynced.files.length > 0
+			? [counted(unsynced.files.length, 'file not uploaded', 'files not uploaded')]
+			: []),
 	];
 	return parts.length === 0 ? null : `Also never sent, and also forgotten: ${parts.join(', ')}.`;
 };

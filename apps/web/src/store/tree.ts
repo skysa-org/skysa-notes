@@ -11,18 +11,24 @@ export interface FolderNode {
 	children: FolderNode[];
 	/** Number of live notes directly inside this folder. */
 	noteCount: number;
+	/** Number of files that are not notes directly inside it (#187). */
+	fileCount: number;
 }
 
 export interface BuildFolderTreeInput {
 	paths: readonly string[];
 	/** Path of every live note, used to count notes per folder. */
 	notePaths?: readonly string[];
+	/**
+	 * Path of every file beside the notes, used to count them. Counted only: a
+	 * file draws no notebook, since the app only ever puts one beside a note.
+	 */
+	filePaths?: readonly string[];
 }
 
-const countsByFolder = (notePaths: readonly string[]): Map<string, number> =>
-	notePaths.reduce(
-		(counts, notePath) =>
-			counts.set(parentPath(notePath), (counts.get(parentPath(notePath)) ?? 0) + 1),
+const countsByFolder = (paths: readonly string[]): Map<string, number> =>
+	paths.reduce(
+		(counts, path) => counts.set(parentPath(path), (counts.get(parentPath(path)) ?? 0) + 1),
 		new Map<string, number>()
 	);
 
@@ -34,6 +40,7 @@ const countsByFolder = (notePaths: readonly string[]): Map<string, number> =>
 export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 	const notePaths = input.notePaths ?? [];
 	const counts = countsByFolder(notePaths);
+	const fileCounts = countsByFolder(input.filePaths ?? []);
 
 	const seed = [...input.paths, ...notePaths.map(parentPath)].filter((path) => path !== ROOT);
 	const all = new Set(seed.flatMap((path) => [...ancestorPaths(path), path]));
@@ -47,6 +54,7 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 				name: basename(path),
 				children: childrenOf(path),
 				noteCount: counts.get(path) ?? 0,
+				fileCount: fileCounts.get(path) ?? 0,
 			}));
 
 	return childrenOf(ROOT);

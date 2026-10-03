@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type ApiClient } from '../src/api/client.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { addAttachment } from '../src/store/files.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
 import {
 	createSyncScheduler,
@@ -268,7 +269,16 @@ const reconnect = async (db: NotesDatabase) => {
 const reconnectAtOnce = (db: NotesDatabase) =>
 	db.transaction(
 		'rw',
-		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.credentials],
+		[
+			db.notes,
+			db.folders,
+			db.opQueue,
+			db.syncState,
+			db.prefs,
+			db.credentials,
+			db.files,
+			db.fileBytes,
+		],
 		() => reconnect(db)
 	);
 
@@ -1198,6 +1208,50 @@ describe('failures', () => {
 				noteId: h.note.id,
 				attempts: 2,
 				error: '503',
+			});
+		});
+
+		describe('with a file waiting to go up', () => {
+			/** A sent note, then a file added to it and an edit, both given up on. */
+			const givenUp = async (ops: readonly string[]) => {
+				const db = await bound();
+				const note = await createNote(db, { title: 'Stuck', body: 'one\n' });
+				const h = started(db, { maxAttempts: 2 });
+				await vi.waitFor(() => {
+					expect(h.remote.fake.contentAt(note.path)).toContain('one');
+				});
+				await reaches(h.scheduler, 'idle');
+				// Queued ahead of the edit's write, as an upload is.
+				await addAttachment(db, {
+					noteId: note.id,
+					name: 'a.png',
+					bytes: new TextEncoder().encode('a').buffer,
+				});
+				await saveNoteBody(db, note.id, 'two\n');
+				await db.opQueue
+					.filter((op) => ops.includes(op.op))
+					.modify({ attempts: 2, lastError: '503' });
+				await focused(h);
+				expect(h.scheduler.status().phase).toBe('attention');
+				return { ...h, note };
+			};
+
+			it('names the op that stopped the queue, not an upload stepped over ahead of it', async () => {
+				// The engine steps over an upload and stops at the write, so the
+				// write is why everything else is waiting.
+				const h = await givenUp(['upload', 'write']);
+
+				expect(h.scheduler.status().stuck).toMatchObject({
+					op: 'write',
+					path: h.note.path,
+				});
+			});
+
+			it('names the upload when it is all that has been given up on', async () => {
+				const h = await givenUp(['upload']);
+
+				expect(h.remote.fake.contentAt(h.note.path)).toContain('two');
+				expect(h.scheduler.status().stuck).toMatchObject({ op: 'upload', attempts: 2 });
 			});
 		});
 

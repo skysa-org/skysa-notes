@@ -500,6 +500,36 @@ describe('deleting a notebook', () => {
 		expect(onDeleteFolder).not.toHaveBeenCalled();
 	});
 
+	it('counts the files that would go with it, which is the one way a file is deleted', async () => {
+		const withFiles = buildFolderTree({
+			paths: ['personal', 'work', 'work/meetings'],
+			notePaths: ['work/one.md', 'work/two.md', 'work/meetings/three.md'],
+			filePaths: ['work/a.png', 'work/meetings/b.pdf', 'personal/c.png'],
+		});
+		renderSidebar({ tree: withFiles, selectedFolder: 'work' });
+
+		await openMenu('work');
+		await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+		const asked = screen.getByRole('alertdialog', { name: 'Delete notebook?' });
+		expect(within(asked).getByText(/will be deleted/).textContent).toBe(
+			'“work” and the 3 notes and 2 files in it will be deleted.'
+		);
+	});
+
+	it('counts the files in a notebook that holds nothing else', async () => {
+		const onlyFiles = buildFolderTree({ paths: ['pictures'], filePaths: ['pictures/a.png'] });
+		renderSidebar({ tree: onlyFiles, selectedFolder: 'pictures' });
+
+		await openMenu('pictures');
+		await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+		const asked = screen.getByRole('alertdialog', { name: 'Delete notebook?' });
+		expect(within(asked).getByText(/will be deleted/).textContent).toBe(
+			'“pictures” and the 1 file in it will be deleted.'
+		);
+	});
+
 	it('does not count notes that are not there', async () => {
 		renderSidebar({ tree: counted, selectedFolder: 'personal' });
 

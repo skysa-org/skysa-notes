@@ -45,6 +45,19 @@ describe('buildFolderTree', () => {
 		expect(tree[0]?.children[0]?.noteCount).toBe(1);
 	});
 
+	it('counts the files beside the notes, and draws no notebook for one', () => {
+		const tree = buildFolderTree({
+			paths: ['work', 'work/meetings'],
+			notePaths: ['work/a.md'],
+			filePaths: ['work/a.png', 'work/b.pdf', 'work/meetings/c.png', 'pictures/d.png'],
+		});
+
+		expect(tree.map((node) => node.path)).toEqual(['work']);
+		expect(tree[0]?.fileCount).toBe(2);
+		expect(tree[0]?.children[0]?.fileCount).toBe(1);
+		expect(tree[0]?.noteCount).toBe(1);
+	});
+
 	it('does not count root notes as belonging to any folder', () => {
 		const tree = buildFolderTree({ paths: ['work'], notePaths: ['root.md'] });
 		expect(tree[0]?.noteCount).toBe(0);

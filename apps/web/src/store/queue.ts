@@ -1,7 +1,7 @@
 import { ancestorPaths, isWithin } from '@skysa/core';
 import Dexie, { type PromiseExtended } from 'dexie';
 
-import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
+import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
 
 /**
  * The push queue: what the sync engine owes the remote, in the order it has to
@@ -46,6 +46,23 @@ import { type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js
  * `rmdir` queued behind them removes the directory they left. Ordered that way
  * round because the notes' own ops are what empty it: the engine refuses an
  * `rmdir` over a directory that still holds any file (`runRmdir`).
+ *
+ * A file beside a note (#187) has ops of its own, by the same rules where a
+ * file has a counterpart to them:
+ *
+ * - **An upload is sent to wherever the row is when it runs**, as a write is,
+ *   and a pending file that moves only has its upload's `path` follow it. The
+ *   engine never lets an upload hold up what is behind it.
+ * - **A `move-file` replaces an earlier one and keeps its origin**, as a move
+ *   does, and one in flight that is replaced is settled as the file having
+ *   moved on (`settleFileMove` in `sync/store.ts`).
+ * - **A `delete-file` withdraws the file's upload and moves.** It is by id, so
+ *   it finds the file wherever an earlier move got it to; its `path` is where
+ *   the remote has the file, which is the first withdrawn move's origin.
+ * - **A file reaches the remote before the note that links it.** `queueWrite`
+ *   adds nothing while a write is queued, so a write queued before the file was
+ *   added would run first; the writer that adds the file sends that write to
+ *   the back (`requeueWriteBehind`).
  */
 
 type QueueDb = Pick<NotesDatabase, 'opQueue'>;
@@ -75,6 +92,11 @@ export const MAX_OP_ATTEMPTS = 8;
  * directory away, nothing behind it depends on that, and it is not the user's
  * work. Calling it blocked here would tell the user their notes cannot be sent
  * while the engine is about to send them.
+ *
+ * An `upload` is the other exception, and only half of one. The engine steps
+ * over it too, so it holds nothing up — but it is the only copy of the file,
+ * so it is kept, and the run ends `blocked` on its account (`drained` in the
+ * engine). So it counts here: the status line and this rule must agree.
  */
 export const outOfAttempts = (
 	op: Pick<OpQueueRecord, 'op' | 'attempts'>,
@@ -124,7 +146,10 @@ const nothing = (): Queued => Dexie.Promise.resolve();
 
 const add = (
 	db: QueueDb,
-	op: Pick<OpQueueRecord, 'connectionId' | 'op' | 'noteId' | 'path' | 'targetPath' | 'remoteId'>
+	op: Pick<
+		OpQueueRecord,
+		'connectionId' | 'op' | 'noteId' | 'fileId' | 'path' | 'targetPath' | 'remoteId' | 'copyOf'
+	>
 ): Queued => db.opQueue.add({ attempts: 0, queuedAt: Date.now(), ...op }).then(() => undefined);
 
 /**
@@ -294,3 +319,114 @@ export const queueRmdir = (
 					? undefined
 					: add(db, { connectionId, op: 'rmdir', path, remoteId })
 			);
+
+/** The ops queued for one file, within its connection, as `opsFor` for a note. */
+const opsForFile = (
+	db: QueueDb,
+	file: Pick<FileRecord, 'connectionId' | 'id'>
+): PromiseExtended<OpQueueRecord[]> =>
+	db.opQueue
+		.where('fileId')
+		.equals(file.id)
+		.filter((op) => op.connectionId === file.connectionId)
+		.toArray();
+
+/**
+ * A file added here, owed its bytes on the remote: one upload for each new
+ * row, which is the only time one is queued. The engine reads the bytes when
+ * it runs the op, from this device or, for a copy whose bytes it does not
+ * hold, from `copyOf` — the `remoteId` of the file it copies.
+ */
+export const queueUpload = (db: QueueDb, file: FileRecord, copyOf?: string): Queued =>
+	add(db, {
+		connectionId: file.connectionId,
+		op: 'upload',
+		fileId: file.id,
+		path: file.path,
+		...(copyOf === undefined ? {} : { copyOf }),
+	});
+
+/**
+ * The file is now at `file.path`, having been at `from`. `queueMove`'s rules:
+ * an earlier move is replaced and its origin kept, one already going there is
+ * left where it stands, and one that would end where it starts is withdrawn.
+ *
+ * A pending file is not moved — there is nothing at `from` — and its upload
+ * goes wherever the row is. Its `path` follows the row all the same, so that
+ * what the queue says of the file is where the file is.
+ */
+export const queueMoveFile = (db: QueueDb, file: FileRecord, from: string): Queued =>
+	opsForFile(db, file).then((ops) => {
+		if (file.remoteId === undefined) {
+			const uploads = ops.filter((op) => op.op === 'upload');
+			return db.opQueue
+				.bulkPut(uploads.map((op) => ({ ...op, path: file.path })))
+				.then(() => undefined);
+		}
+		const moves = ops.filter((op) => op.op === 'move-file');
+		if (moves.length === 1 && moves[0]?.targetPath === file.path) return undefined;
+		const origin = moves[0]?.path ?? from;
+		return db.opQueue.bulkDelete(seqsOf(moves)).then(() =>
+			origin === file.path
+				? undefined
+				: add(db, {
+						connectionId: file.connectionId,
+						op: 'move-file',
+						fileId: file.id,
+						path: origin,
+						targetPath: file.path,
+					})
+		);
+	});
+
+/**
+ * The file's row is going: its notebook is being deleted. Its upload and its
+ * moves are withdrawn — sent, they would put a file on the remote, or move one,
+ * that nothing here would ever remove — and a bound one is owed a `delete-file`.
+ *
+ * By id, which finds the file wherever a move already sent got it to, and from
+ * where the remote has it: the origin of a move still queued, which goes with
+ * the rest. Without a `fileId`, as the store queues one for an upload whose row
+ * went while it was on its way: there is no row left for the op to be about.
+ * An upload already on its way is withdrawn from the queue only, and settled by
+ * the store as a file deleted since (`settleUpload` in `sync/store.ts`).
+ */
+export const queueDeleteFile = (db: QueueDb, file: FileRecord): Queued =>
+	opsForFile(db, file).then((ops) => {
+		const owed = ops.filter((op) => op.op === 'upload' || op.op === 'move-file');
+		const at = ops.find((op) => op.op === 'move-file')?.path ?? file.path;
+		return db.opQueue.bulkDelete(seqsOf(owed)).then(() =>
+			file.remoteId === undefined
+				? undefined
+				: add(db, {
+						connectionId: file.connectionId,
+						op: 'delete-file',
+						path: at,
+						remoteId: file.remoteId,
+					})
+		);
+	});
+
+/**
+ * The note's queued write, sent to the back of the queue: behind a file just
+ * queued that the note links, so that the file lands first and the note never
+ * reaches another device linking a file it cannot find yet. A write carries no
+ * content, so moving it costs nothing, and it keeps its attempts. A note with
+ * no write queued is owed none for this: the edit that adds the link queues one,
+ * behind the file.
+ *
+ * A write already on its way is withdrawn from the queue and queued again, so
+ * the note is sent a second time behind the file; the store settles the first
+ * as it does any withdrawn write.
+ */
+export const requeueWriteBehind = (db: QueueDb, note: NoteRecord): Queued =>
+	opsFor(db, note).then((ops) => {
+		const writes = ops.filter((op) => op.op === 'write');
+		const [first] = writes;
+		if (first === undefined) return undefined;
+		const { seq: _seq, ...again } = first;
+		return db.opQueue
+			.bulkDelete(seqsOf(writes))
+			.then(() => db.opQueue.add(again))
+			.then(() => undefined);
+	});

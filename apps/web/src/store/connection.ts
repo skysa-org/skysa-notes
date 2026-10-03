@@ -450,11 +450,22 @@ const queueOwed = async (db: NotesDatabase, connectionId: string, moved: Moved) 
 
 // The credentials too: a source let go loses its rows and the key to its
 // account together, or a failure between the two leaves a device holding a
-// live credential for a source it no longer admits to having.
+// live credential for a source it no longer admits to having. The files
+// because what is unsent is asked inside (`unsyncedIn`), and a file added here
+// and not uploaded is.
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
 	db.transaction(
 		'rw',
-		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.credentials],
+		[
+			db.notes,
+			db.folders,
+			db.opQueue,
+			db.syncState,
+			db.prefs,
+			db.credentials,
+			db.files,
+			db.fileBytes,
+		],
 		work
 	);
 
@@ -1466,7 +1477,7 @@ export const pileContents = async (
  * the only thing the list offers.
  */
 export const connectedSources = async (
-	db: Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs'>
+	db: Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs' | 'files'>
 ): Promise<ConnectedSource[]> => {
 	const active = await activeConnectionId(db);
 	const states = await db.syncState.toArray();

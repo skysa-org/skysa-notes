@@ -12,6 +12,7 @@ import {
 	PENDING_CREDENTIAL_ID,
 	type SyncStateRecord,
 } from './db.js';
+import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
 import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
@@ -71,8 +72,12 @@ export const useActiveSource = (): SyncStateRecord | null | undefined =>
 
 export const useFolderTree = (): FolderNode[] | undefined =>
 	useLiveQuery(async () => {
-		const [paths, notes] = await Promise.all([folderTree(db), listNotes(db)]);
-		return buildFolderTree({ paths, notePaths: notes.map((note) => note.path) });
+		const [paths, notes, filePaths] = await Promise.all([
+			folderTree(db),
+			listNotes(db),
+			listFilePaths(db),
+		]);
+		return buildFolderTree({ paths, notePaths: notes.map((note) => note.path), filePaths });
 	}, []);
 
 /**

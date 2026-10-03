@@ -123,7 +123,12 @@ const shownNow = async (
 	connectionId: string = ADA.connectionId
 ): Promise<Seen> => seenIn(await unsyncedIn(db, connectionId));
 
-const NOTHING_SEEN: Seen = { notes: new Map(), folders: new Set(), rmdirs: new Set() };
+const NOTHING_SEEN: Seen = {
+	notes: new Map(),
+	folders: new Set(),
+	rmdirs: new Set(),
+	files: new Set(),
+};
 
 describe('letting a source go', () => {
 	it('removes what the remote has, and the source with it when that is everything', async () => {
