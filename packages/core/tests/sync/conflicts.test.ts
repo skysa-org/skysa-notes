@@ -9,6 +9,7 @@ import { noteFilename } from '../../src/markdown/slug.js';
 import {
 	conflictContent,
 	conflictFilename,
+	conflictFilePath,
 	conflictFolderName,
 	conflictFolderPath,
 	conflictNameKeepingExtension,
@@ -200,6 +201,17 @@ describe('conflictFolderName', () => {
 		// `conflictFilename` strips the extension; this must not, or a folder
 		// someone called `notes.md` comes back as `notes`.
 		expect(conflictFolderName('notes.md', AT)).toBe('notes.md (conflict 2026-09-15T14-32)');
+	});
+});
+
+describe('conflictFilePath', () => {
+	it('names a file beside itself, in its own folder, keeping its extension', () => {
+		expect(conflictFilePath('Trips/2026/photo-3f9a1c2b.png', AT)).toBe(
+			'Trips/2026/photo-3f9a1c2b (conflict 2026-09-15T14-32).png'
+		);
+		expect(
+			conflictFilePath('Trips/photo.png', AT, ['photo (conflict 2026-09-15T14-32).png'])
+		).toBe('Trips/photo (conflict 2026-09-15T14-32)-2.png');
 	});
 });
 

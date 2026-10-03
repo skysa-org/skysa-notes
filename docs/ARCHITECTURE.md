@@ -493,7 +493,23 @@ The store's other promises, each pinned by the contract suite:
 
 Bytes are an `ArrayBuffer` rather than a `Blob`. Every browser keeps a large value of either kind out of line, but a `Blob` does not survive the structured clone of the IndexedDB the tests run on.
 
-The engine learns to push files and to mirror them on pull in the PRs that follow (#187). Until then, a file op that reaches it is failed rather than finished.
+**Pushing files (2026-10-03, #187).** Three ops, each in `packages/core/src/sync/engine.ts`:
+- **`upload`** sends a pending row's bytes to where the row is now. The bytes are those held here; for a copy made when a note moved and its file could not go with it, they are the bytes of the file it copies (`copyOf`), read from the remote. The provider is told a content type by extension (`contentTypeOf`), which it records and nothing here reads. A missing parent is made, a level at a time, as for a write. Something already at the name is handled in one of two ways:
+  - **The same file** — a file, of the same size, that no other row holds — is adopted. It is this device's own upload whose answer never came back, or the same picture added on another device; names carry the bytes' hash, so a name and a size that both match are almost always that.
+  - **Anything else** keeps the path, and the upload goes beside it as `<stem> (conflict <stamp>).<ext>`. The note that links the file is not rewritten.
+
+  With no bytes here and nothing left at `copyOf`, the row goes (`lost-file`).
+- **`move-file`** moves by id, from where the op says the file is (the store keeps that current as pulls move it) to the row's path. A not-found is asked of the origin folder's listing, never of the file, since reading the file would download it: gone, the op is done; still there, the target folder is made and the move tried again. The same file at the target is adopted, and the one moved from is left where it was, because another note may link it there. That includes a note on another device, which copied the file rather than moving it. Until a full scan this device does not see that file again: a known gap, and nothing is lost. Anything else at the target and the file goes beside it, as an upload does.
+- **`delete-file`** deletes by the id the queue recorded. Not found is what was wanted.
+
+`rmdir`'s third gate counts file rows, so a notebook holding a file not yet sent is the user's still.
+
+**Uploads do not hold up the queue.** This is the second exception to the ordered queue, after `rmdir`. An upload that fails is counted against its attempts and stepped over, and one out of attempts is stepped over and kept. It is never completed: it is the only copy of the file. A note's edit never waits behind 25 MB on a poor connection. A note that links the file goes without it, and other devices show the file as not there until it lands, which heals itself.
+- The outcome carries `waitingUploads`. Its status is `retry` when an upload failed this run, and `blocked` when one is out of attempts; the scheduler gives a blocked queue its attempts back in time, as for any stuck op.
+- A rate limit or a refused token still stops the drain, since neither is the upload's fault.
+- One op behind a stepped-over upload does wait for it: a `delete-file` of the file the upload copies. Sent first, it would leave the copy nothing to read, since OneDrive and Dropbox cannot read a deleted file back by its id.
+
+The engine learns to mirror files on pull in the PR that follows (#187).
 
 ### Sync loop (per connection)
 1. **Pull**: `changes(cursor)` → for each remote entry:

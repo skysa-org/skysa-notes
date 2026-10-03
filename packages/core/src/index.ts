@@ -85,6 +85,7 @@ export {
 export {
 	conflictContent,
 	conflictFilename,
+	conflictFilePath,
 	conflictPath,
 	conflictStamp,
 } from './sync/conflicts.js';
@@ -113,6 +114,7 @@ export type {
 } from './sync/store.js';
 
 export {
+	contentTypeOf,
 	downloadName,
 	drawsFromData,
 	fileKind,
