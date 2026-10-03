@@ -70,6 +70,7 @@ skysa-notes/
 │   └── quick-thought.md
 ├── Work/
 │   ├── 2026-q3-planning.md
+│   ├── q3-report-3f9a1c2b.pdf  # an attachment, beside the note that links it
 │   └── Meetings/
 │       └── 2026-09-14-standup.md
 └── Personal/
@@ -121,6 +122,10 @@ Rules:
   - The *frontmatter block* is written the way that file writes lines — the body's first line ending; failing that the block's own interior endings; failing both, `\n`. Not "whichever ending appears somewhere in the body": one `\r\n` in a code sample would otherwise flip every line of an otherwise-`\n` file. The third fallback is reachable and bounded: a block has interior endings only with two or more keys, so a one-key CRLF note whose body has no line ending either is rewritten `\n`. Carrying the ending the fences had would close it, and only `splitFrontmatter` ever sees that.
   - A body that has been through *either editor* is `\n` throughout, and the block follows it. That is where normalization happens, and it happens only after a real user edit — including the endings between the lines of a code fence, which CommonMark counts as line endings rather than as the block's content. The raw editor has always done this; the rich editor now does it too, rather than the two disagreeing.
   (Amended twice: this first read "normalized to `\n` on write", which made adding an id on import a whole-file rewrite of every Windows-authored note; the amendment then claimed no file the app writes mixes endings, which was not true of a body carrying one inside a code fence, and is now stated as a promise about the block rather than about the file.) UTF-8 only.
+- **Attachments** (2026-10-03, #187). An image or any other file added to a note is stored **beside it**, in the note's own folder, and linked from the body as ordinary relative markdown: `![Holiday](holiday-3f9a1c2b.jpg)` for an image, `[Q3 report.pdf](q3-report-3f9a1c2b.pdf)` for anything else — what every other editor and every provider's own preview already reads. Nothing about it is a format of the app's own.
+  - **Named by content** (`attachmentName` in `markdown/slug.ts`): `<slug of its name>-<first 8 hex of its SHA-256>.<ext>`, or `pasted-image-<hash>.png` for a picture from the clipboard, whose own name says nothing. The same file added twice, or on two devices, is one name and one file; a clash between two different files is the rare case, and where the 8 hex are already taken by a file of another size the name takes 16. The name the user knows the file by is the link text (an image's alt is its name without the extension, any other file's is its name), so renaming it is editing a link, and **no note body is ever rewritten to rename a file**. The stem is cut to leave a conflict suffix room inside the 255 bytes a name may have. The extension is the name's own, folded, where it is letters and digits, and otherwise from the type the browser gave (`bin` where neither says). **Never `.md`**: a file by that name is a note to every device.
+  - **A link is a file** when its destination is relative — no scheme, no leading `/`, and no `#`, `?` or `\` — and ends in an extension other than `.md` (`isAttachmentHref`). It is resolved from the note's folder with a `..` that may not climb out of the app folder (`resolveRelative`): `normalizePath` drops such a `..` silently, which would turn `../../../a.png` from a note at the top into `a.png`, a file the link never named. What a note links (`linkedFiles`) counts images, links, the definitions reference-style links use, and `<img src>` in raw HTML; not code, not the web, nothing hidden.
+  - At most 25 MiB each (`MAX_ATTACHMENT_BYTES`).
 
 ---
 ## 4. Provider adapter interface

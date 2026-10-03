@@ -251,3 +251,81 @@ const nextFreeName = (base: string, used: ReadonlySet<string>, n: number): strin
 
 export const uniqueFilename = (title: string, taken: Iterable<string>): string =>
 	nextFreeName(slugify(title), new Set([...taken].map(foldName)), 1);
+
+/**
+ * The extension for a file whose name has none, by the type the browser gave
+ * it: a picture pasted from the clipboard, or a file from a share sheet that
+ * came without a name. Only what a person would paste or share; anything else
+ * is `bin`.
+ */
+const EXTENSION_FOR_TYPE: Readonly<Record<string, string>> = {
+	'image/png': 'png',
+	'image/jpeg': 'jpg',
+	'image/gif': 'gif',
+	'image/webp': 'webp',
+	'image/avif': 'avif',
+	'image/svg+xml': 'svg',
+	'image/bmp': 'bmp',
+	'image/heic': 'heic',
+	'image/heif': 'heif',
+	'image/tiff': 'tiff',
+	'application/pdf': 'pdf',
+	'application/zip': 'zip',
+	'text/plain': 'txt',
+	'text/csv': 'csv',
+	'audio/mpeg': 'mp3',
+	'audio/mp4': 'm4a',
+	'audio/wav': 'wav',
+	'video/mp4': 'mp4',
+	'video/quicktime': 'mov',
+	'video/webm': 'webm',
+};
+
+/**
+ * The stem's share of an attachment's name, in bytes: the 255 a filesystem
+ * allows, less a conflict suffix and its counter (28 + 4), less `-` and a hash
+ * of up to 16 hex (17), less `.` and an extension of up to 16 (17).
+ */
+const ATTACHMENT_STEM_BYTES = MAX_NAME_BYTES - 32 - 17 - 17;
+
+/**
+ * The name a file is stored under beside a note: `<slug of its name>-<hash>.<ext>`
+ * — `q3-report-3f9a1c2b.pdf` — or `pasted-image-3f9a1c2b.png` for a picture
+ * from the clipboard, whose own name says nothing. `hash` is the hex of the
+ * file's SHA-256 (`bytesHash`); its first eight characters name it, or
+ * `hashLength` where eight are already taken by a different file.
+ *
+ * Stamped with the content (docs/ARCHITECTURE.md §3, #187): the same file
+ * added twice, or on two devices, is one name and one file, and a name that is
+ * taken by a file of another size is the rare case rather than the common one.
+ * The name the user knows the file by is in the link, not here, so nothing is
+ * renamed when they rename it there.
+ *
+ * The extension is the name's own, folded, where it is plain letters and
+ * digits, and from `type` where it is not. `undefined` for `.md`: a file by
+ * that name is a note to every device that pulls it.
+ */
+export const attachmentName = ({
+	name,
+	hash,
+	type = '',
+	pasted = false,
+	hashLength = 8,
+}: {
+	name: string;
+	hash: string;
+	type?: string;
+	pasted?: boolean;
+	hashLength?: number;
+}): string | undefined => {
+	const written = /\.([^.\s]{1,16})$/u.exec(name);
+	const at = written === null || written.index === 0 ? name.length : written.index;
+	const own = at === name.length ? '' : foldName(written?.[1] ?? '');
+	const media = type.split(';')[0]?.trim().toLowerCase() ?? '';
+	const extension = /^[a-z0-9]{1,16}$/.test(own) ? own : (EXTENSION_FOR_TYPE[media] ?? 'bin');
+	if (`.${extension}` === NOTE_EXTENSION) return undefined;
+
+	const slug = fitBytes(toSlug(pasted ? '' : name.slice(0, at)), ATTACHMENT_STEM_BYTES);
+	const stem = slug.replace(/-+$/, '') || (pasted ? 'pasted-image' : 'attachment');
+	return `${stem}-${hash.slice(0, hashLength).toLowerCase()}.${extension}`;
+};
