@@ -71,6 +71,7 @@ const summary = (unsynced: Unsynced) => ({
 	folders: unsynced.folders.map((folder) => folder.path).sort(),
 	rmdirs: unsynced.rmdirs.map((op) => op.path).sort(),
 	files: unsynced.files.map((file) => file.path).sort(),
+	linked: unsynced.linked.map((file) => file.path).sort(),
 	blocked: unsynced.blocked,
 });
 
@@ -81,6 +82,7 @@ const NOTHING = {
 	folders: [],
 	rmdirs: [],
 	files: [],
+	linked: [],
 	blocked: false,
 };
 
