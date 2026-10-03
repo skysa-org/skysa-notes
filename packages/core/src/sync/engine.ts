@@ -3263,6 +3263,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return;
 		}
 		if (op.op === 'rmdir') return runRmdir(op);
+		// Nothing queues these yet: the store has learnt files before the engine
+		// has learnt to push them (#187). Failed rather than finished, which for
+		// an op with no note is what happens below — an upload counted done would
+		// be a file that never left the device.
+		if (op.op === 'upload' || op.op === 'move-file' || op.op === 'delete-file') {
+			throw new Error(`This build cannot push a file's ${op.op} yet`);
+		}
 
 		const note = op.noteId === undefined ? undefined : await store.noteById(op.noteId);
 		if (op.op === 'delete') return runDelete(op, note);

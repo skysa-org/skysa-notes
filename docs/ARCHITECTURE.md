@@ -467,9 +467,33 @@ syncState    connectionId, cursor, lastSyncAt, rootId,
                           left alone and listed in the storage panel, with where any note of
                           the user's went that one took the name of; written with the cursor,
                           a notice only)
-opQueue      seq, connectionId, op ('write'|'move'|'delete'|'mkdir'|'rmdir'), noteId/path,
-             remoteId? (the folder's, for 'rmdir'), attempts, lastError
+opQueue      seq, connectionId, op ('write'|'move'|'delete'|'mkdir'|'rmdir'
+                                   |'upload'|'move-file'|'delete-file'), noteId/fileId/path,
+             targetPath?, remoteId? (the folder's, for 'rmdir'; the file's, for 'delete-file'),
+             copyOf? (an 'upload' whose bytes are read from another file), attempts, lastError
+files        [connectionId + id], path, remoteId?, remoteVersion?, size
+fileBytes    [connectionId + id], bytes (ArrayBuffer), version?, pinned (0|1), lastUsedAt
 ```
+
+**Files beside notes, in the store (2026-10-03, #187).** A file that is not a note is a row of its own (`SyncFile` in `packages/core/src/sync/store.ts`), mirrored as what the remote says of it — path, id, version, size — and never its bytes, which are fetched when the file is shown and kept apart in `fileBytes`. Two kinds of row, two rules:
+- A **bound** row (it has a `remoteId`) is a copy of the remote's word. A pull may rewrite or drop one freely: the worst a wrong one costs is a picture that does not show until the next scan.
+- A **pending** row (no `remoteId`) was added on this device and is not uploaded yet. It is user data, as a dirty note is. A pull never removes one: a `delete-file` for one is refused, and so is an `upsert-file` that does not say it is adopting it. A folder's deletion leaves it, and its bytes are `pinned` until they are up.
+
+The store's other promises, each pinned by the contract suite:
+- **Bytes.** Bytes cached under one version are not the file's under another. So `fileBytes` hands back pinned bytes, or cached bytes whose `version` is the row's `remoteVersion`, and nothing else. OneDrive moves an `eTag` on a rename, and a move this device made carries its bytes over to the new version, since it knows the bytes did not change.
+- **The user's move.** A row with a `move-file` queued keeps its path through an `upsert-file`; the move starts from where the remote says the file is. Put back where it was, the row would free the name the user chose, and the next file to arrive there would be taken for new.
+- **The user's deletion.** An `upsert-file` is passed over while a `delete-file` for that `remoteId` is queued, because the queued op is the user's word that the file should go. Passed over rather than refused: a refusal rejects the batch, and a delete stuck at the network would stop every pull.
+- **Adoption** binds only a pending row at the path, of the remote's size. Anything else would let the user's bytes go unsent as a cached copy of another file.
+- **A copy's source.** A row a pull takes or unbinds hands its current bytes to every queued `upload` that copies its file (`copyOf`), since the remote has just said there is nothing left to copy from. A row that goes takes its queued `upload` and `move-file` with it.
+- **Folders.** A folder move takes every file row beneath it, and their queued ops. A folder delete takes the bound rows beneath it and their bytes. It spares:
+  - every pending row;
+  - the files the engine names in `keepFiles`;
+  - any file whose own queued `move-file` says it is outside the folder, the same backstop the notes' `keep` has.
+- **An `upload` that lands** is bound to what it made, and its bytes are kept as that version's. If the user moved the row meanwhile, a `move-file` is queued after it. If the user deleted the row, a `delete-file` is queued for what was made. If another row already holds the same `remoteId`, the outcome is refused, as it is for a `move-file`: two rows on one file is an engine that lost track, and letting either row go would break a link. The op fails and is tried again, and an engine must not adopt a file another row holds.
+
+Bytes are an `ArrayBuffer` rather than a `Blob`. Every browser keeps a large value of either kind out of line, but a `Blob` does not survive the structured clone of the IndexedDB the tests run on.
+
+The engine learns to push files and to mirror them on pull in the PRs that follow (#187). Until then, a file op that reaches it is failed rather than finished.
 
 ### Sync loop (per connection)
 1. **Pull**: `changes(cursor)` → for each remote entry:

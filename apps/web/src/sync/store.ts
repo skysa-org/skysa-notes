@@ -10,6 +10,7 @@ import {
 	type PullChange,
 	rebasePath,
 	ROOT,
+	type SyncFile,
 	type SyncFolder,
 	type SyncNote,
 	type SyncOp,
@@ -19,6 +20,8 @@ import {
 import Dexie from 'dexie';
 
 import {
+	type FileBytesRecord,
+	type FileRecord,
 	type FolderRecord,
 	noteKey,
 	type NoteRecord,
@@ -75,7 +78,10 @@ export interface DexieSyncStoreOptions {
 	now?: () => number;
 }
 
-type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState'>;
+type Scope = Pick<
+	NotesDatabase,
+	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes'
+>;
 
 /**
  * Dirty as the engine means it: local writing that has not reached the remote.
@@ -111,12 +117,61 @@ const toSyncOp = (record: OpQueueRecord): SyncOp => {
 		seq: record.seq,
 		op: record.op,
 		...(record.noteId === undefined ? {} : { noteId: record.noteId }),
+		...(record.fileId === undefined ? {} : { fileId: record.fileId }),
 		path: record.path,
 		...(record.targetPath === undefined ? {} : { targetPath: record.targetPath }),
 		...(record.remoteId === undefined ? {} : { remoteId: record.remoteId }),
+		...(record.copyOf === undefined ? {} : { copyOf: record.copyOf }),
 		attempts: record.attempts,
 	};
 };
+
+const toSyncFile = (file: FileRecord): SyncFile => ({
+	id: file.id,
+	path: file.path,
+	...(file.remoteId === undefined ? {} : { remoteId: file.remoteId }),
+	...(file.remoteVersion === undefined ? {} : { remoteVersion: file.remoteVersion }),
+	size: file.size,
+});
+
+/**
+ * Whether bytes held for a file are still the file's: held because they are
+ * not uploaded yet, or cached under the version the row is bound to
+ * (`SyncStore.fileBytes`).
+ */
+const current = (file: FileRecord, held: FileBytesRecord): boolean =>
+	held.pinned === 1 || (held.version !== undefined && held.version === file.remoteVersion);
+
+type FileChange = Extract<
+	PullChange,
+	{ kind: 'upsert-file' | 'displace-file' | 'delete-file' | 'reupload-file' }
+>;
+
+const FILE_CHANGES: ReadonlySet<PullChange['kind']> = new Set([
+	'upsert-file',
+	'displace-file',
+	'delete-file',
+	'reupload-file',
+]);
+
+const isFileChange = (change: PullChange): change is FileChange => FILE_CHANGES.has(change.kind);
+
+type FileOutcome = Extract<OpOutcome, { kind: 'uploaded' | 'moved-file' | 'lost-file' }>;
+
+const FILE_OUTCOMES: ReadonlySet<OpOutcome['kind']> = new Set([
+	'uploaded',
+	'moved-file',
+	'lost-file',
+]);
+
+const isFileOutcome = (outcome: OpOutcome): outcome is FileOutcome =>
+	FILE_OUTCOMES.has(outcome.kind);
+
+/** Cached rather than held: the version they are, and nothing pinning them. */
+const cachedAs = (
+	{ version: _version, ...held }: FileBytesRecord,
+	version: string
+): FileBytesRecord => ({ ...held, version, pinned: 0 });
 
 /** Cut loose from its file, and so from the bytes it last agreed with it on. */
 const withoutRemote = ({
@@ -196,7 +251,7 @@ export const createDexieSyncStore = (
 	const inTransaction = <T>(work: () => Promise<T>): Promise<T> =>
 		db.transaction(
 			'rw',
-			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs],
+			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
 			async () => {
 				const state = await db.syncState.get(connectionId);
 				// Gone, or detached. A run that was at the network when the source
@@ -221,6 +276,89 @@ export const createDexieSyncStore = (
 	const opsOf = (scope: Scope): Promise<OpQueueRecord[]> =>
 		scope.opQueue.where('connectionId').equals(connectionId).toArray();
 
+	const filesOf = (scope: Scope): Promise<FileRecord[]> =>
+		scope.files.where('connectionId').equals(connectionId).toArray();
+
+	const fileKey = (id: string): [string, string] => [connectionId, id];
+
+	const ownFile = (scope: Scope, id: string): Promise<FileRecord | undefined> =>
+		scope.files.get(fileKey(id));
+
+	/** A row and whatever is held for it, together. */
+	const dropFile = async (scope: Scope, id: string): Promise<void> => {
+		await scope.files.delete(fileKey(id));
+		await scope.fileBytes.delete(fileKey(id));
+	};
+
+	const fileOpsOf = async (scope: Scope, fileId: string): Promise<OpQueueRecord[]> =>
+		(await scope.opQueue.where('fileId').equals(fileId).toArray()).filter(
+			(op) => op.connectionId === connectionId
+		);
+
+	const withdraw = (scope: Scope, ops: readonly OpQueueRecord[]) =>
+		scope.opQueue.bulkDelete(ops.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
+
+	/** The same, and the ops queued for it: there is nothing left to send or move. */
+	const forgetFile = async (scope: Scope, id: string): Promise<void> => {
+		await dropFile(scope, id);
+		const owed = await fileOpsOf(scope, id);
+		await withdraw(
+			scope,
+			owed.filter((op) => op.op === 'upload' || op.op === 'move-file')
+		);
+	};
+
+	/**
+	 * A bound row a pull is about to take or cut loose. An upload that copies
+	 * its file (`copyOf`) would read the bytes from the remote, which has just
+	 * said the file is gone — so whatever this device holds of them goes to
+	 * each copy, held until it is sent, and the copy no longer reads anything.
+	 */
+	const handOver = async (scope: Scope, file: FileRecord): Promise<void> => {
+		const held = await scope.fileBytes.get(fileKey(file.id));
+		if (held === undefined || !current(file, held) || file.remoteId === undefined) return;
+		const { version: _version, ...bytes } = held;
+		const copies = (await opsOf(scope)).filter(
+			(op) => op.op === 'upload' && op.copyOf === file.remoteId
+		);
+		await scope.fileBytes.bulkPut(
+			copies.flatMap((op) =>
+				op.fileId === undefined ? [] : [{ ...bytes, id: op.fileId, pinned: 1 as const }]
+			)
+		);
+		await scope.opQueue.bulkPut(copies.map(({ copyOf: _copyOf, ...op }) => op));
+	};
+
+	/** A row is another's file, which only an engine that has lost track makes. */
+	const refuseTwin = async (scope: Scope, fileId: string, remoteId: string) => {
+		const twin = await scope.files
+			.where('[connectionId+remoteId]')
+			.equals([connectionId, remoteId])
+			.filter((each) => each.id !== fileId)
+			.first();
+		if (twin !== undefined) throw new Error(`File ${remoteId} is ${twin.id}'s already`);
+	};
+
+	/** A queued `move-file`'s origin, pointed at where the remote says the file is. */
+	const fileOriginIsNow = async (scope: Scope, fileId: string, at: string): Promise<void> => {
+		const ops = await fileOpsOf(scope, fileId);
+		await scope.opQueue.bulkPut(
+			ops.filter((op) => op.op === 'move-file').map((op) => ({ ...op, path: at }))
+		);
+	};
+
+	/** One file's queued ops, after it as it moves. */
+	const rebaseFileOps = async (scope: Scope, fileId: string, from: string, to: string) => {
+		const ops = await fileOpsOf(scope, fileId);
+		await scope.opQueue.bulkPut(
+			ops.map((op) => ({
+				...op,
+				path: op.path === from ? to : op.path,
+				...(op.targetPath === from ? { targetPath: to } : {}),
+			}))
+		);
+	};
+
 	/**
 	 * This connection's row with this id, or nothing. Another connection's note
 	 * of the same id is another row under another key, and cannot be reached
@@ -244,7 +382,7 @@ export const createDexieSyncStore = (
 
 	const queue = async (
 		scope: Scope,
-		op: Pick<OpQueueRecord, 'op' | 'noteId' | 'path' | 'targetPath'>
+		op: Pick<OpQueueRecord, 'op' | 'noteId' | 'fileId' | 'path' | 'targetPath' | 'remoteId'>
 	): Promise<void> => {
 		await scope.opQueue.add({ connectionId, attempts: 0, queuedAt: now(), ...op });
 	};
@@ -416,6 +554,12 @@ export const createDexieSyncStore = (
 				}))
 		);
 
+		// Files, bound and pending: an id-only feed names none of them.
+		const files = (await filesOf(scope)).filter((file) => isWithin(file.path, from));
+		await scope.files.bulkPut(
+			files.map((file) => ({ ...file, path: rebasePath(file.path, from, to) }))
+		);
+
 		// And the files listed as unreadable: an id-only feed says the folder
 		// moved and nothing about what is in it.
 		await relist(scope, (files) =>
@@ -462,11 +606,34 @@ export const createDexieSyncStore = (
 			.map(([noteId]) => noteId);
 	};
 
+	/** The same rule for files, whose own renames are `move-file`. */
+	const filesMovedOut = async (
+		scope: Scope,
+		path: string,
+		was: string | undefined
+	): Promise<string[]> => {
+		const first = [...(await opsOf(scope))]
+			.sort((one, two) => (one.seq ?? 0) - (two.seq ?? 0))
+			.reduce<Map<string, string>>(
+				(map, op) =>
+					op.op !== 'move-file' || op.fileId === undefined || map.has(op.fileId)
+						? map
+						: map.set(op.fileId, op.path),
+				new Map()
+			);
+		return [...first]
+			.filter(
+				([, from]) => !isWithin(from, path) && (was === undefined || !isWithin(from, was))
+			)
+			.map(([fileId]) => fileId);
+	};
+
 	const deleteFolder = async (
 		scope: Scope,
 		path: string,
 		keep: readonly string[] = [],
-		was?: string
+		was?: string,
+		keepFiles: readonly string[] = []
 	): Promise<void> => {
 		// The app folder is not a notebook, and every path is within it.
 		if (normalizePath(path) === ROOT) return;
@@ -495,6 +662,204 @@ export const createDexieSyncStore = (
 		);
 		await scope.notes.bulkDelete(inside.filter((note) => !isDirty(note)).map(noteKey));
 		await scope.notes.bulkPut(inside.filter(isDirty).map(withoutRemote));
+
+		// A bound file goes, with its bytes, unless spared the same way. A
+		// pending one stays: it is the user's, and exists nowhere else.
+		const sparedFiles = new Set([...keepFiles, ...(await filesMovedOut(scope, path, was))]);
+		const goneFiles = (await filesOf(scope)).filter(
+			(file) =>
+				isWithin(file.path, path) &&
+				file.remoteId !== undefined &&
+				!sparedFiles.has(file.id)
+		);
+		await goneFiles.reduce<Promise<void>>(async (pending, file) => {
+			await pending;
+			await handOver(scope, file);
+			await forgetFile(scope, file.id);
+		}, Promise.resolve());
+	};
+
+	/** Bytes that were held, kept as the remote version's now that it has them. */
+	const releaseBytes = async (scope: Scope, id: string, version: string): Promise<void> => {
+		const held = await scope.fileBytes.get(fileKey(id));
+		if (held !== undefined) await scope.fileBytes.put(cachedAs(held, version));
+	};
+
+	const upsertFile = async (
+		scope: Scope,
+		change: Extract<PullChange, { kind: 'upsert-file' }>
+	): Promise<void> => {
+		// The user's word that it should go, said since the batch was decided.
+		// Passed over rather than refused: a refusal rejects the batch, and a
+		// delete stuck at the network would stop every pull that mentioned it.
+		const ops = await opsOf(scope);
+		const deleting = ops.some(
+			(op) => op.op === 'delete-file' && op.remoteId === change.remote.remoteId
+		);
+		if (deleting) return;
+		const existing = await ownFile(scope, change.fileId);
+		// Only the pending row at that path, of that size: anything else is the
+		// engine mistaking another file for it, and binding it would let the
+		// user's bytes go unsent as a cached copy of someone else's.
+		const adoptable =
+			existing?.remoteId === undefined &&
+			existing?.path === change.path &&
+			existing.size === change.remote.size;
+		if (change.adopt === true && !adoptable) {
+			throw new Error(`File ${change.fileId} is not one to adopt as that file`);
+		}
+		// A file that exists nowhere else, which only an adoption may bind.
+		if (change.adopt !== true && existing !== undefined && existing.remoteId === undefined) {
+			throw new Error(`File ${change.fileId} is pending, and only an adoption binds it`);
+		}
+		// Moved here and not yet there: the row stays where the user put it,
+		// and the move starts from wherever the file now is.
+		const moving = ops.some((op) => op.op === 'move-file' && op.fileId === change.fileId);
+		const path = moving && existing !== undefined ? existing.path : change.path;
+		await ensureFolderChain(scope, parentPath(path));
+		await scope.files.put({
+			connectionId,
+			id: change.fileId,
+			path,
+			remoteId: change.remote.remoteId,
+			remoteVersion: change.remote.version,
+			size: change.remote.size ?? 0,
+		});
+		if (change.adopt === true) {
+			// Up already: what was held is the remote version's, and the upload
+			// that was owed is not.
+			await releaseBytes(scope, change.fileId, change.remote.version);
+			const uploads = (await fileOpsOf(scope, change.fileId)).filter(
+				(op) => op.op === 'upload'
+			);
+			await withdraw(scope, uploads);
+		}
+		await fileOriginIsNow(scope, change.fileId, change.remote.path);
+	};
+
+	const applyFileChange = async (
+		scope: Scope,
+		change: Extract<PullChange, { kind: 'displace-file' | 'delete-file' | 'reupload-file' }>
+	): Promise<void> => {
+		const file = await ownFile(scope, change.fileId);
+		// An id that is not here is a no-op, as for a note.
+		if (file === undefined) return;
+		if (change.kind === 'displace-file') {
+			await ensureFolderChain(scope, parentPath(change.path));
+			await scope.files.put({ ...file, path: change.path });
+			await rebaseFileOps(scope, file.id, file.path, change.path);
+			return;
+		}
+		if (file.remoteId === undefined) {
+			// Never the remote's to take: a pending file exists nowhere else.
+			if (change.kind === 'delete-file') {
+				throw new Error(`File ${file.id} is pending, and not the remote's to delete`);
+			}
+			return;
+		}
+		await handOver(scope, file);
+		if (change.kind === 'delete-file') {
+			await forgetFile(scope, file.id);
+			return;
+		}
+		// Gone from the remote as far as a rescan can tell, and its own copy maybe
+		// what lost it: sent again from here, if there is anything to send, to
+		// where the row is — a move queued for it has nothing to move.
+		const held = await scope.fileBytes.get(fileKey(file.id));
+		await forgetFile(scope, file.id);
+		if (held === undefined || !current(file, held)) return;
+		const { version: _version, ...bytes } = held;
+		await scope.files.put({ connectionId, id: file.id, path: file.path, size: file.size });
+		await scope.fileBytes.put({ ...bytes, pinned: 1 });
+		await queue(scope, { op: 'upload', fileId: file.id, path: file.path });
+	};
+
+	const settleFile = async (
+		scope: Scope,
+		outcome: FileOutcome,
+		withdrawn: boolean
+	): Promise<void> => {
+		if (outcome.kind === 'uploaded') {
+			await settleUpload(scope, outcome);
+			return;
+		}
+		if (outcome.kind === 'moved-file') {
+			await settleFileMove(scope, outcome, withdrawn);
+			return;
+		}
+		await forgetFile(scope, outcome.fileId);
+	};
+
+	const settleUpload = async (
+		scope: Scope,
+		outcome: Extract<OpOutcome, { kind: 'uploaded' }>
+	): Promise<void> => {
+		const file = await ownFile(scope, outcome.fileId);
+		// Deleted while its bytes were on the way: what they made goes too.
+		if (file === undefined) {
+			await queue(scope, {
+				op: 'delete-file',
+				path: outcome.remote.path,
+				remoteId: outcome.remote.remoteId,
+			});
+			return;
+		}
+		await refuseTwin(scope, file.id, outcome.remote.remoteId);
+		// Moved while its bytes were on the way. The file is where they went;
+		// the row stays where the user put it, and a move takes the file there.
+		const moved = file.path !== outcome.sentAs;
+		await scope.files.put({
+			...file,
+			path: moved ? file.path : outcome.remote.path,
+			remoteId: outcome.remote.remoteId,
+			remoteVersion: outcome.remote.version,
+			size: outcome.remote.size ?? file.size,
+		});
+		await releaseBytes(scope, file.id, outcome.remote.version);
+		if (moved) {
+			await queue(scope, {
+				op: 'move-file',
+				fileId: file.id,
+				path: outcome.remote.path,
+				targetPath: file.path,
+			});
+		}
+	};
+
+	const settleFileMove = async (
+		scope: Scope,
+		outcome: Extract<OpOutcome, { kind: 'moved-file' }>,
+		withdrawn: boolean
+	): Promise<void> => {
+		const file = await ownFile(scope, outcome.fileId);
+		if (file === undefined) return;
+		await refuseTwin(scope, file.id, outcome.remote.remoteId);
+		// A move leaves the bytes as they were, whatever it does to the version.
+		const held = await scope.fileBytes.get(fileKey(file.id));
+		if (held !== undefined && held.pinned === 0 && current(file, held)) {
+			await scope.fileBytes.put(cachedAs(held, outcome.remote.version));
+		}
+		const landed: FileRecord = {
+			...file,
+			remoteId: outcome.remote.remoteId,
+			remoteVersion: outcome.remote.version,
+		};
+		const queued = (await fileOpsOf(scope, file.id)).some(
+			(op) => op.op === 'move-file' && op.seq !== undefined
+		);
+		// Where it landed, which is where the row goes — unless the user has
+		// moved it again since, which withdrew this op: then the row stays, and
+		// the move that replaced it starts from here.
+		await scope.files.put(withdrawn ? landed : { ...landed, path: outcome.remote.path });
+		await fileOriginIsNow(scope, file.id, outcome.remote.path);
+		if (withdrawn && !queued && file.path !== outcome.remote.path) {
+			await queue(scope, {
+				op: 'move-file',
+				fileId: file.id,
+				path: outcome.remote.path,
+				targetPath: file.path,
+			});
+		}
 	};
 
 	const upsertNote = async (
@@ -601,6 +966,12 @@ export const createDexieSyncStore = (
 		change: PullChange,
 		hashes: ReadonlyMap<string, string>
 	): Promise<void> => {
+		if (isFileChange(change)) {
+			await (change.kind === 'upsert-file'
+				? upsertFile(scope, change)
+				: applyFileChange(scope, change));
+			return;
+		}
 		switch (change.kind) {
 			case 'upsert-note':
 				await upsertNote(scope, change, hashes);
@@ -663,7 +1034,7 @@ export const createDexieSyncStore = (
 				await moveFolder(scope, change.from, change.to, change.remoteId);
 				return;
 			case 'delete-folder':
-				await deleteFolder(scope, change.path, change.keep, change.was);
+				await deleteFolder(scope, change.path, change.keep, change.was, change.keepFiles);
 				return;
 			// One record per file: a second for the same id is the file renamed.
 			case 'unreadable':
@@ -730,6 +1101,10 @@ export const createDexieSyncStore = (
 			const restored: NoteRecord = { ...withoutRemote(note), dirty: 1 };
 			await scope.notes.put(restored);
 			await queueWrite(scope, restored);
+			return;
+		}
+		if (isFileOutcome(outcome)) {
+			await settleFile(scope, outcome, withdrawn);
 			return;
 		}
 		const note = await requireNote(scope, outcome.noteId);
@@ -829,6 +1204,44 @@ export const createDexieSyncStore = (
 				.map(toSyncFolder),
 
 		unreadable: async () => (await db.syncState.get(connectionId))?.unreadable ?? [],
+
+		fileById: async (id) => {
+			const file = await ownFile(db, id);
+			return file === undefined ? undefined : toSyncFile(file);
+		},
+
+		fileByPath: async (path) => {
+			const file = await db.files
+				.where('[connectionId+path]')
+				.equals([connectionId, path])
+				.first();
+			return file === undefined ? undefined : toSyncFile(file);
+		},
+
+		fileByRemoteId: async (remoteId) => {
+			const file = await db.files
+				.where('[connectionId+remoteId]')
+				.equals([connectionId, remoteId])
+				.first();
+			return file === undefined ? undefined : toSyncFile(file);
+		},
+
+		allFiles: async () => (await filesOf(db)).map(toSyncFile),
+
+		filesUnder: async (folderPath) =>
+			(await filesOf(db)).filter((file) => isWithin(file.path, folderPath)).map(toSyncFile),
+
+		fileBytes: (id) =>
+			// One read of the two, so the bytes are judged against the row they
+			// were read beside.
+			db.transaction('r', db.files, db.fileBytes, async () => {
+				const file = await ownFile(db, id);
+				const held = await db.fileBytes.get(fileKey(id));
+				if (file === undefined || held === undefined || !current(file, held)) {
+					return undefined;
+				}
+				return new Uint8Array(held.bytes);
+			}),
 
 		applyPull: async (batch: PullBatch) => {
 			const hashes = await digestAll(contentsOf(batch.changes));

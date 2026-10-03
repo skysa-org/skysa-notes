@@ -264,22 +264,66 @@ export interface PreferenceRecord {
 	value: string;
 }
 
-export type QueuedOperation = 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
+export type QueuedOperation =
+	'write' | 'move' | 'delete' | 'mkdir' | 'rmdir' | 'upload' | 'move-file' | 'delete-file';
+
+/**
+ * A file beside a note that is not one (#187): one row for every such file the
+ * remote has, and for every file added here and not yet uploaded (no
+ * `remoteId`). Its bytes, where the device holds them, are in `fileBytes`.
+ * `SyncFile` in `packages/core/src/sync/store.ts` says what each kind of row
+ * may and may not have done to it.
+ */
+export interface FileRecord {
+	connectionId: string;
+	id: string;
+	path: string;
+	remoteId?: string;
+	remoteVersion?: string;
+	/** In bytes. */
+	size: number;
+}
+
+/**
+ * A file's bytes, where this device holds them: held until they are uploaded
+ * (`pinned`), which nothing may evict, or cached under the remote version they
+ * were read at, which the cache's budget may.
+ *
+ * An `ArrayBuffer` and not a `Blob`. Every browser keeps a large value of
+ * either kind out of line, but a `Blob` does not survive the structured clone
+ * the tests' IndexedDB makes of it — it comes back an empty object — and bytes
+ * that cannot be tested are bytes that cannot be trusted.
+ */
+export interface FileBytesRecord {
+	connectionId: string;
+	id: string;
+	bytes: ArrayBuffer;
+	/** The remote version these bytes are, for cached ones. */
+	version?: string;
+	/** 1 while the bytes exist nowhere else. A number: IndexedDB indexes no boolean. */
+	pinned: 0 | 1;
+	/** For evicting the least recently used of the cached ones. */
+	lastUsedAt: number;
+}
 
 export interface OpQueueRecord {
 	seq?: number;
 	connectionId: string;
 	op: QueuedOperation;
 	noteId?: string;
+	/** For a file's ops, the file. */
+	fileId?: string;
 	path: string;
 	/** For `move`, where the entry is going. */
 	targetPath?: string;
 	/**
 	 * For `rmdir`, the folder's `remoteId` when it was queued. The row it came
 	 * from is gone by then — that is what the op is for — and without the id the
-	 * engine will not touch the path.
+	 * engine will not touch the path. For `delete-file`, the same.
 	 */
 	remoteId?: string;
+	/** For an `upload` whose bytes this device does not hold, a file that has them. */
+	copyOf?: string;
 	attempts: number;
 	lastError?: string;
 	queuedAt: number;
@@ -292,6 +336,8 @@ export type NotesDatabase = Dexie & {
 	opQueue: Table<OpQueueRecord, number>;
 	prefs: Table<PreferenceRecord, string>;
 	credentials: Table<CredentialRecord, string>;
+	files: Table<FileRecord, [string, string]>;
+	fileBytes: Table<FileBytesRecord, [string, string]>;
 };
 
 export const DATABASE_NAME = 'skysa-notes';
@@ -412,6 +458,16 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		.upgrade(async (tx) => {
 			await tx.table('notes').bulkAdd(await tx.table(NOTES_REKEYING).toArray());
 		});
+
+	// Files beside notes (#187). Keyed by connection and id, as notes are, and
+	// found by path and by remote id within a connection. The bytes apart from
+	// the rows, so that listing a folder's files never reads 25 MB, and indexed
+	// by what eviction asks: the cached ones, least recently used first.
+	db.version(6).stores({
+		files: '[connectionId+id], connectionId, [connectionId+path], [connectionId+remoteId]',
+		fileBytes: '[connectionId+id], connectionId, [pinned+lastUsedAt]',
+		opQueue: '++seq, connectionId, noteId, path, fileId',
+	});
 
 	// A build with a later version than the last one above, opening this database
 	// in another tab, must find this tab stopped rather than still writing —

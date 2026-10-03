@@ -5,6 +5,7 @@ import type {
 	OpOutcome,
 	PullBatch,
 	PullChange,
+	SyncFile,
 	SyncFolder,
 	SyncNote,
 	SyncOp,
@@ -22,8 +23,25 @@ import type {
  * would quietly drop: `applyPull` is all-or-nothing, cursor included.
  */
 
+/**
+ * A file's bytes as this device holds them: held until they are uploaded
+ * (`pinned`), or cached under the version they were read at.
+ */
+export interface HeldBytes {
+	bytes: Uint8Array<ArrayBuffer>;
+	version?: string;
+	pinned?: boolean;
+}
+
 export interface MemoryStore extends SyncStore {
 	readonly notes: () => SyncNote[];
+	readonly files: () => SyncFile[];
+	/** What is held for a file, valid or not: what `fileBytes` decides from. */
+	readonly heldBytes: (id: string) => HeldBytes | undefined;
+	/** Seed a file row, and the bytes held for it if any. */
+	readonly putFile: (file: SyncFile, bytes?: HeldBytes) => void;
+	/** Take a file row and its bytes away, as the user deleting it does. */
+	readonly dropFile: (id: string) => void;
 	readonly folders: () => SyncFolder[];
 	readonly ops: () => SyncOp[];
 	readonly storedCursor: () => string | undefined;
@@ -50,6 +68,8 @@ export interface MemoryStore extends SyncStore {
 
 export const createMemoryStore = (): MemoryStore => {
 	const notes = new Map<string, SyncNote>();
+	const files = new Map<string, SyncFile>();
+	const held = new Map<string, HeldBytes>();
 	const folders = new Map<string, SyncFolder>();
 	const ops = new Map<number, SyncOp & { lastError?: string }>();
 	/** By `remoteId`, which is what makes a second record for a file a rename. */
@@ -120,6 +140,215 @@ export const createMemoryStore = (): MemoryStore => {
 		originIsNow(resolution.noteId, resolution.remote.path);
 		// The copy only exists locally, so it needs a push of its own.
 		queue({ op: 'write', noteId: resolution.copyId, path: resolution.copyPath });
+	};
+
+	/** Held until uploaded, or cached under the version the row is bound to. */
+	const validBytes = (file: SyncFile): Uint8Array<ArrayBuffer> | undefined => {
+		const entry = held.get(file.id);
+		if (entry === undefined) return undefined;
+		const current =
+			entry.pinned === true ||
+			(entry.version !== undefined && entry.version === file.remoteVersion);
+		return current ? entry.bytes : undefined;
+	};
+
+	/** A row and whatever is held for it, together. */
+	const dropFile = (id: string): void => {
+		files.delete(id);
+		held.delete(id);
+	};
+
+	/** The same, and the ops queued for it: there is nothing left to send or move. */
+	const forgetFile = (id: string): void => {
+		dropFile(id);
+		[...ops.values()]
+			.filter((op) => op.fileId === id && (op.op === 'upload' || op.op === 'move-file'))
+			.forEach((op) => ops.delete(op.seq));
+	};
+
+	/**
+	 * A bound row a pull is about to take or cut loose. An upload that copies
+	 * its file (`copyOf`) would read the bytes from the remote, which has just
+	 * said the file is gone — so whatever this device holds of them goes to
+	 * each copy, held until it is sent, and the copy no longer reads anything.
+	 */
+	const handOver = (file: SyncFile): void => {
+		const bytes = validBytes(file);
+		if (bytes === undefined || file.remoteId === undefined) return;
+		[...ops.values()]
+			.filter((op) => op.op === 'upload' && op.copyOf === file.remoteId)
+			.forEach(({ copyOf: _copyOf, ...op }) => {
+				if (op.fileId !== undefined) held.set(op.fileId, { bytes, pinned: true });
+				ops.set(op.seq, op);
+			});
+	};
+
+	/** A row is another's file, which only an engine that has lost track makes. */
+	const refuseTwin = (fileId: string, remoteId: string): void => {
+		const twin = [...files.values()].find(
+			(each) => each.id !== fileId && each.remoteId === remoteId
+		);
+		if (twin !== undefined) throw new Error(`file ${remoteId} is ${twin.id}'s already`);
+	};
+
+	/** Bytes that were held, kept as the remote version's now that it has them. */
+	const releaseBytes = (id: string, version: string): void => {
+		const entry = held.get(id);
+		if (entry !== undefined) held.set(id, { bytes: entry.bytes, version });
+	};
+
+	/** A queued `move-file`'s origin, pointed at where the remote says the file is. */
+	const fileOriginIsNow = (fileId: string, at: string): void => {
+		for (const op of [...ops.values()]) {
+			if (op.op === 'move-file' && op.fileId === fileId) ops.set(op.seq, { ...op, path: at });
+		}
+	};
+
+	/** One file's queued ops, after it as it moves. */
+	const rebaseFileOps = (fileId: string, from: string, to: string): void => {
+		for (const op of [...ops.values()]) {
+			if (op.fileId !== fileId) continue;
+			ops.set(op.seq, {
+				...op,
+				path: op.path === from ? to : op.path,
+				...(op.targetPath === from ? { targetPath: to } : {}),
+			});
+		}
+	};
+
+	const upsertFile = (change: Extract<PullChange, { kind: 'upsert-file' }>): void => {
+		// The user's word that it should go, said since the batch was decided.
+		const deleting = [...ops.values()].some(
+			(op) => op.op === 'delete-file' && op.remoteId === change.remote.remoteId
+		);
+		if (deleting) return;
+		const existing = files.get(change.fileId);
+		const adoptable =
+			existing?.remoteId === undefined &&
+			existing?.path === change.path &&
+			existing.size === change.remote.size;
+		if (change.adopt === true && !adoptable) {
+			throw new Error(`file ${change.fileId} is not one to adopt as that file`);
+		}
+		if (change.adopt !== true && existing !== undefined && existing.remoteId === undefined) {
+			throw new Error(`file ${change.fileId} is pending, and only an adoption binds it`);
+		}
+		const moving = [...ops.values()].some(
+			(op) => op.op === 'move-file' && op.fileId === change.fileId
+		);
+		const path = moving && existing !== undefined ? existing.path : change.path;
+		ensureFolderChain(parentPath(path));
+		files.set(change.fileId, {
+			id: change.fileId,
+			path,
+			remoteId: change.remote.remoteId,
+			remoteVersion: change.remote.version,
+			size: change.remote.size ?? 0,
+		});
+		if (change.adopt === true) {
+			releaseBytes(change.fileId, change.remote.version);
+			[...ops.values()]
+				.filter((op) => op.op === 'upload' && op.fileId === change.fileId)
+				.forEach((op) => ops.delete(op.seq));
+		}
+		fileOriginIsNow(change.fileId, change.remote.path);
+	};
+
+	type FileChange = Extract<
+		PullChange,
+		{ kind: 'upsert-file' | 'displace-file' | 'delete-file' | 'reupload-file' }
+	>;
+
+	const FILE_CHANGES: ReadonlySet<PullChange['kind']> = new Set([
+		'upsert-file',
+		'displace-file',
+		'delete-file',
+		'reupload-file',
+	]);
+
+	const isFileChange = (change: PullChange): change is FileChange =>
+		FILE_CHANGES.has(change.kind);
+
+	const applyFileChange = (change: FileChange): void => {
+		if (change.kind === 'upsert-file') {
+			upsertFile(change);
+			return;
+		}
+		const file = files.get(change.fileId);
+		if (file === undefined) {
+			anomalies.push(`${change.kind} for unknown file ${change.fileId}`);
+			return;
+		}
+		if (change.kind === 'displace-file') {
+			ensureFolderChain(parentPath(change.path));
+			files.set(file.id, { ...file, path: change.path });
+			rebaseFileOps(file.id, file.path, change.path);
+			return;
+		}
+		if (file.remoteId === undefined) {
+			// Never the remote's: a pending file exists nowhere else.
+			if (change.kind === 'delete-file') {
+				throw new Error(`file ${file.id} is pending, and not the remote's to delete`);
+			}
+			anomalies.push(`reupload-file for pending file ${file.id}`);
+			return;
+		}
+		handOver(file);
+		if (change.kind === 'delete-file') {
+			forgetFile(file.id);
+			return;
+		}
+		// Gone from the remote, as far as a rescan can tell, and its own copy
+		// maybe what lost it. Sent again from here if there is anything to send,
+		// to where the row is: a move queued for it has nothing to move.
+		const bytes = validBytes(file);
+		forgetFile(file.id);
+		if (bytes === undefined) return;
+		files.set(file.id, { id: file.id, path: file.path, size: file.size });
+		held.set(file.id, { bytes, pinned: true });
+		queue({ op: 'upload', fileId: file.id, path: file.path });
+	};
+
+	/**
+	 * The files whose queued `move-file` says they are outside the folder being
+	 * deleted, as `renamedOutOf` reads the notes' renames.
+	 */
+	const filesMovedOut = (path: string, was: string | undefined): string[] =>
+		[
+			...[...ops.values()]
+				.sort((one, two) => one.seq - two.seq)
+				.reduce<Map<string, string>>(
+					(map, op) =>
+						op.op !== 'move-file' || op.fileId === undefined || map.has(op.fileId)
+							? map
+							: map.set(op.fileId, op.path),
+					new Map()
+				),
+		].flatMap(([fileId, from]) =>
+			!isWithin(from, path) && (was === undefined || !isWithin(from, was)) ? [fileId] : []
+		);
+
+	/**
+	 * A folder's deletion, for the files beneath it: a bound one goes, with its
+	 * bytes, unless spared as a note is. A pending one stays: it is the user's,
+	 * and exists nowhere else.
+	 */
+	const deleteFilesUnder = (change: Extract<PullChange, { kind: 'delete-folder' }>): void => {
+		const keepFiles = new Set([
+			...(change.keepFiles ?? []),
+			...filesMovedOut(change.path, change.was),
+		]);
+		[...files.values()]
+			.filter(
+				(file) =>
+					isWithin(file.path, change.path) &&
+					file.remoteId !== undefined &&
+					!keepFiles.has(file.id)
+			)
+			.forEach((file) => {
+				handOver(file);
+				forgetFile(file.id);
+			});
 	};
 
 	const noteAt = (path: string): SyncNote | undefined =>
@@ -288,10 +517,14 @@ export const createMemoryStore = (): MemoryStore => {
 				.filter((file) => isWithin(file.path, change.path))
 				.forEach((file) => unreadable.delete(file.remoteId));
 		}
+		if (isFileChange(change)) {
+			applyFileChange(change);
+			return;
+		}
 		applyRowChange(change);
 	};
 
-	const applyRowChange = (change: Exclude<PullChange, ListChange>): void => {
+	const applyRowChange = (change: Exclude<PullChange, ListChange | FileChange>): void => {
 		if (change.kind === 'upsert-note') {
 			upsert(change);
 			return;
@@ -406,6 +639,7 @@ export const createMemoryStore = (): MemoryStore => {
 				(note) => isWithin(note.path, change.path) && !keep.has(note.id)
 			);
 			for (const note of inside) detachOrDelete(note);
+			deleteFilesUnder(change);
 			return;
 		}
 		applyConflict(change.resolution);
@@ -430,6 +664,12 @@ export const createMemoryStore = (): MemoryStore => {
 		for (const note of [...notes.values()]) {
 			if (isWithin(note.path, from)) {
 				notes.set(note.id, { ...note, path: rebasePath(note.path, from, to) });
+			}
+		}
+		// Files, bound and pending: an id-only feed names none of them.
+		for (const file of [...files.values()]) {
+			if (isWithin(file.path, from)) {
+				files.set(file.id, { ...file, path: rebasePath(file.path, from, to) });
 			}
 		}
 		// The files listed as unreadable too: an id-only feed says the folder
@@ -468,6 +708,59 @@ export const createMemoryStore = (): MemoryStore => {
 			notes.delete(outcome.noteId);
 			return;
 		}
+		if (outcome.kind === 'uploaded') {
+			const file = files.get(outcome.fileId);
+			// Deleted while its bytes were on the way: what they made goes too.
+			if (file === undefined) {
+				queue({
+					op: 'delete-file',
+					path: outcome.remote.path,
+					remoteId: outcome.remote.remoteId,
+				});
+				return;
+			}
+			refuseTwin(file.id, outcome.remote.remoteId);
+			const moved = file.path !== outcome.sentAs;
+			files.set(file.id, {
+				...file,
+				path: moved ? file.path : outcome.remote.path,
+				remoteId: outcome.remote.remoteId,
+				remoteVersion: outcome.remote.version,
+				size: outcome.remote.size ?? file.size,
+			});
+			releaseBytes(file.id, outcome.remote.version);
+			if (moved) {
+				queue({
+					op: 'move-file',
+					fileId: file.id,
+					path: outcome.remote.path,
+					targetPath: file.path,
+				});
+			}
+			return;
+		}
+		if (outcome.kind === 'moved-file') {
+			const file = files.get(outcome.fileId);
+			if (file === undefined) return;
+			refuseTwin(file.id, outcome.remote.remoteId);
+			// A move leaves the bytes as they were, whatever the version says.
+			const kept = validBytes(file);
+			files.set(file.id, {
+				...file,
+				path: outcome.remote.path,
+				remoteId: outcome.remote.remoteId,
+				remoteVersion: outcome.remote.version,
+			});
+			if (kept !== undefined && held.get(file.id)?.pinned !== true) {
+				held.set(file.id, { bytes: kept, version: outcome.remote.version });
+			}
+			fileOriginIsNow(file.id, outcome.remote.path);
+			return;
+		}
+		if (outcome.kind === 'lost-file') {
+			forgetFile(outcome.fileId);
+			return;
+		}
 		const note = requireNote(outcome.noteId);
 		if (outcome.kind === 'moved') {
 			notes.set(note.id, {
@@ -494,6 +787,8 @@ export const createMemoryStore = (): MemoryStore => {
 
 	const snapshot = () => ({
 		notes: new Map(notes),
+		files: new Map(files),
+		held: new Map(held),
 		folders: new Map(folders),
 		ops: new Map(ops),
 		unreadable: new Map(unreadable),
@@ -502,6 +797,10 @@ export const createMemoryStore = (): MemoryStore => {
 
 	const restore = (saved: ReturnType<typeof snapshot>): void => {
 		notes.clear();
+		files.clear();
+		held.clear();
+		for (const [key, value] of saved.files) files.set(key, value);
+		for (const [key, value] of saved.held) held.set(key, value);
 		folders.clear();
 		ops.clear();
 		unreadable.clear();
@@ -539,6 +838,19 @@ export const createMemoryStore = (): MemoryStore => {
 				[...folders.values()].filter((folder) => folder.remoteId !== undefined)
 			),
 		unreadable: () => Promise.resolve([...unreadable.values()]),
+		fileById: (id) => Promise.resolve(files.get(id)),
+		fileByPath: (path) =>
+			Promise.resolve([...files.values()].find((file) => file.path === path)),
+		fileByRemoteId: (remoteId) =>
+			Promise.resolve([...files.values()].find((file) => file.remoteId === remoteId)),
+		allFiles: () => Promise.resolve([...files.values()]),
+		filesUnder: (folderPath) =>
+			Promise.resolve([...files.values()].filter((file) => isWithin(file.path, folderPath))),
+		fileBytes: (id) => {
+			const file = files.get(id);
+			// A copy, as a database would hand back: the caller's to keep.
+			return Promise.resolve(file === undefined ? undefined : validBytes(file)?.slice());
+		},
 
 		applyPull: (batch: PullBatch) => {
 			const before = snapshot();
@@ -562,7 +874,13 @@ export const createMemoryStore = (): MemoryStore => {
 		opBySeq: (seq) => Promise.resolve(ops.get(seq)),
 		completeOp: (seq, outcome) => {
 			if (!ops.has(seq)) return Promise.reject(new Error(`no op ${String(seq)}`));
-			settle(outcome);
+			const before = snapshot();
+			try {
+				settle(outcome);
+			} catch (error) {
+				restore(before);
+				return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+			}
 			ops.delete(seq);
 			return Promise.resolve();
 		},
@@ -591,6 +909,14 @@ export const createMemoryStore = (): MemoryStore => {
 		},
 
 		notes: () => [...notes.values()].sort((a, b) => a.path.localeCompare(b.path)),
+		files: () => [...files.values()].sort((a, b) => a.path.localeCompare(b.path)),
+		heldBytes: (id) => held.get(id),
+		putFile: (file, bytes) => {
+			ensureFolderChain(parentPath(file.path));
+			files.set(file.id, file);
+			if (bytes !== undefined) held.set(file.id, bytes);
+		},
+		dropFile,
 		folders: () => [...folders.values()].sort((a, b) => a.path.localeCompare(b.path)),
 		ops: () => [...ops.values()].sort((a, b) => a.seq - b.seq),
 		storedCursor: () => state.get('cursor'),

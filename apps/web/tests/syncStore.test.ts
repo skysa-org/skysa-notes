@@ -100,6 +100,22 @@ describeSyncStoreContract('Dexie', async () => {
 		seedFolder: async (folder) => {
 			await db.folders.put({ connectionId: CONNECTION, createdAt: 0, ...folder });
 		},
+		seedFile: async (file, held) => {
+			await db.files.put({ connectionId: CONNECTION, ...file });
+			if (held === undefined) return;
+			await db.fileBytes.put({
+				connectionId: CONNECTION,
+				id: file.id,
+				bytes: held.bytes.slice().buffer,
+				...(held.version === undefined ? {} : { version: held.version }),
+				pinned: held.pinned === true ? 1 : 0,
+				lastUsedAt: 0,
+			});
+		},
+		dropFile: async (id) => {
+			await db.files.delete([CONNECTION, id]);
+			await db.fileBytes.delete([CONNECTION, id]);
+		},
 		seedOp: async (op) => {
 			// In the app a queued delete always comes with its tombstone:
 			// `deleteNote` makes the one and the push queue the other.
@@ -1112,5 +1128,91 @@ describe('importing a file over a tombstone', () => {
 		});
 
 		expect((await noteById(db, note.id))?.deletedLocally).toBe(0);
+	});
+});
+
+describe('a file moved again while its move was on the way', () => {
+	// The web queue replaces a queued move rather than adding a second one, so
+	// the move at the network is withdrawn, and its outcome arrives for an op
+	// that is no longer queued. The file is where that move put it; the row is
+	// where the user has put it since.
+	const BYTES = new Uint8Array([1, 2, 3]);
+
+	const moving = async (now: string, replaced: boolean) => {
+		const db = freshDatabase();
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		await db.files.put({
+			connectionId: CONNECTION,
+			id: 'x1',
+			path: now,
+			remoteId: 'f1',
+			remoteVersion: 'v1',
+			size: 3,
+		});
+		await db.fileBytes.put({
+			connectionId: CONNECTION,
+			id: 'x1',
+			bytes: BYTES.slice().buffer,
+			version: 'v1',
+			pinned: 0,
+			lastUsedAt: 0,
+		});
+		const op = { connectionId: CONNECTION, attempts: 0, queuedAt: 0, fileId: 'x1' };
+		const sent = await db.opQueue.add({
+			...op,
+			op: 'move-file',
+			path: 'Trips/a.png',
+			targetPath: 'Work/a.png',
+		});
+		await db.opQueue.delete(sent);
+		if (replaced) {
+			await db.opQueue.add({
+				...op,
+				op: 'move-file',
+				path: 'Trips/a.png',
+				targetPath: now,
+			});
+		}
+		await store.completeOp(sent, {
+			kind: 'moved-file',
+			fileId: 'x1',
+			remote: { ...remote('Work/a.png', 'f1', 'v2'), size: 3 },
+		});
+		const ops = (await store.pendingOps()).map(({ op, fileId, path, targetPath }) => ({
+			op,
+			fileId,
+			path,
+			targetPath,
+		}));
+		return { file: await store.fileById('x1'), bytes: await store.fileBytes('x1'), ops };
+	};
+
+	it('keeps the row where the user put it, and starts the move that replaced it from where it landed', async () => {
+		const { file, bytes, ops } = await moving('Home/a.png', true);
+		expect(file).toEqual({
+			id: 'x1',
+			path: 'Home/a.png',
+			remoteId: 'f1',
+			remoteVersion: 'v2',
+			size: 3,
+		});
+		expect(bytes).toEqual(BYTES);
+		expect(ops).toEqual([
+			{ op: 'move-file', fileId: 'x1', path: 'Work/a.png', targetPath: 'Home/a.png' },
+		]);
+	});
+
+	it('owes the file a move of its own where nothing replaced the one that went', async () => {
+		const { file, ops } = await moving('Home/a.png', false);
+		expect(file?.path).toBe('Home/a.png');
+		expect(ops).toEqual([
+			{ op: 'move-file', fileId: 'x1', path: 'Work/a.png', targetPath: 'Home/a.png' },
+		]);
+	});
+
+	it('owes nothing where the user put it back where it landed', async () => {
+		const { file, ops } = await moving('Work/a.png', false);
+		expect(file?.path).toBe('Work/a.png');
+		expect(ops).toEqual([]);
 	});
 });
