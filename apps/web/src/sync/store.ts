@@ -295,6 +295,50 @@ export const createDexieSyncStore = (
 			(op) => op.connectionId === connectionId
 		);
 
+	const withdraw = (scope: Scope, ops: readonly OpQueueRecord[]) =>
+		scope.opQueue.bulkDelete(ops.flatMap((op) => (op.seq === undefined ? [] : [op.seq])));
+
+	/** The same, and the ops queued for it: there is nothing left to send or move. */
+	const forgetFile = async (scope: Scope, id: string): Promise<void> => {
+		await dropFile(scope, id);
+		const owed = await fileOpsOf(scope, id);
+		await withdraw(
+			scope,
+			owed.filter((op) => op.op === 'upload' || op.op === 'move-file')
+		);
+	};
+
+	/**
+	 * A bound row a pull is about to take or cut loose. An upload that copies
+	 * its file (`copyOf`) would read the bytes from the remote, which has just
+	 * said the file is gone — so whatever this device holds of them goes to
+	 * each copy, held until it is sent, and the copy no longer reads anything.
+	 */
+	const handOver = async (scope: Scope, file: FileRecord): Promise<void> => {
+		const held = await scope.fileBytes.get(fileKey(file.id));
+		if (held === undefined || !current(file, held) || file.remoteId === undefined) return;
+		const { version: _version, ...bytes } = held;
+		const copies = (await opsOf(scope)).filter(
+			(op) => op.op === 'upload' && op.copyOf === file.remoteId
+		);
+		await scope.fileBytes.bulkPut(
+			copies.flatMap((op) =>
+				op.fileId === undefined ? [] : [{ ...bytes, id: op.fileId, pinned: 1 as const }]
+			)
+		);
+		await scope.opQueue.bulkPut(copies.map(({ copyOf: _copyOf, ...op }) => op));
+	};
+
+	/** A row is another's file, which only an engine that has lost track makes. */
+	const refuseTwin = async (scope: Scope, fileId: string, remoteId: string) => {
+		const twin = await scope.files
+			.where('[connectionId+remoteId]')
+			.equals([connectionId, remoteId])
+			.filter((each) => each.id !== fileId)
+			.first();
+		if (twin !== undefined) throw new Error(`File ${remoteId} is ${twin.id}'s already`);
+	};
+
 	/** A queued `move-file`'s origin, pointed at where the remote says the file is. */
 	const fileOriginIsNow = async (scope: Scope, fileId: string, at: string): Promise<void> => {
 		const ops = await fileOpsOf(scope, fileId);
@@ -628,8 +672,11 @@ export const createDexieSyncStore = (
 				file.remoteId !== undefined &&
 				!sparedFiles.has(file.id)
 		);
-		await scope.files.bulkDelete(goneFiles.map((file) => fileKey(file.id)));
-		await scope.fileBytes.bulkDelete(goneFiles.map((file) => fileKey(file.id)));
+		await goneFiles.reduce<Promise<void>>(async (pending, file) => {
+			await pending;
+			await handOver(scope, file);
+			await forgetFile(scope, file.id);
+		}, Promise.resolve());
 	};
 
 	/** Bytes that were held, kept as the remote version's now that it has them. */
@@ -642,21 +689,38 @@ export const createDexieSyncStore = (
 		scope: Scope,
 		change: Extract<PullChange, { kind: 'upsert-file' }>
 	): Promise<void> => {
-		const existing = await ownFile(scope, change.fileId);
-		// A file that exists nowhere else, which only an adoption may bind.
-		if (existing !== undefined && existing.remoteId === undefined && change.adopt !== true) {
-			throw new Error(`File ${change.fileId} is pending, and only an adoption binds it`);
-		}
 		// The user's word that it should go, said since the batch was decided.
-		const deleting = (await opsOf(scope)).some(
+		// Passed over rather than refused: a refusal rejects the batch, and a
+		// delete stuck at the network would stop every pull that mentioned it.
+		const ops = await opsOf(scope);
+		const deleting = ops.some(
 			(op) => op.op === 'delete-file' && op.remoteId === change.remote.remoteId
 		);
-		if (deleting) throw new Error(`File ${change.remote.remoteId} is queued to be deleted`);
-		await ensureFolderChain(scope, parentPath(change.path));
+		if (deleting) return;
+		const existing = await ownFile(scope, change.fileId);
+		// Only the pending row at that path, of that size: anything else is the
+		// engine mistaking another file for it, and binding it would let the
+		// user's bytes go unsent as a cached copy of someone else's.
+		const adoptable =
+			existing?.remoteId === undefined &&
+			existing?.path === change.path &&
+			existing.size === change.remote.size;
+		if (change.adopt === true && !adoptable) {
+			throw new Error(`File ${change.fileId} is not one to adopt as that file`);
+		}
+		// A file that exists nowhere else, which only an adoption may bind.
+		if (change.adopt !== true && existing !== undefined && existing.remoteId === undefined) {
+			throw new Error(`File ${change.fileId} is pending, and only an adoption binds it`);
+		}
+		// Moved here and not yet there: the row stays where the user put it,
+		// and the move starts from wherever the file now is.
+		const moving = ops.some((op) => op.op === 'move-file' && op.fileId === change.fileId);
+		const path = moving && existing !== undefined ? existing.path : change.path;
+		await ensureFolderChain(scope, parentPath(path));
 		await scope.files.put({
 			connectionId,
 			id: change.fileId,
-			path: change.path,
+			path,
 			remoteId: change.remote.remoteId,
 			remoteVersion: change.remote.version,
 			size: change.remote.size ?? 0,
@@ -668,11 +732,9 @@ export const createDexieSyncStore = (
 			const uploads = (await fileOpsOf(scope, change.fileId)).filter(
 				(op) => op.op === 'upload'
 			);
-			await scope.opQueue.bulkDelete(
-				uploads.flatMap((op) => (op.seq === undefined ? [] : [op.seq]))
-			);
+			await withdraw(scope, uploads);
 		}
-		await fileOriginIsNow(scope, change.fileId, change.path);
+		await fileOriginIsNow(scope, change.fileId, change.remote.path);
 	};
 
 	const applyFileChange = async (
@@ -695,17 +757,17 @@ export const createDexieSyncStore = (
 			}
 			return;
 		}
+		await handOver(scope, file);
 		if (change.kind === 'delete-file') {
-			await dropFile(scope, file.id);
+			await forgetFile(scope, file.id);
 			return;
 		}
 		// Gone from the remote as far as a rescan can tell, and its own copy maybe
-		// what lost it: sent again from here, if there is anything to send.
+		// what lost it: sent again from here, if there is anything to send, to
+		// where the row is — a move queued for it has nothing to move.
 		const held = await scope.fileBytes.get(fileKey(file.id));
-		if (held === undefined || !current(file, held)) {
-			await dropFile(scope, file.id);
-			return;
-		}
+		await forgetFile(scope, file.id);
+		if (held === undefined || !current(file, held)) return;
 		const { version: _version, ...bytes } = held;
 		await scope.files.put({ connectionId, id: file.id, path: file.path, size: file.size });
 		await scope.fileBytes.put({ ...bytes, pinned: 1 });
@@ -725,7 +787,7 @@ export const createDexieSyncStore = (
 			await settleFileMove(scope, outcome, withdrawn);
 			return;
 		}
-		await dropFile(scope, outcome.fileId);
+		await forgetFile(scope, outcome.fileId);
 	};
 
 	const settleUpload = async (
@@ -742,15 +804,7 @@ export const createDexieSyncStore = (
 			});
 			return;
 		}
-		// Another row holds what it made: the same file twice.
-		const twin = await scope.files
-			.where('[connectionId+remoteId]')
-			.equals([connectionId, outcome.remote.remoteId])
-			.first();
-		if (twin !== undefined && twin.id !== file.id) {
-			await dropFile(scope, file.id);
-			return;
-		}
+		await refuseTwin(scope, file.id, outcome.remote.remoteId);
 		// Moved while its bytes were on the way. The file is where they went;
 		// the row stays where the user put it, and a move takes the file there.
 		const moved = file.path !== outcome.sentAs;
@@ -779,6 +833,7 @@ export const createDexieSyncStore = (
 	): Promise<void> => {
 		const file = await ownFile(scope, outcome.fileId);
 		if (file === undefined) return;
+		await refuseTwin(scope, file.id, outcome.remote.remoteId);
 		// A move leaves the bytes as they were, whatever it does to the version.
 		const held = await scope.fileBytes.get(fileKey(file.id));
 		if (held !== undefined && held.pinned === 0 && current(file, held)) {
@@ -1176,14 +1231,17 @@ export const createDexieSyncStore = (
 		filesUnder: async (folderPath) =>
 			(await filesOf(db)).filter((file) => isWithin(file.path, folderPath)).map(toSyncFile),
 
-		fileBytes: async (id) => {
-			const [file, held] = await Promise.all([
-				ownFile(db, id),
-				db.fileBytes.get(fileKey(id)),
-			]);
-			if (file === undefined || held === undefined || !current(file, held)) return undefined;
-			return new Uint8Array(held.bytes);
-		},
+		fileBytes: (id) =>
+			// One read of the two, so the bytes are judged against the row they
+			// were read beside.
+			db.transaction('r', db.files, db.fileBytes, async () => {
+				const file = await ownFile(db, id);
+				const held = await db.fileBytes.get(fileKey(id));
+				if (file === undefined || held === undefined || !current(file, held)) {
+					return undefined;
+				}
+				return new Uint8Array(held.bytes);
+			}),
 
 		applyPull: async (batch: PullBatch) => {
 			const hashes = await digestAll(contentsOf(batch.changes));

@@ -497,14 +497,21 @@ export type PullChange =
 	 */
 	| Readonly<{
 			/**
-			 * The remote has this file, here: put the row, bound to it, whole. A
-			 * row that had other bytes cached under another version keeps them,
-			 * and `fileBytes` stops returning them (`SyncStore.fileBytes`).
+			 * The remote has this file, at `remote.path`: put the row, bound to
+			 * it, whole, at `path`. A row that had other bytes cached under
+			 * another version keeps them, and `fileBytes` stops returning them
+			 * (`SyncStore.fileBytes`).
 			 *
-			 * Refused — the batch rejected, as for a dirty note — over a pending
-			 * row without `adopt`, which would take a file that exists nowhere
-			 * else and call it the remote's; and while a `delete-file` for this
-			 * `remoteId` is queued, which is the user's word that it should go.
+			 * A row with a `move-file` queued stays where it is, whatever `path`
+			 * says: the user moved it there and the remote has not heard yet. The
+			 * move starts from `remote.path`, which is where the file is.
+			 *
+			 * Passed over while a `delete-file` for this `remoteId` is queued,
+			 * which is the user's word that it should go — passed over rather
+			 * than refused, or a delete stuck at the network would stop every
+			 * pull that mentioned the file. Refused — the batch rejected, as for
+			 * a dirty note — over a pending row without `adopt`, which would take
+			 * a file that exists nowhere else and call it the remote's.
 			 */
 			kind: 'upsert-file';
 			fileId: string;
@@ -516,6 +523,10 @@ export type PullChange =
 			 * of this one that never heard back. Bound to it, and its bytes kept
 			 * as the remote version's — what saves uploading them again. Its
 			 * queued `upload` is withdrawn.
+			 *
+			 * Refused for anything but a pending row at `path` whose size is the
+			 * remote's: adopted, the user's bytes would stop being held for an
+			 * upload and pass for a cached copy of a file they are not.
 			 */
 			adopt?: true;
 	  }>
@@ -531,9 +542,16 @@ export type PullChange =
 	  }>
 	| Readonly<{
 			/**
-			 * Gone remotely: the row goes, and its bytes. Bound rows only — a
-			 * pending one is refused, since it was never the remote's to take. An
-			 * unknown id is a no-op, as for `delete-note`.
+			 * Gone remotely: the row goes, and its bytes, and any `upload` or
+			 * `move-file` queued for it. Bound rows only — a pending one is
+			 * refused, since it was never the remote's to take. An unknown id is a
+			 * no-op, as for `delete-note`.
+			 *
+			 * An `upload` that copies the file (`copyOf`) was to read it from the
+			 * remote, which has just said it is gone; so the bytes this device
+			 * holds of it, if they are current, are handed to the copy first, held
+			 * until it is sent. The same goes for every bound row a
+			 * `delete-folder` takes and for a `reupload-file`.
 			 */
 			kind: 'delete-file';
 			fileId: string;
@@ -545,7 +563,8 @@ export type PullChange =
 			 * bytes, the row forgets its remote, the bytes are held until they are
 			 * up, and an `upload` is queued; where it does not, nothing can be
 			 * sent, and the row goes. Which of the two is the store's to say: only
-			 * it knows what it holds. An unknown id is a no-op.
+			 * it knows what it holds. A `move-file` queued for it goes either way:
+			 * the upload is to where the row is. An unknown id is a no-op.
 			 */
 			kind: 'reupload-file';
 			fileId: string;
@@ -648,10 +667,10 @@ export type OpOutcome =
 			 * Against the row as it stands, which the user may have changed while
 			 * the bytes were on their way. Moved since (`sentAs` is not its path
 			 * any more), a `move-file` is queued to take the file after it.
-			 * Deleted since, a `delete-file` is queued for what was made. And where
-			 * another row already holds the `remoteId` — the upload found its own
-			 * earlier copy and adopted it — this row is the same file twice, and
-			 * goes.
+			 * Deleted since, a `delete-file` is queued for what was made. Refused
+			 * where another row already holds the `remoteId`: two rows on one file
+			 * is an engine that lost track, and letting either go would take a
+			 * link with it.
 			 */
 			kind: 'uploaded';
 			fileId: string;
@@ -663,7 +682,8 @@ export type OpOutcome =
 			/**
 			 * A `move-file` landed. Its bytes, if held, are still the file's: a
 			 * move does not change them, whatever the provider does to the
-			 * version. A row deleted since is left gone.
+			 * version. A row deleted since is left gone. Refused, as `uploaded`
+			 * is, where another row already holds the `remoteId`.
 			 */
 			kind: 'moved-file';
 			fileId: string;
@@ -672,7 +692,7 @@ export type OpOutcome =
 	| Readonly<{
 			/**
 			 * An `upload` had nothing to send: no bytes here, and nothing left at
-			 * `copyOf` to read them from. The row goes.
+			 * `copyOf` to read them from. The row goes, with anything held for it.
 			 */
 			kind: 'lost-file';
 			fileId: string;
