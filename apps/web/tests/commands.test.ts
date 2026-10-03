@@ -8,7 +8,9 @@ import {
 	BLOCK_COMMANDS,
 	clearLink,
 	INLINE_COMMANDS,
+	INSERT_COMMANDS,
 	setLink,
+	SLASH_COMMANDS,
 } from '../src/editor/commands.js';
 import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 
@@ -286,8 +288,17 @@ describe('the catalogue', () => {
 		expect(new Set(ids).size).toBe(ids.length);
 	});
 
+	it('offers a picture and a file in the slash menu, after the blocks', () => {
+		expect(SLASH_COMMANDS.slice(0, BLOCK_COMMANDS.length)).toEqual(BLOCK_COMMANDS);
+		expect(SLASH_COMMANDS.slice(BLOCK_COMMANDS.length).map((command) => command.id)).toEqual([
+			'image',
+			'file',
+		]);
+		expect(INSERT_COMMANDS.map((command) => command.id)).toEqual(['code-block', 'attach']);
+	});
+
 	it('holds everything the menus offer', () => {
-		[...BLOCK_COMMANDS, ...INLINE_COMMANDS].forEach((command) => {
+		[...SLASH_COMMANDS, ...INLINE_COMMANDS, ...INSERT_COMMANDS].forEach((command) => {
 			expect(ALL_COMMANDS).toContain(command);
 		});
 	});

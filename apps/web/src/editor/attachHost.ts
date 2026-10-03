@@ -93,11 +93,20 @@ export interface AttachmentHost {
 	 */
 	readonly add: (file: File, options: Readonly<{ pasted: boolean }>) => Promise<Added>;
 	/**
+	 * Offer this editor as where files the user picks from outside it go — the
+	 * palette's "Attach files", which serves both editors. The one open now
+	 * offers itself; the returned function takes it back.
+	 */
+	readonly receive: (receiver: FileReceiver) => () => void;
+	/**
 	 * Called when what a link resolves to may have changed: the note moved,
 	 * a file arrived with a pull, the network came back. Returns the way to stop.
 	 */
 	readonly changed: (listener: () => void) => () => void;
 }
+
+/** Where files the user has picked go: into the editor open now, at its selection. */
+export type FileReceiver = (files: readonly File[]) => void;
 
 /** The host of an editor nobody gave one: it shows nothing beside a note. */
 export const NO_ATTACHMENTS: AttachmentHost = {
@@ -105,6 +114,7 @@ export const NO_ATTACHMENTS: AttachmentHost = {
 	fetchFile: () => Promise.resolve({ state: 'unavailable' }),
 	report: () => undefined,
 	add: () => Promise.resolve({ state: 'unavailable' }),
+	receive: () => () => undefined,
 	changed: () => () => undefined,
 };
 

@@ -161,6 +161,38 @@ describe('FormatToolbar', () => {
 		);
 	});
 
+	it('asks for files to put in the note when the paperclip is pressed', async () => {
+		await harness('plain\n');
+		const attach = screen.getByRole('button', { name: 'Attach files' });
+		expect(attach.querySelector('svg')).not.toBeNull();
+
+		await userEvent.click(attach);
+
+		const picker = document.querySelector<HTMLInputElement>('input[type="file"]');
+		expect(picker?.multiple).toBe(true);
+		expect(picker?.hasAttribute('accept')).toBe(false);
+		picker?.dispatchEvent(new Event('cancel'));
+	});
+
+	// A button that does something rather than being on or off is not one a
+	// screen reader should call "not pressed".
+	it('says pressed or not only of what is on or off', async () => {
+		await harness('plain\n');
+
+		expect(screen.getByRole('button', { name: 'Bold' }).getAttribute('aria-pressed')).toBe(
+			'false'
+		);
+		expect(
+			screen.getByRole('button', { name: 'Code block' }).getAttribute('aria-pressed')
+		).toBe('false');
+		expect(
+			screen.getByRole('button', { name: 'Attach files' }).hasAttribute('aria-pressed')
+		).toBe(false);
+		expect(
+			screen.getByRole('button', { name: 'Increase indent' }).hasAttribute('aria-pressed')
+		).toBe(false);
+	});
+
 	it('marks the selection when bold is pressed', async () => {
 		const editor = await harness('plain\n');
 		editor.withCtx(selecting('plain'));

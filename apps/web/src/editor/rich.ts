@@ -40,7 +40,7 @@ import {
 	toLf,
 } from '@skysa/core';
 
-import { attachOnDrop, attachOnPaste, pendingFiles } from './attachDrop.js';
+import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from './attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { attachmentSchema, attachmentViewPlugin, chipKey, claimsClick } from './attachment.js';
 import { autoLanguagePlugin } from './autoLanguage.js';
@@ -360,6 +360,7 @@ export const createRichEditor = ({
 		.use($prose(codeBlocksKeepAtoms))
 		// A file on its way in, and where a drop will put it (`attachDrop.ts`).
 		.use($prose(() => pendingFiles))
+		.use($prose(receivePicked))
 		.use($prose(() => dropCursor({ color: false, class: 'drop-cursor' })))
 		.use($prose(() => codeHighlightPlugin(languages)))
 		.use($prose(() => codeActivePlugin))

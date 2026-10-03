@@ -2,14 +2,17 @@ import { basename, drawsFromData, safeOpenType, showsInline } from '@skysa/core'
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 
+import { closedProblem } from '../editor/addFiles.js';
 import type {
 	Added,
 	AttachmentHost,
 	AttachmentProblem,
 	Fetched,
+	FileReceiver,
 	Shown,
 } from '../editor/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
+import { pickFiles } from '../editor/pickFiles.js';
 import { db as appDb, type NoteRecord, type NotesDatabase } from '../store/db.js';
 import { heldFile } from '../store/fileCache.js';
 import {
@@ -60,6 +63,12 @@ export interface NoteAttachmentsOptions {
 }
 
 export interface NoteAttachments extends AttachmentHost {
+	/**
+	 * Ask the user for files, and put them in the editor open now, where its
+	 * selection is (`receive`). From inside the press that asked for it: the
+	 * browser opens its picker only then (`pickFiles`).
+	 */
+	readonly pick: () => void;
 	/** Tell every view that what links resolve to may have changed. */
 	readonly notify: () => void;
 	/** Let go of every URL made for this note. */
@@ -108,6 +117,7 @@ export const createNoteAttachments = ({
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
 	const listeners = new Set<() => void>();
+	const receivers: { current?: FileReceiver } = {};
 
 	/**
 	 * The bytes of a file, from the device where they are, and otherwise as
@@ -203,6 +213,26 @@ export const createNoteAttachments = ({
 		report,
 
 		add: (file, { pasted }) => add(file, pasted),
+
+		receive: (receiver) => {
+			receivers.current = receiver;
+			return () => {
+				// Only if it is still this one: the next editor offers itself
+				// before the last has gone, on a switch between them.
+				if (receivers.current === receiver) receivers.current = undefined;
+			};
+		},
+
+		pick: () => {
+			void pickFiles().then((files) => {
+				if (files.length === 0) return;
+				// The editor open when they were chosen, which is the one the
+				// user is looking at; none, where the note has gone meanwhile.
+				const into = receivers.current;
+				if (into === undefined) report(closedProblem(files.map((file) => file.name)));
+				else into(files);
+			});
+		},
 
 		changed: (listener) => {
 			listeners.add(listener);

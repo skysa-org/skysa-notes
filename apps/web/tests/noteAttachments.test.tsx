@@ -452,6 +452,106 @@ describe('a file added to the open note', () => {
 	});
 });
 
+describe('files picked for the open note', () => {
+	const picking = () => {
+		const report = vi.fn<(problem: AttachmentProblem) => void>();
+		const host = createNoteAttachments({
+			db: freshDatabase(),
+			note: () => ({ connectionId: 'c1', id: 'n1', path: 'a.md' }),
+			readFile: vi.fn(),
+			report,
+		});
+		return { host, report };
+	};
+
+	const picker = (): HTMLInputElement => {
+		const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+		if (input === null) throw new Error('no picker is open');
+		return input;
+	};
+
+	const choose = (files: File[]) => {
+		const input = picker();
+		Object.defineProperty(input, 'files', { value: files });
+		input.dispatchEvent(new Event('change'));
+	};
+
+	const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+	afterEach(() => {
+		document.body.replaceChildren();
+		vi.restoreAllMocks();
+	});
+
+	it('are asked for at once, inside the press that asked for them', () => {
+		const click = vi.spyOn(HTMLInputElement.prototype, 'click');
+		const { host } = picking();
+
+		host.pick();
+
+		expect(click).toHaveBeenCalledOnce();
+	});
+
+	it('go into the editor open now', async () => {
+		const { host, report } = picking();
+		const receiver = vi.fn();
+		host.receive(receiver);
+		const files = [new File(['a'], 'a.pdf')];
+
+		host.pick();
+		choose(files);
+		await settled();
+
+		expect(receiver).toHaveBeenCalledWith(files);
+		expect(report).not.toHaveBeenCalled();
+	});
+
+	it('go nowhere, and nothing is said, where none is chosen', async () => {
+		const { host, report } = picking();
+		const receiver = vi.fn();
+		host.receive(receiver);
+
+		host.pick();
+		picker().dispatchEvent(new Event('cancel'));
+		await settled();
+
+		expect(receiver).not.toHaveBeenCalled();
+		expect(report).not.toHaveBeenCalled();
+	});
+
+	it('are said to be for adding again where no editor is open by then', async () => {
+		const { host, report } = picking();
+		const withdraw = host.receive(vi.fn());
+
+		host.pick();
+		withdraw();
+		choose([new File(['a'], 'a.pdf'), new File(['b'], 'b.pdf')]);
+		await settled();
+
+		expect(report).toHaveBeenCalledWith({
+			message: 'The editor closed before 2 files could go in. Add them again to put them in.',
+			tone: 'warning',
+		});
+	});
+
+	it('go into the editor that offered itself last, though the one before goes after it', async () => {
+		const { host } = picking();
+		const before = vi.fn();
+		const after = vi.fn();
+		const withdrawBefore = host.receive(before);
+		host.receive(after);
+
+		// The switch from one mode to the other: the new editor is there first.
+		withdrawBefore();
+		host.pick();
+		choose([new File(['a'], 'a.pdf')]);
+		await settled();
+
+		expect(after).toHaveBeenCalledOnce();
+		expect(before).not.toHaveBeenCalled();
+	});
+});
+
 describe('the host of the open note', () => {
 	const mounted = async () => {
 		const db = freshDatabase();

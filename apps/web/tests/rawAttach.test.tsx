@@ -9,6 +9,7 @@ import {
 	type Added,
 	type AttachmentHost,
 	type AttachmentProblem,
+	type FileReceiver,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
 import { RawEditor } from '../src/editor/RawEditor.js';
@@ -282,5 +283,89 @@ describe('a file dropped into raw mode', () => {
 		});
 
 		expect(asked).toEqual([]);
+	});
+});
+
+describe('files picked from outside raw mode', () => {
+	/** A host that keeps whatever editor offers itself to it. */
+	const receiving = (answers: Added[]) => {
+		const fake = fakeHost(answers);
+		const offered: FileReceiver[] = [];
+		const withdrawn: FileReceiver[] = [];
+		const host: AttachmentHost = {
+			...fake.host,
+			receive: (receiver) => {
+				offered.push(receiver);
+				return () => {
+					withdrawn.push(receiver);
+				};
+			},
+		};
+		return { ...fake, host, offered, withdrawn };
+	};
+
+	it('go in as the markdown that links them, in place of the selection, focused', async () => {
+		const { host, asked, offered, open } = receiving([added('a.pdf', 'file')]);
+		const { view, onUserEdit } = mount('keep this out', host);
+		view.dispatch({ selection: { anchor: 5, head: 9 } });
+		const focus = vi.spyOn(view, 'focus');
+
+		expect(offered).toHaveLength(1);
+		offered[0]?.([fileNamed('a.pdf')]);
+		expect(focus).toHaveBeenCalled();
+		expect(view.state.doc.toString()).toBe('keep  out');
+		open();
+		await vi.waitFor(() => {
+			expect(view.state.doc.toString()).toBe('keep [a.pdf](a.pdf) out');
+		});
+
+		expect(asked).toEqual([{ name: 'a.pdf', pasted: false }]);
+		expect(onUserEdit).toHaveBeenCalledTimes(2);
+		expect(view.state.selection.main.head).toBe(view.state.doc.length - ' out'.length);
+		// The user's own edits: each undone as one.
+		undo(view);
+		expect(view.state.doc.toString()).toBe('keep  out');
+		undo(view);
+		expect(view.state.doc.toString()).toBe('keep this out');
+	});
+
+	it('are waited for by whoever settles the editors', async () => {
+		const { host, offered, open } = receiving([added('a.pdf', 'file')]);
+		mount('xy', host);
+		const done = vi.fn();
+
+		offered[0]?.([fileNamed('a.pdf')]);
+		void settleEditors().then(done);
+		await settled();
+		expect(done).not.toHaveBeenCalled();
+		open();
+
+		await vi.waitFor(() => {
+			expect(done).toHaveBeenCalled();
+		});
+	});
+
+	it('are said to be for adding again where the editor has closed', () => {
+		const { host, asked, told, offered } = receiving([]);
+		const { unmount } = mount('xy', host);
+		unmount();
+
+		offered[0]?.([fileNamed('a.pdf')]);
+
+		expect(told.map((problem) => problem.message)).toEqual([
+			'The editor closed before a.pdf could go in. Add it again to put it in.',
+		]);
+		expect(asked).toEqual([]);
+	});
+
+	it('stop going into an editor once it has closed', () => {
+		const { host, offered, withdrawn } = receiving([]);
+		const { unmount } = mount('xy', host);
+		expect(withdrawn).toEqual([]);
+
+		unmount();
+
+		expect(withdrawn).toEqual(offered);
+		expect(withdrawn).toHaveLength(1);
 	});
 });
