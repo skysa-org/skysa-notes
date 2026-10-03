@@ -900,7 +900,7 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.queryByText(failure)).toBeNull();
 		failing();
 		await user.click(screen.getByRole('button', { name: 'Discard them…' }));
-		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		await user.click(await enabled('Download them first'));
 		expect(await screen.findByText(failure)).toBeTruthy();
 		expect(await db.notes.count()).toBe(1);
 	});
@@ -2432,7 +2432,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		// thinks they have a copy is a user who discards.
 		failing();
 		await user.click(await enabled('Discard…'));
-		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		await user.click(await enabled('Download them first'));
 		expect(await screen.findByText(failure)).toBeTruthy();
 		expect(await db.notes.count()).toBe(2);
 	});
@@ -2491,7 +2491,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(screen.getByRole('button', { name: 'Discard for good' })).toBeTruthy();
 		// Nothing has gone, and a download is within reach.
 		expect(await db.notes.count()).toBe(2);
-		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		await user.click(await enabled('Download them first'));
 		await waitFor(() => {
 			expect(downloaded).toHaveLength(1);
 		});

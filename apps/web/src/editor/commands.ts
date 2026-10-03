@@ -17,6 +17,7 @@ import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 
+import { attachPicked } from './attachDrop.js';
 import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
 import { applyList } from './lists.js';
@@ -362,6 +363,33 @@ const INDENT: EditorCommand = {
 	apply: run(sinkListItemCommand),
 };
 
+/**
+ * A file beside the note, picked: a picture, or any file. In the slash menu
+ * and not among the blocks, which is a list of what markdown can hold — these
+ * put in a picture or a link, and ask the user for something first.
+ */
+const IMAGE: EditorCommand = {
+	id: 'image',
+	label: 'Image',
+	keywords: ['picture', 'photo', 'attach', 'upload'],
+	apply: attachPicked('image/*'),
+};
+
+const FILE: EditorCommand = {
+	id: 'file',
+	label: 'File',
+	keywords: ['attachment', 'attach', 'upload', 'document'],
+	apply: attachPicked(),
+};
+
+/** The toolbar's paperclip: any file, a picture among them. */
+const ATTACH: EditorCommand = {
+	id: 'attach',
+	label: 'Attach files',
+	keywords: ['attachment', 'upload', 'image', 'picture', 'photo', 'file'],
+	apply: attachPicked(),
+};
+
 /** Block-level constructs, in the order they appear in the slash menu. */
 export const BLOCK_COMMANDS: readonly EditorCommand[] = [
 	HEADING_1,
@@ -376,6 +404,9 @@ export const BLOCK_COMMANDS: readonly EditorCommand[] = [
 	DIVIDER,
 	PLAIN_TEXT,
 ];
+
+/** What the slash menu offers: the blocks, then a file beside the note. */
+export const SLASH_COMMANDS: readonly EditorCommand[] = [...BLOCK_COMMANDS, IMAGE, FILE];
 
 /** Inline marks, in the order they appear in the selection toolbar. */
 export const INLINE_COMMANDS: readonly EditorCommand[] = [BOLD, ITALIC, STRIKETHROUGH, INLINE_CODE];
@@ -427,14 +458,18 @@ export const LIST_COMMANDS: readonly EditorCommand[] = [BULLET_LIST, ORDERED_LIS
 export const INDENT_COMMANDS: readonly EditorCommand[] = [OUTDENT, INDENT];
 
 /**
- * The one thing the toolbar inserts. Everything else a note can hold — tables,
- * quotes, dividers — is reached from the slash menu, and the code block would
- * be too if it were only a matter of getting one: it has a button because it is
- * the one construct people go looking for in a toolbar, and because the block
- * has more to it than its own existence (a language, and the colours that
- * follow), so somewhere to press is somewhere to start.
+ * The two things the toolbar inserts. Everything else a note can hold —
+ * tables, quotes, dividers — is reached from the slash menu, and the code
+ * block would be too if it were only a matter of getting one: it has a button
+ * because it is the one construct people go looking for in a toolbar, and
+ * because the block has more to it than its own existence (a language, and
+ * the colours that follow), so somewhere to press is somewhere to start.
+ *
+ * A file has a button because on a phone it is the way to put a photo in a
+ * note: there is no dragging there, and a paste of a photo is several steps
+ * in another app first.
  */
-export const INSERT_COMMANDS: readonly EditorCommand[] = [CODE_BLOCK];
+export const INSERT_COMMANDS: readonly EditorCommand[] = [CODE_BLOCK, ATTACH];
 
 /**
  * Every command in the catalogue, once each, for the suite that runs them all.
@@ -446,7 +481,7 @@ export const INSERT_COMMANDS: readonly EditorCommand[] = [CODE_BLOCK];
  */
 export const ALL_COMMANDS: readonly EditorCommand[] = [
 	...new Set([
-		...BLOCK_COMMANDS,
+		...SLASH_COMMANDS,
 		...INLINE_COMMANDS,
 		...TEXT_STYLES.map((style) => style.command),
 		...PRIMARY_INLINE_COMMANDS,

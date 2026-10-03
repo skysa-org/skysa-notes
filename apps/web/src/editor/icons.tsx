@@ -26,6 +26,7 @@ const PATHS = {
 	outdent: 'M10 6h11M10 12h11M10 18h11M7 9l-3 3 3 3',
 	indent: 'M10 6h11M10 12h11M10 18h11M4 9l3 3-3 3',
 	link: 'M10 17H7.5a5 5 0 0 1 0-10H10M14 7h2.5a5 5 0 0 1 0 10H14M8.5 12h7',
+	paperclip: 'M16 7v9a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v9.5a1 1 0 0 1-2 0V8',
 	wrap: 'M4 6h16M4 12h13a3 3 0 0 1 0 6h-6M13 15l-3 3 3 3',
 	'line-numbers': 'M4 5v14M9 7h11M9 12h11M9 17h8',
 	copy: 'M9 9h10v11H9zM15 9V4H5v11h4',

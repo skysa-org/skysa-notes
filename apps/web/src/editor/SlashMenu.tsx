@@ -3,7 +3,7 @@ import { useInstance } from '@milkdown/react';
 import { usePluginViewContext } from '@prosemirror-adapter/react';
 import { useEffect, useRef, useState } from 'react';
 
-import { BLOCK_COMMANDS } from './commands.js';
+import { SLASH_COMMANDS } from './commands.js';
 import { moveHighlight, slashItems, slashKeyAction, textBeforeCursor } from './slash.js';
 
 /**
@@ -28,7 +28,7 @@ export const SlashMenu = () => {
 		index: 0,
 	});
 
-	const menu = slashItems(textBeforeCursor(view), BLOCK_COMMANDS);
+	const menu = slashItems(textBeforeCursor(view), SLASH_COMMANDS);
 	const query = menu?.query;
 	const items = menu?.items ?? [];
 	const open = menu !== undefined;
@@ -48,7 +48,7 @@ export const SlashMenu = () => {
 			// would re-show the menu after the render hid it for having nothing
 			// to offer — `/nothing` would leave an empty box under the cursor.
 			shouldShow: (current) =>
-				slashItems(textBeforeCursor(current), BLOCK_COMMANDS) !== undefined,
+				slashItems(textBeforeCursor(current), SLASH_COMMANDS) !== undefined,
 		});
 		provider.current = instance;
 

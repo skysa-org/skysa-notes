@@ -333,6 +333,15 @@ const NoteBody = ({
 }) => {
 	const body = useRef<HTMLDivElement>(null);
 	const attachments = useNoteAttachments(note, { report: onProblem, store: draft?.store });
+	// Either editor's, through the one open: the toolbar's paperclip and the
+	// slash menu are the rich editor's, and this is raw mode's only way.
+	useCommand({
+		id: 'note.attach',
+		label: 'Attach files',
+		group: 'Note',
+		enabled: mode !== undefined,
+		run: attachments.pick,
+	});
 	const attach = useCallback(
 		(element: HTMLDivElement | null) => {
 			body.current = element;

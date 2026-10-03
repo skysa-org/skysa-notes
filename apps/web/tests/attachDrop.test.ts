@@ -11,8 +11,10 @@ import {
 	type Added,
 	type AttachmentHost,
 	type AttachmentProblem,
+	type FileReceiver,
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
+import { INSERT_COMMANDS, SLASH_COMMANDS } from '../src/editor/commands.js';
 import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 import { settleEditors } from '../src/store/heldEdits.js';
 
@@ -376,5 +378,156 @@ describe('a file dropped on the note', () => {
 
 		expect(asked).toEqual([]);
 		expect(mounted.pending()).toEqual([]);
+	});
+});
+
+/** The picker the command opened, answered as the user would answer it. */
+const picker = (): HTMLInputElement => {
+	const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+	if (input === null) throw new Error('no picker is open');
+	return input;
+};
+
+const choose = (files: File[]) => {
+	const input = picker();
+	Object.defineProperty(input, 'files', { value: files });
+	input.dispatchEvent(new Event('change'));
+};
+
+/** The slash menu's or the toolbar's. */
+const commandNamed = (id: string) => {
+	const command = [...SLASH_COMMANDS, ...INSERT_COMMANDS].find((each) => each.id === id);
+	if (command === undefined) throw new Error(`no command "${id}"`);
+	return command;
+};
+
+describe('files picked for the note', () => {
+	it('are asked for, and go in place of the selection as an edit', async () => {
+		const { host, asked, answer } = fakeHost();
+		const mounted = await mount('keep this out\n', host);
+		cursorAt(mounted.view, 6, 10);
+
+		mounted.editor.action(commandNamed('attach').apply);
+		expect(picker().hasAttribute('accept')).toBe(false);
+		choose([fileNamed('a.pdf')]);
+
+		await vi.waitFor(() => {
+			expect(mounted.pending()).toEqual(['Adding a.pdf…']);
+		});
+		await answer(added('a-1a2b3c4d.pdf', 'a.pdf', 'file'));
+		expect(asked).toEqual([{ name: 'a.pdf', pasted: false }]);
+		expect(mounted.markdown()).toBe('keep [a.pdf](a-1a2b3c4d.pdf) out\n');
+		// The selection taken out once a file is chosen, then the file in.
+		expect(mounted.onUserEdit.mock.calls).toEqual([
+			['keep  out\n'],
+			['keep [a.pdf](a-1a2b3c4d.pdf) out\n'],
+		]);
+	});
+
+	it('are pictures from the slash menu, or any file', async () => {
+		const mounted = await mount('xy\n', fakeHost().host);
+
+		mounted.editor.action(commandNamed('image').apply);
+		expect(picker().getAttribute('accept')).toBe('image/*');
+		picker().dispatchEvent(new Event('cancel'));
+
+		mounted.editor.action(commandNamed('file').apply);
+		expect(picker().hasAttribute('accept')).toBe(false);
+	});
+
+	it('change nothing where none is chosen, not even the selection', async () => {
+		const { host, asked } = fakeHost();
+		const mounted = await mount('keep this out\n', host);
+		cursorAt(mounted.view, 6, 10);
+
+		mounted.editor.action(commandNamed('attach').apply);
+		picker().dispatchEvent(new Event('cancel'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(asked).toEqual([]);
+		expect(mounted.markdown()).toBe('keep this out\n');
+		expect(mounted.view.state.selection.from).toBe(6);
+		expect(mounted.view.state.selection.to).toBe(10);
+		expect(mounted.onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('are said to be for adding again where the note closed while the picker was open', async () => {
+		const { host, asked, told } = fakeHost();
+		const mounted = await mount('xy\n', host);
+
+		mounted.editor.action(commandNamed('attach').apply);
+		await mounted.editor.destroy();
+		choose([fileNamed('a.pdf'), fileNamed('b.pdf')]);
+
+		await vi.waitFor(() => {
+			expect(told.map((problem) => problem.message)).toEqual([
+				'The editor closed before 2 files could go in. Add them again to put them in.',
+			]);
+		});
+		expect(asked).toEqual([]);
+	});
+
+	it('are waited for by whoever settles the editors', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('xy\n', host);
+		const settled = vi.fn();
+
+		mounted.editor.action(commandNamed('attach').apply);
+		choose([fileNamed('a.pdf')]);
+		await vi.waitFor(() => {
+			expect(mounted.pending()).toHaveLength(1);
+		});
+		void settleEditors().then(settled);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(settled).not.toHaveBeenCalled();
+		await answer(added('a.pdf', 'a.pdf', 'file'));
+
+		await vi.waitFor(() => {
+			expect(settled).toHaveBeenCalled();
+		});
+	});
+});
+
+describe('files picked from outside the editor', () => {
+	/** A host that keeps whatever editor offers itself to it. */
+	const receiving = () => {
+		const fake = fakeHost();
+		const offered: FileReceiver[] = [];
+		const withdrawn: FileReceiver[] = [];
+		const host: AttachmentHost = {
+			...fake.host,
+			receive: (receiver) => {
+				offered.push(receiver);
+				return () => {
+					withdrawn.push(receiver);
+				};
+			},
+		};
+		return { ...fake, host, offered, withdrawn };
+	};
+
+	it('go into the editor open now, at its selection, focused', async () => {
+		const { host, offered, asked, answer } = receiving();
+		const mounted = await mount('xy\n', host);
+		cursorAt(mounted.view, 2);
+		const focus = vi.spyOn(mounted.view, 'focus');
+
+		expect(offered).toHaveLength(1);
+		offered[0]?.([fileNamed('a.pdf')]);
+		await answer(added('a.pdf', 'a.pdf', 'file'));
+
+		expect(focus).toHaveBeenCalled();
+		expect(asked).toEqual([{ name: 'a.pdf', pasted: false }]);
+		expect(mounted.markdown()).toBe('x[a.pdf](a.pdf)y\n');
+	});
+
+	it('stop going into an editor once it has closed', async () => {
+		const { host, offered, withdrawn } = receiving();
+		const mounted = await mount('xy\n', host);
+
+		await mounted.editor.destroy();
+
+		expect(withdrawn).toEqual(offered);
+		expect(withdrawn).toHaveLength(1);
 	});
 });

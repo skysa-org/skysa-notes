@@ -1,3 +1,5 @@
+import { editorViewCtx } from '@milkdown/kit/core';
+import type { Ctx } from '@milkdown/kit/ctx';
 import { closeHistory } from '@milkdown/kit/prose/history';
 import { Fragment, type Node as ProseNode, type Schema, Slice } from '@milkdown/kit/prose/model';
 import {
@@ -12,12 +14,13 @@ import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/
 
 import { settleAfter } from '../store/heldEdits.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
-import type { Added, AttachmentHost } from './attachHost.js';
+import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
 import { iconElement } from './icons.js';
+import { pickFiles } from './pickFiles.js';
 
 /**
- * Files pasted or dropped into the rich editor (#187): each added beside the
+ * Files pasted, dropped or picked into the rich editor (#187): each added beside the
  * note through the host, then put in the note — a picture as a picture, any
  * other file as its chip — as the user's own edit, where it was put.
  *
@@ -191,6 +194,57 @@ export const attachOnPaste = (
 	settleAfter(attachFiles(view, host, files, { start, at: start.selection.from, pasted: true }));
 	return true;
 };
+
+/**
+ * Files the user picked, put in the note where its selection is, in place of
+ * what is selected — a paste from a dialog. The editor may have gone while
+ * the picker was open, and then they are said to be for adding again.
+ */
+export const attachChosen = (
+	view: EditorView,
+	host: AttachmentHost,
+	files: readonly File[]
+): void => {
+	if (view.isDestroyed) {
+		host.report(closedProblem(files.map((file) => file.name)));
+		return;
+	}
+	view.focus();
+	const start = view.state.tr.deleteSelection();
+	settleAfter(attachFiles(view, host, files, { start, at: start.selection.from, pasted: false }));
+};
+
+/**
+ * Ask the user for files, and put them in the note (`attachChosen`): the
+ * toolbar's paperclip and the slash menu's Image and File. `accept` is what
+ * the picker offers — `image/*` asks for pictures alone, which a phone
+ * answers from its photos.
+ */
+export const attachPicked =
+	(accept?: string) =>
+	(ctx: Ctx): void => {
+		const view = ctx.get(editorViewCtx);
+		const host = ctx.get(attachHostCtx.key);
+		void pickFiles(accept === undefined ? {} : { accept }).then((files) => {
+			if (files.length > 0) attachChosen(view, host, files);
+		});
+	};
+
+/**
+ * This editor, offered to the host as where files picked from outside it go
+ * (`AttachmentHost.receive`), for as long as it is open.
+ */
+export const receivePicked = (ctx: Ctx): Plugin =>
+	new Plugin({
+		view: (view) => {
+			const host = ctx.get(attachHostCtx.key);
+			return {
+				destroy: host.receive((files) => {
+					attachChosen(view, host, files);
+				}),
+			};
+		},
+	});
 
 /**
  * Files dropped on the note, where they were dropped. The DOM's `drop`, not

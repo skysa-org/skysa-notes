@@ -38,8 +38,8 @@ import { fitToolbar, sameFit } from './toolbarFit.js';
  * no text colour, no highlight and no alignment in a `.md` file, and a button
  * that wrote one would put something in the user's note that the file format
  * loses on the next save. Insert — tables, quotes, dividers — is the slash
- * menu's job here and is deliberately not duplicated; the code block is the one
- * exception, and `INSERT_COMMANDS` says why it earns a button of its own.
+ * menu's job here and is deliberately not duplicated; the code block and a file
+ * are the exceptions, and `INSERT_COMMANDS` says why each earns a button.
  *
  * Every button is a view of `FormatState` and an action on the editor, and
  * nothing else: the component holds no document state, so it cannot disagree
@@ -59,6 +59,7 @@ const ICONS: Record<string, IconName> = {
 	strike: 'strike',
 	code: 'code',
 	'code-block': 'code-block',
+	attach: 'paperclip',
 	'clear-formatting': 'clear',
 	'bullet-list': 'bullets',
 	'ordered-list': 'numbers',
@@ -85,6 +86,16 @@ const LISTS: Record<string, FormatState['list']> = {
 	'ordered-list': 'ordered',
 	'task-list': 'task',
 };
+
+/**
+ * Whether the button is one that is on or off: a mark, a list, a block. One
+ * that only does something — indents, clears, attaches — is not pressed or
+ * unpressed, and a screen reader is not told it is.
+ */
+const toggles = (command: EditorCommand): boolean =>
+	MARKS[command.id] !== undefined ||
+	LISTS[command.id] !== undefined ||
+	BLOCKS[command.id] !== undefined;
 
 /** Whether the button should be drawn as already applied. */
 const isOn = (command: EditorCommand, format: FormatState): boolean => {
@@ -130,6 +141,7 @@ const SLOTS: readonly { id: string; group: string }[] = [
 	{ id: 'task-list', group: 'Lists' },
 	{ id: 'indentation', group: 'Indentation' },
 	{ id: 'code-block', group: 'Insert' },
+	{ id: 'attach', group: 'Insert' },
 	{ id: 'link', group: 'Link' },
 ];
 
@@ -150,6 +162,8 @@ const GIVE_UP_ORDER: readonly string[] = [
 	'more-formatting',
 	'task-list',
 	'link',
+	// After the link: on a phone, the way to put a photo in a note.
+	'attach',
 	'ordered-list',
 	'bullet-list',
 	'emphasis',
@@ -372,7 +386,7 @@ const ToolbarButton = ({
 			className={on ? 'toolbar-button toolbar-button-on' : 'toolbar-button'}
 			title={command.label}
 			aria-label={command.label}
-			aria-pressed={on}
+			aria-pressed={toggles(command) ? on : undefined}
 			disabled={isOff(command, format)}
 			// Before the browser moves focus and drops the selection.
 			onMouseDown={(event) => {
@@ -606,7 +620,7 @@ const MenuCommand = ({
 		<button
 			type="button"
 			className="toolbar-item"
-			aria-pressed={isOn(command, format)}
+			aria-pressed={toggles(command) ? isOn(command, format) : undefined}
 			disabled={isOff(command, format)}
 			onMouseDown={(event) => {
 				event.preventDefault();

@@ -22,8 +22,8 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 const SLOT = 30;
 const TEXT_STYLE = 100;
 const GROUP = 10;
-// Ten slots in six groups: the text style, nine 30px slots, six groups' 10px.
-const EVERYTHING = TEXT_STYLE + 9 * SLOT + 6 * GROUP;
+// Eleven slots in six groups: the text style, ten 30px slots, six groups' 10px.
+const EVERYTHING = TEXT_STYLE + 10 * SLOT + 6 * GROUP;
 
 let barWidth = EVERYTHING;
 
@@ -135,8 +135,9 @@ describe('the toolbar on a bar too narrow for it', () => {
 		expect(within(bar()).queryByRole('button', { name: 'Code block' })).toBeNull();
 		// The link is after the code block on the bar, and stays.
 		expect(within(bar()).getByRole('button', { name: 'Link' })).toBeDefined();
-		// Its group had nothing else in it, so the group goes too.
-		expect(within(bar()).queryByRole('group', { name: 'Insert' })).toBeNull();
+		// What else is in its group stays with it.
+		const insert = within(bar()).getByRole('group', { name: 'Insert' });
+		expect(within(insert).getByRole('button', { name: 'Attach files' })).toBeDefined();
 		expect(overflow()).not.toBeNull();
 	});
 
@@ -155,7 +156,8 @@ describe('the toolbar on a bar too narrow for it', () => {
 
 	it('spreads a menu it has taken in into rows of its own', async () => {
 		// Room for the text style, bold, italic and two of the lists: the
-		// task list goes before the link does, and the link goes too.
+		// task list goes before the link does, and the link and the paperclip
+		// go too, the Insert group with them.
 		barWidth = TEXT_STYLE + 5 * SLOT + 3 * GROUP + SLOT;
 		await harness('plain\n');
 
@@ -174,8 +176,20 @@ describe('the toolbar on a bar too narrow for it', () => {
 			'Decrease indent',
 			'Increase indent',
 			'Code block',
+			'Attach files',
 			'Link…',
 		]);
+		expect(within(bar()).queryByRole('group', { name: 'Insert' })).toBeNull();
+	});
+
+	// On a phone, the way to put a photo in a note.
+	it('keeps the paperclip on the bar after the link has gone', async () => {
+		// Room for the text style, bold, italic, two of the lists and one more.
+		barWidth = TEXT_STYLE + 5 * SLOT + 4 * GROUP + SLOT;
+		await harness('plain\n');
+
+		expect(within(bar()).queryByRole('button', { name: 'Link' })).toBeNull();
+		expect(within(bar()).getByRole('button', { name: 'Attach files' })).toBeDefined();
 	});
 
 	it('opens the link form in the overflow menu', async () => {
