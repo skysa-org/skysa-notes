@@ -2,7 +2,8 @@ import { type Extension, StateEffect, StateField, type TransactionSpec } from '@
 import { EditorView } from '@codemirror/view';
 import { extensionOf } from '@skysa/core';
 
-import { addProblem, filesToAttach } from './addFiles.js';
+import { settleAfter } from '../store/heldEdits.js';
+import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import type { Added, AttachmentHost } from './attachHost.js';
 
 /**
@@ -44,23 +45,28 @@ const addAll = async (
 ): Promise<void> => {
 	const id = Symbol(how);
 	view.dispatch(start, { effects: track.of({ id, at }) });
-	const added = await files.reduce<Promise<Added[]>>(async (sofar, file) => {
-		const done = await sofar;
-		const answer = await host.add(file, { pasted: how === 'paste' });
-		const problem = addProblem(file.name, answer);
-		if (problem !== undefined) host.report(problem);
-		return [...done, answer];
-	}, Promise.resolve([]));
-	const links = added.flatMap((each) => (each.state === 'added' ? [each] : []));
-	// Gone with the note: CodeMirror takes its element out of the page.
-	if (!view.dom.isConnected) {
-		links
-			.filter((each) => each.created)
-			.forEach((each) => {
-				void host.withdraw(each.fileId);
-			});
+	// Gone with the note: CodeMirror takes its element out of the page. What is
+	// left once it has gone is not added, as in rich mode.
+	const closed = () => !view.dom.isConnected;
+	const answers = await files.reduce<Promise<readonly (readonly [File, Added | undefined])[]>>(
+		async (sofar, file) => {
+			const done = await sofar;
+			if (closed()) return [...done, [file, undefined]];
+			const answer = await host.add(file, { pasted: how === 'paste' });
+			const problem = addProblem(file.name, answer);
+			if (problem !== undefined) host.report(problem);
+			return [...done, [file, answer]];
+		},
+		Promise.resolve([])
+	);
+	if (closed()) {
+		const lost = answers.filter(
+			([, answer]) => answer === undefined || answer.state === 'added'
+		);
+		if (lost.length > 0) host.report(closedProblem(lost.map(([file]) => file.name)));
 		return;
 	}
+	const links = answers.flatMap(([, answer]) => (answer?.state === 'added' ? [answer] : []));
 	const insert = links.map((each) => each.markdown).join('');
 	if (insert === '') {
 		view.dispatch({ effects: untrack.of(id) });
@@ -90,7 +96,7 @@ export const rawAttachments = (host: () => AttachmentHost): Extension => [
 			if (files.length === 0) return false;
 			const { from, to } = view.state.selection.main;
 			const start = { changes: { from, to }, userEvent: 'input.paste' };
-			void addAll(view, host(), files, { start, at: from, how: 'paste' });
+			settleAfter(addAll(view, host(), files, { start, at: from, how: 'paste' }));
 			return true;
 		},
 		drop: (event, view) => {
@@ -99,7 +105,7 @@ export const rawAttachments = (host: () => AttachmentHost): Extension => [
 			const at =
 				view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
 				view.state.selection.main.head;
-			void addAll(view, host(), files, { start: {}, at, how: 'drop' });
+			settleAfter(addAll(view, host(), files, { start: {}, at, how: 'drop' }));
 			return true;
 		},
 	}),

@@ -14,6 +14,7 @@ import {
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
 import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { settleEditors } from '../src/store/heldEdits.js';
 
 /**
  * Files pasted or dropped into the rich editor (#187): a placeholder while each
@@ -35,7 +36,6 @@ const fakeHost = () => {
 	const asked: { name: string; pasted: boolean }[] = [];
 	const answers: ((added: Added) => void)[] = [];
 	const told: AttachmentProblem[] = [];
-	const withdrawn: string[] = [];
 	const host: AttachmentHost = {
 		...NO_ATTACHMENTS,
 		add: (file, { pasted }) => {
@@ -43,10 +43,6 @@ const fakeHost = () => {
 			return new Promise((resolve) => {
 				answers.push(resolve);
 			});
-		},
-		withdraw: (fileId) => {
-			withdrawn.push(fileId);
-			return Promise.resolve();
 		},
 		report: (problem) => {
 			told.push(problem);
@@ -60,17 +56,16 @@ const fakeHost = () => {
 		answers.shift()?.(added);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 	};
-	return { host, asked, told, withdrawn, answer };
+	return { host, asked, told, answer };
 };
 
-const added = (href: string, label: string, kind: 'image' | 'file', created = true): Added => ({
+const added = (href: string, label: string, kind: 'image' | 'file'): Added => ({
 	state: 'added',
 	fileId: `id-${href}`,
 	href,
 	label,
 	kind,
 	markdown: kind === 'image' ? `![${label}](${href})` : `[${label}](${href})`,
-	created,
 });
 
 const mount = async (body: string, host: AttachmentHost) => {
@@ -243,17 +238,50 @@ describe('a file pasted into the note', () => {
 		]);
 	});
 
-	it('is taken back where the note closed before it could go in, if this add made it', async () => {
-		const { host, withdrawn, answer } = fakeHost();
+	it('says to add it again where the note closed before it could go in, adding no more', async () => {
+		const { host, asked, told, answer } = fakeHost();
 		const mounted = await mount('xy\n', host);
 		paste(mounted.view, carrying([fileNamed('a.pdf'), fileNamed('b.pdf')]));
 
 		await mounted.editor.destroy();
-		await answer(added('a.pdf', 'a.pdf', 'file', true));
-		// The same file found already beside the note is not this add's to take.
-		await answer(added('b.pdf', 'b.pdf', 'file', false));
+		await answer(added('a.pdf', 'a.pdf', 'file'));
 
-		expect(withdrawn).toEqual(['id-a.pdf']);
+		// Kept beside the note, as a file whose link was taken out is; the
+		// rest is not added at all.
+		expect(asked.map((each) => each.name)).toEqual(['a.pdf']);
+		expect(told.map((problem) => problem.message)).toEqual([
+			'The note closed before 2 files could go in. Add them again to put them in.',
+		]);
+	});
+
+	it('is waited for by whoever settles the editors, as an edit on its way', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('xy\n', host);
+		cursorAt(mounted.view, 2);
+		const settled = vi.fn();
+
+		paste(mounted.view, carrying([fileNamed('a.pdf')]));
+		void settleEditors().then(settled);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(settled).not.toHaveBeenCalled();
+		await answer(added('a.pdf', 'a.pdf', 'file'));
+
+		await vi.waitFor(() => {
+			expect(settled).toHaveBeenCalled();
+		});
+	});
+
+	it('says nothing more of a file refused where the note closed meanwhile', async () => {
+		const { host, told, answer } = fakeHost();
+		const mounted = await mount('xy\n', host);
+		paste(mounted.view, carrying([fileNamed('film.mov')]));
+
+		await mounted.editor.destroy();
+		await answer({ state: 'refused', reason: 'too-large' });
+
+		expect(told.map((problem) => problem.message)).toEqual([
+			'film.mov is over 25 MB, the most a file beside a note can be.',
+		]);
 	});
 });
 
@@ -272,6 +300,22 @@ describe('a file dropped on the note', () => {
 		expect(mounted.markdown()).toBe('one[a.pdf](a.pdf) two\n');
 	});
 
+	it('is waited for by whoever settles the editors', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('one two\n', host);
+		const settled = vi.fn();
+
+		drop(mounted.view, carrying([fileNamed('a.pdf')]), 4);
+		void settleEditors().then(settled);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(settled).not.toHaveBeenCalled();
+		await answer(added('a.pdf', 'a.pdf', 'file'));
+
+		await vi.waitFor(() => {
+			expect(settled).toHaveBeenCalled();
+		});
+	});
+
 	it('goes beside a block that holds no file, in a paragraph of its own', async () => {
 		const { host, answer } = fakeHost();
 		const mounted = await mount('```\ncode\n```\n', host);
@@ -284,6 +328,24 @@ describe('a file dropped on the note', () => {
 		await answer(added('a.pdf', 'a.pdf', 'file'));
 
 		expect(mounted.markdown()).toBe('```\ncode\n```\n\n[a.pdf](a.pdf)\n');
+	});
+
+	it('goes in the nearest cell where it lands between the cells of a table, not a new column', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('| a | b |\n| - | - |\n| 1 | 2 |\n', host);
+
+		// Inside the second row, before its first cell.
+		drop(mounted.view, carrying([fileNamed('a.pdf')]), 14);
+		await answer(added('a.pdf', 'a.pdf', 'file'));
+
+		expect(mounted.markdown()).toBe(
+			[
+				'| a               | b |',
+				'| --------------- | - |',
+				'| [a.pdf](a.pdf)1 | 2 |',
+				'',
+			].join('\n')
+		);
 	});
 
 	it('is left to ProseMirror where the drag began in the note', async () => {

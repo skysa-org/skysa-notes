@@ -148,6 +148,39 @@ describe('dragging a note into a notebook', () => {
 	});
 });
 
+describe('dragging a note a file is still being added to', () => {
+	it('waits for the file to go in, and takes it', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const note = await createNote(db, {
+			folderPath: 'Archive',
+			title: 'Minutes',
+			body: 'Minutes\n',
+		});
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(await screen.findByRole('button', { name: /^Minutes/ }));
+		await screen.findByDisplayValue('Minutes');
+		const row = await screen.findByRole('button', { name: /^Minutes/ });
+		const paste = new Event('paste', { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, 'clipboardData', {
+			value: { files: [new File(['%PDF'], 'a.pdf')], getData: () => '' },
+		});
+
+		// Dragged while the file is still on its way: nothing of it is stored yet.
+		document.querySelector('.cm-content')?.dispatchEvent(paste);
+		await dragOnto(row, 'Move “Minutes” into Work');
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.path).toBe('Work/minutes.md');
+		});
+		expect((await getNote(db, note.id))?.body).toMatch(/\[a\.pdf\]\(a-[0-9a-f]{8}\.pdf\)/);
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual([
+			expect.stringMatching(/^Work\/a-[0-9a-f]{8}\.pdf$/),
+		]);
+	});
+});
+
 describe('dragging a notebook', () => {
 	it('puts it inside the one it was dropped on, and keeps the user in it', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Archive' });

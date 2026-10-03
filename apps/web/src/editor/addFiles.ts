@@ -41,6 +41,23 @@ export const filesToAttach = (data: Carried | null, how: 'paste' | 'drop'): File
 
 const MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
 
+/**
+ * What to tell the user about files a paste or a drop put in a note that closed
+ * before they could go in, by their names. Each is beside the note or never
+ * got there; either way, adding it again puts it in — the same bytes are the
+ * same file, so no second copy is made.
+ */
+export const closedProblem = (names: readonly string[]): AttachmentProblem => {
+	const [name] = names;
+	return {
+		message:
+			names.length === 1 && name !== undefined
+				? `The note closed before ${name === '' ? 'the file' : name} could go in. Add it again to put it in.`
+				: `The note closed before ${String(names.length)} files could go in. Add them again to put them in.`,
+		tone: 'warning',
+	};
+};
+
 /** What to tell the user about a file that was not added, by its name; nothing where it was. */
 export const addProblem = (name: string, added: Added): AttachmentProblem | undefined => {
 	const label = name === '' ? 'That file' : name;

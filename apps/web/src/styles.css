@@ -1969,6 +1969,14 @@ button.danger {
 	background: var(--ring);
 }
 
+/* A background is the first thing forced colours take away. */
+@media (forced-colors: active) {
+	.drop-cursor {
+		background: Highlight;
+		forced-color-adjust: none;
+	}
+}
+
 /* ---- Floating menus --------------------------------------------------- */
 
 /*

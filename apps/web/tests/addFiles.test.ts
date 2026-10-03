@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { addProblem, type Carried, filesToAttach } from '../src/editor/addFiles.js';
+import { addProblem, type Carried, closedProblem, filesToAttach } from '../src/editor/addFiles.js';
 
 /**
  * Which of what a paste or a drop carries are files to add (#187), and what to
@@ -99,9 +99,21 @@ describe('what is said about a file not added', () => {
 				label: 'a.pdf',
 				kind: 'file',
 				markdown: '[a.pdf](a.pdf)',
-				created: true,
 			})
 		).toBeUndefined();
+	});
+
+	it('says that the note closed before the files could go in, and to add them again', () => {
+		expect(closedProblem(['a.pdf'])).toEqual({
+			message: 'The note closed before a.pdf could go in. Add it again to put it in.',
+			tone: 'warning',
+		});
+		expect(closedProblem(['a.pdf', 'b.pdf', 'c.pdf']).message).toBe(
+			'The note closed before 3 files could go in. Add them again to put them in.'
+		);
+		expect(closedProblem(['']).message).toBe(
+			'The note closed before the file could go in. Add it again to put it in.'
+		);
 	});
 
 	it('names a file with no name by what it is', () => {

@@ -12,6 +12,7 @@ import {
 	NO_ATTACHMENTS,
 } from '../src/editor/attachHost.js';
 import { RawEditor } from '../src/editor/RawEditor.js';
+import { settleEditors } from '../src/store/heldEdits.js';
 
 /**
  * Files pasted or dropped into raw mode (#187): added beside the note, and put
@@ -30,21 +31,19 @@ const carrying = (files: File[], text = ''): Carried => ({
 	getData: (format) => (format === 'text/plain' ? text : ''),
 });
 
-const added = (href: string, kind: 'image' | 'file', created = true): Added => ({
+const added = (href: string, kind: 'image' | 'file'): Added => ({
 	state: 'added',
 	fileId: `id-${href}`,
 	href,
 	label: href,
 	kind,
 	markdown: kind === 'image' ? `![${href}](${href})` : `[${href}](${href})`,
-	created,
 });
 
 /** A host that answers each add from `answers`, in order, when the test lets it. */
 const fakeHost = (answers: Added[]) => {
 	const asked: { name: string; pasted: boolean }[] = [];
 	const told: AttachmentProblem[] = [];
-	const withdrawn: string[] = [];
 	const gate = { open: (): void => undefined };
 	const opened = new Promise<void>((resolve) => {
 		gate.open = resolve;
@@ -56,15 +55,11 @@ const fakeHost = (answers: Added[]) => {
 			await opened;
 			return answers[asked.length - 1] ?? { state: 'failed' };
 		},
-		withdraw: (fileId) => {
-			withdrawn.push(fileId);
-			return Promise.resolve();
-		},
 		report: (problem) => {
 			told.push(problem);
 		},
 	};
-	return { host, asked, told, withdrawn, open: gate.open };
+	return { host, asked, told, open: gate.open };
 };
 
 const mount = (body: string, host: AttachmentHost) => {
@@ -200,24 +195,68 @@ describe('a file pasted into raw mode', () => {
 		);
 	});
 
-	it('is taken back where the note closed first, if this add made it', async () => {
-		const { host, withdrawn, open } = fakeHost([
-			added('a.pdf', 'file', true),
-			added('b.pdf', 'file', false),
+	it('says to add it again where the note closed first, adding no more', async () => {
+		const { host, asked, told, open } = fakeHost([
+			added('a.pdf', 'file'),
+			added('b.pdf', 'file'),
 		]);
 		const { view, unmount } = mount('xy', host);
 
 		send(view, 'paste', carrying([fileNamed('a.pdf'), fileNamed('b.pdf')]));
+		// Closed while the first is being added.
+		await vi.waitFor(() => {
+			expect(asked).toHaveLength(1);
+		});
 		unmount();
 		open();
 
 		await vi.waitFor(() => {
-			expect(withdrawn).toEqual(['id-a.pdf']);
+			expect(told.map((problem) => problem.message)).toEqual([
+				'The note closed before 2 files could go in. Add them again to put them in.',
+			]);
 		});
+		expect(asked.map((each) => each.name)).toEqual(['a.pdf']);
+	});
+});
+
+describe('a file pasted into raw mode that closed meanwhile', () => {
+	it('says nothing more of a file refused', async () => {
+		const { host, asked, told, open } = fakeHost([{ state: 'refused', reason: 'too-large' }]);
+		const { view, unmount } = mount('xy', host);
+
+		send(view, 'paste', carrying([fileNamed('film.mov')]));
+		await vi.waitFor(() => {
+			expect(asked).toHaveLength(1);
+		});
+		unmount();
+		open();
+		await settled();
+		await settled();
+
+		expect(told.map((problem) => problem.message)).toEqual([
+			'film.mov is over 25 MB, the most a file beside a note can be.',
+		]);
 	});
 });
 
 describe('a file dropped into raw mode', () => {
+	it('is waited for by whoever settles the editors', async () => {
+		const { host, open } = fakeHost([added('a.pdf', 'file')]);
+		const { view } = mount('one two', host);
+		vi.spyOn(view, 'posAtCoords').mockReturnValue(3);
+		const done = vi.fn();
+
+		send(view, 'drop', carrying([fileNamed('a.pdf')]));
+		void settleEditors().then(done);
+		await settled();
+		expect(done).not.toHaveBeenCalled();
+		open();
+
+		await vi.waitFor(() => {
+			expect(done).toHaveBeenCalled();
+		});
+	});
+
 	it('goes in where it was dropped, as a file of its own name', async () => {
 		const { host, asked, open } = fakeHost([added('a.pdf', 'file')]);
 		const { view } = mount('one two', host);

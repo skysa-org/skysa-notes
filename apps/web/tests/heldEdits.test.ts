@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { holdsTextFor } from '../src/store/detached.js';
-import { beforeClosing, flushEditors, settleEditors } from '../src/store/heldEdits.js';
+import { beforeClosing, flushEditors, settleAfter, settleEditors } from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
 
 /**
@@ -38,6 +38,36 @@ const manualFlush = <T>() => {
 };
 
 describe('settling what the editors hold', () => {
+	it('waits first for work that will leave an edit, such as a file being added', async () => {
+		const order: string[] = [];
+		register(() => {
+			order.push('written');
+			return Promise.resolve();
+		});
+		const adding = { finish: (): void => undefined };
+		settleAfter(
+			new Promise<void>((resolve) => {
+				adding.finish = resolve;
+			}).then(() => {
+				order.push('added');
+			})
+		);
+
+		const settled = settleEditors();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(order).toEqual([]);
+		adding.finish();
+		await settled;
+
+		expect(order).toEqual(['added', 'written']);
+	});
+
+	it('does not wait on such work once it has failed', async () => {
+		settleAfter(Promise.reject(new Error('the add failed')));
+
+		await expect(settleEditors()).resolves.toEqual({ failing: [], rejected: 0 });
+	});
+
 	it('has nothing to wait for when no editor is open', async () => {
 		expect(flushEditors()).toEqual([]);
 		expect(await settleEditors()).toEqual({ failing: [], rejected: 0 });

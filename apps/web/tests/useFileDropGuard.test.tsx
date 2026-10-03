@@ -46,6 +46,24 @@ describe('a file dragged over the app', () => {
 		expect(over.dropEffect).toBe('copy');
 	});
 
+	it('is refused over a bar in an editor, which the editor leaves alone', () => {
+		renderHook(useFileDropGuard);
+		const button = place(
+			'<div contenteditable="true"><div contenteditable="false"><button>Copy</button></div></div>'
+		).querySelector('button')!;
+
+		expect(fireEvent.dragOver(button, { dataTransfer: carrying(['Files']) })).toBe(false);
+	});
+
+	it('is left to an editor where it is aimed at the text itself', () => {
+		renderHook(useFileDropGuard);
+		const text = place('<div contenteditable="true"><p>text</p></div>').querySelector(
+			'p'
+		)!.firstChild!;
+
+		expect(fireEvent.dragOver(text, { dataTransfer: carrying(['Files']) })).toBe(true);
+	});
+
 	it('is left alone where something took it first', () => {
 		renderHook(useFileDropGuard);
 		const target = place('<div>target</div>').firstElementChild!;

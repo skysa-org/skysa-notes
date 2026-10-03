@@ -24,6 +24,24 @@ export type HeldEditsFlush = () => Promise<unknown>;
 
 const unfinished = new Set<HeldEditsFlush>();
 
+/**
+ * Work under way that leaves an edit with an editor when it is done: a file
+ * being added to a note, which goes in once it is beside the note (#187).
+ * Settling waits for it, so that the edit it leaves is among those written —
+ * a note moved a moment after a file was pasted into it takes the file only
+ * if its stored body links it (`carryLinkedFiles`).
+ */
+const underway = new Set<Promise<unknown>>();
+
+/** Have `settleEditors` wait for `work` before it has the editors write. */
+export const settleAfter = (work: Promise<unknown>): void => {
+	underway.add(work);
+	const done = () => {
+		underway.delete(work);
+	};
+	work.then(done, done);
+};
+
 /** Register work to be finished first — an editor's held edits. Answers how to withdraw it. */
 export const beforeClosing = (finish: HeldEditsFlush): (() => void) => {
 	unfinished.add(finish);
@@ -74,9 +92,13 @@ export const flushEditors = (): Promise<SettledEditors>[] =>
 
 /**
  * Have every editor write what it holds, and wait for all of them. One that
- * rejects does not stop the others being waited for.
+ * rejects does not stop the others being waited for. Work under way that will
+ * leave an edit (`settleAfter`) is waited for first.
  */
 export const settleEditors = async (): Promise<SettledEditors> => {
+	// Only where there is some, so that the flushes otherwise start there and
+	// then, as `flushEditors` does.
+	if (underway.size > 0) await Promise.allSettled([...underway]);
 	const each = await Promise.all(flushEditors());
 	return {
 		failing: [...new Set(each.flatMap((settled) => settled.failing))],

@@ -23,7 +23,6 @@ import {
 	AttachmentRefusedError,
 	fileForLink,
 	listFilePaths,
-	withdrawAttachment,
 } from '../store/files.js';
 import type { FileRead } from '../sync/fileReads.js';
 import { syncScheduler } from '../sync/runtime.js';
@@ -55,6 +54,12 @@ export interface NoteAttachmentsOptions {
 	readFile: (connectionId: string, fileId: string, signal?: AbortSignal) => Promise<FileRead>;
 	/** Where a problem the editor has nowhere to show goes: a toast. */
 	report?: (problem: AttachmentProblem) => void;
+	/**
+	 * Store the note, where it is a draft stored nowhere yet (`NoteDraft.store`):
+	 * a file added to it is an edit, and goes beside a note that is there.
+	 * Resolves to whether it is stored.
+	 */
+	store?: () => Promise<boolean>;
 	urls?: ObjectUrlCache;
 	now?: () => number;
 }
@@ -103,6 +108,7 @@ export const createNoteAttachments = ({
 	note,
 	readFile,
 	report = () => undefined,
+	store = () => Promise.resolve(true),
 	urls = createObjectUrlCache(),
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
@@ -146,8 +152,9 @@ export const createNoteAttachments = ({
 	 */
 	const add = async (file: File, pasted: boolean): Promise<Added> => {
 		if (file.size > MAX_ATTACHMENT_BYTES) return { state: 'refused', reason: 'too-large' };
-		const { connectionId, id } = note();
 		try {
+			if (!(await store())) return { state: 'failed' };
+			const { connectionId, id } = note();
 			const added = await addAttachment(db, {
 				connectionId,
 				noteId: id,
@@ -194,11 +201,6 @@ export const createNoteAttachments = ({
 
 		add: (file, { pasted }) => add(file, pasted),
 
-		withdraw: (fileId) =>
-			withdrawAttachment(db, { connectionId: note().connectionId, fileId }).catch(
-				() => undefined
-			),
-
 		changed: (listener) => {
 			listeners.add(listener);
 			return () => {
@@ -225,6 +227,8 @@ export interface NoteAttachmentsSources {
 	readonly subscribe?: SyncScheduler['subscribe'];
 	/** Where a problem the editor has nowhere to show goes (`NoteViewProps.onProblem`). */
 	readonly report?: (problem: AttachmentProblem) => void;
+	/** Store the note first, while it is a draft (`NoteViewProps.draft`). */
+	readonly store?: (() => Promise<boolean>) | undefined;
 }
 
 /**
@@ -243,6 +247,7 @@ export const useNoteAttachments = (
 		db = appDb,
 		subscribe = syncScheduler.subscribe,
 		report,
+		store,
 	}: NoteAttachmentsSources = {}
 ): NoteAttachments => {
 	const current = useRef<Pick<NoteRecord, 'connectionId' | 'id' | 'path'>>(note);
@@ -257,6 +262,10 @@ export const useNoteAttachments = (
 	useEffect(() => {
 		told.current = report;
 	}, [report]);
+	const storing = useRef(store);
+	useEffect(() => {
+		storing.current = store;
+	}, [store]);
 
 	const host = useMemo(
 		() =>
@@ -267,6 +276,7 @@ export const useNoteAttachments = (
 				report: (problem) => {
 					told.current?.(problem);
 				},
+				store: () => storing.current?.() ?? Promise.resolve(true),
 			}),
 		// One per note, whatever else of it changes.
 		[note.id, db]

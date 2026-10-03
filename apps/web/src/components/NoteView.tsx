@@ -308,6 +308,7 @@ const NoteBody = ({
 	toolbar,
 	onUserEdit,
 	onProblem,
+	draft,
 	onUnsupported,
 	onAdopted,
 	onBody,
@@ -323,13 +324,15 @@ const NoteBody = ({
 	toolbar: RichEditorProps['toolbar'];
 	onUserEdit: (body: string, origin: string) => void;
 	onProblem: NoteViewProps['onProblem'];
+	/** Stored before a file is added to it, as before the first keystroke. */
+	draft: NoteDraft | undefined;
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 	/** The element, for whoever sizes the outline by its width. */
 	onBody: (element: HTMLDivElement | null) => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
-	const attachments = useNoteAttachments(note, { report: onProblem });
+	const attachments = useNoteAttachments(note, { report: onProblem, store: draft?.store });
 	const attach = useCallback(
 		(element: HTMLDivElement | null) => {
 			body.current = element;
@@ -738,6 +741,7 @@ export const NoteView = ({
 					setFinding(0);
 				}}
 				begun={draft !== undefined}
+				draft={draft}
 				liveEdits={liveEdits}
 				renamings={renamings}
 				onRename={rename}
@@ -850,6 +854,7 @@ const NoteScreen = ({
 	toggleMode,
 	onClose,
 	begun,
+	draft,
 	liveEdits,
 	renamings,
 	onRename,
@@ -874,6 +879,7 @@ const NoteScreen = ({
 	onClose: () => void;
 	/** A draft: begun just now, stored nowhere yet (`NoteViewProps.draft`). */
 	begun: boolean;
+	draft: NoteDraft | undefined;
 	liveEdits: LiveEdits | undefined;
 	renamings: Renamings | undefined;
 	onRename: (title: string) => void;
@@ -992,6 +998,7 @@ const NoteScreen = ({
 				toolbar={layout.toolbar}
 				onUserEdit={onUserEdit}
 				onProblem={onProblem}
+				draft={draft}
 				onUnsupported={onUnsupported}
 				onAdopted={onAdopted}
 				onBody={onBody}

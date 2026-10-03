@@ -16,7 +16,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 } from '../src/store/db.js';
-import { createNote } from '../src/store/notes.js';
+import { createNote, draftNote } from '../src/store/notes.js';
 import type { FileRead } from '../src/sync/fileReads.js';
 import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
 
@@ -319,17 +319,14 @@ describe('a file added to the open note', () => {
 		expect((await db.files.toArray()).map((file) => file.path)).toEqual([`notes/${href}`]);
 	});
 
-	it('is the file already there when the same bytes are added again, which it did not make', async () => {
-		const { host } = await opened();
+	it('is the file already there when the same bytes are added again', async () => {
+		const { db, host } = await opened();
 
 		const first = await host.add(pdf(), { pasted: false });
 		const again = await host.add(pdf(), { pasted: false });
 
-		expect(first.state === 'added' && first.created).toBe(true);
-		expect(again.state === 'added' && again.created).toBe(false);
-		expect(again.state === 'added' && again.fileId).toBe(
-			first.state === 'added' && first.fileId
-		);
+		expect(again).toEqual(first);
+		expect(await db.files.count()).toBe(1);
 	});
 
 	it('is refused when too large, before a byte of it is read', async () => {
@@ -355,6 +352,36 @@ describe('a file added to the open note', () => {
 		});
 	});
 
+	it('stores a note that is a draft first, as its first keystroke would', async () => {
+		const db = freshDatabase();
+		const draft = draftNote({ connectionId: 'c1', folderPath: 'notes', taken: [] });
+		const store = vi.fn(async () => {
+			await db.notes.add(draft);
+			return true;
+		});
+		const host = createNoteAttachments({ db, note: () => draft, readFile: vi.fn(), store });
+
+		const added = await host.add(pdf(), { pasted: false });
+
+		expect(store).toHaveBeenCalledTimes(1);
+		expect(added).toMatchObject({ state: 'added', kind: 'file' });
+		expect(await db.files.count()).toBe(1);
+	});
+
+	it('has failed where a draft could not be stored, and adds nothing', async () => {
+		const db = freshDatabase();
+		const draft = draftNote({ connectionId: 'c1', folderPath: 'notes', taken: [] });
+		const host = createNoteAttachments({
+			db,
+			note: () => draft,
+			readFile: vi.fn(),
+			store: () => Promise.resolve(false),
+		});
+
+		expect(await host.add(pdf(), { pasted: false })).toEqual({ state: 'failed' });
+		expect(await db.files.count()).toBe(0);
+	});
+
 	it('has failed where the store cannot take it', async () => {
 		const { db, host } = await opened();
 		db.close();
@@ -371,16 +398,6 @@ describe('a file added to the open note', () => {
 
 		expect(added).toMatchObject({ state: 'added', kind: 'image', label: 'Pasted image' });
 		expect(added.state === 'added' && added.href).toMatch(/^pasted-image-[0-9a-f]{8}\.png$/);
-	});
-
-	it('is taken back, when the editor had nowhere to link it', async () => {
-		const { db, host } = await opened();
-		const added = await host.add(pdf(), { pasted: false });
-
-		await host.withdraw(added.state === 'added' ? added.fileId : '');
-
-		expect(await db.files.count()).toBe(0);
-		expect(await db.fileBytes.count()).toBe(0);
 	});
 });
 

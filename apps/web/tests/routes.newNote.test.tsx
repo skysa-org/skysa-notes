@@ -29,6 +29,8 @@ afterEach(async () => {
 	await db.prefs.clear();
 	await db.syncState.clear();
 	await db.credentials.clear();
+	await db.files.clear();
+	await db.fileBytes.clear();
 });
 
 const openApp = async (at = '/') => {
@@ -142,6 +144,31 @@ describe('a notebook with nothing in it', () => {
 		await waitFor(async () => {
 			expect((await db.notes.toArray()).map((note) => note.body)).toEqual(['milk']);
 		});
+	});
+
+	it('stores the note when a file is pasted into it, and the file beside it', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await openApp();
+		await begun();
+
+		const paste = new Event('paste', { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, 'clipboardData', {
+			value: { files: [new File(['%PDF'], 'a.pdf')], getData: () => '' },
+		});
+		document.querySelector('.cm-content')?.dispatchEvent(paste);
+		await waitFor(() => {
+			expect(document.querySelector('.cm-content')?.textContent).toContain('[a.pdf](');
+		});
+		flushAutosave();
+
+		await waitFor(async () => {
+			expect((await db.notes.toArray()).map((note) => note.body)).toEqual([
+				expect.stringMatching(/^\[a\.pdf\]\(a-[0-9a-f]{8}\.pdf\)$/),
+			]);
+		});
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual([
+			expect.stringMatching(/^Work\/a-[0-9a-f]{8}\.pdf$/),
+		]);
 	});
 
 	it('leaves nothing behind when it is left unedited', async () => {

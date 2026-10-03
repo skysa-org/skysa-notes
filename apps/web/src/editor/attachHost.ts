@@ -64,8 +64,6 @@ export type Added =
 			label: string;
 			kind: AttachmentKind;
 			markdown: string;
-			/** Made by this add, not found already there: what `withdraw` may take back. */
-			created: boolean;
 	  }
 	/** Not a file that can go beside a note: too large, or a note itself. */
 	| { state: 'refused'; reason: AttachmentRefusal }
@@ -94,8 +92,6 @@ export interface AttachmentHost {
 	 * a picture from the clipboard has no name of its own — or not.
 	 */
 	readonly add: (file: File, options: Readonly<{ pasted: boolean }>) => Promise<Added>;
-	/** Take back a file `add` made that the editor had nowhere to link. */
-	readonly withdraw: (fileId: string) => Promise<void>;
 	/**
 	 * Called when what a link resolves to may have changed: the note moved,
 	 * a file arrived with a pull, the network came back. Returns the way to stop.
@@ -109,7 +105,6 @@ export const NO_ATTACHMENTS: AttachmentHost = {
 	fetchFile: () => Promise.resolve({ state: 'unavailable' }),
 	report: () => undefined,
 	add: () => Promise.resolve({ state: 'unavailable' }),
-	withdraw: () => Promise.resolve(),
 	changed: () => () => undefined,
 };
 

@@ -1,10 +1,17 @@
 import { closeHistory } from '@milkdown/kit/prose/history';
 import { Fragment, type Node as ProseNode, type Schema, Slice } from '@milkdown/kit/prose/model';
-import { type EditorState, Plugin, PluginKey, type Transaction } from '@milkdown/kit/prose/state';
+import {
+	type EditorState,
+	Plugin,
+	PluginKey,
+	Selection,
+	type Transaction,
+} from '@milkdown/kit/prose/state';
 import { dropPoint } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
-import { addProblem, filesToAttach } from './addFiles.js';
+import { settleAfter } from '../store/heldEdits.js';
+import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import type { Added, AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
 import { iconElement } from './icons.js';
@@ -90,38 +97,52 @@ const nodeFor = (
 /**
  * A place near `at` where a file can go: in the text there, or beside the
  * block it is in where that holds no file — a code block — or between blocks,
- * where it goes in a paragraph of its own.
+ * where it goes in a paragraph of its own. Between a table's cells, which is
+ * nowhere a paragraph can go without being a cell of its own — a new column —
+ * it is the text of the nearest cell.
  */
 const placeNear = (doc: ProseNode, at: number): number => {
 	const probe = doc.type.schema.nodes[ATTACHMENT]?.create({ href: 'probe.bin' });
 	if (probe === undefined) return at;
-	return dropPoint(doc, at, new Slice(Fragment.from(probe), 0, 0)) ?? at;
+	const $at = doc.resolve(at);
+	const near = $at.parent.type.spec.tableRole === undefined ? at : Selection.near($at).from;
+	return dropPoint(doc, near, new Slice(Fragment.from(probe), 0, 0)) ?? near;
 };
 
-/** Put one added file where its placeholder is, or say why it is not there. */
-const place = (view: EditorView, host: AttachmentHost, file: File, id: symbol, added: Added) => {
+/**
+ * Put one added file where its placeholder is, or say why it is not there.
+ * Answers whether it was lost to the note closing first: added, and with
+ * nowhere to go in.
+ */
+const place = (
+	view: EditorView,
+	host: AttachmentHost,
+	file: File,
+	id: symbol,
+	added: Added
+): boolean => {
 	// Said even where the note has closed meanwhile: the page says it, not the note.
 	const problem = addProblem(file.name, added);
 	if (problem !== undefined) host.report(problem);
-	if (view.isDestroyed) {
-		if (added.state === 'added' && added.created) void host.withdraw(added.fileId);
-		return;
-	}
+	if (view.isDestroyed) return added.state === 'added';
 	const done = view.state.tr.setMeta(pendingKey, { done: id });
 	const node = added.state === 'added' ? nodeFor(view.state.schema, added) : undefined;
 	if (node === undefined) {
 		view.dispatch(done);
-		return;
+		return false;
 	}
 	// Near, not at: what was around it may have become a code block meanwhile.
 	const at = placeNear(view.state.doc, placeOf(view.state, id) ?? view.state.selection.from);
 	// An undo step of its own, not one with what was typed beside it a moment ago.
 	view.dispatch(closeHistory(done.insert(at, node)));
+	return false;
 };
 
 /**
  * Add `files` to the note and put each in it at `at`, in the document as
- * `start` leaves it: a paste has emptied the selection there.
+ * `start` leaves it: a paste has emptied the selection there. Settling the
+ * editors waits for it (`settleAfter`), so a note moved meanwhile is moved
+ * with the files its body links once they are in.
  */
 export const attachFiles = async (
 	view: EditorView,
@@ -136,10 +157,16 @@ export const attachFiles = async (
 			add: pending.map(({ file, id }) => ({ id, name: file.name })),
 		})
 	);
-	await pending.reduce(async (before, { file, id }) => {
-		await before;
-		place(view, host, file, id, await host.add(file, { pasted }));
-	}, Promise.resolve());
+	// Once the note has closed, what is left is not added at all: kept beside
+	// a note nothing will link it from, each would be one more file nobody put
+	// in a note.
+	const lost = await pending.reduce<Promise<readonly string[]>>(async (before, { file, id }) => {
+		const missed = await before;
+		if (view.isDestroyed) return [...missed, file.name];
+		const added = await host.add(file, { pasted });
+		return place(view, host, file, id, added) ? [...missed, file.name] : missed;
+	}, Promise.resolve([]));
+	if (lost.length > 0) host.report(closedProblem(lost));
 };
 
 /**
@@ -157,7 +184,7 @@ export const attachOnPaste = (
 	const files = filesToAttach(event.clipboardData, 'paste');
 	if (files.length === 0) return false;
 	const start = view.state.tr.deleteSelection();
-	void attachFiles(view, host, files, { start, at: start.selection.from, pasted: true });
+	settleAfter(attachFiles(view, host, files, { start, at: start.selection.from, pasted: true }));
 	return true;
 };
 
@@ -176,6 +203,6 @@ export const attachOnDrop = (host: AttachmentHost, view: EditorView, event: Drag
 		view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ??
 		view.state.selection.from;
 	view.focus();
-	void attachFiles(view, host, files, { start: view.state.tr, at, pasted: false });
+	settleAfter(attachFiles(view, host, files, { start: view.state.tr, at, pasted: false }));
 	return true;
 };
