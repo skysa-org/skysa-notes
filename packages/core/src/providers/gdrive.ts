@@ -22,12 +22,13 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
-import { readText } from './text.js';
+import { decodeText, responseBytes, uploadType } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
 	type ChangeSet,
 	ConflictError,
+	type CreateFileOptions,
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
@@ -91,6 +92,13 @@ const ROOT_VALUE = 'root';
 const FIELDS =
 	'id,name,mimeType,parents,headRevisionId,modifiedTime,createdTime,size,md5Checksum,trashed';
 const PAGE_SIZE = '1000';
+/**
+ * The most a multipart upload is for: "Use this upload type to quickly
+ * transfer a small file (5 MB or less)". A larger file goes up resumable,
+ * which is two requests instead of one.
+ * https://developers.google.com/workspace/drive/api/guides/manage-uploads
+ */
+const MULTIPART_LIMIT = 5 * 1024 * 1024;
 /** Drive refuses to nest folders deeper than this, so a listing need not go further. */
 const MAX_DEPTH = 100;
 
@@ -208,8 +216,19 @@ type Attempt<T> = { ok: true; value: T } | { ok: false; failure: DriveFailure };
 
 interface RequestParts {
 	headers?: Record<string, string>;
-	body?: string;
+	body?: string | Uint8Array<ArrayBuffer>;
 }
+
+const encoder = new TextEncoder();
+
+const joined = (parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> => {
+	const whole = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+	parts.reduce((at, part) => {
+		whole.set(part, at);
+		return at + part.length;
+	}, 0);
+	return whole;
+};
 
 /** A string literal in a Drive query, with `\` and `'` escaped. */
 const literal = (value: string): string => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -731,47 +750,133 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	/**
 	 * A multipart upload: the metadata, then the bytes. Per RFC 2046 the line
 	 * break before a delimiter belongs to the delimiter, so the content goes up
-	 * exactly as it is, trailing newline or not.
+	 * exactly as it is, trailing newline or not. Built as bytes, since what is
+	 * between the delimiters need not be text.
 	 */
-	const multipart = (metadata: object, content: string): RequestParts => {
+	const multipart = (metadata: object, content: Uint8Array, type: string): RequestParts => {
 		const boundary = `skysa-${crypto.randomUUID()}`;
+		const head = [
+			`--${boundary}`,
+			'content-type: application/json; charset=UTF-8',
+			'',
+			JSON.stringify(metadata),
+			`--${boundary}`,
+			`content-type: ${type}`,
+			'',
+			'',
+		].join('\r\n');
 		return {
 			headers: { 'content-type': `multipart/related; boundary=${boundary}` },
-			body: [
-				`--${boundary}`,
-				'content-type: application/json; charset=UTF-8',
-				'',
-				JSON.stringify(metadata),
-				`--${boundary}`,
-				`content-type: ${NOTE_TYPE}; charset=UTF-8`,
-				'',
+			body: joined([
+				encoder.encode(head),
 				content,
-				`--${boundary}--`,
-				'',
-			].join('\r\n'),
+				encoder.encode(`\r\n--${boundary}--\r\n`),
+			]),
 		};
+	};
+
+	/**
+	 * Where a resumable upload's bytes go: the `Location` Drive answers the
+	 * first request with. Taken only on Drive's own host, which is the one the
+	 * token is for and the one `connect-src` allows; anything else is refused
+	 * rather than sent the token. Whether the header is exposed to a page on
+	 * another origin at all is on the live-check list (docs/ARCHITECTURE.md §5.1).
+	 */
+	const sessionUri = (location: string | null): string => {
+		// Told apart, because which it is answers the live check: a header the
+		// page was not shown reads as `null`.
+		if (location === null) {
+			throw new Error('gdrive started a resumable upload and did not say where it is');
+		}
+		const url = ((): URL | undefined => {
+			try {
+				return new URL(location);
+			} catch {
+				return undefined;
+			}
+		})();
+		if (url?.origin !== API) {
+			throw new Error('gdrive started a resumable upload somewhere it will not be sent');
+		}
+		return url.toString();
+	};
+
+	/**
+	 * A file over the multipart limit: the metadata to start a session, then
+	 * every byte in one `PUT` to it. What the `PUT` answers with is the file,
+	 * but not certainly with the fields the start asked for — and `create` reads
+	 * every one of them: the revision is the version, and the time it was made
+	 * is what settles it against a file another device made at the same name. So
+	 * where any is missing, the file is asked for again.
+	 */
+	const resumable = async (
+		metadata: object,
+		content: Uint8Array<ArrayBuffer>,
+		type: string,
+		path: string
+	): Promise<DriveFile> => {
+		const started = await send('POST', `${UPLOADS}?uploadType=resumable&fields=${FIELDS}`, {
+			headers: { 'content-type': 'application/json; charset=UTF-8' },
+			body: JSON.stringify(metadata),
+		});
+		if (!started.ok) return raise(await failureOf(started), path);
+		const sent = await send('PUT', sessionUri(started.headers.get('location')), {
+			headers: { 'content-type': type },
+			body: content,
+		});
+		if (!sent.ok) return raise(await failureOf(sent), path);
+		const made = JSON.parse(await sent.text()) as DriveFile;
+		if (made.id === undefined || made.id === '') {
+			throw new Error('gdrive finished a resumable upload and did not say what it made');
+		}
+		const whole = [made.headRevisionId, made.createdTime, made.name, made.size].every(
+			(field) => field !== undefined && field !== ''
+		);
+		return whole ? made : call<DriveFile>('GET', fileUrl(made.id), {}, path);
 	};
 
 	/**
 	 * Create-only, which Drive has no word for: look, create, look again. A file
 	 * already there is a conflict before anything is sent; one another device
 	 * made in the moment between is a conflict after, with ours deleted.
+	 *
+	 * `mimeType` is what Drive records; `type` is the part's own header, which
+	 * for a note says its charset.
 	 */
-	const create = async (path: string, content: string): Promise<RemoteEntry> => {
+	const create = async (
+		path: string,
+		content: Uint8Array<ArrayBuffer>,
+		mimeType: string,
+		type: string
+	): Promise<RemoteEntry> => {
 		const name = basename(path);
 		const parentId = await folderIdAt(parentPath(path));
 		const existing = earliest(await named(parentId, name));
 		if (existing !== undefined) throw new ConflictError(toEntry(existing, path));
 
-		const made = await call<DriveFile>(
-			'POST',
-			`${UPLOADS}?uploadType=multipart&fields=${FIELDS}`,
-			multipart({ name, mimeType: NOTE_TYPE, parents: [parentId] }, content)
-		);
+		const metadata = { name, mimeType, parents: [parentId] };
+		const made =
+			content.length <= MULTIPART_LIMIT
+				? await call<DriveFile>(
+						'POST',
+						`${UPLOADS}?uploadType=multipart&fields=${FIELDS}`,
+						multipart(metadata, content, type)
+					)
+				: await resumable(metadata, content, type, path);
 		const winner = await settleCreate(parentId, made);
 		if (winner.id !== made.id) throw new ConflictError(toEntry(winner, path));
 		return toEntry(made, path);
 	};
+
+	const createNote = (path: string, content: string): Promise<RemoteEntry> =>
+		create(
+			path,
+			// A copy, for the one `BodyInit` takes in every runtime: bytes over an
+			// `ArrayBuffer`. A note is small; a file arrives as one already.
+			new Uint8Array(encoder.encode(content)),
+			NOTE_TYPE,
+			`${NOTE_TYPE}; charset=UTF-8`
+		);
 
 	/**
 	 * By id, never by path, so a file deleted since the caller saw it is not
@@ -804,8 +909,19 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const target = normalizePath(path);
 		if (target === ROOT) return Promise.reject(new NotFoundError(target));
 		return opts.expectedVersion === undefined
-			? create(target, content)
+			? createNote(target, content)
 			: update(target, content, opts.expectedVersion);
+	};
+
+	const createFile = (
+		path: string,
+		bytes: Uint8Array<ArrayBuffer>,
+		opts: CreateFileOptions = {}
+	): Promise<RemoteEntry> => {
+		const target = normalizePath(path);
+		if (target === ROOT) return Promise.reject(new NotFoundError(target));
+		const type = uploadType(opts.contentType);
+		return create(target, bytes, type, type);
 	};
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
@@ -819,7 +935,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			...(userAgent === undefined ? {} : { userAgent }),
 		});
 		// Create-only, so another device's marker written in between stands.
-		await create(MARKER_FILE, serializeMarker(marker)).catch((error: unknown) => {
+		await createNote(MARKER_FILE, serializeMarker(marker)).catch((error: unknown) => {
 			if (error instanceof ConflictError) return;
 			throw error;
 		});
@@ -845,7 +961,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * Drive can download a past revision only if it was kept forever, so the
 	 * two cannot be pinned together.
 	 */
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
+	const readBytes = async (
+		entry: EntryRef
+	): Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }> => {
 		const id = await idOf(entry);
 		if (id === undefined) throw new NotFoundError(entry.path);
 		const file = await call<DriveFile>('GET', fileUrl(id), {}, entry.path);
@@ -857,7 +975,12 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 		const response = await send('GET', `${FILES}/${encodeURIComponent(id)}?alt=media`);
 		if (!response.ok) return raise(await failureOf(response), entry.path);
-		return { content: await readText(response, entry.path), version };
+		return { bytes: await responseBytes(response), version };
+	};
+
+	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
+		const { bytes, version } = await readBytes(entry);
+		return { content: decodeText(bytes, entry.path), version };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
@@ -1174,6 +1297,8 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		list,
 		read,
 		write,
+		readBytes,
+		createFile,
 		createFolder,
 		move,
 		delete: remove,

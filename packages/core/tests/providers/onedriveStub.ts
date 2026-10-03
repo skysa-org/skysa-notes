@@ -6,6 +6,7 @@ import {
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
+import { bodyBytes, bodyText, createFrom } from './wireBody.js';
 
 /**
  * A stand-in for Microsoft Graph at the transport layer, over the in-memory
@@ -271,9 +272,14 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 
 	/**
 	 * By path. Graph's default for an upload is to replace what is there; only
-	 * `conflictBehavior=fail` makes it refuse.
+	 * `conflictBehavior=fail` makes it refuse. A create takes whatever bytes
+	 * were sent; a replace, which the adapter never asks for, is text.
 	 */
-	const uploadByPath = async (path: string, url: URL, body: string): Promise<Response> => {
+	const uploadByPath = async (
+		path: string,
+		url: URL,
+		bytes: Uint8Array<ArrayBuffer>
+	): Promise<Response> => {
 		const existing = byPath(path);
 		if (existing?.kind === 'folder') return graphError(409, 'nameAlreadyExists');
 		if (existing !== undefined && failOnConflict(url)) {
@@ -281,11 +287,12 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		}
 		const parent = parentPath(path);
 		if (parent !== '' && byPath(parent)?.kind !== 'folder') return graphError(409, 'conflict');
-		const written = await backing.write(
-			path,
-			body,
-			existing === undefined ? {} : { expectedVersion: existing.version }
-		);
+		const written =
+			existing === undefined
+				? await createFrom(backing, path, bytes)
+				: await backing.write(path, new TextDecoder().decode(bytes), {
+						expectedVersion: existing.version,
+					});
 		return json(itemOf(written), existing === undefined ? 201 : 200);
 	};
 
@@ -397,7 +404,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		method: string,
 		url: URL,
 		match: RegExpExecArray,
-		body: string
+		bytes: Uint8Array<ArrayBuffer>
 	): Promise<Response> | Response => {
 		const path = match[1] === undefined ? '' : decodePath(match[1]);
 		const action = `${method} ${match[3] ?? match[4] ?? ''}`;
@@ -408,7 +415,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		// here is what let an adapter that could not make a single folder on
 		// OneDrive pass this suite (docs/ARCHITECTURE.md §5.2).
 		if (action === 'POST /children') return graphError(400, 'invalidRequest');
-		if (action === 'PUT /content' && path !== '') return uploadByPath(path, url, body);
+		if (action === 'PUT /content' && path !== '') return uploadByPath(path, url, bytes);
 		if (action === 'GET ') return path === '' ? json(rootItem()) : found(byPath(path));
 		return graphError(405, 'methodNotAllowed');
 	};
@@ -417,7 +424,8 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		method: string,
 		url: URL,
 		headers: Record<string, string>,
-		body: string
+		body: string,
+		bytes: Uint8Array<ArrayBuffer>
 	): Promise<Response> | Response => {
 		if (url.origin === STUB_DOWNLOAD_ORIGIN) return download(url, headers);
 		if (url.origin !== GRAPH) return graphError(400, 'unknownHost');
@@ -428,7 +436,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		const item = ITEM_PATH.exec(url.pathname);
 		if (item !== null) return itemRoute(method, item, headers, body);
 		const approot = APPROOT_PATH.exec(url.pathname);
-		if (approot !== null) return approotRoute(method, url, approot, body);
+		if (approot !== null) return approotRoute(method, url, approot, bytes);
 		return graphError(400, 'invalidRequest');
 	};
 
@@ -439,12 +447,13 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 				value,
 			])
 		);
-		const body = typeof init.body === 'string' ? init.body : '';
+		const bytes = bodyBytes(init.body);
+		const body = bodyText(init.body);
 		const method = init.method ?? 'GET';
 		requests.push({ method, url: raw, headers, ...(body === '' ? {} : { body }) });
 
 		observe();
-		const response = await route(method, new URL(raw), headers, body);
+		const response = await route(method, new URL(raw), headers, body, bytes);
 		observe();
 		return response;
 	};

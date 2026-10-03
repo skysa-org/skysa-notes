@@ -751,7 +751,7 @@ describe('checking a resumed connection against its remote', () => {
 		fake.snapshot()
 			.filter((entry) => entry.kind === 'file' && entry.path.endsWith('.md'))
 			.forEach((entry) => {
-				fake.writeBytes(entry.path, new Uint8Array([0x63, 0x61, 0x66, 0xe9]));
+				fake.plantBytes(entry.path, new Uint8Array([0x63, 0x61, 0x66, 0xe9]));
 			});
 		await bindConnection(db, { connectionId: 'dropbox-2', ...ACCOUNT });
 

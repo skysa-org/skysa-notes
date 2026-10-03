@@ -228,7 +228,7 @@ describe('a file written as bytes', () => {
 		const first = await provider.write('a.md', 'one\n', {});
 		const { cursor } = await drainChanges(provider);
 
-		const saved = provider.writeBytes('a.md', LATIN1);
+		const saved = provider.plantBytes('a.md', LATIN1);
 
 		expect(saved.remoteId).toBe(first.remoteId);
 		expect(saved.version).not.toBe(first.version);
@@ -240,13 +240,13 @@ describe('a file written as bytes', () => {
 	it('is a new file where there was none, and needs its folder like any other', async () => {
 		const provider = await ready();
 
-		expect(provider.writeBytes('a.md', LATIN1).remoteId).not.toBe('');
-		expect(() => provider.writeBytes('Nowhere/a.md', LATIN1)).toThrow(NotFoundError);
+		expect(provider.plantBytes('a.md', LATIN1).remoteId).not.toBe('');
+		expect(() => provider.plantBytes('Nowhere/a.md', LATIN1)).toThrow(NotFoundError);
 	});
 
 	it('is unreadable as text and whole as bytes', async () => {
 		const provider = await ready();
-		const saved = provider.writeBytes('a.md', LATIN1);
+		const saved = provider.plantBytes('a.md', LATIN1);
 
 		await expect(provider.read(saved)).rejects.toThrow(UnreadableError);
 		expect((await provider.readBytes(saved)).bytes).toEqual(LATIN1);
@@ -256,7 +256,7 @@ describe('a file written as bytes', () => {
 
 	it('is text again once text is written over it', async () => {
 		const provider = await ready();
-		const saved = provider.writeBytes('a.md', LATIN1);
+		const saved = provider.plantBytes('a.md', LATIN1);
 
 		const fixed = await provider.write('a.md', 'café\n', { expectedVersion: saved.version });
 
@@ -267,7 +267,7 @@ describe('a file written as bytes', () => {
 
 	it('reads through the same faults and the same not-found as `read`', async () => {
 		const provider = await ready();
-		const saved = provider.writeBytes('a.md', LATIN1);
+		const saved = provider.plantBytes('a.md', LATIN1);
 		provider.setFault((call) => (call.op === 'read' ? new AuthError('expired') : undefined));
 		await expect(provider.readBytes(saved)).rejects.toThrow(AuthError);
 
@@ -283,5 +283,57 @@ describe('a file written as bytes', () => {
 		const entry = await provider.write('a.md', 'a\u0000b\n', {});
 
 		await expect(provider.read(entry)).rejects.toThrow(UnreadableError);
+	});
+});
+
+/**
+ * `createFile` is the strict create an adapter is held to, where `plantBytes`
+ * is another tool saving over whatever is there — the two must not blur, or an
+ * engine test of an upload that clashes proves nothing.
+ */
+describe('a file created as bytes', () => {
+	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+
+	it('needs its folder, as a note does', async () => {
+		const provider = await ready();
+		await expect(provider.createFile('Nowhere/a.png', PNG)).rejects.toThrow(NotFoundError);
+		await expect(provider.createFile('', PNG)).rejects.toThrow(NotFoundError);
+	});
+
+	it('is a conflict over anything already there, which is left as it was', async () => {
+		const provider = await ready();
+		const file = await provider.createFile('a.png', PNG);
+		const folder = await provider.createFolder('Work');
+
+		await expect(provider.createFile('a.png', new Uint8Array([1]))).rejects.toMatchObject({
+			remote: { remoteId: file.remoteId, kind: 'file', size: PNG.length },
+		});
+		await expect(provider.createFile('Work', PNG)).rejects.toMatchObject({
+			remote: { remoteId: folder.remoteId, kind: 'folder' },
+		});
+		expect(provider.bytesAt('a.png')).toEqual(PNG);
+	});
+
+	it('keeps its own copy of the bytes, and hands out copies', async () => {
+		const provider = await ready();
+		const bytes = PNG.slice();
+		const entry = await provider.createFile('a.png', bytes);
+
+		bytes[0] = 0;
+		(await provider.readBytes(entry)).bytes[1] = 0;
+		provider.bytesAt('a.png')?.fill(0);
+
+		expect((await provider.readBytes(entry)).bytes).toEqual(PNG);
+	});
+
+	it('fails where a test asks it to, as its own operation', async () => {
+		const provider = await ready();
+		provider.setFault((call) =>
+			call.op === 'createFile' ? new AuthError('expired') : undefined
+		);
+
+		await expect(provider.createFile('a.png', PNG)).rejects.toThrow(AuthError);
+		await expect(provider.write('a.md', 'x\n', {})).resolves.toMatchObject({ path: 'a.md' });
+		expect(provider.bytesAt('a.png')).toBeUndefined();
 	});
 });

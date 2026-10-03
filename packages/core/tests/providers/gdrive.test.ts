@@ -22,6 +22,7 @@ import { createSyncEngine } from '../../src/sync/engine.js';
 import { createMemoryStore } from '../sync/memoryStore.js';
 import { drainChanges } from './contract.js';
 import { createGDriveStub, STUB_ROOT_ID } from './gdriveStub.js';
+import { bodyText, sameBytes } from './wireBody.js';
 
 /**
  * What the contract suite cannot see: which requests go by name and which by id,
@@ -279,7 +280,7 @@ const driveWorld = () => {
 		const request = {
 			method: init.method ?? 'GET',
 			url: new URL(raw),
-			body: typeof init.body === 'string' ? init.body : '',
+			body: bodyText(init.body),
 		};
 		seen.push(request);
 		return Promise.resolve(hooks.intercept?.(request) ?? route(request));
@@ -894,6 +895,127 @@ describe('creating', () => {
 		const upload = world.seen.find((r) => r.url.pathname === '/upload/drive/v3/files');
 		expect(upload?.url.searchParams.get('uploadType')).toBe('multipart');
 		expect(upload?.body).toContain('"mimeType":"text/markdown"');
+	});
+
+	it('uploads a file that is not a note as its own type, every byte value intact', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		const bytes = Uint8Array.from({ length: 256 }, (_, at) => at);
+
+		const entry = await provider.createFile('photo.png', bytes, { contentType: 'image/png' });
+
+		expect((await provider.readBytes(entry)).bytes).toEqual(bytes);
+		const upload = stub.requests.filter((r) => r.url.includes('uploadType=multipart')).at(-1);
+		expect(upload?.body).toContain('"name":"photo.png","mimeType":"image/png"');
+		expect(upload?.body).toContain('content-type: image/png\r\n');
+	});
+
+	it('uploads a file of no type the browser knows as bytes', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+
+		await provider.createFile('blob.bin', new Uint8Array([1]), { contentType: '' });
+
+		const upload = stub.requests.filter((r) => r.url.includes('uploadType=multipart')).at(-1);
+		expect(upload?.body).toContain('"name":"blob.bin","mimeType":"application/octet-stream"');
+		expect(upload?.body).toContain('content-type: application/octet-stream\r\n');
+	});
+
+	const BIG = Uint8Array.from({ length: 5 * 1024 * 1024 + 1 }, (_, at) => at % 251);
+
+	it('sends a file over 5 MB resumably, every byte in one PUT to the session', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		stub.requests.length = 0;
+
+		const entry = await provider.createFile('big.bin', BIG);
+
+		expect(stub.requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+			'GET /drive/v3/files',
+			'POST /upload/drive/v3/files',
+			'PUT /upload/drive/v3/files',
+			'GET /drive/v3/files',
+		]);
+		expect(stub.requests[1]?.url).toContain('uploadType=resumable');
+		expect(stub.requests[1]?.body).toContain('"name":"big.bin"');
+		expect(stub.requests[2]?.url).toContain('upload_id=');
+		expect(entry).toMatchObject({ path: 'big.bin', size: BIG.length });
+		expect(entry.version).not.toBe('');
+		expect(sameBytes((await provider.readBytes(entry)).bytes, BIG)).toBe(true);
+	});
+
+	it('asks for the file again where the PUT answers without what a create reads', async () => {
+		const { stub, provider } = stubbed({ resumableAnswer: 'defaults' });
+		await provider.ensureRoot();
+		stub.requests.length = 0;
+
+		const entry = await provider.createFile('big.bin', BIG);
+
+		expect(stub.requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+			'GET /drive/v3/files',
+			'POST /upload/drive/v3/files',
+			'PUT /upload/drive/v3/files',
+			`GET /drive/v3/files/${encodeURIComponent(entry.remoteId)}`,
+			'GET /drive/v3/files',
+		]);
+		expect(entry).toMatchObject({ path: 'big.bin', size: BIG.length });
+		expect(entry.version).not.toBe('');
+	});
+
+	/** Drive as `driveWorld` holds it, with a resumable session it answers as told. */
+	const resumableWorld = (put: () => Response) => {
+		const world = driveWorld();
+		world.hooks.intercept = (request) => {
+			if (request.url.searchParams.get('uploadType') !== 'resumable') return undefined;
+			if (request.method === 'PUT') return put();
+			return new Response(null, {
+				status: 200,
+				headers: { location: `${request.url.toString()}&upload_id=s1` },
+			});
+		};
+		return world;
+	};
+
+	it('says what a failed PUT was, and has made nothing', async () => {
+		const expired = resumableWorld(() => driveError(401, 'authError'));
+		await expect(expired.provider.createFile('big.bin', BIG)).rejects.toThrow(AuthError);
+		expect(expired.files.some((file) => file.name === 'big.bin')).toBe(false);
+
+		const limited = resumableWorld(() => driveError(403, 'userRateLimitExceeded'));
+		await expect(limited.provider.createFile('big.bin', BIG)).rejects.toThrow(RateLimitError);
+
+		const gone = resumableWorld(() => driveError(404, 'notFound'));
+		await expect(gone.provider.createFile('big.bin', BIG)).rejects.toThrow(NotFoundError);
+	});
+
+	it('refuses a session it is not told the place of', async () => {
+		const world = driveWorld();
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('uploadType') === 'resumable'
+				? new Response(null, { status: 200 })
+				: undefined;
+
+		await expect(world.provider.createFile('big.bin', BIG)).rejects.toThrow(
+			/did not say where/
+		);
+	});
+
+	it('refuses a resumable session on any host but Drive\u2019s, and sends it nothing', async () => {
+		const world = driveWorld();
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('uploadType') === 'resumable'
+				? new Response(null, {
+						status: 200,
+						headers: { location: 'https://upload.example.com/session?id=1' },
+					})
+				: undefined;
+
+		await expect(world.provider.createFile('big.bin', BIG)).rejects.toThrow(
+			/somewhere it will not be sent/
+		);
+
+		expect(world.seen.every((r) => r.url.origin === API)).toBe(true);
+		expect(world.files.some((file) => file.name === 'big.bin')).toBe(false);
 	});
 
 	it('refuses a name already taken, without uploading anything', async () => {

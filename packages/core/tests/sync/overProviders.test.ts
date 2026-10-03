@@ -351,7 +351,7 @@ const quiet = async (a: Device, b: Device, trace: () => string): Promise<void> =
 };
 
 /**
- * The notes the remote holds. A file that is not text (`writeBytes`) is not one
+ * The notes the remote holds. A file that is not text (`plantBytes`) is not one
  * of them: no device can read it, so none may hold it (docs/ARCHITECTURE.md §7).
  */
 const remoteFiles = (remote: Remote): Record<string, string> =>
@@ -552,7 +552,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 
 		/** Saved in place, as an editor does: the same file, new bytes. */
 		const resaved = (remote: Remote, path: string): string =>
-			remote.backing.writeBytes(path, LATIN1).remoteId;
+			remote.backing.plantBytes(path, LATIN1).remoteId;
 
 		const leftAlone = (remote: Remote, path: string, id: string, devices: Device[]): void => {
 			expect(remote.backing.bytesAt(path)).toEqual(LATIN1);
@@ -643,7 +643,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			// remote holds, each time.
 			const { remote, a, b } = await setUp(make);
 			await shared(a, b, 'plan.md', 'base\n');
-			remote.backing.writeBytes('plan.md', LATIN1);
+			remote.backing.plantBytes('plan.md', LATIN1);
 
 			expect(await converged(remote, a, b)).toEqual({});
 			expect(await listedUnreadable(a)).toEqual(['plan.md']);
@@ -656,7 +656,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			expect(await converged(remote, a, b)).toEqual({ 'plan.md': 'fixed\n' });
 			expect(await listedUnreadable(a)).toEqual([]);
 
-			remote.backing.writeBytes('plan.md', LATIN1);
+			remote.backing.plantBytes('plan.md', LATIN1);
 
 			expect(await converged(remote, a, b)).toEqual({});
 			expect(await listedUnreadable(b)).toEqual(['plan.md']);
@@ -673,7 +673,7 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			// an entry, a folder by id alone, a subtree entry by entry.
 			const { remote, a, b } = await setUp(make);
 			await remote.backing.createFolder('Work');
-			remote.backing.writeBytes('Work/old.md', LATIN1);
+			remote.backing.plantBytes('Work/old.md', LATIN1);
 			await converged(remote, a, b);
 			expect(await listedUnreadable(a)).toEqual(['Work/old.md']);
 

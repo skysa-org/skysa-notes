@@ -4,7 +4,7 @@ import { createDropboxProvider, type FetchLike } from '../../src/providers/dropb
 import type { FakeProvider } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
-import { decodeText, readText } from '../../src/providers/text.js';
+import { decodeText, responseBytes, uploadType } from '../../src/providers/text.js';
 import {
 	isUnreadableError,
 	type StorageProvider,
@@ -87,13 +87,13 @@ const trickled = (body: Uint8Array, init: ResponseInit): Response => {
 	return new Response(stream, init);
 };
 
-describe('readText', () => {
+describe('responseBytes', () => {
 	it('reads a character split across network chunks as one character', async () => {
 		// The body is taken whole before it is decoded, so where the network cut
 		// it cannot matter. Decoded chunk by chunk, every one of these is an
 		// invalid sequence.
 		const response = trickled(new TextEncoder().encode(WIDE), { status: 200 });
-		expect(await readText(response, 'a.md')).toBe(WIDE);
+		expect(decodeText(await responseBytes(response), 'a.md')).toBe(WIDE);
 	});
 });
 
@@ -122,7 +122,7 @@ describe.each(ADAPTERS)('%s, reading a download', (_, wire, adapt) => {
 		const provider = adapt(fetch === undefined ? wired.fetch : fetch(wired));
 		await provider.ensureRoot();
 		await provider.createFolder('Work');
-		wired.backing.writeBytes('Work/old.md', body);
+		wired.backing.plantBytes('Work/old.md', body);
 		const entry = (await provider.list('Work')).find((each) => each.path === 'Work/old.md');
 		if (entry === undefined) throw new Error('the planted file is not listed');
 		return { provider, entry, wired };
@@ -164,5 +164,26 @@ describe.each(ADAPTERS)('%s, reading a download', (_, wire, adapt) => {
 		);
 
 		expect((await provider.read(entry)).content).toBe('# Heading\n');
+	});
+});
+
+describe('uploadType', () => {
+	it.each([
+		['image/png', 'image/png'],
+		['Image/PNG', 'image/png'],
+		['text/csv; charset=utf-8', 'text/csv'],
+		[
+			'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+			'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		],
+		// What a browser says of a type it does not know.
+		['', 'application/octet-stream'],
+		[undefined, 'application/octet-stream'],
+		['png', 'application/octet-stream'],
+		['image/png\r\nx-evil: 1', 'application/octet-stream'],
+		// Drive would make a Google Doc of it, which has no revision.
+		['application/vnd.google-apps.document', 'application/octet-stream'],
+	])('%s → %s', (given, type) => {
+		expect(uploadType(given)).toBe(type);
 	});
 });

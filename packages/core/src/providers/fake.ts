@@ -6,6 +6,7 @@ import {
 	type ChangeEntry,
 	type ChangeSet,
 	ConflictError,
+	type CreateFileOptions,
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
@@ -25,6 +26,12 @@ import {
  * out a fresh `version` on every single write even when the bytes are
  * identical, and compares versions for equality rather than order.
  *
+ * Every file is held as bytes, whoever wrote it — `write`'s text encoded, a
+ * `createFile`'s bytes, or a file `plantBytes` put there for another tool — so
+ * a wire stub can hand any upload body to it without knowing which method the
+ * adapter was called through, and `read` decodes what is stored exactly as an
+ * adapter decodes a download.
+ *
  * Written as closures over `Map`s: `functional/no-let` rules out mutable
  * bindings, and one-entry maps stand in for the scalars — the same shape
  * `apps/api/src/worker.ts` uses for its isolate cache.
@@ -36,19 +43,20 @@ interface FakeNode {
 	kind: 'file' | 'folder';
 	version: string;
 	modifiedAt: string;
-	/** Empty for folders, and for a file held as `bytes`. */
-	content: string;
-	/**
-	 * A file some other tool wrote, as the bytes it wrote (`writeBytes`). Kept
-	 * apart from `content` because they need not be text at all, and a test of
-	 * what the engine does with such a file has to be able to show that they
-	 * are the same bytes afterwards.
-	 */
-	bytes?: Uint8Array | undefined;
+	/** Empty for a folder. Never handed out: a caller gets a copy. */
+	bytes: Uint8Array;
 }
 
 export type FakeOperation =
-	'ensureRoot' | 'list' | 'read' | 'write' | 'createFolder' | 'move' | 'delete' | 'changes';
+	| 'ensureRoot'
+	| 'list'
+	| 'read'
+	| 'write'
+	| 'createFile'
+	| 'createFolder'
+	| 'move'
+	| 'delete'
+	| 'changes';
 
 export interface FakeCall {
 	op: FakeOperation;
@@ -92,20 +100,19 @@ export interface FakeProvider extends StorageProvider {
 	readonly setFault: (fault: FakeFault | undefined) => void;
 	/** Every entry that currently exists, ordered by path. */
 	readonly snapshot: () => RemoteEntry[];
-	/** The text `write` put there. `undefined` for a file held as bytes. */
+	/**
+	 * The file as text, as `read` would give it — but with a BOM kept, since a
+	 * test asks what was written — or `undefined` where `read` would refuse:
+	 * bytes that are not UTF-8, or that hold a NUL. `undefined` for a folder.
+	 */
 	readonly contentAt: (path: string) => string | undefined;
 	/**
 	 * A file as another tool would save it: any bytes, and no version check.
 	 * A file already at the path keeps its id, as a save in place does; the
-	 * version is renewed and the change is in the feed.
+	 * version is renewed and the change is in the feed. Not `createFile`, which
+	 * is the strict create an adapter is held to.
 	 */
-	readonly writeBytes: (path: string, bytes: Uint8Array) => RemoteEntry;
-	/**
-	 * What a wire stub serves as the download: the same lookup, faults and
-	 * `NotFoundError` as `read`, without the decoding, which is the adapter's
-	 * to do.
-	 */
-	readonly readBytes: (ref: EntryRef) => Promise<{ bytes: Uint8Array; version: string }>;
+	readonly plantBytes: (path: string, bytes: Uint8Array) => RemoteEntry;
 	readonly bytesAt: (path: string) => Uint8Array | undefined;
 	/** Every call made, in order — lets a test assert what the engine did not do. */
 	readonly callLog: () => readonly FakeCall[];
@@ -149,8 +156,16 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 
 	const iso = (): string => new Date(startAt.getTime() + bump('tick') * tickMs).toISOString();
 
-	const bytesOf = (node: FakeNode): Uint8Array =>
-		node.bytes ?? new TextEncoder().encode(node.content);
+	const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+	const textOf = (bytes: Uint8Array): string | undefined => {
+		try {
+			const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+			return text.includes('\u0000') ? undefined : text;
+		} catch {
+			return undefined;
+		}
+	};
 
 	const toEntry = (node: FakeNode): RemoteEntry => ({
 		remoteId: node.remoteId,
@@ -158,7 +173,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		kind: node.kind,
 		version: node.version,
 		modifiedAt: node.modifiedAt,
-		...(node.kind === 'file' ? { size: bytesOf(node).length } : {}),
+		...(node.kind === 'file' ? { size: node.bytes.length } : {}),
 	});
 
 	/** Write a node into the tree and append the matching change record. */
@@ -259,7 +274,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 				kind: 'file',
 				version: `v${String(bump('version'))}`,
 				modifiedAt: iso(),
-				content: serializeMarker(marker),
+				bytes: encode(serializeMarker(marker)),
 			});
 			return { rootId: id };
 		});
@@ -280,23 +295,29 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		return node;
 	};
 
-	const readBytes = (ref: EntryRef): Promise<{ bytes: Uint8Array; version: string }> =>
+	// The same op as `read`, with the same lookup, faults and not-found: a wire
+	// stub serves every download through this, text or not, and a test that
+	// fails the second `read` means the second download whichever the adapter
+	// was asked for.
+	const readBytes = (
+		ref: EntryRef
+	): Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }> =>
 		settle('read', ref.path, () => {
 			const node = fileAt(ref);
-			return { bytes: bytesOf(node), version: node.version };
+			return { bytes: node.bytes.slice(), version: node.version };
 		});
 
 	// Decoded from the bytes whoever wrote them, as an adapter decodes a
 	// download: text this fake was handed by `write` goes through the same
-	// gate as a file planted by `writeBytes`, so a NUL the engine pushed is
+	// gate as a file planted by `plantBytes`, so a NUL the engine pushed is
 	// refused here as it would be on the wire.
 	const read = (ref: EntryRef): Promise<{ content: string; version: string }> =>
 		settle('read', ref.path, () => {
 			const node = fileAt(ref);
-			return { content: decodeText(bytesOf(node), ref.path), version: node.version };
+			return { content: decodeText(node.bytes, ref.path), version: node.version };
 		});
 
-	const writeBytes = (path: string, bytes: Uint8Array): RemoteEntry => {
+	const plantBytes = (path: string, bytes: Uint8Array): RemoteEntry => {
 		const target = normalizePath(path);
 		if (target === ROOT) throw new NotFoundError(target);
 		requireParent(target);
@@ -308,10 +329,32 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 			kind: 'file',
 			version: `v${String(bump('version'))}`,
 			modifiedAt: iso(),
-			content: '',
-			bytes,
+			bytes: bytes.slice(),
 		});
 	};
+
+	// Strict, as `write`'s create is: a file or a folder in the way is a
+	// conflict carrying what is there, and a missing parent is not made.
+	const createFile = (
+		path: string,
+		bytes: Uint8Array,
+		_opts: CreateFileOptions = {}
+	): Promise<RemoteEntry> =>
+		settle('createFile', path, () => {
+			const target = normalizePath(path);
+			if (target === ROOT) throw new NotFoundError(target);
+			const existing = nodes.get(target);
+			if (existing !== undefined) throw new ConflictError(toEntry(existing));
+			requireParent(target);
+			return put({
+				remoteId: `id:${String(bump('id'))}`,
+				path: target,
+				kind: 'file',
+				version: `v${String(bump('version'))}`,
+				modifiedAt: iso(),
+				bytes: bytes.slice(),
+			});
+		});
 
 	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
 		settle('write', path, () => {
@@ -330,7 +373,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 					kind: 'file',
 					version: `v${String(bump('version'))}`,
 					modifiedAt: iso(),
-					content,
+					bytes: encode(content),
 				});
 			}
 
@@ -342,9 +385,8 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 				...existing,
 				version: `v${String(bump('version'))}`,
 				modifiedAt: iso(),
-				content,
 				// Text now, whatever it was: the bytes another tool left are gone.
-				bytes: undefined,
+				bytes: encode(content),
 			});
 		});
 
@@ -365,7 +407,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 				kind: 'folder',
 				version: `v${String(bump('version'))}`,
 				modifiedAt: iso(),
-				content: '',
+				bytes: new Uint8Array(),
 			});
 		});
 
@@ -472,6 +514,8 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		list,
 		read,
 		write,
+		readBytes,
+		createFile,
 		createFolder,
 		move,
 		delete: remove,
@@ -483,13 +527,12 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		snapshot: () => [...nodes.values()].sort(byPath).map(toEntry),
 		contentAt: (path) => {
 			const node = nodes.get(normalizePath(path));
-			return node?.bytes === undefined ? node?.content : undefined;
+			return node === undefined || node.kind === 'folder' ? undefined : textOf(node.bytes);
 		},
-		writeBytes,
-		readBytes,
+		plantBytes,
 		bytesAt: (path) => {
 			const node = nodes.get(normalizePath(path));
-			return node === undefined || node.kind === 'folder' ? undefined : bytesOf(node);
+			return node === undefined || node.kind === 'folder' ? undefined : node.bytes.slice();
 		},
 		callLog: () => [...calls.values()],
 	};

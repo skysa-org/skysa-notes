@@ -13,6 +13,7 @@ import {
 	NotFoundError,
 	type RemoteEntry,
 } from '../../src/providers/types.js';
+import { bodyBytes, bodyText, createFrom } from './wireBody.js';
 
 /**
  * A stand-in for Dropbox at the transport layer: it speaks the v2 wire format —
@@ -200,17 +201,28 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		return asChangeSet(await backing.changes(cursor));
 	};
 
-	const upload = async (arg: Record<string, unknown>, content: string): Promise<Response> => {
+	// `add` is a create, of whatever bytes were sent; `update` replaces a
+	// note, whose bytes are its text.
+	const upload = async (
+		arg: Record<string, unknown>,
+		bytes: Uint8Array<ArrayBuffer>
+	): Promise<Response> => {
 		const mode = arg.mode;
 		const expected =
 			typeof mode === 'object' && mode !== null
 				? str((mode as { update?: unknown }).update)
 				: undefined;
-		const entry = await backing.write(
-			fromDropboxPath(str(arg.path)),
-			content,
-			expected === undefined ? {} : { expectedVersion: expected }
-		);
+		const path = fromDropboxPath(str(arg.path));
+		const entry =
+			expected === undefined
+				? await createFrom(backing, path, bytes)
+				: await backing.write(
+						path,
+						new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
+						{
+							expectedVersion: expected,
+						}
+					);
 		return json(fileMetadata(entry));
 	};
 
@@ -281,13 +293,13 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		(
 			body: Record<string, unknown>,
 			arg: Record<string, unknown>,
-			content: string
+			bytes: Uint8Array<ArrayBuffer>
 		) => Promise<Response>
 	> = {
 		'files/get_metadata': getMetadata,
 		'files/list_folder': listFolder,
 		'files/list_folder/continue': (body) => continueFrom(str(body.cursor)),
-		'files/upload': (_body, arg, content) => upload(arg, content),
+		'files/upload': (_body, arg, bytes) => upload(arg, bytes),
 		'files/download': (_body, arg) => download(arg),
 		'files/create_folder_v2': async (body) =>
 			json({
@@ -303,7 +315,8 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		const headers = (init.headers ?? {}) as Record<string, string>;
 		const rawArg = headers['Dropbox-API-Arg'];
 		const arg = rawArg === undefined ? {} : (JSON.parse(rawArg) as Record<string, unknown>);
-		const content = typeof init.body === 'string' ? init.body : '';
+		const bytes = bodyBytes(init.body);
+		const content = rawArg === undefined ? bodyText(init.body) : '';
 		const body =
 			rawArg === undefined && content !== ''
 				? (JSON.parse(content) as Record<string, unknown>)
@@ -319,7 +332,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		if (route === undefined) {
 			return Promise.resolve(failure('unknown_route/...', { '.tag': 'other' }, 400));
 		}
-		return route(body, arg, content);
+		return route(body, arg, bytes);
 	};
 
 	return {

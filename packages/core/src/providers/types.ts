@@ -21,7 +21,12 @@ export interface RemoteEntry {
 	version: string;
 	/** ISO 8601. */
 	modifiedAt: string;
-	/** UTF-8 bytes. Absent for folders. */
+	/**
+	 * Bytes. Present on every file entry an adapter hands back — a listing, a
+	 * feed, a write, and the `remote` of a `ConflictError` — and absent for
+	 * folders. An upload that finds a file already at its name asks whether it
+	 * is the same file by its size (docs/ARCHITECTURE.md §7).
+	 */
 	size?: number;
 }
 
@@ -74,6 +79,16 @@ export interface WriteOptions {
 	expectedVersion?: string;
 }
 
+export interface CreateFileOptions {
+	/**
+	 * What the bytes are, for a provider that records it (Drive's `mimeType`).
+	 * `application/octet-stream` when absent, empty, or anything but a plain
+	 * `type/subtype` (`uploadType`). Never used to decide anything here: the
+	 * name's extension is what the app reads.
+	 */
+	contentType?: string;
+}
+
 /**
  * Written as property signatures rather than methods to match the house style
  * (`EntitlementProvider`), which `functional/prefer-property-signatures`
@@ -108,7 +123,19 @@ export interface WriteOptions {
  * - `rootId` is opaque, non-empty and stable. A provider whose root has no id
  *   of its own — a Dropbox app folder, where the root simply is `/` — returns a
  *   synthetic constant.
- * - Content is UTF-8 text, decoded strictly (`decodeText`). Binary attachments are out of scope (docs/ARCHITECTURE.md §14).
+ * - `read` and `write` are for notes: UTF-8 text, decoded strictly
+ *   (`decodeText`). `readBytes` and `createFile` are for every other file — an
+ *   attachment beside a note (docs/ARCHITECTURE.md §3) — and hand the bytes over
+ *   exactly as they are, a BOM included. `read` is `readBytes` decoded, so the
+ *   two agree on what is there and on every error but `UnreadableError`, which
+ *   `readBytes` never raises.
+ * - `createFile` is create-only, and there is no update: the app never writes
+ *   into a file that is not a note, and a name stamped with its content
+ *   (docs/ARCHITECTURE.md §3) is never asked to hold other bytes. A file *or
+ *   folder* already at the path is a `ConflictError` whose `remote` carries its
+ *   `kind` and, for a file, its `size` — what lets the caller tell its own
+ *   file, uploaded once already, from a different one. A missing parent may be
+ *   `NotFoundError` or may be made, as for `write` (Dropbox makes it).
  * - No `AbortSignal`: operations are short, and the engine discards results it
  *   no longer wants. Revisit in Phase 6 if a hung request ever blocks a queue.
  */
@@ -133,6 +160,16 @@ export interface StorageProvider {
 	readonly list: (folderPath: string) => Promise<RemoteEntry[]>;
 	readonly read: (entry: EntryRef) => Promise<{ content: string; version: string }>;
 	readonly write: (path: string, content: string, opts: WriteOptions) => Promise<RemoteEntry>;
+	/** The file's bytes as stored, with the version they are. Never decoded. */
+	readonly readBytes: (
+		entry: EntryRef
+	) => Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }>;
+	/** Create-only, for a file that is not a note; see above. */
+	readonly createFile: (
+		path: string,
+		bytes: Uint8Array<ArrayBuffer>,
+		opts?: CreateFileOptions
+	) => Promise<RemoteEntry>;
 	readonly createFolder: (path: string) => Promise<RemoteEntry>;
 	readonly move: (entry: EntryRef, newPath: string) => Promise<RemoteEntry>;
 	readonly delete: (entry: EntryRef) => Promise<void>;

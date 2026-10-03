@@ -6933,7 +6933,7 @@ describe('a file that is not UTF-8 text', () => {
 	it('imports nothing, and the pull goes through', async () => {
 		// A throw here is a pull that never moves its cursor: the same entry
 		// and the same bytes next time, and the user's sync is over.
-		const file = provider.writeBytes('a.md', LATIN1);
+		const file = provider.plantBytes('a.md', LATIN1);
 		await remoteFile('b.md', 'readable\n');
 
 		const result = await engine.pull();
@@ -6949,7 +6949,7 @@ describe('a file that is not UTF-8 text', () => {
 		// UTF-16 with no BOM is valid UTF-8 to a decoder, with a NUL for every
 		// other byte; so is most of what a binary holds.
 		const utf16 = new Uint8Array([0x68, 0x00, 0x69, 0x00]);
-		provider.writeBytes('a.md', utf16);
+		provider.plantBytes('a.md', utf16);
 
 		const result = await engine.pull();
 
@@ -6962,7 +6962,7 @@ describe('a file that is not UTF-8 text', () => {
 		await engine.pull();
 		store.put({ id: 'mine', path: 'a.md', content: 'mine\n', dirty: true });
 		store.queue({ op: 'write', noteId: 'mine', path: 'a.md' });
-		const file = provider.writeBytes('a.md', LATIN1);
+		const file = provider.plantBytes('a.md', LATIN1);
 
 		// By the pull, as for any file arriving at a name of ours: left to the
 		// push, the note sits on the file's path until a write has failed there.
@@ -6987,7 +6987,7 @@ describe('a file that is not UTF-8 text', () => {
 		// its version, and the first push from it replaces the user's bytes.
 		const { entry } = await pulledNote('a.md', 'one\n');
 		const before = sent();
-		provider.writeBytes('a.md', LATIN1);
+		provider.plantBytes('a.md', LATIN1);
 
 		const result = await engine.sync();
 
@@ -7004,7 +7004,7 @@ describe('a file that is not UTF-8 text', () => {
 	it('cuts a dirty note loose and moves it aside, and its edit goes up beside the file', async () => {
 		const { entry, note } = await pulledNote('a.md', 'one\n');
 		editHere(note, 'my edit\n');
-		provider.writeBytes('a.md', LATIN1);
+		provider.plantBytes('a.md', LATIN1);
 
 		const pulled = await engine.pull();
 
@@ -7032,7 +7032,7 @@ describe('a file that is not UTF-8 text', () => {
 		store.put({ ...note, path: 'b.md', content: 'my edit\n', dirty: true });
 		store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
 		store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
-		provider.writeBytes('a.md', LATIN1);
+		provider.plantBytes('a.md', LATIN1);
 
 		const result = await engine.sync();
 
@@ -7050,7 +7050,7 @@ describe('a file that is not UTF-8 text', () => {
 		// The store refuses a `delete-note` for a note edited since (§7), the
 		// batch rolls back with its cursor, and the next pull meets a dirty note.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
-		provider.writeBytes('a.md', LATIN1);
+		provider.plantBytes('a.md', LATIN1);
 		const cursor = store.storedCursor();
 		const typed = { done: false };
 		const typing: SyncStore = {
@@ -7082,7 +7082,7 @@ describe('a file that is not UTF-8 text', () => {
 		// alone, and the tombstone goes with nothing sent.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
 		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
-		provider.writeBytes('a.md', LATIN1);
+		provider.plantBytes('a.md', LATIN1);
 
 		const result = await engine.sync();
 
@@ -7103,7 +7103,7 @@ describe('a file that is not UTF-8 text', () => {
 		// moves aside, and the file's own entry then lets go of it.
 		const { entry, note } = await pulledNote('a.md', 'one\n');
 		await provider.move(entry, 'old.md');
-		const old = provider.writeBytes('old.md', LATIN1);
+		const old = provider.plantBytes('old.md', LATIN1);
 		const theirs = await remoteFile('a.md', 'theirs\n');
 
 		const result = await pullNow([theirs]);
@@ -7134,7 +7134,7 @@ describe('a file that is not UTF-8 text', () => {
 			store.queue({ op: 'delete', noteId: 'n1', path: 'a.md' });
 		};
 		const resave = (): void => {
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 		};
 		const setAsideThere = async (): Promise<void> => {
 			await remoteFile(COPY, theirCopy);
@@ -7174,7 +7174,7 @@ describe('a file that is not UTF-8 text', () => {
 		it('sets the edit aside in one drain when the note’s own file cannot be read', async () => {
 			const { entry, note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 
 			const result = await engine.push();
 
@@ -7195,7 +7195,7 @@ describe('a file that is not UTF-8 text', () => {
 			// Still bound, the retry goes out against the unreadable file's id.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 			provider.setFault((call) =>
 				call.op === 'write' && call.path === COPY ? new Error('network down') : undefined
 			);
@@ -7223,7 +7223,7 @@ describe('a file that is not UTF-8 text', () => {
 			// of the copy, under two suffixes.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 			await remoteFile(COPY, 'their edit\n');
 			const next = conflictPath('a.md', AT, [COPY]);
 
@@ -7246,7 +7246,7 @@ describe('a file that is not UTF-8 text', () => {
 		it('gives up on a name after as many refusals as a rename does, and says why', async () => {
 			const { note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 			provider.setFault((call) =>
 				call.op === 'write' ? new ConflictError(remoteEntryAt('a.md')) : undefined
 			);
@@ -7273,7 +7273,7 @@ describe('a file that is not UTF-8 text', () => {
 			store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
 			store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
 			store.queue({ op: 'move', noteId: note.id, path: 'mine.md', targetPath: 'a.md' });
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 
 			await engine.push();
 
@@ -7296,7 +7296,7 @@ describe('a file that is not UTF-8 text', () => {
 			const { entry, note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
 			await provider.move(entry, 'renamed.md');
-			provider.writeBytes('renamed.md', LATIN1);
+			provider.plantBytes('renamed.md', LATIN1);
 
 			const result = await engine.push();
 
@@ -7318,7 +7318,7 @@ describe('a file that is not UTF-8 text', () => {
 			store.queue({ op: 'write', noteId: note.id, path: 'b.md' });
 			store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'b.md' });
 			provider.setFault((call) => {
-				if (call.op === 'move') provider.writeBytes('a.md', LATIN1);
+				if (call.op === 'move') provider.plantBytes('a.md', LATIN1);
 				return undefined;
 			});
 
@@ -7343,7 +7343,7 @@ describe('a file that is not UTF-8 text', () => {
 			store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
 			store.queue({ op: 'move', noteId: note.id, path: 'x.md', targetPath: 'a.md' });
 			await remoteFile('a.md', 'theirs\n');
-			provider.writeBytes('x.md', LATIN1);
+			provider.plantBytes('x.md', LATIN1);
 
 			await engine.push();
 			const result = await engine.push();
@@ -7364,7 +7364,7 @@ describe('a file that is not UTF-8 text', () => {
 			store.putFolder({ path: 'New' });
 			store.put({ ...note, path: 'New/a.md' });
 			store.queue({ op: 'move', noteId: note.id, path: 'a.md', targetPath: 'New/a.md' });
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 
 			const result = await engine.push();
 
@@ -7416,7 +7416,7 @@ describe('a file that is not UTF-8 text', () => {
 		};
 
 		it('once it has been found, and the pull counts it', async () => {
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			await remoteFile('b.md', 'readable\n');
 
 			const result = await engine.pull();
@@ -7430,10 +7430,10 @@ describe('a file that is not UTF-8 text', () => {
 		it('and says nothing when the feed names the file again with nothing changed', async () => {
 			// No row holds the file's version, so every mention is a read. A
 			// record for each would have `pulled` count a change that is not one.
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
 			const { batches, engine: again } = watched();
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 
 			const result = await again.pull();
 
@@ -7443,7 +7443,7 @@ describe('a file that is not UTF-8 text', () => {
 		});
 
 		it('under its new name when it is renamed, once', async () => {
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
 			await provider.move(file, 'renamed.md');
 
@@ -7460,7 +7460,7 @@ describe('a file that is not UTF-8 text', () => {
 			// — and the banner is gone by the time they wonder about the name.
 			const { entry, note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
-			provider.writeBytes('a.md', LATIN1);
+			provider.plantBytes('a.md', LATIN1);
 
 			const result = await engine.pull();
 
@@ -7472,7 +7472,7 @@ describe('a file that is not UTF-8 text', () => {
 
 		it('and so is a note never pushed that an unreadable file took the name of', async () => {
 			await engine.pull();
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
 			// Made here after the file was listed: the record is a repeat, and
 			// the note moving aside is still news.
@@ -7494,7 +7494,7 @@ describe('a file that is not UTF-8 text', () => {
 			// for a note that is not where they left it and nothing says where
 			// it went.
 			await engine.pull();
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			store.put({ id: 'first', path: 'a.md', content: 'first\n', dirty: true });
 			store.queue({ op: 'write', noteId: 'first', path: 'a.md' });
 
@@ -7502,7 +7502,7 @@ describe('a file that is not UTF-8 text', () => {
 
 			store.put({ id: 'second', path: 'a.md', content: 'second\n', dirty: true });
 			store.queue({ op: 'write', noteId: 'second', path: 'a.md' });
-			const resaved = provider.writeBytes('a.md', LATIN1);
+			const resaved = provider.plantBytes('a.md', LATIN1);
 
 			await pullNow([resaved]);
 
@@ -7518,7 +7518,7 @@ describe('a file that is not UTF-8 text', () => {
 			// the rename and left bare would drop the only explanation of it.
 			const { note } = await pulledNote('a.md', 'one\n');
 			editHere(note, 'my edit\n');
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
 			await provider.move(file, 'renamed.md');
 
@@ -7530,7 +7530,7 @@ describe('a file that is not UTF-8 text', () => {
 
 		describe('until it reads', () => {
 			it('under the same id, and is imported', async () => {
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 				await provider.write('a.md', 'fixed\n', { expectedVersion: file.version });
 
@@ -7545,7 +7545,7 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('under the same id at another name, fixed and renamed between two pulls', async () => {
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 				const fixed = await provider.write('a.md', 'fixed\n', {
 					expectedVersion: file.version,
@@ -7582,7 +7582,7 @@ describe('a file that is not UTF-8 text', () => {
 			it('or a note this device already holds is renamed onto its path, and nothing is read', async () => {
 				// The version the row holds, so no read: a file this device has
 				// read is at the path, and whatever was listed there is not.
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				const { entry, note } = await pulledNote('b.md', 'one\n');
 				expect(await listed()).toEqual([`${file.remoteId} a.md`]);
 				await provider.delete(file);
@@ -7598,7 +7598,7 @@ describe('a file that is not UTF-8 text', () => {
 			it('at the same path under a new id, with no word of the old file going', async () => {
 				// A tool that saves by deleting and writing again, on a feed that
 				// need not report the deletion of a file replaced at its path.
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 				await provider.delete(file);
 				const fixed = await remoteFile('a.md', 'fixed\n');
@@ -7612,10 +7612,10 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('or is replaced at its path by another that does not', async () => {
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 				await provider.delete(file);
-				const other = provider.writeBytes('a.md', LATIN1);
+				const other = provider.plantBytes('a.md', LATIN1);
 
 				await pullNow([other]);
 
@@ -7625,7 +7625,7 @@ describe('a file that is not UTF-8 text', () => {
 			it.each(['a.txt', '.a.md'])(
 				'or is no longer a note the app would show: %s',
 				async (path) => {
-					const file = provider.writeBytes('a.md', LATIN1);
+					const file = provider.plantBytes('a.md', LATIN1);
 					await engine.pull();
 					await provider.move(file, path);
 
@@ -7639,8 +7639,8 @@ describe('a file that is not UTF-8 text', () => {
 
 		describe('until it is deleted', () => {
 			it('by a deletion that names its id', async () => {
-				const file = provider.writeBytes('a.md', LATIN1);
-				provider.writeBytes('b.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
+				provider.plantBytes('b.md', LATIN1);
 				await engine.pull();
 				const other = remoteEntryAt('b.md');
 
@@ -7652,8 +7652,8 @@ describe('a file that is not UTF-8 text', () => {
 			});
 
 			it('by a deletion that names only its path', async () => {
-				provider.writeBytes('a.md', LATIN1);
-				const other = provider.writeBytes('ab.md', LATIN1);
+				provider.plantBytes('a.md', LATIN1);
+				const other = provider.plantBytes('ab.md', LATIN1);
 				await engine.pull();
 
 				await pullNow([{ deleted: true, path: 'a.md' }]);
@@ -7664,8 +7664,8 @@ describe('a file that is not UTF-8 text', () => {
 			it('by the deletion of a folder above it, which is all a path-only feed says', async () => {
 				await provider.createFolder('Work');
 				await provider.createFolder('Work/Old');
-				provider.writeBytes('Work/Old/a.md', LATIN1);
-				const other = provider.writeBytes('Workshop.md', LATIN1);
+				provider.plantBytes('Work/Old/a.md', LATIN1);
+				const other = provider.plantBytes('Workshop.md', LATIN1);
 				await engine.pull();
 				// No row for the folder, so no `delete-folder` to do it in the
 				// store: this is the engine's own rule.
@@ -7685,8 +7685,8 @@ describe('a file that is not UTF-8 text', () => {
 				// inside it, and left listed the file is named for ever at a
 				// path that no longer exists.
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('Work/a.md', LATIN1);
-				const other = provider.writeBytes('Workshop.md', LATIN1);
+				const file = provider.plantBytes('Work/a.md', LATIN1);
+				const other = provider.plantBytes('Workshop.md', LATIN1);
 				await engine.pull();
 				expect(await listed()).toEqual(
 					[`${file.remoteId} Work/a.md`, `${other.remoteId} Workshop.md`].sort()
@@ -7707,7 +7707,7 @@ describe('a file that is not UTF-8 text', () => {
 				['the entry first', true],
 			])('but not when the same round says the file is elsewhere, %s', async (_o, first) => {
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('Work/a.md', LATIN1);
+				const file = provider.plantBytes('Work/a.md', LATIN1);
 				await engine.pull();
 				store.removeFolder('Work');
 				const moved = await provider.move(file, 'a.md');
@@ -7726,7 +7726,7 @@ describe('a file that is not UTF-8 text', () => {
 				// Graph, for a folder it can no longer place. The notice waits
 				// for a re-scan (docs/ARCHITECTURE.md §7).
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('Work/a.md', LATIN1);
+				const file = provider.plantBytes('Work/a.md', LATIN1);
 				await engine.pull();
 				store.removeFolder('Work');
 
@@ -7737,7 +7737,7 @@ describe('a file that is not UTF-8 text', () => {
 
 			it('by the deletion of a folder above it, on a feed that names the folder by id alone', async () => {
 				const folder = await provider.createFolder('Work');
-				provider.writeBytes('Work/a.md', LATIN1);
+				provider.plantBytes('Work/a.md', LATIN1);
 				await engine.pull();
 
 				await pullNow([{ deleted: true, remoteId: folder.remoteId }]);
@@ -7751,7 +7751,7 @@ describe('a file that is not UTF-8 text', () => {
 				// folders alone: the file's entry and the folder's deletion, and
 				// the record is still at the path the file had before.
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 				const moved = await provider.move(file, 'Work/a.md');
 				await provider.delete(folder);
@@ -7767,7 +7767,7 @@ describe('a file that is not UTF-8 text', () => {
 				['the entry first', true],
 				['the deletion first', false],
 			])('but not by the deletion half of a move, %s', async (_order, entryFirst) => {
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 				const moved = await provider.move(file, 'b.md');
 				const gone: ChangeEntry = { deleted: true, path: 'a.md' };
@@ -7782,7 +7782,7 @@ describe('a file that is not UTF-8 text', () => {
 				/** The folder renamed, with the listed file still inside it. */
 				const renamedOver = async () => {
 					const folder = await provider.createFolder('Work');
-					const file = provider.writeBytes('Work/a.md', LATIN1);
+					const file = provider.plantBytes('Work/a.md', LATIN1);
 					await engine.pull();
 					expect(await listed()).toEqual([`${file.remoteId} Work/a.md`]);
 					const moved = await provider.move(folder, 'Archive');
@@ -7826,7 +7826,7 @@ describe('a file that is not UTF-8 text', () => {
 				// A deletion by path, and then the same file at the same path. The
 				// list the batch began with says it is listed already; by then it
 				// is not.
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 				await engine.pull();
 
 				await pullNow([{ deleted: true, path: 'a.md' }, file]);
@@ -7837,8 +7837,8 @@ describe('a file that is not UTF-8 text', () => {
 
 		describe('until a rescan does not see it', () => {
 			const twoListed = async () => {
-				const kept = provider.writeBytes('a.md', LATIN1);
-				const gone = provider.writeBytes('b.md', LATIN1);
+				const kept = provider.plantBytes('a.md', LATIN1);
+				const gone = provider.plantBytes('b.md', LATIN1);
 				await engine.pull();
 				await provider.delete(gone);
 				return { kept, gone };
@@ -7869,8 +7869,8 @@ describe('a file that is not UTF-8 text', () => {
 				// knows what was not seen.
 				const paged = createFakeProvider({ pageSize: 1 });
 				await paged.ensureRoot();
-				const first = paged.writeBytes('a.md', LATIN1);
-				const second = paged.writeBytes('b.md', LATIN1);
+				const first = paged.plantBytes('a.md', LATIN1);
+				const second = paged.plantBytes('b.md', LATIN1);
 				await createSyncEngine({ provider: paged, store, now: () => AT }).pull();
 				const dead = store.storedCursor();
 				const pages = { read: 0 };
@@ -7903,8 +7903,8 @@ describe('a file that is not UTF-8 text', () => {
 		describe('under a folder', () => {
 			it('follows the folder when a feed says the folder moved and nothing else', async () => {
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('Work/a.md', LATIN1);
-				const other = provider.writeBytes('Workshop.md', LATIN1);
+				const file = provider.plantBytes('Work/a.md', LATIN1);
+				const other = provider.plantBytes('Workshop.md', LATIN1);
 				await engine.pull();
 				await provider.move(folder, 'Archive');
 
@@ -7925,7 +7925,7 @@ describe('a file that is not UTF-8 text', () => {
 					// Taken at its word, the deletion covers everything under the
 					// path, and nothing in the round lists the file again.
 					const folder = await provider.createFolder('Work');
-					const file = provider.writeBytes('Work/a.md', LATIN1);
+					const file = provider.plantBytes('Work/a.md', LATIN1);
 					await engine.pull();
 					const moved = await provider.move(folder, 'Archive');
 					const gone: ChangeEntry = { deleted: true, path: 'Work' };
@@ -7941,7 +7941,7 @@ describe('a file that is not UTF-8 text', () => {
 				// The folder's deletion takes the record with it in the store, so
 				// the entry behind it is not the repeat the batch's list says it is.
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('Work/a.md', LATIN1);
+				const file = provider.plantBytes('Work/a.md', LATIN1);
 				await engine.pull();
 
 				await pullNow([
@@ -7957,7 +7957,7 @@ describe('a file that is not UTF-8 text', () => {
 				// The engine has to see the folder's move in what it has decided,
 				// or the file reads as renamed and is recorded over its own record.
 				const folder = await provider.createFolder('Work');
-				const file = provider.writeBytes('Work/a.md', LATIN1);
+				const file = provider.plantBytes('Work/a.md', LATIN1);
 				await engine.pull();
 				const moved = await provider.move(folder, 'Archive');
 				const entry = { ...file, path: 'Archive/a.md' };
@@ -7976,7 +7976,7 @@ describe('a file that is not UTF-8 text', () => {
 			it('when the conflict says which file and where', async () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
 				editHere(note, 'my edit\n');
-				provider.writeBytes('a.md', LATIN1);
+				provider.plantBytes('a.md', LATIN1);
 
 				const result = await engine.push();
 
@@ -7989,7 +7989,7 @@ describe('a file that is not UTF-8 text', () => {
 				store.put({ ...note, path: 'a.md', content: 'my edit\n', dirty: true });
 				store.queue({ op: 'write', noteId: note.id, path: 'a.md' });
 				store.queue({ op: 'move', noteId: note.id, path: 'mine.md', targetPath: 'a.md' });
-				const file = provider.writeBytes('a.md', LATIN1);
+				const file = provider.plantBytes('a.md', LATIN1);
 
 				await engine.push();
 
@@ -7999,7 +7999,7 @@ describe('a file that is not UTF-8 text', () => {
 			it('once, when the name the edit was first given turns out to be taken', async () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
 				editHere(note, 'my edit\n');
-				provider.writeBytes('a.md', LATIN1);
+				provider.plantBytes('a.md', LATIN1);
 				await remoteFile(COPY, 'their edit\n');
 				const { batches, engine: pushing } = watched();
 
@@ -8022,7 +8022,7 @@ describe('a file that is not UTF-8 text', () => {
 				const { entry, note } = await pulledNote('a.md', 'one\n');
 				editHere(note, 'my edit\n');
 				await provider.move(entry, 'renamed.md');
-				provider.writeBytes('renamed.md', LATIN1);
+				provider.plantBytes('renamed.md', LATIN1);
 
 				await engine.push();
 
@@ -8037,7 +8037,7 @@ describe('a file that is not UTF-8 text', () => {
 		it('and the list costs nothing when it is lost: the next mention is read and listed again', async () => {
 			// No decision rests on the list. A store that lost it is a store the
 			// notice is missing from until the file is next named, and no more.
-			const file = provider.writeBytes('a.md', LATIN1);
+			const file = provider.plantBytes('a.md', LATIN1);
 			await engine.pull();
 			await store.applyPull({
 				changes: [{ kind: 'forget-unreadable', remoteId: file.remoteId }],
