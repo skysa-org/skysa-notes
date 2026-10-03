@@ -1,12 +1,30 @@
-import { basename, drawsFromData, safeOpenType, showsInline } from '@skysa/core';
+import {
+	basename,
+	drawsFromData,
+	MAX_ATTACHMENT_BYTES,
+	safeOpenType,
+	showsInline,
+} from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 
-import type { AttachmentHost, AttachmentProblem, Fetched, Shown } from '../editor/attachHost.js';
+import type {
+	Added,
+	AttachmentHost,
+	AttachmentProblem,
+	Fetched,
+	Shown,
+} from '../editor/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { db as appDb, type NoteRecord, type NotesDatabase } from '../store/db.js';
 import { heldFile } from '../store/fileCache.js';
-import { fileForLink, listFilePaths } from '../store/files.js';
+import {
+	addAttachment,
+	AttachmentRefusedError,
+	fileForLink,
+	listFilePaths,
+	withdrawAttachment,
+} from '../store/files.js';
 import type { FileRead } from '../sync/fileReads.js';
 import { syncScheduler } from '../sync/runtime.js';
 import type { SyncScheduler } from '../sync/scheduler.js';
@@ -32,8 +50,8 @@ export const LARGE_PICTURE_BYTES = 8 * 1024 * 1024;
 
 export interface NoteAttachmentsOptions {
 	db: NotesDatabase;
-	/** The note as it is now: where it is, in which source. */
-	note: () => Pick<NoteRecord, 'connectionId' | 'path'>;
+	/** The note as it is now: which it is, where it is, in which source. */
+	note: () => Pick<NoteRecord, 'connectionId' | 'id' | 'path'>;
 	readFile: (connectionId: string, fileId: string, signal?: AbortSignal) => Promise<FileRead>;
 	/** Where a problem the editor has nowhere to show goes: a toast. */
 	report?: (problem: AttachmentProblem) => void;
@@ -121,6 +139,32 @@ export const createNoteAttachments = ({
 		return { state: 'ready', file: new File([read.bytes], name, { type: safeOpenType(name) }) };
 	};
 
+	/**
+	 * A file the user has put in the note, beside it. One too large is refused
+	 * before its bytes are read, which for a film could be more than the
+	 * page can hold.
+	 */
+	const add = async (file: File, pasted: boolean): Promise<Added> => {
+		if (file.size > MAX_ATTACHMENT_BYTES) return { state: 'refused', reason: 'too-large' };
+		const { connectionId, id } = note();
+		try {
+			const added = await addAttachment(db, {
+				connectionId,
+				noteId: id,
+				name: file.name,
+				bytes: await file.arrayBuffer(),
+				type: file.type,
+				pasted,
+			});
+			return { state: 'added', ...added };
+		} catch (error) {
+			if (error instanceof AttachmentRefusedError) {
+				return { state: 'refused', reason: error.reason };
+			}
+			return { state: 'failed' };
+		}
+	};
+
 	return {
 		show: async (href, { signal, large = false }) => {
 			const { connectionId, path } = note();
@@ -147,6 +191,13 @@ export const createNoteAttachments = ({
 			fetchFile(href, signal).catch((): Fetched => ({ state: 'failed' })),
 
 		report,
+
+		add: (file, { pasted }) => add(file, pasted),
+
+		withdraw: (fileId) =>
+			withdrawAttachment(db, { connectionId: note().connectionId, fileId }).catch(
+				() => undefined
+			),
 
 		changed: (listener) => {
 			listeners.add(listener);
@@ -194,7 +245,7 @@ export const useNoteAttachments = (
 		report,
 	}: NoteAttachmentsSources = {}
 ): NoteAttachments => {
-	const current = useRef<Pick<NoteRecord, 'connectionId' | 'path'>>(note);
+	const current = useRef<Pick<NoteRecord, 'connectionId' | 'id' | 'path'>>(note);
 	useEffect(() => {
 		current.current = note;
 	}, [note]);

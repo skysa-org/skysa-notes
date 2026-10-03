@@ -27,6 +27,7 @@ import {
 	AttachmentRefusedError,
 	fileForLink,
 	listFilePaths,
+	withdrawAttachment,
 } from '../src/store/files.js';
 import { createFolder, deleteFolder, FolderExistsError, moveFolder } from '../src/store/folders.js';
 import {
@@ -196,6 +197,7 @@ describe('adding a file to a note', () => {
 		const again = await attach(db, two.id, 'a.png', 'same');
 
 		expect(again.fileId).toBe(first.fileId);
+		expect([first.created, again.created]).toEqual([true, false]);
 		expect(await db.files.count()).toBe(1);
 		expect((await queued(db)).filter((op) => op.op === 'upload')).toHaveLength(1);
 	});
@@ -293,6 +295,42 @@ describe('adding a file to a note', () => {
 		await expect(attach(db, 'nobody', 'a.png', 'a')).rejects.toThrow(/No note/);
 		expect(await db.files.count()).toBe(0);
 		expect(await db.fileBytes.count()).toBe(0);
+	});
+});
+
+describe('taking back a file nothing came to link', () => {
+	it('takes the row, the bytes and the upload of a file not up yet', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { ...scope, folderPath: 'Work', title: 'Trip' });
+		const added = await attach(db, note.id, 'a.pdf', 'pdf');
+
+		await withdrawAttachment(db, { ...scope, fileId: added.fileId });
+
+		expect(await db.files.count()).toBe(0);
+		expect(await heldFor(db, { id: added.fileId })).toBeUndefined();
+		expect((await queued(db)).filter((op) => op.fileId !== undefined)).toEqual([]);
+	});
+
+	it('leaves one a note in its folder links: the same bytes, added there meanwhile', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { ...scope, folderPath: 'Work', title: 'Trip' });
+		const added = await attach(db, note.id, 'a.pdf', 'pdf');
+		await saveNoteBody(db, note.id, `Trip\n\n${added.markdown}\n`, undefined, scope);
+
+		await withdrawAttachment(db, { ...scope, fileId: added.fileId });
+
+		expect(await db.files.count()).toBe(1);
+	});
+
+	it('leaves one the remote has, which no add makes', async () => {
+		const db = freshDatabase();
+		const file = await boundFile(db, 'Work/a.pdf');
+
+		await withdrawAttachment(db, { ...scope, fileId: file.id });
+		await withdrawAttachment(db, { ...scope, fileId: 'no such file' });
+
+		expect(await fileRows(db)).toEqual([file]);
+		expect(await queued(db)).toEqual([]);
 	});
 });
 

@@ -23,7 +23,7 @@ import {
 	type NotesDatabase,
 } from './db.js';
 import { foldPath } from './naming.js';
-import { queueMoveFile, queueUpload, requeueWriteBehind } from './queue.js';
+import { queueDeleteFile, queueMoveFile, queueUpload, requeueWriteBehind } from './queue.js';
 
 /**
  * Files beside notes (#187): the writers that add one, and the rules a note's
@@ -82,6 +82,8 @@ export interface AddedAttachment {
 	kind: AttachmentKind;
 	/** What the editor inserts: an image, or a link that shows as a chip. */
 	markdown: string;
+	/** Made by this add, rather than the same file found already there. */
+	created: boolean;
 }
 
 export const fileKey = (file: Pick<FileRecord, 'connectionId' | 'id'>): [string, string] => [
@@ -158,10 +160,10 @@ export const addAttachment = async (
 	if (short === undefined) throw new AttachmentRefusedError('note', input.name);
 	const long = attachmentName({ ...named, hashLength: 16 }) ?? short;
 
-	const file = await db.transaction(
+	const { file, created } = await db.transaction(
 		'rw',
 		[db.notes, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
-		async (): Promise<FileRecord> => {
+		async (): Promise<{ file: FileRecord; created: boolean }> => {
 			const connectionId = input.connectionId ?? (await activeConnectionId(db));
 			const note = await db.notes.get([connectionId, input.noteId]);
 			if (note === undefined || note.deletedLocally === 1) {
@@ -178,7 +180,7 @@ export const addAttachment = async (
 				// Not up yet, and the note is about to link it: its write goes
 				// behind the upload, as for a file added new.
 				if (place.existing.remoteId === undefined) await requeueWriteBehind(db, note);
-				return place.existing;
+				return { file: place.existing, created: false };
 			}
 			const added: FileRecord = {
 				connectionId,
@@ -196,7 +198,7 @@ export const addAttachment = async (
 			});
 			await queueUpload(db, added);
 			await requeueWriteBehind(db, note);
-			return added;
+			return { file: added, created: true };
 		}
 	);
 	const stored = basename(file.path);
@@ -210,8 +212,41 @@ export const addAttachment = async (
 		label,
 		kind,
 		markdown: attachmentMarkdown({ label, href, kind }),
+		created,
 	};
 };
+
+/**
+ * Take back a file `addAttachment` made that no note came to link: the editor
+ * it was added from closed before the link could go in. Only one not up yet,
+ * which is what an add makes, and only while no note in its folder links it —
+ * the same bytes added to another note meanwhile are that note's file. Its
+ * row, its bytes and its upload go together (`queueDeleteFile`).
+ */
+export const withdrawAttachment = (
+	db: NotesDatabase,
+	file: { connectionId: string; fileId: string }
+): Promise<void> =>
+	db.transaction('rw', [db.notes, db.opQueue, db.files, db.fileBytes], async () => {
+		const row = await db.files.get([file.connectionId, file.fileId]);
+		if (row === undefined || row.remoteId !== undefined) return;
+		const folder = foldPath(parentPath(row.path));
+		const linked = await db.notes
+			.where('connectionId')
+			.equals(row.connectionId)
+			.filter(
+				(note) =>
+					foldPath(parentPath(note.path)) === folder &&
+					linkedFiles(note.body, note.path).some(
+						(path) => foldPath(path) === foldPath(row.path)
+					)
+			)
+			.count();
+		if (linked > 0) return;
+		await queueDeleteFile(db, row);
+		await db.files.delete(fileKey(row));
+		await db.fileBytes.delete(fileKey(row));
+	});
 
 /**
  * The file a note's link names, if this source has a row for it: resolved from

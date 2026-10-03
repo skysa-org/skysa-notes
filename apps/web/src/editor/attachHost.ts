@@ -1,4 +1,7 @@
 import { $ctx } from '@milkdown/kit/utils';
+import type { AttachmentKind } from '@skysa/core';
+
+import type { AttachmentRefusal } from '../store/files.js';
 
 /**
  * What the rich editor asks of the app about the files beside a note (#187).
@@ -51,6 +54,25 @@ export type Fetched =
 	| { state: 'failed' }
 	| { state: 'aborted' };
 
+/** What adding a file to the note came to. */
+export type Added =
+	/** Beside the note: what links it, as a node or as markdown. */
+	| {
+			state: 'added';
+			fileId: string;
+			href: string;
+			label: string;
+			kind: AttachmentKind;
+			markdown: string;
+			/** Made by this add, not found already there: what `withdraw` may take back. */
+			created: boolean;
+	  }
+	/** Not a file that can go beside a note: too large, or a note itself. */
+	| { state: 'refused'; reason: AttachmentRefusal }
+	| { state: 'failed' }
+	/** Nowhere to put it: an editor with no note behind it. */
+	| { state: 'unavailable' };
+
 /** Something the editor could not do with a file, for the app to tell the user. */
 export interface AttachmentProblem {
 	readonly message: string;
@@ -68,6 +90,13 @@ export interface AttachmentHost {
 	/** Tell the user, where the editor has nowhere to say it. */
 	readonly report: (problem: AttachmentProblem) => void;
 	/**
+	 * Put a file beside the note, as the user has just asked to: pasted —
+	 * a picture from the clipboard has no name of its own — or not.
+	 */
+	readonly add: (file: File, options: Readonly<{ pasted: boolean }>) => Promise<Added>;
+	/** Take back a file `add` made that the editor had nowhere to link. */
+	readonly withdraw: (fileId: string) => Promise<void>;
+	/**
 	 * Called when what a link resolves to may have changed: the note moved,
 	 * a file arrived with a pull, the network came back. Returns the way to stop.
 	 */
@@ -79,6 +108,8 @@ export const NO_ATTACHMENTS: AttachmentHost = {
 	show: () => Promise.resolve({ state: 'unavailable' }),
 	fetchFile: () => Promise.resolve({ state: 'unavailable' }),
 	report: () => undefined,
+	add: () => Promise.resolve({ state: 'unavailable' }),
+	withdraw: () => Promise.resolve(),
 	changed: () => () => undefined,
 };
 

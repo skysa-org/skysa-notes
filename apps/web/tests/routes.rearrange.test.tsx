@@ -24,6 +24,8 @@ afterEach(async () => {
 	await db.opQueue.clear();
 	await db.prefs.clear();
 	await db.syncState.clear();
+	await db.files.clear();
+	await db.fileBytes.clear();
 });
 
 /** jsdom has no `DataTransfer`, and the rows write to the one they are given. */
@@ -107,6 +109,42 @@ describe('dragging a note into a notebook', () => {
 		// it has just left, and clearing that is the same problem opening a
 		// search result has.
 		expect(await screen.findByRole('heading', { name: 'Work' })).toBeDefined();
+	});
+
+	it('takes a file pasted into it a moment ago, before the paste was saved', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const note = await createNote(db, {
+			folderPath: 'Archive',
+			title: 'Minutes',
+			body: 'Minutes\n',
+		});
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(await screen.findByRole('button', { name: /^Minutes/ }));
+		await screen.findByDisplayValue('Minutes');
+		const text = document.querySelector('.cm-content');
+		const paste = new Event('paste', { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, 'clipboardData', {
+			value: { files: [new File(['%PDF'], 'a.pdf')], getData: () => '' },
+		});
+		text?.dispatchEvent(paste);
+		await waitFor(() => {
+			expect(text?.textContent).toContain('[a.pdf](');
+		});
+
+		// Inside the autosave's wait: the stored body does not link the file yet.
+		await dragOnto(
+			await screen.findByRole('button', { name: /^Minutes/ }),
+			'Move “Minutes” into Work'
+		);
+
+		await waitFor(async () => {
+			expect((await getNote(db, note.id))?.path).toBe('Work/minutes.md');
+		});
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual([
+			expect.stringMatching(/^Work\/a-[0-9a-f]{8}\.pdf$/),
+		]);
 	});
 });
 

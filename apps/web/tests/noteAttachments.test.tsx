@@ -1,3 +1,4 @@
+import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,7 +67,7 @@ const objectUrls = () => {
  */
 const setup = (answer: FileRead = { state: 'ready', bytes: bufferOf('far') }) => {
 	const db = freshDatabase();
-	const where = { current: { connectionId: 'c1', path: 'notes/day.md' } };
+	const where = { current: { connectionId: 'c1', id: 'n1', path: 'notes/day.md' } };
 	const readFile = vi.fn<NoteAttachmentsOptions['readFile']>(() => Promise.resolve(answer));
 	const { urls, made, revoked } = objectUrls();
 	const host = createNoteAttachments({ db, note: () => where.current, readFile, urls });
@@ -119,7 +120,7 @@ describe('a picture beside the open note', () => {
 		await db.files.put(row('notes/cat.png'));
 		await db.files.put(row('archive/cat.png', { id: 'moved' }));
 
-		where.current = { connectionId: 'c1', path: 'archive/day.md' };
+		where.current = { connectionId: 'c1', id: 'n1', path: 'archive/day.md' };
 
 		expect(urlOf(await show('cat.png'))).toBe('blob:test/1');
 		expect(await show('../notes/cat.png')).toMatchObject({ state: 'ready' });
@@ -279,7 +280,7 @@ describe('a file beside the open note, asked for whole', () => {
 		const told = vi.fn();
 		const host = createNoteAttachments({
 			db: freshDatabase(),
-			note: () => ({ connectionId: 'c1', path: 'a.md' }),
+			note: () => ({ connectionId: 'c1', id: 'n1', path: 'a.md' }),
 			readFile: vi.fn(),
 			report: told,
 		});
@@ -290,6 +291,96 @@ describe('a file beside the open note, asked for whole', () => {
 			message: 'a.pdf could not be downloaded.',
 			tone: 'error',
 		});
+	});
+});
+
+describe('a file added to the open note', () => {
+	const opened = async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, {
+			title: 'Day',
+			connectionId: 'c1',
+			folderPath: 'notes',
+		});
+		const host = createNoteAttachments({ db, note: () => note, readFile: vi.fn() });
+		return { db, host };
+	};
+	const pdf = () => new File(['%PDF-1.7'], 'Q3 report.pdf', { type: 'application/pdf' });
+
+	it('is put beside the note, and the editor told how to link it', async () => {
+		const { db, host } = await opened();
+
+		const added = await host.add(pdf(), { pasted: false });
+
+		expect(added).toMatchObject({ state: 'added', kind: 'file', label: 'Q3 report.pdf' });
+		const href = added.state === 'added' ? added.href : '';
+		expect(href).toMatch(/^q3-report-[0-9a-f]{8}\.pdf$/);
+		expect(added.state === 'added' && added.markdown).toBe(`[Q3 report.pdf](${href})`);
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual([`notes/${href}`]);
+	});
+
+	it('is the file already there when the same bytes are added again, which it did not make', async () => {
+		const { host } = await opened();
+
+		const first = await host.add(pdf(), { pasted: false });
+		const again = await host.add(pdf(), { pasted: false });
+
+		expect(first.state === 'added' && first.created).toBe(true);
+		expect(again.state === 'added' && again.created).toBe(false);
+		expect(again.state === 'added' && again.fileId).toBe(
+			first.state === 'added' && first.fileId
+		);
+	});
+
+	it('is refused when too large, before a byte of it is read', async () => {
+		const { db, host } = await opened();
+		const film = new File(['x'], 'film.mov');
+		Object.defineProperty(film, 'size', { value: MAX_ATTACHMENT_BYTES + 1 });
+		const read = vi.spyOn(film, 'arrayBuffer');
+
+		expect(await host.add(film, { pasted: false })).toEqual({
+			state: 'refused',
+			reason: 'too-large',
+		});
+		expect(read).not.toHaveBeenCalled();
+		expect(await db.files.count()).toBe(0);
+	});
+
+	it('is refused when it is a note', async () => {
+		const { host } = await opened();
+
+		expect(await host.add(new File(['# Other'], 'other.md'), { pasted: false })).toEqual({
+			state: 'refused',
+			reason: 'note',
+		});
+	});
+
+	it('has failed where the store cannot take it', async () => {
+		const { db, host } = await opened();
+		db.close();
+
+		expect(await host.add(pdf(), { pasted: false })).toEqual({ state: 'failed' });
+	});
+
+	it('is a pasted picture by the name a pasted picture has', async () => {
+		const { host } = await opened();
+
+		const added = await host.add(new File(['png'], 'image.png', { type: 'image/png' }), {
+			pasted: true,
+		});
+
+		expect(added).toMatchObject({ state: 'added', kind: 'image', label: 'Pasted image' });
+		expect(added.state === 'added' && added.href).toMatch(/^pasted-image-[0-9a-f]{8}\.png$/);
+	});
+
+	it('is taken back, when the editor had nowhere to link it', async () => {
+		const { db, host } = await opened();
+		const added = await host.add(pdf(), { pasted: false });
+
+		await host.withdraw(added.state === 'added' ? added.fileId : '');
+
+		expect(await db.files.count()).toBe(0);
+		expect(await db.fileBytes.count()).toBe(0);
 	});
 });
 

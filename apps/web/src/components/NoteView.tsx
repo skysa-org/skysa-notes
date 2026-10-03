@@ -346,6 +346,7 @@ const NoteBody = ({
 					origin={note.bodyOrigin ?? ''}
 					onUserEdit={onUserEdit}
 					onAdopted={onAdopted}
+					attachments={attachments}
 				/>
 			)}
 			{mode === 'rich' && (
