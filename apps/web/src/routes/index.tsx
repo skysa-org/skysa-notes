@@ -50,6 +50,7 @@ import {
 	moveFolder,
 	renameFolder,
 } from '../store/folders.js';
+import { settleEditors } from '../store/heldEdits.js';
 import {
 	type NoteToOpen,
 	useActiveConnectionId,
@@ -1248,7 +1249,11 @@ const Home = () => {
 		setProblem(null);
 
 		if (move.kind === 'note') {
-			void moveNote(db, move.id, move.into)
+			// What the editor holds is saved first: a file pasted into the note
+			// a moment ago is carried by the links its body has stored
+			// (`carryLinkedFiles`), and left behind by one that has not been.
+			void settleEditors()
+				.then(() => moveNote(db, move.id, move.into))
 				.then(() => {
 					// Only when it is the note in front. A note dragged out of the
 					// list the user is reading leaves it, which is the whole of what

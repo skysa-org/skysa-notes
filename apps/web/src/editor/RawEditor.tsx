@@ -5,6 +5,7 @@ import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 
+import { type AttachmentHost, NO_ATTACHMENTS } from './attachHost.js';
 import { isUserEdit, programmatic } from './dirty.js';
 import { findExtension, rawFindTarget } from './findRaw.js';
 import { useOfferFindTarget } from './findTarget.js';
@@ -12,6 +13,7 @@ import { CODE_HIGHLIGHTER } from './highlight.js';
 import { useIncomingBody } from './incoming.js';
 import { markdownCodeLanguages } from './languages.js';
 import { rawWithoutNul } from './noNul.js';
+import { rawAttachments } from './rawAttach.js';
 
 /**
  * Raw markdown mode: CodeMirror 6 over the note body. The body string is the
@@ -33,6 +35,11 @@ export interface RawEditorProps {
 	 * another tab. What was typed before is no longer under what is typed next.
 	 */
 	onAdopted?: () => void;
+	/**
+	 * Where a file pasted or dropped into the note goes (`attachHost.ts`): the
+	 * same host the rich editor is given. None, and a file is not taken.
+	 */
+	attachments?: AttachmentHost;
 }
 
 /**
@@ -42,7 +49,14 @@ export interface RawEditorProps {
  */
 const undoHistory = new Compartment();
 
-export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEditorProps) => {
+export const RawEditor = ({
+	noteId,
+	body,
+	origin,
+	onUserEdit,
+	onAdopted,
+	attachments,
+}: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
 	// Read inside the update listener, so changing the callback does not tear
@@ -55,6 +69,10 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEd
 	useEffect(() => {
 		replaced.current = onAdopted;
 	}, [onAdopted]);
+	const files = useRef(attachments);
+	useEffect(() => {
+		files.current = attachments;
+	}, [attachments]);
 	const incoming = useIncomingBody(noteId, body, origin);
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
@@ -83,6 +101,7 @@ export const RawEditor = ({ noteId, body, origin, onUserEdit, onAdopted }: RawEd
 					syntaxHighlighting(CODE_HIGHLIGHTER),
 					findExtension(),
 					rawWithoutNul(),
+					rawAttachments(() => files.current ?? NO_ATTACHMENTS),
 					EditorView.lineWrapping,
 					EditorView.updateListener.of((update) => {
 						if (!isUserEdit(update)) return;

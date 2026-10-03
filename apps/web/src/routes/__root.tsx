@@ -2,13 +2,17 @@ import { createRootRoute, Outlet } from '@tanstack/react-router';
 
 import { ErrorScreen } from '../components/ErrorScreen';
 import { UpdatePrompt } from '../components/UpdatePrompt';
+import { useFileDropGuard } from '../components/useFileDropGuard';
 
-const RootLayout = () => (
-	<div className="app">
-		<Outlet />
-		<UpdatePrompt />
-	</div>
-);
+const RootLayout = () => {
+	useFileDropGuard();
+	return (
+		<div className="app">
+			<Outlet />
+			<UpdatePrompt />
+		</div>
+	);
+};
 
 export const Route = createRootRoute({
 	component: RootLayout,

@@ -1942,6 +1942,41 @@ button.danger {
 	}
 }
 
+/*
+ * A file on its way into the note (`editor/attachDrop.ts`): where it is going,
+ * until it is there. A decoration, not the note's text.
+ */
+.attachment-pending {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3em;
+	padding: 0 0.4em;
+	border: 1px dashed var(--border);
+	border-radius: 0.375rem;
+	color: var(--muted);
+	cursor: progress;
+	line-height: 1.6;
+	user-select: none;
+}
+
+.attachment-pending svg {
+	width: 1em;
+	height: 1em;
+}
+
+/* Where something dragged over the note will land. */
+.drop-cursor {
+	background: var(--ring);
+}
+
+/* A background is the first thing forced colours take away. */
+@media (forced-colors: active) {
+	.drop-cursor {
+		background: Highlight;
+		forced-color-adjust: none;
+	}
+}
+
 /* ---- Floating menus --------------------------------------------------- */
 
 /*

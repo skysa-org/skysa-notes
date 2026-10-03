@@ -134,6 +134,24 @@ const placeFor = async (
 };
 
 /**
+ * Why a file cannot go beside a note, where it cannot: too large, or a note
+ * itself (`attachmentName` will not name a `.md`). Known from its name, its
+ * type and its size, before a byte of it is read — the hash it is named by
+ * plays no part in either, so any will do here.
+ */
+export const attachmentRefusal = (
+	file: Readonly<{
+		name: string;
+		type?: string;
+		size: number;
+	}>
+): AttachmentRefusal | undefined => {
+	if (file.size > MAX_ATTACHMENT_BYTES) return 'too-large';
+	const named = attachmentName({ name: file.name, hash: '0'.repeat(8), type: file.type ?? '' });
+	return named === undefined ? 'note' : undefined;
+};
+
+/**
  * Add a file beside a note: a row for it, its bytes held here until they are
  * up, and an upload queued — ahead of the note's write, which is moved behind
  * it (`requeueWriteBehind`). Answers the markdown that links it, which the
@@ -148,7 +166,8 @@ export const addAttachment = async (
 	input: AddAttachmentInput
 ): Promise<AddedAttachment> => {
 	const size = input.bytes.byteLength;
-	if (size > MAX_ATTACHMENT_BYTES) throw new AttachmentRefusedError('too-large', input.name);
+	const refused = attachmentRefusal({ ...input, size });
+	if (refused !== undefined) throw new AttachmentRefusedError(refused, input.name);
 	// Outside the transaction, which the digest would otherwise have to be
 	// held open across, for up to 25 MB. Over a view: the tests' jsdom hands
 	// WebCrypto an `ArrayBuffer` of the page's realm, which it refuses.

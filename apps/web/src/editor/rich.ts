@@ -25,6 +25,7 @@ import {
 	tableCellSchema,
 	tableHeaderSchema,
 } from '@milkdown/kit/preset/gfm';
+import { dropCursor } from '@milkdown/kit/prose/dropcursor';
 import { keymap } from '@milkdown/kit/prose/keymap';
 import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
@@ -39,6 +40,7 @@ import {
 	toLf,
 } from '@skysa/core';
 
+import { attachOnDrop, attachOnPaste, pendingFiles } from './attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { attachmentSchema, attachmentViewPlugin, chipKey, claimsClick } from './attachment.js';
 import { autoLanguagePlugin } from './autoLanguage.js';
@@ -321,6 +323,12 @@ export const createRichEditor = ({
 				// Ahead of every keymap, which a plugin's would not be.
 				handleKeyDown: chipKey,
 				handleClickOn: (_view, _pos, node, _nodePos, event) => claimsClick(node, event),
+				// Files, ahead of the clipboard plugin's paste and of ProseMirror's drop.
+				handlePaste: (view, event) =>
+					attachOnPaste(ctx.get(attachHostCtx.key), view, event),
+				handleDOMEvents: {
+					drop: (view, event) => attachOnDrop(ctx.get(attachHostCtx.key), view, event),
+				},
 			}));
 			if (menus === undefined) return;
 			ctx.set(slash.key, menus.slash);
@@ -350,6 +358,9 @@ export const createRichEditor = ({
 		// Code is text: a chip or a picture is never lost to it (`codeAtoms.ts`).
 		.use($prose(() => codeSpansHoldText))
 		.use($prose(codeBlocksKeepAtoms))
+		// A file on its way in, and where a drop will put it (`attachDrop.ts`).
+		.use($prose(() => pendingFiles))
+		.use($prose(() => dropCursor({ color: false, class: 'drop-cursor' })))
 		.use($prose(() => codeHighlightPlugin(languages)))
 		.use($prose(() => codeActivePlugin))
 		.use($prose(() => codeNumbersPlugin(display)))
