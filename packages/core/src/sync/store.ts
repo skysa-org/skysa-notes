@@ -674,7 +674,10 @@ export type OpOutcome =
 			 * Against the row as it stands, which the user may have changed while
 			 * the bytes were on their way. Moved since (`sentAs` is not its path
 			 * any more), a `move-file` is queued to take the file after it.
-			 * Deleted since, a `delete-file` is queued for what was made. Refused
+			 * Deleted since, a `delete-file` is queued for what was made. Either
+			 * way, every `rmdir` over where the file landed goes behind it: the
+			 * notebook was let go meanwhile, and run first, its `rmdir` would
+			 * find the file and leave the directory standing. Refused
 			 * where another row already holds the `remoteId`: two rows on one file
 			 * is an engine that lost track, and letting either go would take a
 			 * link with it.

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { bindConnection, verifyResume } from '../src/store/connection.js';
 import { createDatabase, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
+import { addAttachment } from '../src/store/files.js';
 import { createFolder, deleteFolder, renameFolder } from '../src/store/folders.js';
 import {
 	createNote,
@@ -14,7 +15,15 @@ import {
 	saveNoteBody,
 } from '../src/store/notes.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts, queueWrite } from '../src/store/queue.js';
-import { isEmpty, movable, type Unsynced, unsyncedIn } from '../src/store/unsynced.js';
+import {
+	countOf,
+	isEmpty,
+	movable,
+	seenIn,
+	unseenIn,
+	type Unsynced,
+	unsyncedIn,
+} from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 
 /**
@@ -61,10 +70,19 @@ const summary = (unsynced: Unsynced) => ({
 	deletes: unsynced.deletes.map((note) => note.path).sort(),
 	folders: unsynced.folders.map((folder) => folder.path).sort(),
 	rmdirs: unsynced.rmdirs.map((op) => op.path).sort(),
+	files: unsynced.files.map((file) => file.path).sort(),
 	blocked: unsynced.blocked,
 });
 
-const NOTHING = { notes: [], renames: [], deletes: [], folders: [], rmdirs: [], blocked: false };
+const NOTHING = {
+	notes: [],
+	renames: [],
+	deletes: [],
+	folders: [],
+	rmdirs: [],
+	files: [],
+	blocked: false,
+};
 
 /** A remote, and an engine for `connectionId` against it: the app's own push, not a stand-in. */
 const remoteFor = async (db: NotesDatabase, connectionId: string) => {
@@ -405,6 +423,62 @@ describe('what a source holds that its remote has not been sent', () => {
 		expect(movable(unsynced)).toBe(0);
 	});
 
+	describe('a file beside a note', () => {
+		const attached = async (db: NotesDatabase) => {
+			const note = await pushedNote(db, 'Work/a.md');
+			return addAttachment(db, {
+				...scope,
+				noteId: note.id,
+				name: 'a.png',
+				bytes: new TextEncoder().encode('a').buffer,
+			});
+		};
+
+		it('counts one added here and not uploaded: its bytes are nowhere else', async () => {
+			const db = freshDatabase();
+			const added = await attached(db);
+
+			const unsynced = await unsyncedIn(db, CONNECTION);
+
+			expect(summary(unsynced)).toEqual({ ...NOTHING, files: [added.path] });
+			expect(countOf(unsynced)).toBe(1);
+			expect(isEmpty(unsynced)).toBe(false);
+		});
+
+		it('counts nothing for one the remote has, nor for its queued move', async () => {
+			const db = freshDatabase();
+			await db.files.put({ ...scope, id: 'f', path: 'a.png', remoteId: 'rf', size: 1 });
+			await db.opQueue.add({
+				...scope,
+				op: 'move-file',
+				fileId: 'f',
+				path: 'old.png',
+				targetPath: 'a.png',
+				attempts: 0,
+				queuedAt: 0,
+			});
+
+			expect(isEmpty(await unsyncedIn(db, CONNECTION))).toBe(true);
+		});
+
+		it("counts nothing of another source's", async () => {
+			const db = freshDatabase();
+			await attached(db);
+
+			expect(isEmpty(await unsyncedIn(db, OTHER))).toBe(true);
+		});
+
+		it('tells a file added since the list was made from one on it', async () => {
+			const db = freshDatabase();
+			const seen = seenIn(await unsyncedIn(db, CONNECTION));
+			await attached(db);
+			const now = await unsyncedIn(db, CONNECTION);
+
+			expect(unseenIn(now, seen)).toBe(true);
+			expect(unseenIn(now, seenIn(now))).toBe(false);
+		});
+	});
+
 	describe('blocked', () => {
 		const stuckWrite = async (db: NotesDatabase, attempts: number) => {
 			const note = await createNote(db, { ...scope, title: 'Stuck' });
@@ -621,7 +695,7 @@ describe('what a source holds that its remote has not been sent', () => {
 		const db = freshDatabase();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 
-		const tables = [db.notes, db.folders, db.opQueue, db.syncState];
+		const tables = [db.notes, db.folders, db.opQueue, db.syncState, db.files];
 		const paths = await db.transaction('rw', tables, async () => {
 			const unsynced = await unsyncedIn(db, CONNECTION);
 			await db.notes.bulkDelete(unsynced.notes.map((each) => [each.connectionId, each.id]));

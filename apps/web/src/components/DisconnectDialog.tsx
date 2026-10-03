@@ -95,6 +95,9 @@ const summary = (listed: Unsynced): string =>
 		...(listed.rmdirs.length > 0
 			? [counted(listed.rmdirs.length, 'notebook delete', 'notebook deletes')]
 			: []),
+		...(listed.files.length > 0
+			? [`${counted(listed.files.length, 'file', 'files')} not yet uploaded`]
+			: []),
 	].join(' · ');
 
 /** Why the last push could not clear this, where the user should wait instead. */

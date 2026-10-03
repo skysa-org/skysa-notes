@@ -16,6 +16,7 @@ import { bindingCount, finishImport, verifyResume } from '../store/connection.js
 import {
 	activeConnectionId,
 	type NotesDatabase,
+	type OpQueueRecord,
 	type QueuedOperation,
 	type SyncStateRecord,
 } from '../store/db.js';
@@ -460,7 +461,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	/**
 	 * The op a `blocked` sync is about. The queue is ordered, so the first one
 	 * out of attempts is both the one that failed and the one holding up
-	 * everything behind it.
+	 * everything behind it — except an upload, which the engine steps over and
+	 * keeps (docs/ARCHITECTURE.md §7, "Pushing files"). So the first op that is
+	 * not an upload is named before any upload: it is what stopped the queue.
+	 * Only an upload, and the run was blocked for that upload alone.
 	 */
 	const stuckOp = async (connectionId: string): Promise<StuckOp | undefined> => {
 		const failing = await db.opQueue
@@ -468,7 +472,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			.equals(connectionId)
 			.filter((op) => outOfAttempts(op, maxAttempts))
 			.toArray();
-		const first = [...failing].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0)).at(0);
+		const upload = (op: OpQueueRecord): number => (op.op === 'upload' ? 1 : 0);
+		const first = [...failing]
+			.sort((a, b) => upload(a) - upload(b) || (a.seq ?? 0) - (b.seq ?? 0))
+			.at(0);
 		if (first === undefined) return undefined;
 		return {
 			op: first.op,

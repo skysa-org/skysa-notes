@@ -30,6 +30,7 @@ import {
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
 import { ArchiveLimitError, type Library } from '../src/store/exportNotes.js';
+import { addAttachment } from '../src/store/files.js';
 import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createKeeping, type Keeping } from '../src/store/keeping.js';
@@ -2346,6 +2347,27 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(await screen.findByRole('button', { name: 'This device' })).toBeTruthy();
 	});
 
+	it('says a file never uploaded goes with what is discarded', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		const plan = await createNote(db, { title: 'Plan' });
+		await addAttachment(db, {
+			noteId: plan.id,
+			name: 'a.png',
+			bytes: new TextEncoder().encode('a').buffer,
+		});
+		await detachConnection(db, { connectionId: 'c1' });
+		renderPanel(clientWith(), db);
+
+		await user.click(await enabled('Discard…'));
+
+		expect(
+			await screen.findByText('Also never sent, and also forgotten: 1 file not uploaded.')
+		).toBeTruthy();
+	});
+
 	it('downloads the notes that were never sent', async () => {
 		const user = userEvent.setup();
 		const { db } = await detached();
@@ -3000,6 +3022,29 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		expect(screen.getByText('1 note not yet sent')).toBeTruthy();
 		expect(
 			screen.getByRole('button', { name: 'Move 1 note to OneDrive · ms:1…' })
+		).toBeTruthy();
+	});
+
+	it('counts a file added here and not uploaded, which is lost with the source', async () => {
+		const user = userEvent.setup();
+		const { db } = await withSomewhereToPutIt();
+		const sent = await sentNote(db, 'Sent');
+		await addAttachment(db, {
+			noteId: sent.id,
+			name: 'a.png',
+			bytes: new TextEncoder().encode('a').buffer,
+		});
+		renderPanel(answering(db), db);
+
+		await user.click(await enabled('Disconnect…'));
+
+		expect(
+			await screen.findByText('1 note not yet sent · 1 file not yet uploaded')
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				'2 changes on this device have not reached Dropbox, and cannot once it is disconnected.'
+			)
 		).toBeTruthy();
 	});
 

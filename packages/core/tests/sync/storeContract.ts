@@ -2613,6 +2613,42 @@ export const describeSyncStoreContract = (
 					}
 				);
 
+				it.each([
+					['deleted', true],
+					['moved', false],
+				])(
+					'puts the rmdirs over a file %s while it was on its way behind what that owes',
+					async (_how, deleted) => {
+						// Its notebook was let go meanwhile, and its `rmdir` queued first.
+						// Run first, it would find the file and leave the directory.
+						const { store, seedFile, seedOp, dropFile } = await harness();
+						const at = deleted ? 'Trips/a.png' : 'Work/a.png';
+						await seedFile({ ...pending, path: at }, { bytes: BYTES, pinned: true });
+						const seq = await seedOp({ op: 'upload', fileId: 'x1', path: at });
+						await seedOp({ op: 'rmdir', path: 'trips' });
+						await seedOp({ op: 'rmdir', path: 'Other' });
+						if (deleted) await dropFile('x1');
+						await store.completeOp(seq, {
+							kind: 'uploaded',
+							fileId: 'x1',
+							remote: file('Trips/a.png'),
+							sentAs: 'Trips/a.png',
+						});
+						expect(await opsOf(store)).toEqual([
+							{ op: 'rmdir', path: 'Other' },
+							deleted
+								? { op: 'delete-file', path: 'Trips/a.png', remoteId: 'f1' }
+								: {
+										op: 'move-file',
+										fileId: 'x1',
+										path: 'Trips/a.png',
+										targetPath: 'Work/a.png',
+									},
+							{ op: 'rmdir', path: 'trips' },
+						]);
+					}
+				);
+
 				it("is refused for a row it would make another's file", async () => {
 					// Two rows on one file, which only an engine that lost track
 					// makes. Letting either go would take a link with it; the

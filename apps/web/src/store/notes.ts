@@ -31,10 +31,28 @@ import {
 } from './db.js';
 import { deletedHere } from './deletedHere.js';
 import { ensureDetached } from './detached.js';
+import { carryLinkedFiles } from './files.js';
 import { ensureFolder } from './folders.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
+
+/**
+ * The scope every writer here opens, whether or not it touches every table in
+ * it: one caller wraps several writers in a transaction of its own, and a
+ * writer that asked for more than that caller opened would fail there with a
+ * `SubTransactionError`. The files are in it because a note's move carries the
+ * files it links (`carryLinkedFiles`).
+ */
+const writerTables = (db: NotesDatabase) => [
+	db.notes,
+	db.folders,
+	db.opQueue,
+	db.syncState,
+	db.prefs,
+	db.files,
+	db.fileBytes,
+];
 
 /**
  * Notes CRUD over IndexedDB.
@@ -211,7 +229,7 @@ export const createNote = async (
 	// chosen from the names already taken, and the digest between that read and
 	// the `add` is long enough for a second "New note" click to choose the very
 	// same name. Two rows at one path is one file on the remote and a note lost.
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+	db.transaction('rw', writerTables(db), async () => {
 		const connectionId = input.connectionId ?? (await activeConnectionId(db));
 		const folderPath = input.folderPath ?? '';
 		const record = begunNote({
@@ -334,8 +352,9 @@ const applyEdit = async (
 	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
 	// `folders` is in scope because a note can move into a folder that does not
-	// exist yet, and creating it belongs to the same all-or-nothing step.
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+	// exist yet, and creating it belongs to the same all-or-nothing step; the
+	// files because the files it links move with it.
+	db.transaction('rw', writerTables(db), async () => {
 		const existing = await db.notes.get(await keyFor(db, id, scope));
 		if (existing === undefined) throw new Error(`No note with id ${id}`);
 
@@ -418,7 +437,7 @@ export const saveNoteBody = async (
 	/** Where the note is, for a caller with no `base` to say. */
 	scope: NoteScope = {}
 ): Promise<NoteRecord> =>
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+	db.transaction('rw', writerTables(db), async () => {
 		// A paste can carry a U+0000, and a file holding one is unreadable to
 		// every device (`withoutNul`). Dropped here, ahead of every road the
 		// body takes below, so the row holds what its file will; the file is
@@ -719,7 +738,11 @@ export const renameNote = async (
 		scope
 	);
 
-/** Move a note to another folder, keeping its filename where possible. */
+/**
+ * Move a note to another folder, keeping its filename where possible, and the
+ * files it links beside it with it — moved, or copied where another note there
+ * links them too (`carryLinkedFiles`).
+ */
 export const moveNote = async (
 	db: NotesDatabase,
 	id: string,
@@ -740,6 +763,9 @@ export const moveNote = async (
 			// behind for a notebook the note never reached.
 			if (folderPath !== '')
 				await ensureFolder(db, folderPath, { connectionId: note.connectionId });
+			// Ahead of the note's own ops, which `applyEdit` queues once this
+			// returns: a file lands before the note that links it.
+			await carryLinkedFiles(db, note, folderPath);
 			return { path: joinPath(folderPath, filename) };
 		},
 		scope
@@ -783,7 +809,7 @@ const setDeleted = (
 	deleted: Flag,
 	scope: NoteScope = {}
 ): Promise<void> =>
-	db.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+	db.transaction('rw', writerTables(db), async () => {
 		const note = await db.notes.get(await keyFor(db, id, scope));
 		if (note === undefined || note.deletedLocally === deleted) return;
 		const updated: NoteRecord = {
@@ -863,7 +889,7 @@ export const undeleteNote = (db: NotesDatabase, deleted: NoteRecord): Promise<No
 	// way would leave the note back without the text only `deleted` holds — and
 	// reported as not brought back at all.
 	db
-		.transaction('rw', db.notes, db.folders, db.opQueue, db.syncState, db.prefs, async () => {
+		.transaction('rw', writerTables(db), async () => {
 			// Before the save below, which would otherwise let the text go.
 			deletedHere.delete(deleted);
 			// Wherever the tombstone is by now: its source may have been detached
@@ -970,45 +996,35 @@ export const importNoteFile = async (
 	// the note clean, so nothing will ever push what it overwrote.
 	//
 	// `folders` is in scope although nothing here touches it, so that every
-	// writer in this file takes the same scope. A caller that wraps several of
-	// these in one transaction of its own — which is what a sync pull batch will
-	// be — has then only one scope to open, instead of a `SubTransactionError`
-	// the first time it reaches the one writer that asked for less.
-	return db.transaction(
-		'rw',
-		db.notes,
-		db.folders,
-		db.opQueue,
-		db.syncState,
-		db.prefs,
-		async () => {
-			const connectionId = input.connectionId ?? (await activeConnectionId(db));
-			const existing =
-				parsed.id === undefined
-					? await noteAtPath(db, connectionId, input.path)
-					: await db.notes.get([connectionId, parsed.id]);
+	// writer in this file takes the same scope (`writerTables`). A caller that
+	// wraps several of these in one transaction of its own has then only one
+	// scope to open, instead of a `SubTransactionError` the first time it
+	// reaches the one writer that asked for less.
+	return db.transaction('rw', writerTables(db), async () => {
+		const connectionId = input.connectionId ?? (await activeConnectionId(db));
+		const existing =
+			parsed.id === undefined
+				? await noteAtPath(db, connectionId, input.path)
+				: await db.notes.get([connectionId, parsed.id]);
 
-			const record: NoteRecord = {
-				...noteRecordFromFile({
-					id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
-					connectionId,
-					path: input.path,
-					source,
-					hash: await Dexie.waitFor(contentHash(source)),
-					existing,
-					now,
-				}),
-				...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
-				...(input.remoteVersion === undefined
-					? {}
-					: { remoteVersion: input.remoteVersion }),
-				deletedLocally: 0,
-			};
+		const record: NoteRecord = {
+			...noteRecordFromFile({
+				id: parsed.id ?? existing?.id ?? crypto.randomUUID(),
+				connectionId,
+				path: input.path,
+				source,
+				hash: await Dexie.waitFor(contentHash(source)),
+				existing,
+				now,
+			}),
+			...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
+			...(input.remoteVersion === undefined ? {} : { remoteVersion: input.remoteVersion }),
+			deletedLocally: 0,
+		};
 
-			await db.notes.put(record);
-			return record;
-		}
-	);
+		await db.notes.put(record);
+		return record;
+	});
 };
 
 export interface NoteFileInput {

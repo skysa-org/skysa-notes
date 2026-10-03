@@ -10,13 +10,23 @@ import {
 
 import {
 	activeConnectionId,
+	type FileRecord,
 	type FolderRecord,
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
 import { deletedHere } from './deletedHere.js';
+import { handOverToCopies } from './files.js';
 import { foldPath, freePath } from './naming.js';
-import { queueDelete, queueMkdir, queueMove, queueRmdir, withdrawMkdirs } from './queue.js';
+import {
+	queueDelete,
+	queueDeleteFile,
+	queueMkdir,
+	queueMove,
+	queueMoveFile,
+	queueRmdir,
+	withdrawMkdirs,
+} from './queue.js';
 
 /**
  * Folders are notebooks. They exist as real directories on the provider, so the
@@ -231,11 +241,7 @@ export const moveFolder = async (
 
 	await db.transaction(
 		'rw',
-		db.folders,
-		db.notes,
-		db.opQueue,
-		db.syncState,
-		db.prefs,
+		[db.folders, db.notes, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
 		async () => {
 			const connectionId = options.connectionId ?? (await activeConnectionId(db));
 			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
@@ -266,6 +272,8 @@ export const moveFolder = async (
 			const moving = folders.filter((folder) => isWithin(folder.path, source));
 			const notes = await db.notes.where('connectionId').equals(connectionId).toArray();
 			const inside = notes.filter((note) => isWithin(note.path, source));
+			const files = await db.files.where('connectionId').equals(connectionId).toArray();
+			const carried = files.filter((file) => isWithin(file.path, source));
 
 			// Nothing is there — before the refusal below, not after it: a move that
 			// moves nothing has no destination to report a duplicate for, and saying
@@ -278,12 +286,15 @@ export const moveFolder = async (
 			// and explained below. What it replaces is worse: the only thing that
 			// used to happen was `ensureFolder` conjuring the destination, a notebook
 			// the user never asked for out of a move that moved nothing.
-			if (moving.length === 0 && inside.length === 0) return;
+			if (moving.length === 0 && inside.length === 0 && carried.length === 0) return;
 
-			const occupying = folders.filter(
-				(folder) =>
-					isWithin(foldPath(folder.path), foldPath(target)) &&
-					!isWithin(folder.path, source)
+			// A file is in the way as a notebook is. A file keeps its name — the
+			// notes that link it say it — so there is no giving way, as a note
+			// does below; and one under the destination with no folder row over
+			// it is what a pull can leave.
+			const occupying = [...folders, ...files].filter(
+				(each) =>
+					isWithin(foldPath(each.path), foldPath(target)) && !isWithin(each.path, source)
 			);
 			if (occupying.length > 0) throw new FolderExistsError(target, basename(target));
 
@@ -373,6 +384,21 @@ export const moveFolder = async (
 					return [...done, { ...note, path }];
 				}, buried);
 
+			// The files beside the notes go with them, under the names they have,
+			// which the notes' links say. Moved one by one, as the notes are:
+			// ahead of them, so no note arrives anywhere before the files it
+			// links, and ahead of the `rmdir`s, which a file still in the old
+			// directory would keep standing.
+			const rebased = carried.map((file): FileRecord => ({
+				...file,
+				path: rebasePath(file.path, source, target),
+			}));
+			if (rebased.length > 0) await db.files.bulkPut(rebased);
+			await rebased.reduce<Promise<void>>(async (pending, file, at) => {
+				await pending;
+				await queueMoveFile(db, file, carried[at]?.path ?? file.path);
+			}, Promise.resolve());
+
 			if (relocated.length > 0) await db.notes.bulkPut(relocated);
 			const from = new Map(inside.map((note) => [note.id, note.path]));
 			await relocated.reduce<Promise<void>>(async (pending, note) => {
@@ -436,7 +462,9 @@ export const renameFolder = async (
 
 /**
  * Delete a folder and tombstone every note beneath it, so each deletion is
- * pushed to the provider rather than silently dropped locally.
+ * pushed to the provider rather than silently dropped locally. Every file
+ * beneath it goes too (#187): the one way a file is ever deleted, which the
+ * confirmation counts them for.
  */
 export const deleteFolder = async (
 	db: NotesDatabase,
@@ -448,11 +476,7 @@ export const deleteFolder = async (
 
 	await db.transaction(
 		'rw',
-		db.folders,
-		db.notes,
-		db.opQueue,
-		db.syncState,
-		db.prefs,
+		[db.folders, db.notes, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
 		async () => {
 			const connectionId = options.connectionId ?? (await activeConnectionId(db));
 			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
@@ -479,6 +503,24 @@ export const deleteFolder = async (
 				await pending;
 				await queueDelete(db, note);
 			}, Promise.resolve());
+
+			// The files, with no tombstone: nothing brings a file back, so the
+			// row and its bytes go now and the op is what is left of it. A copy
+			// elsewhere that was to read one of them from the remote is handed
+			// the bytes first, where this device has them.
+			const files = await db.files
+				.where('connectionId')
+				.equals(connectionId)
+				.filter((file) => isWithin(file.path, target))
+				.toArray();
+			await files.reduce<Promise<void>>(async (pending, file) => {
+				await pending;
+				await handOverToCopies(db, file);
+				await queueDeleteFile(db, file);
+			}, Promise.resolve());
+			const keys = files.map((file): [string, string] => [file.connectionId, file.id]);
+			await db.files.bulkDelete(keys);
+			await db.fileBytes.bulkDelete(keys);
 
 			// A notebook the remote never heard of: its `mkdir` is withdrawn rather
 			// than sent, or it would make a directory this device can no longer ask

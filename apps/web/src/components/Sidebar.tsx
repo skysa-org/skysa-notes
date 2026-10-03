@@ -185,6 +185,21 @@ const destinationLabel = (
 ): string =>
 	allowed ? `Move “${moving.name}” ${landing ?? `into ${name}`}` : `${name} — cannot go here`;
 
+const howMany = (count: number, one: string, many: string): string[] =>
+	count === 0 ? [] : [`${String(count)} ${count === 1 ? one : many}`];
+
+/**
+ * What deleting a notebook takes, in words. The files too: a file beside a note
+ * is deleted with its notebook and in no other way (#187), so this is the one
+ * place the user is told it will go.
+ */
+const deletionOf = (name: string, noteCount: number, fileCount: number): string => {
+	const going = [...howMany(noteCount, 'note', 'notes'), ...howMany(fileCount, 'file', 'files')];
+	return going.length === 0
+		? `\u201c${name}\u201d will be deleted.`
+		: `\u201c${name}\u201d and the ${going.join(' and ')} in it will be deleted.`;
+};
+
 /**
  * Asked before a notebook goes, and not told afterwards — the rule the
  * disconnect confirm exists for (docs/ARCHITECTURE.md §10), and the reason a notebook
@@ -198,11 +213,13 @@ const destinationLabel = (
 const DeleteConfirm = ({
 	name,
 	noteCount,
+	fileCount,
 	onConfirm,
 	onCancel,
 }: {
 	name: string;
 	noteCount: number;
+	fileCount: number;
 	onConfirm: () => void;
 	onCancel: () => void;
 }) => (
@@ -213,11 +230,7 @@ const DeleteConfirm = ({
 		onConfirm={onConfirm}
 		onCancel={onCancel}
 	>
-		{noteCount === 0
-			? `\u201c${name}\u201d will be deleted.`
-			: `\u201c${name}\u201d and the ${String(noteCount)} ${
-					noteCount === 1 ? 'note' : 'notes'
-				} in it will be deleted.`}
+		{deletionOf(name, noteCount, fileCount)}
 	</ConfirmDialog>
 );
 
@@ -460,6 +473,10 @@ const TOP_LEVEL_LABEL = 'Top level';
 /** Every live note beneath a notebook, which is what deleting it would take. */
 const notesUnder = (node: FolderNode): number =>
 	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
+
+/** Every file beneath a notebook, which deleting it takes as well. */
+const filesUnder = (node: FolderNode): number =>
+	node.children.reduce((total, child) => total + filesUnder(child), node.fileCount);
 
 const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefined =>
 	nodes.reduce<FolderNode | undefined>(
@@ -738,6 +755,7 @@ export const Sidebar = ({
 				<DeleteConfirm
 					name={basename(deleting)}
 					noteCount={going === undefined ? 0 : notesUnder(going)}
+					fileCount={going === undefined ? 0 : filesUnder(going)}
 					onConfirm={() => {
 						setDeleting(null);
 						onDeleteFolder?.(deleting);

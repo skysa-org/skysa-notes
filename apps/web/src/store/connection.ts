@@ -450,11 +450,22 @@ const queueOwed = async (db: NotesDatabase, connectionId: string, moved: Moved) 
 
 // The credentials too: a source let go loses its rows and the key to its
 // account together, or a failure between the two leaves a device holding a
-// live credential for a source it no longer admits to having.
+// live credential for a source it no longer admits to having. The files
+// because what is unsent is asked inside (`unsyncedIn`), and a file added here
+// and not uploaded is.
 const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T> =>
 	db.transaction(
 		'rw',
-		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.credentials],
+		[
+			db.notes,
+			db.folders,
+			db.opQueue,
+			db.syncState,
+			db.prefs,
+			db.credentials,
+			db.files,
+			db.fileBytes,
+		],
 		work
 	);
 
@@ -864,6 +875,9 @@ const keepOnly = async (
 	const unmade = new Set(unsynced.folders.map((folder) => foldPath(folder.path)));
 	const stays = (op: OpQueueRecord): boolean => {
 		if (op.op === 'rmdir') return true;
+		// Every file row stays here, and so does every op about one: a file kept
+		// with its upload dropped would never be sent (#187, #195).
+		if (op.fileId !== undefined || op.op === 'delete-file') return true;
 		if (op.op === 'mkdir') return unmade.has(foldPath(op.path));
 		return op.noteId !== undefined && stayingIds.has(op.noteId);
 	};
@@ -961,6 +975,8 @@ export const abandonImport = (db: NotesDatabase, connectionId: string): Promise<
 		await db.notes.where('connectionId').equals(connectionId).delete();
 		await db.folders.where('connectionId').equals(connectionId).delete();
 		await db.opQueue.where('connectionId').equals(connectionId).delete();
+		await db.files.where('connectionId').equals(connectionId).delete();
+		await db.fileBytes.where('connectionId').equals(connectionId).delete();
 		await forgetSource(db, connectionId);
 		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: state.importing.returnTo });
 		return { outcome: 'abandoned', gone: state };
@@ -1203,6 +1219,9 @@ export const releaseConnection = (
 		await db.notes.where('connectionId').equals(connectionId).delete();
 		await db.folders.where('connectionId').equals(connectionId).delete();
 		await db.opQueue.where('connectionId').equals(connectionId).delete();
+		// The files the user was told would be forgotten with it, and the rest.
+		await db.files.where('connectionId').equals(connectionId).delete();
+		await db.fileBytes.where('connectionId').equals(connectionId).delete();
 		await forgetSource(db, connectionId);
 		return { outcome: 'released', gone: state };
 	}).then(({ outcome, gone }) => {
@@ -1466,7 +1485,7 @@ export const pileContents = async (
  * the only thing the list offers.
  */
 export const connectedSources = async (
-	db: Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs'>
+	db: Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs' | 'files'>
 ): Promise<ConnectedSource[]> => {
 	const active = await activeConnectionId(db);
 	const states = await db.syncState.toArray();

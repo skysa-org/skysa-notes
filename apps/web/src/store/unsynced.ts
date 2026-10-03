@@ -1,6 +1,7 @@
 import { isWithin } from '@skysa/core';
 
 import {
+	type FileRecord,
 	type FolderRecord,
 	type NoteRecord,
 	noteRef,
@@ -67,6 +68,13 @@ export interface Unsynced {
 	/** Directories still owed their removal. The rows are gone, so the ops stand for them. */
 	rmdirs: OpQueueRecord[];
 	/**
+	 * Files added here and not uploaded yet (#187): pending rows, whose bytes
+	 * exist on this device and nowhere else. A bound file is the remote's, and
+	 * its queued move or delete goes with the note or the notebook that queued
+	 * it, which is counted already.
+	 */
+	files: FileRecord[];
+	/**
 	 * An op of this source is out of attempts, so none of the above can be sent
 	 * right now however long the user waits (`outOfAttempts` in `store/queue.ts`,
 	 * the same rule the sync status says `blocked` by).
@@ -85,14 +93,14 @@ export interface UnsyncedOptions {
 	maxAttempts?: number;
 }
 
-type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState'>;
+type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'files'>;
 
 /** The ids of the notes that have an op of this kind queued. */
 const notesWith = (ops: readonly OpQueueRecord[], kind: OpQueueRecord['op']): Set<string> =>
 	new Set(ops.flatMap((op) => (op.op === kind && op.noteId !== undefined ? [op.noteId] : [])));
 
 /**
- * Safe inside a transaction over `notes`, `folders`, `opQueue` and `syncState`:
+ * Safe inside a transaction over `notes`, `folders`, `opQueue`, `syncState` and `files`:
  * every await is on a promise Dexie made. A caller that has to act on the
  * answer — discard exactly what the user was shown, and nothing typed since —
  * asks again inside the transaction that acts.
@@ -106,6 +114,11 @@ export const unsyncedIn = async (
 	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 	const ops = await db.opQueue.where('connectionId').equals(connectionId).sortBy('seq');
 	const unverified = (await db.syncState.get(connectionId))?.resumeUnverified === true;
+	const pending = await db.files
+		.where('connectionId')
+		.equals(connectionId)
+		.filter((file) => file.remoteId === undefined)
+		.toArray();
 
 	const written = notesWith(ops, 'write');
 	const moved = notesWith(ops, 'move');
@@ -146,6 +159,7 @@ export const unsyncedIn = async (
 		deletes: rows.filter((note) => note.deletedLocally === 1 && note.remoteId !== undefined),
 		folders: folders.filter(unsentFolder),
 		rmdirs: ops.filter((op) => op.op === 'rmdir'),
+		files: pending,
 		blocked: ops.some((op) => outOfAttempts(op, options.maxAttempts)),
 		unverified,
 	};
@@ -166,6 +180,8 @@ export interface Seen {
 	notes: ReadonlyMap<string, number>;
 	folders: ReadonlySet<string>;
 	rmdirs: ReadonlySet<string>;
+	/** By id: a file is never written into, so one listed is the same file however it has moved. */
+	files: ReadonlySet<string>;
 }
 
 /**
@@ -188,6 +204,7 @@ export const seenIn = (unsynced: Unsynced, standing: readonly string[] = []): Se
 	),
 	folders: new Set([...unsynced.folders.map((folder) => folder.path), ...standing]),
 	rmdirs: new Set(unsynced.rmdirs.map((op) => op.path)),
+	files: new Set(unsynced.files.map((file) => file.id)),
 });
 
 /** Whether the note is one the list stood for, exactly as it stood. */
@@ -204,7 +221,8 @@ export const unseenIn = (unsynced: Unsynced, seen: Seen): boolean =>
 		(note) => !wasSeen(seen, note)
 	) ||
 	unsynced.folders.some((folder) => !seen.folders.has(folder.path)) ||
-	unsynced.rmdirs.some((op) => !seen.rmdirs.has(op.path));
+	unsynced.rmdirs.some((op) => !seen.rmdirs.has(op.path)) ||
+	unsynced.files.some((file) => !seen.files.has(file.id));
 
 /**
  * The notebooks worth telling the user about in their own right: the ones with
@@ -247,6 +265,7 @@ export const countOf = (unsynced: Unsynced): number =>
 	unsynced.renames.length +
 	unsynced.deletes.length +
 	unsynced.rmdirs.length +
+	unsynced.files.length +
 	countedFolders(unsynced).length;
 
 /**
@@ -259,4 +278,5 @@ export const isEmpty = (unsynced: Unsynced): boolean =>
 	unsynced.renames.length === 0 &&
 	unsynced.deletes.length === 0 &&
 	unsynced.folders.length === 0 &&
-	unsynced.rmdirs.length === 0;
+	unsynced.rmdirs.length === 0 &&
+	unsynced.files.length === 0;
