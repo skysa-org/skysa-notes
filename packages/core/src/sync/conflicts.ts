@@ -127,6 +127,10 @@ export const conflictFolderPath = (path: string, at: Date, taken: Iterable<strin
 export const conflictPath = (path: string, at: Date, taken: Iterable<string> = []): string =>
 	replaceBasename(path, conflictFilename(basename(path), at, taken));
 
+/** The same, for a file that is not a note: its own extension kept (#187). */
+export const conflictFilePath = (path: string, at: Date, taken: Iterable<string> = []): string =>
+	replaceBasename(path, conflictNameKeepingExtension(basename(path), at, taken));
+
 /**
  * The copy's contents: the local file exactly as it was, with a fresh `id`.
  *

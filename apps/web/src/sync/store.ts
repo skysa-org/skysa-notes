@@ -834,9 +834,16 @@ export const createDexieSyncStore = (
 		const file = await ownFile(scope, outcome.fileId);
 		if (file === undefined) return;
 		await refuseTwin(scope, file.id, outcome.remote.remoteId);
-		// A move leaves the bytes as they were, whatever it does to the version.
+		// A move leaves the bytes as they were, whatever it does to the version —
+		// unless it landed on another file and took that one for its own, whose
+		// bytes nobody here has read, and whose version can be the same string
+		// as the one these were cached under.
 		const held = await scope.fileBytes.get(fileKey(file.id));
-		if (held !== undefined && held.pinned === 0 && current(file, held)) {
+		const same = outcome.remote.remoteId === file.remoteId;
+		if (held !== undefined && held.pinned === 0 && !same) {
+			await scope.fileBytes.delete(fileKey(file.id));
+		}
+		if (held !== undefined && held.pinned === 0 && same && current(file, held)) {
 			await scope.fileBytes.put(cachedAs(held, outcome.remote.version));
 		}
 		const landed: FileRecord = {

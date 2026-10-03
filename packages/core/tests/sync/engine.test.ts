@@ -12,7 +12,7 @@ import {
 	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
-import { conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
+import { conflictFilePath, conflictFolderPath, conflictPath } from '../../src/sync/conflicts.js';
 import { createSyncEngine, type SyncEngine, type SyncProgress } from '../../src/sync/engine.js';
 import type { PullBatch, SyncNote, SyncStore } from '../../src/sync/store.js';
 import { createMemoryStore, type MemoryStore } from './memoryStore.js';
@@ -83,6 +83,15 @@ afterEach(() => {
 	const paths = notes.map((note) => note.path);
 	expect(paths).toEqual([...new Set(paths)]);
 	const remotes = notes.flatMap((note) => (note.remoteId === undefined ? [] : [note.remoteId]));
+	expect(remotes).toEqual([...new Set(remotes)]);
+});
+
+/** The same two, for files: a picture shown twice, or a link the store cannot keep. */
+afterEach(() => {
+	const files = store.files();
+	const paths = files.map((file) => file.path);
+	expect(paths).toEqual([...new Set(paths)]);
+	const remotes = files.flatMap((file) => (file.remoteId === undefined ? [] : [file.remoteId]));
 	expect(remotes).toEqual([...new Set(remotes)]);
 });
 
@@ -1022,21 +1031,791 @@ describe('push', () => {
 	});
 });
 
-describe('a file op this engine cannot send yet', () => {
-	// The store learns files before the engine learns to push them (#187).
-	// Finished, an upload would be a file that never left the device.
-	it.each([
-		{ op: 'upload' as const, fileId: 'x1', path: 'a.png' },
-		{ op: 'move-file' as const, fileId: 'x1', path: 'a.png', targetPath: 'b.png' },
-		{ op: 'delete-file' as const, path: 'a.png', remoteId: 'f1' },
-	])('fails $op and keeps it queued', async (queued) => {
-		const op = store.queue(queued);
+describe('pushing a file', () => {
+	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 10, 13]);
+	const OTHER = new Uint8Array([1, 2, 3]);
+
+	/** A file added here: its row, its bytes held until they go, and its upload. */
+	const added = (path: string, attempts = 0) => {
+		store.putFile(
+			{ id: 'x1', path, size: PNG.byteLength },
+			{ bytes: PNG.slice(), pinned: true }
+		);
+		return store.queue({ op: 'upload', fileId: 'x1', path, attempts });
+	};
+
+	const remoteAt = (path: string) => provider.snapshot().find((entry) => entry.path === path);
+
+	/** A note behind the upload in the queue, to see whether it waited. */
+	const noteBehind = () => {
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+	};
+
+	const creates = () => provider.callLog().filter((call) => call.op === 'createFile').length;
+
+	it('sends the bytes held here, and binds the row to what they made', async () => {
+		added('a-1234abcd.png');
 
 		const result = await engine.push();
 
-		expect(result.status).toBe('retry');
-		expect(store.ops()).toEqual([expect.objectContaining({ seq: op.seq, attempts: 1 })]);
-		expect(store.lastError(op.seq)).toContain(queued.op);
+		expect(result).toEqual({ status: 'ok', pulled: 0, pushed: 1, conflicts: [] });
+		expect(provider.bytesAt('a-1234abcd.png')).toEqual(PNG);
+		const made = remoteAt('a-1234abcd.png');
+		expect(store.files()).toEqual([
+			{
+				id: 'x1',
+				path: 'a-1234abcd.png',
+				remoteId: made?.remoteId,
+				remoteVersion: made?.version,
+				size: PNG.byteLength,
+			},
+		]);
+		// Up now: kept as that version's, and no longer held for an upload.
+		expect(store.heldBytes('x1')).toEqual({ bytes: PNG, version: made?.version });
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('makes the folders a file needs, from the top', async () => {
+		added('Trips/2026/a.png');
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.bytesAt('Trips/2026/a.png')).toEqual(PNG);
+	});
+
+	it('tells the provider what kind of file it is, where it knows', async () => {
+		const asked: (string | undefined)[] = [];
+		const telling: StorageProvider = {
+			...provider,
+			createFile: (path, bytes, opts) => {
+				asked.push(opts?.contentType);
+				return provider.createFile(path, bytes, opts);
+			},
+		};
+		added('a.png');
+		store.putFile({ id: 'x2', path: 'b.qqq', size: 3 }, { bytes: OTHER.slice(), pinned: true });
+		store.queue({ op: 'upload', fileId: 'x2', path: 'b.qqq' });
+
+		await createSyncEngine({ provider: telling, store, now: () => AT }).push();
+
+		expect(asked).toEqual(['image/png', undefined]);
+	});
+
+	it('takes the same file at its name for its own: a run that never heard back', async () => {
+		const sent = await provider.createFile('a.png', PNG.slice());
+		added('a.png');
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(2);
+		expect(store.files()).toEqual([
+			{
+				id: 'x1',
+				path: 'a.png',
+				remoteId: sent.remoteId,
+				remoteVersion: sent.version,
+				size: PNG.byteLength,
+			},
+		]);
+	});
+
+	it.each([
+		['a different file', () => provider.createFile('a.png', OTHER.slice())],
+		['a folder', () => provider.createFolder('a.png')],
+	])('goes beside %s at its name, keeping its extension', async (_what, occupy) => {
+		// The remote keeps the path. The note that links the file is not
+		// rewritten: it goes on naming what another device put there first.
+		const there = await occupy();
+		added('a.png');
+
+		expect((await engine.push()).status).toBe('ok');
+		const beside = conflictFilePath('a.png', AT);
+		expect(beside).toMatch(/\.png$/u);
+		expect(provider.bytesAt(beside)).toEqual(PNG);
+		expect(remoteAt('a.png')?.remoteId).toBe(there.remoteId);
+		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
+	});
+
+	it('goes beside the same file where another row holds it', async () => {
+		// Two rows on one file is a link the store cannot keep: the other one
+		// is on its way out of that name, or not yet told it moved there.
+		const theirs = await provider.createFile('a.png', PNG.slice());
+		const other = {
+			id: 'x0',
+			path: 'Old/a.png',
+			remoteId: theirs.remoteId,
+			remoteVersion: theirs.version,
+			size: PNG.byteLength,
+		};
+		store.putFile(other);
+		added('a.png');
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(store.files()).toEqual([
+			expect.objectContaining({ id: 'x1', path: conflictFilePath('a.png', AT) }),
+			other,
+		]);
+	});
+
+	it('copies a file it does not hold from the remote file it copies', async () => {
+		await provider.createFolder('Trips');
+		const original = await provider.createFile('Trips/a.png', PNG.slice());
+		store.putFile({
+			id: 'x0',
+			path: 'Trips/a.png',
+			remoteId: original.remoteId,
+			remoteVersion: original.version,
+			size: PNG.byteLength,
+		});
+		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
+		store.queue({
+			op: 'upload',
+			fileId: 'x1',
+			path: 'Work/a.png',
+			copyOf: original.remoteId,
+		});
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
+		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(store.files().map((file) => file.remoteId)).toEqual([
+			original.remoteId,
+			remoteAt('Work/a.png')?.remoteId,
+		]);
+	});
+
+	it('lets a copy go that has nothing left to copy', async () => {
+		store.putFile({ id: 'x1', path: 'Work/a.png', size: 8 });
+		store.queue({ op: 'upload', fileId: 'x1', path: 'Work/a.png', copyOf: 'id:gone' });
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('ok');
+		expect(store.files()).toEqual([]);
+		expect(store.ops()).toEqual([]);
+		expect(creates()).toBe(0);
+	});
+
+	it('sends nothing for a file deleted before it went, or one already up', async () => {
+		store.queue({ op: 'upload', fileId: 'nope', path: 'a.png' });
+		store.putFile({ id: 'x2', path: 'b.png', remoteId: 'id:b', remoteVersion: 'v1', size: 3 });
+		store.queue({ op: 'upload', fileId: 'x2', path: 'b.png' });
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(store.files()).toEqual([expect.objectContaining({ id: 'x2', remoteId: 'id:b' })]);
+		expect(creates()).toBe(0);
+	});
+
+	it('does not hold back what is queued behind an upload that fails', async () => {
+		// 25 MB on a poor connection is no reason for a note's edit to wait.
+		added('a.png');
+		noteBehind();
+		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+
+		const result = await engine.push();
+
+		expect(result).toEqual(
+			expect.objectContaining({
+				status: 'retry',
+				error: 'offline',
+				pushed: 1,
+				waitingUploads: 1,
+			})
+		);
+		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 1 })]);
+	});
+
+	it('steps over an upload out of attempts, keeps it, and says it is stuck', async () => {
+		// The only copy of the file: never completed for having failed.
+		added('a.png', 5);
+		noteBehind();
+
+		const result = await engine.push();
+
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'blocked', pushed: 1, waitingUploads: 1 })
+		);
+		expect(result.error).toContain('upload a.png');
+		expect(provider.contentAt('a.md')).toBe('mine\n');
+		expect(store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 5 })]);
+		expect(store.heldBytes('x1')?.pinned).toBe(true);
+		expect(creates()).toBe(0);
+	});
+
+	it('says why a failing upload failed, over one out of attempts', async () => {
+		// One stuck says wait for help; one failing says try again soon, which
+		// is the sooner of the two.
+		added('a.png', 5);
+		store.putFile({ id: 'x2', path: 'b.png', size: 3 }, { bytes: OTHER.slice(), pinned: true });
+		store.queue({ op: 'upload', fileId: 'x2', path: 'b.png' });
+		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+
+		const result = await engine.push();
+
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'retry', error: 'offline', waitingUploads: 2 })
+		);
+	});
+
+	it('still stops for a rate limit on an upload, which is no fault of the upload', async () => {
+		added('a.png');
+		noteBehind();
+		provider.setFault((call) =>
+			call.op === 'createFile' ? new RateLimitError('slow down', 9000) : undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'retry', pushed: 0, retryAfterMs: 9000 })
+		);
+		expect(store.ops().map((op) => [op.op, op.attempts])).toEqual([
+			['upload', 0],
+			['write', 0],
+		]);
+	});
+
+	it('holds back the delete of a file that a failed upload is still to copy', async () => {
+		// The note moved and its file was copied, not held here; then the
+		// notebook it came from was deleted. Sent first, the delete would leave
+		// the copy nothing to read — OneDrive and Dropbox cannot read a deleted
+		// file back by its id.
+		await provider.createFolder('Trips');
+		const original = await provider.createFile('Trips/a.png', PNG.slice());
+		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
+		store.queue({
+			op: 'upload',
+			fileId: 'x1',
+			path: 'Work/a.png',
+			copyOf: original.remoteId,
+		});
+		store.queue({ op: 'delete-file', path: 'Trips/a.png', remoteId: original.remoteId });
+		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+
+		expect((await engine.push()).status).toBe('retry');
+		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(store.ops().map((op) => [op.op, op.attempts])).toEqual([
+			['upload', 1],
+			['delete-file', 0],
+		]);
+
+		provider.setFault(undefined);
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
+		expect(remoteAt('Trips/a.png')).toBeUndefined();
+	});
+
+	/** A copy of `Trips/a.png` the user made in `Work`, and the delete of the original. */
+	const copiedThenDeleted = async () => {
+		await provider.createFolder('Trips');
+		const original = await provider.createFile('Trips/a.png', PNG.slice());
+		store.putFile({ id: 'x1', path: 'Work/a.png', size: PNG.byteLength });
+		store.queue({
+			op: 'upload',
+			fileId: 'x1',
+			path: 'Work/a.png',
+			copyOf: original.remoteId,
+		});
+		store.queue({ op: 'delete-file', path: 'Trips/a.png', remoteId: original.remoteId });
+		return original;
+	};
+
+	const offline = () =>
+		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+
+	it('still holds back the delete of what it copies through a conflict met in between', async () => {
+		// A conflict resolved behind a stepped-over upload is an ordinary day.
+		// Forgetting the upload there, the drain would send the delete, and the
+		// copy would find nothing to read on its next try.
+		await copiedThenDeleted();
+		await remoteFile('n.md', 'theirs\n');
+		store.put({ id: 'n1', path: 'n.md', content: 'mine\n', dirty: true });
+		const write = store.queue({ op: 'write', noteId: 'n1', path: 'n.md' });
+		const del = store.ops().find((op) => op.op === 'delete-file');
+		if (del === undefined) throw new Error('no delete');
+		// The write between the copy and the delete, as the user made them.
+		store.unqueue(del.seq);
+		store.queue({ op: 'delete-file', path: del.path, remoteId: del.remoteId });
+		offline();
+
+		const result = await engine.push();
+
+		expect(write.seq).toBeLessThan(store.ops().at(-1)?.seq ?? 0);
+		expect(result).toEqual(
+			expect.objectContaining({ status: 'retry', error: 'offline', waitingUploads: 1 })
+		);
+		expect(result.conflicts).toHaveLength(1);
+		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+
+		provider.setFault(undefined);
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
+		expect(remoteAt('Trips/a.png')).toBeUndefined();
+	});
+
+	it.each([
+		['a rate limit', () => new RateLimitError('slow down', 9000), 'retry'],
+		['an expired token', () => new AuthError('expired'), 'paused'],
+		['a failure', () => new Error('refused'), 'retry'],
+	])(
+		'still says an upload is waiting when a write behind it meets %s',
+		async (_what, fault, status) => {
+			added('a.png');
+			noteBehind();
+			provider.setFault((call) =>
+				call.op === 'createFile'
+					? new Error('offline')
+					: call.op === 'write'
+						? fault()
+						: undefined
+			);
+
+			const result = await engine.push();
+
+			expect(result).toEqual(expect.objectContaining({ status, waitingUploads: 1 }));
+		}
+	);
+
+	it('still says an upload is waiting when a write behind it is out of attempts', async () => {
+		added('a.png');
+		store.put({ id: 'n1', path: 'a.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md', attempts: 5 });
+		offline();
+
+		const result = await engine.push();
+
+		expect(result).toEqual(expect.objectContaining({ status: 'blocked', waitingUploads: 1 }));
+		expect(result.error).toContain('write a.md');
+	});
+
+	it('sends the edits queued behind an upload that has failed before ahead of its next try', async () => {
+		// Its first try keeps its place, so a file lands ahead of the note that
+		// links it. Once it has failed, the note's edits do not wait out every
+		// further try of 25 MB on the connection that failed it.
+		added('a.png', 1);
+		noteBehind();
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(
+			provider
+				.callLog()
+				.filter((call) => call.op === 'createFile' || call.op === 'write')
+				.map((call) => call.op)
+		).toEqual(['write', 'createFile']);
+	});
+
+	it('keeps a copy whose original could not be read just now', async () => {
+		// Only "not found" says there is nothing left to copy. Anything else
+		// is tried again, and the row is the only thing that says to.
+		await copiedThenDeleted();
+		provider.setFault((call) => (call.op === 'read' ? new Error('offline') : undefined));
+
+		const result = await engine.push();
+
+		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 1 }));
+		expect(store.files()).toEqual([{ id: 'x1', path: 'Work/a.png', size: PNG.byteLength }]);
+		expect(store.ops().map((op) => [op.op, op.attempts])).toEqual([
+			['upload', 1],
+			['delete-file', 0],
+		]);
+	});
+
+	it('lets a file go that has nothing here and copies nothing', async () => {
+		store.putFile({ id: 'x1', path: 'a.png', size: 8 });
+		store.queue({ op: 'upload', fileId: 'x1', path: 'a.png' });
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(store.files()).toEqual([]);
+		expect(store.ops()).toEqual([]);
+		expect(creates()).toBe(0);
+	});
+
+	it('finds a free name beside two files from one listing, sending its bytes twice in all', async () => {
+		// Dropbox and OneDrive take the whole body before they say a name is
+		// taken: trying each conflict name in turn would send 25 MB a try.
+		const first = conflictFilePath('a.png', AT);
+		await provider.createFile('a.png', OTHER.slice());
+		await provider.createFile(first, OTHER.slice());
+		added('a.png');
+		const before = creates();
+
+		expect((await engine.push()).status).toBe('ok');
+		const beside = conflictFilePath('a.png', AT, [basename(first)]);
+		expect(beside).not.toBe(first);
+		expect(provider.bytesAt(beside)).toEqual(PNG);
+		expect(creates() - before).toBe(2);
+		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
+	});
+
+	it('does not go beside at a name a file here still holds, sent or not', async () => {
+		const first = conflictFilePath('a.png', AT);
+		store.putFile({ id: 'x0', path: first, size: 3 }, { bytes: OTHER.slice(), pinned: true });
+		await provider.createFile('a.png', OTHER.slice());
+		added('a.png');
+		store.queue({ op: 'upload', fileId: 'x0', path: first });
+
+		expect((await engine.push()).status).toBe('ok');
+		const beside = conflictFilePath('a.png', AT, [basename(first)]);
+		expect(store.files().map((file) => [file.id, file.path])).toEqual([
+			['x1', beside],
+			['x0', first],
+		]);
+		expect(provider.bytesAt(first)).toEqual(OTHER);
+		expect(provider.bytesAt(beside)).toEqual(PNG);
+	});
+
+	it('gives up on a name after so many, and tries again later', async () => {
+		// A provider that never stops saying "taken" is spending a request, and
+		// up to 25 MB, a turn.
+		added('a.png');
+		const always: StorageProvider = {
+			...provider,
+			createFile: async (path) => {
+				const there = await provider.createFile(`${path}.x`, OTHER.slice());
+				return Promise.reject(new ConflictError({ ...there, path }));
+			},
+		};
+
+		const result = await createSyncEngine({ provider: always, store, now: () => AT }).push();
+
+		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 1 }));
+		expect(provider.snapshot().filter((entry) => entry.path.endsWith('.x'))).toHaveLength(9);
+		expect(store.ops()).toEqual([expect.objectContaining({ op: 'upload', attempts: 1 })]);
+	});
+
+	it('does not take a file for its own that a queued delete is to take', async () => {
+		// Its row gone, its delete still owed: the row that took it would be
+		// bound to nothing once the delete went, and its bytes let go.
+		const there = await provider.createFile('a.png', PNG.slice());
+		added('a.png');
+		store.queue({ op: 'delete-file', path: 'a.png', remoteId: there.remoteId });
+
+		expect((await engine.push()).status).toBe('ok');
+		const beside = conflictFilePath('a.png', AT);
+		expect(remoteAt('a.png')).toBeUndefined();
+		expect(provider.bytesAt(beside)).toEqual(PNG);
+		expect(store.files()).toEqual([
+			expect.objectContaining({
+				id: 'x1',
+				path: beside,
+				remoteId: remoteAt(beside)?.remoteId,
+			}),
+		]);
+	});
+
+	it('holds an upload to where a held-back delete is still to clear the way', async () => {
+		// The notebook deleted, made again, and the same picture added: sent
+		// now, it would meet the file on its way out and go beside it, away
+		// from the name the note links.
+		const original = await copiedThenDeleted();
+		store.putFile(
+			{ id: 'x2', path: 'Trips/a.png', size: PNG.byteLength },
+			{ bytes: PNG.slice(), pinned: true }
+		);
+		store.queue({ op: 'upload', fileId: 'x2', path: 'Trips/a.png' });
+		// Only the copy fails: the upload behind it would go, if let.
+		provider.setFault((call) =>
+			call.op === 'createFile' && call.path === 'Work/a.png'
+				? new Error('offline')
+				: undefined
+		);
+
+		const result = await engine.push();
+
+		expect(result).toEqual(expect.objectContaining({ status: 'retry', waitingUploads: 2 }));
+		expect(provider.snapshot().filter((entry) => entry.path.endsWith('.png'))).toEqual([
+			expect.objectContaining({ path: 'Trips/a.png', remoteId: original.remoteId }),
+		]);
+
+		provider.setFault(undefined);
+		expect((await engine.push()).status).toBe('ok');
+		const made = remoteAt('Trips/a.png');
+		expect(made?.remoteId).not.toBe(original.remoteId);
+		expect(store.files()).toEqual([
+			expect.objectContaining({ id: 'x2', path: 'Trips/a.png', remoteId: made?.remoteId }),
+			expect.objectContaining({ id: 'x1', path: 'Work/a.png' }),
+		]);
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('holds back the delete of what a held copy is still to copy', async () => {
+		// Held, a copy is as owed as one stepped over, and what it copies must
+		// stay readable until it goes.
+		await copiedThenDeleted();
+		await provider.createFolder('Home');
+		const other = await provider.createFile('Home/a.png', PNG.slice());
+		store.putFile({ id: 'x2', path: 'Trips/a.png', size: PNG.byteLength });
+		store.queue({
+			op: 'upload',
+			fileId: 'x2',
+			path: 'Trips/a.png',
+			copyOf: other.remoteId,
+		});
+		store.queue({ op: 'delete-file', path: 'Home/a.png', remoteId: other.remoteId });
+		offline();
+
+		expect((await engine.push()).status).toBe('retry');
+		expect(provider.bytesAt('Home/a.png')).toEqual(PNG);
+
+		provider.setFault(undefined);
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		expect(remoteAt('Home/a.png')).toBeUndefined();
+	});
+
+	it('knows the same file by the size of what it sends', async () => {
+		// A copy reads its bytes from the remote; the row's size is only what
+		// it was told.
+		await provider.createFolder('Trips');
+		const original = await provider.createFile('Trips/a.png', PNG.slice());
+		await provider.createFolder('Work');
+		const there = await provider.createFile('Work/a.png', PNG.slice());
+		store.putFile({ id: 'x1', path: 'Work/a.png', size: 999 });
+		store.queue({
+			op: 'upload',
+			fileId: 'x1',
+			path: 'Work/a.png',
+			copyOf: original.remoteId,
+		});
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(store.files()).toEqual([
+			expect.objectContaining({ id: 'x1', path: 'Work/a.png', remoteId: there.remoteId }),
+		]);
+	});
+
+	it('holds the removal of a notebook a held-back delete has a file in still', async () => {
+		// Sent now, it would find the file and leave the directory for good:
+		// an empty notebook, once the delete lands.
+		await copiedThenDeleted();
+		const trips = provider.snapshot().find((entry) => entry.path === 'Trips');
+		store.queue({ op: 'rmdir', path: 'Trips', remoteId: trips?.remoteId });
+		offline();
+
+		expect((await engine.push()).status).toBe('retry');
+		expect(store.ops().map((op) => op.op)).toEqual(['upload', 'delete-file', 'rmdir']);
+
+		provider.setFault(undefined);
+		expect((await engine.push()).status).toBe('ok');
+		expect(remoteAt('Trips')).toBeUndefined();
+	});
+});
+
+describe('moving a file', () => {
+	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 10, 13]);
+	const remoteAt = (path: string) => provider.snapshot().find((entry) => entry.path === path);
+
+	/** A file in `Trips` the user has moved to `Work/a.png`, the move queued. */
+	const movedHere = async () => {
+		await provider.createFolder('Trips');
+		const file = await provider.createFile('Trips/a.png', PNG.slice());
+		store.putFile({
+			id: 'x1',
+			path: 'Work/a.png',
+			remoteId: file.remoteId,
+			remoteVersion: file.version,
+			size: PNG.byteLength,
+		});
+		store.queue({
+			op: 'move-file',
+			fileId: 'x1',
+			path: 'Trips/a.png',
+			targetPath: 'Work/a.png',
+		});
+		return file;
+	};
+
+	it('moves it, into a folder it makes, and records where it landed', async () => {
+		const file = await movedHere();
+
+		expect((await engine.push()).status).toBe('ok');
+		const landed = remoteAt('Work/a.png');
+		expect(landed?.remoteId).toBe(file.remoteId);
+		expect(remoteAt('Trips/a.png')).toBeUndefined();
+		expect(store.files()).toEqual([
+			{
+				id: 'x1',
+				path: 'Work/a.png',
+				remoteId: file.remoteId,
+				remoteVersion: landed?.version,
+				size: PNG.byteLength,
+			},
+		]);
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('asks the folder, not the file, whether it is still there', async () => {
+		// Reading the file to find out would be to download it: 25 MB, for a
+		// yes or a no.
+		await movedHere();
+
+		await engine.push();
+
+		expect(provider.callLog().filter((call) => call.op === 'read')).toEqual([]);
+	});
+
+	it('lets a move go whose file is gone from where it was', async () => {
+		const file = await movedHere();
+		await provider.delete(file);
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(remoteAt('Work')).toBeUndefined();
+		expect(store.ops()).toEqual([]);
+		expect(store.files()[0]?.remoteId).toBe(file.remoteId);
+	});
+
+	it('takes the same file at the name for its own, and leaves the one it moved', async () => {
+		// Copied there on another device, which kept a note linking the one in
+		// `Trips`: taking that one would take the note's picture.
+		const file = await movedHere();
+		await provider.createFolder('Work');
+		const there = await provider.createFile('Work/a.png', PNG.slice());
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(remoteAt('Trips/a.png')?.remoteId).toBe(file.remoteId);
+		expect(store.files()).toEqual([
+			expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
+		]);
+	});
+
+	it('goes beside a different file at the name, keeping its extension', async () => {
+		const file = await movedHere();
+		await provider.createFolder('Work');
+		const there = await provider.createFile('Work/a.png', new Uint8Array([1]));
+
+		expect((await engine.push()).status).toBe('ok');
+		const beside = conflictFilePath('Work/a.png', AT);
+		expect(remoteAt(beside)?.remoteId).toBe(file.remoteId);
+		expect(remoteAt('Work/a.png')?.remoteId).toBe(there.remoteId);
+		expect(store.files()).toEqual([expect.objectContaining({ id: 'x1', path: beside })]);
+	});
+
+	it('takes its own file at the name for a move that landed unheard', async () => {
+		// A provider that answers a move to where the file already is with a
+		// conflict naming the file itself.
+		const file = await movedHere();
+		await provider.createFolder('Work');
+		await provider.move(file, 'Work/a.png');
+		const strict: StorageProvider = {
+			...provider,
+			move: (ref, path) => {
+				const there = remoteAt(path);
+				return there === undefined
+					? provider.move(ref, path)
+					: Promise.reject(new ConflictError(there));
+			},
+		};
+
+		const result = await createSyncEngine({ provider: strict, store, now: () => AT }).push();
+
+		expect(result.status).toBe('ok');
+		expect(store.files()).toEqual([
+			expect.objectContaining({ path: 'Work/a.png', remoteId: file.remoteId }),
+		]);
+		expect(provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(2);
+	});
+
+	it('goes beside the same file where another row holds it', async () => {
+		// Two rows on one file is a link the store cannot keep.
+		const file = await movedHere();
+		await provider.createFolder('Work');
+		const there = await provider.createFile('Work/a.png', PNG.slice());
+		const other = {
+			id: 'x0',
+			path: 'Old/a.png',
+			remoteId: there.remoteId,
+			remoteVersion: there.version,
+			size: PNG.byteLength,
+		};
+		store.putFile(other);
+
+		expect((await engine.push()).status).toBe('ok');
+		const beside = conflictFilePath('Work/a.png', AT);
+		expect(remoteAt(beside)?.remoteId).toBe(file.remoteId);
+		expect(store.files()).toEqual([other, expect.objectContaining({ id: 'x1', path: beside })]);
+	});
+
+	it('holds a move to where a held-back delete is still to clear the way', async () => {
+		// The same picture moved into a notebook made again where one was
+		// deleted: sent now, it would meet the file on its way out.
+		const file = await movedHere();
+		await provider.createFolder('Work');
+		const old = await provider.createFile('Work/a.png', PNG.slice());
+		store.putFile({ id: 'x0', path: 'Home/a.png', size: PNG.byteLength });
+		store.unqueue(store.ops()[0]?.seq ?? 0);
+		store.queue({ op: 'upload', fileId: 'x0', path: 'Home/a.png', copyOf: old.remoteId });
+		store.queue({ op: 'delete-file', path: 'Work/a.png', remoteId: old.remoteId });
+		store.queue({
+			op: 'move-file',
+			fileId: 'x1',
+			path: 'Trips/a.png',
+			targetPath: 'Work/a.png',
+		});
+		provider.setFault((call) => (call.op === 'createFile' ? new Error('offline') : undefined));
+
+		expect((await engine.push()).status).toBe('retry');
+		expect(remoteAt('Trips/a.png')?.remoteId).toBe(file.remoteId);
+
+		provider.setFault(undefined);
+		expect((await engine.push()).status).toBe('ok');
+		expect(remoteAt('Work/a.png')?.remoteId).toBe(file.remoteId);
+		expect(store.files()).toEqual([
+			expect.objectContaining({ id: 'x0', path: 'Home/a.png' }),
+			expect.objectContaining({ id: 'x1', path: 'Work/a.png', remoteId: file.remoteId }),
+		]);
+	});
+
+	it('moves nothing for a file deleted here, or one never sent', async () => {
+		store.queue({ op: 'move-file', fileId: 'nope', path: 'a.png', targetPath: 'b.png' });
+		store.putFile({ id: 'x2', path: 'd.png', size: 3 });
+		store.queue({ op: 'move-file', fileId: 'x2', path: 'c.png', targetPath: 'd.png' });
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+		expect(provider.callLog().filter((call) => call.op === 'move')).toEqual([]);
+	});
+});
+
+describe('deleting a file', () => {
+	it('deletes it by the id the queue recorded', async () => {
+		const file = await provider.createFile('a.png', new Uint8Array([1, 2, 3]));
+		store.queue({ op: 'delete-file', path: 'elsewhere.png', remoteId: file.remoteId });
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.snapshot().filter((entry) => entry.kind === 'file')).toHaveLength(1);
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('fails a delete the provider refused for any other reason', async () => {
+		const file = await provider.createFile('a.png', new Uint8Array([1, 2, 3]));
+		store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+		provider.setFault((call) => (call.op === 'delete' ? new Error('offline') : undefined));
+
+		expect((await engine.push()).status).toBe('retry');
+		expect(store.ops()).toEqual([expect.objectContaining({ op: 'delete-file', attempts: 1 })]);
+	});
+
+	it('counts a file already gone as deleted', async () => {
+		store.queue({ op: 'delete-file', path: 'a.png', remoteId: 'id:gone' });
+		provider.setFault((call) =>
+			call.op === 'delete' ? new NotFoundError('a.png') : undefined
+		);
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(store.ops()).toEqual([]);
+	});
+
+	it('keeps the directory of a notebook a file row is still under', async () => {
+		// A file added there and not sent yet: the notebook is the user's still,
+		// though the remote holds nothing in it.
+		const made = await provider.createFolder('Work');
+		store.putFile({ id: 'x1', path: 'Work/a.png', size: 3 });
+		store.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		store.removeFolder('Work');
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.snapshot().map((entry) => entry.path)).toContain('Work');
 	});
 });
 

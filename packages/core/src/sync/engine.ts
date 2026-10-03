@@ -1,3 +1,4 @@
+import { contentTypeOf } from '../attachments.js';
 import { NOTE_EXTENSION } from '../config.js';
 import { contentHash } from '../hash.js';
 import { parseNoteFile } from '../markdown/note.js';
@@ -27,7 +28,12 @@ import {
 	type RemoteEntry,
 	type StorageProvider,
 } from '../providers/types.js';
-import { conflictContent, conflictFolderPath, conflictPath } from './conflicts.js';
+import {
+	conflictContent,
+	conflictFilePath,
+	conflictFolderPath,
+	conflictPath,
+} from './conflicts.js';
 
 /**
  * How many times `freeFolderPath` may ask for a name before giving up. Names go
@@ -36,9 +42,15 @@ import { conflictContent, conflictFolderPath, conflictPath } from './conflicts.j
  * user produces — it is the two folds having drifted apart.
  */
 const FREE_PATH_ATTEMPTS = 100;
+/**
+ * Conflict names a file is tried at before its op fails (`nextBeside`). Each
+ * is free when it is chosen, so a second is a race with another device.
+ */
+const FILE_BESIDE_ATTEMPTS = 8;
 import type {
 	ConflictResolution,
 	PullChange,
+	SyncFile,
 	SyncFolder,
 	SyncNote,
 	SyncOp,
@@ -85,6 +97,12 @@ export interface SyncOutcome {
 	 * stop. The scheduler waits at least this long instead of guessing.
 	 */
 	retryAfterMs?: number;
+	/**
+	 * Files added here that a push stepped over, failing or given up on, and
+	 * which are still to go (docs/ARCHITECTURE.md §7, "Pushing files"). Absent
+	 * when there are none.
+	 */
+	waitingUploads?: number;
 }
 
 export interface SyncEngineOptions {
@@ -3188,8 +3206,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 *    existed.
 	 * 2. Without the id recorded when it was queued, nothing: a folder cannot be
 	 *    confirmed as the one this op is about by its path alone.
-	 * 3. A folder row at the path, or a live note at or under it: the user has
-	 *    made the notebook again, and it is theirs now.
+	 * 3. A folder row at the path, or a live note or a file row at or under
+	 *    it: the user has made the notebook again, or has a file there still to
+	 *    send or still to move out, and it is theirs now.
 	 * 4. Nothing at the name on the remote, or something with another id — it was
 	 *    renamed or replaced elsewhere — and the op is about a folder that is
 	 *    already gone.
@@ -3208,7 +3227,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (remoteId === undefined || normalizePath(op.path) === ROOT) return finish();
 		const mine = await store.folderByPath(op.path);
 		const notes = await store.notesUnder(op.path);
-		if (mine !== undefined || notes.length > 0) return finish();
+		const files = await store.filesUnder(op.path);
+		if (mine !== undefined || notes.length > 0 || files.length > 0) return finish();
 
 		const beside = await provider.list(parentPath(op.path)).catch((error: unknown) => {
 			if (isNotFoundError(error)) return [];
@@ -3231,6 +3251,262 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			throw error;
 		});
 		return finish();
+	};
+
+	/**
+	 * The file in the way is this one, as far as can be told without reading
+	 * 25 MB to find out: a file, of the same size. Names are stamped with the
+	 * bytes' hash (docs/ARCHITECTURE.md §3), so a name and a size that both
+	 * match are the same upload — this device's own, sent by a run whose answer
+	 * never came back, or the same picture added on another device. A file
+	 * whose name the app did not choose can match by chance, and is then taken
+	 * for this one; nothing is overwritten or removed either way, and the bytes
+	 * this device held are what the provider already had a copy of.
+	 */
+	const sameFile = (there: RemoteEntry, size: number): boolean =>
+		there.kind === 'file' && there.size === size;
+
+	/**
+	 * The same file, and one nothing here has a claim on. A row already bound
+	 * to it is somewhere else here — on its way out of that name, or not yet
+	 * told it has moved there — and two rows on one file is a link the store
+	 * cannot keep (it refuses the outcome). A `delete-file` still queued for it
+	 * — its row gone, the delete held back for a copy (`awaitsCopy`) or behind
+	 * a failure — takes it when it goes, and the row that took it would be
+	 * bound to nothing. Either way this one goes beside it, as a stranger's
+	 * file would make it.
+	 *
+	 * `size` is what is being sent, where that is known: for a copy, the bytes
+	 * read from the remote rather than what the row was told.
+	 */
+	const adoptable = async (
+		there: RemoteEntry,
+		file: SyncFile,
+		size = file.size
+	): Promise<boolean> => {
+		if (!sameFile(there, size)) return false;
+		if (((await store.fileByRemoteId(there.remoteId))?.id ?? file.id) !== file.id) {
+			return false;
+		}
+		return !(await store.pendingOps()).some(
+			(op) => op.op === 'delete-file' && op.remoteId === there.remoteId
+		);
+	};
+
+	/**
+	 * Every name in use beside `target`, on the remote and here: a file sent
+	 * beside another is named from these, found with one listing rather than
+	 * by trying each conflict name in turn — Dropbox and OneDrive take the
+	 * whole body before they say a name is taken, and 25 MB a try is too dear.
+	 * A row here that has not gone up yet holds its name as surely, or two
+	 * rows would end at one path.
+	 */
+	const namesBeside = async (target: string): Promise<string[]> => {
+		const folder = normalizePath(parentPath(target));
+		const there = await provider.list(folder).catch((error: unknown) => {
+			if (isNotFoundError(error)) return [];
+			throw error;
+		});
+		const here = (await store.filesUnder(folder)).filter(
+			(file) => normalizePath(parentPath(file.path)) === folder
+		);
+		return [...there, ...here].map((entry) => basename(entry.path));
+	};
+
+	/**
+	 * Where a file goes after meeting something else at `path`: a conflict
+	 * name free of everything beside it, and of the names it has met already.
+	 * Bounded as `freeNotePath` is — each turn is a listing and an upload or a
+	 * move, and only a race with another device ever takes a second.
+	 */
+	interface Beside {
+		path: string;
+		taken: readonly string[];
+		left: number;
+	}
+
+	const nextBeside = async (target: string, tried: Beside | undefined): Promise<Beside> => {
+		const met = tried === undefined ? [] : [...tried.taken, basename(tried.path)];
+		const taken = [...met, ...(await namesBeside(target))];
+		return {
+			path: conflictFilePath(target, now(), taken),
+			taken: met,
+			left: (tried?.left ?? FILE_BESIDE_ATTEMPTS) - 1,
+		};
+	};
+
+	/**
+	 * A file's bytes, sent to where its row is — or, where something else is
+	 * there already, beside it under a conflict name that keeps its extension.
+	 * The remote keeps the path (CLAUDE.md), and the note that links the file
+	 * is not rewritten: it goes on naming what is at the path, which another
+	 * device put there first.
+	 */
+	const sendFile = async (
+		file: SyncFile,
+		bytes: Uint8Array<ArrayBuffer>,
+		beside?: Beside
+	): Promise<RemoteEntry> => {
+		const path = beside?.path ?? file.path;
+		const type = contentTypeOf(path);
+		const create = () =>
+			provider.createFile(path, bytes, type === undefined ? {} : { contentType: type });
+		return (
+			create()
+				// Nothing to put it in: a notebook made here whose `mkdir` has not
+				// gone, or one removed on another device since. As `runWrite`
+				// answers it, and `createFile` makes no parents on any provider.
+				.catch(async (error: unknown) => {
+					if (!isNotFoundError(error)) throw error;
+					await ensureRemoteFolder(parentPath(path));
+					return create();
+				})
+				.catch(async (error: unknown) => {
+					if (!isConflictError(error)) throw error;
+					if (await adoptable(error.remote, file, bytes.byteLength)) return error.remote;
+					if (beside !== undefined && beside.left <= 0) throw error;
+					return sendFile(file, bytes, await nextBeside(file.path, beside));
+				})
+		);
+	};
+
+	/**
+	 * What an `upload` sends: the bytes held here, or — for a copy made when a
+	 * note moved and its file could not be (docs/ARCHITECTURE.md §7) — the
+	 * bytes of the file it copies, read from the remote. `undefined` when there
+	 * are neither: nothing here, and the original gone.
+	 */
+	const bytesToSend = async (
+		op: SyncOp,
+		file: SyncFile
+	): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+		const held = await store.fileBytes(file.id);
+		if (held !== undefined || op.copyOf === undefined) return held;
+		const original = await store.fileByRemoteId(op.copyOf);
+		return provider
+			.readBytes({ remoteId: op.copyOf, path: original?.path ?? file.path })
+			.then(({ bytes }) => bytes)
+			.catch((error: unknown) => {
+				if (isNotFoundError(error)) return undefined;
+				throw error;
+			});
+	};
+
+	const runUpload = async (op: SyncOp): Promise<void> => {
+		const file = op.fileId === undefined ? undefined : await store.fileById(op.fileId);
+		// Deleted before it went, which leaves nothing to send; or bound already
+		// — a pull found it there and took it — which leaves nothing to do.
+		if (file === undefined || file.remoteId !== undefined) {
+			await store.completeOp(op.seq, { kind: 'done' });
+			return;
+		}
+		const bytes = await bytesToSend(op, file);
+		if (bytes === undefined) {
+			await store.completeOp(op.seq, { kind: 'lost-file', fileId: file.id });
+			return;
+		}
+		// Sent to where the file is now, which is not always where it was when
+		// the op was queued: the store says what to do if it moves again while
+		// the bytes are on their way.
+		const entry = await sendFile(file, bytes);
+		await store.completeOp(op.seq, {
+			kind: 'uploaded',
+			fileId: file.id,
+			remote: entry,
+			sentAs: file.path,
+		});
+	};
+
+	/**
+	 * Is the file still where the op last knew it to be? Asked of the folder
+	 * rather than of the file, which a provider can only answer for by sending
+	 * its bytes. A folder that is not there holds nothing.
+	 */
+	const stillListed = async (from: EntryRef): Promise<boolean> => {
+		const beside = await provider.list(parentPath(from.path)).catch((error: unknown) => {
+			if (isNotFoundError(error)) return [];
+			throw error;
+		});
+		return beside.some((entry) => entry.remoteId === from.remoteId);
+	};
+
+	/**
+	 * `runMove`'s answers, for a file. `undefined` when the file has gone from
+	 * where it was: the pull that reports it moved or deleted puts the row
+	 * right, and no retry would find it.
+	 */
+	const moveFile = async (
+		from: EntryRef,
+		target: string,
+		file: SyncFile,
+		beside?: Beside
+	): Promise<RemoteEntry | undefined> => {
+		const path = beside?.path ?? target;
+		return provider
+			.move(from, path)
+			.catch(async (error: unknown) => {
+				if (!isNotFoundError(error)) throw error;
+				// The file, or the folder it is going into: as in `runMove`, the
+				// provider does not say which.
+				if (!(await stillListed(from))) return undefined;
+				await ensureRemoteFolder(parentPath(path));
+				return provider.move(from, path);
+			})
+			.catch(async (error: unknown) => {
+				if (!isConflictError(error)) throw error;
+				// The same file, there already: this row's own, moved by a run
+				// whose answer never came back; or another, and then the row
+				// follows it and the one it was is left where it was. Another
+				// note may link it there — one on another device, which copied it
+				// rather than moving it — and taking it would take that note's
+				// picture.
+				if (await adoptable(error.remote, file)) return error.remote;
+				if (beside !== undefined && beside.left <= 0) throw error;
+				return moveFile(from, target, file, await nextBeside(target, beside));
+			});
+	};
+
+	const runMoveFile = async (op: SyncOp): Promise<void> => {
+		// As `runMove`: a store that lost the column, not a move with nothing to do.
+		if (op.targetPath === undefined) {
+			throw new Error(`move of ${op.path} has no target path`);
+		}
+		const file = op.fileId === undefined ? undefined : await store.fileById(op.fileId);
+		// Deleted since, and its own `delete-file` is behind this; or never sent,
+		// and its `upload` goes to wherever it is now.
+		if (file?.remoteId === undefined) {
+			await store.completeOp(op.seq, { kind: 'done' });
+			return;
+		}
+		// From where the op says, which the store keeps up with the remote as
+		// pulls move the file; the row's own path is where it is going.
+		const entry = await moveFile(
+			{ remoteId: file.remoteId, path: op.path },
+			op.targetPath,
+			file
+		);
+		await store.completeOp(
+			op.seq,
+			entry === undefined
+				? { kind: 'done' }
+				: { kind: 'moved-file', fileId: file.id, remote: entry }
+		);
+	};
+
+	/**
+	 * By the id the queue recorded: the row is gone. Already gone is what was
+	 * wanted, as in `runDelete`.
+	 */
+	const runDeleteFile = async (op: SyncOp): Promise<void> => {
+		if (op.remoteId !== undefined) {
+			await provider
+				.delete({ remoteId: op.remoteId, path: op.path })
+				.catch((error: unknown) => {
+					if (isNotFoundError(error)) return;
+					throw error;
+				});
+		}
+		await store.completeOp(op.seq, { kind: 'done' });
 	};
 
 	/** Runs one op, or throws. A conflict is thrown, and answered by the caller. */
@@ -3263,13 +3539,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return;
 		}
 		if (op.op === 'rmdir') return runRmdir(op);
-		// Nothing queues these yet: the store has learnt files before the engine
-		// has learnt to push them (#187). Failed rather than finished, which for
-		// an op with no note is what happens below — an upload counted done would
-		// be a file that never left the device.
-		if (op.op === 'upload' || op.op === 'move-file' || op.op === 'delete-file') {
-			throw new Error(`This build cannot push a file's ${op.op} yet`);
-		}
+		if (op.op === 'upload') return runUpload(op);
+		if (op.op === 'move-file') return runMoveFile(op);
+		if (op.op === 'delete-file') return runDeleteFile(op);
 
 		const note = op.noteId === undefined ? undefined : await store.noteById(op.noteId);
 		if (op.op === 'delete') return runDelete(op, note);
@@ -3632,7 +3904,108 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	interface PushProgress {
 		pushed: number;
 		conflicts: readonly string[];
+		/**
+		 * Uploads stepped over (`drainOps`): how many, why the latest of them
+		 * was, the files they were to copy, and where the deletes are that wait
+		 * on those copies (`awaitsCopy`).
+		 */
+		waiting?: {
+			count: number;
+			failed?: string;
+			stuck?: string;
+			copying: readonly string[];
+			holding: readonly string[];
+		};
 	}
+
+	/** An upload stepped over: counted, and `failed` or `stuck` with why. */
+	const stepOver = (
+		progress: PushProgress,
+		op: SyncOp,
+		why: { failed: string } | { stuck: string }
+	): PushProgress => ({
+		...progress,
+		waiting: {
+			...progress.waiting,
+			...why,
+			count: (progress.waiting?.count ?? 0) + 1,
+			copying: [
+				...(progress.waiting?.copying ?? []),
+				...(op.copyOf === undefined ? [] : [op.copyOf]),
+			],
+			holding: progress.waiting?.holding ?? [],
+		},
+	});
+
+	/**
+	 * A delete of a file that an upload stepped over in this drain is still to
+	 * copy (`copyOf`): sent, it would leave the copy nothing to read — a
+	 * deleted file cannot be read back by its id, trashed on Drive or gone on
+	 * OneDrive and Dropbox — and the copy would be lost. It waits for the
+	 * upload, as everything behind a failed op used to wait for that op.
+	 *
+	 * And what a delete held back so is still in the way of. An `rmdir` over
+	 * it: the file is still in the folder, which `runRmdir` would find and
+	 * leave standing for good, an empty notebook once the delete lands. An
+	 * upload or a move to its name — the notebook made again, the same picture
+	 * added or moved there — which would meet the file on its way out and go
+	 * beside it, away from the name the note links; and could not take it,
+	 * since the delete would take it back (`adoptable`).
+	 */
+	const awaitsCopy = (op: SyncOp, progress: PushProgress): boolean => {
+		const { waiting } = progress;
+		if (waiting === undefined) return false;
+		if (op.op === 'rmdir') return waiting.holding.some((path) => isWithin(path, op.path));
+		if (op.op === 'upload' || op.op === 'move-file') {
+			const at = foldName(normalizePath(op.targetPath ?? op.path));
+			return waiting.holding.some((path) => foldName(normalizePath(path)) === at);
+		}
+		return (
+			op.op === 'delete-file' &&
+			op.remoteId !== undefined &&
+			waiting.copying.includes(op.remoteId)
+		);
+	};
+
+	/**
+	 * An op `awaitsCopy` holds back: left queued, and its path kept for what
+	 * is behind it — a move's is where the file still is. An upload held is a
+	 * file still waiting, as one stepped over is, and a copy among them holds
+	 * back the delete of what it copies.
+	 */
+	const holdBack = (progress: PushProgress, op: SyncOp): PushProgress => {
+		const { waiting } = progress;
+		if (waiting === undefined) return progress;
+		const held = { ...waiting, holding: [...waiting.holding, op.path] };
+		if (op.op !== 'upload') return { ...progress, waiting: held };
+		return {
+			...progress,
+			waiting: {
+				...held,
+				count: held.count + 1,
+				copying: [...held.copying, ...(op.copyOf === undefined ? [] : [op.copyOf])],
+			},
+		};
+	};
+
+	/**
+	 * A drain that reached the end. Uploads it stepped over are still owed: one
+	 * that failed this run is tried again on the backoff, as any failure is, and
+	 * one that has run out of attempts is surfaced as a stuck op would be — the
+	 * same `blocked` the scheduler gives its attempts back from in time.
+	 */
+	const drained = (progress: PushProgress): SyncOutcome => {
+		const done = ok({ pushed: progress.pushed, conflicts: progress.conflicts });
+		const { waiting } = progress;
+		if (waiting === undefined) return done;
+		const outcome = { ...done, waitingUploads: waiting.count };
+		if (waiting.failed !== undefined) {
+			return { ...outcome, status: 'retry', error: waiting.failed };
+		}
+		return waiting.stuck === undefined
+			? outcome
+			: { ...outcome, status: 'blocked', error: waiting.stuck };
+	};
 
 	/** The push under way, for `onProgress`: how long its queue was. */
 	const pushes = new Map<'current', number>();
@@ -3654,9 +4027,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				...(held === undefined ? {} : { path: held.targetPath ?? held.path }),
 			});
 		}
-		if (held === undefined) {
-			return ok({ pushed: progress.pushed, conflicts: progress.conflicts });
-		}
+		if (held === undefined) return drained(progress);
 		// The queue was read once, and the user has gone on since: a restore
 		// withdraws a delete, a second rename replaces a move, a pull's conflict
 		// drops a write. Sent anyway, a withdrawn delete removes a file the user
@@ -3664,6 +4035,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// goes, and one that is gone is passed over.
 		const op = await store.opBySeq(held.seq);
 		if (op === undefined) return drainOps(rest, progress, retriedAuth);
+		if (awaitsCopy(op, progress)) return drainOps(rest, holdBack(progress, op), retriedAuth);
 
 		// Ordered queue: a later op may depend on an earlier one having landed,
 		// so a dead op stops the drain rather than being stepped over.
@@ -3677,11 +4049,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				await store.completeOp(op.seq, { kind: 'done' });
 				return drainOps(rest, progress, retriedAuth);
 			}
-			return {
-				...ok(progress),
-				status: 'blocked',
-				error: `${op.op} ${op.path} failed ${String(op.attempts)} times`,
-			};
+			const error = `${op.op} ${op.path} failed ${String(op.attempts)} times`;
+			// Nor does anything wait on an upload (docs/ARCHITECTURE.md §7,
+			// "Pushing files"): a note that links the file is sent without it,
+			// and shows it once it lands. Stepped over, not completed — it is the
+			// only copy of the file — and still owed.
+			if (op.op === 'upload') {
+				return drainOps(rest, stepOver(progress, op, { stuck: error }), retriedAuth);
+			}
+			return { ...drained(progress), status: 'blocked', error };
 		}
 
 		const failure = await runOp(op)
@@ -3725,6 +4101,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return drainOps(
 				ops.slice(1),
 				{
+					...progress,
 					pushed: progress.pushed + (how.pushed ? 1 : 0),
 					conflicts:
 						how.conflict === undefined
@@ -3738,7 +4115,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 		if (isAuthError(reason)) {
 			if (retriedAuth || reauthorize === undefined) {
-				return { ...ok(progress), status: 'paused', error: 'authorization required' };
+				return { ...drained(progress), status: 'paused', error: 'authorization required' };
 			}
 			await reauthorize();
 			return drainOps(ops, progress, true);
@@ -3751,7 +4128,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// wait the provider asked for goes back to the scheduler.
 		if (isRateLimitError(reason)) {
 			return {
-				...ok(progress),
+				...drained(progress),
 				status: 'retry',
 				error: messageOf(reason),
 				...waitFor(reason),
@@ -3759,7 +4136,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 
 		await store.failOp(op.seq, messageOf(reason));
-		return { ...ok(progress), status: 'retry', error: messageOf(reason) };
+		// Counted against it like any other, and stepped over unlike any other:
+		// 25 MB on a poor connection is no reason for a note's edit to wait.
+		if (op.op === 'upload') {
+			return drainOps(
+				ops.slice(1),
+				stepOver(progress, op, { failed: messageOf(reason) }),
+				retriedAuth
+			);
+		}
+		return { ...drained(progress), status: 'retry', error: messageOf(reason) };
 	};
 
 	/** One retry after a refresh, for a pull that met an expired token. */
@@ -3777,7 +4163,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	const runPush = async (): Promise<SyncOutcome> => {
-		const ops = await store.pendingOps();
+		const queued = await store.pendingOps();
+		// An upload that has failed before goes last. Its first try keeps its
+		// place, so a file lands ahead of the note that links it; once it has
+		// failed, the edits queued since go first, rather than each waiting out
+		// another try of up to 25 MB on the connection that just failed it. A
+		// copy keeps its place: a delete of what it copies behind it must meet
+		// it first to be held back for it (`awaitsCopy`).
+		const later = (op: SyncOp): boolean =>
+			op.op === 'upload' && op.attempts > 0 && op.copyOf === undefined;
+		const ops = [...queued.filter((op) => !later(op)), ...queued.filter(later)];
 		pushes.set('current', ops.length);
 		return drainOps(ops, { pushed: 0, conflicts: [] }, false).finally(() => {
 			pushes.delete('current');

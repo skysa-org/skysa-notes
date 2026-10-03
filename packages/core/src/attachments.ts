@@ -136,6 +136,44 @@ const OPENS_AS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * The type to tell a provider a file is, as it is uploaded, by its name: one a
+ * person adds to a note, where the provider's own preview of it is worth
+ * having. Anything else goes up as bytes. This is what the provider records
+ * and nothing more — the app reads the extension, never this — so it is not
+ * the allowlist below, which is about what this origin will show.
+ */
+const UPLOAD_TYPES: ReadonlyMap<string, string> = new Map([
+	['png', 'image/png'],
+	['jpg', 'image/jpeg'],
+	['jpeg', 'image/jpeg'],
+	['gif', 'image/gif'],
+	['webp', 'image/webp'],
+	['avif', 'image/avif'],
+	['svg', 'image/svg+xml'],
+	['bmp', 'image/bmp'],
+	['heic', 'image/heic'],
+	['heif', 'image/heif'],
+	['tif', 'image/tiff'],
+	['tiff', 'image/tiff'],
+	['pdf', 'application/pdf'],
+	['txt', 'text/plain'],
+	['csv', 'text/csv'],
+	['zip', 'application/zip'],
+	['mp3', 'audio/mpeg'],
+	['m4a', 'audio/mp4'],
+	['wav', 'audio/wav'],
+	['mp4', 'video/mp4'],
+	['mov', 'video/quicktime'],
+	['webm', 'video/webm'],
+	['docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+	['xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+	['pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+]);
+
+export const contentTypeOf = (name: string): string | undefined =>
+	UPLOAD_TYPES.get(extensionOf(name));
+
+/**
  * The type to give a file's bytes before a tab is opened on them, and the
  * reason the answer is an allowlist. A `blob:` URL belongs to the page that
  * made it, so a file opened as `text/html` — or as `image/svg+xml`, which is a

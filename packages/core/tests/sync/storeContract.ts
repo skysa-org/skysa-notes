@@ -2557,22 +2557,35 @@ export const describeSyncStoreContract = (
 					]);
 				});
 
-				it('owes the remote a delete of a file the user deleted while it was on its way', async () => {
-					const { store, seedFile, seedOp, dropFile } = await harness();
-					await seedFile(pending, { bytes: BYTES, pinned: true });
-					const seq = await seedOp({ op: 'upload', fileId: 'x1', path: 'Trips/a.png' });
-					await dropFile('x1');
-					await store.completeOp(seq, {
-						kind: 'uploaded',
-						fileId: 'x1',
-						remote: file('Trips/a.png'),
-						sentAs: 'Trips/a.png',
-					});
-					expect(await store.allFiles()).toEqual([]);
-					expect(await opsOf(store)).toEqual([
-						{ op: 'delete-file', path: 'Trips/a.png', remoteId: 'f1' },
-					]);
-				});
+				it.each([
+					['', false],
+					[', and the delete withdrew it', true],
+				])(
+					'owes the remote a delete of a file the user deleted while it was on its way%s',
+					async (_how, withdraw) => {
+						// Withdrawn is how the app's queue does it: a file never sent
+						// owes the remote nothing, so its delete takes the upload.
+						const { store, seedFile, seedOp, dropFile, withdrawOp } = await harness();
+						await seedFile(pending, { bytes: BYTES, pinned: true });
+						const seq = await seedOp({
+							op: 'upload',
+							fileId: 'x1',
+							path: 'Trips/a.png',
+						});
+						await dropFile('x1');
+						if (withdraw) await withdrawOp(seq);
+						await store.completeOp(seq, {
+							kind: 'uploaded',
+							fileId: 'x1',
+							remote: file('Trips/a.png'),
+							sentAs: 'Trips/a.png',
+						});
+						expect(await store.allFiles()).toEqual([]);
+						expect(await opsOf(store)).toEqual([
+							{ op: 'delete-file', path: 'Trips/a.png', remoteId: 'f1' },
+						]);
+					}
+				);
 
 				it("is refused for a row it would make another's file", async () => {
 					// Two rows on one file, which only an engine that lost track
@@ -2645,6 +2658,100 @@ export const describeSyncStoreContract = (
 
 				it('does not make stale bytes current by moving them', async () => {
 					const store = await moving({ bytes: BYTES, version: 'v0' });
+					expect(await store.fileBytes('x1')).toBeUndefined();
+				});
+
+				describe('moved again while its move was on the way', () => {
+					// The app's queue replaces a queued move rather than adding a
+					// second, so the move at the network is withdrawn and its
+					// outcome arrives for an op no longer queued. The file is where
+					// that move put it; the row is where the user has put it since.
+					const movedAgain = async (now: string, replaced: boolean) => {
+						const { store, seedFile, seedOp, withdrawOp } = await harness();
+						await seedFile({ ...bound, path: now }, { bytes: BYTES, version: 'v1' });
+						const sent = await seedOp({
+							op: 'move-file',
+							fileId: 'x1',
+							path: 'Trips/a.png',
+							targetPath: 'Work/a.png',
+						});
+						await withdrawOp(sent);
+						if (replaced) {
+							await seedOp({
+								op: 'move-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								targetPath: now,
+							});
+						}
+						await store.completeOp(sent, {
+							kind: 'moved-file',
+							fileId: 'x1',
+							remote: file('Work/a.png', 'f1', 'v2'),
+						});
+						return {
+							file: await store.fileById('x1'),
+							bytes: await store.fileBytes('x1'),
+							ops: await opsOf(store),
+						};
+					};
+
+					it('keeps the row where the user put it, and starts the move that replaced it from where it landed', async () => {
+						const { file: row, bytes, ops } = await movedAgain('Home/a.png', true);
+						expect(row).toEqual({ ...bound, path: 'Home/a.png', remoteVersion: 'v2' });
+						expect(bytes).toEqual(BYTES);
+						expect(ops).toEqual([
+							{
+								op: 'move-file',
+								fileId: 'x1',
+								path: 'Work/a.png',
+								targetPath: 'Home/a.png',
+							},
+						]);
+					});
+
+					it('owes the file a move of its own where nothing replaced the one that went', async () => {
+						const { file: row, ops } = await movedAgain('Home/a.png', false);
+						expect(row?.path).toBe('Home/a.png');
+						expect(ops).toEqual([
+							{
+								op: 'move-file',
+								fileId: 'x1',
+								path: 'Work/a.png',
+								targetPath: 'Home/a.png',
+							},
+						]);
+					});
+
+					it('owes nothing where the user put it back where it landed', async () => {
+						const { file: row, ops } = await movedAgain('Work/a.png', false);
+						expect(row?.path).toBe('Work/a.png');
+						expect(ops).toEqual([]);
+					});
+				});
+
+				it('takes no bytes to another file it took for its own', async () => {
+					// Landed on the same picture another device put there, and
+					// took it: those bytes were never read here, and its version
+					// can be the very string these were cached under.
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile(bound, { bytes: BYTES, version: 'v1' });
+					const seq = await seedOp({
+						op: 'move-file',
+						fileId: 'x1',
+						path: 'Trips/a.png',
+						targetPath: 'Work/a.png',
+					});
+					await store.completeOp(seq, {
+						kind: 'moved-file',
+						fileId: 'x1',
+						remote: file('Work/a.png', 'f9', 'v1'),
+					});
+					expect(await store.fileById('x1')).toEqual({
+						...bound,
+						path: 'Work/a.png',
+						remoteId: 'f9',
+					});
 					expect(await store.fileBytes('x1')).toBeUndefined();
 				});
 
