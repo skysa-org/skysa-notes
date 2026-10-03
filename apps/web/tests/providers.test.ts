@@ -68,6 +68,35 @@ describe('provider requests', () => {
 		}
 	});
 
+	it('keep what an upload earned once it is answered', async () => {
+		// A large upload answered late must not have its answer cut off: the
+		// provider would keep the file while this side counted a failure, and the
+		// retry would find its own upload in the way.
+		vi.useFakeTimers();
+		try {
+			const answered = vi.fn<FetchLike>(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 5_000));
+				return new Response('{}', {
+					headers: { 'content-length': String(SLOWEST_BYTES_PER_MS) },
+				});
+			});
+			const request = timedFetch(answered, 1_000)('https://example.test', {
+				method: 'PUT',
+				body: new Uint8Array(5 * SLOWEST_BYTES_PER_MS * 1_000),
+			});
+			await vi.advanceTimersByTimeAsync(5_000);
+			await request;
+			const signal = answered.mock.calls[0]?.[1].signal;
+
+			await vi.advanceTimersByTimeAsync(1_000);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(signal?.aborted).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('are given longer once the answer says how much it holds', async () => {
 		vi.useFakeTimers();
 		try {
@@ -83,7 +112,7 @@ describe('provider requests', () => {
 			await request;
 			const signal = answered.mock.calls[0]?.[1].signal;
 
-			await vi.advanceTimersByTimeAsync(9_999);
+			await vi.advanceTimersByTimeAsync(10_599);
 			expect(signal?.aborted).toBe(false);
 			await vi.advanceTimersByTimeAsync(1);
 			expect(signal?.aborted).toBe(true);
@@ -92,22 +121,103 @@ describe('provider requests', () => {
 		}
 	});
 
-	it('keep the deadline they had when the answer is small, or does not say', async () => {
+	it('are given longer for every byte of an answer that does not say how much it holds', async () => {
+		vi.useFakeTimers();
+		try {
+			const source = new Map<'stream', ReadableStreamDefaultController<Uint8Array>>();
+			const body = new ReadableStream<Uint8Array>({
+				start: (controller) => {
+					source.set('stream', controller);
+				},
+			});
+			const answered = vi.fn<FetchLike>(() => Promise.resolve(new Response(body)));
+			const response = await timedFetch(answered, 1_000)('https://example.test', {});
+			const signal = answered.mock.calls[0]?.[1].signal;
+			const reader = response.body?.getReader();
+			const arrives = async (ms: number) => {
+				source.get('stream')?.enqueue(new Uint8Array(ms * SLOWEST_BYTES_PER_MS));
+				await reader?.read();
+			};
+
+			await vi.advanceTimersByTimeAsync(900);
+			await arrives(500);
+			await vi.advanceTimersByTimeAsync(500);
+			await arrives(1_000);
+			await vi.advanceTimersByTimeAsync(1_099);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(signal?.aborted).toBe(true);
+			expect((signal?.reason as DOMException).name).toBe('TimeoutError');
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('keep the minute when the answer is small', async () => {
 		vi.useFakeTimers();
 		try {
 			const answered = vi.fn<FetchLike>(async () => {
 				await new Promise((resolve) => setTimeout(resolve, 400));
-				return new Response('{"entries":[]}', { headers: { 'content-length': '14' } });
+				return new Response('{}', {
+					headers: { 'content-length': String(SLOWEST_BYTES_PER_MS) },
+				});
 			});
 			const request = timedFetch(answered, 1_000)('https://example.test', {});
 			await vi.advanceTimersByTimeAsync(400);
 			await request;
 			const signal = answered.mock.calls[0]?.[1].signal;
 
-			await vi.advanceTimersByTimeAsync(599);
+			await vi.advanceTimersByTimeAsync(600);
 			expect(signal?.aborted).toBe(false);
 			await vi.advanceTimersByTimeAsync(1);
 			expect(signal?.aborted).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('let go of their deadline once they fail, or their answer has been read', async () => {
+		vi.useFakeTimers();
+		try {
+			const offline = vi.fn<FetchLike>(() =>
+				Promise.reject(new TypeError('Failed to fetch'))
+			);
+			await expect(timedFetch(offline, 1_000)('https://example.test', {})).rejects.toThrow();
+			expect(vi.getTimerCount()).toBe(0);
+
+			const unsized = vi.fn<FetchLike>(() => Promise.resolve(new Response('{"entries":[]}')));
+			const response = await timedFetch(unsized, 1_000)('https://example.test', {});
+			expect(await response.json()).toEqual({ entries: [] });
+			expect(vi.getTimerCount()).toBe(0);
+
+			const empty = vi.fn<FetchLike>(() =>
+				Promise.resolve(new Response(null, { status: 204 }))
+			);
+			await timedFetch(empty, 1_000)('https://example.test', {});
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('are given up on at their deadline in a session that has not ended', async () => {
+		vi.useFakeTimers();
+		try {
+			const session = new AbortController();
+			const sent = vi.fn<FetchLike>(hanging);
+			const request = timedFetch(
+				sent,
+				1_000,
+				session.signal
+			)('https://example.test', {}).catch((error: unknown) => error);
+			const signal = sent.mock.calls[0]?.[1].signal;
+
+			await vi.advanceTimersByTimeAsync(1_000);
+
+			expect(signal?.aborted).toBe(true);
+			expect((signal?.reason as DOMException).name).toBe('TimeoutError');
+			expect(session.signal.aborted).toBe(false);
+			await expect(request).resolves.toBeInstanceOf(Error);
 		} finally {
 			vi.useRealTimers();
 		}
