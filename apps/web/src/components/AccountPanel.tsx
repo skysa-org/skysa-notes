@@ -29,7 +29,6 @@ import {
 	activeConnectionId,
 	db as defaultDb,
 	LOCAL_CONNECTION_ID,
-	type NoteRecord,
 	type NotesDatabase,
 	type QueuedOperation,
 	type SyncStateRecord,
@@ -37,11 +36,11 @@ import {
 import { holdsTextFor } from '../store/detached.js';
 import {
 	downloadLibrary,
-	downloadNotes,
+	downloadNotice,
 	downloadProblem,
 	downloadSource,
+	downloadUnsent,
 	holdsAnything,
-	INCOMPLETE_DOWNLOAD,
 	type Library,
 } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
@@ -103,10 +102,11 @@ export interface AccountPanelProps {
 	 */
 	navigate?: (url: string) => void;
 	/**
-	 * How notes are handed to the user as a file. Injected for the same reason:
+	 * How what a source never sent is handed to the user as a file, once its
+	 * files' bytes are read (`downloadUnsent`). Injected for the same reason:
 	 * jsdom cannot make a blob URL, so the real one cannot run in a test.
 	 */
-	download?: (notes: readonly NoteRecord[]) => void;
+	download?: (library: Library) => void;
 	/** How a whole source is handed to the user as a file, for the same reason. */
 	downloadAll?: (library: Library) => void;
 	/**
@@ -479,8 +479,8 @@ const useDownloadAll = (
 		setBusy(true);
 		setProblem(null);
 		void downloadSource(database, connectionId, downloadAll)
-			.then(({ incomplete }) => {
-				if (incomplete) setProblem(INCOMPLETE_DOWNLOAD);
+			.then((answer) => {
+				setProblem(downloadNotice(answer));
 			})
 			.catch((error: unknown) => {
 				setProblem(downloadProblem(error));
@@ -1102,7 +1102,7 @@ interface ConnectedProps {
 	disconnects: Readonly<Record<string, Disconnecting>>;
 	onDisconnect: (connectionId: string, answer: Omit<LetGoInput, 'connectionId'>) => Promise<void>;
 	/** Hand the notes that were never sent to the user as a file. */
-	download: (notes: readonly NoteRecord[]) => void;
+	download: (listed: Unsynced) => void;
 	/** Hand the whole source to the user as a file. */
 	downloadAll: (library: Library) => void;
 	returnTo: string;
@@ -1588,7 +1588,7 @@ const Connected = ({
 
 interface DetachedProps extends LocalProps {
 	bound: SyncStateRecord;
-	download: (notes: readonly NoteRecord[]) => void;
+	download: (listed: Unsynced) => void;
 	onReleased: () => void;
 	/**
 	 * What came of the disconnect that left it detached, where that is not what
@@ -1665,7 +1665,7 @@ export const AccountPanel = ({
 	database = defaultDb,
 	sync = syncScheduler,
 	navigate,
-	download = downloadNotes,
+	download = downloadLibrary,
 	downloadAll = downloadLibrary,
 	keeping = browserKeeping,
 	connectIs = 'above',
@@ -1687,6 +1687,11 @@ export const AccountPanel = ({
 	const [config, setConfig] = useState<Asked<InstanceConfig>>({ kind: 'asking' });
 	const [account, setAccount] = useState<Asked<AccountState>>({ kind: 'asking' });
 	const { disconnects, disconnect } = useDisconnects(database, client);
+	// What a source never sent, with the files whose bytes are here. A file it
+	// leaves out is the remote's, which still has it, so nothing is said of it.
+	const downloadListed = (listed: Unsynced): void => {
+		void downloadUnsent(database, listed, download);
+	};
 
 	// A discard takes its source, and its panel, with it: the button the user
 	// pressed is gone and the focus would fall to the page. It goes to the next
@@ -1791,7 +1796,7 @@ export const AccountPanel = ({
 					database={database}
 					config={config}
 					bound={bound.state}
-					download={download}
+					download={downloadListed}
 					onReleased={released}
 					notice={disconnects[bound.state.connectionId]?.problem ?? null}
 					returnTo={returnTo}
@@ -1811,7 +1816,7 @@ export const AccountPanel = ({
 				key={bound.state.connectionId}
 				disconnects={disconnects}
 				onDisconnect={disconnect}
-				download={download}
+				download={downloadListed}
 				downloadAll={downloadAll}
 				client={client}
 				database={database}

@@ -42,7 +42,7 @@ import {
 	noteRef,
 	type SyncStateRecord,
 } from '../store/db.js';
-import { downloadProblem, downloadSource, INCOMPLETE_DOWNLOAD } from '../store/exportNotes.js';
+import { downloadNotice, downloadProblem, downloadSource } from '../store/exportNotes.js';
 import {
 	createFolder,
 	deleteFolder,
@@ -312,8 +312,9 @@ const useDownloadCommand = ({
 		run: () => {
 			if (connectionId === undefined) return;
 			void downloadSource(db, connectionId)
-				.then(({ incomplete }) => {
-					if (incomplete) onProblem({ message: INCOMPLETE_DOWNLOAD, tone: 'warning' });
+				.then((answer) => {
+					const notice = downloadNotice(answer);
+					if (notice !== null) onProblem({ message: notice, tone: 'warning' });
 				})
 				.catch((error: unknown) => {
 					onProblem({ message: downloadProblem(error), tone: 'error' });

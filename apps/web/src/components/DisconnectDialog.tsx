@@ -2,6 +2,7 @@ import { type ReactNode, type RefObject, useEffect, useState } from 'react';
 
 import { type ConnectedSource } from '../store/connection.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
+import { hasUnsentDownload } from '../store/exportNotes.js';
 import { countedFolders, countOf, isEmpty, type Unsynced } from '../store/unsynced.js';
 import { type UnsentAnswer } from '../sync/account.js';
 import { canMove, leftBehind, MoveUnsent } from './MoveUnsent.js';
@@ -66,7 +67,7 @@ export interface DisconnectDialogProps {
 	 * it, the app's access is meant to stay.
 	 */
 	leftAtProvider: ReactNode;
-	download: (notes: readonly NoteRecord[]) => void;
+	download: (listed: Unsynced) => void;
 	onAnswer: (answer: UnsentAnswer) => void;
 	onCancel: () => void;
 	/** The parent moves the focus here, and keeps it off a button that has gone. */
@@ -253,9 +254,9 @@ export const DisconnectDialog = ({
 				</button>
 				<button
 					type="button"
-					disabled={busy || listed.notes.length === 0}
+					disabled={busy || !hasUnsentDownload(listed)}
 					onClick={() => {
-						download(listed.notes);
+						download(listed);
 					}}
 				>
 					Download them first
@@ -310,9 +311,9 @@ export const DisconnectDialog = ({
 			</button>
 			<button
 				type="button"
-				disabled={busy || listed.notes.length === 0}
+				disabled={busy || !hasUnsentDownload(listed)}
 				onClick={() => {
-					download(listed.notes);
+					download(listed);
 				}}
 			>
 				Download them
