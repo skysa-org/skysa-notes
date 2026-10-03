@@ -1767,6 +1767,73 @@ button.danger {
 	max-width: 100%;
 }
 
+/*
+ * A picture in a note (`editor/image.ts`). The `<img>` is there in every
+ * state and empty until it has a URL; a picture not shown is a line saying
+ * why, in a box where the picture would be, with a button where there is
+ * something to do about it.
+ */
+.editor-rich-surface .note-image {
+	display: inline-block;
+	max-width: 100%;
+	vertical-align: bottom;
+	border-radius: 0.25rem;
+}
+
+.editor-rich-surface .note-image img {
+	display: block;
+	height: auto;
+}
+
+.editor-rich-surface .note-image:not([data-state='ready']) img {
+	display: none;
+}
+
+/* Room held for a picture on its way, so the lines below do not jump twice. */
+.editor-rich-surface .note-image[data-state='loading'] {
+	min-inline-size: 6rem;
+	min-block-size: 4rem;
+	background: var(--surface);
+}
+
+.editor-rich-surface .note-image:not([data-state='ready'], [data-state='loading']) {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2xs) var(--space-s);
+	padding: var(--space-2xs) var(--space-s);
+	border: 1px dashed var(--border);
+	background: var(--surface);
+}
+
+.note-image-status {
+	font-size: 0.875rem;
+	color: var(--muted);
+}
+
+.note-image-action {
+	font: inherit;
+	font-size: 0.8125rem;
+	padding: 0.15rem 0.5rem;
+	border: 1px solid var(--border);
+	border-radius: 0.25rem;
+	background: var(--bg);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.note-image-action:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* Selected whole — clicked, or reached with the arrow keys. */
+.editor-rich-surface .note-image.ProseMirror-selectednode {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+}
+
 /* ---- Floating menus --------------------------------------------------- */
 
 /*
@@ -3126,6 +3193,11 @@ button.danger {
 	}
 
 	.note-title-input {
+		min-height: var(--tap);
+	}
+
+	/* Under a picture not shown: Show, Try again. */
+	.note-image-action {
 		min-height: var(--tap);
 	}
 

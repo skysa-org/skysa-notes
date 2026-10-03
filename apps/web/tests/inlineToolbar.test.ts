@@ -1,5 +1,5 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { shouldShowInlineToolbar } from '../src/editor/InlineToolbar.js';
@@ -66,6 +66,17 @@ describe('the floating formatting toolbar', () => {
 	 * top greys its mark buttons inside one. A floating bar has no grey to show,
 	 * so it stays away rather than offering five buttons that do nothing.
 	 */
+	it('stays away from a picture selected whole, which holds no text to format', async () => {
+		const editor = await mount('A ![cat](cat.png) here.\n');
+
+		editor.view.dispatch(
+			editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, 3))
+		);
+
+		expect(editor.view.state.selection).toBeInstanceOf(NodeSelection);
+		expect(editor.shows()).toBe(false);
+	});
+
 	/**
 	 * The system draws its own menu over a selection on a touch screen, and
 	 * the formatting there is the bar under the note.
