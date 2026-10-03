@@ -1834,6 +1834,108 @@ button.danger {
 	outline-offset: 2px;
 }
 
+/*
+ * A file beside a note that is not a picture (`editor/attachment.ts`): a chip
+ * with the file's kind and its name, in the line like a word, and under it,
+ * while it is selected, what can be done with it — the code block's bar.
+ */
+.editor-rich-surface .attachment {
+	position: relative;
+	display: inline-block;
+	max-width: 100%;
+	vertical-align: bottom;
+}
+
+.attachment-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3em;
+	max-width: 100%;
+	padding: 0 0.4em;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--surface);
+	color: var(--fg);
+	cursor: pointer;
+	line-height: 1.6;
+	/* The chip is one thing: dragging across it moves it, never its letters. */
+	user-select: none;
+}
+
+.attachment-icon {
+	display: inline-flex;
+	flex: none;
+	color: var(--muted);
+}
+
+.attachment-icon svg {
+	width: 1em;
+	height: 1em;
+}
+
+.attachment-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+@media (hover: hover) {
+	.attachment-chip:hover {
+		background: var(--hover-bg);
+	}
+}
+
+.editor-rich-surface .attachment[data-selected] .attachment-chip {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+/* A large file on its way: the chip says so until it is opened or saved. */
+.editor-rich-surface .attachment[aria-busy='true'] .attachment-chip {
+	cursor: progress;
+	opacity: 0.6;
+}
+
+.attachment-actions {
+	position: absolute;
+	inset-block-start: 100%;
+	inset-inline-start: 0;
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	gap: 0.125rem;
+	margin-block-start: 0.25rem;
+	padding: 0.2rem 0.25rem;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--surface);
+	box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 12%);
+	user-select: none;
+}
+
+/* `display` above would otherwise show it whatever `hidden` says. */
+.attachment-actions[hidden] {
+	display: none;
+}
+
+.attachment-action {
+	display: inline-flex;
+	align-items: center;
+	padding: 0.25rem;
+	border: 0;
+	border-radius: 0.25rem;
+	background: none;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.attachment-action:hover {
+		background: var(--hover-bg);
+		color: var(--fg);
+	}
+}
+
 /* ---- Floating menus --------------------------------------------------- */
 
 /*
@@ -3199,6 +3301,17 @@ button.danger {
 	/* Under a picture not shown: Show, Try again. */
 	.note-image-action {
 		min-height: var(--tap);
+	}
+
+	/* A file's chip, big enough to land on, and its bar's buttons. */
+	.attachment-chip {
+		min-height: 1.5rem;
+	}
+
+	.attachment-action {
+		justify-content: center;
+		width: var(--tap);
+		height: var(--tap);
 	}
 
 	/* Rows: the notebooks, the notes, the sources, the answers to a search. */

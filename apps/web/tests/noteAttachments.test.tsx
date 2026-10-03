@@ -7,7 +7,7 @@ import {
 	type NoteAttachmentsOptions,
 	useNoteAttachments,
 } from '../src/components/noteAttachments.js';
-import type { Shown } from '../src/editor/attachHost.js';
+import type { AttachmentProblem, Shown } from '../src/editor/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlFactory } from '../src/editor/objectUrls.js';
 import {
 	createDatabase,
@@ -228,6 +228,71 @@ describe('a picture beside the open note', () => {
 	});
 });
 
+describe('a file beside the open note, asked for whole', () => {
+	const fetchFile = (host: ReturnType<typeof setup>['host'], href: string) =>
+		host.fetchFile(href, new AbortController().signal);
+
+	it('is the file as it is stored, typed as this app may open it, whatever its size', async () => {
+		const { db, host, readFile } = setup();
+		await db.files.put(row('notes/q3-1a2b3c4d.pdf', { size: LARGE_PICTURE_BYTES * 2 }));
+		await db.files.put(row('notes/page.html'));
+
+		const pdf = await fetchFile(host, 'q3-1a2b3c4d.pdf');
+		const page = await fetchFile(host, 'page.html');
+
+		expect(readFile).toHaveBeenCalledWith(
+			'c1',
+			'notes/q3-1a2b3c4d.pdf',
+			expect.any(AbortSignal)
+		);
+		expect(pdf.state === 'ready' && [pdf.file.name, pdf.file.type]).toEqual([
+			'q3-1a2b3c4d.pdf',
+			'application/pdf',
+		]);
+		expect(pdf.state === 'ready' && (await pdf.file.text())).toBe('far');
+		expect(page.state === 'ready' && page.file.type).toBe('application/octet-stream');
+	});
+
+	it.each([
+		[{ state: 'gone' }, { state: 'missing' }],
+		[{ state: 'offline' }, { state: 'offline' }],
+		[{ state: 'unavailable' }, { state: 'unavailable' }],
+		[{ state: 'failed' }, { state: 'failed' }],
+		[{ state: 'aborted' }, { state: 'aborted' }],
+	] as const)('is %o read as %o', async (read, fetched) => {
+		const { db, host } = setup(read);
+		await db.files.put(row('notes/a.pdf'));
+
+		expect(await fetchFile(host, 'a.pdf')).toEqual(fetched);
+	});
+
+	it('is missing where no file is, and failed where the store cannot be read', async () => {
+		const { db, host, readFile } = setup();
+
+		expect(await fetchFile(host, 'a.pdf')).toEqual({ state: 'missing' });
+		db.close();
+		expect(await fetchFile(host, 'a.pdf')).toEqual({ state: 'failed' });
+		expect(readFile).not.toHaveBeenCalled();
+	});
+
+	it('passes on what the editor could not do', () => {
+		const told = vi.fn();
+		const host = createNoteAttachments({
+			db: freshDatabase(),
+			note: () => ({ connectionId: 'c1', path: 'a.md' }),
+			readFile: vi.fn(),
+			report: told,
+		});
+
+		host.report({ message: 'a.pdf could not be downloaded.', tone: 'error' });
+
+		expect(told).toHaveBeenCalledWith({
+			message: 'a.pdf could not be downloaded.',
+			tone: 'error',
+		});
+	});
+});
+
 describe('the host of the open note', () => {
 	const mounted = async () => {
 		const db = freshDatabase();
@@ -311,6 +376,29 @@ describe('the host of the open note', () => {
 
 		hook.unmount();
 		expect(statuses.size).toBe(0);
+	});
+
+	it('passes on a problem to whoever the note view says now', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, { title: 'Day', connectionId: 'c1' });
+		const first = vi.fn();
+		const second = vi.fn();
+		const hook = renderHook(
+			({ report }: { report: (problem: AttachmentProblem) => void }) =>
+				useNoteAttachments(note, {
+					readFile: vi.fn(),
+					db,
+					subscribe: () => () => undefined,
+					report,
+				}),
+			{ initialProps: { report: first } }
+		);
+
+		hook.rerender({ report: second });
+		hook.result.current.report({ message: 'No.', tone: 'error' });
+
+		expect(first).not.toHaveBeenCalled();
+		expect(second).toHaveBeenCalledWith({ message: 'No.', tone: 'error' });
 	});
 
 	it('is a new host for another note, the old one letting go of its URLs', async () => {

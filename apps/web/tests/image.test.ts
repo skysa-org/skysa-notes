@@ -3,7 +3,12 @@ import { DOMParser as ProseParser, DOMSerializer } from '@milkdown/kit/prose/mod
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AttachmentHost, Shown, ShowOptions } from '../src/editor/attachHost.js';
+import {
+	type AttachmentHost,
+	NO_ATTACHMENTS,
+	type Shown,
+	type ShowOptions,
+} from '../src/editor/attachHost.js';
 import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 
 /**
@@ -29,6 +34,7 @@ const fakeHost = () => {
 	const asked: Asked[] = [];
 	const listeners = new Set<() => void>();
 	const host: AttachmentHost = {
+		...NO_ATTACHMENTS,
 		show: (href, options) =>
 			new Promise((resolve) => {
 				asked.push({ href, options, answer: resolve });
@@ -185,6 +191,7 @@ describe('a picture beside the note', () => {
 	it('could not be downloaded when the host fails outright, and can be asked for again', async () => {
 		const asked: string[] = [];
 		const host: AttachmentHost = {
+			...NO_ATTACHMENTS,
 			show: (href) => {
 				asked.push(href);
 				return Promise.reject(new Error('Database has been closed'));

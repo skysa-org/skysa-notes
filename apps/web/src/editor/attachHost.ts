@@ -39,9 +39,34 @@ export interface ShowOptions {
 	readonly large?: boolean;
 }
 
+/**
+ * A file's bytes, for opening or saving it: a `File` named as it is stored and
+ * typed as this origin may open it (`safeOpenType`), or why there is none.
+ */
+export type Fetched =
+	| { state: 'ready'; file: File }
+	| { state: 'missing' }
+	| { state: 'offline' }
+	| { state: 'unavailable' }
+	| { state: 'failed' }
+	| { state: 'aborted' };
+
+/** Something the editor could not do with a file, for the app to tell the user. */
+export interface AttachmentProblem {
+	readonly message: string;
+	readonly tone: 'warning' | 'error';
+}
+
 export interface AttachmentHost {
 	/** A picture, for a link relative to the note (`classifyHref`). */
 	readonly show: (href: string, options: ShowOptions) => Promise<Shown>;
+	/**
+	 * Any file, for a link relative to the note, whatever its size: the user
+	 * asked for it by opening or saving it.
+	 */
+	readonly fetchFile: (href: string, signal?: AbortSignal) => Promise<Fetched>;
+	/** Tell the user, where the editor has nowhere to say it. */
+	readonly report: (problem: AttachmentProblem) => void;
 	/**
 	 * Called when what a link resolves to may have changed: the note moved,
 	 * a file arrived with a pull, the network came back. Returns the way to stop.
@@ -52,6 +77,8 @@ export interface AttachmentHost {
 /** The host of an editor nobody gave one: it shows nothing beside a note. */
 export const NO_ATTACHMENTS: AttachmentHost = {
 	show: () => Promise.resolve({ state: 'unavailable' }),
+	fetchFile: () => Promise.resolve({ state: 'unavailable' }),
+	report: () => undefined,
 	changed: () => () => undefined,
 };
 

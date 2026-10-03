@@ -40,6 +40,7 @@ import {
 } from '@skysa/core';
 
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
+import { attachmentSchema, attachmentViewPlugin, openOnEnter } from './attachment.js';
 import { autoLanguagePlugin } from './autoLanguage.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
 import { codeDisplay, type CodeDisplayStore } from './codeDisplay.js';
@@ -316,6 +317,9 @@ export const createRichEditor = ({
 			ctx.update(editorViewOptionsCtx, (options) => ({
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': 'Note body' },
+				// Ahead of every keymap, which a plugin's would not be.
+				handleKeyDown: (view, event) =>
+					openOnEnter(ctx.get(attachHostCtx.key), view, event),
 			}));
 			if (menus === undefined) return;
 			ctx.set(slash.key, menus.slash);
@@ -323,6 +327,8 @@ export const createRichEditor = ({
 		})
 		.use(attachHostCtx)
 		.use(commonmarkWithoutBreakEater)
+		// A file beside the note, as a chip rather than a link (`attachment.ts`).
+		.use(attachmentSchema)
 		// After the preset, so that its html transformer has already put a
 		// block of html into a paragraph for this to find.
 		.use(emptyLinePlugin)
@@ -339,6 +345,7 @@ export const createRichEditor = ({
 		// A picture beside the note, from the note's storage, when it is on screen.
 		.use(imageViewPlugin)
 		.use(unloadablePicturesInWords)
+		.use(attachmentViewPlugin)
 		.use($prose(() => codeHighlightPlugin(languages)))
 		.use($prose(() => codeActivePlugin))
 		.use($prose(() => codeNumbersPlugin(display)))

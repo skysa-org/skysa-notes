@@ -1,7 +1,7 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
-import { TextSelection } from '@milkdown/kit/prose/state';
-import { afterEach, describe, expect, it } from 'vitest';
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	ALL_COMMANDS,
@@ -179,6 +179,45 @@ describe('links', () => {
 		withCtx(clearLink);
 
 		expect(withCtx(currentMarkdown)).toBe('plain\n');
+	});
+
+	it('puts no file beside the note in a link, which would be two broken ones', async () => {
+		const withCtx = await mount('See [a.zip](a.zip) now\n');
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			const end = view.state.doc.content.size - 1;
+			view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, end)));
+		});
+
+		withCtx(setLink('https://example.test/a'));
+
+		expect(withCtx(currentMarkdown)).toBe(
+			'[See](https://example.test/a) [a.zip](a.zip) [now](https://example.test/a)\n'
+		);
+	});
+
+	it('leaves a file beside the note alone when it is all that is selected', async () => {
+		const withCtx = await mount('See [a.zip](a.zip) now\n');
+		const dispatch = withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 5)));
+			return vi.spyOn(view, 'dispatch');
+		});
+
+		withCtx(setLink('https://example.test/a'));
+
+		expect(withCtx(currentMarkdown)).toBe('See [a.zip](a.zip) now\n');
+		// Not linked and unlinked again: an edit of nothing would still be one.
+		expect(dispatch).not.toHaveBeenCalled();
+	});
+
+	it('keeps a file beside the note out of a link the cursor is in', async () => {
+		const withCtx = await mount('[go](https://example.test/a) and [a.zip](a.zip)\n');
+		withCtx(cursorIn('go'));
+
+		withCtx(setLink('https://example.test/b'));
+
+		expect(withCtx(currentMarkdown)).toBe('[go](https://example.test/b) and [a.zip](a.zip)\n');
 	});
 
 	it('writes the URL as its own words when nothing is selected', async () => {

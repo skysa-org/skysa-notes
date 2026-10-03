@@ -116,6 +116,17 @@ describe('the floating formatting toolbar', () => {
 		expect(editor.shows()).toBe(false);
 	});
 
+	it('stays away from a file beside the note selected whole, which has a bar of its own', async () => {
+		const editor = await mount('A [a.zip](a.zip) here.\n');
+
+		editor.view.dispatch(
+			editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, 3))
+		);
+
+		expect(editor.view.state.selection).toBeInstanceOf(NodeSelection);
+		expect(editor.shows()).toBe(false);
+	});
+
 	it('has nothing to say about a cursor that has selected nothing', async () => {
 		const editor = await mount('Words to bold.\n');
 
