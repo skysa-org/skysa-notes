@@ -1,4 +1,5 @@
 import { extensionOf } from './markdown/attachments.js';
+import { extensionAt, fitBytes, MAX_NAME_BYTES, utf8Length } from './markdown/slug.js';
 
 /**
  * What the app knows about a file beside a note from its name alone: how to
@@ -85,6 +86,17 @@ const INLINE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'bmp
 
 export const showsInline = (name: string): boolean => INLINE.has(extensionOf(name));
 
+/**
+ * Whether a picture is drawn from a `data:` URL rather than a `blob:` one: an
+ * SVG (decided 2026-10-03, #187). In an `<img>` an SVG runs nothing, but a
+ * picture is one middle-click or "Open image in new tab" from being a document
+ * of its own, and a `blob:` URL is this app's origin — an SVG `<script>`
+ * opened there would run as the app, with the storage credential in reach,
+ * kept out only by every browser carrying the page's CSP over to the `blob:`
+ * document. A `data:` document's origin is opaque wherever it is opened.
+ */
+export const drawsFromData = (name: string): boolean => extensionOf(name) === 'svg';
+
 const LABELS: Readonly<Record<FileKind, string>> = {
 	image: 'Image',
 	pdf: 'PDF',
@@ -132,7 +144,8 @@ const OPENS_AS: ReadonlyMap<string, string> = new Map([
  * (CLAUDE.md, the `sk1_` trade-off rests on nothing doing that). So anything
  * not named here, SVG, HTML and XML among them, is
  * `application/octet-stream`, which every browser downloads rather than shows.
- * An SVG is still drawn in a note: through `<img>`, where it runs nothing.
+ * An SVG is still drawn in a note: through `<img>`, where it runs nothing, and
+ * from a `data:` URL (`drawsFromData`).
  */
 export const safeOpenType = (name: string): string =>
 	OPENS_AS.get(extensionOf(name)) ?? 'application/octet-stream';
@@ -141,17 +154,41 @@ export const safeOpenType = (name: string): string =>
 export const opensInTab = (name: string): boolean => OPENS_AS.has(extensionOf(name));
 
 /**
+ * What a saved file's name may not hold: a path's separators and what a
+ * filesystem refuses; bidirectional controls, which make `invoice\u202efdp.exe`
+ * show as `invoiceexe.pdf`; and lone surrogates, which are no character.
+ */
+// eslint-disable-next-line no-control-regex
+const UNSAVEABLE = /[\u0000-\u001f\u007f-\u009f/\\:*?"<>|]/g;
+const SPOOFING = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]|\p{Surrogate}/gu;
+
+const tidy = (name: string): string =>
+	name
+		.replace(SPOOFING, '')
+		.replace(UNSAVEABLE, ' ')
+		.replace(/\s+/g, ' ')
+		.replace(/^[.\s]+|\s+$/g, '');
+
+/** As much of a name as a filesystem takes, cut from its stem, its extension kept. */
+const fitted = (name: string): string => {
+	const dot = extensionAt(name);
+	const extension = name.slice(dot);
+	return (
+		fitBytes(name.slice(0, dot), MAX_NAME_BYTES - utf8Length(extension)).trimEnd() + extension
+	);
+};
+
+/**
  * The name to save a file under: the one the user knows it by — a chip's
  * label, which `attachmentLabel` made from the name it was added with — where
  * that still ends in the stored file's extension, and the stored name where
  * it does not, since a label the user has edited may say anything at all.
- * Nothing that would be a path or a hidden file.
+ * Nothing that would be a path or a hidden file, nothing that shows as other
+ * than it is, and no more than a filesystem takes.
  */
 export const downloadName = (label: string, storedName: string): string => {
-	const clean = label
-		// eslint-disable-next-line no-control-regex
-		.replace(/[\u0000-\u001f\u007f-\u009f/\\:*?"<>|]/g, ' ')
-		.replace(/\s+/g, ' ')
-		.replace(/^[.\s]+|\s+$/g, '');
-	return clean !== '' && extensionOf(clean) === extensionOf(storedName) ? clean : storedName;
+	const clean = tidy(label);
+	const name =
+		clean !== '' && extensionOf(clean) === extensionOf(storedName) ? clean : tidy(storedName);
+	return name === '' ? 'attachment' : fitted(name);
 };

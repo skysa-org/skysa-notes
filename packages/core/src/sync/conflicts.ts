@@ -5,7 +5,7 @@ import {
 	splitFrontmatter,
 } from '../markdown/frontmatter.js';
 import { serializeNoteFile } from '../markdown/note.js';
-import { fitBytes, foldName, MAX_NAME_BYTES, utf8Length } from '../markdown/slug.js';
+import { extensionAt, fitBytes, foldName, MAX_NAME_BYTES, utf8Length } from '../markdown/slug.js';
 import { basename, replaceBasename } from '../paths.js';
 
 /**
@@ -84,15 +84,6 @@ export const conflictFilename = (
 };
 
 /**
- * What counts as a file's extension when its conflict name keeps one: a dot and
- * up to sixteen characters with no dot or space, at the end. Bounded, so the
- * stem is always what gives way to fit the name (`conflictName`): another tool's
- * `minutes.2026-01-01 with the board` has no extension, only a stem with a dot
- * in it, and keeping the whole tail as one would leave nothing to cut.
- */
-const EXTENSION = /\.[^.\s]{1,16}$/u;
-
-/**
  * The same name for a file that is not a note, keeping its own extension.
  *
  * `conflictFilename` gives every copy `.md`, which is right for a note and
@@ -101,19 +92,18 @@ const EXTENSION = /\.[^.\s]{1,16}$/u;
  * tries to read as text. So the stamp goes before the extension, as it does
  * for a note: `photo (conflict 2026-09-15T14-32).png`.
  *
- * A name that starts with its only dot (`.env`) is a hidden file, not an
- * extension with no stem, and gets the stamp at the end, as a folder does.
+ * Where the extension starts is `extensionAt`'s answer, bounded so the stem
+ * is always what gives way to fit the name (`conflictName`). A name that
+ * starts with its only dot (`.env`) is a hidden file, not an extension with no
+ * stem, and gets the stamp at the end, as a folder does.
  */
 export const conflictNameKeepingExtension = (
 	filename: string,
 	at: Date,
 	taken: Iterable<string> = []
 ): string => {
-	const extension = EXTENSION.exec(filename)?.[0] ?? '';
-	const stem = filename.slice(0, filename.length - extension.length);
-	return stem === ''
-		? conflictName(filename, '', at, taken)
-		: conflictName(stem, extension, at, taken);
+	const dot = extensionAt(filename);
+	return conflictName(filename.slice(0, dot), filename.slice(dot), at, taken);
 };
 
 /**

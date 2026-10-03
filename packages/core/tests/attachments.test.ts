@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	downloadName,
+	drawsFromData,
 	fileKind,
 	fileKindLabel,
 	opensInTab,
@@ -81,9 +82,61 @@ describe('safeOpenType', () => {
 		'a.docx',
 		'a',
 		'a.png.html',
+		'a.svgz',
+		'a.xht',
+		'a.xsl',
+		'a.mht',
+		'a.shtml',
+		'a.wasm',
 	])('never opens %s, only downloads it', (name) => {
 		expect(safeOpenType(name)).toBe('application/octet-stream');
 		expect(opensInTab(name)).toBe(false);
+	});
+
+	it('opens nothing as a type outside the allowlist', () => {
+		// The whole of what may open in a tab. Anything added here is a type a
+		// browser shows in this origin, and has to be one that runs nothing.
+		const allowed = new Set([
+			'image/png',
+			'image/jpeg',
+			'image/gif',
+			'image/webp',
+			'image/avif',
+			'image/bmp',
+			'application/pdf',
+			'audio/mpeg',
+			'audio/mp4',
+			'audio/wav',
+			'audio/ogg',
+			'video/mp4',
+			'video/webm',
+			'application/octet-stream',
+		]);
+		const extensions = [
+			...'png jpg jpeg gif webp avif svg svgz bmp heic heif tif tiff ico cur'.split(' '),
+			...'pdf doc docx odt rtf pages epub txt log markdown md rst org'.split(' '),
+			...'xls xlsx ods csv tsv numbers ppt pptx odp key zip tar gz tgz bz2 xz 7z rar'.split(
+				' '
+			),
+			...'mp3 m4a aac wav flac ogg oga opus mp4 m4v mov webm mkv avi ogv'.split(' '),
+			...'json yaml yml toml xml xsl xslt xht xhtml html htm shtml mht mhtml'.split(' '),
+			...'css js mjs cjs ts wasm swf rdf vtt py rb go rs java c h cpp sh sql'.split(' '),
+		];
+		const opened = new Set(extensions.map((extension) => safeOpenType(`a.${extension}`)));
+
+		expect([...opened].filter((type) => !allowed.has(type))).toEqual([]);
+		expect([...opened].filter((type) => /svg|xml|html|script/.test(type))).toEqual([]);
+	});
+});
+
+describe('drawsFromData', () => {
+	it.each([
+		['a.svg', true],
+		['a.SVG', true],
+		['a.png', false],
+		['a.pdf', false],
+	])('%s → %s', (name, expected) => {
+		expect(drawsFromData(name)).toBe(expected);
 	});
 });
 
@@ -96,7 +149,19 @@ describe('downloadName', () => {
 		['a/b\\c:d.pdf', 'a-3f9a1c2b.pdf', 'a b c d.pdf'],
 		['.hidden.pdf', 'a-3f9a1c2b.pdf', 'hidden.pdf'],
 		['', 'a-3f9a1c2b.pdf', 'a-3f9a1c2b.pdf'],
-	])('%s for %s → %s', (label, stored, name) => {
+		// Shown as `Invoice exe.pdf`, and saved as an `.exe`, were the control
+		// kept.
+		['Invoice \u202efdp.exe', 'invoice-3f9a1c2b.exe', 'Invoice fdp.exe'],
+		['a\ud800b.pdf', 'a-3f9a1c2b.pdf', 'ab.pdf'],
+		['', '.hidden', 'hidden'],
+		['', '...', 'attachment'],
+	])('%j for %s → %j', (label, stored, name) => {
 		expect(downloadName(label, stored)).toBe(name);
+	});
+
+	it('cuts a long name to what a filesystem takes, keeping its extension', () => {
+		const name = downloadName(`${'写'.repeat(400)}.pdf`, 'a-3f9a1c2b.pdf');
+		expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(255);
+		expect(name).toMatch(/^写+\.pdf$/u);
 	});
 });

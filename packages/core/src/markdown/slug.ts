@@ -253,6 +253,24 @@ export const uniqueFilename = (title: string, taken: Iterable<string>): string =
 	nextFreeName(slugify(title), new Set([...taken].map(foldName)), 1);
 
 /**
+ * Where a name's extension starts — at its dot — or the name's length where it
+ * has none: a dot and up to sixteen characters with no dot, space or
+ * separator, at the end, and not at the start, where the dot makes a hidden
+ * file (`.env`) rather than an extension with no stem. Bounded, so the stem is
+ * always what gives way to fit a name: another tool's
+ * `minutes.2026-01-01 with the board` has no extension, only a stem with a dot
+ * in it.
+ *
+ * The one reading of an extension, for the name an attachment is stored
+ * under, its conflict copy and what a link says it points at, so the three
+ * never disagree about where it starts.
+ */
+export const extensionAt = (name: string): number => {
+	const match = /\.[^./\\\s]{1,16}$/u.exec(name);
+	return match === null || match.index === 0 ? name.length : match.index;
+};
+
+/**
  * The extension for a file whose name has none, by the type the browser gave
  * it: a picture pasted from the clipboard, or a file from a share sheet that
  * came without a name. Only what a person would paste or share; anything else
@@ -281,6 +299,15 @@ const EXTENSION_FOR_TYPE: Readonly<Record<string, string>> = {
 	'video/webm': 'webm',
 };
 
+/** The extensions a pasted picture can have, from its type or its name. */
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+	...Object.entries(EXTENSION_FOR_TYPE)
+		.filter(([type]) => type.startsWith('image/'))
+		.map(([, extension]) => extension),
+	'jpeg',
+	'tif',
+]);
+
 /**
  * The stem's share of an attachment's name, in bytes: the 255 a filesystem
  * allows, less a conflict suffix and its counter (28 + 4), less `-` and a hash
@@ -291,9 +318,12 @@ const ATTACHMENT_STEM_BYTES = MAX_NAME_BYTES - 32 - 17 - 17;
 /**
  * The name a file is stored under beside a note: `<slug of its name>-<hash>.<ext>`
  * — `q3-report-3f9a1c2b.pdf` — or `pasted-image-3f9a1c2b.png` for a picture
- * from the clipboard, whose own name says nothing. `hash` is the hex of the
- * file's SHA-256 (`bytesHash`); its first eight characters name it, or
- * `hashLength` where eight are already taken by a different file.
+ * from the clipboard, whose own name (`image.png`) says nothing; a file that is
+ * not a picture keeps its name however it arrived. `hash` is the hex of the
+ * file's SHA-256 (`bytesHash`); its first eight characters name it, or up to
+ * sixteen (`hashLength`) where eight are already taken by a different file.
+ * Anything else is a `RangeError`: the hash goes into a path, and a longer one
+ * would eat the room a conflict suffix is promised.
  *
  * Stamped with the content (docs/ARCHITECTURE.md §3, #187): the same file
  * added twice, or on two devices, is one name and one file, and a name that is
@@ -318,14 +348,22 @@ export const attachmentName = ({
 	pasted?: boolean;
 	hashLength?: number;
 }): string | undefined => {
-	const written = /\.([^.\s]{1,16})$/u.exec(name);
-	const at = written === null || written.index === 0 ? name.length : written.index;
-	const own = at === name.length ? '' : foldName(written?.[1] ?? '');
+	if (!Number.isInteger(hashLength) || hashLength < 8 || hashLength > 16) {
+		throw new RangeError(
+			`an attachment's name takes 8 to 16 hex of its hash, not ${hashLength}`
+		);
+	}
+	if (!new RegExp(`^[0-9a-f]{${hashLength},}$`, 'i').test(hash)) {
+		throw new RangeError('an attachment is named by the hex of its hash');
+	}
+	const at = extensionAt(name);
+	const own = foldName(name.slice(at + 1));
 	const media = type.split(';')[0]?.trim().toLowerCase() ?? '';
 	const extension = /^[a-z0-9]{1,16}$/.test(own) ? own : (EXTENSION_FOR_TYPE[media] ?? 'bin');
 	if (`.${extension}` === NOTE_EXTENSION) return undefined;
 
-	const slug = fitBytes(toSlug(pasted ? '' : name.slice(0, at)), ATTACHMENT_STEM_BYTES);
-	const stem = slug.replace(/-+$/, '') || (pasted ? 'pasted-image' : 'attachment');
+	const nameless = pasted && IMAGE_EXTENSIONS.has(extension);
+	const slug = fitBytes(toSlug(nameless ? '' : name.slice(0, at)), ATTACHMENT_STEM_BYTES);
+	const stem = slug.replace(/-+$/, '') || (nameless ? 'pasted-image' : 'attachment');
 	return `${stem}-${hash.slice(0, hashLength).toLowerCase()}.${extension}`;
 };

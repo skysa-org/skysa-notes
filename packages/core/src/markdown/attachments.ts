@@ -1,9 +1,9 @@
 import type { Nodes, Root } from 'mdast';
 
 import { NOTE_EXTENSION } from '../config.js';
-import { isHidden, parentPath, pathSegments, ROOT, SEPARATOR } from '../paths.js';
+import { basename, isHidden, parentPath, pathSegments, SEPARATOR } from '../paths.js';
 import { parse, serialize } from './pipeline.js';
-import { foldName } from './slug.js';
+import { extensionAt, foldName } from './slug.js';
 
 /**
  * A file beside a note, and the markdown that points at it (#187). An image is
@@ -16,25 +16,22 @@ import { foldName } from './slug.js';
  * The most one attachment may hold: 25 MiB. Far under what any provider takes
  * in one request (docs/ARCHITECTURE.md §4), and what a phone on a poor signal
  * can still send and fetch inside the deadline a request is given for its size.
+ *
+ * "25 MB" to the person told it, and of the two things a device means by that
+ * (Windows counts in 1024s, macOS and iOS in 1000s) the larger, so that no file
+ * a device calls 25 MB or less is refused.
  */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export type AttachmentKind = 'image' | 'file';
 
+/** The extension with its dot, as written, or empty (`extensionAt`). */
+const extensionPart = (name: string): string => name.slice(extensionAt(name));
+
 /**
- * A file's extension, folded, without its dot: `Photo.PNG` is `png`. Up to
- * sixteen characters with no dot or space, as `conflictNameKeepingExtension`
- * reads one, so the two never disagree about where a name's extension starts.
- * Empty where there is none, a hidden file's leading dot included.
+ * A file's extension, folded, without its dot: `Photo.PNG` is `png`. Empty
+ * where there is none, a hidden file's leading dot included.
  */
-const EXTENSION = /\.([^.\s]{1,16})$/u;
-
-/** The extension with its dot, as written, or empty. */
-const extensionPart = (name: string): string => {
-	const match = EXTENSION.exec(name);
-	return match === null || match.index === 0 ? '' : match[0];
-};
-
 export const extensionOf = (name: string): string => foldName(extensionPart(name).slice(1));
 
 const NOTE = NOTE_EXTENSION.slice(1);
@@ -55,7 +52,20 @@ export type HrefKind = 'relative' | 'https' | 'data' | 'other';
 
 const SCHEME = /^([a-z][a-z0-9+.-]*):/i;
 
-export const classifyHref = (href: string): HrefKind => {
+/**
+ * A destination as a browser's URL parser reads it: C0 controls and spaces
+ * off both ends, and every tab and newline gone from inside it
+ * (https://url.spec.whatwg.org/#concept-basic-url-parser). Read as written,
+ * `\tjavascript:…` and `java\tscript:…` would be `relative`, and a browser
+ * given either would run it; so every question here is asked of what a
+ * browser would see.
+ */
+const asParsed = (href: string): string =>
+	// eslint-disable-next-line no-control-regex
+	href.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '').replace(/[\t\n\r]/g, '');
+
+export const classifyHref = (written: string): HrefKind => {
+	const href = asParsed(written);
 	const scheme = SCHEME.exec(href)?.[1]?.toLowerCase();
 	if (scheme === 'https') return 'https';
 	if (scheme === 'data') return 'data';
@@ -64,16 +74,38 @@ export const classifyHref = (href: string): HrefKind => {
 };
 
 /**
- * A link's destination as a path segment-wise: `%20` read as the space it
- * stands for. A `%` that starts no escape — `100%.pdf`, written as it is —
- * leaves the whole destination as written rather than failing it.
+ * `%20` read as the space it stands for. A `%` that starts no escape —
+ * `100%.pdf`, written as it is — leaves the text as written rather than
+ * failing it.
  */
-const decoded = (href: string): string => {
+const decoded = (text: string): string => {
 	try {
-		return decodeURIComponent(href);
+		return decodeURIComponent(text);
 	} catch {
-		return href;
+		return text;
 	}
+};
+
+/**
+ * The names a relative destination's segments stand for, each decoded on its
+ * own once the destination is split, so that an escaped separator cannot make
+ * one segment two: `x.md%2F` is not a link to the note `x.md`. `undefined`
+ * where the destination is not relative, or a segment decodes to what no
+ * file's name holds — a separator, a backslash (one, to some tools), or a
+ * control character.
+ */
+const relativeNames = (href: string): readonly string[] | undefined => {
+	const target = asParsed(href);
+	if (classifyHref(target) !== 'relative') return undefined;
+	const names = target.split(SEPARATOR).map(decoded);
+	// eslint-disable-next-line no-control-regex
+	return names.some((name) => /[/\\\u0000-\u001f\u007f]/.test(name)) ? undefined : names;
+};
+
+/** Whether a file by this name can be an attachment: it has an extension, and not `.md`. */
+const attachmentNamed = (name: string): boolean => {
+	const extension = extensionOf(name);
+	return extension !== '' && extension !== NOTE;
 };
 
 /**
@@ -81,11 +113,8 @@ const decoded = (href: string): string => {
  * with an extension, and that extension not `.md` — a link to another note is
  * a link, and stays one.
  */
-export const isAttachmentHref = (href: string): boolean => {
-	if (classifyHref(href) !== 'relative') return false;
-	const extension = extensionOf(decoded(href.split(SEPARATOR).at(-1) ?? ''));
-	return extension !== '' && extension !== NOTE;
-};
+export const isAttachmentHref = (href: string): boolean =>
+	attachmentNamed(relativeNames(href)?.at(-1) ?? '');
 
 /**
  * The path of the file `href` names, from the note at `notePath`, or
@@ -98,21 +127,23 @@ export const isAttachmentHref = (href: string): boolean => {
  * `etc/a.png`, a file the link never named, and the app would show it.
  */
 export const resolveRelative = (notePath: string, href: string): string | undefined => {
-	if (classifyHref(href) !== 'relative') return undefined;
-	const segments = decoded(href)
-		.split(SEPARATOR)
+	const names = relativeNames(href);
+	const last = names?.at(-1);
+	// One that ends at a folder — `a/`, `a/.`, `a/..` — names no file.
+	if (names === undefined || last === undefined || ['', '.', '..'].includes(last)) {
+		return undefined;
+	}
+	return names
 		.reduce<readonly string[] | undefined>(
-			(path, segment) => {
+			(path, name) => {
 				if (path === undefined) return undefined;
-				if (segment === '' || segment === '.') return path;
-				if (segment === '..') return path.length === 0 ? undefined : path.slice(0, -1);
-				return [...path, segment];
+				if (name === '' || name === '.') return path;
+				if (name === '..') return path.length === 0 ? undefined : path.slice(0, -1);
+				return [...path, name];
 			},
 			pathSegments(parentPath(notePath))
-		);
-	if (segments === undefined) return undefined;
-	const path = segments.join(SEPARATOR);
-	return path === ROOT ? undefined : path;
+		)
+		?.join(SEPARATOR);
 };
 
 /** Every byte of `char` as `%XX`, parentheses included, which `encodeURIComponent` leaves. */
@@ -124,12 +155,22 @@ const percentEncoded = (char: string): string =>
 
 /**
  * The destination to write for a file beside the note: its name, with only
- * what a markdown destination cannot hold as itself escaped. A name the app
- * made (`attachmentName`) has none of those characters and comes back as it
- * is, so what is in the note is the name in the folder, in any script.
+ * what a markdown destination cannot hold as itself escaped — and a colon,
+ * without which `a:b.pdf` would read as a link in a scheme called `a`. A name
+ * the app made (`attachmentName`) has none of those characters and comes back
+ * as it is, so what is in the note is the name in the folder, in any script.
  */
 export const attachmentHref = (name: string): string =>
-	name.replace(/[\s%#?<>()[\]\\]/gu, percentEncoded);
+	// eslint-disable-next-line no-control-regex
+	name.replace(/[\s\u0000-\u001f\u007f%#?<>()[\]\\:]/gu, percentEncoded);
+
+/**
+ * What no label shows: control characters, a line break among them, which in
+ * a link's text would end the paragraph the link is in; and a lone surrogate,
+ * which is no character at all, and which UTF-8 cannot hold.
+ */
+// eslint-disable-next-line no-control-regex
+const UNSHOWABLE = /[\u0000-\u001f\u007f-\u009f]|\p{Surrogate}/gu;
 
 /**
  * The words a link shows for a file: an image's name without its extension,
@@ -148,8 +189,7 @@ export const attachmentLabel = ({
 	pasted?: boolean;
 }): string => {
 	if (pasted && kind === 'image') return 'Pasted image';
-	// eslint-disable-next-line no-control-regex
-	const clean = name.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim();
+	const clean = name.replace(UNSHOWABLE, ' ').trim();
 	if (kind === 'file') return clean === '' ? 'Attachment' : clean;
 	const stem = clean.slice(0, clean.length - extensionPart(clean).length).trim();
 	return stem === '' ? 'Image' : stem;
@@ -169,6 +209,7 @@ export const attachmentMarkdown = ({
 	href: string;
 	kind: AttachmentKind;
 }): string => {
+	const words = label.replace(UNSHOWABLE, ' ');
 	const tree: Root = {
 		type: 'root',
 		children: [
@@ -176,12 +217,12 @@ export const attachmentMarkdown = ({
 				type: 'paragraph',
 				children: [
 					kind === 'image'
-						? { type: 'image', url: href, alt: label, title: null }
+						? { type: 'image', url: href, alt: words, title: null }
 						: {
 								type: 'link',
 								url: href,
 								title: null,
-								children: [{ type: 'text', value: label }],
+								children: [{ type: 'text', value: words }],
 							},
 				],
 			},
@@ -190,17 +231,76 @@ export const attachmentMarkdown = ({
 	return serialize(tree).replace(/\n+$/, '');
 };
 
-/** `<img src>` in raw HTML, however it is quoted, which a note may hold too. */
-const HTML_IMAGE = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/giu;
+/**
+ * An `<img>` tag in raw HTML, its attributes captured. Outside a quoted value
+ * a tag stops at the next `<`, which keeps a search through text full of
+ * unclosed tags linear: no attempt reads on into the next one.
+ */
+const IMG_TAG = /<img\b((?:"[^"]*"|'[^']*'|[^'"<>])*)>/giu;
+
+/**
+ * One attribute of a tag, read as a browser reads it: a value quoted either way
+ * is whole, so `alt="x src=y.png"` is an `alt` and holds no `src`.
+ */
+const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>=`]+)))?/gu;
+
+/**
+ * Raw HTML less its comments, each from `<!--` to its `-->`, or to the end
+ * where it has none. Split rather than matched: a pattern would read to the
+ * end from every unclosed `<!--`.
+ */
+const uncommented = (html: string): string => {
+	const [before = '', ...after] = html.split('<!--');
+	return (
+		before +
+		after
+			.map((piece) => {
+				const end = piece.indexOf('-->');
+				return end === -1 ? '' : piece.slice(end + '-->'.length);
+			})
+			.join('')
+	);
+};
+
+const NAMED_REFERENCES: Readonly<Record<string, string>> = {
+	amp: '&',
+	lt: '<',
+	gt: '>',
+	quot: '"',
+	apos: "'",
+};
+
+/**
+ * An attribute's value with the character references a `src` is likely to
+ * hold read as what they stand for: `&amp;`, the other four that HTML escapes,
+ * and the numeric ones. Any other is left as written.
+ */
+const unescaped = (value: string): string =>
+	value.replace(
+		/&(?:#(\d{1,7})|#x([\da-f]{1,6})|([a-z]{2,4}));/giu,
+		(whole: string, decimal?: string, hex?: string, name?: string): string => {
+			if (name !== undefined) return NAMED_REFERENCES[name.toLowerCase()] ?? whole;
+			const point = decimal === undefined ? parseInt(hex ?? '', 16) : Number(decimal);
+			const character = point > 0 && point <= 0x10ffff && (point < 0xd800 || point > 0xdfff);
+			return character ? String.fromCodePoint(point) : whole;
+		}
+	);
+
+/** What each `<img>` in raw HTML says its `src` is, trimmed as a browser trims a URL. */
+const imageSources = (html: string): readonly string[] =>
+	Array.from(uncommented(html).matchAll(IMG_TAG), ([, attributes = '']) => {
+		const src = Array.from(attributes.matchAll(ATTRIBUTE)).find(
+			([, name]) => name?.toLowerCase() === 'src'
+		);
+		return src === undefined ? '' : unescaped(src[2] ?? src[3] ?? src[4] ?? '').trim();
+	}).filter((src) => src !== '');
 
 const destinations = (node: Nodes): readonly string[] => {
 	const own = ((): readonly string[] => {
 		if (node.type === 'image' || node.type === 'link' || node.type === 'definition') {
 			return [node.url];
 		}
-		if (node.type === 'html') {
-			return Array.from(node.value.matchAll(HTML_IMAGE), (m) => m[1] ?? m[2] ?? m[3] ?? '');
-		}
+		if (node.type === 'html') return imageSources(node.value);
 		return [];
 	})();
 	const children = 'children' in node ? node.children.flatMap(destinations) : [];
@@ -212,7 +312,9 @@ const destinations = (node: Nodes): readonly string[] => {
  * folder, each once, in the order the body first names them: images, links,
  * the definitions a reference-style link uses, and `<img src>` in raw HTML.
  * Not a link to another note, nothing on the web, nothing outside the app
- * folder, and nothing hidden — the marker file is not an attachment.
+ * folder, nothing hidden — the marker file is not an attachment — and nothing
+ * in a comment. Each is judged by the name it resolves to, which is the name
+ * a provider would be asked for.
  *
  * What a note links is what it owns when it moves, and what has to go with it
  * when it leaves its source (#187). A link in a code block is text, and is not
@@ -221,8 +323,10 @@ const destinations = (node: Nodes): readonly string[] => {
 export const linkedFiles = (body: string, notePath: string): readonly string[] => [
 	...new Set(
 		destinations(parse(body))
-			.filter(isAttachmentHref)
 			.map((href) => resolveRelative(notePath, href))
-			.filter((path): path is string => path !== undefined && !isHidden(path))
+			.filter(
+				(path): path is string =>
+					path !== undefined && attachmentNamed(basename(path)) && !isHidden(path)
+			)
 	),
 ];

@@ -38,6 +38,8 @@ describe('extensionOf', () => {
 		['README', ''],
 		['minutes.2026-01-01 with the board', ''],
 		['name.waytoolongtobeanextension', ''],
+		['folder.v2/readme', ''],
+		['folder.v2\\readme', ''],
 	])('%s → %s', (name, extension) => {
 		expect(extensionOf(name)).toBe(extension);
 	});
@@ -71,7 +73,15 @@ describe('classifyHref', () => {
 		['a.pdf#page=2', 'other'],
 		['a\\b.png', 'other'],
 		['', 'other'],
-	])('%s is %s', (href, kind) => {
+		// As a browser's URL parser reads it, which drops what is around a URL
+		// and every tab and newline in it.
+		['\tjavascript:alert(1)', 'other'],
+		['java\tscript:alert(1)', 'other'],
+		['java\nscript:alert(1)', 'other'],
+		['\u0000javascript:alert(1)', 'other'],
+		[' https://example.com/a.png', 'https'],
+		[' photo.png ', 'relative'],
+	])('%j is %s', (href, kind) => {
 		expect(classifyHref(href)).toBe(kind);
 	});
 });
@@ -87,6 +97,18 @@ describe('isAttachmentHref', () => {
 		['.hidden', false],
 		['https://example.com/a.pdf', false],
 		['#a.png', false],
+		['a%20b/100%.pdf', true],
+		// Judged by the name each segment decodes to, once the destination is
+		// split: an escaped separator does not make a note or a folder a file.
+		['x.md%2F', false],
+		['X.MD%2F', false],
+		['sub/x.md%2F%2F', false],
+		['folder.v2%2F', false],
+		['a%2Fb.png', false],
+		['a%5Cb.png', false],
+		['a%00.png', false],
+		['a/', false],
+		['a/..', false],
 	])('%s → %s', (href, expected) => {
 		expect(isAttachmentHref(href)).toBe(expected);
 	});
@@ -102,6 +124,9 @@ describe('resolveRelative', () => {
 		['Work/note.md', 'a%20b.pdf', 'Work/a b.pdf'],
 		['Work/note.md', '100%.pdf', 'Work/100%.pdf'],
 		['Work/note.md', 'a//b.png', 'Work/a/b.png'],
+		['Work/note.md', 'a%20b/100%.pdf', 'Work/a b/100%.pdf'],
+		// An escaped `..` is a `..`, as it is to a browser.
+		['Work/note.md', '%2e%2e/a.png', 'a.png'],
 	])('%s + %s → %s', (note, href, path) => {
 		expect(resolveRelative(note, href)).toBe(path);
 	});
@@ -116,6 +141,16 @@ describe('resolveRelative', () => {
 		['note.md', 'https://example.com/a.png'],
 		['note.md', '/a.png'],
 		['note.md', 'a\\b.png'],
+		// Escaped, the same climbs, and what no file's name holds.
+		['Work/note.md', '%2e%2e/%2e%2e/%2e%2e/etc/a.png'],
+		['Work/note.md', '..%2F..%2F..%2Fa.png'],
+		['Work/note.md', 'a%5C..%5C..%5Cb.png'],
+		['Work/note.md', 'a%2Fb.png'],
+		['Work/note.md', 'a%00.png'],
+		// A folder, not a file.
+		['Work/note.md', 'a/'],
+		['Work/note.md', 'a/..'],
+		['Work/note.md', 'x.md%2F'],
 	])('%s + %s → nothing', (note, href) => {
 		expect(resolveRelative(note, href)).toBeUndefined();
 	});
@@ -159,6 +194,27 @@ describe('attachmentName', () => {
 		expect(attachmentName({ name: '.env', hash: HASH, type: 'text/plain' })).toBe(
 			'env-3f9a1c2b.txt'
 		);
+	});
+
+	it('keeps the name of a pasted file that is not a picture', () => {
+		expect(attachmentName({ name: 'Q3 report.pdf', hash: HASH, pasted: true })).toBe(
+			'q3-report-3f9a1c2b.pdf'
+		);
+		expect(attachmentName({ name: 'image.JPEG', hash: HASH, pasted: true })).toBe(
+			'pasted-image-3f9a1c2b.jpeg'
+		);
+	});
+
+	it.each([
+		[{ hash: 'ABC/../x' }],
+		[{ hash: '3f9a1c2' }],
+		[{ hash: HASH, hashLength: 7 }],
+		[{ hash: HASH, hashLength: 17 }],
+		[{ hash: HASH, hashLength: 64 }],
+		[{ hash: HASH, hashLength: 8.5 }],
+		[{ hash: '3f9a1c2b', hashLength: 16 }],
+	])('refuses a hash that is not 8 to 16 hex: %o', (input) => {
+		expect(() => attachmentName({ name: 'a.png', ...input })).toThrow(RangeError);
 	});
 
 	it('uses a longer hash when asked to', () => {
@@ -217,6 +273,15 @@ describe('attachmentHref', () => {
 		expect(resolveRelative('Work/note.md', href)).toBe(`Work/${name}`);
 		expect(isAttachmentHref(href)).toBe(true);
 	});
+
+	it.each(['a:b.pdf', 'c:report.pdf', 'https:x.png'])(
+		'keeps %j a file beside the note, not a link somewhere else',
+		(name) => {
+			const href = attachmentHref(name);
+			expect(classifyHref(href)).toBe('relative');
+			expect(resolveRelative('Work/note.md', href)).toBe(`Work/${name}`);
+		}
+	);
 });
 
 describe('attachmentLabel', () => {
@@ -228,6 +293,7 @@ describe('attachmentLabel', () => {
 		[{ name: 'Q3 report.pdf', kind: 'file' as const }, 'Q3 report.pdf'],
 		[{ name: 'a\u0000b.pdf', kind: 'file' as const }, 'a b.pdf'],
 		[{ name: '  ', kind: 'file' as const }, 'Attachment'],
+		[{ name: 'a\ud800b.pdf', kind: 'file' as const }, 'a b.pdf'],
 	])('%o → %s', (input, label) => {
 		expect(attachmentLabel(input)).toBe(label);
 	});
@@ -263,6 +329,14 @@ describe('attachmentMarkdown', () => {
 		expect(link.type).toBe('link');
 		expect(link.url).toBe(href);
 		expect(link.children).toEqual([expect.objectContaining({ type: 'text', value: label })]);
+	});
+
+	it('keeps a label with a line break in it to one link', () => {
+		for (const kind of ['image', 'file'] as const) {
+			const markdown = attachmentMarkdown({ label: 'a\n\nb\u0000c', href: 'a.png', kind });
+			expect(parse(markdown).children).toHaveLength(1);
+			expect(only(markdown).type).toBe(kind === 'image' ? 'image' : 'link');
+		}
 	});
 });
 
@@ -316,6 +390,42 @@ describe('linkedFiles', () => {
 			'Trips/a b.pdf',
 			'Trips/diagram-0c0c0c0c.svg',
 		]);
+	});
+
+	it('reads raw <img> as a browser does', () => {
+		const body = [
+			'<img alt="x src=evil.png" src="real.png">',
+			'<img alt="a -> b" src="gt.png">',
+			'<img src=" spaced.png ">',
+			'<IMG SRC=upper.png>',
+			'<img src="a&amp;b.png"> <img src="&#99;&#x64;.png">',
+			'<img alt="no source">',
+			'<!-- <img src="commented.png"> -->',
+			'<!-- unclosed <img src="after.png">',
+		].join('\n');
+
+		expect(linkedFiles(body, 'note.md')).toEqual([
+			'real.png',
+			'gt.png',
+			'spaced.png',
+			'upper.png',
+			'a&b.png',
+			'cd.png',
+		]);
+	});
+
+	it('reads raw HTML in time that grows with it, not with its square', () => {
+		// Unclosed tags, each of which a pattern that read on to the next `>`
+		// would read to the end from.
+		const body = `<div>\n${'<img a '.repeat(100_000)}`;
+		const started = performance.now();
+		expect(linkedFiles(body, 'note.md')).toEqual([]);
+		expect(performance.now() - started).toBeLessThan(1_000);
+	});
+
+	it('leaves out a link to a note or a folder written with an escaped separator', () => {
+		const body = '[x](x.md%2F) [y](folder.v2%2F) ![z](a%5C..%5C..%5Cb.png) ![n](a%00.png)';
+		expect(linkedFiles(body, 'Work/note.md')).toEqual([]);
 	});
 
 	it('reads a destination written in angle brackets or with escapes as the same file', () => {
