@@ -79,28 +79,20 @@ describe('picking files', () => {
 		expect(await asked).toEqual([]);
 	});
 
-	it('gives up on a pick whose picker never said it closed, at the next', async () => {
+	// Chrome queues a picker asked for while another is open: pressed twice,
+	// the first picker's choice is still the user's.
+	it('keeps each pick its own, one asked for while another is open included', async () => {
 		const first = pickFiles();
 		const second = pickFiles();
+		const [one, two] = pickers();
+		if (one === undefined || two === undefined) throw new Error('two pickers expected');
 
-		expect(await first).toEqual([]);
-		expect(pickers()).toHaveLength(1);
-		const files = [fileNamed('a.pdf')];
-		choose(picker(), files);
-		expect(await second).toEqual(files);
-	});
-
-	it('takes nothing from a pick already answered when the next begins', async () => {
-		const first = pickFiles();
 		const chosen = [fileNamed('a.pdf')];
-		choose(picker(), chosen);
-
-		const second = pickFiles();
-
+		choose(one, chosen);
 		expect(await first).toEqual(chosen);
-		expect(pickers()).toHaveLength(1);
-		picker().dispatchEvent(new Event('cancel'));
+		two.dispatchEvent(new Event('cancel'));
 		expect(await second).toEqual([]);
+		expect(pickers()).toEqual([]);
 	});
 
 	it('puts its input in the document it is given', () => {

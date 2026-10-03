@@ -8,21 +8,19 @@
  * chosen, or none when the picker is closed without a choice.
  *
  * The input is in the page while the picker is open, which is what Safari asks
- * of an input it is to open, and gone once it answers. A browser that does not
- * say when its picker was closed without a choice (`cancel`) leaves the input
- * there: the next pick takes the one before it away, so there is never more
- * than one.
+ * of an input it is to open, and gone once it answers. Each pick is its own:
+ * Chrome queues a picker asked for while another is open, so a paperclip
+ * pressed twice is two pickers, one after the other, and the first one's
+ * choice is still the user's. A browser that does not say when its picker was
+ * closed without a choice (`cancel`, which every current browser does) leaves
+ * its input in the page, hidden, until the page is left.
  */
-
-/** How to give up on the pick before, where its picker never said it closed. */
-const waiting: { current?: () => void } = {};
 
 export const pickFiles = ({
 	accept,
 	within = document,
 }: { accept?: string; within?: Document } = {}): Promise<File[]> =>
 	new Promise((resolve) => {
-		waiting.current?.();
 		const input = within.createElement('input');
 		input.setAttribute('type', 'file');
 		input.setAttribute('multiple', '');
@@ -32,9 +30,6 @@ export const pickFiles = ({
 		const answer = (files: File[]): void => {
 			input.remove();
 			resolve(files);
-		};
-		waiting.current = () => {
-			answer([]);
 		};
 		input.addEventListener('change', () => {
 			answer(Array.from(input.files ?? []));

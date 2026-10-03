@@ -7,12 +7,12 @@ import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import type { Added, AttachmentHost } from './attachHost.js';
 
 /**
- * Files pasted or dropped into raw mode (#187): added beside the note as in
+ * Files pasted, dropped or picked into raw mode (#187): added beside the note as in
  * rich mode, and put in as the markdown that links them, as the user's own
  * edit. A paste takes the selection at once, as in rich mode. Raw mode shows
  * text, so a file on its way shows nothing; where it is going is kept through
  * whatever is typed meanwhile — what is typed there goes before it, as it would
- * before rich mode's placeholder — and every file of one paste or drop goes in
+ * before rich mode's placeholder — and every file of one paste, drop or pick goes in
  * there together once they have all been added, an undo step of its own.
  *
  * A drop of nothing but notes is left to CodeMirror, which puts a dropped
@@ -31,7 +31,7 @@ const USER_EVENTS: Readonly<Record<How, string>> = {
 const track = StateEffect.define<Readonly<{ id: symbol; at: number }>>();
 const untrack = StateEffect.define<symbol>();
 
-/** Where each paste or drop on its way is going, through every change meanwhile. */
+/** Where each paste, drop or pick on its way is going, through every change meanwhile. */
 const spots = StateField.define<ReadonlyMap<symbol, number>>({
 	create: () => new Map(),
 	update: (value, tr) => {

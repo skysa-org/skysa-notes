@@ -20,7 +20,7 @@ import { iconElement } from './icons.js';
 import { pickFiles } from './pickFiles.js';
 
 /**
- * Files pasted or dropped into the rich editor (#187): each added beside the
+ * Files pasted, dropped or picked into the rich editor (#187): each added beside the
  * note through the host, then put in the note — a picture as a picture, any
  * other file as its chip — as the user's own edit, where it was put.
  *
@@ -217,8 +217,8 @@ export const attachChosen = (
 /**
  * Ask the user for files, and put them in the note (`attachChosen`): the
  * toolbar's paperclip and the slash menu's Image and File. `accept` is what
- * the picker offers — `image/*` brings up the camera and the photo library on
- * a phone.
+ * the picker offers — `image/*` asks for pictures alone, which a phone
+ * answers from its photos.
  */
 export const attachPicked =
 	(accept?: string) =>

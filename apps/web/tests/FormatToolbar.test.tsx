@@ -1,9 +1,9 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readFormat } from '../src/editor/format.js';
 import { FormatToolbar } from '../src/editor/FormatToolbar.js';
@@ -87,6 +87,7 @@ const selecting = (word: string) => (ctx: Ctx) => {
 
 afterEach(async () => {
 	cleanup();
+	vi.restoreAllMocks();
 	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
 	document.body.replaceChildren();
 });
@@ -165,8 +166,12 @@ describe('FormatToolbar', () => {
 		await harness('plain\n');
 		const attach = screen.getByRole('button', { name: 'Attach files' });
 		expect(attach.querySelector('svg')).not.toBeNull();
+		const click = vi.spyOn(HTMLInputElement.prototype, 'click');
 
-		await userEvent.click(attach);
+		fireEvent.mouseDown(attach);
+
+		// In the press itself, nothing awaited: a browser opens a picker only then.
+		expect(click).toHaveBeenCalledOnce();
 
 		const picker = document.querySelector<HTMLInputElement>('input[type="file"]');
 		expect(picker?.multiple).toBe(true);

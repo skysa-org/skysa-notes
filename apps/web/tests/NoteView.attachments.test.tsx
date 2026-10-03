@@ -134,4 +134,41 @@ describe('attaching files from the palette', () => {
 
 		expect(await screen.findByRole('link', { name: 'Q3.pdf, PDF' })).toBeDefined();
 	});
+
+	// The raw editor is rebuilt for the next note, and offers itself to that
+	// note's host, not the last one's.
+	it('puts what is picked in the note opened since, beside it, in raw mode', async () => {
+		await setDefaultEditorMode(db, 'raw');
+		const first = await createNote(db, { title: 'Day', body: 'Before.\n' });
+		const second = await createNote(db, {
+			title: 'Work',
+			body: 'After.\n',
+			folderPath: 'work',
+		});
+		const onProblem = vi.fn();
+		const { rerender } = render(
+			<CommandsProvider>
+				<Harness id={first.id} onProblem={onProblem} />
+			</CommandsProvider>
+		);
+		await screen.findByDisplayValue('Day');
+		rerender(
+			<CommandsProvider>
+				<Harness id={second.id} onProblem={onProblem} />
+			</CommandsProvider>
+		);
+		await screen.findByDisplayValue('Work');
+
+		await attach([pdf()]);
+
+		await waitFor(() => {
+			expect(document.querySelector('.cm-content')?.textContent).toMatch(
+				/\[Q3\.pdf\]\(q3-[0-9a-f]{8}\.pdf\)After\./
+			);
+		});
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual([
+			expect.stringMatching(/^work\/q3-[0-9a-f]{8}\.pdf$/),
+		]);
+		expect(onProblem).not.toHaveBeenCalled();
+	});
 });

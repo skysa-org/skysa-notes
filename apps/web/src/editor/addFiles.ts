@@ -42,7 +42,7 @@ export const filesToAttach = (data: Carried | null, how: 'paste' | 'drop'): File
 const MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
 
 /**
- * What to tell the user about files a paste or a drop put in an editor that
+ * What to tell the user about files a paste, drop or pick put in an editor that
  * closed before they could go in, by their names: the note was left, or the
  * other editor chosen. Each is beside the note or never got there; either way,
  * adding it again puts it in — the same bytes are the same file, so no second

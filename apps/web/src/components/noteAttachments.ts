@@ -117,7 +117,13 @@ export const createNoteAttachments = ({
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
 	const listeners = new Set<() => void>();
-	const receivers: { current?: FileReceiver } = {};
+	// Every editor that has offered itself and not gone, in the order they
+	// offered. The last is the one open now. More than one only while one
+	// editor is giving way to another, and that can go either way round: the
+	// new one can be built before the old one has gone, and a rich editor
+	// still being built when it is let go of is built — and offers itself —
+	// before it goes.
+	const receivers = new Set<FileReceiver>();
 
 	/**
 	 * The bytes of a file, from the device where they are, and otherwise as
@@ -215,11 +221,9 @@ export const createNoteAttachments = ({
 		add: (file, { pasted }) => add(file, pasted),
 
 		receive: (receiver) => {
-			receivers.current = receiver;
+			receivers.add(receiver);
 			return () => {
-				// Only if it is still this one: the next editor offers itself
-				// before the last has gone, on a switch between them.
-				if (receivers.current === receiver) receivers.current = undefined;
+				receivers.delete(receiver);
 			};
 		},
 
@@ -228,7 +232,7 @@ export const createNoteAttachments = ({
 				if (files.length === 0) return;
 				// The editor open when they were chosen, which is the one the
 				// user is looking at; none, where the note has gone meanwhile.
-				const into = receivers.current;
+				const into = [...receivers].at(-1);
 				if (into === undefined) report(closedProblem(files.map((file) => file.name)));
 				else into(files);
 			});

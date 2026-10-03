@@ -534,6 +534,40 @@ describe('files picked for the open note', () => {
 		});
 	});
 
+	it('go into the editor offered last, while the one before has yet to go', async () => {
+		const { host } = picking();
+		const before = vi.fn();
+		const after = vi.fn();
+		host.receive(before);
+		host.receive(after);
+
+		host.pick();
+		choose([new File(['a'], 'a.pdf')]);
+		await settled();
+
+		expect(after).toHaveBeenCalledOnce();
+		expect(before).not.toHaveBeenCalled();
+	});
+
+	// A rich editor let go of while it is still being built is built, and
+	// offers itself, before it goes: after the raw editor that replaced it.
+	it('go into the editor still open, though one that has gone offered itself after it', async () => {
+		const { host, report } = picking();
+		const open = vi.fn();
+		const gone = vi.fn();
+		host.receive(open);
+		const withdrawGone = host.receive(gone);
+
+		withdrawGone();
+		host.pick();
+		choose([new File(['a'], 'a.pdf')]);
+		await settled();
+
+		expect(open).toHaveBeenCalledOnce();
+		expect(gone).not.toHaveBeenCalled();
+		expect(report).not.toHaveBeenCalled();
+	});
+
 	it('go into the editor that offered itself last, though the one before goes after it', async () => {
 		const { host } = picking();
 		const before = vi.fn();
