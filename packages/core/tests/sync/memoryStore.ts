@@ -692,7 +692,85 @@ export const createMemoryStore = (): MemoryStore => {
 		}
 	};
 
-	const settle = (outcome: OpOutcome): void => {
+	const settleUpload = (outcome: Extract<OpOutcome, { kind: 'uploaded' }>): void => {
+		const file = files.get(outcome.fileId);
+		// Deleted while its bytes were on the way: what they made goes too.
+		if (file === undefined) {
+			queue({
+				op: 'delete-file',
+				path: outcome.remote.path,
+				remoteId: outcome.remote.remoteId,
+			});
+			return;
+		}
+		refuseTwin(file.id, outcome.remote.remoteId);
+		const moved = file.path !== outcome.sentAs;
+		files.set(file.id, {
+			...file,
+			path: moved ? file.path : outcome.remote.path,
+			remoteId: outcome.remote.remoteId,
+			remoteVersion: outcome.remote.version,
+			size: outcome.remote.size ?? file.size,
+		});
+		releaseBytes(file.id, outcome.remote.version);
+		if (moved) {
+			queue({
+				op: 'move-file',
+				fileId: file.id,
+				path: outcome.remote.path,
+				targetPath: file.path,
+			});
+		}
+	};
+
+	const settleFileMove = (
+		outcome: Extract<OpOutcome, { kind: 'moved-file' }>,
+		withdrawn: boolean
+	): void => {
+		const file = files.get(outcome.fileId);
+		if (file === undefined) return;
+		refuseTwin(file.id, outcome.remote.remoteId);
+		// A move leaves the bytes as they were, whatever the version says —
+		// unless it landed on another file and took that one for its own,
+		// whose bytes nobody here has read, and whose version can be the
+		// same string as the one these were cached under.
+		const same = outcome.remote.remoteId === file.remoteId;
+		const kept = validBytes(file);
+		files.set(file.id, {
+			...file,
+			path: withdrawn ? file.path : outcome.remote.path,
+			remoteId: outcome.remote.remoteId,
+			remoteVersion: outcome.remote.version,
+		});
+		const cached = held.get(file.id)?.pinned !== true;
+		if (cached && !same) held.delete(file.id);
+		if (cached && same && kept !== undefined) {
+			held.set(file.id, { bytes: kept, version: outcome.remote.version });
+		}
+		fileOriginIsNow(file.id, outcome.remote.path);
+		// Moved again while this one was on its way: the row stays where
+		// the user put it, and the file is owed a move there from where it
+		// landed — by the move that replaced this one, or by a new one.
+		const queued = [...ops.values()].some(
+			(op) => op.op === 'move-file' && op.fileId === file.id
+		);
+		if (withdrawn && !queued && file.path !== outcome.remote.path) {
+			queue({
+				op: 'move-file',
+				fileId: file.id,
+				path: outcome.remote.path,
+				targetPath: file.path,
+			});
+		}
+	};
+
+	/**
+	 * `withdrawn`: the op is gone from the queue, which only a later change of
+	 * the user's does — a second move replaces a queued one, a delete withdraws
+	 * an upload. What it did on the remote is recorded either way, as the app's
+	 * store records it.
+	 */
+	const settle = (outcome: OpOutcome, withdrawn: boolean): void => {
 		if (outcome.kind === 'done') return;
 		// Only if the row is still at that path: the notebook may have been
 		// renamed or deleted here while the `mkdir` was at the network, and
@@ -709,52 +787,11 @@ export const createMemoryStore = (): MemoryStore => {
 			return;
 		}
 		if (outcome.kind === 'uploaded') {
-			const file = files.get(outcome.fileId);
-			// Deleted while its bytes were on the way: what they made goes too.
-			if (file === undefined) {
-				queue({
-					op: 'delete-file',
-					path: outcome.remote.path,
-					remoteId: outcome.remote.remoteId,
-				});
-				return;
-			}
-			refuseTwin(file.id, outcome.remote.remoteId);
-			const moved = file.path !== outcome.sentAs;
-			files.set(file.id, {
-				...file,
-				path: moved ? file.path : outcome.remote.path,
-				remoteId: outcome.remote.remoteId,
-				remoteVersion: outcome.remote.version,
-				size: outcome.remote.size ?? file.size,
-			});
-			releaseBytes(file.id, outcome.remote.version);
-			if (moved) {
-				queue({
-					op: 'move-file',
-					fileId: file.id,
-					path: outcome.remote.path,
-					targetPath: file.path,
-				});
-			}
+			settleUpload(outcome);
 			return;
 		}
 		if (outcome.kind === 'moved-file') {
-			const file = files.get(outcome.fileId);
-			if (file === undefined) return;
-			refuseTwin(file.id, outcome.remote.remoteId);
-			// A move leaves the bytes as they were, whatever the version says.
-			const kept = validBytes(file);
-			files.set(file.id, {
-				...file,
-				path: outcome.remote.path,
-				remoteId: outcome.remote.remoteId,
-				remoteVersion: outcome.remote.version,
-			});
-			if (kept !== undefined && held.get(file.id)?.pinned !== true) {
-				held.set(file.id, { bytes: kept, version: outcome.remote.version });
-			}
-			fileOriginIsNow(file.id, outcome.remote.path);
+			settleFileMove(outcome, withdrawn);
 			return;
 		}
 		if (outcome.kind === 'lost-file') {
@@ -765,10 +802,20 @@ export const createMemoryStore = (): MemoryStore => {
 		if (outcome.kind === 'moved') {
 			notes.set(note.id, {
 				...note,
-				path: outcome.remote.path,
+				path: withdrawn ? note.path : outcome.remote.path,
 				remoteId: outcome.remote.remoteId,
 				remoteVersion: outcome.remote.version,
 			});
+			// Renamed again while this move was on its way: the file is at the
+			// name before, and the note moves there from it.
+			if (withdrawn && note.path !== outcome.remote.path) {
+				queue({
+					op: 'move',
+					noteId: note.id,
+					path: outcome.remote.path,
+					targetPath: note.path,
+				});
+			}
 			return;
 		}
 		notes.set(note.id, {
@@ -873,10 +920,12 @@ export const createMemoryStore = (): MemoryStore => {
 		pendingOps: () => Promise.resolve([...ops.values()].sort((a, b) => a.seq - b.seq)),
 		opBySeq: (seq) => Promise.resolve(ops.get(seq)),
 		completeOp: (seq, outcome) => {
-			if (!ops.has(seq)) return Promise.reject(new Error(`no op ${String(seq)}`));
+			// Gone is not an error: a change the user made while the op was in
+			// flight withdrew it (`settle`).
+			const withdrawn = !ops.has(seq);
 			const before = snapshot();
 			try {
-				settle(outcome);
+				settle(outcome, withdrawn);
 			} catch (error) {
 				restore(before);
 				return Promise.reject(error instanceof Error ? error : new Error(String(error)));
