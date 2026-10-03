@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDatabase, type FileRecord, type NotesDatabase } from '../src/store/db.js';
 import { cacheBytes, evictCache, heldFile, TOUCH_AFTER_MS } from '../src/store/fileCache.js';
@@ -91,6 +91,45 @@ describe('a file as this device holds it', () => {
 		// The bytes come back unharmed by the write.
 		expect(text((await db.fileBytes.get(['c1', 'a']))?.bytes)).toBe('a');
 	});
+
+	it('writes a use back once for two reads at once, reading it again inside the write', async () => {
+		const db = freshDatabase();
+		await db.files.put(boundRow('a'));
+		await cached(db, 'a');
+		const put = vi.spyOn(db.fileBytes, 'put');
+
+		await Promise.all([
+			heldFile(db, 'c1', 'a', TOUCH_AFTER_MS),
+			heldFile(db, 'c1', 'a', TOUCH_AFTER_MS),
+		]);
+
+		expect(put).toHaveBeenCalledTimes(1);
+	});
+
+	it('hands the bytes over even where the use cannot be written back', async () => {
+		const db = freshDatabase();
+		await db.files.put(boundRow('a'));
+		await cached(db, 'a');
+		vi.spyOn(db.fileBytes, 'put').mockRejectedValue(new Error('QuotaExceededError'));
+
+		expect(text((await heldFile(db, 'c1', 'a', TOUCH_AFTER_MS))?.bytes)).toBe('a');
+	});
+
+	it('never writes a use back for pinned bytes, which the cache has no order to keep for', async () => {
+		const db = freshDatabase();
+		await db.files.put({ ...SCOPE, id: 'p', path: 'p.png', size: 1 });
+		await db.fileBytes.put({
+			...SCOPE,
+			id: 'p',
+			bytes: bufferOf('p'),
+			pinned: 1,
+			lastUsedAt: 0,
+		});
+		const put = vi.spyOn(db.fileBytes, 'put');
+
+		expect(text((await heldFile(db, 'c1', 'p', TOUCH_AFTER_MS * 5))?.bytes)).toBe('p');
+		expect(put).not.toHaveBeenCalled();
+	});
 });
 
 describe('keeping bytes read from the remote', () => {
@@ -118,6 +157,20 @@ describe('keeping bytes read from the remote', () => {
 		expect(await cacheBytes(db, boundRow('a'), read, 0)).toBe(false);
 		await db.files.put({ ...boundRow('a'), remoteId: 'r-other' });
 		expect(await cacheBytes(db, boundRow('a'), read, 0)).toBe(false);
+		expect(await db.fileBytes.count()).toBe(0);
+	});
+
+	it('keeps nothing for a source detached or not yet checked, where held bytes count as unsent', async () => {
+		const db = freshDatabase();
+		await db.files.bulkPut([boundRow('a', 1, 'gone'), boundRow('a', 1, 'unsure')]);
+		await db.syncState.bulkPut([
+			{ connectionId: 'gone', clientId: 'x', detached: { at: 0, reason: 'disconnected' } },
+			{ connectionId: 'unsure', clientId: 'x', resumeUnverified: true },
+		]);
+		const read = { bytes: bufferOf('x'), version: 'v2' };
+
+		expect(await cacheBytes(db, boundRow('a', 1, 'gone'), read, 0)).toBe(false);
+		expect(await cacheBytes(db, boundRow('a', 1, 'unsure'), read, 0)).toBe(false);
 		expect(await db.fileBytes.count()).toBe(0);
 	});
 
@@ -196,11 +249,17 @@ describe('the cache budget', () => {
 		expect(await heldIds(db)).toEqual(['d', 'u']);
 	});
 
-	it('lets go of bytes no row is left for, whatever the budget', async () => {
+	it('lets go of bytes no row is left for, whatever the budget and whichever the source', async () => {
 		const db = freshDatabase();
+		await db.syncState.put({
+			connectionId: 'gone',
+			clientId: 'x',
+			detached: { at: 0, reason: 'disconnected' },
+		});
 		await cached(db, 'orphan', { lastUsedAt: 99 });
+		await cached(db, 'spared-orphan', { connectionId: 'gone' });
 
-		expect(await evictCache(db, 1_000_000)).toBe(1);
+		expect(await evictCache(db, 1_000_000)).toBe(2);
 		expect(await db.fileBytes.count()).toBe(0);
 	});
 });

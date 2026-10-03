@@ -38,6 +38,12 @@ export interface ObjectUrlCache {
 	 * called then, so a caller can hand over bytes it has not wrapped yet.
 	 */
 	readonly acquire: (key: string, blob: () => Blob) => HeldUrl;
+	/**
+	 * The URL for `key` if there is one, held as `acquire` holds it, and
+	 * `undefined` if not: for a view rebuilt inside the grace, which then
+	 * need not read the bytes again only to find a URL already made of them.
+	 */
+	readonly reuse: (key: string) => HeldUrl | undefined;
 	/** Revoke every URL now, held or not. For a whole editor going away. */
 	readonly clear: () => void;
 }
@@ -77,26 +83,32 @@ export const createObjectUrlCache = (
 		return made;
 	};
 
+	/** One more hold on `entry`, and the revoke it was waiting on called off. */
+	const hold = (key: string, entry: Entry): HeldUrl => {
+		clearTimeout(entry.pending.current);
+		entry.pending.current = undefined;
+		entry.holds.current += 1;
+		const released = new Set<'once'>();
+		return {
+			url: entry.url,
+			release: () => {
+				if (released.has('once')) return;
+				released.add('once');
+				entry.holds.current -= 1;
+				// Cleared meanwhile, or held again by someone else.
+				if (entries.get(key) !== entry || entry.holds.current > 0) return;
+				entry.pending.current = setTimeout(() => {
+					forget(key, entry);
+				}, graceMs);
+			},
+		};
+	};
+
 	return {
-		acquire: (key, blob) => {
-			const entry = entryFor(key, blob);
-			clearTimeout(entry.pending.current);
-			entry.pending.current = undefined;
-			entry.holds.current += 1;
-			const released = new Set<'once'>();
-			return {
-				url: entry.url,
-				release: () => {
-					if (released.has('once')) return;
-					released.add('once');
-					entry.holds.current -= 1;
-					// Cleared meanwhile, or held again by someone else.
-					if (entries.get(key) !== entry || entry.holds.current > 0) return;
-					entry.pending.current = setTimeout(() => {
-						forget(key, entry);
-					}, graceMs);
-				},
-			};
+		acquire: (key, blob) => hold(key, entryFor(key, blob)),
+		reuse: (key) => {
+			const entry = entries.get(key);
+			return entry === undefined ? undefined : hold(key, entry);
 		},
 		clear: () => {
 			entries.forEach((entry, key) => {

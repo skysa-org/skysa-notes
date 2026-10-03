@@ -75,6 +75,26 @@ describe('object URLs for the files beside a note', () => {
 		expect(revoked).toEqual([]);
 	});
 
+	it('hands back a URL already made without a blob, holding it, and nothing for one not made', () => {
+		const { urls, made, revoked } = factory();
+		const cache = createObjectUrlCache(urls, GRACE);
+
+		expect(cache.reuse('c1/a')).toBeUndefined();
+		const old = cache.acquire('c1/a', () => new Blob(['a']));
+		old.release();
+		vi.advanceTimersByTime(GRACE - 1);
+		const rebuilt = cache.reuse('c1/a');
+		vi.advanceTimersByTime(GRACE * 10);
+
+		expect(rebuilt?.url).toBe(old.url);
+		expect(made).toHaveLength(1);
+		expect(revoked).toEqual([]);
+		rebuilt?.release();
+		vi.advanceTimersByTime(GRACE);
+		expect(revoked).toEqual([old.url]);
+		expect(cache.reuse('c1/a')).toBeUndefined();
+	});
+
 	it('counts a release once, however often it is called', () => {
 		const { urls, revoked } = factory();
 		const cache = createObjectUrlCache(urls, GRACE);

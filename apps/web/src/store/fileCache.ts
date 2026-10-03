@@ -38,31 +38,63 @@ export interface HeldFile {
 }
 
 /**
+ * Write a use back, read again inside its own transaction so nothing written
+ * since is put back over. Not for pinned bytes, which the cache never lets go
+ * of and so has no order to keep for.
+ */
+const touch = (db: NotesDatabase, key: [string, string], now: number): Promise<void> =>
+	db.transaction('rw', db.fileBytes, async () => {
+		const held = await db.fileBytes.get(key);
+		if (held === undefined || held.pinned === 1 || now - held.lastUsedAt < TOUCH_AFTER_MS)
+			return;
+		await db.fileBytes.put({ ...held, lastUsedAt: now });
+	});
+
+/**
  * The row and its current bytes, if any, with the use written back once it is
  * `TOUCH_AFTER_MS` stale. `undefined` where the source has no such file.
+ *
+ * A read, in a read transaction: forty pictures shown at once are forty reads
+ * that need not wait for each other. The write, when one is due, is a
+ * transaction of its own, and a failed one costs only the order of the cache.
  */
-export const heldFile = (
+export const heldFile = async (
 	db: NotesDatabase,
 	connectionId: string,
 	fileId: string,
 	now: number
-): Promise<HeldFile | undefined> =>
-	db.transaction('rw', db.files, db.fileBytes, async () => {
+): Promise<HeldFile | undefined> => {
+	const found = await db.transaction('r', db.files, db.fileBytes, async () => {
 		const file = await db.files.get([connectionId, fileId]);
 		if (file === undefined) return undefined;
 		const held = await db.fileBytes.get(fileKey(file));
-		if (held === undefined || !heldBytesAreCurrent(file, held)) return { file };
-		if (now - held.lastUsedAt >= TOUCH_AFTER_MS) {
-			await db.fileBytes.put({ ...held, lastUsedAt: now });
-		}
-		return { file, bytes: held.bytes };
+		return {
+			file,
+			held: held !== undefined && heldBytesAreCurrent(file, held) ? held : undefined,
+		};
 	});
+	if (found === undefined) return undefined;
+	const { file, held } = found;
+	if (held === undefined) return { file };
+	if (held.pinned === 0 && now - held.lastUsedAt >= TOUCH_AFTER_MS) {
+		await touch(db, fileKey(file), now).catch(() => undefined);
+	}
+	return { file, bytes: held.bytes };
+};
 
 /**
  * Keep bytes just read from the remote, under the version they are. Only for a
  * row still bound to the file they were read from: one deleted meanwhile, cut
- * loose, or bound to another file is not theirs to hold. And never over pinned
- * bytes, which are the only copy of something. Answers whether they were kept.
+ * loose, or bound to another file is not theirs to hold. Never over pinned
+ * bytes, which are the only copy of something.
+ *
+ * And not for a source detached or resumed and not yet checked. Bytes held for
+ * a bound file there count as unsent work (`Unsynced.unverified`), since they
+ * may be the only copy left; a picture merely looked at would be counted with
+ * them, and the disconnect question would say ten files were never sent that
+ * had just been read from the remote. They are shown, and not kept.
+ *
+ * Answers whether they were kept.
  */
 export const cacheBytes = (
 	db: NotesDatabase,
@@ -70,7 +102,9 @@ export const cacheBytes = (
 	read: { bytes: ArrayBuffer; version: string },
 	now: number
 ): Promise<boolean> =>
-	db.transaction('rw', db.files, db.fileBytes, async () => {
+	db.transaction('rw', db.files, db.fileBytes, db.syncState, async () => {
+		const state = await db.syncState.get(file.connectionId);
+		if (state?.detached !== undefined || state?.resumeUnverified === true) return false;
 		const row = await db.files.get(fileKey(file));
 		if (row?.remoteId === undefined || row.remoteId !== file.remoteId) return false;
 		if ((await db.fileBytes.get(fileKey(row)))?.pinned === 1) return false;
@@ -90,10 +124,11 @@ export const cacheBytes = (
  *
  * Read by keys: the `[pinned+lastUsedAt]` index gives the unpinned ones oldest
  * first, and their rows give their sizes. Bytes with no row are let go of
- * whatever the budget, since nothing can show them. Spared, and not counted,
- * are those of a source that could not read them again or may hold the only
- * copy (see above). One transaction, so a row pinned while this runs — cut
- * loose by a detach, say — is not taken for cache.
+ * whatever the budget and whichever the source: nothing can show, export or
+ * move bytes no row names. Spared, and not counted, are the rest of a source
+ * that could not read them again or may hold the only copy (see above). One
+ * transaction, so bytes pinned while this runs — by `cutLoose`, say, when a
+ * resume turns out to be another account — are not taken for cache.
  */
 export const evictCache = (
 	db: NotesDatabase,
@@ -105,23 +140,25 @@ export const evictCache = (
 				.filter((state) => state.detached !== undefined || state.resumeUnverified === true)
 				.map((state) => state.connectionId)
 		);
-		const keys = (
-			await db.fileBytes
-				.where('[pinned+lastUsedAt]')
-				.between([0, -Infinity], [0, Infinity], true, true)
-				.primaryKeys()
-		).filter(([connectionId]) => !spared.has(connectionId));
+		const keys = await db.fileBytes
+			.where('[pinned+lastUsedAt]')
+			.between([0, -Infinity], [0, Infinity], true, true)
+			.primaryKeys();
 		const rows = await db.files.bulkGet(keys);
-		const sized = keys.map((key, index) => ({ key, size: rows[index]?.size }));
-		const total = sized.reduce((sum, { size }) => sum + (size ?? 0), 0);
-		// Written to as it goes, oldest first, which is the order of the index.
-		const left = { current: total };
-		const evicted = sized.filter(({ size }) => {
-			if (size === undefined) return true;
-			if (left.current <= budget) return false;
-			left.current -= size;
-			return true;
+		const orphans = keys.filter((_, index) => rows[index] === undefined);
+		const sized = keys.flatMap((key, index) => {
+			const row = rows[index];
+			return row === undefined || spared.has(key[0]) ? [] : [{ key, size: row.size }];
 		});
-		await db.fileBytes.bulkDelete(evicted.map(({ key }) => key));
-		return evicted.length;
+		// Written to as it goes, oldest first, which is the order of the index.
+		const left = { current: sized.reduce((sum, { size }) => sum + size, 0) };
+		const evicted = sized
+			.filter(({ size }) => {
+				if (left.current <= budget) return false;
+				left.current -= size;
+				return true;
+			})
+			.map(({ key }) => key);
+		await db.fileBytes.bulkDelete([...orphans, ...evicted]);
+		return orphans.length + evicted.length;
 	});

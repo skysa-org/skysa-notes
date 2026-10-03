@@ -1,4 +1,5 @@
 import {
+	AuthError,
 	createFakeProvider,
 	type EntryRef,
 	type FakeProvider,
@@ -69,11 +70,13 @@ const setup = async (
 	};
 	const live = new Set<'on'>(['on']);
 	const network = new Set<'up'>(['up']);
-	const session: ReadingSession = { provider, withAuth: (work) => work() };
+	const sessions = new Map<'current', ReadingSession>([
+		['current', { provider, withAuth: (work) => work() }],
+	]);
 	const reader = createFileReader({
 		db,
 		sessionFor: (connectionId) =>
-			connectionId === 'c1' && live.has('on') ? session : undefined,
+			connectionId === 'c1' && live.has('on') ? sessions.get('current') : undefined,
 		isOnline: () => network.has('up'),
 		now: () => 1000,
 		...overrides,
@@ -86,7 +89,7 @@ const setup = async (
 			opened.resolve(undefined);
 		};
 	};
-	return { db, fake, rows, asked, live, network, reader, hold };
+	return { db, fake, rows, asked, live, network, reader, hold, provider, sessions };
 };
 
 describe('reading a file for showing it', () => {
@@ -282,15 +285,106 @@ describe('reading a file for showing it', () => {
 		expect(asked).toEqual([]);
 	});
 
-	it('keeps the cache within its budget after each download', async () => {
-		const { db, reader } = await setup(['aa', 'bb'], { budget: 3 });
+	it('keeps the cache within its budget after each download, the latest kept', async () => {
+		const clock = { current: 0 };
+		const { db, reader } = await setup(['aa', 'bb'], {
+			budget: 3,
+			now: () => (clock.current += 1),
+		});
 
-		await reader.read('c1', 'aa');
+		// Read in the order the keys do not sort in, so it is recency that decides.
 		await reader.read('c1', 'bb');
+		await reader.read('c1', 'aa');
 
 		expect((await db.fileBytes.toCollection().primaryKeys()).map(([, id]) => id)).toEqual([
-			'bb',
+			'aa',
 		]);
+	});
+
+	it("hands a caller who asks after the row was bound to another file that file's bytes", async () => {
+		const { db, fake, reader, hold, asked } = await setup();
+		const open = hold('a.png');
+		const before = reader.read('c1', 'a');
+		await vi.waitFor(() => {
+			expect(asked).toEqual(['a.png']);
+		});
+		// The row moves on while the download of the old file is out.
+		const other = fake.plantBytes('two.png', bytesOf('two'));
+		await db.files.update(['c1', 'a'], {
+			remoteId: other.remoteId,
+			remoteVersion: other.version,
+		});
+
+		const after = reader.read('c1', 'a');
+		open();
+
+		expect(text(await before)).toBe('a');
+		expect(text(await after)).toBe('two');
+		// And only the file the row is bound to now is kept for it.
+		expect(await db.fileBytes.get(['c1', 'a'])).toMatchObject({ version: other.version });
+	});
+
+	it('shows a copy not uploaded yet from the bytes held of the file it copies, asking nobody', async () => {
+		const { db, reader, rows, asked, live, network } = await setup();
+		await db.fileBytes.put({
+			connectionId: 'c1',
+			id: 'a',
+			bytes: bytesOf('held').buffer as ArrayBuffer,
+			version: rows[0]?.remoteVersion,
+			pinned: 0,
+			lastUsedAt: 0,
+		});
+		const copy: FileRecord = {
+			connectionId: 'c1',
+			id: 'copy',
+			path: 'Elsewhere/a.png',
+			size: 1,
+		};
+		await db.files.put(copy);
+		await queueUpload(db, copy, rows[0]?.remoteId);
+		live.delete('on');
+		network.delete('up');
+
+		expect(text(await reader.read('c1', 'copy'))).toBe('held');
+		expect(asked).toEqual([]);
+	});
+
+	it('is gone for a file nothing can be read for, whether or not its source is being synced', async () => {
+		const { db, reader, live } = await setup([]);
+		await db.files.put({ connectionId: 'c1', id: 'p', path: 'p.png', size: 1 });
+		live.delete('on');
+
+		expect(await reader.read('c1', 'p')).toEqual({ state: 'gone' });
+	});
+
+	it('shows a file of a source not yet checked, and keeps nothing that would count as unsent', async () => {
+		const { db, reader } = await setup();
+		await db.syncState.put({ connectionId: 'c1', clientId: 'x', resumeUnverified: true });
+
+		expect(text(await reader.read('c1', 'a'))).toBe('a');
+		expect(await db.fileBytes.count()).toBe(0);
+	});
+
+	it('is failed, to be asked again, where the session was replaced by another for the same source', async () => {
+		const { fake, reader, hold, asked, provider, sessions } = await setup();
+		const open = hold('a.png');
+		fake.setFault(() => new DOMException('The session ended', 'AbortError'));
+
+		const read = reader.read('c1', 'a');
+		await vi.waitFor(() => {
+			expect(asked).toEqual(['a.png']);
+		});
+		sessions.set('current', { provider: { ...provider }, withAuth: (work) => work() });
+		open();
+
+		expect(await read).toEqual({ state: 'failed' });
+	});
+
+	it('is unavailable where even a fresh token is refused', async () => {
+		const { fake, reader } = await setup();
+		fake.setFault(() => new AuthError('refused'));
+
+		expect(await reader.read('c1', 'a')).toEqual({ state: 'unavailable' });
 	});
 
 	it('shows what it downloaded even where the store will not keep it', async () => {

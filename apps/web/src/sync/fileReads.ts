@@ -1,4 +1,4 @@
-import { type EntryRef, isNotFoundError, type StorageProvider } from '@skysa/core';
+import { type EntryRef, isAuthError, isNotFoundError, type StorageProvider } from '@skysa/core';
 
 import { type FileRecord, type NotesDatabase } from '../store/db.js';
 import { CACHE_BUDGET_BYTES, cacheBytes, evictCache, heldFile } from '../store/fileCache.js';
@@ -111,11 +111,16 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 	/**
 	 * Where the bytes are on the remote: the file's own, or — for a copy not
 	 * uploaded yet, whose bytes this device never had — the file it copies
-	 * (`copyOf`), which is what the upload will send. `undefined` for a file
-	 * nothing can be read for.
+	 * (`copyOf`), which is what the upload will send, with that file's row if
+	 * this source still has one. `undefined` for a file nothing can be read
+	 * for, wherever it is asked from: a question about the store alone.
 	 */
-	const sourceOf = async (file: FileRecord): Promise<EntryRef | undefined> => {
-		if (file.remoteId !== undefined) return { remoteId: file.remoteId, path: file.path };
+	const sourceOf = async (
+		file: FileRecord
+	): Promise<{ entry: EntryRef; original?: FileRecord } | undefined> => {
+		if (file.remoteId !== undefined) {
+			return { entry: { remoteId: file.remoteId, path: file.path } };
+		}
 		const upload = await db.opQueue
 			.where('connectionId')
 			.equals(file.connectionId)
@@ -126,7 +131,20 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 			.where('[connectionId+remoteId]')
 			.equals([file.connectionId, upload.copyOf])
 			.first();
-		return { remoteId: upload.copyOf, path: original?.path ?? file.path };
+		return { entry: { remoteId: upload.copyOf, path: original?.path ?? file.path }, original };
+	};
+
+	/** A copy's bytes, where this device holds the file it copies as it is now. */
+	const copiedBytes = async (
+		original: FileRecord | undefined
+	): Promise<ArrayBuffer | undefined> =>
+		original === undefined
+			? undefined
+			: (await heldFile(db, original.connectionId, original.id, now()))?.bytes;
+
+	/** Let a download's entry go — its own, and not one that has replaced it. */
+	const drop = (key: string, waiting: Waiting) => {
+		if (downloads.get(key)?.waiting === waiting) downloads.delete(key);
 	};
 
 	/**
@@ -140,18 +158,26 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 	};
 
 	/** What a download that threw comes to. */
-	const failure = (error: unknown, file: FileRecord, session: ReadingSession): FileRead => {
+	const failure = (error: unknown, file: FileRecord): FileRead => {
 		// The remote's answer, and never a reason to drop the row: a pull says
 		// what the remote has, and a read is not one.
 		if (isNotFoundError(error)) return { state: 'gone' };
-		// The session ended while it was out, which aborts its requests.
-		if (sessionFor(file.connectionId)?.provider !== session.provider) {
-			return { state: 'unavailable' };
-		}
+		// A fresh token refused as well: nothing is read from this source until
+		// the user connects it again, which the sync status asks them to.
+		if (isAuthError(error)) return { state: 'unavailable' };
+		// The session ended while it was out, which aborts its requests. One
+		// begun since for the same source is asked afresh, by asking again.
+		if (sessionFor(file.connectionId) === undefined) return { state: 'unavailable' };
 		return isOnline() ? { state: 'failed' } : { state: 'offline' };
 	};
 
+	/**
+	 * One download, once a slot is free. A request that stalls is ended by the
+	 * adapter's own deadline, which is sized to the file (`timedFetch`, #190),
+	 * so a slot is never held for good.
+	 */
 	const download = async (
+		key: string,
 		file: FileRecord,
 		entry: EntryRef,
 		session: ReadingSession,
@@ -159,8 +185,13 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 	): Promise<FileRead> => {
 		await acquire();
 		try {
-			// Everyone who asked has stopped waiting while it was queued.
-			if (waiting.current === 0) return ABORTED;
+			// Everyone who asked has stopped waiting while it was queued. Let go
+			// of here and now, not when the answer has settled: a caller arriving
+			// in between would join a download that is not going to happen.
+			if (waiting.current === 0) {
+				drop(key, waiting);
+				return ABORTED;
+			}
 			if (!isOnline()) return { state: 'offline' };
 			const read = await session.withAuth(() => session.provider.readBytes(entry));
 			const bytes = ownBuffer(read.bytes);
@@ -169,7 +200,7 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 			await keep(file, bytes, read.version).catch(() => undefined);
 			return { state: 'ready', bytes };
 		} catch (error) {
-			return failure(error, file, session);
+			return failure(error, file);
 		} finally {
 			release();
 		}
@@ -195,24 +226,31 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 		});
 	};
 
-	const fetched = async (
+	/**
+	 * The download of `entry` for `file`, joined where one is already out.
+	 * Without a wait between the look and the start, so two callers can never
+	 * both start one. Keyed by what is read as well as by the file: a row bound
+	 * to another file, or to a newer version, since a download began is a
+	 * different download, and a caller joining the old one would be handed
+	 * bytes that are not the file's.
+	 */
+	const fetched = (
 		file: FileRecord,
+		entry: EntryRef,
 		signal: AbortSignal | undefined
 	): Promise<FileRead> => {
 		const session = sessionFor(file.connectionId);
-		if (session === undefined) return { state: 'unavailable' };
-		const entry = await sourceOf(file);
-		if (entry === undefined) return { state: 'gone' };
-		// Looked for only now, after the last wait: two callers that asked at
-		// once have both got this far before either started anything.
-		const key = `${file.connectionId}\u0000${file.id}`;
+		if (session === undefined) return Promise.resolve({ state: 'unavailable' });
+		const key = [file.connectionId, file.id, entry.remoteId, file.remoteVersion ?? ''].join(
+			'\u0000'
+		);
 		const going = downloads.get(key);
 		if (going !== undefined) return waitFor(going, signal);
 		const waiting: Waiting = { current: 0 };
 		const job: Download = {
 			waiting,
-			result: download(file, entry, session, waiting).finally(() => {
-				downloads.delete(key);
+			result: download(key, file, entry, session, waiting).finally(() => {
+				drop(key, waiting);
 			}),
 		};
 		downloads.set(key, job);
@@ -226,7 +264,11 @@ export const createFileReader = (options: FileReaderOptions): FileReader => {
 				const held = await heldFile(db, connectionId, fileId, now());
 				if (held === undefined) return { state: 'gone' };
 				if (held.bytes !== undefined) return { state: 'ready', bytes: held.bytes };
-				return await fetched(held.file, signal);
+				const source = await sourceOf(held.file);
+				if (source === undefined) return { state: 'gone' };
+				const copied = await copiedBytes(source.original);
+				if (copied !== undefined) return { state: 'ready', bytes: copied };
+				return await fetched(held.file, source.entry, signal);
 			} catch {
 				// The store, not the remote: nothing a caller could do but ask again.
 				return { state: 'failed' };
