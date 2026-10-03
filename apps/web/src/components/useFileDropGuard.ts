@@ -21,10 +21,12 @@ const carriesFiles = (event: DragEvent): boolean =>
 const inEditor = (target: EventTarget | null): boolean => {
 	const element =
 		target instanceof Node && !(target instanceof Element) ? target.parentElement : target;
-	return (
-		element instanceof Element &&
-		element.closest('[contenteditable]')?.getAttribute('contenteditable') === 'true'
-	);
+	// Anything but `false` is editable: `true`, the empty string, `plaintext-only`.
+	const value =
+		element instanceof Element
+			? element.closest('[contenteditable]')?.getAttribute('contenteditable')
+			: undefined;
+	return value !== undefined && value !== null && value.toLowerCase() !== 'false';
 };
 
 const refuse = (event: DragEvent): void => {

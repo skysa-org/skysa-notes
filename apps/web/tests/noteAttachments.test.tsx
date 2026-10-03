@@ -368,6 +368,57 @@ describe('a file added to the open note', () => {
 		expect(await db.files.count()).toBe(1);
 	});
 
+	it('stores no draft for a file it refuses or cannot read: that would be an empty note', async () => {
+		const db = freshDatabase();
+		const draft = draftNote({ connectionId: 'c1', folderPath: 'notes', taken: [] });
+		const store = vi.fn(() => Promise.resolve(true));
+		const host = createNoteAttachments({ db, note: () => draft, readFile: vi.fn() });
+		const storing = createNoteAttachments({ db, note: () => draft, readFile: vi.fn(), store });
+		const unreadable = new File(['x'], 'folder');
+		vi.spyOn(unreadable, 'arrayBuffer').mockRejectedValue(new Error('a folder'));
+		const note = new File(['# Other'], 'other.md');
+		const read = vi.spyOn(note, 'arrayBuffer');
+
+		expect(await storing.add(note, { pasted: false })).toEqual({
+			state: 'refused',
+			reason: 'note',
+		});
+		expect(await storing.add(unreadable, { pasted: false })).toEqual({ state: 'failed' });
+
+		expect(store).not.toHaveBeenCalled();
+		// A note is refused before a byte of it is read, as one too large is.
+		expect(read).not.toHaveBeenCalled();
+		expect(await host.add(note, { pasted: false })).toMatchObject({ state: 'refused' });
+	});
+
+	it('goes beside the note it was put in, though another is open by the time the draft is stored', async () => {
+		const db = freshDatabase();
+		const draft = draftNote({ connectionId: 'c1', folderPath: 'notes', taken: [] });
+		const other = await createNote(db, {
+			title: 'Other',
+			connectionId: 'c1',
+			folderPath: 'elsewhere',
+		});
+		const open: { current: NoteRecord } = { current: draft };
+		const host = createNoteAttachments({
+			db,
+			note: () => open.current,
+			readFile: vi.fn(),
+			store: async () => {
+				open.current = other;
+				await db.notes.add(draft);
+				return true;
+			},
+		});
+
+		const added = await host.add(pdf(), { pasted: false });
+
+		expect(added.state).toBe('added');
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual([
+			expect.stringMatching(/^notes\/q3-report-[0-9a-f]{8}\.pdf$/),
+		]);
+	});
+
 	it('has failed where a draft could not be stored, and adds nothing', async () => {
 		const db = freshDatabase();
 		const draft = draftNote({ connectionId: 'c1', folderPath: 'notes', taken: [] });

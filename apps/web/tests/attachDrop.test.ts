@@ -250,7 +250,7 @@ describe('a file pasted into the note', () => {
 		// rest is not added at all.
 		expect(asked.map((each) => each.name)).toEqual(['a.pdf']);
 		expect(told.map((problem) => problem.message)).toEqual([
-			'The note closed before 2 files could go in. Add them again to put them in.',
+			'The editor closed before 2 files could go in. Add them again to put them in.',
 		]);
 	});
 
@@ -346,6 +346,22 @@ describe('a file dropped on the note', () => {
 				'',
 			].join('\n')
 		);
+	});
+
+	it('goes in the cell it lands at the end of, or the last, never the next', async () => {
+		const table = '| a | b |\n| - | - |\n| 1 | 2 |\n\nafter\n';
+		const endOf = async (at: number) => {
+			const { host, answer } = fakeHost();
+			const mounted = await mount(table, host);
+			drop(mounted.view, carrying([fileNamed('a.pdf')]), at);
+			await answer(added('a.pdf', 'a.pdf', 'file'));
+			return mounted.markdown().split('\n');
+		};
+
+		// The end of the first cell, after its paragraph.
+		expect((await endOf(6))[0]).toBe('| a[a.pdf](a.pdf) | b |');
+		// The end of the table, after its last row.
+		expect((await endOf(25))[2]).toBe('| 1 | 2[a.pdf](a.pdf) |');
 	});
 
 	it('is left to ProseMirror where the drag began in the note', async () => {

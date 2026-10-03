@@ -105,7 +105,11 @@ const placeNear = (doc: ProseNode, at: number): number => {
 	const probe = doc.type.schema.nodes[ATTACHMENT]?.create({ href: 'probe.bin' });
 	if (probe === undefined) return at;
 	const $at = doc.resolve(at);
-	const near = $at.parent.type.spec.tableRole === undefined ? at : Selection.near($at).from;
+	// Back into the cell it is after, unless it is before them all: the end of
+	// a cell, a row or the table is the cell just before it, never the next.
+	const toward = $at.index() === 0 ? 1 : -1;
+	const near =
+		$at.parent.type.spec.tableRole === undefined ? at : Selection.near($at, toward).from;
 	return dropPoint(doc, near, new Slice(Fragment.from(probe), 0, 0)) ?? near;
 };
 

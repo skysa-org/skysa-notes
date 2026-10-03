@@ -48,11 +48,17 @@ describe('a file dragged over the app', () => {
 
 	it('is refused over a bar in an editor, which the editor leaves alone', () => {
 		renderHook(useFileDropGuard);
-		const button = place(
-			'<div contenteditable="true"><div contenteditable="false"><button>Copy</button></div></div>'
-		).querySelector('button')!;
+		const buttons = place(
+			'<div contenteditable="true"><div contenteditable="false"><button>Copy</button></div>' +
+				'<div contenteditable="FALSE"><button>Wrap</button></div></div>'
+		).querySelectorAll('button');
 
-		expect(fireEvent.dragOver(button, { dataTransfer: carrying(['Files']) })).toBe(false);
+		// An attribute's keywords are the same whatever their case.
+		expect(
+			[...buttons].map((button) =>
+				fireEvent.dragOver(button, { dataTransfer: carrying(['Files']) })
+			)
+		).toEqual([false, false]);
 	});
 
 	it('is left to an editor where it is aimed at the text itself', () => {
@@ -62,6 +68,19 @@ describe('a file dragged over the app', () => {
 		)!.firstChild!;
 
 		expect(fireEvent.dragOver(text, { dataTransfer: carrying(['Files']) })).toBe(true);
+	});
+
+	it('is left to anything editable, however it says so', () => {
+		renderHook(useFileDropGuard);
+		const fields = place(
+			'<div contenteditable=""><p>a</p></div><div contenteditable="plaintext-only"><p>b</p></div>'
+		).querySelectorAll('p');
+
+		expect(
+			[...fields].map((field) =>
+				fireEvent.dragOver(field, { dataTransfer: carrying(['Files']) })
+			)
+		).toEqual([true, true]);
 	});
 
 	it('is left alone where something took it first', () => {

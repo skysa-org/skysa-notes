@@ -212,7 +212,7 @@ describe('a file pasted into raw mode', () => {
 
 		await vi.waitFor(() => {
 			expect(told.map((problem) => problem.message)).toEqual([
-				'The note closed before 2 files could go in. Add them again to put them in.',
+				'The editor closed before 2 files could go in. Add them again to put them in.',
 			]);
 		});
 		expect(asked.map((each) => each.name)).toEqual(['a.pdf']);

@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { holdsTextFor } from '../src/store/detached.js';
-import { beforeClosing, flushEditors, settleAfter, settleEditors } from '../src/store/heldEdits.js';
+import {
+	beforeClosing,
+	flushEditors,
+	settleAfter,
+	settleEditors,
+	UNDERWAY_WAIT_MS,
+} from '../src/store/heldEdits.js';
 import { tabState } from '../src/store/staleTab.js';
 
 /**
@@ -60,6 +66,31 @@ describe('settling what the editors hold', () => {
 		await settled;
 
 		expect(order).toEqual(['added', 'written']);
+	});
+
+	it('goes on without such work once it has waited long enough', async () => {
+		vi.useFakeTimers();
+		const stuck = { release: (): void => undefined };
+		try {
+			settleAfter(
+				new Promise<void>((resolve) => {
+					stuck.release = resolve;
+				})
+			);
+			const settled = vi.fn();
+
+			void settleEditors().then(settled);
+			await vi.advanceTimersByTimeAsync(UNDERWAY_WAIT_MS - 1);
+			expect(settled).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+
+			expect(settled).toHaveBeenCalledWith({ failing: [], rejected: 0 });
+		} finally {
+			// Registered for the module's life otherwise, and every test after
+			// this would wait on it.
+			stuck.release();
+			vi.useRealTimers();
+		}
 	});
 
 	it('does not wait on such work once it has failed', async () => {

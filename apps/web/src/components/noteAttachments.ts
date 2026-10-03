@@ -1,10 +1,4 @@
-import {
-	basename,
-	drawsFromData,
-	MAX_ATTACHMENT_BYTES,
-	safeOpenType,
-	showsInline,
-} from '@skysa/core';
+import { basename, drawsFromData, safeOpenType, showsInline } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -20,6 +14,7 @@ import { db as appDb, type NoteRecord, type NotesDatabase } from '../store/db.js
 import { heldFile } from '../store/fileCache.js';
 import {
 	addAttachment,
+	attachmentRefusal,
 	AttachmentRefusedError,
 	fileForLink,
 	listFilePaths,
@@ -146,20 +141,28 @@ export const createNoteAttachments = ({
 	};
 
 	/**
-	 * A file the user has put in the note, beside it. One too large is refused
-	 * before its bytes are read, which for a film could be more than the
-	 * page can hold.
+	 * A file the user has put in the note, beside it. One that is refused is
+	 * refused before its bytes are read, which for a film could be more than
+	 * the page can hold.
+	 *
+	 * A draft is stored only once nothing is left to refuse the file or fail to
+	 * read it: a draft stored for a file that never went in would be an empty
+	 * note in the user's folder. And the note is the one open when the file was
+	 * put in, read before anything is awaited — the host's note follows the one
+	 * open now, which may be another by the time the draft is stored.
 	 */
 	const add = async (file: File, pasted: boolean): Promise<Added> => {
-		if (file.size > MAX_ATTACHMENT_BYTES) return { state: 'refused', reason: 'too-large' };
+		const refused = attachmentRefusal(file);
+		if (refused !== undefined) return { state: 'refused', reason: refused };
+		const { connectionId, id } = note();
 		try {
+			const bytes = await file.arrayBuffer();
 			if (!(await store())) return { state: 'failed' };
-			const { connectionId, id } = note();
 			const added = await addAttachment(db, {
 				connectionId,
 				noteId: id,
 				name: file.name,
-				bytes: await file.arrayBuffer(),
+				bytes,
 				type: file.type,
 				pasted,
 			});

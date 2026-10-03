@@ -105,14 +105,14 @@ describe('what is said about a file not added', () => {
 
 	it('says that the note closed before the files could go in, and to add them again', () => {
 		expect(closedProblem(['a.pdf'])).toEqual({
-			message: 'The note closed before a.pdf could go in. Add it again to put it in.',
+			message: 'The editor closed before a.pdf could go in. Add it again to put it in.',
 			tone: 'warning',
 		});
 		expect(closedProblem(['a.pdf', 'b.pdf', 'c.pdf']).message).toBe(
-			'The note closed before 3 files could go in. Add them again to put them in.'
+			'The editor closed before 3 files could go in. Add them again to put them in.'
 		);
 		expect(closedProblem(['']).message).toBe(
-			'The note closed before the file could go in. Add it again to put it in.'
+			'The editor closed before the file could go in. Add it again to put it in.'
 		);
 	});
 

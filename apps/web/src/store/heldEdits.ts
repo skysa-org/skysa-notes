@@ -33,6 +33,14 @@ const unfinished = new Set<HeldEditsFlush>();
  */
 const underway = new Set<Promise<unknown>>();
 
+/**
+ * How long settling waits on work under way before it goes on without it. A
+ * file's bytes can take as long as the disk they are on, and one dragged from
+ * a cloud drive's folder may be fetched first: whoever is settling — a move,
+ * a disconnect — is not kept waiting on that past a few seconds.
+ */
+export const UNDERWAY_WAIT_MS = 10_000;
+
 /** Have `settleEditors` wait for `work` before it has the editors write. */
 export const settleAfter = (work: Promise<unknown>): void => {
 	underway.add(work);
@@ -90,15 +98,25 @@ export const flushEditors = (): Promise<SettledEditors>[] =>
 		)
 	);
 
+const waitForUnderway = (): Promise<void> =>
+	new Promise((resolve) => {
+		const timer = setTimeout(resolve, UNDERWAY_WAIT_MS);
+		void Promise.allSettled([...underway]).then(() => {
+			clearTimeout(timer);
+			resolve();
+		});
+	});
+
 /**
  * Have every editor write what it holds, and wait for all of them. One that
  * rejects does not stop the others being waited for. Work under way that will
- * leave an edit (`settleAfter`) is waited for first.
+ * leave an edit (`settleAfter`) is waited for first, for as long as
+ * `UNDERWAY_WAIT_MS`.
  */
 export const settleEditors = async (): Promise<SettledEditors> => {
 	// Only where there is some, so that the flushes otherwise start there and
 	// then, as `flushEditors` does.
-	if (underway.size > 0) await Promise.allSettled([...underway]);
+	if (underway.size > 0) await waitForUnderway();
 	const each = await Promise.all(flushEditors());
 	return {
 		failing: [...new Set(each.flatMap((settled) => settled.failing))],
