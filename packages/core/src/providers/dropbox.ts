@@ -1,7 +1,7 @@
 import { MARKER_FILE } from '../config.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { normalizePath, ROOT } from '../paths.js';
-import { readText } from './text.js';
+import { decodeText, responseBytes } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -270,7 +270,11 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 
 	const authorization = async (): Promise<string> => `Bearer ${await getAccessToken()}`;
 
-	const post = async (url: string, headers: HeadersInit, body?: string): Promise<Response> =>
+	const post = async (
+		url: string,
+		headers: HeadersInit,
+		body?: string | Uint8Array<ArrayBuffer>
+	): Promise<Response> =>
 		doFetch(url, {
 			method: 'POST',
 			headers: { authorization: await authorization(), ...headers },
@@ -323,15 +327,20 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 	const target = (entry: EntryRef): string =>
 		entry.remoteId === '' ? toDropboxPath(entry.path) : entry.remoteId;
 
-	const write = async (
+	/**
+	 * One upload, for a note or any other file: `files/upload` takes bytes and
+	 * does not care what they are. Up to 150 MiB in one call ("Do not use this
+	 * to upload a file larger than 150 MiB", the `upload` route in
+	 * https://github.com/dropbox/dropbox-api-spec/blob/main/files.stone), which
+	 * is past anything the app sends (docs/ARCHITECTURE.md §3).
+	 */
+	const upload = async (
 		path: string,
-		content: string,
-		opts: WriteOptions
+		body: string | Uint8Array<ArrayBuffer>,
+		expectedVersion: string | undefined
 	): Promise<RemoteEntry> => {
 		const mode =
-			opts.expectedVersion === undefined
-				? 'add'
-				: { '.tag': 'update', update: opts.expectedVersion };
+			expectedVersion === undefined ? 'add' : { '.tag': 'update', update: expectedVersion };
 
 		const response = await post(
 			`${CONTENT}/files/upload`,
@@ -348,7 +357,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 					strict_conflict: true,
 				}),
 			},
-			content
+			body
 		);
 		if (response.ok) return toEntry((await response.json()) as Metadata);
 
@@ -361,9 +370,16 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		// been deleted, so a conflict with nothing there is the "expected a version
 		// of a file that is gone" case. docs/ARCHITECTURE.md §4 calls that not-found, and
 		// the engine's re-create-on-push path depends on telling them apart.
-		if (opts.expectedVersion !== undefined) throw new NotFoundError(path);
+		if (expectedVersion !== undefined) throw new NotFoundError(path);
 		return raise(failure, path);
 	};
+
+	const write = (path: string, content: string, opts: WriteOptions): Promise<RemoteEntry> =>
+		upload(path, content, opts.expectedVersion);
+
+	/** `mode: add` with nothing expected: a file or folder in the way is a conflict. */
+	const createFile = (path: string, bytes: Uint8Array): Promise<RemoteEntry> =>
+		upload(path, new Uint8Array(bytes), undefined);
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		// With App folder access the root exists by construction and has no id of
@@ -404,7 +420,7 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		return (await gather(first, [])).map(toEntry);
 	};
 
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
+	const readBytes = async (entry: EntryRef): Promise<{ bytes: Uint8Array; version: string }> => {
 		const response = await post(`${CONTENT}/files/download`, {
 			'Dropbox-API-Arg': asciiArg({ path: target(entry) }),
 		});
@@ -415,7 +431,12 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		if (metadata.rev === undefined || metadata.rev === '') {
 			throw new Error('dropbox sent a download with no rev');
 		}
-		return { content: await readText(response, entry.path), version: metadata.rev };
+		return { bytes: await responseBytes(response), version: metadata.rev };
+	};
+
+	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
+		const { bytes, version } = await readBytes(entry);
+		return { content: decodeText(bytes, entry.path), version };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
@@ -546,6 +567,8 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		list,
 		read,
 		write,
+		readBytes,
+		createFile,
 		createFolder,
 		move,
 		delete: remove,

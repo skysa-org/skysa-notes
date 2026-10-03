@@ -22,6 +22,7 @@ import { createSyncEngine } from '../../src/sync/engine.js';
 import { createMemoryStore } from '../sync/memoryStore.js';
 import { drainChanges } from './contract.js';
 import { createGDriveStub, STUB_ROOT_ID } from './gdriveStub.js';
+import { bodyText, sameBytes } from './wireBody.js';
 
 /**
  * What the contract suite cannot see: which requests go by name and which by id,
@@ -279,7 +280,7 @@ const driveWorld = () => {
 		const request = {
 			method: init.method ?? 'GET',
 			url: new URL(raw),
-			body: typeof init.body === 'string' ? init.body : '',
+			body: bodyText(init.body),
 		};
 		seen.push(request);
 		return Promise.resolve(hooks.intercept?.(request) ?? route(request));
@@ -894,6 +895,59 @@ describe('creating', () => {
 		const upload = world.seen.find((r) => r.url.pathname === '/upload/drive/v3/files');
 		expect(upload?.url.searchParams.get('uploadType')).toBe('multipart');
 		expect(upload?.body).toContain('"mimeType":"text/markdown"');
+	});
+
+	it('uploads a file that is not a note as its own type, every byte value intact', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		const bytes = Uint8Array.from({ length: 256 }, (_, at) => at);
+
+		const entry = await provider.createFile('photo.png', bytes, { contentType: 'image/png' });
+
+		expect((await provider.readBytes(entry)).bytes).toEqual(bytes);
+		const upload = stub.requests.filter((r) => r.url.includes('uploadType=multipart')).at(-1);
+		expect(upload?.body).toContain('"name":"photo.png","mimeType":"image/png"');
+		expect(upload?.body).toContain('content-type: image/png\r\n');
+	});
+
+	it('sends a file over 5 MB resumably, and asks for the revision the answer left out', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		const bytes = Uint8Array.from({ length: 5 * 1024 * 1024 + 1 }, (_, at) => at % 251);
+		stub.requests.length = 0;
+
+		const entry = await provider.createFile('big.bin', bytes);
+
+		expect(stub.requests.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual([
+			'GET /drive/v3/files',
+			'POST /upload/drive/v3/files',
+			'PUT /upload/drive/v3/files',
+			`GET /drive/v3/files/${encodeURIComponent(entry.remoteId)}`,
+			'GET /drive/v3/files',
+		]);
+		expect(stub.requests[1]?.url).toContain('uploadType=resumable');
+		expect(stub.requests[1]?.body).toContain('"name":"big.bin"');
+		expect(entry).toMatchObject({ path: 'big.bin', size: bytes.length });
+		expect(entry.version).not.toBe('');
+		expect(sameBytes((await provider.readBytes(entry)).bytes, bytes)).toBe(true);
+	});
+
+	it('refuses a resumable session on any host but Drive\u2019s, and sends it nothing', async () => {
+		const world = driveWorld();
+		world.hooks.intercept = (request) =>
+			request.url.searchParams.get('uploadType') === 'resumable'
+				? new Response(null, {
+						status: 200,
+						headers: { location: 'https://upload.example.com/session?id=1' },
+					})
+				: undefined;
+
+		await expect(
+			world.provider.createFile('big.bin', new Uint8Array(5 * 1024 * 1024 + 1))
+		).rejects.toThrow(/no session/);
+
+		expect(world.seen.every((r) => r.url.origin === API)).toBe(true);
+		expect(world.files.some((file) => file.name === 'big.bin')).toBe(false);
 	});
 
 	it('refuses a name already taken, without uploading anything', async () => {

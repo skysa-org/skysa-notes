@@ -6,12 +6,14 @@ import {
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
+import { bodyBytes, bodyText } from './wireBody.js';
 
 /**
  * A stand-in for the Google Drive API v3 at the transport layer, over the
  * in-memory fake. It speaks Drive's shapes — `{ error: { errors: [{ reason }] } }`
- * envelopes, `nextPageToken` paging, `q` searches, multipart uploads, a
- * `headRevisionId` that changes with content and not with a move, the trash —
+ * envelopes, `nextPageToken` paging, `q` searches, multipart and resumable
+ * uploads, a `headRevisionId` that changes with content and not with a move,
+ * the trash —
  * and Drive's change feed: files by id and parent id with no paths, the current
  * state of each file rather than each change, and a folder rename or trash that
  * does not mention what is inside the folder.
@@ -60,6 +62,29 @@ interface DriveFile {
 	size?: string;
 	trashed: boolean;
 }
+
+interface UploadMetadata {
+	name?: string;
+	mimeType?: string;
+	parents?: string[];
+}
+
+const encoder = new TextEncoder();
+
+/** Where `needle` first starts in `haystack` at or after `from`, or -1. */
+const indexOf = (haystack: Uint8Array, needle: Uint8Array, from: number): number => {
+	for (let at = Math.max(from, 0); at <= haystack.length - needle.length; at += 1) {
+		if (needle.every((byte, offset) => haystack[at + offset] === byte)) return at;
+	}
+	return -1;
+};
+
+const lastIndexOf = (haystack: Uint8Array, needle: Uint8Array): number => {
+	for (let at = haystack.length - needle.length; at >= 0; at -= 1) {
+		if (needle.every((byte, offset) => haystack[at + offset] === byte)) return at;
+	}
+	return -1;
+};
 
 interface Seen {
 	path: string;
@@ -119,6 +144,10 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	const removed = new Set<string>();
 	/** What was inside a folder put in the trash, which the feed does not name. */
 	const silenced = new Set<string>();
+	/** Resumable sessions started and not yet sent: upload id → the metadata. */
+	const sessions = new Map<string, UploadMetadata>();
+	/** The type each file was uploaded as, which Drive keeps through a move. */
+	const mimeTypes = new Map<string, string>();
 
 	const tick = () => {
 		counter += 1;
@@ -149,7 +178,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		return {
 			id: entry.remoteId,
 			name: basename(entry.path),
-			mimeType: folder ? FOLDER : 'text/markdown',
+			mimeType: folder ? FOLDER : (mimeTypes.get(entry.remoteId) ?? 'text/markdown'),
 			parents: [idOfPath(parentPath(entry.path)) ?? 'unknown-parent'],
 			...(folder ? {} : { headRevisionId: revisions.get(entry.remoteId) ?? 'r0' }),
 			modifiedTime: entry.modifiedAt,
@@ -269,25 +298,62 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		return json(fileOf(made));
 	};
 
-	/** RFC 2387, as the adapter frames it: metadata, then the bytes. */
-	const multipartUpload = async (headers: Record<string, string>, body: string) => {
+	/** A new file from an upload, wherever its metadata and bytes came from. */
+	const upload = async (metadata: UploadMetadata, content: Uint8Array): Promise<DriveFile> => {
+		const parent = pathOfId(metadata.parents?.[0] ?? '');
+		if (parent === undefined || metadata.name === undefined) throw new NotFoundError('');
+		const target = joinPath(parent, metadata.name);
+		if (byPath(target) !== undefined) throw new Error('stubCannotHoldDuplicates');
+		const written = await backing.createFile(target, content);
+		if (metadata.mimeType !== undefined) mimeTypes.set(written.remoteId, metadata.mimeType);
+		observe();
+		return fileOf(written);
+	};
+
+	/**
+	 * RFC 2387, as the adapter frames it: metadata, then the bytes, which need
+	 * not be text — so the body is cut as bytes, at the delimiters, and only the
+	 * metadata is decoded.
+	 */
+	const multipartUpload = async (headers: Record<string, string>, body: Uint8Array) => {
 		const boundary = /boundary=([^;]+)/.exec(headers['content-type'] ?? '')?.[1];
 		if (boundary === undefined) return driveError(400, 'badContent');
-		const parts = body.split(`\r\n--${boundary}`);
-		const metadataPart = parts[0]?.replace(`--${boundary}\r\n`, '') ?? '';
-		const contentPart = parts[1] ?? '';
-		const metadata = JSON.parse(metadataPart.slice(metadataPart.indexOf('\r\n\r\n') + 4)) as {
-			name?: string;
-			parents?: string[];
-		};
-		const content = contentPart.slice(contentPart.indexOf('\r\n\r\n') + 4);
-		const parent = pathOfId(metadata.parents?.[0] ?? '');
-		if (parent === undefined || metadata.name === undefined) return driveError(404, 'notFound');
-		const target = joinPath(parent, metadata.name);
-		if (byPath(target) !== undefined) return driveError(500, 'stubCannotHoldDuplicates');
-		const written = await backing.write(target, content, {});
-		observe();
-		return json(fileOf(written));
+		const delimiter = encoder.encode(`\r\n--${boundary}`);
+		const blank = encoder.encode('\r\n\r\n');
+		const metadataAt = indexOf(body, blank, 0) + blank.length;
+		const metadataEnd = indexOf(body, delimiter, metadataAt);
+		const contentAt = indexOf(body, blank, metadataEnd + delimiter.length) + blank.length;
+		const contentEnd = lastIndexOf(body, encoder.encode(`\r\n--${boundary}--`));
+		if (metadataEnd < 0 || contentEnd < contentAt) return driveError(400, 'badContent');
+		const metadata = JSON.parse(
+			new TextDecoder().decode(body.subarray(metadataAt, metadataEnd))
+		) as UploadMetadata;
+		return json(await upload(metadata, body.slice(contentAt, contentEnd)));
+	};
+
+	/**
+	 * The first half of a resumable upload: the metadata, answered with where
+	 * to send the bytes. https://developers.google.com/workspace/drive/api/guides/manage-uploads#resumable
+	 */
+	const startSession = (body: string): Response => {
+		const id = `session-${String(sessions.size + 1)}-${String(counter)}`;
+		sessions.set(id, JSON.parse(body) as UploadMetadata);
+		const location = `${API}/upload/drive/v3/files?uploadType=resumable&upload_id=${id}`;
+		return new Response(null, { status: 200, headers: { location } });
+	};
+
+	/**
+	 * The second half: every byte in one `PUT`. Answered with the file in
+	 * Drive's default fields — the session's `fields` are not promised to carry
+	 * over, so the adapter has to ask for the revision itself.
+	 */
+	const finishSession = async (url: URL, body: Uint8Array): Promise<Response> => {
+		const id = url.searchParams.get('upload_id') ?? '';
+		const metadata = sessions.get(id);
+		if (metadata === undefined) return driveError(404, 'notFound');
+		sessions.delete(id);
+		const made = await upload(metadata, body);
+		return json({ kind: 'drive#file', id: made.id, name: made.name, mimeType: made.mimeType });
 	};
 
 	const mediaUpload = async (id: string, body: string): Promise<Response> => {
@@ -405,11 +471,19 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	const routeUpload = (
 		method: string,
 		id: string | undefined,
+		url: URL,
 		headers: Record<string, string>,
-		body: string
+		body: { text: string; bytes: Uint8Array }
 	) => {
-		if (id === undefined && method === 'POST') return multipartUpload(headers, body);
-		if (id !== undefined && method === 'PATCH') return mediaUpload(id, body);
+		const type = url.searchParams.get('uploadType');
+		if (id === undefined && method === 'POST' && type === 'multipart') {
+			return multipartUpload(headers, body.bytes);
+		}
+		if (id === undefined && method === 'POST' && type === 'resumable') {
+			return startSession(body.text);
+		}
+		if (id === undefined && method === 'PUT') return finishSession(url, body.bytes);
+		if (id !== undefined && method === 'PATCH') return mediaUpload(id, body.text);
 		return driveError(405, 'methodNotAllowed');
 	};
 
@@ -417,7 +491,8 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		method: string,
 		url: URL,
 		headers: Record<string, string>,
-		body: string
+		body: string,
+		bytes: Uint8Array
 	): Promise<Response> | Response => {
 		if (url.origin !== API) return driveError(400, 'unknownHost');
 		if (headers.authorization !== 'Bearer stub-token') return driveError(401, 'authError');
@@ -433,7 +508,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		const upload = UPLOAD_PATH.exec(path);
 		if (upload !== null) {
 			const id = upload[1] === undefined ? undefined : decodeURIComponent(upload[1]);
-			return routeUpload(method, id, headers, body);
+			return routeUpload(method, id, url, headers, { text: body, bytes });
 		}
 		const file = FILE_PATH.exec(path);
 		if (file === null) return driveError(404, 'notFound');
@@ -447,12 +522,13 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 				value,
 			])
 		);
-		const body = typeof init.body === 'string' ? init.body : '';
+		const bytes = bodyBytes(init.body);
+		const body = bodyText(init.body);
 		const method = init.method ?? 'GET';
 		requests.push({ method, url: raw, headers, ...(body === '' ? {} : { body }) });
 
 		observe();
-		const response = await route(method, new URL(raw), headers, body);
+		const response = await route(method, new URL(raw), headers, body, bytes);
 		observe();
 		return response;
 	};

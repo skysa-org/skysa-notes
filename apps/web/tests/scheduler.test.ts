@@ -190,6 +190,14 @@ const remote = (): Remote => {
 				await authorized();
 				return fake.write(path, content, expectedVersion);
 			},
+			readBytes: async (entry) => {
+				await authorized();
+				return fake.readBytes(entry);
+			},
+			createFile: async (path, bytes, opts) => {
+				await authorized();
+				return fake.createFile(path, bytes, opts);
+			},
 			createFolder: async (path) => {
 				await authorized();
 				return fake.createFolder(path);
@@ -1025,7 +1033,7 @@ describe('failures', () => {
 				const db = await bound();
 				const h = started(db);
 				await reaches(h.scheduler, 'idle');
-				const file = h.remote.fake.writeBytes('old.md', LATIN1);
+				const file = h.remote.fake.plantBytes('old.md', LATIN1);
 				await h.scheduler.syncNow();
 				const listed = [{ remoteId: file.remoteId, path: 'old.md' }];
 				expect((await db.syncState.get('c1'))?.unreadable).toEqual(listed);

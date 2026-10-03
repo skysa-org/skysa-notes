@@ -13,11 +13,12 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
-import { readText } from './text.js';
+import { decodeText, responseBytes } from './text.js';
 import {
 	AuthError,
 	type ChangeSet,
 	ConflictError,
+	type CreateFileOptions,
 	CursorResetError,
 	type EntryRef,
 	NotFoundError,
@@ -104,7 +105,7 @@ type Attempt<T> = { ok: true; value: T } | { ok: false; failure: GraphFailure };
 
 interface RequestParts {
 	headers?: Record<string, string>;
-	body?: string;
+	body?: string | Uint8Array<ArrayBuffer>;
 }
 
 /**
@@ -424,12 +425,21 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	 * A create is addressed by path, and told to fail rather than replace or
 	 * rename. Graph's default for an upload is to replace, which here would be
 	 * the blind overwrite the contract exists to forbid.
+	 *
+	 * The same simple upload for a note and for any other file: one request up
+	 * to 250 MB ("This method only supports files up to 250 MB in size",
+	 * https://learn.microsoft.com/en-us/graph/api/driveitem-put-content), past
+	 * anything the app sends (docs/ARCHITECTURE.md §3).
 	 */
-	const create = async (path: string, content: string): Promise<RemoteEntry> => {
+	const create = async (
+		path: string,
+		body: string | Uint8Array<ArrayBuffer>,
+		headers: Record<string, string> = upload
+	): Promise<RemoteEntry> => {
 		const result = await attempt<DriveItem>(
 			'PUT',
 			`${byPath(path, '/content')}?${FAIL_ON_CONFLICT}`,
-			{ headers: upload, body: content }
+			{ headers, body }
 		);
 		if (result.ok) return toEntry(result.value, placed(path, result.value));
 		if (result.failure.status !== 409 && result.failure.status !== 404) {
@@ -484,6 +494,18 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 			: update(target, content, opts.expectedVersion);
 	};
 
+	const createFile = (
+		path: string,
+		bytes: Uint8Array,
+		opts: CreateFileOptions = {}
+	): Promise<RemoteEntry> => {
+		const target = normalizePath(path);
+		if (target === ROOT) return Promise.reject(new NotFoundError(target));
+		return create(target, new Uint8Array(bytes), {
+			'content-type': opts.contentType ?? 'application/octet-stream',
+		});
+	};
+
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		// Addressing `special/approot` is what makes Graph create the folder.
 		const id = await rootId();
@@ -530,7 +552,7 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	 * reported with them. That errs safe: the next push sends the older version,
 	 * conflicts, and the conflict rule keeps both.
 	 */
-	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
+	const readBytes = async (entry: EntryRef): Promise<{ bytes: Uint8Array; version: string }> => {
 		const url = entry.remoteId === '' ? byPath(entry.path) : byId(entry.remoteId);
 		const item = await call<DriveItem>('GET', url, {}, entry.path);
 		if (item.folder !== undefined) throw new NotFoundError(entry.path);
@@ -549,7 +571,12 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		const response = await doFetch(download, { method: 'GET' });
 		if (response.status === 404) throw new NotFoundError(entry.path);
 		if (!response.ok) throw new Error(`onedrive download ${String(response.status)}`);
-		return { content: await readText(response, entry.path), version };
+		return { bytes: await responseBytes(response), version };
+	};
+
+	const read = async (entry: EntryRef): Promise<{ content: string; version: string }> => {
+		const { bytes, version } = await readBytes(entry);
+		return { content: decodeText(bytes, entry.path), version };
 	};
 
 	const createFolder = async (path: string): Promise<RemoteEntry> => {
@@ -773,6 +800,8 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 		list,
 		read,
 		write,
+		readBytes,
+		createFile,
 		createFolder,
 		move,
 		delete: remove,

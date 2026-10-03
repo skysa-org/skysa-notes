@@ -24,7 +24,7 @@ import { createOneDriveStub } from './onedriveStub.js';
  */
 const beneath = (backing: FakeProvider) => ({
 	plant: (path: string, bytes: Uint8Array) => {
-		backing.writeBytes(path, bytes);
+		backing.plantBytes(path, bytes);
 		return Promise.resolve();
 	},
 	bytesAt: (path: string) => Promise.resolve(backing.bytesAt(path)),

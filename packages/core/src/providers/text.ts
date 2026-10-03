@@ -43,11 +43,11 @@ export const decodeText = (bytes: ArrayBuffer | Uint8Array, path: string): strin
 export const withoutNul = (text: string): string => text.replaceAll('\u0000', '');
 
 /**
- * The body taken whole and then decoded. A character split across two network
- * chunks is therefore one character by the time the decoder sees it, and there
- * is no streaming state to get wrong.
+ * A download's body, taken whole. Every adapter reads a file through this and
+ * then decodes it for a note (`decodeText`), or hands it over as it is for any
+ * other file (`readBytes`). Whole, so a character split across two network
+ * chunks is one character by the time the decoder sees it, and there is no
+ * streaming state to get wrong.
  */
-export const readText = async (
-	response: Pick<Response, 'arrayBuffer'>,
-	path: string
-): Promise<string> => decodeText(await response.arrayBuffer(), path);
+export const responseBytes = async (response: Pick<Response, 'arrayBuffer'>): Promise<Uint8Array> =>
+	new Uint8Array(await response.arrayBuffer());

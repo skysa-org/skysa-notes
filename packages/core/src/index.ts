@@ -43,6 +43,7 @@ export {
 	type DeletedEntry,
 	type ChangeSet,
 	ConflictError,
+	type CreateFileOptions,
 	CursorResetError,
 	type EntryRef,
 	isAuthError,

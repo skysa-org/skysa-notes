@@ -212,7 +212,7 @@ const createRemote = (seed: number, backing: FakeProvider, encodings = false) =>
 			return true;
 		}
 		log.push(`re-save ${file.path} as Latin-1`);
-		backing.writeBytes(file.path, LATIN1);
+		backing.plantBytes(file.path, LATIN1);
 		return true;
 	};
 

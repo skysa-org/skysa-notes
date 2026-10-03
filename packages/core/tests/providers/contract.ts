@@ -10,6 +10,7 @@ import {
 	type StorageProvider,
 	UnreadableError,
 } from '../../src/providers/types.js';
+import { sameBytes } from './wireBody.js';
 
 /**
  * The scenario suite every adapter has to pass — see CLAUDE.md. It is a helper
@@ -32,9 +33,11 @@ export interface ProviderHarness {
 	cleanup?: () => Promise<void>;
 	/**
 	 * Put a file there beneath the adapter, as another tool would: any bytes at
-	 * all. No adapter can do it — `write` takes text — so the scenarios about a
-	 * file that is not UTF-8 need a way in from underneath. The fake and the
-	 * wire stubs have one; a live account has not, and those scenarios skip.
+	 * all, over whatever is there. An adapter can make a new file of any bytes
+	 * (`createFile`) but never rewrites one with them — `write` takes text — so
+	 * the scenarios about a file that is not UTF-8 need a way in from
+	 * underneath. The fake and the wire stubs have one; a live account has not,
+	 * and those scenarios skip.
 	 */
 	plant?: (path: string, bytes: Uint8Array) => Promise<void>;
 	/** The bytes at a path now, asked the same way. Required with `plant`. */
@@ -719,6 +722,186 @@ export const describeProviderContract = (
 				expect((await provider.list('')).map((entry) => entry.path)).not.toContain(
 					'renamed.md'
 				);
+			});
+		});
+
+		/**
+		 * docs/ARCHITECTURE.md §4: an attachment beside a note goes up as bytes
+		 * and comes back as the same bytes, through the port alone — so these
+		 * run against a live account too, where the scenarios above that plant
+		 * a file from underneath cannot.
+		 */
+		describe('a file that is not a note', () => {
+			/** Every byte value once, a NUL among them: no decoder would let it through. */
+			const EVERY_BYTE = Uint8Array.from({ length: 256 }, (_, at) => at);
+			/** Over Drive's 5 MB multipart limit, so its resumable upload is the one used. */
+			const LARGE = 6 * 1024 * 1024;
+
+			it('goes up and comes back byte for byte', config, async () => {
+				const provider = await open();
+
+				const entry = await provider.createFile('photo.png', EVERY_BYTE, {
+					contentType: 'image/png',
+				});
+
+				expect(entry).toMatchObject({ path: 'photo.png', kind: 'file', size: 256 });
+				expect(entry.remoteId).not.toBe('');
+				expect(entry.version).not.toBe('');
+				const back = await provider.readBytes(entry);
+				expect(sameBytes(back.bytes, EVERY_BYTE)).toBe(true);
+				expect(back.version).toBe(entry.version);
+			});
+
+			it('can be empty', config, async () => {
+				const provider = await open();
+
+				const entry = await provider.createFile('empty.bin', new Uint8Array());
+
+				expect(entry.size).toBe(0);
+				expect((await provider.readBytes(entry)).bytes).toHaveLength(0);
+			});
+
+			it(
+				'can be larger than one request carries on every provider',
+				timeout === undefined ? { timeout: 30_000 } : config,
+				async () => {
+					const provider = await open();
+					const bytes = Uint8Array.from({ length: LARGE }, (_, at) => (at * 7) % 256);
+
+					const entry = await provider.createFile('scan.pdf', bytes, {
+						contentType: 'application/pdf',
+					});
+
+					expect(entry.size).toBe(LARGE);
+					expect(sameBytes((await provider.readBytes(entry)).bytes, bytes)).toBe(true);
+				}
+			);
+
+			it('keeps a BOM that a note would lose', config, async () => {
+				const provider = await open();
+				const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0x61, 0x0a]);
+
+				const entry = await provider.createFile('data.csv', bytes);
+
+				expect(sameBytes((await provider.readBytes(entry)).bytes, bytes)).toBe(true);
+				expect((await provider.read(entry)).content).toBe('a\n');
+			});
+
+			it('is an UnreadableError to read as a note', config, async () => {
+				const provider = await open();
+				const entry = await provider.createFile('photo.png', EVERY_BYTE);
+
+				await expect(provider.read(entry)).rejects.toThrow(UnreadableError);
+			});
+
+			it('in a folder goes into that folder', config, async () => {
+				const provider = await open();
+				await provider.createFolder('Work');
+
+				const entry = await provider.createFile('Work/photo.png', EVERY_BYTE);
+
+				expect(entry.path).toBe('Work/photo.png');
+				expect(paths(await provider.list('Work'))).toEqual(['Work/photo.png']);
+			});
+
+			it(
+				'is never made over a file, and the conflict says what is there',
+				config,
+				async () => {
+					const provider = await open();
+					const first = await provider.createFile('photo.png', EVERY_BYTE);
+
+					const failure = await provider
+						.createFile('photo.png', new Uint8Array([1, 2, 3]))
+						.then(
+							() => undefined,
+							(error: unknown) => error
+						);
+
+					expect(failure).toBeInstanceOf(ConflictError);
+					expect((failure as ConflictError).remote).toMatchObject({
+						path: 'photo.png',
+						kind: 'file',
+						size: 256,
+						remoteId: first.remoteId,
+					});
+					const kept = await provider.readBytes({ remoteId: '', path: 'photo.png' });
+					expect(sameBytes(kept.bytes, EVERY_BYTE)).toBe(true);
+				}
+			);
+
+			it('is never made over a note either', config, async () => {
+				const provider = await open();
+				await seedFile(provider, 'note.md', 'mine\n');
+
+				const failure = await provider.createFile('note.md', EVERY_BYTE).then(
+					() => undefined,
+					(error: unknown) => error
+				);
+
+				expect(failure).toBeInstanceOf(ConflictError);
+				expect((failure as ConflictError).remote).toMatchObject({
+					kind: 'file',
+					size: 5,
+				});
+				expect((await provider.read({ remoteId: '', path: 'note.md' })).content).toBe(
+					'mine\n'
+				);
+			});
+
+			it('is never made over a folder', config, async () => {
+				const provider = await open();
+				await provider.createFolder('Work');
+
+				const failure = await provider.createFile('Work', EVERY_BYTE).then(
+					() => undefined,
+					(error: unknown) => error
+				);
+
+				expect(failure).toBeInstanceOf(ConflictError);
+				expect((failure as ConflictError).remote).toMatchObject({
+					path: 'Work',
+					kind: 'folder',
+				});
+				expect(await provider.list('Work')).toEqual([]);
+			});
+
+			it('is listed and in the feed with its size in bytes', config, async () => {
+				const provider = await open();
+				const cursor = await quietCursor(provider);
+
+				await provider.createFile('photo.png', EVERY_BYTE);
+
+				const listed = (await provider.list('')).find(
+					(entry) => entry.path === 'photo.png'
+				);
+				expect(listed).toMatchObject({ kind: 'file', size: 256 });
+				const { entries } = await drainUntil(
+					provider,
+					cursor,
+					(got) => liveAt(got, 'photo.png') !== undefined
+				);
+				expect(liveAt(entries, 'photo.png')).toMatchObject({ kind: 'file', size: 256 });
+				const { entries: scanned } = await drainSettled(provider);
+				expect(liveAt(scanned, 'photo.png')).toMatchObject({ size: 256 });
+			});
+
+			it('moves with its bytes, and is gone once deleted', config, async () => {
+				const provider = await open();
+				await provider.createFolder('Work');
+				const entry = await provider.createFile('photo.png', EVERY_BYTE);
+
+				const moved = await provider.move(entry, 'Work/photo-2.png');
+
+				expect(moved).toMatchObject({ path: 'Work/photo-2.png', size: 256 });
+				const back = await provider.readBytes(moved);
+				expect(sameBytes(back.bytes, EVERY_BYTE)).toBe(true);
+				expect(back.version).toBe(moved.version);
+
+				await provider.delete(moved);
+
+				await expect(provider.readBytes(moved)).rejects.toThrow(NotFoundError);
+				expect(paths(await provider.list('Work'))).toEqual([]);
 			});
 		});
 	});

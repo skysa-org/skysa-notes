@@ -725,7 +725,7 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 				(file) => file.path
 			);
 
-		remote.backing.writeBytes(path, latin1);
+		remote.backing.plantBytes(path, latin1);
 		await quiet(remote, a, b);
 
 		expect(await localFiles(a)).toEqual({});
