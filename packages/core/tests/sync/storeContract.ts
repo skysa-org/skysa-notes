@@ -2319,11 +2319,37 @@ export const describeSyncStoreContract = (
 					]);
 				});
 
-				it('goes, where there is nothing here to send', async () => {
+				it('is pending all the same where there is nothing here to send', async () => {
+					// Its upload finds that out, and the row goes then (`lost-file`):
+					// the engine, which cannot see the bytes, has to know what the row
+					// is after this.
 					const { store, seedFile } = await harness();
 					await seedFile(bound, { bytes: BYTES, version: 'v0' });
 					await store.applyPull({ changes: [{ kind: 'reupload-file', fileId: 'x1' }] });
-					expect(await store.fileById('x1')).toBeUndefined();
+					expect(await store.fileById('x1')).toEqual(pending);
+					expect(await store.fileBytes('x1')).toBeUndefined();
+					expect(await opsOf(store)).toEqual([
+						{ op: 'upload', fileId: 'x1', path: 'Trips/a.png' },
+					]);
+				});
+
+				it('is adopted by the same file arriving later in the batch, bytes or none', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(bound);
+					const arrived = file('Trips/a.png', 'f2', 'w1');
+					await store.applyPull({
+						changes: [
+							{ kind: 'reupload-file', fileId: 'x1' },
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: arrived,
+								adopt: true,
+							},
+						],
+					});
+					expect(await store.fileById('x1')).toMatchObject({ remoteId: 'f2' });
 					expect(await store.pendingOps()).toEqual([]);
 				});
 			});

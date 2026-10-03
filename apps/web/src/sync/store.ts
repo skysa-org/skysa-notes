@@ -704,7 +704,7 @@ export const createDexieSyncStore = (
 		const adoptable =
 			existing?.remoteId === undefined &&
 			existing?.path === change.path &&
-			existing.size === change.remote.size;
+			existing.size === (change.remote.size ?? 0);
 		if (change.adopt === true && !adoptable) {
 			throw new Error(`File ${change.fileId} is not one to adopt as that file`);
 		}
@@ -762,15 +762,17 @@ export const createDexieSyncStore = (
 			await forgetFile(scope, file.id);
 			return;
 		}
-		// Gone from the remote as far as a rescan can tell, and its own copy maybe
-		// what lost it: sent again from here, if there is anything to send, to
-		// where the row is — a move queued for it has nothing to move.
+		// Gone from the remote, and wanted there: sent again from here to where
+		// the row is — a move queued for it has nothing to move. Pending whether
+		// or not there is anything to send, which the upload finds out
+		// (`lost-file`): the engine has to know what the row is now.
 		const held = await scope.fileBytes.get(fileKey(file.id));
 		await forgetFile(scope, file.id);
-		if (held === undefined || !current(file, held)) return;
-		const { version: _version, ...bytes } = held;
 		await scope.files.put({ connectionId, id: file.id, path: file.path, size: file.size });
-		await scope.fileBytes.put({ ...bytes, pinned: 1 });
+		if (held !== undefined && current(file, held)) {
+			const { version: _version, ...bytes } = held;
+			await scope.fileBytes.put({ ...bytes, pinned: 1 });
+		}
 		await queue(scope, { op: 'upload', fileId: file.id, path: file.path });
 	};
 

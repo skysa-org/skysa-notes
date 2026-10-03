@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { foldName } from '../../src/markdown/slug.js';
 import { isHidden, isWithin, joinPath, parentPath, rebasePath } from '../../src/paths.js';
 import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
@@ -155,9 +156,17 @@ const random = (seed: number): (() => number) => {
 
 const NAMES = ['A', 'B', 'C'];
 const FILES = ['a.md', 'b.md', 'c.md'];
+/** Files that are not notes: a picture and a PDF, say, beside the notes. */
+const ATTACHMENTS = ['x.png', 'y.pdf'];
 
 const files = (backing: FakeProvider): RemoteEntry[] =>
 	backing.snapshot().filter((entry) => entry.kind === 'file' && !isHidden(entry.path));
+
+const isNote = (entry: RemoteEntry): boolean => foldName(entry.path).endsWith('.md');
+
+/** The files a device holds a row for and never reads (docs/ARCHITECTURE.md §7). */
+const attachments = (backing: FakeProvider): RemoteEntry[] =>
+	files(backing).filter((entry) => !isNote(entry));
 
 const folders = (backing: FakeProvider): RemoteEntry[] =>
 	backing.snapshot().filter((entry) => entry.kind === 'folder');
@@ -165,16 +174,16 @@ const folders = (backing: FakeProvider): RemoteEntry[] =>
 /** "café" as Latin-1 writes it: `0xE9` alone is not a UTF-8 sequence. */
 const LATIN1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]);
 
-/** The files a device can hold: the ones that are text (docs/ARCHITECTURE.md §7). */
+/** The notes a device can hold: the ones that are text (docs/ARCHITECTURE.md §7). */
 const readable = (backing: FakeProvider): RemoteEntry[] =>
-	files(backing).filter((entry) => backing.contentAt(entry.path) !== undefined);
+	files(backing).filter((entry) => isNote(entry) && backing.contentAt(entry.path) !== undefined);
 
 /**
  * `encodings` adds the other tool that saves a note as Latin-1, and the user
  * who then fixes it. Drawn ahead of the ordinary roll and only when asked for,
  * so the seeds of the run without it go on meaning what they meant.
  */
-const createRemote = (seed: number, backing: FakeProvider, encodings = false) => {
+const createRemote = (seed: number, backing: FakeProvider, encodings = false, attached = false) => {
 	const next = random(seed);
 	const log: string[] = [];
 	const counter = { value: 0 };
@@ -216,8 +225,57 @@ const createRemote = (seed: number, backing: FakeProvider, encodings = false) =>
 		return true;
 	};
 
+	/** A few bytes, of a size that changes as often as not. */
+	const bytes = (): Uint8Array<ArrayBuffer> => {
+		counter.value += 1;
+		return new Uint8Array(1 + Math.floor(next() * 4)).fill(counter.value % 256);
+	};
+
+	/**
+	 * `attached` adds files that are not notes, and the renames that turn one
+	 * kind into the other. Drawn ahead of the ordinary roll, as `recode` is.
+	 */
+	const attach = async (): Promise<boolean> => {
+		if (!attached || next() >= 0.35) return false;
+		const roll = next();
+		const some = attachments(backing);
+		if (roll < 0.35 || some.length === 0) {
+			const path = freePath(ATTACHMENTS);
+			if (path === undefined) return true;
+			log.push(`add ${path}`);
+			await backing.createFile(path, bytes());
+			return true;
+		}
+		const file = pick(some);
+		if (roll < 0.55) {
+			log.push(`replace ${file.path}`);
+			backing.plantBytes(file.path, bytes());
+			return true;
+		}
+		if (roll < 0.75) {
+			const to = freePath([...ATTACHMENTS, ...FILES]);
+			if (to === undefined) return true;
+			log.push(`move ${file.path} -> ${to}`);
+			await backing.move(file, to);
+			return true;
+		}
+		if (roll < 0.85) {
+			const note = files(backing).filter(isNote);
+			const to = freePath(ATTACHMENTS);
+			if (note.length === 0 || to === undefined) return true;
+			const from = pick(note);
+			log.push(`move ${from.path} -> ${to}`);
+			await backing.move(from, to);
+			return true;
+		}
+		log.push(`delete ${file.path}`);
+		await backing.delete(file);
+		return true;
+	};
+
 	const step = async (): Promise<void> => {
 		if (await recode()) return;
+		if (await attach()) return;
 		const roll = next();
 		const someFile = files(backing);
 		const someFolder = folders(backing);
@@ -279,22 +337,37 @@ const createRemote = (seed: number, backing: FakeProvider, encodings = false) =>
 /** Fewer for the run with encodings in it: the same walk, and twice the suite otherwise. */
 const ENCODING_SEEDS = 40;
 
+/** And for the run with files that are not notes in it, for the same reason. */
+const ATTACHMENT_SEEDS = 40;
+
 const RUNS = [
-	{ title: 'is followed exactly by a pull after every burst', encodings: false, seeds: SEEDS },
+	{
+		title: 'is followed exactly by a pull after every burst',
+		encodings: false,
+		attached: false,
+		seeds: SEEDS,
+	},
 	{
 		title: 'holds exactly the files that are UTF-8 text, as they come and go',
 		encodings: true,
+		attached: false,
 		seeds: ENCODING_SEEDS,
+	},
+	{
+		title: 'holds a row for every file that is not a note, as they come and go',
+		encodings: false,
+		attached: true,
+		seeds: ATTACHMENT_SEEDS,
 	},
 ];
 
 describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
-	describe.each(RUNS)('$title', ({ encodings, seeds }) => {
+	describe.each(RUNS)('$title', ({ encodings, attached, seeds }) => {
 		it.each(Array.from({ length: seeds }, (__, seed) => seed + 1))('seed %i', async (seed) => {
 			const { backing, adapter } = make();
 			await adapter.ensureRoot();
 			const store = createMemoryStore();
-			const remote = createRemote(seed, backing, encodings);
+			const remote = createRemote(seed, backing, encodings, attached);
 			// What each page said, for the trace a failure prints.
 			const reporting: StorageProvider = {
 				...adapter,
@@ -360,8 +433,23 @@ describe.each(CASES)('a remote changed at random, over $name', ({ make }) => {
 					remote.trace()
 				).toEqual(
 					files(backing)
-						.filter((entry) => backing.contentAt(entry.path) === undefined)
+						.filter(
+							(entry) => isNote(entry) && backing.contentAt(entry.path) === undefined
+						)
 						.map((entry) => `${entry.path} ${entry.remoteId}`)
+						.sort()
+				);
+				// And a row for every file that is not a note, bound to it, at its
+				// path, of its size — never its bytes, which a pull does not read.
+				expect(
+					store
+						.files()
+						.map((file) => `${file.path} ${file.remoteId ?? ''} ${String(file.size)}`)
+						.sort(),
+					remote.trace()
+				).toEqual(
+					attachments(backing)
+						.map((entry) => `${entry.path} ${entry.remoteId} ${String(entry.size)}`)
 						.sort()
 				);
 				expect(

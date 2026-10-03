@@ -558,13 +558,20 @@ export type PullChange =
 	  }>
 	| Readonly<{
 			/**
-			 * A file a rescan did not return, where the provider said its own copy
-			 * may be what lost it (`reupload-note`). Where this device holds the
-			 * bytes, the row forgets its remote, the bytes are held until they are
-			 * up, and an `upload` is queued; where it does not, nothing can be
-			 * sent, and the row goes. Which of the two is the store's to say: only
-			 * it knows what it holds. A `move-file` queued for it goes either way:
-			 * the upload is to where the row is. An unknown id is a no-op.
+			 * A file gone from the remote that this device still wants there: a
+			 * rescan did not return it where the provider said its own copy may be
+			 * what lost it (`reupload-note`), or the user had moved it here. The
+			 * row forgets its remote and is pending where it is, an `upload` is
+			 * queued, and the bytes, where they are current here, are held until
+			 * they are up. Where they are not, the row is pending all the same:
+			 * its upload finds nothing to send, and the row goes then (`lost-file`).
+			 *
+			 * Pending either way, because the engine cannot see the bytes and has
+			 * to know what the row is after this: a later file in the same batch
+			 * at its path, of its size, is adopted into it, and adopting a row the
+			 * store had dropped would reject the batch on every pull for good
+			 * (#194). A `move-file` queued for it goes: the upload is to where the
+			 * row is. An unknown id is a no-op.
 			 */
 			kind: 'reupload-file';
 			fileId: string;
