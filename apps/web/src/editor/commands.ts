@@ -14,7 +14,7 @@ import {
 } from '@milkdown/kit/preset/commonmark';
 import { insertTableCommand, toggleStrikethroughCommand } from '@milkdown/kit/preset/gfm';
 import type { MarkType } from '@milkdown/kit/prose/model';
-import { type EditorState, NodeSelection } from '@milkdown/kit/prose/state';
+import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 
 import { ATTACHMENT } from './attachment.js';
@@ -103,6 +103,15 @@ const linkAround = (state: EditorState, type: MarkType): { from: number; to: num
 	return found.current;
 };
 
+/** Whether everything inline in `from`–`to` is a file's chip. */
+const onlyChips = (state: EditorState, from: number, to: number): boolean => {
+	const other = { current: false };
+	state.doc.nodesBetween(from, to, (node) => {
+		if (node.isInline && node.type.name !== ATTACHMENT) other.current = true;
+	});
+	return !other.current;
+};
+
 /**
  * Make the selection a link to `href`, or point the link it is already in
  * somewhere else.
@@ -116,10 +125,10 @@ const linkAround = (state: EditorState, type: MarkType): { from: number; to: num
  * a link with no words in it cannot be seen or clicked.
  *
  * A file's chip is never put in a link (#187): it is a link already, and in
- * markdown one inside another is two broken ones. A chip selected alone is
- * left as it is — not linked and unlinked again, which would be an edit of
- * nothing, and a note dirty for it — and one inside a selection is left out of
- * the link.
+ * markdown one inside another is two broken ones. A selection of nothing but
+ * chips — one selected whole, or one Shift+Arrow has gone over — is left as it
+ * is: not linked and unlinked again, which would be an edit of nothing, and a
+ * note dirty for it. A chip inside a selection is left out of the link.
  */
 export const setLink =
 	(href: string) =>
@@ -128,12 +137,10 @@ export const setLink =
 		const { state } = view;
 		const type = state.schema.marks[LINK_MARK];
 		if (type === undefined) return;
-		const { selection } = state;
-		if (selection instanceof NodeSelection && selection.node.type.name === ATTACHMENT) return;
-
 		const mark = type.create({ href });
 		const around = linkAround(state, type);
-		const { from, to, empty } = selection;
+		const { from, to, empty } = state.selection;
+		if (!empty && onlyChips(state, from, to)) return;
 
 		const tr = () => {
 			if (around !== null) return state.tr.addMark(around.from, around.to, mark);

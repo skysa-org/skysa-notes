@@ -1913,6 +1913,12 @@ button.danger {
 	user-select: none;
 }
 
+/* From the chip's end, where from its start it would run off the editor. */
+.attachment-actions[data-align='end'] {
+	inset-inline-start: auto;
+	inset-inline-end: 0;
+}
+
 /* `display` above would otherwise show it whatever `hidden` says. */
 .attachment-actions[hidden] {
 	display: none;

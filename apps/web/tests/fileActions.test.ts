@@ -40,7 +40,7 @@ interface Options {
 
 const fakeBrowser = ({ tab = true, share = 'none' }: Options = {}) => {
 	const did: string[] = [];
-	const files: File[] = [];
+	const files: Blob[] = [];
 	const browser: FileBrowser = {
 		openTab: () => {
 			did.push('open tab');
@@ -67,7 +67,7 @@ const fakeBrowser = ({ tab = true, share = 'none' }: Options = {}) => {
 			return Promise.resolve();
 		},
 		urlFor: (blob) => {
-			files.push(blob instanceof File ? blob : fileNamed('blob'));
+			files.push(blob);
 			return 'blob:test/1';
 		},
 	};
@@ -86,6 +86,18 @@ describe('opening a file', () => {
 		await opening;
 
 		expect(did).toEqual(['open tab', 'show blob:test/1']);
+		expect(files[0]?.type).toBe('application/pdf');
+	});
+
+	it('shows the file in the tab as what its name says, whatever type it came with', async () => {
+		const { host, answer } = fakeHost();
+		const { browser, files } = fakeBrowser();
+
+		const opening = openFile({ host, href: 'q3.pdf', label: 'Q3.pdf', browser });
+		// A host that got the type wrong: as html, this origin would run it.
+		answer({ state: 'ready', file: fileNamed('q3.pdf', 'text/html') });
+		await opening;
+
 		expect(files[0]?.type).toBe('application/pdf');
 	});
 

@@ -161,6 +161,18 @@ const button = (icon: IconName, label: string): HTMLButtonElement => {
 const open = (host: AttachmentHost, node: ProseNode, browser?: FileBrowser): Promise<void> =>
 	openFile({ host, href: attributeOf(node, 'href'), label: shownName(node), browser });
 
+/** A click that opens a chip rather than selecting it: Cmd or Ctrl held. */
+const opensOnClick = (event: MouseEvent): boolean => event.metaKey || event.ctrlKey;
+
+/** What the keyboard can do with a chip selected whole (`chipKey`). */
+interface ChipKeys {
+	readonly open: () => void;
+	readonly toBar: () => void;
+}
+
+/** Each chip's, by the element its view draws: the editor's props have only the view to ask. */
+const chipKeys = new WeakMap<Node, ChipKeys>();
+
 export const attachmentView =
 	(
 		host: AttachmentHost,
@@ -241,7 +253,21 @@ export const attachmentView =
 			busy(() => open(host, held.current, browser));
 		});
 		chip.addEventListener('click', (event) => {
-			if (event.metaKey || event.ctrlKey) busy(() => open(host, held.current, browser));
+			if (opensOnClick(event)) busy(() => open(host, held.current, browser));
+		});
+		// Back to the chip, still selected, from a bar reached with Tab.
+		actions.addEventListener('keydown', (event) => {
+			if (event.key !== 'Escape') return;
+			event.preventDefault();
+			view.focus();
+		});
+		chipKeys.set(dom, {
+			open: () => {
+				busy(() => open(host, held.current, browser));
+			},
+			toBar: () => {
+				opener.focus();
+			},
 		});
 
 		describe();
@@ -258,6 +284,15 @@ export const attachmentView =
 			selectNode: () => {
 				dom.setAttribute('data-selected', '');
 				actions.removeAttribute('hidden');
+				// Under the chip from its start, unless that runs it off the
+				// editor's edge — a chip at the end of a line on a phone — when
+				// it is put under the chip from its end instead.
+				actions.removeAttribute('data-align');
+				const room = view.dom.getBoundingClientRect();
+				const bar = actions.getBoundingClientRect();
+				if (bar.right > room.right || bar.left < room.left) {
+					actions.setAttribute('data-align', 'end');
+				}
 			},
 
 			deselectNode: () => {
@@ -277,23 +312,32 @@ export const attachmentViewPlugin = $view(
 );
 
 /**
- * Enter on a chip selected whole opens it, as Enter on a link does anywhere
- * else. Asked before the keymaps (an editor prop, not a plugin's), since
- * `splitBlock` would otherwise replace the chip with a new paragraph. Only
- * Enter alone: Mod+Enter ticks a task, wherever the selection is.
+ * The keys a chip selected whole takes: Enter opens it, as Enter on a link does
+ * anywhere else, and Tab goes into its bar, which is the keyboard's way to
+ * Download and Remove (Escape comes back). Asked before the keymaps (an editor
+ * prop, not a plugin's): `splitBlock` would otherwise replace the chip with a
+ * new paragraph, and in a list Tab would indent the item. Only the key alone:
+ * Mod+Enter ticks a task, and Shift+Tab is still the list's.
  */
-export const openOnEnter = (
-	host: AttachmentHost,
-	view: EditorView,
-	event: KeyboardEvent,
-	browser?: FileBrowser
-): boolean => {
-	if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) {
-		return false;
-	}
+export const chipKey = (view: EditorView, event: KeyboardEvent): boolean => {
+	if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
+	if (event.key !== 'Enter' && event.key !== 'Tab') return false;
 	const { selection } = view.state;
 	if (!(selection instanceof NodeSelection) || selection.node.type.name !== ATTACHMENT)
 		return false;
-	void open(host, selection.node, browser);
+	const keys = chipKeys.get(view.nodeDOM(selection.from) ?? view.dom);
+	if (keys === undefined) return false;
+	if (event.key === 'Enter') keys.open();
+	else keys.toBar();
 	return true;
 };
+
+/**
+ * A click that opens a chip is the chip's, and selects nothing. ProseMirror
+ * would otherwise take Cmd-click (Ctrl-click off a Mac) on a chip already
+ * selected as a click on the paragraph around it, and select that: the file
+ * opens in a tab, and the next key pressed back in the note replaces the
+ * paragraph. For the editor's `handleClickOn`, which is asked before that.
+ */
+export const claimsClick = (node: ProseNode, event: MouseEvent): boolean =>
+	node.type.name === ATTACHMENT && opensOnClick(event);

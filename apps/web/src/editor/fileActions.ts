@@ -1,4 +1,4 @@
-import { contentTypeOf, downloadName, opensInTab } from '@skysa/core';
+import { contentTypeOf, downloadName, opensInTab, safeOpenType } from '@skysa/core';
 
 import { COARSE_POINTER } from '../components/layout.js';
 import { DOWNLOAD_GRACE_MS } from '../store/exportNotes.js';
@@ -175,7 +175,9 @@ export const openFile = async (request: FileRequest): Promise<void> => {
 		return;
 	}
 	if (tab !== undefined && opensInTab(file.name)) {
-		tab.show(browser.urlFor(file));
+		// Typed here, where the tab is given it, rather than trusted from
+		// whoever made the `File`: what this origin opens is the allowlist's.
+		tab.show(browser.urlFor(new Blob([file], { type: safeOpenType(file.name) })));
 		return;
 	}
 	tab?.close();

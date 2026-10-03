@@ -314,6 +314,7 @@ describe('a chip', () => {
 			);
 		enter({});
 
+		expect(mounted.chips()[0]?.getAttribute('aria-busy')).toBe('true');
 		expect(asked).toEqual(['a.zip']);
 		expect(mounted.view.state.doc.eq(before)).toBe(true);
 		// Mod+Enter is the task list's, wherever the selection is, and
@@ -323,6 +324,87 @@ describe('a chip', () => {
 		enter({ shiftKey: true });
 		expect(asked).toEqual(['a.zip']);
 	});
+
+	it("goes into its bar on Tab, the keyboard's way to Download, and back on Escape", async () => {
+		const mounted = await mount('- one\n  - A [a.zip](a.zip) b.\n');
+		const focus = vi.spyOn(mounted.view, 'focus');
+		// Asked each time: the lift below draws the chip again.
+		const open = () => mounted.chips()[0]?.querySelector('[aria-label="Open"]');
+		const key = (target: EventTarget | null | undefined, init: KeyboardEventInit) =>
+			target?.dispatchEvent(
+				new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+			);
+
+		// Shift+Tab is still the list's.
+		selectChip(mounted);
+		key(mounted.view.dom, { key: 'Tab', shiftKey: true });
+		expect(mounted.markdown()).toBe('- one\n- A [a.zip](a.zip) b.\n');
+		expect(document.activeElement).not.toBe(open());
+
+		selectChip(mounted);
+		key(mounted.view.dom, { key: 'Tab' });
+
+		expect(document.activeElement).toBe(open());
+		// And Tab is not: the item is not put back under the one above it.
+		expect(mounted.markdown()).toBe('- one\n- A [a.zip](a.zip) b.\n');
+		key(open(), { key: 'Escape' });
+		expect(focus).toHaveBeenCalled();
+		expect(mounted.view.state.selection).toBeInstanceOf(NodeSelection);
+	});
+
+	it('stays the one thing selected when a click that opens it lands on it selected', async () => {
+		const { host, asked } = fakeHost();
+		const mounted = await mount('A [a.zip](a.zip) b.\n', host);
+		const at = mounted.chipAt();
+		// Where jsdom, which lays nothing out, cannot say what is under the pointer.
+		vi.spyOn(mounted.view, 'posAtCoords').mockReturnValue({ pos: at, inside: at });
+		const link = mounted.chips()[0]?.querySelector('[role="link"]');
+		const click = (held: MouseEventInit) => {
+			['mousedown', 'mouseup', 'click'].forEach((type) => {
+				link?.dispatchEvent(
+					new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, ...held })
+				);
+			});
+		};
+		// A plain click is still ProseMirror's, and selects the chip.
+		mounted.view.dispatch(
+			mounted.view.state.tr.setSelection(Selection.atStart(mounted.view.state.doc))
+		);
+		click({});
+		expect(mounted.view.state.selection).toBeInstanceOf(NodeSelection);
+
+		click({ metaKey: true });
+		click({ ctrlKey: true });
+
+		expect(asked).toEqual(['a.zip', 'a.zip']);
+		const { selection } = mounted.view.state;
+		expect(selection).toBeInstanceOf(NodeSelection);
+		expect(selection.from).toBe(at);
+	});
+
+	it.each([
+		['runs off the end', { left: 250, right: 350 }, 'end'],
+		['runs off the start', { left: -50, right: 50 }, 'end'],
+		['fits', { left: 100, right: 200 }, null],
+	])(
+		'puts its bar under it from its end only where from its start it %s',
+		async (_, bar, align) => {
+			const mounted = await mount('A [a.zip](a.zip) b.\n');
+			const actions = mounted.chips()[0]?.querySelector('.attachment-actions');
+			if (!(actions instanceof HTMLElement)) throw new Error('no bar');
+			vi.spyOn(mounted.view.dom, 'getBoundingClientRect').mockReturnValue({
+				left: 0,
+				right: 300,
+			} as DOMRect);
+			vi.spyOn(actions, 'getBoundingClientRect').mockReturnValue(bar as DOMRect);
+			// Flipped once already, so that fitting has to say so.
+			actions.setAttribute('data-align', 'end');
+
+			selectChip(mounted);
+
+			expect(actions.getAttribute('data-align')).toBe(align);
+		}
+	);
 
 	it('leaves Enter alone anywhere but on a chip, a picture selected whole included', async () => {
 		const { host, asked } = fakeHost();

@@ -211,6 +211,20 @@ describe('links', () => {
 		expect(dispatch).not.toHaveBeenCalled();
 	});
 
+	it('leaves it alone, too, where a selection has gone over it and nothing else', async () => {
+		const withCtx = await mount('See [a.zip](a.zip) now\n');
+		const dispatch = withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			// What Shift+Arrow across a chip makes: words of nothing but it.
+			view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 5, 6)));
+			return vi.spyOn(view, 'dispatch');
+		});
+
+		withCtx(setLink('https://example.test/a'));
+
+		expect(dispatch).not.toHaveBeenCalled();
+	});
+
 	it('keeps a file beside the note out of a link the cursor is in', async () => {
 		const withCtx = await mount('[go](https://example.test/a) and [a.zip](a.zip)\n');
 		withCtx(cursorIn('go'));
@@ -218,6 +232,18 @@ describe('links', () => {
 		withCtx(setLink('https://example.test/b'));
 
 		expect(withCtx(currentMarkdown)).toBe('[go](https://example.test/b) and [a.zip](a.zip)\n');
+	});
+
+	it('writes the URL as its own words at the end of a line, too', async () => {
+		const withCtx = await mount('plain\n');
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 6)));
+		});
+
+		withCtx(setLink('https://example.test/a'));
+
+		expect(withCtx(currentMarkdown)).toBe('plain<https://example.test/a>\n');
 	});
 
 	it('writes the URL as its own words when nothing is selected', async () => {
