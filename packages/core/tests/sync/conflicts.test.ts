@@ -11,6 +11,7 @@ import {
 	conflictFilename,
 	conflictFolderName,
 	conflictFolderPath,
+	conflictNameKeepingExtension,
 	conflictPath,
 	conflictStamp,
 } from '../../src/sync/conflicts.js';
@@ -199,6 +200,56 @@ describe('conflictFolderName', () => {
 		// `conflictFilename` strips the extension; this must not, or a folder
 		// someone called `notes.md` comes back as `notes`.
 		expect(conflictFolderName('notes.md', AT)).toBe('notes.md (conflict 2026-09-15T14-32)');
+	});
+});
+
+describe('conflictNameKeepingExtension', () => {
+	// For a file that is not a note — a picture beside one, say. Given `.md` it
+	// would stop being a picture and start being a note the engine tries to read.
+	it('puts the stamp before the file’s own extension', () => {
+		expect(conflictNameKeepingExtension('photo-3f9a1c2b.png', AT)).toBe(
+			'photo-3f9a1c2b (conflict 2026-09-15T14-32).png'
+		);
+		expect(conflictNameKeepingExtension('Q3 Report.PDF', AT)).toBe(
+			'Q3 Report (conflict 2026-09-15T14-32).PDF'
+		);
+	});
+
+	it('never gives a file that is not a note the extension of one', () => {
+		['photo.png', 'README', 'archive.tar.gz', '.env', 'minutes.2026-01-01 board'].forEach(
+			(name) => {
+				expect(conflictNameKeepingExtension(name, AT).toLowerCase()).not.toMatch(/\.md$/);
+			}
+		);
+	});
+
+	it('takes only the last extension, and none from a dot in the stem', () => {
+		expect(conflictNameKeepingExtension('archive.tar.gz', AT)).toBe(
+			'archive.tar (conflict 2026-09-15T14-32).gz'
+		);
+		// Too long, and spaced, to be an extension: the whole name is the stem.
+		expect(conflictNameKeepingExtension('minutes.2026-01-01 with the board', AT)).toBe(
+			'minutes.2026-01-01 with the board (conflict 2026-09-15T14-32)'
+		);
+	});
+
+	it('stamps the end of a name with no extension, or one that is only a dot and a name', () => {
+		expect(conflictNameKeepingExtension('README', AT)).toBe(
+			'README (conflict 2026-09-15T14-32)'
+		);
+		expect(conflictNameKeepingExtension('.env', AT)).toBe('.env (conflict 2026-09-15T14-32)');
+	});
+
+	it('numbers a second copy before the extension, folding case as every name does', () => {
+		expect(
+			conflictNameKeepingExtension('photo.png', AT, ['PHOTO (conflict 2026-09-15T14-32).PNG'])
+		).toBe('photo (conflict 2026-09-15T14-32)-2.png');
+	});
+
+	it('fits a long name by cutting the stem, never the extension', () => {
+		const copy = conflictNameKeepingExtension(`${'漢'.repeat(80)}.jpeg`, AT);
+		expect(new TextEncoder().encode(copy).length).toBeLessThanOrEqual(255);
+		expect(copy.endsWith(' (conflict 2026-09-15T14-32).jpeg')).toBe(true);
 	});
 });
 
