@@ -43,6 +43,7 @@ import {
 	useElementWidth,
 	useMediaQuery,
 } from './layout.js';
+import { useNoteAttachments } from './noteAttachments.js';
 import { Outline } from './Outline.js';
 import { UnsupportedBanner, useUnsupported } from './unsupported.js';
 
@@ -320,6 +321,7 @@ const NoteBody = ({
 	onBody: (element: HTMLDivElement | null) => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
+	const attachments = useNoteAttachments(note);
 	const attach = useCallback(
 		(element: HTMLDivElement | null) => {
 			body.current = element;
@@ -347,6 +349,7 @@ const NoteBody = ({
 					onUnsupported={onUnsupported}
 					onAdopted={onAdopted}
 					toolbar={toolbar}
+					attachments={attachments}
 				/>
 			)}
 			{showOutline && (

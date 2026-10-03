@@ -1,5 +1,5 @@
 import { TooltipProvider } from '@milkdown/kit/plugin/tooltip';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { useInstance } from '@milkdown/react';
 import { usePluginViewContext } from '@prosemirror-adapter/react';
@@ -50,6 +50,10 @@ export const shouldShowInlineToolbar =
 
 		if (mediaMatches(COARSE_POINTER)) return false;
 		if (codeBlockAround(state) !== null) return false;
+		// A picture selected whole holds no text to format, and a mark over it
+		// changes nothing a reader sees (#187).
+		if (selection instanceof NodeSelection && selection.node.type.name === 'image')
+			return false;
 
 		if (!view.editable) return false;
 		if (!view.hasFocus() && !content.contains(document.activeElement)) return false;

@@ -9,6 +9,7 @@ import type { StructuralDifference } from '@skysa/core';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { useCodeDisplay } from '../store/hooks.js';
+import type { AttachmentHost } from './attachHost.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
@@ -51,6 +52,12 @@ export interface RichEditorProps {
 	 * correctly, and a toolbar that is not there cannot be tabbed into.
 	 */
 	toolbar?: ToolbarPlacement | 'none';
+	/**
+	 * What shows the files beside the note (`attachHost.ts`). Read when the
+	 * editor is built, which is once per note: it answers for the note as it
+	 * is now, so it needs no rebuilding when the note moves.
+	 */
+	attachments?: AttachmentHost;
 }
 
 /**
@@ -82,6 +89,7 @@ const EditorBody = ({
 	onUnsupported,
 	onAdopted,
 	toolbar = 'top',
+	attachments,
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
@@ -137,6 +145,7 @@ const EditorBody = ({
 					slash: { view: pluginView({ component: SlashMenu }) },
 					tooltip: { view: pluginView({ component: InlineToolbar }) },
 				},
+				attachments,
 			}),
 		[noteId]
 	);

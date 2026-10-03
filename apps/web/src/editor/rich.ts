@@ -14,7 +14,11 @@ import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { history } from '@milkdown/kit/plugin/history';
 import { slashFactory } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
-import { commonmark, remarkPreserveEmptyLinePlugin } from '@milkdown/kit/preset/commonmark';
+import {
+	commonmark,
+	imageSchema,
+	remarkPreserveEmptyLinePlugin,
+} from '@milkdown/kit/preset/commonmark';
 import {
 	extendListItemSchemaForTask,
 	gfm,
@@ -35,6 +39,7 @@ import {
 	toLf,
 } from '@skysa/core';
 
+import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { autoLanguagePlugin } from './autoLanguage.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
 import { codeDisplay, type CodeDisplayStore } from './codeDisplay.js';
@@ -42,6 +47,7 @@ import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
+import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } from './image.js';
 import { createLanguageSource } from './languages.js';
 import { richWithoutNul } from './noNul.js';
 import { tailPlugin } from './tail.js';
@@ -97,6 +103,11 @@ export interface RichEditorSetup {
 	 * of its own so it is not reading whatever the last test left behind.
 	 */
 	display?: CodeDisplayStore;
+	/**
+	 * What shows the files beside the note: the pictures in it. None, and a
+	 * picture beside the note says it is not on this device (`NO_ATTACHMENTS`).
+	 */
+	attachments?: AttachmentHost;
 }
 
 /**
@@ -290,6 +301,7 @@ export const createRichEditor = ({
 	onStateChange,
 	menus,
 	display = codeDisplay,
+	attachments,
 }: RichEditorSetup): Editor =>
 	Editor.make()
 		.config((ctx) => {
@@ -299,6 +311,8 @@ export const createRichEditor = ({
 			ctx.update(tableCellSchema.key, cellWithoutEmptyLine);
 			ctx.update(tableHeaderSchema.key, cellWithoutEmptyLine);
 			ctx.update(extendListItemSchemaForTask.key, itemWithoutEmptyLine);
+			ctx.update(imageSchema.key, imageWithoutStrayTitles);
+			if (attachments !== undefined) ctx.set(attachHostCtx.key, attachments);
 			ctx.update(editorViewOptionsCtx, (options) => ({
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': 'Note body' },
@@ -307,6 +321,7 @@ export const createRichEditor = ({
 			ctx.set(slash.key, menus.slash);
 			ctx.set(tooltip.key, menus.tooltip);
 		})
+		.use(attachHostCtx)
 		.use(commonmarkWithoutBreakEater)
 		// After the preset, so that its html transformer has already put a
 		// block of html into a paragraph for this to find.
@@ -321,6 +336,9 @@ export const createRichEditor = ({
 		// The code block: its tools, the colours, the gutter, and the guess at
 		// what language it is in.
 		.use(codeBlockViewPlugin(display))
+		// A picture beside the note, from the note's storage, when it is on screen.
+		.use(imageViewPlugin)
+		.use(unloadablePicturesInWords)
 		.use($prose(() => codeHighlightPlugin(languages)))
 		.use($prose(() => codeActivePlugin))
 		.use($prose(() => codeNumbersPlugin(display)))
