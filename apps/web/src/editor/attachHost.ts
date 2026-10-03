@@ -26,6 +26,8 @@ export type Shown =
 	| { state: 'unavailable' }
 	/** The download went wrong. Worth asking again. */
 	| { state: 'failed' }
+	/** A file no browser can be relied on to draw (`showsInline`): not downloaded. */
+	| { state: 'unsupported' }
 	/** Large enough to download only when asked to (`large: true`). */
 	| { state: 'large'; size: number }
 	/** The asker stopped waiting. */

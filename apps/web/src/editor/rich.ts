@@ -47,7 +47,7 @@ import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
-import { imageViewPlugin, imageWithoutStrayTitles } from './image.js';
+import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } from './image.js';
 import { createLanguageSource } from './languages.js';
 import { richWithoutNul } from './noNul.js';
 import { tailPlugin } from './tail.js';
@@ -338,6 +338,7 @@ export const createRichEditor = ({
 		.use(codeBlockViewPlugin(display))
 		// A picture beside the note, from the note's storage, when it is on screen.
 		.use(imageViewPlugin)
+		.use(unloadablePicturesInWords)
 		.use($prose(() => codeHighlightPlugin(languages)))
 		.use($prose(() => codeActivePlugin))
 		.use($prose(() => codeNumbersPlugin(display)))

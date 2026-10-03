@@ -17,6 +17,7 @@ import {
 } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import type { FileRead } from '../src/sync/fileReads.js';
+import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
 
 const opened: NotesDatabase[] = [];
 
@@ -149,13 +150,16 @@ describe('a picture beside the open note', () => {
 		expect(await show('cat.png')).toEqual(shown);
 	});
 
-	it('opens a file that is not a picture as nothing a browser would run', async () => {
-		const { db, show, made } = setup();
+	it('downloads nothing that is not a kind of picture a browser can be relied on to draw', async () => {
+		const { db, show, readFile } = setup();
 		await db.files.put(row('notes/page.html'));
+		await db.files.put(row('notes/report.pdf'));
+		await db.files.put(row('notes/IMG_0001.heic'));
 
-		await show('page.html');
-
-		expect(made[0]?.type).toBe('application/octet-stream');
+		expect(await show('page.html')).toEqual({ state: 'unsupported' });
+		expect(await show('report.pdf')).toEqual({ state: 'unsupported' });
+		expect(await show('IMG_0001.heic')).toEqual({ state: 'unsupported' });
+		expect(readFile).not.toHaveBeenCalled();
 	});
 
 	it('draws an SVG from a data: URL, never a blob: one, which would be the app', async () => {
@@ -235,13 +239,26 @@ describe('the host of the open note', () => {
 		const readFile = vi.fn<NoteAttachmentsOptions['readFile']>(() =>
 			Promise.resolve({ state: 'offline' })
 		);
+		const statuses = new Set<(status: SchedulerStatus) => void>();
+		const subscribe: SyncScheduler['subscribe'] = (listener) => {
+			statuses.add(listener);
+			return () => {
+				statuses.delete(listener);
+			};
+		};
+		const synced = (lastSyncAt?: number) => {
+			statuses.forEach((listener) => {
+				listener({ phase: 'idle', conflicts: [], lastSyncAt });
+			});
+		};
 		const hook = renderHook(
-			({ current }: { current: NoteRecord }) => useNoteAttachments(current, readFile, db),
+			({ current }: { current: NoteRecord }) =>
+				useNoteAttachments(current, { readFile, db, subscribe }),
 			{ initialProps: { current: note } }
 		);
 		const heard = vi.fn();
 		hook.result.current.changed(heard);
-		return { db, note, hook, heard };
+		return { db, note, hook, heard, synced, statuses };
 	};
 
 	it('is one host for the note, whatever of it changes, and tells it when the note moves', async () => {
@@ -275,6 +292,25 @@ describe('the host of the open note', () => {
 		});
 
 		expect(heard).toHaveBeenCalledTimes(1);
+	});
+
+	it('tells its views when a sync has run, which a source that could not be read may now be', async () => {
+		const { hook, heard, synced, statuses } = await mounted();
+		heard.mockClear();
+
+		act(() => {
+			synced(1000);
+			// Every other status a run goes through says nothing new.
+			synced(1000);
+		});
+		expect(heard).toHaveBeenCalledTimes(1);
+		act(() => {
+			synced(2000);
+		});
+		expect(heard).toHaveBeenCalledTimes(2);
+
+		hook.unmount();
+		expect(statuses.size).toBe(0);
 	});
 
 	it('is a new host for another note, the old one letting go of its URLs', async () => {

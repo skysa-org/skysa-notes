@@ -1,4 +1,4 @@
-import { basename, drawsFromData, safeOpenType } from '@skysa/core';
+import { basename, drawsFromData, safeOpenType, showsInline } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -9,6 +9,7 @@ import { heldFile } from '../store/fileCache.js';
 import { fileForLink, listFilePaths } from '../store/files.js';
 import type { FileRead } from '../sync/fileReads.js';
 import { syncScheduler } from '../sync/runtime.js';
+import type { SyncScheduler } from '../sync/scheduler.js';
 
 /**
  * The files beside one open note, for its editor (#187): `AttachmentHost`,
@@ -100,6 +101,7 @@ export const createNoteAttachments = ({
 			const file = await fileForLink(db, { connectionId, notePath: path, href });
 			if (file === undefined) return { state: 'missing' };
 			const name = basename(file.path);
+			if (!showsInline(name)) return { state: 'unsupported' };
 			const svg = drawsFromData(name);
 			// The bytes, not only the file: a version the remote has moved on to
 			// is another picture, under another URL.
@@ -134,17 +136,29 @@ export const createNoteAttachments = ({
 	};
 };
 
+export interface NoteAttachmentsSources {
+	readonly readFile?: NoteAttachmentsOptions['readFile'];
+	readonly db?: NotesDatabase;
+	/** Where to hear that a sync has run: the scheduler's status. */
+	readonly subscribe?: SyncScheduler['subscribe'];
+}
+
 /**
  * The host for the note open now, one per note: the same note moved, renamed
  * or bound to a source keeps it, and its views are told to look again
  * (`notify`) rather than rebuilt. Told as well when the source's files change —
- * a picture that was missing may have arrived with a pull — and when the
- * network comes back.
+ * a picture that was missing may have arrived with a pull — when the network
+ * comes back, and when a sync has run to the end of a pull: a source that
+ * could not be read from, its token refused or its account reconnected, can
+ * be now.
  */
 export const useNoteAttachments = (
 	note: NoteRecord,
-	readFile: NoteAttachmentsOptions['readFile'] = syncScheduler.readFile,
-	db: NotesDatabase = appDb
+	{
+		readFile = syncScheduler.readFile,
+		db = appDb,
+		subscribe = syncScheduler.subscribe,
+	}: NoteAttachmentsSources = {}
 ): NoteAttachments => {
 	const current = useRef<Pick<NoteRecord, 'connectionId' | 'path'>>(note);
 	useEffect(() => {
@@ -189,6 +203,15 @@ export const useNoteAttachments = (
 			window.removeEventListener('online', online);
 		};
 	}, [host]);
+
+	useEffect(() => {
+		const synced: { current?: number } = {};
+		return subscribe(({ lastSyncAt }) => {
+			if (lastSyncAt === synced.current) return;
+			synced.current = lastSyncAt;
+			host.notify();
+		});
+	}, [host, subscribe]);
 
 	return host;
 };

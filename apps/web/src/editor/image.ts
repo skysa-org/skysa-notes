@@ -1,9 +1,10 @@
 import type { Ctx } from '@milkdown/kit/ctx';
 import { imageSchema } from '@milkdown/kit/preset/commonmark';
-import type { Node as ProseNode } from '@milkdown/kit/prose/model';
-import type { NodeView } from '@milkdown/kit/prose/view';
+import { Fragment, type Node as ProseNode, type Schema, Slice } from '@milkdown/kit/prose/model';
+import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
+import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { NodeSchema } from '@milkdown/kit/transformer';
-import { $view } from '@milkdown/kit/utils';
+import { $prose, $view } from '@milkdown/kit/utils';
 import { classifyHref } from '@skysa/core';
 
 import { attachHostCtx, type AttachmentHost, type Shown } from './attachHost.js';
@@ -36,6 +37,7 @@ const REASONS: Readonly<Partial<Record<State, string>>> = {
 	offline: 'not downloaded yet, and this device is offline',
 	unavailable: 'not on this device',
 	failed: 'could not be downloaded',
+	unsupported: 'not a kind of picture this app shows',
 	blocked: 'its address is not one this app loads',
 	broken: 'could not be shown',
 };
@@ -55,8 +57,25 @@ const attributeOf = (node: ProseNode, name: 'src' | 'alt' | 'title'): string => 
 	return typeof value === 'string' ? value : '';
 };
 
-/** Start `work` once `element` is on screen, or at once where nothing can say when. */
-const whenVisible = (element: Element, work: () => void): (() => void) => {
+/**
+ * The nearest of `element` and its ancestors that scrolls, or none where the
+ * page itself does. An observer's margin widens only its root: watched against
+ * the viewport, a picture in an editor that scrolls inside the page is not
+ * seen until it is on screen, however wide the margin.
+ */
+const scrollerOf = (element: Element | null): Element | null => {
+	if (element === null) return null;
+	const { overflowY } = getComputedStyle(element);
+	return /^(?:auto|scroll|overlay)$/.test(overflowY)
+		? element
+		: scrollerOf(element.parentElement);
+};
+
+/**
+ * Start `work` once `element` is within a screen of being seen in `editor`, or
+ * at once where nothing can say when.
+ */
+const whenVisible = (element: Element, editor: Element, work: () => void): (() => void) => {
 	if (typeof IntersectionObserver === 'undefined') {
 		work();
 		return () => undefined;
@@ -68,7 +87,7 @@ const whenVisible = (element: Element, work: () => void): (() => void) => {
 			work();
 		},
 		// A screen ahead, so a picture is on its way before it is reached.
-		{ rootMargin: '100% 0px' }
+		{ root: scrollerOf(editor), rootMargin: '100% 0px' }
 	);
 	observer.observe(element);
 	return () => {
@@ -77,7 +96,7 @@ const whenVisible = (element: Element, work: () => void): (() => void) => {
 };
 
 const imageView =
-	(host: AttachmentHost) =>
+	(host: AttachmentHost, editor: Element) =>
 	(initial: ProseNode): NodeView => {
 		const held = { current: initial };
 		// What the picture shown is, and how to let go of it: the request out
@@ -88,6 +107,9 @@ const imageView =
 		const state = { current: 'loading' as State };
 		// A large picture's size, kept for saying it again when the alt changes.
 		const size = { current: 0 };
+		// The user asked for this one whatever its size (Show). Kept for asking
+		// again — Try again, a notice — until the link names another picture.
+		const wanted = { current: false };
 
 		const img = document.createElement('img');
 		img.setAttribute('referrerpolicy', 'no-referrer');
@@ -103,13 +125,22 @@ const imageView =
 		dom.setAttribute('class', 'note-image');
 		dom.append(img, reason, action);
 
+		const reasonFor = (next: State): string | undefined => {
+			if (next === 'large') return `${megabytes(size.current)}, not downloaded yet`;
+			// A download the user waits on, which may be long, says so.
+			if (next === 'loading' && wanted.current)
+				return `downloading ${megabytes(size.current)}`;
+			return REASONS[next];
+		};
+
 		const say = (next: State, bytes?: number) => {
 			if (bytes !== undefined) size.current = bytes;
 			state.current = next;
 			dom.setAttribute('data-state', next);
+			if (next === 'loading') dom.setAttribute('aria-busy', 'true');
+			else dom.removeAttribute('aria-busy');
 			const alt = attributeOf(held.current, 'alt');
-			const why =
-				next === 'large' ? `${megabytes(size.current)}, not downloaded yet` : REASONS[next];
+			const why = reasonFor(next);
 			reason.replaceChildren(
 				why === undefined ? '' : `${alt === '' ? 'Picture' : alt}: ${why}`
 			);
@@ -128,18 +159,23 @@ const imageView =
 			const asking = new AbortController();
 			const kept = { current: (): void => undefined };
 			say('loading');
-			void host.show(src, { signal: asking.signal, large }).then((shown) => {
-				if (asking.signal.aborted) {
-					if (shown.state === 'ready') shown.release();
-					return;
-				}
-				if (shown.state === 'ready') {
-					kept.current = shown.release;
-					draw(shown.url);
-					return;
-				}
-				say(shown.state, shown.state === 'large' ? shown.size : undefined);
-			});
+			void host
+				.show(src, { signal: asking.signal, large })
+				// A host that throws — a store that cannot be read — is a picture
+				// that could not be got, and worth asking for again.
+				.catch((): Shown => ({ state: 'failed' }))
+				.then((shown) => {
+					if (asking.signal.aborted) {
+						if (shown.state === 'ready') shown.release();
+						return;
+					}
+					if (shown.state === 'ready') {
+						kept.current = shown.release;
+						draw(shown.url);
+						return;
+					}
+					say(shown.state, shown.state === 'large' ? shown.size : undefined);
+				});
 			return () => {
 				asking.abort();
 				kept.current();
@@ -147,7 +183,7 @@ const imageView =
 		};
 
 		/** Show what `src` says, letting go of whatever was shown before. */
-		const show = (src: string, large = false) => {
+		const show = (src: string) => {
 			showing.current.stop();
 			showing.current = { src, stop: () => undefined };
 			img.removeAttribute('src');
@@ -162,8 +198,8 @@ const imageView =
 			}
 			say('loading');
 			const asked = { current: (): void => undefined };
-			const unwatch = whenVisible(dom, () => {
-				asked.current = ask(src, large);
+			const unwatch = whenVisible(dom, editor, () => {
+				asked.current = ask(src, wanted.current);
 			});
 			showing.current = {
 				src,
@@ -190,7 +226,8 @@ const imageView =
 			event.preventDefault();
 		});
 		action.addEventListener('click', () => {
-			show(showing.current.src, state.current === 'large');
+			if (state.current === 'large') wanted.current = true;
+			show(showing.current.src);
 		});
 
 		// What a link resolves to can change under a picture that is not shown —
@@ -214,6 +251,7 @@ const imageView =
 				held.current = node;
 				describe();
 				if (attributeOf(node, 'src') !== before) {
+					wanted.current = false;
 					show(attributeOf(node, 'src'));
 					return true;
 				}
@@ -234,7 +272,8 @@ const imageView =
 
 export const imageViewPlugin = $view(
 	imageSchema.node,
-	(ctx: Ctx) => (node: ProseNode) => imageView(ctx.get(attachHostCtx.key))(node)
+	(ctx: Ctx) => (node: ProseNode, view: EditorView) =>
+		imageView(ctx.get(attachHostCtx.key), view.dom)(node)
 );
 
 /**
@@ -244,9 +283,46 @@ export const imageViewPlugin = $view(
  */
 const UNLOADABLE = /^\s*(?:blob|webkit-fake-url|file):/i;
 
+const unloadable = (node: ProseNode): boolean =>
+	node.type.name === 'image' && UNLOADABLE.test(attributeOf(node, 'src'));
+
+/** `fragment` with each picture no page can load as its alt text, or nothing. */
+const inWords = (fragment: Fragment, schema: Schema): Fragment =>
+	Fragment.from(
+		fragment.content.flatMap((node): ProseNode[] => {
+			if (!unloadable(node))
+				return [node.isLeaf ? node : node.copy(inWords(node.content, schema))];
+			const alt = attributeOf(node, 'alt');
+			return alt === '' ? [] : [schema.text(alt, node.marks)];
+		})
+	);
+
+/**
+ * A pasted picture whose source no page can load (`UNLOADABLE`) — Word's and
+ * Outlook's `file:` pictures, a web app's `blob:` preview — is kept as its alt
+ * text: the words were the author's, and the address is nothing. Not for a
+ * picture dragged within the note, which is the user's own and only moving.
+ * And not where that would leave nothing: a paste that only deleted what it
+ * replaced would be worse than a picture saying it cannot be loaded.
+ */
+export const unloadablePicturesInWords = $prose(
+	() =>
+		new Plugin({
+			key: new PluginKey('SKYSA_UNLOADABLE_PICTURES'),
+			props: {
+				transformPasted: (slice, view) => {
+					if (view.dragging !== null) return slice;
+					const content = inWords(slice.content, view.state.schema);
+					if (content.size === 0 && slice.content.size > 0) return slice;
+					return new Slice(content, slice.openStart, slice.openEnd);
+				},
+			},
+		})
+);
+
 /**
  * Milkdown's image, read from and written to the DOM — the clipboard — with
- * three changes:
+ * two changes:
  *
  * - An `alt` is not copied into `title` when an `<img>` is pasted. Milkdown's
  *   own rule does, and a picture pasted from a web page came back
@@ -254,8 +330,8 @@ const UNLOADABLE = /^\s*(?:blob|webkit-fake-url|file):/i;
  * - A picture this app's file is drawn from is written as `data-src`, not
  *   `src`. Copied out as HTML, an `<img src="photo.png">` is a request to
  *   whatever page it is pasted into for a file relative to that page; and read
- *   back, `data-src` is what it was.
- * - An `<img>` whose source no page can load is not taken in (`UNLOADABLE`).
+ *   back, `data-src` is what it was. Any other is written with the same
+ *   `referrerpolicy` the view loads it with.
  *
  * https://github.com/Milkdown/milkdown/blob/v7.22.1/packages/plugins/preset-commonmark/src/node/image.ts
  */
@@ -271,7 +347,7 @@ export const imageWithoutStrayTitles =
 					getAttrs: (dom) => {
 						if (!(dom instanceof HTMLElement)) return false;
 						const src = dom.getAttribute('src') ?? dom.getAttribute('data-src') ?? '';
-						if (src === '' || UNLOADABLE.test(src)) return false;
+						if (src === '') return false;
 						return {
 							src,
 							alt: dom.getAttribute('alt') ?? '',
@@ -286,7 +362,7 @@ export const imageWithoutStrayTitles =
 				return [
 					'img',
 					{
-						[own ? 'data-src' : 'src']: src,
+						...(own ? { 'data-src': src } : { src, referrerpolicy: 'no-referrer' }),
 						alt: attributeOf(node, 'alt'),
 						...(attributeOf(node, 'title') === ''
 							? {}
