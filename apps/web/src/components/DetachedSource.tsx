@@ -9,7 +9,7 @@ import {
 } from '../store/connection.js';
 import { noteRef, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { holdsTextFor } from '../store/detached.js';
-import { hasUnsentDownload } from '../store/exportNotes.js';
+import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
@@ -42,7 +42,7 @@ export interface DetachedSourceProps {
 	/** Start connecting this source's account again, where the server lets the user. */
 	reconnect: ReactNode;
 	/** Hand the notes to the user as a file. Injected: jsdom cannot make a blob URL. */
-	download: (listed: Unsynced) => void;
+	download: (listed: Unsynced) => Promise<void>;
 	/**
 	 * The source has gone, and this panel with it. Called for the focus, which
 	 * was on a button that no longer exists: the caller puts it somewhere that
@@ -233,6 +233,16 @@ export const DetachedSource = ({
 	const name = sourceName(bound) ?? 'A source';
 	const held = unsynced === undefined ? undefined : countOf(unsynced);
 
+	// A download that fails says so here, in the panel's own alert: one that
+	// silently does nothing is a user who goes on to discard, thinking they
+	// have a copy.
+	const save = (shown: Unsynced) => {
+		setProblem(null);
+		void download(shown).catch((error: unknown) => {
+			setProblem(downloadProblem(error));
+		});
+	};
+
 	const ask = () => {
 		setBusy(true);
 		setProblem(null);
@@ -386,7 +396,7 @@ export const DetachedSource = ({
 				type="button"
 				disabled={unsynced === undefined || !hasUnsentDownload(unsynced)}
 				onClick={() => {
-					if (unsynced !== undefined) download(unsynced);
+					if (unsynced !== undefined) save(unsynced);
 				}}
 			>
 				Download
@@ -405,7 +415,7 @@ export const DetachedSource = ({
 				<DiscardConfirm
 					listed={listed}
 					busy={busy}
-					download={download}
+					download={save}
 					cancelRef={cancelButton}
 					onDiscard={() => {
 						discard(listed);

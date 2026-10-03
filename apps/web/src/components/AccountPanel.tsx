@@ -1102,7 +1102,7 @@ interface ConnectedProps {
 	disconnects: Readonly<Record<string, Disconnecting>>;
 	onDisconnect: (connectionId: string, answer: Omit<LetGoInput, 'connectionId'>) => Promise<void>;
 	/** Hand the notes that were never sent to the user as a file. */
-	download: (listed: Unsynced) => void;
+	download: (listed: Unsynced) => Promise<void>;
 	/** Hand the whole source to the user as a file. */
 	downloadAll: (library: Library) => void;
 	returnTo: string;
@@ -1588,7 +1588,7 @@ const Connected = ({
 
 interface DetachedProps extends LocalProps {
 	bound: SyncStateRecord;
-	download: (listed: Unsynced) => void;
+	download: (listed: Unsynced) => Promise<void>;
 	onReleased: () => void;
 	/**
 	 * What came of the disconnect that left it detached, where that is not what
@@ -1689,9 +1689,8 @@ export const AccountPanel = ({
 	const { disconnects, disconnect } = useDisconnects(database, client);
 	// What a source never sent, with the files whose bytes are here. A file it
 	// leaves out is the remote's, which still has it, so nothing is said of it.
-	const downloadListed = (listed: Unsynced): void => {
-		void downloadUnsent(database, listed, download);
-	};
+	const downloadListed = (listed: Unsynced): Promise<void> =>
+		downloadUnsent(database, listed, download);
 
 	// A discard takes its source, and its panel, with it: the button the user
 	// pressed is gone and the focus would fall to the page. It goes to the next

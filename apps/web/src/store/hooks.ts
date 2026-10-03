@@ -12,6 +12,7 @@ import {
 	PENDING_CREDENTIAL_ID,
 	type SyncStateRecord,
 } from './db.js';
+import { holdsAnything } from './exportNotes.js';
 import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
 import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
@@ -234,6 +235,18 @@ export const useCodeDisplay = (store: CodeDisplayStore = codeDisplay): void => {
  */
 export const useLooseNoteCount = (): number | undefined =>
 	useLiveQuery(async () => (await listNotes(db, { folderPath: ROOT })).length, []);
+
+/**
+ * Whether the source has anything a download of it would hold
+ * (`holdsAnything`): what the palette's "Download all notes" goes by, as the
+ * panel's button does, so the two are never offered for different libraries.
+ * `undefined` while there is no source, or before the first read.
+ */
+export const useHoldsAnything = (connectionId: string | undefined): boolean | undefined =>
+	useLiveQuery(
+		() => (connectionId === undefined ? undefined : holdsAnything(db, connectionId)),
+		[connectionId]
+	);
 
 /**
  * Notes matching what the user has typed, across every notebook. `undefined`

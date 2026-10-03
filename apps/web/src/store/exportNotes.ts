@@ -1,6 +1,11 @@
 import { ancestorPaths, basename, normalizePath, parentPath, ROOT } from '@skysa/core';
 
-import { type FileRecord, type NoteRecord, type NotesDatabase } from './db.js';
+import {
+	type FileBytesRecord,
+	type FileRecord,
+	type NoteRecord,
+	type NotesDatabase,
+} from './db.js';
 import { holdsTextFor } from './detached.js';
 import { fileKey, heldBytesAreCurrent } from './files.js';
 import { settleEditors } from './heldEdits.js';
@@ -495,16 +500,18 @@ export interface Library {
 }
 
 /**
- * The files of `rows` this device holds the bytes of, as they are now, and how
- * many it does not. Bytes of a version the remote has moved on from are not
- * the file, and are not written under its name. Stamped `at`, the export: a
- * file row carries no date of its own, and the earliest date the format has
- * would put every picture in 1980.
+ * The files of `rows` this device holds the bytes of, and how many it does
+ * not. Which bytes count is `accepts`, and by default only the file as it is
+ * now: bytes of a version the remote has moved on from are not the file, and
+ * are not written under its name. Stamped `at`, the export: a file row carries
+ * no date of its own, and the earliest date the format has would put every
+ * picture in 1980.
  */
 const heldFiles = async (
 	db: Pick<NotesDatabase, 'fileBytes'>,
 	rows: readonly FileRecord[],
-	at: number
+	at: number,
+	accepts: (file: FileRecord, held: FileBytesRecord) => boolean = heldBytesAreCurrent
 ): Promise<{ files: ZipFile[]; missing: number }> => {
 	const sorted = [...rows].sort(
 		(a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id)
@@ -512,11 +519,25 @@ const heldFiles = async (
 	const held = await db.fileBytes.bulkGet(sorted.map(fileKey));
 	const files = sorted.flatMap((file, index): ZipFile[] => {
 		const bytes = held[index];
-		return bytes !== undefined && heldBytesAreCurrent(file, bytes)
+		return bytes !== undefined && accepts(file, bytes)
 			? [{ path: file.path, content: new Uint8Array(bytes.bytes), modifiedAt: at }]
 			: [];
 	});
 	return { files, missing: sorted.length - files.length };
+};
+
+/**
+ * Refuse an archive too big to write before a byte of it is read: `zipParts`
+ * would refuse it too, but only once every file was in memory, and four
+ * gigabytes of pictures is a tab the browser kills first. Counted from the
+ * rows, for the files whose bytes are held. A stale copy is counted at the
+ * size the remote has now, not its own, and will not be written at all, so
+ * this can refuse an archive within a few stale files of the limit that would
+ * just have fitted; `zipParts` still has the last word on one that passes.
+ */
+const refuseOversize = (rows: readonly FileRecord[], held: ReadonlySet<string>): void => {
+	const size = rows.reduce((total, file) => (held.has(file.id) ? total + file.size : total), 0);
+	if (size >= ZIP64_BYTES) throw new ArchiveLimitError('bytes', 'Too much for one archive');
 };
 
 /**
@@ -530,7 +551,7 @@ const heldFiles = async (
  */
 export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Library> =>
 	db.transaction('r', [db.notes, db.folders, db.files, db.fileBytes], async () => {
-		const [notes, folders, rows] = await Promise.all([
+		const [notes, folders, rows, held] = await Promise.all([
 			db.notes
 				.where('connectionId')
 				.equals(connectionId)
@@ -538,7 +559,10 @@ export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Libr
 				.toArray(),
 			db.folders.where('connectionId').equals(connectionId).sortBy('path'),
 			db.files.where('connectionId').equals(connectionId).toArray(),
+			// Keys alone, which is all `refuseOversize` needs.
+			db.fileBytes.where('connectionId').equals(connectionId).primaryKeys(),
 		]);
+		refuseOversize(rows, new Set(held.map(([, id]) => id)));
 		return {
 			notes,
 			folders: folders.map((folder) => ({ path: folder.path, modifiedAt: folder.createdAt })),
@@ -552,35 +576,68 @@ export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Libr
  * those notes link, so the pictures in them come too — each where this device
  * holds its bytes. One it does not is the remote's, or a copy to be made of
  * the remote's (`Unsynced.portable`), and is there still.
+ *
+ * A listed file goes in as whatever this device holds of it, stale or not.
+ * Pending, its bytes are the only ones there are; bound, it is listed only
+ * while the source is unchecked (`Unsynced.unverified`), and then the copy here
+ * may be all that is left, which is the whole reason it was listed. A file
+ * that is only linked is the remote's, and goes in only as the remote has it.
  */
 export const unsentLibrary = (db: NotesDatabase, listed: Unsynced): Promise<Library> =>
-	db.transaction('r', db.fileBytes, async () => ({
-		notes: listed.notes,
-		folders: [],
-		...(await heldFiles(
-			db,
-			[
-				...new Map(
-					[...listed.files, ...listed.linked].map((file) => [file.id, file])
-				).values(),
-			],
-			Date.now()
-		)),
-	}));
+	db.transaction('r', db.fileBytes, async () => {
+		const unsent = new Set(listed.files.map((file) => file.id));
+		return {
+			notes: listed.notes,
+			folders: [],
+			...(await heldFiles(
+				db,
+				[
+					...new Map(
+						[...listed.files, ...listed.linked].map((file) => [file.id, file])
+					).values(),
+				],
+				Date.now(),
+				(file, held) => unsent.has(file.id) || heldBytesAreCurrent(file, held)
+			)),
+		};
+	});
 
 /**
- * Whether one source holds anything to download: a notebook, a file, or a note
- * that has not been deleted. It stops at the first note it finds, since the
- * panel asks it again every time a note is saved.
+ * Whether one source holds anything to download: a notebook, a note that has
+ * not been deleted, or a file whose bytes would go into the archive
+ * (`heldFiles`). A file row alone is not enough: with no bytes here, the
+ * download it offered would be an empty archive. It stops at the first note it
+ * finds, since the panel asks it again every time a note is saved, and only
+ * then looks at the files, whose bytes are read one at a time until one counts.
  */
 export const holdsAnything = async (db: NotesDatabase, connectionId: string): Promise<boolean> =>
 	(await db.folders.where('connectionId').equals(connectionId).count()) > 0 ||
-	(await db.files.where('connectionId').equals(connectionId).count()) > 0 ||
 	(await db.notes
 		.where('connectionId')
 		.equals(connectionId)
 		.filter((note) => note.deletedLocally === 0)
-		.first()) !== undefined;
+		.first()) !== undefined ||
+	(await holdsFile(db, connectionId));
+
+/** Whether some file of one source has its current bytes here (`holdsAnything`). */
+const holdsFile = (db: NotesDatabase, connectionId: string): Promise<boolean> =>
+	db.transaction('r', db.files, db.fileBytes, async () => {
+		const rows = new Map(
+			(await db.files.where('connectionId').equals(connectionId).toArray()).map((file) => [
+				file.id,
+				file,
+			])
+		);
+		const held = await db.fileBytes
+			.where('connectionId')
+			.equals(connectionId)
+			.filter((bytes) => {
+				const file = rows.get(bytes.id);
+				return file !== undefined && heldBytesAreCurrent(file, bytes);
+			})
+			.first();
+		return held !== undefined;
+	});
 
 /**
  * Save a library to the user's disk as one archive, empty notebooks and all.
@@ -641,7 +698,7 @@ export const downloadSource = async (
 export interface DownloadAnswer {
 	/** An editor holds text the store would not take, and the archive lacks it. */
 	incomplete: boolean;
-	/** Files the source has that this device holds no bytes of (`Library.missing`). */
+	/** Files the source has that this device holds no current bytes of (`Library.missing`). */
 	missing: number;
 }
 
@@ -652,13 +709,14 @@ export const INCOMPLETE_DOWNLOAD =
 /**
  * What to tell the user once an archive has been handed over, if anything:
  * the text that is missing from it first, since only the user can save that,
- * and otherwise the files this device has never read, which the source's
- * storage still has.
+ * and otherwise the files this device has no current copy of — never read
+ * here, or read before the remote changed them — which the source's storage
+ * still has.
  */
 export const downloadNotice = ({ incomplete, missing }: DownloadAnswer): string | null => {
 	if (incomplete) return INCOMPLETE_DOWNLOAD;
 	if (missing === 0) return null;
-	return `Downloaded, without ${missing === 1 ? '1 file' : `${String(missing)} files`} this device has never opened. ${missing === 1 ? 'It is' : 'They are'} still in the source's storage.`;
+	return `Downloaded, without ${missing === 1 ? '1 file' : `${String(missing)} files`} this device has no current copy of. ${missing === 1 ? 'It is' : 'They are'} still in the source's storage.`;
 };
 
 /**

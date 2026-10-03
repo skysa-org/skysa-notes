@@ -871,6 +871,40 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await db.credentials.get('c1')).toBeUndefined();
 	});
 
+	it('says so beside the question when its download fails, from either step', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		await createNote(db, { title: 'Unsent' });
+		const { downloaded } = renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db
+		);
+		const failure = 'The notes could not be downloaded. Try again.';
+		// The store will not give the bytes up.
+		const failing = () =>
+			vi.spyOn(db.fileBytes, 'bulkGet').mockRejectedValue(new Error('disk'));
+		await user.click(await enabled('Disconnect…'));
+		const failed = failing();
+
+		await user.click(await screen.findByRole('button', { name: 'Download them' }));
+
+		expect((await screen.findByText(failure)).getAttribute('role')).toBe('alert');
+		// Tried again and done, it no longer says so.
+		failed.mockRestore();
+		await user.click(screen.getByRole('button', { name: 'Download them' }));
+		await waitFor(() => {
+			expect(downloaded).toHaveLength(1);
+		});
+		expect(screen.queryByText(failure)).toBeNull();
+		failing();
+		await user.click(screen.getByRole('button', { name: 'Discard them…' }));
+		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		expect(await screen.findByText(failure)).toBeTruthy();
+		expect(await db.notes.count()).toBe(1);
+	});
+
 	it('asks what becomes of what was never sent, and tells the server nothing until it is answered', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
@@ -2372,6 +2406,35 @@ describe('AccountPanel, with a detached source in front', () => {
 			expect(downloadedFiles).toEqual([[added.path]]);
 		});
 		expect(downloaded).toEqual([[]]);
+	});
+
+	it('says so when a download fails, from either step', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		const { downloaded } = renderPanel(clientWith(), db);
+		const failure = 'The notes could not be downloaded. Try again.';
+		// The store will not give the bytes up.
+		const failing = () =>
+			vi.spyOn(db.fileBytes, 'bulkGet').mockRejectedValue(new Error('disk'));
+		const failed = failing();
+
+		await user.click(await enabled('Download'));
+
+		expect(await screen.findByText(failure)).toBeTruthy();
+		// Tried again and done, it no longer says so.
+		failed.mockRestore();
+		await user.click(await enabled('Download'));
+		await waitFor(() => {
+			expect(downloaded).toHaveLength(1);
+		});
+		expect(screen.queryByText(failure)).toBeNull();
+		// And from the discard's second step, where it matters most: a user who
+		// thinks they have a copy is a user who discards.
+		failing();
+		await user.click(await enabled('Discard…'));
+		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		expect(await screen.findByText(failure)).toBeTruthy();
+		expect(await db.notes.count()).toBe(2);
 	});
 
 	it('says a file never uploaded goes with what is discarded', async () => {

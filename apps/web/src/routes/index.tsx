@@ -57,6 +57,7 @@ import {
 	useClaimingConnection,
 	useFolderTree,
 	useHeldImport,
+	useHoldsAnything,
 	useLastOpen,
 	useLooseNoteCount,
 	useNote,
@@ -289,26 +290,19 @@ const useNoteMove = (
 const useDownloadCommand = ({
 	connectionId,
 	source,
-	notebooks = 0,
-	looseNotes = 0,
 	onProblem,
 }: {
 	connectionId: string | undefined;
 	/** The source showing: `null` for the device's own, `undefined` until read. */
 	source: SyncStateRecord | null | undefined;
-	/** How many notebooks are at the top of the source; every other note is in one. */
-	notebooks: number | undefined;
-	looseNotes: number | undefined;
 	onProblem: (notice: Notice) => void;
 }) => {
+	const holds = useHoldsAnything(connectionId);
 	useCommand({
 		id: 'app.download',
 		label: 'Download all notes',
 		group: 'App',
-		enabled:
-			connectionId !== undefined &&
-			source?.importing === undefined &&
-			notebooks + looseNotes > 0,
+		enabled: connectionId !== undefined && source?.importing === undefined && holds === true,
 		run: () => {
 			if (connectionId === undefined) return;
 			void downloadSource(db, connectionId)
@@ -1333,13 +1327,7 @@ const Home = () => {
 		},
 	});
 
-	useDownloadCommand({
-		connectionId: activeConnection,
-		source,
-		notebooks: tree?.length,
-		looseNotes: looseNoteCount,
-		onProblem: setProblem,
-	});
+	useDownloadCommand({ connectionId: activeConnection, source, onProblem: setProblem });
 
 	useCommand({
 		id: 'note.undoDelete',

@@ -30,6 +30,7 @@ import {
 	INCOMPLETE_DOWNLOAD,
 	type Library,
 	libraryOf,
+	unsentLibrary,
 	type ZipFile,
 	zipOf,
 	zipParts,
@@ -1254,14 +1255,61 @@ describe('the files beside the notes (#187)', () => {
 
 	it('puts them in the archive beside the notes, and no folder of their own', async () => {
 		const { db, note, added } = await source();
+		// A notebook holding a file and no note: the file says it is a folder.
+		await createFolder(db, { ...scope, name: 'Pics' });
+		await db.files.put({ ...scope, id: 'p', path: 'Pics/p.png', size: 1 });
+		await db.fileBytes.put({
+			...scope,
+			id: 'p',
+			bytes: bufferOf('p'),
+			pinned: 1,
+			lastUsedAt: 0,
+		});
 
 		const archive = await archiveOf(await libraryOf(db, scope.connectionId));
 
 		expect(readZip(archive).entries.map((entry) => entry.path)).toEqual([
 			note.path,
+			'Pics/p.png',
 			'Work/map.png',
 			added.path,
 		]);
+	});
+
+	it('refuses an archive too big from the sizes of the files held, before reading their bytes', async () => {
+		const db = freshDatabase();
+		const half = 2 ** 31;
+		const bound = (id: string) =>
+			db.files.put({
+				...scope,
+				id,
+				path: `${id}.bin`,
+				remoteId: `r-${id}`,
+				remoteVersion: 'v',
+				size: half,
+			});
+		const cached = (id: string) =>
+			db.fileBytes.put({
+				...scope,
+				id,
+				bytes: bufferOf(id),
+				version: 'v',
+				pinned: 0,
+				lastUsedAt: 0,
+			});
+		await bound('a');
+		await bound('b');
+		await cached('a');
+		// One held: under the limit, whatever the other's row says.
+		expect((await libraryOf(db, scope.connectionId)).missing).toBe(1);
+		await cached('b');
+		const read = vi.spyOn(db.fileBytes, 'bulkGet');
+
+		const refused = await libraryOf(db, scope.connectionId).catch((error: unknown) => error);
+
+		expect(refused).toBeInstanceOf(ArchiveLimitError);
+		expect((refused as ArchiveLimitError).limit).toBe('bytes');
+		expect(read).not.toHaveBeenCalled();
 	});
 
 	it('answers how many it left out, and the user is told where they are', async () => {
@@ -1272,21 +1320,45 @@ describe('the files beside the notes (#187)', () => {
 			missing: 2,
 		});
 		expect(downloadNotice({ incomplete: false, missing: 2 })).toBe(
-			"Downloaded, without 2 files this device has never opened. They are still in the source's storage."
+			"Downloaded, without 2 files this device has no current copy of. They are still in the source's storage."
 		);
 		expect(downloadNotice({ incomplete: false, missing: 1 })).toBe(
-			"Downloaded, without 1 file this device has never opened. It is still in the source's storage."
+			"Downloaded, without 1 file this device has no current copy of. It is still in the source's storage."
 		);
 		expect(downloadNotice({ incomplete: false, missing: 0 })).toBeNull();
 		// Text only the user can save comes first.
 		expect(downloadNotice({ incomplete: true, missing: 2 })).toBe(INCOMPLETE_DOWNLOAD);
 	});
 
-	it('holds something to download with only a file in it', async () => {
+	it('holds something to download in a file alone, where its current bytes are here', async () => {
 		const db = freshDatabase();
-		await db.files.put({ ...scope, id: 'f', path: 'a.png', size: 1 });
+		const cached = (id: string, version: string) =>
+			db.fileBytes.put({
+				...scope,
+				id,
+				bytes: bufferOf(id),
+				version,
+				pinned: 0,
+				lastUsedAt: 0,
+			});
+		await db.files.put({
+			...scope,
+			id: 'f',
+			path: 'a.png',
+			remoteId: 'r-f',
+			remoteVersion: 'v2',
+			size: 1,
+		});
 
+		// The row alone would be an empty archive.
+		expect(await holdsAnything(db, scope.connectionId)).toBe(false);
+		// And so would bytes of no file, or of a version the remote has moved on from.
+		await cached('g', 'v2');
+		await cached('f', 'v1');
+		expect(await holdsAnything(db, scope.connectionId)).toBe(false);
+		await cached('f', 'v2');
 		expect(await holdsAnything(db, scope.connectionId)).toBe(true);
+		expect(await holdsAnything(db, 'dropbox-2')).toBe(false);
 	});
 
 	it('takes what was never sent with the files the notes link, where their bytes are here', async () => {
@@ -1304,6 +1376,28 @@ describe('the files beside the notes (#187)', () => {
 		expect(handed[0]?.files.map((file) => file.path)).toEqual(['Work/map.png', added.path]);
 		// The linked one never read, which the remote has.
 		expect(handed[0]?.missing).toBe(1);
+	});
+
+	it("takes a listed file's bytes as they are while the source is unchecked, and a linked one's only as they are now", async () => {
+		const { db, added } = await source();
+		await db.syncState.put({ ...scope, clientId: 'this-browser', resumeUnverified: true });
+		const listed = await unsyncedIn(db, scope.connectionId);
+		const contents = (library: Library) =>
+			library.files.map((file) => [file.path, text(file.content as Uint8Array)]);
+
+		// Unchecked, the older copy here may be the only one left.
+		expect(contents(await unsentLibrary(db, listed))).toEqual([
+			['Work/map.png', 'map'],
+			['Work/old.png', 'was'],
+			[added.path, 'sun'],
+		]);
+		// Only linked, the same file is the remote's, which has it as it is now.
+		const linkedOnly = await unsentLibrary(db, { ...listed, files: [], linked: listed.files });
+		expect(contents(linkedOnly)).toEqual([
+			['Work/map.png', 'map'],
+			[added.path, 'sun'],
+		]);
+		expect(linkedOnly.missing).toBe(1);
 	});
 
 	it('has something to download in a file not uploaded alone', async () => {
