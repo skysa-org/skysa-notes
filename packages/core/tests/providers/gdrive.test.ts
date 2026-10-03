@@ -1399,7 +1399,7 @@ describe('changes', () => {
 			expect(livePaths(entries).sort()).toEqual([MARKER_FILE, 'photo.png', renamed].sort());
 		});
 
-		it('trash a later copy of a file with the same bytes, and report only the first', async () => {
+		it('trash a later copy of a file with the same bytes, and report no new file', async () => {
 			const world = driveWorld();
 			const picture = {
 				parent: world.root.id,
@@ -1423,6 +1423,88 @@ describe('changes', () => {
 			expect(world.seen.some((r) => r.method === 'PATCH' && r.body.includes('"name"'))).toBe(
 				false
 			);
+		});
+
+		it('report a copy this device already holds deleted where it was, by its id', async () => {
+			const world = driveWorld();
+			const picture = {
+				parent: world.root.id,
+				mimeType: 'image/png',
+				size: '3',
+				md5Checksum: 'aaa',
+			};
+			world.add({
+				...picture,
+				id: 'copy',
+				name: 'p.png',
+				createdTime: '2026-01-02T00:00:00Z',
+			});
+			const { cursor } = await drainChanges(world.provider);
+			// Another device's upload of the same bytes, made earlier and seen later.
+			world.add({
+				...picture,
+				id: 'first',
+				name: 'p.png',
+				createdTime: '2026-01-01T00:00:00Z',
+			});
+
+			const { entries } = await drainChanges(world.provider, cursor);
+
+			expect(world.find('copy')?.trashed).toBe(true);
+			expect(
+				entries.map((entry) => [entry.remoteId, entry.path, entry.deleted === true])
+			).toEqual([
+				['first', 'p.png', false],
+				['copy', 'p.png', true],
+			]);
+		});
+
+		it('rename rather than trash a copy rewritten since it was listed', async () => {
+			const world = driveWorld();
+			const picture = { parent: world.root.id, mimeType: 'image/png', size: '3' };
+			world.add({ ...picture, id: 'one', name: 'p.png', md5Checksum: 'aaa' });
+			world.add({ ...picture, id: 'two', name: 'p.png', md5Checksum: 'aaa' });
+			// Between the listing and the trash, another device puts new bytes in it.
+			world.hooks.intercept = (request) => {
+				if (request.method !== 'GET' || !request.url.pathname.endsWith('/files/two')) {
+					return undefined;
+				}
+				world.patch('two', { md5Checksum: 'bbb' });
+				return undefined;
+			};
+
+			await drainChanges(world.provider);
+
+			expect(world.find('two')).toMatchObject({ trashed: false });
+			expect(world.find('two')?.name).toMatch(/^p \(conflict .*\)\.png$/);
+		});
+
+		it('leave alone a copy moved away since it was listed', async () => {
+			const world = driveWorld();
+			world.add({
+				id: 'elsewhere',
+				name: 'Elsewhere',
+				parent: world.root.id,
+				mimeType: FOLDER,
+			});
+			const picture = { parent: world.root.id, mimeType: 'image/png', size: '3' };
+			world.add({ ...picture, id: 'one', name: 'p.png', md5Checksum: 'aaa' });
+			world.add({ ...picture, id: 'two', name: 'p.png', md5Checksum: 'aaa' });
+			world.hooks.intercept = (request) => {
+				if (request.method !== 'GET' || !request.url.pathname.endsWith('/files/two')) {
+					return undefined;
+				}
+				world.patch('two', { parents: ['elsewhere'] });
+				return undefined;
+			};
+
+			await drainChanges(world.provider);
+
+			expect(world.find('two')).toMatchObject({
+				name: 'p.png',
+				parents: ['elsewhere'],
+				trashed: false,
+			});
 		});
 
 		it('rename rather than trash a copy whose size or checksum differs', async () => {

@@ -1044,6 +1044,17 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * aside is written to a path with no file behind it for ever.
 	 */
 	const separate = async (page: Page, { parent, name, ids }: Clash): Promise<void> => {
+		/** The file as it is now, if it is still in the clash. */
+		const stillHere = async (id: string): Promise<DriveFile | undefined> => {
+			const result = await attempt<DriveFile>('GET', fileUrl(id));
+			if (!result.ok && result.failure.status === 404) return undefined;
+			if (!result.ok) return raise(result.failure);
+			const file = result.value;
+			const here =
+				file.trashed !== true && file.name === name && file.parents?.[0] === parent;
+			return here ? file : undefined;
+		};
+
 		const found = await named(parent, name);
 		// The feed can announce a file before the search index lists it, and a
 		// clash passed over now is not asked about again until one of them next
@@ -1052,20 +1063,24 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			ids
 				.filter((id) => !found.some((file) => file.id === id))
 				.map(async (id) => {
-					const result = await attempt<DriveFile>('GET', fileUrl(id));
-					if (!result.ok && result.failure.status === 404) return [];
-					if (!result.ok) return raise(result.failure);
-					const file = result.value;
-					const here =
-						file.trashed !== true && file.name === name && file.parents?.[0] === parent;
-					return here ? [file] : [];
+					const file = await stillHere(id);
+					return file === undefined ? [] : [file];
 				})
 		);
 		const [canonical, ...others] = byAge([...found, ...confirmed.flat()]);
 		if (canonical === undefined || others.length === 0) return;
 		const taken = (await childrenOf(parent)).map((child) => child.name ?? '');
-		await others.reduce<Promise<readonly string[]>>(async (chosen, other) => {
+		await others.reduce<Promise<readonly string[]>>(async (chosen, listed) => {
 			const names = await chosen;
+			// Drive has no conditional trash, and a trash is a delete to every
+			// device, where a stray rename is only a name. So a copy is looked at
+			// once more just before: one moved, trashed or rewritten since it was
+			// listed is not trashed for what it was. That narrows the window to
+			// the length of one request; it cannot close it, and what lands in it
+			// is in Drive's trash for thirty days rather than gone.
+			const other = sameBytes(canonical, listed) ? await stillHere(listed.id ?? '') : listed;
+			// Gone or moved since: no longer a duplicate, and the feed says where.
+			if (other === undefined) return names;
 			if (sameBytes(canonical, other)) {
 				await trash(other.id ?? '');
 				applyItem(page, { id: other.id ?? '', gone: true });
