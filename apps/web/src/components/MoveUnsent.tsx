@@ -109,15 +109,37 @@ export const leftBehind = (listed: Unsynced, from: string): string | null => {
 
 /**
  * What is going, in the user's terms: "2 notes", or "2 notes and 1 notebook"
- * where a notebook is going that is not simply one of those notes' own. Both
- * steps say it the same way, and it is the same count the panel's headline uses
- * (`countedFolders`), so nothing the user is shown disagrees with anything else.
+ * where a notebook is going that is not simply one of those notes' own, and
+ * "1 file" for each not uploaded yet that can go (`portable`). Both steps say
+ * it the same way, and it is the same count the panel's headline uses
+ * (`countedFolders`), so nothing the user is shown disagrees with anything
+ * else. The notes are said even at none
+ * where nothing else is going either, which `canMove` never offers.
  */
 const going = (listed: Unsynced): string => {
-	const notes = counted(listed.notes.length, 'note', 'notes');
 	const folders = countedFolders(listed).length;
-	return folders === 0 ? notes : `${notes} and ${counted(folders, 'notebook', 'notebooks')}`;
+	const files = listed.portable.length;
+	const parts = [
+		...(listed.notes.length > 0 || folders + files === 0
+			? [counted(listed.notes.length, 'note', 'notes')]
+			: []),
+		...(folders > 0 ? [counted(folders, 'notebook', 'notebooks')] : []),
+		...(files > 0 ? [counted(files, 'file', 'files')] : []),
+	];
+	const last = parts.at(-1) ?? '';
+	return parts.length === 1 ? last : `${parts.slice(0, -1).join(', ')} and ${last}`;
 };
+
+/**
+ * Said where the notes going link files the account being left has (#187),
+ * or a copy is owed of one there (`portable`): the ones this device holds go
+ * with them, and the rest cannot, so the notes arrive without those pictures
+ * and the files stay where they are.
+ */
+const linkedNote = (listed: Unsynced, from: string): string | null =>
+	listed.linked.length === 0 && listed.portable.length === listed.files.length
+		? null
+		: `Pictures and files they link go with them where this device holds them; any it has never downloaded stay in ${from}.`;
 
 /**
  * Notes the account being left already has a file for, in an older version. The
@@ -189,6 +211,7 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 
 	const older = alsoThere(shown);
 	const also = leftBehind(shown, from);
+	const linked = linkedNote(shown, from);
 	return (
 		<div className="account-confirm" role="group" aria-label="Move to another source">
 			<p>
@@ -196,6 +219,7 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 				{older > 0 &&
 					` ${String(older)} of them also ${older === 1 ? 'exists' : 'exist'} in ${from} in an older version, which stays there.`}
 				{also !== null && ` ${also}`}
+				{linked !== null && ` ${linked}`}
 			</p>
 			<button
 				type="button"

@@ -84,7 +84,7 @@ export interface AddedAttachment {
 	markdown: string;
 }
 
-const fileKey = (file: Pick<FileRecord, 'connectionId' | 'id'>): [string, string] => [
+export const fileKey = (file: Pick<FileRecord, 'connectionId' | 'id'>): [string, string] => [
 	file.connectionId,
 	file.id,
 ];

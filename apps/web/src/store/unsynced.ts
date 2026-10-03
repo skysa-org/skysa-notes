@@ -1,4 +1,4 @@
-import { isWithin } from '@skysa/core';
+import { isWithin, linkedFiles } from '@skysa/core';
 
 import {
 	type FileRecord,
@@ -71,9 +71,28 @@ export interface Unsynced {
 	 * Files added here and not uploaded yet (#187): pending rows, whose bytes
 	 * exist on this device and nowhere else. A bound file is the remote's, and
 	 * its queued move or delete goes with the note or the notebook that queued
-	 * it, which is counted already.
+	 * it, which is counted already — except while `unverified`, when a bound
+	 * file whose bytes are held here is listed too, since nobody has looked
+	 * for it on the remote and those bytes may be the only copy.
 	 */
 	files: FileRecord[];
+	/**
+	 * Of `files`, the ones a move to another source can take: those whose
+	 * bytes are on this device. A pending row without them is a copy a note's
+	 * move owes (`carryLinkedFiles` in `store/files.ts`), to be made on the
+	 * remote from the file it copies (`copyOf`). Nothing here can send it to
+	 * any other account, so a move leaves it, as it leaves a linked file this
+	 * device has never downloaded, and the original stays where it is.
+	 */
+	portable: FileRecord[];
+	/**
+	 * Files the remote has that the unsent notes link. Not unsent, and not
+	 * counted: for a move to another source to say that it takes the ones
+	 * this device holds the bytes of, and leaves the others in the account
+	 * being left. Empty while `unverified`, when a move is refused anyway and
+	 * every note in the source is listed.
+	 */
+	linked: FileRecord[];
 	/**
 	 * An op of this source is out of attempts, so none of the above can be sent
 	 * right now however long the user waits (`outOfAttempts` in `store/queue.ts`,
@@ -93,15 +112,20 @@ export interface UnsyncedOptions {
 	maxAttempts?: number;
 }
 
-type Scope = Pick<NotesDatabase, 'notes' | 'folders' | 'opQueue' | 'syncState' | 'files'>;
+type Scope = Pick<
+	NotesDatabase,
+	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes'
+>;
 
 /** The ids of the notes that have an op of this kind queued. */
 const notesWith = (ops: readonly OpQueueRecord[], kind: OpQueueRecord['op']): Set<string> =>
 	new Set(ops.flatMap((op) => (op.op === kind && op.noteId !== undefined ? [op.noteId] : [])));
 
 /**
- * Safe inside a transaction over `notes`, `folders`, `opQueue`, `syncState` and `files`:
- * every await is on a promise Dexie made. A caller that has to act on the
+ * Safe inside a transaction over `notes`, `folders`, `opQueue`, `syncState`,
+ * `files` and `fileBytes`: every await is on a promise Dexie made. No file's
+ * bytes are read, only which files have some, by key: this is asked on every
+ * change to a source shown in the tab bar. A caller that has to act on the
  * answer — discard exactly what the user was shown, and nothing typed since —
  * asks again inside the transaction that acts.
  */
@@ -114,11 +138,19 @@ export const unsyncedIn = async (
 	const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
 	const ops = await db.opQueue.where('connectionId').equals(connectionId).sortBy('seq');
 	const unverified = (await db.syncState.get(connectionId))?.resumeUnverified === true;
-	const pending = await db.files
-		.where('connectionId')
-		.equals(connectionId)
-		.filter((file) => file.remoteId === undefined)
-		.toArray();
+	const files = await db.files.where('connectionId').equals(connectionId).toArray();
+	// Keys alone. A pending row's bytes are pinned, so to hold some is to hold
+	// its own; a bound file's may be a stale version, and are counted anyway
+	// while unverified, since the question then is whether they could be the
+	// only copy.
+	const held = new Set(
+		(await db.fileBytes.where('connectionId').equals(connectionId).primaryKeys()).map(
+			([, id]) => id
+		)
+	);
+	const unsentFiles = files.filter(
+		(file) => file.remoteId === undefined || (unverified && held.has(file.id))
+	);
 
 	const written = notesWith(ops, 'write');
 	const moved = notesWith(ops, 'move');
@@ -153,13 +185,22 @@ export const unsyncedIn = async (
 			// Folded: `Work` and `work` are one directory on the provider.
 			!settled.some((note) => isWithin(foldPath(note.path), foldPath(folder.path))));
 
+	const notes = live.filter(unsent);
+	const linkedPaths = unverified
+		? new Set<string>()
+		: new Set(notes.flatMap((note) => linkedFiles(note.body, note.path).map(foldPath)));
+
 	return {
-		notes: live.filter(unsent),
+		notes,
 		renames: live.filter((note) => !unsent(note) && moved.has(note.id)),
 		deletes: rows.filter((note) => note.deletedLocally === 1 && note.remoteId !== undefined),
 		folders: folders.filter(unsentFolder),
 		rmdirs: ops.filter((op) => op.op === 'rmdir'),
-		files: pending,
+		files: unsentFiles,
+		portable: unsentFiles.filter((file) => held.has(file.id)),
+		linked: files.filter(
+			(file) => file.remoteId !== undefined && linkedPaths.has(foldPath(file.path))
+		),
 		blocked: ops.some((op) => outOfAttempts(op, options.maxAttempts)),
 		unverified,
 	};
@@ -244,14 +285,15 @@ export const countedFolders = (unsynced: Unsynced): FolderRecord[] =>
 	);
 
 /**
- * How many rows could be taken to another source: the notes and the notebooks
- * that are changes in their own right. Not the renames and not the deletes —
+ * How many rows could be taken to another source: the notes, the notebooks
+ * that are changes in their own right, and the files not uploaded yet whose
+ * bytes are here (`portable`). Not the renames and not the deletes —
  * each is about a file in the account being left, and means nothing anywhere
  * else. Zero means a move would move nothing, and a move of nothing is a
  * discard under another name.
  */
 export const movable = (unsynced: Unsynced): number =>
-	unsynced.notes.length + countedFolders(unsynced).length;
+	unsynced.notes.length + countedFolders(unsynced).length + unsynced.portable.length;
 
 /**
  * How many changes the remote has not had, for saying "3 not sent" of a source.
