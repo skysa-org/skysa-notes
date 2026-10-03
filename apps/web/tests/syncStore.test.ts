@@ -100,6 +100,22 @@ describeSyncStoreContract('Dexie', async () => {
 		seedFolder: async (folder) => {
 			await db.folders.put({ connectionId: CONNECTION, createdAt: 0, ...folder });
 		},
+		seedFile: async (file, held) => {
+			await db.files.put({ connectionId: CONNECTION, ...file });
+			if (held === undefined) return;
+			await db.fileBytes.put({
+				connectionId: CONNECTION,
+				id: file.id,
+				bytes: held.bytes.slice().buffer,
+				...(held.version === undefined ? {} : { version: held.version }),
+				pinned: held.pinned === true ? 1 : 0,
+				lastUsedAt: 0,
+			});
+		},
+		dropFile: async (id) => {
+			await db.files.delete([CONNECTION, id]);
+			await db.fileBytes.delete([CONNECTION, id]);
+		},
 		seedOp: async (op) => {
 			// In the app a queued delete always comes with its tombstone:
 			// `deleteNote` makes the one and the push queue the other.

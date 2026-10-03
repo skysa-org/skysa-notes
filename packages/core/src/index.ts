@@ -103,6 +103,7 @@ export type {
 	OpOutcome,
 	PullBatch,
 	PullChange,
+	SyncFile,
 	SyncFolder,
 	SyncNote,
 	SyncOp,

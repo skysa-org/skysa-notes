@@ -1022,6 +1022,24 @@ describe('push', () => {
 	});
 });
 
+describe('a file op this engine cannot send yet', () => {
+	// The store learns files before the engine learns to push them (#187).
+	// Finished, an upload would be a file that never left the device.
+	it.each([
+		{ op: 'upload' as const, fileId: 'x1', path: 'a.png' },
+		{ op: 'move-file' as const, fileId: 'x1', path: 'a.png', targetPath: 'b.png' },
+		{ op: 'delete-file' as const, path: 'a.png', remoteId: 'f1' },
+	])('fails $op and keeps it queued', async (queued) => {
+		const op = store.queue(queued);
+
+		const result = await engine.push();
+
+		expect(result.status).toBe('retry');
+		expect(store.ops()).toEqual([expect.objectContaining({ seq: op.seq, attempts: 1 })]);
+		expect(store.lastError(op.seq)).toContain(queued.op);
+	});
+});
+
 describe('a note deleted here and changed there', () => {
 	it('lets the delete win, having written the row back first', async () => {
 		// The row is the tombstone — it is what carries the `remoteId` the

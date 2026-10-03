@@ -35,12 +35,32 @@ export interface StoreHarness {
 	seedElsewhere: (id: string) => void | Promise<void>;
 	seedFolder: (folder: { path: string; remoteId?: string }) => void | Promise<void>;
 	/** Queue an op and return the seq it was given. */
+	/**
+	 * Seed a file row, and the bytes held for it: `pinned` until they are
+	 * uploaded, or cached under `version`.
+	 */
+	seedFile: (
+		file: { id: string; path: string; remoteId?: string; remoteVersion?: string; size: number },
+		bytes?: { bytes: Uint8Array<ArrayBuffer>; version?: string; pinned?: boolean }
+	) => void | Promise<void>;
+	/** Take a file row away, as the user deleting it does. */
+	dropFile: (id: string) => void | Promise<void>;
 	seedOp: (op: {
-		op: 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
+		op:
+			| 'write'
+			| 'move'
+			| 'delete'
+			| 'mkdir'
+			| 'rmdir'
+			| 'upload'
+			| 'move-file'
+			| 'delete-file';
 		path: string;
 		noteId?: string;
+		fileId?: string;
 		targetPath?: string;
 		remoteId?: string;
+		copyOf?: string;
 	}) => number | Promise<number>;
 	/** Take a queued op back out, as a later change of the user's does. */
 	withdrawOp: (seq: number) => void | Promise<void>;
@@ -1901,6 +1921,569 @@ export const describeSyncStoreContract = (
 
 				expect((await store.noteById('n1'))?.content).toBe('theirs\n');
 				expect((await store.noteById('c1'))?.content).toBe(conflictContent('mine\n', 'c1'));
+			});
+		});
+
+		describe('files beside notes', () => {
+			const BYTES = new Uint8Array([1, 2, 3]);
+			const file = (path: string, id = 'f1', version = 'v1', size = 3): RemoteEntry => ({
+				remoteId: id,
+				path,
+				kind: 'file',
+				version,
+				modifiedAt: '2026-01-01T00:00:00.000Z',
+				size,
+			});
+			const bound = {
+				id: 'x1',
+				path: 'Trips/a.png',
+				remoteId: 'f1',
+				remoteVersion: 'v1',
+				size: 3,
+			};
+			const pending = { id: 'x1', path: 'Trips/a.png', size: 3 };
+			const opsOf = async (store: SyncStore) =>
+				(await store.pendingOps()).map(({ seq: _seq, attempts: _attempts, ...op }) => op);
+
+			it('reads a row by id, by path and by remote id, and under its folders', async () => {
+				const { store, seedFile } = await harness();
+				await seedFile(bound);
+				expect(await store.fileById('x1')).toEqual(bound);
+				expect(await store.fileByPath('Trips/a.png')).toEqual(bound);
+				expect(await store.fileByRemoteId('f1')).toEqual(bound);
+				expect(await store.allFiles()).toEqual([bound]);
+				expect(await store.filesUnder('Trips')).toEqual([bound]);
+				expect(await store.filesUnder('')).toEqual([bound]);
+				expect(await store.filesUnder('Work')).toEqual([]);
+			});
+
+			it('carries a file op whole: the file it is about, and where its bytes are', async () => {
+				const { store, seedOp } = await harness();
+				await seedOp({ op: 'upload', fileId: 'x1', path: 'a.png', copyOf: 'f0' });
+				await seedOp({
+					op: 'move-file',
+					fileId: 'x2',
+					path: 'b.png',
+					targetPath: 'c/b.png',
+				});
+				await seedOp({ op: 'delete-file', path: 'd.png', remoteId: 'f3' });
+				expect(await opsOf(store)).toEqual([
+					{ op: 'upload', fileId: 'x1', path: 'a.png', copyOf: 'f0' },
+					{ op: 'move-file', fileId: 'x2', path: 'b.png', targetPath: 'c/b.png' },
+					{ op: 'delete-file', path: 'd.png', remoteId: 'f3' },
+				]);
+			});
+
+			describe('the bytes held for a file', () => {
+				it('are handed back while held for an upload, whatever version they carry', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					expect(await store.fileBytes('x1')).toEqual(BYTES);
+				});
+
+				it('are handed back from the cache only under the version the row is bound to', async () => {
+					// The file changed since, or another took its name — or, on
+					// OneDrive, it was only renamed, and the version moved anyway.
+					const { store, seedFile } = await harness();
+					await seedFile(bound, { bytes: BYTES, version: 'v1' });
+					await seedFile(
+						{ ...bound, id: 'x2', path: 'b.png', remoteId: 'f2' },
+						{
+							bytes: BYTES,
+							version: 'v0',
+						}
+					);
+					expect(await store.fileBytes('x1')).toEqual(BYTES);
+					expect(await store.fileBytes('x2')).toBeUndefined();
+					expect(await store.fileBytes('nope')).toBeUndefined();
+				});
+			});
+
+			describe('a file a pull brings in', () => {
+				it('is put whole, bound to the remote, with the folders above it', async () => {
+					const { store } = await harness();
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png'),
+							},
+						],
+						cursor: 'c1',
+					});
+					expect(await store.fileById('x1')).toEqual(bound);
+					expect(await store.folderByPath('Trips')).toBeDefined();
+					expect(await store.cursor()).toBe('c1');
+				});
+
+				it('leaves bytes cached under the version it had behind', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(bound, { bytes: BYTES, version: 'v1' });
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png', 'f1', 'v2'),
+							},
+						],
+					});
+					expect((await store.fileById('x1'))?.remoteVersion).toBe('v2');
+					expect(await store.fileBytes('x1')).toBeUndefined();
+				});
+
+				it('binds a pending file it adopts, keeps its bytes, and withdraws its upload', async () => {
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					await seedOp({ op: 'upload', fileId: 'x1', path: 'Trips/a.png' });
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png'),
+								adopt: true,
+							},
+						],
+					});
+					expect(await store.fileById('x1')).toEqual(bound);
+					expect(await store.fileBytes('x1')).toEqual(BYTES);
+					expect(await store.pendingOps()).toEqual([]);
+					// Kept as the remote version's, not held: a newer one leaves them.
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png', 'f1', 'v2'),
+							},
+						],
+					});
+					expect(await store.fileBytes('x1')).toBeUndefined();
+				});
+
+				it('is refused over a pending file it does not adopt, and the batch with it', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					await expect(
+						store.applyPull({
+							changes: [
+								{
+									kind: 'upsert-file',
+									fileId: 'x1',
+									path: 'Trips/a.png',
+									remote: file('Trips/a.png'),
+								},
+							],
+							cursor: 'c1',
+						})
+					).rejects.toThrow();
+					expect(await store.fileById('x1')).toEqual(pending);
+					expect(await store.cursor()).toBeUndefined();
+				});
+
+				it('is refused while the user has a delete of it queued', async () => {
+					// The row went when the user deleted it; the op is all that says so.
+					const { store, seedOp } = await harness();
+					await seedOp({ op: 'delete-file', path: 'Trips/a.png', remoteId: 'f1' });
+					await expect(
+						store.applyPull({
+							changes: [
+								{
+									kind: 'upsert-file',
+									fileId: 'x1',
+									path: 'Trips/a.png',
+									remote: file('Trips/a.png'),
+								},
+							],
+						})
+					).rejects.toThrow();
+					expect(await store.fileById('x1')).toBeUndefined();
+				});
+
+				it('points a queued move of it at where the remote says it is', async () => {
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile({ ...bound, path: 'Work/a.png' });
+					await seedOp({
+						op: 'move-file',
+						fileId: 'x1',
+						path: 'Trips/a.png',
+						targetPath: 'Work/a.png',
+					});
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Old/a.png',
+								remote: file('Old/a.png', 'f1', 'v2'),
+							},
+						],
+					});
+					expect(await opsOf(store)).toEqual([
+						{
+							op: 'move-file',
+							fileId: 'x1',
+							path: 'Old/a.png',
+							targetPath: 'Work/a.png',
+						},
+					]);
+				});
+			});
+
+			it('moves a pending file aside, with its queued upload', async () => {
+				const { store, seedFile, seedOp } = await harness();
+				await seedFile(pending, { bytes: BYTES, pinned: true });
+				await seedOp({ op: 'upload', fileId: 'x1', path: 'Trips/a.png' });
+				await store.applyPull({
+					changes: [
+						{ kind: 'displace-file', fileId: 'x1', path: 'Trips/a (conflict).png' },
+						{ kind: 'displace-file', fileId: 'nope', path: 'b.png' },
+					],
+				});
+				expect(await store.fileById('x1')).toEqual({
+					...pending,
+					path: 'Trips/a (conflict).png',
+				});
+				expect(await opsOf(store)).toEqual([
+					{ op: 'upload', fileId: 'x1', path: 'Trips/a (conflict).png' },
+				]);
+			});
+
+			describe('a file gone remotely', () => {
+				it('takes the row and its bytes', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(bound, { bytes: BYTES, version: 'v1' });
+					await store.applyPull({
+						changes: [
+							{ kind: 'delete-file', fileId: 'x1' },
+							{ kind: 'delete-file', fileId: 'nope' },
+						],
+					});
+					expect(await store.fileById('x1')).toBeUndefined();
+					// Back under the version its bytes were cached at, with none.
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png'),
+							},
+						],
+					});
+					expect(await store.fileBytes('x1')).toBeUndefined();
+				});
+
+				it("is refused for a pending file, which was never the remote's", async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					await expect(
+						store.applyPull({ changes: [{ kind: 'delete-file', fileId: 'x1' }] })
+					).rejects.toThrow();
+					expect(await store.fileBytes('x1')).toEqual(BYTES);
+				});
+			});
+
+			describe('a file a rescan did not return, its own copy maybe what lost it', () => {
+				it('goes back up from the bytes held here', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(bound, { bytes: BYTES, version: 'v1' });
+					await store.applyPull({
+						changes: [
+							{ kind: 'reupload-file', fileId: 'x1' },
+							{ kind: 'reupload-file', fileId: 'nope' },
+						],
+					});
+					expect(await store.fileById('x1')).toEqual(pending);
+					expect(await store.fileBytes('x1')).toEqual(BYTES);
+					expect(await opsOf(store)).toEqual([
+						{ op: 'upload', fileId: 'x1', path: 'Trips/a.png' },
+					]);
+				});
+
+				it('goes, where there is nothing here to send', async () => {
+					const { store, seedFile } = await harness();
+					await seedFile(bound, { bytes: BYTES, version: 'v0' });
+					await store.applyPull({ changes: [{ kind: 'reupload-file', fileId: 'x1' }] });
+					expect(await store.fileById('x1')).toBeUndefined();
+					expect(await store.pendingOps()).toEqual([]);
+				});
+			});
+
+			it('moves the files under a folder that moved, and their queued ops', async () => {
+				const { store, seedFolder, seedFile, seedOp } = await harness();
+				await seedFolder({ path: 'Trips', remoteId: 'd1' });
+				await seedFile(bound);
+				await seedFile(
+					{ id: 'x2', path: 'Trips/b.png', size: 3 },
+					{ bytes: BYTES, pinned: true }
+				);
+				await seedOp({ op: 'upload', fileId: 'x2', path: 'Trips/b.png' });
+				await seedOp({
+					op: 'move-file',
+					fileId: 'x1',
+					path: 'Trips/a.png',
+					targetPath: 'Trips/sub/a.png',
+				});
+				await store.applyPull({
+					changes: [
+						{ kind: 'move-folder', from: 'Trips', to: 'Holidays', remoteId: 'd1' },
+					],
+				});
+				expect((await store.allFiles()).map((each) => each.path).sort()).toEqual([
+					'Holidays/a.png',
+					'Holidays/b.png',
+				]);
+				expect(await opsOf(store)).toEqual([
+					{ op: 'upload', fileId: 'x2', path: 'Holidays/b.png' },
+					{
+						op: 'move-file',
+						fileId: 'x1',
+						path: 'Holidays/a.png',
+						targetPath: 'Holidays/sub/a.png',
+					},
+				]);
+			});
+
+			describe('a folder gone remotely', () => {
+				it('takes the bound files under it and their bytes, and leaves a pending one', async () => {
+					const { store, seedFolder, seedFile } = await harness();
+					await seedFolder({ path: 'Trips', remoteId: 'd1' });
+					await seedFile(bound, { bytes: BYTES, version: 'v1' });
+					await seedFile(
+						{ id: 'x2', path: 'Trips/sub/b.png', size: 3 },
+						{ bytes: BYTES, pinned: true }
+					);
+					await seedFile({
+						id: 'x3',
+						path: 'Work/c.png',
+						remoteId: 'f3',
+						remoteVersion: 'v1',
+						size: 3,
+					});
+					await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Trips' }] });
+					expect((await store.allFiles()).map((each) => each.id).sort()).toEqual([
+						'x2',
+						'x3',
+					]);
+					expect(await store.fileBytes('x2')).toEqual(BYTES);
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png'),
+							},
+						],
+					});
+					expect(await store.fileBytes('x1')).toBeUndefined();
+				});
+
+				it('spares a file the engine names, and one whose queued move says it is outside', async () => {
+					// Moved in here by the user, and still where it was on the remote
+					// until that move runs: the folder going says nothing about it.
+					const { store, seedFolder, seedFile, seedOp } = await harness();
+					await seedFolder({ path: 'Trips', remoteId: 'd1' });
+					await seedFile(bound);
+					await seedFile({
+						id: 'x2',
+						path: 'Trips/b.png',
+						remoteId: 'f2',
+						remoteVersion: 'v1',
+						size: 3,
+					});
+					await seedFile({
+						id: 'x3',
+						path: 'Trips/c.png',
+						remoteId: 'f3',
+						remoteVersion: 'v1',
+						size: 3,
+					});
+					await seedOp({
+						op: 'move-file',
+						fileId: 'x2',
+						path: 'Work/b.png',
+						targetPath: 'Trips/b.png',
+					});
+					await seedOp({
+						op: 'move-file',
+						fileId: 'x3',
+						path: 'Trips/old/c.png',
+						targetPath: 'Trips/c.png',
+					});
+					await store.applyPull({
+						changes: [
+							{ kind: 'delete-folder', path: 'Trips', keepFiles: ['x1', 'nope'] },
+						],
+					});
+					expect((await store.allFiles()).map((each) => each.id).sort()).toEqual([
+						'x1',
+						'x2',
+					]);
+				});
+			});
+
+			describe('an upload that landed', () => {
+				it("binds the file, and keeps its bytes as that version's", async () => {
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					const seq = await seedOp({ op: 'upload', fileId: 'x1', path: 'Trips/a.png' });
+					await store.completeOp(seq, {
+						kind: 'uploaded',
+						fileId: 'x1',
+						remote: file('Trips/a.png'),
+						sentAs: 'Trips/a.png',
+					});
+					expect(await store.fileById('x1')).toEqual(bound);
+					expect(await store.fileBytes('x1')).toEqual(BYTES);
+					expect(await store.pendingOps()).toEqual([]);
+					await store.applyPull({
+						changes: [
+							{
+								kind: 'upsert-file',
+								fileId: 'x1',
+								path: 'Trips/a.png',
+								remote: file('Trips/a.png', 'f1', 'v2'),
+							},
+						],
+					});
+					expect(await store.fileBytes('x1')).toBeUndefined();
+				});
+
+				it('takes the name the remote gave it, where that is not the one asked for', async () => {
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					const seq = await seedOp({ op: 'upload', fileId: 'x1', path: 'Trips/a.png' });
+					await store.completeOp(seq, {
+						kind: 'uploaded',
+						fileId: 'x1',
+						remote: file('Trips/a (conflict).png'),
+						sentAs: 'Trips/a.png',
+					});
+					expect((await store.fileById('x1'))?.path).toBe('Trips/a (conflict).png');
+				});
+
+				it('takes the file after a row the user moved while it was on its way', async () => {
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile(
+						{ ...pending, path: 'Work/a.png' },
+						{ bytes: BYTES, pinned: true }
+					);
+					const seq = await seedOp({ op: 'upload', fileId: 'x1', path: 'Work/a.png' });
+					await store.completeOp(seq, {
+						kind: 'uploaded',
+						fileId: 'x1',
+						remote: file('Trips/a.png'),
+						sentAs: 'Trips/a.png',
+					});
+					expect(await store.fileById('x1')).toEqual({ ...bound, path: 'Work/a.png' });
+					expect(await opsOf(store)).toEqual([
+						{
+							op: 'move-file',
+							fileId: 'x1',
+							path: 'Trips/a.png',
+							targetPath: 'Work/a.png',
+						},
+					]);
+				});
+
+				it('owes the remote a delete of a file the user deleted while it was on its way', async () => {
+					const { store, seedFile, seedOp, dropFile } = await harness();
+					await seedFile(pending, { bytes: BYTES, pinned: true });
+					const seq = await seedOp({ op: 'upload', fileId: 'x1', path: 'Trips/a.png' });
+					await dropFile('x1');
+					await store.completeOp(seq, {
+						kind: 'uploaded',
+						fileId: 'x1',
+						remote: file('Trips/a.png'),
+						sentAs: 'Trips/a.png',
+					});
+					expect(await store.allFiles()).toEqual([]);
+					expect(await opsOf(store)).toEqual([
+						{ op: 'delete-file', path: 'Trips/a.png', remoteId: 'f1' },
+					]);
+				});
+
+				it("lets a row go that turns out to be another's file", async () => {
+					const { store, seedFile, seedOp } = await harness();
+					await seedFile(bound);
+					await seedFile(
+						{ id: 'x2', path: 'Trips/a.png', size: 3 },
+						{ bytes: BYTES, pinned: true }
+					);
+					const seq = await seedOp({ op: 'upload', fileId: 'x2', path: 'Trips/a.png' });
+					await store.completeOp(seq, {
+						kind: 'uploaded',
+						fileId: 'x2',
+						remote: file('Trips/a.png'),
+						sentAs: 'Trips/a.png',
+					});
+					expect(await store.allFiles()).toEqual([bound]);
+				});
+			});
+
+			it('records where a moved file landed, and keeps its bytes under the new version', async () => {
+				const { store, seedFile, seedOp } = await harness();
+				await seedFile(bound, { bytes: BYTES, version: 'v1' });
+				const seq = await seedOp({
+					op: 'move-file',
+					fileId: 'x1',
+					path: 'Trips/a.png',
+					targetPath: 'Work/a.png',
+				});
+				await store.completeOp(seq, {
+					kind: 'moved-file',
+					fileId: 'x1',
+					remote: file('Work/a.png', 'f1', 'v2'),
+				});
+				expect(await store.fileById('x1')).toEqual({
+					...bound,
+					path: 'Work/a.png',
+					remoteVersion: 'v2',
+				});
+				expect(await store.fileBytes('x1')).toEqual(BYTES);
+			});
+
+			it('lets a file go that had nothing to upload', async () => {
+				const { store, seedFile, seedOp } = await harness();
+				await seedFile(pending);
+				const seq = await seedOp({
+					op: 'upload',
+					fileId: 'x1',
+					path: 'Trips/a.png',
+					copyOf: 'f0',
+				});
+				await store.completeOp(seq, { kind: 'lost-file', fileId: 'x1' });
+				expect(await store.allFiles()).toEqual([]);
+				expect(await store.pendingOps()).toEqual([]);
+			});
+
+			it('takes a refused batch back whole, files and bytes included', async () => {
+				const { store, seedFile } = await harness();
+				await seedFile(bound, { bytes: BYTES, version: 'v1' });
+				await seedFile(
+					{ id: 'x2', path: 'b.png', size: 3 },
+					{ bytes: BYTES, pinned: true }
+				);
+				await expect(
+					store.applyPull({
+						changes: [
+							{ kind: 'delete-file', fileId: 'x1' },
+							{ kind: 'delete-file', fileId: 'x2' },
+						],
+						cursor: 'c1',
+					})
+				).rejects.toThrow();
+				expect(await store.fileById('x1')).toEqual(bound);
+				expect(await store.fileBytes('x1')).toEqual(BYTES);
+				expect(await store.cursor()).toBeUndefined();
 			});
 		});
 	});

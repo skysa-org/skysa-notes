@@ -75,20 +75,63 @@ export interface UnreadableFile {
 	movedAside?: readonly string[];
 }
 
+/**
+ * A file beside a note that is not one: a picture, a PDF, anything a note links
+ * (#187, docs/ARCHITECTURE.md §7). Mirrored as what the remote says of it and
+ * nothing more — its bytes are fetched when it is shown, not when it is pulled
+ * — so a row is cheap, and a store holds one for every such file the remote
+ * has, linked or not.
+ *
+ * Two kinds of row, and two rules:
+ *
+ * - **Bound** (`remoteId` set): a copy of what the remote says. A pull may
+ *   rewrite or drop one freely; the worst a wrong one costs is a picture that
+ *   does not show until the next scan.
+ * - **Pending** (no `remoteId`): added on this device and not yet uploaded.
+ *   User data, as a dirty note is: a pull never removes one, a folder's
+ *   deletion leaves it, and its bytes are held until they are up.
+ *
+ * Files never conflict on content — the app never writes into one — only on
+ * where they are.
+ */
+export interface SyncFile {
+	/** The store's own name for the row: a file has no frontmatter to carry one. */
+	id: string;
+	path: string;
+	/** Absent while the file is pending. */
+	remoteId?: string;
+	remoteVersion?: string;
+	/** In bytes. */
+	size: number;
+}
+
 /** A folder as the engine sees it. Only identity and position matter here. */
 export interface SyncFolder {
 	path: string;
 	remoteId?: string;
 }
 
-export type SyncOperation = 'write' | 'move' | 'delete' | 'mkdir' | 'rmdir';
+export type SyncOperation =
+	| 'write'
+	| 'move'
+	| 'delete'
+	| 'mkdir'
+	| 'rmdir'
+	/** A pending file's bytes, sent to `path`. */
+	| 'upload'
+	/** A bound file, from `path` to `targetPath`. */
+	| 'move-file'
+	/** A file this device no longer holds a row for, by `remoteId`. */
+	| 'delete-file';
 
 /** One queued push. `seq` orders the queue and identifies the row. */
 export interface SyncOp {
 	seq: number;
 	op: SyncOperation;
-	/** Absent for `mkdir` and `rmdir`, which are about a folder rather than a note. */
+	/** Absent for `mkdir` and `rmdir`, which are about a folder, and for a file's ops. */
 	noteId?: string;
+	/** The file an `upload` or a `move-file` is about. */
+	fileId?: string;
 	path: string;
 	/** Where a `move` is going. */
 	targetPath?: string;
@@ -97,8 +140,18 @@ export interface SyncOp {
 	 * removes a folder this device no longer holds, so there is no row left to
 	 * read it from — and without it the engine cannot tell the folder it is
 	 * about from whatever has the name now, so it does nothing at all.
+	 *
+	 * For `delete-file`, the same, for the same reason: the row goes when the
+	 * user deletes the file, and the op is what is left of it.
 	 */
 	remoteId?: string;
+	/**
+	 * For an `upload` whose bytes this device does not hold: the `remoteId` of
+	 * a file that has them, to read them from. A note moved out of a folder
+	 * where another note links the same file takes a copy of it, and the copy
+	 * can be owed before the original was ever downloaded here.
+	 */
+	copyOf?: string;
 	/** How many times this op has already failed. */
 	attempts: number;
 }
@@ -294,6 +347,9 @@ export type PullChange =
 			 * And every `UnreadableFile` beneath it, whose path is rebased the
 			 * same way. A feed that reports by id says the folder moved and
 			 * nothing about what is in it, so nothing else would correct them.
+			 *
+			 * And every file row beneath it, bound or pending, with the queued
+			 * ops that name them — the rule for ops above is about every op.
 			 */
 			kind: 'move-folder';
 			from: string;
@@ -360,6 +416,16 @@ export type PullChange =
 			 * for saying more than the store needs.
 			 */
 			keep?: readonly string[];
+			/**
+			 * The same for files, by file id: a bound file under the folder goes
+			 * with it unless it is named here, or its own queued `move-file` says
+			 * it is outside both `path` and `was` — the same backstop, for the
+			 * same reason. A pending file always stays: it is the user's, and
+			 * exists nowhere else.
+			 *
+			 * A file that goes takes its bytes with it.
+			 */
+			keepFiles?: readonly string[];
 	  }>
 	| Readonly<{
 			/**
@@ -424,7 +490,66 @@ export type PullChange =
 			kind: 'forget-unreadable';
 			remoteId: string;
 	  }>
-	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>;
+	| Readonly<{ kind: 'conflict'; resolution: ConflictResolution }>
+	/*
+	 * A file's changes are keyed by `fileId`, never `id`: the engine asks which
+	 * changes are about a note by whether they carry an `id`.
+	 */
+	| Readonly<{
+			/**
+			 * The remote has this file, here: put the row, bound to it, whole. A
+			 * row that had other bytes cached under another version keeps them,
+			 * and `fileBytes` stops returning them (`SyncStore.fileBytes`).
+			 *
+			 * Refused — the batch rejected, as for a dirty note — over a pending
+			 * row without `adopt`, which would take a file that exists nowhere
+			 * else and call it the remote's; and while a `delete-file` for this
+			 * `remoteId` is queued, which is the user's word that it should go.
+			 */
+			kind: 'upsert-file';
+			fileId: string;
+			path: string;
+			remote: RemoteEntry;
+			/**
+			 * The row is a pending file found already on the remote at its own
+			 * path and size: the same file, uploaded by another device or by a run
+			 * of this one that never heard back. Bound to it, and its bytes kept
+			 * as the remote version's — what saves uploading them again. Its
+			 * queued `upload` is withdrawn.
+			 */
+			adopt?: true;
+	  }>
+	| Readonly<{
+			/**
+			 * A pending file is where a different remote file is about to land:
+			 * moved aside, with its queued `upload`, as `displace-note` moves a
+			 * note. An unknown id is a no-op, as there.
+			 */
+			kind: 'displace-file';
+			fileId: string;
+			path: string;
+	  }>
+	| Readonly<{
+			/**
+			 * Gone remotely: the row goes, and its bytes. Bound rows only — a
+			 * pending one is refused, since it was never the remote's to take. An
+			 * unknown id is a no-op, as for `delete-note`.
+			 */
+			kind: 'delete-file';
+			fileId: string;
+	  }>
+	| Readonly<{
+			/**
+			 * A file a rescan did not return, where the provider said its own copy
+			 * may be what lost it (`reupload-note`). Where this device holds the
+			 * bytes, the row forgets its remote, the bytes are held until they are
+			 * up, and an `upload` is queued; where it does not, nothing can be
+			 * sent, and the row goes. Which of the two is the store's to say: only
+			 * it knows what it holds. An unknown id is a no-op.
+			 */
+			kind: 'reupload-file';
+			fileId: string;
+	  }>;
 
 /**
  * Both sides changed the same note. The remote keeps the path; the local copy
@@ -515,6 +640,43 @@ export type OpOutcome =
 			path: string;
 			remote: RemoteEntry;
 	  }>
+	| Readonly<{
+			/**
+			 * An `upload` landed. The row is bound to what it made, and its bytes
+			 * are kept as that version's rather than held: they are up now.
+			 *
+			 * Against the row as it stands, which the user may have changed while
+			 * the bytes were on their way. Moved since (`sentAs` is not its path
+			 * any more), a `move-file` is queued to take the file after it.
+			 * Deleted since, a `delete-file` is queued for what was made. And where
+			 * another row already holds the `remoteId` — the upload found its own
+			 * earlier copy and adopted it — this row is the same file twice, and
+			 * goes.
+			 */
+			kind: 'uploaded';
+			fileId: string;
+			remote: RemoteEntry;
+			/** The path the upload was sent to. */
+			sentAs: string;
+	  }>
+	| Readonly<{
+			/**
+			 * A `move-file` landed. Its bytes, if held, are still the file's: a
+			 * move does not change them, whatever the provider does to the
+			 * version. A row deleted since is left gone.
+			 */
+			kind: 'moved-file';
+			fileId: string;
+			remote: RemoteEntry;
+	  }>
+	| Readonly<{
+			/**
+			 * An `upload` had nothing to send: no bytes here, and nothing left at
+			 * `copyOf` to read them from. The row goes.
+			 */
+			kind: 'lost-file';
+			fileId: string;
+	  }>
 	/** Nothing to record beyond the op being finished. */
 	| Readonly<{ kind: 'done' }>;
 
@@ -595,6 +757,25 @@ export interface SyncStore {
 	 * `UnreadableFile` for what it must never be used for.
 	 */
 	readonly unreadable: () => Promise<UnreadableFile[]>;
+
+	/** A file row by its id, within this store's connection, as for notes. */
+	readonly fileById: (id: string) => Promise<SyncFile | undefined>;
+	/** Between batches, as `noteByPath`: one row at each path then. */
+	readonly fileByPath: (path: string) => Promise<SyncFile | undefined>;
+	readonly fileByRemoteId: (remoteId: string) => Promise<SyncFile | undefined>;
+	/** Every file row, bound and pending, for reconciling a full scan. */
+	readonly allFiles: () => Promise<SyncFile[]>;
+	/** Every file row at or beneath a folder; the root means every one. */
+	readonly filesUnder: (folderPath: string) => Promise<SyncFile[]>;
+	/**
+	 * The file's bytes, if this device holds them and they are still the
+	 * file's: held because they are not uploaded yet, or cached under the
+	 * version the row is bound to. Bytes cached under another version are not
+	 * returned — the file has changed since, or been replaced at its name, and
+	 * on OneDrive a rename moves the version too, which a stale picture would
+	 * otherwise survive.
+	 */
+	readonly fileBytes: (id: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
 
 	/**
 	 * Apply a pull batch and its cursor atomically, **in the order given**.

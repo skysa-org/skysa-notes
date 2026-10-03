@@ -244,7 +244,8 @@ const attentionMessage = (
 
 /**
  * What a stuck op was trying to do, in the user's terms. `mkdir` and `rmdir`
- * are the two that are not about a note, and so the two with no note to open.
+ * are about a notebook, and a file's three about a file beside a note (#187):
+ * none of them has a note to open.
  *
  * `rmdir` cannot actually be stuck — the engine gives up on one rather than
  * holding the queue up (§7, "A dead `rmdir` is given up on") — but it is a
@@ -257,6 +258,9 @@ const OP_LABELS: Record<QueuedOperation, string> = {
 	delete: 'the deletion of',
 	mkdir: 'the new notebook',
 	rmdir: 'the removal of the notebook',
+	upload: 'the upload of',
+	'move-file': 'the move of the file to',
+	'delete-file': 'the deletion of the file',
 };
 
 /**
