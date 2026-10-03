@@ -226,7 +226,7 @@ export const createMemoryStore = (): MemoryStore => {
 		const adoptable =
 			existing?.remoteId === undefined &&
 			existing?.path === change.path &&
-			existing.size === change.remote.size;
+			existing.size === (change.remote.size ?? 0);
 		if (change.adopt === true && !adoptable) {
 			throw new Error(`file ${change.fileId} is not one to adopt as that file`);
 		}
@@ -298,14 +298,13 @@ export const createMemoryStore = (): MemoryStore => {
 			forgetFile(file.id);
 			return;
 		}
-		// Gone from the remote, as far as a rescan can tell, and its own copy
-		// maybe what lost it. Sent again from here if there is anything to send,
-		// to where the row is: a move queued for it has nothing to move.
+		// Gone from the remote, and wanted there. Sent again from here to where
+		// the row is: a move queued for it has nothing to move. Pending whether
+		// or not there is anything to send, which the upload finds out.
 		const bytes = validBytes(file);
 		forgetFile(file.id);
-		if (bytes === undefined) return;
 		files.set(file.id, { id: file.id, path: file.path, size: file.size });
-		held.set(file.id, { bytes, pinned: true });
+		if (bytes !== undefined) held.set(file.id, { bytes, pinned: true });
 		queue({ op: 'upload', fileId: file.id, path: file.path });
 	};
 

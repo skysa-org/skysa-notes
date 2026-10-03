@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { NOTE_EXTENSION } from '../../src/config.js';
+import { foldName } from '../../src/markdown/slug.js';
 import {
 	ancestorPaths,
 	basename,
@@ -437,6 +439,9 @@ const remoteFiles = (remote: Remote): Record<string, string> =>
 			})
 	);
 
+/** A note, by the engine's rule: `.md`, in any case. */
+const isNotePath = (path: string): boolean => foldName(path).endsWith(NOTE_EXTENSION);
+
 /**
  * The files the remote holds that no device can read, which each device lists
  * for its user instead (docs/ARCHITECTURE.md §7). Only what would have been a note.
@@ -448,7 +453,7 @@ const remoteUnreadable = (remote: Remote): string[] =>
 			(entry) =>
 				entry.kind === 'file' &&
 				!isHidden(entry.path) &&
-				entry.path.endsWith('.md') &&
+				isNotePath(entry.path) &&
 				remote.backing.contentAt(entry.path) === undefined
 		)
 		.map((entry) => entry.path)
@@ -468,7 +473,7 @@ const remoteAttachments = (remote: Remote): Place[] =>
 	remote.backing
 		.snapshot()
 		.filter(
-			(entry) => entry.kind === 'file' && !isHidden(entry.path) && !entry.path.endsWith('.md')
+			(entry) => entry.kind === 'file' && !isHidden(entry.path) && !isNotePath(entry.path)
 		)
 		.map((entry) => ({ path: entry.path, remoteId: entry.remoteId, size: entry.size }))
 		.sort(byPlace);

@@ -441,6 +441,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return map.set(entry.remoteId, [...seen, { path: entry.path, at }]);
 		}, new Map());
 
+	/** The same, without what is at a hidden path (`Batch.listed`), each at its own `at`. */
+	const unhidden = (live: LiveEntries): LiveEntries =>
+		new Map(
+			[...live].flatMap(([id, entries]): [string, LiveEntry[]][] => {
+				const shown = entries.filter((entry) => !isHidden(entry.path));
+				return shown.length === 0 ? [] : [[id, shown]];
+			})
+		);
+
 	/**
 	 * Does this batch say the thing is still somewhere other than the path a
 	 * deletion at `at` is about?
@@ -1071,6 +1080,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const { path, remoteId } = entry;
 		const { live } = batch;
 
+		// A file that is not a note, first: it is matched by id or by where
+		// its file is, and never takes a note or a folder with it.
+		const file = deletedFile(entry, batch, decided, at);
+		if (file !== undefined) return file;
+
 		// A deletion names a path, so unlike an entry it does have to be matched
 		// by path when it carries no id: that is the only thing it has. When it
 		// does carry one and we do not know it, the file being deleted is not a
@@ -1093,10 +1107,6 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// on being held. There is no need to fall back to `store.noteByPath`:
 		// `notesEndingIn` starts from the store's own rows under that folder, so
 		// a note that has not been moved is found by it too.
-		// A file that is not a note, first: it is matched by id or by where
-		// its file is, and never takes a note or a folder with it.
-		const file = deletedFile(entry, batch, decided, at);
-		if (file !== undefined) return file;
 		const { note: local, byOldName } = await deletedNote(entry, batch, decided);
 
 		if (await movedNotDeleted(path, remoteId, local, batch, at, decided)) return [];
@@ -1139,9 +1149,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 
 		// Not a note we hold, so the only thing left it could be about is a
-		// folder we hold. Anything else — a PDF beside the notes, a file we
-		// never imported, a folder that was never ours — is not news, and
-		// saying otherwise would tell the user something happened to them.
+		// folder we hold, files having been asked first. Anything else — a file
+		// at a hidden path, one we never imported, a folder that was never
+		// ours — is not news, and saying otherwise would tell the user
+		// something happened to them.
 		// Including one this batch has just made: a folder created and removed
 		// inside one cursor window is reported as both, and asking the store
 		// alone leaves a notebook in the sidebar with nothing behind it until
@@ -1306,7 +1317,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	): string[] =>
 		[...filesNow(batch.files, decided).values()].flatMap((file) => {
 			if (file.remoteId === undefined || !isWithin(file.at, final)) return [];
-			const later = (batch.live.get(file.remoteId) ?? []).some((entry) => entry.at > at);
+			const later = (batch.listed.get(file.remoteId) ?? []).some((entry) => entry.at > at);
 			return later ? [file.id] : [];
 		});
 
@@ -1319,6 +1330,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/** What every decision in a batch is reached against, worked out once. */
 	interface Batch {
 		live: LiveEntries;
+		/**
+		 * `live` without what is at a hidden path, for the files' rules: `decide`
+		 * passes such an entry over, so it says nothing of where a file went.
+		 * Read as the file's next place, it kept a row for a file that had gone
+		 * where nothing would ever put the row (#194).
+		 */
+		listed: LiveEntries;
 		/**
 		 * Paths the batch brings a file or folder to, and the old names of
 		 * renames queued here: the file is still there until the rename runs,
@@ -2390,8 +2408,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (change.kind === 'delete-file') {
 			return new Map([...view].filter(([id]) => id !== file.id));
 		}
-		// `reupload-file`: pending again where it is, or gone, which only the
-		// store can say. Pending keeps the name taken, the safer of the two.
+		// `reupload-file`: pending again where it is, whatever the store holds
+		// of it. Without bytes, its upload finds that out (`lost-file`).
 		return new Map(view).set(file.id, {
 			...file,
 			remote: file.at,
@@ -2406,8 +2424,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * A file gone from the remote, for a row the user has moved here: the move
 	 * is theirs, as an edit is, and outranks the deletion as far as this
 	 * device can keep it. Sent back up from the bytes held here, where the user
-	 * put it; let go of where there are none (`reupload-file`). Any other bound
-	 * row is only the remote's word, and goes.
+	 * put it (`reupload-file`); where none are held, the upload finds nothing to
+	 * send and the row goes then (`lost-file`). Any other bound row is only the
+	 * remote's word, and goes.
 	 */
 	const fileGone = (file: FilePlace): PullChange =>
 		file.moving
@@ -2489,7 +2508,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 					const aside = freeFilePath(path, view, batch);
 					return [...changes, { kind: 'displace-file', fileId: file.id, path: aside }];
 				}
-				const later = (batch.live.get(file.remoteId) ?? []).some((entry) => entry.at > at);
+				const later = (batch.listed.get(file.remoteId) ?? []).some(
+					(entry) => entry.at > at
+				);
 				return later ? changes : [...changes, { kind: 'delete-file', fileId: file.id }];
 			}, []);
 
@@ -2508,6 +2529,38 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// The user has deleted it here, and the delete has not run: what the
 		// remote says of it is old news, and the store would pass it over.
 		if (batch.files.deleting.has(entry.remoteId)) return [];
+		const taken = originsTaken(entry, decided, batch, at);
+		return [...taken, ...placeAttachment(entry, [...decided, ...taken], batch, at)];
+	};
+
+	/**
+	 * Rows the user moved away from where `entry` now is, whose file is no
+	 * longer the one there: another has the name, and the batch does not say
+	 * the old one went anywhere. A feed can report a file put in place of
+	 * another and never the deletion of the one it replaced, which
+	 * `clearFilePath` answers for a row still at the path; for a row the user
+	 * moved away, the move would find nothing to move and leave the row bound
+	 * to nothing. Gone, as a deletion would have said (#194).
+	 */
+	const originsTaken = (
+		entry: RemoteEntry,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): PullChange[] =>
+		[...filesNow(batch.files, decided).values()].flatMap((file) => {
+			if (!file.moving || file.remoteId === undefined || file.remote !== entry.path)
+				return [];
+			const later = (batch.listed.get(file.remoteId) ?? []).some((each) => each.at > at);
+			return file.remoteId === entry.remoteId || later ? [] : [fileGone(file)];
+		});
+
+	const placeAttachment = (
+		entry: RemoteEntry,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): PullChange[] => {
 		const view = [...filesNow(batch.files, decided).values()];
 		const size = entry.size ?? 0;
 		const own = view.find((file) => file.remoteId === entry.remoteId);
@@ -2595,8 +2648,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (file?.remoteId === undefined) return undefined;
 		const here = path !== undefined && file.remote === path;
 		const alive = here
-			? (batch.live.get(file.remoteId) ?? []).some((each) => each.at > at)
-			: aliveElsewhere(batch.live, file.remoteId, path, at);
+			? (batch.listed.get(file.remoteId) ?? []).some((each) => each.at > at)
+			: aliveElsewhere(batch.listed, file.remoteId, path, at);
 		return alive ? [] : [fileGone(file)];
 	};
 
@@ -2616,16 +2669,19 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const file = [...filesNow(batch.files, decided).values()].find(
 			(each) => each.remoteId !== undefined && each.remote === was
 		);
-		if (file?.remoteId === undefined || batch.live.has(file.remoteId)) return [];
+		if (file?.remoteId === undefined || batch.listed.has(file.remoteId)) return [];
 		return [fileGone(file)];
 	};
 
 	/**
 	 * Two rows on one path once a batch is decided, which nothing above means
-	 * to leave: folders moved together, or a shape nobody has found. The one
-	 * whose file is there keeps it; one never sent, or on its way elsewhere,
-	 * steps aside; another that says its file is there is out of date, and
-	 * goes.
+	 * to leave: a pending row a deletion kept, and a notebook renamed onto its
+	 * name by an entry that lists none of its files; or a shape nobody has
+	 * found. The first row bound there, and not on its way elsewhere, keeps
+	 * the path, and where there is none the first row does. One never sent, or
+	 * on its way elsewhere, steps aside. Another bound there goes: which of
+	 * two such rows the file really is, nothing in the batch says any more,
+	 * and the wrong one costs a picture that does not show until a scan.
 	 */
 	const settleFileClashes = (decided: readonly PullChange[], batch: Batch): PullChange[] => {
 		const groups = [...filesNow(batch.files, decided).values()].reduce<
@@ -2876,6 +2932,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// Everything this batch says still exists, and where, so a deletion
 			// elsewhere in it can be recognised as the first half of a move.
 			live: liveEntries(entries),
+			listed: unhidden(liveEntries(entries)),
 			claimed: new Set([...claimedPaths(entries), ...renaming.values()]),
 			doomed: doomedIn(entries),
 			renaming,
