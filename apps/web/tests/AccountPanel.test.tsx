@@ -25,7 +25,6 @@ import {
 	activeConnectionId,
 	createDatabase,
 	LOCAL_CONNECTION_ID,
-	type NoteRecord,
 	type NotesDatabase,
 	PENDING_CREDENTIAL_ID,
 } from '../src/store/db.js';
@@ -194,6 +193,8 @@ const renderPanel = (
 	const went: string[] = [];
 	// And what it would hand the user as a file, by title: no blob URLs either.
 	const downloaded: string[][] = [];
+	// And the files that went with them, by path.
+	const downloadedFiles: string[][] = [];
 	// And a whole source, by its notes' titles and its notebooks' paths.
 	const downloadedAll: { notes: string[]; folders: string[] }[] = [];
 	// The bar as well as the panel, because since the tabs arrived the two are
@@ -221,9 +222,10 @@ const renderPanel = (
 						went.push(to);
 						go(to);
 					}}
-					download={(notes: readonly NoteRecord[]) =>
-						downloaded.push(notes.map((note) => note.title))
-					}
+					download={(library) => {
+						downloaded.push(library.notes.map((note) => note.title));
+						downloadedFiles.push(library.files.map((file) => file.path));
+					}}
 					keeping={keep}
 					downloadAll={(library) => {
 						saveAll(library);
@@ -241,7 +243,7 @@ const renderPanel = (
 		history: createMemoryHistory({ initialEntries: [url] }),
 	});
 	render(<RouterProvider router={router} />);
-	return { went, downloaded, downloadedAll };
+	return { went, downloaded, downloadedFiles, downloadedAll };
 };
 
 /**
@@ -635,7 +637,7 @@ describe('AccountPanel, downloading every note', () => {
 		await user.click(await enabled('Download all notes'));
 
 		expect((await screen.findByRole('alert')).textContent).toBe(
-			'There are too many notes and notebooks here for one archive, which holds at most 65,534. Nothing was downloaded.'
+			'There are too many notes, notebooks and files here for one archive, which holds at most 65,534. Nothing was downloaded.'
 		);
 		// And the button is there to try again.
 		expect(await enabled('Download all notes')).toBeTruthy();
@@ -867,6 +869,40 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await noteById(db, sent.id)).toBeUndefined();
 		// And the credential is gone with the binding: it reaches nothing now.
 		expect(await db.credentials.get('c1')).toBeUndefined();
+	});
+
+	it('says so beside the question when its download fails, from either step', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		await createNote(db, { title: 'Unsent' });
+		const { downloaded } = renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db
+		);
+		const failure = 'The notes could not be downloaded. Try again.';
+		// The store will not give the bytes up.
+		const failing = () =>
+			vi.spyOn(db.fileBytes, 'bulkGet').mockRejectedValue(new Error('disk'));
+		await user.click(await enabled('Disconnect…'));
+		const failed = failing();
+
+		await user.click(await screen.findByRole('button', { name: 'Download them' }));
+
+		expect((await screen.findByText(failure)).getAttribute('role')).toBe('alert');
+		// Tried again and done, it no longer says so.
+		failed.mockRestore();
+		await user.click(screen.getByRole('button', { name: 'Download them' }));
+		await waitFor(() => {
+			expect(downloaded).toHaveLength(1);
+		});
+		expect(screen.queryByText(failure)).toBeNull();
+		failing();
+		await user.click(screen.getByRole('button', { name: 'Discard them…' }));
+		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		expect(await screen.findByText(failure)).toBeTruthy();
+		expect(await db.notes.count()).toBe(1);
 	});
 
 	it('asks what becomes of what was never sent, and tells the server nothing until it is answered', async () => {
@@ -2347,6 +2383,60 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(await screen.findByRole('button', { name: 'This device' })).toBeTruthy();
 	});
 
+	it('downloads a file never uploaded, with nothing else unsent', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
+		await holding(db, 'c1');
+		const plan = await createNote(db, { title: 'Plan' });
+		const added = await addAttachment(db, {
+			noteId: plan.id,
+			name: 'a.png',
+			bytes: new TextEncoder().encode('a').buffer,
+		});
+		// The note is up; the file it links is not.
+		await db.notes.update(['c1', plan.id], { remoteId: 'r-plan', dirty: 0 });
+		await db.opQueue.filter((op) => op.noteId === plan.id).delete();
+		await detachConnection(db, { connectionId: 'c1' });
+		const { downloaded, downloadedFiles } = renderPanel(clientWith(), db);
+
+		await user.click(await enabled('Download'));
+
+		await waitFor(() => {
+			expect(downloadedFiles).toEqual([[added.path]]);
+		});
+		expect(downloaded).toEqual([[]]);
+	});
+
+	it('says so when a download fails, from either step', async () => {
+		const user = userEvent.setup();
+		const { db } = await detached();
+		const { downloaded } = renderPanel(clientWith(), db);
+		const failure = 'The notes could not be downloaded. Try again.';
+		// The store will not give the bytes up.
+		const failing = () =>
+			vi.spyOn(db.fileBytes, 'bulkGet').mockRejectedValue(new Error('disk'));
+		const failed = failing();
+
+		await user.click(await enabled('Download'));
+
+		expect(await screen.findByText(failure)).toBeTruthy();
+		// Tried again and done, it no longer says so.
+		failed.mockRestore();
+		await user.click(await enabled('Download'));
+		await waitFor(() => {
+			expect(downloaded).toHaveLength(1);
+		});
+		expect(screen.queryByText(failure)).toBeNull();
+		// And from the discard's second step, where it matters most: a user who
+		// thinks they have a copy is a user who discards.
+		failing();
+		await user.click(await enabled('Discard…'));
+		await user.click(screen.getByRole('button', { name: 'Download them first' }));
+		expect(await screen.findByText(failure)).toBeTruthy();
+		expect(await db.notes.count()).toBe(2);
+	});
+
 	it('says a file never uploaded goes with what is discarded', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
@@ -2375,7 +2465,9 @@ describe('AccountPanel, with a detached source in front', () => {
 
 		await user.click(await enabled('Download'));
 
-		expect(downloaded.map((titles) => [...titles].sort())).toEqual([['List', 'Plan']]);
+		await waitFor(() => {
+			expect(downloaded.map((titles) => [...titles].sort())).toEqual([['List', 'Plan']]);
+		});
 		// A download takes nothing away.
 		expect(await db.notes.count()).toBe(2);
 	});
@@ -2400,7 +2492,9 @@ describe('AccountPanel, with a detached source in front', () => {
 		// Nothing has gone, and a download is within reach.
 		expect(await db.notes.count()).toBe(2);
 		await user.click(screen.getByRole('button', { name: 'Download them first' }));
-		expect(downloaded).toHaveLength(1);
+		await waitFor(() => {
+			expect(downloaded).toHaveLength(1);
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 

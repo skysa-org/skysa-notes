@@ -19,17 +19,23 @@ import {
 	crc32,
 	DOWNLOAD_GRACE_MS,
 	downloadLibrary,
-	downloadNotes,
+	downloadNotice,
 	downloadProblem,
 	downloadSource,
+	downloadUnsent,
 	entryName,
 	filesOf,
+	hasUnsentDownload,
 	holdsAnything,
+	INCOMPLETE_DOWNLOAD,
 	type Library,
 	libraryOf,
+	unsentLibrary,
 	type ZipFile,
 	zipOf,
+	zipParts,
 } from '../src/store/exportNotes.js';
+import { addAttachment } from '../src/store/files.js';
 import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import {
@@ -39,6 +45,7 @@ import {
 	noteFile,
 	saveNoteBody,
 } from '../src/store/notes.js';
+import { unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
 
 /**
@@ -49,6 +56,11 @@ import { createDexieSyncStore } from '../src/sync/store.js';
  */
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/** Notes alone, as a library with nothing else in it. */
+const downloadNotes = (notes: readonly NoteRecord[], filename?: string): void => {
+	downloadLibrary({ notes: [...notes], folders: [], files: [], missing: 0 }, filename);
+};
 const text = (bytes: Uint8Array): string => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 
 /** Bit by bit, with no table: slow, obvious, and not the code under test. */
@@ -66,7 +78,9 @@ const slowCrc32 = (bytes: Uint8Array): number =>
 
 interface ReadEntry {
 	path: string;
+	/** The entry's bytes as text, for a note's; `data` is what was written. */
 	content: string;
+	data: Uint8Array;
 	flags: number;
 	method: number;
 	time: number;
@@ -153,7 +167,8 @@ const readZip = (bytes: Uint8Array): { entries: ReadEntry[]; directoryOffset: nu
 		expected.current = offset + 30 + nameLength + size;
 		return {
 			path: text(name),
-			content: text(data),
+			content: new TextDecoder().decode(data),
+			data,
 			flags,
 			method,
 			time,
@@ -233,8 +248,9 @@ describe('a store-only ZIP', () => {
 		expect(entries[0]?.path).toBe(files[0]?.path);
 		expect(entries[0]?.content).toBe(files[0]?.content);
 		// Sizes are in bytes, not in characters.
-		expect(entries[0]?.size).toBe(utf8(files[0]?.content ?? '').length);
-		expect(entries[0]?.size).toBeGreaterThan((files[0]?.content ?? '').length);
+		const written = String(files[0]?.content ?? '');
+		expect(entries[0]?.size).toBe(utf8(written).length);
+		expect(entries[0]?.size).toBeGreaterThan(written.length);
 	});
 
 	it('sets the UTF-8 flag on a plain ASCII name too', () => {
@@ -622,6 +638,30 @@ describe('a store-only ZIP', () => {
 		}
 	});
 
+	it.skipIf(!unzip)("gives a file's bytes back exactly, every value of them", () => {
+		const folder = mkdtempSync(join(tmpdir(), 'skysa-export-'));
+		try {
+			const archive = join(folder, 'notes.zip');
+			const bytes = Uint8Array.from({ length: 4096 }, (_, index) => (index * 31) & 0xff);
+			writeFileSync(
+				archive,
+				zipOf([
+					{ path: 'work/plan.md', content: '![p](p.png)\n' },
+					{ path: 'work/p.png', content: bytes },
+				])
+			);
+
+			expect(execFileSync('unzip', ['-t', archive], { encoding: 'utf8' })).toContain(
+				'No errors detected'
+			);
+			expect(new Uint8Array(execFileSync('unzip', ['-p', archive, 'work/p.png']))).toEqual(
+				bytes
+			);
+		} finally {
+			rmSync(folder, { recursive: true, force: true });
+		}
+	});
+
 	it.skipIf(!unzip)('unpacks an empty notebook as an empty folder', () => {
 		const folder = mkdtempSync(join(tmpdir(), 'skysa-export-'));
 		try {
@@ -644,13 +684,13 @@ describe('a store-only ZIP', () => {
 describe('what the user is told when there is no download', () => {
 	it('names the limit that was met, and that nothing was downloaded', () => {
 		expect(downloadProblem(new ArchiveLimitError('entries', ''))).toBe(
-			'There are too many notes and notebooks here for one archive, which holds at most 65,534. Nothing was downloaded.'
+			'There are too many notes, notebooks and files here for one archive, which holds at most 65,534. Nothing was downloaded.'
 		);
 		expect(downloadProblem(new ArchiveLimitError('bytes', ''))).toBe(
-			'These notes come to more than one archive can hold, which is 4 GB. Nothing was downloaded.'
+			'These notes and files come to more than one archive can hold, which is 4 GB. Nothing was downloaded.'
 		);
 		expect(downloadProblem(new ArchiveLimitError('name', ''))).toBe(
-			'A note or notebook here has a path too long to put in an archive. Nothing was downloaded.'
+			'A note, notebook or file here has a path too long to put in an archive. Nothing was downloaded.'
 		);
 	});
 
@@ -894,7 +934,12 @@ describe('exporting notes', () => {
 			createdAt: 1,
 			updatedAt: 1,
 		};
-		const library: Library = { notes: [note], folders: [{ path: 'Ideas' }, { path: 'Work' }] };
+		const library: Library = {
+			notes: [note],
+			folders: [{ path: 'Ideas' }, { path: 'Work' }],
+			files: [],
+			missing: 0,
+		};
 
 		downloadLibrary(library);
 
@@ -1068,7 +1113,7 @@ describe('a whole source', () => {
 
 		const answer = await downloadSource(db, LOCAL_CONNECTION_ID, () => undefined);
 
-		expect(answer).toEqual({ incomplete: true });
+		expect(answer).toEqual({ incomplete: true, missing: 0 });
 	});
 
 	it("does not call it incomplete for another source's unsaved text", async () => {
@@ -1082,7 +1127,284 @@ describe('a whole source', () => {
 			given.push(library);
 		});
 
-		expect(answer).toEqual({ incomplete: false });
+		expect(answer).toEqual({ incomplete: false, missing: 0 });
 		expect(given[0]?.notes.map((each) => each.title)).toEqual(['Here']);
+	});
+});
+
+describe('the files beside the notes (#187)', () => {
+	const opened: NotesDatabase[] = [];
+	const listening: (() => void)[] = [];
+	const scope = { connectionId: 'dropbox-1' };
+
+	afterEach(async () => {
+		listening.splice(0).forEach((stop) => {
+			stop();
+		});
+		vi.unstubAllGlobals();
+		await Promise.all(opened.splice(0).map((db) => db.delete()));
+	});
+
+	const freshDatabase = (): NotesDatabase => {
+		const db = createDatabase(`export-files-${crypto.randomUUID()}`);
+		opened.push(db);
+		return db;
+	};
+
+	const bufferOf = (value: string): ArrayBuffer => new TextEncoder().encode(value).buffer;
+
+	/** The archive `downloadLibrary` hands the browser, read back. */
+	const archiveOf = async (library: Library): Promise<Uint8Array> => {
+		const blobs: Blob[] = [];
+		vi.stubGlobal('URL', {
+			createObjectURL: (blob: Blob) => {
+				blobs.push(blob);
+				return 'blob:skysa/files';
+			},
+			revokeObjectURL: () => undefined,
+		});
+		const onClick = (event: Event) => {
+			event.preventDefault();
+		};
+		document.addEventListener('click', onClick);
+		listening.push(() => {
+			document.removeEventListener('click', onClick);
+		});
+		downloadLibrary(library);
+		return new Uint8Array(await (blobs[0] ?? new Blob()).arrayBuffer());
+	};
+
+	/**
+	 * In `dropbox-1`: an unsent note in Work that links two files the remote
+	 * has — one whose bytes are cached here, one never read — and a file added
+	 * here and not uploaded; and beside them a file the remote has moved on
+	 * from, whose bytes here are an older version.
+	 */
+	const source = async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, {
+			...scope,
+			folderPath: 'Work',
+			title: 'Trip',
+			body: '![m](map.png) ![f](far.png)\n',
+		});
+		const added = await addAttachment(db, {
+			...scope,
+			noteId: note.id,
+			name: 'sun.png',
+			bytes: bufferOf('sun'),
+		});
+		const bound = (id: string, path: string) =>
+			db.files.put({ ...scope, id, path, remoteId: `r-${id}`, remoteVersion: 'v2', size: 3 });
+		const cached = (id: string, value: string, version: string) =>
+			db.fileBytes.put({
+				...scope,
+				id,
+				bytes: bufferOf(value),
+				version,
+				pinned: 0,
+				lastUsedAt: 0,
+			});
+		await bound('map', 'Work/map.png');
+		await cached('map', 'map', 'v2');
+		await bound('far', 'Work/far.png');
+		await bound('old', 'Work/old.png');
+		await cached('old', 'was', 'v1');
+		return { db, note, added };
+	};
+
+	it("writes a file's bytes exactly as they are, and never copies them", () => {
+		const bytes = Uint8Array.from({ length: 256 }, (_, index) => index);
+		const files: ZipFile[] = [
+			{ path: 'a.md', content: '# A\n' },
+			{ path: 'pic.png', content: bytes },
+		];
+
+		// The very buffer, as a part of the archive, rather than a copy of it.
+		expect(zipParts(files).some((part) => part === bytes)).toBe(true);
+		const { entries } = readZip(zipOf(files));
+		expect(entries.map((entry) => entry.path)).toEqual(['a.md', 'pic.png']);
+		expect(entries[1]?.data).toEqual(bytes);
+		expect(entries[1]?.size).toBe(256);
+	});
+
+	it('takes the files whose bytes are here as they are now, and counts the rest', async () => {
+		const { db, added } = await source();
+		await addAttachment(db, {
+			connectionId: 'dropbox-2',
+			noteId: (await createNote(db, { connectionId: 'dropbox-2', title: 'Theirs' })).id,
+			name: 'theirs.png',
+			bytes: bufferOf('theirs'),
+		});
+
+		const library = await libraryOf(db, scope.connectionId);
+
+		expect(
+			library.files.map((file) => ({
+				path: file.path,
+				content: text(file.content as Uint8Array),
+			}))
+		).toEqual([
+			{ path: 'Work/map.png', content: 'map' },
+			{ path: added.path, content: 'sun' },
+		]);
+		expect(library.files.every((file) => typeof file.modifiedAt === 'number')).toBe(true);
+		// The one never read, and the one held only in an older version.
+		expect(library.missing).toBe(2);
+	});
+
+	it('puts them in the archive beside the notes, and no folder of their own', async () => {
+		const { db, note, added } = await source();
+		// A notebook holding a file and no note: the file says it is a folder.
+		await createFolder(db, { ...scope, name: 'Pics' });
+		await db.files.put({ ...scope, id: 'p', path: 'Pics/p.png', size: 1 });
+		await db.fileBytes.put({
+			...scope,
+			id: 'p',
+			bytes: bufferOf('p'),
+			pinned: 1,
+			lastUsedAt: 0,
+		});
+
+		const archive = await archiveOf(await libraryOf(db, scope.connectionId));
+
+		expect(readZip(archive).entries.map((entry) => entry.path)).toEqual([
+			note.path,
+			'Pics/p.png',
+			'Work/map.png',
+			added.path,
+		]);
+	});
+
+	it('refuses an archive too big from the sizes of the files held, before reading their bytes', async () => {
+		const db = freshDatabase();
+		const half = 2 ** 31;
+		const bound = (id: string) =>
+			db.files.put({
+				...scope,
+				id,
+				path: `${id}.bin`,
+				remoteId: `r-${id}`,
+				remoteVersion: 'v',
+				size: half,
+			});
+		const cached = (id: string) =>
+			db.fileBytes.put({
+				...scope,
+				id,
+				bytes: bufferOf(id),
+				version: 'v',
+				pinned: 0,
+				lastUsedAt: 0,
+			});
+		await bound('a');
+		await bound('b');
+		await cached('a');
+		// One held: under the limit, whatever the other's row says.
+		expect((await libraryOf(db, scope.connectionId)).missing).toBe(1);
+		await cached('b');
+		const read = vi.spyOn(db.fileBytes, 'bulkGet');
+
+		const refused = await libraryOf(db, scope.connectionId).catch((error: unknown) => error);
+
+		expect(refused).toBeInstanceOf(ArchiveLimitError);
+		expect((refused as ArchiveLimitError).limit).toBe('bytes');
+		expect(read).not.toHaveBeenCalled();
+	});
+
+	it('answers how many it left out, and the user is told where they are', async () => {
+		const { db } = await source();
+
+		expect(await downloadSource(db, scope.connectionId, () => undefined)).toEqual({
+			incomplete: false,
+			missing: 2,
+		});
+		expect(downloadNotice({ incomplete: false, missing: 2 })).toBe(
+			"Downloaded, without 2 files this device has no current copy of. They are still in the source's storage."
+		);
+		expect(downloadNotice({ incomplete: false, missing: 1 })).toBe(
+			"Downloaded, without 1 file this device has no current copy of. It is still in the source's storage."
+		);
+		expect(downloadNotice({ incomplete: false, missing: 0 })).toBeNull();
+		// Text only the user can save comes first.
+		expect(downloadNotice({ incomplete: true, missing: 2 })).toBe(INCOMPLETE_DOWNLOAD);
+	});
+
+	it('holds something to download in a file alone, where its current bytes are here', async () => {
+		const db = freshDatabase();
+		const cached = (id: string, version: string) =>
+			db.fileBytes.put({
+				...scope,
+				id,
+				bytes: bufferOf(id),
+				version,
+				pinned: 0,
+				lastUsedAt: 0,
+			});
+		await db.files.put({
+			...scope,
+			id: 'f',
+			path: 'a.png',
+			remoteId: 'r-f',
+			remoteVersion: 'v2',
+			size: 1,
+		});
+
+		// The row alone would be an empty archive.
+		expect(await holdsAnything(db, scope.connectionId)).toBe(false);
+		// And so would bytes of no file, or of a version the remote has moved on from.
+		await cached('g', 'v2');
+		await cached('f', 'v1');
+		expect(await holdsAnything(db, scope.connectionId)).toBe(false);
+		await cached('f', 'v2');
+		expect(await holdsAnything(db, scope.connectionId)).toBe(true);
+		expect(await holdsAnything(db, 'dropbox-2')).toBe(false);
+	});
+
+	it('takes what was never sent with the files the notes link, where their bytes are here', async () => {
+		const { db, note, added } = await source();
+		const listed = await unsyncedIn(db, scope.connectionId);
+		const handed: Library[] = [];
+
+		await downloadUnsent(db, listed, (library) => {
+			handed.push(library);
+		});
+
+		expect(handed).toHaveLength(1);
+		expect(handed[0]?.notes.map((each) => each.id)).toEqual([note.id]);
+		expect(handed[0]?.folders).toEqual([]);
+		expect(handed[0]?.files.map((file) => file.path)).toEqual(['Work/map.png', added.path]);
+		// The linked one never read, which the remote has.
+		expect(handed[0]?.missing).toBe(1);
+	});
+
+	it("takes a listed file's bytes as they are while the source is unchecked, and a linked one's only as they are now", async () => {
+		const { db, added } = await source();
+		await db.syncState.put({ ...scope, clientId: 'this-browser', resumeUnverified: true });
+		const listed = await unsyncedIn(db, scope.connectionId);
+		const contents = (library: Library) =>
+			library.files.map((file) => [file.path, text(file.content as Uint8Array)]);
+
+		// Unchecked, the older copy here may be the only one left.
+		expect(contents(await unsentLibrary(db, listed))).toEqual([
+			['Work/map.png', 'map'],
+			['Work/old.png', 'was'],
+			[added.path, 'sun'],
+		]);
+		// Only linked, the same file is the remote's, which has it as it is now.
+		const linkedOnly = await unsentLibrary(db, { ...listed, files: [], linked: listed.files });
+		expect(contents(linkedOnly)).toEqual([
+			['Work/map.png', 'map'],
+			[added.path, 'sun'],
+		]);
+		expect(linkedOnly.missing).toBe(1);
+	});
+
+	it('has something to download in a file not uploaded alone', async () => {
+		const { db } = await source();
+		const listed = await unsyncedIn(db, scope.connectionId);
+
+		expect(hasUnsentDownload({ ...listed, notes: [] })).toBe(true);
+		expect(hasUnsentDownload({ ...listed, notes: [], portable: [] })).toBe(false);
 	});
 });

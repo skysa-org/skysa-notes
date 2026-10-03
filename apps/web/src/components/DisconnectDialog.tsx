@@ -2,6 +2,7 @@ import { type ReactNode, type RefObject, useEffect, useState } from 'react';
 
 import { type ConnectedSource } from '../store/connection.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
+import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
 import { countedFolders, countOf, isEmpty, type Unsynced } from '../store/unsynced.js';
 import { type UnsentAnswer } from '../sync/account.js';
 import { canMove, leftBehind, MoveUnsent } from './MoveUnsent.js';
@@ -66,7 +67,7 @@ export interface DisconnectDialogProps {
 	 * it, the app's access is meant to stay.
 	 */
 	leftAtProvider: ReactNode;
-	download: (notes: readonly NoteRecord[]) => void;
+	download: (listed: Unsynced) => Promise<void>;
 	onAnswer: (answer: UnsentAnswer) => void;
 	onCancel: () => void;
 	/** The parent moves the focus here, and keeps it off a button that has gone. */
@@ -183,6 +184,21 @@ export const DisconnectDialog = ({
 	cancelRef,
 }: DisconnectDialogProps) => {
 	const [discarding, setDiscarding] = useState(false);
+	// Why the last download did not happen. Said here, beside the button: one
+	// that silently does nothing is a user who goes on to discard, thinking
+	// they have a copy.
+	const [failed, setFailed] = useState<string | null>(null);
+	const save = () => {
+		setFailed(null);
+		void download(listed).catch((error: unknown) => {
+			setFailed(downloadProblem(error));
+		});
+	};
+	const failure = failed !== null && (
+		<p className="muted" role="alert">
+			{failed}
+		</p>
+	);
 	const named = displayName === null ? label : `${label} · ${displayName}`;
 	// Nothing about other devices without the server: it is not asked, so the
 	// account is wherever it was.
@@ -251,15 +267,10 @@ export const DisconnectDialog = ({
 				>
 					Discard for good
 				</button>
-				<button
-					type="button"
-					disabled={busy || listed.notes.length === 0}
-					onClick={() => {
-						download(listed.notes);
-					}}
-				>
+				<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
 					Download them first
 				</button>
+				{failure}
 				{cancel}
 			</div>
 		);
@@ -308,15 +319,10 @@ export const DisconnectDialog = ({
 			>
 				Discard them…
 			</button>
-			<button
-				type="button"
-				disabled={busy || listed.notes.length === 0}
-				onClick={() => {
-					download(listed.notes);
-				}}
-			>
+			<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
 				Download them
 			</button>
+			{failure}
 			{cancel}
 		</div>
 	);

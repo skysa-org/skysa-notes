@@ -1,10 +1,17 @@
 import { ancestorPaths, basename, normalizePath, parentPath, ROOT } from '@skysa/core';
 
-import { type NoteRecord, type NotesDatabase } from './db.js';
+import {
+	type FileBytesRecord,
+	type FileRecord,
+	type NoteRecord,
+	type NotesDatabase,
+} from './db.js';
 import { holdsTextFor } from './detached.js';
+import { fileKey, heldBytesAreCurrent } from './files.js';
 import { settleEditors } from './heldEdits.js';
 import { foldPath } from './naming.js';
 import { noteFile } from './notes.js';
+import { type Unsynced } from './unsynced.js';
 
 /**
  * Notes out of the app as files, with no provider involved.
@@ -23,7 +30,9 @@ import { noteFile } from './notes.js';
  * A ZIP written by hand, stored and not compressed. Notes are small, DEFLATE is
  * a dependency or a few hundred lines, and a stored archive is a header, the
  * bytes, and a table of contents — little enough to get exactly right and to
- * check field by field (`tests/exportNotes.test.ts`). Nothing here touches the
+ * check field by field (`tests/exportNotes.test.ts`). The files beside the
+ * notes (#187) go in as the bytes this device holds of them: pictures and
+ * documents are compressed already, and would gain nothing. Nothing here touches the
  * network, and a blob handed to `<a download>` is not a script or a fetch, so
  * the content security policy has nothing to say about it.
  *
@@ -32,13 +41,21 @@ import { noteFile } from './notes.js';
  * header, §4.3.12 central directory, §4.3.16 end record, §4.4.4 flag bit 11).
  */
 
+/**
+ * Bytes over a buffer of their own, which is what `new Uint8Array(n)` makes and
+ * what a `Blob` will take: the plain `Uint8Array` type allows a shared buffer,
+ * and a blob cannot be made of memory another thread may still be writing.
+ */
+type Bytes = Uint8Array<ArrayBuffer>;
+
 export interface ZipFile {
 	/**
 	 * POSIX, relative, as the provider has it. What is written is `entryName` of
 	 * it, which is the same thing for every path the app itself makes.
 	 */
 	path: string;
-	content: string;
+	/** A note's text, or a file's bytes, which go in exactly as they are. */
+	content: string | Bytes;
 	/** Epoch milliseconds. Absent is the earliest date the format has, 1980-01-01. */
 	modifiedAt?: number;
 }
@@ -138,13 +155,6 @@ const dosStamp = (modifiedAt: number | undefined): { time: number; date: number 
 		date: ((year - 1980) << 9) | ((at.getMonth() + 1) << 5) | at.getDate(),
 	};
 };
-
-/**
- * Bytes over a buffer of their own, which is what `new Uint8Array(n)` makes and
- * what a `Blob` will take: the plain `Uint8Array` type allows a shared buffer,
- * and a blob cannot be made of memory another thread may still be writing.
- */
-type Bytes = Uint8Array<ArrayBuffer>;
 
 const joined = (parts: readonly Uint8Array[]): Bytes => {
 	const out = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
@@ -281,9 +291,16 @@ const emptyFolders = (folders: readonly ZipFolder[], files: readonly ZipFile[]):
 		});
 };
 
+/**
+ * An entry's two records, each as the parts it is made of. Kept apart rather
+ * than joined, so a file's bytes are never copied: a 25 MB picture goes into
+ * the blob as the buffer it was read into (`zipParts`).
+ */
 interface Entry {
-	local: Bytes;
-	central: Bytes;
+	local: Bytes[];
+	/** How many bytes `local` comes to, which is where the next entry begins. */
+	size: number;
+	central: Bytes[];
 }
 
 /** `attributes` is the external attributes field: `DIRECTORY` for a folder, nothing for a file. */
@@ -295,7 +312,8 @@ const entryFor = (file: ZipFile, offset: number, attributes = 0): Entry => {
 	if (name.length > MAX_NAME_BYTES) {
 		throw new ArchiveLimitError('name', "A note's path is too long to archive");
 	}
-	const data = new TextEncoder().encode(file.content);
+	const data =
+		typeof file.content === 'string' ? new TextEncoder().encode(file.content) : file.content;
 	const { time, date } = dosStamp(file.modifiedAt);
 	// The part the two headers share, in the order both have it. Stored, so the
 	// compressed size is the size.
@@ -311,13 +329,11 @@ const entryFor = (file: ZipFile, offset: number, attributes = 0): Entry => {
 		// No extra field.
 		...u16(0),
 	];
+	const header = Uint8Array.from([...u32(LOCAL_HEADER), ...u16(VERSION), ...described]);
 	return {
-		local: joined([
-			Uint8Array.from([...u32(LOCAL_HEADER), ...u16(VERSION), ...described]),
-			name,
-			data,
-		]),
-		central: joined([
+		local: [header, name, data],
+		size: header.length + name.length + data.length,
+		central: [
 			Uint8Array.from([
 				...u32(CENTRAL_HEADER),
 				...u16(VERSION),
@@ -331,14 +347,16 @@ const entryFor = (file: ZipFile, offset: number, attributes = 0): Entry => {
 				...u32(offset),
 			]),
 			name,
-		]),
+		],
 	};
 };
 
 /**
  * A ZIP archive of `files`, stored, with an entry for each of `folders` that
- * no file is in. Pure: the same files give the same bytes. Linear in the number
- * of files and in their size.
+ * no file is in, as the parts it is made of, in order: what a `Blob` is made
+ * from without the whole archive ever being one buffer here (`save`). Pure:
+ * the same files give the same bytes. Linear in the number of files and in
+ * their size.
  *
  * The folders come first, as `apart` takes their names first. With none, the
  * archive is exactly what it was before folders could be given.
@@ -349,7 +367,10 @@ const entryFor = (file: ZipFile, offset: number, attributes = 0): Entry => {
  * longest name a header can describe. All far beyond any folder of notes, and a
  * wrong number in a header is a file that silently will not open.
  */
-export const zipOf = (files: readonly ZipFile[], folders: readonly ZipFolder[] = []): Bytes => {
+export const zipParts = (
+	files: readonly ZipFile[],
+	folders: readonly ZipFolder[] = []
+): Bytes[] => {
 	// Before any work, where the files alone are already too many; the folders
 	// can only add to them.
 	if (files.length >= ZIP64_ENTRIES) {
@@ -365,7 +386,7 @@ export const zipOf = (files: readonly ZipFile[], folders: readonly ZipFolder[] =
 	const size = { current: 0 };
 	const next = (file: ZipFile, attributes?: number): Entry => {
 		const entry = entryFor(file, size.current, attributes);
-		size.current += entry.local.length;
+		size.current += entry.size;
 		return entry;
 	};
 	const entries = [
@@ -374,15 +395,15 @@ export const zipOf = (files: readonly ZipFile[], folders: readonly ZipFolder[] =
 		),
 		...placed.files.map((file) => next(file)),
 	];
-	const directory = joined(entries.map((entry) => entry.central));
+	const directory = joined(entries.flatMap((entry) => entry.central));
 	// Every 32-bit field in the archive — each offset, each size, the
 	// directory's own — is smaller than this sum, so one check covers them all.
 	if (size.current + directory.length >= ZIP64_BYTES) {
 		throw new ArchiveLimitError('bytes', 'Too much for one archive');
 	}
 
-	return joined([
-		...entries.map((entry) => entry.local),
+	return [
+		...entries.flatMap((entry) => entry.local),
 		directory,
 		Uint8Array.from([
 			...u32(END_RECORD),
@@ -396,8 +417,12 @@ export const zipOf = (files: readonly ZipFile[], folders: readonly ZipFolder[] =
 			// No comment.
 			...u16(0),
 		]),
-	]);
+	];
 };
+
+/** `zipParts`, as the one buffer they come to: for a reader, and for a test. */
+export const zipOf = (files: readonly ZipFile[], folders: readonly ZipFolder[] = []): Bytes =>
+	joined(zipParts(files, folders));
 
 /**
  * The notes as the files a push would send — `noteFile`, the same bytes the
@@ -438,12 +463,12 @@ const today = (): string => {
  * element for ever, and a URL never revoked keeps every exported note in
  * memory for as long as the tab lives.
  *
- * Handed bytes, not notes, so every caller writes the archive before it gets
- * here: `zipOf` can throw, and nothing is to be made that would need letting go
- * until it has not.
+ * Handed the archive's parts, not notes, so every caller writes the archive
+ * before it gets here: `zipParts` can throw, and nothing is to be made that
+ * would need letting go until it has not.
  */
-const save = (bytes: Bytes, filename: string): void => {
-	const archive = new Blob([bytes], { type: 'application/zip' });
+const save = (parts: readonly Bytes[], filename: string): void => {
+	const archive = new Blob([...parts], { type: 'application/zip' });
 	const url = URL.createObjectURL(archive);
 	const link = document.createElement('a');
 	try {
@@ -460,48 +485,130 @@ const save = (bytes: Bytes, filename: string): void => {
 	}
 };
 
-/** Save `notes` to the user's disk as one archive. */
-export const downloadNotes = (
-	notes: readonly NoteRecord[],
-	filename = `notes-${today()}.zip`
-): void => {
-	save(zipOf(filesOf(notes)), filename);
-};
-
-/** Everything one source holds that a push would put in its folder. */
+/** Everything one source holds that a push would put in its folder, as far as this device has it. */
 export interface Library {
 	notes: NoteRecord[];
 	folders: ZipFolder[];
+	/** The files beside the notes whose bytes this device holds (#187), each at its own path. */
+	files: ZipFile[];
+	/**
+	 * How many it does not: files the remote has that this device has never
+	 * read, or holds an older version of. Not in the archive, and still in the
+	 * source's storage, which is where the user is told to find them.
+	 */
+	missing: number;
 }
 
 /**
- * Every live note and every notebook in one source. One transaction, so the two
- * agree: a notebook deleted between two reads would otherwise leave its notes
- * in the archive, in a folder of their own making.
+ * The files of `rows` this device holds the bytes of, and how many it does
+ * not. Which bytes count is `accepts`, and by default only the file as it is
+ * now: bytes of a version the remote has moved on from are not the file, and
+ * are not written under its name. Stamped `at`, the export: a file row carries
+ * no date of its own, and the earliest date the format has would put every
+ * picture in 1980.
+ */
+const heldFiles = async (
+	db: Pick<NotesDatabase, 'fileBytes'>,
+	rows: readonly FileRecord[],
+	at: number,
+	accepts: (file: FileRecord, held: FileBytesRecord) => boolean = heldBytesAreCurrent
+): Promise<{ files: ZipFile[]; missing: number }> => {
+	const sorted = [...rows].sort(
+		(a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id)
+	);
+	const held = await db.fileBytes.bulkGet(sorted.map(fileKey));
+	const files = sorted.flatMap((file, index): ZipFile[] => {
+		const bytes = held[index];
+		return bytes !== undefined && accepts(file, bytes)
+			? [{ path: file.path, content: new Uint8Array(bytes.bytes), modifiedAt: at }]
+			: [];
+	});
+	return { files, missing: sorted.length - files.length };
+};
+
+/**
+ * Refuse an archive too big to write before a byte of it is read: `zipParts`
+ * would refuse it too, but only once every file was in memory, and four
+ * gigabytes of pictures is a tab the browser kills first. Counted from the
+ * rows, for the files whose bytes are held. A stale copy is counted at the
+ * size the remote has now, not its own, and will not be written at all, so
+ * this can refuse an archive within a few stale files of the limit that would
+ * just have fitted; `zipParts` still has the last word on one that passes.
+ */
+const refuseOversize = (rows: readonly FileRecord[], held: ReadonlySet<string>): void => {
+	const size = rows.reduce((total, file) => (held.has(file.id) ? total + file.size : total), 0);
+	if (size >= ZIP64_BYTES) throw new ArchiveLimitError('bytes', 'Too much for one archive');
+};
+
+/**
+ * Every live note, every notebook and every file whose bytes are here, in one
+ * source. One transaction, so they agree: a notebook deleted between two reads
+ * would otherwise leave its notes in the archive, in a folder of their own
+ * making.
  *
  * Not the tombstones: a deleted note is one a push would delete, and is not in
  * the folder the archive stands for.
  */
 export const libraryOf = (db: NotesDatabase, connectionId: string): Promise<Library> =>
-	db.transaction('r', db.notes, db.folders, async () => {
-		const [notes, folders] = await Promise.all([
+	db.transaction('r', [db.notes, db.folders, db.files, db.fileBytes], async () => {
+		const [notes, folders, rows, held] = await Promise.all([
 			db.notes
 				.where('connectionId')
 				.equals(connectionId)
 				.filter((note) => note.deletedLocally === 0)
 				.toArray(),
 			db.folders.where('connectionId').equals(connectionId).sortBy('path'),
+			db.files.where('connectionId').equals(connectionId).toArray(),
+			// Keys alone, which is all `refuseOversize` needs.
+			db.fileBytes.where('connectionId').equals(connectionId).primaryKeys(),
 		]);
+		refuseOversize(rows, new Set(held.map(([, id]) => id)));
 		return {
 			notes,
 			folders: folders.map((folder) => ({ path: folder.path, modifiedAt: folder.createdAt })),
+			...(await heldFiles(db, rows, Date.now())),
 		};
 	});
 
 /**
- * Whether one source holds anything to download: a notebook, or a note that has
- * not been deleted. It stops at the first note it finds, since the panel asks
- * it again every time a note is saved.
+ * What a source never sent, as an archive's worth (docs/ARCHITECTURE.md §6):
+ * the notes the user was shown, the files not uploaded yet, and the files
+ * those notes link, so the pictures in them come too — each where this device
+ * holds its bytes. One it does not is the remote's, or a copy to be made of
+ * the remote's (`Unsynced.portable`), and is there still.
+ *
+ * A listed file goes in as whatever this device holds of it, stale or not.
+ * Pending, its bytes are the only ones there are; bound, it is listed only
+ * while the source is unchecked (`Unsynced.unverified`), and then the copy here
+ * may be all that is left, which is the whole reason it was listed. A file
+ * that is only linked is the remote's, and goes in only as the remote has it.
+ */
+export const unsentLibrary = (db: NotesDatabase, listed: Unsynced): Promise<Library> =>
+	db.transaction('r', db.fileBytes, async () => {
+		const unsent = new Set(listed.files.map((file) => file.id));
+		return {
+			notes: listed.notes,
+			folders: [],
+			...(await heldFiles(
+				db,
+				[
+					...new Map(
+						[...listed.files, ...listed.linked].map((file) => [file.id, file])
+					).values(),
+				],
+				Date.now(),
+				(file, held) => unsent.has(file.id) || heldBytesAreCurrent(file, held)
+			)),
+		};
+	});
+
+/**
+ * Whether one source holds anything to download: a notebook, a note that has
+ * not been deleted, or a file whose bytes would go into the archive
+ * (`heldFiles`). A file row alone is not enough: with no bytes here, the
+ * download it offered would be an empty archive. It stops at the first note it
+ * finds, since the panel asks it again every time a note is saved, and only
+ * then looks at the files, whose bytes are read one at a time until one counts.
  */
 export const holdsAnything = async (db: NotesDatabase, connectionId: string): Promise<boolean> =>
 	(await db.folders.where('connectionId').equals(connectionId).count()) > 0 ||
@@ -509,12 +616,54 @@ export const holdsAnything = async (db: NotesDatabase, connectionId: string): Pr
 		.where('connectionId')
 		.equals(connectionId)
 		.filter((note) => note.deletedLocally === 0)
-		.first()) !== undefined;
+		.first()) !== undefined ||
+	(await holdsFile(db, connectionId));
 
-/** Save a whole source to the user's disk as one archive, empty notebooks and all. */
+/** Whether some file of one source has its current bytes here (`holdsAnything`). */
+const holdsFile = (db: NotesDatabase, connectionId: string): Promise<boolean> =>
+	db.transaction('r', db.files, db.fileBytes, async () => {
+		const rows = new Map(
+			(await db.files.where('connectionId').equals(connectionId).toArray()).map((file) => [
+				file.id,
+				file,
+			])
+		);
+		const held = await db.fileBytes
+			.where('connectionId')
+			.equals(connectionId)
+			.filter((bytes) => {
+				const file = rows.get(bytes.id);
+				return file !== undefined && heldBytesAreCurrent(file, bytes);
+			})
+			.first();
+		return held !== undefined;
+	});
+
+/**
+ * Save a library to the user's disk as one archive, empty notebooks and all.
+ * The notes first, so a file at a note's name — which the app never makes —
+ * is the numbered one.
+ */
 export const downloadLibrary = (library: Library, filename = `notes-${today()}.zip`): void => {
-	save(zipOf(filesOf(library.notes), library.folders), filename);
+	save(zipParts([...filesOf(library.notes), ...library.files], library.folders), filename);
 };
+
+/**
+ * What a source never sent, to the user's disk (`unsentLibrary`): the disconnect
+ * question's download, and a detached source's. `download` is the seam a test
+ * replaces, as `downloadSource`'s is.
+ */
+export const downloadUnsent = async (
+	db: NotesDatabase,
+	listed: Unsynced,
+	download: (library: Library) => void = downloadLibrary
+): Promise<void> => {
+	download(await unsentLibrary(db, listed));
+};
+
+/** Whether what a source never sent has anything an archive of it would hold. */
+export const hasUnsentDownload = (listed: Unsynced): boolean =>
+	listed.notes.length > 0 || listed.portable.length > 0;
 
 /**
  * One source, whole, to the user's disk (docs/ARCHITECTURE.md §7, "Getting a
@@ -538,15 +687,37 @@ export const downloadSource = async (
 	db: NotesDatabase,
 	connectionId: string,
 	download: (library: Library) => void = downloadLibrary
-): Promise<{ incomplete: boolean }> => {
+): Promise<DownloadAnswer> => {
 	const settled = await settleEditors();
-	download(await libraryOf(db, connectionId));
-	return { incomplete: holdsTextFor(settled, connectionId) };
+	const library = await libraryOf(db, connectionId);
+	download(library);
+	return { incomplete: holdsTextFor(settled, connectionId), missing: library.missing };
 };
+
+/** What a download handed over without (`downloadSource`). */
+export interface DownloadAnswer {
+	/** An editor holds text the store would not take, and the archive lacks it. */
+	incomplete: boolean;
+	/** Files the source has that this device holds no current bytes of (`Library.missing`). */
+	missing: number;
+}
 
 /** Said once an incomplete archive has been handed over (`downloadSource`). */
 export const INCOMPLETE_DOWNLOAD =
 	'Downloaded, but a note here has text that could not be saved, and the archive does not have it. Copy that text somewhere safe; the note says how.';
+
+/**
+ * What to tell the user once an archive has been handed over, if anything:
+ * the text that is missing from it first, since only the user can save that,
+ * and otherwise the files this device has no current copy of — never read
+ * here, or read before the remote changed them — which the source's storage
+ * still has.
+ */
+export const downloadNotice = ({ incomplete, missing }: DownloadAnswer): string | null => {
+	if (incomplete) return INCOMPLETE_DOWNLOAD;
+	if (missing === 0) return null;
+	return `Downloaded, without ${missing === 1 ? '1 file' : `${String(missing)} files`} this device has no current copy of. ${missing === 1 ? 'It is' : 'They are'} still in the source's storage.`;
+};
 
 /**
  * What to tell the user when a download did not happen, in their words rather
@@ -560,10 +731,10 @@ export const downloadProblem = (error: unknown): string => {
 	switch (error.limit) {
 		case 'entries':
 			// In English's digits, as every other word of it is.
-			return `There are too many notes and notebooks here for one archive, which holds at most ${(ZIP64_ENTRIES - 1).toLocaleString('en')}. Nothing was downloaded.`;
+			return `There are too many notes, notebooks and files here for one archive, which holds at most ${(ZIP64_ENTRIES - 1).toLocaleString('en')}. Nothing was downloaded.`;
 		case 'bytes':
-			return 'These notes come to more than one archive can hold, which is 4 GB. Nothing was downloaded.';
+			return 'These notes and files come to more than one archive can hold, which is 4 GB. Nothing was downloaded.';
 		case 'name':
-			return 'A note or notebook here has a path too long to put in an archive. Nothing was downloaded.';
+			return 'A note, notebook or file here has a path too long to put in an archive. Nothing was downloaded.';
 	}
 };
