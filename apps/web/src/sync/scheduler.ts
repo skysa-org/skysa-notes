@@ -22,6 +22,7 @@ import {
 } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
+import { createFileReader, type FileRead } from './fileReads.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 
@@ -209,6 +210,16 @@ export interface SyncScheduler {
 	 * store, which its requests being aborted makes quick.
 	 */
 	readonly halt: (connectionId: string) => Promise<() => void>;
+	/**
+	 * A file beside a note, for showing it: from this device if it holds the
+	 * bytes, and otherwise downloaded through the session running for
+	 * `connectionId`, if one is, and kept (`sync/fileReads.ts`). Never rejects.
+	 */
+	readonly readFile: (
+		connectionId: string,
+		fileId: string,
+		signal?: AbortSignal
+	) => Promise<FileRead>;
 }
 
 /**
@@ -865,6 +876,18 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		void run(session);
 	};
 
+	const reader = createFileReader({
+		db,
+		isOnline: environment.isOnline,
+		now: environment.now,
+		sessionFor: (connectionId) => {
+			const session = current.get('session');
+			const provider = session?.provider;
+			if (session?.connectionId !== connectionId || provider === undefined) return undefined;
+			return { provider, withAuth: (work) => withAuth(session, work) };
+		},
+	});
+
 	const nudgeCurrent = (): Promise<void> => {
 		const session = current.get('session');
 		return session === undefined ? Promise.resolve() : nudge(session);
@@ -994,5 +1017,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				listeners.delete(listener);
 			};
 		},
+
+		readFile: reader.read,
 	};
 };
