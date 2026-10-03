@@ -82,8 +82,9 @@ export interface WriteOptions {
 export interface CreateFileOptions {
 	/**
 	 * What the bytes are, for a provider that records it (Drive's `mimeType`).
-	 * `application/octet-stream` when absent. Never used to decide anything
-	 * here: the name's extension is what the app reads.
+	 * `application/octet-stream` when absent, empty, or anything but a plain
+	 * `type/subtype` (`uploadType`). Never used to decide anything here: the
+	 * name's extension is what the app reads.
 	 */
 	contentType?: string;
 }
@@ -160,11 +161,13 @@ export interface StorageProvider {
 	readonly read: (entry: EntryRef) => Promise<{ content: string; version: string }>;
 	readonly write: (path: string, content: string, opts: WriteOptions) => Promise<RemoteEntry>;
 	/** The file's bytes as stored, with the version they are. Never decoded. */
-	readonly readBytes: (entry: EntryRef) => Promise<{ bytes: Uint8Array; version: string }>;
+	readonly readBytes: (
+		entry: EntryRef
+	) => Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }>;
 	/** Create-only, for a file that is not a note; see above. */
 	readonly createFile: (
 		path: string,
-		bytes: Uint8Array,
+		bytes: Uint8Array<ArrayBuffer>,
 		opts?: CreateFileOptions
 	) => Promise<RemoteEntry>;
 	readonly createFolder: (path: string) => Promise<RemoteEntry>;

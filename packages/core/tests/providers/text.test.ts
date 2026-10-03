@@ -4,7 +4,7 @@ import { createDropboxProvider, type FetchLike } from '../../src/providers/dropb
 import type { FakeProvider } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
-import { decodeText, responseBytes } from '../../src/providers/text.js';
+import { decodeText, responseBytes, uploadType } from '../../src/providers/text.js';
 import {
 	isUnreadableError,
 	type StorageProvider,
@@ -164,5 +164,26 @@ describe.each(ADAPTERS)('%s, reading a download', (_, wire, adapt) => {
 		);
 
 		expect((await provider.read(entry)).content).toBe('# Heading\n');
+	});
+});
+
+describe('uploadType', () => {
+	it.each([
+		['image/png', 'image/png'],
+		['Image/PNG', 'image/png'],
+		['text/csv; charset=utf-8', 'text/csv'],
+		[
+			'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+			'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		],
+		// What a browser says of a type it does not know.
+		['', 'application/octet-stream'],
+		[undefined, 'application/octet-stream'],
+		['png', 'application/octet-stream'],
+		['image/png\r\nx-evil: 1', 'application/octet-stream'],
+		// Drive would make a Google Doc of it, which has no revision.
+		['application/vnd.google-apps.document', 'application/octet-stream'],
+	])('%s → %s', (given, type) => {
+		expect(uploadType(given)).toBe(type);
 	});
 });

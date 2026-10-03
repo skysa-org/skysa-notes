@@ -22,7 +22,7 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
-import { decodeText, responseBytes } from './text.js';
+import { decodeText, responseBytes, uploadType } from './text.js';
 import {
 	AuthError,
 	type ChangeEntry,
@@ -783,15 +783,20 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * another origin at all is on the live-check list (docs/ARCHITECTURE.md §5.1).
 	 */
 	const sessionUri = (location: string | null): string => {
+		// Told apart, because which it is answers the live check: a header the
+		// page was not shown reads as `null`.
+		if (location === null) {
+			throw new Error('gdrive started a resumable upload and did not say where it is');
+		}
 		const url = ((): URL | undefined => {
 			try {
-				return location === null ? undefined : new URL(location);
+				return new URL(location);
 			} catch {
 				return undefined;
 			}
 		})();
 		if (url?.origin !== API) {
-			throw new Error('gdrive started a resumable upload with no session it can be sent to');
+			throw new Error('gdrive started a resumable upload somewhere it will not be sent');
 		}
 		return url.toString();
 	};
@@ -799,13 +804,14 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	/**
 	 * A file over the multipart limit: the metadata to start a session, then
 	 * every byte in one `PUT` to it. What the `PUT` answers with is the file,
-	 * but not certainly with the fields the start asked for, and a file with no
-	 * `headRevisionId` has no version — so where it lacks one the file is asked
-	 * for again.
+	 * but not certainly with the fields the start asked for — and `create` reads
+	 * every one of them: the revision is the version, and the time it was made
+	 * is what settles it against a file another device made at the same name. So
+	 * where any is missing, the file is asked for again.
 	 */
 	const resumable = async (
 		metadata: object,
-		content: Uint8Array,
+		content: Uint8Array<ArrayBuffer>,
 		type: string,
 		path: string
 	): Promise<DriveFile> => {
@@ -816,13 +822,17 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		if (!started.ok) return raise(await failureOf(started), path);
 		const sent = await send('PUT', sessionUri(started.headers.get('location')), {
 			headers: { 'content-type': type },
-			// A copy, for the one `BodyInit` takes: bytes over an `ArrayBuffer`.
-			body: new Uint8Array(content),
+			body: content,
 		});
 		if (!sent.ok) return raise(await failureOf(sent), path);
 		const made = JSON.parse(await sent.text()) as DriveFile;
-		if ((made.headRevisionId ?? '') !== '') return made;
-		return call<DriveFile>('GET', fileUrl(made.id ?? ''), {}, path);
+		if (made.id === undefined || made.id === '') {
+			throw new Error('gdrive finished a resumable upload and did not say what it made');
+		}
+		const whole = [made.headRevisionId, made.createdTime, made.name, made.size].every(
+			(field) => field !== undefined && field !== ''
+		);
+		return whole ? made : call<DriveFile>('GET', fileUrl(made.id), {}, path);
 	};
 
 	/**
@@ -835,7 +845,7 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 */
 	const create = async (
 		path: string,
-		content: Uint8Array,
+		content: Uint8Array<ArrayBuffer>,
 		mimeType: string,
 		type: string
 	): Promise<RemoteEntry> => {
@@ -859,7 +869,14 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	};
 
 	const createNote = (path: string, content: string): Promise<RemoteEntry> =>
-		create(path, encoder.encode(content), NOTE_TYPE, `${NOTE_TYPE}; charset=UTF-8`);
+		create(
+			path,
+			// A copy, for the one `BodyInit` takes in every runtime: bytes over an
+			// `ArrayBuffer`. A note is small; a file arrives as one already.
+			new Uint8Array(encoder.encode(content)),
+			NOTE_TYPE,
+			`${NOTE_TYPE}; charset=UTF-8`
+		);
 
 	/**
 	 * By id, never by path, so a file deleted since the caller saw it is not
@@ -898,12 +915,12 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 
 	const createFile = (
 		path: string,
-		bytes: Uint8Array,
+		bytes: Uint8Array<ArrayBuffer>,
 		opts: CreateFileOptions = {}
 	): Promise<RemoteEntry> => {
 		const target = normalizePath(path);
 		if (target === ROOT) return Promise.reject(new NotFoundError(target));
-		const type = opts.contentType ?? 'application/octet-stream';
+		const type = uploadType(opts.contentType);
 		return create(target, bytes, type, type);
 	};
 
@@ -944,7 +961,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	 * Drive can download a past revision only if it was kept forever, so the
 	 * two cannot be pinned together.
 	 */
-	const readBytes = async (entry: EntryRef): Promise<{ bytes: Uint8Array; version: string }> => {
+	const readBytes = async (
+		entry: EntryRef
+	): Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }> => {
 		const id = await idOf(entry);
 		if (id === undefined) throw new NotFoundError(entry.path);
 		const file = await call<DriveFile>('GET', fileUrl(id), {}, entry.path);

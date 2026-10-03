@@ -6,7 +6,7 @@ import {
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
-import { bodyBytes, bodyText } from './wireBody.js';
+import { bodyBytes, bodyText, createFrom } from './wireBody.js';
 
 /**
  * A stand-in for the Google Drive API v3 at the transport layer, over the
@@ -35,7 +35,15 @@ export const STUB_ROOT_ID = 'folder-skysa-notes';
 const MY_DRIVE = 'my-drive';
 const BASE_TIME = Date.parse('2026-01-01T00:00:00Z');
 
-export type GDriveStubOptions = Omit<FakeProviderOptions, 'folderChanges' | 'kind'>;
+export type GDriveStubOptions = Omit<FakeProviderOptions, 'folderChanges' | 'kind'> & {
+	/**
+	 * What the `PUT` that finishes a resumable upload answers with: the fields
+	 * the session asked for, as Drive is expected to, or only Drive's defaults
+	 * (`id`, `name`, `mimeType`), which the adapter has to cope with too since
+	 * nothing on Drive's reference pages promises otherwise.
+	 */
+	resumableAnswer?: 'asked' | 'defaults';
+};
 
 export interface StubRequest {
 	method: string;
@@ -70,6 +78,18 @@ interface UploadMetadata {
 }
 
 const encoder = new TextEncoder();
+
+/**
+ * What a file holds, as cheaply as two can be told apart: its length and an
+ * FNV-1a hash of its bytes. Any bytes, where reading them as text would make
+ * every file that is not text look the same.
+ */
+const fingerprint = (bytes: Uint8Array | undefined): string | undefined => {
+	if (bytes === undefined) return undefined;
+	let hash = 0x811c9dc5;
+	for (const byte of bytes) hash = Math.imul(hash ^ byte, 0x01000193);
+	return `${String(bytes.length)}:${(hash >>> 0).toString(16)}`;
+};
 
 /** Where `needle` first starts in `haystack` at or after `from`, or -1. */
 const indexOf = (haystack: Uint8Array, needle: Uint8Array, from: number): number => {
@@ -121,8 +141,9 @@ const NAMED_QUERY = new RegExp(`^name = ${LITERAL} and ${LITERAL} in parents and
 const CHILDREN_QUERY = new RegExp(`^${LITERAL} in parents and trashed = false$`);
 
 export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub => {
+	const { resumableAnswer = 'asked', ...fakeOptions } = options;
 	const backing = createFakeProvider({
-		...options,
+		...fakeOptions,
 		kind: 'gdrive',
 		folderChanges: 'folder-only',
 	});
@@ -203,7 +224,14 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		for (const entry of now) {
 			const before = seen.get(entry.remoteId);
 			if (!createdAt.has(entry.remoteId)) createdAt.set(entry.remoteId, tick());
-			const content = entry.kind === 'file' ? backing.contentAt(entry.path) : undefined;
+			// Read only where the version has moved, which is the only time the
+			// bytes can have: a large file is not read on every request.
+			const content =
+				entry.kind !== 'file'
+					? undefined
+					: before !== undefined && before.version === entry.version
+						? before.content
+						: fingerprint(backing.bytesAt(entry.path));
 			const wrote =
 				before === undefined ||
 				(before.version !== entry.version && before.path === entry.path) ||
@@ -299,12 +327,15 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	};
 
 	/** A new file from an upload, wherever its metadata and bytes came from. */
-	const upload = async (metadata: UploadMetadata, content: Uint8Array): Promise<DriveFile> => {
+	const upload = async (
+		metadata: UploadMetadata,
+		content: Uint8Array<ArrayBuffer>
+	): Promise<DriveFile> => {
 		const parent = pathOfId(metadata.parents?.[0] ?? '');
 		if (parent === undefined || metadata.name === undefined) throw new NotFoundError('');
 		const target = joinPath(parent, metadata.name);
 		if (byPath(target) !== undefined) throw new Error('stubCannotHoldDuplicates');
-		const written = await backing.createFile(target, content);
+		const written = await createFrom(backing, target, content);
 		if (metadata.mimeType !== undefined) mimeTypes.set(written.remoteId, metadata.mimeType);
 		observe();
 		return fileOf(written);
@@ -320,11 +351,14 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		if (boundary === undefined) return driveError(400, 'badContent');
 		const delimiter = encoder.encode(`\r\n--${boundary}`);
 		const blank = encoder.encode('\r\n\r\n');
-		const metadataAt = indexOf(body, blank, 0) + blank.length;
-		const metadataEnd = indexOf(body, delimiter, metadataAt);
-		const contentAt = indexOf(body, blank, metadataEnd + delimiter.length) + blank.length;
+		const metadataHead = indexOf(body, blank, 0);
+		const metadataAt = metadataHead + blank.length;
+		const metadataEnd = metadataHead < 0 ? -1 : indexOf(body, delimiter, metadataAt);
+		const contentHead =
+			metadataEnd < 0 ? -1 : indexOf(body, blank, metadataEnd + delimiter.length);
+		const contentAt = contentHead + blank.length;
 		const contentEnd = lastIndexOf(body, encoder.encode(`\r\n--${boundary}--`));
-		if (metadataEnd < 0 || contentEnd < contentAt) return driveError(400, 'badContent');
+		if (contentHead < 0 || contentEnd < contentAt) return driveError(400, 'badContent');
 		const metadata = JSON.parse(
 			new TextDecoder().decode(body.subarray(metadataAt, metadataEnd))
 		) as UploadMetadata;
@@ -335,25 +369,30 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	 * The first half of a resumable upload: the metadata, answered with where
 	 * to send the bytes. https://developers.google.com/workspace/drive/api/guides/manage-uploads#resumable
 	 */
-	const startSession = (body: string): Response => {
+	const startSession = (url: URL, body: string): Response => {
 		const id = `session-${String(sessions.size + 1)}-${String(counter)}`;
 		sessions.set(id, JSON.parse(body) as UploadMetadata);
-		const location = `${API}/upload/drive/v3/files?uploadType=resumable&upload_id=${id}`;
-		return new Response(null, { status: 200, headers: { location } });
+		// The session's own query, `fields` included, with its id added.
+		const location = new URL(url);
+		location.searchParams.set('upload_id', id);
+		return new Response(null, { status: 200, headers: { location: location.toString() } });
 	};
 
 	/**
-	 * The second half: every byte in one `PUT`. Answered with the file in
-	 * Drive's default fields — the session's `fields` are not promised to carry
-	 * over, so the adapter has to ask for the revision itself.
+	 * The second half: every byte in one `PUT`, answered with the file — in the
+	 * fields the session asked for, or in Drive's defaults (`resumableAnswer`).
 	 */
-	const finishSession = async (url: URL, body: Uint8Array): Promise<Response> => {
+	const finishSession = async (url: URL, body: Uint8Array<ArrayBuffer>): Promise<Response> => {
 		const id = url.searchParams.get('upload_id') ?? '';
 		const metadata = sessions.get(id);
 		if (metadata === undefined) return driveError(404, 'notFound');
 		sessions.delete(id);
 		const made = await upload(metadata, body);
-		return json({ kind: 'drive#file', id: made.id, name: made.name, mimeType: made.mimeType });
+		return json(
+			resumableAnswer === 'asked'
+				? made
+				: { kind: 'drive#file', id: made.id, name: made.name, mimeType: made.mimeType }
+		);
 	};
 
 	const mediaUpload = async (id: string, body: string): Promise<Response> => {
@@ -473,14 +512,14 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		id: string | undefined,
 		url: URL,
 		headers: Record<string, string>,
-		body: { text: string; bytes: Uint8Array }
+		body: { text: string; bytes: Uint8Array<ArrayBuffer> }
 	) => {
 		const type = url.searchParams.get('uploadType');
 		if (id === undefined && method === 'POST' && type === 'multipart') {
 			return multipartUpload(headers, body.bytes);
 		}
 		if (id === undefined && method === 'POST' && type === 'resumable') {
-			return startSession(body.text);
+			return startSession(url, body.text);
 		}
 		if (id === undefined && method === 'PUT') return finishSession(url, body.bytes);
 		if (id !== undefined && method === 'PATCH') return mediaUpload(id, body.text);
@@ -492,7 +531,7 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		url: URL,
 		headers: Record<string, string>,
 		body: string,
-		bytes: Uint8Array
+		bytes: Uint8Array<ArrayBuffer>
 	): Promise<Response> | Response => {
 		if (url.origin !== API) return driveError(400, 'unknownHost');
 		if (headers.authorization !== 'Bearer stub-token') return driveError(401, 'authError');

@@ -123,6 +123,23 @@ describe('creating and updating', () => {
 		);
 	});
 
+	it('creates a file that is not a note as its own type, or as bytes where it has none', async () => {
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+		stub.requests.length = 0;
+
+		await provider.createFile('photo.png', bytes, { contentType: 'image/png' });
+		await provider.createFile('blob.bin', bytes, { contentType: '' });
+
+		const [photo, blob] = stub.requests.filter((r) => r.method === 'PUT');
+		expect(photo?.url).toBe(
+			`${GRAPH}/me/drive/special/approot:/photo.png:/content?@microsoft.graph.conflictBehavior=fail`
+		);
+		expect(photo?.headers['content-type']).toBe('image/png');
+		expect(blob?.headers['content-type']).toBe('application/octet-stream');
+	});
+
 	it('updates by id with If-Match, and never creates a file that has gone', async () => {
 		const { stub, provider } = stubbed();
 		await provider.ensureRoot();

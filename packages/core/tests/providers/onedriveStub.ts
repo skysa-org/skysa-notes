@@ -6,7 +6,7 @@ import {
 	type FakeProviderOptions,
 } from '../../src/providers/fake.js';
 import { ConflictError, NotFoundError, type RemoteEntry } from '../../src/providers/types.js';
-import { bodyBytes, bodyText } from './wireBody.js';
+import { bodyBytes, bodyText, createFrom } from './wireBody.js';
 
 /**
  * A stand-in for Microsoft Graph at the transport layer, over the in-memory
@@ -275,7 +275,11 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 	 * `conflictBehavior=fail` makes it refuse. A create takes whatever bytes
 	 * were sent; a replace, which the adapter never asks for, is text.
 	 */
-	const uploadByPath = async (path: string, url: URL, bytes: Uint8Array): Promise<Response> => {
+	const uploadByPath = async (
+		path: string,
+		url: URL,
+		bytes: Uint8Array<ArrayBuffer>
+	): Promise<Response> => {
 		const existing = byPath(path);
 		if (existing?.kind === 'folder') return graphError(409, 'nameAlreadyExists');
 		if (existing !== undefined && failOnConflict(url)) {
@@ -285,7 +289,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		if (parent !== '' && byPath(parent)?.kind !== 'folder') return graphError(409, 'conflict');
 		const written =
 			existing === undefined
-				? await backing.createFile(path, bytes)
+				? await createFrom(backing, path, bytes)
 				: await backing.write(path, new TextDecoder().decode(bytes), {
 						expectedVersion: existing.version,
 					});
@@ -400,7 +404,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		method: string,
 		url: URL,
 		match: RegExpExecArray,
-		bytes: Uint8Array
+		bytes: Uint8Array<ArrayBuffer>
 	): Promise<Response> | Response => {
 		const path = match[1] === undefined ? '' : decodePath(match[1]);
 		const action = `${method} ${match[3] ?? match[4] ?? ''}`;
@@ -421,7 +425,7 @@ export const createOneDriveStub = (options: OneDriveStubOptions = {}): OneDriveS
 		url: URL,
 		headers: Record<string, string>,
 		body: string,
-		bytes: Uint8Array
+		bytes: Uint8Array<ArrayBuffer>
 	): Promise<Response> | Response => {
 		if (url.origin === STUB_DOWNLOAD_ORIGIN) return download(url, headers);
 		if (url.origin !== GRAPH) return graphError(400, 'unknownHost');

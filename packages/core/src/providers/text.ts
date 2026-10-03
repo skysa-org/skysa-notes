@@ -42,6 +42,25 @@ export const decodeText = (bytes: ArrayBuffer | Uint8Array, path: string): strin
  */
 export const withoutNul = (text: string): string => text.replaceAll('\u0000', '');
 
+/** `type/subtype`, as RFC 6838 spells the two names, and nothing else. */
+const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
+
+/**
+ * The type a file goes up as (`CreateFileOptions.contentType`): the one given,
+ * where it is a plain `type/subtype`, and `application/octet-stream` where it
+ * is anything else. Empty is what a browser says of a type it does not know
+ * (`File.type`), and goes into a header as a header with nothing in it; a line
+ * break would end the header it is in; and a Google Workspace type tells Drive
+ * to convert the upload into a document of its own, which has no revision and
+ * so no version. Parameters are dropped: no provider here reads one.
+ */
+export const uploadType = (contentType: string | undefined): string => {
+	const type = (contentType ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+	return MEDIA_TYPE.test(type) && !type.startsWith('application/vnd.google-apps.')
+		? type
+		: 'application/octet-stream';
+};
+
 /**
  * A download's body, taken whole. Every adapter reads a file through this and
  * then decodes it for a note (`decodeText`), or hands it over as it is for any
@@ -49,5 +68,6 @@ export const withoutNul = (text: string): string => text.replaceAll('\u0000', ''
  * chunks is one character by the time the decoder sees it, and there is no
  * streaming state to get wrong.
  */
-export const responseBytes = async (response: Pick<Response, 'arrayBuffer'>): Promise<Uint8Array> =>
-	new Uint8Array(await response.arrayBuffer());
+export const responseBytes = async (
+	response: Pick<Response, 'arrayBuffer'>
+): Promise<Uint8Array<ArrayBuffer>> => new Uint8Array(await response.arrayBuffer());

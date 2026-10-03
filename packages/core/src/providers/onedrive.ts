@@ -13,7 +13,7 @@ import {
 	settlePage,
 	type TreeItem,
 } from './idTree.js';
-import { decodeText, responseBytes } from './text.js';
+import { decodeText, responseBytes, uploadType } from './text.js';
 import {
 	AuthError,
 	type ChangeSet,
@@ -496,14 +496,12 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 
 	const createFile = (
 		path: string,
-		bytes: Uint8Array,
+		bytes: Uint8Array<ArrayBuffer>,
 		opts: CreateFileOptions = {}
 	): Promise<RemoteEntry> => {
 		const target = normalizePath(path);
 		if (target === ROOT) return Promise.reject(new NotFoundError(target));
-		return create(target, new Uint8Array(bytes), {
-			'content-type': opts.contentType ?? 'application/octet-stream',
-		});
+		return create(target, bytes, { 'content-type': uploadType(opts.contentType) });
 	};
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
@@ -552,7 +550,9 @@ export const createOneDriveProvider = (options: OneDriveProviderOptions): Storag
 	 * reported with them. That errs safe: the next push sends the older version,
 	 * conflicts, and the conflict rule keeps both.
 	 */
-	const readBytes = async (entry: EntryRef): Promise<{ bytes: Uint8Array; version: string }> => {
+	const readBytes = async (
+		entry: EntryRef
+	): Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }> => {
 		const url = entry.remoteId === '' ? byPath(entry.path) : byId(entry.remoteId);
 		const item = await call<DriveItem>('GET', url, {}, entry.path);
 		if (item.folder !== undefined) throw new NotFoundError(entry.path);

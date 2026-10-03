@@ -299,7 +299,9 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 	// stub serves every download through this, text or not, and a test that
 	// fails the second `read` means the second download whichever the adapter
 	// was asked for.
-	const readBytes = (ref: EntryRef): Promise<{ bytes: Uint8Array; version: string }> =>
+	const readBytes = (
+		ref: EntryRef
+	): Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }> =>
 		settle('read', ref.path, () => {
 			const node = fileAt(ref);
 			return { bytes: node.bytes.slice(), version: node.version };

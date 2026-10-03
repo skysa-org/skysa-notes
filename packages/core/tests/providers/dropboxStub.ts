@@ -13,7 +13,7 @@ import {
 	NotFoundError,
 	type RemoteEntry,
 } from '../../src/providers/types.js';
-import { bodyBytes, bodyText } from './wireBody.js';
+import { bodyBytes, bodyText, createFrom } from './wireBody.js';
 
 /**
  * A stand-in for Dropbox at the transport layer: it speaks the v2 wire format —
@@ -203,7 +203,10 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 
 	// `add` is a create, of whatever bytes were sent; `update` replaces a
 	// note, whose bytes are its text.
-	const upload = async (arg: Record<string, unknown>, bytes: Uint8Array): Promise<Response> => {
+	const upload = async (
+		arg: Record<string, unknown>,
+		bytes: Uint8Array<ArrayBuffer>
+	): Promise<Response> => {
 		const mode = arg.mode;
 		const expected =
 			typeof mode === 'object' && mode !== null
@@ -212,7 +215,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		const path = fromDropboxPath(str(arg.path));
 		const entry =
 			expected === undefined
-				? await backing.createFile(path, bytes)
+				? await createFrom(backing, path, bytes)
 				: await backing.write(
 						path,
 						new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes),
@@ -290,7 +293,7 @@ export const createDropboxStub = (options: FakeProviderOptions = {}): DropboxStu
 		(
 			body: Record<string, unknown>,
 			arg: Record<string, unknown>,
-			bytes: Uint8Array
+			bytes: Uint8Array<ArrayBuffer>
 		) => Promise<Response>
 	> = {
 		'files/get_metadata': getMetadata,

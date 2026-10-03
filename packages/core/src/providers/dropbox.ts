@@ -378,8 +378,8 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		upload(path, content, opts.expectedVersion);
 
 	/** `mode: add` with nothing expected: a file or folder in the way is a conflict. */
-	const createFile = (path: string, bytes: Uint8Array): Promise<RemoteEntry> =>
-		upload(path, new Uint8Array(bytes), undefined);
+	const createFile = (path: string, bytes: Uint8Array<ArrayBuffer>): Promise<RemoteEntry> =>
+		upload(path, bytes, undefined);
 
 	const ensureRoot = async (): Promise<{ rootId: string }> => {
 		// With App folder access the root exists by construction and has no id of
@@ -420,11 +420,13 @@ export const createDropboxProvider = (options: DropboxProviderOptions): StorageP
 		return (await gather(first, [])).map(toEntry);
 	};
 
-	const readBytes = async (entry: EntryRef): Promise<{ bytes: Uint8Array; version: string }> => {
+	const readBytes = async (
+		entry: EntryRef
+	): Promise<{ bytes: Uint8Array<ArrayBuffer>; version: string }> => {
 		const response = await post(`${CONTENT}/files/download`, {
 			'Dropbox-API-Arg': asciiArg({ path: target(entry) }),
 		});
-		if (!response.ok) return raise(await failureOf(response));
+		if (!response.ok) return raise(await failureOf(response), entry.path);
 
 		// The body is the file itself, so the metadata rides in a header.
 		const metadata = downloadResult(response.headers.get('dropbox-api-result'));
