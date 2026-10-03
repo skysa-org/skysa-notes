@@ -1,7 +1,7 @@
 import { type FetchLike } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createProviderFactory, timedFetch } from '../src/sync/providers.js';
+import { createProviderFactory, SLOWEST_BYTES_PER_MS, timedFetch } from '../src/sync/providers.js';
 
 /** A request the network never answers, until it is aborted — or already was. */
 const hanging: FetchLike = (_url, init) =>
@@ -45,6 +45,72 @@ describe('provider requests', () => {
 		session.abort();
 
 		await expect(listing).rejects.toThrow();
+	});
+
+	it('are given longer for every byte they send', async () => {
+		vi.useFakeTimers();
+		try {
+			const sent = vi.fn<FetchLike>(hanging);
+			const upload = timedFetch(sent, 1_000)('https://example.test', {
+				method: 'PUT',
+				body: new Uint8Array(5 * SLOWEST_BYTES_PER_MS * 1_000),
+			}).catch((error: unknown) => error);
+			const signal = sent.mock.calls[0]?.[1].signal;
+
+			await vi.advanceTimersByTimeAsync(5_999);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(signal?.aborted).toBe(true);
+			expect((signal?.reason as DOMException).name).toBe('TimeoutError');
+			await expect(upload).resolves.toBeInstanceOf(Error);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('are given longer once the answer says how much it holds', async () => {
+		vi.useFakeTimers();
+		try {
+			// Ten seconds of bytes at the slowest rate, answered 400 ms in.
+			const answered = vi.fn<FetchLike>(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 400));
+				return new Response('', {
+					headers: { 'content-length': String(10 * SLOWEST_BYTES_PER_MS * 1_000) },
+				});
+			});
+			const request = timedFetch(answered, 1_000)('https://example.test', {});
+			await vi.advanceTimersByTimeAsync(400);
+			await request;
+			const signal = answered.mock.calls[0]?.[1].signal;
+
+			await vi.advanceTimersByTimeAsync(9_999);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(signal?.aborted).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('keep the deadline they had when the answer is small, or does not say', async () => {
+		vi.useFakeTimers();
+		try {
+			const answered = vi.fn<FetchLike>(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 400));
+				return new Response('{"entries":[]}', { headers: { 'content-length': '14' } });
+			});
+			const request = timedFetch(answered, 1_000)('https://example.test', {});
+			await vi.advanceTimersByTimeAsync(400);
+			await request;
+			const signal = answered.mock.calls[0]?.[1].signal;
+
+			await vi.advanceTimersByTimeAsync(599);
+			expect(signal?.aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(signal?.aborted).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('keep a signal the caller brought', async () => {
