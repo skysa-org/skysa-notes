@@ -334,19 +334,27 @@ const opsForFile = (
 		.toArray();
 
 /**
- * A file added here, owed its bytes on the remote: one upload for each new
- * row, which is the only time one is queued. The engine reads the bytes when
- * it runs the op, from this device or, for a copy whose bytes it does not
- * hold, from `copyOf` — the `remoteId` of the file it copies.
+ * A file added here, owed its bytes on the remote. The engine reads the bytes
+ * when it runs the op, from this device or, for a copy whose bytes it does
+ * not hold, from `copyOf` — the `remoteId` of the file it copies.
+ *
+ * One upload is enough, as one write is for a note: asked again for a file
+ * that has one queued — a bind that both resumes rows and finds the same
+ * connection's own owed (`bindConnection`) — it adds nothing, and the file is
+ * not sent twice.
  */
 export const queueUpload = (db: QueueDb, file: FileRecord, copyOf?: string): Queued =>
-	add(db, {
-		connectionId: file.connectionId,
-		op: 'upload',
-		fileId: file.id,
-		path: file.path,
-		...(copyOf === undefined ? {} : { copyOf }),
-	});
+	opsForFile(db, file).then((queued) =>
+		queued.some((op) => op.op === 'upload')
+			? undefined
+			: add(db, {
+					connectionId: file.connectionId,
+					op: 'upload',
+					fileId: file.id,
+					path: file.path,
+					...(copyOf === undefined ? {} : { copyOf }),
+				})
+	);
 
 /**
  * The file is now at `file.path`, having been at `from`. `queueMove`'s rules:

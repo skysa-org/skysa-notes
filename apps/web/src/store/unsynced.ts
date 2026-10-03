@@ -77,6 +77,15 @@ export interface Unsynced {
 	 */
 	files: FileRecord[];
 	/**
+	 * Of `files`, the ones a move to another source can take: those whose
+	 * bytes are on this device. A pending row without them is a copy a note's
+	 * move owes (`carryLinkedFiles` in `store/files.ts`), to be made on the
+	 * remote from the file it copies (`copyOf`). Nothing here can send it to
+	 * any other account, so a move leaves it, as it leaves a linked file this
+	 * device has never downloaded, and the original stays where it is.
+	 */
+	portable: FileRecord[];
+	/**
 	 * Files the remote has that the unsent notes link. Not unsent, and not
 	 * counted: for a move to another source to say that it takes the ones
 	 * this device holds the bytes of, and leaves the others in the account
@@ -130,15 +139,18 @@ export const unsyncedIn = async (
 	const ops = await db.opQueue.where('connectionId').equals(connectionId).sortBy('seq');
 	const unverified = (await db.syncState.get(connectionId))?.resumeUnverified === true;
 	const files = await db.files.where('connectionId').equals(connectionId).toArray();
-	// Keys alone: a bound file's bytes may be a stale version, and counted
-	// anyway, since the question is whether they could be the only copy.
-	const held = unverified
-		? new Set(
-				(await db.fileBytes.where('connectionId').equals(connectionId).primaryKeys()).map(
-					([, id]) => id
-				)
-			)
-		: new Set<string>();
+	// Keys alone. A pending row's bytes are pinned, so to hold some is to hold
+	// its own; a bound file's may be a stale version, and are counted anyway
+	// while unverified, since the question then is whether they could be the
+	// only copy.
+	const held = new Set(
+		(await db.fileBytes.where('connectionId').equals(connectionId).primaryKeys()).map(
+			([, id]) => id
+		)
+	);
+	const unsentFiles = files.filter(
+		(file) => file.remoteId === undefined || (unverified && held.has(file.id))
+	);
 
 	const written = notesWith(ops, 'write');
 	const moved = notesWith(ops, 'move');
@@ -184,7 +196,8 @@ export const unsyncedIn = async (
 		deletes: rows.filter((note) => note.deletedLocally === 1 && note.remoteId !== undefined),
 		folders: folders.filter(unsentFolder),
 		rmdirs: ops.filter((op) => op.op === 'rmdir'),
-		files: files.filter((file) => file.remoteId === undefined || held.has(file.id)),
+		files: unsentFiles,
+		portable: unsentFiles.filter((file) => held.has(file.id)),
 		linked: files.filter(
 			(file) => file.remoteId !== undefined && linkedPaths.has(foldPath(file.path))
 		),
@@ -273,14 +286,14 @@ export const countedFolders = (unsynced: Unsynced): FolderRecord[] =>
 
 /**
  * How many rows could be taken to another source: the notes, the notebooks
- * that are changes in their own right, and the files not uploaded yet. Not the
- * renames and not the deletes —
+ * that are changes in their own right, and the files not uploaded yet whose
+ * bytes are here (`portable`). Not the renames and not the deletes —
  * each is about a file in the account being left, and means nothing anywhere
  * else. Zero means a move would move nothing, and a move of nothing is a
  * discard under another name.
  */
 export const movable = (unsynced: Unsynced): number =>
-	unsynced.notes.length + countedFolders(unsynced).length + unsynced.files.length;
+	unsynced.notes.length + countedFolders(unsynced).length + unsynced.portable.length;
 
 /**
  * How many changes the remote has not had, for saying "3 not sent" of a source.

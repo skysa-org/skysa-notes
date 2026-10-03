@@ -14,7 +14,7 @@ import {
 	renameNote,
 	saveNoteBody,
 } from '../src/store/notes.js';
-import { MAX_OP_ATTEMPTS, outOfAttempts, queueWrite } from '../src/store/queue.js';
+import { MAX_OP_ATTEMPTS, outOfAttempts, queueUpload, queueWrite } from '../src/store/queue.js';
 import {
 	countOf,
 	isEmpty,
@@ -71,6 +71,7 @@ const summary = (unsynced: Unsynced) => ({
 	folders: unsynced.folders.map((folder) => folder.path).sort(),
 	rmdirs: unsynced.rmdirs.map((op) => op.path).sort(),
 	files: unsynced.files.map((file) => file.path).sort(),
+	portable: unsynced.portable.map((file) => file.path).sort(),
 	linked: unsynced.linked.map((file) => file.path).sort(),
 	blocked: unsynced.blocked,
 });
@@ -82,6 +83,7 @@ const NOTHING = {
 	folders: [],
 	rmdirs: [],
 	files: [],
+	portable: [],
 	linked: [],
 	blocked: false,
 };
@@ -442,9 +444,28 @@ describe('what a source holds that its remote has not been sent', () => {
 
 			const unsynced = await unsyncedIn(db, CONNECTION);
 
-			expect(summary(unsynced)).toEqual({ ...NOTHING, files: [added.path] });
+			expect(summary(unsynced)).toEqual({
+				...NOTHING,
+				files: [added.path],
+				portable: [added.path],
+			});
 			expect(countOf(unsynced)).toBe(1);
 			expect(isEmpty(unsynced)).toBe(false);
+		});
+
+		it('counts a copy owed from the remote, and says no other account can be sent it', async () => {
+			const db = freshDatabase();
+			// A note's move copied a file this device never downloaded: the
+			// upload is to read it from the remote (`copyOf`).
+			const copy = { ...scope, id: 'c', path: 'Play/a.png', size: 1 };
+			await db.files.put(copy);
+			await queueUpload(db, copy, 'rf');
+
+			const unsynced = await unsyncedIn(db, CONNECTION);
+
+			expect(summary(unsynced)).toEqual({ ...NOTHING, files: [copy.path] });
+			expect(isEmpty(unsynced)).toBe(false);
+			expect(movable(unsynced)).toBe(0);
 		});
 
 		it('counts nothing for one the remote has, nor for its queued move', async () => {
@@ -697,7 +718,7 @@ describe('what a source holds that its remote has not been sent', () => {
 		const db = freshDatabase();
 		const note = await createNote(db, { ...scope, title: 'Plan' });
 
-		const tables = [db.notes, db.folders, db.opQueue, db.syncState, db.files];
+		const tables = [db.notes, db.folders, db.opQueue, db.syncState, db.files, db.fileBytes];
 		const paths = await db.transaction('rw', tables, async () => {
 			const unsynced = await unsyncedIn(db, CONNECTION);
 			await db.notes.bulkDelete(unsynced.notes.map((each) => [each.connectionId, each.id]));

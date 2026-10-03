@@ -23,7 +23,7 @@ import {
 } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { renameFolder } from '../src/store/folders.js';
-import { createNote, importNoteFile, saveNoteBody } from '../src/store/notes.js';
+import { createNote, importNoteFile, moveNote, saveNoteBody } from '../src/store/notes.js';
 import { queueUpload } from '../src/store/queue.js';
 import { movable, seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { updateNote } from './noteRows.js';
@@ -390,6 +390,47 @@ describe('a detached source', () => {
 		expect((await db.syncState.get(ADA.connectionId))?.resumeUnverified).toBe(true);
 	});
 
+	it('keeps the upload of a copy it holds no bytes of when cut loose, to read from the remote', async () => {
+		const { db } = await detached();
+		const copy: FileRecord = { ...ada, id: 'copy', path: 'Work/c.png', size: 1 };
+		await db.files.put(copy);
+		await queueUpload(db, copy, 'r-original');
+		await bindConnection(db, ADA_AGAIN);
+		await updateNote(db, (await db.notes.toArray())[0]!.id, { remoteId: 'r-note' });
+		const emptied = { read: () => Promise.reject(new NotFoundError('gone')) };
+
+		expect(await verifyResume(db, ADA_AGAIN.connectionId, emptied)).toBe('copied');
+
+		const its = (
+			await db.opQueue.where('connectionId').equals(ADA_AGAIN.connectionId).toArray()
+		).filter((op) => op.fileId === copy.id);
+		expect(its.map(({ op, path, copyOf }) => ({ op, path, copyOf }))).toEqual([
+			{ op: 'upload', path: copy.path, copyOf: 'r-original' },
+		]);
+	});
+
+	it('sends a file once where a bind both resumes rows and finds its own owed', async () => {
+		const db = freshDatabase();
+		const EARLIER = { ...ADA, connectionId: 'c-ada-0' } as const;
+		await connected(db, EARLIER);
+		await unsentNote(db, EARLIER.connectionId, '# One\n');
+		await pendingFile(db, EARLIER.connectionId, 'Work/a.png', 'a');
+		await detachConnection(db, { connectionId: EARLIER.connectionId });
+		// Ada's own source, detached as well, with another file at that name.
+		await db.syncState.put({
+			...ADA,
+			clientId: 'client',
+			detached: { at: 0, reason: 'revoked' },
+		});
+		await pendingFile(db, ADA.connectionId, 'Work/a.png', 'aa');
+
+		await bindConnection(db, ADA);
+
+		const uploads = (await uploadsOf(db, ADA.connectionId)).map((op) => op.fileId);
+		expect(uploads).toHaveLength(2);
+		expect(new Set(uploads).size).toBe(2);
+	});
+
 	it('keeps a file a notebook renamed here took with it, and the move it owes', async () => {
 		const db = freshDatabase();
 		await connected(db, ADA);
@@ -422,6 +463,39 @@ describe('a detached source', () => {
 		await detachConnection(db, ada);
 
 		expect(await db.folders.get([ADA.connectionId, 'Pics'])).toBeDefined();
+	});
+});
+
+describe('a detach that finds nothing unsent', () => {
+	it("forgets a file's owed move and delete with the source, and leaves nothing under it", async () => {
+		const db = freshDatabase();
+		await connected(db, ADA);
+		const moved = await boundFile(db, ADA.connectionId, 'New/x.png');
+		await db.opQueue.bulkAdd([
+			{
+				...ada,
+				op: 'move-file',
+				fileId: moved.id,
+				path: 'Old/x.png',
+				targetPath: moved.path,
+				attempts: 0,
+				queuedAt: 0,
+			},
+			{
+				...ada,
+				op: 'delete-file',
+				remoteId: 'r-y',
+				path: 'Gone/y.png',
+				attempts: 0,
+				queuedAt: 0,
+			},
+		]);
+
+		expect(await detachConnection(db, ada)).toBe(true);
+
+		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
+		expect(await db.files.where('connectionId').equals(ADA.connectionId).count()).toBe(0);
+		expect(await db.opQueue.where('connectionId').equals(ADA.connectionId).count()).toBe(0);
 	});
 });
 
@@ -546,6 +620,35 @@ describe('moving what a source never sent into another', () => {
 		expect((await db.notes.get([ADA.connectionId, written.id]))?.path).toBe(written.path);
 	});
 
+	it('makes no notebook in the target for a file it cannot take', async () => {
+		const db = freshDatabase();
+		await connected(db, BOB);
+		await connected(db, ADA);
+		await db.folders.put({ ...ada, path: 'Archive', remoteId: 'f-archive', createdAt: 0 });
+		// Never downloaded, and held but of a version the remote has moved on from.
+		await boundFile(db, ADA.connectionId, 'Archive/x.png');
+		const stale = await boundFile(db, ADA.connectionId, 'Old/s.png', 'ss');
+		await db.fileBytes.update([ADA.connectionId, stale.id], { version: 'v0' });
+		await db.folders.put({ ...ada, path: 'Old', remoteId: 'f-old', createdAt: 0 });
+		await unsentNote(db, ADA.connectionId, '![x](../Archive/x.png) ![s](../Old/s.png)\n');
+		await detachConnection(db, ada);
+
+		expect(
+			await moveUnsyncedTo(db, {
+				connectionId: ADA.connectionId,
+				target: BOB.connectionId,
+				seen: seenIn(await unsyncedIn(db, ADA.connectionId)),
+			})
+		).toBe('released');
+
+		expect(await db.folders.get([BOB.connectionId, 'Archive'])).toBeUndefined();
+		expect(await db.folders.get([BOB.connectionId, 'Old'])).toBeUndefined();
+		expect((await opsOf(db, BOB.connectionId)).map((op) => `${op.op} ${op.path}`)).toEqual([
+			'mkdir Work',
+			'write Work/one.md',
+		]);
+	});
+
 	it('moves a file not uploaded on its own, with the notebook it is in', async () => {
 		const db = freshDatabase();
 		await connected(db, BOB);
@@ -571,6 +674,84 @@ describe('moving what a source never sent into another', () => {
 			{ op: 'mkdir', path: 'Pics' },
 			{ op: 'upload', path: alone.path, fileId: alone.id },
 		]);
+	});
+
+	it("leaves a copy a note's move owes of a file never downloaded, and says so", async () => {
+		const db = freshDatabase();
+		await connected(db, BOB);
+		await connected(db, ADA);
+		await db.folders.put({ ...ada, path: 'Work', remoteId: 'f-work', createdAt: 0 });
+		const pic = await boundFile(db, ADA.connectionId, 'Work/pic.png');
+		const pushed = (path: string) =>
+			importNoteFile(db, {
+				...ada,
+				path,
+				source: '![p](pic.png)\n',
+				remoteId: `r-${path}`,
+				remoteVersion: 'v1',
+			});
+		await pushed('Work/m.md');
+		const n = await pushed('Work/n.md');
+		// m links the picture too, so it is copied, from the remote.
+		await moveNote(db, n.id, 'Play', ada);
+		await saveNoteBody(db, n.id, '![p](pic.png)\n\nmore\n', undefined, ada);
+		await detachConnection(db, ada);
+		const listed = await unsyncedIn(db, ADA.connectionId);
+		const [copy] = listed.files;
+		expect(copy?.path).toBe('Play/pic.png');
+		expect(copy?.remoteId).toBeUndefined();
+		expect(
+			(await db.opQueue.where('connectionId').equals(ADA.connectionId).toArray()).find(
+				(op) => op.fileId === copy?.id
+			)?.copyOf
+		).toBe(pic.remoteId);
+		expect(listed.portable).toEqual([]);
+
+		const user = userEvent.setup();
+		render(
+			<MoveUnsent
+				listed={listed}
+				from="Dropbox"
+				targets={[{ ...BOB, active: false }]}
+				busy={false}
+				disabled={false}
+				onMove={() => undefined}
+			/>
+		);
+		await user.click(screen.getByRole('button', { name: /^Move 1 note to / }));
+		expect(screen.getByText(/any it has never downloaded stay in Dropbox\.$/)).toBeTruthy();
+
+		expect(
+			await moveUnsyncedTo(db, {
+				connectionId: ADA.connectionId,
+				target: BOB.connectionId,
+				seen: seenIn(listed),
+			})
+		).toBe('released');
+		expect(await filesOf(db, BOB.connectionId)).toEqual([]);
+		expect(await uploadsOf(db, BOB.connectionId)).toEqual([]);
+	});
+
+	it('finds nothing to move in a copy alone, and keeps it', async () => {
+		const db = freshDatabase();
+		await connected(db, BOB);
+		await connected(db, ADA);
+		const copy: FileRecord = { ...ada, id: 'copy', path: 'p.png', size: 1 };
+		await db.files.put(copy);
+		await queueUpload(db, copy, 'r-original');
+		await detachConnection(db, ada);
+		const listed = await unsyncedIn(db, ADA.connectionId);
+		expect(movable(listed)).toBe(0);
+
+		expect(
+			await moveUnsyncedTo(db, {
+				connectionId: ADA.connectionId,
+				target: BOB.connectionId,
+				seen: seenIn(listed),
+			})
+		).toBe('nothing-to-move');
+		expect(await filesOf(db, ADA.connectionId)).toEqual([copy]);
+		expect(await uploadsOf(db, ADA.connectionId)).toHaveLength(1);
 	});
 
 	it('counts the files going, and says the ones it cannot take stay', async () => {
