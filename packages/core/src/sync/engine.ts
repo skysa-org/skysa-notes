@@ -1093,6 +1093,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// on being held. There is no need to fall back to `store.noteByPath`:
 		// `notesEndingIn` starts from the store's own rows under that folder, so
 		// a note that has not been moved is found by it too.
+		// A file that is not a note, first: it is matched by id or by where
+		// its file is, and never takes a note or a folder with it.
+		const file = deletedFile(entry, batch, decided, at);
+		if (file !== undefined) return file;
 		const { note: local, byOldName } = await deletedNote(entry, batch, decided);
 
 		if (await movedNotDeleted(path, remoteId, local, batch, at, decided)) return [];
@@ -1101,6 +1105,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (moved?.kind === 'under' && path !== undefined) {
 			return [
 				...forgetMovedUnder(path, moved, local, batch, decided),
+				...(local === undefined ? fileUnderMoved(path, moved, batch, decided) : []),
 				...(await decideUnderMoved(path, local, moved, decided, batch, at)),
 			];
 		}
@@ -1268,17 +1273,42 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// braces on `undefined`: nothing rescued out of a folder deletes it,
 		// and deleting `gone` instead would take whatever the rescue put there.
 		const doomedRow = await folderAt(gone, decided);
-		const final =
-			doomedRow === undefined ? gone : folderNow(doomedRow.path, [...decided, ...rescued]);
+		const after = [...decided, ...rescued];
+		const final = doomedRow === undefined ? gone : folderNow(doomedRow.path, after);
 		if (final === undefined) return rescued;
 		return [
 			...rescued,
-			await cascadeOver(final, doomedRow?.path ?? gone, batch.renaming, [
-				...decided,
-				...rescued,
-			]),
+			await cascadeOver(
+				final,
+				doomedRow?.path ?? gone,
+				batch.renaming,
+				after,
+				filesLeaving(final, after, batch, at)
+			),
 		];
 	};
+
+	/**
+	 * The files a folder's deletion must spare (`keepFiles`): bound rows under
+	 * it that the rest of the round lists again — out of it, or back in a
+	 * folder made again at its name. The batch holds only the last entry about
+	 * each file, so a later one is its last word. Each one's own entry puts it
+	 * there as the same row, with whatever bytes are held for it; taken by the
+	 * cascade, it would come back as a new row with none. Files' answer to the
+	 * subfolders rescued above, and to the note a cascade takes that its own
+	 * entry puts back by its id.
+	 */
+	const filesLeaving = (
+		final: string,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): string[] =>
+		[...filesNow(batch.files, decided).values()].flatMap((file) => {
+			if (file.remoteId === undefined || !isWithin(file.at, final)) return [];
+			const later = (batch.live.get(file.remoteId) ?? []).some((entry) => entry.at > at);
+			return later ? [file.id] : [];
+		});
 
 	/** What this batch says has been deleted, by remote id and by path. */
 	interface Doomed {
@@ -1326,6 +1356,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		 * decided, and those a rescue has decided early on the way to it.
 		 */
 		deciding: ReadonlySet<number>;
+		/** The files that are not notes, as the batch found them (`filesNow`). */
+		files: FileBase;
 	}
 
 	const doomedIn = (entries: readonly ChangeEntry[]): Doomed => ({
@@ -2210,6 +2242,413 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		];
 	};
 
+	// ------------------------------------------------------- files, on pull
+
+	/**
+	 * A file that is not a note, as a batch has left it so far. `at` is where
+	 * its row is. `remote` is where its file is on the remote, which is not
+	 * `at` while a `move-file` the user queued has not run — it is that move's
+	 * origin, which the store keeps up with the remote. A pending row has no
+	 * file anywhere else, and `remote` is `at`.
+	 *
+	 * Rows are mirrored, never read: a pull downloads no file's bytes, and no
+	 * decision here asks the provider anything. A bound row is only the
+	 * remote's word, so the worst a wrong decision about one costs is a picture
+	 * that does not show until the next scan. A pending row is the user's, and
+	 * nothing here takes one away (docs/ARCHITECTURE.md §7).
+	 */
+	interface FilePlace {
+		id: string;
+		at: string;
+		remote: string;
+		remoteId: string | undefined;
+		version: string | undefined;
+		size: number;
+		moving: boolean;
+		/**
+		 * Moved out of a folder here whose deletion there took its file: the
+		 * row is outside the folder, so the cascade does not reach it, and its
+		 * file is gone (`strandedFiles`).
+		 */
+		stranded: boolean;
+	}
+
+	/** The file rows a batch starts from, and what the queue says of them. */
+	interface FileBase {
+		rows: readonly SyncFile[];
+		/** Each file's first queued `move-file`, by the origin it names. */
+		moves: ReadonlyMap<string, string>;
+		/** Files the user has deleted here, by `remoteId`, not yet deleted there. */
+		deleting: ReadonlySet<string>;
+	}
+
+	const fileBaseOf = async (queue: readonly SyncOp[]): Promise<FileBase> => ({
+		rows: await store.allFiles(),
+		moves: queue.reduce<Map<string, string>>(
+			(map, op) =>
+				op.op !== 'move-file' || op.fileId === undefined || map.has(op.fileId)
+					? map
+					: map.set(op.fileId, op.path),
+			new Map()
+		),
+		deleting: new Set(
+			queue.flatMap((op) =>
+				op.op === 'delete-file' && op.remoteId !== undefined ? [op.remoteId] : []
+			)
+		),
+	});
+
+	const startingFiles = (base: FileBase): ReadonlyMap<string, FilePlace> =>
+		new Map(
+			base.rows.map((row) => [
+				row.id,
+				{
+					id: row.id,
+					at: row.path,
+					remote: base.moves.get(row.id) ?? row.path,
+					remoteId: row.remoteId,
+					version: row.remoteVersion,
+					size: row.size,
+					moving: base.moves.has(row.id),
+					stranded: false,
+				},
+			])
+		);
+
+	/** `rebasePath`, for a path that may not be under `from`. */
+	const carried = (path: string, from: string, to: string): string =>
+		isWithin(path, from) ? rebasePath(path, from, to) : path;
+
+	/**
+	 * A folder's deletion, as the store applies it to files: a bound row under
+	 * it goes, unless the engine names it or its queued move says its file is
+	 * outside the folder under both of the folder's names.
+	 */
+	const cascadesOver = (
+		file: FilePlace,
+		change: Extract<PullChange, { kind: 'delete-folder' }>
+	): boolean => {
+		if (!isWithin(file.at, change.path) || file.remoteId === undefined) return false;
+		if (change.keepFiles?.includes(file.id) === true) return false;
+		const out =
+			!isWithin(file.remote, change.path) &&
+			(change.was === undefined || !isWithin(file.remote, change.was));
+		return !(file.moving && out);
+	};
+
+	/** One change, applied to the files as the store applies it. */
+	const placedFiles = (
+		view: ReadonlyMap<string, FilePlace>,
+		change: PullChange
+	): ReadonlyMap<string, FilePlace> => {
+		if (change.kind === 'move-folder') {
+			return new Map(
+				[...view].map(([id, file]) => [
+					id,
+					{
+						...file,
+						at: carried(file.at, change.from, change.to),
+						remote: carried(file.remote, change.from, change.to),
+					},
+				])
+			);
+		}
+		if (change.kind === 'delete-folder') {
+			return new Map(
+				[...view].flatMap(([id, file]): [string, FilePlace][] => {
+					if (cascadesOver(file, change)) return [];
+					const stranded =
+						file.moving &&
+						file.remoteId !== undefined &&
+						isWithin(file.remote, change.path);
+					return [[id, stranded ? { ...file, stranded } : file]];
+				})
+			);
+		}
+		if (!('fileId' in change)) return view;
+		const file = view.get(change.fileId);
+		if (change.kind === 'upsert-file') {
+			// A row the user has moved stays where they put it (the store's
+			// rule): the move goes from where the file now is.
+			const moving = file?.moving ?? false;
+			return new Map(view).set(change.fileId, {
+				id: change.fileId,
+				at: moving && file !== undefined ? file.at : change.path,
+				remote: change.remote.path,
+				remoteId: change.remote.remoteId,
+				version: change.remote.version,
+				size: change.remote.size ?? 0,
+				moving,
+				stranded: false,
+			});
+		}
+		if (file === undefined) return view;
+		if (change.kind === 'displace-file') {
+			const remote = file.remoteId === undefined ? change.path : file.remote;
+			return new Map(view).set(file.id, { ...file, at: change.path, remote });
+		}
+		if (change.kind === 'delete-file') {
+			return new Map([...view].filter(([id]) => id !== file.id));
+		}
+		// `reupload-file`: pending again where it is, or gone, which only the
+		// store can say. Pending keeps the name taken, the safer of the two.
+		return new Map(view).set(file.id, {
+			...file,
+			remote: file.at,
+			remoteId: undefined,
+			version: undefined,
+			moving: false,
+			stranded: false,
+		});
+	};
+
+	/**
+	 * A file gone from the remote, for a row the user has moved here: the move
+	 * is theirs, as an edit is, and outranks the deletion as far as this
+	 * device can keep it. Sent back up from the bytes held here, where the user
+	 * put it; let go of where there are none (`reupload-file`). Any other bound
+	 * row is only the remote's word, and goes.
+	 */
+	const fileGone = (file: FilePlace): PullChange =>
+		file.moving
+			? { kind: 'reupload-file', fileId: file.id }
+			: { kind: 'delete-file', fileId: file.id };
+
+	/** The rows a folder's deletion left with no file (`FilePlace.stranded`). */
+	const strandedFiles = (decided: readonly PullChange[], batch: Batch): PullChange[] =>
+		[...filesNow(batch.files, decided).values()].flatMap((file) =>
+			file.stranded ? [fileGone(file)] : []
+		);
+
+	/**
+	 * The last view asked for, per batch, and the decisions it was reached
+	 * through. A batch's decisions only ever grow at the end, and each file
+	 * entry asks once: replayed from the start every time, a scan of a
+	 * thousand files would be a million steps.
+	 */
+	const fileViews = new WeakMap<
+		FileBase,
+		{ decided: readonly PullChange[]; view: ReadonlyMap<string, FilePlace> }
+	>();
+
+	/** The files once the decisions so far have been applied, by row id. */
+	const filesNow = (
+		base: FileBase,
+		decided: readonly PullChange[]
+	): ReadonlyMap<string, FilePlace> => {
+		const known = fileViews.get(base);
+		const from =
+			known !== undefined &&
+			known.decided.length <= decided.length &&
+			known.decided.every((change, index) => decided[index] === change)
+				? known
+				: { decided: [], view: startingFiles(base) };
+		const view = decided.slice(from.decided.length).reduce(placedFiles, from.view);
+		fileViews.set(base, { decided, view });
+		return view;
+	};
+
+	/**
+	 * A free name beside `path` for a file that has to step out of the way,
+	 * against the rows the batch has left in that folder and the paths it is
+	 * bringing in. Its own extension kept, so it stays the kind of file it is.
+	 */
+	const freeFilePath = (
+		path: string,
+		view: ReadonlyMap<string, FilePlace>,
+		batch: Batch
+	): string => {
+		const folder = parentPath(path);
+		const taken = [...[...view.values()].map((file) => file.at), ...batch.claimed]
+			.filter((each) => parentPath(each) === folder)
+			.map(basename);
+		return conflictFilePath(path, now(), taken);
+	};
+
+	/**
+	 * The rows in the way of a file arriving at `path`, other than its own. The
+	 * remote keeps the path (CLAUDE.md). A row whose file is not there steps
+	 * aside: one never sent, whose upload goes to the new name, and one the
+	 * user moved here, whose move does. A row whose file *was* there is let go
+	 * of — its file is gone from the path, and a bound row is only the
+	 * remote's word — unless the batch says later where it went, and then its
+	 * own entry takes it there.
+	 */
+	const clearFilePath = (
+		path: string,
+		own: string | undefined,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): PullChange[] =>
+		[...filesNow(batch.files, decided).values()]
+			.filter((file) => file.at === path && file.id !== own)
+			.reduce<PullChange[]>((changes, file) => {
+				if (file.remoteId === undefined || file.moving) {
+					const view = filesNow(batch.files, [...decided, ...changes]);
+					const aside = freeFilePath(path, view, batch);
+					return [...changes, { kind: 'displace-file', fileId: file.id, path: aside }];
+				}
+				const later = (batch.live.get(file.remoteId) ?? []).some((entry) => entry.at > at);
+				return later ? changes : [...changes, { kind: 'delete-file', fileId: file.id }];
+			}, []);
+
+	/**
+	 * A file that is not a note, listed. Matched by its id; then by a pending
+	 * row at its path, the same file if it is the same size — an upload whose
+	 * answer never came, or the same picture added on two devices — which is
+	 * adopted rather than sent again; otherwise a new row.
+	 */
+	const decideAttachment = (
+		entry: RemoteEntry,
+		decided: readonly PullChange[],
+		batch: Batch,
+		at: number
+	): PullChange[] => {
+		// The user has deleted it here, and the delete has not run: what the
+		// remote says of it is old news, and the store would pass it over.
+		if (batch.files.deleting.has(entry.remoteId)) return [];
+		const view = [...filesNow(batch.files, decided).values()];
+		const size = entry.size ?? 0;
+		const own = view.find((file) => file.remoteId === entry.remoteId);
+		if (own !== undefined) {
+			const same =
+				own.remote === entry.path && own.version === entry.version && own.size === size;
+			if (same) return [];
+			// Moved here by the user and not yet there: the row stays put, as
+			// the store keeps it, and nothing is in the way of a file not coming.
+			if (own.moving) {
+				return [{ kind: 'upsert-file', fileId: own.id, path: own.at, remote: entry }];
+			}
+			return [
+				...clearFilePath(entry.path, own.id, decided, batch, at),
+				{ kind: 'upsert-file', fileId: own.id, path: entry.path, remote: entry },
+			];
+		}
+		const pending = view.find(
+			(file) => file.at === entry.path && file.remoteId === undefined && file.size === size
+		);
+		if (pending !== undefined) {
+			return [
+				{
+					kind: 'upsert-file',
+					fileId: pending.id,
+					path: entry.path,
+					remote: entry,
+					adopt: true,
+				},
+			];
+		}
+		return [
+			...clearFilePath(entry.path, undefined, decided, batch, at),
+			{ kind: 'upsert-file', fileId: newId(), path: entry.path, remote: entry },
+		];
+	};
+
+	/**
+	 * A note's file renamed to a name that is not a note's: it is a file now,
+	 * and the note lets go of it as it would of a file deleted — gone if
+	 * clean, cut loose and sent again if not.
+	 */
+	const noteNoLonger = async (
+		entry: RemoteEntry,
+		decided: readonly PullChange[]
+	): Promise<PullChange[]> => {
+		const note =
+			(await store.noteByRemoteId(entry.remoteId)) ??
+			madeInBatch(decided).find((each) => each.remoteId === entry.remoteId);
+		// Taken already, by a folder's deletion in front of this: once is enough.
+		if (note === undefined || removedInBatch(note, decided)) return [];
+		return remoteNow(note, decided) === entry.remoteId ? [forgetNote(note)] : [];
+	};
+
+	/** The other way round: a file renamed into a note. Its row goes. */
+	const fileNoLonger = (
+		entry: RemoteEntry,
+		decided: readonly PullChange[],
+		batch: Batch
+	): PullChange[] => {
+		const file = [...filesNow(batch.files, decided).values()].find(
+			(each) => each.remoteId === entry.remoteId
+		);
+		return file === undefined ? [] : [{ kind: 'delete-file', fileId: file.id }];
+	};
+
+	/**
+	 * A deletion about a file row: by its id, or — Dropbox's, which is a path
+	 * and nothing else — by where its file is on the remote. `undefined` for
+	 * one about no file, which the rest of `decideDeletedRow` asks about notes
+	 * and folders. As for a note, a thing the batch says lives on elsewhere was
+	 * moved, not deleted (`movedNotDeleted`).
+	 */
+	const deletedFile = (
+		{ path, remoteId }: DeletedEntry,
+		batch: Batch,
+		decided: readonly PullChange[],
+		at: number
+	): PullChange[] | undefined => {
+		const rows = [...filesNow(batch.files, decided).values()];
+		const file =
+			remoteId === undefined
+				? rows.find((each) => each.remoteId !== undefined && each.remote === path)
+				: rows.find((each) => each.remoteId === remoteId);
+		if (file?.remoteId === undefined) return undefined;
+		const here = path !== undefined && file.remote === path;
+		const alive = here
+			? (batch.live.get(file.remoteId) ?? []).some((each) => each.at > at)
+			: aliveElsewhere(batch.live, file.remoteId, path, at);
+		return alive ? [] : [fileGone(file)];
+	};
+
+	/**
+	 * A deletion by path under a folder this batch moves: the row went with
+	 * the folder, so it is found at the path rebased. Whether the file moved
+	 * with the folder or was deleted out of it first, the batch answers — the
+	 * file is listed again by its own entry if it lives (`forgetMovedUnder`).
+	 */
+	const fileUnderMoved = (
+		path: string,
+		over: Readonly<{ from: string; to: string }>,
+		batch: Batch,
+		decided: readonly PullChange[]
+	): PullChange[] => {
+		const was = rebasePath(path, over.from, over.to);
+		const file = [...filesNow(batch.files, decided).values()].find(
+			(each) => each.remoteId !== undefined && each.remote === was
+		);
+		if (file?.remoteId === undefined || batch.live.has(file.remoteId)) return [];
+		return [fileGone(file)];
+	};
+
+	/**
+	 * Two rows on one path once a batch is decided, which nothing above means
+	 * to leave: folders moved together, or a shape nobody has found. The one
+	 * whose file is there keeps it; one never sent, or on its way elsewhere,
+	 * steps aside; another that says its file is there is out of date, and
+	 * goes.
+	 */
+	const settleFileClashes = (decided: readonly PullChange[], batch: Batch): PullChange[] => {
+		const groups = [...filesNow(batch.files, decided).values()].reduce<
+			Map<string, FilePlace[]>
+		>((map, file) => map.set(file.at, [...(map.get(file.at) ?? []), file]), new Map());
+		return [...groups.values()]
+			.filter((group) => group.length > 1)
+			.reduce<PullChange[]>((changes, group) => {
+				const keeper =
+					group.find((file) => file.remoteId !== undefined && !file.moving) ?? group[0];
+				return group
+					.filter((file) => file !== keeper)
+					.reduce<PullChange[]>((more, file) => {
+						if (file.remoteId !== undefined && !file.moving) {
+							return [...more, { kind: 'delete-file', fileId: file.id }];
+						}
+						const view = filesNow(batch.files, [...decided, ...more]);
+						const aside = freeFilePath(file.at, view, batch);
+						return [...more, { kind: 'displace-file', fileId: file.id, path: aside }];
+					}, changes);
+			}, []);
+	};
+
 	const decide = async (
 		entry: ChangeEntry,
 		decided: readonly PullChange[],
@@ -2230,16 +2669,27 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (isHidden(entry.path)) return unlisted();
 		if (entry.kind === 'folder') return decideFolder(entry, decided, batch, at);
 
-		// A file that is not a note. The app owns the folder but does not own
-		// everything in it — the user may have dropped a PDF beside their notes,
-		// and turning it into a note would corrupt the list and, on push, the
-		// file. See docs/ARCHITECTURE.md §14.
+		// A file that is not a note: a picture added beside one, or a PDF the
+		// user dropped in from outside the app. Turning it into a note would
+		// corrupt the list and, on push, the file.
 		// Folded, like every other question about a name: `Report.MD` from a
 		// Windows tool is a markdown file, and a gate that says otherwise means
 		// the fold in `conflictFilename` below can never be reached by anything
 		// the engine actually pulls.
-		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) return unlisted();
-		return decideFile(entry, decided, batch);
+		//
+		// It is a row of its own (docs/ARCHITECTURE.md §7, "Files beside
+		// notes"): mirrored, never read.
+		if (!foldName(entry.path).endsWith(NOTE_EXTENSION)) {
+			return [
+				...unlisted(),
+				...(await noteNoLonger(entry, decided)),
+				...decideAttachment(entry, decided, batch, at),
+			];
+		}
+		return [
+			...fileNoLonger(entry, decided, batch),
+			...(await decideFile(entry, decided, batch)),
+		];
 	};
 
 	/**
@@ -2295,10 +2745,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * note is often carried somewhere else by a later decision, and a row
 	 * re-established for it on the way past would outlive it.
 	 */
-	const roofOver = (decided: readonly PullChange[]): Promise<PullChange[]> =>
+	const roofOver = (decided: readonly PullChange[], files: FileBase): Promise<PullChange[]> =>
 		roofsFor(
 			decided.flatMap((change) => (change.kind === 'delete-folder' ? [change.path] : [])),
-			decided
+			decided,
+			files
 		);
 
 	/**
@@ -2308,13 +2759,20 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const roofsFor = async (
 		cascades: readonly string[],
-		decided: readonly PullChange[]
+		decided: readonly PullChange[],
+		files: FileBase
 	): Promise<PullChange[]> => {
 		if (cascades.length === 0) return [];
 		const groups = await Promise.all(cascades.map((path) => notesUnderNow(path, decided)));
-		const wanted = groups
-			.flat()
-			.flatMap((entry) => [parentPath(entry.path), ...ancestorPaths(entry.path)]);
+		// And the files it kept: one never sent, which exists nowhere else, and
+		// one whose queued move says its file is somewhere else.
+		const kept = [...filesNow(files, decided).values()].flatMap((file) =>
+			cascades.some((path) => file.at !== path && isWithin(file.at, path)) ? [file.at] : []
+		);
+		const wanted = [...groups.flat().map((entry) => entry.path), ...kept].flatMap((path) => [
+			parentPath(path),
+			...ancestorPaths(path),
+		]);
 		return [...new Set(wanted)]
 			.filter((path) => normalizePath(path) !== ROOT)
 			.sort((one, two) => one.length - two.length)
@@ -2370,14 +2828,16 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	};
 
 	/**
-	 * A `delete-folder` that spares the notes whose files are not inside it.
-	 * `was` is where the row stood before the batch, `path` where it ends up.
+	 * A `delete-folder` that spares the notes whose files are not inside it,
+	 * and the files named in `keepFiles` (`filesLeaving`). `was` is where the
+	 * row stood before the batch, `path` where it ends up.
 	 */
 	const cascadeOver = async (
 		path: string,
 		was: string,
 		renaming: ReadonlyMap<string, string>,
-		decided: readonly PullChange[]
+		decided: readonly PullChange[],
+		keepFiles: readonly string[] = []
 	): Promise<PullChange> => {
 		const keep = await keptFromCascade(path, was, renaming, decided);
 		return {
@@ -2385,6 +2845,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			path,
 			...(was === path ? {} : { was }),
 			...(keep.length === 0 ? {} : { keep }),
+			...(keepFiles.length === 0 ? {} : { keepFiles }),
 		};
 	};
 
@@ -2401,11 +2862,14 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		scanning: boolean,
 		asked?: readonly SyncOp[],
 		/** The same for the unreadable files listed, which `reconcile` prunes. */
-		listed?: ReadonlyMap<string, UnreadableFile>
+		listed?: ReadonlyMap<string, UnreadableFile>,
+		/** And for the files that are not notes, which it reconciles too. */
+		known?: FileBase
 	): Promise<PullChange[]> => {
 		const entries = deduped(reported);
 		const queue = asked ?? (await store.pendingOps());
 		const unread = listed ?? unreadMap(await store.unreadable());
+		const files = known ?? (await fileBaseOf(queue));
 
 		const renaming = renamesQueued(queue);
 		const batch: Batch = {
@@ -2429,6 +2893,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			unread,
 			entries,
 			deciding: new Set(),
+			files,
 		};
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
@@ -2437,7 +2902,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				...(await decide(entry, sofar, { ...batch, deciding: new Set([at]) }, at)),
 			];
 		}, Promise.resolve([]));
-		return [...decided, ...(await roofOver(decided))];
+		const left = [...decided, ...strandedFiles(decided, batch)];
+		const settled = [...left, ...settleFileClashes(left, batch)];
+		return [...settled, ...(await roofOver(settled, files))];
 	};
 
 	/**
@@ -2529,8 +2996,18 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		 */
 		upload = false,
 		/** The unreadable files listed when this page of the scan began. */
-		unread: ReadonlyMap<string, UnreadableFile> = new Map()
+		unread: ReadonlyMap<string, UnreadableFile> = new Map(),
+		/** The files that are not notes, as this page of the scan found them. */
+		files?: FileBase
 	): Promise<PullChange[]> => {
+		const known = files ?? (await fileBaseOf(await store.pendingOps()));
+		// A file the scan did not return is gone from the remote, as a note is,
+		// or sent back up where the provider says its own copy may have lost
+		// it. Only a bound row: a pending one was never there to be returned.
+		const lostFiles = [...filesNow(known, changes).values()].flatMap((file): PullChange[] => {
+			if (file.remoteId === undefined || seen.has(file.remoteId)) return [];
+			return [upload ? { kind: 'reupload-file', fileId: file.id } : fileGone(file)];
+		});
 		// A scan that proves what is there asks the narrower question, so a note
 		// moved aside for somebody else's file is still asked after.
 		//
@@ -2617,7 +3094,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			// `runWrite`'s `NotFoundError` recovery — a wasted round trip per
 			// note, and the folder made by a side effect rather than by the op
 			// that exists to make it.
-			return [...remade, ...forgotten];
+			return [...remade, ...forgotten, ...lostFiles];
 		}
 		// The outermost of them only. `delete-folder` cascades over what is
 		// inside it, so naming a nested one as well is a second delete of a
@@ -2663,9 +3140,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const unlisted = [...unreadNow(unread, changes).keys()]
 			.filter((remoteId) => !seen.has(remoteId))
 			.map((remoteId): PullChange => ({ kind: 'forget-unreadable', remoteId }));
-		const tail = [...forgotten, ...removals, ...unlisted];
+		const tail = [...forgotten, ...lostFiles, ...removals, ...unlisted];
 		const paths = cascades.map(({ at }) => at);
-		return [...tail, ...(await roofsFor(paths, [...changes, ...tail]))];
+		return [...tail, ...(await roofsFor(paths, [...changes, ...tail], known))];
 	};
 
 	/**
@@ -2768,7 +3245,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		const more = rest.length > 0;
 		const queue = await store.pendingOps();
 		const unread = unreadMap(await store.unreadable());
-		const changes = await decideAll(set.entries, true, queue, unread);
+		const files = await fileBaseOf(queue);
+		const changes = await decideAll(set.entries, true, queue, unread, files);
 		const seen = new Set([
 			...progress.seen,
 			...set.entries.flatMap((entry) =>
@@ -2780,7 +3258,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		// one carries both the cursor and whatever the scan proved was deleted.
 		const tail = more
 			? []
-			: await reconcile(seen, changes, renamesQueued(queue), upload, unread);
+			: await reconcile(seen, changes, renamesQueued(queue), upload, unread, files);
 		const batch = [...changes, ...tail];
 		await store.applyPull({ changes: batch, ...(more ? {} : { cursor: set.cursor }) });
 

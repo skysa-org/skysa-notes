@@ -1777,6 +1777,511 @@ describe('moving a file', () => {
 	});
 });
 
+describe('pulling a file that is not a note', () => {
+	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 255, 10, 13]);
+	const OTHER = new Uint8Array([1, 2, 3]);
+	const remoteAt = (path: string) => {
+		const entry = provider.snapshot().find((each) => each.path === path);
+		if (entry === undefined) throw new Error(`nothing at ${path}`);
+		return entry;
+	};
+	const opsNow = () => store.ops().map(({ seq: _seq, attempts: _attempts, ...op }) => op);
+
+	it('mirrors it as a row, bound, of its size, without reading a byte', async () => {
+		await provider.createFolder('Trips');
+		const file = await provider.createFile('Trips/a.png', PNG.slice());
+
+		const result = await engine.pull();
+
+		expect(result).toMatchObject({ status: 'ok', pulled: 2 });
+		expect(store.files()).toEqual([
+			{
+				id: 'copy-1',
+				path: 'Trips/a.png',
+				remoteId: file.remoteId,
+				remoteVersion: file.version,
+				size: PNG.byteLength,
+			},
+		]);
+		expect(store.heldBytes('copy-1')).toBeUndefined();
+		expect(provider.callLog().filter((call) => call.op === 'read')).toEqual([]);
+	});
+
+	it('follows it where it is moved, and as it is replaced, and says nothing of an echo', async () => {
+		const file = await provider.createFile('a.png', PNG.slice());
+		await engine.pull();
+		await provider.createFolder('Trips');
+		await provider.move(file, 'Trips/a.png');
+		provider.plantBytes('Trips/a.png', OTHER);
+
+		await engine.pull();
+		const now = remoteAt('Trips/a.png');
+		expect(store.files()).toEqual([
+			{
+				id: 'copy-1',
+				path: 'Trips/a.png',
+				remoteId: file.remoteId,
+				remoteVersion: now.version,
+				size: OTHER.byteLength,
+			},
+		]);
+
+		expect(await pullNow([now])).toMatchObject({ status: 'ok', pulled: 0 });
+	});
+
+	it.each([
+		['by its id', (id: string) => ({ deleted: true as const, remoteId: id, path: 'a.png' })],
+		['by its path alone', () => ({ deleted: true as const, path: 'a.png' })],
+	])('lets go of it when it is deleted %s', async (_how, deletion) => {
+		const file = await provider.createFile('a.png', PNG.slice());
+		await engine.pull();
+
+		await pullNow([deletion(file.remoteId)]);
+
+		expect(store.files()).toEqual([]);
+	});
+
+	it('takes a deletion followed by the file somewhere else for a move', async () => {
+		// Dropbox's way of telling a move: the old path, and the new place.
+		const file = await provider.createFile('a.png', PNG.slice());
+		await engine.pull();
+
+		await pullNow([
+			{ deleted: true, path: 'a.png' },
+			{ ...file, path: 'b.png' },
+		]);
+
+		expect(store.files()).toEqual([
+			expect.objectContaining({ id: 'copy-1', path: 'b.png', remoteId: file.remoteId }),
+		]);
+	});
+
+	it('lets go of a row whose file is no longer at its path, for the one that is', async () => {
+		// Replaced while the cursor slept, its deletion never told.
+		const old = await provider.createFile('a.png', PNG.slice());
+		await engine.pull();
+		await provider.delete(old);
+		const replaced = await provider.createFile('a.png', OTHER.slice());
+
+		await pullNow([replaced]);
+
+		expect(store.files()).toEqual([
+			expect.objectContaining({ path: 'a.png', remoteId: replaced.remoteId }),
+		]);
+	});
+
+	it('keeps the row, and its bytes, of a file the round moves on after another took its place', async () => {
+		const file = await provider.createFile('a.png', PNG.slice());
+		await engine.pull();
+		store.putFile(store.files()[0] ?? { id: '', path: '', size: 0 }, {
+			bytes: PNG.slice(),
+			version: file.version,
+		});
+		await provider.move(file, 'b.png');
+		const other = await provider.createFile('a.png', OTHER.slice());
+
+		await pullNow([other, remoteAt('b.png')]);
+
+		expect(store.files()).toEqual([
+			expect.objectContaining({ path: 'a.png', remoteId: other.remoteId }),
+			expect.objectContaining({ id: 'copy-1', path: 'b.png', remoteId: file.remoteId }),
+		]);
+		expect(store.heldBytes('copy-1')?.bytes).toEqual(PNG);
+	});
+
+	it('keeps the row, and its bytes, of a file moved out of a notebook deleted in the same round', async () => {
+		// As the subfolders a deletion rescues: taken by the cascade, it would
+		// come back as a new row with nothing held.
+		const folder = await provider.createFolder('Trips');
+		const file = await provider.createFile('Trips/a.png', PNG.slice());
+		await engine.pull();
+		store.putFile(store.files()[0] ?? { id: '', path: '', size: 0 }, {
+			bytes: PNG.slice(),
+			version: file.version,
+		});
+		await provider.move(file, 'a.png');
+		await provider.delete(folder);
+
+		await pullNow([
+			{ deleted: true, remoteId: folder.remoteId, path: 'Trips' },
+			remoteAt('a.png'),
+		]);
+
+		expect(store.files()).toEqual([
+			expect.objectContaining({ id: 'copy-1', path: 'a.png', remoteId: file.remoteId }),
+		]);
+		expect(store.heldBytes('copy-1')?.bytes).toEqual(PNG);
+	});
+
+	it('lets go of a row whose file was deleted out of a folder the same round moves', async () => {
+		// Dropbox's way: the folder's new place, and the old path of the file.
+		const folder = await provider.createFolder('Trips');
+		const file = await provider.createFile('Trips/a.png', PNG.slice());
+		await engine.pull();
+		await provider.delete(file);
+		await provider.move(folder, 'Holidays');
+
+		await pullNow([remoteAt('Holidays'), { deleted: true, path: 'Trips/a.png' }]);
+
+		expect(store.files()).toEqual([]);
+		expect(store.folders().map((each) => each.path)).toEqual(['Holidays']);
+	});
+
+	describe('beside a file added here', () => {
+		const added = (path = 'a.png') => {
+			store.putFile(
+				{ id: 'x1', path, size: PNG.byteLength },
+				{ bytes: PNG.slice(), pinned: true }
+			);
+			store.queue({ op: 'upload', fileId: 'x1', path });
+		};
+
+		it('takes the same file at its path for the one it is uploading, and owes nothing', async () => {
+			// The upload landed and its answer never came back; or the same
+			// picture was added on another device.
+			added();
+			const there = await provider.createFile('a.png', PNG.slice());
+
+			await engine.pull();
+
+			expect(store.files()).toEqual([
+				{
+					id: 'x1',
+					path: 'a.png',
+					remoteId: there.remoteId,
+					remoteVersion: there.version,
+					size: PNG.byteLength,
+				},
+			]);
+			expect(store.heldBytes('x1')).toEqual({ bytes: PNG, version: there.version });
+			expect(store.ops()).toEqual([]);
+		});
+
+		it('moves it aside for a different file at its path, and its upload with it', async () => {
+			added();
+			const there = await provider.createFile('a.png', OTHER.slice());
+
+			await engine.pull();
+
+			const aside = conflictFilePath('a.png', AT);
+			expect(store.files()).toEqual([
+				{ id: 'x1', path: aside, size: PNG.byteLength },
+				expect.objectContaining({ path: 'a.png', remoteId: there.remoteId }),
+			]);
+			expect(opsNow()).toEqual([{ op: 'upload', fileId: 'x1', path: aside }]);
+
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.bytesAt(aside)).toEqual(PNG);
+			expect(provider.bytesAt('a.png')).toEqual(OTHER);
+		});
+
+		it('steps aside to a name the round is not bringing in', async () => {
+			// The name it would have taken is the next entry's.
+			added();
+			const there = await provider.createFile('a.png', OTHER.slice());
+			const first = conflictFilePath('a.png', AT);
+			const theirs = await provider.createFile(first, OTHER.slice());
+
+			await pullNow([there, theirs]);
+
+			const aside = conflictFilePath('a.png', AT, [basename(first)]);
+			expect(store.files().map((file) => [file.path, file.remoteId])).toEqual([
+				[aside, undefined],
+				[first, theirs.remoteId],
+				['a.png', there.remoteId],
+			]);
+		});
+
+		it('is not moved aside for a file the user is deleting there', async () => {
+			// The delete goes first, and then the upload, to the name it has.
+			const file = await provider.createFile('a.png', PNG.slice());
+			await engine.pull();
+			store.dropFile('copy-1');
+			store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+			store.putFile(
+				{ id: 'x1', path: 'a.png', size: OTHER.byteLength },
+				{ bytes: OTHER.slice(), pinned: true }
+			);
+			store.queue({ op: 'upload', fileId: 'x1', path: 'a.png' });
+
+			await pullNow([file]);
+
+			expect(store.files()).toEqual([{ id: 'x1', path: 'a.png', size: OTHER.byteLength }]);
+			expect(opsNow()).toEqual([
+				{ op: 'delete-file', path: 'a.png', remoteId: file.remoteId },
+				{ op: 'upload', fileId: 'x1', path: 'a.png' },
+			]);
+		});
+
+		it('keeps it, and the notebook above it, when the notebook is deleted there', async () => {
+			// It exists nowhere else.
+			await provider.createFolder('Trips');
+			const theirs = await provider.createFile('Trips/b.png', OTHER.slice());
+			await engine.pull();
+			added('Trips/a.png');
+			await provider.delete(remoteAt('Trips'));
+
+			expect((await engine.pull()).status).toBe('ok');
+			expect(store.files()).toEqual([{ id: 'x1', path: 'Trips/a.png', size: 8 }]);
+			expect(store.folders().map((folder) => folder.path)).toEqual(['Trips']);
+			expect(theirs.remoteId).toBeDefined();
+
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.bytesAt('Trips/a.png')).toEqual(PNG);
+		});
+	});
+
+	describe('that the user has moved here, and not yet there', () => {
+		/** Pulled into `Trips`, and moved to `Work` here. */
+		const moved = async () => {
+			await provider.createFolder('Trips');
+			const file = await provider.createFile('Trips/a.png', PNG.slice());
+			await engine.pull();
+			const row = store.files()[0];
+			if (row === undefined) throw new Error('no row');
+			store.putFile({ ...row, path: 'Work/a.png' });
+			store.queue({
+				op: 'move-file',
+				fileId: row.id,
+				path: 'Trips/a.png',
+				targetPath: 'Work/a.png',
+			});
+			return file;
+		};
+
+		it('stays where the user put it, and its move starts from where the file went', async () => {
+			const file = await moved();
+			await provider.createFolder('Other');
+			await provider.move(file, 'Other/a.png');
+
+			await engine.pull();
+
+			expect(store.files()).toEqual([
+				expect.objectContaining({ path: 'Work/a.png', remoteId: file.remoteId }),
+			]);
+			expect(opsNow()).toEqual([
+				{
+					op: 'move-file',
+					fileId: 'copy-1',
+					path: 'Other/a.png',
+					targetPath: 'Work/a.png',
+				},
+			]);
+			expect((await engine.push()).status).toBe('ok');
+			expect(remoteAt('Work/a.png').remoteId).toBe(file.remoteId);
+		});
+
+		it('steps aside for a different file arriving at the name it is moving to', async () => {
+			const file = await moved();
+			await provider.createFolder('Work');
+			const there = await provider.createFile('Work/a.png', OTHER.slice());
+
+			await engine.pull();
+
+			const aside = conflictFilePath('Work/a.png', AT);
+			expect(store.files()).toEqual([
+				expect.objectContaining({ id: 'copy-1', path: aside, remoteId: file.remoteId }),
+				expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
+			]);
+			expect(opsNow()).toEqual([
+				{ op: 'move-file', fileId: 'copy-1', path: 'Trips/a.png', targetPath: aside },
+			]);
+		});
+
+		it('keeps the notebook it is moving into when that is deleted there', async () => {
+			await provider.createFolder('Work');
+			const file = await moved();
+			await provider.delete(remoteAt('Work'));
+
+			await engine.pull();
+
+			expect(store.files()).toEqual([
+				expect.objectContaining({ path: 'Work/a.png', remoteId: file.remoteId }),
+			]);
+			expect(store.folders().map((folder) => folder.path)).toContain('Work');
+			expect((await engine.push()).status).toBe('ok');
+			expect(remoteAt('Work/a.png').remoteId).toBe(file.remoteId);
+		});
+
+		it('steps aside for a file arriving where it is going, though its own news came first', async () => {
+			const file = await moved();
+			await provider.move(file, 'Trips/b.png');
+			await provider.createFolder('Work');
+			const there = await provider.createFile('Work/a.png', OTHER.slice());
+
+			await pullNow([remoteAt('Trips/b.png'), there]);
+
+			const aside = conflictFilePath('Work/a.png', AT);
+			expect(store.files()).toEqual([
+				expect.objectContaining({ id: 'copy-1', path: aside, remoteId: file.remoteId }),
+				expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
+			]);
+			expect(opsNow()).toEqual([
+				{ op: 'move-file', fileId: 'copy-1', path: 'Trips/b.png', targetPath: aside },
+			]);
+		});
+
+		it('is let go of when its notebook there is deleted after it stepped aside', async () => {
+			// Aside, its file is where it was: in the notebook that went.
+			await moved();
+			await provider.createFolder('Work');
+			const there = await provider.createFile('Work/a.png', OTHER.slice());
+			const trips = remoteAt('Trips');
+			await provider.delete(trips);
+
+			await pullNow([there, { deleted: true, remoteId: trips.remoteId, path: 'Trips' }]);
+
+			expect(store.files()).toEqual([
+				expect.objectContaining({ path: 'Work/a.png', remoteId: there.remoteId }),
+			]);
+			expect(store.ops()).toEqual([]);
+		});
+
+		it('is where its first queued move says, through a second', async () => {
+			// The second starts where the first was going, which the file never
+			// reached: its file was in `Trips`, and went with it.
+			await moved();
+			const row = store.files()[0];
+			if (row === undefined) throw new Error('no row');
+			store.putFile({ ...row, path: 'Home/a.png' });
+			store.queue({
+				op: 'move-file',
+				fileId: row.id,
+				path: 'Work/a.png',
+				targetPath: 'Home/a.png',
+			});
+			const trips = remoteAt('Trips');
+			await provider.delete(trips);
+
+			await pullNow([{ deleted: true, remoteId: trips.remoteId, path: 'Trips' }]);
+
+			expect(store.files()).toEqual([]);
+		});
+
+		it.each([
+			['by its notebook being deleted there', () => provider.delete(remoteAt('Trips'))],
+			['by its own deletion there', () => provider.delete(remoteAt('Trips/a.png'))],
+		])('is let go of when its file is taken %s, held nowhere here', async (_how, take) => {
+			await moved();
+			await take();
+
+			await engine.pull();
+
+			expect(store.files()).toEqual([]);
+			expect(store.ops()).toEqual([]);
+		});
+
+		it.each([
+			['by its notebook being deleted there', () => provider.delete(remoteAt('Trips'))],
+			['by its own deletion there', () => provider.delete(remoteAt('Trips/a.png'))],
+			['out of sight of a rescan', () => provider.delete(remoteAt('Trips/a.png'))],
+		])('is sent again where the user put it when its file is taken %s', async (how, take) => {
+			// The move is the user's, as an edit is: kept as far as this
+			// device can keep it.
+			const file = await moved();
+			const row = store.files()[0];
+			if (row === undefined) throw new Error('no row');
+			store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			await take();
+			if (how.includes('rescan')) killTheCursor();
+
+			await engine.pull();
+
+			expect(store.files()).toEqual([{ id: 'copy-1', path: 'Work/a.png', size: 8 }]);
+			expect(opsNow()).toEqual([{ op: 'upload', fileId: 'copy-1', path: 'Work/a.png' }]);
+			expect((await engine.push()).status).toBe('ok');
+			expect(provider.bytesAt('Work/a.png')).toEqual(PNG);
+		});
+	});
+
+	it('passes over a file the user has deleted here, whose delete has not run', async () => {
+		const file = await provider.createFile('a.png', PNG.slice());
+		store.queue({ op: 'delete-file', path: 'a.png', remoteId: file.remoteId });
+
+		await engine.pull();
+
+		expect(store.files()).toEqual([]);
+	});
+
+	it.each([
+		['a clean note, which goes', false, []],
+		['an edited note, which is kept and sent again', true, ['a.md']],
+	])(
+		'lets go of %s whose file is renamed to a file that is not a note',
+		async (_what, edited, kept) => {
+			const file = await remoteFile('a.md', 'a\n');
+			await engine.pull();
+			const note = noteAt('a.md');
+			if (note === undefined) throw new Error('no note');
+			if (edited) store.put({ ...note, content: 'mine\n', dirty: true });
+			await provider.move(file, 'a.txt');
+
+			await engine.pull();
+
+			expect(store.notes().map((each) => each.path)).toEqual(kept);
+			expect(store.notes().every((each) => each.remoteId === undefined)).toBe(true);
+			expect(store.files()).toEqual([
+				expect.objectContaining({ path: 'a.txt', remoteId: file.remoteId }),
+			]);
+		}
+	);
+
+	it('lets go of the row of a file renamed to a note, which is read as one', async () => {
+		const file = await provider.createFile('a.txt', new TextEncoder().encode('text\n'));
+		await engine.pull();
+		await provider.move(file, 'a.md');
+
+		await engine.pull();
+
+		expect(store.files()).toEqual([]);
+		expect(noteAt('a.md')).toMatchObject({ remoteId: file.remoteId, content: 'text\n' });
+	});
+
+	it('carries the rows under a folder moved there', async () => {
+		const folder = await provider.createFolder('Trips');
+		await provider.createFile('Trips/a.png', PNG.slice());
+		await engine.pull();
+		await provider.move(folder, 'Holidays');
+
+		await engine.pull();
+
+		expect(store.files().map((file) => file.path)).toEqual(['Holidays/a.png']);
+	});
+
+	describe('after a rescan', () => {
+		it('lets go of a row whose file the scan did not return, and keeps one never sent', async () => {
+			const file = await provider.createFile('a.png', PNG.slice());
+			await engine.pull();
+			store.putFile(
+				{ id: 'x1', path: 'b.png', size: 3 },
+				{ bytes: OTHER.slice(), pinned: true }
+			);
+			await provider.delete(file);
+			killTheCursor();
+
+			expect((await engine.pull()).status).toBe('ok');
+			expect(store.files()).toEqual([{ id: 'x1', path: 'b.png', size: 3 }]);
+		});
+
+		it('sends one back up that it holds the bytes of, where the provider says it may have lost it', async () => {
+			const file = await provider.createFile('a.png', PNG.slice());
+			const gone = await provider.createFile('b.png', OTHER.slice());
+			await engine.pull();
+			const row = store.files().find((each) => each.path === 'a.png');
+			if (row === undefined) throw new Error('no row');
+			store.putFile(row, { bytes: PNG.slice(), version: file.version });
+			await provider.delete(file);
+			await provider.delete(gone);
+			killTheCursor(true);
+
+			expect((await engine.pull()).status).toBe('ok');
+			// Held here, so pending again and owed an upload; the other is gone.
+			expect(store.files()).toEqual([{ id: row.id, path: 'a.png', size: PNG.byteLength }]);
+			expect(opsNow()).toEqual([{ op: 'upload', fileId: row.id, path: 'a.png' }]);
+		});
+	});
+});
+
 describe('deleting a file', () => {
 	it('deletes it by the id the queue recorded', async () => {
 		const file = await provider.createFile('a.png', new Uint8Array([1, 2, 3]));
@@ -2007,19 +2512,35 @@ describe('authorization', () => {
 
 describe('deletions that are not about a note', () => {
 	it('says nothing when a file we never imported is deleted', async () => {
-		// The app owns the folder but not everything in it. A PDF the user
-		// dropped beside their notes being removed is not news, and counting it
-		// puts a number in front of them for something that did not happen.
+		// The app owns the folder but not everything in it. A file it does not
+		// show being removed is not news, and counting it puts a number in
+		// front of the user for something that did not happen.
+		await provider.write('.cache', 'binary\n', {});
+		await engine.pull();
+		const hidden = provider.snapshot().find((node) => node.path === '.cache');
+		if (hidden === undefined) throw new Error('no file');
+		await provider.delete(hidden);
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(result.pulled).toBe(0);
+	});
+
+	it('lets go of a file that is not a note when it is deleted', async () => {
+		// A picture beside the notes is a row of its own (§7), and its
+		// deletion is news like a note's.
 		await provider.write('photo.png', 'binary\n', {});
 		await engine.pull();
+		expect(store.files().map((file) => file.path)).toEqual(['photo.png']);
 		const shot = provider.snapshot().find((node) => node.path === 'photo.png');
 		if (shot === undefined) throw new Error('no file');
 		await provider.delete(shot);
 
 		const result = await engine.pull();
 
-		expect(result.status).toBe('ok');
-		expect(result.pulled).toBe(0);
+		expect(result).toMatchObject({ status: 'ok', pulled: 1 });
+		expect(store.files()).toEqual([]);
 	});
 
 	it('leaves a note of our own alone when the deletion is about another file', async () => {
@@ -8419,19 +8940,21 @@ describe('a file that is not UTF-8 text', () => {
 				expect(await listed()).toEqual([`${other.remoteId} a.md`]);
 			});
 
-			it.each(['a.txt', '.a.md'])(
-				'or is no longer a note the app would show: %s',
-				async (path) => {
-					const file = provider.plantBytes('a.md', LATIN1);
-					await engine.pull();
-					await provider.move(file, path);
+			it.each([
+				// Forgotten, and a file that is not a note now: a row of its own.
+				['a.txt', 2, ['a.txt']],
+				['.a.md', 1, []],
+			])('or is no longer a note the app would show: %s', async (path, pulled, files) => {
+				const file = provider.plantBytes('a.md', LATIN1);
+				await engine.pull();
+				await provider.move(file, path);
 
-					const result = await engine.pull();
+				const result = await engine.pull();
 
-					expect(result).toMatchObject({ status: 'ok', pulled: 1 });
-					expect(await listed()).toEqual([]);
-				}
-			);
+				expect(result).toMatchObject({ status: 'ok', pulled });
+				expect(await listed()).toEqual([]);
+				expect(store.files().map((each) => each.path)).toEqual(files);
+			});
 		});
 
 		describe('until it is deleted', () => {

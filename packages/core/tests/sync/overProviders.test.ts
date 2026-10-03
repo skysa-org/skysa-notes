@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { ancestorPaths, isHidden, isWithin, parentPath, rebasePath } from '../../src/paths.js';
+import {
+	ancestorPaths,
+	basename,
+	isHidden,
+	isWithin,
+	parentPath,
+	rebasePath,
+} from '../../src/paths.js';
 import { createDropboxProvider, type FetchLike } from '../../src/providers/dropbox.js';
 import { createFakeProvider, type FakeProvider } from '../../src/providers/fake.js';
 import { createGDriveProvider } from '../../src/providers/gdrive.js';
 import { createOneDriveProvider } from '../../src/providers/onedrive.js';
 import type { StorageProvider } from '../../src/providers/types.js';
+import { conflictFilePath } from '../../src/sync/conflicts.js';
 import { createSyncEngine, type SyncEngine, type SyncOutcome } from '../../src/sync/engine.js';
 import type { SyncNote } from '../../src/sync/store.js';
 import { createDropboxStub } from '../providers/dropboxStub.js';
@@ -185,7 +193,7 @@ const queueWrite = (d: Device, note: SyncNote): void => {
 	if (!queued) d.store.queue({ op: 'write', noteId: note.id, path: note.path });
 };
 
-const counters = { note: 0 };
+const counters = { note: 0, file: 0 };
 
 /**
  * The notebook a note is going into, as `createNote` and `moveNote` do it: both
@@ -267,7 +275,69 @@ const addNotebook = (d: Device, path: string): void => {
 	});
 };
 
-/** As `store/folders.ts` deleteFolder: the notes' deletes, then the directory. */
+/**
+ * As `store/files.ts` addAttachment will: the row, its bytes held until they
+ * go, and the upload. Its name is stamped with its bytes, as the app's are, so
+ * one name is one file wherever it is added.
+ */
+const attach = (d: Device, path: string, bytes: Uint8Array<ArrayBuffer>): string => {
+	counters.file += 1;
+	intoNotebook(d, path);
+	const id = `${d.name}-file-${String(counters.file)}`;
+	d.store.putFile({ id, path, size: bytes.byteLength }, { bytes: bytes.slice(), pinned: true });
+	d.store.queue({ op: 'upload', fileId: id, path });
+	return id;
+};
+
+/**
+ * A notebook's files, as `moveFolder` will move them: each row re-pathed, and
+ * a `move-file` from wherever the file still is for each one that went up.
+ * One that has not goes up from where it is now.
+ */
+const moveFiles = (d: Device, path: string, to: string): void => {
+	d.store
+		.files()
+		.filter((file) => isWithin(file.path, path))
+		.forEach((file) => {
+			const at = rebasePath(file.path, path, to);
+			d.store.putFile({ ...file, path: at });
+			const moves = d.store
+				.ops()
+				.filter((op) => op.op === 'move-file' && op.fileId === file.id);
+			const origin = moves[0]?.path ?? file.path;
+			moves.forEach((op) => {
+				d.store.unqueue(op.seq);
+			});
+			if (file.remoteId !== undefined && origin !== at) {
+				d.store.queue({ op: 'move-file', fileId: file.id, path: origin, targetPath: at });
+			}
+		});
+};
+
+/**
+ * A notebook's files, as `deleteFolder` will delete them: each row and its
+ * bytes, a `delete-file` for each one that went up, and the upload of each one
+ * that did not withdrawn — there is nothing left to send.
+ */
+const removeFiles = (d: Device, path: string): void => {
+	d.store
+		.files()
+		.filter((file) => isWithin(file.path, path))
+		.forEach((file) => {
+			d.store
+				.ops()
+				.filter((op) => op.fileId === file.id)
+				.forEach((op) => {
+					d.store.unqueue(op.seq);
+				});
+			d.store.dropFile(file.id);
+			if (file.remoteId !== undefined) {
+				d.store.queue({ op: 'delete-file', path: file.path, remoteId: file.remoteId });
+			}
+		});
+};
+
+/** As `store/folders.ts` deleteFolder: the notes' and files' deletes, then the directory. */
 const removeNotebook = (d: Device, path: string): void => {
 	const id = d.store.folders().find((folder) => folder.path === path)?.remoteId;
 	live(d)
@@ -275,6 +345,7 @@ const removeNotebook = (d: Device, path: string): void => {
 		.forEach((note) => {
 			remove(d, note.path);
 		});
+	removeFiles(d, path);
 	d.store
 		.folders()
 		.filter((folder) => isWithin(folder.path, path))
@@ -285,7 +356,7 @@ const removeNotebook = (d: Device, path: string): void => {
 	if (id !== undefined) d.store.queue({ op: 'rmdir', path, remoteId: id });
 };
 
-/** As `store/folders.ts` moveFolder: mkdir, the notes' moves, then the directory. */
+/** As `store/folders.ts` moveFolder: mkdir, the notes' and files' moves, then the directory. */
 const renameNotebook = (d: Device, path: string, to: string): void => {
 	const id = d.store.folders().find((folder) => folder.path === path)?.remoteId;
 	const inside = d.store.folders().filter((folder) => isWithin(folder.path, path));
@@ -308,6 +379,7 @@ const renameNotebook = (d: Device, path: string, to: string): void => {
 		.forEach((note) => {
 			rename(d, note.path, rebasePath(note.path, path, to));
 		});
+	moveFiles(d, path, to);
 	withdrawMkdirs(d, path);
 	if (id !== undefined) d.store.queue({ op: 'rmdir', path, remoteId: id });
 };
@@ -382,6 +454,31 @@ const remoteUnreadable = (remote: Remote): string[] =>
 		.map((entry) => entry.path)
 		.sort();
 
+/** A file's place, for comparing a device's rows with the remote. */
+interface Place {
+	path: string;
+	remoteId: string | undefined;
+	size: number | undefined;
+}
+
+const byPlace = (x: Place, y: Place): number => x.path.localeCompare(y.path);
+
+/** The files the remote holds that are not notes: what every device mirrors as rows. */
+const remoteAttachments = (remote: Remote): Place[] =>
+	remote.backing
+		.snapshot()
+		.filter(
+			(entry) => entry.kind === 'file' && !isHidden(entry.path) && !entry.path.endsWith('.md')
+		)
+		.map((entry) => ({ path: entry.path, remoteId: entry.remoteId, size: entry.size }))
+		.sort(byPlace);
+
+const fileRows = (d: Device): Place[] =>
+	d.store
+		.files()
+		.map((file) => ({ path: file.path, remoteId: file.remoteId, size: file.size }))
+		.sort(byPlace);
+
 const listedUnreadable = async (d: Device): Promise<string[]> =>
 	(await d.store.unreadable()).map((file) => file.path).sort();
 
@@ -402,6 +499,10 @@ const converged = async (
 	// And each says which files it is not showing: those, and no others.
 	expect(await listedUnreadable(a), trace()).toEqual(remoteUnreadable(remote));
 	expect(await listedUnreadable(b), trace()).toEqual(remoteUnreadable(remote));
+	// And every file that is not a note is a row on each device, bound to it,
+	// at its path: none left to send, none the remote no longer has.
+	expect(fileRows(a), `a\n${trace()}`).toEqual(remoteAttachments(remote));
+	expect(fileRows(b), `b\n${trace()}`).toEqual(remoteAttachments(remote));
 	// And every row names the file that is actually at its path. The general
 	// form of the ghost family: the paths and the bytes above can all agree
 	// while a row points at another file, or at one that is gone — and then the
@@ -424,6 +525,22 @@ const converged = async (
 	});
 	return files;
 };
+
+/** Every folder the remote holds. */
+const remoteFolders = (remote: Remote): string[] =>
+	remote.backing
+		.snapshot()
+		.filter((entry) => entry.kind === 'folder' && !isHidden(entry.path))
+		.map((entry) => entry.path)
+		.sort();
+
+/**
+ * Whether this provider's listings are the whole truth about a folder. Drive's
+ * are not — `drive.file` hides what the user put there — so it is never asked
+ * to remove one, and the empty directory stays. Every assertion about what is
+ * left has to say which of the two it is.
+ */
+const tidies = (remote: Remote): boolean => remote.adapter().listsEverything;
 
 /** The conflict copies of `path`, by content. */
 const copiesOf = (files: Record<string, string>, path: string): string[] =>
@@ -692,22 +809,6 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 	});
 
 	describe('a notebook removed here', () => {
-		/** Every folder the remote holds. */
-		const remoteFolders = (remote: Remote): string[] =>
-			remote.backing
-				.snapshot()
-				.filter((entry) => entry.kind === 'folder' && !isHidden(entry.path))
-				.map((entry) => entry.path)
-				.sort();
-
-		/**
-		 * Whether this provider's listings are the whole truth about a folder.
-		 * Drive's are not — `drive.file` hides what the user put there — so it
-		 * is never asked to remove one, and the empty directory stays. Every
-		 * assertion about what is left has to say which of the two it is.
-		 */
-		const tidies = (remote: Remote): boolean => remote.adapter().listsEverything;
-
 		it('leaves the provider no directory when a notebook is deleted', async () => {
 			const { remote, a, b } = await setUp(make);
 			addNotebook(a, 'Work');
@@ -779,10 +880,142 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 		});
 	});
 
-	describe('two devices, at random', () => {
-		const run = async (seed: number): Promise<void> => {
+	describe('a file that is not a note', () => {
+		// Not UTF-8, so no device could take either for a note's text.
+		const PNG = new Uint8Array([0xff, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+		const JPG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+		it('reaches the other device as a row, its bytes left on the remote', async () => {
 			const { remote, a, b } = await setUp(make);
-			const soak = createSoak(seed, [a, b]);
+			attach(a, 'Trips/photo-1234abcd.png', PNG);
+
+			await converged(remote, a, b);
+			const [row] = b.store.files();
+			expect(row).toEqual(
+				expect.objectContaining({ path: 'Trips/photo-1234abcd.png', size: PNG.byteLength })
+			);
+			// Fetched when it is first shown, not when it is pulled.
+			expect(b.store.heldBytes(row?.id ?? '')).toBeUndefined();
+			expect(remote.backing.bytesAt('Trips/photo-1234abcd.png')).toEqual(PNG);
+		});
+
+		it.each([
+			['the pull', false],
+			['the push', true],
+		])('is one file when both devices added it, found by %s', async (_how, between) => {
+			// The name is stamped with the bytes: the same picture, added twice.
+			const { remote, a, b } = await setUp(make);
+			attach(a, 'photo-1234abcd.png', PNG);
+			attach(b, 'photo-1234abcd.png', PNG);
+			if (between) await b.engine.pull();
+			await synced(a);
+			if (between) await b.engine.push();
+
+			await converged(remote, a, b);
+			expect(remoteAttachments(remote)).toEqual([
+				expect.objectContaining({ path: 'photo-1234abcd.png' }),
+			]);
+		});
+
+		it.each([
+			['the pull', false],
+			['the push', true],
+		])(
+			'goes beside a different file the other device put at its name first, found by %s',
+			async (_how, between) => {
+				// Only a name the app did not choose can do this; the remote
+				// keeps the path, and the other goes beside it.
+				const { remote, a, b } = await setUp(make);
+				attach(a, 'photo.png', PNG);
+				attach(b, 'photo.png', JPG);
+				if (between) await b.engine.pull();
+				await synced(a);
+				if (between) await b.engine.push();
+
+				await converged(remote, a, b);
+				const beside = conflictFilePath('photo.png', AT);
+				expect(remote.backing.bytesAt('photo.png')).toEqual(PNG);
+				expect(remote.backing.bytesAt(beside)).toEqual(JPG);
+				expect(remoteAttachments(remote)).toHaveLength(2);
+			}
+		);
+
+		it('moves with its notebook, and leaves no directory behind', async () => {
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'Work/plan.md', 'base\n');
+			attach(a, 'Work/photo.png', PNG);
+			await converged(remote, a, b);
+			const sent = remoteAttachments(remote)[0]?.remoteId;
+
+			renameNotebook(a, 'Work', 'Plans');
+
+			await converged(remote, a, b);
+			// Moved, not sent again.
+			expect(remoteAttachments(remote)).toEqual([
+				expect.objectContaining({ path: 'Plans/photo.png', remoteId: sent }),
+			]);
+			expect(remoteFolders(remote)).toEqual(tidies(remote) ? ['Plans'] : ['Plans', 'Work']);
+		});
+
+		it('goes with its notebook, and leaves no directory behind', async () => {
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'Work/plan.md', 'base\n');
+			attach(a, 'Work/photo.png', PNG);
+			await converged(remote, a, b);
+
+			removeNotebook(a, 'Work');
+
+			expect(await converged(remote, a, b)).toEqual({});
+			expect(remoteAttachments(remote)).toEqual([]);
+			expect(remoteFolders(remote)).toEqual(tidies(remote) ? [] : ['Work']);
+		});
+
+		it('keeps the directory, and the file, that the other device added to a notebook deleted here', async () => {
+			// Never pulled here, so not this device's to delete.
+			const { remote, a, b } = await setUp(make);
+			await shared(a, b, 'Work/plan.md', 'base\n');
+			attach(b, 'Work/theirs.png', PNG);
+			await synced(b);
+
+			removeNotebook(a, 'Work');
+
+			await converged(remote, a, b);
+			expect(remoteAttachments(remote)).toEqual([
+				expect.objectContaining({ path: 'Work/theirs.png' }),
+			]);
+			expect(remoteFolders(remote)).toEqual(['Work']);
+		});
+
+		it.each([
+			['sent again from the bytes held there', true],
+			['let go of where nothing holds its bytes', false],
+		])(
+			'is %s when it was moved out of a notebook the other device deleted',
+			async (_how, held) => {
+				// The move is the user's, as an edit is, and outranks the
+				// deletion as far as the device that made it can keep it.
+				const { remote, a, b } = await setUp(make);
+				await shared(a, b, 'Trips/plan.md', 'base\n');
+				attach(held ? b : a, 'Trips/photo.png', PNG);
+				await converged(remote, a, b);
+				addNotebook(b, 'Work');
+				moveFiles(b, 'Trips/photo.png', 'Work/photo.png');
+				removeNotebook(a, 'Trips');
+				await synced(a);
+
+				await converged(remote, a, b);
+				expect(remoteAttachments(remote)).toEqual(
+					held ? [expect.objectContaining({ path: 'Work/photo.png' })] : []
+				);
+				if (held) expect(remote.backing.bytesAt('Work/photo.png')).toEqual(PNG);
+			}
+		);
+	});
+
+	describe('two devices, at random', () => {
+		const run = async (seed: number, attaching = false): Promise<void> => {
+			const { remote, a, b } = await setUp(make);
+			const soak = createSoak(seed, [a, b], attaching);
 			await Array.from({ length: 30 }).reduce<Promise<void>>(async (done) => {
 				await done;
 				await soak.step(soak.pick([a, b]));
@@ -795,6 +1028,24 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 				lost.filter((token) => !soak.mayBeLost(token)),
 				soak.trace()
 			).toEqual([]);
+
+			// And every file added is on the remote with the bytes it was
+			// added with, unless a notebook it was in was deleted.
+			const sent = new Map(
+				remoteAttachments(remote).map((entry) => [
+					tokenOf(entry.path),
+					remote.backing.bytesAt(entry.path),
+				])
+			);
+			const missing = soak.attached().filter((token) => !sent.has(token));
+			expect(
+				missing.filter((token) => !soak.mayBeLost(token)),
+				soak.trace()
+			).toEqual([]);
+			const wrong = [...sent].filter(
+				([token, bytes]) => !equalBytes(bytes, attachmentBytes(token))
+			);
+			expect(wrong, soak.trace()).toEqual([]);
 
 			// And no device holds a notebook the remote has no directory for.
 			// That is the ghost this whole op exists to prevent: a row with
@@ -825,7 +1076,14 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 		// failure prints the steps that led to it.
 		it.each(Array.from({ length: 120 }, (__, seed) => seed + 1))(
 			'lose nothing and agree, seed %i',
-			run
+			(seed) => run(seed)
+		);
+
+		// And with files beside the notes, added, moved with their notebooks
+		// and deleted with them.
+		it.each(Array.from({ length: ATTACHING_SEEDS }, (__, seed) => seed + 1))(
+			'lose nothing and agree with files beside the notes, seed %i',
+			(seed) => run(seed, true)
 		);
 	});
 });
@@ -844,6 +1102,23 @@ const random = (seed: number): (() => number) => {
 };
 
 const PATHS = ['a.md', 'b.md', 'c.md', 'Work/d.md', 'Work/e.md'];
+/** Where the soak adds files: beside the notes, and in each notebook. */
+const FILE_FOLDERS = ['', 'Work', 'Play', 'Work/Inner'];
+const ATTACHING_SEEDS = 40;
+
+/**
+ * A file's bytes, from the token its name carries — so a name is one file's
+ * bytes wherever it is, as the app's hash-stamped names are. Not UTF-8, so no
+ * device could take it for a note.
+ */
+const attachmentBytes = (token: string): Uint8Array<ArrayBuffer> =>
+	new Uint8Array([0xff, ...new TextEncoder().encode(token)]);
+
+/** The token a file's name carries, past any conflict suffix. */
+const tokenOf = (path: string): string => basename(path).split(/[ .]/u)[0] ?? '';
+
+const equalBytes = (x: Uint8Array | undefined, y: Uint8Array): boolean =>
+	x !== undefined && x.length === y.length && x.every((byte, i) => byte === y[i]);
 /** Notebooks the soak makes, renames and removes. `Work` is where PATHS point. */
 const NOTEBOOKS = ['Work', 'Play', 'Work/Inner'];
 
@@ -854,9 +1129,13 @@ const NOTEBOOKS = ['Work', 'Play', 'Work/Inner'];
  * edit made elsewhere that it never saw, so a token written into a note some
  * device deleted, while that note still pointed at the deleted file, may go.
  */
-const createSoak = (seed: number, devices: readonly Device[]) => {
+const createSoak = (seed: number, devices: readonly Device[], attaching = false) => {
 	const next = random(seed);
+	// Files are added on a stream of their own, so the seeds without them
+	// take the same steps they always have.
+	const nextFile = random(seed ^ 0x5bd1e995);
 	const tokens: string[] = [];
+	const files: string[] = [];
 	const doomed = new Set<string>();
 	/** Remote files some device has deleted, and notes deleted before they had one. */
 	const deletedFiles = new Set<string>();
@@ -902,7 +1181,21 @@ const createSoak = (seed: number, devices: readonly Device[]) => {
 		log.push(`${d.name} ${what}`);
 	};
 
+	/** A file added, with a name no other file has. */
+	const attachOne = (d: Device): void => {
+		const made = `f${String(seed)}-${String(files.length)}`;
+		files.push(made);
+		const folder = FILE_FOLDERS[Math.floor(nextFile() * FILE_FOLDERS.length)] ?? '';
+		const path = folder === '' ? `${made}.png` : `${folder}/${made}.png`;
+		say(d, `attach ${path}`);
+		attach(d, path, attachmentBytes(made));
+	};
+
 	const step = async (d: Device): Promise<void> => {
+		if (attaching && nextFile() < 0.2) {
+			attachOne(d);
+			return;
+		}
 		const notes = live(d);
 		const roll = next();
 		if (roll < 0.25 || notes.length === 0) {
@@ -970,6 +1263,11 @@ const createSoak = (seed: number, devices: readonly Device[]) => {
 				.forEach((note) => {
 					willTake(d, note);
 				});
+			// Its files too: by id, wherever the other device has put them since.
+			d.store
+				.files()
+				.filter((file) => isWithin(file.path, at))
+				.forEach((file) => doomed.add(tokenOf(file.path)));
 			say(d, `remove notebook ${at}`);
 			removeNotebook(d, at);
 			return;
@@ -984,6 +1282,7 @@ const createSoak = (seed: number, devices: readonly Device[]) => {
 		written: () => [...tokens],
 		trace,
 		mayBeLost: (made: string) => doomed.has(made),
+		attached: () => [...files],
 	};
 };
 
