@@ -2,7 +2,7 @@ import { basename, drawsFromData, safeOpenType, showsInline } from '@skysa/core'
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 
-import type { AttachmentHost, Shown } from '../editor/attachHost.js';
+import type { AttachmentHost, AttachmentProblem, Fetched, Shown } from '../editor/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { db as appDb, type NoteRecord, type NotesDatabase } from '../store/db.js';
 import { heldFile } from '../store/fileCache.js';
@@ -35,6 +35,8 @@ export interface NoteAttachmentsOptions {
 	/** The note as it is now: where it is, in which source. */
 	note: () => Pick<NoteRecord, 'connectionId' | 'path'>;
 	readFile: (connectionId: string, fileId: string, signal?: AbortSignal) => Promise<FileRead>;
+	/** Where a problem the editor has nowhere to show goes: a toast. */
+	report?: (problem: AttachmentProblem) => void;
 	urls?: ObjectUrlCache;
 	now?: () => number;
 }
@@ -45,6 +47,15 @@ export interface NoteAttachments extends AttachmentHost {
 	/** Let go of every URL made for this note. */
 	readonly dispose: () => void;
 }
+
+/** What a read that did not end in bytes is, to a file asked for whole. */
+const FETCHED: Readonly<Record<Exclude<FileRead['state'], 'ready'>, Fetched>> = {
+	gone: { state: 'missing' },
+	offline: { state: 'offline' },
+	unavailable: { state: 'unavailable' },
+	failed: { state: 'failed' },
+	aborted: { state: 'aborted' },
+};
 
 /** What a read that did not end in bytes is to a picture. */
 const SHOWN: Readonly<Record<Exclude<FileRead['state'], 'ready'>, Shown>> = {
@@ -73,6 +84,7 @@ export const createNoteAttachments = ({
 	db,
 	note,
 	readFile,
+	report = () => undefined,
 	urls = createObjectUrlCache(),
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
@@ -93,6 +105,20 @@ export const createNoteAttachments = ({
 		if (!large && file.size > LARGE_PICTURE_BYTES) return { state: 'large', size: file.size };
 		const read = await readFile(connectionId, file.id, signal);
 		return read.state === 'ready' ? { bytes: read.bytes } : SHOWN[read.state];
+	};
+
+	/**
+	 * A file asked for whole, to open or save: `readFile` answers from the
+	 * device where it can, and nothing waits on a size, since the user asked.
+	 */
+	const fetchFile = async (href: string, signal?: AbortSignal): Promise<Fetched> => {
+		const { connectionId, path } = note();
+		const file = await fileForLink(db, { connectionId, notePath: path, href });
+		if (file === undefined) return { state: 'missing' };
+		const read = await readFile(connectionId, file.id, signal);
+		if (read.state !== 'ready') return FETCHED[read.state];
+		const name = basename(file.path);
+		return { state: 'ready', file: new File([read.bytes], name, { type: safeOpenType(name) }) };
 	};
 
 	return {
@@ -116,6 +142,11 @@ export const createNoteAttachments = ({
 			if (svg) return { state: 'ready', url: await dataUrl(blob), release: () => undefined };
 			return { state: 'ready', ...urls.acquire(key, () => blob) };
 		},
+
+		fetchFile: (href, signal) =>
+			fetchFile(href, signal).catch((): Fetched => ({ state: 'failed' })),
+
+		report,
 
 		changed: (listener) => {
 			listeners.add(listener);
@@ -141,6 +172,8 @@ export interface NoteAttachmentsSources {
 	readonly db?: NotesDatabase;
 	/** Where to hear that a sync has run: the scheduler's status. */
 	readonly subscribe?: SyncScheduler['subscribe'];
+	/** Where a problem the editor has nowhere to show goes (`NoteViewProps.onProblem`). */
+	readonly report?: (problem: AttachmentProblem) => void;
 }
 
 /**
@@ -158,6 +191,7 @@ export const useNoteAttachments = (
 		readFile = syncScheduler.readFile,
 		db = appDb,
 		subscribe = syncScheduler.subscribe,
+		report,
 	}: NoteAttachmentsSources = {}
 ): NoteAttachments => {
 	const current = useRef<Pick<NoteRecord, 'connectionId' | 'path'>>(note);
@@ -168,6 +202,10 @@ export const useNoteAttachments = (
 	useEffect(() => {
 		read.current = readFile;
 	}, [readFile]);
+	const told = useRef(report);
+	useEffect(() => {
+		told.current = report;
+	}, [report]);
 
 	const host = useMemo(
 		() =>
@@ -175,6 +213,9 @@ export const useNoteAttachments = (
 				db,
 				note: () => current.current,
 				readFile: (...args) => read.current(...args),
+				report: (problem) => {
+					told.current?.(problem);
+				},
 			}),
 		// One per note, whatever else of it changes.
 		[note.id, db]

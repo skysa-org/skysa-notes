@@ -17,6 +17,7 @@ import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 
+import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
 import { applyList } from './lists.js';
 
@@ -102,6 +103,15 @@ const linkAround = (state: EditorState, type: MarkType): { from: number; to: num
 	return found.current;
 };
 
+/** Whether everything inline in `from`–`to` is a file's chip. */
+const onlyChips = (state: EditorState, from: number, to: number): boolean => {
+	const other = { current: false };
+	state.doc.nodesBetween(from, to, (node) => {
+		if (node.isInline && node.type.name !== ATTACHMENT) other.current = true;
+	});
+	return !other.current;
+};
+
 /**
  * Make the selection a link to `href`, or point the link it is already in
  * somewhere else.
@@ -113,6 +123,12 @@ const linkAround = (state: EditorState, type: MarkType): { from: number; to: num
  *
  * With nothing selected and no link to edit, the URL becomes the text, because
  * a link with no words in it cannot be seen or clicked.
+ *
+ * A file's chip is never put in a link (#187): it is a link already, and in
+ * markdown one inside another is two broken ones. A selection of nothing but
+ * chips — one selected whole, or one Shift+Arrow has gone over — is left as it
+ * is: not linked and unlinked again, which would be an edit of nothing, and a
+ * note dirty for it. A chip inside a selection is left out of the link.
  */
 export const setLink =
 	(href: string) =>
@@ -121,10 +137,10 @@ export const setLink =
 		const { state } = view;
 		const type = state.schema.marks[LINK_MARK];
 		if (type === undefined) return;
-
 		const mark = type.create({ href });
 		const around = linkAround(state, type);
 		const { from, to, empty } = state.selection;
+		if (!empty && onlyChips(state, from, to)) return;
 
 		const tr = () => {
 			if (around !== null) return state.tr.addMark(around.from, around.to, mark);
@@ -133,7 +149,16 @@ export const setLink =
 			return state.tr.addMark(from, to, mark);
 		};
 
-		view.dispatch(tr());
+		// Only a selection can hold a chip: a link the cursor is in is one run
+		// of text, and a URL written in as its own words is another.
+		const linked = tr();
+		const chips = new Set<number>();
+		linked.doc.nodesBetween(from, to, (node, pos) => {
+			if (node.type.name === ATTACHMENT) chips.add(pos);
+		});
+		view.dispatch(
+			[...chips].reduce((step, pos) => step.removeMark(pos, pos + 1, type), linked)
+		);
 		view.focus();
 	};
 

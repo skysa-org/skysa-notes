@@ -13,6 +13,7 @@ import {
 
 import { parseChord } from '../commands/chord.js';
 import { useCommand } from '../commands/context.js';
+import type { AttachmentProblem } from '../editor/attachHost.js';
 import { FindTargetProvider } from '../editor/findTarget.js';
 import { Icon, type IconName } from '../editor/icons.js';
 import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
@@ -104,6 +105,11 @@ export interface NoteViewProps {
 	liveEdits?: LiveEdits;
 	/** A notebook being renamed, so the note's path says what is typed. */
 	renamings?: Renamings;
+	/**
+	 * Something done with a file beside the note that did not work — one that
+	 * could not be opened — for the route to say over the page (#187).
+	 */
+	onProblem?: (problem: AttachmentProblem) => void;
 	/** For the route, which offers Delete on every note in the list. */
 	ref?: Ref<NoteViewHandle>;
 }
@@ -301,6 +307,7 @@ const NoteBody = ({
 	onCloseOutline,
 	toolbar,
 	onUserEdit,
+	onProblem,
 	onUnsupported,
 	onAdopted,
 	onBody,
@@ -315,13 +322,14 @@ const NoteBody = ({
 	onCloseOutline: () => void;
 	toolbar: RichEditorProps['toolbar'];
 	onUserEdit: (body: string, origin: string) => void;
+	onProblem: NoteViewProps['onProblem'];
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 	/** The element, for whoever sizes the outline by its width. */
 	onBody: (element: HTMLDivElement | null) => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
-	const attachments = useNoteAttachments(note);
+	const attachments = useNoteAttachments(note, { report: onProblem });
 	const attach = useCallback(
 		(element: HTMLDivElement | null) => {
 			body.current = element;
@@ -498,6 +506,7 @@ export const NoteView = ({
 	draft,
 	liveEdits,
 	renamings,
+	onProblem,
 	ref: handle,
 }: NoteViewProps) => {
 	const noteId = note?.id;
@@ -735,6 +744,7 @@ export const NoteView = ({
 					focusEditor(body);
 				}}
 				onUserEdit={onUserEdit}
+				onProblem={onProblem}
 				onUnsupported={unsupported.report}
 				// A body from outside is on screen now. What was typed before it
 				// is not under whatever is typed next — a new sitting, so the next
@@ -844,6 +854,7 @@ const NoteScreen = ({
 	onRename,
 	onTitleDone,
 	onUserEdit,
+	onProblem,
 	onUnsupported,
 	onAdopted,
 }: {
@@ -867,6 +878,7 @@ const NoteScreen = ({
 	onRename: (title: string) => void;
 	onTitleDone: () => void;
 	onUserEdit: (body: string, origin: string) => void;
+	onProblem: NoteViewProps['onProblem'];
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 }) => {
@@ -978,6 +990,7 @@ const NoteScreen = ({
 				onCloseOutline={layout.closeOutline}
 				toolbar={layout.toolbar}
 				onUserEdit={onUserEdit}
+				onProblem={onProblem}
 				onUnsupported={onUnsupported}
 				onAdopted={onAdopted}
 				onBody={onBody}

@@ -1527,6 +1527,7 @@ const Home = () => {
 					draft={place.noteDraft}
 					liveEdits={liveEdits}
 					renamings={renamings}
+					onProblem={setProblem}
 					{...emptyPaneOffers({
 						folder,
 						nothingYet: tree?.length === 0 && looseNoteCount === 0,

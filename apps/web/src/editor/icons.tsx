@@ -46,6 +46,28 @@ const PATHS = {
 	'rich-text': 'M5 7V5h14v2M12 5v14M9 19h6',
 	format: 'M6 16 12 4l6 12M8 12h8M4 20h16',
 	outline: 'M4 6h16M8 12h12M12 18h8',
+	// A file beside a note: its chip, by what kind of file it is (`fileKind`),
+	// and what can be done with it. Every kind is the same page with something
+	// on it, so the chips line up whatever they hold.
+	file: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
+	'file-text':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+	'file-sheet':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M8 12h8v6H8zM8 15h8M12 12v6',
+	'file-slides':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M8 12h8v5H8zM12 17v2',
+	'file-archive':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M11 8h.01M11 11h.01M10 14h2v3h-2z',
+	'file-audio':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M11 17.5a1.5 1.5 0 1 1-3 0a1.5 1.5 0 1 1 3 0M11 17.5V12l4 1',
+	'file-video':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M10 12v6l5-3z',
+	'file-code':
+		'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M10 12l-2 2.5 2 2.5M14 12l2 2.5-2 2.5',
+	image: 'M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 9h.01',
+	download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+	open: 'M14 4h6v6M20 4l-9 9M18 14v5H5V6h5',
+	share: 'M12 15V4M8 8l4-4 4 4M5 12v8h14v-8',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;
