@@ -19,6 +19,20 @@ export {
 export { headings, type Heading } from './outline.js';
 export { previewLines, previewText } from './preview.js';
 export {
+	attachmentHref,
+	attachmentLabel,
+	attachmentMarkdown,
+	type AttachmentKind,
+	classifyHref,
+	extensionOf,
+	type HrefKind,
+	isAttachmentHref,
+	linkedFiles,
+	MAX_ATTACHMENT_BYTES,
+	resolveRelative,
+} from './attachments.js';
+export {
+	attachmentName,
 	foldName,
 	noteFilename,
 	normalizeTag,

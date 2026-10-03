@@ -111,6 +111,17 @@ export type {
 	UnreadableFile,
 } from './sync/store.js';
 
+export {
+	downloadName,
+	drawsFromData,
+	fileKind,
+	fileKindLabel,
+	type FileKind,
+	opensInTab,
+	safeOpenType,
+	showsInline,
+} from './attachments.js';
+
 export * from './hash.js';
 export * from './markdown/index.js';
 export * from './paths.js';
