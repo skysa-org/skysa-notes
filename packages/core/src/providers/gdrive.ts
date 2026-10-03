@@ -1,9 +1,14 @@
 import { z } from 'zod';
 
-import { APP_FOLDER_NAME, MARKER_FILE } from '../config.js';
+import { APP_FOLDER_NAME, MARKER_FILE, NOTE_EXTENSION } from '../config.js';
+import { foldName } from '../markdown/slug.js';
 import { buildMarker, serializeMarker } from '../marker.js';
 import { basename, joinPath, normalizePath, parentPath, pathSegments, ROOT } from '../paths.js';
-import { conflictFilename, conflictFolderName } from '../sync/conflicts.js';
+import {
+	conflictFilename,
+	conflictFolderName,
+	conflictNameKeepingExtension,
+} from '../sync/conflicts.js';
 import type { FetchLike } from './dropbox.js';
 import {
 	applyItem,
@@ -83,7 +88,8 @@ const FOLDER = 'application/vnd.google-apps.folder';
 const NOTE_TYPE = 'text/markdown';
 const ROOT_KEY = 'notesapp';
 const ROOT_VALUE = 'root';
-const FIELDS = 'id,name,mimeType,parents,headRevisionId,modifiedTime,createdTime,size,trashed';
+const FIELDS =
+	'id,name,mimeType,parents,headRevisionId,modifiedTime,createdTime,size,md5Checksum,trashed';
 const PAGE_SIZE = '1000';
 /** Drive refuses to nest folders deeper than this, so a listing need not go further. */
 const MAX_DEPTH = 100;
@@ -109,6 +115,8 @@ interface DriveFile {
 	modifiedTime?: string;
 	createdTime?: string;
 	size?: string;
+	/** Absent for folders and for Google's own documents, which have no bytes. */
+	md5Checksum?: string;
 	trashed?: boolean;
 }
 
@@ -218,6 +226,42 @@ const byAge = (files: readonly DriveFile[]): DriveFile[] =>
 	);
 
 const earliest = (files: readonly DriveFile[]): DriveFile | undefined => byAge(files)[0];
+
+/** A note by its name, folded as the engine asks it (`decide`), so `Report.MD` is one. */
+const isNoteName = (name: string): boolean => foldName(name).endsWith(NOTE_EXTENSION);
+
+/**
+ * Two files at one name with the same bytes: one is a copy of the other, and
+ * the copy can go to the trash without anything of the user's going with it.
+ * Two devices uploading the same picture beside a note while offline is the
+ * ordinary way to get here — an attachment's name is stamped with its content
+ * (issue #187) — and renaming the second would leave a file nobody links to
+ * beside the one every note does.
+ *
+ * Never a note. Two notes with the same bytes are still two rows on whichever
+ * devices hold them, and a note that disappears is a remote delete to each;
+ * renaming keeps both, as it always has. Never a folder, which has no bytes.
+ */
+const sameBytes = (canonical: DriveFile, other: DriveFile): boolean =>
+	!isFolder(canonical) &&
+	!isFolder(other) &&
+	!isNoteName(other.name ?? '') &&
+	canonical.md5Checksum !== undefined &&
+	canonical.md5Checksum === other.md5Checksum &&
+	canonical.size === other.size;
+
+/**
+ * How a duplicate is renamed: a folder with no extension, a note with `.md`,
+ * and any other file with the extension it had — `conflictFilename` would make
+ * `photo.png (conflict …).md` of a picture, which the engine would then take for
+ * a note.
+ */
+const nameBeside = (file: DriveFile, name: string, at: Date, taken: readonly string[]): string => {
+	if (isFolder(file)) return conflictFolderName(name, at, taken);
+	return isNoteName(name)
+		? conflictFilename(name, at, taken)
+		: conflictNameKeepingExtension(name, at, taken);
+};
 
 /**
  * A name that can be a path segment. Drive allows a `/` in a name, and an empty
@@ -989,7 +1033,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 	/**
 	 * Two items at one path, made one again under §7's rule for a conflict: the
 	 * canonical one keeps the name, and each other is renamed beside it as a
-	 * conflict copy would be. Asked of Drive as it is *now*, not of the tree: a
+	 * conflict copy would be — or, where it is a file that is not a note and
+	 * holds the same bytes, goes to the trash as the copy it is (`sameBytes`) and
+	 * is reported deleted. Asked of Drive as it is *now*, not of the tree: a
 	 * tree that still holds a file under a name it has since left is not a
 	 * duplicate, and the page that says so may be the next one.
 	 *
@@ -1015,15 +1061,17 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 					return here ? [file] : [];
 				})
 		);
-		const present = byAge([...found, ...confirmed.flat()]);
-		if (present.length < 2) return;
+		const [canonical, ...others] = byAge([...found, ...confirmed.flat()]);
+		if (canonical === undefined || others.length === 0) return;
 		const taken = (await childrenOf(parent)).map((child) => child.name ?? '');
-		await present.slice(1).reduce<Promise<readonly string[]>>(async (chosen, other) => {
+		await others.reduce<Promise<readonly string[]>>(async (chosen, other) => {
 			const names = await chosen;
-			const renamed = (isFolder(other) ? conflictFolderName : conflictFilename)(name, now(), [
-				...taken,
-				...names,
-			]);
+			if (sameBytes(canonical, other)) {
+				await trash(other.id ?? '');
+				applyItem(page, { id: other.id ?? '', gone: true });
+				return names;
+			}
+			const renamed = nameBeside(other, name, now(), [...taken, ...names]);
 			const result = await call<DriveFile>(
 				'PATCH',
 				fileUrl(other.id ?? ''),

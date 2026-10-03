@@ -13,7 +13,11 @@ import {
 	RateLimitError,
 	type StorageProvider,
 } from '../../src/providers/types.js';
-import { conflictFilename, conflictFolderName } from '../../src/sync/conflicts.js';
+import {
+	conflictFilename,
+	conflictFolderName,
+	conflictNameKeepingExtension,
+} from '../../src/sync/conflicts.js';
 import { createSyncEngine } from '../../src/sync/engine.js';
 import { createMemoryStore } from '../sync/memoryStore.js';
 import { drainChanges } from './contract.js';
@@ -74,6 +78,7 @@ interface WorldFile {
 	modifiedTime: string;
 	createdTime: string;
 	size?: string;
+	md5Checksum?: string;
 	trashed: boolean;
 	appProperties?: Record<string, string>;
 	content?: string;
@@ -1374,6 +1379,87 @@ describe('changes', () => {
 			expect(entries.map((entry) => [entry.remoteId, entry.path])).toEqual([
 				['dup', renamed],
 			]);
+		});
+
+		it('rename a file that is not a note beside it with its own extension', async () => {
+			const world = driveWorld();
+			const picture = { parent: world.root.id, mimeType: 'image/png', size: '3' };
+			world.add({ ...picture, id: 'one', name: 'photo.png', md5Checksum: 'aaa' });
+			world.add({ ...picture, id: 'two', name: 'photo.png', md5Checksum: 'bbb' });
+
+			const { entries } = await drainChanges(world.provider);
+
+			const renamed = conflictNameKeepingExtension('photo.png', AT, [
+				MARKER_FILE,
+				'photo.png',
+				'photo.png',
+			]);
+			expect(renamed).toMatch(/^photo \(conflict [^)]+\)\.png$/);
+			expect(world.find('two')?.name).toBe(renamed);
+			expect(livePaths(entries).sort()).toEqual([MARKER_FILE, 'photo.png', renamed].sort());
+		});
+
+		it('trash a later copy of a file with the same bytes, and report only the first', async () => {
+			const world = driveWorld();
+			const picture = {
+				parent: world.root.id,
+				mimeType: 'image/png',
+				size: '3',
+				md5Checksum: 'aaa',
+			};
+			world.add({ ...picture, id: 'first', name: 'photo-3f9a1c2b.png' });
+			const { cursor } = await drainChanges(world.provider);
+			// Another device uploaded the same picture under the same name.
+			world.add({ ...picture, id: 'copy', name: 'photo-3f9a1c2b.png' });
+
+			const { entries } = await drainChanges(world.provider, cursor);
+
+			expect(world.find('copy')?.trashed).toBe(true);
+			expect(world.find('first')).toMatchObject({
+				name: 'photo-3f9a1c2b.png',
+				trashed: false,
+			});
+			expect(entries.filter((entry) => entry.deleted !== true)).toEqual([]);
+			expect(world.seen.some((r) => r.method === 'PATCH' && r.body.includes('"name"'))).toBe(
+				false
+			);
+		});
+
+		it('rename rather than trash a copy whose size or checksum differs', async () => {
+			const world = driveWorld();
+			const picture = { parent: world.root.id, mimeType: 'image/png', md5Checksum: 'aaa' };
+			world.add({ ...picture, id: 'one', name: 'p.png', size: '3' });
+			world.add({ ...picture, id: 'two', name: 'p.png', size: '4' });
+			world.add({
+				...picture,
+				id: 'three',
+				name: 'q.png',
+				size: '3',
+				md5Checksum: undefined,
+			});
+			world.add({ ...picture, id: 'four', name: 'q.png', size: '3', md5Checksum: undefined });
+
+			await drainChanges(world.provider);
+
+			expect(world.files.filter((file) => file.trashed)).toEqual([]);
+			expect(world.find('two')?.name).toMatch(/^p \(conflict .*\)\.png$/);
+			expect(world.find('four')?.name).toMatch(/^q \(conflict .*\)\.png$/);
+		});
+
+		it('rename a note with the same bytes as another rather than trash it', async () => {
+			// Two notes are two rows on whichever devices hold them; one going to
+			// the trash would be a remote delete to every one of them.
+			const world = driveWorld();
+			const note = { parent: world.root.id, size: '1', md5Checksum: 'same', content: 'x' };
+			world.add({ ...note, id: 'one', name: 'a.md' });
+			world.add({ ...note, id: 'two', name: 'a.md' });
+
+			await drainChanges(world.provider);
+
+			expect(world.find('two')).toMatchObject({
+				name: conflictFilename('a.md', AT, [MARKER_FILE, 'a.md', 'a.md']),
+				trashed: false,
+			});
 		});
 
 		it('are separated on a first scan too', async () => {
