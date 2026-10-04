@@ -46,6 +46,10 @@ const show = (db: NotesDatabase, onClose = vi.fn()) => {
 	return onClose;
 };
 
+/**
+ * A file's row, once the list has it. Its Delete comes only once the store has
+ * said whether the device holds every note, which may be after: find it.
+ */
 const rowOf = async (name: string) => {
 	const label = await screen.findByText(name);
 	const row = label.closest('li');
@@ -66,7 +70,7 @@ describe('Attached files', () => {
 
 		const loose = await rowOf('old-map.pdf');
 		expect(loose.getByText('Not in any note')).toBeDefined();
-		expect(loose.getByRole('button', { name: 'Delete old-map.pdf' })).toBeDefined();
+		expect(await loose.findByRole('button', { name: 'Delete old-map.pdf' })).toBeDefined();
 	});
 
 	it('deletes a file no note links once asked twice, and the list follows', async () => {
@@ -75,7 +79,7 @@ describe('Attached files', () => {
 		const user = userEvent.setup();
 
 		const loose = await rowOf('old-map.pdf');
-		await user.click(loose.getByRole('button', { name: 'Delete old-map.pdf' }));
+		await user.click(await loose.findByRole('button', { name: 'Delete old-map.pdf' }));
 		expect(await db.files.get([LOCAL_CONNECTION_ID, 'loose'])).toBeDefined();
 		await user.click(
 			within(loose.getByRole('group', { name: 'Delete old-map.pdf' })).getByRole('button', {
@@ -96,7 +100,7 @@ describe('Attached files', () => {
 		const user = userEvent.setup();
 
 		const loose = await rowOf('old-map.pdf');
-		await user.click(loose.getByRole('button', { name: 'Delete old-map.pdf' }));
+		await user.click(await loose.findByRole('button', { name: 'Delete old-map.pdf' }));
 		await user.click(loose.getByRole('button', { name: 'Keep' }));
 
 		expect(loose.getByRole('button', { name: 'Delete old-map.pdf' })).toBeDefined();
@@ -109,7 +113,7 @@ describe('Attached files', () => {
 		const user = userEvent.setup();
 
 		const loose = await rowOf('old-map.pdf');
-		await user.click(loose.getByRole('button', { name: 'Delete old-map.pdf' }));
+		await user.click(await loose.findByRole('button', { name: 'Delete old-map.pdf' }));
 		expect(document.activeElement).toBe(loose.getByRole('button', { name: 'Keep' }));
 
 		await user.click(loose.getByRole('button', { name: 'Keep' }));
