@@ -1,5 +1,15 @@
 # @skysa/web
 
+## 0.11.1
+
+### Patch Changes
+
+- 8f50a08: When the rich editor keeps a note in markdown mode, the banner now always says what it found. If the editor would add something the note doesn't have, the banner says so and shows what it is, including its text, with invisible characters written out. A kind of markdown the banner has no friendly name for is named as it is, rather than as "markdown the rich editor has no way to show".
+- 0a4e2e3: A note with a picture in it opens in the rich editor again. A picture with no title broke the rich editor with prosemirror-model 1.25.12, so a note was sent to markdown mode with "This note uses markdown the rich editor has no way to show" once it was opened again, or switched to markdown and back. A picture just added was shown fine until then. The workspace now resolves prosemirror-model 1.25.12 and prosemirror-view 1.42.6, so the tests run against the versions a fresh install gets.
+- 898b222: The text cursor in the markdown editor is visible in dark mode again. It was drawn black on the dark background.
+- Updated dependencies [8f50a08]
+  - @skysa/core@0.11.1
+
 ## 0.11.0
 
 ### Minor Changes
