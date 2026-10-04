@@ -154,6 +154,37 @@ describe('firstStructuralDifference', () => {
 			line: 1,
 		});
 	});
+
+	it('names text that changed, with the text', () => {
+		expect(firstStructuralDifference('one\n\ntwo\n', 'one\n\nthree\n')).toEqual({
+			type: 'text',
+			line: 3,
+			value: 'two',
+		});
+	});
+
+	// Where nothing is missing, what was added is the difference: a banner
+	// that can only say "markdown it has no way to show" gives nobody
+	// anything to look for.
+	it('names a block added, with what it holds, where nothing is missing', () => {
+		expect(
+			firstStructuralDifference('![a](a.png)\n', '![a](a.png)\n\nsomething new\n')
+		).toEqual({ type: 'paragraph', value: 'something new', added: true });
+	});
+
+	it('names text added beside something, on the line of what it was added to', () => {
+		expect(
+			firstStructuralDifference('one\n\n![a](a.png)\n', 'one\n\n![a](a.png)\u200b\n')
+		).toEqual({ type: 'text', line: 3, value: '\u200b', added: true });
+	});
+
+	it('names what was lost before anything added', () => {
+		expect(firstStructuralDifference('a\n\n<div>x</div>\n', 'a\n\nb\n\nc\n')).toEqual({
+			type: 'html',
+			line: 3,
+			value: '<div>x</div>',
+		});
+	});
 });
 
 describe('roundTripsLosslessly', () => {

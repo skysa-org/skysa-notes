@@ -111,32 +111,85 @@ export const roundTripsLosslessly = (markdown: string): boolean =>
 	sameMarkdownStructure(markdown, normalize(markdown));
 
 /**
- * The first thing in `original` that `other` does not have, or has differently.
- * What the rich editor's banner names, so the user knows what to look for in a
- * note it has sent to raw mode.
+ * The first thing in `original` that `other` does not have, or has differently
+ * — or, where nothing of `original`'s is missing, the first thing `other` has
+ * that `original` does not (`added`). What the rich editor's banner names, so
+ * the user knows what to look for in a note it has sent to raw mode.
  */
 export interface StructuralDifference {
 	/** The mdast type of the node, e.g. `html`, `definition`, `table`. */
 	readonly type: string;
-	/** The line in `original` it starts on, counting from 1. */
+	/**
+	 * The line in `original` it starts on, counting from 1. For one `added`,
+	 * the line of what it was added to, and none where that is the whole note.
+	 */
 	readonly line?: number;
-	/** For html, the html itself, shortened: it is what the user will search for. */
+	/**
+	 * For html, the html itself, and for text the text, shortened: it is what
+	 * the user will search for, or, added, what there is to see of it.
+	 */
 	readonly value?: string;
+	/**
+	 * Not in `original` at all, but in `other`: the rich editor would write it
+	 * into the note.
+	 *
+	 * Added 2026-10-04. Until then a difference that was all addition was
+	 * described by the node it was added to, or by the note itself, and the
+	 * banner could only say "markdown the rich editor has no way to show" —
+	 * which is what a phone showed for a note holding nothing but a picture,
+	 * with nothing to say what was found.
+	 */
+	readonly added?: true;
 }
 
-/** Enough of a piece of html to find it by; a banner is not the place for a whole block. */
-const SHOWN_HTML = 40;
+/** Enough of a piece of html or text to find it by; a banner is not the place for a whole block. */
+const SHOWN = 40;
 
-const described = (node: Tree): StructuralDifference => {
-	const line = node.position?.start.line;
-	const html =
-		node.type === 'html' && typeof node.value === 'string' ? node.value.trim() : undefined;
+const shortened = (value: string): string =>
+	value.length > SHOWN ? `${value.slice(0, SHOWN)}…` : value;
+
+/** What a banner can show of a node: html trimmed, text as it is, since its spaces may be the point. */
+const valueOf = (node: Tree): string | undefined => {
+	if (typeof node.value !== 'string') return undefined;
+	if (node.type === 'html') return shortened(node.value.trim());
+	return node.type === 'text' ? shortened(node.value) : undefined;
+};
+
+/** Every piece of text a node holds, in order: what there is to see of a paragraph added. */
+const textIn = (node: Tree): string =>
+	typeof node.value === 'string' ? node.value : (node.children ?? []).map(textIn).join('');
+
+/**
+ * What a banner can show of a node added: as for any other, and for anything
+ * else the text it holds — the user never wrote it, so it is all there is to
+ * go on.
+ */
+const addedValueOf = (node: Tree): string | undefined => {
+	const own = valueOf(node);
+	if (own !== undefined) return own;
+	const text = textIn(node);
+	return text === '' ? undefined : shortened(text);
+};
+
+/** A node found to differ: one of `original`'s, or one `other` added `within` one of them. */
+interface Found {
+	readonly node: Tree;
+	readonly within?: Tree;
+}
+
+const described = ({ node, within }: Found): StructuralDifference => {
+	const line =
+		within === undefined
+			? node.position?.start.line
+			: within.type === 'root'
+				? undefined
+				: within.position?.start.line;
+	const value = within === undefined ? valueOf(node) : addedValueOf(node);
 	return {
 		type: node.type,
 		...(line === undefined ? {} : { line }),
-		...(html === undefined
-			? {}
-			: { value: html.length > SHOWN_HTML ? `${html.slice(0, SHOWN_HTML)}…` : html }),
+		...(value === undefined ? {} : { value }),
+		...(within === undefined ? {} : { added: true as const }),
 	};
 };
 
@@ -161,32 +214,51 @@ const lostChild = (original: readonly Tree[], other: readonly Tree[]): Tree | un
 };
 
 /**
+ * Of two lists of children that no longer line up, where nothing is lost, the
+ * child the second list added: the first that does not line up with the
+ * first list. By place, not by count — a paragraph added after a paragraph is
+ * the second one, and counting would name the first.
+ */
+const addedChild = (original: readonly Tree[], other: readonly Tree[]): Tree | undefined =>
+	other.find((node, index) => node.type !== original[index]?.type);
+
+/**
  * Walked like `sameStructure`, with `original`'s side of the difference kept.
  * `sameStructure` itself stays as it is: it is on the path of every keystroke
  * through `adoptBody`, and this is asked only once a note has already failed.
  */
-const differenceIn = (original: Tree, other: Tree): Tree | undefined => {
+const differenceIn = (original: Tree, other: Tree): Found | undefined => {
 	const { children: had, ...originalOwn } = original;
 	const { children: has, ...otherOwn } = other;
-	if (!sameStructure(originalOwn, otherOwn)) return original;
-	if (had === undefined || has === undefined) return had === has ? undefined : original;
+	if (!sameStructure(originalOwn, otherOwn)) return { node: original };
+	if (had === undefined || has === undefined) {
+		return had === has ? undefined : { node: original };
+	}
 
 	const lineUp =
 		had.length === has.length && had.every((child, index) => child.type === has[index]?.type);
-	if (!lineUp) return lostChild(had, has) ?? original;
+	if (!lineUp) {
+		// What went, before anything that came: losing the user's markdown is
+		// what the check is for.
+		const lost = lostChild(had, has);
+		if (lost !== undefined) return { node: lost };
+		const added = addedChild(had, has);
+		return added === undefined ? { node: original } : { node: added, within: original };
+	}
 
 	// The first difference, and nothing asked of the children after it.
-	return had.reduce<Tree | undefined>((found, child, index) => {
+	return had.reduce<Found | undefined>((found, child, index) => {
 		if (found !== undefined) return found;
 		const counterpart = has[index];
-		return counterpart === undefined ? child : differenceIn(child, counterpart);
+		return counterpart === undefined ? { node: child } : differenceIn(child, counterpart);
 	}, undefined);
 };
 
 /**
  * Where `other` first departs from `original`, by the same measure as
  * `sameMarkdownStructure` — `undefined` exactly when that says they are the
- * same — described by the node of `original` that is missing or changed.
+ * same — described by the node of `original` that is missing or changed, or,
+ * where nothing is, by the node `other` added.
  */
 export const firstStructuralDifference = (
 	original: string,

@@ -164,11 +164,45 @@ describe('a note the rich editor cannot represent', () => {
 		expect(await noteById(db, note.id)).toMatchObject({ body: 'first\nsecond\nEXOTIC\n' });
 	});
 
-	it('falls back to the general wording for something it has no name for', () => {
-		render(<UnsupportedBanner lost={{ type: 'somethingNew' }} retryable={false} />);
+	it('falls back to the general wording for the note as a whole', () => {
+		render(<UnsupportedBanner lost={{ type: 'root' }} retryable={false} />);
 
 		expect(banner()).toContain(
 			'This note uses markdown the rich editor has no way to show, so this note stays in markdown mode.'
+		);
+	});
+
+	it('names a kind it has no words for as it is, rather than naming nothing', () => {
+		render(<UnsupportedBanner lost={{ type: 'somethingNew', line: 2 }} retryable={false} />);
+
+		expect(banner()).toContain(
+			'The rich editor has no way to show markdown of the kind somethingNew on line 2'
+		);
+	});
+
+	it('says what the rich editor would add that the note does not have', () => {
+		render(
+			<UnsupportedBanner
+				lost={{ type: 'paragraph', value: 'something new', added: true }}
+				retryable={false}
+			/>
+		);
+
+		expect(banner()).toContain(
+			'The rich editor would add a paragraph “something new” that this note does not have, so this note stays in markdown mode.'
+		);
+	});
+
+	it('shows text it cannot see as its code point', () => {
+		render(
+			<UnsupportedBanner
+				lost={{ type: 'text', line: 1, value: 'a\u200b\u00a0b ', added: true }}
+				retryable={false}
+			/>
+		);
+
+		expect(banner()).toContain(
+			'The rich editor would add the text “aU+200BU+00A0b ” on line 1 that this note does not have'
 		);
 	});
 });
