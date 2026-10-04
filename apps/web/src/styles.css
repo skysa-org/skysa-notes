@@ -1942,6 +1942,14 @@ button.danger {
 	margin-block-start: 0;
 }
 
+/* A picture not shown has no picture to lie over, and its corner is where
+   Show or Try again is: the bar goes after them in the line, and wraps. */
+.editor-rich-surface .note-image:not([data-state='ready']) .note-image-actions {
+	position: static;
+	margin: 0;
+	box-shadow: none;
+}
+
 .attachment-action {
 	display: inline-flex;
 	align-items: center;

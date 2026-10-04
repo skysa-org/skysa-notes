@@ -87,17 +87,11 @@ describe('a delete from a keyboard with no keys', () => {
 		}
 	);
 
-	it('takes nothing typed over the selection as a delete', async () => {
-		const mounted = await mount();
-		mounted.select('image');
-
-		mounted.input('insertText', { data: '' });
-
-		expect(mounted.at('image')).toBe(-1);
-	});
-
 	it.each([
 		['words typed over it, which the browser types', 'insertText', { data: 'x' }],
+		// No keyboard is known to spell a delete so, and one that sent it as a
+		// selection settled would take a picture just tapped.
+		['nothing typed over it', 'insertText', { data: '' }],
 		['a cut, which is the clipboard’s', 'deleteByCut', {}],
 		['a drag, which is the drop’s', 'deleteByDrag', {}],
 	])('leaves %s alone', async (_what, inputType, init) => {

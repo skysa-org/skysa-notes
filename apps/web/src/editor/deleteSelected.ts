@@ -25,9 +25,7 @@ const DELETES = /^delete(?!By)/;
 export const deleteSelectedNode = (view: EditorView, event: Event): boolean => {
 	if (!(event instanceof InputEvent) || !event.cancelable) return false;
 	if (!(view.state.selection instanceof NodeSelection)) return false;
-	// Typing nothing over the selection, as some keyboards spell a delete.
-	const nothingTyped = event.inputType === 'insertText' && (event.data ?? '') === '';
-	if (!DELETES.test(event.inputType) && !nothingTyped) return false;
+	if (!DELETES.test(event.inputType)) return false;
 	event.preventDefault();
 	view.dispatch(view.state.tr.deleteSelection().scrollIntoView());
 	return true;
