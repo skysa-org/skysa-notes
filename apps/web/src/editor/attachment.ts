@@ -4,11 +4,11 @@ import { NodeSelection } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { MarkdownNode } from '@milkdown/kit/transformer';
 import { $nodeSchema, $view } from '@milkdown/kit/utils';
-import { type FileKind, fileKind, fileKindLabel, isAttachmentHref } from '@skysa/core';
+import { fileKind, fileKindLabel, isAttachmentHref } from '@skysa/core';
 
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { type FileBrowser, openFile, saveFile } from './fileActions.js';
-import { iconElement, type IconName } from './icons.js';
+import { FILE_ICONS, iconElement, type IconName } from './icons.js';
 
 /**
  * A file beside a note that is not a picture (#187): `[Q3 report.pdf](q3-report-1a2b3c4d.pdf)`
@@ -117,20 +117,6 @@ export const attachmentSchema = $nodeSchema(ATTACHMENT, () => ({
 	},
 }));
 
-const ICONS: Readonly<Record<FileKind, IconName>> = {
-	image: 'image',
-	pdf: 'file-text',
-	document: 'file-text',
-	text: 'file-text',
-	spreadsheet: 'file-sheet',
-	presentation: 'file-slides',
-	archive: 'file-archive',
-	audio: 'file-audio',
-	video: 'file-video',
-	code: 'file-code',
-	file: 'file',
-};
-
 /** The file's name as the link has it, decoded where it can be. */
 const nameIn = (href: string): string => {
 	const written = href.slice(href.lastIndexOf('/') + 1);
@@ -210,7 +196,7 @@ export const attachmentView =
 			const shown = shownName(node);
 			const kind = fileKind(nameIn(attributeOf(node, 'href')));
 			name.replaceChildren(shown);
-			icon.replaceChildren(iconElement(ICONS[kind]));
+			icon.replaceChildren(iconElement(FILE_ICONS[kind]));
 			chip.setAttribute('aria-label', `${shown}, ${fileKindLabel(kind)}`);
 			const title = titleOf(node);
 			if (title === null || title === '') chip.removeAttribute('title');

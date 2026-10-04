@@ -1,3 +1,5 @@
+import type { FileKind } from '@skysa/core';
+
 /**
  * The toolbar's icons, drawn here rather than installed.
  *
@@ -72,6 +74,21 @@ const PATHS = {
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;
+
+/** The icon for each kind of file: a chip's (`attachment.ts`), and a notebook's list of them. */
+export const FILE_ICONS: Readonly<Record<FileKind, IconName>> = {
+	image: 'image',
+	pdf: 'file-text',
+	document: 'file-text',
+	text: 'file-text',
+	spreadsheet: 'file-sheet',
+	presentation: 'file-slides',
+	archive: 'file-archive',
+	audio: 'file-audio',
+	video: 'file-video',
+	code: 'file-code',
+	file: 'file',
+};
 
 /** What both drawings share, so the two cannot drift apart. */
 const SVG_ATTRIBUTES = {

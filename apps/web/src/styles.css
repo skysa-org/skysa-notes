@@ -3242,6 +3242,80 @@ button.danger {
 	border-color: color-mix(in srgb, var(--bad) 50%, var(--border));
 }
 
+/* A notebook's Attached files (`AttachedFiles.tsx`): as wide as the card
+   allows, against the viewport for the reason the import's card is. A
+   notebook may hold many files, so the list scrolls inside the card and Close
+   stays in view. */
+.attached-files {
+	width: min(28rem, 100vw - 2rem);
+}
+
+.attached-file-list {
+	max-height: min(24rem, 60vh);
+	margin: 0 0 1rem;
+	padding: 0;
+	overflow-y: auto;
+	list-style: none;
+}
+
+/* Icon, then the name with its size at the end of the line, and under the
+   name the notes it is in, with Delete beside them. Asked to confirm, the
+   question takes a line of its own: on a phone it does not fit beside them. */
+.attached-file {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	grid-template-areas:
+		'icon name size'
+		'icon notes action';
+	column-gap: 0.625rem;
+	align-items: center;
+	padding: 0.5rem 0;
+	border-block-start: 1px solid var(--border);
+}
+
+.attached-file:first-child {
+	border-block-start: 0;
+}
+
+.attached-file-icon {
+	grid-area: icon;
+	align-self: start;
+	display: flex;
+	color: var(--muted);
+}
+
+.attached-file-name {
+	grid-area: name;
+	overflow-wrap: anywhere;
+}
+
+.attached-file-size {
+	grid-area: size;
+	justify-self: end;
+	font-size: 0.8125rem;
+	white-space: nowrap;
+}
+
+.attached-file-notes {
+	grid-area: notes;
+	font-size: 0.8125rem;
+	overflow-wrap: anywhere;
+}
+
+.attached-file-delete {
+	grid-area: action;
+	justify-self: end;
+}
+
+.attached-file-confirm {
+	grid-column: 2 / -1;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin-block-start: 0.375rem;
+}
+
 /* Above the other corner notices: it is the one that says nothing here saves. */
 .tab-stale-bar {
 	inset-block-end: 9rem;
