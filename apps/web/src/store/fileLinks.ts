@@ -59,8 +59,10 @@ const linking = (
 ): ReadonlyMap<string, readonly LinkingNote[]> => {
 	const wanted = new Set(files.map((file) => foldPath(file.path)));
 	const extensions = [...new Set(files.map((file) => extensionOf(file.path)))];
+	// By title, so that a list says them in an order a person can follow.
 	const pairs = notes
 		.filter((note) => mayLink(note.body, extensions))
+		.toSorted((a, b) => a.title.localeCompare(b.title))
 		.flatMap((note) =>
 			linkedFiles(note.body, note.path)
 				.map(foldPath)

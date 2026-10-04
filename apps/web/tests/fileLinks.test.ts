@@ -44,7 +44,7 @@ const ops = async (db: NotesDatabase) =>
 	(await db.opQueue.orderBy('seq').toArray()).map((op) => ({ op: op.op, path: op.path }));
 
 describe('the files in a notebook', () => {
-	it('are the ones directly in it, by name, each with the notes that link it', async () => {
+	it('are the ones directly in it, by name, each with the notes that link it by title', async () => {
 		const db = freshDatabase();
 		await bound(db, 'b', 'Work/b.png');
 		await bound(db, 'a', 'Work/a.pdf', 2048);
@@ -70,8 +70,8 @@ describe('the files in a notebook', () => {
 				name: 'b.png',
 				size: 10,
 				linkedBy: [
-					expect.objectContaining({ title: 'Plan' }),
 					expect.objectContaining({ title: 'From home' }),
+					expect.objectContaining({ title: 'Plan' }),
 				],
 			},
 		]);
