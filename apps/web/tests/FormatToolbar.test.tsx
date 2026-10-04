@@ -1,7 +1,7 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -333,6 +333,84 @@ describe('FormatToolbar', () => {
 
 		expect(screen.queryByRole('button', { name: /Heading 1/ })).toBeNull();
 		expect(document.activeElement).not.toBe(style);
+	});
+
+	it('formats the selection from the keyboard, with Enter or Space on a button', async () => {
+		const user = userEvent.setup();
+		const editor = await harness('plain\n');
+		editor.withCtx(selecting('plain'));
+		const bold = screen.getByRole('button', { name: 'Bold' });
+		bold.focus();
+
+		await user.keyboard('{Enter}');
+		expect(editor.markdown()).toBe('**plain**\n');
+
+		await user.keyboard(' ');
+		expect(editor.markdown()).toBe('plain\n');
+	});
+
+	it('opens a panel from the keyboard, with what is in it next in the tab order', async () => {
+		const user = userEvent.setup();
+		const editor = await harness('plain\n');
+		editor.withCtx(cursorIn('plain'));
+		screen.getByRole('button', { name: /^Text style/ }).focus();
+
+		await user.keyboard('{Enter}');
+		await user.tab();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Plain text' }));
+		screen.getByRole('button', { name: 'Heading 1' }).focus();
+		await user.keyboard('{Enter}');
+
+		expect(editor.markdown()).toBe('# plain\n');
+		expect(screen.queryByRole('button', { name: 'Heading 2' })).toBeNull();
+	});
+
+	it('closes a panel once focus has gone past it', async () => {
+		const user = userEvent.setup();
+		await harness('plain\n');
+		const elsewhere = document.createElement('button');
+		document.body.append(elsewhere);
+		screen.getByRole('button', { name: /^Text style/ }).focus();
+		await user.keyboard('{Enter}');
+		expect(screen.getByRole('button', { name: 'Heading 1' })).toBeDefined();
+
+		// Inside it, it stays.
+		screen.getByRole('button', { name: 'Heading 1' }).focus();
+		expect(screen.getByRole('button', { name: 'Heading 2' })).toBeDefined();
+		act(() => {
+			elsewhere.focus();
+		});
+
+		expect(screen.queryByRole('button', { name: 'Heading 1' })).toBeNull();
+	});
+
+	it('leaves the arrow keys to the link field, for moving about in the address', async () => {
+		const user = userEvent.setup();
+		const editor = await harness('plain\n');
+		editor.withCtx(selecting('plain'));
+		screen.getByRole('button', { name: 'Link' }).focus();
+		await user.keyboard('{Enter}');
+		const field = screen.getByLabelText<HTMLInputElement>('Link to');
+		expect(document.activeElement).toBe(field);
+
+		await user.keyboard('https://example.cm{ArrowLeft}o');
+
+		expect(document.activeElement).toBe(field);
+		expect(field.value).toBe('https://example.com');
+		await user.keyboard('{Enter}');
+		expect(editor.markdown()).toBe('[plain](https://example.com)\n');
+	});
+
+	it('asks for files from the keyboard, inside the key press', async () => {
+		const user = userEvent.setup();
+		await harness('plain\n');
+		const click = vi.spyOn(HTMLInputElement.prototype, 'click');
+		screen.getByRole('button', { name: 'Attach files' }).focus();
+
+		await user.keyboard('{Enter}');
+
+		expect(click).toHaveBeenCalledOnce();
+		document.querySelector('input[type="file"]')?.dispatchEvent(new Event('cancel'));
 	});
 
 	// Fourteen buttons between the note's title and its text would otherwise be

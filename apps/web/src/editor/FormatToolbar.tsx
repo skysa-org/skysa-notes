@@ -26,6 +26,7 @@ import {
 } from './commands.js';
 import type { FormatState } from './format.js';
 import { Icon, type IconName } from './icons.js';
+import { onPress } from './press.js';
 import { fitToolbar, sameFit } from './toolbarFit.js';
 
 /**
@@ -310,6 +311,12 @@ const useRoving = (root: RefObject<HTMLDivElement | null>, hidden: ReadonlySet<s
 	};
 
 	const onKeyDown = (event: ReactKeyboardEvent) => {
+		// Only on the bar's own controls. A key pressed in an open panel is the
+		// panel's: an arrow in the link field moves the caret in the address,
+		// and used to send focus off along the bar instead.
+		if (!(event.target instanceof HTMLElement) || event.target.dataset.stop === undefined) {
+			return;
+		}
 		if (event.key === 'ArrowRight') move(1, 'here');
 		if (event.key === 'ArrowLeft') move(-1, 'here');
 		if (event.key === 'Home') move(1, 'edge');
@@ -329,7 +336,8 @@ const useRoving = (root: RefObject<HTMLDivElement | null>, hidden: ReadonlySet<s
 };
 
 /**
- * Close when the next press lands outside, and on Escape.
+ * Close when the next press lands outside, when focus goes somewhere outside —
+ * Tab past the panel's last control — and on Escape.
  *
  * `close` is told which of the two it was, because they owe the user different
  * things: Escape leaves focus where the user can still see it, on the button
@@ -349,6 +357,10 @@ const useDismiss = (
 			if (host.current?.contains(event.target as Node) === true) return;
 			close(false);
 		};
+		const onFocusIn = (event: FocusEvent) => {
+			if (host.current?.contains(event.target as Node) === true) return;
+			close(false);
+		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== 'Escape') return;
 			// Claimed, so that the app's own shortcut registry — which stands
@@ -360,9 +372,11 @@ const useDismiss = (
 		};
 
 		document.addEventListener('pointerdown', onPointerDown, true);
+		document.addEventListener('focusin', onFocusIn, true);
 		document.addEventListener('keydown', onKeyDown, true);
 		return () => {
 			document.removeEventListener('pointerdown', onPointerDown, true);
+			document.removeEventListener('focusin', onFocusIn, true);
 			document.removeEventListener('keydown', onKeyDown, true);
 		};
 	}, [open, close, host]);
@@ -388,11 +402,9 @@ const ToolbarButton = ({
 			aria-label={command.label}
 			aria-pressed={toggles(command) ? on : undefined}
 			disabled={isOff(command, format)}
-			// Before the browser moves focus and drops the selection.
-			onMouseDown={(event) => {
-				event.preventDefault();
+			{...onPress(() => {
 				run(command.apply);
-			}}
+			})}
 			{...stop}
 		>
 			{icon === undefined ? command.label : <Icon name={icon} />}
@@ -542,10 +554,9 @@ const ToolbarPopover = ({
 				aria-controls={open ? `${id}-panel` : undefined}
 				// The editor keeps its selection while the panel is open, so the
 				// command picked from it still knows what it is acting on.
-				onMouseDown={(event) => {
-					event.preventDefault();
+				{...onPress(() => {
 					setOpen(!open);
-				}}
+				})}
 				{...stop}
 			>
 				{trigger}
@@ -592,11 +603,10 @@ const TextStyleMenu = ({
 					key={style.command.id}
 					className="toolbar-item"
 					aria-pressed={style.level === format.level}
-					onMouseDown={(event) => {
-						event.preventDefault();
+					{...onPress(() => {
 						run(style.command.apply);
 						setOpen(false);
-					}}
+					})}
 				>
 					<span className={`toolbar-sample toolbar-sample-${String(style.level)}`}>
 						{style.command.label}
@@ -622,11 +632,10 @@ const MenuCommand = ({
 			className="toolbar-item"
 			aria-pressed={toggles(command) ? isOn(command, format) : undefined}
 			disabled={isOff(command, format)}
-			onMouseDown={(event) => {
-				event.preventDefault();
+			{...onPress(() => {
 				run(command.apply);
 				close();
-			}}
+			})}
 		>
 			{icon !== undefined && <Icon name={icon} />}
 			<span>{command.label}</span>
@@ -814,10 +823,9 @@ const OverflowItems = ({
 				type="button"
 				className="toolbar-item"
 				aria-pressed={format.link !== null}
-				onMouseDown={(event) => {
-					event.preventDefault();
+				{...onPress(() => {
 					setLinking(true);
-				}}
+				})}
 			>
 				<Icon name="link" />
 				<span>Link…</span>

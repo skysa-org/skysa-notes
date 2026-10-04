@@ -154,6 +154,35 @@ describe('the toolbar on a bar too narrow for it', () => {
 		expect(screen.queryByRole('button', { name: 'Code block' })).toBeNull();
 	});
 
+	it('runs a command from the overflow menu from the keyboard', async () => {
+		const user = userEvent.setup();
+		barWidth = EVERYTHING - 1;
+		const editor = await harness('plain\n');
+		editor.withCtx(selecting('plain'));
+		(overflow() as HTMLElement).focus();
+
+		await user.keyboard('{Enter}');
+		await user.tab();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Code block' }));
+		await user.keyboard('{Enter}');
+
+		expect(editor.markdown()).toContain('```');
+		expect(screen.queryByRole('button', { name: 'Code block' })).toBeNull();
+	});
+
+	it('opens the link form in the overflow menu from the keyboard', async () => {
+		const user = userEvent.setup();
+		barWidth = TEXT_STYLE + 5 * SLOT + 3 * GROUP + SLOT;
+		await harness('plain\n');
+		(overflow() as HTMLElement).focus();
+		await user.keyboard('{Enter}');
+
+		screen.getByRole('button', { name: 'Link…' }).focus();
+		await user.keyboard('{Enter}');
+
+		expect(document.activeElement).toBe(screen.getByLabelText('Link to'));
+	});
+
 	it('spreads a menu it has taken in into rows of its own', async () => {
 		// Room for the text style, bold, italic and two of the lists: the
 		// task list goes before the link does, and the link and the paperclip

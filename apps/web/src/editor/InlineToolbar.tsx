@@ -8,6 +8,7 @@ import { useEffect, useRef } from 'react';
 import { COARSE_POINTER, mediaMatches } from '../components/layout.js';
 import { codeBlockAround } from './codeTools.js';
 import { INLINE_COMMANDS } from './commands.js';
+import { onPress } from './press.js';
 
 /**
  * Formatting for the current selection, shown where the selection is.
@@ -103,13 +104,11 @@ export const InlineToolbar = () => {
 					className="toolbar-button"
 					title={command.label}
 					aria-label={command.label}
-					// Before the browser moves focus and drops the selection.
-					onMouseDown={(event) => {
-						event.preventDefault();
+					{...onPress(() => {
 						const editor = getEditor();
 						if (editor === undefined || loading) return;
 						editor.action(command.apply);
-					}}
+					})}
 				>
 					{command.label}
 				</button>
