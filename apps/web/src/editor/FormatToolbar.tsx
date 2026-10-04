@@ -26,7 +26,7 @@ import {
 } from './commands.js';
 import type { FormatState } from './format.js';
 import { Icon, type IconName } from './icons.js';
-import { onPress } from './press.js';
+import { onPress, type PressedBy } from './press.js';
 import { fitToolbar, sameFit } from './toolbarFit.js';
 
 /**
@@ -50,8 +50,12 @@ import { fitToolbar, sameFit } from './toolbarFit.js';
 export interface FormatToolbarProps {
 	/** What the selection is, as `format.ts` reads it. */
 	format: FormatState;
-	/** Run a command against the open editor. */
-	run: (apply: (ctx: Ctx) => void) => void;
+	/**
+	 * Run a command against the open editor, and say what pressed for it: a
+	 * mouse's press hands focus back to the editor, any other leaves it on the
+	 * control (`PressedBy`). Unsaid, it is a mouse's.
+	 */
+	run: (apply: (ctx: Ctx) => void, by?: PressedBy) => void;
 }
 
 const ICONS: Record<string, IconName> = {
@@ -336,8 +340,8 @@ const useRoving = (root: RefObject<HTMLDivElement | null>, hidden: ReadonlySet<s
 };
 
 /**
- * Close when the next press lands outside, when focus goes somewhere outside —
- * Tab past the panel's last control — and on Escape.
+ * Close when the next press lands outside, and on Escape. (And when focus
+ * leaves the panel for somewhere else on the page: `ToolbarPopover`.)
  *
  * `close` is told which of the two it was, because they owe the user different
  * things: Escape leaves focus where the user can still see it, on the button
@@ -357,10 +361,6 @@ const useDismiss = (
 			if (host.current?.contains(event.target as Node) === true) return;
 			close(false);
 		};
-		const onFocusIn = (event: FocusEvent) => {
-			if (host.current?.contains(event.target as Node) === true) return;
-			close(false);
-		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== 'Escape') return;
 			// Claimed, so that the app's own shortcut registry — which stands
@@ -372,11 +372,9 @@ const useDismiss = (
 		};
 
 		document.addEventListener('pointerdown', onPointerDown, true);
-		document.addEventListener('focusin', onFocusIn, true);
 		document.addEventListener('keydown', onKeyDown, true);
 		return () => {
 			document.removeEventListener('pointerdown', onPointerDown, true);
-			document.removeEventListener('focusin', onFocusIn, true);
 			document.removeEventListener('keydown', onKeyDown, true);
 		};
 	}, [open, close, host]);
@@ -393,6 +391,7 @@ const ToolbarButton = ({
 }) => {
 	const icon = ICONS[command.id];
 	const on = isOn(command, format);
+	const off = isOff(command, format);
 
 	return (
 		<button
@@ -401,9 +400,14 @@ const ToolbarButton = ({
 			title={command.label}
 			aria-label={command.label}
 			aria-pressed={toggles(command) ? on : undefined}
-			disabled={isOff(command, format)}
-			{...onPress(() => {
-				run(command.apply);
+			// Not `disabled`, which a browser takes focus from: an indent pressed
+			// from the keyboard that leaves nothing more to indent would drop
+			// focus, and the bar's one tab stop with it, until the cursor moved
+			// somewhere it could indent again. A toolbar keeps a control that is
+			// off where it can be reached, and says it is off.
+			aria-disabled={off || undefined}
+			{...onPress((by) => {
+				if (!off) run(command.apply, by);
 			})}
 			{...stop}
 		>
@@ -533,6 +537,17 @@ const ToolbarPopover = ({
 	);
 	useDismiss(open, close, host);
 
+	// A panel that closes with focus in it — a row pressed from the keyboard,
+	// which goes with the panel — hands focus to its button, where it was before
+	// the panel opened, rather than to nowhere.
+	const wasOpen = useRef(open);
+	useLayoutEffect(() => {
+		const owner = button.current?.ownerDocument;
+		const lost = owner?.activeElement === null || owner?.activeElement === owner?.body;
+		if (wasOpen.current && !open && lost) button.current?.focus();
+		wasOpen.current = open;
+	}, [open]);
+
 	return (
 		<div
 			className={
@@ -542,6 +557,15 @@ const ToolbarPopover = ({
 			}
 			ref={host}
 			{...(id === 'overflow' ? { 'data-overflow': '' } : {})}
+			// Focus gone from the panel to something else on the page — Tab past
+			// its last control — and it closes, as for a press elsewhere. Not on
+			// focus going nowhere, which is another window taking it, nor on focus
+			// coming back to the editor from there with a panel open beside it.
+			onBlur={(event) => {
+				const to = event.relatedTarget;
+				if (open && to instanceof Node && host.current?.contains(to) === false)
+					close(false);
+			}}
 		>
 			<button
 				type="button"
@@ -549,7 +573,6 @@ const ToolbarPopover = ({
 				className={open ? 'toolbar-button toolbar-button-on' : 'toolbar-button'}
 				title={label}
 				aria-label={announce ?? label}
-				aria-haspopup="true"
 				aria-expanded={open}
 				aria-controls={open ? `${id}-panel` : undefined}
 				// The editor keeps its selection while the panel is open, so the
@@ -563,7 +586,13 @@ const ToolbarPopover = ({
 				{chevron && <Icon name="chevron" />}
 			</button>
 			{open && (
-				<div className="toolbar-panel" ref={panel} id={`${id}-panel`} aria-label={label}>
+				<div
+					className="toolbar-panel"
+					ref={panel}
+					id={`${id}-panel`}
+					role="group"
+					aria-label={label}
+				>
 					{children}
 				</div>
 			)}
@@ -603,8 +632,8 @@ const TextStyleMenu = ({
 					key={style.command.id}
 					className="toolbar-item"
 					aria-pressed={style.level === format.level}
-					{...onPress(() => {
-						run(style.command.apply);
+					{...onPress((by) => {
+						run(style.command.apply, by);
 						setOpen(false);
 					})}
 				>
@@ -632,8 +661,8 @@ const MenuCommand = ({
 			className="toolbar-item"
 			aria-pressed={toggles(command) ? isOn(command, format) : undefined}
 			disabled={isOff(command, format)}
-			{...onPress(() => {
-				run(command.apply);
+			{...onPress((by) => {
+				run(command.apply, by);
 				close();
 			})}
 		>

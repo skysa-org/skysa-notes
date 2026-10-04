@@ -13,9 +13,10 @@ import type { AttachmentHost } from './attachHost.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
-import { FormatToolbar, type ToolbarPlacement } from './FormatToolbar.js';
+import { FormatToolbar, type FormatToolbarProps, type ToolbarPlacement } from './FormatToolbar.js';
 import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
+import type { PressedBy } from './press.js';
 import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
 import { SlashMenu } from './SlashMenu.js';
 
@@ -74,7 +75,7 @@ const EditorToolbar = ({
 	placement,
 }: {
 	store: FormatStore;
-	run: (apply: (ctx: Ctx) => void) => void;
+	run: FormatToolbarProps['run'];
 	placement: ToolbarPlacement;
 }) => {
 	const format = useSyncExternalStore(store.subscribe, store.get);
@@ -206,15 +207,19 @@ const EditorBody = ({
 		});
 	}, [body, origin, get, incoming, loading]);
 
-	// The editor keeps the selection a toolbar press acts on — the press itself
-	// never takes focus away — and is handed focus back afterwards, so that
-	// typing carries on where the user left off rather than in the toolbar.
+	// The editor keeps the selection a toolbar press acts on. A mouse's press
+	// never takes focus away, and the editor is handed it back afterwards, so
+	// that typing carries on where the user left off. A press from the keyboard
+	// or a screen reader leaves focus on the control that was pressed
+	// (`PressedBy`): the next key is the toolbar's, not one typed over the
+	// selection, and Enter held down presses again rather than splitting the
+	// paragraph.
 	const run = useCallback(
-		(apply: (ctx: Ctx) => void) => {
+		(apply: (ctx: Ctx) => void, by: PressedBy = 'mouse') => {
 			if (loading) return;
 			get()?.action((ctx) => {
 				apply(ctx);
-				ctx.get(editorViewCtx).focus();
+				if (by === 'mouse') ctx.get(editorViewCtx).focus();
 			});
 		},
 		// `get` is a fresh closure on every render and is read when the button is
