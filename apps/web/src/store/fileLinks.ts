@@ -2,6 +2,7 @@ import { basename, foldName, parentPath } from '@skysa/core';
 
 import type { FileRecord, NoteRecord, NotesDatabase, SyncStateRecord } from './db.js';
 import { fileKey, handOverToCopies } from './files.js';
+import { foldPath } from './naming.js';
 import { queueDeleteFile } from './queue.js';
 
 /**
@@ -212,6 +213,26 @@ export const attachedFiles = (
 			.sort((a, b) => a.name.localeCompare(b.name));
 	});
 
+/** Delete those of `files` no note in the source names, inside the caller's transaction. */
+const deleteUnnamed = async (
+	db: NotesDatabase,
+	connectionId: string,
+	files: readonly FileRecord[]
+): Promise<string[]> => {
+	if (files.length === 0) return [];
+	const links = linking(await notesOf(db, connectionId), files);
+	const going = files.filter((file) => (links.get(file.id) ?? []).length === 0);
+	await going.reduce<Promise<void>>(async (pending, file) => {
+		await pending;
+		await handOverToCopies(db, file);
+		await queueDeleteFile(db, file);
+	}, Promise.resolve());
+	const keys = going.map(fileKey);
+	await db.files.bulkDelete(keys);
+	await db.fileBytes.bulkDelete(keys);
+	return going.map((file) => file.path);
+};
+
 /**
  * Delete each of `ids` that no note in the source names, asked again here
  * rather than taken from whatever list the caller showed: a note may have
@@ -228,17 +249,36 @@ export const deleteUnlinkedFiles = (
 	db.transaction('rw', [db.syncState, db.notes, db.files, db.fileBytes, db.opQueue], async () => {
 		if (!holdsEveryNote(await db.syncState.get(connectionId))) return [];
 		const found = await db.files.bulkGet(ids.map((id): [string, string] => [connectionId, id]));
-		const files = found.filter((file): file is FileRecord => file !== undefined);
-		if (files.length === 0) return [];
-		const links = linking(await notesOf(db, connectionId), files);
-		const going = files.filter((file) => (links.get(file.id) ?? []).length === 0);
-		await going.reduce<Promise<void>>(async (pending, file) => {
-			await pending;
-			await handOverToCopies(db, file);
-			await queueDeleteFile(db, file);
-		}, Promise.resolve());
-		const keys = going.map(fileKey);
-		await db.files.bulkDelete(keys);
-		await db.fileBytes.bulkDelete(keys);
-		return going.map((file) => file.path);
+		return deleteUnnamed(
+			db,
+			connectionId,
+			found.filter((file): file is FileRecord => file !== undefined)
+		);
+	});
+
+/**
+ * `deleteUnlinkedFiles` for the files at `paths`, compared folded: the cleanup
+ * after a note is left (`store/fileCleanup.ts`), which has the paths its links
+ * say. `undefined` where it is too soon to tell — the device may not hold
+ * every note in the source, or, for a source with a remote, no pull has
+ * reached the end since `since`, so a link another device has added since may
+ * not be here yet — for the caller to ask again later.
+ */
+export const deleteUnlinkedFilesAt = (
+	db: NotesDatabase,
+	connectionId: string,
+	paths: readonly string[],
+	since: number
+): Promise<string[] | undefined> =>
+	db.transaction('rw', [db.syncState, db.notes, db.files, db.fileBytes, db.opQueue], async () => {
+		const state = await db.syncState.get(connectionId);
+		if (!holdsEveryNote(state)) return undefined;
+		if (state !== undefined && (state.lastSyncAt ?? 0) < since) return undefined;
+		const wanted = new Set(paths.map(foldPath));
+		const files = await db.files
+			.where('connectionId')
+			.equals(connectionId)
+			.filter((file) => wanted.has(foldPath(file.path)))
+			.toArray();
+		return deleteUnnamed(db, connectionId, files);
 	});

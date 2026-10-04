@@ -1,10 +1,12 @@
+import { EditorView } from '@codemirror/view';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useShortcuts } from '../src/commands/context.js';
 import { NoteView } from '../src/components/NoteView.js';
-import { db } from '../src/store/db.js';
+import { db, noteRef } from '../src/store/db.js';
+import { fileCleanup } from '../src/store/fileCleanup.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote, getNote, importNoteFile } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
@@ -51,6 +53,7 @@ const richSurface = () => document.querySelector('.ProseMirror');
 
 afterEach(async () => {
 	cleanup();
+	vi.restoreAllMocks();
 	await db.notes.clear();
 	await db.prefs.clear();
 });
@@ -248,5 +251,21 @@ describe('abandoning a rename', () => {
 		const after = await getNote(db, note.id);
 		expect(after?.title).toBe('Original');
 		expect(after?.path).toBe(note.path);
+	});
+});
+
+describe('a file taken out of a note', () => {
+	it('is handed to the cleanup when the note is left', async () => {
+		const left = vi.spyOn(fileCleanup, 'left').mockImplementation(() => undefined);
+		await setDefaultEditorMode(db, 'raw');
+		const note = await openNote('![a](a.png)\n\nText.\n');
+		const editor = await screen.findByTestId('raw-editor');
+		const view = EditorView.findFromDOM(editor);
+		if (view === null) throw new Error('CodeMirror did not mount');
+
+		view.dispatch({ changes: { from: 0, to: '![a](a.png)\n\n'.length } });
+		cleanup();
+
+		expect(left).toHaveBeenCalledWith(noteRef(note), note.connectionId, ['a.png']);
 	});
 });

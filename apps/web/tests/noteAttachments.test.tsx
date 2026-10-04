@@ -319,6 +319,24 @@ describe('a file added to the open note', () => {
 		expect((await db.files.toArray()).map((file) => file.path)).toEqual([`notes/${href}`]);
 	});
 
+	it('is told of, by where it is, for the cleanup once the note is left', async () => {
+		const db = freshDatabase();
+		const note = await createNote(db, {
+			title: 'Day',
+			connectionId: 'c1',
+			folderPath: 'notes',
+		});
+		const onAdded = vi.fn();
+		const host = createNoteAttachments({ db, note: () => note, readFile: vi.fn(), onAdded });
+
+		const added = await host.add(pdf(), { pasted: false });
+		await host.add(new File(['# Other'], 'other.md'), { pasted: false });
+
+		expect(onAdded.mock.calls).toEqual([
+			[`notes/${added.state === 'added' ? added.href : ''}`],
+		]);
+	});
+
 	it('is the file already there when the same bytes are added again', async () => {
 		const { db, host } = await opened();
 
