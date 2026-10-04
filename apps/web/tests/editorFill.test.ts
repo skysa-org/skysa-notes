@@ -59,3 +59,14 @@ describe('the rich editor', () => {
 		expect(declarations('.format-toolbar')).toContain('flex: 0 0 auto');
 	});
 });
+
+describe('the raw editor', () => {
+	// CodeMirror colours its caret black unless the editor is declared dark,
+	// and this one takes its colours from the page's tokens instead, so in dark
+	// mode the caret blinked black on the dark background, unseen. Three
+	// classes, to outweigh CodeMirror's `&light .cm-content` (two), which it
+	// adds to the page after this sheet.
+	it('draws its caret in the page’s own text colour', () => {
+		expect(declarations('.editor .cm-editor .cm-content')).toContain('caret-color: var(--fg)');
+	});
+});
