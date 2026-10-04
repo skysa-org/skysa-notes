@@ -318,6 +318,89 @@ describe('an empty line', () => {
 		expect(holder?.child(1).childCount).toBe(0);
 	});
 
+	it.each([
+		['bulleted', '- a\n\n\n* b\n'],
+		['numbered', '1. a\n\n\n1) b\n'],
+		['in a list item', '- x\n\n  - a\n\n\n  * b\n'],
+		['in a quote', '> - a\n>\n>\n> * b\n'],
+	])('between two lists keeps them two, each with its own marker: %s', async (_where, body) => {
+		// Written with one marker, the two were one list on the way back: a list
+		// goes on across blank lines, and the writer forgot the first list's
+		// marker at the empty line between them.
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+	});
+
+	it('put between two lists in the editor is read back there', async () => {
+		const { withCtx } = await mount('- a\n\n* b\n');
+
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			const paragraph = view.state.schema.nodes['paragraph'];
+			if (paragraph === undefined) throw new Error('no paragraph node');
+			view.dispatch(
+				view.state.tr.insert(view.state.doc.child(0).nodeSize, paragraph.create())
+			);
+		});
+
+		const written = withCtx(currentMarkdown);
+		expect(written).toBe('- a\n\n\n* b\n');
+		const again = await mount(written);
+		const doc = again.withCtx((ctx) => ctx.get(editorViewCtx).state.doc);
+		expect(doc.childCount).toBe(3);
+		expect(doc.child(1).type.name === 'paragraph' && doc.child(1).childCount).toBe(0);
+	});
+
+	it.each([
+		['one item', '> - a\n>\n>\n> b\n'],
+		['two items', '> - a\n> - b\n>\n>\n> c\n'],
+		['numbered', '> 1. a\n>\n>\n> b\n'],
+	])(
+		'after a list in a quote is kept, and the list stays tight, with %s',
+		async (_where, body) => {
+			// In a quote, remark counts the blank lines after a list as the list's
+			// own, and two of them as a gap between its items.
+			const { withCtx } = await mount(body);
+
+			expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+			expect(withCtx(currentMarkdown)).toBe(body);
+			const quote = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild);
+			expect(quote?.childCount).toBe(3);
+			expect(quote?.child(0).attrs.spread).toBe(false);
+			expect(quote?.child(1).childCount).toBe(0);
+		}
+	);
+
+	it('is kept inside a footnote', async () => {
+		const body = 'Text[^1]\n\n[^1]: note\n\n\n    more\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+		const footnote = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.lastChild);
+		expect(footnote?.childCount).toBe(3);
+		expect(footnote?.child(1).childCount).toBe(0);
+	});
+
+	it.each([
+		['added', 'a\n\nb\n', 'a\n\n\nb\n', 3],
+		['taken out', 'a\n\n\nb\n', 'a\n\nb\n', 2],
+	])('%s by a pull is taken in by the open editor', async (_how, open, pulled, blocks) => {
+		// Only blank lines tell the two apart, and the structural comparison that
+		// decides whether a pull changes anything does not count them: the pull
+		// was ignored, and the next keystroke wrote the old spacing back over it.
+		const onUserEdit = vi.fn();
+		const { withCtx, type } = await mount(open, onUserEdit);
+
+		withCtx((ctx) => adoptBody(ctx, pulled));
+
+		expect(withCtx((ctx) => ctx.get(editorViewCtx).state.doc.childCount)).toBe(blocks);
+		type('!');
+		expect(onUserEdit.mock.calls.at(-1)?.[0]).toBe(`${pulled.trimEnd()}!\n`);
+	});
+
 	it('is nothing at the top or bottom of a note, where blank lines say nothing', async () => {
 		// The blank line the app writes under a note's frontmatter is the top of
 		// its body, and would otherwise be an empty line at the top of every

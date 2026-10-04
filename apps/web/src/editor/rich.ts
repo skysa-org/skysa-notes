@@ -35,7 +35,6 @@ import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $prose, $remark } from '@milkdown/kit/utils';
 import {
 	firstStructuralDifference,
-	sameMarkdownStructure,
 	STRINGIFY_OPTIONS,
 	type StructuralDifference,
 	toLf,
@@ -151,7 +150,7 @@ const watchState = (report: (state: EditorState) => void) =>
  * raw text does.
  *
  * Only between blocks, and only in what holds blocks: the note, a quote, a
- * list item. One at the start or end of any of them is written as nothing,
+ * list item, a footnote. One at the start or end of any of them is written as nothing,
  * and blank lines there are read as nothing — the blank line the app writes
  * under a note's frontmatter is the top of its body, and would otherwise be an
  * empty line at the top of every note that has it.
@@ -177,12 +176,13 @@ interface MdastNode {
 	readonly type: string;
 	readonly value?: unknown;
 	readonly checked?: unknown;
+	readonly spread?: unknown;
 	readonly children?: readonly MdastNode[];
 	readonly position?: Readonly<{ start: MdastPoint; end: MdastPoint }>;
 }
 
 /** What holds blocks, rather than items, rows or words. */
-const HOLDS_BLOCKS = new Set(['root', 'blockquote', 'listItem']);
+const HOLDS_BLOCKS = new Set(['root', 'blockquote', 'listItem', 'footnoteDefinition']);
 
 const isEmptyLine = (node: MdastNode): boolean => {
 	const [only] = node.children ?? [];
@@ -197,10 +197,12 @@ const isEmptyLine = (node: MdastNode): boolean => {
 /**
  * The lines a block spans: its own, or else its children's — the preset's
  * `remarkHtmlTransformer` wraps a block of html in a paragraph it gives no
- * position.
+ * position. A list's are always its items': in a quote, remark counts the
+ * blank lines after a list as the list's own, and the gap after it would be
+ * none.
  */
 const linesOf = (node: MdastNode): { first: number; last: number } | undefined => {
-	if (node.position !== undefined)
+	if (node.position !== undefined && node.type !== 'list')
 		return { first: node.position.start.line, last: node.position.end.line };
 	const children = node.children ?? [];
 	const head = children[0];
@@ -208,6 +210,27 @@ const linesOf = (node: MdastNode): { first: number; last: number } | undefined =
 	const first = head === undefined ? undefined : linesOf(head)?.first;
 	const last = tail === undefined ? undefined : linesOf(tail)?.last;
 	return first === undefined || last === undefined ? undefined : { first, last };
+};
+
+/**
+ * A list as the lines between its items say it is: loose where a blank line
+ * parts two of them. Asked only of a list that holds blank lines after its
+ * last item — in a quote, remark takes two or more of those for a gap between
+ * items, and a tight list followed by an empty line came back loose.
+ */
+const withItemsApart = (list: MdastNode): MdastNode => {
+	const items = list.children ?? [];
+	const last = items.at(-1);
+	const end = last === undefined ? undefined : linesOf(last)?.last;
+	if (list.position === undefined || end === undefined || end >= list.position.end.line)
+		return list;
+	const apart = items.some((item, index) => {
+		const next = items[index + 1];
+		const here = linesOf(item);
+		const there = next === undefined ? undefined : linesOf(next);
+		return here !== undefined && there !== undefined && there.first - here.last > 1;
+	});
+	return { ...list, spread: apart };
 };
 
 /** An empty paragraph for each blank line past the one that only separates. */
@@ -224,6 +247,7 @@ const withEmptyLines = (node: MdastNode): MdastNode => {
 			? { ...child, children: [] }
 			: withEmptyLines(child)
 	);
+	if (node.type === 'list') return withItemsApart({ ...node, children: read });
 	if (!HOLDS_BLOCKS.has(node.type)) return { ...node, children: read };
 	return {
 		...node,
@@ -244,18 +268,41 @@ const emptyLinePlugin = $remark(
 	() => () => (tree) => withEmptyLines(tree) as typeof tree
 );
 
+/** The marker each list was written with, as it stood when a blank line followed. */
+const listMarkers = new WeakMap<object, string | undefined>();
+
 /**
  * Whether the join between two blocks says nothing (`-1`, a `BLANK_LINE` at the
  * start or end of what holds it), a line ending (`0`, a `BLANK_LINE` after
  * anything), or the blank line that separates (`1`). Every other join is left
  * to the writer.
+ *
+ * And a list after empty lines is told the marker of a list before them. Two
+ * lists side by side are written with different markers, because a list goes
+ * on across blank lines and one marker would read back as one list; the writer
+ * forgets the marker at any block that is not a list (`containerFlow` in
+ * `mdast-util-to-markdown`), a `BLANK_LINE` too. A join runs after that and
+ * before the next block is written, and is handed the writer's state, so it
+ * is the one place to put the marker back.
  */
-const blankLinesBetween = (left: { type: string }, right: { type: string }, parent: unknown) => {
+const blankLinesBetween = (
+	left: { type: string },
+	right: { type: string },
+	parent: unknown,
+	state: { bulletLastUsed?: string | undefined }
+) => {
 	if (left.type !== BLANK_LINE && right.type !== BLANK_LINE) return undefined;
 	const siblings = (parent as { children: readonly { type: string }[] }).children;
 	const at = siblings.indexOf(left);
 	const real = (node: { type: string }) => node.type !== BLANK_LINE;
-	if (!siblings.slice(0, at + 1).some(real) || !siblings.slice(at + 1).some(real)) return -1;
+	if (left.type === 'list') listMarkers.set(left, state.bulletLastUsed);
+	const before = siblings.slice(0, at + 1).findLast(real);
+	if (right.type === 'list' && before?.type === 'list') {
+		// The writer's own state, which is what there is to tell it with.
+		// eslint-disable-next-line functional/immutable-data
+		state.bulletLastUsed = listMarkers.get(before);
+	}
+	if (before === undefined || !siblings.slice(at + 1).some(real)) return -1;
 	return right.type === BLANK_LINE ? 0 : 1;
 };
 
@@ -490,9 +537,9 @@ export const createRichEditor = ({
 /**
  * The editor's document as markdown, exactly as Milkdown writes it.
  *
- * Not folded, deliberately: both callers below compare it through
- * `sameMarkdownStructure`, which parses with `core`'s pipeline and folds line
- * endings there. Folding here as well would be a second copy of that decision
+ * Not folded, deliberately: `whatIsLost` compares it through `core`'s
+ * pipeline, which folds line endings there, and `adoptBody` with what this
+ * same writer makes of a body. Folding here as well would be a second copy of that decision
  * that no test could tell from its absence — and the fold that *does* matter is
  * on the edit callback, where the string reaches the user's file.
  */
@@ -536,21 +583,26 @@ const forgetHistory = (view: EditorView): void => {
  * Put a body into the editor without it counting as an edit — a sync pull, or a
  * change made in raw mode.
  *
- * Does nothing when the document already means what the body says. The
- * comparison is structural because the editor writes its own formatting: a note
+ * Does nothing when the document already means what the body says: when what
+ * the editor would write of the body is what it writes of the document. Not
+ * the body itself, because the editor writes its own formatting: a note
  * stored with `*` bullets becomes `-` bullets the moment it is parsed, and
  * replacing the document with the original text over and over would achieve
  * nothing but throw away the cursor on every keystroke that reaches the store.
+ * Not by structure either, as it was until an empty line became blank lines
+ * (`withEmptyLines`): a structure says nothing of where a block is, so a pull
+ * that only added or took out an empty line was ignored, and the next
+ * keystroke wrote the old spacing back over it.
  */
 export const adoptBody = (ctx: Ctx, body: string): boolean => {
 	const view = ctx.get(editorViewCtx);
-	if (sameMarkdownStructure(currentMarkdown(ctx), body)) return true;
 
 	// Milkdown types its parser as total, but its own `replaceAll` guards against
 	// a null document — so a parse can evidently fail, and trusting the type here
 	// would crash the editor on the note that proves it.
 	const doc = ctx.get(parserCtx)(body) as ProseNode | null;
 	if (doc === null) return false;
+	if (ctx.get(serializerCtx)(doc) === currentMarkdown(ctx)) return true;
 
 	// Held for the length of the dispatch, because the marker only reaches
 	// transactions appended to this one, and the heading-id plugin answers with a
