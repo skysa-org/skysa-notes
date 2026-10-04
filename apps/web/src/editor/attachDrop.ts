@@ -17,6 +17,7 @@ import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { ATTACHMENT } from './attachment.js';
 import { iconElement } from './icons.js';
+import { LIST_ITEM } from './lists.js';
 import { pickFiles } from './pickFiles.js';
 
 /**
@@ -117,6 +118,13 @@ const placeNear = (doc: ProseNode, at: number): number => {
 };
 
 /**
+ * What a line's leaves read as, looking for what is either side of a picture:
+ * a line break as the break it is, anything else — a picture, a chip — as a
+ * thing that is not a space.
+ */
+const asLine = (leaf: ProseNode): string => (leaf.type.name === 'hardbreak' ? '\n' : '\ufffc');
+
+/**
  * Put `node` in at `at`. A picture is a thing of its own, never on a line with
  * words: where it lands in a paragraph holding anything else, it goes in a
  * paragraph of its own there — before the paragraph at its start, after it at
@@ -124,26 +132,49 @@ const placeNear = (doc: ProseNode, at: number): number => {
  * have their own, in the order they came, the placeholders of those still to
  * come being carried past each one put in.
  *
+ * The spaces and line breaks either side of it go: they would end the line
+ * before it or start the one after, where markdown keeps neither — a space
+ * there is written `&#x20;`, and a break is an empty line.
+ *
+ * The cursor is left after it, as after anything pasted, and Enter is the next
+ * line. Not before it at the end of the words: a second paste there would go
+ * in above the first.
+ *
  * A paragraph only. A heading split is two headings, and a table's cell holds
- * one line, so a picture put in either is put where it lands; so is a file's
- * chip, which is a name in a line of text.
+ * one line, so a picture put in either is put where it lands; so is one put at
+ * the very start of a list item, whose first line is its bullet's or its
+ * checkbox's and the words'. A file's chip is a name in a line of text, and
+ * goes where it lands.
  */
 const putIn = (tr: Transaction, at: number, node: ProseNode): Transaction => {
 	const $at = tr.doc.resolve(at);
+	const line = $at.parent;
 	const { image, paragraph } = tr.doc.type.schema.nodes;
-	const alone =
+	if (
 		node.type !== image ||
 		paragraph === undefined ||
-		$at.parent.type !== paragraph ||
-		$at.parent.content.size === 0 ||
-		$at.node(-1).type.spec.tableRole !== undefined;
-	if (alone) return tr.insert(at, node);
-	if ($at.parentOffset === 0) return tr.insert($at.before(), paragraph.create(null, node));
-	const atEnd = $at.parentOffset === $at.parent.content.size;
+		line.type !== paragraph ||
+		$at.node(-1).type.spec.tableRole !== undefined
+	) {
+		return tr.insert(at, node);
+	}
+	const before = line.textBetween(0, $at.parentOffset, undefined, asLine);
+	const after = line.textBetween($at.parentOffset, line.content.size, undefined, asLine);
+	const from = at - (before.length - before.trimEnd().length);
+	const to = at + (after.length - after.trimStart().length);
+	const $from = tr.delete(from, to).doc.resolve(from);
+	const opensItem = $from.index(-1) === 0 && $from.node(-1).type.name === LIST_ITEM;
+	if ($from.parent.content.size === 0 || ($from.parentOffset === 0 && opensItem)) {
+		return tr.insert(from, node);
+	}
+	if ($from.parentOffset === 0) return tr.insert($from.before(), paragraph.create(null, node));
+	const atEnd = $from.parentOffset === $from.parent.content.size;
 	// Split there, and into the empty paragraph the end leaves, or between the
 	// halves the middle leaves.
-	const split = tr.split(at);
-	return atEnd ? split.insert(at + 2, node) : split.insert(at + 1, paragraph.create(null, node));
+	const split = tr.split(from);
+	return atEnd
+		? split.insert(from + 2, node)
+		: split.insert(from + 1, paragraph.create(null, node));
 };
 
 /**

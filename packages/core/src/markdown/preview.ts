@@ -1,6 +1,6 @@
 import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
-import { isAttachmentHref } from './attachments.js';
+import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 
 /**
@@ -63,6 +63,12 @@ const isChip = (link: Link): boolean => {
  */
 const apart = (words: string): string => ` ${words} `;
 
+/** What a chip says: its words, or the file's name where it has none, as the editor shows it. */
+const chipWords = (link: Link): string => {
+	const words = link.children.map(inline).join('');
+	return words === '' ? hrefFileName(link.url) : words;
+};
+
 /** What a run of inline content looks like on screen. */
 const inline = (node: PhrasingContent): string => {
 	switch (node.type) {
@@ -82,9 +88,7 @@ const inline = (node: PhrasingContent): string => {
 		case 'footnoteReference':
 			return `[^${node.label ?? node.identifier}]`;
 		case 'link':
-			return isChip(node)
-				? apart(node.children.map(inline).join(''))
-				: node.children.map(inline).join('');
+			return isChip(node) ? apart(chipWords(node)) : node.children.map(inline).join('');
 		case 'emphasis':
 		case 'strong':
 		case 'delete':

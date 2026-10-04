@@ -117,6 +117,12 @@ export const isAttachmentHref = (href: string): boolean =>
 	attachmentNamed(relativeNames(href)?.at(-1) ?? '');
 
 /**
+ * The name of the file a destination ends in, decoded, or nothing where it
+ * names none: what a chip with no words of its own shows.
+ */
+export const hrefFileName = (href: string): string => relativeNames(href)?.at(-1) ?? '';
+
+/**
  * The path of the file `href` names, from the note at `notePath`, or
  * `undefined` where it names nothing in the note's storage: not relative, or
  * climbing out of the app folder.

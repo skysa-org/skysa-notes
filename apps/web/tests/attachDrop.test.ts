@@ -367,6 +367,53 @@ describe('a picture put in the note', () => {
 		expect(tabled.markdown().split('\n')[0]).toBe('| a![a](a.png) | b |');
 	});
 
+	it('takes the spaces either side of it, which markdown would write as `&#x20;`', async () => {
+		const atEnd = await picturesAt('Look at this: \n', 15, 'a');
+		expect(atEnd.markdown()).toBe('Look at this:\n\n![a](a.png)\n');
+
+		const inMiddle = await picturesAt('one two\n', 5, 'a');
+		expect(inMiddle.markdown()).toBe('one\n\n![a](a.png)\n\ntwo\n');
+	});
+
+	it('goes in a paragraph of nothing but spaces as it is, the spaces gone', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('one\n\n<br />\n', host);
+		mounted.view.dispatch(mounted.view.state.tr.insertText('   ', 6));
+		cursorAt(mounted.view, 8);
+
+		paste(mounted.view, carrying([fileNamed('a.png')]));
+		await answer(picture('a'));
+
+		expect(mounted.markdown()).toBe('one\n\n![a](a.png)\n');
+	});
+
+	it('takes a line break beside it, which would be an empty line', async () => {
+		const hard = await picturesAt('a\\\nb\n', 2, 'a');
+		expect(hard.markdown()).toBe('a\n\n![a](a.png)\n\nb\n');
+
+		const soft = await picturesAt('a\nb\n', 2, 'a');
+		expect(soft.markdown()).toBe('a\n\n![a](a.png)\n\nb\n');
+	});
+
+	it('goes after the one before it, pasted one after another at the end of the words', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('xy\n', host);
+		cursorAt(mounted.view, 3);
+
+		paste(mounted.view, carrying([fileNamed('a.png')]));
+		await answer(picture('a'));
+		paste(mounted.view, carrying([fileNamed('b.png')]));
+		await answer(picture('b'));
+
+		expect(mounted.markdown()).toBe('xy\n\n![a](a.png)\n\n![b](b.png)\n');
+	});
+
+	it('goes where it lands at the very start of a list item, whose line is its checkbox’s', async () => {
+		const mounted = await picturesAt('- [ ] todo\n', 3, 'a');
+
+		expect(mounted.markdown()).toBe('- [ ] ![a](a.png)todo\n');
+	});
+
 	it('leaves a file’s chip in the line, as a name among the words', async () => {
 		const { host, answer } = fakeHost();
 		const mounted = await mount('xy\n', host);

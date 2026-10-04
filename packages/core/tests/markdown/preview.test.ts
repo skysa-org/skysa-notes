@@ -119,6 +119,8 @@ describe('inline syntax', () => {
 		expect(previewText('see[Q3 report.pdf](q3-report-1a2b3c4d.pdf)now\n')).toBe(
 			'see Q3 report.pdf now'
 		);
+		// A chip with no words shows the file's name.
+		expect(previewText('see[](q3%20report.pdf)now\n')).toBe('see q3 report.pdf now');
 	});
 
 	it('runs a link that is not a file’s chip into its words, as the editor shows it', () => {
