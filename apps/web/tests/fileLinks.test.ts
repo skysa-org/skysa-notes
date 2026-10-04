@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
-import { attachedFiles, deleteUnlinkedFiles } from '../src/store/fileLinks.js';
+import { createDatabase, type NotesDatabase, type SyncStateRecord } from '../src/store/db.js';
+import {
+	attachedFiles,
+	deleteUnlinkedFiles,
+	everyNoteHeld,
+	namesFile,
+} from '../src/store/fileLinks.js';
 import { addAttachment } from '../src/store/files.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
 
@@ -102,6 +107,35 @@ describe('the files in a notebook', () => {
 		expect(file?.linkedBy.map((linking) => linking.title)).toEqual(['Plan']);
 	});
 
+	it.each([
+		// Reported in review: each of these was a link no parser here read, and
+		// the file was deleted under the note that showed it.
+		['a.pdf', 'Work', '[p. 2](a.pdf#page=2)\n'],
+		['a.png', 'Work', '![a](a.png?v=2)\n'],
+		['a.pdf', 'Work', '<a href="a.pdf">the report</a>\n'],
+		['a.mp4', 'Work', '<video src="a.mp4"></video>\n'],
+		['a.png', 'Work', '![[a.png]]\n'],
+		['a.png', 'Work', '![a](a&#46;png)\n'],
+		['a.png', 'Work', '<img src="a&period;png">\n'],
+		['c++.pdf', 'Work', '[c](c\\+\\+.pdf)\n'],
+		['café.png', 'Work', '![c](cafe\u0301.png)\n'],
+		['LICENSE', 'Work', '[the licence](LICENSE)\n'],
+		// Cut from a note here and pasted into one in another notebook: the link
+		// points nowhere now, and still means the file.
+		['a.png', 'Home', '![a](a.png)\n'],
+		// Only the hash the app stamped the name with is plain.
+		['été-1a2b3c4d.png', 'Work', '![e](&eacute;t&eacute;-1a2b3c4d.png)\n'],
+	])('counts %s named in a note in %s as %j', async (name, folder, body) => {
+		const db = freshDatabase();
+		await bound(db, 'a', `Work/${name}`);
+		await note(db, folder, 'Plan', body);
+
+		const [file] = await attachedFiles(db, CONNECTION, 'Work');
+
+		expect(file?.linkedBy.map((linking) => linking.title)).toEqual(['Plan']);
+		expect(await deleteUnlinkedFiles(db, CONNECTION, ['a'])).toEqual([]);
+	});
+
 	it('counts a note deleted and not yet sent, and says so', async () => {
 		const db = freshDatabase();
 		await bound(db, 'a', 'Work/a.png');
@@ -176,5 +210,54 @@ describe('deleting a file no note links', () => {
 
 		expect(await deleteUnlinkedFiles(db, CONNECTION, ['a'])).toEqual([]);
 		expect(await db.files.get([CONNECTION, 'a'])).toBeDefined();
+	});
+});
+
+describe('a source whose notes the device may not all hold', () => {
+	const state = (overrides: Partial<SyncStateRecord>): SyncStateRecord => ({
+		connectionId: CONNECTION,
+		clientId: 'client',
+		cursor: 'c1',
+		...overrides,
+	});
+
+	it('holds them all once pulled to the end, as the device’s own library always does', async () => {
+		const db = freshDatabase();
+		await db.syncState.put(state({}));
+
+		expect(await everyNoteHeld(db, CONNECTION)).toBe(true);
+		expect(await everyNoteHeld(db, 'local')).toBe(true);
+	});
+
+	it.each<[string, Partial<SyncStateRecord>]>([
+		['never pulled to the end', { cursor: undefined }],
+		['still importing', { importing: { lock: true, returnTo: 'local' } }],
+		['resumed and not yet checked', { resumeUnverified: true }],
+		['detached', { detached: { at: 1, reason: 'disconnected' } }],
+		[
+			'it has a note it cannot read',
+			{ unreadable: [{ remoteId: 'r', path: 'Work/latin1.md' }] },
+		],
+	])('has nothing deleted when %s', async (_why, overrides) => {
+		const db = freshDatabase();
+		await db.syncState.put(state(overrides));
+		await bound(db, 'a', 'Work/a.png');
+
+		expect(await everyNoteHeld(db, CONNECTION)).toBe(false);
+		expect(await deleteUnlinkedFiles(db, CONNECTION, ['a'])).toEqual([]);
+		expect(await db.files.get([CONNECTION, 'a'])).toBeDefined();
+	});
+});
+
+describe('a name in a body', () => {
+	it.each([
+		['plain', 'see a.png', 'a.png', true],
+		['in other capitals', 'see A.PNG', 'a.png', true],
+		['percent-encoded', 'see a%20b.png', 'a b.png', true],
+		['written as what it decodes to', 'see 100%41.png', '100%41.png', true],
+		['another file', 'see b.png', 'a.png', false],
+		['past a malformed escape, which does not throw', 'see %E0%A4%A.png', 'x.png', false],
+	])('%s', (_how, body, name, found) => {
+		expect(namesFile(body, name)).toBe(found);
 	});
 });

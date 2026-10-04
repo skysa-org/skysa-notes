@@ -6,7 +6,12 @@ import { createPortal } from 'react-dom';
 import { useSuspendShortcuts } from '../commands/context.js';
 import { FILE_ICONS, Icon } from '../editor/icons.js';
 import { activeConnectionId, db, type NotesDatabase } from '../store/db.js';
-import { type AttachedFile, attachedFiles, deleteUnlinkedFiles } from '../store/fileLinks.js';
+import {
+	type AttachedFile,
+	attachedFiles,
+	deleteUnlinkedFiles,
+	everyNoteHeld,
+} from '../store/fileLinks.js';
 
 /**
  * The files in a notebook, each with the notes that link it under its name,
@@ -14,9 +19,12 @@ import { type AttachedFile, attachedFiles, deleteUnlinkedFiles } from '../store/
  * `⋯` where it has files (`NotebookMenu.tsx`).
  *
  * A file nothing links is one the user took out of every note, or whose notes
- * were deleted, and nothing else would ever show it to them. One linked only by
- * a note deleted here and not yet sent says so, and cannot be deleted: the
- * note's delete can still be undone.
+ * were deleted, and nothing else would ever show it to them. A note that names
+ * the file anywhere counts as linking it (`store/fileLinks.ts`). One linked only
+ * by a note deleted here and not yet sent says so, and cannot be deleted: the
+ * note's delete can still be undone. Nothing can be deleted at all while the
+ * device may not hold every note in the source — importing, say — and the
+ * dialog says so.
  *
  * Of the source in front when it was opened, held for as long as it is: a
  * Delete pressed after the sources changed is still about the files listed.
@@ -49,14 +57,33 @@ export const linkedFrom = (file: AttachedFile): string =>
 
 const FileRow = ({
 	file,
+	deletable,
 	onDelete,
 }: {
 	file: AttachedFile;
+	/** Whether a file no note links can be deleted from here at all. */
+	deletable: boolean;
 	onDelete: (file: AttachedFile) => Promise<void>;
 }) => {
 	const [asking, setAsking] = useState(false);
 	const [busy, setBusy] = useState(false);
-	const linked = file.linkedBy.length > 0;
+	const offered = file.linkedBy.length === 0 && deletable;
+	const deleteButton = useRef<HTMLButtonElement>(null);
+	const keepButton = useRef<HTMLButtonElement>(null);
+	const asked = useRef(false);
+
+	// The button pressed goes as the question comes and goes: the focus goes
+	// to Keep, which answers it safely, and back to Delete after.
+	useEffect(() => {
+		const was = asked.current;
+		asked.current = asking;
+		if (asking) {
+			keepButton.current?.focus();
+			return;
+		}
+		if (was) deleteButton.current?.focus();
+	}, [asking]);
+
 	return (
 		<li className="attached-file">
 			<span className="attached-file-icon" aria-hidden="true">
@@ -65,8 +92,9 @@ const FileRow = ({
 			<span className="attached-file-name">{file.name}</span>
 			<span className="attached-file-size muted">{sizeOf(file.size)}</span>
 			<span className="attached-file-notes muted">{linkedFrom(file)}</span>
-			{!linked && !asking && (
+			{offered && !asking && (
 				<button
+					ref={deleteButton}
 					type="button"
 					className="danger attached-file-delete"
 					aria-label={`Delete ${file.name}`}
@@ -77,7 +105,7 @@ const FileRow = ({
 					Delete
 				</button>
 			)}
-			{!linked && asking && (
+			{offered && asking && (
 				<span
 					className="attached-file-confirm"
 					role="group"
@@ -99,6 +127,7 @@ const FileRow = ({
 						Delete
 					</button>
 					<button
+						ref={keepButton}
 						type="button"
 						disabled={busy}
 						onClick={() => {
@@ -130,6 +159,10 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 			connectionId === undefined ? undefined : attachedFiles(database, connectionId, path),
 		[database, connectionId, path]
 	);
+	const held = useLiveQuery(
+		() => (connectionId === undefined ? undefined : everyNoteHeld(database, connectionId)),
+		[database, connectionId]
+	);
 
 	useEffect(() => {
 		const back = document.activeElement;
@@ -139,6 +172,8 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 		};
 	}, []);
 
+	// On the document, not the dialog: a button that goes as it is pressed
+	// leaves the focus nowhere, and Escape and Tab must still be the dialog's.
 	useEffect(() => {
 		const element = dialog.current;
 		if (element === null) return undefined;
@@ -155,9 +190,9 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 			event.preventDefault();
 			(buttons[next] as HTMLButtonElement | undefined)?.focus();
 		};
-		element.addEventListener('keydown', onKey);
+		document.addEventListener('keydown', onKey);
 		return () => {
-			element.removeEventListener('keydown', onKey);
+			document.removeEventListener('keydown', onKey);
 		};
 	}, [onClose]);
 
@@ -167,7 +202,7 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 		try {
 			const gone = await deleteUnlinkedFiles(database, connectionId, [file.id]);
 			// Linked since the list was drawn: the live list shows by what.
-			if (gone.length === 0) setProblem(`${file.name} is in a note now, and was kept.`);
+			if (gone.length === 0) setProblem(`${file.name} was kept: a note may link it now.`);
 		} catch {
 			setProblem(`${file.name} could not be deleted.`);
 		}
@@ -187,10 +222,21 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 				{files !== undefined && files.length === 0 && (
 					<p className="muted">No files in this notebook.</p>
 				)}
+				{held === false && files !== undefined && files.length > 0 && (
+					<p className="muted">
+						Not every note in this storage is on this device yet, so a file here may be
+						in one that is not. Nothing can be deleted until they all are.
+					</p>
+				)}
 				{files !== undefined && files.length > 0 && (
 					<ul className="attached-file-list">
 						{files.map((file) => (
-							<FileRow key={file.id} file={file} onDelete={remove} />
+							<FileRow
+								key={file.id}
+								file={file}
+								deletable={held === true}
+								onDelete={remove}
+							/>
 						))}
 					</ul>
 				)}

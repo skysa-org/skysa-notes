@@ -103,6 +103,56 @@ describe('Attached files', () => {
 		expect(await db.files.get([LOCAL_CONNECTION_ID, 'loose'])).toBeDefined();
 	});
 
+	it('keeps the focus on the question, and back on Delete when kept', async () => {
+		const db = await seeded();
+		show(db);
+		const user = userEvent.setup();
+
+		const loose = await rowOf('old-map.pdf');
+		await user.click(loose.getByRole('button', { name: 'Delete old-map.pdf' }));
+		expect(document.activeElement).toBe(loose.getByRole('button', { name: 'Keep' }));
+
+		await user.click(loose.getByRole('button', { name: 'Keep' }));
+		expect(document.activeElement).toBe(
+			loose.getByRole('button', { name: 'Delete old-map.pdf' })
+		);
+	});
+
+	it('closes on Escape with the focus nowhere', async () => {
+		const db = await seeded();
+		const user = userEvent.setup();
+		const onClose = show(db);
+		await rowOf('old-map.pdf');
+
+		(document.activeElement as HTMLElement | null)?.blur();
+		await user.keyboard('{Escape}');
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('offers no Delete while the device may not hold every note in the source', async () => {
+		const db = freshDatabase();
+		await db.syncState.put({
+			connectionId: 'drop',
+			clientId: 'client',
+			importing: { lock: true, returnTo: LOCAL_CONNECTION_ID },
+		});
+		await db.files.put({
+			connectionId: 'drop',
+			id: 'loose',
+			path: 'Trip/old-map.pdf',
+			size: 3,
+		});
+		show(db);
+
+		const loose = await rowOf('old-map.pdf');
+		expect(
+			await screen.findByText(/Not every note in this storage is on this device/)
+		).toBeDefined();
+		expect(loose.getByText('Not in any note')).toBeDefined();
+		expect(loose.queryByRole('button', { name: /Delete/ })).toBeNull();
+	});
+
 	it('closes on Close and on Escape', async () => {
 		const db = await seeded();
 		const user = userEvent.setup();
