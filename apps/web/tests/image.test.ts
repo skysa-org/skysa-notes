@@ -1,6 +1,6 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import { DOMParser as ProseParser, DOMSerializer } from '@milkdown/kit/prose/model';
-import { TextSelection } from '@milkdown/kit/prose/state';
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -534,5 +534,55 @@ describe('a picture on the clipboard', () => {
 		expect(await parsed('<p><img data-src="cat.png" alt="cat"></p>')).toEqual([
 			{ src: 'cat.png', alt: 'cat', title: '' },
 		]);
+	});
+});
+
+/**
+ * A picture selected whole has a bar, as a chip has, with Remove from note: a
+ * phone's keyboard may delete nothing for a picture selected (2026-10-04).
+ */
+describe('a picture selected whole', () => {
+	const BODY = 'A ![cat](cat-1a2b3c4d.png) here.\n';
+
+	const selected = async () => {
+		const mounted = await mount(BODY);
+		const { view } = mounted;
+		// The paragraph, then "A ".
+		view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 3)));
+		const remover = () =>
+			mounted.picture()?.querySelector<HTMLButtonElement>('[aria-label="Remove from note"]');
+		return { ...mounted, remover };
+	};
+
+	it('shows Remove from note while it is selected, and not after', async () => {
+		const { view, picture, remover } = await selected();
+
+		expect(picture()?.classList.contains('ProseMirror-selectednode')).toBe(true);
+		expect(remover()?.closest('[hidden]')).toBeNull();
+
+		view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
+
+		expect(picture()?.classList.contains('ProseMirror-selectednode')).toBe(false);
+		expect(remover()?.closest('[hidden]')).not.toBeNull();
+	});
+
+	it('is taken out of the note by Remove from note, as the user’s edit', async () => {
+		const { picture, remover, onUserEdit } = await selected();
+
+		remover()?.click();
+
+		expect(picture()).toBeNull();
+		expect(onUserEdit).toHaveBeenLastCalledWith('A  here.\n');
+	});
+
+	it('keeps a key pressed in its bar from the editor', async () => {
+		const { view, remover } = await selected();
+		const before = view.state.doc;
+
+		remover()?.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })
+		);
+
+		expect(view.state.doc.eq(before)).toBe(true);
 	});
 });

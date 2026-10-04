@@ -8,6 +8,7 @@ import { $prose, $view } from '@milkdown/kit/utils';
 import { classifyHref } from '@skysa/core';
 
 import { attachHostCtx, type AttachmentHost, type Shown } from './attachHost.js';
+import { barButton } from './attachment.js';
 
 /**
  * A picture in a note (#187), shown where the markdown says it is.
@@ -18,9 +19,14 @@ import { attachHostCtx, type AttachmentHost, type Shown } from './attachHost.js'
  * the picture instead (`attachHost.ts`), the first time it scrolls into view,
  * and says in words why it cannot be shown where it cannot.
  *
- * Display only: it never dispatches. What the user sees of a picture is never
- * an edit, and the dirty rule (a note is dirty only on a user's editing
- * transaction) would be one careless line away from broken.
+ * Showing a picture never dispatches. What the user sees of one is never an
+ * edit, and the dirty rule (a note is dirty only on a user's editing
+ * transaction) would be one careless line away from broken. The one edit it
+ * makes is the user's own: Remove from note, on the bar a picture selected
+ * whole shows, as a chip's does (2026-10-04). On an Android phone a picture
+ * tapped, and outlined as selected, stayed put on Backspace — the keyboard
+ * edits the page's text, and a picture is none — so a phone needs a way to take
+ * one out that is not a key.
  *
  * On the web (`https:`) and in the link itself (`data:`), the address is the
  * picture's, and the `<img>` loads it, sending no referrer: which note a
@@ -96,8 +102,9 @@ const whenVisible = (element: Element, editor: Element, work: () => void): (() =
 };
 
 const imageView =
-	(host: AttachmentHost, editor: Element) =>
+	(host: AttachmentHost, view: EditorView, getPos: () => number | undefined) =>
 	(initial: ProseNode): NodeView => {
+		const editor = view.dom;
 		const held = { current: initial };
 		// What the picture shown is, and how to let go of it: the request out
 		// for it, the URL it was drawn from, the wait for it to be on screen.
@@ -121,9 +128,15 @@ const imageView =
 		action.setAttribute('class', 'note-image-action');
 		action.setAttribute('hidden', '');
 
+		const remover = barButton('trash', 'Remove from note');
+		const actions = document.createElement('span');
+		actions.setAttribute('class', 'attachment-actions note-image-actions');
+		actions.setAttribute('hidden', '');
+		actions.append(remover);
+
 		const dom = document.createElement('span');
 		dom.setAttribute('class', 'note-image');
-		dom.append(img, reason, action);
+		dom.append(img, reason, action, actions);
 
 		const reasonFor = (next: State): string | undefined => {
 			if (next === 'large') return `${megabytes(size.current)}, not downloaded yet`;
@@ -229,6 +242,18 @@ const imageView =
 			if (state.current === 'large') wanted.current = true;
 			show(showing.current.src);
 		});
+		actions.addEventListener('mousedown', (event) => {
+			// The picture stays selected, and with it the bar.
+			event.preventDefault();
+		});
+		// The user taking the picture out of the note: an edit like any other,
+		// so the note is dirty and saved.
+		remover.addEventListener('click', () => {
+			const at = getPos();
+			if (at === undefined) return;
+			view.dispatch(view.state.tr.delete(at, at + held.current.nodeSize));
+			view.focus();
+		});
 
 		// What a link resolves to can change under a picture that is not shown —
 		// a file that arrives with a pull, a network that comes back — and is
@@ -260,8 +285,21 @@ const imageView =
 				return true;
 			},
 
-			/** The button is the view's own; pressing it is not editing. */
-			stopEvent: (event) => event.target === action,
+			// What ProseMirror does for a node selected whole, and the bar.
+			selectNode: () => {
+				dom.classList.add('ProseMirror-selectednode');
+				actions.removeAttribute('hidden');
+			},
+
+			deselectNode: () => {
+				dom.classList.remove('ProseMirror-selectednode');
+				actions.setAttribute('hidden', '');
+			},
+
+			/** The buttons are the view's own; pressing one is not editing. */
+			stopEvent: (event) =>
+				event.target === action ||
+				(event.target instanceof Node && actions.contains(event.target)),
 
 			destroy: () => {
 				unsubscribe();
@@ -272,8 +310,8 @@ const imageView =
 
 export const imageViewPlugin = $view(
 	imageSchema.node,
-	(ctx: Ctx) => (node: ProseNode, view: EditorView) =>
-		imageView(ctx.get(attachHostCtx.key), view.dom)(node)
+	(ctx: Ctx) => (node: ProseNode, view: EditorView, getPos: () => number | undefined) =>
+		imageView(ctx.get(attachHostCtx.key), view, getPos)(node)
 );
 
 /**

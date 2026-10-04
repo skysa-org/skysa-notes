@@ -48,6 +48,7 @@ import { codeBlocksKeepAtoms, codeSpansHoldText } from './codeAtoms.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
 import { codeDisplay, type CodeDisplayStore } from './codeDisplay.js';
 import { codeActivePlugin, codeNumbersPlugin } from './codeTools.js';
+import { deleteSelectedNode } from './deleteSelected.js';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
@@ -460,6 +461,9 @@ export const createRichEditor = ({
 					attachOnPaste(ctx.get(attachHostCtx.key), view, event),
 				handleDOMEvents: {
 					drop: (view, event) => attachOnDrop(ctx.get(attachHostCtx.key), view, event),
+					// Ahead of ProseMirror's own, which on Android waits for a
+					// change the keyboard may never make.
+					beforeinput: deleteSelectedNode,
 				},
 			}));
 			if (menus === undefined) return;
