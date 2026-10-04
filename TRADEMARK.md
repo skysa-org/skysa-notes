@@ -62,6 +62,16 @@ None of the above is a licence fee or an approval queue. If you have rebranded
 and are describing your relationship to the project accurately, you are within
 this policy and do not need to contact anyone.
 
+## Other companies' marks
+
+The app shows the marks of the storage providers it connects to — Dropbox,
+OneDrive and Google Drive — so a user can tell which storage a set of notes is
+in (`apps/web/src/assets/providers/`). They belong to Dropbox, Inc., Microsoft
+Corporation and Google LLC. They are not part of what AGPL-3.0 grants and not
+part of this policy: they are here unaltered, to identify those services, as
+each company's brand guidelines allow, and their use is governed by those
+guidelines. A fork that shows them takes on the same guidelines.
+
 ## Questions
 
 Open a GitHub Discussion, or an issue if Discussions are not enabled yet.

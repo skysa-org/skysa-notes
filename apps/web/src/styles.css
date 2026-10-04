@@ -394,6 +394,22 @@ code {
 	}
 }
 
+/* Which storage a source is (`ProviderIcon`): the provider's own mark, or a
+   glyph in the colour of the words beside it. As tall as a line of them. */
+.provider-icon {
+	display: block;
+	flex: none;
+	width: 1rem;
+	height: 1rem;
+}
+
+/* Centred on the name rather than sat on its baseline, which an image's
+   bottom edge is. */
+.source-tab > .provider-icon {
+	align-self: center;
+	margin-inline-end: var(--space-xs);
+}
+
 /* Not colour alone: the weight and the underline say it too, and the
    `aria-current` on the button says it to a screen reader. */
 .source-tab-active {
@@ -462,9 +478,13 @@ code {
 	}
 }
 
-/* No box of its own: the tab around it is the box. */
+/* No box of its own: the tab around it is the box. What is left of it after
+   the mark, however few characters that is: an input will not otherwise go
+   narrower than its `size`. */
 .source-tab-rename {
 	display: block;
+	flex: 1 1 0;
+	min-width: 0;
 	width: 100%;
 	margin: 0;
 	padding: 0;
@@ -1082,6 +1102,15 @@ button.danger {
 	background: none;
 	border: 0;
 	cursor: pointer;
+}
+
+/* A row's mark, then its name or the field it becomes: a source's, in a
+   compact window's dropdown. */
+.row-marked {
+	display: flex;
+	align-items: center;
+	gap: var(--space-s);
+	min-width: 0;
 }
 
 .row-label {

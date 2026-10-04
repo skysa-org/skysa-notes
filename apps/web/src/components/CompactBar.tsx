@@ -1,6 +1,7 @@
 import { basename, ROOT } from '@skysa/core';
 import {
 	type CSSProperties,
+	type ReactNode,
 	type RefObject,
 	useCallback,
 	useDeferredValue,
@@ -15,8 +16,9 @@ import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
+import { ProviderIcon } from './ProviderIcon.js';
 import { SearchField, type SearchFieldProps } from './SearchField.js';
-import { useShowingSourceName } from './SourceTabs.js';
+import { useShowingSource } from './SourceTabs.js';
 
 /**
  * The bar across the top of a compact window, where the sources, the notebooks
@@ -182,6 +184,7 @@ const PaneTrigger = ({
 	pane,
 	name,
 	value,
+	icon,
 	panel,
 	onPanel,
 }: {
@@ -190,6 +193,8 @@ const PaneTrigger = ({
 	name: string;
 	/** What is chosen now. Truncated on screen, whole in the tooltip. */
 	value: string;
+	/** Shown in place of `value`, which is then in the tooltip and the name only. */
+	icon?: ReactNode;
 	panel: Pane | null;
 	onPanel: (panel: Pane | null) => void;
 }) => (
@@ -206,7 +211,7 @@ const PaneTrigger = ({
 			onPanel(panel === pane ? null : pane);
 		}}
 	>
-		<span className="compact-picker-label">{value}</span>
+		{icon ?? <span className="compact-picker-label">{value}</span>}
 		<span className="compact-picker-chevron">
 			<Icon name="chevron" />
 		</span>
@@ -267,7 +272,7 @@ export const CompactBar = ({
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const renaming = useRenaming(renamings);
-	const source = useShowingSourceName(renaming);
+	const source = useShowingSource(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
 	const title = note === undefined ? 'Notes' : shownNote(note, edit).title;
 	// Measured rather than a container query, since it changes what is drawn.
@@ -297,7 +302,7 @@ export const CompactBar = ({
 			return { left: box.left - across.left, right: across.right - box.right };
 		};
 		onOrigins({ sources: from(sources), notebooks: from(notebooks), notes: from(notes) });
-	}, [bar, width, searching, onOrigins, source, notebook, title]);
+	}, [bar, width, searching, onOrigins, source.kind, notebook, title]);
 
 	// The field appears because the icon was pressed, so the cursor goes into
 	// it; a keyboard user would otherwise have to find what they just opened.
@@ -345,10 +350,15 @@ export const CompactBar = ({
 	return (
 		<div className="compact-bar" ref={setBar}>
 			<div className="compact-pickers">
+				{/* The source's mark alone (2026-10-04): on a phone its name took
+				    the room the notebook's and the note's need, and which storage
+				    it is is what the mark says. The name is in the tooltip, the
+				    button's name, and the panel it opens. */}
 				<PaneTrigger
 					pane="sources"
 					name="Source"
-					value={source}
+					value={source.name}
+					icon={<ProviderIcon kind={source.kind} />}
 					panel={panel}
 					onPanel={onPanel}
 				/>

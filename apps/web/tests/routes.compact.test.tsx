@@ -110,6 +110,18 @@ describe('the compact bar', () => {
 		expect(await screen.findByRole('button', { name: /^Minutes/ })).toBeDefined();
 	});
 
+	it('shows the source as its mark alone, and its name to a screen reader', async () => {
+		// Asked for on a phone: which storage it is is what the mark says, and
+		// the name took the room the notebook's and the note's need.
+		await twoNotebooks();
+		await openApp();
+
+		const source = await screen.findByRole('button', { name: 'Source: This device' });
+		expect(source.textContent).toBe('');
+		expect(source.getAttribute('title')).toBe('This device');
+		expect(source.firstElementChild?.getAttribute('class')).toBe('provider-icon');
+	});
+
 	it('opens the notebooks once a source is chosen', async () => {
 		await twoNotebooks();
 		const user = userEvent.setup();
