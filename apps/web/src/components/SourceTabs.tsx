@@ -33,6 +33,7 @@ import {
 } from '../sync/account.js';
 import { ConnectButton } from './ConnectButton.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
+import { ProviderIcon, type SourceKind, sourceKind } from './ProviderIcon.js';
 import { RowOptions } from './RowOptions.js';
 import { RowRename } from './RowRename.js';
 import { useEscape } from './useEscape.js';
@@ -150,6 +151,7 @@ export const SourceTabs = ({
 							{renaming?.id === source.connectionId ? (
 								<RenameField
 									name={tabName(source, ordered)}
+									kind={sourceKind(source)}
 									width={renaming.width}
 									onDone={(chosen) => {
 										setRenaming(null);
@@ -259,6 +261,7 @@ const SourceTab = ({
 			onShow(event.currentTarget.offsetWidth);
 		}}
 	>
+		<ProviderIcon kind={sourceKind(source)} />
 		{/* The name once more on `data-name`, for the hidden bold copy that
 		    holds the tab's width — see `.source-tab-name` in the stylesheet. */}
 		<span className="source-tab-name" data-name={name}>
@@ -273,7 +276,7 @@ const SourceTab = ({
 );
 
 /**
- * The tab, become its own name.
+ * The tab, become its own name, with the provider's mark still in front of it.
  *
  * The field carries no box of its own — no padding, no background, no border,
  * no focus ring. The tab's own box is still there, around it, so entering a
@@ -302,10 +305,12 @@ const SourceTab = ({
  */
 const RenameField = ({
 	name,
+	kind,
 	width,
 	onDone,
 }: {
 	name: string;
+	kind: SourceKind;
 	width: number;
 	onDone: (chosen?: string) => void;
 }) => {
@@ -334,6 +339,7 @@ const RenameField = ({
 			className="source-tab source-tab-active source-tab-editing"
 			{...(width > 0 ? { style: { width: `${String(width)}px` } } : {})}
 		>
+			<ProviderIcon kind={kind} />
 			<input
 				ref={field}
 				className="source-tab-rename"
@@ -420,6 +426,7 @@ const ConnectButtons = ({
 			className={className}
 			{...(navigate === undefined ? {} : { navigate })}
 		>
+			<ProviderIcon kind={provider} />
 			{PROVIDER_LABELS[provider]}
 		</ConnectButton>
 	));
@@ -1063,6 +1070,7 @@ export const SourcePanel = ({
 										name={name}
 										selected={source.active}
 										maxLength={LABEL_LIMIT}
+										mark={<ProviderIcon kind={sourceKind(source)} />}
 										onDraft={(text) => {
 											renamings?.typed('source', source.connectionId, text);
 										}}
@@ -1090,14 +1098,17 @@ export const SourcePanel = ({
 											void showConnection(db, source.connectionId);
 									}}
 								>
-									<span className="row-label">
-										{name}
-										{source.detached !== undefined && (
-											<span className="source-tab-detached">
-												{' '}
-												— disconnected
-											</span>
-										)}
+									<span className="row-marked">
+										<ProviderIcon kind={sourceKind(source)} />
+										<span className="row-label">
+											{name}
+											{source.detached !== undefined && (
+												<span className="source-tab-detached">
+													{' '}
+													— disconnected
+												</span>
+											)}
+										</span>
 									</span>
 								</button>
 								{source.active ? (
@@ -1134,18 +1145,23 @@ export const SourcePanel = ({
 };
 
 /**
- * What the compact bar's source dropdown says: the source showing, or plain
- * "Storage" before there is one — the dropdown is there regardless, because
- * the storage panel is in it.
+ * What the compact bar's source dropdown is about: the source showing, or
+ * plain "Storage" before there is one — the dropdown is there regardless,
+ * because the storage panel is in it. Its name, for the trigger's tooltip and
+ * for a screen reader, and which storage it is, for the mark the trigger shows
+ * in place of the name.
  */
-export const useShowingSourceName = (
+export const useShowingSource = (
 	renaming?: Renaming,
 	db: NotesDatabase = defaultDb,
 	client: Pick<ApiClient, 'config' | 'startConnect' | 'checkConnectCode'> = api
-): string => {
+): { name: string; kind: SourceKind } => {
 	const { ordered } = useSourceChoices(db, client);
 	const showing = ordered.find((source) => source.active);
 	return showing === undefined
-		? 'Storage'
-		: shownSourceName(showing.connectionId, tabName(showing, ordered), renaming);
+		? { name: 'Storage', kind: undefined }
+		: {
+				name: shownSourceName(showing.connectionId, tabName(showing, ordered), renaming),
+				kind: sourceKind(showing),
+			};
 };

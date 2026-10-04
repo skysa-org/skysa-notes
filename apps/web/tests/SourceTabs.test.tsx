@@ -3,6 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
+import dropboxMark from '../src/assets/providers/dropbox.svg';
+import gdrive16 from '../src/assets/providers/gdrive-16.png';
+import gdrive32 from '../src/assets/providers/gdrive-32.png';
+import gdrive48 from '../src/assets/providers/gdrive-48.png';
+import onedriveMark from '../src/assets/providers/onedrive.svg';
 import { type AccountSlot, SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
 import {
@@ -224,6 +229,8 @@ describe('the source tabs', () => {
 		expect(box?.className).toContain('source-tab-active');
 		expect(box?.className).toContain('source-tab-editing');
 		expect(field.className).toBe('source-tab-rename');
+		// The mark stays in front of it: only the name becomes a field.
+		expect(box?.firstElementChild?.getAttribute('src')).toBe(dropboxMark);
 	});
 
 	it('leaves the name alone when the rename is abandoned', async () => {
@@ -283,6 +290,10 @@ describe('the source tabs', () => {
 		const menu = within(await screen.findByRole('group', { name: 'Storage providers' }));
 		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
 		expect(menu.getByRole('button', { name: 'OneDrive' })).toBeTruthy();
+		// Each with the mark its tab will have once it is connected.
+		expect(
+			menu.getByRole('button', { name: 'OneDrive' }).querySelector('img')?.getAttribute('src')
+		).toBe(onedriveMark);
 	});
 
 	it('offers the way to connect before there is anything to switch between', async () => {
@@ -332,6 +343,53 @@ describe('the source tabs', () => {
 
 		const found = await screen.findByRole('button', { name: 'Dropbox — disconnected' });
 		expect(found.textContent).toBe('Dropbox — disconnected');
+	});
+
+	it('puts which storage each source is in front of its name', async () => {
+		// The provider's own mark, so a source renamed "Work" still says where
+		// its notes are.
+		const db = freshDatabase();
+		await bindInOrder(db, [
+			{ connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:ada' },
+			{ connectionId: 'c2', provider: 'onedrive', accountId: 'live:bo' },
+		]);
+		await bindConnection(db, { connectionId: 'c3', provider: 'gdrive' });
+		await renameSource(db, 'c1', 'Work');
+		show(db);
+
+		const mark = async (name: string) =>
+			(await screen.findByRole('button', { name })).firstElementChild;
+		expect((await mark('Work'))?.getAttribute('src')).toBe(dropboxMark);
+		expect((await mark('OneDrive'))?.getAttribute('src')).toBe(onedriveMark);
+		// Google's own drawing at each size, where the screen has the pixels.
+		expect((await mark('Google Drive'))?.getAttribute('srcset')).toBe(
+			`${gdrive16} 1x, ${gdrive32} 2x, ${gdrive48} 3x`
+		);
+		// Said by the name beside it, so not said a second time.
+		expect((await mark('Work'))?.getAttribute('alt')).toBe('');
+		expect(tabs()).toEqual(['Work', 'OneDrive', 'Google Drive']);
+	});
+
+	it('marks this device, and a source that no longer says whose it was, each its own way', async () => {
+		const db = freshDatabase();
+		await createNote(db, { title: 'Mine' });
+		await db.syncState.put({
+			connectionId: 'c-gone',
+			clientId: 'client',
+			detached: { at: 1, reason: 'interrupted' },
+		});
+		await createNote(db, { connectionId: 'c-gone', title: 'Late' });
+		show(db);
+
+		const glyph = async (name: string) =>
+			(await screen.findByRole('button', { name }))
+				.querySelector('svg.provider-icon path')
+				?.getAttribute('d');
+		const gone = await glyph('A source — disconnected');
+		const device = await glyph('This device');
+		expect(gone).toBeDefined();
+		expect(device).toBeDefined();
+		expect(gone).not.toBe(device);
 	});
 
 	it('offers nothing to connect when the server cannot be asked', async () => {
@@ -428,6 +486,7 @@ describe('the source panel, in a compact window', () => {
 		const list = await within(panel()).findByRole('list');
 		const [dropbox, onedrive] = within(list).getAllByRole('button');
 		expect(dropbox?.textContent).toBe('Dropbox');
+		expect(dropbox?.querySelector('.provider-icon')?.getAttribute('src')).toBe(dropboxMark);
 		expect(dropbox?.getAttribute('aria-current')).toBe('true');
 		expect(onedrive?.textContent).toBe('OneDrive');
 		expect(onedrive?.getAttribute('aria-current')).toBeNull();
@@ -566,9 +625,11 @@ describe('the source panel, in a compact window', () => {
 				name: 'Rename',
 			})
 		);
-		// Its row is the field, with the name in it to type over.
+		// Its row is the field, with the name in it to type over, behind the
+		// same mark: nothing moves as the name becomes editable.
 		const field = within(panel()).getByRole('textbox', { name: 'Rename OneDrive' });
 		expect(document.activeElement).toBe(field);
+		expect(field.previousElementSibling?.getAttribute('src')).toBe(onedriveMark);
 		await user.keyboard('Work');
 		expect(shownSourceName('c2', 'OneDrive', renamings.get())).toBe('Work');
 

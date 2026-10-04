@@ -71,6 +71,10 @@ const PATHS = {
 	download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
 	open: 'M14 4h6v6M20 4l-9 9M18 14v5H5V6h5',
 	share: 'M12 15V4M8 8l4-4 4 4M5 12v8h14v-8',
+	// A source with no provider's mark: this device's own notes, and storage
+	// that no longer says whose it was (`ProviderIcon`).
+	device: 'M6 5h12a1 1 0 0 1 1 1v9H5V6a1 1 0 0 1 1-1zM3 19h18',
+	storage: 'M7 19a5 5 0 0 1-.6-9.96A6 6 0 0 1 17.6 9.2 4.5 4.5 0 0 1 17 19z',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;
@@ -129,9 +133,15 @@ export const iconElement = (name: IconName): SVGElement => {
  * Decorative throughout: every button carries its own name in `aria-label` or
  * in text beside the icon, so an icon announced as well would be said twice.
  */
-export const Icon = ({ name }: { name: IconName }) => (
+export const Icon = ({
+	name,
+	className = 'toolbar-icon',
+}: {
+	name: IconName;
+	className?: string;
+}) => (
 	<svg
-		className="toolbar-icon"
+		className={className}
 		viewBox={SVG_ATTRIBUTES.viewBox}
 		width={SVG_ATTRIBUTES.width}
 		height={SVG_ATTRIBUTES.height}

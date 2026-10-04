@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 /**
  * A row's name, being typed: a notebook's in the sidebar, a source's in a
@@ -17,6 +17,7 @@ export const RowRename = ({
 	selected,
 	count,
 	maxLength,
+	mark,
 	onDraft,
 	onDone,
 }: {
@@ -25,6 +26,8 @@ export const RowRename = ({
 	selected: boolean;
 	count?: number;
 	maxLength?: number;
+	/** In front of the field, where it is in front of the name on the row: a source's. */
+	mark?: ReactNode;
 	onDraft?: (text: string) => void;
 	/** The chosen name, or nothing at all when the rename was abandoned. */
 	onDone: (chosen?: string) => void;
@@ -49,35 +52,46 @@ export const RowRename = ({
 		onDone(chosen);
 	};
 
+	const input = (
+		<input
+			ref={field}
+			className="row-rename"
+			aria-label={`Rename ${name}`}
+			value={draft}
+			{...(maxLength === undefined ? {} : { maxLength })}
+			onChange={(event) => {
+				setDraft(event.target.value);
+				onDraft?.(event.target.value);
+			}}
+			onKeyDown={(event) => {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					finish(draft);
+				}
+				if (event.key === 'Escape') {
+					event.preventDefault();
+					finish();
+				}
+			}}
+			onBlur={() => {
+				finish(draft);
+			}}
+		/>
+	);
+
 	return (
 		<span
 			className={selected ? 'row-editing selected' : 'row-editing'}
 			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
 		>
-			<input
-				ref={field}
-				className="row-rename"
-				aria-label={`Rename ${name}`}
-				value={draft}
-				{...(maxLength === undefined ? {} : { maxLength })}
-				onChange={(event) => {
-					setDraft(event.target.value);
-					onDraft?.(event.target.value);
-				}}
-				onKeyDown={(event) => {
-					if (event.key === 'Enter') {
-						event.preventDefault();
-						finish(draft);
-					}
-					if (event.key === 'Escape') {
-						event.preventDefault();
-						finish();
-					}
-				}}
-				onBlur={() => {
-					finish(draft);
-				}}
-			/>
+			{mark === undefined ? (
+				input
+			) : (
+				<span className="row-marked">
+					{mark}
+					{input}
+				</span>
+			)}
 			{count !== undefined && count > 0 && <span className="count">{count}</span>}
 		</span>
 	);
