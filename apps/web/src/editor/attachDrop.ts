@@ -117,6 +117,36 @@ const placeNear = (doc: ProseNode, at: number): number => {
 };
 
 /**
+ * Put `node` in at `at`. A picture is a thing of its own, never on a line with
+ * words: where it lands in a paragraph holding anything else, it goes in a
+ * paragraph of its own there — before the paragraph at its start, after it at
+ * its end, and between its halves in its middle. Several of one paste each
+ * have their own, in the order they came, the placeholders of those still to
+ * come being carried past each one put in.
+ *
+ * A paragraph only. A heading split is two headings, and a table's cell holds
+ * one line, so a picture put in either is put where it lands; so is a file's
+ * chip, which is a name in a line of text.
+ */
+const putIn = (tr: Transaction, at: number, node: ProseNode): Transaction => {
+	const $at = tr.doc.resolve(at);
+	const { image, paragraph } = tr.doc.type.schema.nodes;
+	const alone =
+		node.type !== image ||
+		paragraph === undefined ||
+		$at.parent.type !== paragraph ||
+		$at.parent.content.size === 0 ||
+		$at.node(-1).type.spec.tableRole !== undefined;
+	if (alone) return tr.insert(at, node);
+	if ($at.parentOffset === 0) return tr.insert($at.before(), paragraph.create(null, node));
+	const atEnd = $at.parentOffset === $at.parent.content.size;
+	// Split there, and into the empty paragraph the end leaves, or between the
+	// halves the middle leaves.
+	const split = tr.split(at);
+	return atEnd ? split.insert(at + 2, node) : split.insert(at + 1, paragraph.create(null, node));
+};
+
+/**
  * Put one added file where its placeholder is, or say why it is not there.
  * Answers whether it was lost to the note closing first: added, and with
  * nowhere to go in.
@@ -141,7 +171,7 @@ const place = (
 	// Near, not at: what was around it may have become a code block meanwhile.
 	const at = placeNear(view.state.doc, placeOf(view.state, id) ?? view.state.selection.from);
 	// An undo step of its own, not one with what was typed beside it a moment ago.
-	view.dispatch(closeHistory(done.insert(at, node)));
+	view.dispatch(closeHistory(putIn(done, at, node)));
 	return false;
 };
 

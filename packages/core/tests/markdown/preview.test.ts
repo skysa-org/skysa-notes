@@ -108,6 +108,25 @@ describe('inline syntax', () => {
 		);
 	});
 
+	// A picture is a thing of its own on screen, and so is a file's chip; what
+	// either says is never run into the word beside it.
+	it('keeps what a picture or a file says apart from the words beside it', () => {
+		expect(
+			previewText(
+				'coast![Pasted image](pasted-image-1a2b3c4d.png)![Beach](beach-1a2b3c4d.jpg)\n'
+			)
+		).toBe('coast Pasted image Beach');
+		expect(previewText('see[Q3 report.pdf](q3-report-1a2b3c4d.pdf)now\n')).toBe(
+			'see Q3 report.pdf now'
+		);
+	});
+
+	it('runs a link that is not a file’s chip into its words, as the editor shows it', () => {
+		expect(previewText('a[b](https://example.com)c [*Q3* report](q3.pdf)s\n')).toBe(
+			'abc Q3 reports'
+		);
+	});
+
 	it('keeps punctuation the user escaped, and reads an entity as its character', () => {
 		expect(previewText('\\*not emphasis\\* &amp; 2 \\< 3\n')).toBe('*not emphasis* & 2 < 3');
 	});
