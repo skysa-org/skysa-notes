@@ -1,5 +1,11 @@
 # @skysa/core
 
+## 0.11.1
+
+### Patch Changes
+
+- 8f50a08: When the rich editor keeps a note in markdown mode, the banner now always says what it found. If the editor would add something the note doesn't have, the banner says so and shows what it is, including its text, with invisible characters written out. A kind of markdown the banner has no friendly name for is named as it is, rather than as "markdown the rich editor has no way to show".
+
 ## 0.11.0
 
 ### Minor Changes

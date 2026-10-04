@@ -1,5 +1,12 @@
 # @skysa/api
 
+## 0.11.1
+
+### Patch Changes
+
+- Updated dependencies [8f50a08]
+  - @skysa/core@0.11.1
+
 ## 0.11.0
 
 ### Patch Changes
