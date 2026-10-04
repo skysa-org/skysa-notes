@@ -1394,6 +1394,16 @@ button.danger {
 	padding-block: var(--gutter);
 }
 
+/* The caret in the page's own text colour. CodeMirror gives it black unless
+   the editor is declared dark, which this one never is — its colours are the
+   page's tokens, dark or light by the page's — so in dark mode the caret was
+   black on the dark background, there and blinking but unseen. Three classes,
+   to outweigh CodeMirror's own rule (`&light .cm-content`, two), which it adds
+   to the page after this sheet. */
+.editor .cm-editor .cm-content {
+	caret-color: var(--fg);
+}
+
 .editor .cm-gutters {
 	border-inline-end: 1px solid var(--border);
 	background: var(--surface);
