@@ -9,7 +9,7 @@ import {
 	type Shown,
 	type ShowOptions,
 } from '../src/editor/attachHost.js';
-import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
+import { createRichEditor, currentMarkdown, whatIsLost } from '../src/editor/rich.js';
 
 /**
  * A picture in a note, drawn by the rich editor's image view (#187), against a
@@ -315,6 +315,27 @@ describe('a picture beside the note', () => {
 		img()?.dispatchEvent(new Event('error'));
 
 		expect(picture()?.getAttribute('data-state')).toBe('loading');
+	});
+});
+
+// remark gives a picture with no title the title `null`, and Milkdown passed it
+// on; from prosemirror-model 1.25.12 a node is checked against its schema as it
+// is made, the schema says a title is a string, and the parse threw. Every
+// note with a picture in it then failed the rich editor's check once it was
+// opened again — only in a build whose lockfile had 1.25.12, the deployed one.
+describe('a picture read from the note', () => {
+	it.each([
+		['with no title', '![Pasted image](pasted-image-3b8fbf95.png)\n', ''],
+		['with a title', '![a](a.png "A title")\n', 'A title'],
+		['with no alt text', '![](a.png)\n', ''],
+	])('opens, %s, and is written back as it was', async (_, body, title) => {
+		const mounted = await mount(body);
+
+		const picture = mounted.view.state.doc.firstChild?.firstChild;
+		expect(picture?.type.name).toBe('image');
+		expect(picture?.attrs.title).toBe(title);
+		expect(mounted.editor.action((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(mounted.editor.action(currentMarkdown)).toBe(body);
 	});
 });
 

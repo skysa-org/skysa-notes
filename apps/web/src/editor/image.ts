@@ -320,9 +320,22 @@ export const unloadablePicturesInWords = $prose(
 		})
 );
 
+/** A picture's attribute as remark read it, or the schema's own default where it has none. */
+const stringOf = (value: unknown): string => (typeof value === 'string' ? value : '');
+
 /**
- * Milkdown's image, read from and written to the DOM — the clipboard — with
- * two changes:
+ * Milkdown's image, read from markdown and from and to the DOM — the
+ * clipboard — with three changes:
+ *
+ * - Read from markdown, a picture with no title has the title `''`, not the
+ *   `null` remark gives it. The schema says a title is a string, and
+ *   ProseMirror checks that as a node is made from 1.25.12, not only when a
+ *   document is checked: Milkdown's own reader handed it `null`, the parse
+ *   threw, and every note with a picture in it failed the rich editor's check
+ *   once it was opened again — a picture just put in was made with `''`, and
+ *   was fine until then (2026-10-04). Its alt the same, for a picture remark
+ *   gives none. Nothing is written differently: an empty title was never
+ *   written.
  *
  * - An `alt` is not copied into `title` when an `<img>` is pasted. Milkdown's
  *   own rule does, and a picture pasted from a web page came back
@@ -334,6 +347,7 @@ export const unloadablePicturesInWords = $prose(
  *   `referrerpolicy` the view loads it with.
  *
  * https://github.com/Milkdown/milkdown/blob/v7.22.1/packages/plugins/preset-commonmark/src/node/image.ts
+ * https://github.com/ProseMirror/prosemirror-model/blob/1.25.12/src/schema.ts (`computeAttrs`)
  */
 export const imageWithoutStrayTitles =
 	(schema: (ctx: Ctx) => NodeSchema) =>
@@ -341,6 +355,16 @@ export const imageWithoutStrayTitles =
 		const spec = schema(ctx);
 		return {
 			...spec,
+			parseMarkdown: {
+				...spec.parseMarkdown,
+				runner: (state, node, type) => {
+					state.addNode(type, {
+						src: stringOf(node.url),
+						alt: stringOf(node.alt),
+						title: stringOf(node.title),
+					});
+				},
+			},
 			parseDOM: [
 				{
 					tag: 'img',
