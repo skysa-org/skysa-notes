@@ -15,10 +15,10 @@ import { PROGRAMMATIC_META } from './dirty.js';
  * keys. This is the same affordance Atlassian's editor has under a trailing
  * block, and for the same reason.
  *
- * What it is not is a trailing paragraph kept in the document. Milkdown drops
- * an empty paragraph at the *end* of a document when it serializes — a `<br />`
- * anywhere else survives the round trip, one at the end does not — so a
- * paragraph parked there would be a difference between the note on screen and
+ * What it is not is a trailing paragraph kept in the document. An empty
+ * paragraph at the *end* of a document is written as nothing — one between two
+ * blocks is a blank line in the file (§7), and one at the end has no blank line
+ * to be — so a paragraph parked there would be a difference between the note on screen and
  * the note in the file that nothing would ever reconcile, and the way out
  * would vanish from under the block that needed it. The paragraph appears when
  * it is asked for, and goes away again if the user thinks better of it.
@@ -108,8 +108,8 @@ export const tailPlugin = new Plugin<boolean>({
 	/**
 	 * Take the offer back when the cursor leaves it still empty — a click on the
 	 * strip, then a click somewhere else. Only ever the paragraph this plugin
-	 * put there and nobody has typed in, so an empty paragraph that came from
-	 * the user's own file (a `<br />` at the end of it) is never touched.
+	 * put there and nobody has typed in, so an empty paragraph the user made,
+	 * or one the file's blank lines stand for, is never touched.
 	 */
 	appendTransaction: (_transactions, _before, state) => {
 		if (tailKey.getState(state) !== true) return null;
