@@ -58,6 +58,8 @@ export interface NoteAttachmentsOptions {
 	 * Resolves to whether it is stored.
 	 */
 	store?: () => Promise<boolean>;
+	/** A file was put in the note, at `path` from the root of its source. */
+	onAdded?: (path: string) => void;
 	urls?: ObjectUrlCache;
 	now?: () => number;
 }
@@ -113,6 +115,7 @@ export const createNoteAttachments = ({
 	readFile,
 	report = () => undefined,
 	store = () => Promise.resolve(true),
+	onAdded = () => undefined,
 	urls = createObjectUrlCache(),
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
@@ -182,6 +185,7 @@ export const createNoteAttachments = ({
 				type: file.type,
 				pasted,
 			});
+			onAdded(added.path);
 			return { state: 'added', ...added };
 		} catch (error) {
 			if (error instanceof AttachmentRefusedError) {
@@ -266,6 +270,8 @@ export interface NoteAttachmentsSources {
 	readonly report?: (problem: AttachmentProblem) => void;
 	/** Store the note first, while it is a draft (`NoteViewProps.draft`). */
 	readonly store?: (() => Promise<boolean>) | undefined;
+	/** Hears of each file put in the note (`NoteAttachmentsOptions.onAdded`). */
+	readonly onAdded?: ((path: string) => void) | undefined;
 }
 
 /**
@@ -285,6 +291,7 @@ export const useNoteAttachments = (
 		subscribe = syncScheduler.subscribe,
 		report,
 		store,
+		onAdded,
 	}: NoteAttachmentsSources = {}
 ): NoteAttachments => {
 	const current = useRef<Pick<NoteRecord, 'connectionId' | 'id' | 'path'>>(note);
@@ -303,6 +310,10 @@ export const useNoteAttachments = (
 	useEffect(() => {
 		storing.current = store;
 	}, [store]);
+	const adding = useRef(onAdded);
+	useEffect(() => {
+		adding.current = onAdded;
+	}, [onAdded]);
 
 	const host = useMemo(
 		() =>
@@ -314,6 +325,9 @@ export const useNoteAttachments = (
 					told.current?.(problem);
 				},
 				store: () => storing.current?.() ?? Promise.resolve(true),
+				onAdded: (path) => {
+					adding.current?.(path);
+				},
 			}),
 		// One per note, whatever else of it changes.
 		[note.id, db]

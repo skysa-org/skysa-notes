@@ -47,6 +47,7 @@ import {
 import { useNoteAttachments } from './noteAttachments.js';
 import { Outline } from './Outline.js';
 import { UnsupportedBanner, useUnsupported } from './unsupported.js';
+import { useFileCleanup } from './useFileCleanup.js';
 
 /** The open note: its title, its body, and the actions that act on it. */
 
@@ -312,6 +313,7 @@ const NoteBody = ({
 	onUnsupported,
 	onAdopted,
 	onBody,
+	onAdded,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -330,9 +332,15 @@ const NoteBody = ({
 	onAdopted: () => void;
 	/** The element, for whoever sizes the outline by its width. */
 	onBody: (element: HTMLDivElement | null) => void;
+	/** A file was put in the note (`useFileCleanup`). */
+	onAdded: (path: string) => void;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
-	const attachments = useNoteAttachments(note, { report: onProblem, store: draft?.store });
+	const attachments = useNoteAttachments(note, {
+		report: onProblem,
+		store: draft?.store,
+		onAdded,
+	});
 	// Either editor's, through the one open: the toolbar's paperclip and the
 	// slash menu are the rich editor's, and this is raw mode's only way.
 	useCommand({
@@ -580,6 +588,8 @@ export const NoteView = ({
 	const unsupported = useUnsupported(note, { rebased, settle, failing: autosave.failing });
 	const locked = unsupported.lost !== undefined;
 	const { edited } = unsupported;
+	// What this visit took out of the note, looked at once it is left.
+	const { edited: editedInVisit, added: addedInVisit } = useFileCleanup(note);
 
 	const onUserEdit = useCallback(
 		(body: string, origin: string) => {
@@ -590,8 +600,9 @@ export const NoteView = ({
 			if (typedInto !== undefined) liveEdits?.typed(noteRef(typedInto), body, origin);
 			change({ body, origin, note: typedInto });
 			edited();
+			editedInVisit(body, origin);
 		},
-		[change, edited, draft, liveEdits]
+		[change, edited, draft, liveEdits, editedInVisit]
 	);
 
 	const rename = useCallback(
@@ -766,6 +777,7 @@ export const NoteView = ({
 				// not typed over it: saved as the body, it would put text the
 				// editor no longer shows over the text it does.
 				onAdopted={overtaken}
+				onAdded={addedInVisit}
 			/>
 		</FindTargetProvider>
 	);
@@ -872,6 +884,7 @@ const NoteScreen = ({
 	onProblem,
 	onUnsupported,
 	onAdopted,
+	onAdded,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -897,6 +910,7 @@ const NoteScreen = ({
 	onProblem: NoteViewProps['onProblem'];
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
+	onAdded: (path: string) => void;
 }) => {
 	// Whether there is an outline to open. A button for a rail that would be
 	// empty is a button that does nothing when pressed.
@@ -1011,6 +1025,7 @@ const NoteScreen = ({
 				onUnsupported={onUnsupported}
 				onAdopted={onAdopted}
 				onBody={onBody}
+				onAdded={onAdded}
 			/>
 		</section>
 	);
