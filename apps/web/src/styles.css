@@ -2050,7 +2050,7 @@ button.danger {
 }
 
 @media (hover: hover) {
-	.toolbar-button:hover:not(:disabled) {
+	.toolbar-button:hover:not(:disabled, [aria-disabled='true']) {
 		background: var(--hover-bg);
 	}
 }
@@ -2062,7 +2062,8 @@ button.danger {
 	background: var(--on-bg);
 }
 
-.toolbar-button:disabled {
+.toolbar-button:disabled,
+.toolbar-button[aria-disabled='true'] {
 	color: var(--muted);
 	opacity: 0.5;
 	cursor: default;

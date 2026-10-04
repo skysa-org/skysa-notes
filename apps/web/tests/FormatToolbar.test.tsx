@@ -1,7 +1,7 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -156,10 +156,15 @@ describe('FormatToolbar', () => {
 		editor.withCtx(cursorIn('code'));
 		editor.redraw();
 
-		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Bold' }).disabled).toBe(true);
-		expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Italic' }).disabled).toBe(
-			true
+		// Off, and said to be, where a keyboard can still reach them.
+		expect(screen.getByRole('button', { name: 'Bold' }).getAttribute('aria-disabled')).toBe(
+			'true'
 		);
+		expect(screen.getByRole('button', { name: 'Italic' }).getAttribute('aria-disabled')).toBe(
+			'true'
+		);
+		await userEvent.click(screen.getByRole('button', { name: 'Bold' }));
+		expect(editor.markdown()).toBe('```js\ncode\n```\n');
 	});
 
 	it('asks for files to put in the note when the paperclip is pressed', async () => {
@@ -242,11 +247,14 @@ describe('FormatToolbar', () => {
 		editor.redraw();
 
 		expect(
-			screen.getByRole<HTMLButtonElement>('button', { name: 'Increase indent' }).disabled
-		).toBe(true);
+			screen.getByRole('button', { name: 'Increase indent' }).getAttribute('aria-disabled')
+		).toBe('true');
 		expect(
-			screen.getByRole<HTMLButtonElement>('button', { name: 'Decrease indent' }).disabled
-		).toBe(true);
+			screen.getByRole('button', { name: 'Decrease indent' }).getAttribute('aria-disabled')
+		).toBe('true');
+		expect(screen.getByRole('button', { name: 'Bold' }).hasAttribute('aria-disabled')).toBe(
+			false
+		);
 	});
 
 	it('nests a list item, and stops offering to when it cannot', async () => {
@@ -333,6 +341,123 @@ describe('FormatToolbar', () => {
 
 		expect(screen.queryByRole('button', { name: /Heading 1/ })).toBeNull();
 		expect(document.activeElement).not.toBe(style);
+	});
+
+	it('formats the selection from the keyboard, with Enter or Space on a button', async () => {
+		const user = userEvent.setup();
+		const editor = await harness('plain\n');
+		editor.withCtx(selecting('plain'));
+		const bold = screen.getByRole('button', { name: 'Bold' });
+		bold.focus();
+
+		await user.keyboard('{Enter}');
+		expect(editor.markdown()).toBe('**plain**\n');
+
+		await user.keyboard(' ');
+		expect(editor.markdown()).toBe('plain\n');
+	});
+
+	it('opens a panel from the keyboard, with what is in it next in the tab order', async () => {
+		const user = userEvent.setup();
+		const editor = await harness('plain\n');
+		editor.withCtx(cursorIn('plain'));
+		screen.getByRole('button', { name: /^Text style/ }).focus();
+
+		await user.keyboard('{Enter}');
+		await user.tab();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Plain text' }));
+		screen.getByRole('button', { name: 'Heading 1' }).focus();
+		await user.keyboard('{Enter}');
+
+		expect(editor.markdown()).toBe('# plain\n');
+		expect(screen.queryByRole('button', { name: 'Heading 2' })).toBeNull();
+	});
+
+	it('closes a panel once Tab has gone past it', async () => {
+		const user = userEvent.setup();
+		await harness('plain\n');
+		const after = document.createElement('button');
+		after.textContent = 'After';
+		document.body.append(after);
+		screen.getByRole('button', { name: /^Text style/ }).focus();
+		await user.keyboard('{Enter}');
+
+		// Through it, it stays.
+		await user.tab();
+		await user.tab();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Heading 1' }));
+		screen.getByRole('button', { name: 'Heading 6' }).focus();
+		await user.tab();
+
+		expect(document.activeElement).toBe(after);
+		expect(screen.queryByRole('button', { name: 'Heading 1' })).toBeNull();
+	});
+
+	// Another window taking focus, and giving it back to the editor beside an
+	// open panel, is not the user leaving the panel.
+	it('keeps a panel open when focus goes to another window and comes back', async () => {
+		await harness('plain\n');
+		const outside = document.createElement('button');
+		document.body.append(outside);
+		outside.focus();
+		fireEvent.mouseDown(screen.getByRole('button', { name: /^Text style/ }));
+		expect(screen.getByRole('button', { name: 'Heading 1' })).toBeDefined();
+
+		act(() => {
+			outside.blur();
+			outside.focus();
+		});
+		screen.getByRole('button', { name: 'Heading 1' }).focus();
+		act(() => {
+			screen.getByRole('button', { name: 'Heading 1' }).blur();
+		});
+
+		expect(screen.getByRole('button', { name: 'Heading 1' })).toBeDefined();
+	});
+
+	it('is a disclosure, not a menu: its panel is a group of ordinary controls', async () => {
+		const user = userEvent.setup();
+		await harness('plain\n');
+		const trigger = screen.getByRole('button', { name: /^Text style/ });
+
+		expect(trigger.hasAttribute('aria-haspopup')).toBe(false);
+		expect(trigger.getAttribute('aria-expanded')).toBe('false');
+		trigger.focus();
+		await user.keyboard('{Enter}');
+
+		expect(trigger.getAttribute('aria-expanded')).toBe('true');
+		const panel = document.getElementById(trigger.getAttribute('aria-controls') ?? '');
+		expect(panel?.getAttribute('role')).toBe('group');
+		expect(panel?.getAttribute('aria-label')).toBe('Text style');
+	});
+
+	it('leaves the arrow keys to the link field, for moving about in the address', async () => {
+		const user = userEvent.setup();
+		const editor = await harness('plain\n');
+		editor.withCtx(selecting('plain'));
+		screen.getByRole('button', { name: 'Link' }).focus();
+		await user.keyboard('{Enter}');
+		const field = screen.getByLabelText<HTMLInputElement>('Link to');
+		expect(document.activeElement).toBe(field);
+
+		await user.keyboard('https://example.cm{ArrowLeft}o');
+
+		expect(document.activeElement).toBe(field);
+		expect(field.value).toBe('https://example.com');
+		await user.keyboard('{Enter}');
+		expect(editor.markdown()).toBe('[plain](https://example.com)\n');
+	});
+
+	it('asks for files from the keyboard', async () => {
+		const user = userEvent.setup();
+		await harness('plain\n');
+		const click = vi.spyOn(HTMLInputElement.prototype, 'click');
+		screen.getByRole('button', { name: 'Attach files' }).focus();
+
+		await user.keyboard('{Enter}');
+
+		expect(click).toHaveBeenCalledOnce();
+		document.querySelector('input[type="file"]')?.dispatchEvent(new Event('cancel'));
 	});
 
 	// Fourteen buttons between the note's title and its text would otherwise be
