@@ -119,9 +119,9 @@ export const useUnsupported = (
 };
 
 /**
- * The words for what the editor could not show, by mdast type. Only what a
- * banner can usefully point at: anything else is described as "markdown", as
- * the banner always used to.
+ * The words for what the editor could not show, by mdast type. A type with no
+ * words here is named as it is: a banner that names nothing gives the user,
+ * and whoever they report it to, nothing to look for (2026-10-04).
  */
 const NAMES: Record<string, string> = {
 	blockquote: 'a quote',
@@ -140,12 +140,30 @@ const NAMES: Record<string, string> = {
 	linkReference: 'a reference-style link',
 	list: 'a list',
 	listItem: 'a list item',
+	paragraph: 'a paragraph',
 	strong: 'bold text',
 	table: 'a table',
+	tableCell: 'a table cell',
+	tableRow: 'a table row',
 	thematicBreak: 'a divider',
+	toml: 'frontmatter',
+	yaml: 'frontmatter',
 };
 
+/**
+ * Text as a banner can show it: what cannot be seen — a control character, a
+ * zero-width one, a space other than the plain one — written as its code
+ * point, since what an editor added unseen is exactly what is being looked for.
+ */
+const seen = (text: string): string =>
+	text.replace(
+		/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|[^\S ]/gu,
+		(char) => `U+${(char.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`
+	);
+
 const what = (lost: StructuralDifference): ReactNode => {
+	// The note as a whole: nothing in it is the one thing to point at.
+	if (lost.type === 'root') return undefined;
 	if (lost.type === 'html') {
 		return lost.value === undefined ? (
 			'some HTML'
@@ -155,7 +173,17 @@ const what = (lost: StructuralDifference): ReactNode => {
 			</>
 		);
 	}
-	return NAMES[lost.type];
+	const named = NAMES[lost.type] ?? (
+		<>
+			markdown of the kind <code>{lost.type}</code>
+		</>
+	);
+	if (lost.value === undefined) return lost.type === 'text' ? 'some text' : named;
+	return (
+		<>
+			{lost.type === 'text' ? 'the text' : named} <code>“{seen(lost.value)}”</code>
+		</>
+	);
 };
 
 export const UnsupportedBanner = ({
@@ -171,6 +199,11 @@ export const UnsupportedBanner = ({
 		<p className="banner" role="status">
 			{named === undefined ? (
 				'This note uses markdown the rich editor has no way to show'
+			) : lost.added === true ? (
+				<>
+					The rich editor would add {named}
+					{where} that this note does not have
+				</>
 			) : (
 				<>
 					The rich editor has no way to show {named}
