@@ -313,7 +313,7 @@ describe('a picture put in the note', () => {
 	});
 
 	it('goes in an empty paragraph as it is', async () => {
-		const mounted = await picturesAt('one\n\n<br />\n\ntwo\n', 6, 'a');
+		const mounted = await picturesAt('one\n\n\ntwo\n', 6, 'a');
 
 		expect(mounted.markdown()).toBe('one\n\n![a](a.png)\n\ntwo\n');
 	});
@@ -377,14 +377,14 @@ describe('a picture put in the note', () => {
 
 	it('goes in a paragraph of nothing but spaces as it is, the spaces gone', async () => {
 		const { host, answer } = fakeHost();
-		const mounted = await mount('one\n\n<br />\n', host);
+		const mounted = await mount('one\n\n\ntwo\n', host);
 		mounted.view.dispatch(mounted.view.state.tr.insertText('   ', 6));
 		cursorAt(mounted.view, 8);
 
 		paste(mounted.view, carrying([fileNamed('a.png')]));
 		await answer(picture('a'));
 
-		expect(mounted.markdown()).toBe('one\n\n![a](a.png)\n');
+		expect(mounted.markdown()).toBe('one\n\n![a](a.png)\n\ntwo\n');
 	});
 
 	it('takes a line break beside it, which would be an empty line', async () => {

@@ -17,6 +17,7 @@ import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
 import {
 	commonmark,
 	imageSchema,
+	paragraphSchema,
 	remarkPreserveEmptyLinePlugin,
 } from '@milkdown/kit/preset/commonmark';
 import {
@@ -27,7 +28,7 @@ import {
 } from '@milkdown/kit/preset/gfm';
 import { dropCursor } from '@milkdown/kit/prose/dropcursor';
 import { keymap } from '@milkdown/kit/prose/keymap';
-import { type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
+import { Fragment, type Node as ProseNode, Slice } from '@milkdown/kit/prose/model';
 import { type EditorState, Plugin, type PluginSpec } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import type { NodeSchema } from '@milkdown/kit/transformer';
@@ -133,36 +134,55 @@ const watchState = (report: (state: EditorState) => void) =>
 	});
 
 /**
- * The `<br />` the editor writes for an empty paragraph, read back as one — and
- * nothing else.
+ * Blank lines between blocks, kept as blank lines (2026-10-04).
  *
- * Milkdown writes an empty paragraph as a line holding only `<br />` (§7,
- * "Empty paragraphs become `<br />`"), and its preset reads that back with
- * `remarkPreserveEmptyLinePlugin`. But that plugin removes *every* html node
- * spelled `<br />`, `<br>`, `<br/>` or `<br >`, wherever it sits: a break
- * inside a sentence was deleted outright, `first<br />second` becoming
- * `firstsecond`, and the fidelity check rightly sent the note to raw mode.
+ * Markdown has no blank paragraph: a blank line separates two blocks, and
+ * three say no more than one. Milkdown wrote an empty paragraph as a line
+ * holding only `<br />`, the one thing the editor put in a file that the user
+ * had not typed, and an empty paragraph with nothing after it as nothing at
+ * all — so a note of one empty line and another was written as `<br />`, read
+ * back as one empty line, last, and written as nothing, and the fidelity check
+ * sent the note to raw mode for the `<br />` it had lost. Now an empty
+ * paragraph is one more blank line between the blocks either side of it
+ * (`BLANK_LINE`, written by `blankLinesBetween`), and is read back from how
+ * many there are: remark drops them, but every block says which lines it
+ * spans, so the gap is still there to count. A file another app wrote with
+ * three blank lines between two paragraphs shows two empty lines there, as its
+ * raw text does.
+ *
+ * Only between blocks, and only in what holds blocks: the note, a quote, a
+ * list item. One at the start or end of any of them is written as nothing,
+ * and blank lines there are read as nothing — the blank line the app writes
+ * under a note's frontmatter is the top of its body, and would otherwise be an
+ * empty line at the top of every note that has it.
+ *
+ * A `<br />` is the author's html wherever it is, and is written back as it
+ * was, as an inline atom — `first<br />second`, and one on a line of its own
+ * alike — the rule `previewLines` in `core` follows. Milkdown's own reader
+ * (`remarkPreserveEmptyLinePlugin`) took every `<br>`, in four spellings and
+ * anywhere in the note, and deleted it, so it is left out.
  * https://github.com/Milkdown/milkdown/blob/v7.22.1/packages/plugins/preset-commonmark/src/plugin/remark-preserve-empty-line.ts
- *
- * So the preset's is left out and this one stands in its place, taking only
- * the shape the editor writes: a paragraph whose one child is exactly `<br />`
- * (the preset's `remarkHtmlTransformer` has by then wrapped a block of html in
- * a paragraph). Anything else is the author's own html and stays in the
- * document as an inline atom, which the serializer writes back as it was — the
- * rule `previewLines` in `core` follows for the same reason.
- *
- * The preset's plugin is left out but its *options* are not: the paragraph
- * serializer decides whether to write `<br />` for an empty paragraph by
- * asking for that ctx slice, so removing it would break the other half.
+ * The one `<br />` the editor still writes is an empty task item's
+ * (`itemWithoutEmptyLine`), and it is read back as an empty paragraph there.
  */
+const BLANK_LINE = 'blankLine';
+
 const EMPTY_LINE = '<br />';
+
+interface MdastPoint {
+	readonly line: number;
+}
 
 interface MdastNode {
 	readonly type: string;
 	readonly value?: unknown;
 	readonly checked?: unknown;
 	readonly children?: readonly MdastNode[];
+	readonly position?: Readonly<{ start: MdastPoint; end: MdastPoint }>;
 }
+
+/** What holds blocks, rather than items, rows or words. */
+const HOLDS_BLOCKS = new Set(['root', 'blockquote', 'listItem']);
 
 const isEmptyLine = (node: MdastNode): boolean => {
 	const [only] = node.children ?? [];
@@ -175,51 +195,108 @@ const isEmptyLine = (node: MdastNode): boolean => {
 };
 
 /**
- * Whether a list item whose first paragraph is empty is written as its marker
- * alone (`itemWithoutEmptyLine`), asked the same way of the item the editor
- * writes and of the one it reads. Not a task item, whose box GFM writes only
- * before a paragraph, and not one whose next block is a paragraph, which
- * would be read back as the item's first.
+ * The lines a block spans: its own, or else its children's — the preset's
+ * `remarkHtmlTransformer` wraps a block of html in a paragraph it gives no
+ * position.
  */
-const markerAlone = (checked: unknown, next: string | undefined): boolean =>
-	(checked === null || checked === undefined) && next !== 'paragraph';
+const linesOf = (node: MdastNode): { first: number; last: number } | undefined => {
+	if (node.position !== undefined)
+		return { first: node.position.start.line, last: node.position.end.line };
+	const children = node.children ?? [];
+	const head = children[0];
+	const tail = children.at(-1);
+	const first = head === undefined ? undefined : linesOf(head)?.first;
+	const last = tail === undefined ? undefined : linesOf(tail)?.last;
+	return first === undefined || last === undefined ? undefined : { first, last };
+};
 
-const emptyEmptyLines = (node: MdastNode): MdastNode => {
+/** An empty paragraph for each blank line past the one that only separates. */
+const emptyLines = (blank: number): MdastNode[] =>
+	Array.from({ length: Math.max(0, blank - 1) }, () => ({ type: 'paragraph', children: [] }));
+
+const withEmptyLines = (node: MdastNode): MdastNode => {
 	const children = node.children;
 	if (children === undefined) return node;
-	if (isEmptyLine(node)) return { ...node, children: [] };
-	// Where the editor writes an empty item as its marker alone, it never
-	// writes `<br />` for one, so a `<br />` there is the author's own.
-	const [first, ...rest] = children;
-	if (
-		node.type === 'listItem' &&
-		first !== undefined &&
-		isEmptyLine(first) &&
-		markerAlone(node.checked, rest[0]?.type)
-	) {
-		return { ...node, children: [first, ...rest.map(emptyEmptyLines)] };
-	}
-	return { ...node, children: children.map(emptyEmptyLines) };
+	// An empty task item's `<br />` (`itemWithoutEmptyLine`), and only that one.
+	const task = node.type === 'listItem' && typeof node.checked === 'boolean';
+	const read = children.map((child, index) =>
+		task && index === 0 && isEmptyLine(child)
+			? { ...child, children: [] }
+			: withEmptyLines(child)
+	);
+	if (!HOLDS_BLOCKS.has(node.type)) return { ...node, children: read };
+	return {
+		...node,
+		children: read.flatMap((child, index) => {
+			const previous = children[index - 1];
+			const before = previous === undefined ? undefined : linesOf(previous);
+			const here = linesOf(child);
+			if (before === undefined || here === undefined) return [child];
+			return [...emptyLines(here.first - before.last - 1), child];
+		}),
+	};
 };
 
 // A transformer may hand back a new tree in place of the one it was given, and
-// this one is the same tree with some paragraphs emptied: still a root.
+// this one is the same tree with empty paragraphs in it: still a root.
 const emptyLinePlugin = $remark(
 	'skysa-empty-line',
-	() => () => (tree) => emptyEmptyLines(tree) as typeof tree
+	() => () => (tree) => withEmptyLines(tree) as typeof tree
 );
 
+/**
+ * Whether the join between two blocks says nothing (`-1`, a `BLANK_LINE` at the
+ * start or end of what holds it), a line ending (`0`, a `BLANK_LINE` after
+ * anything), or the blank line that separates (`1`). Every other join is left
+ * to the writer.
+ */
+const blankLinesBetween = (left: { type: string }, right: { type: string }, parent: unknown) => {
+	if (left.type !== BLANK_LINE && right.type !== BLANK_LINE) return undefined;
+	const siblings = (parent as { children: readonly { type: string }[] }).children;
+	const at = siblings.indexOf(left);
+	const real = (node: { type: string }) => node.type !== BLANK_LINE;
+	if (!siblings.slice(0, at + 1).some(real) || !siblings.slice(at + 1).some(real)) return -1;
+	return right.type === BLANK_LINE ? 0 : 1;
+};
+
+/** `core`'s options, and what an empty paragraph is written as. */
+const EDITOR_STRINGIFY_OPTIONS = {
+	...STRINGIFY_OPTIONS,
+	join: [...(STRINGIFY_OPTIONS.join ?? []), blankLinesBetween],
+	handlers: { ...STRINGIFY_OPTIONS.handlers, [BLANK_LINE]: () => '' },
+};
+
+/** An empty paragraph handed to the writer as a `BLANK_LINE`; any other as Milkdown writes it. */
+const paragraphAsBlankLine =
+	(schema: (ctx: Ctx) => NodeSchema) =>
+	(ctx: Ctx): NodeSchema => {
+		const spec = schema(ctx);
+		const write = spec.toMarkdown.runner;
+		return {
+			...spec,
+			toMarkdown: {
+				...spec.toMarkdown,
+				runner: (state, node) => {
+					if (node.content.size === 0) state.addNode(BLANK_LINE);
+					else write(state, node);
+				},
+			},
+		};
+	};
+
 const commonmarkWithoutBreakEater = commonmark.filter(
-	(plugin) => plugin !== remarkPreserveEmptyLinePlugin.plugin
+	(plugin) =>
+		plugin !== remarkPreserveEmptyLinePlugin.plugin &&
+		plugin !== remarkPreserveEmptyLinePlugin.options
 );
 
 /**
  * An empty table cell written as one, not as `<br />`.
  *
- * A cell holds exactly one paragraph, so an empty cell holds an empty one, and
- * the paragraph's writer spells that `<br />` (above) without asking where it
- * is. Between blocks that keeps a blank line; in a cell it adds a break that
- * was never there, the fidelity check finds the cell changed, and a table with
+ * A cell holds exactly one paragraph, so an empty cell holds an empty one,
+ * which the paragraph's writer hands on as a blank line (above) without asking
+ * where it is. Milkdown spelled it `<br />`, which in a cell added a break that
+ * was never there: the fidelity check found the cell changed, and a table with
  * one gap in it — an index with no "Modified" date — could not be opened in
  * rich text at all. So the cell asks instead, and writes nothing for an empty
  * paragraph. A `<br />` the author wrote in a cell is an inline atom in a
@@ -244,19 +321,24 @@ const cellWithoutEmptyLine =
 	};
 
 /**
- * An empty list item written as its marker alone — `-`, `2.` — and not as
- * `- <br />`.
+ * An empty list item written as its marker alone — `-`, `2.` — and an empty
+ * task item as `- [ ] <br />`.
  *
  * An item begins with a paragraph, so an empty item holds an empty one, and
- * Enter after an item leaves the cursor in exactly that: switching to the
- * markdown then showed `- <br />` for an item the user had not written
- * anything in. CommonMark has a word for an empty item, which is its marker
- * with nothing after it, and reads it back as an item with no content — which
- * the schema fills with the empty paragraph an item begins with. So the two
- * are each other's, and a `-` the author wrote, which the editor could not
- * show before (it came back as `- <br />`, and the fidelity check sent the
- * note to raw mode), opens in rich text now. Where the marker alone would say
- * something else, the item keeps the `<br />` (`markerAlone`).
+ * Enter after an item leaves the cursor in exactly that. CommonMark has a word
+ * for an empty item, which is its marker with nothing after it, and reads it
+ * back as an item with no content — which the schema fills with the empty
+ * paragraph an item begins with. So the two are each other's, and a `-` the
+ * author wrote opens in rich text (2026-10-02; it came back as `- <br />`, and
+ * the fidelity check sent the note to raw mode). An empty first paragraph with
+ * more after it is written as nothing, as an empty line at the start of
+ * anything that holds blocks is (`blankLinesBetween`): CommonMark lets an item
+ * begin with one blank line, not with two.
+ *
+ * A task item is the exception, and the one `<br />` the editor writes: GFM
+ * writes the box only before a paragraph, and `- [ ]` with nothing after it is
+ * the words "[ ]" in a list item, not a box. The reader takes it back as the
+ * empty paragraph it stands for (`withEmptyLines`).
  *
  * The task item's schema, since GFM's is the one the editor has: it wraps
  * commonmark's own rather than reading it from the ctx.
@@ -273,12 +355,14 @@ const itemWithoutEmptyLine =
 				...spec.toMarkdown,
 				runner: (state, node) => {
 					const first = node.firstChild;
-					const alone =
-						first?.type.name === 'paragraph' &&
-						first.content.size === 0 &&
-						markerAlone(node.attrs.checked, node.maybeChild(1)?.type.name);
-					if (!alone) {
+					if (first?.type.name !== 'paragraph' || first.content.size > 0) {
 						write(state, node);
+						return;
+					}
+					if (typeof node.attrs.checked === 'boolean') {
+						const html = node.type.schema.nodes.html?.create({ value: EMPTY_LINE });
+						const held = html === undefined ? first : first.copy(Fragment.from(html));
+						write(state, node.copy(node.content.replaceChild(0, held)));
 						return;
 					}
 					const rest = node.content.cut(first.nodeSize);
@@ -311,7 +395,8 @@ export const createRichEditor = ({
 		.config((ctx) => {
 			ctx.set(rootCtx, root);
 			ctx.set(defaultValueCtx, body);
-			ctx.set(remarkStringifyOptionsCtx, STRINGIFY_OPTIONS);
+			ctx.set(remarkStringifyOptionsCtx, EDITOR_STRINGIFY_OPTIONS);
+			ctx.update(paragraphSchema.key, paragraphAsBlankLine);
 			ctx.update(tableCellSchema.key, cellWithoutEmptyLine);
 			ctx.update(tableHeaderSchema.key, cellWithoutEmptyLine);
 			ctx.update(extendListItemSchemaForTask.key, itemWithoutEmptyLine);
@@ -339,7 +424,7 @@ export const createRichEditor = ({
 		// A file beside the note, as a chip rather than a link (`attachment.ts`).
 		.use(attachmentSchema)
 		// After the preset, so that its html transformer has already put a
-		// block of html into a paragraph for this to find.
+		// block of html into a paragraph, which has no position of its own.
 		.use(emptyLinePlugin)
 		.use(gfm)
 		.use(history)

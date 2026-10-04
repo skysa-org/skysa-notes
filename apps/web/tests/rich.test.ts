@@ -1,7 +1,7 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { redo, undo, undoDepth } from '@milkdown/kit/prose/history';
-import { Selection, TextSelection } from '@milkdown/kit/prose/state';
+import { Selection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -231,31 +231,113 @@ describe('adoptBody', () => {
 	});
 });
 
-describe('an empty paragraph', () => {
-	it('round-trips as an HTML break, because markdown has no other word for it', async () => {
-		// Markdown cannot say "a blank paragraph here" — blank lines are only
-		// separators — so Milkdown writes `<br />` and reads it back. Pinned
-		// because it is the one place the editor puts something in a file the
-		// user did not type, and it must stay a bijection rather than becoming a
-		// one-way accumulation of HTML.
-		const { withCtx } = await mount('first\n\nsecond\n');
-
+/**
+ * Markdown has no blank paragraph — a blank line only separates — so an empty
+ * one is written as one more blank line between the blocks either side, and
+ * read back from how many there are (2026-10-04). It was written as `<br />`,
+ * the one thing the editor put in a file the user had not typed.
+ */
+describe('an empty line', () => {
+	/** Enter at `at`: the paragraph there split in two. */
+	const enterAt = (withCtx: Awaited<ReturnType<typeof mount>>['withCtx'], at: number) => {
 		withCtx((ctx) => {
 			const view = ctx.get(editorViewCtx);
-			view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1)));
-			view.dispatch(view.state.tr.split(view.state.selection.from));
+			view.dispatch(view.state.tr.split(at));
 		});
+	};
 
-		expect(withCtx(currentMarkdown)).toBe('<br />\n\nfirst\n\nsecond\n');
+	it('between two paragraphs is one more blank line, and is read back as one', async () => {
+		const { withCtx } = await mount('first\n\nsecond\n');
+
+		// After "first", and again: two empty lines.
+		enterAt(withCtx, 6);
+		enterAt(withCtx, 8);
+
+		const written = withCtx(currentMarkdown);
+		expect(written).toBe('first\n\n\n\nsecond\n');
+		expect(written).not.toContain('<br');
+
+		const again = await mount(written);
+		expect(again.withCtx((ctx) => whatIsLost(ctx, written))).toBeUndefined();
+		expect(again.withCtx(currentMarkdown)).toBe(written);
+		const doc = again.withCtx((ctx) => ctx.get(editorViewCtx).state.doc);
+		expect(doc.childCount).toBe(4);
+		expect([doc.child(1).childCount, doc.child(2).childCount]).toEqual([0, 0]);
 	});
 
-	it('comes back as an empty paragraph, not as literal HTML in the text', async () => {
-		const { withCtx } = await mount('<br />\n\nfirst\n');
-		expect(withCtx(currentMarkdown)).toBe('<br />\n\nfirst\n');
+	it.each([
+		['the only thing in the note', '', 1],
+		['at the top of the note', 'first\n', 1],
+		['at the end of the note', 'first\n', 6],
+	])('is written as nothing as %s, and the note opens again', async (_where, body, at) => {
+		// Reported: Enter in an empty note wrote `<br />`, which came back as an
+		// empty paragraph with nothing after it, written as nothing — and the
+		// fidelity check sent the note to raw mode for the `<br />` it lost.
+		const { withCtx } = await mount(body);
 
-		const first = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild);
-		expect(first?.type.name).toBe('paragraph');
-		expect(first?.childCount).toBe(0);
+		enterAt(withCtx, at);
+
+		const written = withCtx(currentMarkdown);
+		expect(written).toBe(body);
+		const again = await mount(written);
+		expect(again.withCtx((ctx) => whatIsLost(ctx, written))).toBeUndefined();
+	});
+
+	it.each([
+		['between paragraphs', 'A\n\n\n\n\nB\n', [1, 2, 3]],
+		['after a heading', '# H\n\n\nText\n', [1]],
+		['after a code block whose own blank lines are code', '```\nx\n\n\ny\n```\n\n\nA\n', [1]],
+		['after a block of html', '<div>\nhi\n</div>\n\n\nA\n', [1]],
+		['after a list', '- a\n\n\nB\n', [1]],
+	])(
+		'from another app, every blank line past the first is an empty line, %s',
+		async (_where, body, empty) => {
+			const { withCtx } = await mount(body);
+
+			expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+			expect(withCtx(currentMarkdown)).toBe(body);
+			const doc = withCtx((ctx) => ctx.get(editorViewCtx).state.doc);
+			for (const index of empty)
+				expect(
+					doc.child(index).type.name === 'paragraph' && doc.child(index).childCount
+				).toBe(0);
+		}
+	);
+
+	it.each([
+		['a quote', '> A\n>\n>\n> B\n'],
+		['a list item', '- A\n\n\n  B\n'],
+	])('is kept inside %s', async (_where, body) => {
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+		const inner = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild);
+		const holder = inner?.type.name === 'blockquote' ? inner : inner?.firstChild;
+		expect(holder?.childCount).toBe(3);
+		expect(holder?.child(1).childCount).toBe(0);
+	});
+
+	it('is nothing at the top or bottom of a note, where blank lines say nothing', async () => {
+		// The blank line the app writes under a note's frontmatter is the top of
+		// its body, and would otherwise be an empty line at the top of every
+		// note that has it.
+		const body = '\n\nfirst\n\n\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx((ctx) => ctx.get(editorViewCtx).state.doc.childCount)).toBe(1);
+		expect(withCtx(currentMarkdown)).toBe('first\n');
+	});
+
+	it("read from an older note as `<br />`, is the author's html and stays", async () => {
+		const body = '<br />\n\nfirst\n';
+		const { withCtx } = await mount(body);
+
+		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
+		expect(withCtx(currentMarkdown)).toBe(body);
+		const top = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild);
+		expect(top?.firstChild?.type.name).toBe('html');
 	});
 });
 
@@ -340,7 +422,7 @@ describe('an empty table cell', () => {
 
 /**
  * An item begins with a paragraph, so the item Enter makes after another holds
- * an empty one, and the paragraph's writer spelled it `- <br />`. CommonMark
+ * an empty one, which Milkdown spelled `- <br />`. CommonMark
  * spells an empty item as its marker alone, and reads that back as an item the
  * schema fills with the empty paragraph it begins with.
  */
@@ -391,15 +473,33 @@ describe('an empty list item', () => {
 		expect(second?.firstChild?.childCount).toBe(0);
 	});
 
-	it('keeps the break before a paragraph, which would otherwise be read as the first', async () => {
+	it('writes nothing for an empty line at its start, which CommonMark has no way to say', async () => {
+		// An item may begin with one blank line, not two: `-` and then a
+		// paragraph would be read back as the item's first.
+		const { withCtx } = await mount('- first\n\n  second\n');
+
+		withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			// Ahead of "first": the list, the item and the paragraph.
+			view.dispatch(view.state.tr.split(3));
+		});
+
+		const item = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild?.firstChild);
+		expect(item?.firstChild?.childCount).toBe(0);
+		const written = withCtx(currentMarkdown);
+		expect(written).toBe('- first\n\n  second\n');
+		const again = await mount(written);
+		expect(again.withCtx((ctx) => whatIsLost(ctx, written))).toBeUndefined();
+	});
+
+	it('keeps a break the author put before a paragraph in one', async () => {
 		const body = '- <br />\n\n  second\n';
 		const { withCtx } = await mount(body);
 
 		expect(withCtx((ctx) => whatIsLost(ctx, body))).toBeUndefined();
 		expect(withCtx(currentMarkdown)).toBe(body);
 		const item = withCtx((ctx) => ctx.get(editorViewCtx).state.doc.firstChild?.firstChild);
-		expect(item?.childCount).toBe(2);
-		expect(item?.firstChild?.childCount).toBe(0);
+		expect(item?.firstChild?.firstChild?.type.name).toBe('html');
 	});
 
 	it('keeps a break the author put in one, since the editor does not write it there', async () => {

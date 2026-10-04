@@ -122,15 +122,23 @@ describe('the end of a note', () => {
 	 * something nobody asked it to touch.
 	 */
 	it('never removes an empty paragraph it did not put there', async () => {
-		const editor = await mount('```js\nconst a = 1;\n```\n\n<br />\n\nafter\n\n<br />\n');
+		// One the file's blank lines stand for, and one the user makes at the end.
+		const body = '```js\nconst a = 1;\n```\n\n\nafter\n';
+		const editor = await mount(body);
+		editor.withCtx((ctx) => {
+			const view = ctx.get(editorViewCtx);
+			view.dispatch(view.state.tr.split(view.state.doc.content.size - 1));
+		});
 
 		expect(editor.lastBlock()).toBe('paragraph');
 		editor.clickAway();
 
-		expect(editor.lastBlock()).toBe('paragraph');
-		// The one in the middle is the one the file can hold: Milkdown drops a
-		// trailing empty paragraph when it serializes, which is also why this
-		// plugin's own offer costs the file nothing.
-		expect(editor.markdown()).toContain('<br />');
+		const doc = editor.withCtx((ctx) => ctx.get(editorViewCtx).state.doc);
+		expect(doc.childCount).toBe(4);
+		expect([doc.child(1).childCount, doc.child(3).childCount]).toEqual([0, 0]);
+		// The one in the middle is the one the file can hold: an empty paragraph
+		// at the end is written as nothing, which is also why this plugin's own
+		// offer costs the file nothing.
+		expect(editor.markdown()).toBe(body);
 	});
 });
