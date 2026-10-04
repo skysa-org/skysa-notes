@@ -147,7 +147,8 @@ const shownName = (node: ProseNode): string =>
 		? nameIn(attributeOf(node, 'href'))
 		: attributeOf(node, 'label');
 
-const button = (icon: IconName, label: string): HTMLButtonElement => {
+/** A button in the bar under a chip — or over a picture (`image.ts`) — selected whole. */
+export const barButton = (icon: IconName, label: string): HTMLButtonElement => {
 	const element = document.createElement('button');
 	element.setAttribute('type', 'button');
 	element.setAttribute('class', 'attachment-action');
@@ -192,9 +193,9 @@ export const attachmentView =
 		chip.setAttribute('role', 'link');
 		chip.append(icon, name);
 
-		const opener = button('open', 'Open');
-		const saver = button('download', 'Download');
-		const remover = button('trash', 'Remove from note');
+		const opener = barButton('open', 'Open');
+		const saver = barButton('download', 'Download');
+		const remover = barButton('trash', 'Remove from note');
 		const actions = document.createElement('span');
 		actions.setAttribute('class', 'attachment-actions');
 		actions.setAttribute('hidden', '');
