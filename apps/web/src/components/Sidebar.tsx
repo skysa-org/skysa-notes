@@ -5,6 +5,7 @@ import { useCommand } from '../commands/context.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
+import { AttachedFiles } from './AttachedFiles.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
@@ -629,6 +630,7 @@ export const Sidebar = ({
 	}
 	const [renaming, setRenaming] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<string | null>(null);
+	const [listing, setListing] = useState<string | null>(null);
 	/** A notebook's row right-clicked, and where: its menu is open there. */
 	const [menu, setMenu] = useState<{ path: string; at: MenuPoint } | null>(null);
 	/** Which row the pointer is over, for the highlight and nothing else. */
@@ -662,6 +664,12 @@ export const Sidebar = ({
 		onMove: () => {
 			pickUp({ kind: 'notebook', path, name: basename(path) });
 		},
+		onFiles:
+			(nodeAt(tree ?? [], path)?.fileCount ?? 0) === 0
+				? undefined
+				: () => {
+						setListing(path);
+					},
 		onDelete: () => {
 			setDeleting(path);
 		},
@@ -747,6 +755,16 @@ export const Sidebar = ({
 						const parent = creating.parent;
 						setCreating(null);
 						onCreateFolder(parent, name);
+					}}
+				/>
+			)}
+
+			{listing !== null && (
+				<AttachedFiles
+					name={basename(listing)}
+					path={listing}
+					onClose={() => {
+						setListing(null);
 					}}
 				/>
 			)}

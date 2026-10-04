@@ -17,16 +17,19 @@ export interface NotebookActions {
 	onNewInside: () => void;
 	onRename: () => void;
 	onMove: () => void;
+	/** Only where the notebook has files in it (`AttachedFiles.tsx`). */
+	onFiles?: () => void;
 	onDelete: () => void;
 }
 
 /** What can be done to a notebook, wherever it is offered from. */
 export const notebookMenuItems = (
 	name: string,
-	{ onNewInside, onRename, onMove, onDelete }: NotebookActions
+	{ onNewInside, onRename, onMove, onFiles, onDelete }: NotebookActions
 ): OptionsMenuItem[] => [
 	{ label: `New notebook inside “${name}”`, onChoose: onNewInside },
 	{ label: 'Rename', onChoose: onRename },
 	{ label: 'Move', onChoose: onMove },
+	...(onFiles === undefined ? [] : [{ label: 'Attached files', onChoose: onFiles }]),
 	{ label: 'Delete', onChoose: onDelete, danger: true },
 ];
