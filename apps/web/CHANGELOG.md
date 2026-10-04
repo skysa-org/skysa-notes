@@ -1,5 +1,18 @@
 # @skysa/web
 
+## 0.12.0
+
+### Minor Changes
+
+- fd9d5dc: A notebook's menu has Attached files where it holds any: each file with the notes that link it, and Delete for one no note links.
+- 3ae8fe4: A picture or file taken out of a note is deleted a few minutes after the note is closed, once a sync has run since, if no note in the same storage names it then. A provider puts it in its trash. Nothing is deleted while the device may not hold every note in that storage, such as during its first import, and deleting a note still deletes none of its files.
+
+### Patch Changes
+
+- 17d5f49: An empty line in the rich editor is written to the note as a blank line, not as `<br />`. Two blank lines between paragraphs are one empty line in rich text, and three are two, so a note another app wrote opens with the spacing its text shows. Pressing Enter in an empty note, or at the top or end of one, no longer sends the note to markdown mode with "The rich editor has no way to show the HTML `<br />` on line 1": an empty line at the top or end of a note is written as nothing. A `<br />` already in a note is kept as written and shows in rich text, where it can be deleted. An empty task item is still written `- [ ] <br />`, since `- [ ]` alone is not a task in markdown.
+- a782267: A picture tapped on a phone can be taken out of the note again. Backspace on a picture selected whole did nothing on Android, where the keyboard sends an input event rather than a key: a delete it asks for now deletes the selected picture or file chip. A selected picture also has a Remove from note button over its corner, as a chip has, for a keyboard that sends nothing at all.
+- @skysa/core@0.12.0
+
 ## 0.11.1
 
 ### Patch Changes
