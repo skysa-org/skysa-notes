@@ -1,5 +1,6 @@
-import type { Paragraph, PhrasingContent, RootContent } from 'mdast';
+import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
+import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 
 /**
@@ -45,6 +46,29 @@ import { parse } from './pipeline.js';
  */
 const EDITOR_BREAK = /^\s*<br\s*\/?>\s*$/i;
 
+/**
+ * A link the rich editor shows as a file's chip: one run of plain words, to a
+ * file beside the note (`apps/web/src/editor/attachment.ts`).
+ */
+const isChip = (link: Link): boolean => {
+	const [only, ...rest] = link.children;
+	return isAttachmentHref(link.url) && rest.length === 0 && (only?.type ?? 'text') === 'text';
+};
+
+/**
+ * What a picture or a chip says, apart from the words either side of it. Each
+ * is a thing of its own on screen, never part of a word, and written with
+ * nothing between it and the text before it — `coast![Pasted image](…)` — it
+ * would otherwise read "coastPasted image".
+ */
+const apart = (words: string): string => ` ${words} `;
+
+/** What a chip says: its words, or the file's name where it has none, as the editor shows it. */
+const chipWords = (link: Link): string => {
+	const words = link.children.map(inline).join('');
+	return words === '' ? hrefFileName(link.url) : words;
+};
+
 /** What a run of inline content looks like on screen. */
 const inline = (node: PhrasingContent): string => {
 	switch (node.type) {
@@ -58,15 +82,16 @@ const inline = (node: PhrasingContent): string => {
 			return '\n';
 		case 'image':
 		case 'imageReference':
-			return node.alt ?? '';
+			return apart(node.alt ?? '');
 		// The rich editor cannot show a footnote at all, and sends the note to raw
 		// mode (§7) — where this is what is on screen.
 		case 'footnoteReference':
 			return `[^${node.label ?? node.identifier}]`;
+		case 'link':
+			return isChip(node) ? apart(chipWords(node)) : node.children.map(inline).join('');
 		case 'emphasis':
 		case 'strong':
 		case 'delete':
-		case 'link':
 		case 'linkReference':
 			return node.children.map(inline).join('');
 		default:

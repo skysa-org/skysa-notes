@@ -128,7 +128,7 @@ describe('a file pasted into the note', () => {
 		expect(asked).toEqual([{ name: 'image.png', pasted: true }]);
 
 		expect(mounted.pending()).toEqual([]);
-		expect(mounted.markdown()).toBe('x![Pasted image](pasted-image-1a2b3c4d.png)y\n');
+		expect(mounted.markdown()).toBe('x\n\n![Pasted image](pasted-image-1a2b3c4d.png)\n\ny\n');
 		expect(mounted.onUserEdit).toHaveBeenCalledTimes(1);
 	});
 
@@ -284,6 +284,145 @@ describe('a file pasted into the note', () => {
 		expect(told.map((problem) => problem.message)).toEqual([
 			'film.mov is over 25 MB, the most a file beside a note can be.',
 		]);
+	});
+});
+
+const picture = (name: string) => added(`${name}.png`, name, 'image');
+
+/** Paste pictures at `at` in `body`, each answered in turn; the note they leave. */
+const picturesAt = async (body: string, at: number, ...names: string[]) => {
+	const { host, answer } = fakeHost();
+	const mounted = await mount(body, host);
+	cursorAt(mounted.view, at);
+	paste(mounted.view, carrying(names.map((name) => fileNamed(`${name}.png`))));
+	for (const name of names) await answer(picture(name));
+	return mounted;
+};
+
+describe('a picture put in the note', () => {
+	it('goes in a paragraph of its own after the words it lands at the end of', async () => {
+		const mounted = await picturesAt('Packing list for the coast\n', 27, 'a');
+
+		expect(mounted.markdown()).toBe('Packing list for the coast\n\n![a](a.png)\n');
+	});
+
+	it('goes in a paragraph of its own before the words it lands at the start of', async () => {
+		const mounted = await picturesAt('words\n', 1, 'a');
+
+		expect(mounted.markdown()).toBe('![a](a.png)\n\nwords\n');
+	});
+
+	it('goes in an empty paragraph as it is', async () => {
+		const mounted = await picturesAt('one\n\n<br />\n\ntwo\n', 6, 'a');
+
+		expect(mounted.markdown()).toBe('one\n\n![a](a.png)\n\ntwo\n');
+	});
+
+	it('goes in a paragraph of its own beside another picture', async () => {
+		const mounted = await picturesAt('![a](a.png)\n', 2, 'b');
+
+		expect(mounted.markdown()).toBe('![a](a.png)\n\n![b](b.png)\n');
+	});
+
+	it('keeps the order they came in, several at once, at the end or the middle', async () => {
+		const atEnd = await picturesAt('xy\n', 3, 'a', 'b');
+		expect(atEnd.markdown()).toBe('xy\n\n![a](a.png)\n\n![b](b.png)\n');
+
+		const inMiddle = await picturesAt('xy\n', 2, 'a', 'b');
+		expect(inMiddle.markdown()).toBe('x\n\n![a](a.png)\n\n![b](b.png)\n\ny\n');
+
+		const atStart = await picturesAt('xy\n', 1, 'a', 'b');
+		expect(atStart.markdown()).toBe('![a](a.png)\n\n![b](b.png)\n\nxy\n');
+	});
+
+	it('leaves the cursor after it, where the next thing typed goes', async () => {
+		const mounted = await picturesAt('xy\n', 2, 'a');
+
+		mounted.view.dispatch(mounted.view.state.tr.insertText('z'));
+
+		expect(mounted.markdown()).toBe('x\n\n![a](a.png)\n\nzy\n');
+	});
+
+	it('is an undo step of its own, split and all', async () => {
+		const mounted = await picturesAt('xy\n', 2, 'a');
+
+		undo(mounted.view.state, mounted.view.dispatch);
+
+		expect(mounted.markdown()).toBe('xy\n');
+	});
+
+	it('goes in a paragraph of its own inside the list item or quote it lands in', async () => {
+		const listed = await picturesAt('- one\n- two\n', 6, 'a');
+		expect(listed.markdown()).toBe('- one\n\n  ![a](a.png)\n- two\n');
+
+		const quoted = await picturesAt('> one\n', 5, 'a');
+		expect(quoted.markdown()).toBe('> one\n>\n> ![a](a.png)\n');
+	});
+
+	it('goes where it lands in a heading, or a table’s cell, which hold one line', async () => {
+		const headed = await picturesAt('# Head\n', 5, 'a');
+		expect(headed.markdown()).toBe('# Head![a](a.png)\n');
+
+		const tabled = await picturesAt('| a | b |\n| - | - |\n| 1 | 2 |\n', 5, 'a');
+		expect(tabled.markdown().split('\n')[0]).toBe('| a![a](a.png) | b |');
+	});
+
+	it('takes the spaces either side of it, which markdown would write as `&#x20;`', async () => {
+		const atEnd = await picturesAt('Look at this: \n', 15, 'a');
+		expect(atEnd.markdown()).toBe('Look at this:\n\n![a](a.png)\n');
+
+		const inMiddle = await picturesAt('one two\n', 5, 'a');
+		expect(inMiddle.markdown()).toBe('one\n\n![a](a.png)\n\ntwo\n');
+	});
+
+	it('goes in a paragraph of nothing but spaces as it is, the spaces gone', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('one\n\n<br />\n', host);
+		mounted.view.dispatch(mounted.view.state.tr.insertText('   ', 6));
+		cursorAt(mounted.view, 8);
+
+		paste(mounted.view, carrying([fileNamed('a.png')]));
+		await answer(picture('a'));
+
+		expect(mounted.markdown()).toBe('one\n\n![a](a.png)\n');
+	});
+
+	it('takes a line break beside it, which would be an empty line', async () => {
+		const hard = await picturesAt('a\\\nb\n', 2, 'a');
+		expect(hard.markdown()).toBe('a\n\n![a](a.png)\n\nb\n');
+
+		const soft = await picturesAt('a\nb\n', 2, 'a');
+		expect(soft.markdown()).toBe('a\n\n![a](a.png)\n\nb\n');
+	});
+
+	it('goes after the one before it, pasted one after another at the end of the words', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('xy\n', host);
+		cursorAt(mounted.view, 3);
+
+		paste(mounted.view, carrying([fileNamed('a.png')]));
+		await answer(picture('a'));
+		paste(mounted.view, carrying([fileNamed('b.png')]));
+		await answer(picture('b'));
+
+		expect(mounted.markdown()).toBe('xy\n\n![a](a.png)\n\n![b](b.png)\n');
+	});
+
+	it('goes where it lands at the very start of a list item, whose line is its checkbox’s', async () => {
+		const mounted = await picturesAt('- [ ] todo\n', 3, 'a');
+
+		expect(mounted.markdown()).toBe('- [ ] ![a](a.png)todo\n');
+	});
+
+	it('leaves a file’s chip in the line, as a name among the words', async () => {
+		const { host, answer } = fakeHost();
+		const mounted = await mount('xy\n', host);
+		cursorAt(mounted.view, 3);
+		paste(mounted.view, carrying([fileNamed('a.png'), fileNamed('b.pdf')]));
+		await answer(picture('a'));
+		await answer(added('b.pdf', 'b.pdf', 'file'));
+
+		expect(mounted.markdown()).toBe('xy\n\n![a](a.png)[b.pdf](b.pdf)\n');
 	});
 });
 
