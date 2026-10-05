@@ -1,3 +1,4 @@
+import { MAX_CONNECT_CODE } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError, createApiClient, type FetchLike } from '../src/api/client.js';
@@ -133,12 +134,26 @@ describe('the API client', () => {
 	it('asks the policy about a code, trimmed and bounded, and reads its answer', async () => {
 		const { fetch, calls } = answering(200, { accepted: true, expiresIn: 840 });
 
-		const result = await createApiClient({ fetch }).checkConnectCode(`  ${'x'.repeat(80)}\n`);
+		const result = await createApiClient({ fetch }).checkConnectCode(
+			`  ${'x'.repeat(MAX_CONNECT_CODE + 16)}\n`
+		);
 
 		expect(result).toEqual({ ok: true, value: { accepted: true, expiresIn: 840 } });
 		expect(calls[0]?.url).toBe('/api/connect-code');
 		expect(calls[0]?.init?.method).toBe('POST');
-		expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({ code: 'x'.repeat(64) });
+		expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({
+			code: 'x'.repeat(MAX_CONNECT_CODE),
+		});
+	});
+
+	it('reads what the policy gives to hold in place of the code', async () => {
+		const pass = `dt1.${'Ab_-'.repeat(40)}`;
+		const { fetch } = answering(200, { accepted: true, expiresIn: 15_552_000, hold: pass });
+
+		expect(await createApiClient({ fetch }).checkConnectCode('K7QM-2XRD')).toEqual({
+			ok: true,
+			value: { accepted: true, expiresIn: 15_552_000, hold: pass },
+		});
 	});
 
 	it('reads a refusal, dropping a reason it cannot show and keeping the refusal', async () => {
@@ -523,14 +538,23 @@ describe('the API client', () => {
 
 		await client.startConnect('dropbox', 'A'.repeat(43), '/', '  K7QM-2XRD\n');
 		await client.startConnect('dropbox', 'A'.repeat(43), '/', '   ');
-		await client.startConnect('dropbox', 'A'.repeat(43), '/', 'x'.repeat(80));
+		await client.startConnect(
+			'dropbox',
+			'A'.repeat(43),
+			'/',
+			'x'.repeat(MAX_CONNECT_CODE + 16)
+		);
 
 		expect(calls.map((call) => JSON.parse(call.init?.body as string) as unknown)).toEqual([
 			{ credentialHash: 'A'.repeat(43), returnTo: '/', connectCode: 'K7QM-2XRD' },
 			// Blank is no code, and the body is as it was before there could be one.
 			{ credentialHash: 'A'.repeat(43), returnTo: '/' },
 			// Held to the server's bound, so the start is not refused outright.
-			{ credentialHash: 'A'.repeat(43), returnTo: '/', connectCode: 'x'.repeat(64) },
+			{
+				credentialHash: 'A'.repeat(43),
+				returnTo: '/',
+				connectCode: 'x'.repeat(MAX_CONNECT_CODE),
+			},
 		]);
 	});
 

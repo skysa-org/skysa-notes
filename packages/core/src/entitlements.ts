@@ -81,13 +81,22 @@ export interface ConnectGate {
  * most `MAX_CODE_HOLD_SECONDS`. Refused, with a reason the app shows under the
  * field: plain text, at most `MAX_CODE_REASON` characters, and never anything
  * the person typing should not see (an address the code was sent to, say).
+ *
+ * `hold`: what the app should keep, and send with its connects, in place of
+ * what was typed — a pass the policy issued for this device in exchange for a
+ * code good only briefly, say. Bounded and printable as a code is, since it
+ * travels as one (`MAX_CONNECT_CODE`), and never shown: the app names a held
+ * value only when it is what the person typed. The app also asks about a held
+ * value again as it loads, so a policy that answers with a fresh `hold` each
+ * time keeps a pass alive for as long as the device is used, and one that
+ * refuses it closes the gate before any consent screen rather than after.
  */
 export type ConnectCodeCheck =
-	| Readonly<{ accepted: true; expiresIn: number }>
+	| Readonly<{ accepted: true; expiresIn: number; hold?: string }>
 	| Readonly<{ accepted: false; reason?: string }>;
 
-/** The longest the app keeps an accepted code: a day. */
-export const MAX_CODE_HOLD_SECONDS = 86_400;
+/** The longest the app keeps an accepted code, or what it holds in its place: a year. */
+export const MAX_CODE_HOLD_SECONDS = 365 * 86_400;
 
 /** The longest reason `checkCode` may give for a refusal. */
 export const MAX_CODE_REASON = 200;
@@ -124,10 +133,12 @@ export interface EntitlementSubject {
  */
 export interface EntitlementContext {
 	/**
-	 * What was typed into the gate's `connectCode` field, trimmed, at most
-	 * `MAX_CONNECT_CODE` characters and never blank. Absent when nothing was.
+	 * What was typed into the gate's `connectCode` field, or what `checkCode`
+	 * gave the app to hold in its place (`ConnectCodeCheck.hold`): trimmed, at
+	 * most `MAX_CONNECT_CODE` characters and never blank. Absent when nothing
+	 * was.
 	 *
-	 * Typed by the person connecting, so it is a claim, not a fact: a policy
+	 * Sent by the device connecting, so it is a claim, not a fact: a policy
 	 * that accepts one checks it against something it issued itself. It reaches
 	 * the callback inside the signed flow cookie, so it cannot be changed between
 	 * the two, but it is not a secret from the browser that holds that cookie.
@@ -136,12 +147,14 @@ export interface EntitlementContext {
 }
 
 /**
- * The longest `connectCode` the server will carry. It shares a cookie with
- * the flow's verifier, and a cookie a browser refuses to store is a flow that
- * cannot complete. Here so the app's field and the server's check are one
- * number.
+ * The longest `connectCode` the server will carry, typed or held. It shares a
+ * cookie with the flow's verifier, and a cookie a browser refuses to store is
+ * a flow that cannot complete: at this bound, with the longest return path,
+ * the flow cookie is about 2.1 KB at worst, against the 4 KB a browser keeps. Room for a
+ * sealed pass, not only a typed code (`ConnectCodeCheck.hold`). Here so the
+ * app's field and the server's check are one number.
  */
-export const MAX_CONNECT_CODE = 64;
+export const MAX_CONNECT_CODE = 256;
 
 export interface EntitlementProvider {
 	/**
@@ -165,7 +178,9 @@ export interface EntitlementProvider {
 	 * Whether a code typed into the gate will do, asked as it is used
 	 * (`POST /api/connect-code`), so the app can say so at once rather than
 	 * after a consent screen, and keep it only as long as it is good. Required
-	 * when the gate asks for a code.
+	 * when the gate asks for a code. Asked again, once, as the app loads with a
+	 * code or a held value still kept (`ConnectCodeCheck.hold`): the answer
+	 * replaces what is kept, and a refusal drops it.
 	 *
 	 * Advice, not the decision: `check` at the callback is still asked with the
 	 * code, and a code that expires between the two is refused there. Given the

@@ -32,7 +32,7 @@ import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
-import { dropConnectCode, heldConnectCode } from '../store/connectCode.js';
+import { dropConnectCode, heldConnectCode, holdAcceptedCode } from '../store/connectCode.js';
 import { showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -371,6 +371,45 @@ const codeWasRefused = (
 	connect === 'refused' &&
 	(code === undefined || code === 'not_allowed') &&
 	heldConnectCode() !== undefined;
+
+/**
+ * The gate's code, or what the operator's policy gave to hold in its place
+ * (`ConnectCodeCheck.hold`), asked about again once as the app loads, where
+ * the instance's gate asks for a code and something is held.
+ *
+ * A policy that hands a device a pass to keep says each time whether it still
+ * takes it, and may answer with a fresh one, so a pass lives as long as the
+ * device is used rather than from the day it was given. One it no longer takes
+ * — the subscription behind it ended, say — is let go of here, and the gate
+ * asks for a code again before any consent screen rather than after one. Not
+ * asked, or not answered, it is kept: the callback still decides, as it always
+ * did. An answer about a value no longer held, because a new code was typed
+ * meanwhile, is not the answer about this one, and changes nothing.
+ *
+ * After the refusal of a connect that carried a code, which lets go of the
+ * code first (`useConnectNotice`), there is nothing left to ask about.
+ */
+const useCodeAskedAgain = () => {
+	const config = useInstanceConfig(api);
+	const asksForCode = answer(config)?.connectGate?.connectCode !== undefined;
+	const asked = useRef(false);
+	useEffect(() => {
+		if (!asksForCode || asked.current) return;
+		asked.current = true;
+		const held = heldConnectCode();
+		if (held === undefined) return;
+		void api.checkConnectCode(held).then(
+			(result) => {
+				if (!result.ok || heldConnectCode() !== held) return;
+				if (result.value.accepted) holdAcceptedCode(held, result.value);
+				else dropConnectCode();
+			},
+			() => {
+				// A limit reached or no answer at all: kept, as it was.
+			}
+		);
+	}, [asksForCode]);
+};
 
 /**
  * The toast for how a connect went, read once as the app opens on the way back
@@ -842,6 +881,7 @@ const Home = () => {
 	// it is through.
 	const held = useHeldImport();
 	const { connectNotice, dismissConnect } = useConnectNotice(connect, code, held);
+	useCodeAskedAgain();
 	const activeConnection = useActiveConnectionId();
 	const sources = useSources();
 	const tree = useFolderTree();

@@ -21,6 +21,16 @@ import { MAX_CONNECT_CODE } from '@skysa/core';
  * server carries it no further than that policy. It is not a credential to
  * anything this app holds.
  *
+ * What is held may instead be what the policy gave in exchange for the code
+ * (`ConnectCodeCheck.hold`): a pass for this device, kept for as long as the
+ * policy says, up to a year, and renewed each time the app loads and asks
+ * about it again. That is still none of the three kinds — it reaches no
+ * storage and no credential — but it is a bearer to the operator's policy:
+ * whoever copies it out of this browser can connect what the policy would let
+ * this device connect, until the policy stops taking it. It shares the third
+ * kind's exposure, then, and what keeps it is the same `script-src 'self'`. It
+ * is never shown: the gate names a held value only when it is what was typed.
+ *
  * Every access is guarded: a browser with storage turned off throws on the
  * property itself. The code is then held in memory instead, which is enough to
  * send it with the connect it was accepted for, and forgotten on the way back.
@@ -32,7 +42,12 @@ interface Held {
 	readonly code: string;
 	/** When it stops being good, by this device's clock. */
 	readonly until: number;
+	/** Whether it is what the person typed, and so theirs to see; not, when it is the policy's `hold`. */
+	readonly shown: boolean;
 }
+
+/** Told after every change to what is held, so a gate showing it can follow. */
+const watchers = new Set<() => void>();
 
 /** Where the code is when storage is refused, and never read otherwise. */
 const memory: { current: Held | undefined } = { current: undefined };
@@ -43,13 +58,14 @@ const parse = (raw: string | null): Held | undefined => {
 	try {
 		const value: unknown = JSON.parse(raw);
 		if (typeof value !== 'object' || value === null) return undefined;
-		const { code, until } = value as Record<string, unknown>;
+		const { code, until, shown } = value as Record<string, unknown>;
 		return typeof code === 'string' &&
 			code !== '' &&
 			code.length <= MAX_CONNECT_CODE &&
 			typeof until === 'number' &&
 			Number.isFinite(until)
-			? { code, until }
+			? // A code kept before there were holds was typed, so it may be shown.
+				{ code, until, shown: shown !== false }
 			: undefined;
 	} catch {
 		return undefined;
@@ -72,6 +88,9 @@ const write = (held: Held | undefined): void => {
 	} catch {
 		// Kept in memory above.
 	}
+	watchers.forEach((watcher) => {
+		watcher();
+	});
 };
 
 /** The code while it is good, and its end. One past its end is let go of as it is read. */
@@ -88,14 +107,50 @@ export const heldConnectCode = (now = Date.now()): string | undefined => current
 /** When the held code stops being good, so a gate showing it can go back to asking. */
 export const connectCodeHeldUntil = (now = Date.now()): number | undefined => current(now)?.until;
 
+/** Whether what is held is what the person typed, which the gate may show; false for a `hold`. */
+export const heldConnectCodeShown = (now = Date.now()): boolean => current(now)?.shown === true;
+
+/** Calls `watcher` after every change to what is held, here; the returned function stops it. */
+export const watchConnectCode = (watcher: () => void): (() => void) => {
+	watchers.add(watcher);
+	return () => {
+		watchers.delete(watcher);
+	};
+};
+
+const hold = (value: string, expiresIn: number, shown: boolean, now: number): void => {
+	const code = value.trim().slice(0, MAX_CONNECT_CODE);
+	write(
+		code === '' || !(expiresIn > 0) ? undefined : { code, until: now + expiresIn * 1000, shown }
+	);
+};
+
 /**
  * Held trimmed and bounded, as the server takes it, for `expiresIn` seconds
  * from `now`: what the policy said when it accepted it. A blank one, or one
  * good for no time at all, is none.
  */
 export const holdConnectCode = (typed: string, expiresIn: number, now = Date.now()): void => {
-	const code = typed.trim().slice(0, MAX_CONNECT_CODE);
-	write(code === '' || !(expiresIn > 0) ? undefined : { code, until: now + expiresIn * 1000 });
+	hold(typed, expiresIn, true, now);
+};
+
+/**
+ * What the policy said, accepting `sent`, held as it said: its `hold` in place
+ * of what was sent where it gave one, never shown; otherwise `sent` itself,
+ * shown as it was if it is what is held already (a value asked about again as
+ * the app loads) and as typed if not.
+ */
+export const holdAcceptedCode = (
+	sent: string,
+	answer: Readonly<{ expiresIn: number; hold?: string }>,
+	now = Date.now()
+): void => {
+	if (answer.hold !== undefined) {
+		hold(answer.hold, answer.expiresIn, false, now);
+		return;
+	}
+	const held = current(now);
+	hold(sent, answer.expiresIn, held?.code === sent.trim() ? held.shown : true, now);
 };
 
 export const dropConnectCode = (): void => {

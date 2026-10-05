@@ -89,8 +89,14 @@ export const checkGate = (
  * held to what the gate's own text is: plain, printable and bounded. A reason
  * that is not is dropped rather than failing the answer, since the refusal is
  * still a refusal and the app has words of its own for one. A hold longer than
- * a day is cut to a day, and a fraction of a second is rounded up; a hold of
+ * a year is cut to a year, and a fraction of a second is rounded up; a hold of
  * nothing, or of a number that is not one, is no answer at all.
+ *
+ * A value to hold in place of the code is held to what a code is, since the
+ * app sends it as one (`connectCodeSchema`): bounded and printable. One that is
+ * not fails the answer rather than being dropped, since dropping it would have
+ * the app keep the typed code instead, which the policy just said it would
+ * rather not.
  */
 const codeCheckSchema = z.discriminatedUnion('accepted', [
 	z.object({
@@ -99,6 +105,13 @@ const codeCheckSchema = z.discriminatedUnion('accepted', [
 			.number()
 			.positive()
 			.transform((seconds) => Math.min(Math.ceil(seconds), MAX_CODE_HOLD_SECONDS)),
+		hold: z
+			.string()
+			.trim()
+			.min(1)
+			.max(MAX_CONNECT_CODE)
+			.regex(/^\P{C}*$/u)
+			.optional(),
 	}),
 	z.object({
 		accepted: z.literal(false),
@@ -117,7 +130,11 @@ export const readCodeCheck = (answer: unknown): ConnectCodeCheck | undefined => 
 	const result = codeCheckSchema.safeParse(answer);
 	if (!result.success) return undefined;
 	const check = result.data;
-	if (check.accepted) return { accepted: true, expiresIn: check.expiresIn };
+	if (check.accepted) {
+		return check.hold === undefined
+			? { accepted: true, expiresIn: check.expiresIn }
+			: { accepted: true, expiresIn: check.expiresIn, hold: check.hold };
+	}
 	return check.reason === undefined
 		? { accepted: false }
 		: { accepted: false, reason: check.reason };
@@ -125,11 +142,12 @@ export const readCodeCheck = (answer: unknown): ConnectCodeCheck | undefined => 
 
 /**
  * What `/start` takes as the gate's code (`EntitlementContext.connectCode`),
- * on its way into the flow cookie and from there to the policy.
+ * on its way into the flow cookie and from there to the policy: typed, or
+ * held in its place (`ConnectCodeCheck.hold`).
  *
  * Bounded (`MAX_CONNECT_CODE`), because it rides in the flow cookie. Printable,
- * because it is something a person typed, and a policy should not have to
- * wonder what a control character in it means. Blank is the same as none: a
+ * because it is something a person typed or a policy issued as text, and a
+ * policy should not have to wonder what a control character in it means. Blank is the same as none: a
  * field left empty is not a code.
  */
 export const connectCodeSchema = z

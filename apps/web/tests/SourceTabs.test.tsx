@@ -1,3 +1,4 @@
+import { MAX_CONNECT_CODE } from '@skysa/core';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +10,12 @@ import gdrive32 from '../src/assets/providers/gdrive-32.png';
 import gdrive48 from '../src/assets/providers/gdrive-48.png';
 import onedriveMark from '../src/assets/providers/onedrive.svg';
 import { type AccountSlot, SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
-import { dropConnectCode, heldConnectCode, holdConnectCode } from '../src/store/connectCode.js';
+import {
+	dropConnectCode,
+	heldConnectCode,
+	holdAcceptedCode,
+	holdConnectCode,
+} from '../src/store/connectCode.js';
 import {
 	bindConnection,
 	connectedSources,
@@ -1193,6 +1199,61 @@ describe("the gate's code, on an instance that asks for one", () => {
 		);
 	});
 
+	it('trades a code for what the policy gives to hold, and shows neither', async () => {
+		const user = userEvent.setup();
+		const pass = `dt1.${'Ab_-'.repeat(40)}`;
+		const { client, startConnect } = coded(REQUIRED, () =>
+			Promise.resolve({
+				ok: true as const,
+				value: { accepted: true as const, expiresIn: 180 * 86_400, hold: pass },
+			})
+		);
+		const menu = await openMenu(user, client);
+
+		await user.type(menu.getByRole('textbox', { name: 'Connect code' }), 'K7QM-2XRD{Enter}');
+
+		await menu.findByRole('button', { name: 'Dropbox' });
+		expect(menu.getByText(/Connect code accepted on this device/)).toBeTruthy();
+		expect(menu.queryByText('K7QM-2XRD')).toBeNull();
+		expect(document.body.textContent).not.toContain(pass);
+		expect(heldConnectCode()).toBe(pass);
+		// And it is what goes with the connect, in place of the code.
+		await user.click(menu.getByRole('button', { name: 'Dropbox' }));
+		await waitFor(() => {
+			expect(startConnect).toHaveBeenCalled();
+		});
+		expect(startConnect.mock.calls[0]?.[3]).toBe(pass);
+	});
+
+	it('opens a held pass on an empty field, since it was never typed', async () => {
+		const user = userEvent.setup();
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 900, hold: `dt1.${'A'.repeat(100)}` });
+		const { client } = coded(REQUIRED);
+		const menu = await openMenu(user, client);
+
+		await user.click(menu.getByRole('button', { name: 'Change Connect code' }));
+
+		expect(menu.getByRole<HTMLInputElement>('textbox', { name: 'Connect code' }).value).toBe(
+			''
+		);
+	});
+
+	it('follows what is held when it changes under an open gate', async () => {
+		const user = userEvent.setup();
+		holdConnectCode('K7QM-2XRD', 900);
+		const { client } = coded(REQUIRED);
+		const menu = await openMenu(user, client);
+		expect(menu.getByRole('button', { name: 'Dropbox' })).toBeTruthy();
+
+		// As the app asking about it again on load lets it go.
+		act(() => {
+			dropConnectCode();
+		});
+
+		expect(await menu.findByRole('textbox', { name: 'Connect code' })).toBeTruthy();
+		expect(menu.queryByRole('button', { name: 'Dropbox' })).toBeNull();
+	});
+
 	it('asks again once the code is no longer good, with the field empty', async () => {
 		const user = userEvent.setup();
 		holdConnectCode('K7QM-2XRD', 0.4);
@@ -1273,7 +1334,7 @@ describe("the gate's code, on an instance that asks for one", () => {
 
 		const field = menu.getByRole('textbox', { name: 'Connect code' });
 
-		expect(field.getAttribute('maxlength')).toBe('64');
+		expect(field.getAttribute('maxlength')).toBe(String(MAX_CONNECT_CODE));
 		expect(field.getAttribute('autocomplete')).toBe('one-time-code');
 	});
 
