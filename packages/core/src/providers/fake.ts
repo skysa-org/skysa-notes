@@ -94,6 +94,8 @@ export interface FakeProviderOptions {
 	 * for Drive, whose scope hides what the user put there (`StorageProvider`).
 	 */
 	listsEverything?: boolean;
+	/** How many notes a push may write at once (`StorageProvider`). */
+	writesAtOnce?: number;
 }
 
 export interface FakeProvider extends StorageProvider {
@@ -134,6 +136,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 		pageSize = Number.POSITIVE_INFINITY,
 		folderChanges = 'folder-only',
 		listsEverything = true,
+		writesAtOnce,
 	} = options;
 
 	/** Normalized path → node. The root is not stored; it always exists. */
@@ -510,6 +513,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 	return {
 		kind,
 		listsEverything,
+		...(writesAtOnce === undefined ? {} : { writesAtOnce }),
 		ensureRoot,
 		list,
 		read,

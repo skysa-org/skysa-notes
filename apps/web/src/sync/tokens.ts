@@ -94,6 +94,23 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 		return result.value.accessToken;
 	};
 
+	/**
+	 * The mint under way, which every request that finds the token spent while
+	 * it is out waits on. Notes are written several at once on Google Drive
+	 * (`StorageProvider.writesAtOnce`), and each of them finding the token
+	 * expired asked the server for one of its own.
+	 */
+	const minting = new Map<'mint', Promise<string>>();
+	const mintOnce = (): Promise<string> => {
+		const under = minting.get('mint');
+		if (under !== undefined) return under;
+		const minted = mint().finally(() => {
+			minting.delete('mint');
+		});
+		minting.set('mint', minted);
+		return minted;
+	};
+
 	return {
 		get: async () => {
 			const inMemory = cached.get('token');
@@ -114,7 +131,7 @@ export const createTokenSource = (options: TokenSourceOptions): TokenSource => {
 					: { accessToken: state.accessToken, expiresAt: state.accessTokenExpiresAt };
 			// Minted by another tab, perhaps after this one was refused.
 			if (usable(stored)) return using(stored);
-			return mint();
+			return mintOnce();
 		},
 
 		refresh: async () => {

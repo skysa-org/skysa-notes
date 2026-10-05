@@ -868,6 +868,33 @@ describe.each(REMOTES)('the engine over %s', (_, make) => {
 			expect(b.store.folders().map((folder) => folder.path)).toEqual(['Work']);
 		});
 
+		it('is made once when it went from the remote under edits to several notes in it', async () => {
+			// Sent together on Drive, each write found the notebook missing and
+			// made it, and the stub — one folder to a name — refused all but one.
+			const { remote, a, b } = await setUp(make);
+			const paths = ['Work/p.md', 'Work/q.md', 'Work/r.md', 'Work/s.md'];
+			paths.forEach((path) => {
+				create(a, path, 'base\n');
+			});
+			await synced(a);
+			await synced(b);
+			paths.forEach((path) => {
+				edit(a, path, `${path} here\n`);
+			});
+			// Gone from the remote with the notes in it, as the website's trash
+			// takes a folder.
+			const work = remote.backing.snapshot().find((entry) => entry.path === 'Work');
+			expect(work).toBeDefined();
+			await remote.backing.delete({ remoteId: work?.remoteId ?? '', path: 'Work' });
+
+			expect((await synced(a)).status).toBe('ok');
+			const files = await converged(remote, a, b);
+			expect(files).toEqual(
+				Object.fromEntries(paths.map((path) => [path, `${path} here\n`]))
+			);
+			expect(remoteFolders(remote)).toEqual(['Work']);
+		});
+
 		it('keeps the directory when the other device has put a file in it', async () => {
 			// The file is not ours to delete: this device has never pulled it,
 			// and the notebook's delete says nothing about it.
