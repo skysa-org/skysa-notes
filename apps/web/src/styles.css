@@ -977,31 +977,48 @@ button.row,
 }
 
 /* A list with a notebook in it that opens sets aside room for its chevron
-   before every name, so the names stand in one column (`rowIndent`). */
+   before every name, so the names stand in one column (`rowIndent`). As wide
+   as a level of nesting, so a notebook's chevron is under the name of the
+   notebook it is in. */
 .tree.nested {
-	--disclosure: 1rem;
+	--disclosure: 0.85rem;
 }
 
 /* Drawn over the row's start, as the `⋯` is over its end, so the row keeps
    its whole width for its highlight and its hit area. Pointing along the row
-   while the notebook is shut, and turned down into it while it is open. */
+   while the notebook is shut, and turned down into it while it is open.
+
+   The chevron's stroke starts at the gutter, where the text of every other
+   list starts, and not its box: the drawing has `--chevron-inset` of nothing
+   before the stroke, so the box starts that far into the gutter. The button
+   reaches back `--disclosure-reach` from the gutter, at least to the box,
+   and on to the name. */
 .row-disclosure {
+	--chevron: 0.875rem;
+	--chevron-inset: calc(var(--chevron) * 8.5 / 24);
+	--disclosure-reach: var(--chevron-inset);
+
 	position: absolute;
 	z-index: 1;
 	inset-block: 0;
 	display: grid;
-	place-items: center;
-	width: var(--disclosure, 1rem);
+	place-items: center start;
+	width: calc(var(--disclosure-reach) + var(--disclosure, 0.85rem));
 	padding: 0;
+	padding-inline-start: calc(var(--disclosure-reach) - var(--chevron-inset));
 	border: 0;
 	background: transparent;
 	color: var(--muted);
 	cursor: pointer;
 }
 
+/* Turned about its middle, so it keeps its distance from the name. Shut, the
+   stroke is 8.5 to 16.5 of the drawing's 24 units across, and that start is
+   the inset; open, it is 5 to 19, and reaches 2px into the gutter. Turned
+   about a point that kept the start, it moved towards the name as it opened. */
 .row-disclosure .toolbar-icon {
-	width: 0.875rem;
-	height: 0.875rem;
+	width: var(--chevron);
+	height: var(--chevron);
 	transform: rotate(-90deg);
 }
 
@@ -3576,9 +3593,15 @@ button.danger {
 	}
 
 	/* A chevron a thumb can land on: a near miss selects the notebook, and in a
-	   compact window that leaves for its notes. The names move over with it. */
+	   compact window that leaves for its notes. It reaches back over the gutter,
+	   where there is nothing else to tap, so the names move over by less than
+	   the 1.75rem or more it is wide. */
 	.tree.nested {
-		--disclosure: 1.75rem;
+		--disclosure: 1rem;
+	}
+
+	.row-disclosure {
+		--disclosure-reach: var(--gutter);
 	}
 
 	.source-tab,
