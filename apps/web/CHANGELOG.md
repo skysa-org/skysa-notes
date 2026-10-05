@@ -1,5 +1,19 @@
 # @skysa/web
 
+## 0.16.0
+
+### Minor Changes
+
+- 89fcd18: A notebook with notebooks inside it can be opened and shut in the sidebar, by the chevron before its name or with the Right and Left arrow keys on its row. Notebooks start shut, so a large library opens as the short list of its top level, and a shut notebook's count includes every note inside it. Which notebooks are open is remembered on this device, for each source, and follows a notebook that is renamed or moved, here or on another device. The notebook open in the note list is always shown: the notebooks it is in are opened for it. While a note or notebook is being moved, resting it on a shut notebook opens it, so a destination inside one can be reached.
+- 6d1123f: A note's dates come from its frontmatter in every browser. A `created` written as `2014-02-20 14:00:10 UTC`, as OneNote's exporters write it, is now read in Safari and on iPhones too, where it was taken for the day the note was imported. The date a note shows as edited is read from `updated`, or else from `modified`, `date modified` or `lastmod`, as other tools write it, or else from when the note was made, rather than being the day it was imported. Notes already imported keep the dates they were given; importing them again dates them by their frontmatter.
+
+### Patch Changes
+
+- 095ecfa: The chevron before a notebook that opens now starts where the text of the other lists does, and the notebooks' names move over by less to make room for it. On a touch screen its tap area reaches back to the pane's edge, so it is wider than before while the names sit closer to it.
+- e8fe1bf: A note's row no longer spends its preview on a line that only says when the note was made, such as the `Thursday, February 20, 2014 2:00 PM` OneNote puts under every page's title. The preview starts with the note's own words instead. A line that says anything more than the date is kept.
+- Updated dependencies [6d1123f]
+  - @skysa/core@0.16.0
+
 ## 0.15.0
 
 ### Minor Changes
