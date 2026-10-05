@@ -22,7 +22,7 @@ import {
 	saveNoteBody,
 	setNoteEditorMode,
 } from '../src/store/notes.js';
-import { queueWrite } from '../src/store/queue.js';
+import { queueByNotebook, queueWrite } from '../src/store/queue.js';
 import { createDexieSyncStore, type DexieSyncStoreOptions } from '../src/sync/store.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -1058,5 +1058,56 @@ describe('a note deleted before its write was ever sent, on two devices', () => 
 		expect(Object.keys(await localFiles(theirs))).toEqual(['plans.md']);
 		expect(Object.keys(await localFiles(mine))).toEqual(['plans.md']);
 		expect(await localFiles(mine)).toEqual(await localFiles(theirs));
+	});
+});
+
+describe('a library queued notebook by notebook', () => {
+	const ops = async (db: NotesDatabase) =>
+		(await db.opQueue.orderBy('seq').toArray()).map((op) => [op.op, op.path]);
+
+	it('makes a notebook spelled two ways before what is in it, in either spelling', async () => {
+		const db = freshDatabase();
+		const notes = await Promise.all(
+			['Workshop/c.md', 'WORK/inner/b.md', 'work/a.md'].map((path) =>
+				importNoteFile(db, { ...scope, path, source: `# ${path}\n` })
+			)
+		);
+		await db.opQueue.clear();
+
+		await queueByNotebook(db, CONNECTION, {
+			folders: ['Workshop', 'Work/Inner', 'Work'],
+			files: [],
+			notes,
+		});
+
+		expect(await ops(db)).toEqual([
+			['mkdir', 'Work'],
+			['write', 'work/a.md'],
+			['mkdir', 'Work/Inner'],
+			['write', 'WORK/inner/b.md'],
+			['mkdir', 'Workshop'],
+			['write', 'Workshop/c.md'],
+		]);
+	});
+
+	it('leaves what is queued already where it is, and queues none of it twice', async () => {
+		const db = freshDatabase();
+		const first = await importNoteFile(db, { ...scope, path: 'Work/a.md', source: '# A\n' });
+		const second = await importNoteFile(db, { ...scope, path: 'Work/b.md', source: '# B\n' });
+		await db.opQueue.clear();
+		// The first note's write is queued already, and nothing else.
+		await queueWrite(db, first);
+
+		await queueByNotebook(db, CONNECTION, {
+			folders: ['Work'],
+			files: [],
+			notes: [first, second],
+		});
+
+		expect(await ops(db)).toEqual([
+			['write', 'Work/a.md'],
+			['mkdir', 'Work'],
+			['write', 'Work/b.md'],
+		]);
 	});
 });

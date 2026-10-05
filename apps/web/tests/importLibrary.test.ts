@@ -229,6 +229,82 @@ describe('importLibrary', () => {
 		expect(after.every((note) => note.dirty === 0)).toBe(true);
 	});
 
+	it('queues the top first, then each notebook with its files before its notes, then the notebooks inside it', async () => {
+		const db = await bound();
+		const plan = planImport(
+			// Picked in an order the queue is not to follow.
+			picked(
+				{
+					'Work/Meetings/standup.md': '# Standup\n',
+					'Work/plan.md': '# Plan\n\n![](photo.png)\n',
+					'top.md': '# Top\n\n![](icon.png)\n',
+					'Play/game.md': '# Game\n',
+					'Work/Meetings/board.jpg': 'jpg',
+					'Work/photo.png': 'png',
+					'icon.png': 'icon',
+				},
+				['Empty/']
+			)
+		);
+
+		await importLibrary(db, CONNECTION, plan);
+
+		const queue = (await db.opQueue.where('connectionId').equals(CONNECTION).sortBy('seq')).map(
+			(op) => [op.op, op.path]
+		);
+		expect(queue).toEqual([
+			['upload', 'icon.png'],
+			['write', 'top.md'],
+			['mkdir', 'Empty'],
+			['mkdir', 'Play'],
+			['write', 'Play/game.md'],
+			['mkdir', 'Work'],
+			['upload', 'Work/photo.png'],
+			['write', 'Work/plan.md'],
+			['mkdir', 'Work/Meetings'],
+			['upload', 'Work/Meetings/board.jpg'],
+			['write', 'Work/Meetings/standup.md'],
+		]);
+
+		// And the strictest provider takes it in that order.
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		const engine = createSyncEngine({ provider: fake, store: createDexieSyncStore(db, scope) });
+		expect((await engine.sync()).status).toBe('ok');
+		expect(await db.opQueue.where('connectionId').equals(CONNECTION).count()).toBe(0);
+		expect(
+			fake
+				.snapshot()
+				.filter((entry) => entry.kind === 'file' && !isHidden(entry.path))
+				.map((entry) => entry.path)
+				.sort()
+		).toEqual(queue.flatMap(([op, path]) => (op === 'mkdir' ? [] : [path])).sort());
+	});
+
+	it('queues what goes into a notebook the source has after what is above it, and before the notebooks inside it', async () => {
+		const db = await bound();
+		await createFolder(db, { ...scope, name: 'Work' });
+		await db.opQueue.clear();
+
+		await importLibrary(
+			db,
+			CONNECTION,
+			planImport(picked({ 'work/Inner/deep.md': 'd', 'work/plan.md': 'p', 'top.md': 't' }))
+		);
+
+		expect(
+			(await db.opQueue.where('connectionId').equals(CONNECTION).sortBy('seq')).map((op) => [
+				op.op,
+				op.path,
+			])
+		).toEqual([
+			['write', 'top.md'],
+			['write', 'Work/plan.md'],
+			['mkdir', 'Work/Inner'],
+			['write', 'Work/Inner/deep.md'],
+		]);
+	});
+
 	it('goes into the notebooks the source has, as the source spells them, and numbers a name that is taken', async () => {
 		const db = await bound();
 		await importNoteFile(db, { ...scope, path: 'Work/Plan.md', source: '# Mine\n' });

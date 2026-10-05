@@ -26,7 +26,7 @@ import {
 } from './db.js';
 import { foldPath, freePath } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
-import { queueMkdir, queueUpload, queueWrite } from './queue.js';
+import { queueByNotebook } from './queue.js';
 import { readZip } from './readZip.js';
 
 /**
@@ -47,9 +47,10 @@ import { readZip } from './readZip.js';
  * A note whose name is taken comes in under a numbered one; a notebook that is
  * there already is the one it goes into; a file that is there already, by
  * name and size, is the same file and is not sent twice. Each is owed to the
- * remote as a note written here is, in the order a bind sends a pile — every
- * notebook, then every file, then every note — so no note arrives ahead of the
- * pictures it links.
+ * remote as a note written here is, in the order a bind sends a pile — notebook
+ * by notebook, each made before what is in it and its files before its notes
+ * (`queueByNotebook`) — so another device fills in a notebook at a time, and no
+ * note arrives ahead of the pictures beside it.
  *
  * Three kinds of file stay out, and the user is told which: a note that is
  * not UTF-8 text, which sync would leave alone too (§14, "Other encodings"); a
@@ -574,21 +575,14 @@ export const importLibrary = async (
 				}))
 			);
 			await db.notes.bulkAdd(notes.rows);
-			// As a bind queues a pile it copies (`queueOwed`): notebooks outermost
-			// first, then files, then notes, so nothing lands ahead of what it is
-			// in or what it links.
-			await folders.reduce(async (pending, folder) => {
-				await pending;
-				await queueMkdir(db, connectionId, folder.path);
-			}, Promise.resolve());
-			await files.rows.reduce(async (pending, file) => {
-				await pending;
-				await queueUpload(db, file.row);
-			}, Promise.resolve());
-			await notes.rows.reduce(async (pending, note) => {
-				await pending;
-				await queueWrite(db, note);
-			}, Promise.resolve());
+			// As a bind queues a pile it copies (`queueOwed`): notebook by
+			// notebook, each made before what is in it and its files before its
+			// notes, so another device fills in a notebook at a time.
+			await queueByNotebook(db, connectionId, {
+				folders: folders.map((folder) => folder.path),
+				files: files.rows.map((file) => file.row),
+				notes: notes.rows,
+			});
 
 			return {
 				notes: notes.rows.length,

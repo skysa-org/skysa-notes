@@ -214,7 +214,9 @@ describe('moving what a source never sent into another source', () => {
 		expect(await pathsUnder(db, BOB.connectionId)).toEqual(['kept.md']);
 		expect((await noteById(db, kept.id))?.connectionId).toBe(BOB.connectionId);
 		expect(await noteById(db, doomed.id)).toBeUndefined();
-		expect(await opsUnder(db, BOB.connectionId)).toEqual(['mkdir Renamed', 'write kept.md']);
+		// The note at the top first, which needs no notebook made; then the
+		// notebook, notebook by notebook.
+		expect(await opsUnder(db, BOB.connectionId)).toEqual(['write kept.md', 'mkdir Renamed']);
 		expect(await db.notes.where('connectionId').equals(ADA.connectionId).count()).toBe(0);
 		expect(await db.opQueue.where('connectionId').equals(ADA.connectionId).count()).toBe(0);
 	});
