@@ -419,7 +419,9 @@ const Disclosure = ({
 			tabIndex={moving === null ? -1 : 0}
 			aria-expanded={open}
 			aria-label={`Notebooks inside \u201c${name}\u201d`}
-			style={{ insetInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
+			style={{
+				insetInlineStart: `calc(var(--gutter) - var(--disclosure-reach) + ${String(depth * 0.85)}rem)`,
+			}}
 			onClick={onToggle}
 			onDragOver={(event) => {
 				if (!allowed) return;
