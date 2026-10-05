@@ -24,6 +24,8 @@ const renderSidebar = (props: Partial<Parameters<typeof Sidebar>[0]> = {}) =>
 			onSelectFolder={() => undefined}
 			onCreateFolder={() => undefined}
 			looseNoteCount={0}
+			// Open, so the notebook inside it is listed: shutting is tested below.
+			openNotebooks={new Set(['work'])}
 			{...props}
 		/>
 	);
@@ -727,5 +729,112 @@ describe('the notebook right-click menu', () => {
 		fireEvent.contextMenu(screen.getByRole('button', { name: /into work$/ }));
 
 		expect(screen.queryByRole('group', { name: /^Notebook/ })).toBeNull();
+	});
+});
+
+describe('opening and shutting a notebook', () => {
+	const toggle = (name: string) =>
+		screen.getByRole('button', { name: `Notebooks inside \u201c${name}\u201d` });
+
+	it('lists only the top level of a notebook nobody has opened, counting all it holds', () => {
+		renderSidebar({ tree: counted, openNotebooks: new Set() });
+
+		expect(screen.queryByRole('button', { name: /^meetings/ })).toBeNull();
+		// Its own two notes and the one in the notebook inside it.
+		expect(screen.getByRole('button', { name: /^work/ }).textContent).toBe('work3');
+		expect(toggle('work').getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('lists what is inside once it is open, counting only its own', () => {
+		renderSidebar({ tree: counted });
+
+		expect(screen.getByRole('button', { name: /^meetings/ })).toBeDefined();
+		expect(screen.getByRole('button', { name: /^work/ }).textContent).toBe('work2');
+		expect(toggle('work').getAttribute('aria-expanded')).toBe('true');
+	});
+
+	it('opens and shuts by its chevron, which has no tab stop of its own', async () => {
+		const onOpenNotebooks = vi.fn();
+		const { rerender } = renderSidebar({ openNotebooks: new Set(), onOpenNotebooks });
+
+		expect(toggle('work').tabIndex).toBe(-1);
+		await userEvent.click(toggle('work'));
+		expect(onOpenNotebooks).toHaveBeenLastCalledWith(['work'], true);
+
+		rerender(
+			<Sidebar
+				tree={tree}
+				selectedFolder="personal"
+				onSelectFolder={() => undefined}
+				onCreateFolder={() => undefined}
+				looseNoteCount={0}
+				openNotebooks={new Set(['work'])}
+				onOpenNotebooks={onOpenNotebooks}
+			/>
+		);
+		await userEvent.click(toggle('work'));
+		expect(onOpenNotebooks).toHaveBeenLastCalledWith(['work'], false);
+	});
+
+	it('opens and shuts with Right and Left on the row, and goes in and out', () => {
+		const onOpenNotebooks = vi.fn();
+		const { rerender } = renderSidebar({ openNotebooks: new Set(), onOpenNotebooks });
+		const work = () => screen.getByRole('button', { name: /^work/ });
+
+		fireEvent.keyDown(work(), { key: 'ArrowRight' });
+		expect(onOpenNotebooks).toHaveBeenLastCalledWith(['work'], true);
+
+		rerender(
+			<Sidebar
+				tree={tree}
+				selectedFolder="personal"
+				onSelectFolder={() => undefined}
+				onCreateFolder={() => undefined}
+				looseNoteCount={0}
+				openNotebooks={new Set(['work'])}
+				onOpenNotebooks={onOpenNotebooks}
+			/>
+		);
+		work().focus();
+		fireEvent.keyDown(work(), { key: 'ArrowRight' });
+		const meetings = screen.getByRole('button', { name: /^meetings/ });
+		expect(document.activeElement).toBe(meetings);
+
+		fireEvent.keyDown(meetings, { key: 'ArrowLeft' });
+		expect(document.activeElement).toBe(work());
+
+		fireEvent.keyDown(work(), { key: 'ArrowLeft' });
+		expect(onOpenNotebooks).toHaveBeenLastCalledWith(['work'], false);
+	});
+
+	it('opens the notebooks the open notebook is in, once', () => {
+		const onOpenNotebooks = vi.fn();
+		const deep = buildFolderTree({ paths: ['a/b/c', 'd'] });
+		const props = {
+			tree: deep,
+			selectedFolder: 'a/b/c',
+			onSelectFolder: () => undefined,
+			onCreateFolder: () => undefined,
+			looseNoteCount: 0,
+			onOpenNotebooks,
+		};
+		const { rerender } = render(<Sidebar {...props} openNotebooks={new Set()} />);
+
+		expect(onOpenNotebooks).toHaveBeenCalledTimes(1);
+		expect(onOpenNotebooks).toHaveBeenCalledWith(['a', 'a/b'], true);
+
+		// The user shut one of them again: that stands.
+		rerender(<Sidebar {...props} openNotebooks={new Set(['a/b'])} />);
+		expect(onOpenNotebooks).toHaveBeenCalledTimes(1);
+	});
+
+	it('sets aside room for a chevron only where a notebook has one', () => {
+		const { container, unmount } = renderSidebar({
+			tree: buildFolderTree({ paths: ['a', 'b'] }),
+		});
+		expect(container.querySelector('.tree.nested')).toBeNull();
+		unmount();
+
+		expect(renderSidebar().container.querySelector('.tree.nested')).not.toBeNull();
 	});
 });

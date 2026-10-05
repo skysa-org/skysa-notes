@@ -1,7 +1,8 @@
-import { basename, ROOT } from '@skysa/core';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { ancestorPaths, basename, ROOT } from '@skysa/core';
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useCommand } from '../commands/context.js';
+import { Icon } from '../editor/icons.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
@@ -10,7 +11,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 import { RowOptions } from './RowOptions.js';
-import { RowRename } from './RowRename.js';
+import { rowIndent, RowRename } from './RowRename.js';
 
 /**
  * The notebook tree. Folders are real directories on the provider, so this is a
@@ -36,6 +37,13 @@ import { RowRename } from './RowRename.js';
  * arranges only when there are no notebooks. Nesting is the rarer thing and it
  * now has two ways of its own to be asked for, so the common one is the one
  * that is unconditional.
+ *
+ * A notebook with notebooks inside it lists them only while it is open, which
+ * it is once the user has opened it and stays on this device
+ * (`store/openNotebooks.ts`). A library brought in from elsewhere can be
+ * hundreds of notebooks nested three deep, and listed whole it was a column
+ * to scroll through to find anything. Shut, a notebook counts every note
+ * inside it, so the number says what is behind it.
  */
 
 export interface SidebarProps {
@@ -83,6 +91,13 @@ export interface SidebarProps {
 	 * holds stay the sidebar's own.
 	 */
 	newNotebookAsked?: number;
+	/**
+	 * The notebooks whose notebooks are listed. `undefined` until it has been
+	 * read, when every notebook is shut, as one nobody has opened is.
+	 */
+	openNotebooks?: ReadonlySet<string>;
+	/** Open or shut these notebooks. */
+	onOpenNotebooks?: (paths: string[], open: boolean) => void;
 }
 
 /**
@@ -257,6 +272,8 @@ interface RowProps {
 	onCancelMove: () => void;
 	/** A right-click: the notebook's menu, where it has one. */
 	onMenu?: (at: MenuPoint) => void;
+	/** Left and Right, which open and shut a notebook (`treeKeys`). */
+	onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }
 
 /**
@@ -279,6 +296,7 @@ const Row = ({
 	onPickUp,
 	onCancelMove,
 	onMenu,
+	onKeyDown,
 }: RowProps) => {
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
@@ -292,7 +310,7 @@ const Row = ({
 		<button
 			type="button"
 			className={classes.join(' ')}
-			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
+			style={{ paddingInlineStart: rowIndent(depth) }}
 			// A row nothing can land on is not a destination, and saying so with
 			// `disabled` also takes it out of the tab order for the length of the
 			// move — a keyboard user stepping through destinations should not have
@@ -314,6 +332,7 @@ const Row = ({
 				if (moving === null) onSelect();
 				else onDrop(path);
 			}}
+			onKeyDown={onKeyDown}
 			onDragStart={(event) => {
 				if (onPickUp === undefined) return;
 				// Firefox starts no drag at all without data on it, and the string
@@ -347,6 +366,70 @@ const Row = ({
 	);
 };
 
+/** Every live note beneath a notebook, which is what deleting it would take. */
+const notesUnder = (node: FolderNode): number =>
+	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
+
+/**
+ * The chevron that opens and shuts a notebook with notebooks inside it, in
+ * the room before its name. Out of the tab order: the row is the stop, and
+ * Left and Right on it do what this does, as in any tree of folders, so a
+ * keyboard does not take two stops a notebook. Still a button with a name
+ * and a state, for a screen reader's list of them and for a pointer.
+ */
+const Disclosure = ({
+	name,
+	depth,
+	open,
+	onToggle,
+}: {
+	name: string;
+	depth: number;
+	open: boolean;
+	onToggle: () => void;
+}) => (
+	<button
+		type="button"
+		className="row-disclosure"
+		tabIndex={-1}
+		aria-expanded={open}
+		aria-label={`Notebooks inside \u201c${name}\u201d`}
+		style={{ insetInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
+		onClick={onToggle}
+	>
+		<Icon name="chevron" />
+	</button>
+);
+
+/**
+ * Left and Right on a notebook's row, as a tree of folders has them: Right
+ * opens a shut notebook and goes into an open one, to the first notebook
+ * inside it; Left shuts an open one and goes out of any other, to the
+ * notebook it is in.
+ */
+const treeKeys =
+	(hasChildren: boolean, open: boolean, toggle: (open: boolean) => void) =>
+	(event: KeyboardEvent<HTMLButtonElement>) => {
+		if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+		const item = event.currentTarget.closest('li');
+		if (event.key === 'ArrowRight') {
+			if (!hasChildren) return;
+			event.preventDefault();
+			if (open) item?.querySelector<HTMLButtonElement>(':scope > ul button.row')?.focus();
+			else toggle(true);
+			return;
+		}
+		event.preventDefault();
+		if (open) {
+			toggle(false);
+			return;
+		}
+		item?.parentElement
+			?.closest('li')
+			?.querySelector<HTMLButtonElement>(':scope > .row-item > button.row')
+			?.focus();
+	};
+
 interface FolderRowsProps {
 	nodes: FolderNode[];
 	depth: number;
@@ -367,6 +450,9 @@ interface FolderRowsProps {
 	onMenu: (path: string, at: MenuPoint) => void;
 	/** What its `⋯` and its right-click offer. */
 	itemsFor: (path: string) => OptionsMenuItem[];
+	/** The notebooks whose notebooks are listed. */
+	openNotebooks: ReadonlySet<string>;
+	onToggle: (path: string, open: boolean) => void;
 }
 
 const FolderRows = ({
@@ -385,95 +471,130 @@ const FolderRows = ({
 	onRenamed,
 	onMenu,
 	itemsFor,
+	openNotebooks,
+	onToggle,
 }: FolderRowsProps) => (
 	<>
-		{nodes.map((node) => (
-			<li key={node.path}>
-				<div className="row-item">
-					{node.path === renaming ? (
-						<RowRename
-							name={node.name}
-							depth={depth}
-							selected={node.path === selectedFolder}
-							count={node.noteCount}
-							onDraft={(text) => {
-								onDraft(node.path, text);
-							}}
-							onDone={(chosen) => {
-								onRenamed(node.path, chosen);
-							}}
-						/>
-					) : (
-						<Row
-							path={node.path}
-							name={node.name}
-							selected={node.path === selectedFolder}
-							depth={depth}
-							count={node.noteCount}
-							moving={moving}
-							over={over}
-							onOver={onOver}
-							onSelect={() => {
-								onSelectFolder(node.path);
-							}}
-							onDrop={onDrop}
-							onPickUp={() => {
-								onPickUp({ kind: 'notebook', path: node.path, name: node.name });
-							}}
-							onCancelMove={onCancelMove}
-							onMenu={(at) => {
-								onMenu(node.path, at);
-							}}
-						/>
-					)}
-					{/* Not while its name is being typed, when the row is a field;
+		{nodes.map((node) => {
+			const hasChildren = node.children.length > 0;
+			const open = hasChildren && openNotebooks.has(node.path);
+			const toggle = (to: boolean) => {
+				onToggle(node.path, to);
+			};
+			// Shut, it counts what it holds at every depth: the notes that are
+			// in it and the ones it hides.
+			const count = hasChildren && !open ? notesUnder(node) : node.noteCount;
+			return (
+				<li key={node.path}>
+					<div className="row-item">
+						{hasChildren && (
+							<Disclosure
+								name={node.name}
+								depth={depth}
+								open={open}
+								onToggle={() => {
+									toggle(!open);
+								}}
+							/>
+						)}
+						{node.path === renaming ? (
+							<RowRename
+								name={node.name}
+								depth={depth}
+								selected={node.path === selectedFolder}
+								count={count}
+								onDraft={(text) => {
+									onDraft(node.path, text);
+								}}
+								onDone={(chosen) => {
+									onRenamed(node.path, chosen);
+								}}
+							/>
+						) : (
+							<Row
+								path={node.path}
+								name={node.name}
+								selected={node.path === selectedFolder}
+								depth={depth}
+								count={count}
+								moving={moving}
+								over={over}
+								onOver={onOver}
+								onSelect={() => {
+									onSelectFolder(node.path);
+								}}
+								onDrop={onDrop}
+								onPickUp={() => {
+									onPickUp({
+										kind: 'notebook',
+										path: node.path,
+										name: node.name,
+									});
+								}}
+								onCancelMove={onCancelMove}
+								onMenu={(at) => {
+									onMenu(node.path, at);
+								}}
+								onKeyDown={treeKeys(hasChildren, open, toggle)}
+							/>
+						)}
+						{/* Not while its name is being typed, when the row is a field;
 				    nor while something is being moved, when the rows are only
 				    places to put it. */}
-					{node.path !== renaming && (
-						<RowOptions
-							name={node.name}
-							kind="Notebook"
-							items={itemsFor(node.path)}
-							disabled={moving !== null}
-							// Rightwards, over the note list: the sidebar is at the
-							// window's left edge, and a card opened leftwards from its
-							// end has a sidebar's width to fit in.
-							align="start"
-						/>
+						{node.path !== renaming && (
+							<RowOptions
+								name={node.name}
+								kind="Notebook"
+								items={itemsFor(node.path)}
+								disabled={moving !== null}
+								// Rightwards, over the note list: the sidebar is at the
+								// window's left edge, and a card opened leftwards from its
+								// end has a sidebar's width to fit in.
+								align="start"
+							/>
+						)}
+					</div>
+					{open && (
+						<ul>
+							<FolderRows
+								nodes={node.children}
+								depth={depth + 1}
+								selectedFolder={selectedFolder}
+								onSelectFolder={onSelectFolder}
+								moving={moving}
+								over={over}
+								onOver={onOver}
+								onPickUp={onPickUp}
+								onDrop={onDrop}
+								onCancelMove={onCancelMove}
+								renaming={renaming}
+								onDraft={onDraft}
+								onRenamed={onRenamed}
+								onMenu={onMenu}
+								itemsFor={itemsFor}
+								openNotebooks={openNotebooks}
+								onToggle={onToggle}
+							/>
+						</ul>
 					)}
-				</div>
-				{node.children.length > 0 && (
-					<ul>
-						<FolderRows
-							nodes={node.children}
-							depth={depth + 1}
-							selectedFolder={selectedFolder}
-							onSelectFolder={onSelectFolder}
-							moving={moving}
-							over={over}
-							onOver={onOver}
-							onPickUp={onPickUp}
-							onDrop={onDrop}
-							onCancelMove={onCancelMove}
-							renaming={renaming}
-							onDraft={onDraft}
-							onRenamed={onRenamed}
-							onMenu={onMenu}
-							itemsFor={itemsFor}
-						/>
-					</ul>
-				)}
-			</li>
-		))}
+				</li>
+			);
+		})}
 	</>
 );
 
+/** No notebook open, which is how every one starts. */
+const NONE_OPEN: ReadonlySet<string> = new Set();
+
+/** One notebook opened or shut, by whoever keeps which are open. */
+const toggleWith =
+	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
+	(path: string, open: boolean) => {
+		onOpenNotebooks?.([path], open);
+	};
+
 /** The top level of the tree, which has no row of its own until one is needed. */
 const TOP_LEVEL_LABEL = 'Top level';
-
-/** Every live note beneath a notebook, which is what deleting it would take. */
-const notesUnder = (node: FolderNode): number =>
-	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
 
 /** Every file beneath a notebook, which deleting it takes as well. */
 const filesUnder = (node: FolderNode): number =>
@@ -485,7 +606,9 @@ const nodeAt = (nodes: readonly FolderNode[], path: string): FolderNode | undefi
 		undefined
 	);
 
-interface TreeBodyProps extends Omit<FolderRowsProps, 'nodes' | 'depth'> {
+interface TreeBodyProps extends Omit<FolderRowsProps, 'nodes' | 'depth' | 'openNotebooks'> {
+	/** Undefined until read, when every notebook is shut. */
+	openNotebooks: ReadonlySet<string> | undefined;
 	tree: FolderNode[] | undefined;
 	looseNoteCount: number | undefined;
 	/** Open the field for a new top-level notebook, as the header's `+` does. */
@@ -514,8 +637,12 @@ const TreeBody = ({
 	onRenamed,
 	onMenu,
 	itemsFor,
+	openNotebooks = NONE_OPEN,
+	onToggle,
 }: TreeBodyProps) => (
-	<ul className="tree">
+	// Room for a chevron before every name, so the names stand in one column,
+	// only where some notebook has one.
+	<ul className={tree?.some((node) => node.children.length > 0) ? 'tree nested' : 'tree'}>
 		{/* With no notebooks and the loose notes not yet counted there is
 			nothing here to say — but "nothing" reads as an empty sidebar
 			beside a note list that says it is still loading. */}
@@ -572,6 +699,8 @@ const TreeBody = ({
 				onRenamed={onRenamed}
 				onMenu={onMenu}
 				itemsFor={itemsFor}
+				openNotebooks={openNotebooks}
+				onToggle={onToggle}
 			/>
 		)}
 		{/* A row like the notebooks', the room for a `⋯` and all, so its count
@@ -599,6 +728,28 @@ const TreeBody = ({
 	</ul>
 );
 
+/**
+ * The notebook open in the note list is shown in the sidebar too: when one is
+ * opened — from the URL, from where the user was, from a search or a palette
+ * command, or made — the notebooks it is in are opened. Once for each, so
+ * shutting one of them afterwards is the user's to do, and done.
+ */
+const useRevealed = (
+	selectedFolder: string | undefined,
+	openNotebooks: ReadonlySet<string> | undefined,
+	onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined
+) => {
+	const revealed = useRef<string | undefined>(undefined);
+	useEffect(() => {
+		if (openNotebooks === undefined || selectedFolder === undefined || selectedFolder === ROOT)
+			return;
+		if (revealed.current === selectedFolder) return;
+		revealed.current = selectedFolder;
+		const shut = ancestorPaths(selectedFolder).filter((path) => !openNotebooks.has(path));
+		if (shut.length > 0) onOpenNotebooks?.(shut, true);
+	}, [selectedFolder, openNotebooks, onOpenNotebooks]);
+};
+
 export const Sidebar = ({
 	tree,
 	selectedFolder,
@@ -615,6 +766,8 @@ export const Sidebar = ({
 	onReveal,
 	newNotebookAsked = 0,
 	renamings,
+	openNotebooks,
+	onOpenNotebooks,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -635,6 +788,8 @@ export const Sidebar = ({
 	const [menu, setMenu] = useState<{ path: string; at: MenuPoint } | null>(null);
 	/** Which row the pointer is over, for the highlight and nothing else. */
 	const [over, setOver] = useState<string | null>(null);
+
+	useRevealed(selectedFolder, openNotebooks, onOpenNotebooks);
 
 	const pickUp = onPickUp ?? (() => undefined);
 	const drop = onDrop ?? (() => undefined);
@@ -807,6 +962,8 @@ export const Sidebar = ({
 					setMenu({ path, at });
 				}}
 				itemsFor={(path) => notebookMenuItems(basename(path), actionsFor(path))}
+				openNotebooks={openNotebooks}
+				onToggle={toggleWith(onOpenNotebooks)}
 			/>
 
 			{menu !== null && (

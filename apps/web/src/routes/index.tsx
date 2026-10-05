@@ -71,6 +71,7 @@ import {
 	useNoteSearch,
 	useNotesInFolder,
 	useNoteToOpen,
+	useOpenNotebooks,
 	useSources,
 } from '../store/hooks.js';
 import { keeping } from '../store/keeping.js';
@@ -84,6 +85,7 @@ import {
 	setNoteEditorMode,
 	undeleteNote,
 } from '../store/notes.js';
+import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { findFolder, type FolderNode, selectedFolderPath } from '../store/tree.js';
@@ -910,6 +912,14 @@ const Home = () => {
 	const { connectNotice, dismissConnect } = useConnectNotice(connect, code, held);
 	useCodeAskedAgain(connect);
 	const activeConnection = useActiveConnectionId();
+	const openNotebooks = useOpenNotebooks(activeConnection);
+	const onOpenNotebooks = useCallback(
+		(paths: string[], open: boolean) => {
+			if (activeConnection !== undefined)
+				void setNotebooksOpen(db, activeConnection, paths, open);
+		},
+		[activeConnection]
+	);
 	const sources = useSources();
 	const tree = useFolderTree();
 	const looseNoteCount = useLooseNoteCount();
@@ -1544,6 +1554,8 @@ const Home = () => {
 						if (compact) setPanel('notebooks');
 					}}
 					newNotebookAsked={newNotebookAsked}
+					openNotebooks={openNotebooks}
+					onOpenNotebooks={onOpenNotebooks}
 				/>
 
 				<NoteList

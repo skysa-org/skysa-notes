@@ -976,6 +976,45 @@ button.row,
 	padding-inline-end: calc(var(--gutter) + var(--row-options) + var(--space-xs));
 }
 
+/* A list with a notebook in it that opens sets aside room for its chevron
+   before every name, so the names stand in one column (`rowIndent`). */
+.tree.nested {
+	--disclosure: 1rem;
+}
+
+/* Drawn over the row's start, as the `⋯` is over its end, so the row keeps
+   its whole width for its highlight and its hit area. Pointing along the row
+   while the notebook is shut, and turned down into it while it is open. */
+.row-disclosure {
+	position: absolute;
+	z-index: 1;
+	inset-block: 0;
+	display: grid;
+	place-items: center;
+	width: var(--disclosure, 1rem);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+.row-disclosure .toolbar-icon {
+	width: 0.875rem;
+	height: 0.875rem;
+	transform: rotate(-90deg);
+}
+
+.row-disclosure[aria-expanded='true'] .toolbar-icon {
+	transform: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.row-disclosure .toolbar-icon {
+		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+}
+
 .row-options {
 	position: absolute;
 	inset-block: 0;

@@ -17,6 +17,7 @@ import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
 import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
+import { getOpenNotebooks } from './openNotebooks.js';
 import {
 	getCodeDisplay,
 	getDefaultEditorMode,
@@ -149,6 +150,24 @@ export const useLastOpen = (connectionId: string | undefined): LastOpen | undefi
 		[connectionId]
 	);
 	return result?.connectionId === connectionId ? result?.lastOpen : undefined;
+};
+
+/**
+ * The notebooks open in the sidebar for a source, on this device
+ * (`store/openNotebooks.ts`). `undefined` until read for this source, as
+ * `useLastOpen` has it.
+ */
+export const useOpenNotebooks = (
+	connectionId: string | undefined
+): ReadonlySet<string> | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined
+				? undefined
+				: { connectionId, open: new Set(await getOpenNotebooks(db, connectionId)) },
+		[connectionId]
+	);
+	return result?.connectionId === connectionId ? result?.open : undefined;
 };
 
 export interface NoteToOpen {

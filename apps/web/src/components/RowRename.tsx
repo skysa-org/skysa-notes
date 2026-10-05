@@ -1,6 +1,14 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 /**
+ * Where a row's name starts: in from the pane's edge by the gutter, by a step
+ * per level it is nested, and by the room a notebook's chevron takes
+ * (`--disclosure`), which a list with nothing nested in it does not set aside.
+ */
+export const rowIndent = (depth: number): string =>
+	`calc(var(--gutter) + var(--disclosure, 0rem) + ${String(depth * 0.85)}rem)`;
+
+/**
  * A row's name, being typed: a notebook's in the sidebar, a source's in a
  * compact window's source dropdown. The same shape the source tabs use: the
  * row stays as it was — its box, its highlight, its count — and only the name
@@ -82,7 +90,7 @@ export const RowRename = ({
 	return (
 		<span
 			className={selected ? 'row-editing selected' : 'row-editing'}
-			style={{ paddingInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
+			style={{ paddingInlineStart: rowIndent(depth) }}
 		>
 			{mark === undefined ? (
 				input

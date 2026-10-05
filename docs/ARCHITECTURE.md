@@ -578,6 +578,17 @@ The mode is one piece of state in the route, because the two ends of a note's mo
 
 The URL names the open notebook by path, and a move changes that path — for the notebook itself and for everything under it. So a notebook move rebases the open folder, or moving the notebook you are in throws you out of it and into the first one in the tree. A note move follows the note only when it is the one open in the editor: a note dragged out of a list the user is reading has left, which is all they asked for, but the note they are *writing in* would otherwise sit beside a sidebar lighting up the notebook it has just left — the same disagreement opening a search result has to avoid.
 
+### The sidebar opens as far as it is asked (2026-10-05)
+
+A notebook with notebooks inside it lists them only while it is **open**, and a notebook starts **shut**: a library brought in from elsewhere can be hundreds of notebooks nested three deep, and listed whole the sidebar was a column to scroll to find anything in. The owner's choices (2026-10-05): shut by default, remembered per device and per source, Left and Right on a row, and counts that include what a shut notebook hides.
+
+- **What is kept is which are open**, in `prefs` (`store/openNotebooks.ts`, `openNotebooks:<connectionId>`), as `lastOpen` keeps where the user was and for its reasons: how far one device has the tree open is that device's, and each source is its own notebooks. Kept as open rather than shut, so a notebook nobody has opened — pulled, imported, made on another device — is shut wherever it came from. At most 500, oldest opened first out, since one let go of is shut, which is where it starts anyway.
+- **By path, and so moved with the notebook**: `moveFolder` rebases the open ones it moves, a rename included, and `deleteFolder` lets go of the ones it deletes, each inside the transaction that changes the paths (it already holds `prefs`). A notebook made later at a deleted one's path starts shut, as a new one does.
+- **The open notebook is always reachable**: when a notebook is opened in the note list — from the URL, from where the user was, from a search or a palette command, or made — the notebooks it is in are opened, once for each opening, so shutting one of them afterwards is the user's to do and stays done.
+- **A chevron before the name** opens and shuts it, drawn over the row's start as the `⋯` is over its end, so the row keeps its whole width for its highlight, its hit area and its drop outline. It is out of the tab order: the row is the stop, and **Right** on it opens a shut notebook and goes into an open one, **Left** shuts an open one and goes out of any other, to the notebook it is in, as in any tree of folders. Still a button with a name ("Notebooks inside “Work”") and `aria-expanded`, for a screen reader's list of them and for a pointer. During a move it still works, since a destination inside a shut notebook has to be reached.
+- **A shut notebook counts every note inside it**, at every depth; an open one counts its own, since the ones inside show their own beneath it.
+- **Room for a chevron is set aside only in a tree that has one** (`.tree.nested`, `--disclosure`), so the names stand in one column; a library with nothing nested looks as it did.
+
 ### Conflict rule (concrete)
 Remote wins the original path. Local content is saved as a new note at `<path minus .md> (conflict <YYYY-MM-DDTHH-mm>).md` with the same frontmatter except a fresh `id`. Both appear in the UI; a small banner links to the pair.
 
