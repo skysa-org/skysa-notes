@@ -44,6 +44,25 @@ describe('readTime', () => {
 		expect(readTime('0042-01-01')).toBe(at.getTime());
 	});
 
+	it('reads a local time a clock change skips as the engine does, not as no time', () => {
+		const zone = process.env.TZ;
+		// Nuuk's clocks went from 23:00 to midnight on 28 March 2026.
+		process.env.TZ = 'America/Nuuk';
+		try {
+			expect(readTime('2026-03-28 23:30')).toBe(Date.parse('2026-03-28T23:30'));
+			expect(readTime('2026-03-28 23:30')).toBeDefined();
+		} finally {
+			process.env.TZ = zone;
+		}
+	});
+
+	it('refuses an offset past a day, and hands a date with an offset and no time on', () => {
+		expect(readTime('2014-02-20 14:00 +24:00')).toBeUndefined();
+		expect(readTime('2014-02-20 14:00 +05:60')).toBeUndefined();
+		const odd = Date.parse('2014-02-20-05');
+		expect(readTime('2014-02-20-05')).toBe(Number.isNaN(odd) ? undefined : odd);
+	});
+
 	it('answers nothing for a day, month or time that does not exist', () => {
 		[
 			'2014-02-30',

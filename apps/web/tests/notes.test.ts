@@ -13,6 +13,7 @@ import {
 	moveNote,
 	noteFile,
 	noteFileContents,
+	noteRecordFromFile,
 	purgeNote,
 	renameNote,
 	restoreNote,
@@ -873,5 +874,54 @@ describe('two notes created at once', () => {
 
 		const paths = (await listNotes(db, { folderPath: 'Notebook' })).map((note) => note.path);
 		expect(new Set(paths).size).toBe(2);
+	});
+});
+
+describe('the dates a note read from a file is given', () => {
+	const NOW = Date.UTC(2026, 9, 5, 12);
+	const file = (frontmatter: string, body = 'Body.\n') => `---\n${frontmatter}\n---\n\n${body}`;
+	const read = (source: string, existing?: ReturnType<typeof noteRecordFromFile>, now = NOW) =>
+		noteRecordFromFile({
+			id: 'n1',
+			connectionId: 'c1',
+			path: 'a.md',
+			source,
+			hash: `hash:${source}`,
+			now,
+			...(existing === undefined ? {} : { existing }),
+		});
+
+	it('takes what the file says the first time it is read', () => {
+		const note = read(
+			file('created: "2017-08-12 20:30:06 UTC"\nmodified: "2017-08-12 20:30:17 UTC"')
+		);
+		expect(note.createdAt).toBe(Date.UTC(2017, 7, 12, 20, 30, 6));
+		expect(note.updatedAt).toBe(Date.UTC(2017, 7, 12, 20, 30, 17));
+		expect(read('Body.\n').updatedAt).toBe(NOW);
+	});
+
+	it("takes the file's creation date over the one a row was given by its import", () => {
+		const imported = { ...read(file('title: T')), createdAt: NOW };
+		expect(read(file('created: "2014-02-20 14:00:10 UTC"'), imported).createdAt).toBe(
+			Date.UTC(2014, 1, 20, 14, 0, 10)
+		);
+	});
+
+	it('moves the edited date only forward once the note is known', () => {
+		const known = { ...read(file('created: 2017-08-12')), updatedAt: Date.UTC(2026, 0, 1) };
+		const later = NOW + 60_000;
+
+		// The same file again: a push coming back, or a pull that changed nothing.
+		expect(read(file('created: 2017-08-12'), known, later).updatedAt).toBe(known.updatedAt);
+		// Changed, and saying nothing later: changed since it was last seen here.
+		expect(read(file('created: 2017-08-12', 'Edited.\n'), known, later).updatedAt).toBe(later);
+		// Changed, and saying when: then.
+		expect(
+			read(
+				file('created: 2017-08-12\nupdated: 2026-03-01T00:00:00Z', 'Edited.\n'),
+				known,
+				later
+			).updatedAt
+		).toBe(Date.UTC(2026, 2, 1));
 	});
 });

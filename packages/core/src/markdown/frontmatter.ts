@@ -623,11 +623,16 @@ const stringified = (doc: Document): string | undefined => {
  * 14:00:10 UTC` would be respelled on the first edit in one browser and not
  * in another.
  *
- * A `created` that is not a time at all — `created: last spring` — is declined
- * the way an `id` is. The app could not read it, so the store fell back on the
- * time of the import, and writing that over the line would replace something
- * the user meant with something nobody did. `updated` is not held to that: the
- * app changes it on every save, by design, and what it says afterwards is true.
+ * A `created` the file has is never written over, a time or not. When a note
+ * was made does not change, so a store that holds another value for it holds
+ * a wrong one: the time it was imported, read on a device that could not read
+ * the file's spelling (WebKit's `Date.parse` could not read `2014-02-20
+ * 14:00:10 UTC`), and the first edit there wrote the import day over the
+ * note's own, then another device wrote it back. `created: last spring` is
+ * left as the user meant it, the way an `id` is. Only a `created` the file
+ * lacks, or names with nothing after it (`created:`), is filled in. `updated` is not held to any of that:
+ * the app changes it on every save, by design, and what it says afterwards is
+ * true.
  */
 const changes = (
 	key: KnownKey,
@@ -641,11 +646,10 @@ const changes = (
 	if (current === undefined || current === null) return true;
 	if (typeof value !== 'string') return !sameList(asTags(current) ?? [], value);
 
+	if (key === 'created') return false;
 	const read = asString(current);
-	if (key === 'created' && !isTime(read)) return false;
 	if (read === value) return false;
-	const times = key === 'created' || key === 'updated';
-	return !(times && isTime(read) && readTime(read) === readTime(value));
+	return !(key === 'updated' && isTime(read) && readTime(read) === readTime(value));
 };
 
 /**

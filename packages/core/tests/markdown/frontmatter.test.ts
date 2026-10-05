@@ -854,6 +854,18 @@ describe('writeFrontmatter, over values the app did not change', () => {
 		);
 	});
 
+	it('never writes over a `created` the file has, whatever the store holds', () => {
+		// A row dated by its import, on a device that could not read the file's
+		// spelling: the note was made in 2014 whatever that row says.
+		const block = 'title: Trip\ncreated: "2014-02-20 14:00:10 UTC"';
+		expect(
+			writeFrontmatter(block, { title: 'Trip', created: '2026-10-01T09:00:00.000Z' })
+		).toBe(block);
+		expect(
+			writeFrontmatter('created: ""\ntitle: a', { created: '2026-10-01T09:00:00.000Z' })
+		).toBe('created: ""\ntitle: a');
+	});
+
 	it('keeps a `created` spelled with a space and a zone, given back as the same instant', () => {
 		// OneNote's exporters' spelling, which `Date.parse` in WebKit cannot read:
 		// read by another rule there, it was respelled on the first edit there only.
@@ -1160,8 +1172,8 @@ describe('writeFrontmatter, over blocks put together at random', () => {
 				.filter((key) => !(key in patch))
 				.forEach((key) => expect(after[key], `${key}, ${about}`).toEqual(before[key]));
 
-			// What the patch names reads back — except over an `id` or a `created`
-			// the app declines, which stay the user's.
+			// What the patch names reads back — except over an `id` the app
+			// declines, and over any `created` the block has, which stay the user's.
 			const read = readFrontmatter(written);
 			const was = readFrontmatter(block);
 			if ('title' in patch) expect(read.title, about).toBe(patch.title);
@@ -1173,13 +1185,13 @@ describe('writeFrontmatter, over blocks put together at random', () => {
 			}
 			if ('id' in patch && typeof before.id !== 'number')
 				expect(read.id, about).toBe(patch.id);
-			if (
-				'created' in patch &&
-				(was.created === undefined || was.created !== 'last spring')
-			) {
+			if ('created' in patch && (was.created === undefined || patch.created === undefined)) {
 				expect(Date.parse(read.created ?? ''), about).toBe(
 					Date.parse(patch.created as string)
 				);
+			}
+			if ('created' in patch && was.created !== undefined && patch.created !== undefined) {
+				expect(read.created, about).toBe(was.created);
 			}
 
 			// The bytes of every pair the patch does not name, and every comment
