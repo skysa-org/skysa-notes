@@ -1,4 +1,4 @@
-import { type EntitlementCode } from '@skysa/core';
+import { type EntitlementCode, MAX_CONNECT_CODE } from '@skysa/core';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -911,17 +911,39 @@ describe("the gate's connect code", () => {
 		expect(jar.get(cookieNames.flow)).toBeUndefined();
 	});
 
-	it('takes 64 characters, which is the most a cookie is asked to carry', async () => {
+	it('takes 256 characters, room for a value a policy gives the app to hold', async () => {
 		const { request } = buildApp();
 		const response = await start(request, {
 			credentialHash: HASH,
-			connectCode: 'A'.repeat(64),
+			connectCode: 'A'.repeat(MAX_CONNECT_CODE),
 		});
+		expect(MAX_CONNECT_CODE).toBe(256);
 		expect(response.status).toBe(200);
 	});
 
+	it('keeps the flow cookie one a browser will store, with the longest code and return path', async () => {
+		const { request } = buildApp();
+		const response = await start(
+			request,
+			{
+				credentialHash: HASH,
+				// Three bytes apiece once encoded, the most a character the bound
+				// counts as one can take.
+				connectCode: '漢'.repeat(MAX_CONNECT_CODE),
+				returnTo: `/${'a'.repeat(511)}`,
+			},
+			{ headers: { 'user-agent': 'Mozilla/5.0 (Macintosh) Chrome/131.0 Safari/537.36' } }
+		);
+
+		const cookie = response.headers
+			.getSetCookie()
+			.find((one) => one.startsWith(`${cookieNames.flow}=`));
+		expect(cookie).toBeDefined();
+		expect(new TextEncoder().encode(cookie).length).toBeLessThan(4096);
+	});
+
 	it.each([
-		['too long', 'A'.repeat(65)],
+		['too long', 'A'.repeat(MAX_CONNECT_CODE + 1)],
 		['not a string', 12_345_678],
 		['a control character', 'K7QM\u00002XRD'],
 		['a line break inside it', 'K7QM\n2XRD'],

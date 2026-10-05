@@ -12,7 +12,13 @@ import {
 
 import { api, type ApiClient, ApiError } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
-import { connectCodeHeldUntil, heldConnectCode, holdConnectCode } from '../store/connectCode.js';
+import {
+	connectCodeHeldUntil,
+	heldConnectCode,
+	heldConnectCodeShown,
+	holdAcceptedCode,
+	watchConnectCode,
+} from '../store/connectCode.js';
 import {
 	type ConnectedSource,
 	connectedSources,
@@ -448,8 +454,9 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
 const NOT_CHECKED = 'The code could not be checked. Try again.';
 
 /**
- * Asks the operator's policy about a code, and holds it for as long as the
- * policy says where it is accepted. Otherwise, what to say under the field:
+ * Asks the operator's policy about a code, and holds it — or what the policy
+ * gave in its place — for as long as the policy says where it is accepted.
+ * Otherwise, what to say under the field:
  * the policy's reason, or this app's words for a refusal without one, a limit
  * reached, or no answer at all.
  */
@@ -461,7 +468,7 @@ const askAbout = async (
 		const result = await client.checkConnectCode(code);
 		if (!result.ok) return NOT_CHECKED;
 		if (!result.value.accepted) return result.value.reason ?? 'That code was not accepted.';
-		holdConnectCode(code, result.value.expiresIn);
+		holdAcceptedCode(code, result.value);
 		return undefined;
 	} catch (error) {
 		return error instanceof ApiError && error.status === 429
@@ -470,32 +477,52 @@ const askAbout = async (
 	}
 };
 
+/** The longest delay `setTimeout` takes as meant; one longer fires at once. */
+const LONGEST_TIMER_MS = 2 ** 31 - 1;
+
+/** What the gate knows of the code it holds: whether it may show it, and until when it is good. */
+interface HeldCode {
+	readonly code: string;
+	readonly until: number;
+	readonly shown: boolean;
+}
+
 /**
  * The code held for the gate. Read at every render rather than kept, since the
  * hold ends by the clock and another tab can take or drop one, with a render
- * when it ends, so a gate showing it goes back to asking. `onLapse` is told
- * which code it was.
+ * when it ends, so a gate showing it goes back to asking, and one whenever this
+ * tab changes it — the app asking about it again as it loads, say. `onLapse`
+ * is told which code it was.
  */
-const useHeldCode = (
-	onLapse: (code: string) => void
-): { code: string; until: number } | undefined => {
+const useHeldCode = (onLapse: (code: string) => void): HeldCode | undefined => {
 	const until = connectCodeHeldUntil();
 	const code = until === undefined ? undefined : heldConnectCode();
-	const [, setLapsed] = useState(0);
+	const shown = heldConnectCodeShown();
+	const [woken, setWoken] = useState(0);
+	useEffect(
+		() =>
+			watchConnectCode(() => {
+				setWoken((n) => n + 1);
+			}),
+		[]
+	);
 	useEffect(() => {
 		if (code === undefined || until === undefined) return;
+		// A timer longer than a browser can count (2³¹ ms, about 25 days) fires at
+		// once, and a hold may run a year: so it wakes at the most, and is set
+		// again from there (`woken`) until the hold has truly ended.
 		const timer = setTimeout(
 			() => {
-				setLapsed((n) => n + 1);
-				onLapse(code);
+				setWoken((n) => n + 1);
+				if (Date.now() >= until) onLapse(code);
 			},
-			Math.max(0, until - Date.now()) + 50
+			Math.min(Math.max(0, until - Date.now()) + 50, LONGEST_TIMER_MS)
 		);
 		return () => {
 			clearTimeout(timer);
 		};
-	}, [code, until, onLapse]);
-	return code === undefined || until === undefined ? undefined : { code, until };
+	}, [code, until, onLapse, woken]);
+	return code === undefined || until === undefined ? undefined : { code, until, shown };
 };
 
 /**
@@ -588,12 +615,19 @@ const ConnectCodeForm = ({
 	);
 };
 
-/** The time a held code stops being good, with the day where it is not today. */
+/**
+ * The time a held code stops being good, with the day where it is not today,
+ * and the year where it is not this one: a hold may run a year, and "Tue,
+ * Oct 5" on the Monday before would read as tomorrow.
+ */
 const untilFormat = (until: number, now = Date.now()): string =>
 	new Intl.DateTimeFormat(undefined, {
 		...(new Date(until).toDateString() === new Date(now).toDateString()
 			? {}
 			: { weekday: 'short', month: 'short', day: 'numeric' }),
+		...(new Date(until).getFullYear() === new Date(now).getFullYear()
+			? {}
+			: { year: 'numeric' }),
 		hour: 'numeric',
 		minute: '2-digit',
 	}).format(until);
@@ -601,7 +635,9 @@ const untilFormat = (until: number, now = Date.now()): string =>
 /**
  * The code step folded while the buttons are open: the code they will send and
  * until when the policy said it is good, or, where a code is not required,
- * that they will send none. Its control opens the step again, which hides the
+ * that they will send none. What the policy gave to hold in place of a code
+ * is not named, only that the code was accepted on this device: it was never
+ * the person's to read, and it can be long. Its control opens the step again, which hides the
  * buttons, so the code and the buttons are never both open and what is on
  * screen is only ever the next thing to do.
  */
@@ -611,7 +647,7 @@ const ConnectCodeLine = ({
 	onOpen,
 }: {
 	label: string;
-	held: { code: string; until: number } | undefined;
+	held: HeldCode | undefined;
 	onOpen: () => void;
 }) =>
 	held === undefined ? (
@@ -623,7 +659,13 @@ const ConnectCodeLine = ({
 	) : (
 		<p className="connect-code-line">
 			<span>
-				{label}: <code title={held.code}>{held.code}</code>{' '}
+				{held.shown ? (
+					<>
+						{label}: <code title={held.code}>{held.code}</code>
+					</>
+				) : (
+					<>{label} accepted on this device</>
+				)}{' '}
 				<button
 					type="button"
 					className="link-button"
@@ -659,8 +701,9 @@ const ConnectCodeLine = ({
  * A gate that asks for a code is two steps, one open at a time: the gate with
  * its code field, then the buttons. A code the policy accepts is held for as
  * long as it said (`store/connectCode.ts`), and while it is, the gate is folded
- * to a line naming it (`ConnectCodeLine`), from which it opens again and the
- * buttons close. When the hold ends, here or while the app was closed, the gate
+ * to a line naming it, or saying it was accepted where the policy gave
+ * something to hold in its place (`ConnectCodeLine`), from which it opens again
+ * and the buttons close. When the hold ends, here or while the app was closed, the gate
  * asks again. Where the operator made the code `required`, that is the only
  * way to the buttons, for every device. Where not, "Already have access?"
  * shows them without one, and a device with an account syncing here starts on
@@ -678,7 +721,11 @@ const ConnectChoice = ({
 	openAt: number | undefined;
 }) => {
 	const [picked, setPicked] = useState<'gate' | 'buttons'>();
-	const [code, setCode] = useState(() => heldConnectCode() ?? '');
+	// Only a code the person typed goes back in the field: a value held in its
+	// place was never theirs to edit.
+	const [code, setCode] = useState(() =>
+		heldConnectCodeShown() ? (heldConnectCode() ?? '') : ''
+	);
 	const [checking, setChecking] = useState(false);
 	const [problem, setProblem] = useState<string>();
 	// Where the focus goes next, counted so that the same place twice moves it

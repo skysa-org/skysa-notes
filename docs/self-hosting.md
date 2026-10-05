@@ -301,10 +301,14 @@ export const entitlements: EntitlementProvider = {
 A gate can ask for a code as well, when your policy lets accounts in by
 something other than the account itself: an invite, or a code your own page
 sends to someone who has paid. Give it `connectCode: { label: 'Invite code' }`
-and the app shows a field under that label where the gate is. Whatever is typed
-reaches your policy once, at the callback, as `check(subject, { connectCode })`.
-It is trimmed, at most 64 characters, and never blank. `/token` does not pass
-it, so a policy that accepts a code has to remember the account it let in:
+and the app shows a field under that label where the gate is. A gate that asks
+for a code needs `checkCode` beside it, which the app asks as the code is used,
+so a wrong one is said at once rather than after the provider's consent screen;
+it answers how many seconds the app should keep the code (at most a year), or
+why not. That is advice: whatever the app kept reaches your policy again at the
+callback, as `check(subject, { connectCode })`, trimmed, at most 256 characters,
+and never blank, and that is where it decides. `/token` does not pass it, so a
+policy that accepts a code has to remember the account it let in:
 
 ```ts
 export const entitlements: EntitlementProvider = {
@@ -316,6 +320,10 @@ export const entitlements: EntitlementProvider = {
 		}
 		return { allowed: false, code: 'not_allowed' };
 	},
+	checkCode: async (code) =>
+		(await isOpen(code))
+			? { accepted: true, expiresIn: 15 * 60 }
+			: { accepted: false, reason: 'That invite code is not valid.' },
 	gate: {
 		message: 'This server syncs invited accounts only.',
 		action: { label: 'Ask for an invite', url: 'https://example.com/invite' },
@@ -324,9 +332,24 @@ export const entitlements: EntitlementProvider = {
 };
 ```
 
-`admitted`, `redeem` and `admit` are yours: somewhere your Worker keeps what it
-has let in. The app words a plain refusal to a connect that carried a code as
-"The code you entered was not accepted".
+`admitted`, `redeem`, `admit` and `isOpen` are yours: somewhere your Worker
+keeps what it has let in. `checkCode` only reads; the callback is where an
+invite is spent. The app words a plain refusal to a connect that carried a code
+as "The code you entered was not accepted".
+
+An accepted answer may also carry `hold`: something the app keeps and sends in
+place of what was typed, with connects and to `checkCode`, for `expiresIn`.
+An invite that becomes a pass for the device it was typed on is one use: the
+invite is good once, briefly, and the pass, which your Worker issues and can
+check without keeping, lets that device connect more accounts later without
+another invite. The app never shows a held value, and asks about it again as
+it loads, at most once an hour, keeping what you answer (a fresh `hold` keeps a
+pass alive while the device is used) and letting it go if you refuse it. Don't
+have a fresh `hold` end the one it replaces: two tabs loading together can
+leave the earlier one held. A held value is a bearer: anyone who copies it out
+of the browser can use it as that device would, until your policy stops taking
+it. Apps from before holds existed refuse an answer longer than a day, so give
+long holds once your deployment's app has been updated.
 
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
 its one `createApp({ config: parseEnv(env) })` to pass `entitlements` as well,
@@ -341,7 +364,8 @@ these:
 - a message that is blank or over 500 characters;
 - a label that is blank or over 40 characters;
 - a link that is not an `https:` URL, or is over 2048 characters;
-- a code field whose label is blank or over 40 characters.
+- a code field whose label is blank or over 40 characters;
+- a code field without `checkCode`.
 
 The entry then logs the problem and answers `server_misconfigured`, rather
 than showing a broken link to your users. The link is served in its

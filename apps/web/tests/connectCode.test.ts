@@ -1,10 +1,15 @@
+import { MAX_CONNECT_CODE } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+	connectCodeAskedAt,
 	connectCodeHeldUntil,
 	dropConnectCode,
 	heldConnectCode,
+	heldConnectCodeShown,
+	holdAcceptedCode,
 	holdConnectCode,
+	watchConnectCode,
 } from '../src/store/connectCode.js';
 
 /**
@@ -57,8 +62,8 @@ describe('the connect code held for as long as it is good', () => {
 	});
 
 	it('is held to the bound the server takes', () => {
-		holdConnectCode('x'.repeat(80), 900, NOW);
-		expect(heldConnectCode(NOW)).toBe('x'.repeat(64));
+		holdConnectCode('x'.repeat(MAX_CONNECT_CODE + 16), 900, NOW);
+		expect(heldConnectCode(NOW)).toBe('x'.repeat(MAX_CONNECT_CODE));
 	});
 
 	it('goes when it is dropped', () => {
@@ -91,5 +96,83 @@ describe('the connect code held for as long as it is good', () => {
 		holdConnectCode('K7QM-2XRD', 900, NOW);
 		dropConnectCode();
 		expect(heldConnectCode(NOW)).toBeUndefined();
+	});
+});
+
+describe('what the policy gives to hold in place of a code', () => {
+	const PASS = `dt1.${'Ab_-'.repeat(40)}`;
+
+	it('is held in place of what was typed, for as long as the policy said, and never shown', () => {
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 180 * 86_400, hold: PASS }, NOW);
+
+		expect(heldConnectCode(NOW)).toBe(PASS);
+		expect(connectCodeHeldUntil(NOW)).toBe(NOW + 180 * 86_400_000);
+		expect(heldConnectCodeShown(NOW)).toBe(false);
+	});
+
+	it('leaves a code the policy gave nothing for held as typed, and shown', () => {
+		holdAcceptedCode(' K7QM-2XRD ', { expiresIn: 900 }, NOW);
+
+		expect(heldConnectCode(NOW)).toBe('K7QM-2XRD');
+		expect(heldConnectCodeShown(NOW)).toBe(true);
+	});
+
+	it('stays unshown when it is asked about again and kept as it is', () => {
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS }, NOW);
+		holdAcceptedCode(PASS, { expiresIn: 120 }, NOW);
+
+		expect(heldConnectCode(NOW)).toBe(PASS);
+		expect(connectCodeHeldUntil(NOW)).toBe(NOW + 120_000);
+		expect(heldConnectCodeShown(NOW)).toBe(false);
+	});
+
+	it('is replaced by a code typed after it, which is shown', () => {
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS }, NOW);
+		holdAcceptedCode('W3TB-9HQP', { expiresIn: 900 }, NOW);
+
+		expect(heldConnectCode(NOW)).toBe('W3TB-9HQP');
+		expect(heldConnectCodeShown(NOW)).toBe(true);
+	});
+
+	it('reads a code kept before there were holds as typed, asked about at no known time', () => {
+		localStorage.setItem(
+			'skysa.connectCode',
+			JSON.stringify({ code: 'K7QM-2XRD', until: NOW + 60_000 })
+		);
+
+		expect(heldConnectCode(NOW)).toBe('K7QM-2XRD');
+		expect(heldConnectCodeShown(NOW)).toBe(true);
+		expect(connectCodeAskedAt(NOW)).toBe(0);
+	});
+
+	it('remembers when the policy last answered about it', () => {
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS }, NOW);
+		holdAcceptedCode(PASS, { expiresIn: 60 }, NOW + 30_000);
+
+		expect(connectCodeAskedAt(NOW + 30_000)).toBe(NOW + 30_000);
+	});
+
+	it('tells whoever is watching when another tab changes it', () => {
+		const told = vi.fn();
+		const stop = watchConnectCode(told);
+
+		window.dispatchEvent(new StorageEvent('storage', { key: 'skysa.connectCode' }));
+		window.dispatchEvent(new StorageEvent('storage', { key: 'something.else' }));
+		stop();
+		window.dispatchEvent(new StorageEvent('storage', { key: 'skysa.connectCode' }));
+
+		expect(told).toHaveBeenCalledTimes(1);
+	});
+
+	it('tells whoever is watching each time what is held changes, until they stop', () => {
+		const told = vi.fn();
+		const stop = watchConnectCode(told);
+
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS }, NOW);
+		dropConnectCode();
+		stop();
+		holdConnectCode('K7QM-2XRD', 900, NOW);
+
+		expect(told).toHaveBeenCalledTimes(2);
 	});
 });

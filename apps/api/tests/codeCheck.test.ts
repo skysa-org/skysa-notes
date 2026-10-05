@@ -2,6 +2,8 @@ import {
 	alwaysAllowed,
 	type ConnectCodeCheck,
 	type EntitlementProvider,
+	MAX_CODE_HOLD_SECONDS,
+	MAX_CONNECT_CODE,
 	type RateLimiter,
 } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -85,18 +87,19 @@ describe('checking a code as it is used', () => {
 		expect(await response.json()).toEqual({ accepted: false });
 	});
 
-	it('keeps a code a day at most, and rounds a fraction of a second up', async () => {
+	it('keeps a code a year at most, and rounds a fraction of a second up', async () => {
 		const answers = [
-			{ accepted: true, expiresIn: 30 * 86_400 },
+			{ accepted: true, expiresIn: 3 * 365 * 86_400 },
 			{ accepted: true, expiresIn: 0.2 },
 		];
 		const { request } = buildApp({
 			entitlements: policy(() => Promise.resolve(answers.shift())),
 		});
 
+		expect(MAX_CODE_HOLD_SECONDS).toBe(365 * 86_400);
 		expect(await (await ask(request, { code: 'A' })).json()).toEqual({
 			accepted: true,
-			expiresIn: 86_400,
+			expiresIn: MAX_CODE_HOLD_SECONDS,
 		});
 		expect(await (await ask(request, { code: 'A' })).json()).toEqual({
 			accepted: true,
@@ -104,9 +107,58 @@ describe('checking a code as it is used', () => {
 		});
 	});
 
+	it('passes on what the policy gives to hold in place of the code, trimmed', async () => {
+		const pass = `dt1.${'Ab_-'.repeat(60)}`;
+		const { request } = buildApp({
+			entitlements: policy(() =>
+				Promise.resolve({ accepted: true, expiresIn: 180 * 86_400, hold: ` ${pass}\n` })
+			),
+		});
+
+		const response = await ask(request, { code: 'K7QM-2XRD' });
+
+		expect(await response.json()).toEqual({
+			accepted: true,
+			expiresIn: 180 * 86_400,
+			hold: pass,
+		});
+	});
+
+	it('takes a held value back as a code, up to the same bound', async () => {
+		const entitlements = policy(() => Promise.resolve({ accepted: true, expiresIn: 60 }));
+		const { request } = buildApp({ entitlements });
+
+		const response = await ask(request, { code: 'A'.repeat(MAX_CONNECT_CODE) });
+
+		expect(response.status).toBe(200);
+		expect(entitlements.checkCode).toHaveBeenCalledWith('A'.repeat(MAX_CONNECT_CODE));
+	});
+
 	it.each([
-		['no hold', { accepted: true }],
-		['a hold of nothing', { accepted: true, expiresIn: 0 }],
+		['blank', '   '],
+		['too long', 'A'.repeat(MAX_CONNECT_CODE + 1)],
+		['not printable', 'dt1.\u0000'],
+		['not a string', 42],
+	])(
+		'answers 500 for a hold that is %s, rather than have the typed code kept',
+		async (_name, hold) => {
+			const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+			const { request } = buildApp({
+				entitlements: policy(() =>
+					Promise.resolve({ accepted: true, expiresIn: 60, hold })
+				),
+			});
+
+			const response = await ask(request, { code: 'K7QM-2XRD' });
+
+			expect(response.status).toBe(500);
+			expect(error).toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		['no time to keep it', { accepted: true }],
+		['no time at all', { accepted: true, expiresIn: 0 }],
 		['no verdict', { expiresIn: 60 }],
 		['nothing', undefined],
 	])('answers 500 for a policy that says %s', async (_name, answer) => {
@@ -173,7 +225,7 @@ describe('checking a code as it is used', () => {
 	it.each([
 		['missing', {}],
 		['blank', { code: '   ' }],
-		['too long', { code: 'A'.repeat(65) }],
+		['too long', { code: 'A'.repeat(MAX_CONNECT_CODE + 1) }],
 		['not printable', { code: 'K7QM\u0000' }],
 		['not a string', { code: 42 }],
 	])('refuses a code that is %s without asking the policy', async (_name, body) => {

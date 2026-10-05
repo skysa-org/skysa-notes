@@ -113,14 +113,16 @@ const authorizeSchema = z.object({ authorizeUrl: z.url() });
 
 /**
  * The policy's word on a code as it is used (`ConnectCodeCheck` in
- * `@skysa/core`): how many seconds to keep it, or why not, in words the server
- * has already held to plain text. A reason this app cannot show is dropped and
- * the refusal kept.
+ * `@skysa/core`): how many seconds to keep it, and what to keep in its place
+ * where the policy gave something, or why not, in words the server has already
+ * held to plain text. A reason this app cannot show is dropped and the refusal
+ * kept.
  */
 const codeCheckSchema = z.discriminatedUnion('accepted', [
 	z.object({
 		accepted: z.literal(true),
 		expiresIn: z.number().positive().max(MAX_CODE_HOLD_SECONDS),
+		hold: z.string().min(1).max(MAX_CONNECT_CODE).optional(),
 	}),
 	z.object({
 		accepted: z.literal(false),
@@ -287,7 +289,8 @@ export interface ApiClient {
 	) => Promise<Result<string>>;
 	/**
 	 * Whether the operator's policy will take a code typed into the gate, and
-	 * for how long, asked as it is used rather than after a consent screen.
+	 * for how long, asked as it is used rather than after a consent screen;
+	 * and, as the app loads, whether it still takes what the app is holding.
 	 * `not_found` where the instance asks for no code; throws, with the status,
 	 * for a limit reached (429) or a server that could not say.
 	 */
