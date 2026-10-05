@@ -854,6 +854,15 @@ describe('writeFrontmatter, over values the app did not change', () => {
 		);
 	});
 
+	it('keeps a `created` spelled with a space and a zone, given back as the same instant', () => {
+		// OneNote's exporters' spelling, which `Date.parse` in WebKit cannot read:
+		// read by another rule there, it was respelled on the first edit there only.
+		const block = 'title: Trip\ncreated: "2014-02-20 14:00:10 UTC"';
+		expect(
+			writeFrontmatter(block, { title: 'Trip', created: '2014-02-20T14:00:10.000Z' })
+		).toBe(block);
+	});
+
 	it('does not put the time of the import over a `created` it could not read', () => {
 		// The store has no date for this note but the day it first saw the file,
 		// and that is what it hands back. It is nobody's creation date.

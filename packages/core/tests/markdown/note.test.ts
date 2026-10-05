@@ -24,12 +24,72 @@ describe('parseNoteFile', () => {
 		expect(parseNoteFile(source)).toEqual({
 			id: '018f3c4e',
 			title: 'Planning',
-			created: '2026-09-14T13:02:11Z',
+			createdAt: Date.UTC(2026, 8, 14, 13, 2, 11),
+			// No `updated`: last edited when it was made, as far as the file says.
+			updatedAt: Date.UTC(2026, 8, 14, 13, 2, 11),
 			body: '\n# Planning\n\nBody.\n',
 			frontmatter:
 				'id: 018f3c4e\ntitle: Planning\ncreated: 2026-09-14T13:02:11Z\ntags: [work]',
 			tags: ['work'],
 		});
+	});
+
+	it('reads the times another tool wrote, under the keys it wrote them', () => {
+		// The shape OneNote's exporters write, which WebKit's `Date.parse` cannot read.
+		const onenote = parseNoteFile(
+			[
+				'---',
+				'title: "Roxana Dental"',
+				'notebook: "Misc"',
+				'created: "2017-08-12 20:30:06 UTC"',
+				'modified: "2017-08-12 20:30:17 UTC"',
+				'---',
+				'',
+				'# Roxana Dental',
+				'',
+			].join('\n')
+		);
+		expect(onenote.createdAt).toBe(Date.UTC(2017, 7, 12, 20, 30, 6));
+		expect(onenote.updatedAt).toBe(Date.UTC(2017, 7, 12, 20, 30, 17));
+
+		const obsidian = parseNoteFile(
+			'---\ndate created: 2024-01-02\ndate modified: 2024-03-04T05:06:07Z\n---\nx\n'
+		);
+		expect(obsidian.createdAt).toBe(Date.UTC(2024, 0, 2));
+		expect(obsidian.updatedAt).toBe(Date.UTC(2024, 2, 4, 5, 6, 7));
+
+		expect(parseNoteFile('---\nlastmod: 2023-05-06Z\n---\nx\n').updatedAt).toBe(
+			Date.UTC(2023, 4, 6)
+		);
+	});
+
+	it("takes the app's own keys over another tool's, and passes over one that is no time", () => {
+		const parsed = parseNoteFile(
+			[
+				'---',
+				'created: last spring',
+				'date created: 2020-01-01',
+				'updated: whenever',
+				'modified: 2021-01-01',
+				'lastmod: 2022-01-01',
+				'---',
+				'x',
+			].join('\n')
+		);
+
+		expect(parsed.createdAt).toBe(Date.UTC(2020, 0, 1));
+		expect(parsed.updatedAt).toBe(Date.UTC(2021, 0, 1));
+		expect(
+			parseNoteFile(
+				'---\ncreated: 2020-01-01\nupdated: 2021-01-01\nmodified: 2019-01-01\n---\n'
+			).updatedAt
+		).toBe(Date.UTC(2021, 0, 1));
+	});
+
+	it('says nothing of a time the file does not give', () => {
+		const parsed = parseNoteFile('---\ntitle: T\ncreated: last spring\n---\nx\n');
+		expect(parsed.createdAt).toBeUndefined();
+		expect(parsed.updatedAt).toBeUndefined();
 	});
 
 	it('accepts a file written by another tool, with no frontmatter at all', () => {

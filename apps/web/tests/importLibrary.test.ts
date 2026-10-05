@@ -279,6 +279,38 @@ describe('importLibrary', () => {
 		expect(await db.files.where('connectionId').equals(CONNECTION).count()).toBe(1);
 	});
 
+	it('dates each note by what its frontmatter says, not by the day it came in', async () => {
+		const db = await bound();
+		const onenote = (modified: string) =>
+			[
+				'---',
+				'title: "Links"',
+				'created: "2020-01-13 19:44:34 UTC"',
+				...(modified === '' ? [] : [`modified: "${modified}"`]),
+				'---',
+				'',
+				'# Links',
+				'',
+			].join('\n');
+
+		await importLibrary(
+			db,
+			CONNECTION,
+			planImport(
+				picked({
+					'Tombras/08 - Links.md': onenote(''),
+					'Tombras/09 - Edited.md': onenote('2021-02-03 04:05:06 UTC'),
+				})
+			)
+		);
+
+		const rows = await db.notes.where('connectionId').equals(CONNECTION).sortBy('path');
+		expect(rows.map((note) => [note.createdAt, note.updatedAt])).toEqual([
+			[Date.UTC(2020, 0, 13, 19, 44, 34), Date.UTC(2020, 0, 13, 19, 44, 34)],
+			[Date.UTC(2020, 0, 13, 19, 44, 34), Date.UTC(2021, 1, 3, 4, 5, 6)],
+		]);
+	});
+
 	it('puts a file beside one of its name and another size, keeping its extension', async () => {
 		const db = await bound();
 		await importLibrary(db, CONNECTION, planImport(picked({ 'img/a.png': 'one' })));

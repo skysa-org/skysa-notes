@@ -954,23 +954,6 @@ const noteAtPath = async (
 };
 
 /**
- * A frontmatter date, or now.
- *
- * `Date.parse` answers `NaN` for anything it cannot read, and these two fields
- * come out of a file the app did not write — including one whose YAML the
- * parser had to recover from, where an unterminated quote swallows the next
- * line into the value. `NaN` in `updatedAt` is not a wrong date, it is a
- * comparator that returns false both ways: the field is an IndexedDB index and
- * the note list sorts on it, so one bad note leaves the whole list in no
- * particular order, and `noteFileContents` throws `RangeError` on the row.
- */
-const timeFrom = (value: string | undefined, fallback: number): number => {
-	if (value === undefined) return fallback;
-	const parsed = Date.parse(value);
-	return Number.isNaN(parsed) ? fallback : parsed;
-};
-
-/**
  * Take a note file into the store as-is.
  *
  * Nothing here marks the note dirty and nothing re-serializes the body: a note
@@ -1081,8 +1064,11 @@ export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 		contentHash: input.hash,
 		dirty: 0,
 		deletedLocally: existing?.deletedLocally ?? 0,
-		createdAt: existing?.createdAt ?? timeFrom(parsed.created, input.now),
-		updatedAt: timeFrom(parsed.updated, input.now),
+		// What the file says, or now: `parseNoteFile` reads the times every
+		// browser alike, and answers nothing rather than `NaN`, which in a field
+		// the note list sorts on leaves the whole list in no particular order.
+		createdAt: existing?.createdAt ?? parsed.createdAt ?? input.now,
+		updatedAt: parsed.updatedAt ?? input.now,
 		...(existing?.editorMode === undefined ? {} : { editorMode: existing.editorMode }),
 		...(existing !== undefined && sameBody(existing, parsed)
 			? // A file that changed only its frontmatter leaves what an editor

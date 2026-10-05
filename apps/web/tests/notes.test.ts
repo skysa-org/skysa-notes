@@ -52,7 +52,7 @@ describe('createNote', () => {
 		const parsed = parseNoteFile(noteFileContents(note));
 		expect(parsed.id).toBe(note.id);
 		expect(parsed.title).toBe('Hi');
-		expect(parsed.created).toBeDefined();
+		expect(parsed.createdAt).toBe(note.createdAt);
 	});
 
 	it('disambiguates a colliding filename in the same folder', async () => {
