@@ -976,6 +976,45 @@ button.row,
 	padding-inline-end: calc(var(--gutter) + var(--row-options) + var(--space-xs));
 }
 
+/* A list with a notebook in it that opens sets aside room for its chevron
+   before every name, so the names stand in one column (`rowIndent`). */
+.tree.nested {
+	--disclosure: 1rem;
+}
+
+/* Drawn over the row's start, as the `⋯` is over its end, so the row keeps
+   its whole width for its highlight and its hit area. Pointing along the row
+   while the notebook is shut, and turned down into it while it is open. */
+.row-disclosure {
+	position: absolute;
+	z-index: 1;
+	inset-block: 0;
+	display: grid;
+	place-items: center;
+	width: var(--disclosure, 1rem);
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+}
+
+.row-disclosure .toolbar-icon {
+	width: 0.875rem;
+	height: 0.875rem;
+	transform: rotate(-90deg);
+}
+
+.row-disclosure[aria-expanded='true'] .toolbar-icon {
+	transform: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.row-disclosure .toolbar-icon {
+		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+	}
+}
+
 .row-options {
 	position: absolute;
 	inset-block: 0;
@@ -997,6 +1036,12 @@ button.row.selected,
 button.row:disabled {
 	opacity: 0.45;
 	cursor: default;
+}
+
+/* And not where a pointer lands, so a drag resting on a shut notebook the
+   move cannot go into reaches the row's box, which opens it (`useDwell`). */
+.tree button.row:disabled {
+	pointer-events: none;
 }
 
 /* The row being dragged, still in the list it came from. */
@@ -3528,6 +3573,12 @@ button.danger {
 	/* As wide as `button.icon` is here. */
 	.row-item {
 		--row-options: var(--tap);
+	}
+
+	/* A chevron a thumb can land on: a near miss selects the notebook, and in a
+	   compact window that leaves for its notes. The names move over with it. */
+	.tree.nested {
+		--disclosure: 1.75rem;
 	}
 
 	.source-tab,
