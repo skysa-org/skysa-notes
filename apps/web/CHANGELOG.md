@@ -1,5 +1,21 @@
 # @skysa/web
 
+## 0.17.0
+
+### Minor Changes
+
+- d8f1140: The storage panel at the foot of a wide window's sidebar is now one line — the source and how syncing is going, with the account in its tooltip — and a gear whose menu holds Sync now, Re-scan, the download, the imports, Stop syncing and Disconnect, the same items as a source's `⋯` on a phone. How many other devices are signed in stays in the line, beside the gear, and opens their list over everything. What Google Drive keeps from the app is in the gear as "About Google Drive…".
+- bbd503b: Notebooks and notes can be pinned to the top of their list from the `⋯` on their row, or a right-click: "Pin to top", and "Unpin" once pinned. A pinned notebook goes to the top of the notebooks under its own parent, a pinned note to the top of its notebook's list, and a pinned row is tinted. Pins are kept on this device, per source, and follow a notebook that is renamed or moved.
+- 6fbffb5: A long sync now says how far it has got. The engine counts a round from a stored cursor as it receives it (`SyncProgress` gains a `receiving` stage), so a device picking up another's import of a thousand notes is no longer silent until all of it lands. The storage panel shows a run of twenty or more as a count in its status line — "Sending 120 of 1,000", "Receiving 5 of 30", "Looking for notes: 40 found" — with a bar under it and the file it is on in the line's tooltip; in a compact window the panel says it in a sentence over the bar.
+
+### Patch Changes
+
+- dc3bca7: An imported library, or the notes a device brings to the first account it connects, is now sent notebook by notebook: each notebook goes up with its notes and the files beside them before the next one starts. Another device fills in a notebook at a time, rather than showing every notebook empty until the notes arrive.
+- 62ce687: A sync to Google Drive sends up to four notes at once rather than one at a time, so a large import reaches it several times faster. A provider says how many it takes (`StorageProvider.writesAtOnce`); Dropbox and OneDrive still take one, since Dropbox refuses writes that meet one another as a rate limit. Notebooks, moves, deletions, files beside notes, and the write of a note with a rename queued still go one at a time, in order, and a notebook missing under notes sent together is made once between them. Requests that find the access token expired at the same moment now share one new token.
+- Updated dependencies [62ce687]
+- Updated dependencies [6fbffb5]
+  - @skysa/core@0.17.0
+
 ## 0.16.0
 
 ### Minor Changes
