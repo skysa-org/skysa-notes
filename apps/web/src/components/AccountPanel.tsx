@@ -21,6 +21,7 @@ import {
 } from '../api/client.js';
 import { answer, type Asked } from '../api/instanceConfig.js';
 import { Icon } from '../editor/icons.js';
+import { type pickFiles } from '../editor/pickFiles.js';
 import { failedAt, saying } from '../errors/reached.js';
 import { folderToSearch } from '../routes/search.js';
 import { connectedSources } from '../store/connection.js';
@@ -67,6 +68,7 @@ import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
+import { importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
@@ -115,6 +117,11 @@ export interface AccountPanelProps {
 	 * reason again: jsdom has no `navigator.storage`.
 	 */
 	keeping?: Keeping;
+	/**
+	 * How files are picked for an import (`ImportNotes`). Injected for the same
+	 * reason again: jsdom opens no picker.
+	 */
+	pick?: typeof pickFiles;
 	/**
 	 * Where the way to connect storage is, from here. Beside the tabs it is the
 	 * `+` above the panel, which has words while nothing is connected; in a
@@ -583,10 +590,20 @@ const NotConnected = ({
 	downloadAll,
 	keep,
 	slot,
-}: LocalProps & { downloadAll: (library: Library) => void; keep: Keeping }) => {
+	pick,
+}: LocalProps & {
+	downloadAll: (library: Library) => void;
+	keep: Keeping;
+	pick: typeof pickFiles | undefined;
+}) => {
 	const settings = answer(config);
 	const holds = useLiveQuery(() => holdsAnything(database, LOCAL_CONNECTION_ID), [database]);
 	const downloading = useDownloadAll(database, LOCAL_CONNECTION_ID, downloadAll);
+	const importing = useImportNotes(database, LOCAL_CONNECTION_ID, {
+		label: 'this device',
+		syncs: false,
+		...(pick === undefined ? {} : { pick }),
+	});
 	useAsked(slot, LOCAL_CONNECTION_ID, (action) => {
 		if (action !== 'download') return true;
 		if (holds === undefined) return false;
@@ -637,8 +654,12 @@ const NotConnected = ({
 				</p>
 			)}
 			<DownloadAll holds={holds} downloading={downloading} button={slot === undefined} />
+			<ImportNotes importing={importing} buttons={slot === undefined} />
 			{slot !== undefined && (
-				<ActionsMenu slot={slot} items={downloadItem(holds, downloading)} />
+				<ActionsMenu
+					slot={slot}
+					items={[...downloadItem(holds, downloading), ...importItems(importing)]}
+				/>
 			)}
 		</section>
 	);
@@ -1129,6 +1150,7 @@ interface ConnectedProps {
 	download: (listed: Unsynced) => Promise<void>;
 	/** Hand the whole source to the user as a file. */
 	downloadAll: (library: Library) => void;
+	pick?: typeof pickFiles;
 	returnTo: string;
 	navigate?: (url: string) => void;
 	slot?: AccountSlot;
@@ -1274,6 +1296,7 @@ const StorageActions = ({
 	rescanning,
 	onRescan,
 	download,
+	imports,
 	stranded,
 	open,
 	disconnectBlocked,
@@ -1287,6 +1310,8 @@ const StorageActions = ({
 	rescanning: boolean;
 	onRescan: () => void;
 	download: readonly OptionsMenuItem[];
+	/** The ways to import (`importItems`), or none where an import is held back. */
+	imports: readonly OptionsMenuItem[];
 	stranded: boolean;
 	/** Whether the disconnect question is open. */
 	open: boolean;
@@ -1305,6 +1330,7 @@ const StorageActions = ({
 				? [{ label: 'Re-scan from scratch', onChoose: onRescan, disabled: syncing }]
 				: []),
 			...download,
+			...imports,
 			...(stranded && !open
 				? [
 						{
@@ -1375,6 +1401,13 @@ type Step =
 	| { kind: 'pushing'; onServer: boolean }
 	| ({ kind: 'asking'; onServer: boolean } & Awaited<ReturnType<typeof prepare>>);
 
+/** How an import into a connected source names it, and picks its files. */
+const importInto = (bound: SyncStateRecord, pick: typeof pickFiles | undefined) => ({
+	label: bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider],
+	syncs: true,
+	...(pick === undefined ? {} : { pick }),
+});
+
 const Connected = ({
 	client,
 	database,
@@ -1386,6 +1419,7 @@ const Connected = ({
 	onDisconnect,
 	download,
 	downloadAll,
+	pick,
 	returnTo,
 	navigate,
 	slot,
@@ -1403,6 +1437,7 @@ const Connected = ({
 		[database, connectionId]
 	);
 	const downloading = useDownloadAll(database, connectionId, downloadAll);
+	const importing = useImportNotes(database, connectionId, importInto(bound, pick));
 	// The other live sources, which what this one never sent could go to.
 	const sources = useLiveQuery(() => connectedSources(database), [database]);
 	const targets = otherLiveSources(sources, connectionId);
@@ -1547,6 +1582,13 @@ const Connected = ({
 			{downloadable && (
 				<DownloadAll holds={holds} downloading={downloading} button={buttons} />
 			)}
+			{/*
+			 * Held back as the download is, and for a like reason: notes written
+			 * in while a first import is filling the source would meet its files
+			 * as they arrive, and an import beside the disconnect question would
+			 * add to the very list being asked about.
+			 */}
+			{downloadable && <ImportNotes importing={importing} buttons={buttons} />}
 			<Devices
 				client={client}
 				database={database}
@@ -1598,6 +1640,7 @@ const Connected = ({
 					setRescanning(true);
 				}}
 				download={downloadable ? downloadItem(holds, downloading) : []}
+				imports={downloadable ? importItems(importing) : []}
 				stranded={stranded}
 				open={open}
 				disconnectBlocked={disconnectBlocked}
@@ -1693,6 +1736,7 @@ export const AccountPanel = ({
 	download = downloadLibrary,
 	downloadAll = downloadLibrary,
 	keeping = browserKeeping,
+	pick,
 	connectIs = 'above',
 	slot,
 }: AccountPanelProps) => {
@@ -1722,10 +1766,11 @@ export const AccountPanel = ({
 	// panel instead, once that has rendered — to whatever that panel offers
 	// first, and failing that to the panel itself.
 	//
-	// "Failing that" is the ordinary case now that the source list and the
-	// connect buttons have moved to the tab bar: discard the last source and
-	// what is left here is a sentence. The frame takes `tabIndex={-1}` so there
-	// is somewhere to land that says where the user is, rather than the body,
+	// The source list and the connect buttons have moved to the tab bar, so
+	// discard the last source and what is left here is a sentence and the ways
+	// to import, the first of which is where the focus goes. Where a panel
+	// offers nothing at all, the frame takes `tabIndex={-1}` so there is
+	// somewhere to land that says where the user is, rather than the body,
 	// which says nothing and puts the next Tab back at the top of the page.
 	// Not the bar's `+`: the panel does not own it, and a component reaching
 	// across the screen for someone else's button is how focus ends up fought
@@ -1806,6 +1851,7 @@ export const AccountPanel = ({
 					connectIs={connectIs}
 					downloadAll={downloadAll}
 					keep={keeping}
+					pick={pick}
 					{...(navigate === undefined ? {} : { navigate })}
 					{...(slot === undefined ? {} : { slot })}
 				/>
@@ -1842,6 +1888,7 @@ export const AccountPanel = ({
 				onDisconnect={disconnect}
 				download={downloadListed}
 				downloadAll={downloadAll}
+				{...(pick === undefined ? {} : { pick })}
 				client={client}
 				database={database}
 				sync={sync}
