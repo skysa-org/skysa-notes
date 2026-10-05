@@ -954,23 +954,6 @@ const noteAtPath = async (
 };
 
 /**
- * A frontmatter date, or now.
- *
- * `Date.parse` answers `NaN` for anything it cannot read, and these two fields
- * come out of a file the app did not write — including one whose YAML the
- * parser had to recover from, where an unterminated quote swallows the next
- * line into the value. `NaN` in `updatedAt` is not a wrong date, it is a
- * comparator that returns false both ways: the field is an IndexedDB index and
- * the note list sorts on it, so one bad note leaves the whole list in no
- * particular order, and `noteFileContents` throws `RangeError` on the row.
- */
-const timeFrom = (value: string | undefined, fallback: number): number => {
-	if (value === undefined) return fallback;
-	const parsed = Date.parse(value);
-	return Number.isNaN(parsed) ? fallback : parsed;
-};
-
-/**
  * Take a note file into the store as-is.
  *
  * Nothing here marks the note dirty and nothing re-serializes the body: a note
@@ -1066,6 +1049,34 @@ const sameBody = (existing: NoteRecord, parsed: { body: string }): boolean =>
 	existing.body === parsed.body ||
 	parseNoteFile(noteFile(existing), { filename: basename(existing.path) }).body === parsed.body;
 
+/**
+ * When a note read from a file was last edited, as far as anyone here can say.
+ *
+ * Read for the first time — imported, or pulled into a device that never had
+ * it — it is what the file says (`parseNoteFile`: `updated`, another tool's
+ * key for it, or when it was made), or now where it says nothing. Never `NaN`,
+ * which in a field the note list sorts on leaves the list in no order at all.
+ *
+ * Read again, it only moves forward. The file's time where that is later than
+ * the row's: another device saved it, and said when. The row's own where the
+ * file is the one the row already has: a push's echo, a pull that changed
+ * nothing. And now where the file has changed and says nothing later: another
+ * tool wrote it and kept the old date, or the frontmatter is one the app cannot
+ * write its `updated` into. Taking the file's older time there put the note back
+ * years in the list on every pull, and an edit just made here read as one not
+ * yet saved (`store/liveEdits.ts`).
+ */
+const editedAt = (
+	parsed: { updatedAt?: number },
+	existing: NoteRecord | undefined,
+	input: Pick<NoteFileInput, 'hash' | 'now'>
+): number => {
+	if (existing === undefined) return parsed.updatedAt ?? input.now;
+	if (parsed.updatedAt !== undefined && parsed.updatedAt > existing.updatedAt)
+		return parsed.updatedAt;
+	return existing.contentHash === input.hash ? existing.updatedAt : input.now;
+};
+
 export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
 	const { existing } = input;
@@ -1081,8 +1092,11 @@ export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
 		contentHash: input.hash,
 		dirty: 0,
 		deletedLocally: existing?.deletedLocally ?? 0,
-		createdAt: existing?.createdAt ?? timeFrom(parsed.created, input.now),
-		updatedAt: timeFrom(parsed.updated, input.now),
+		// What the file says first, so a row given the time it was imported, by
+		// a device that could not read the file's spelling, takes the note's own
+		// when it is next read; then when it was first seen here.
+		createdAt: parsed.createdAt ?? existing?.createdAt ?? input.now,
+		updatedAt: editedAt(parsed, existing, input),
 		...(existing?.editorMode === undefined ? {} : { editorMode: existing.editorMode }),
 		...(existing !== undefined && sameBody(existing, parsed)
 			? // A file that changed only its frontmatter leaves what an editor

@@ -10,12 +10,15 @@ export {
 	splitFrontmatter,
 	joinFrontmatter,
 	readFrontmatter,
+	readNoteTimes,
 	writeFrontmatter,
 	frontmatterIsEditable,
 	frontmatterHasDeclinedId,
 	type SplitDocument,
 	type NoteFrontmatter,
+	type NoteTimes,
 } from './frontmatter.js';
+export { readTime } from './time.js';
 export { headings, type Heading } from './outline.js';
 export { previewLines, previewText } from './preview.js';
 export {

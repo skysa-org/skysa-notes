@@ -13,6 +13,7 @@ import {
 } from 'yaml';
 
 import { toLf } from './lineEndings.js';
+import { readTime } from './time.js';
 
 /**
  * Frontmatter is handled as text, outside the remark pipeline: it is split off
@@ -462,6 +463,50 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 };
 
 /**
+ * Where a note's times are, in the order they are looked for: the app's own
+ * key first, then what other tools write. `modified` is OneNote's exporters'
+ * and Bear's, `date created` and `date modified` are Obsidian's (its Templater
+ * and Front Matter Title plugins), and `lastmod` is Hugo's. Not `date`, which
+ * is as often when a post goes out as when it was written.
+ */
+const CREATED_KEYS = ['created', 'date created'] as const;
+const UPDATED_KEYS = ['updated', 'modified', 'date modified', 'lastmod'] as const;
+
+const firstTime = (record: Record<string, unknown>, keys: readonly string[]): number | undefined =>
+	keys.reduce<number | undefined>((found, key) => {
+		if (found !== undefined) return found;
+		const text = asString(record[key]);
+		return text === undefined ? undefined : readTime(text);
+	}, undefined);
+
+/** When a note was made and last edited, as far as its frontmatter says. */
+export interface NoteTimes {
+	created?: number;
+	/** The last edit, or the creation where no edit is recorded. */
+	updated?: number;
+}
+
+/**
+ * The note's times, read from whichever key holds them (`CREATED_KEYS`,
+ * `UPDATED_KEYS`), as instants. A note that says when it was made and not
+ * when it was edited was last edited, as far as anyone can tell, then: a
+ * library exported from OneNote records `modified` on a fifth of its pages,
+ * and the rest showed the day they were imported as the day they were edited.
+ * A key whose value is no time is passed over for the next one.
+ *
+ * Only read. What the app writes back is its own `created` and `updated`, and
+ * only when one changes (`writeFrontmatter`); the keys another tool wrote are
+ * left as they are.
+ */
+export const readNoteTimes = (frontmatter: string | null): NoteTimes => {
+	const recovered = recover(frontmatter);
+	if (recovered === undefined) return {};
+	const created = firstTime(recovered.record, CREATED_KEYS);
+	const updated = firstTime(recovered.record, UPDATED_KEYS) ?? created;
+	return defined({ created, updated });
+};
+
+/**
  * Can this block be edited, or only read?
  *
  * `writeFrontmatter` will not rewrite YAML the parser had to recover from —
@@ -517,7 +562,7 @@ type KnownKey = (typeof KNOWN_KEYS)[number];
 
 /** `created` and `updated` are read as an instant, not as a spelling of one. */
 const isTime = (value: string | undefined): value is string =>
-	value !== undefined && !Number.isNaN(Date.parse(value));
+	value !== undefined && readTime(value) !== undefined;
 
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
 	a.length === b.length && a.every((item, index) => item === b[index]);
@@ -573,15 +618,21 @@ const stringified = (doc: Document): string | undefined => {
  * A time is compared as an instant. The store keeps `createdAt` as a number and
  * hands back `2024-09-14T00:00:00.000Z` for a file that said `2024-09-14`; that
  * is the file's own date coming home, and the user's spelling of it stays.
- * `Date.parse` reads formats differently from one engine to the next, which
- * does not matter here: the number being compared came out of the same
- * `Date.parse`, on this device, from this string.
+ * It is read by `readTime`, the reader the store's number came from, so the
+ * two agree on every spelling: had they differed, `created: 2014-02-20
+ * 14:00:10 UTC` would be respelled on the first edit in one browser and not
+ * in another.
  *
- * A `created` that is not a time at all — `created: last spring` — is declined
- * the way an `id` is. The app could not read it, so the store fell back on the
- * time of the import, and writing that over the line would replace something
- * the user meant with something nobody did. `updated` is not held to that: the
- * app changes it on every save, by design, and what it says afterwards is true.
+ * A `created` the file has is never written over, a time or not. When a note
+ * was made does not change, so a store that holds another value for it holds
+ * a wrong one: the time it was imported, read on a device that could not read
+ * the file's spelling (WebKit's `Date.parse` could not read `2014-02-20
+ * 14:00:10 UTC`), and the first edit there wrote the import day over the
+ * note's own, then another device wrote it back. `created: last spring` is
+ * left as the user meant it, the way an `id` is. Only a `created` the file
+ * lacks, or names with nothing after it (`created:`), is filled in. `updated` is not held to any of that:
+ * the app changes it on every save, by design, and what it says afterwards is
+ * true.
  */
 const changes = (
 	key: KnownKey,
@@ -595,11 +646,10 @@ const changes = (
 	if (current === undefined || current === null) return true;
 	if (typeof value !== 'string') return !sameList(asTags(current) ?? [], value);
 
+	if (key === 'created') return false;
 	const read = asString(current);
-	if (key === 'created' && !isTime(read)) return false;
 	if (read === value) return false;
-	const times = key === 'created' || key === 'updated';
-	return !(times && isTime(read) && Date.parse(read) === Date.parse(value));
+	return !(key === 'updated' && isTime(read) && readTime(read) === readTime(value));
 };
 
 /**

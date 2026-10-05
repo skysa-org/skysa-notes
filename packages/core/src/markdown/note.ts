@@ -2,6 +2,7 @@ import {
 	joinFrontmatter,
 	type NoteFrontmatter,
 	readFrontmatter,
+	readNoteTimes,
 	splitFrontmatter,
 	writeFrontmatter,
 } from './frontmatter.js';
@@ -23,8 +24,10 @@ export interface ParsedNoteFile {
 	body: string;
 	/** Raw YAML between the fences, or null when the file had none. */
 	frontmatter: string | null;
-	created?: string;
-	updated?: string;
+	/** When the note was made, as an instant, where the file says (`readNoteTimes`). */
+	createdAt?: number;
+	/** When it was last edited, or else made, where the file says. */
+	updatedAt?: number;
 	tags: string[];
 }
 
@@ -39,11 +42,12 @@ export const parseNoteFile = (
 ): ParsedNoteFile => {
 	const { frontmatter, body } = splitFrontmatter(source);
 	const fields = readFrontmatter(frontmatter);
+	const times = readNoteTimes(frontmatter);
 
 	return {
 		...(fields.id === undefined ? {} : { id: fields.id }),
-		...(fields.created === undefined ? {} : { created: fields.created }),
-		...(fields.updated === undefined ? {} : { updated: fields.updated }),
+		...(times.created === undefined ? {} : { createdAt: times.created }),
+		...(times.updated === undefined ? {} : { updatedAt: times.updated }),
 		title: deriveTitle({
 			frontmatterTitle: fields.title,
 			body,
