@@ -947,8 +947,11 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Discard them…' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Download them' })).toBeTruthy();
-		// A stray Enter answers no, and nothing has been asked of the server.
-		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+		// A stray Enter answers no, and nothing has been asked of the server. The
+		// focus is moved by an effect after the render, so waited for, as below.
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+		});
 		expect(signOut).not.toHaveBeenCalled();
 		expect(await db.credentials.get('c1')).toBeDefined();
 	});
@@ -1398,7 +1401,9 @@ describe('AccountPanel, with an account connected', () => {
 
 		await user.click(await enabled('Disconnect…'));
 		await screen.findByRole('button', { name: 'Disconnect' });
-		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Disconnect…' }));
