@@ -2,9 +2,18 @@ import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCodeDisplayStore } from '../src/editor/codeDisplay.js';
-import { db } from '../src/store/db.js';
-import { useCodeDisplay, useLooseNoteCount, useNote, useNoteSearch } from '../src/store/hooks.js';
+import { bindConnection, finishImport } from '../src/store/connection.js';
+import { ACTIVE_CONNECTION_KEY, db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
+import { createFolder } from '../src/store/folders.js';
+import {
+	useCodeDisplay,
+	useLooseNoteCount,
+	useNote,
+	useNoteSearch,
+	usePinnedTree,
+} from '../src/store/hooks.js';
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
+import { setNotebookPinned, setNotePinned } from '../src/store/pins.js';
 import { getCodeDisplay, setCodeDisplay } from '../src/store/prefs.js';
 
 /**
@@ -19,6 +28,8 @@ beforeEach(async () => {
 	// The hooks read the singleton database, not an injected one.
 	await db.notes.clear();
 	await db.folders.clear();
+	await db.prefs.clear();
+	await db.syncState.clear();
 });
 
 const count = async (): Promise<number | undefined> => {
@@ -50,6 +61,63 @@ describe('useLooseNoteCount', () => {
 		await purgeNote(db, loose.id);
 
 		expect(await count()).toBe(0);
+	});
+});
+
+describe('usePinnedTree', () => {
+	const names = (tree: ReturnType<typeof usePinnedTree>['tree']) =>
+		tree?.map((node) => `${node.path}${node.pinned === true ? '*' : ''}`);
+
+	it('brings each source’s notebooks with that source’s pins, together', async () => {
+		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
+		await finishImport(db, 'dropbox-1');
+		for (const name of ['Alpha', 'Beta', 'Gamma'])
+			await createFolder(db, { connectionId: 'dropbox-1', name });
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Alpha' });
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Beta' });
+		await setNotebookPinned(db, LOCAL_CONNECTION_ID, 'Beta', true);
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: LOCAL_CONNECTION_ID });
+		const seen: (string[] | undefined)[] = [];
+		const { result } = renderHook(() => {
+			const showing = usePinnedTree();
+			seen.push(names(showing.tree));
+			return showing;
+		});
+		await waitFor(() => {
+			expect(names(result.current.tree)).toEqual(['Beta*', 'Alpha']);
+		});
+
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: 'dropbox-1' });
+
+		await waitFor(() => {
+			expect(names(result.current.tree)).toEqual(['Alpha', 'Beta', 'Gamma']);
+		});
+		expect(result.current.pins?.notebooks.size).toBe(0);
+		// Neither source's notebooks were ever drawn under the other's pins.
+		expect(seen).not.toContainEqual(['Beta*', 'Alpha', 'Gamma']);
+		expect(seen).not.toContainEqual(['Alpha', 'Beta']);
+	});
+
+	it('keeps the same pins while they are the same, and gives new ones when they change', async () => {
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Work' });
+		const { result } = renderHook(usePinnedTree);
+		await waitFor(() => {
+			expect(result.current.pins).not.toBeUndefined();
+		});
+		const before = result.current.pins;
+
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await waitFor(() => {
+			expect(result.current.tree?.[0]?.noteCount).toBe(1);
+		});
+		expect(result.current.pins).toBe(before);
+
+		const note = await createNote(db, { title: 'Other', folderPath: 'Work' });
+		await setNotePinned(db, LOCAL_CONNECTION_ID, note.id, true);
+		await waitFor(() => {
+			expect(result.current.pins?.notes.has(note.id)).toBe(true);
+		});
+		expect(result.current.pins).not.toBe(before);
 	});
 });
 

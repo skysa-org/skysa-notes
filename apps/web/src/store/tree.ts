@@ -1,5 +1,7 @@
 import { ancestorPaths, basename, parentPath, ROOT } from '@skysa/core';
 
+import { pinnedFirst } from './pins.js';
+
 /**
  * Flat folder paths in, a nested tree out. Kept pure and separate from the
  * components so the shape of the sidebar is testable without rendering anything.
@@ -13,6 +15,8 @@ export interface FolderNode {
 	noteCount: number;
 	/** Number of files that are not notes directly inside it (#187). */
 	fileCount: number;
+	/** Pinned to the top of its level on this device (`withPins`). */
+	pinned?: boolean;
 }
 
 export interface BuildFolderTreeInput {
@@ -59,6 +63,21 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 
 	return childrenOf(ROOT);
 };
+
+/**
+ * The tree with the pinned notebooks first at each level: a pinned notebook
+ * goes to the top of the notebooks beside it, under its own parent, and the
+ * rest keep their order (`store/pins.ts`).
+ */
+export const withPins = (tree: readonly FolderNode[], pinned: ReadonlySet<string>): FolderNode[] =>
+	pinnedFirst(
+		tree.map((node) => ({
+			...node,
+			pinned: pinned.has(node.path),
+			children: withPins(node.children, pinned),
+		})),
+		(node) => node.pinned
+	);
 
 /** Is `path` one of the folders in this tree? */
 export const containsPath = (tree: readonly FolderNode[], path: string): boolean =>

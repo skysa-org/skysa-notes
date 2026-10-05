@@ -1,3 +1,4 @@
+import { pinItem } from './noteMenu.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
@@ -14,6 +15,10 @@ import { type OptionsMenuItem } from './OptionsMenu.js';
  */
 
 export interface NotebookActions {
+	/** Pinned to the top of its level on this device (`store/pins.ts`). */
+	pinned?: boolean;
+	/** Pin or unpin it, whichever it is not. */
+	onPin?: () => void;
 	onNewInside: () => void;
 	onRename: () => void;
 	onMove: () => void;
@@ -25,8 +30,9 @@ export interface NotebookActions {
 /** What can be done to a notebook, wherever it is offered from. */
 export const notebookMenuItems = (
 	name: string,
-	{ onNewInside, onRename, onMove, onFiles, onDelete }: NotebookActions
+	{ pinned, onPin, onNewInside, onRename, onMove, onFiles, onDelete }: NotebookActions
 ): OptionsMenuItem[] => [
+	...pinItem(pinned, onPin),
 	{ label: `New notebook inside “${name}”`, onChoose: onNewInside },
 	{ label: 'Rename', onChoose: onRename },
 	{ label: 'Move', onChoose: onMove },

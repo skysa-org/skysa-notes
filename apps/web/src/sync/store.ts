@@ -34,6 +34,7 @@ import { heldBytesAreCurrent } from '../store/files.js';
 import { foldPath } from '../store/naming.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
 import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.js';
+import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 
 /**
@@ -550,8 +551,10 @@ export const createDexieSyncStore = (
 				}))
 		);
 
-		// Open in the sidebar where it was, as a move made here keeps it.
+		// Open in the sidebar where it was, and pinned, as a move made here
+		// keeps it.
 		await moveOpenNotebooks(scope, connectionId, from, to);
+		await movePinnedNotebooks(scope, connectionId, from, to);
 
 		// Files, bound and pending: an id-only feed names none of them.
 		const files = (await filesOf(scope)).filter((file) => isWithin(file.path, from));
@@ -643,8 +646,10 @@ export const createDexieSyncStore = (
 
 		const folders = (await foldersOf(scope)).filter((folder) => isWithin(folder.path, path));
 		await scope.folders.bulkDelete(folders.map((folder) => [connectionId, folder.path]));
-		// So one made at its path later starts shut, as a delete made here leaves it.
+		// So one made at its path later starts shut and unpinned, as a delete
+		// made here leaves it.
 		await forgetOpenNotebooks(scope, connectionId, path);
+		await forgetPinnedNotebooks(scope, connectionId, path);
 
 		// A clean note goes with its folder. A dirty one is the user's writing and
 		// exists nowhere else, so it stays, cut loose from the file that is gone.

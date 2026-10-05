@@ -86,6 +86,10 @@
 	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 	--on-fg: var(--accent);
 	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
+	/* A row pinned to the top of its list (`store/pins.ts`): a wash of the
+	   "on" colour, lighter than a pressed toggle's, since it is a row that is
+	   kept somewhere rather than a control that is on. */
+	--pinned-bg: color-mix(in srgb, var(--accent) 9%, transparent);
 	/* Keyboard focus: a ring, drawn outside the control, so it never reads
 	   as the control's own state. */
 	--ring: color-mix(in srgb, var(--accent) 70%, transparent);
@@ -1044,6 +1048,34 @@ button.row.selected,
 .row-editing.selected {
 	background: color-mix(in srgb, var(--fg) 11%, transparent);
 	font-weight: 600;
+}
+
+/* Pinned: the wash, and hover and selection deeper in the same hue rather
+   than grey over it, so a pinned row still reads as pinned while the pointer
+   is on it or it is the one open — which is when it has just been pinned. */
+button.row.pinned {
+	background: var(--pinned-bg);
+}
+
+@media (hover: hover) {
+	button.row.pinned:hover,
+	.row-item:hover > button.row.pinned:not(:disabled) {
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
+	}
+}
+
+button.row.pinned.selected {
+	background: color-mix(in srgb, var(--accent) 19%, transparent);
+}
+
+/* Forced colours take the wash away, and with it the only sign of a pin. An
+   outline inside the row stays, in the system's own colour; the focus ring
+   takes its place while the row has focus. */
+@media (forced-colors: active) {
+	button.row.pinned:not(:focus-visible) {
+		outline: 1px solid CanvasText;
+		outline-offset: -1px;
+	}
 }
 
 /* A move is on, and this row is not somewhere the thing being moved can go.

@@ -62,7 +62,6 @@ import {
 	useActiveConnectionId,
 	useActiveSource,
 	useClaimingConnection,
-	useFolderTree,
 	useHeldImport,
 	useHoldsAnything,
 	useLastOpen,
@@ -72,6 +71,7 @@ import {
 	useNotesInFolder,
 	useNoteToOpen,
 	useOpenNotebooks,
+	usePinnedTree,
 	useSources,
 } from '../store/hooks.js';
 import { keeping } from '../store/keeping.js';
@@ -86,6 +86,7 @@ import {
 	undeleteNote,
 } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
+import { pinnedFirst, type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { findFolder, type FolderNode, selectedFolderPath } from '../store/tree.js';
@@ -712,6 +713,7 @@ const useOpenPlace = ({
 	activeConnection,
 	tree,
 	looseNoteCount,
+	pins,
 	startable,
 	onStoreFailed,
 }: {
@@ -719,6 +721,8 @@ const useOpenPlace = ({
 	activeConnection: string | undefined;
 	tree: FolderNode[] | undefined;
 	looseNoteCount: number | undefined;
+	/** What the source has pinned: a notebook opens on a pinned note first. */
+	pins: Pins | undefined;
 	/**
 	 * Whether an empty notebook may start a note. Not while a source's first
 	 * import is filling it: the notebook is empty only because its notes have
@@ -739,11 +743,13 @@ const useOpenPlace = ({
 		rememberedFolder(lastOpen)
 	);
 	const remembered = folder === undefined ? undefined : lastOpen?.notes[folder];
+	const pinnedNotes = pins?.notes;
 	const toOpen = useNoteToOpen({
 		connectionId: activeConnection,
 		folder,
 		open: noteId,
 		remembered,
+		pinned: pinnedNotes,
 		ready: lastOpen !== undefined && !elsewhere,
 	});
 
@@ -806,6 +812,7 @@ const useOpenPlace = ({
 			folderPath: toOpen.folder,
 			open: noteId,
 			remembered,
+			pinned: pinnedNotes,
 		}).then((again) => {
 			if (asking.current) show(again ?? blank()?.id);
 		});
@@ -818,6 +825,7 @@ const useOpenPlace = ({
 		noteId,
 		requestedFolder,
 		remembered,
+		pinnedNotes,
 		navigate,
 		begun,
 		storedNote,
@@ -865,21 +873,30 @@ const canBegin = (
 ): boolean => source !== undefined && source?.importing === undefined && held === undefined;
 
 /**
- * The open notebook's notes, and the note begun in it at the top, as the
- * newest, though the store has no row for it yet.
+ * The open notebook's notes, the pinned first (`store/pins.ts`), and the note
+ * begun in it as the newest, though the store has no row for it yet: at the
+ * top of the ones that are not pinned. The pins come with the tree
+ * (`usePinnedTree`), which is read before any notebook is open.
  */
-const useListedNotes = (folder: string | undefined, begun: NoteRecord | undefined) => {
+const useListedNotes = (
+	folder: string | undefined,
+	begun: NoteRecord | undefined,
+	pins: Pins | undefined
+) => {
 	const stored = useNotesInFolder(folder);
-	const notes = useMemo(
-		() =>
-			stored === undefined ||
+	const notes = useMemo(() => {
+		if (stored === undefined) return undefined;
+		const pinned = (note: NoteRecord) => pins?.notes.has(note.id) === true;
+		const sorted = pinnedFirst(stored, pinned);
+		if (
 			begun === undefined ||
 			parentPath(begun.path) !== folder ||
 			stored.some((note) => note.id === begun.id)
-				? stored
-				: [begun, ...stored],
-		[stored, begun, folder]
-	);
+		)
+			return sorted;
+		const at = sorted.filter(pinned).length;
+		return [...sorted.slice(0, at), begun, ...sorted.slice(at)];
+	}, [stored, begun, folder, pins]);
 	return { stored, notes, unsavedNoteId: begun?.id };
 };
 
@@ -921,7 +938,7 @@ const Home = () => {
 		[activeConnection]
 	);
 	const sources = useSources();
-	const tree = useFolderTree();
+	const { tree, pins } = usePinnedTree();
 	const looseNoteCount = useLooseNoteCount();
 
 	/**
@@ -947,11 +964,12 @@ const Home = () => {
 		activeConnection,
 		tree,
 		looseNoteCount,
+		pins,
 		startable: canBegin(source, held),
 		onStoreFailed: noteNotMade,
 	});
 	const { folder, noteId, openNote, storedNote } = place;
-	const { stored, notes, unsavedNoteId } = useListedNotes(folder, place.begun);
+	const { stored, notes, unsavedNoteId } = useListedNotes(folder, place.begun, pins);
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
 	const noteView = useRef<NoteViewHandle>(null);
@@ -1556,6 +1574,10 @@ const Home = () => {
 					newNotebookAsked={newNotebookAsked}
 					openNotebooks={openNotebooks}
 					onOpenNotebooks={onOpenNotebooks}
+					onPinFolder={(path, pinned) => {
+						if (activeConnection !== undefined)
+							void setNotebookPinned(db, activeConnection, path, pinned);
+					}}
 				/>
 
 				<NoteList
@@ -1585,8 +1607,18 @@ const Home = () => {
 					// The note's own menu, about the note on the row its `⋯` or
 					// a right-click is on, which need not be the one open. Delete goes through the note pane,
 					// which holds what autosave has not stored yet.
+					pinnedNoteIds={pins?.notes}
 					menuFor={(note) =>
 						noteMenuItems({
+							pinned: pins?.notes.has(note.id),
+							onPin: () => {
+								void setNotePinned(
+									db,
+									note.connectionId,
+									note.id,
+									pins?.notes.has(note.id) !== true
+								);
+							},
 							onMove:
 								moving === null
 									? () => {

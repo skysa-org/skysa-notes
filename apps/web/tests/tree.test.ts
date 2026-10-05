@@ -6,7 +6,9 @@ import {
 	containsPath,
 	findFolder,
 	folderLabel,
+	type FolderNode,
 	selectedFolderPath,
+	withPins,
 } from '../src/store/tree.js';
 
 describe('buildFolderTree', () => {
@@ -77,6 +79,38 @@ describe('buildFolderTree', () => {
 	});
 });
 
+describe('withPins', () => {
+	const tree = buildFolderTree({
+		paths: ['Alpha', 'Beta', 'Gamma', 'Beta/One', 'Beta/Two', 'Beta/Three'],
+	});
+	const shape = (nodes: readonly FolderNode[]): unknown[] =>
+		nodes.map((node) =>
+			node.children.length === 0
+				? `${node.name}${node.pinned === true ? '*' : ''}`
+				: { [`${node.name}${node.pinned === true ? '*' : ''}`]: shape(node.children) }
+		);
+
+	it('puts a pinned notebook first among those beside it, the rest in their order', () => {
+		expect(shape(withPins(tree, new Set(['Gamma'])))).toEqual([
+			'Gamma*',
+			'Alpha',
+			{ Beta: ['One', 'Three', 'Two'] },
+		]);
+	});
+
+	it('puts a pinned notebook inside another first under its parent, not at the top', () => {
+		expect(shape(withPins(tree, new Set(['Beta/Two', 'Beta/Three'])))).toEqual([
+			'Alpha',
+			{ Beta: ['Three*', 'Two*', 'One'] },
+			'Gamma',
+		]);
+	});
+
+	it('leaves the tree as it was with nothing pinned', () => {
+		expect(shape(withPins(tree, new Set()))).toEqual(shape(tree));
+	});
+});
+
 describe('ancestorPaths', () => {
 	it('lists ancestors outermost first', () => {
 		expect(ancestorPaths('work/meetings/2026/a.md')).toEqual([
@@ -133,6 +167,11 @@ describe('selectedFolderPath', () => {
 
 	it('opens the first notebook when none is asked for', () => {
 		expect(selectedFolderPath(tree, undefined, 0, null)).toBe('personal');
+	});
+
+	it('falls back to a pinned notebook, since it is the first', () => {
+		const tree = withPins(buildFolderTree({ paths: ['personal', 'work'] }), new Set(['work']));
+		expect(selectedFolderPath(tree, undefined, 0, null)).toBe('work');
 	});
 
 	it('opens the notebook that was asked for', () => {

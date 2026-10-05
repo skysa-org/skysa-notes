@@ -270,7 +270,7 @@ describe('opening a notebook', () => {
 			within(menu)
 				.getAllByRole('button')
 				.map((item) => item.textContent)
-		).toEqual(['Move to notebook…', 'Delete']);
+		).toEqual(['Pin to top', 'Move to notebook…', 'Delete']);
 		await user.click(within(menu).getByRole('button', { name: 'Delete' }));
 
 		// Deleted, with the same way back a delete from the note's own menu has.
