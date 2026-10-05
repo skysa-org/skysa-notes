@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { StaleTabGate } from './components/StaleTabGate.js';
 import { routeTree } from './routeTree.gen';
 import { syncScheduler } from './sync/runtime.js';
+import { keepAwakeWhileSyncing } from './sync/wakeLock.js';
 
 const router = createRouter({
 	routeTree,
@@ -26,6 +27,9 @@ declare module '@tanstack/react-router' {
 // Before the first render, and never stopped: it follows the connection on
 // its own, and syncs nothing while there is none.
 syncScheduler.start();
+// The screen kept on through a long sync, so a phone's timeout does not stop
+// an import part-way. Never stopped either, for the same reason.
+keepAwakeWhileSyncing(syncScheduler);
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('#root is missing from index.html');
