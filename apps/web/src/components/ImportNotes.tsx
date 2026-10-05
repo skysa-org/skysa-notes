@@ -9,6 +9,8 @@ import {
 	type ImportOutcome,
 	type ImportPlan,
 	ImportRefusedError,
+	ImportTooLargeError,
+	MAX_IMPORT_BYTES,
 	planImport,
 	readPicked,
 	type Skipped,
@@ -149,9 +151,13 @@ export const useImportNotes = (
 				}
 				setStep({ kind: 'asking', plan });
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
 				setStep({ kind: 'idle' });
-				setSaid('The files could not be read, so nothing was imported.');
+				setSaid(
+					error instanceof ImportTooLargeError
+						? `That is more than ${String(MAX_IMPORT_BYTES / 1024 ** 3)} GB to import at once, so nothing was imported. Import it a notebook at a time.`
+						: 'The files could not be read, so nothing was imported.'
+				);
 			});
 	};
 

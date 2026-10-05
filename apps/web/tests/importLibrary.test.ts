@@ -11,6 +11,8 @@ import {
 	importLibrary,
 	type ImportPlan,
 	ImportRefusedError,
+	ImportTooLargeError,
+	MAX_IMPORT_BYTES,
 	type Picked,
 	planImport,
 	readPicked,
@@ -308,6 +310,45 @@ describe('importLibrary', () => {
 		expect(mkdirs).toEqual(['Work', 'New']);
 	});
 
+	it('puts a notebook beside a file of its name, and what is picked under it goes with it', async () => {
+		const db = await bound();
+		await importLibrary(db, CONNECTION, planImport(picked({ Archive: 'no extension' })));
+
+		await importLibrary(
+			db,
+			CONNECTION,
+			planImport(picked({ 'Archive/a.md': '# A\n', 'Archive/Old/b.md': '# B\n' }))
+		);
+
+		const mkdirs = (await db.opQueue.where('connectionId').equals(CONNECTION).toArray())
+			.filter((op) => op.op === 'mkdir')
+			.map((op) => op.path);
+		expect(mkdirs).toHaveLength(2);
+		expect(mkdirs[0]).toMatch(/^Archive \(conflict .+\)$/);
+		expect(mkdirs[1]).toBe(`${mkdirs[0] ?? ''}/Old`);
+		expect(await liveNotes(db)).toEqual([
+			`${mkdirs[0] ?? ''}/Old/b.md`,
+			`${mkdirs[0] ?? ''}/a.md`,
+		]);
+		expect((await db.files.toArray()).map((file) => file.path)).toEqual(['Archive']);
+	});
+
+	it('puts a file beside a notebook of its name', async () => {
+		const db = await bound();
+		await createFolder(db, { ...scope, name: 'Work' });
+
+		await importLibrary(
+			db,
+			CONNECTION,
+			planImport(picked({ work: 'no extension', 'New/Old': 'x', 'New/Old/c.md': '# C\n' }))
+		);
+
+		const paths = (await db.files.toArray()).map((file) => file.path).sort();
+		expect(paths).toHaveLength(2);
+		expect(paths[0]).toMatch(/^New\/Old \(conflict .+\)$/);
+		expect(paths[1]).toMatch(/^work \(conflict .+\)$/);
+	});
+
 	it("goes into the device's own notes when nothing is connected", async () => {
 		const db = freshDatabase();
 		await createNote(db, { connectionId: LOCAL_CONNECTION_ID, title: 'Already here' });
@@ -342,6 +383,32 @@ describe('importLibrary', () => {
 			ImportRefusedError
 		);
 		expect(await db.notes.where('path').equals('a.md').count()).toBe(0);
+	});
+
+	it('refuses a source this device has no record of', async () => {
+		const db = freshDatabase();
+
+		await expect(
+			importLibrary(db, CONNECTION, planImport(picked({ 'a.md': 'a' })))
+		).rejects.toBeInstanceOf(ImportRefusedError);
+		expect(await db.notes.count()).toBe(0);
+	});
+
+	it("refuses the device's own notes while a source's first import is holding them", async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: CONNECTION, provider: 'dropbox' });
+
+		await expect(
+			importLibrary(db, LOCAL_CONNECTION_ID, planImport(picked({ 'a.md': 'a' })))
+		).rejects.toBeInstanceOf(ImportRefusedError);
+
+		await finishImport(db, CONNECTION);
+		const outcome = await importLibrary(
+			db,
+			LOCAL_CONNECTION_ID,
+			planImport(picked({ 'a.md': 'a' }))
+		);
+		expect(outcome.notes).toBe(1);
 	});
 });
 
@@ -381,6 +448,57 @@ describe('readPicked', () => {
 		);
 		expect(read.folders).toEqual(['Empty/']);
 		expect(read.skipped).toEqual([{ path: 'broken.zip', reason: 'unreadable' }]);
+	});
+
+	it('keeps an archive picked inside a folder as the file it is', async () => {
+		const archive = zipOf([{ path: 'plan.md', content: 'P' }], []);
+
+		const read = await readPicked([fileAt('picked/Old/backup.zip', archive)], 'folder');
+
+		expect(read.files.map((file) => file.path)).toEqual(['Old/backup.zip']);
+	});
+
+	it('does not read what stays out by its name, and says which notes it left out', async () => {
+		const unread = (relative: string): File => {
+			const file = fileAt(relative, 'x');
+			Object.defineProperty(file, 'arrayBuffer', {
+				value: () => Promise.reject(new Error('read, and it should not have been')),
+			});
+			return file;
+		};
+
+		const read = await readPicked(
+			[unread('picked/.git/HEAD'), unread('picked/.DS_Store'), unread('picked/.drafts/a.md')],
+			'folder'
+		);
+
+		expect(read).toEqual({
+			files: [],
+			folders: [],
+			skipped: [{ path: '.drafts/a.md', reason: 'hidden' }],
+		});
+	});
+
+	it('says a file the browser cannot read is unreadable, and reads the rest', async () => {
+		const gone = fileAt('picked/gone.md', 'x');
+		Object.defineProperty(gone, 'arrayBuffer', {
+			value: () => Promise.reject(new DOMException('gone', 'NotFoundError')),
+		});
+
+		const read = await readPicked([gone, fileAt('picked/here.md', 'H')], 'folder');
+
+		expect(read.files.map((file) => file.path)).toEqual(['here.md']);
+		expect(read.skipped).toEqual([{ path: 'gone.md', reason: 'unreadable' }]);
+	});
+
+	it('refuses, before reading, more than an import takes at once', async () => {
+		const huge = new File(['x'], 'everything.zip', { type: 'application/zip' });
+		Object.defineProperty(huge, 'size', { value: MAX_IMPORT_BYTES + 1 });
+		Object.defineProperty(huge, 'arrayBuffer', {
+			value: () => Promise.reject(new Error('read, and it should not have been')),
+		});
+
+		await expect(readPicked([huge], 'files')).rejects.toBeInstanceOf(ImportTooLargeError);
 	});
 
 	it('leaves out a file over the limit without reading it', async () => {

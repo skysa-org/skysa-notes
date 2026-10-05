@@ -86,6 +86,7 @@ export {
 	conflictContent,
 	conflictFilename,
 	conflictFilePath,
+	conflictFolderPath,
 	conflictPath,
 	conflictStamp,
 } from './sync/conflicts.js';

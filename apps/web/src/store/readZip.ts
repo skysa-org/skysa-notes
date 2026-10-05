@@ -23,8 +23,9 @@ import { crc32 } from './exportNotes.js';
  *
  * Nothing here is trusted to be what it says. An entry larger than a file
  * beside a note may be is not inflated at all; one whose bytes inflate past the
- * size it declared is cut off there and refused, so a few kilobytes cannot
- * become gigabytes in the tab; and every entry's checksum is compared, so a
+ * size it declared is cut off there and refused, the compressed bytes going
+ * in a slice at a time so that is where it stops (`SLICE`), so a few megabytes
+ * cannot become gigabytes in the tab; and every entry's checksum is compared, so a
  * damaged archive is a file the user is told about rather than a note that
  * quietly holds the wrong text.
  *
@@ -173,17 +174,41 @@ const entryAt = (view: DataView, bytes: Uint8Array, offset: number): Listed => {
 };
 
 /**
+ * How much compressed input goes into the decompressor at once. Chromium and
+ * WebKit inflate a whole written chunk before the reader is answered, whatever
+ * the reader's limit: one write of a 25 MB entry built to inflate to 25 GB took
+ * the tab down before a byte was read. Deflate inflates at most about 1032
+ * to 1, so a slice this size is at most some 17 MB out before the count below
+ * sees it and stops.
+ */
+const SLICE = 16 * 1024;
+
+/**
+ * Hand `data` to the decompressor a slice at a time, each write awaited, so it
+ * takes the next only once the reader has taken what the last one made.
+ * Settles quietly however it ends — finished, or the reader gone, or the bytes
+ * not deflate at all — since what went wrong is the read's to say.
+ */
+const feed = async (writer: WritableStreamDefaultWriter<BufferSource>, data: Uint8Array) => {
+	const write = async (at: number): Promise<void> => {
+		if (at >= data.length) {
+			await writer.close();
+			return;
+		}
+		await writer.write(data.slice(at, at + SLICE));
+		await write(at + SLICE);
+	};
+	await write(0).catch(() => undefined);
+};
+
+/**
  * Inflate raw deflate, stopping once more than `limit` bytes have come out:
  * past what the entry declared is a damaged entry or a hostile one, and either
  * way not worth the memory.
  */
 const inflate = async (data: Uint8Array, limit: number): Promise<Bytes | undefined> => {
 	const stream = new DecompressionStream('deflate-raw');
-	const writer = stream.writable.getWriter();
-	// Not awaited: the writes resolve only as the reader takes what they make,
-	// and a failure — bytes that are not deflate — surfaces at the read.
-	writer.write(new Uint8Array(data)).catch(() => undefined);
-	writer.close().catch(() => undefined);
+	void feed(stream.writable.getWriter(), data);
 	const reader = stream.readable.getReader();
 	const chunks: Uint8Array[] = [];
 	const total = { current: 0 };
@@ -256,7 +281,9 @@ export const readZip = async (archive: ArrayBuffer): Promise<ZipEntry[]> => {
 	return entries.reduce<Promise<ZipEntry[]>>(async (sofar, entry) => {
 		const done = await sofar;
 		// Written to as it goes, as `listed` is, and for its reason.
-		if (entry.name.endsWith('/')) {
+		// A folder, by its trailing separator: `/`, or `\` from the Windows tools
+		// that write names with backslashes (PowerShell's `Compress-Archive`).
+		if (entry.name.endsWith('/') || entry.name.endsWith('\\')) {
 			// eslint-disable-next-line functional/immutable-data
 			done.push({ kind: 'folder', name: entry.name });
 			return done;

@@ -2,6 +2,7 @@ import {
 	ancestorPaths,
 	basename,
 	conflictFilePath,
+	conflictFolderPath,
 	contentHash,
 	foldName,
 	isHidden,
@@ -15,11 +16,18 @@ import {
 	withoutNul,
 } from '@skysa/core';
 
-import { type FileRecord, type FolderRecord, type NoteRecord, type NotesDatabase } from './db.js';
+import { holdsPile } from './connection.js';
+import {
+	type FileRecord,
+	type FolderRecord,
+	LOCAL_CONNECTION_ID,
+	type NoteRecord,
+	type NotesDatabase,
+} from './db.js';
 import { foldPath, freePath } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
 import { queueMkdir, queueUpload, queueWrite } from './queue.js';
-import { readZip, ZipUnreadableError } from './readZip.js';
+import { readZip } from './readZip.js';
 
 /**
  * Notes into the app from files: a folder the user picks, or a ZIP — the one
@@ -114,9 +122,25 @@ export interface ImportOutcome {
 	present: number;
 }
 
-/** Thrown where the source cannot take an import: detached, or its first import still filling it. */
+/**
+ * Thrown where the source cannot take an import: detached, gone, its first
+ * import still filling it, or — for the device's own notes — a bind about to
+ * carry them into an account.
+ */
 export class ImportRefusedError extends Error {
 	override readonly name = 'ImportRefusedError';
+}
+
+/**
+ * The most one import reads, in bytes. Everything picked is held in the tab and
+ * written in one transaction; a folder is otherwise unbounded, and past this a
+ * tab runs out of memory, or a browser out of storage, part way.
+ */
+export const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+
+/** Thrown before, or while, reading a pick that comes to more than `MAX_IMPORT_BYTES`. */
+export class ImportTooLargeError extends RangeError {
+	override readonly name = 'ImportTooLargeError';
 }
 
 /** What a folder holds that its system put there, and nobody would call a note or a file of theirs. */
@@ -137,6 +161,27 @@ const isSystemPath = (path: string): boolean => {
 };
 
 const isNote = (path: string): boolean => foldName(path).endsWith(NOTE_EXTENSION);
+
+/**
+ * A picked path with its separators and its climbing settled, and nothing else
+ * changed: what every question about it is asked of. A backslash is a separator
+ * here: APPNOTE says a ZIP's names use `/`, and Windows tools that wrote `\`
+ * anyway (PowerShell's `Compress-Archive`) are why every reader takes both.
+ * Asked of the raw name, `vault\.obsidian\workspace.json` was not hidden.
+ */
+const tidy = (path: string): string => normalizePath(path.replaceAll('\\', '/'));
+
+/**
+ * Why a picked path stays out before a byte of it is read: the system's, a
+ * hidden note — said, since it is the user's writing — or anything else hidden,
+ * which is a tool's settings (`.obsidian`, `.git`) and is not.
+ */
+const excluded = (path: string): 'system' | 'hidden-note' | 'hidden' | undefined => {
+	const tidied = tidy(path);
+	if (isSystemPath(tidied)) return 'system';
+	if (!isHidden(tidied)) return undefined;
+	return isNote(tidied) ? 'hidden-note' : 'hidden';
+};
 
 /**
  * A character no provider here takes in a name: what Windows refuses, which
@@ -174,12 +219,10 @@ export const acceptedName = (segment: string): string => {
 
 /**
  * A picked path as the app holds paths: POSIX, relative, with nothing that
- * climbs out of the root (`normalizePath`), and each name one a provider takes.
- * A backslash is a separator here: APPNOTE says a ZIP's names use `/`, and
- * Windows tools that wrote `\` anyway are why every reader takes both.
+ * climbs out of the root (`tidy`), and each name one a provider takes.
  */
 const placed = (path: string): { path: string; renamed: boolean } => {
-	const normal = normalizePath(path.replaceAll('\\', '/'));
+	const normal = tidy(path);
 	const accepted = pathSegments(normal).map(acceptedName).join('/');
 	return { path: accepted, renamed: accepted !== normal };
 };
@@ -208,7 +251,18 @@ const pickedPath = (file: File, how: 'folder' | 'files'): string => {
 	return relative.split('/').slice(1).join('/');
 };
 
-/** An archive unpacked into what it holds, or said to be unreadable as a whole. */
+const NOTHING: Picked = { files: [], folders: [], skipped: [] };
+
+const skip = (path: string, reason: SkipReason): Picked => ({
+	files: [],
+	folders: [],
+	skipped: [{ path, reason }],
+});
+
+/**
+ * An archive unpacked into what it holds, or said to be unreadable as a whole:
+ * not an archive this reads, or a file the browser could not read at all.
+ */
 const unpack = async (file: File, path: string): Promise<Picked> => {
 	try {
 		const entries = await readZip(await file.arrayBuffer());
@@ -228,38 +282,77 @@ const unpack = async (file: File, path: string): Promise<Picked> => {
 					: []
 			),
 		};
-	} catch (error) {
-		if (!(error instanceof ZipUnreadableError)) throw error;
-		return { files: [], folders: [], skipped: [{ path, reason: 'unreadable' }] };
+	} catch {
+		return skip(path, 'unreadable');
 	}
 };
 
-/** One picked file read, or an archive unpacked into what it holds. */
+/**
+ * Whether a picked file is an archive to unpack: one picked as a file, or one
+ * a folder picker handed over with no path inside a folder — which is what a
+ * phone's picker does, having no folders to offer, when "Import a folder…"
+ * opens it.
+ */
+const unpacks = (file: File, how: 'folder' | 'files'): boolean =>
+	isZip(file) && (how === 'files' || file.webkitRelativePath === '');
+
+/**
+ * Whether a picked file is read at all: not what stays out by its name, and
+ * not one larger than a file may be, both known before a byte of it is read —
+ * a 2 GB video, or a `.git` of a few hundred megabytes, picked with a folder is
+ * not read into the tab only to be left out.
+ */
+const readable = (file: File, how: 'folder' | 'files'): boolean =>
+	unpacks(file, how) ||
+	(excluded(pickedPath(file, how)) === undefined && file.size <= MAX_ATTACHMENT_BYTES);
+
+/**
+ * One picked file read, or an archive unpacked into what it holds. One the
+ * browser cannot read — gone since it was picked, or a placeholder for a file
+ * a cloud drive has not downloaded — is said to be unreadable, and the rest
+ * still come in.
+ */
 const readOne = async (file: File, how: 'folder' | 'files'): Promise<Picked> => {
 	const path = pickedPath(file, how);
-	if (how === 'files' && isZip(file)) return unpack(file, path);
-	// Known from its size before a byte of it is read: a 2 GB video picked
-	// with a folder is not read into the tab only to be left out.
-	if (file.size > MAX_ATTACHMENT_BYTES) {
-		return { files: [], folders: [], skipped: [{ path, reason: 'too-large' }] };
+	if (unpacks(file, how)) return unpack(file, path);
+	const why = excluded(path);
+	if (why === 'hidden-note') return skip(path, 'hidden');
+	if (why !== undefined) return NOTHING;
+	if (file.size > MAX_ATTACHMENT_BYTES) return skip(path, 'too-large');
+	try {
+		return {
+			files: [{ path, bytes: new Uint8Array(await file.arrayBuffer()) }],
+			folders: [],
+			skipped: [],
+		};
+	} catch {
+		return skip(path, 'unreadable');
 	}
-	return {
-		files: [{ path, bytes: new Uint8Array(await file.arrayBuffer()) }],
-		folders: [],
-		skipped: [],
-	};
 };
 
 /**
  * What the user picked, read: from a folder, every file in it; from a pick of
  * files, each `.zip` unpacked and anything else as it is. One file at a time,
  * so at most one archive is being unpacked at once.
+ *
+ * Refused (`ImportTooLargeError`) before a byte is read where what would be
+ * read comes to more than `MAX_IMPORT_BYTES`, and as soon as unpacked archives
+ * have taken it past that.
  */
-export const readPicked = (files: readonly File[], how: 'folder' | 'files'): Promise<Picked> =>
-	files.reduce<Promise<Picked>>(
+export const readPicked = (files: readonly File[], how: 'folder' | 'files'): Promise<Picked> => {
+	const size = files
+		.filter((file) => readable(file, how))
+		.reduce((total, file) => total + file.size, 0);
+	if (size > MAX_IMPORT_BYTES)
+		return Promise.reject(new ImportTooLargeError('Too much to import'));
+	const read = { current: 0 };
+	return files.reduce<Promise<Picked>>(
 		async (sofar, file) => {
 			const done = await sofar;
 			const one = await readOne(file, how);
+			read.current += one.files.reduce((total, each) => total + each.bytes.length, 0);
+			if (read.current > MAX_IMPORT_BYTES)
+				throw new ImportTooLargeError('Too much to import');
 			// Written to as it goes: a folder of thousands of notes spread into a
 			// new array per file would copy the list once for each of them.
 			// eslint-disable-next-line functional/immutable-data
@@ -272,6 +365,7 @@ export const readPicked = (files: readonly File[], how: 'folder' | 'files'): Pro
 		},
 		Promise.resolve({ files: [], folders: [], skipped: [] })
 	);
+};
 
 /**
  * What an import of `picked` would bring in, and what it would leave out. Pure,
@@ -283,16 +377,15 @@ export const readPicked = (files: readonly File[], how: 'folder' | 'files'): Pro
  * numbered as it is written, as a name taken in the source is.
  */
 export const planImport = (picked: Picked): ImportPlan => {
-	const wanted = picked.files.filter((file) => !isSystemPath(file.path));
-	// A hidden note is said, since it is the user's writing; anything else
-	// hidden is a tool's settings — `.obsidian`, `.git` — and is not.
-	const hidden = wanted
-		.filter((file) => isHidden(normalizePath(file.path)) && isNote(file.path))
+	const hidden = picked.files
+		.filter((file) => excluded(file.path) === 'hidden-note')
 		.map((file): Skipped => ({ path: file.path, reason: 'hidden' }));
-	const kept = wanted
-		.filter((file) => !isHidden(normalizePath(file.path)))
+	// Asked again of the name as placed: a leading space dropped can leave a
+	// dot at the front of it.
+	const kept = picked.files
+		.filter((file) => excluded(file.path) === undefined)
 		.map((file) => ({ ...file, ...placed(file.path), was: file.path }))
-		.filter((file) => file.path !== '');
+		.filter((file) => file.path !== '' && !isHidden(file.path));
 	const notes = kept.flatMap((file) => {
 		if (!isNote(file.path)) return [];
 		const source = textOf(file.bytes);
@@ -305,9 +398,9 @@ export const planImport = (picked: Picked): ImportPlan => {
 		.filter((file) => !isNote(file.path))
 		.map((file) => ({ path: file.path, bytes: file.bytes }));
 	const listed = picked.folders
-		.filter((folder) => !isHidden(normalizePath(folder)) && !isSystemPath(folder))
+		.filter((folder) => excluded(folder) === undefined)
 		.map((folder) => placed(folder).path)
-		.filter((folder) => folder !== '');
+		.filter((folder) => folder !== '' && !isHidden(folder));
 	const folders = new Map<string, string>();
 	[...notes, ...files]
 		.flatMap((item) => ancestorPaths(item.path))
@@ -320,9 +413,10 @@ export const planImport = (picked: Picked): ImportPlan => {
 		files,
 		folders: [...folders.values()].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b)),
 		skipped: [
-			...picked.skipped.filter(
-				(skipped) => !isHidden(normalizePath(skipped.path)) && !isSystemPath(skipped.path)
-			),
+			...picked.skipped.filter((skipped) => {
+				const why = excluded(skipped.path);
+				return why === undefined || (why === 'hidden-note' && skipped.reason === 'hidden');
+			}),
 			...hidden,
 			...notText,
 		],
@@ -378,6 +472,51 @@ const respell = (spellings: Map<string, string>, path: string): string => {
 };
 
 /**
+ * Whether a source takes an import now. A connected one only while it is live —
+ * not detached, not gone since the question was asked, not still filling with
+ * its first import — and the device's own notes only while no bind is carrying
+ * them into an account: a bind copies the pile and then takes only what was
+ * written in it since, by `updatedAt`, which an imported note takes from its
+ * file and may be years before.
+ */
+const mayImport = async (db: NotesDatabase, connectionId: string): Promise<boolean> => {
+	if (connectionId === LOCAL_CONNECTION_ID) {
+		return !(await db.syncState.toArray()).some(holdsPile);
+	}
+	const state = await db.syncState.get(connectionId);
+	return state !== undefined && state.detached === undefined && state.importing === undefined;
+};
+
+/**
+ * The notebooks this import makes, outermost first, each under the source's
+ * spelling of the notebooks above it. One the source has already, in any
+ * spelling, is the one things go into, and is not made again. One whose name a
+ * file there has taken — a file with no extension, `Archive` beside a picked
+ * `Archive/` — goes beside it under a conflict name, and everything picked
+ * under it follows (`spellings` is written to as it goes): a directory cannot
+ * be made where a file is, and a `mkdir` that fails on every try holds up the
+ * queue behind it.
+ */
+const placeFolders = (
+	plan: ImportPlan,
+	spellings: Map<string, string>,
+	existing: readonly FileRecord[],
+	stamp: Date
+): string[] => {
+	const files = new Set(existing.map((file) => foldPath(file.path)));
+	return plan.folders.flatMap((folder) => {
+		if (spellings.has(foldPath(folder))) return [];
+		const parent = respell(spellings, parentPath(folder));
+		const wanted = joinPath(parent, basename(folder));
+		const path = files.has(foldPath(wanted))
+			? conflictFolderPath(wanted, stamp, namesIn([...files, ...spellings.values()], parent))
+			: wanted;
+		spellings.set(foldPath(folder), path);
+		return [path];
+	});
+};
+
+/**
  * Bring `plan` into `connectionId`, as one transaction: the source as it is
  * when the transaction opens is what names are chosen against, and what is
  * written is all of the import or none of it.
@@ -406,8 +545,7 @@ export const importLibrary = async (
 		'rw',
 		[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
 		async (): Promise<ImportOutcome> => {
-			const state = await db.syncState.get(connectionId);
-			if (state?.detached !== undefined || state?.importing !== undefined) {
+			if (!(await mayImport(db, connectionId))) {
 				throw new ImportRefusedError('This source cannot take an import now');
 			}
 			const [folderRows, noteRows, fileRows] = await Promise.all([
@@ -416,16 +554,12 @@ export const importLibrary = async (
 				db.files.where('connectionId').equals(connectionId).toArray(),
 			]);
 			const spellings = notebooksOf(folderRows, noteRows, fileRows);
-			const had = new Set(spellings.keys());
+			const stamp = new Date(now);
 
-			const folders = plan.folders
-				.map((folder) => respell(spellings, folder))
-				.filter((folder) => !had.has(foldPath(folder)))
-				.map((path): FolderRecord => ({ connectionId, path, createdAt: now }));
-			// Only the new ones: one already a notebook there is the one these go into.
-			const made = new Set(folders.map((folder) => foldPath(folder.path)));
-
-			const files = placeFiles(connectionId, plan, fileRows, spellings, made);
+			const folders = placeFolders(plan, spellings, fileRows, stamp).map(
+				(path): FolderRecord => ({ connectionId, path, createdAt: now })
+			);
+			const files = placeFiles(connectionId, plan, fileRows, spellings, stamp);
 			const notes = placeNotes(connectionId, plan, noteRows, spellings, hashes, now);
 
 			await db.folders.bulkPut(folders);
@@ -472,20 +606,20 @@ export const importLibrary = async (
  * same file, by the rule an upload adopts one by, and is not brought in again;
  * one there of another size keeps its name, and this one goes beside it under
  * a conflict name that keeps its extension, as an upload does (§7). So does
- * one whose name a notebook made by this import has taken. The notes that link
- * a file by its name are not rewritten.
+ * one whose name a notebook has, there already or made by this import. The
+ * notes that link a file by its name are not rewritten.
  */
 const placeFiles = (
 	connectionId: string,
 	plan: ImportPlan,
 	existing: readonly FileRecord[],
 	spellings: Map<string, string>,
-	notebooks: ReadonlySet<string>
+	stamp: Date
 ): { rows: { row: FileRecord; bytes: Bytes }[]; present: number } => {
 	// Written to as files are placed, so two from this import cannot take one name.
 	const at = new Map(existing.map((file) => [foldPath(file.path), file.size]));
+	const notebooks = new Set([...spellings.values()].map(foldPath));
 	const present = { current: 0 };
-	const stamp = new Date();
 	const rows = plan.files.flatMap((file) => {
 		const wanted = joinPath(respell(spellings, parentPath(file.path)), basename(file.path));
 		const there = at.get(foldPath(wanted));
@@ -495,7 +629,11 @@ const placeFiles = (
 		}
 		const taken = there !== undefined || notebooks.has(foldPath(wanted));
 		const path = taken
-			? conflictFilePath(wanted, stamp, namesIn(at.keys(), parentPath(wanted)))
+			? conflictFilePath(
+					wanted,
+					stamp,
+					namesIn([...at.keys(), ...notebooks], parentPath(wanted))
+				)
 			: wanted;
 		at.set(foldPath(path), file.bytes.length);
 		const row: FileRecord = {

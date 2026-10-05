@@ -116,6 +116,33 @@ describe('readZip', () => {
 		expect(text(entries[0])).toBe(body);
 	});
 
+	it('inflates an entry fed to the decompressor in many slices', async () => {
+		// Bytes that do not compress, so the deflated entry is many times a slice.
+		const seed = { current: 1 };
+		const body = Uint8Array.from({ length: 200_000 }, () => {
+			seed.current = (seed.current * 1103515245 + 12345) % 2 ** 31;
+			return seed.current >>> 23;
+		});
+
+		const entries = await readZip(archive([{ name: 'noise.bin', content: body }]));
+
+		expect(entries[0]?.kind === 'file' && entries[0].bytes).toEqual(body);
+	});
+
+	it('reads a name ending in a backslash as a folder, as PowerShell writes one', async () => {
+		const entries = await readZip(
+			archive([
+				{ name: 'Work\\', method: 0 },
+				{ name: 'Work\\a.md', content: 'A' },
+			])
+		);
+
+		expect(entries.map((entry) => [entry.kind, entry.name])).toEqual([
+			['folder', 'Work\\'],
+			['file', 'Work\\a.md'],
+		]);
+	});
+
 	it('finds the table of contents behind a comment', async () => {
 		const entries = await readZip(
 			archive([{ name: 'a.md', content: 'hi' }], 'made by a tool, PK\u0005\u0006 and all')

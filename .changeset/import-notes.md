@@ -1,4 +1,5 @@
 ---
+'@skysa/core': minor
 '@skysa/web': minor
 ---
 
