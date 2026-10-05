@@ -9763,10 +9763,49 @@ describe('progress', () => {
 		expect(said.at(-1)).toEqual({ stage: 'scanning', found: 2, done: 2, listing: false });
 	});
 
-	it('says nothing for a round from a stored cursor', async () => {
+	it('counts a round from a stored cursor note by note, having read its pages first', async () => {
 		await remoteFile('a.md', '1\n');
 		await engine.pull();
 		await remoteFile('b.md', '2\n');
+		await remoteFile('c.md', '3\n');
+		await provider.createFolder('Work');
+		const { said, counted } = reporting(provider);
+
+		await counted.pull();
+
+		// The folder is not a note, so the count is of the two notes alone.
+		expect(said).toEqual([
+			{ stage: 'receiving', done: 0, total: 2 },
+			{ stage: 'receiving', done: 1, total: 2, path: 'b.md' },
+			{ stage: 'receiving', done: 2, total: 2, path: 'c.md' },
+		]);
+	});
+
+	it('counts a note a round names that it already holds, without reading it', async () => {
+		await engine.pull();
+		// This device's own push, which the next round reports back.
+		store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+		await engine.push();
+		const reads: string[] = [];
+		const { said, counted } = reporting({
+			...provider,
+			read: (entry) => {
+				reads.push(entry.path);
+				return provider.read(entry);
+			},
+		});
+
+		await counted.pull();
+
+		expect(reads).toEqual([]);
+		expect(said.at(-1)).toEqual({ stage: 'receiving', done: 1, total: 1, path: 'a.md' });
+	});
+
+	it('says nothing for a round that names no note', async () => {
+		await remoteFile('a.md', '1\n');
+		await engine.pull();
+		await provider.createFolder('Work');
 		const { said, counted } = reporting(provider);
 
 		await counted.pull();
