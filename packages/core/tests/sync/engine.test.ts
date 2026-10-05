@@ -820,6 +820,153 @@ describe('push', () => {
 		expect(provider.contentAt('Work/a.md')).toBeUndefined();
 	});
 
+	describe('writing notes at once', () => {
+		/**
+		 * The provider, with each write and folder it is asked for logged as it
+		 * starts and as it ends, a moment apart, so writes sent together are
+		 * seen to overlap and ones sent in turn are seen not to.
+		 */
+		const logged = (base: StorageProvider) => {
+			const events: string[] = [];
+			const around =
+				<A extends unknown[], R>(name: string, call: (...args: A) => Promise<R>) =>
+				async (...args: A): Promise<R> => {
+					events.push(`+${name}`);
+					await new Promise((resolve) => setTimeout(resolve, 1));
+					return call(...args).finally(() => {
+						events.push(`-${name}`);
+					});
+				};
+			return {
+				events,
+				provider: {
+					...base,
+					write: around('write', base.write),
+					createFolder: around('mkdir', base.createFolder),
+				},
+			};
+		};
+
+		/** The most calls the log ever had out at once. */
+		const most = (events: readonly string[]): number =>
+			events.reduce(
+				({ out, top }, event) => {
+					const next = out + (event.startsWith('+') ? 1 : -1);
+					return { out: next, top: Math.max(top, next) };
+				},
+				{ out: 0, top: 0 }
+			).top;
+
+		const queueNotes = (paths: readonly string[]) => {
+			paths.forEach((path, at) => {
+				store.put({ id: `n${String(at)}`, path, content: `${path}\n`, dirty: true });
+				store.queue({ op: 'write', noteId: `n${String(at)}`, path });
+			});
+		};
+
+		const pushing = (base: StorageProvider) =>
+			createSyncEngine({ provider: base, store, now: () => AT }).push();
+
+		it('writes up to four notes at once, and every one of them', async () => {
+			// One at a time, a thousand notes on Google Drive took most of half
+			// an hour, each waiting on the one before though none depends on
+			// another.
+			const paths = ['a.md', 'b.md', 'c.md', 'd.md', 'e.md', 'f.md'];
+			queueNotes(paths);
+			const { events, provider: counted } = logged(provider);
+
+			const result = await pushing(counted);
+
+			expect(result.status).toBe('ok');
+			expect(result.pushed).toBe(6);
+			expect(most(events)).toBe(4);
+			expect(store.ops()).toEqual([]);
+			paths.forEach((path) => {
+				expect(provider.contentAt(path)).toBe(`${path}\n`);
+			});
+		});
+
+		it('makes a notebook alone, before the notes behind it', async () => {
+			// What a later op can depend on goes in its turn, by itself: a note
+			// sent beside its notebook's `mkdir` could reach the remote first.
+			store.put({ id: 'n1', path: 'a.md', content: 'a\n', dirty: true });
+			store.put({ id: 'n2', path: 'Work/b.md', content: 'b\n', dirty: true });
+			store.put({ id: 'n3', path: 'Work/c.md', content: 'c\n', dirty: true });
+			store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
+			store.queue({ op: 'mkdir', path: 'Work' });
+			store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
+			store.queue({ op: 'write', noteId: 'n3', path: 'Work/c.md' });
+			const { events, provider: counted } = logged(provider);
+
+			const result = await pushing(counted);
+
+			expect(result.status).toBe('ok');
+			expect(events.slice(0, 4)).toEqual(['+write', '-write', '+mkdir', '-mkdir']);
+			expect(most(events.slice(4))).toBe(2);
+			expect(provider.contentAt('Work/c.md')).toBe('c\n');
+		});
+
+		it('stops where a write failed, and keeps what landed beside it', async () => {
+			queueNotes(['a.md', 'b.md', 'c.md', 'd.md', 'e.md']);
+			provider.setFault((call) =>
+				call.op === 'write' && call.path === 'b.md' ? new Error('offline') : undefined
+			);
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('retry');
+			// The three sent with it are done. The one behind them was never
+			// sent: the drain stopped at the failure, as it would have alone.
+			expect(store.ops().map((op) => op.path)).toEqual(['b.md', 'e.md']);
+			expect(store.ops()[0]?.attempts).toBe(1);
+			expect(provider.contentAt('d.md')).toBe('d.md\n');
+			expect(provider.contentAt('e.md')).toBeUndefined();
+		});
+
+		it('waits out a rate limit one of them met, without counting it', async () => {
+			queueNotes(['a.md', 'b.md', 'c.md', 'd.md', 'e.md']);
+			provider.setFault((call) =>
+				call.op === 'write' && call.path === 'c.md'
+					? new RateLimitError('slow down', 4000)
+					: undefined
+			);
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('retry');
+			expect(result.retryAfterMs).toBe(4000);
+			expect(store.ops().map((op) => op.path)).toEqual(['c.md', 'e.md']);
+			expect(store.ops()[0]?.attempts).toBe(0);
+		});
+
+		it('resolves a conflict one of them met, and goes on', async () => {
+			const entry = await remoteFile('b.md', 'one\n');
+			store.put({ id: 'n0', path: 'a.md', content: 'a\n', dirty: true });
+			store.put({
+				id: 'n1',
+				path: 'b.md',
+				content: 'mine\n',
+				dirty: true,
+				remoteId: entry.remoteId,
+				remoteVersion: entry.version,
+			});
+			store.put({ id: 'n2', path: 'c.md', content: 'c\n', dirty: true });
+			store.put({ id: 'n3', path: 'd.md', content: 'd\n', dirty: true });
+			store.put({ id: 'n4', path: 'e.md', content: 'e\n', dirty: true });
+			['a.md', 'b.md', 'c.md', 'd.md', 'e.md'].forEach((path, at) => {
+				store.queue({ op: 'write', noteId: `n${String(at)}`, path });
+			});
+			await provider.write('b.md', 'theirs\n', { expectedVersion: entry.version });
+
+			const result = await engine.push();
+
+			expect(result.status).toBe('ok');
+			expect(result.conflicts).toHaveLength(1);
+			expect(provider.contentAt('b.md')).toBe('theirs\n');
+			expect(provider.contentAt('e.md')).toBe('e\n');
+		});
+	});
+
 	/**
 	 * Two places ask the provider "is it still there?" by reading it and taking
 	 * any rejection for a no. That is only true of a not-found. Everything else
@@ -9814,18 +9961,21 @@ describe('progress', () => {
 	});
 
 	it('counts a push against its queue', async () => {
-		store.put({ id: 'n1', path: 'a.md', content: 'one\n', dirty: true });
-		store.put({ id: 'n2', path: 'b.md', content: 'two\n', dirty: true });
-		store.queue({ op: 'write', noteId: 'n1', path: 'a.md' });
-		store.queue({ op: 'write', noteId: 'n2', path: 'b.md' });
+		store.put({ id: 'n1', path: 'Work/a.md', content: 'one\n', dirty: true });
+		store.put({ id: 'n2', path: 'Work/b.md', content: 'two\n', dirty: true });
+		store.queue({ op: 'mkdir', path: 'Work' });
+		store.queue({ op: 'write', noteId: 'n1', path: 'Work/a.md' });
+		store.queue({ op: 'write', noteId: 'n2', path: 'Work/b.md' });
 		const { said, counted } = reporting(provider);
 
 		await counted.push();
 
+		// The notebook alone, then its two notes at once (`together`), so the
+		// count goes up by two.
 		expect(said).toEqual([
-			{ stage: 'uploading', done: 0, total: 2, path: 'a.md' },
-			{ stage: 'uploading', done: 1, total: 2, path: 'b.md' },
-			{ stage: 'uploading', done: 2, total: 2 },
+			{ stage: 'uploading', done: 0, total: 3, path: 'Work' },
+			{ stage: 'uploading', done: 1, total: 3, path: 'Work/a.md' },
+			{ stage: 'uploading', done: 3, total: 3 },
 		]);
 	});
 

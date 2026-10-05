@@ -72,6 +72,18 @@ import type {
 /** Times an op may fail before the engine stops asking and surfaces it. */
 const MAX_ATTEMPTS = 5;
 
+/**
+ * How many notes a push writes at once (`together` in the engine). One at a
+ * time, every note waited on the one before though none depends on another,
+ * and on Google Drive, where a note is three or four requests end to end, an
+ * import of a thousand took most of half an hour. Four at once is well inside
+ * every provider's limits — Drive allows a user 325,000 quota units a minute
+ * and a note costs a few hundred
+ * (https://developers.google.com/workspace/drive/api/guides/limits) — and a
+ * rate limit met by any of them stops the drain as one met alone does.
+ */
+const TOGETHER = 4;
+
 export type SyncStatus =
 	/** Everything queued reached the remote. */
 	| 'ok'
@@ -4581,6 +4593,82 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	/** The push under way, for `onProgress`: how long its queue was. */
 	const pushes = new Map<'current', number>();
 
+	/**
+	 * The writes at the front of the queue that can be sent at once: notes,
+	 * each at its own path, none out of attempts, at most `TOGETHER`. Nothing
+	 * else goes with them. A notebook made or removed, a move, a delete, a file
+	 * is what an op behind it can depend on ("A failed push stops the queue"),
+	 * and goes alone, in its turn; a note's write depends on no other note's.
+	 */
+	const together = (ops: readonly SyncOp[]): SyncOp[] =>
+		ops.slice(0, TOGETHER).reduce<{ taken: SyncOp[]; open: boolean }>(
+			(batch, op) => {
+				if (!batch.open) return batch;
+				const at = foldName(normalizePath(op.path));
+				const fits =
+					op.op === 'write' &&
+					op.attempts < maxAttempts &&
+					!batch.taken.some(
+						(taken) =>
+							taken.noteId === op.noteId || foldName(normalizePath(taken.path)) === at
+					);
+				return fits
+					? { taken: [...batch.taken, op], open: true }
+					: { ...batch, open: false };
+			},
+			{ taken: [], open: true }
+		).taken;
+
+	/**
+	 * Writes sent at once (`together`), then met as the drain meets any op:
+	 * those that landed are counted, and the first that did not is handled as
+	 * if it had been sent alone, with the others that did not just behind it
+	 * and in front of everything else. So a rate limit or a failure still stops
+	 * the drain where it would have, and a conflict is resolved and the drain
+	 * goes on — and nothing stepped over is anything a later op waits on, since
+	 * a write is not.
+	 */
+	const sendTogether = async (
+		batch: readonly SyncOp[],
+		rest: readonly SyncOp[],
+		progress: PushProgress,
+		retriedAuth: boolean
+	): Promise<SyncOutcome> => {
+		const results = await Promise.all(
+			batch.map((op) =>
+				runOp(op).then(
+					() => undefined,
+					(error: unknown) => ({ op, error })
+				)
+			)
+		);
+		const failures = results.filter((failure) => failure !== undefined);
+		const after = { ...progress, pushed: progress.pushed + batch.length - failures.length };
+		const [first, ...others] = failures;
+		if (first === undefined) return drainOps(rest, after, retriedAuth);
+		return handleOpError(
+			first.error,
+			first.op,
+			[first.op, ...others.map((failure) => failure.op), ...rest],
+			after,
+			retriedAuth
+		);
+	};
+
+	/**
+	 * The writes `together` picked, as the store has them now, or nothing where
+	 * any of them has changed since the queue was read — passed over, out of
+	 * attempts, become something else. Those go one at a time, as before, where
+	 * each is asked about just before it is sent.
+	 */
+	const stillTogether = async (batch: readonly SyncOp[]): Promise<SyncOp[] | undefined> => {
+		const now = await Promise.all(batch.map((op) => store.opBySeq(op.seq)));
+		const ready = now.filter(
+			(op): op is SyncOp => op?.op === 'write' && op.attempts < maxAttempts
+		);
+		return ready.length === batch.length ? ready : undefined;
+	};
+
 	const drainOps = async (
 		ops: readonly SyncOp[],
 		progress: PushProgress,
@@ -4599,6 +4687,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			});
 		}
 		if (held === undefined) return drained(progress);
+		const batch = together(ops);
+		const ready = batch.length > 1 ? await stillTogether(batch) : undefined;
+		if (ready !== undefined) {
+			return sendTogether(ready, ops.slice(batch.length), progress, retriedAuth);
+		}
 		// The queue was read once, and the user has gone on since: a restore
 		// withdraws a delete, a second rename replaces a move, a pull's conflict
 		// drops a write. Sent anyway, a withdrawn delete removes a file the user
