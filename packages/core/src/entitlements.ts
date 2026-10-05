@@ -87,9 +87,12 @@ export interface ConnectGate {
  * code good only briefly, say. Bounded and printable as a code is, since it
  * travels as one (`MAX_CONNECT_CODE`), and never shown: the app names a held
  * value only when it is what the person typed. The app also asks about a held
- * value again as it loads, so a policy that answers with a fresh `hold` each
- * time keeps a pass alive for as long as the device is used, and one that
- * refuses it closes the gate before any consent screen rather than after.
+ * value again as it loads, at most once an hour and at once after a refused
+ * connect, so a policy that answers with a fresh `hold` keeps a pass alive for
+ * as long as the device is used, and one that refuses it closes the gate
+ * before any consent screen rather than after. A fresh `hold` must not end
+ * the one it replaces: two tabs loading together, or an answer lost on the
+ * way, can leave the earlier one held.
  */
 export type ConnectCodeCheck =
 	| Readonly<{ accepted: true; expiresIn: number; hold?: string }>
@@ -178,9 +181,9 @@ export interface EntitlementProvider {
 	 * Whether a code typed into the gate will do, asked as it is used
 	 * (`POST /api/connect-code`), so the app can say so at once rather than
 	 * after a consent screen, and keep it only as long as it is good. Required
-	 * when the gate asks for a code. Asked again, once, as the app loads with a
-	 * code or a held value still kept (`ConnectCodeCheck.hold`): the answer
-	 * replaces what is kept, and a refusal drops it.
+	 * when the gate asks for a code. Asked again as the app loads about a value
+	 * held in a code's place (`ConnectCodeCheck.hold`), at most once an hour:
+	 * the answer replaces what is kept, and a refusal drops it.
 	 *
 	 * Advice, not the decision: `check` at the callback is still asked with the
 	 * code, and a code that expires between the two is refused there. Given the

@@ -342,11 +342,14 @@ place of what was typed, with connects and to `checkCode`, for `expiresIn`.
 An invite that becomes a pass for the device it was typed on is one use: the
 invite is good once, briefly, and the pass, which your Worker issues and can
 check without keeping, lets that device connect more accounts later without
-another invite. The app never shows a held value, and asks about it again once
-each time it loads, keeping what you answer (a fresh `hold` keeps a pass alive
-while the device is used) and letting it go if you refuse it. A held value is
-a bearer: anyone who copies it out of the browser can use it as that device
-would, until your policy stops taking it.
+another invite. The app never shows a held value, and asks about it again as
+it loads, at most once an hour, keeping what you answer (a fresh `hold` keeps a
+pass alive while the device is used) and letting it go if you refuse it. Don't
+have a fresh `hold` end the one it replaces: two tabs loading together can
+leave the earlier one held. A held value is a bearer: anyone who copies it out
+of the browser can use it as that device would, until your policy stops taking
+it. Apps from before holds existed refuse an answer longer than a day, so give
+long holds once your deployment's app has been updated.
 
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
 its one `createApp({ config: parseEnv(env) })` to pass `entitlements` as well,

@@ -477,6 +477,9 @@ const askAbout = async (
 	}
 };
 
+/** The longest delay `setTimeout` takes as meant; one longer fires at once. */
+const LONGEST_TIMER_MS = 2 ** 31 - 1;
+
 /** What the gate knows of the code it holds: whether it may show it, and until when it is good. */
 interface HeldCode {
 	readonly code: string;
@@ -495,27 +498,30 @@ const useHeldCode = (onLapse: (code: string) => void): HeldCode | undefined => {
 	const until = connectCodeHeldUntil();
 	const code = until === undefined ? undefined : heldConnectCode();
 	const shown = heldConnectCodeShown();
-	const [, setLapsed] = useState(0);
+	const [woken, setWoken] = useState(0);
 	useEffect(
 		() =>
 			watchConnectCode(() => {
-				setLapsed((n) => n + 1);
+				setWoken((n) => n + 1);
 			}),
 		[]
 	);
 	useEffect(() => {
 		if (code === undefined || until === undefined) return;
+		// A timer longer than a browser can count (2³¹ ms, about 25 days) fires at
+		// once, and a hold may run a year: so it wakes at the most, and is set
+		// again from there (`woken`) until the hold has truly ended.
 		const timer = setTimeout(
 			() => {
-				setLapsed((n) => n + 1);
-				onLapse(code);
+				setWoken((n) => n + 1);
+				if (Date.now() >= until) onLapse(code);
 			},
-			Math.max(0, until - Date.now()) + 50
+			Math.min(Math.max(0, until - Date.now()) + 50, LONGEST_TIMER_MS)
 		);
 		return () => {
 			clearTimeout(timer);
 		};
-	}, [code, until, onLapse]);
+	}, [code, until, onLapse, woken]);
 	return code === undefined || until === undefined ? undefined : { code, until, shown };
 };
 
@@ -609,12 +615,19 @@ const ConnectCodeForm = ({
 	);
 };
 
-/** The time a held code stops being good, with the day where it is not today. */
+/**
+ * The time a held code stops being good, with the day where it is not today,
+ * and the year where it is not this one: a hold may run a year, and "Tue,
+ * Oct 5" on the Monday before would read as tomorrow.
+ */
 const untilFormat = (until: number, now = Date.now()): string =>
 	new Intl.DateTimeFormat(undefined, {
 		...(new Date(until).toDateString() === new Date(now).toDateString()
 			? {}
 			: { weekday: 'short', month: 'short', day: 'numeric' }),
+		...(new Date(until).getFullYear() === new Date(now).getFullYear()
+			? {}
+			: { year: 'numeric' }),
 		hour: 'numeric',
 		minute: '2-digit',
 	}).format(until);

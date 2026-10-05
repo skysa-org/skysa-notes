@@ -32,7 +32,13 @@ import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
-import { dropConnectCode, heldConnectCode, holdAcceptedCode } from '../store/connectCode.js';
+import {
+	connectCodeAskedAt,
+	dropConnectCode,
+	heldConnectCode,
+	heldConnectCodeShown,
+	holdAcceptedCode,
+} from '../store/connectCode.js';
 import { showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -363,6 +369,11 @@ const emptyPaneOffers = ({
  * person offered, and what they can put right. A `lapsed` or a `limit_reached`
  * is about the account or the instance, whatever was typed, and is said as it
  * is.
+ *
+ * Not a value the policy gave to hold in a code's place: nothing was typed
+ * this time, and a pass that cost an email to get is not thrown away on a no
+ * that may be about the account. The policy is asked about it instead
+ * (`useCodeAskedAgain`), and lets it go if it no longer takes it.
  */
 const codeWasRefused = (
 	connect: ConnectOutcome | undefined,
@@ -370,12 +381,25 @@ const codeWasRefused = (
 ): boolean =>
 	connect === 'refused' &&
 	(code === undefined || code === 'not_allowed') &&
-	heldConnectCode() !== undefined;
+	heldConnectCode() !== undefined &&
+	heldConnectCodeShown();
+
+/** How long the policy's word on a held value stands before the app asks again as it loads. */
+const ASK_AGAIN_MS = 60 * 60_000;
 
 /**
- * The gate's code, or what the operator's policy gave to hold in its place
+ * What the operator's policy gave to hold in place of the gate's code
  * (`ConnectCodeCheck.hold`), asked about again once as the app loads, where
- * the instance's gate asks for a code and something is held.
+ * the instance's gate asks for a code: at most once an hour, since the policy
+ * last answered, and at once after a refused connect.
+ *
+ * A typed code is not asked about again: it is good for as long as the policy
+ * said when it took it, minutes as a rule, and an answer would add nothing.
+ * Nor is a held value the policy answered about within the hour. Each asking
+ * costs one of the guesses the instance allows an address
+ * (`connect-code:<ip>`), which the people behind one carrier's or one office's
+ * address share, and someone typing a fresh code must not find them spent by
+ * the others opening the app.
  *
  * A policy that hands a device a pass to keep says each time whether it still
  * takes it, and may answer with a fresh one, so a pass lives as long as the
@@ -386,18 +410,21 @@ const codeWasRefused = (
  * did. An answer about a value no longer held, because a new code was typed
  * meanwhile, is not the answer about this one, and changes nothing.
  *
- * After the refusal of a connect that carried a code, which lets go of the
- * code first (`useConnectNotice`), there is nothing left to ask about.
+ * After the refusal of a connect that carried a typed code, which lets go of
+ * the code first (`useConnectNotice`), there is nothing left to ask about; a
+ * held value is kept through a refusal (`codeWasRefused`) and asked about here.
  */
-const useCodeAskedAgain = () => {
+const useCodeAskedAgain = (connect: ConnectOutcome | undefined) => {
 	const config = useInstanceConfig(api);
 	const asksForCode = answer(config)?.connectGate?.connectCode !== undefined;
 	const asked = useRef(false);
+	const [refused] = useState(connect === 'refused');
 	useEffect(() => {
 		if (!asksForCode || asked.current) return;
 		asked.current = true;
 		const held = heldConnectCode();
-		if (held === undefined) return;
+		if (held === undefined || heldConnectCodeShown()) return;
+		if (!refused && Date.now() - (connectCodeAskedAt() ?? 0) < ASK_AGAIN_MS) return;
 		void api.checkConnectCode(held).then(
 			(result) => {
 				if (!result.ok || heldConnectCode() !== held) return;
@@ -408,7 +435,7 @@ const useCodeAskedAgain = () => {
 				// A limit reached or no answer at all: kept, as it was.
 			}
 		);
-	}, [asksForCode]);
+	}, [asksForCode, refused]);
 };
 
 /**
@@ -881,7 +908,7 @@ const Home = () => {
 	// it is through.
 	const held = useHeldImport();
 	const { connectNotice, dismissConnect } = useConnectNotice(connect, code, held);
-	useCodeAskedAgain();
+	useCodeAskedAgain(connect);
 	const activeConnection = useActiveConnectionId();
 	const sources = useSources();
 	const tree = useFolderTree();

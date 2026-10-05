@@ -157,8 +157,8 @@ describe('checking a code as it is used', () => {
 	);
 
 	it.each([
-		['no hold', { accepted: true }],
-		['a hold of nothing', { accepted: true, expiresIn: 0 }],
+		['no time to keep it', { accepted: true }],
+		['no time at all', { accepted: true, expiresIn: 0 }],
 		['no verdict', { expiresIn: 60 }],
 		['nothing', undefined],
 	])('answers 500 for a policy that says %s', async (_name, answer) => {

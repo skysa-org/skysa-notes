@@ -2,6 +2,7 @@ import { MAX_CONNECT_CODE } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+	connectCodeAskedAt,
 	connectCodeHeldUntil,
 	dropConnectCode,
 	heldConnectCode,
@@ -133,7 +134,7 @@ describe('what the policy gives to hold in place of a code', () => {
 		expect(heldConnectCodeShown(NOW)).toBe(true);
 	});
 
-	it('reads a code kept before there were holds as typed', () => {
+	it('reads a code kept before there were holds as typed, asked about at no known time', () => {
 		localStorage.setItem(
 			'skysa.connectCode',
 			JSON.stringify({ code: 'K7QM-2XRD', until: NOW + 60_000 })
@@ -141,6 +142,26 @@ describe('what the policy gives to hold in place of a code', () => {
 
 		expect(heldConnectCode(NOW)).toBe('K7QM-2XRD');
 		expect(heldConnectCodeShown(NOW)).toBe(true);
+		expect(connectCodeAskedAt(NOW)).toBe(0);
+	});
+
+	it('remembers when the policy last answered about it', () => {
+		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS }, NOW);
+		holdAcceptedCode(PASS, { expiresIn: 60 }, NOW + 30_000);
+
+		expect(connectCodeAskedAt(NOW + 30_000)).toBe(NOW + 30_000);
+	});
+
+	it('tells whoever is watching when another tab changes it', () => {
+		const told = vi.fn();
+		const stop = watchConnectCode(told);
+
+		window.dispatchEvent(new StorageEvent('storage', { key: 'skysa.connectCode' }));
+		window.dispatchEvent(new StorageEvent('storage', { key: 'something.else' }));
+		stop();
+		window.dispatchEvent(new StorageEvent('storage', { key: 'skysa.connectCode' }));
+
+		expect(told).toHaveBeenCalledTimes(1);
 	});
 
 	it('tells whoever is watching each time what is held changes, until they stop', () => {

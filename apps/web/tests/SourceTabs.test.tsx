@@ -1225,6 +1225,25 @@ describe("the gate's code, on an instance that asks for one", () => {
 		expect(startConnect.mock.calls[0]?.[3]).toBe(pass);
 	});
 
+	it('keeps a code held for longer than a timer can count, and its year', async () => {
+		const user = userEvent.setup();
+		// Past 2³¹ ms, where a timer fires at once rather than when meant.
+		holdConnectCode('K7QM-2XRD', 400 * 86_400);
+		const { client } = coded(REQUIRED);
+		const menu = await openMenu(user, client);
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		expect(
+			menu.getByText(
+				new RegExp(String(new Date(Date.now() + 400 * 86_400_000).getFullYear()))
+			)
+		).toBeTruthy();
+		await user.click(menu.getByRole('button', { name: 'Change Connect code' }));
+		expect(menu.getByRole<HTMLInputElement>('textbox', { name: 'Connect code' }).value).toBe(
+			'K7QM-2XRD'
+		);
+	});
+
 	it('opens a held pass on an empty field, since it was never typed', async () => {
 		const user = userEvent.setup();
 		holdAcceptedCode('K7QM-2XRD', { expiresIn: 900, hold: `dt1.${'A'.repeat(100)}` });

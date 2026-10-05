@@ -44,6 +44,8 @@ interface Held {
 	readonly until: number;
 	/** Whether it is what the person typed, and so theirs to see; not, when it is the policy's `hold`. */
 	readonly shown: boolean;
+	/** When the policy last said it would take it, by this device's clock. */
+	readonly asked: number;
 }
 
 /** Told after every change to what is held, so a gate showing it can follow. */
@@ -58,14 +60,20 @@ const parse = (raw: string | null): Held | undefined => {
 	try {
 		const value: unknown = JSON.parse(raw);
 		if (typeof value !== 'object' || value === null) return undefined;
-		const { code, until, shown } = value as Record<string, unknown>;
+		const { code, until, shown, asked } = value as Record<string, unknown>;
 		return typeof code === 'string' &&
 			code !== '' &&
 			code.length <= MAX_CONNECT_CODE &&
 			typeof until === 'number' &&
 			Number.isFinite(until)
-			? // A code kept before there were holds was typed, so it may be shown.
-				{ code, until, shown: shown !== false }
+			? // A code kept before there were holds was typed, so it may be shown,
+				// and when it was asked about is not known.
+				{
+					code,
+					until,
+					shown: shown !== false,
+					asked: typeof asked === 'number' && Number.isFinite(asked) ? asked : 0,
+				}
 			: undefined;
 	} catch {
 		return undefined;
@@ -110,18 +118,32 @@ export const connectCodeHeldUntil = (now = Date.now()): number | undefined => cu
 /** Whether what is held is what the person typed, which the gate may show; false for a `hold`. */
 export const heldConnectCodeShown = (now = Date.now()): boolean => current(now)?.shown === true;
 
-/** Calls `watcher` after every change to what is held, here; the returned function stops it. */
+/** When the policy last said it would take what is held: 0 where that is not known. */
+export const connectCodeAskedAt = (now = Date.now()): number | undefined => current(now)?.asked;
+
+/**
+ * Calls `watcher` after every change to what is held, in this tab or another
+ * (the `storage` event, which a browser sends only to the other tabs); the
+ * returned function stops it.
+ */
 export const watchConnectCode = (watcher: () => void): (() => void) => {
+	const elsewhere = (event: StorageEvent) => {
+		if (event.key === KEY || event.key === null) watcher();
+	};
 	watchers.add(watcher);
+	globalThis.addEventListener('storage', elsewhere);
 	return () => {
 		watchers.delete(watcher);
+		globalThis.removeEventListener('storage', elsewhere);
 	};
 };
 
 const hold = (value: string, expiresIn: number, shown: boolean, now: number): void => {
 	const code = value.trim().slice(0, MAX_CONNECT_CODE);
 	write(
-		code === '' || !(expiresIn > 0) ? undefined : { code, until: now + expiresIn * 1000, shown }
+		code === '' || !(expiresIn > 0)
+			? undefined
+			: { code, until: now + expiresIn * 1000, shown, asked: now }
 	);
 };
 

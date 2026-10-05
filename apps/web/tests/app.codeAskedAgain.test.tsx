@@ -68,6 +68,15 @@ afterEach(() => {
 	dropConnectCode();
 });
 
+/** A pass the policy last answered about `hours` ago, good for a day from then. */
+const passFrom = (hours: number) => {
+	holdAcceptedCode(
+		'K7QM-2XRD',
+		{ expiresIn: 86_400, hold: PASS },
+		Date.now() - hours * 3_600_000
+	);
+};
+
 const open = async (url = '/?folder=Work') => {
 	const router = createRouter({
 		routeTree,
@@ -79,7 +88,7 @@ const open = async (url = '/?folder=Work') => {
 
 describe('what the gate holds, asked about again as the app loads', () => {
 	it('is renewed with what the policy answers, still unshown', async () => {
-		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS });
+		passFrom(2);
 		codeAnswer = () =>
 			Promise.resolve(
 				Response.json({ accepted: true, expiresIn: 180 * 86_400, hold: RENEWED })
@@ -95,7 +104,7 @@ describe('what the gate holds, asked about again as the app loads', () => {
 	});
 
 	it('is let go of where the policy no longer takes it', async () => {
-		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS });
+		passFrom(2);
 		codeAnswer = () =>
 			Promise.resolve(
 				Response.json({ accepted: false, reason: 'The subscription is not active.' })
@@ -115,7 +124,7 @@ describe('what the gate holds, asked about again as the app loads', () => {
 			() => Promise.resolve(Response.json({ error: 'rate_limited' }, { status: 429 })),
 		],
 	])('is kept where there was %s', async (_name, answer) => {
-		holdAcceptedCode('K7QM-2XRD', { expiresIn: 60, hold: PASS });
+		passFrom(2);
 		codeAnswer = answer;
 
 		await open();
@@ -124,6 +133,52 @@ describe('what the gate holds, asked about again as the app loads', () => {
 			expect(codeAsked).toHaveLength(1);
 		});
 		expect(heldConnectCode()).toBe(PASS);
+	});
+
+	it('asks nothing within the hour since the policy last answered', async () => {
+		passFrom(0.5);
+
+		await open();
+		await screen.findByRole('button', { name: /Connect storage provider/ });
+
+		expect(codeAsked).toEqual([]);
+		expect(heldConnectCode()).toBe(PASS);
+	});
+
+	it('asks nothing about a typed code, which is good for minutes', async () => {
+		holdConnectCode('K7QM-2XRD', 900, Date.now() - 2 * 3_600_000 + 1_000_000);
+
+		await open();
+		await screen.findByRole('button', { name: /Connect storage provider/ });
+
+		expect(codeAsked).toEqual([]);
+	});
+
+	it('keeps a pass through a refused connect, and asks about it at once', async () => {
+		passFrom(0.5);
+		codeAnswer = () =>
+			Promise.resolve(Response.json({ accepted: true, expiresIn: 86_400, hold: RENEWED }));
+
+		await open('/?folder=Work&connect=refused&code=not_allowed');
+
+		const toast = await screen.findByRole('alert');
+		// Nothing was typed this time, so nothing typed was turned down.
+		expect(toast.textContent).not.toMatch(/code you entered/);
+		await waitFor(() => {
+			expect(heldConnectCode()).toBe(RENEWED);
+		});
+		expect(codeAsked).toEqual([{ code: PASS }]);
+	});
+
+	it('lets go of a pass after a refused connect where the policy no longer takes it', async () => {
+		passFrom(0.5);
+		codeAnswer = () => Promise.resolve(Response.json({ accepted: false }));
+
+		await open('/?folder=Work&connect=refused&code=not_allowed');
+
+		await waitFor(() => {
+			expect(heldConnectCode()).toBeUndefined();
+		});
 	});
 
 	it('asks nothing where nothing is held', async () => {
