@@ -1,5 +1,12 @@
 # @skysa/core
 
+## 0.17.0
+
+### Minor Changes
+
+- 62ce687: A sync to Google Drive sends up to four notes at once rather than one at a time, so a large import reaches it several times faster. A provider says how many it takes (`StorageProvider.writesAtOnce`); Dropbox and OneDrive still take one, since Dropbox refuses writes that meet one another as a rate limit. Notebooks, moves, deletions, files beside notes, and the write of a note with a rename queued still go one at a time, in order, and a notebook missing under notes sent together is made once between them. Requests that find the access token expired at the same moment now share one new token.
+- 6fbffb5: A long sync now says how far it has got. The engine counts a round from a stored cursor as it receives it (`SyncProgress` gains a `receiving` stage), so a device picking up another's import of a thousand notes is no longer silent until all of it lands. The storage panel shows a run of twenty or more as a count in its status line — "Sending 120 of 1,000", "Receiving 5 of 30", "Looking for notes: 40 found" — with a bar under it and the file it is on in the line's tooltip; in a compact window the panel says it in a sentence over the bar.
+
 ## 0.16.0
 
 ### Minor Changes
