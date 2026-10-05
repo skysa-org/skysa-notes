@@ -57,6 +57,14 @@ export interface OptionsMenuProps {
 	 * way it is kept inside the window (`FloatingMenu`).
 	 */
 	align?: 'start' | 'end';
+	/**
+	 * Opened upwards, over the button rather than under it, for a button at the
+	 * foot of a pane: under it, the card would be pushed back up over the
+	 * button by the window's edge (`FloatingMenu`).
+	 */
+	rises?: boolean;
+	/** The button, for whoever has to put the focus back on it. */
+	triggerRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /** The gap between a button and the card it opens, as `.toolbar-panel` has it. */
@@ -71,10 +79,13 @@ export const OptionsMenu = ({
 	disabled = false,
 	items,
 	align = 'end',
+	rises = false,
+	triggerRef,
 }: OptionsMenuProps) => {
 	/** Where the card is open, under the button, or null while it is shut. */
 	const [open, setOpen] = useState<MenuPoint | null>(null);
-	const button = useRef<HTMLButtonElement>(null);
+	const own = useRef<HTMLButtonElement>(null);
+	const button = triggerRef ?? own;
 
 	return (
 		<div className="options-menu">
@@ -94,7 +105,7 @@ export const OptionsMenu = ({
 					const edge = event.currentTarget.getBoundingClientRect();
 					setOpen({
 						x: align === 'start' ? edge.left : edge.right,
-						y: edge.bottom + DROP,
+						y: rises ? edge.top - DROP : edge.bottom + DROP,
 					});
 				}}
 			>
@@ -104,6 +115,7 @@ export const OptionsMenu = ({
 				<FloatingMenu
 					at={open}
 					align={align}
+					rises={rises}
 					label={groupLabel}
 					items={items}
 					anchor={button}
@@ -186,6 +198,8 @@ export interface FloatingMenuProps {
 	 * right-click menu opens) or its right (`end`, under the end of a button).
 	 */
 	align?: 'start' | 'end';
+	/** Whether the card's bottom edge is at `at` rather than its top. */
+	rises?: boolean;
 	/** What the items are about, for a screen reader. */
 	label: string;
 	items: readonly OptionsMenuItem[];
@@ -217,6 +231,7 @@ export interface FloatingMenuProps {
 export const FloatingMenu = ({
 	at,
 	align = 'start',
+	rises = false,
 	label,
 	items,
 	onClose,
@@ -234,9 +249,10 @@ export const FloatingMenu = ({
 		if (element === null) return;
 		const { width, height } = element.getBoundingClientRect();
 		const left = align === 'end' ? at.x - width : at.x;
+		const top = rises ? at.y - height : at.y;
 		element.style.left = `${String(Math.max(EDGE, Math.min(left, innerWidth - width - EDGE)))}px`;
-		element.style.top = `${String(Math.max(EDGE, Math.min(at.y, innerHeight - height - EDGE)))}px`;
-	}, [at, align]);
+		element.style.top = `${String(Math.max(EDGE, Math.min(top, innerHeight - height - EDGE)))}px`;
+	}, [at, align, rises]);
 
 	useEffect(() => {
 		const before = anchor?.current ?? document.activeElement;

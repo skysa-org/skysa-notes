@@ -227,7 +227,7 @@ const SourceDropdown = ({
 			returnTo={returnTo}
 			renamings={renamings}
 			enterCode={enterCode}
-			account={(slot) => <AccountPanel connectIs="header" slot={slot} />}
+			account={(slot) => <AccountPanel slot={slot} />}
 			onChosen={onChosen}
 		/>
 	) : null;

@@ -3,6 +3,7 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	Fragment,
+	type ReactNode,
 	type RefObject,
 	useCallback,
 	useEffect,
@@ -50,9 +51,7 @@ import { getNote } from '../store/notes.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
 	type AccountState,
-	anyConnected,
 	claimConnection,
-	CONNECT_FIRST_LABEL,
 	CONNECTABLE,
 	LEFT_AT_PROVIDER,
 	type LetGoInput,
@@ -68,7 +67,8 @@ import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
-import { importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
+import { type Importing, importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
+import { InfoDialog } from './InfoDialog.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
@@ -123,19 +123,14 @@ export interface AccountPanelProps {
 	 */
 	pick?: typeof pickFiles;
 	/**
-	 * Where the way to connect storage is, from here. Beside the tabs it is the
-	 * `+` above the panel, which has words while nothing is connected; in a
-	 * compact window's source dropdown it is the `+` in the dropdown's header,
-	 * which never has.
-	 */
-	connectIs?: 'above' | 'header';
-	/**
-	 * Where the panel's actions go as one `⋯` menu, rather than as buttons in
+	 * Where the panel's actions go as one `⋯` menu, with what it says above
 	 * it: the end of the showing source's row in a compact window's source
 	 * dropdown, as every notebook's and note's row ends in its own
 	 * (`SourcePanel`, `RowOptions`), with what another source's `⋯` asked of
-	 * this one once it is showing. Left out, they are buttons in the panel, as
-	 * at the foot of the sidebar.
+	 * this one once it is showing. Left out, as at the foot of the sidebar, the
+	 * panel is one line — the source and how its syncing is going — with the
+	 * actions behind a gear at its end (`StatusLine`), and only what needs the
+	 * user said above it, while it does.
 	 */
 	slot?: AccountSlot;
 }
@@ -248,6 +243,37 @@ const attentionMessage = (
 	if (status.refusal === 'not_found') return `The server no longer has this ${label} connection.`;
 	if (status.stuck !== undefined) return stuckMessage(status.stuck, label);
 	return `Some changes could not be sent to ${label}. They will be tried again (${status.error ?? 'unknown error'}).`;
+};
+
+/**
+ * How syncing is going, as the status line at the foot of the sidebar says it:
+ * a few words after the source's name, with the whole sentence, where there is
+ * more to say, as its tooltip. Where syncing has stopped on something the user
+ * has to deal with, the line says only that, and the sentence is said above it
+ * (`SyncState`), where it stays until it is dealt with.
+ */
+const lineStatus = (
+	status: SchedulerStatus,
+	label: string,
+	syncable: boolean
+): { text: string; title: string | null } => {
+	const said = (words: string, title: string | null = null) => ({
+		text: `${label} · ${words}`,
+		title,
+	});
+	switch (status.phase) {
+		case 'local':
+			return { text: label, title: null };
+		case 'syncing':
+		case 'idle':
+			return said(statusMessage(status, label, syncable) ?? 'Synced');
+		case 'offline':
+			return said('Offline', statusMessage(status, label, syncable));
+		case 'retrying':
+			return said('Trying again shortly', statusMessage(status, label, syncable));
+		case 'attention':
+			return said('Not syncing');
+	}
 };
 
 /**
@@ -419,25 +445,45 @@ const UnseenAtProvider = ({ provider }: { provider: ProviderKind | undefined }) 
 	);
 };
 
+/**
+ * The same, from the gear at the foot of the sidebar, where there is no room
+ * for it to fold out: an item that opens it over everything.
+ */
+const unseenItem = (
+	provider: ProviderKind | undefined,
+	label: string,
+	onOpen: () => void
+): OptionsMenuItem[] =>
+	provider !== undefined && UNSEEN_AT_PROVIDER[provider] !== undefined
+		? [{ label: `About ${label}…`, onChoose: onOpen }]
+		: [];
+
+const UnseenDialog = ({
+	provider,
+	onClose,
+	returnFocus,
+}: {
+	provider: ProviderKind | undefined;
+	onClose: () => void;
+	returnFocus: RefObject<HTMLElement | null>;
+}) => {
+	const unseen = provider === undefined ? undefined : UNSEEN_AT_PROVIDER[provider];
+	if (unseen === undefined) return null;
+	return (
+		<InfoDialog title={unseen.summary} onClose={onClose} returnFocus={returnFocus}>
+			<p>{unseen.detail}</p>
+		</InfoDialog>
+	);
+};
+
 interface LocalProps {
 	client: Client;
 	database: NotesDatabase;
 	config: Asked<InstanceConfig>;
 	returnTo: string;
 	navigate?: (url: string) => void;
-	connectIs?: 'above' | 'header';
 	slot?: AccountSlot;
 }
-
-/**
- * Where to go to connect, named as the control there is named. With nothing
- * connected yet the `+` carries its words (`CONNECT_FIRST_LABEL`), and the
- * compact panel's list is headed by them.
- */
-const connectHint = (connectIs: 'above' | 'header', first: boolean): string =>
-	first && connectIs === 'above'
-		? ` Use “${CONNECT_FIRST_LABEL}” above to sync them.`
-		: ' Use + above to connect storage.';
 
 /**
  * The panel's actions as one `⋯` menu, drawn into the end of the showing
@@ -467,6 +513,55 @@ const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly Optio
 				slot.menuIn
 			);
 };
+
+/**
+ * The foot of the sidebar, once there is nothing to ask the user: the source
+ * and how it is going, in one line, and the gear with everything that can be
+ * done to it at the line's end. What needs the user — a reconnect, a problem, a
+ * question being asked — is drawn above the line while it lasts, so the line
+ * is where the panel ends whatever is going on.
+ */
+const StatusLine = ({
+	text,
+	title,
+	children,
+}: {
+	text: string;
+	title: string | null;
+	children: ReactNode;
+}) => (
+	<div className="account-line">
+		<p className="account-status muted" {...(title === null ? {} : { title })}>
+			{text}
+		</p>
+		{children}
+	</div>
+);
+
+/**
+ * The panel's actions, behind a gear at the end of its status line: what the
+ * showing source's `⋯` offers in a compact window's source dropdown, from the
+ * same lists. It opens upwards, being at the foot of the window.
+ */
+const GearMenu = ({
+	items,
+	triggerRef,
+}: {
+	items: readonly OptionsMenuItem[];
+	triggerRef?: RefObject<HTMLButtonElement | null>;
+}) => (
+	<OptionsMenu
+		label="Storage options"
+		title="Storage options"
+		groupLabel="Storage"
+		triggerClassName="icon icon-quiet"
+		trigger={<Icon name="gear" />}
+		disabled={items.length === 0}
+		items={items}
+		rises
+		{...(triggerRef === undefined ? {} : { triggerRef })}
+	/>
+);
 
 /**
  * What another source's `⋯` asked of this one (`SourceAsk`), once this one is
@@ -525,35 +620,22 @@ const useDownloadAll = (
 
 type Downloading = ReturnType<typeof useDownloadAll>;
 
+/** What went wrong with the download, said where it was asked for. */
 const DownloadAll = ({
 	holds,
 	downloading,
-	button,
 }: {
 	/** `holdsAnything`, as the panel has read it: undefined until it has. */
 	holds: boolean | undefined;
 	downloading: Downloading;
-	/** Drawn as a button here, rather than offered in the `⋯` menu. */
-	button: boolean;
-}) => {
-	if (holds !== true) return null;
-	return (
-		<>
-			{button && (
-				<button type="button" disabled={downloading.busy} onClick={downloading.start}>
-					Download all notes
-				</button>
-			)}
-			{downloading.problem !== null && (
-				<p className="muted" role="alert">
-					{downloading.problem}
-				</p>
-			)}
-		</>
-	);
-};
+}) =>
+	holds === true && downloading.problem !== null ? (
+		<p className="muted" role="alert">
+			{downloading.problem}
+		</p>
+	) : null;
 
-/** The same, as an item of the `⋯` menu. */
+/** The way to start it, as an item of the gear's menu or the `⋯`. */
 const downloadItem = (holds: boolean | undefined, downloading: Downloading): OptionsMenuItem[] =>
 	holds === true
 		? [{ label: 'Download all notes', onChoose: downloading.start, disabled: downloading.busy }]
@@ -586,7 +668,6 @@ const useKept = (keep: Keeping) => {
 const NotConnected = ({
 	config,
 	database,
-	connectIs = 'above',
 	downloadAll,
 	keep,
 	slot,
@@ -615,16 +696,20 @@ const NotConnected = ({
 		settings?.authMode === 'storage-first'
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
-	const sources = useLiveQuery(() => connectedSources(database), [database]);
+	const items = [...downloadItem(holds, downloading), ...importItems(importing)];
 
 	return (
 		<section className="account" aria-label="Storage">
-			<p className="muted">
-				Notes are kept on this device only.
-				{offerable.length > 0 &&
-					sources !== undefined &&
-					connectHint(connectIs, !anyConnected(sources))}
-			</p>
+			{/* Said by the status line, at the foot of the sidebar, with the way
+			    to connect beside it in the bar above, in words while nothing is
+			    connected. In a compact window's source dropdown the way is the
+			    `+` in its header, which never has words. */}
+			{slot !== undefined && (
+				<p className="muted">
+					Notes are kept on this device only.
+					{offerable.length > 0 && ' Use + above to connect storage.'}
+				</p>
+			)}
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">
 					Connecting storage needs a sign-in this server does not offer yet.
@@ -653,13 +738,14 @@ const NotConnected = ({
 					download them.
 				</p>
 			)}
-			<DownloadAll holds={holds} downloading={downloading} button={slot === undefined} />
-			<ImportNotes importing={importing} buttons={slot === undefined} />
-			{slot !== undefined && (
-				<ActionsMenu
-					slot={slot}
-					items={[...downloadItem(holds, downloading), ...importItems(importing)]}
-				/>
+			<DownloadAll holds={holds} downloading={downloading} />
+			<ImportNotes importing={importing} />
+			{slot === undefined ? (
+				<StatusLine text="On this device only" title={null}>
+					<GearMenu items={items} />
+				</StatusLine>
+			) : (
+				<ActionsMenu slot={slot} items={items} />
 			)}
 		</section>
 	);
@@ -750,8 +836,12 @@ interface SyncStateProps {
 	/** Whether the re-scan is being asked about, which the panel holds. */
 	rescanning: boolean;
 	onRescanning: (asking: boolean) => void;
-	/** Drawn as buttons here, rather than offered in the `⋯` menu. */
-	buttons: boolean;
+	/**
+	 * Whether the panel ends in a status line (`StatusLine`), which says how
+	 * syncing is going itself: here, then, only where it has stopped on
+	 * something the user has to deal with.
+	 */
+	line: boolean;
 }
 
 /**
@@ -771,7 +861,7 @@ const SyncState = ({
 	navigate,
 	rescanning,
 	onRescanning: setRescanning,
-	buttons,
+	line,
 }: SyncStateProps) => {
 	const status = useSyncStatus(sync);
 	const syncable = isSyncable(bound);
@@ -808,7 +898,9 @@ const SyncState = ({
 					Connect again
 				</ConnectButton>
 			)}
-			{message !== null && <p className="muted">{message}</p>}
+			{message !== null && (!line || status.phase === 'attention') && (
+				<p className="muted">{message}</p>
+			)}
 			<Denied status={status} syncable={syncable} config={config} />
 			{/*
 			 * Beside the message that names the op, and only there: `stuck`
@@ -823,64 +915,40 @@ const SyncState = ({
 				<p className="muted">{conflictMessage(status.conflicts.length)}</p>
 			)}
 			<UnreadableNotice files={bound.unreadable} label={label} />
-			{buttons && status.phase !== 'local' && (
-				<button
-					type="button"
-					disabled={status.phase === 'syncing'}
-					onClick={() => {
-						void sync.syncNow();
-					}}
-				>
-					Sync now
-				</button>
-			)}
 			{/*
 			 * The way out of a cursor the provider has lost track of, or a
 			 * store that disagrees with the remote about what is there. It is
-			 * not a repair of nothing: the confirm says what it costs.
+			 * not a repair of nothing: the confirm says what it costs. Asked for
+			 * from the gear's menu, or the `⋯`.
 			 */}
-			{status.phase !== 'local' &&
-				syncable &&
-				(rescanning ? (
-					<div className="account-confirm">
-						<p className="muted">
-							Read everything in {label} again? This device compares every note with
-							the folder from scratch. Notes that are no longer in {label} are removed
-							here too, unless they have edits that have not been sent.
-						</p>
-						<button
-							type="button"
-							disabled={status.phase === 'syncing'}
-							onClick={() => {
-								setRescanning(false);
-								void sync.resync();
-							}}
-						>
-							Re-scan
-						</button>
-						<button
-							type="button"
-							className="ghost"
-							onClick={() => {
-								setRescanning(false);
-							}}
-						>
-							Cancel
-						</button>
-					</div>
-				) : (
-					buttons && (
-						<button
-							type="button"
-							disabled={status.phase === 'syncing'}
-							onClick={() => {
-								setRescanning(true);
-							}}
-						>
-							Re-scan from scratch
-						</button>
-					)
-				))}
+			{status.phase !== 'local' && syncable && rescanning && (
+				<div className="account-confirm">
+					<p className="muted">
+						Read everything in {label} again? This device compares every note with the
+						folder from scratch. Notes that are no longer in {label} are removed here
+						too, unless they have edits that have not been sent.
+					</p>
+					<button
+						type="button"
+						disabled={status.phase === 'syncing'}
+						onClick={() => {
+							setRescanning(false);
+							void sync.resync();
+						}}
+					>
+						Re-scan
+					</button>
+					<button
+						type="button"
+						className="ghost"
+						onClick={() => {
+							setRescanning(false);
+						}}
+					>
+						Cancel
+					</button>
+				</div>
+			)}
 		</>
 	);
 };
@@ -936,56 +1004,18 @@ const useGrants = (client: Client, database: NotesDatabase, connectionId: string
 const stillSignedIn = (grants: Asked<Grant[]>): number | undefined =>
 	answer(grants)?.filter((grant) => !grant.current && !grant.expired).length;
 
-/**
- * The devices holding this connection, and the way to take one away.
- *
- * The point of it is that a stolen credential is visible and revocable. It is
- * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
- * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
- * how many other devices there are is said whether or not the list is open:
- * one more than the user has is what a theft looks like from here. The rows
- * fold behind that count (2026-10-02), each naming the device as its browser
- * did at sign-in ("Safari on iPhone"), since a row that says only "a device"
- * cannot be told from the one in the user's pocket. This one is not among
- * them.
- *
- * Revoking is permanent in a way worth saying: the server spends a credential's
- * hash for ever, so the device that held it cannot be talked back into this
- * connection — it has to be connected again from scratch.
- */
-const Devices = ({
-	client,
-	database,
-	connectionId,
-	grants,
-	onChanged,
-}: {
-	client: Client;
-	database: NotesDatabase;
-	/**
-	 * Which source these are the devices of. Named rather than looked up: it
-	 * pins every call in this component to one source, rather than re-reading
-	 * "whichever is in front" between asking and revoking.
-	 */
-	connectionId: string;
-	/**
-	 * Asked by the panel (`useGrants`), keyed by the same source, which is what
-	 * keeps the list from staying on the previous source's devices after a
-	 * switch, with a Remove sending a grant id the new connection has never
-	 * heard of. The panel's because the disconnect question counts them too.
-	 */
-	grants: Asked<Grant[]>;
-	/** A device was removed: ask again. */
-	onChanged: () => void;
-}) => {
+const devicesLine = (count: number): string =>
+	`${count === 1 ? '1 other device' : `${String(count)} other devices`} signed in on this account`;
+
+/** Taking a device off the connection, and what went wrong if it did not come off. */
+const useRevoke = (
+	client: Client,
+	database: NotesDatabase,
+	connectionId: string,
+	onChanged: () => void
+) => {
 	const [busy, setBusy] = useState<string | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
-
-	// This one is not listed: it cannot be removed from itself (disconnecting
-	// is that), and "this device" is the one thing about it the user knows.
-	const others = (answer(grants) ?? []).filter((grant) => !grant.current);
-	if (others.length === 0) return null;
-
 	const revoke = (grantId: string) => {
 		setBusy(grantId);
 		setProblem(null);
@@ -1025,6 +1055,151 @@ const Devices = ({
 				setBusy(null);
 			});
 	};
+	return { busy, problem, revoke };
+};
+
+/** A row per other device, each with its Remove, and what went wrong with one. */
+const DeviceRows = ({
+	others,
+	revoking,
+}: {
+	others: readonly Grant[];
+	revoking: ReturnType<typeof useRevoke>;
+}) => (
+	<>
+		<ul aria-label="Other devices">
+			{others.map((grant) => (
+				<li key={grant.id}>
+					<span className="muted">
+						{`${grant.device ?? 'A device'}, last used ${when(grant.lastUsedAt)}`}
+						{grant.expired && ' · signed out for being idle'}
+					</span>
+					<button
+						type="button"
+						disabled={revoking.busy !== null}
+						onClick={() => {
+							revoking.revoke(grant.id);
+						}}
+					>
+						Remove
+					</button>
+				</li>
+			))}
+		</ul>
+		{revoking.problem !== null && (
+			<p className="muted" role="alert">
+				{revoking.problem}
+			</p>
+		)}
+	</>
+);
+
+/**
+ * The devices holding this connection, and the way to take one away.
+ *
+ * The point of it is that a stolen credential is visible and revocable. It is
+ * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
+ * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
+ * how many other devices there are is said whether or not the list is open:
+ * one more than the user has is what a theft looks like from here. The rows
+ * fold behind that count (2026-10-02), each naming the device as its browser
+ * did at sign-in ("Safari on iPhone"), since a row that says only "a device"
+ * cannot be told from the one in the user's pocket. This one is not among
+ * them.
+ *
+ * Revoking is permanent in a way worth saying: the server spends a credential's
+ * hash for ever, so the device that held it cannot be talked back into this
+ * connection — it has to be connected again from scratch.
+ */
+const Devices = ({
+	client,
+	database,
+	connectionId,
+	grants,
+	onChanged,
+	line,
+	gear,
+}: {
+	client: Client;
+	database: NotesDatabase;
+	/**
+	 * Which source these are the devices of. Named rather than looked up: it
+	 * pins every call in this component to one source, rather than re-reading
+	 * "whichever is in front" between asking and revoking.
+	 */
+	connectionId: string;
+	/**
+	 * Asked by the panel (`useGrants`), keyed by the same source, which is what
+	 * keeps the list from staying on the previous source's devices after a
+	 * switch, with a Remove sending a grant id the new connection has never
+	 * heard of. The panel's because the disconnect question counts them too.
+	 */
+	grants: Asked<Grant[]>;
+	/** A device was removed: ask again. */
+	onChanged: () => void;
+	/**
+	 * In the status line at the foot of the sidebar (`StatusLine`), where there
+	 * is room for the count and not for the rows: the count is a button, beside
+	 * the gear, that opens them over everything. Still said without opening
+	 * anything, since the count is what the list is for.
+	 */
+	line: boolean;
+	/**
+	 * Where the focus goes when the list is put away with nobody left on it: the
+	 * count it was opened from went with the last of them.
+	 */
+	gear?: RefObject<HTMLButtonElement | null>;
+}) => {
+	const revoking = useRevoke(client, database, connectionId, onChanged);
+	const [open, setOpen] = useState(false);
+	const count = useRef<HTMLButtonElement>(null);
+
+	// This one is not listed: it cannot be removed from itself (disconnecting
+	// is that), and "this device" is the one thing about it the user knows.
+	const others = (answer(grants) ?? []).filter((grant) => !grant.current);
+	// Kept open after the last other device is removed, saying so, rather than
+	// taken away from under the focus.
+	if (others.length === 0 && !open) return null;
+
+	if (line) {
+		return (
+			<>
+				{others.length > 0 && (
+					<button
+						ref={count}
+						type="button"
+						className="icon icon-quiet account-devices-count"
+						aria-label={devicesLine(others.length)}
+						title={devicesLine(others.length)}
+						onClick={() => {
+							setOpen(true);
+						}}
+					>
+						<Icon name="device" />
+						<span aria-hidden="true">{others.length}</span>
+					</button>
+				)}
+				{open && (
+					<InfoDialog
+						title="Other devices signed in on this account"
+						onClose={() => {
+							setOpen(false);
+							if (others.length === 0) gear?.current?.focus();
+						}}
+						returnFocus={count}
+					>
+						<div className="account-devices">
+							{others.length === 0 ? (
+								<p>No other device is signed in on this account.</p>
+							) : (
+								<DeviceRows others={others} revoking={revoking} />
+							)}
+						</div>
+					</InfoDialog>
+				)}
+			</>
+		);
+	}
 
 	return (
 		<div className="account-devices">
@@ -1033,36 +1208,10 @@ const Devices = ({
 			<details>
 				<summary className="muted">
 					<Icon name="chevron" />
-					{others.length === 1
-						? '1 other device'
-						: `${String(others.length)} other devices`}{' '}
-					signed in on this account
+					{devicesLine(others.length)}
 				</summary>
-				<ul aria-label="Other devices">
-					{others.map((grant) => (
-						<li key={grant.id}>
-							<span className="muted">
-								{`${grant.device ?? 'A device'}, last used ${when(grant.lastUsedAt)}`}
-								{grant.expired && ' · signed out for being idle'}
-							</span>
-							<button
-								type="button"
-								disabled={busy !== null}
-								onClick={() => {
-									revoke(grant.id);
-								}}
-							>
-								Remove
-							</button>
-						</li>
-					))}
-				</ul>
+				<DeviceRows others={others} revoking={revoking} />
 			</details>
-			{problem !== null && (
-				<p className="muted" role="alert">
-					{problem}
-				</p>
-			)}
 		</div>
 	);
 };
@@ -1283,28 +1432,26 @@ const stoppedBy = (status: SchedulerStatus, listed: Unsynced): 'offline' | 'bloc
 };
 
 /**
- * What can be done to a connected source, beyond what its status offers: as
- * the `⋯` menu where the panel has one (`slot`), in the order its buttons
- * would be drawn and disabled where they would be, and otherwise as the
- * buttons at the panel's foot. Neither button while the disconnect question is
- * open, which is the way on from either.
+ * What can be done to a connected source, beyond what its status offers: the
+ * items of the gear's menu at the foot of the sidebar, or of the `⋯` in a
+ * compact window's source dropdown, disabled where they cannot be done now.
+ * Neither way to let the source go while the disconnect question is open,
+ * which is the way on from there.
  */
-const StorageActions = ({
-	slot,
+const storageItems = ({
 	bound,
 	phase,
 	rescanning,
 	onRescan,
 	download,
 	imports,
+	about,
 	stranded,
 	open,
 	disconnectBlocked,
 	syncNow,
 	ask,
-	openButton,
 }: {
-	slot: AccountSlot | undefined;
 	bound: SyncStateRecord;
 	phase: SchedulerStatus['phase'];
 	rescanning: boolean;
@@ -1312,77 +1459,163 @@ const StorageActions = ({
 	download: readonly OptionsMenuItem[];
 	/** The ways to import (`importItems`), or none where an import is held back. */
 	imports: readonly OptionsMenuItem[];
+	/** What the provider keeps from the app, where it is asked for from the gear. */
+	about: readonly OptionsMenuItem[];
 	stranded: boolean;
 	/** Whether the disconnect question is open. */
 	open: boolean;
 	disconnectBlocked: boolean;
 	syncNow: () => void;
 	ask: (onServer: boolean) => void;
-	/** Where the focus goes back to once the question is put away. */
-	openButton: RefObject<HTMLButtonElement | null>;
-}) => {
-	if (slot !== undefined) {
-		const syncing = phase === 'syncing';
-		const syncs = !importingHere(bound) && phase !== 'local';
-		const items: OptionsMenuItem[] = [
-			...(syncs ? [{ label: 'Sync now', onChoose: syncNow, disabled: syncing }] : []),
-			...(syncs && isSyncable(bound) && !rescanning
-				? [{ label: 'Re-scan from scratch', onChoose: onRescan, disabled: syncing }]
-				: []),
-			...download,
-			...imports,
-			...(stranded && !open
-				? [
-						{
-							label: 'Stop syncing on this device',
-							onChoose: () => {
-								ask(false);
-							},
-						},
-					]
-				: []),
-			...(open
-				? []
-				: [
-						{
-							label: 'Disconnect…',
-							onChoose: () => {
-								ask(true);
-							},
-							danger: true,
-							disabled: disconnectBlocked,
-						},
-					]),
-		];
-		return <ActionsMenu slot={slot} items={items} />;
-	}
-	if (open) return null;
-	return (
-		<>
-			{stranded && (
-				<button
-					type="button"
-					className="ghost"
-					onClick={() => {
+}): OptionsMenuItem[] => {
+	const syncing = phase === 'syncing';
+	const syncs = !importingHere(bound) && phase !== 'local';
+	return [
+		...(syncs ? [{ label: 'Sync now', onChoose: syncNow, disabled: syncing }] : []),
+		...(syncs && isSyncable(bound) && !rescanning
+			? [{ label: 'Re-scan from scratch', onChoose: onRescan, disabled: syncing }]
+			: []),
+		...download,
+		...imports,
+		...about,
+		...(stranded && !open
+			? [
+					{
+						label: 'Stop syncing on this device',
 						// The same question again, and nothing asked of the server:
 						// it has already refused, and nothing on it is touched.
-						ask(false);
+						onChoose: () => {
+							ask(false);
+						},
+					},
+				]
+			: []),
+		...(open
+			? []
+			: [
+					{
+						label: 'Disconnect…',
+						onChoose: () => {
+							ask(true);
+						},
+						danger: true,
+						disabled: disconnectBlocked,
+					},
+				]),
+	];
+};
+
+/**
+ * Which source this is and whose, at the top of its panel in a compact
+ * window's source dropdown. Nothing at the foot of the sidebar, whose status
+ * line names the source, with the account in its tooltip.
+ */
+const SourceHeading = ({
+	line,
+	label,
+	displayName,
+}: {
+	line: boolean;
+	label: string;
+	displayName: string | null;
+}) =>
+	line ? null : (
+		<p>
+			Syncing with {label}
+			{displayName !== null && <span className="muted"> · {displayName}</span>}
+		</p>
+	);
+
+/**
+ * Where a connected source's panel ends. In a compact window's source dropdown
+ * that is the `⋯` at the end of the source's row. At the foot of the sidebar it
+ * is the status line (`StatusLine`): how syncing is going, the count of the
+ * other devices, and the gear, whose menu also opens what the provider keeps
+ * from the app — said there over everything, the line having no room for it.
+ */
+const ConnectedFoot = ({
+	slot,
+	bound,
+	status,
+	label,
+	displayName,
+	openButton,
+	client,
+	database,
+	grants,
+	onGrantsChanged,
+	downloadable,
+	holds,
+	downloading,
+	importing,
+	...actions
+}: Omit<Parameters<typeof storageItems>[0], 'about' | 'phase' | 'download' | 'imports'> & {
+	slot: AccountSlot | undefined;
+	/**
+	 * Whether the source can be downloaded or imported into now: not while a
+	 * first import is filling it, nor while the disconnect question is open.
+	 */
+	downloadable: boolean;
+	holds: boolean | undefined;
+	downloading: Downloading;
+	importing: Importing;
+	status: SchedulerStatus;
+	label: string;
+	displayName: string | null;
+	/** The gear, where the focus goes back to once a question is put away. */
+	openButton: RefObject<HTMLButtonElement | null>;
+	client: Client;
+	database: NotesDatabase;
+	grants: Asked<Grant[]>;
+	onGrantsChanged: () => void;
+}) => {
+	const [about, setAbout] = useState(false);
+	const items = storageItems({
+		...actions,
+		bound,
+		phase: status.phase,
+		download: downloadable ? downloadItem(holds, downloading) : [],
+		imports: downloadable ? importItems(importing) : [],
+		about:
+			slot === undefined
+				? unseenItem(bound.provider, label, () => {
+						setAbout(true);
+					})
+				: [],
+	});
+	if (slot !== undefined) return <ActionsMenu slot={slot} items={items} />;
+	const said = lineStatus(status, label, isSyncable(bound));
+	// Who the account is, which the line has no room for, and the whole of
+	// what it says about syncing, where that is more than its few words.
+	const title = [
+		`Syncing with ${label}${displayName === null ? '' : ` · ${displayName}`}`,
+		said.title,
+	]
+		.filter((line) => line !== null)
+		.join('\n');
+	return (
+		<>
+			{about && (
+				<UnseenDialog
+					provider={bound.provider}
+					onClose={() => {
+						setAbout(false);
 					}}
-				>
-					Stop syncing on this device
-				</button>
+					returnFocus={openButton}
+				/>
 			)}
-			<button
-				ref={openButton}
-				type="button"
-				className="danger"
-				disabled={disconnectBlocked}
-				onClick={() => {
-					ask(true);
-				}}
-			>
-				Disconnect…
-			</button>
+			<StatusLine text={said.text} title={title}>
+				<Devices
+					client={client}
+					database={database}
+					connectionId={bound.connectionId}
+					grants={grants}
+					onChanged={onGrantsChanged}
+					line
+					gear={openButton}
+				/>
+				<GearMenu items={items} triggerRef={openButton} />
+			</StatusLine>
 		</>
 	);
 };
@@ -1426,7 +1659,9 @@ const Connected = ({
 }: ConnectedProps) => {
 	const [step, setStep] = useState<Step>({ kind: 'closed' });
 	const [rescanning, setRescanning] = useState(false);
-	const buttons = slot === undefined;
+	// Ends in a status line, at the foot of the sidebar, rather than in a
+	// compact window's source dropdown.
+	const line = slot === undefined;
 	const [trouble, setTrouble] = useState<string | null>(null);
 	const status = useSyncStatus(sync);
 	// Only ever this source's. Named once per render, so the click below is
@@ -1555,10 +1790,7 @@ const Connected = ({
 
 	return (
 		<section ref={panel} className="account" aria-label="Storage">
-			<p>
-				Syncing with {label}
-				{displayName !== null && <span className="muted"> · {displayName}</span>}
-			</p>
+			<SourceHeading line={line} label={label} displayName={displayName} />
 			<SyncState
 				client={client}
 				database={database}
@@ -1571,31 +1803,32 @@ const Connected = ({
 				{...(navigate === undefined ? {} : { navigate })}
 				rescanning={rescanning}
 				onRescanning={setRescanning}
-				buttons={buttons}
+				line={line}
 			/>
-			<UnseenAtProvider provider={bound.provider} />
+			{!line && <UnseenAtProvider provider={bound.provider} />}
 			{/*
 			 * Not while an import is filling the source, when the archive would be
 			 * whatever part of it had arrived; nor while the disconnect question
 			 * is open, which offers its own download of what was never sent.
 			 */}
-			{downloadable && (
-				<DownloadAll holds={holds} downloading={downloading} button={buttons} />
-			)}
+			{downloadable && <DownloadAll holds={holds} downloading={downloading} />}
 			{/*
 			 * Held back as the download is, and for a like reason: notes written
 			 * in while a first import is filling the source would meet its files
 			 * as they arrive, and an import beside the disconnect question would
 			 * add to the very list being asked about.
 			 */}
-			{downloadable && <ImportNotes importing={importing} buttons={buttons} />}
-			<Devices
-				client={client}
-				database={database}
-				connectionId={connectionId}
-				grants={devices.grants}
-				onChanged={devices.ask}
-			/>
+			{downloadable && <ImportNotes importing={importing} />}
+			{!line && (
+				<Devices
+					client={client}
+					database={database}
+					connectionId={connectionId}
+					grants={devices.grants}
+					onChanged={devices.ask}
+					line={false}
+				/>
+			)}
 			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
 					{problem ?? trouble}
@@ -1631,16 +1864,20 @@ const Connected = ({
 					cancelRef={cancelButton}
 				/>
 			)}
-			<StorageActions
+			<ConnectedFoot
 				slot={slot}
 				bound={bound}
-				phase={status.phase}
+				status={status}
+				label={label}
+				displayName={displayName}
 				rescanning={rescanning}
 				onRescan={() => {
 					setRescanning(true);
 				}}
-				download={downloadable ? downloadItem(holds, downloading) : []}
-				imports={downloadable ? importItems(importing) : []}
+				downloadable={downloadable}
+				holds={holds}
+				downloading={downloading}
+				importing={importing}
 				stranded={stranded}
 				open={open}
 				disconnectBlocked={disconnectBlocked}
@@ -1649,6 +1886,10 @@ const Connected = ({
 				}}
 				ask={ask}
 				openButton={openButton}
+				client={client}
+				database={database}
+				grants={devices.grants}
+				onGrantsChanged={devices.ask}
 			/>
 		</section>
 	);
@@ -1737,7 +1978,6 @@ export const AccountPanel = ({
 	downloadAll = downloadLibrary,
 	keeping = browserKeeping,
 	pick,
-	connectIs = 'above',
 	slot,
 }: AccountPanelProps) => {
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -1848,7 +2088,6 @@ export const AccountPanel = ({
 					database={database}
 					config={config}
 					returnTo={returnTo}
-					connectIs={connectIs}
 					downloadAll={downloadAll}
 					keep={keeping}
 					pick={pick}
