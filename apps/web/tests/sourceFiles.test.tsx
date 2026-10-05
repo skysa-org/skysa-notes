@@ -1,4 +1,4 @@
-import { NotFoundError } from '@skysa/core';
+import { NotFoundError, parentPath } from '@skysa/core';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -128,10 +128,22 @@ const opsOf = async (db: NotesDatabase, connectionId: string) =>
 const uploadsOf = async (db: NotesDatabase, connectionId: string) =>
 	(await opsOf(db, connectionId)).filter((op) => op.op === 'upload');
 
-/** Whether every upload in the queue comes ahead of every write. */
+/**
+ * Whether every upload in the queue comes ahead of every write in its notebook,
+ * which is the order a library is queued in (`queueByNotebook`).
+ */
 const filesFirst = async (db: NotesDatabase, connectionId: string) => {
-	const ops = (await opsOf(db, connectionId)).map((op) => op.op);
-	return ops.lastIndexOf('upload') < ops.indexOf('write');
+	const ops = await opsOf(db, connectionId);
+	return ops.every(
+		(op, at) =>
+			op.op !== 'upload' ||
+			!ops
+				.slice(0, at)
+				.some(
+					(before) =>
+						before.op === 'write' && parentPath(before.path) === parentPath(op.path)
+				)
+	);
 };
 
 /** A note nothing has sent, so a detach keeps it and the source with it. */

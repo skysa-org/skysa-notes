@@ -20,6 +20,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 } from '../src/store/db.js';
+import { addAttachment } from '../src/store/files.js';
 import { createFolder, folderTree, listFolders, renameFolder } from '../src/store/folders.js';
 import {
 	createNote,
@@ -49,6 +50,8 @@ const freshDatabase = (): NotesDatabase => {
 
 const queued = async (db: NotesDatabase) =>
 	(await db.opQueue.orderBy('seq').toArray()).map((op) => [op.connectionId, op.op, op.path]);
+
+const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer;
 
 /** A device that has been used for a while with nothing connected. */
 const usedLocally = async () => {
@@ -113,17 +116,79 @@ describe('binding a connection', () => {
 		expect(await listFolders(db, { connectionId: LOCAL_CONNECTION_ID })).toEqual([]);
 	});
 
-	it('queues what the remote needs: each notebook outermost first, then each note', async () => {
+	it('queues what the remote needs notebook by notebook, each made before what is in it', async () => {
 		const { db, plan, deep } = await usedLocally();
 
 		await bindConnection(db, DROPBOX);
 
 		expect((await queued(db)).filter(([to]) => to === DROPBOX.connectionId)).toEqual([
 			['dropbox-1', 'mkdir', 'Work'],
+			['dropbox-1', 'write', plan.path],
 			['dropbox-1', 'mkdir', 'Work/Inner'],
 			['dropbox-1', 'write', deep.path],
-			['dropbox-1', 'write', plan.path],
 		]);
+	});
+
+	it('queues the top first, then each notebook with its files before its notes, then the notebooks inside it', async () => {
+		const db = freshDatabase();
+		const local = { connectionId: LOCAL_CONNECTION_ID };
+		// Made in an order the queue is not to follow.
+		await createFolder(db, { name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Inner' });
+		await createFolder(db, { name: 'Play' });
+		await createFolder(db, { name: 'Empty' });
+		const deep = await createNote(db, { folderPath: 'Work/Inner', title: 'Deep' });
+		const plan = await createNote(db, { folderPath: 'Work', title: 'Plan' });
+		const game = await createNote(db, { folderPath: 'Play', title: 'Game' });
+		const top = await createNote(db, { title: 'Top' });
+		const chart = await addAttachment(db, {
+			...local,
+			noteId: deep.id,
+			name: 'chart.png',
+			bytes: bytesOf('chart'),
+		});
+		const photo = await addAttachment(db, {
+			...local,
+			noteId: plan.id,
+			name: 'photo.png',
+			bytes: bytesOf('photo'),
+		});
+		const icon = await addAttachment(db, {
+			...local,
+			noteId: top.id,
+			name: 'icon.png',
+			bytes: bytesOf('icon'),
+		});
+
+		await bindConnection(db, DROPBOX);
+
+		expect((await queued(db)).filter(([to]) => to === DROPBOX.connectionId)).toEqual([
+			['dropbox-1', 'upload', icon.path],
+			['dropbox-1', 'write', top.path],
+			['dropbox-1', 'mkdir', 'Empty'],
+			['dropbox-1', 'mkdir', 'Play'],
+			['dropbox-1', 'write', game.path],
+			['dropbox-1', 'mkdir', 'Work'],
+			['dropbox-1', 'upload', photo.path],
+			['dropbox-1', 'write', plan.path],
+			['dropbox-1', 'mkdir', 'Work/Inner'],
+			['dropbox-1', 'upload', chart.path],
+			['dropbox-1', 'write', deep.path],
+		]);
+
+		// And the strictest provider takes it in that order.
+		await finishImport(db, DROPBOX.connectionId);
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		const engine = createSyncEngine({
+			provider: fake,
+			store: createDexieSyncStore(db, { connectionId: DROPBOX.connectionId }),
+		});
+		expect((await engine.sync()).status).toBe('ok');
+		expect(filesOn(fake).sort()).toEqual(
+			[icon.path, top.path, game.path, photo.path, plan.path, chart.path, deep.path].sort()
+		);
+		expect(await db.opQueue.where('connectionId').equals(DROPBOX.connectionId).count()).toBe(0);
 	});
 
 	it('keeps each note exactly the file it was, whatever it says about its own time', async () => {

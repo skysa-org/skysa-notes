@@ -34,7 +34,7 @@ import { goneSources } from './goneSources.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
-import { queueMkdir, queueUpload, queueWrite } from './queue.js';
+import { queueByNotebook } from './queue.js';
 import {
 	countOf,
 	isEmpty,
@@ -577,31 +577,19 @@ const cutLoose = async (db: Scope, connectionId: string): Promise<Moved> => {
 };
 
 /**
- * What moved rows owe their new connection: each notebook, then each file,
- * then each note, so a note never lands ahead of the files it links.
+ * What moved rows owe their new connection, notebook by notebook: each made
+ * before what is in it, and its files before its notes, so another device
+ * fills in a notebook at a time and a note never lands ahead of the files
+ * beside it (`queueByNotebook`).
  */
-const queueOwed = async (db: NotesDatabase, connectionId: string, moved: Moved) => {
-	// Outermost first, since `createFolder` is not recursive everywhere.
-	await [...moved.folders]
-		.sort((a, b) => depth(a.path) - depth(b.path))
-		.reduce<Promise<void>>(async (pending, folder) => {
-			await pending;
-			await queueMkdir(db, connectionId, folder.path);
-		}, Promise.resolve());
-	// By path, so the queue reads in an order a person could follow.
-	await [...moved.files]
-		.sort((a, b) => a.path.localeCompare(b.path))
-		.reduce<Promise<void>>(async (pending, file) => {
-			await pending;
-			await queueUpload(db, file);
-		}, Promise.resolve());
-	await [...moved.notes]
-		.sort((a, b) => a.path.localeCompare(b.path))
-		.reduce<Promise<void>>(async (pending, note) => {
-			await pending;
-			await queueWrite(db, note);
-		}, Promise.resolve());
-};
+const queueOwed = (db: NotesDatabase, connectionId: string, moved: Moved) =>
+	queueByNotebook(db, connectionId, {
+		folders: moved.folders.map((folder) => folder.path),
+		// By path within a notebook, so the queue reads in an order a person
+		// could follow.
+		files: [...moved.files].sort((a, b) => a.path.localeCompare(b.path)),
+		notes: [...moved.notes].sort((a, b) => a.path.localeCompare(b.path)),
+	});
 
 // The credentials too: a source let go loses its rows and the key to its
 // account together, or a failure between the two leaves a device holding a

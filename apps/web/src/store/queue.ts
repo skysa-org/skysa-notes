@@ -1,4 +1,4 @@
-import { ancestorPaths, isWithin } from '@skysa/core';
+import { ancestorPaths, foldName, isWithin, parentPath, pathSegments } from '@skysa/core';
 import Dexie, { type PromiseExtended } from 'dexie';
 
 import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecord } from './db.js';
@@ -65,6 +65,10 @@ import { type FileRecord, type NoteRecord, type NotesDatabase, type OpQueueRecor
  *   that write to the back (`requeueWriteBehind`), and so does one that finds
  *   the file already there and not up yet. A notebook's move queues its files'
  *   moves ahead of its notes'.
+ *
+ * What a whole library owes at once — an import, or the rows a bind carries in
+ * — is queued notebook by notebook (`queueByNotebook`), so that another device
+ * fills in one notebook at a time.
  */
 
 type QueueDb = Pick<NotesDatabase, 'opQueue'>;
@@ -440,3 +444,81 @@ export const requeueWriteBehind = (db: QueueDb, note: NoteRecord): Queued =>
 			.then(() => db.opQueue.add(again))
 			.then(() => undefined);
 	});
+
+/** What a library owes the remote at once: notebooks to make, files to send, notes to write. */
+export interface Owed {
+	readonly folders: readonly string[];
+	readonly files: readonly FileRecord[];
+	readonly notes: readonly NoteRecord[];
+}
+
+/** One owed op, by the notebook it is in (folded segments) and which of its ops it is. */
+interface InNotebook {
+	readonly notebook: readonly string[];
+	readonly rank: number;
+	readonly queue: () => Queued;
+}
+
+const notebookOf = (path: string): string[] => pathSegments(path).map(foldName);
+
+/**
+ * Notebooks in depth-first pre-order: each before every notebook inside it, and
+ * siblings by name. The top of the source, which is no notebook, is first.
+ */
+const preOrder = (a: readonly string[], b: readonly string[]): number => {
+	const [name, ...insideA] = a;
+	const [other, ...insideB] = b;
+	if (name === undefined || other === undefined) return a.length - b.length;
+	return name.localeCompare(other) || preOrder(insideA, insideB);
+};
+
+/**
+ * What a whole library owes the remote, queued notebook by notebook: a pick of
+ * files imported (`importLibrary`), or the rows a bind or a move carries into a
+ * connection (`queueOwed` in `connection.ts`). The notes at the top of the
+ * source first, which need no `mkdir`; then each notebook in turn — its
+ * `mkdir`, the uploads of the files directly in it, the writes of the notes
+ * directly in it — and after it the notebooks inside it, in the same way.
+ *
+ * So another device fills in a notebook at a time. Queued as they once were,
+ * every `mkdir`, then every upload, then every write, a library of a thousand
+ * notes on Google Drive, where a note is about four requests one after another,
+ * showed every notebook on another device, empty, long before the first note
+ * reached any of them.
+ *
+ * A notebook's `mkdir` comes before everything in it, since `createFolder` is
+ * not recursive everywhere. A notebook's files come before its notes, so a
+ * picture beside a note lands before the note does. One a note links from
+ * elsewhere — a notebook inside, such as `assets/`, or another by `../` — may
+ * land after it, and shows as not there until it does, which heals itself.
+ *
+ * Siblings by name, by `localeCompare`, as paths are sorted elsewhere in the
+ * store; folded, so one notebook spelled two ways by two rows is one notebook
+ * here as on every provider, and its `mkdir` comes before what is in it in
+ * either spelling. Within a notebook, its files, and its notes, keep the order
+ * they are given in.
+ *
+ * Only what is queued here is ordered so. Each op is queued by the helper that
+ * dedupes it, so a notebook with a `mkdir` queued, a file with an upload or a
+ * note with a write gets nothing more, and the one queued keeps its place.
+ */
+export const queueByNotebook = (db: QueueDb, connectionId: string, owed: Owed): Queued =>
+	[
+		...owed.folders.map((path): InNotebook => ({
+			notebook: notebookOf(path),
+			rank: 0,
+			queue: () => queueMkdir(db, connectionId, path),
+		})),
+		...owed.files.map((file): InNotebook => ({
+			notebook: notebookOf(parentPath(file.path)),
+			rank: 1,
+			queue: () => queueUpload(db, file),
+		})),
+		...owed.notes.map((note): InNotebook => ({
+			notebook: notebookOf(parentPath(note.path)),
+			rank: 2,
+			queue: () => queueWrite(db, note),
+		})),
+	]
+		.sort((a, b) => preOrder(a.notebook, b.notebook) || a.rank - b.rank)
+		.reduce<Queued>((queued, next) => queued.then(next.queue), nothing());
