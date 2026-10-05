@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { bindConnection, finishImport } from '../src/store/connection.js';
 import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
 import { createFolder, deleteFolder, moveFolder, renameFolder } from '../src/store/folders.js';
 import { getOpenNotebooks, setNotebooksOpen } from '../src/store/openNotebooks.js';
+import { createDexieSyncStore } from '../src/sync/store.js';
 
 let db: NotesDatabase;
 let counter = 0;
@@ -77,5 +79,24 @@ describe('which notebooks are open', () => {
 		await deleteFolder(db, 'Work', scope);
 
 		expect(await open()).toEqual(['Home']);
+	});
+
+	it('follows a notebook a sync renames, and lets go of one it deletes', async () => {
+		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
+		await finishImport(db, 'dropbox-1');
+		const store = createDexieSyncStore(db, { connectionId: 'dropbox-1' });
+		await store.applyPull({
+			changes: [
+				{ kind: 'ensure-folder', path: 'Work' },
+				{ kind: 'ensure-folder', path: 'Work/Old' },
+			],
+		});
+		await setNotebooksOpen(db, 'dropbox-1', ['Work', 'Work/Old'], true);
+
+		await store.applyPull({ changes: [{ kind: 'move-folder', from: 'Work', to: 'Job' }] });
+		expect(await getOpenNotebooks(db, 'dropbox-1')).toEqual(['Job', 'Job/Old']);
+
+		await store.applyPull({ changes: [{ kind: 'delete-folder', path: 'Job' }] });
+		expect(await getOpenNotebooks(db, 'dropbox-1')).toEqual([]);
 	});
 });

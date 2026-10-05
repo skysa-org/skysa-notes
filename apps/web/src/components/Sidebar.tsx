@@ -274,6 +274,12 @@ interface RowProps {
 	onMenu?: (at: MenuPoint) => void;
 	/** Left and Right, which open and shut a notebook (`treeKeys`). */
 	onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void;
+	/**
+	 * Whether the notebooks inside it are listed, for one that has any: said
+	 * on the row, the tab stop, so a screen reader tabbing down the list hears
+	 * that something is inside and whether it is showing.
+	 */
+	expanded?: boolean;
 }
 
 /**
@@ -297,6 +303,7 @@ const Row = ({
 	onCancelMove,
 	onMenu,
 	onKeyDown,
+	expanded,
 }: RowProps) => {
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
@@ -320,6 +327,7 @@ const Row = ({
 				moving === null ? undefined : destinationLabel(moving, name, landing, allowed)
 			}
 			aria-current={selected && moving === null ? 'true' : undefined}
+			aria-expanded={expanded}
 			draggable={onPickUp !== undefined}
 			onContextMenu={(event) => {
 				// The browser's own menu where this row has none of its own: the
@@ -370,36 +378,95 @@ const Row = ({
 const notesUnder = (node: FolderNode): number =>
 	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
 
+interface DisclosureProps {
+	path: string;
+	name: string;
+	depth: number;
+	open: boolean;
+	onToggle: () => void;
+	moving: Moving | null;
+	onOver: (path: string | null) => void;
+	onDrop: (into: string) => void;
+}
+
 /**
  * The chevron that opens and shuts a notebook with notebooks inside it, in
  * the room before its name. Out of the tab order: the row is the stop, and
  * Left and Right on it do what this does, as in any tree of folders, so a
  * keyboard does not take two stops a notebook. Still a button with a name
  * and a state, for a screen reader's list of them and for a pointer.
+ *
+ * Except while something is being moved, when it is a stop of its own: the
+ * row may then be no destination, and disabled — the notebook a note is
+ * already in — and the destination the user wants is inside it. And it is a
+ * piece of the row to drop on, as the row's start was before it was there.
  */
 const Disclosure = ({
+	path,
 	name,
 	depth,
 	open,
 	onToggle,
-}: {
-	name: string;
-	depth: number;
-	open: boolean;
-	onToggle: () => void;
-}) => (
-	<button
-		type="button"
-		className="row-disclosure"
-		tabIndex={-1}
-		aria-expanded={open}
-		aria-label={`Notebooks inside \u201c${name}\u201d`}
-		style={{ insetInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
-		onClick={onToggle}
-	>
-		<Icon name="chevron" />
-	</button>
-);
+	moving,
+	onOver,
+	onDrop,
+}: DisclosureProps) => {
+	const allowed = moving !== null && canDrop(moving, path);
+	return (
+		<button
+			type="button"
+			className="row-disclosure"
+			tabIndex={moving === null ? -1 : 0}
+			aria-expanded={open}
+			aria-label={`Notebooks inside \u201c${name}\u201d`}
+			style={{ insetInlineStart: `calc(var(--gutter) + ${String(depth * 0.85)}rem)` }}
+			onClick={onToggle}
+			onDragOver={(event) => {
+				if (!allowed) return;
+				event.preventDefault();
+				onOver(path);
+			}}
+			onDrop={(event) => {
+				if (!allowed) return;
+				event.preventDefault();
+				onOver(null);
+				onDrop(path);
+			}}
+		>
+			<Icon name="chevron" />
+		</button>
+	);
+};
+
+/** How long something dragged rests on a shut notebook before it opens. */
+const DWELL_MS = 600;
+/** Longer than this between two `dragover`s, and it had gone and come back. */
+const DWELL_GAP_MS = 600;
+
+/**
+ * A shut notebook opens under something dragged that rests on it, as a
+ * folder does in a file manager: before there was a chevron, every notebook
+ * was a place to drop, and a drag has no hand free to press one. Counted by
+ * the `dragover`s a browser sends while the pointer is there, moving or not,
+ * so there is no timer to cancel.
+ */
+const useDwell = (open: (path: string) => void) => {
+	const dwell = useRef<{ path: string; since: number; seen: number } | null>(null);
+	return (path: string) => {
+		const now = Date.now();
+		const last = dwell.current;
+		const since =
+			last !== null && last.path === path && now - last.seen < DWELL_GAP_MS
+				? last.since
+				: now;
+		if (now - since >= DWELL_MS) {
+			dwell.current = null;
+			open(path);
+			return;
+		}
+		dwell.current = { path, since, seen: now };
+	};
+};
 
 /**
  * Left and Right on a notebook's row, as a tree of folders has them: Right
@@ -411,6 +478,8 @@ const treeKeys =
 	(hasChildren: boolean, open: boolean, toggle: (open: boolean) => void) =>
 	(event: KeyboardEvent<HTMLButtonElement>) => {
 		if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+		// Alt and Command with an arrow are the browser's Back and Forward.
+		if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
 		const item = event.currentTarget.closest('li');
 		if (event.key === 'ArrowRight') {
 			if (!hasChildren) return;
@@ -453,6 +522,8 @@ interface FolderRowsProps {
 	/** The notebooks whose notebooks are listed. */
 	openNotebooks: ReadonlySet<string>;
 	onToggle: (path: string, open: boolean) => void;
+	/** Something dragged is over a shut notebook (`useDwell`). */
+	onDwell: (path: string) => void;
 }
 
 const FolderRows = ({
@@ -473,6 +544,7 @@ const FolderRows = ({
 	itemsFor,
 	openNotebooks,
 	onToggle,
+	onDwell,
 }: FolderRowsProps) => (
 	<>
 		{nodes.map((node) => {
@@ -486,15 +558,30 @@ const FolderRows = ({
 			const count = hasChildren && !open ? notesUnder(node) : node.noteCount;
 			return (
 				<li key={node.path}>
-					<div className="row-item">
+					<div
+						className="row-item"
+						// On the row's box rather than its button, which may be
+						// disabled for the move, and then is not where the pointer lands.
+						onDragOver={
+							moving !== null && hasChildren && !open
+								? () => {
+										onDwell(node.path);
+									}
+								: undefined
+						}
+					>
 						{hasChildren && (
 							<Disclosure
+								path={node.path}
 								name={node.name}
 								depth={depth}
 								open={open}
 								onToggle={() => {
 									toggle(!open);
 								}}
+								moving={moving}
+								onOver={onOver}
+								onDrop={onDrop}
 							/>
 						)}
 						{node.path === renaming ? (
@@ -536,6 +623,7 @@ const FolderRows = ({
 									onMenu(node.path, at);
 								}}
 								onKeyDown={treeKeys(hasChildren, open, toggle)}
+								expanded={hasChildren ? open : undefined}
 							/>
 						)}
 						{/* Not while its name is being typed, when the row is a field;
@@ -574,6 +662,7 @@ const FolderRows = ({
 								itemsFor={itemsFor}
 								openNotebooks={openNotebooks}
 								onToggle={onToggle}
+								onDwell={onDwell}
 							/>
 						</ul>
 					)}
@@ -585,6 +674,13 @@ const FolderRows = ({
 
 /** No notebook open, which is how every one starts. */
 const NONE_OPEN: ReadonlySet<string> = new Set();
+
+/** Notebooks opened, by whoever keeps which are open. */
+const opener =
+	(onOpenNotebooks: ((paths: string[], open: boolean) => void) | undefined) =>
+	(...paths: string[]) => {
+		onOpenNotebooks?.(paths, true);
+	};
 
 /** One notebook opened or shut, by whoever keeps which are open. */
 const toggleWith =
@@ -639,6 +735,7 @@ const TreeBody = ({
 	itemsFor,
 	openNotebooks = NONE_OPEN,
 	onToggle,
+	onDwell,
 }: TreeBodyProps) => (
 	// Room for a chevron before every name, so the names stand in one column,
 	// only where some notebook has one.
@@ -701,6 +798,7 @@ const TreeBody = ({
 				itemsFor={itemsFor}
 				openNotebooks={openNotebooks}
 				onToggle={onToggle}
+				onDwell={onDwell}
 			/>
 		)}
 		{/* A row like the notebooks', the room for a `⋯` and all, so its count
@@ -741,8 +839,14 @@ const useRevealed = (
 ) => {
 	const revealed = useRef<string | undefined>(undefined);
 	useEffect(() => {
-		if (openNotebooks === undefined || selectedFolder === undefined || selectedFolder === ROOT)
+		// Not read yet, for this source: a source shown in place of another has
+		// a set of its own, which the notebook open there has to be revealed in
+		// too, though its path may be the one revealed in the last.
+		if (openNotebooks === undefined) {
+			revealed.current = undefined;
 			return;
+		}
+		if (selectedFolder === undefined || selectedFolder === ROOT) return;
 		if (revealed.current === selectedFolder) return;
 		revealed.current = selectedFolder;
 		const shut = ancestorPaths(selectedFolder).filter((path) => !openNotebooks.has(path));
@@ -790,6 +894,8 @@ export const Sidebar = ({
 	const [over, setOver] = useState<string | null>(null);
 
 	useRevealed(selectedFolder, openNotebooks, onOpenNotebooks);
+	const openThese = opener(onOpenNotebooks);
+	const dwell = useDwell(openThese);
 
 	const pickUp = onPickUp ?? (() => undefined);
 	const drop = onDrop ?? (() => undefined);
@@ -858,6 +964,10 @@ export const Sidebar = ({
 		enabled: manageable,
 		run: () => {
 			setRenaming(open ?? null);
+			// The row becomes the field, so it has to be listed: a notebook inside
+			// a shut one is not, and its name would wait there for whenever that
+			// one is opened next, and take the focus then.
+			if (open !== undefined) openThese(...ancestorPaths(open));
 			onReveal?.();
 		},
 	});
@@ -964,6 +1074,7 @@ export const Sidebar = ({
 				itemsFor={(path) => notebookMenuItems(basename(path), actionsFor(path))}
 				openNotebooks={openNotebooks}
 				onToggle={toggleWith(onOpenNotebooks)}
+				onDwell={dwell}
 			/>
 
 			{menu !== null && (

@@ -33,6 +33,7 @@ import { deletedHere } from '../store/deletedHere.js';
 import { heldBytesAreCurrent } from '../store/files.js';
 import { foldPath } from '../store/naming.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
+import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 
 /**
@@ -82,7 +83,7 @@ export interface DexieSyncStoreOptions {
 
 type Scope = Pick<
 	NotesDatabase,
-	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes'
+	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes' | 'prefs'
 >;
 
 /**
@@ -549,6 +550,9 @@ export const createDexieSyncStore = (
 				}))
 		);
 
+		// Open in the sidebar where it was, as a move made here keeps it.
+		await moveOpenNotebooks(scope, connectionId, from, to);
+
 		// Files, bound and pending: an id-only feed names none of them.
 		const files = (await filesOf(scope)).filter((file) => isWithin(file.path, from));
 		await scope.files.bulkPut(
@@ -639,6 +643,8 @@ export const createDexieSyncStore = (
 
 		const folders = (await foldersOf(scope)).filter((folder) => isWithin(folder.path, path));
 		await scope.folders.bulkDelete(folders.map((folder) => [connectionId, folder.path]));
+		// So one made at its path later starts shut, as a delete made here leaves it.
+		await forgetOpenNotebooks(scope, connectionId, path);
 
 		// A clean note goes with its folder. A dirty one is the user's writing and
 		// exists nowhere else, so it stays, cut loose from the file that is gone.

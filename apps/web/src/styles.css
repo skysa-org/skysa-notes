@@ -1038,6 +1038,12 @@ button.row:disabled {
 	cursor: default;
 }
 
+/* And not where a pointer lands, so a drag resting on a shut notebook the
+   move cannot go into reaches the row's box, which opens it (`useDwell`). */
+.tree button.row:disabled {
+	pointer-events: none;
+}
+
 /* The row being dragged, still in the list it came from. */
 button.row.moving {
 	opacity: 0.5;
@@ -3567,6 +3573,12 @@ button.danger {
 	/* As wide as `button.icon` is here. */
 	.row-item {
 		--row-options: var(--tap);
+	}
+
+	/* A chevron a thumb can land on: a near miss selects the notebook, and in a
+	   compact window that leaves for its notes. The names move over with it. */
+	.tree.nested {
+		--disclosure: 1.75rem;
 	}
 
 	.source-tab,
