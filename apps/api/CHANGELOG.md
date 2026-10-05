@@ -1,5 +1,12 @@
 # @skysa/api
 
+## 0.17.1
+
+### Patch Changes
+
+- Updated dependencies [bca2080]
+  - @skysa/core@0.17.1
+
 ## 0.17.0
 
 ### Patch Changes
