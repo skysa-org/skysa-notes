@@ -81,6 +81,28 @@ describe('NoteList', () => {
 		);
 	});
 
+	it('passes over the date above the title, and a time on the line after it', () => {
+		const made = Date.UTC(2020, 0, 13, 19, 44, 34);
+		renderList({
+			notes: [
+				{
+					...note('Links', 'Monday, January 13, 2020\n\n# Links\n\nAdd okta\n'),
+					createdAt: made,
+				},
+				{
+					...note(
+						'Plans',
+						'# Plans\n\nMonday, January 13, 2020\n\n2:44 PM\n\nAgree the plan\n'
+					),
+					createdAt: made,
+				},
+			],
+		});
+
+		expect(screen.getByText(/okta/).textContent).toBe('Add okta');
+		expect(screen.getByText(/Agree/).textContent).toBe('Agree the plan');
+	});
+
 	it('marks where one line of the note ends and the next begins', () => {
 		renderList({
 			notes: [note('Alpha', '# Alpha\n\nBuy milk\nCall the bank\n\nThen   lunch.\n')],

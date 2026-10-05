@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isCreatedLine } from '../src/store/createdLine.js';
+import { isCreatedLine, isTimeLine } from '../src/store/createdLine.js';
 
 const MADE = Date.UTC(2014, 1, 20, 14, 0, 10);
 
@@ -34,6 +34,34 @@ describe('isCreatedLine', () => {
 		expect(isCreatedLine('2014-02', second, ['en'])).toBe(false);
 	});
 
+	it('reads the forms other languages write a date in', () => {
+		[
+			['es', 'jueves, 20 de febrero de 2014'],
+			['pt-BR', 'quinta-feira, 20 de fevereiro de 2014'],
+			['ru', '20 февраля 2014 г.'],
+			['pl', '20 lutego 2014'],
+			['de', 'Donnerstag, 20. Februar 2014 um 14:00'],
+			['da', 'torsdag den 20. februar 2014'],
+			['ja', '2014年2月20日'],
+			['ko', '2014년 2월 20일'],
+		].forEach(([locale = '', line]) => {
+			expect(isCreatedLine(line, MADE, [locale, 'en']), `${locale}: ${String(line)}`).toBe(
+				true
+			);
+		});
+		expect(isCreatedLine('20 de febrero de 2014 fui', MADE, ['es', 'en'])).toBe(false);
+	});
+
+	it('reads the times and ordinals a template writes', () => {
+		[
+			'Thursday, February 20th, 2014',
+			'February 20, 2014 2 PM',
+			'20 February 2014 14h00',
+		].forEach((line) => {
+			expect(isCreatedLine(line, MADE, ['en']), line).toBe(true);
+		});
+	});
+
 	it('takes the day in this time zone or in UTC, as an exporter may have written either', () => {
 		const lateUtc = Date.UTC(2014, 1, 20, 23, 30);
 		const local = new Date(lateUtc);
@@ -44,9 +72,22 @@ describe('isCreatedLine', () => {
 
 	it('leaves any line that says more than the date, or another date', () => {
 		[
+			// The day's numbers, but other things than a date made of them.
+			'$20 – Feb 2014',
+			'20 × 2 = 2014',
+			'-20 °, 2 Feb 2014',
+			'2014-20-20',
+			'20 20 2014',
+			'2014-02-20 / 2014-02-02',
+			'Feb 20 – Feb 2, 2014',
+			// The month and day the other way round, the year first.
+			'2014-20-02',
+			// A second time is an event, not when the note was made.
+			'Thursday, February 20, 2014 7:00 PM - 11:30 PM',
 			'Thursday, February 20, 2014: the meeting',
 			'Notes from February 20, 2014',
-			'Thursday, February 21, 2014',
+			// Days enough away that no time zone makes them the note's.
+			'Sunday, February 23, 2014',
 			'February 2014',
 			'20 2014',
 			'',
@@ -55,5 +96,21 @@ describe('isCreatedLine', () => {
 		});
 		expect(isCreatedLine(undefined, MADE, ['en'])).toBe(false);
 		expect(isCreatedLine('2014-02-20', Number.NaN, ['en'])).toBe(false);
+	});
+
+	it('reads ISO order as year, month, day, and another order either way', () => {
+		const third = Date.UTC(2014, 1, 3, 12);
+		expect(isCreatedLine('2014-02-03', third, ['en'])).toBe(true);
+		expect(isCreatedLine('2014-03-02', third, ['en'])).toBe(false);
+		expect(isCreatedLine('03/02/2014', third, ['en'])).toBe(true);
+		expect(isCreatedLine('02/03/2014', third, ['en'])).toBe(true);
+	});
+
+	it('knows a line that is only a time of day', () => {
+		expect(isTimeLine('2:00 PM')).toBe(true);
+		expect(isTimeLine('14:00')).toBe(true);
+		expect(isTimeLine('2:00 PM - 3:00 PM')).toBe(false);
+		expect(isTimeLine('Lunch at 2:00 PM')).toBe(false);
+		expect(isTimeLine(undefined)).toBe(false);
 	});
 });
