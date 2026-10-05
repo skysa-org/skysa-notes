@@ -2424,6 +2424,28 @@ button.danger {
 	flex-basis: 100%;
 }
 
+/* The two ways to import (`ImportNotes`): side by side while they fit, each
+   taking half, and one above the other in a sidebar too narrow for both. */
+.account-import {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.account-import button {
+	flex: 1 1 8rem;
+}
+
+/* The import question says what comes in and then, a line each, what stays
+   out and why: one paragraph to a reader, lines apart to the eye. */
+.import-line {
+	display: block;
+}
+
+.import-line + .import-line {
+	margin-block-start: 0.5rem;
+}
+
 /* The devices signed in to a source (`Devices`): one row each, what the device
    is on the left and Remove at the end. The label wraps in its own column, so
    in a narrow sidebar "last used 9:48 AM" breaks across lines beside the

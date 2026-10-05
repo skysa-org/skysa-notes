@@ -18,14 +18,27 @@
 
 export const pickFiles = ({
 	accept,
+	folder = false,
 	within = document,
-}: { accept?: string; within?: Document } = {}): Promise<File[]> =>
+}: {
+	accept?: string;
+	/**
+	 * A folder rather than files: everything in it, at every depth, each with
+	 * its path from the folder in `webkitRelativePath`. For an import
+	 * (`store/importLibrary.ts`). Every desktop browser takes the attribute,
+	 * unprefixed name or not; a browser that does not opens a picker of files.
+	 * https://developer.mozilla.org/en-US/docs/Web/API/HTMLInputElement/webkitdirectory
+	 */
+	folder?: boolean;
+	within?: Document;
+} = {}): Promise<File[]> =>
 	new Promise((resolve) => {
 		const input = within.createElement('input');
 		input.setAttribute('type', 'file');
 		input.setAttribute('multiple', '');
 		input.setAttribute('hidden', '');
 		if (accept !== undefined) input.setAttribute('accept', accept);
+		if (folder) input.setAttribute('webkitdirectory', '');
 		// Once: a promise keeps the first answer, and the input is gone after it.
 		const answer = (files: File[]): void => {
 			input.remove();

@@ -110,7 +110,7 @@ export const UNSEEN_AT_PROVIDER: Partial<
 > = {
 	gdrive: {
 		summary: 'Notes added on the Drive website do not appear here',
-		detail: `Google Drive lets this app see only the files it made. Notes added to the ${APP_FOLDER_NAME} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here.`,
+		detail: `Google Drive lets this app see only the files it made. Notes added to the ${APP_FOLDER_NAME} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here. To bring notes in, use Import a folder or Import files here.`,
 	},
 };
 

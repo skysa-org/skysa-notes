@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
+import { type pickFiles } from '../src/editor/pickFiles.js';
 import {
 	bindConnection,
 	detachConnection,
@@ -187,7 +188,9 @@ const renderPanel = (
 	/** What handing a whole source over does, for a test about one that fails. */
 	saveAll: (library: Library) => void = () => undefined,
 	/** What the browser says about keeping the store: by default, as jsdom, nothing. */
-	keep: Keeping = createKeeping(() => undefined)
+	keep: Keeping = createKeeping(() => undefined),
+	/** What the picker hands back, for an import: jsdom opens none. */
+	pick?: typeof pickFiles
 ) => {
 	// Where the panel would send the browser. jsdom has no navigation, so
 	// without this seam a connect test could only prove the button renders.
@@ -228,6 +231,7 @@ const renderPanel = (
 						downloadedFiles.push(library.files.map((file) => file.path));
 					}}
 					keeping={keep}
+					{...(pick === undefined ? {} : { pick })}
 					downloadAll={(library) => {
 						saveAll(library);
 						downloadedAll.push({
@@ -1050,6 +1054,113 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.getByRole('link', { name: 'My Apps' }).getAttribute('href')).toBe(
 			'https://myapplications.microsoft.com/'
 		);
+	});
+
+	describe('importing', () => {
+		/** A picker that hands back these files, and remembers what it was asked for. */
+		const picker = (files: File[]) => {
+			const asked: Parameters<typeof pickFiles>[0][] = [];
+			const pick: typeof pickFiles = (options) => {
+				asked.push(options);
+				return Promise.resolve(files);
+			};
+			return { pick, asked };
+		};
+		const inFolder = (relative: string, content: string): File => {
+			const file = new File([content], relative.split('/').at(-1) ?? relative);
+			Object.defineProperty(file, 'webkitRelativePath', { value: relative });
+			return file;
+		};
+
+		it('asks what will come in and what stays out, then brings it in', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const gdrive = { ...dropbox, provider: 'gdrive' as const, accountId: 'g' };
+			await bindConnection(db, { connectionId: 'c1', provider: 'gdrive', accountId: 'g' });
+			await finishImport(db, 'c1');
+			await holding(db, 'c1');
+			const { pick, asked } = picker([
+				inFolder('old/Work/plan.md', '# Plan\n'),
+				inFolder('old/Work/.hidden.md', 'h'),
+				inFolder('old/.DS_Store', 'x'),
+			]);
+			renderPanel(
+				clientWith({ connection: () => Promise.resolve({ ok: true, value: gdrive }) }),
+				db,
+				'/',
+				fakeSync(),
+				undefined,
+				undefined,
+				undefined,
+				pick
+			);
+
+			await user.click(await enabled('Import a folder…'));
+			const dialog = await screen.findByRole('alertdialog', {
+				name: 'Import into Google Drive?',
+			});
+			expect(asked).toEqual([{ folder: true }]);
+			expect(dialog.textContent).toContain(
+				'1 note, in 1 notebook, will be added to Google Drive'
+			);
+			expect(dialog.textContent).toContain('Left out: 1 note has a name');
+			expect(dialog.textContent).toContain('Work/.hidden.md');
+			expect(await db.notes.count()).toBe(0);
+
+			await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+
+			expect(
+				await screen.findByText(
+					/Imported 1 note\. They go up to Google Drive as it syncs\./
+				)
+			).toBeTruthy();
+			const note = await db.notes
+				.where('[connectionId+path]')
+				.equals(['c1', 'Work/plan.md'])
+				.first();
+			expect(note?.dirty).toBe(1);
+			expect(note?.source).toBe('# Plan\n');
+		});
+
+		it('brings nothing in when the question is cancelled', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick, asked } = picker([new File(['# One'], 'one.md')]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await user.click(await enabled('Import files…'));
+			expect(asked[0]?.accept).toContain('.zip');
+			const dialog = await screen.findByRole('alertdialog', {
+				name: 'Import into this device?',
+			});
+			await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+			expect(screen.queryByRole('alertdialog')).toBeNull();
+			expect(await db.notes.count()).toBe(0);
+		});
+
+		it('says so when there is nothing to bring in, and asks nothing', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick } = picker([inFolder('old/.DS_Store', 'x')]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await user.click(await enabled('Import a folder…'));
+
+			expect(
+				await screen.findByText('Nothing to import: no notes or files were found.')
+			).toBeTruthy();
+			expect(screen.queryByRole('alertdialog')).toBeNull();
+		});
+
+		it('is not offered while a first import is filling the source', async () => {
+			const db = freshDatabase();
+			await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+			renderPanel(clientWith(), db, '/', fakeSync());
+
+			expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+			expect(screen.queryByRole('button', { name: 'Import a folder…' })).toBeNull();
+		});
 	});
 
 	it('says Google Drive hides what the app did not put in its folder', async () => {
@@ -2638,15 +2749,14 @@ describe('AccountPanel, with a detached source in front', () => {
 		await user.click(await enabled('Discard…'));
 		await user.click(await screen.findByRole('button', { name: 'Discard for good' }));
 
-		const said = await screen.findByText(/Notes are kept on this device only/);
-		// Not on the page. With the source list and the connect buttons moved
-		// to the tab bar there is nothing here to press, so the landing is the
-		// panel itself — which says where the user now is. The bar's `+` is
-		// deliberately not taken: it belongs to another component.
+		await screen.findByText(/Notes are kept on this device only/);
+		// Not on the page, and not on the bar's `+`, which belongs to another
+		// component: on the first thing the panel now offers, which with the
+		// source list and the connect buttons in the tab bar is the import.
+		const first = await screen.findByRole('button', { name: 'Import a folder…' });
 		await waitFor(() => {
-			expect(document.activeElement?.contains(said)).toBe(true);
+			expect(document.activeElement).toBe(first);
 		});
-		expect(document.activeElement?.tagName).toBe('DIV');
 	});
 
 	it('says plainly that a delete still owed will be carried out on reconnecting', async () => {
@@ -3928,6 +4038,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
+				'Import a folder…',
+				'Import files…',
 				'Disconnect…',
 			]);
 		});
@@ -4044,6 +4156,10 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		const options = await rowOptions('This device');
 		await user.click(options);
 		await screen.findByRole('group', { name: 'Source “This device”' });
-		expect(labels('This device')).toEqual(['Download all notes']);
+		expect(labels('This device')).toEqual([
+			'Download all notes',
+			'Import a folder…',
+			'Import files…',
+		]);
 	});
 });
