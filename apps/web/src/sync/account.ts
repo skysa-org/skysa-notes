@@ -96,6 +96,19 @@ export const LEFT_AT_PROVIDER: Partial<
 	},
 };
 
+/**
+ * What the app cannot see in its own folder, where that is less than everything
+ * in it. Google Drive's `drive.file` scope reaches only the files this app made
+ * (docs/ARCHITECTURE.md §5.1), so a file put in the folder any other way — the
+ * Drive website, Drive for desktop, another app — is not there as far as the
+ * app can tell, and nothing about it says so. Dropbox's and OneDrive's app
+ * folders show the app everything in them.
+ * https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+ */
+export const UNSEEN_AT_PROVIDER: Partial<Record<ProviderKind, string>> = {
+	gdrive: 'Google Drive lets this app see only the files it made. Notes put in its folder another way — on the Drive website, with Drive for desktop, or by another app — do not appear here.',
+};
+
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
 	dropbox: 'Dropbox',
 	onedrive: 'OneDrive',

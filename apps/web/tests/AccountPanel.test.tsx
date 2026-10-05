@@ -1051,6 +1051,28 @@ describe('AccountPanel, with an account connected', () => {
 		);
 	});
 
+	it('says Google Drive hides what the app did not put in its folder', async () => {
+		const db = freshDatabase();
+		const gdrive = { ...dropbox, provider: 'gdrive' as const, accountId: 'g-sub' };
+		await bindConnection(db, { connectionId: 'c1', provider: 'gdrive' });
+		renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: gdrive }) }),
+			db
+		);
+
+		expect(await screen.findByText(/Syncing with Google Drive/)).toBeTruthy();
+		expect(screen.getByText(/lets this app see only the files it made/)).toBeTruthy();
+	});
+
+	it('says nothing of the kind for a provider that shows the app its whole folder', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(clientWith(), db);
+
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(screen.queryByText(/lets this app see only the files it made/)).toBeNull();
+	});
+
 	describe('with other devices in the account', () => {
 		const onedrive = { ...dropbox, provider: 'onedrive' as const, accountId: 'ms-sub' };
 		const here = { id: 'g1', createdAt: 1, lastUsedAt: 1, expired: false, current: true };

@@ -59,6 +59,7 @@ import {
 	type LetGoResult,
 	PROVIDER_LABELS,
 	refusedMessage,
+	UNSEEN_AT_PROVIDER,
 	type UnsentAnswer,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
@@ -386,6 +387,16 @@ const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) =>
 			.
 		</p>
 	);
+};
+
+/**
+ * What this source's app folder holds that the app cannot see, said where the
+ * source is: a user who copies notes into the folder by hand otherwise finds
+ * nothing arrived, and nothing to say why (`UNSEEN_AT_PROVIDER`).
+ */
+const UnseenAtProvider = ({ provider }: { provider: ProviderKind | undefined }) => {
+	const unseen = provider === undefined ? undefined : UNSEEN_AT_PROVIDER[provider];
+	return unseen === undefined ? null : <p className="muted">{unseen}</p>;
 };
 
 interface LocalProps {
@@ -1500,6 +1511,7 @@ const Connected = ({
 				Syncing with {label}
 				{displayName !== null && <span className="muted"> · {displayName}</span>}
 			</p>
+			<UnseenAtProvider provider={bound.provider} />
 			<SyncState
 				client={client}
 				database={database}
