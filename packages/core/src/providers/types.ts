@@ -155,6 +155,24 @@ export interface StorageProvider {
 	 * everything in it.
 	 */
 	readonly listsEverything: boolean;
+	/**
+	 * How many notes a push may write at once; one where absent.
+	 *
+	 * Four on Google Drive, where a note is three or four requests end to end:
+	 * one at a time, an import of a thousand took most of half an hour. Four is
+	 * well inside its limits — 325,000 quota units a user a minute, and a note
+	 * costs a few hundred
+	 * (https://developers.google.com/workspace/drive/api/guides/limits).
+	 *
+	 * One on Dropbox, which takes a lock on the namespace for each write, so
+	 * that enough written at once contend for it and are answered `429
+	 * too_many_write_operations`
+	 * (https://docs.dropboxapi.com/dropbox-api/docs/performance) — a rate limit,
+	 * which stops the drain and backs the scheduler off, so writes sent together
+	 * could finish later than in turn. And one on OneDrive until it has
+	 * been measured there.
+	 */
+	readonly writesAtOnce?: number;
 	/** Create the app folder if missing; write the marker only if absent. */
 	readonly ensureRoot: () => Promise<{ rootId: string }>;
 	readonly list: (folderPath: string) => Promise<RemoteEntry[]>;

@@ -72,18 +72,6 @@ import type {
 /** Times an op may fail before the engine stops asking and surfaces it. */
 const MAX_ATTEMPTS = 5;
 
-/**
- * How many notes a push writes at once (`together` in the engine). One at a
- * time, every note waited on the one before though none depends on another,
- * and on Google Drive, where a note is three or four requests end to end, an
- * import of a thousand took most of half an hour. Four at once is well inside
- * every provider's limits — Drive allows a user 325,000 quota units a minute
- * and a note costs a few hundred
- * (https://developers.google.com/workspace/drive/api/guides/limits) — and a
- * rate limit met by any of them stops the drain as one met alone does.
- */
-const TOGETHER = 4;
-
 export type SyncStatus =
 	/** Everything queued reached the remote. */
 	| 'ok'
@@ -218,6 +206,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		maxAttempts = MAX_ATTEMPTS,
 		onProgress = () => undefined,
 	} = options;
+	const writesAtOnce = Math.max(1, provider.writesAtOnce ?? 1);
 
 	/**
 	 * The scan under way, for `onProgress`, and none during a round. Kept here
@@ -3618,11 +3607,33 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * fake is deliberately strict about parents for exactly this reason — so a
 	 * nested notebook has to be made a level at a time.
 	 */
-	const ensureRemoteFolder = async (path: string): Promise<void> => {
-		if (normalizePath(path) === ROOT) return;
-		await ensureRemoteFolder(parentPath(path));
-		await provider.createFolder(path);
+	const ensureRemoteFolder = (path: string): Promise<void> => {
+		if (normalizePath(path) === ROOT) return Promise.resolve();
+		const key = foldName(normalizePath(path));
+		const already = making.get(key);
+		if (already !== undefined) return already;
+		const made = ensureRemoteFolder(parentPath(path)).then(async () => {
+			await provider.createFolder(path);
+		});
+		making.set(key, made);
+		// A folder that could not be made is asked for again by the next write
+		// that needs it, not failed on this one's word.
+		void made.catch(() => {
+			making.delete(key);
+		});
+		return made;
 	};
+
+	/**
+	 * The folders made, or being made, for the turn of the drain under way, by
+	 * folded path: so writes sent together (`sendTogether`) that each find their
+	 * notebook missing — deleted on another device while they had edits — make
+	 * it once between them. Each making it, Google Drive made one apiece: its
+	 * `createFolder` asks first whether the folder is there, and none of them
+	 * was yet. Emptied at every turn (`drainOps`), so a folder removed since is
+	 * asked about again.
+	 */
+	const making = new Map<string, Promise<void>>();
 
 	/**
 	 * Puts a rename beside the name it wanted, when the remote will not give it
@@ -4595,19 +4606,28 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	/**
 	 * The writes at the front of the queue that can be sent at once: notes,
-	 * each at its own path, none out of attempts, at most `TOGETHER`. Nothing
-	 * else goes with them. A notebook made or removed, a move, a delete, a file
-	 * is what an op behind it can depend on ("A failed push stops the queue"),
-	 * and goes alone, in its turn; a note's write depends on no other note's.
+	 * each at its own path, none out of attempts, at most as many as the
+	 * provider takes (`writesAtOnce`). Nothing else goes with them. A notebook
+	 * made or removed, a move, a delete, a file is what an op behind it can
+	 * depend on ("A failed push stops the queue"), and goes alone, in its turn.
+	 *
+	 * Nor does the write of a note with a rename queued: its write takes the
+	 * rename with it (`followTheRename`), so another note's write can be waiting
+	 * on the name it gives up — two notes renamed b→c and a→b, both edited,
+	 * and the second sent beside the first found b.md still taken and was put
+	 * beside it as a conflict. A note's write that moves nothing depends on no
+	 * other note's.
 	 */
-	const together = (ops: readonly SyncOp[]): SyncOp[] =>
-		ops.slice(0, TOGETHER).reduce<{ taken: SyncOp[]; open: boolean }>(
+	const together = (ops: readonly SyncOp[]): SyncOp[] => {
+		const renamed = new Set(ops.filter((op) => op.op === 'move').map((op) => op.noteId));
+		return ops.slice(0, writesAtOnce).reduce<{ taken: SyncOp[]; open: boolean }>(
 			(batch, op) => {
 				if (!batch.open) return batch;
 				const at = foldName(normalizePath(op.path));
 				const fits =
 					op.op === 'write' &&
 					op.attempts < maxAttempts &&
+					!renamed.has(op.noteId) &&
 					!batch.taken.some(
 						(taken) =>
 							taken.noteId === op.noteId || foldName(normalizePath(taken.path)) === at
@@ -4618,6 +4638,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			},
 			{ taken: [], open: true }
 		).taken;
+	};
 
 	/**
 	 * Writes sent at once (`together`), then met as the drain meets any op:
@@ -4626,7 +4647,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * and in front of everything else. So a rate limit or a failure still stops
 	 * the drain where it would have, and a conflict is resolved and the drain
 	 * goes on — and nothing stepped over is anything a later op waits on, since
-	 * a write is not.
+	 * a write is not. A rate limit among them is the one handled, wherever it
+	 * came: handled behind a conflict, the drain would go on and send the rest
+	 * again at once, through the wait the provider asked for.
 	 */
 	const sendTogether = async (
 		batch: readonly SyncOp[],
@@ -4644,8 +4667,9 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		);
 		const failures = results.filter((failure) => failure !== undefined);
 		const after = { ...progress, pushed: progress.pushed + batch.length - failures.length };
-		const [first, ...others] = failures;
+		const first = failures.find((failure) => isRateLimitError(failure.error)) ?? failures[0];
 		if (first === undefined) return drainOps(rest, after, retriedAuth);
+		const others = failures.filter((failure) => failure !== first);
 		return handleOpError(
 			first.error,
 			first.op,
@@ -4674,6 +4698,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		progress: PushProgress,
 		retriedAuth: boolean
 	): Promise<SyncOutcome> => {
+		making.clear();
 		// Every call is handed what is left, so how far it has got is the rest:
 		// an op passed over, given up on or resolved is as done as one sent.
 		const total = pushes.get('current') ?? 0;

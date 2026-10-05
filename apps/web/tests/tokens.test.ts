@@ -83,6 +83,24 @@ describe('provider access tokens', () => {
 		expect(await tokens.get()).toBe('t2');
 	});
 
+	it('mints one for every request that finds the token spent at once', async () => {
+		// Google Drive is written four notes at a time, and each asked for a
+		// token of its own.
+		const db = await bound();
+		const clock = { now: 0 };
+		const client = minting(clock);
+		const tokens = createTokenSource({ db, client, connectionId: 'c1', now: () => clock.now });
+
+		const got = await Promise.all([tokens.get(), tokens.get(), tokens.get(), tokens.get()]);
+
+		expect(got).toEqual(['t1', 't1', 't1', 't1']);
+		expect(client.token).toHaveBeenCalledTimes(1);
+		// And again once it is spent, rather than handing out the first one.
+		clock.now = HOUR;
+		expect(await Promise.all([tokens.get(), tokens.get()])).toEqual(['t2', 't2']);
+		expect(client.token).toHaveBeenCalledTimes(2);
+	});
+
 	it('survives a reload through the connection row, and nowhere else', async () => {
 		const db = await bound();
 		const clock = { now: 0 };
