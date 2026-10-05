@@ -34,6 +34,7 @@ import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createKeeping, type Keeping } from '../src/store/keeping.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
+import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 
@@ -1049,6 +1050,32 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.getByRole('link', { name: 'My Apps' }).getAttribute('href')).toBe(
 			'https://myapplications.microsoft.com/'
 		);
+	});
+
+	it('says Google Drive hides what the app did not put in its folder', async () => {
+		const db = freshDatabase();
+		const gdrive = { ...dropbox, provider: 'gdrive' as const, accountId: 'g-sub' };
+		await bindConnection(db, { connectionId: 'c1', provider: 'gdrive' });
+		renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: gdrive }) }),
+			db
+		);
+
+		expect(await screen.findByText(/Syncing with Google Drive/)).toBeTruthy();
+		const unseen = UNSEEN_AT_PROVIDER.gdrive;
+		const storage = within(screen.getByRole('region', { name: 'Storage' }));
+		expect(unseen?.detail).toContain('skysa-notes folder');
+		expect(storage.getByText(unseen?.summary ?? '')).toBeTruthy();
+		expect(storage.getByText(unseen?.detail ?? '')).toBeTruthy();
+	});
+
+	it('says nothing of the kind for a provider that shows the app its whole folder', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		renderPanel(clientWith(), db);
+
+		expect(await screen.findByText(/Syncing with Dropbox/)).toBeTruthy();
+		expect(screen.queryByText(UNSEEN_AT_PROVIDER.gdrive?.summary ?? '')).toBeNull();
 	});
 
 	describe('with other devices in the account', () => {

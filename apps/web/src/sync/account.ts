@@ -1,4 +1,4 @@
-import { type EntitlementCode, type ProviderKind } from '@skysa/core';
+import { APP_FOLDER_NAME, type EntitlementCode, type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';
@@ -93,6 +93,24 @@ export const LEFT_AT_PROVIDER: Partial<
 				accounts: 'a work or school account, or ask your administrator',
 			},
 		],
+	},
+};
+
+/**
+ * What the app cannot see in its own folder, where that is less than everything
+ * in it. Google Drive's `drive.file` scope reaches only the files this app made
+ * (docs/ARCHITECTURE.md §5.1), so a file put in the folder any other way — the
+ * Drive website, Drive for desktop, another app — is not there as far as the
+ * app can tell, and nothing about it says so. Dropbox's and OneDrive's app
+ * folders show the app everything in them.
+ * https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+ */
+export const UNSEEN_AT_PROVIDER: Partial<
+	Record<ProviderKind, Readonly<{ summary: string; detail: string }>>
+> = {
+	gdrive: {
+		summary: 'Notes added on the Drive website do not appear here',
+		detail: `Google Drive lets this app see only the files it made. Notes added to the ${APP_FOLDER_NAME} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here.`,
 	},
 };
 

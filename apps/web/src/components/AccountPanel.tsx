@@ -59,6 +59,7 @@ import {
 	type LetGoResult,
 	PROVIDER_LABELS,
 	refusedMessage,
+	UNSEEN_AT_PROVIDER,
 	type UnsentAnswer,
 } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
@@ -385,6 +386,29 @@ const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) =>
 			))}
 			.
 		</p>
+	);
+};
+
+/**
+ * What this source's app folder holds that the app cannot see, said where the
+ * source is: a user who copies notes into the folder by hand otherwise finds
+ * nothing arrived, and nothing to say why (`UNSEEN_AT_PROVIDER`). Shut until
+ * asked for, as the devices are: it is the same for every Drive source for
+ * good, and open it would be a paragraph in the sidebar for good.
+ */
+const UnseenAtProvider = ({ provider }: { provider: ProviderKind | undefined }) => {
+	const unseen = provider === undefined ? undefined : UNSEEN_AT_PROVIDER[provider];
+	if (unseen === undefined) return null;
+	return (
+		<div className="account-unseen">
+			<details>
+				<summary className="muted">
+					<Icon name="chevron" />
+					{unseen.summary}
+				</summary>
+				<p className="muted">{unseen.detail}</p>
+			</details>
+		</div>
 	);
 };
 
@@ -1514,6 +1538,7 @@ const Connected = ({
 				onRescanning={setRescanning}
 				buttons={buttons}
 			/>
+			<UnseenAtProvider provider={bound.provider} />
 			{/*
 			 * Not while an import is filling the source, when the archive would be
 			 * whatever part of it had arrived; nor while the disconnect question
