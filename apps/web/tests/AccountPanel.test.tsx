@@ -479,10 +479,14 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(within(question).getByText(/will move/).textContent).toBe(
 			'Your 1 notebook and 2 notes on this device will move into Dropbox and sync there. Cancel to keep them on this device only.'
 		);
-		// Cancel has the focus, as in every question this app asks.
-		expect(document.activeElement).toBe(
-			within(question).getByRole('button', { name: 'Cancel' })
-		);
+		// Cancel has the focus, as in every question this app asks — once the
+		// dialog's effect has given it, which a loaded machine runs a moment
+		// after the dialog is found.
+		await waitFor(() => {
+			expect(document.activeElement).toBe(
+				within(question).getByRole('button', { name: 'Cancel' })
+			);
+		});
 		// Nothing has been started while the question is out.
 		expect(started).toEqual([]);
 		expect(await db.credentials.get(PENDING_CREDENTIAL_ID)).toBeUndefined();
