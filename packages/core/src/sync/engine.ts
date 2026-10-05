@@ -67,6 +67,11 @@ import type {
  * which is what makes it safe to interrupt at any point: a sync that dies
  * halfway leaves a consistent store and a cursor that under-claims rather than
  * over-claims, so the next run redoes work instead of skipping it.
+ *
+ * The one exception is what a pull has read and not yet committed (`held`),
+ * kept so that redoing the work does not mean downloading it again. It decides
+ * nothing: it answers only for a file at the exact version it was read at,
+ * whose bytes cannot have changed since.
  */
 
 /** Times an op may fail before the engine stops asking and surfaces it. */
@@ -221,6 +226,39 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * reason the scan's count is.
 	 */
 	const rounds = new Map<'current', { total: number; done: number }>();
+
+	/**
+	 * Notes a pull has read whose batch has not been committed, by remote id.
+	 * A batch is all-or-nothing — a round is one, and on Google Drive a scan of
+	 * up to a thousand notes is one page — so a pull that fails at the last
+	 * note, because a phone's screen went off and took the network with it,
+	 * would otherwise read every one of them again. Kept across a failed pull
+	 * for the next on this engine, which is the same session's; let go of as
+	 * each batch commits. Never consulted for a read that asks whether a file
+	 * is still there, which is about now.
+	 *
+	 * In memory, so a reload starts empty. Not capped: these are the strings
+	 * the batch's own changes held while it ran, one version per file.
+	 */
+	const held = new Map<string, { version: string; content: string }>();
+
+	/** A note's content, from `held` at the listed version or else the provider. */
+	const readNote = async (entry: RemoteEntry): Promise<{ content: string; version: string }> => {
+		const kept = held.get(entry.remoteId);
+		if (kept !== undefined && kept.version === entry.version) return kept;
+		const found = await provider.read(entry);
+		// Under the version the read says, not the one the feed did: a file
+		// written in between is not held as the version that was listed.
+		held.set(entry.remoteId, { version: found.version, content: found.content });
+		return found;
+	};
+
+	/** What a committed batch read is in the store now. */
+	const letGo = (entries: readonly ChangeEntry[]) => {
+		entries.forEach((entry) => {
+			if (entry.remoteId !== undefined) held.delete(entry.remoteId);
+		});
+	};
 
 	const reportRound = (path?: string) => {
 		const round = rounds.get('current');
@@ -2223,7 +2261,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		//
 		// Nor may a file that is not UTF-8 text throw, for the same reason and
 		// worse: that one reads the same way every time (`leaveUnread`).
-		const found = await provider.read(entry).catch((error: unknown) => {
+		//
+		// Read once per version: a pull that failed after reading it read it into
+		// `held`, and this is that pull again.
+		const found = await readNote(entry).catch((error: unknown) => {
 			if (isNotFoundError(error)) return 'gone' as const;
 			if (isUnreadableError(error)) return 'unreadable' as const;
 			throw error;
@@ -3281,6 +3322,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			rounds.delete('current');
 		});
 		await store.applyPull({ changes, cursor: round.cursor });
+		letGo(round.entries);
 		return ok({ pulled: changes.length, conflicts: conflictPathsIn(changes) });
 	};
 
@@ -3355,6 +3397,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			: await reconcile(seen, changes, renamesQueued(queue), upload, unread, files);
 		const batch = [...changes, ...tail];
 		await store.applyPull({ changes: batch, ...(more ? {} : { cursor: set.cursor }) });
+		// This page's notes only: a scan retried after failing on a later page
+		// commits this one again first, and what that later page had read is
+		// still to be used.
+		letGo(set.entries);
 
 		// Every note on the page is dealt with now, read or already held.
 		const scanning = scans.get('current');
@@ -3418,7 +3464,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	// Everything, not just the drain: reading the cursor is a store call too, and
 	// a store that is closed or corrupt rejects there, before the loop that was
 	// carrying the `catch`.
-	const pull = (): Promise<SyncOutcome> => runPull().catch(transient);
+	const pull = (): Promise<SyncOutcome> =>
+		runPull()
+			.then((outcome) => {
+				// Every batch committed: anything still held is a file the
+				// listing no longer names, read by a pull that failed.
+				if (outcome.status === 'ok') held.clear();
+				return outcome;
+			})
+			.catch(transient);
 
 	// ---------------------------------------------------------------- push
 

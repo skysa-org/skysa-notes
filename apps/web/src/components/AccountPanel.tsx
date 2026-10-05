@@ -62,6 +62,7 @@ import {
 	UNSEEN_AT_PROVIDER,
 	type UnsentAnswer,
 } from '../sync/account.js';
+import { isLongRun } from '../sync/progress.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
 import { ConnectButton } from './ConnectButton.js';
@@ -206,15 +207,6 @@ const when = (at: number): string => {
 		: date.toLocaleDateString();
 };
 
-/**
- * From how many a run's count is said. A run of a few — an edit sent, a
- * notebook made — is over before a count could be read, and a bar for each
- * would flash under the line every time the user stopped typing; the runs
- * worth counting are an import's thousand notes, sent from one device and
- * received on another (docs/ARCHITECTURE.md §7, "Sync loop").
- */
-export const PROGRESS_FROM = 20;
-
 const counted = (n: number): string => n.toLocaleString();
 
 /**
@@ -231,9 +223,8 @@ interface SyncCount {
 
 /** A long run's count, or nothing for a run too short to count. */
 const syncCount = (progress: SyncProgress | undefined, label: string): SyncCount | undefined => {
-	if (progress === undefined) return undefined;
+	if (!isLongRun(progress)) return undefined;
 	if (progress.stage === 'scanning') return scanCount(progress, label);
-	if (progress.total < PROGRESS_FROM) return undefined;
 	const of = `${counted(progress.done)} of ${counted(progress.total)}`;
 	const bar = { value: progress.done, max: progress.total };
 	return progress.stage === 'uploading'
@@ -244,8 +235,7 @@ const syncCount = (progress: SyncProgress | undefined, label: string): SyncCount
 const scanCount = (
 	{ found, done, listing }: Extract<SyncProgress, { stage: 'scanning' }>,
 	label: string
-): SyncCount | undefined => {
-	if (found < PROGRESS_FROM) return undefined;
+): SyncCount => {
 	if (listing) {
 		return {
 			text: `Looking for notes: ${counted(found)} found`,

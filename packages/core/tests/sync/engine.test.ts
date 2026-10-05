@@ -10149,3 +10149,189 @@ describe('progress', () => {
 		expect(said).toEqual([]);
 	});
 });
+
+/**
+ * A pull that fails part-way: a phone's screen goes off and takes the network
+ * with it. A batch commits whole or not at all — a round always, and a scan a
+ * page at a time, which on Google Drive is a thousand notes — so what was read
+ * before the failure is not in the store. The engine keeps it (`held`), and
+ * the next pull on the same engine reads each note once, not the whole batch
+ * again.
+ */
+describe('a pull that fails part-way', () => {
+	const readsOf = (on: FakeProvider): string[] =>
+		on
+			.callLog()
+			.filter((call) => call.op === 'read')
+			.map((call) => call.path ?? '');
+
+	/** How many times each path was read since `from` reads had been made. */
+	const readCounts = (on: FakeProvider, from: number): Record<string, number> =>
+		readsOf(on)
+			.slice(from)
+			.reduce<Record<string, number>>(
+				(counts, path) => ({ ...counts, [path]: (counts[path] ?? 0) + 1 }),
+				{}
+			);
+
+	/** The first read of `path`, once, fails with `error`. */
+	const failFirstReadOf = (
+		on: FakeProvider,
+		path: string,
+		error: Error = new Error('network suspended')
+	) => {
+		let failed = false;
+		on.setFault((call) => {
+			if (call.op !== 'read' || call.path !== path || failed) return undefined;
+			failed = true;
+			return error;
+		});
+	};
+
+	const PATHS = ['a.md', 'b.md', 'c.md', 'd.md', 'e.md', 'f.md'];
+
+	/** Six notes sent from another device since this one's cursor: one round. */
+	const sixInARound = async (): Promise<void> => {
+		await engine.pull();
+		expect(store.storedCursor()).toBeDefined();
+		for (const path of PATHS) await remoteFile(path, `${path}\n`);
+	};
+
+	const paths = () =>
+		store
+			.notes()
+			.map((note) => note.path)
+			.sort();
+
+	it('reads each note of a round once, however many tries it takes', async () => {
+		await sixInARound();
+		const before = readsOf(provider).length;
+		failFirstReadOf(provider, 'd.md');
+
+		const failed = await engine.pull();
+
+		expect(failed.status).toBe('retry');
+		expect(store.notes()).toEqual([]);
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(paths()).toEqual(PATHS);
+		expect(store.notes().find((note) => note.path === 'c.md')?.content).toBe('c.md\n');
+		// The three read before the failure are not read again. The one that
+		// failed is, and those after it once each.
+		expect(readCounts(provider, before)).toEqual({
+			'a.md': 1,
+			'b.md': 1,
+			'c.md': 1,
+			'd.md': 2,
+			'e.md': 1,
+			'f.md': 1,
+		});
+	});
+
+	it('reads nothing again when it was the commit that failed', async () => {
+		await sixInARound();
+		store.breakNextApply();
+
+		expect((await engine.pull()).status).toBe('retry');
+		const before = readsOf(provider).length;
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(paths()).toEqual(PATHS);
+		expect(readsOf(provider)).toHaveLength(before);
+	});
+
+	it('reads again a note written over since it was read', async () => {
+		await sixInARound();
+		failFirstReadOf(provider, 'd.md');
+		expect((await engine.pull()).status).toBe('retry');
+		provider.setFault(undefined);
+		const held = provider.snapshot().find((entry) => entry.path === 'a.md');
+		await provider.write('a.md', 'written since\n', { expectedVersion: held?.version });
+		const before = readsOf(provider).length;
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(store.notes().find((note) => note.path === 'a.md')?.content).toBe('written since\n');
+		expect(readCounts(provider, before)).toEqual({
+			'a.md': 1,
+			'd.md': 1,
+			'e.md': 1,
+			'f.md': 1,
+		});
+	});
+
+	it('does not hold a file it could not read as text', async () => {
+		await engine.pull();
+		await remoteFile('a.md', 'a\n');
+		provider.plantBytes('b.md', new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+		await remoteFile('c.md', 'c\n');
+		const before = readsOf(provider).length;
+		failFirstReadOf(provider, 'c.md');
+
+		expect((await engine.pull()).status).toBe('retry');
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(paths()).toEqual(['a.md', 'c.md']);
+		expect((await store.unreadable()).map((file) => file.path)).toEqual(['b.md']);
+		expect(readCounts(provider, before)).toEqual({ 'a.md': 1, 'b.md': 2, 'c.md': 2 });
+	});
+
+	it('reads a round once more, not twice, when a token expires part-way', async () => {
+		await sixInARound();
+		let refreshed = 0;
+		const withAuth = createSyncEngine({
+			provider,
+			store,
+			now: () => AT,
+			reauthorize: () => {
+				refreshed += 1;
+				return Promise.resolve();
+			},
+		});
+		const before = readsOf(provider).length;
+		failFirstReadOf(provider, 'd.md', new AuthError('expired'));
+
+		const result = await withAuth.pull();
+
+		expect(result.status).toBe('ok');
+		expect(refreshed).toBe(1);
+		expect(paths()).toEqual(PATHS);
+		expect(Object.values(readCounts(provider, before)).reduce((a, b) => a + b, 0)).toBe(7);
+	});
+
+	it('keeps what a scan read on a page that did not commit', async () => {
+		const paged = createFakeProvider({ pageSize: 2 });
+		await paged.ensureRoot();
+		for (const path of PATHS) await paged.write(path, `${path}\n`, {});
+		const scanning = createSyncEngine({ provider: paged, store, now: () => AT });
+		const before = readsOf(paged).length;
+		failFirstReadOf(paged, 'e.md');
+
+		expect((await scanning.pull()).status).toBe('retry');
+		// Pages of two, in path order, the root folder first: [/, a] [b, c]
+		// [d, e] [f]. Two committed; the third had read d.md when e.md failed.
+		expect(paths()).toEqual(['a.md', 'b.md', 'c.md']);
+		expect(store.storedCursor()).toBeUndefined();
+
+		const result = await scanning.pull();
+
+		expect(result.status).toBe('ok');
+		expect(paths()).toEqual(PATHS);
+		expect(store.storedCursor()).toBeDefined();
+		// a.md to c.md are in the store at their versions, and d.md is held.
+		// Only the note that failed is read twice.
+		expect(readCounts(paged, before)).toEqual({
+			'a.md': 1,
+			'b.md': 1,
+			'c.md': 1,
+			'd.md': 1,
+			'e.md': 2,
+			'f.md': 1,
+		});
+	});
+});

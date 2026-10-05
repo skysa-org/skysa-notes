@@ -11,7 +11,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { AccountPanel, PROGRESS_FROM, returnPath } from '../src/components/AccountPanel.js';
+import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { type pickFiles } from '../src/editor/pickFiles.js';
 import {
@@ -36,6 +36,7 @@ import { beforeClosing } from '../src/store/heldEdits.js';
 import { createKeeping, type Keeping } from '../src/store/keeping.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
 import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
+import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
 import { noteById, updateNote } from './noteRows.js';
 
