@@ -75,6 +75,9 @@ const PATHS = {
 	// that no longer says whose it was (`ProviderIcon`).
 	device: 'M6 5h12a1 1 0 0 1 1 1v9H5V6a1 1 0 0 1 1-1zM3 19h18',
 	storage: 'M7 19a5 5 0 0 1-.6-9.96A6 6 0 0 1 17.6 9.2 4.5 4.5 0 0 1 17 19z',
+	// What can be done to the source showing, at the foot of the sidebar: eight
+	// teeth round a hole, the conventional mark for settings.
+	gear: 'M10.43 5.18L10.68 2.59L13.32 2.59L13.57 5.18A7 7 0 0 1 15.71 6.06L17.72 4.41L19.59 6.28L17.94 8.29A7 7 0 0 1 18.82 10.43L21.41 10.68L21.41 13.32L18.82 13.57A7 7 0 0 1 17.94 15.71L19.59 17.72L17.72 19.59L15.71 17.94A7 7 0 0 1 13.57 18.82L13.32 21.41L10.68 21.41L10.43 18.82A7 7 0 0 1 8.29 17.94L6.28 19.59L4.41 17.72L6.06 15.71A7 7 0 0 1 5.18 13.57L2.59 13.32L2.59 10.68L5.18 10.43A7 7 0 0 1 6.06 8.29L4.41 6.28L6.28 4.41L8.29 6.06A7 7 0 0 1 10.43 5.18zM15 12a3 3 0 1 0-6 0a3 3 0 1 0 6 0',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;

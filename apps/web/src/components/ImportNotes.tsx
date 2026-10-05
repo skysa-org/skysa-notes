@@ -209,27 +209,13 @@ export const importItems = (importing: Importing): OptionsMenuItem[] => [
 ];
 
 /**
- * The import's buttons, where the panel has buttons rather than a menu, and
- * what it says: that it is working, the question, and how it went.
+ * What an import says, wherever its source's panel is: that it is working, the
+ * question, and how it went. The ways in are menu items (`importItems`).
  */
-export const ImportNotes = ({ importing, buttons }: { importing: Importing; buttons: boolean }) => {
+export const ImportNotes = ({ importing }: { importing: Importing }) => {
 	const { step, said } = importing;
 	return (
 		<>
-			{buttons && (
-				<div className="account-import" role="group" aria-label="Import notes">
-					{importItems(importing).map((item) => (
-						<button
-							key={item.label}
-							type="button"
-							disabled={item.disabled}
-							onClick={item.onChoose}
-						>
-							{item.label}
-						</button>
-					))}
-				</div>
-			)}
 			{step.kind === 'reading' && (
 				<p className="muted" role="status">
 					Reading the files…

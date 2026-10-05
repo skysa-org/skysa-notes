@@ -2453,7 +2453,7 @@ button.danger {
 }
 
 .account a.button,
-.account button {
+.account button:not(.icon) {
 	font: inherit;
 	padding: 0.35rem 0.75rem;
 	border-radius: 0.375rem;
@@ -2476,6 +2476,31 @@ button.danger {
 	cursor: default;
 }
 
+/* The foot of the sidebar, when nothing needs the user (`StatusLine`): the
+   source and how it is going, and at the end the count of the other devices
+   and the gear. The words wrap in their own column, so a long one does not
+   push the buttons off the line. */
+.account-line {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.account-status {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* The count of the other devices, as quiet as the gear beside it: the device
+   and its number, which is the whole of what it is there to say. */
+button.icon.account-devices-count {
+	width: auto;
+	gap: 0.2rem;
+	padding-inline: 0.35rem;
+	font-size: 0.8rem;
+}
+
 .account-confirm {
 	display: flex;
 	flex-wrap: wrap;
@@ -2484,18 +2509,6 @@ button.danger {
 
 .account-confirm p {
 	flex-basis: 100%;
-}
-
-/* The two ways to import (`ImportNotes`): side by side while they fit, each
-   taking half, and one above the other in a sidebar too narrow for both. */
-.account-import {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-}
-
-.account-import button {
-	flex: 1 1 8rem;
 }
 
 /* The import question says what comes in and then, a line each, what stays
