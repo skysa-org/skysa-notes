@@ -18,6 +18,7 @@ import { folderTree } from './folders.js';
 import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
 import { getOpenNotebooks } from './openNotebooks.js';
+import { getPins, type Pins, pinsFromKey, pinsKey } from './pins.js';
 import {
 	getCodeDisplay,
 	getDefaultEditorMode,
@@ -25,7 +26,7 @@ import {
 	setCodeDisplay,
 } from './prefs.js';
 import { createNoteSearch, type NoteHit } from './search.js';
-import { buildFolderTree, type FolderNode } from './tree.js';
+import { buildFolderTree, type FolderNode, withPins } from './tree.js';
 
 /**
  * Live reads from IndexedDB. `useLiveQuery` re-runs its query whenever a write
@@ -72,15 +73,50 @@ export const useHeldImport = (): SyncStateRecord | undefined =>
 export const useActiveSource = (): SyncStateRecord | null | undefined =>
 	useLiveQuery(async () => (await db.syncState.get(await activeConnectionId(db))) ?? null, []);
 
-export const useFolderTree = (): FolderNode[] | undefined =>
-	useLiveQuery(async () => {
-		const [paths, notes, filePaths] = await Promise.all([
-			folderTree(db),
-			listNotes(db),
-			listFilePaths(db),
+/**
+ * The showing source's notebooks, and what it has pinned on this device; both
+ * `undefined` until read.
+ */
+export interface PinnedTree {
+	/** The notebooks, the pinned first at each level (`withPins`). */
+	readonly tree: FolderNode[] | undefined;
+	readonly pins: Pins | undefined;
+}
+
+/**
+ * The showing source's notebooks and its pins (`store/pins.ts`), from one
+ * query, so they come together: a notebook renamed or moved, or another source
+ * shown, is never drawn with the pins from before.
+ *
+ * The source is asked for once and each read is given it, so there are no
+ * more reads in a row than the tree had before the pins: a slower tree loses
+ * the race to have a notebook just moved or made before the URL names it, and
+ * the app falls back to another. The pins are not read by the notes' query or
+ * by `pickNote` for the same reason, and are handed to them from here.
+ *
+ * The pins stay the same object while they are the same pins (`pinsKey`):
+ * `pickNote` is asked again when they change.
+ */
+export const usePinnedTree = (): PinnedTree => {
+	const result = useLiveQuery(async () => {
+		const connectionId = await activeConnectionId(db);
+		const [paths, notes, filePaths, pins] = await Promise.all([
+			folderTree(db, { connectionId }),
+			listNotes(db, { connectionId }),
+			listFilePaths(db, { connectionId }),
+			getPins(db, connectionId),
 		]);
-		return buildFolderTree({ paths, notePaths: notes.map((note) => note.path), filePaths });
+		const tree = buildFolderTree({
+			paths,
+			notePaths: notes.map((note) => note.path),
+			filePaths,
+		});
+		return { tree: withPins(tree, pins.notebooks), pinned: pinsKey(pins) };
 	}, []);
+	const pinned = result?.pinned;
+	const pins = useMemo(() => (pinned === undefined ? undefined : pinsFromKey(pinned)), [pinned]);
+	return { tree: result?.tree, pins };
+};
 
 /**
  * Notes in a folder. With no folder open there is nothing to list.
@@ -192,20 +228,29 @@ export const useNoteToOpen = ({
 	folder,
 	open,
 	remembered,
+	pinned,
 	ready,
 }: {
 	connectionId: string | undefined;
 	folder: string | undefined;
 	open: string | undefined;
 	remembered: string | undefined;
+	/** The source's pinned notes, the first of which a notebook opens on. */
+	pinned: ReadonlySet<string> | undefined;
 	/** The remembered place has been read; until then `remembered` means nothing. */
 	ready: boolean;
 }): NoteToOpen | undefined =>
 	useLiveQuery(async () => {
 		if (connectionId === undefined || folder === undefined || !ready) return undefined;
-		const pick = await pickNote(db, { connectionId, folderPath: folder, open, remembered });
+		const pick = await pickNote(db, {
+			connectionId,
+			folderPath: folder,
+			open,
+			remembered,
+			pinned,
+		});
 		return { folder, open, pick };
-	}, [connectionId, folder, open, remembered, ready]);
+	}, [connectionId, folder, open, remembered, pinned, ready]);
 
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>

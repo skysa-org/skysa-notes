@@ -19,6 +19,7 @@ import { deletedHere } from './deletedHere.js';
 import { handOverToCopies } from './files.js';
 import { foldPath, freePath } from './naming.js';
 import { forgetOpenNotebooks, moveOpenNotebooks } from './openNotebooks.js';
+import { forgetPinnedNotebooks, movePinnedNotebooks } from './pins.js';
 import {
 	queueDelete,
 	queueDeleteFile,
@@ -413,8 +414,10 @@ export const moveFolder = async (
 			// After the `mkdir`s above, which are about the destination.
 			await withdrawMkdirs(db, connectionId, source);
 
-			// Open in the sidebar where it was, it is open where it is.
+			// Open in the sidebar where it was, it is open where it is; and
+			// pinned, pinned.
 			await moveOpenNotebooks(db, connectionId, source, target);
+			await movePinnedNotebooks(db, connectionId, source, target);
 
 			// Last, so the notes are out of them before the engine looks: the
 			// moves above are what leave the old directories empty, and the
@@ -531,6 +534,7 @@ export const deleteFolder = async (
 			// to have removed, and the next pull would make the notebook again.
 			await withdrawMkdirs(db, connectionId, target);
 			await forgetOpenNotebooks(db, connectionId, target);
+			await forgetPinnedNotebooks(db, connectionId, target);
 
 			// Behind the deletes, which are what empty the directories. The engine
 			// refuses to remove one that still holds a file, so a note another

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import { Sidebar } from '../src/components/Sidebar.js';
-import { buildFolderTree } from '../src/store/tree.js';
+import { buildFolderTree, withPins } from '../src/store/tree.js';
 
 /**
  * The sidebar lists notebooks and nothing else — except when the root itself
@@ -636,6 +636,54 @@ describe('the notebook menu', () => {
 		expect(document.activeElement).toBe(
 			screen.getByRole('button', { name: 'Options for “work”' })
 		);
+	});
+});
+
+/** What a row says beside its name, from `aria-describedby`. */
+const description = (row: HTMLElement): string | null | undefined => {
+	const id = row.getAttribute('aria-describedby');
+	return id === null ? null : document.getElementById(id)?.textContent;
+};
+
+describe('pinning a notebook', () => {
+	it('is offered first in its menu, and pins the notebook it is about', async () => {
+		const onPinFolder = vi.fn();
+		renderSidebar({ selectedFolder: 'work', onPinFolder });
+
+		await openMenu('personal');
+		const menu = screen.getByRole('group', { name: 'Notebook “personal”' });
+		expect(within(menu).getAllByRole('button')[0]?.textContent).toBe('Pin to top');
+		await userEvent.click(within(menu).getByRole('button', { name: 'Pin to top' }));
+
+		expect(onPinFolder).toHaveBeenCalledWith('personal', true);
+	});
+
+	it('shows one inside another first under its parent, tinted, said to be pinned, and unpins it', async () => {
+		const onPinFolder = vi.fn();
+		renderSidebar({
+			tree: withPins(
+				buildFolderTree({ paths: ['personal', 'work', 'work/archive', 'work/meetings'] }),
+				new Set(['work/meetings'])
+			),
+			onPinFolder,
+		});
+
+		expect(
+			[...document.querySelectorAll('.row-label')].map((label) => label.textContent)
+		).toEqual(['personal', 'work', 'meetings', 'archive']);
+		const pinned = screen.getByRole('button', { name: /^meetings/ });
+		expect(pinned.classList.contains('pinned')).toBe(true);
+		expect(description(pinned)).toBe('Pinned');
+		// Its name is what it was, which is what it is found by.
+		expect(screen.getByRole('button', { name: 'meetings' })).toBe(pinned);
+		const other = screen.getByRole('button', { name: /^archive/ });
+		expect(other.classList.contains('pinned')).toBe(false);
+		expect(description(other)).toBeNull();
+
+		await openMenu('meetings');
+		await userEvent.click(await screen.findByRole('button', { name: 'Unpin' }));
+
+		expect(onPinFolder).toHaveBeenCalledWith('work/meetings', false);
 	});
 });
 

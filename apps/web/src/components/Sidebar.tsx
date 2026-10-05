@@ -1,5 +1,5 @@
 import { ancestorPaths, basename, ROOT } from '@skysa/core';
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 import { useCommand } from '../commands/context.js';
 import { Icon } from '../editor/icons.js';
@@ -98,6 +98,11 @@ export interface SidebarProps {
 	openNotebooks?: ReadonlySet<string>;
 	/** Open or shut these notebooks. */
 	onOpenNotebooks?: (paths: string[], open: boolean) => void;
+	/**
+	 * Pin a notebook to the top of its level, or unpin it. Which are pinned is
+	 * in the tree (`withPins`), which comes in that order.
+	 */
+	onPinFolder?: (path: string, pinned: boolean) => void;
 }
 
 /**
@@ -280,6 +285,8 @@ interface RowProps {
 	 * that something is inside and whether it is showing.
 	 */
 	expanded?: boolean;
+	/** Pinned to the top of its level on this device (`store/pins.ts`). */
+	pinned?: boolean;
 }
 
 /**
@@ -304,10 +311,13 @@ const Row = ({
 	onMenu,
 	onKeyDown,
 	expanded,
+	pinned = false,
 }: RowProps) => {
+	const pinId = useId();
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
 		'row',
+		pinned ? 'pinned' : undefined,
 		selected && moving === null ? 'selected' : undefined,
 		moving?.kind === 'notebook' && moving.path === path ? 'moving' : undefined,
 		allowed && over === path ? 'drop-over' : undefined,
@@ -328,6 +338,9 @@ const Row = ({
 			}
 			aria-current={selected && moving === null ? 'true' : undefined}
 			aria-expanded={expanded}
+			// Said beside the name rather than in it, which is what the row is
+			// found by, and in words as well as the tint (`.row.pinned`).
+			aria-describedby={pinned ? pinId : undefined}
 			draggable={onPickUp !== undefined}
 			onContextMenu={(event) => {
 				// The browser's own menu where this row has none of its own: the
@@ -370,6 +383,11 @@ const Row = ({
 		>
 			<span className="row-label">{name}</span>
 			{count !== undefined && count > 0 && <span className="count">{count}</span>}
+			{pinned && (
+				<span id={pinId} hidden>
+					Pinned
+				</span>
+			)}
 		</button>
 	);
 };
@@ -626,6 +644,7 @@ const FolderRows = ({
 								}}
 								onKeyDown={treeKeys(hasChildren, open, toggle)}
 								expanded={hasChildren ? open : undefined}
+								pinned={node.pinned === true}
 							/>
 						)}
 						{/* Not while its name is being typed, when the row is a field;
@@ -874,6 +893,7 @@ export const Sidebar = ({
 	renamings,
 	openNotebooks,
 	onOpenNotebooks,
+	onPinFolder,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -913,30 +933,49 @@ export const Sidebar = ({
 	const manageable = open !== undefined && moving === null;
 	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
 
+	/** Pinned or not, and the way to change it, where the route keeps pins. */
+	const pinning = (
+		path: string,
+		node: FolderNode | undefined
+	): Pick<NotebookActions, 'pinned' | 'onPin'> => {
+		if (onPinFolder === undefined) return {};
+		const pinned = node?.pinned === true;
+		return {
+			pinned,
+			onPin: () => {
+				onPinFolder(path, !pinned);
+			},
+		};
+	};
+
 	/**
 	 * What the menu does to a notebook, from its row's `⋯` or a right-click on
 	 * the row. One set of actions, so the two menus cannot drift.
 	 */
-	const actionsFor = (path: string): NotebookActions => ({
-		onNewInside: () => {
-			setCreating({ parent: path });
-		},
-		onRename: () => {
-			setRenaming(path);
-		},
-		onMove: () => {
-			pickUp({ kind: 'notebook', path, name: basename(path) });
-		},
-		onFiles:
-			(nodeAt(tree ?? [], path)?.fileCount ?? 0) === 0
-				? undefined
-				: () => {
-						setListing(path);
-					},
-		onDelete: () => {
-			setDeleting(path);
-		},
-	});
+	const actionsFor = (path: string): NotebookActions => {
+		const node = nodeAt(tree ?? [], path);
+		return {
+			...pinning(path, node),
+			onNewInside: () => {
+				setCreating({ parent: path });
+			},
+			onRename: () => {
+				setRenaming(path);
+			},
+			onMove: () => {
+				pickUp({ kind: 'notebook', path, name: basename(path) });
+			},
+			onFiles:
+				(node?.fileCount ?? 0) === 0
+					? undefined
+					: () => {
+							setListing(path);
+						},
+			onDelete: () => {
+				setDeleting(path);
+			},
+		};
+	};
 
 	const renamed = (path: string, chosen?: string) => {
 		setRenaming(null);

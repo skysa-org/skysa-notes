@@ -257,6 +257,20 @@ describe('NoteList', () => {
 		expect(screen.queryByRole('button', { name: 'Note options' })).toBeNull();
 	});
 
+	it('tints a pinned note and says it is pinned, beside its name', () => {
+		renderList({ notes: [note('Alpha'), note('Beta')], pinnedNoteIds: new Set(['Alpha']) });
+
+		const pinned = screen.getByRole('button', { name: /^Alpha/ });
+		expect(pinned.classList.contains('pinned')).toBe(true);
+		const described = pinned.getAttribute('aria-describedby');
+		expect(described === null ? null : document.getElementById(described)?.textContent).toBe(
+			'Pinned'
+		);
+		const other = screen.getByRole('button', { name: /^Beta/ });
+		expect(other.classList.contains('pinned')).toBe(false);
+		expect(other.hasAttribute('aria-describedby')).toBe(false);
+	});
+
 	it('leaves the browser its own menu where it is given none', () => {
 		renderList({ notes: [note('Alpha')] });
 		expect(fireEvent.contextMenu(screen.getByRole('button', { name: /^Alpha/ }))).toBe(true);

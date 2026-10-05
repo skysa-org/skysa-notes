@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
 import { getNote, listNotes } from './notes.js';
+import { pinnedFirst } from './pins.js';
 
 /**
  * Where the user was, per source, on this device: the notebook open last, and
@@ -101,6 +102,12 @@ export interface PickNoteInput {
 	open: string | undefined;
 	/** The note remembered for this notebook, if there is one. */
 	remembered: string | undefined;
+	/**
+	 * The source's pinned notes (`store/pins.ts`), which come first. Handed in
+	 * rather than read here: one more read in this answer made it late enough,
+	 * under load, to lose the race a notebook just moved has to win.
+	 */
+	pinned?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -108,11 +115,12 @@ export interface PickNoteInput {
  *
  * The note the URL names, for as long as it is there to show — wherever it is,
  * since the user put it there. Otherwise the one open last in this notebook,
- * if it is still there and still in it. Otherwise the notebook's first.
+ * if it is still there and still in it. Otherwise the notebook's first, as its
+ * list has it: a pinned note before the rest (`store/pins.ts`).
  */
 export const pickNote = async (
 	db: NotesDatabase,
-	{ connectionId, folderPath, open, remembered }: PickNoteInput
+	{ connectionId, folderPath, open, remembered, pinned }: PickNoteInput
 ): Promise<string | null> => {
 	const live = async (id: string | undefined) => {
 		if (id === undefined) return undefined;
@@ -123,6 +131,8 @@ export const pickNote = async (
 	if ((await live(open)) !== undefined) return open ?? null;
 	const last = await live(remembered);
 	if (last !== undefined && noteIsUnder(last.path, folderPath)) return last.id;
-	const [first] = await listNotes(db, { connectionId, folderPath });
+	const notes = await listNotes(db, { connectionId, folderPath });
+	const [first] =
+		pinned === undefined ? notes : pinnedFirst(notes, (note) => pinned.has(note.id));
 	return first?.id ?? null;
 };

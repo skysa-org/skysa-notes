@@ -1,5 +1,5 @@
 import { ROOT } from '@skysa/core';
-import { type ReactNode, useDeferredValue, useState } from 'react';
+import { type ReactNode, useDeferredValue, useId, useState } from 'react';
 
 import { isCreatedLine, isTimeLine } from '../store/createdLine.js';
 import { type NoteRecord } from '../store/db.js';
@@ -13,7 +13,8 @@ import { RowOptions } from './RowOptions.js';
 
 /**
  * The middle pane: the notes in the selected notebook, newest first by when
- * each was made (`listNotes`). Each row still says when its note was last
+ * each was made (`listNotes`), with any pinned on this device above the rest
+ * (`store/pins.ts`). Each row still says when its note was last
  * edited; that is what it says, not where it sits. A row says what is being
  * typed into its note as it is typed, not once autosave has stored it
  * (`store/liveEdits.ts`), so the list and the editor beside it never disagree.
@@ -71,6 +72,11 @@ export interface NoteListProps {
 	menuFor?: (note: NoteRecord) => readonly OptionsMenuItem[];
 	/** A notebook being renamed, so the heading says what is typed. */
 	renamings?: Renamings;
+	/**
+	 * The notes pinned to the top of the list on this device (`store/pins.ts`),
+	 * to tint. The list comes in with them first (`pinnedFirst`).
+	 */
+	pinnedNoteIds?: ReadonlySet<string>;
 }
 
 /**
@@ -205,6 +211,8 @@ interface NoteRowProps {
 	onMenu?: (at: MenuPoint) => void;
 	/** What its `⋯` and its right-click offer: none for a note not stored yet. */
 	items: readonly OptionsMenuItem[];
+	/** Pinned to the top of the list on this device. */
+	pinned: boolean;
 }
 
 const NoteRow = ({
@@ -218,15 +226,18 @@ const NoteRow = ({
 	moving,
 	onMenu,
 	items,
+	pinned,
 }: NoteRowProps) => {
 	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
 	// preview is a parse.
 	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
+	const pinId = useId();
 	return (
 		<li className="row-item">
 			<button
 				type="button"
 				className={[
+					pinned ? 'pinned' : undefined,
 					selected ? 'selected' : undefined,
 					moving ? 'moving' : undefined,
 				].reduce(
@@ -241,6 +252,8 @@ const NoteRow = ({
 					onMenu(menuPoint(event));
 				}}
 				aria-current={selected ? 'true' : undefined}
+				// Said beside the name rather than in it, as a notebook's is.
+				aria-describedby={pinned ? pinId : undefined}
 				draggable={onPickUp !== undefined}
 				onDragStart={(event) => {
 					if (onPickUp === undefined) return;
@@ -260,6 +273,11 @@ const NoteRow = ({
 				</span>
 				<span className="note-meta">{meta}</span>
 				<Preview note={note} typing={note.body !== row.body} />
+				{pinned && (
+					<span id={pinId} hidden>
+						Pinned
+					</span>
+				)}
 			</button>
 			<RowOptions name={note.title} kind="Note" items={items} />
 		</li>
@@ -296,6 +314,7 @@ export const NoteList = ({
 	liveEdits,
 	menuFor,
 	renamings,
+	pinnedNoteIds,
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
@@ -355,6 +374,7 @@ export const NoteList = ({
 								}
 								onCancelMove={onCancelMove}
 								moving={note.id === movingNoteId}
+								pinned={pinnedNoteIds?.has(note.id) === true}
 								items={menuFor === undefined || !stored ? [] : menuFor(note)}
 								{...(menuFor === undefined || !stored
 									? {}
