@@ -1,5 +1,17 @@
 # @skysa/web
 
+## 0.15.0
+
+### Minor Changes
+
+- 1366545: The storage panel of a Google Drive source says, behind a line that opens, that Drive lets the app see only the files it made, so notes copied into its folder on the Drive website, with Drive for desktop or by another app do not appear. The README says the same before anyone chooses a provider.
+- 07032bf: Notes can be imported from a folder or from files (a `.zip`, such as the one "Download all notes" makes, or loose `.md` files), from the storage panel of the source showing. Notebooks and the files beside notes come too. Before anything is written, a question says what will come in and what stays out and why: notes that are not UTF-8 text, notes the app keeps hidden, and files over 25 MB. Nothing already in the source is changed: a taken name gets a number, and a file already there is not sent again. This is the way to bring notes into a Google Drive source, where files copied into the folder on the Drive website are invisible to the app; the Drive notice now points to it.
+
+### Patch Changes
+
+- Updated dependencies [07032bf]
+  - @skysa/core@0.15.0
+
 ## 0.14.0
 
 ### Minor Changes
