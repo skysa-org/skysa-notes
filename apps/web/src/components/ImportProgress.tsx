@@ -51,6 +51,9 @@ const progressMessage = (progress: SyncProgress | undefined, label: string): str
 	if (progress.stage === 'uploading') {
 		return `Uploading notes to ${label}: ${count(progress.done)} of ${count(progress.total)}.`;
 	}
+	if (progress.stage === 'receiving') {
+		return `Downloading notes from ${label}: ${count(progress.done)} of ${count(progress.total)}.`;
+	}
 	const { found, done } = progress;
 	return progress.listing
 		? `Looking for notes in ${label}: ${count(found)} found so far.`
@@ -61,7 +64,7 @@ const progressMessage = (progress: SyncProgress | undefined, label: string): str
 const fraction = (status: SchedulerStatus): { value: number; max: number } | undefined => {
 	const { progress } = status;
 	if (status.phase !== 'syncing' || progress === undefined) return undefined;
-	if (progress.stage === 'uploading') return { value: progress.done, max: progress.total };
+	if (progress.stage !== 'scanning') return { value: progress.done, max: progress.total };
 	if (progress.listing || progress.found === 0) return undefined;
 	return { value: progress.done, max: progress.found };
 };

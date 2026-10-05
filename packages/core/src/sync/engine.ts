@@ -115,10 +115,10 @@ export interface SyncEngineOptions {
 	 */
 	reauthorize?: () => Promise<void>;
 	/**
-	 * Told how far a long run has got: a full scan, as notes are found and
-	 * read, and a push, op by op. Nothing is reported for a round from a stored
-	 * cursor, which is short. Called synchronously, as often as every file, so
-	 * a caller that draws from it decides how often to.
+	 * Told how far a run has got: a full scan, as notes are found and read; a
+	 * round from a stored cursor, note by note; and a push, op by op. Called
+	 * synchronously, as often as every file, so a caller that draws from it
+	 * decides how often to — and whether a run of a few notes is worth showing.
 	 */
 	onProgress?: (progress: SyncProgress) => void;
 	/** Injected so conflict filenames are deterministic in tests. */
@@ -134,11 +134,18 @@ export interface SyncEngineOptions {
  * `found` is the whole of it and `done` counts up to it — a note read, or one
  * this device already holds at that version and so never read, which keeps a
  * scan resumed after an interruption from claiming to fetch it all again.
+ * A round from a stored cursor reads all its pages before it decides any
+ * (`drainRound`), so it knows how many notes it names before it reads the
+ * first: `done` counts each as it is decided, read or already held. Another
+ * device's import of a thousand notes is one round, and nothing of it shows
+ * until all of it is read, so this is what there is to see meanwhile.
  * A push knows its queue before it starts, so it gives a total. `path` is the
- * file just read, or the one about to be sent, for a caller that shows it.
+ * file just read or decided, or the one about to be sent, for a caller that
+ * shows it.
  */
 export type SyncProgress =
 	| { stage: 'scanning'; found: number; done: number; listing: boolean; path?: string }
+	| { stage: 'receiving'; done: number; total: number; path?: string }
 	| { stage: 'uploading'; done: number; total: number; path?: string };
 
 export interface SyncEngine {
@@ -206,6 +213,24 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * read; a scheduler runs one pull at a time per engine.
 	 */
 	const scans = new Map<'current', ScanCount>();
+
+	/**
+	 * The round under way, for `onProgress`, and none during a scan: how many
+	 * notes it names, and how many of them are decided. Kept here for the
+	 * reason the scan's count is.
+	 */
+	const rounds = new Map<'current', { total: number; done: number }>();
+
+	const reportRound = (path?: string) => {
+		const round = rounds.get('current');
+		if (round === undefined || round.total === 0) return;
+		onProgress({
+			stage: 'receiving',
+			done: round.done,
+			total: round.total,
+			...(path === undefined ? {} : { path }),
+		});
+	};
 
 	const reportScan = (path?: string) => {
 		const scanning = scans.get('current');
@@ -2954,10 +2979,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		};
 		const decided = await entries.reduce<Promise<PullChange[]>>(async (pending, entry, at) => {
 			const sofar = await pending;
-			return [
-				...sofar,
-				...(await decide(entry, sofar, { ...batch, deciding: new Set([at]) }, at)),
-			];
+			const made = await decide(entry, sofar, { ...batch, deciding: new Set([at]) }, at);
+			const round = rounds.get('current');
+			if (round !== undefined && isNoteEntry(entry)) {
+				rounds.set('current', { ...round, done: round.done + 1 });
+				reportRound(entry.path);
+			}
+			return [...sofar, ...made];
 		}, Promise.resolve([]));
 		const left = [...decided, ...strandedFiles(decided, batch)];
 		const settled = [...left, ...settleFileClashes(left, batch)];
@@ -3242,7 +3270,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	const drainRound = async (cursor: string): Promise<SyncOutcome> => {
 		const round = await readRound(cursor, []);
-		const changes = await decideAll(round.entries, false);
+		// Counted as `decideAll` will see them, one entry per file.
+		rounds.set('current', {
+			total: deduped(round.entries).filter(isNoteEntry).length,
+			done: 0,
+		});
+		reportRound();
+		const changes = await decideAll(round.entries, false).finally(() => {
+			rounds.delete('current');
+		});
 		await store.applyPull({ changes, cursor: round.cursor });
 		return ok({ pulled: changes.length, conflicts: conflictPathsIn(changes) });
 	};

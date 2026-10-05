@@ -1,4 +1,4 @@
-import { parentPath, type ProviderKind } from '@skysa/core';
+import { parentPath, type ProviderKind, type SyncProgress } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -207,6 +207,77 @@ const when = (at: number): string => {
 };
 
 /**
+ * From how many a run's count is said. A run of a few — an edit sent, a
+ * notebook made — is over before a count could be read, and a bar for each
+ * would flash under the line every time the user stopped typing; the runs
+ * worth counting are an import's thousand notes, sent from one device and
+ * received on another (docs/ARCHITECTURE.md §7, "Sync loop").
+ */
+export const PROGRESS_FROM = 20;
+
+const counted = (n: number): string => n.toLocaleString();
+
+/**
+ * How far a long run has got: a few words for the status line, the sentence
+ * for its tooltip and for the panel in a compact window, and how full its bar
+ * is — `null` while a scan is still listing, which knows how many so far and
+ * not of how many.
+ */
+interface SyncCount {
+	text: string;
+	sentence: string;
+	bar: { value: number; max: number } | null;
+}
+
+/** A long run's count, or nothing for a run too short to count. */
+const syncCount = (progress: SyncProgress | undefined, label: string): SyncCount | undefined => {
+	if (progress === undefined) return undefined;
+	if (progress.stage === 'scanning') return scanCount(progress, label);
+	if (progress.total < PROGRESS_FROM) return undefined;
+	const of = `${counted(progress.done)} of ${counted(progress.total)}`;
+	const bar = { value: progress.done, max: progress.total };
+	return progress.stage === 'uploading'
+		? { text: `Sending ${of}`, sentence: `Sending changes to ${label}: ${of}.`, bar }
+		: { text: `Receiving ${of}`, sentence: `Receiving notes from ${label}: ${of}.`, bar };
+};
+
+const scanCount = (
+	{ found, done, listing }: Extract<SyncProgress, { stage: 'scanning' }>,
+	label: string
+): SyncCount | undefined => {
+	if (found < PROGRESS_FROM) return undefined;
+	if (listing) {
+		return {
+			text: `Looking for notes: ${counted(found)} found`,
+			sentence: `Looking for notes in ${label}: ${counted(found)} found so far.`,
+			bar: null,
+		};
+	}
+	const of = `${counted(done)} of ${counted(found)}`;
+	return {
+		text: `Receiving ${of}`,
+		sentence: `Receiving notes from ${label}: ${of}.`,
+		bar: { value: done, max: found },
+	};
+};
+
+/**
+ * How full a long run is, under what says how far it has got: a fraction, or,
+ * while a scan is still listing, a bar that does not pretend to know.
+ */
+const SyncBar = ({ count }: { count: SyncCount }) =>
+	count.bar === null ? (
+		<progress className="account-bar" aria-label="Sync progress" />
+	) : (
+		<progress
+			className="account-bar"
+			aria-label="Sync progress"
+			value={count.bar.value}
+			max={Math.max(count.bar.max, 1)}
+		/>
+	);
+
+/**
  * How syncing is going, in words, or nothing to say. A refusal that connecting
  * again would fix is not said here: the panel offers to connect again instead.
  */
@@ -219,7 +290,7 @@ const statusMessage = (
 		case 'local':
 			return null;
 		case 'syncing':
-			return 'Syncing…';
+			return syncCount(status.progress, label)?.sentence ?? 'Syncing…';
 		case 'idle':
 			return status.lastSyncAt === undefined ? 'Synced' : `Synced ${when(status.lastSyncAt)}`;
 		case 'offline':
@@ -265,6 +336,7 @@ const lineStatus = (
 		case 'local':
 			return { text: label, title: null };
 		case 'syncing':
+			return syncingLine(status.progress, label);
 		case 'idle':
 			return said(statusMessage(status, label, syncable) ?? 'Synced');
 		case 'offline':
@@ -274,6 +346,22 @@ const lineStatus = (
 		case 'attention':
 			return said('Not syncing');
 	}
+};
+
+/**
+ * A run, in the status line: how far it has got where it is long enough to
+ * count, with the sentence and the file it is on in the tooltip.
+ */
+const syncingLine = (
+	progress: SyncProgress | undefined,
+	label: string
+): { text: string; title: string | null } => {
+	const count = syncCount(progress, label);
+	if (count === undefined) return { text: `${label} · Syncing…`, title: null };
+	return {
+		text: `${label} · ${count.text}`,
+		title: [count.sentence, progress?.path].filter((line) => line !== undefined).join('\n'),
+	};
 };
 
 /**
@@ -866,6 +954,7 @@ const SyncState = ({
 	const status = useSyncStatus(sync);
 	const syncable = isSyncable(bound);
 	const message = statusMessage(status, label, syncable);
+	const count = syncCount(status.progress, label);
 	const reconnect = needsReconnect(status);
 
 	return (
@@ -901,6 +990,7 @@ const SyncState = ({
 			{message !== null && (!line || status.phase === 'attention') && (
 				<p className="muted">{message}</p>
 			)}
+			{!line && count !== undefined && <SyncBar count={count} />}
 			<Denied status={status} syncable={syncable} config={config} />
 			{/*
 			 * Beside the message that names the op, and only there: `stuck`
@@ -1585,6 +1675,7 @@ const ConnectedFoot = ({
 	});
 	if (slot !== undefined) return <ActionsMenu slot={slot} items={items} />;
 	const said = lineStatus(status, label, isSyncable(bound));
+	const count = syncCount(status.progress, label);
 	// Who the account is, which the line has no room for, and the whole of
 	// what it says about syncing, where that is more than its few words.
 	const title = [
@@ -1616,6 +1707,7 @@ const ConnectedFoot = ({
 				/>
 				<GearMenu items={items} triggerRef={openButton} />
 			</StatusLine>
+			{count !== undefined && <SyncBar count={count} />}
 		</>
 	);
 };

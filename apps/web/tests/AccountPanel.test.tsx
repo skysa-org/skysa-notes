@@ -11,7 +11,7 @@ import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
-import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
+import { AccountPanel, PROGRESS_FROM, returnPath } from '../src/components/AccountPanel.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { type pickFiles } from '../src/editor/pickFiles.js';
 import {
@@ -479,10 +479,14 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(within(question).getByText(/will move/).textContent).toBe(
 			'Your 1 notebook and 2 notes on this device will move into Dropbox and sync there. Cancel to keep them on this device only.'
 		);
-		// Cancel has the focus, as in every question this app asks.
-		expect(document.activeElement).toBe(
-			within(question).getByRole('button', { name: 'Cancel' })
-		);
+		// Cancel has the focus, as in every question this app asks — once the
+		// dialog's effect has given it, which a loaded machine runs a moment
+		// after the dialog is found.
+		await waitFor(() => {
+			expect(document.activeElement).toBe(
+				within(question).getByRole('button', { name: 'Cancel' })
+			);
+		});
 		// Nothing has been started while the question is out.
 		expect(started).toEqual([]);
 		expect(await db.credentials.get(PENDING_CREDENTIAL_ID)).toBeUndefined();
@@ -2053,6 +2057,69 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			expect(line.textContent).toBe('Dropbox · Synced');
 		});
 		expect(await offered(user, 'Sync now')).toBeTruthy();
+	});
+
+	it('counts a long run in its line, with a bar under it, and leaves a short one at syncing', async () => {
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'uploading', done: 3, total: PROGRESS_FROM - 1 },
+		});
+		await connected(sync);
+		const line = await naming('ada@example.com');
+		expect(line.textContent).toBe('Dropbox · Syncing…');
+		expect(screen.queryByRole('progressbar')).toBeNull();
+
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'uploading', done: 120, total: 1000, path: 'Work/Plan.md' },
+		});
+		const thousand = (1000).toLocaleString();
+		await waitFor(() => {
+			expect(line.textContent).toBe(`Dropbox · Sending 120 of ${thousand}`);
+		});
+		expect(line.title).toBe(
+			`Syncing with Dropbox · ada@example.com\nSending changes to Dropbox: 120 of ${thousand}.\nWork/Plan.md`
+		);
+		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
+		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['120', '1000']);
+
+		// Another device's import, read before any of it is applied.
+		sync.say({ phase: 'syncing', progress: { stage: 'receiving', done: 5, total: 30 } });
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Receiving 5 of 30');
+		});
+		expect(line.title).toBe(
+			'Syncing with Dropbox · ada@example.com\nReceiving notes from Dropbox: 5 of 30.'
+		);
+
+		sync.say({ phase: 'idle' });
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Synced');
+		});
+		expect(screen.queryByRole('progressbar')).toBeNull();
+	});
+
+	it('counts a re-scan as it finds notes, with a bar that does not know how many until it does', async () => {
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'scanning', found: 40, done: 0, listing: true },
+		});
+		await connected(sync);
+		const line = await statusLine();
+		expect(line.textContent).toBe('Dropbox · Looking for notes: 40 found');
+		expect(
+			screen.getByRole('progressbar', { name: 'Sync progress' }).hasAttribute('value')
+		).toBe(false);
+
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'scanning', found: 40, done: 10, listing: false },
+		});
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Receiving 10 of 40');
+		});
+		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
+		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['10', '40']);
 	});
 
 	it('says nothing, and offers nothing, before the scheduler has picked the connection up', async () => {
@@ -4502,6 +4569,23 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		).toBe(true);
 		// Renaming it is never held up by a sync.
 		expect(document.activeElement).toBe(menu.getByRole('button', { name: 'Rename' }));
+	});
+
+	it('says how far a long run has got in a sentence, with the bar under it', async () => {
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 25, total: 400 },
+		});
+		await connected(sync);
+
+		expect(await screen.findByText('Receiving notes from Dropbox: 25 of 400.')).toBeTruthy();
+		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
+		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['25', '400']);
+
+		sync.say({ phase: 'idle' });
+		await waitFor(() => {
+			expect(screen.queryByRole('progressbar')).toBeNull();
+		});
 	});
 
 	it('offers another source’s actions on its own row, and shows that source to do them', async () => {
