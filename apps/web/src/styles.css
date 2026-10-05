@@ -2429,7 +2429,8 @@ button.danger {
    in a narrow sidebar "last used 9:48 AM" breaks across lines beside the
    button rather than around it. No bullets: it is a list for a screen reader,
    and rows to the eye. */
-.account-devices {
+.account-devices,
+.account-unseen {
 	display: flex;
 	flex-direction: column;
 	gap: 0.35rem;
@@ -2438,7 +2439,8 @@ button.danger {
 /* Its count, and the way into the rows: as tall as anything else pressed in
    the panel, its marker the app's chevron rather than the browser's
    triangle, turned down while it is open. */
-.account-devices summary {
+.account-devices summary,
+.account-unseen summary {
 	display: flex;
 	align-items: center;
 	gap: 0.35rem;
@@ -2447,21 +2449,25 @@ button.danger {
 	list-style: none;
 }
 
-.account-devices summary::-webkit-details-marker {
+.account-devices summary::-webkit-details-marker,
+.account-unseen summary::-webkit-details-marker {
 	display: none;
 }
 
-.account-devices summary .toolbar-icon {
+.account-devices summary .toolbar-icon,
+.account-unseen summary .toolbar-icon {
 	flex: none;
 	transform: rotate(-90deg);
 }
 
-.account-devices details[open] > summary .toolbar-icon {
+.account-devices details[open] > summary .toolbar-icon,
+.account-unseen details[open] > summary .toolbar-icon {
 	transform: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-	.account-devices summary .toolbar-icon {
+	.account-devices summary .toolbar-icon,
+	.account-unseen summary .toolbar-icon {
 		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 	}
 }

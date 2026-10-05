@@ -1,4 +1,4 @@
-import { type EntitlementCode, type ProviderKind } from '@skysa/core';
+import { APP_FOLDER_NAME, type EntitlementCode, type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';
@@ -105,8 +105,13 @@ export const LEFT_AT_PROVIDER: Partial<
  * folders show the app everything in them.
  * https://developers.google.com/workspace/drive/api/guides/api-specific-auth
  */
-export const UNSEEN_AT_PROVIDER: Partial<Record<ProviderKind, string>> = {
-	gdrive: 'Google Drive lets this app see only the files it made. Notes put in its folder another way — on the Drive website, with Drive for desktop, or by another app — do not appear here.',
+export const UNSEEN_AT_PROVIDER: Partial<
+	Record<ProviderKind, Readonly<{ summary: string; detail: string }>>
+> = {
+	gdrive: {
+		summary: 'Notes added on the Drive website do not appear here',
+		detail: `Google Drive lets this app see only the files it made. Notes added to the ${APP_FOLDER_NAME} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here.`,
+	},
 };
 
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
