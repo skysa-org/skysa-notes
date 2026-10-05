@@ -1,6 +1,7 @@
 import { ROOT } from '@skysa/core';
 import { type ReactNode, useDeferredValue, useState } from 'react';
 
+import { isCreatedLine } from '../store/createdLine.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
@@ -155,10 +156,15 @@ const LINE_BREAK = ' | ';
  * a note whose heading comes after an introduction had the introduction eaten
  * and the heading shown. Comparing against the title the row is already
  * displaying is the question actually being asked.
+ *
+ * So is a line after it that says only when the note was made, as OneNote puts
+ * under every title (`isCreatedLine`): the list is in that order already, and
+ * the line was all the row had room for.
  */
-const preview = (body: string, title: string, keep: boolean): string => {
-	const lines = openingLines(body, { keep });
-	const opening = isTitle(lines[0], title) ? lines.slice(1) : lines;
+const preview = (note: NoteRecord, keep: boolean): string => {
+	const lines = openingLines(note.body, { keep });
+	const untitled = isTitle(lines[0], note.title) ? lines.slice(1) : lines;
+	const opening = isCreatedLine(untitled[0], note.createdAt) ? untitled.slice(1) : untitled;
 	const text = opening.join(LINE_BREAK);
 	return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 };
@@ -168,7 +174,7 @@ const preview = (body: string, title: string, keep: boolean): string => {
  * for a body being typed, which is read once and not kept (`visibleLines`).
  */
 const Preview = ({ note, typing }: { note: NoteRecord; typing: boolean }) => {
-	const text = preview(note.body, note.title, !typing);
+	const text = preview(note, !typing);
 	return text === '' ? null : <span className="note-preview">{text}</span>;
 };
 

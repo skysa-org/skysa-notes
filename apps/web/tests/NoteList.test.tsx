@@ -57,6 +57,30 @@ describe('NoteList', () => {
 		expect(preview.textContent).toBe('turn the heap | every second week');
 	});
 
+	it('passes over a line that says only when the note was made, as OneNote writes one', () => {
+		renderList({
+			notes: [
+				{
+					...note(
+						'Links',
+						'# Links\n\n*Monday, January 13, 2020 2:44 PM*\n\nAdd okta to the site\n'
+					),
+					createdAt: Date.UTC(2020, 0, 13, 19, 44, 34),
+				},
+				{
+					...note('Plans', '# Plans\n\nMonday, January 13, 2020: what we agreed\n'),
+					createdAt: Date.UTC(2020, 0, 13, 19, 44, 34),
+				},
+			],
+		});
+
+		expect(screen.getByText(/okta/).textContent).toBe('Add okta to the site');
+		// More than the date is the user's own words, and stays.
+		expect(screen.getByText(/what we agreed/).textContent).toBe(
+			'Monday, January 13, 2020: what we agreed'
+		);
+	});
+
 	it('marks where one line of the note ends and the next begins', () => {
 		renderList({
 			notes: [note('Alpha', '# Alpha\n\nBuy milk\nCall the bank\n\nThen   lunch.\n')],
