@@ -30,6 +30,29 @@
 	--control: 1.75rem;
 	--control-inline: var(--space-s);
 
+	/*
+	 * Motion, in as few steps as spacing has, so that everything that moves
+	 * moves alike. One curve for what arrives or answers, fast out of the gate
+	 * and settling, and one for what leaves, which goes without lingering.
+	 * `--duration-state` is a colour changing — hover, a press, what is
+	 * selected or on — and is not movement, so it stays when the system asks
+	 * for less motion; every other step goes to nothing then, and what would
+	 * have moved is simply there.
+	 */
+	--ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+	--ease-in: cubic-bezier(0.4, 0, 1, 1);
+	/* A panel the width of the window, which has further to go. */
+	--ease-glide: cubic-bezier(0.3, 0.7, 0.2, 1);
+	--duration-state: 120ms;
+	/* A fade, and a thing the size of a glyph. */
+	--duration-s: 120ms;
+	/* A menu or a popover opening, a chevron turning, a list's new rows. */
+	--duration-m: 180ms;
+	/* A dialog or a notice arriving over the page. */
+	--duration-l: 240ms;
+	/* A panel crossing the window. */
+	--duration-xl: 300ms;
+
 	--bg: #ffffff;
 	--fg: #111827;
 	--muted: #6b7280;
@@ -136,6 +159,15 @@
 	}
 }
 
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--duration-s: 0ms;
+		--duration-m: 0ms;
+		--duration-l: 0ms;
+		--duration-xl: 0ms;
+	}
+}
+
 * {
 	box-sizing: border-box;
 }
@@ -178,6 +210,78 @@ button.row:focus-visible,
 button,
 a {
 	-webkit-tap-highlight-color: transparent;
+}
+
+/* What the pointer lights, and what becomes selected or on, fades rather than
+   blinks. In `:where()`, so a control that moves something else as well says
+   so in a rule of its own without first having to outrank this one. Not the
+   focus ring, which is an outline and comes at once: it is where the keys
+   are, and a ring that arrives late reads as lag. Nor the lists the arrow
+   keys move a highlight through, below. */
+:where(button, a, input, select, textarea, [role='button']) {
+	transition-property: color, background-color, border-color, box-shadow, opacity;
+	transition-duration: var(--duration-state);
+	transition-timing-function: var(--ease-out);
+}
+
+/* A highlight that follows the arrow keys moves at once, as the caret does:
+   one that fades along behind them looks like the list keeping up. The
+   palette's and the search's rows are not buttons, and are not lit by the
+   pointer at all. */
+.slash-item {
+	transition: none;
+}
+
+/* Everything that opens arrives the same way: from nothing, from a little
+   short of where it rests and a little smaller, towards the edge it opened
+   from. The longhands, `translate` and `scale`, rather than `transform`, so
+   this composes with whatever an element is already transformed by and
+   leaves a measurement of its size (`offsetWidth`) alone. Where it comes
+   from is the element's own to say. */
+@keyframes arrive {
+	from {
+		opacity: 0;
+		translate: 0 var(--arrive-y, 0);
+		scale: var(--arrive-scale, 1);
+	}
+}
+
+/* What appears in a list, among rows that have already moved to make room
+   for it, only fades: sliding in, it would arrive after the rows beside it. */
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
+/* Behind a dialog. The backdrop's colour, not its opacity, which would fade
+   the dialog in a second time on top of its own. */
+@keyframes dim-in {
+	from {
+		background-color: transparent;
+	}
+}
+
+/* A card hung from the control that opened it: under it, or over it when it
+   rises from the foot of a pane or a bar. */
+.toolbar-panel,
+.slash-menu[data-show='true'],
+.inline-toolbar[data-show='true'],
+.source-search .search-results {
+	--arrive-y: -0.25rem;
+	--arrive-scale: 0.98;
+	transform-origin: top;
+	animation: arrive var(--duration-m) var(--ease-out);
+}
+
+/* Over what opened it: the selection's toolbar, above the words; the bar at
+   the foot of a phone's note; the storage gear's menu, at the foot of the
+   sidebar (`FloatingMenu`'s `rises`). */
+.inline-toolbar[data-show='true'],
+.format-toolbar-bottom .toolbar-panel,
+.toolbar-panel.options-menu-rises {
+	--arrive-y: 0.25rem;
+	transform-origin: bottom;
 }
 
 a {
@@ -299,6 +403,13 @@ code {
 	inset-inline: 1rem;
 	margin-inline: auto;
 	max-width: 28rem;
+}
+
+/* Up into place from the foot of the page, where every notice sits. */
+.update-prompt,
+.toast-stack > * {
+	--arrive-y: 0.5rem;
+	animation: arrive var(--duration-l) var(--ease-out);
 }
 
 .update-prompt span,
@@ -767,6 +878,8 @@ code {
 	height: calc(100dvh - 100%);
 	border-block-start: 1px solid var(--border);
 	padding-block-end: env(safe-area-inset-bottom);
+	/* The window's width, so it fades rather than drops. */
+	animation: fade-in var(--duration-s) var(--ease-out);
 }
 
 /* A list of its own, though it sits in the source bar, whose list of tabs
@@ -931,6 +1044,11 @@ button.icon:disabled {
 	padding: 0;
 }
 
+/* A notebook's own notebooks, as it opens. */
+.tree ul {
+	animation: fade-in var(--duration-m) var(--ease-out);
+}
+
 button.row,
 .row-editing {
 	display: flex;
@@ -1030,10 +1148,8 @@ button.row,
 	transform: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-	.row-disclosure .toolbar-icon {
-		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-	}
+.row-disclosure .toolbar-icon {
+	transition: transform var(--duration-m) var(--ease-out);
 }
 
 .row-options {
@@ -2710,10 +2826,9 @@ button.icon.account-devices-count {
 		0 0 24px color-mix(in srgb, var(--brand, var(--accent)) 60%, transparent);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-	.clipboard {
-		transition: box-shadow 150ms ease;
-	}
+/* Its edge and glow, which are a state's colour, as a control's are. */
+.clipboard {
+	transition: box-shadow var(--duration-state) var(--ease-out);
 }
 
 /* What a drag over the window is told, over the panel. Out of the flow, so
@@ -2733,6 +2848,7 @@ button.icon.account-devices-count {
 	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
 	background: color-mix(in srgb, var(--bg) 80%, transparent);
 	pointer-events: none;
+	animation: fade-in var(--duration-s) var(--ease-out);
 }
 
 .clipboard-drop-over > .clipboard-drop-hint {
@@ -2788,6 +2904,9 @@ button.icon.account-devices-count {
 	display: flex;
 	align-items: flex-start;
 	gap: 0.25rem;
+	/* A new one at the top, the rest already moved down for it; one from
+	   another device as well, which is how it is noticed coming in. */
+	animation: fade-in var(--duration-m) var(--ease-out);
 }
 
 /* The item and what is drawn over it: a spinner while it goes up, and a
@@ -2828,6 +2947,15 @@ button.icon.account-devices-count {
 	filter: grayscale(1);
 }
 
+/* And comes into its colour once it is up, rather than snapping to it. */
+.clipboard button.clipboard-choose {
+	transition-property: color, background-color, border-color, box-shadow, opacity, filter;
+	transition-duration:
+		var(--duration-state), var(--duration-state), var(--duration-state), var(--duration-state),
+		var(--duration-m), var(--duration-m);
+	transition-timing-function: var(--ease-out);
+}
+
 .clipboard-progress {
 	position: absolute;
 	inset-block-start: 50%;
@@ -2855,24 +2983,21 @@ button.icon.account-devices-count {
 	pointer-events: none;
 }
 
+.clipboard-done {
+	animation: fade-in var(--duration-s) var(--ease-out);
+}
+
+/* A turn a lap, for as long as the item is on its way: a loop, not a step of
+   motion, so it is stopped outright rather than shortened when the system
+   asks for less of it. */
 @media (prefers-reduced-motion: no-preference) {
 	.clipboard-progress {
 		animation: clipboard-spin 0.8s linear infinite;
 	}
 
-	.clipboard-done {
-		animation: clipboard-done-in 150ms ease-out;
-	}
-
 	@keyframes clipboard-spin {
 		to {
 			transform: rotate(360deg);
-		}
-	}
-
-	@keyframes clipboard-done-in {
-		from {
-			opacity: 0;
 		}
 	}
 }
@@ -3020,10 +3145,10 @@ button.icon.account-devices-count {
 		opacity: 0;
 		pointer-events: none;
 		transition:
-			clip-path 0.18s cubic-bezier(0.4, 0, 1, 1),
-			opacity 0.18s cubic-bezier(0.4, 0, 1, 1),
-			transform 0.18s cubic-bezier(0.4, 0, 1, 1),
-			display 0.18s allow-discrete;
+			clip-path var(--duration-m) var(--ease-in),
+			opacity var(--duration-m) var(--ease-in),
+			transform var(--duration-m) var(--ease-in),
+			display var(--duration-m) allow-discrete;
 	}
 
 	/* Open, and opening: above one still shutting when the user goes straight
@@ -3036,10 +3161,10 @@ button.icon.account-devices-count {
 		opacity: 1;
 		pointer-events: auto;
 		transition:
-			clip-path 0.3s cubic-bezier(0.3, 0.7, 0.2, 1),
-			opacity 0.12s linear,
-			transform 0.3s cubic-bezier(0.3, 0.7, 0.2, 1),
-			display 0.3s allow-discrete;
+			clip-path var(--duration-xl) var(--ease-glide),
+			opacity var(--duration-s) linear,
+			transform var(--duration-xl) var(--ease-glide),
+			display var(--duration-xl) allow-discrete;
 	}
 
 	/* Straight from one panel to the next — a source chosen opens its
@@ -3065,8 +3190,8 @@ button.icon.account-devices-count {
 		opacity: 1;
 		transform: translateX(var(--slide-out));
 		transition:
-			transform 0.3s cubic-bezier(0.3, 0.7, 0.2, 1),
-			display 0.3s allow-discrete;
+			transform var(--duration-xl) var(--ease-glide),
+			display var(--duration-xl) allow-discrete;
 	}
 
 	/* Where opening starts: a panel that was `display: none` has no style of
@@ -3183,6 +3308,10 @@ button.icon.account-devices-count {
 	background: var(--on-bg);
 }
 
+.compact-picker-chevron {
+	transition: background-color var(--duration-state) var(--ease-out);
+}
+
 /* Pointing along the bar while the panel is shut, and turned down at it while
    it is open. */
 .compact-picker .toolbar-icon {
@@ -3195,10 +3324,10 @@ button.icon.account-devices-count {
 	transform: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-	.compact-picker .toolbar-icon {
-		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-	}
+.compact-picker .toolbar-icon {
+	transition:
+		transform var(--duration-m) var(--ease-out),
+		color var(--duration-state) var(--ease-out);
 }
 
 .compact-icon {
@@ -3281,6 +3410,7 @@ button.icon.account-devices-count {
 	align-items: flex-start;
 	padding: 4rem 1rem 1rem;
 	background: rgb(0 0 0 / 35%);
+	animation: dim-in var(--duration-l) var(--ease-out);
 }
 
 .palette {
@@ -3471,6 +3601,8 @@ button.icon.account-devices-count {
 	padding: var(--space-s) var(--gutter);
 	border-block-end: 1px solid var(--border);
 	background: var(--surface);
+	/* In the column, so the note has already moved down to make room for it. */
+	animation: fade-in var(--duration-m) var(--ease-out);
 }
 
 .find-row {
@@ -3585,6 +3717,7 @@ button.icon.account-devices-count {
 	place-items: center;
 	padding: 1rem;
 	background: rgb(0 0 0 / 0.4);
+	animation: dim-in var(--duration-l) var(--ease-out);
 }
 
 .tab-notice,
@@ -3596,6 +3729,16 @@ button.icon.account-devices-count {
 	background: var(--surface);
 	box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
 	line-height: 1.6;
+}
+
+/* A dialog rises into the middle of the page as its backdrop dims, as the
+   palette does into the top of it. */
+.tab-notice,
+.modal,
+.palette {
+	--arrive-y: 0.5rem;
+	--arrive-scale: 0.98;
+	animation: arrive var(--duration-l) var(--ease-out);
 }
 
 .tab-notice h2,

@@ -140,16 +140,22 @@ const MenuCard = ({
 	onChosen,
 	cardRef,
 	at,
+	rises,
 }: {
 	label: string;
 	items: readonly OptionsMenuItem[];
 	onChosen: () => void;
 	cardRef: RefObject<HTMLDivElement | null>;
 	at: MenuPoint;
+	rises: boolean;
 }) => (
 	<div
 		ref={cardRef}
-		className="toolbar-panel options-menu-items"
+		className={
+			rises
+				? 'toolbar-panel options-menu-items options-menu-rises'
+				: 'toolbar-panel options-menu-items'
+		}
 		role="group"
 		aria-label={label}
 		style={{ left: at.x, top: at.y }}
@@ -243,11 +249,12 @@ export const FloatingMenu = ({
 
 	// Placed on the element itself rather than through state: it is a
 	// measurement of what has just been drawn, and a second render to apply it
-	// would draw the card once in the wrong place first.
+	// would draw the card once in the wrong place first. Its laid-out size, not
+	// its drawn box, which is scaled down while it opens (`arrive`).
 	useLayoutEffect(() => {
 		const element = card.current;
 		if (element === null) return;
-		const { width, height } = element.getBoundingClientRect();
+		const { offsetWidth: width, offsetHeight: height } = element;
 		const left = align === 'end' ? at.x - width : at.x;
 		const top = rises ? at.y - height : at.y;
 		element.style.left = `${String(Math.max(EDGE, Math.min(left, innerWidth - width - EDGE)))}px`;
@@ -298,7 +305,14 @@ export const FloatingMenu = ({
 	}, [onClose, anchor]);
 
 	return createPortal(
-		<MenuCard cardRef={card} label={label} items={items} onChosen={onClose} at={at} />,
+		<MenuCard
+			cardRef={card}
+			label={label}
+			items={items}
+			onChosen={onClose}
+			at={at}
+			rises={rises}
+		/>,
 		document.body
 	);
 };
