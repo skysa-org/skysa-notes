@@ -41,6 +41,14 @@ describe('parseSearch', () => {
 		expect(parseSearch({ enter: ['code'] })).toEqual({});
 	});
 
+	it('takes a share only by an id the service worker could have made', () => {
+		const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+		expect(parseSearch({ share: id })).toEqual({ share: id });
+		expect(parseSearch({ share: 'x' })).toEqual({});
+		expect(parseSearch({ share: `${id}/0` })).toEqual({});
+		expect(parseSearch({ share: [id] })).toEqual({});
+	});
+
 	it('takes the kind of refusal only when it is one a policy can give', () => {
 		expect(parseSearch({ connect: 'refused', code: 'lapsed' })).toEqual({
 			connect: 'refused',
@@ -66,6 +74,7 @@ describe('parseSearch', () => {
 			connect: 'signin',
 			code: 'x',
 			enter: 'x',
+			share: '../x',
 		});
 		expect(refused).toStrictEqual({
 			folder: undefined,
@@ -73,6 +82,7 @@ describe('parseSearch', () => {
 			connect: undefined,
 			code: undefined,
 			enter: undefined,
+			share: undefined,
 		});
 		expect({ note: { a: 1 }, ...refused }.note).toBeUndefined();
 	});

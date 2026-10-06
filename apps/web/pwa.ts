@@ -18,6 +18,63 @@ import { type Brand } from './brand.js';
 const PROVIDER_ORIGINS =
 	/^https:\/\/(www\.googleapis\.com|graph\.microsoft\.com|[a-z]+\.dropboxapi\.com|(?:[a-z0-9-]+\.)+files\.1drv\.com|my\.microsoftpersonalcontent\.com|(?:[a-z0-9-]+\.)+sharepoint\.com)\//;
 
+/**
+ * The share target's answer to a share, in the service worker
+ * (docs/ARCHITECTURE.md §8, "Shared to the app"). The system's share sheet
+ * POSTs what was shared to `/share` as a form; this keeps it in Cache Storage
+ * and sends the page to `/?share=<id>`, which asks the user before anything
+ * goes on the clipboard (`src/share/`). Nothing of it reaches the API.
+ *
+ * **Written into `sw.js` as its own source** (`handler.toString()` in
+ * workbox-build's `runtimeCachingConverter`), so it uses nothing from outside
+ * itself: no import, no constant of this module's, no helper. The cache's name,
+ * the keys and the shape of the listing are written out here and in
+ * `src/share/received.ts` both, and `tests/share.test.ts` runs the one into the
+ * other.
+ *
+ * A file larger than the clipboard takes (`MAX_ATTACHMENT_BYTES`, 25 MiB) is
+ * listed by its name and not kept, so the page can say so.
+ */
+export const receiveShare = async ({ request }: { request: Request }): Promise<Response> => {
+	const form = await request.formData();
+	const id = crypto.randomUUID();
+	const cache = await caches.open('skysa-share');
+	const largest = 25 * 1024 * 1024;
+	const text = ['title', 'text', 'url']
+		.map((field) => form.get(field))
+		.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+		.join('\n');
+	const files = form
+		.getAll('files')
+		.filter((value): value is File => typeof value !== 'string' && value.name !== '');
+	const listed = files.map((file, part) => ({
+		name: file.name,
+		type: file.type,
+		size: file.size,
+		part: file.size > largest ? null : part,
+	}));
+	await Promise.all(
+		files.flatMap((file, part) =>
+			file.size > largest
+				? []
+				: [
+						cache.put(
+							new URL(`/share/${id}/${String(part)}`, request.url),
+							new Response(file)
+						),
+					]
+		)
+	);
+	// The listing last: the page takes a share only once it is all there.
+	await cache.put(
+		new URL(`/share/${id}`, request.url),
+		new Response(JSON.stringify({ text, files: listed }), {
+			headers: { 'Content-Type': 'application/json' },
+		})
+	);
+	return Response.redirect(new URL(`/?share=${id}`, request.url).href, 303);
+};
+
 /** The manifest, named and coloured by the brand (`brand.ts`). */
 export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
 	name: brand.name,
@@ -30,6 +87,21 @@ export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
 	display: 'standalone',
 	start_url: '/',
 	scope: '/',
+	// The system's share sheet offers the app, installed, where the platform
+	// supports it: Android and ChromeOS. What is shared goes to the source's
+	// clipboard, once the user says so (docs/ARCHITECTURE.md §8).
+	// https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/share_target
+	share_target: {
+		action: '/share',
+		method: 'POST',
+		enctype: 'multipart/form-data',
+		params: {
+			title: 'title',
+			text: 'text',
+			url: 'url',
+			files: [{ name: 'files', accept: ['*/*'] }],
+		},
+	},
 	icons: [
 		{ src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
 		{ src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
@@ -69,6 +141,13 @@ export const PWA_WORKBOX: VitePWAOptions['workbox'] = {
 			// all.
 			urlPattern: PROVIDER_ORIGINS,
 			handler: 'NetworkOnly',
+		},
+		{
+			// A share, from the system's share sheet (`receiveShare`). Answered
+			// here and never sent on: what was shared is note content's kind.
+			urlPattern: ({ url, sameOrigin }) => sameOrigin && url.pathname === '/share',
+			handler: receiveShare,
+			method: 'POST',
 		},
 	],
 };

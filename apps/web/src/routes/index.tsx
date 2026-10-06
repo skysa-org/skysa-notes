@@ -32,6 +32,7 @@ import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
+import { TakeShare } from '../share/TakeShare.js';
 import {
 	connectCodeAskedAt,
 	dropConnectCode,
@@ -916,7 +917,7 @@ const useBegunInView = (begun: NoteRecord | undefined, shut: (panel: null) => vo
 
 const Home = () => {
 	const search = Route.useSearch();
-	const { connect, code, enter } = search;
+	const { connect, code, enter, share } = search;
 	const navigate = useNavigate({ from: Route.fullPath });
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -1014,6 +1015,16 @@ const Home = () => {
 	} = useCompactLayout();
 	useBegunInView(place.begun, setPanel);
 	const enterCode = useEnterCode(enter, compact, setPanel);
+	// Something shared to the app (`share/TakeShare.tsx`): out of the URL once
+	// read, so a reload does not ask again, and the clipboard brought into
+	// view once it has it, which in a compact window is in the sources
+	// dropdown.
+	const shareRead = useCallback(() => {
+		void navigate({ search: ({ share: _share, ...rest }) => rest, replace: true });
+	}, [navigate]);
+	const shareAdded = useCallback(() => {
+		if (compact) setPanel('sources');
+	}, [compact, setPanel]);
 	// The answers hang from the field, over whatever else is open; a dropdown
 	// left open under them would be a second list behind the first.
 	const onQuery = (next: string) => {
@@ -1670,6 +1681,13 @@ const Home = () => {
 			 * it did while it was the only other card on the screen.
 			 */}
 			<HeldImport source={held} />
+			<TakeShare
+				share={share}
+				source={source}
+				sources={sources}
+				onRead={shareRead}
+				onAdded={shareAdded}
+			/>
 			<div className="toast-stack">
 				{deleted !== null && (
 					<DeletedNotice
