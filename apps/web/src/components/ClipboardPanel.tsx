@@ -36,12 +36,13 @@ import {
 
 /**
  * A source's clipboard, shared by its devices (docs/ARCHITECTURE.md §7, "The
- * clipboard"), a section of its own just before the storage panel, wherever
- * that is: at the foot of the sidebar, and at the foot of a compact window's
- * source dropdown. Shown where the user has asked for it on this device, from
- * the storage menu. It glows a little in the brand's colour while it holds
- * anything, and more while files are dragged over the window, most of all
- * over itself, where they can be dropped.
+ * clipboard"), a full-width region of its own just before the storage panel,
+ * wherever that is: at the foot of the sidebar, and at the foot of a compact
+ * window's source dropdown. Shown where the user has asked for it on this
+ * device, from the storage menu. Holding anything, it is featured, edged and
+ * glowing in the brand's colour; the edge thickens inward while files are
+ * dragged over the window, most of all over itself, where they can be dropped
+ * (`styles.css`).
  *
  * Things come in by Paste, which reads the browser's clipboard (text or a
  * picture); by a keyboard paste or a drop on the panel, and by "Add a file",

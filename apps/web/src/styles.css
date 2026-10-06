@@ -2634,13 +2634,45 @@ button.icon.account-devices-count {
    the sidebar. Its title and what puts things in, then the items, newest
    first. Ten is more than the foot of a sidebar has room for, so the list
    scrolls inside itself past a few. Spaced by margins rather than a gap, so
-   that the live region, empty but there to be announced into, takes no room. */
+   that the live region, empty but there to be announced into, takes no room.
+
+   The width of the sidebar, square, and a step lighter than it. Holding
+   anything, it is featured: a gradient tinted with the brand's colour, an edge
+   in it and a glow outside it. Files dragged over the window thicken the edge
+   and widen the glow, to say where they can go, and most with them over it.
+   Every edge is a hard shadow drawn inside it, so a thicker one never moves
+   what is in it; the glow shows above and below, as the sidebar cuts off its
+   sides. */
 .clipboard {
+	--clipboard-bg: var(--bg);
+	--clipboard-featured-bg: linear-gradient(
+		160deg,
+		var(--bg) 0%,
+		color-mix(in srgb, var(--brand, var(--accent)) 9%, var(--bg)) 100%
+	);
+	--clipboard-glow: 22%;
+	--clipboard-glow-more: 30%;
 	position: relative;
 	flex: none;
 	padding: var(--space-m) var(--gutter);
 	font-size: 0.85rem;
-	border-block-start: 1px solid var(--border);
+	background: var(--clipboard-bg);
+	box-shadow: inset 0 1px 0 var(--border);
+}
+
+/* Lifted rather than sunk: the dark page is darker than the sidebar, so the
+   region is a step lighter than the sidebar, and its tint is at the top. */
+@media (prefers-color-scheme: dark) {
+	.clipboard {
+		--clipboard-bg: color-mix(in srgb, var(--fg) 4%, var(--surface));
+		--clipboard-featured-bg: linear-gradient(
+			160deg,
+			color-mix(in srgb, var(--brand, var(--accent)) 22%, var(--surface)) 0%,
+			var(--surface) 78%
+		);
+		--clipboard-glow: 28%;
+		--clipboard-glow-more: 32%;
+	}
 }
 
 .clipboard > :not(:first-child) {
@@ -2657,24 +2689,25 @@ button.icon.account-devices-count {
 	outline: none;
 }
 
-/* A glow inside it, in the brand's colour: a little while it holds anything;
-   more while files are dragged anywhere over the window, to say where they
-   can go; most over the panel itself, where letting go adds them. */
-.clipboard-filled {
-	box-shadow: inset 0 0 1.25rem -0.25rem
-		color-mix(in srgb, var(--brand, var(--accent)) 40%, transparent);
+.clipboard-filled,
+.clipboard-drop-ready {
+	background: var(--clipboard-featured-bg);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 42%, transparent),
+		0 0 12px color-mix(in srgb, var(--brand, var(--accent)) var(--clipboard-glow), transparent);
 }
 
 .clipboard-drop-ready {
 	box-shadow:
-		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 35%, transparent),
-		inset 0 0 1.25rem -0.25rem color-mix(in srgb, var(--brand, var(--accent)) 45%, transparent);
+		inset 0 0 0 2px color-mix(in srgb, var(--brand, var(--accent)) 65%, transparent),
+		0 0 20px
+			color-mix(in srgb, var(--brand, var(--accent)) var(--clipboard-glow-more), transparent);
 }
 
 .clipboard-drop-over {
 	box-shadow:
-		inset 0 0 0 2px var(--brand, var(--accent)),
-		inset 0 0 2.5rem 0.5rem color-mix(in srgb, var(--brand, var(--accent)) 70%, transparent);
+		inset 0 0 0 3px var(--brand, var(--accent)),
+		0 0 24px color-mix(in srgb, var(--brand, var(--accent)) 60%, transparent);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -2695,7 +2728,9 @@ button.icon.account-devices-count {
 	padding: var(--space-m) var(--gutter);
 	text-align: center;
 	font-weight: 600;
-	color: var(--brand, var(--accent));
+	/* The brand's colour, a third of the way to the text's: readable on the
+	   wash under it whatever colour a brand gives itself. */
+	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
 	background: color-mix(in srgb, var(--bg) 80%, transparent);
 	pointer-events: none;
 }
@@ -2815,7 +2850,7 @@ button.icon.account-devices-count {
 	gap: 0.25rem;
 	border-radius: 0.375rem;
 	font-weight: 600;
-	color: var(--brand, var(--accent));
+	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
 	background: color-mix(in srgb, var(--surface) 88%, transparent);
 	pointer-events: none;
 }
