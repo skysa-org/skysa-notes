@@ -124,14 +124,14 @@ export interface AccountPanelProps {
 	 */
 	pick?: typeof pickFiles;
 	/**
-	 * Where the panel's actions go as one `⋯` menu, with what it says above
-	 * it: the end of the showing source's row in a compact window's source
-	 * dropdown, as every notebook's and note's row ends in its own
-	 * (`SourcePanel`, `RowOptions`), with what another source's `⋯` asked of
-	 * this one once it is showing. Left out, as at the foot of the sidebar, the
-	 * panel is one line — the source and how its syncing is going — with the
-	 * actions behind a gear at its end (`StatusLine`), and only what needs the
-	 * user said above it, while it does.
+	 * Where the panel's actions go as one `⋯` menu: the end of the showing
+	 * source's row in a compact window's source dropdown, as every notebook's
+	 * and note's row ends in its own (`SourcePanel`, `RowOptions`), with what
+	 * another source's `⋯` asked of this one once it is showing. Left out, as at
+	 * the foot of the sidebar, the actions are behind a gear at the end of the
+	 * panel's line (`StatusLine`). Either way a connected source's panel is that
+	 * one line — the source and how its syncing is going — with only what needs
+	 * the user said above it, while it does.
 	 */
 	slot?: AccountSlot;
 }
@@ -501,31 +501,11 @@ const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) =>
 };
 
 /**
- * What this source's app folder holds that the app cannot see, said where the
- * source is: a user who copies notes into the folder by hand otherwise finds
- * nothing arrived, and nothing to say why (`UNSEEN_AT_PROVIDER`). Shut until
- * asked for, as the devices are: it is the same for every Drive source for
- * good, and open it would be a paragraph in the sidebar for good.
- */
-const UnseenAtProvider = ({ provider }: { provider: ProviderKind | undefined }) => {
-	const unseen = provider === undefined ? undefined : UNSEEN_AT_PROVIDER[provider];
-	if (unseen === undefined) return null;
-	return (
-		<div className="account-unseen">
-			<details>
-				<summary className="muted">
-					<Icon name="chevron" />
-					{unseen.summary}
-				</summary>
-				<p className="muted">{unseen.detail}</p>
-			</details>
-		</div>
-	);
-};
-
-/**
- * The same, from the gear at the foot of the sidebar, where there is no room
- * for it to fold out: an item that opens it over everything.
+ * What this source's app folder holds that the app cannot see: a user who
+ * copies notes into the folder by hand otherwise finds nothing arrived, and
+ * nothing to say why (`UNSEEN_AT_PROVIDER`). An item of the gear's menu or the
+ * `⋯`, that opens it over everything: it is the same for every Drive source
+ * for good, and said in the panel it would be a paragraph there for good.
  */
 const unseenItem = (
 	provider: ProviderKind | undefined,
@@ -569,7 +549,15 @@ interface LocalProps {
  * names it takes). There with nothing in it too, disabled, so the rows keep
  * their shape from source to source.
  */
-const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly OptionsMenuItem[] }) => {
+const ActionsMenu = ({
+	slot,
+	items,
+	triggerRef,
+}: {
+	slot: AccountSlot;
+	items: readonly OptionsMenuItem[];
+	triggerRef?: RefObject<HTMLButtonElement | null>;
+}) => {
 	// First, as a notebook's menu has it: what the source is called, then what
 	// can be done with it.
 	const all =
@@ -587,17 +575,20 @@ const ActionsMenu = ({ slot, items }: { slot: AccountSlot; items: readonly Optio
 					trigger={<Icon name="overflow" />}
 					disabled={all.length === 0}
 					items={all}
+					{...(triggerRef === undefined ? {} : { triggerRef })}
 				/>,
 				slot.menuIn
 			);
 };
 
 /**
- * The foot of the sidebar, once there is nothing to ask the user: the source
- * and how it is going, in one line, and the gear with everything that can be
- * done to it at the line's end. What needs the user — a reconnect, a problem, a
- * question being asked — is drawn above the line while it lasts, so the line
- * is where the panel ends whatever is going on.
+ * Where the panel ends, once there is nothing to ask the user: the source and
+ * how it is going, in one line, with a connected source's count of its other
+ * devices at the line's end — and, at the foot of the sidebar, the gear with
+ * everything that can be done to it, which a compact window's source dropdown
+ * has in the source's `⋯` instead. What needs the user — a reconnect, a
+ * problem, a question being asked — is drawn above the line while it lasts,
+ * so the line is where the panel ends whatever is going on.
  */
 const StatusLine = ({
 	text,
@@ -914,18 +905,14 @@ interface SyncStateProps {
 	/** Whether the re-scan is being asked about, which the panel holds. */
 	rescanning: boolean;
 	onRescanning: (asking: boolean) => void;
-	/**
-	 * Whether the panel ends in a status line (`StatusLine`), which says how
-	 * syncing is going itself: here, then, only where it has stopped on
-	 * something the user has to deal with.
-	 */
-	line: boolean;
 }
 
 /**
- * How syncing is going, and what to do about it. Not a live region: it changes
- * on every sync, every minute, and a screen reader announcing each one would
- * be noise; the panel is where the user looks.
+ * What to do about how syncing is going, above the status line
+ * (`StatusLine`), which says how it is going itself: here, then, only where it
+ * has stopped on something the user has to deal with. Not a live region: it
+ * changes on every sync, every minute, and a screen reader announcing each one
+ * would be noise; the panel is where the user looks.
  */
 const SyncState = ({
 	client,
@@ -939,12 +926,10 @@ const SyncState = ({
 	navigate,
 	rescanning,
 	onRescanning: setRescanning,
-	line,
 }: SyncStateProps) => {
 	const status = useSyncStatus(sync);
 	const syncable = isSyncable(bound);
 	const message = statusMessage(status, label, syncable);
-	const count = syncCount(status.progress, label);
 	const reconnect = needsReconnect(status);
 
 	return (
@@ -977,10 +962,7 @@ const SyncState = ({
 					Connect again
 				</ConnectButton>
 			)}
-			{message !== null && (!line || status.phase === 'attention') && (
-				<p className="muted">{message}</p>
-			)}
-			{!line && count !== undefined && <SyncBar count={count} />}
+			{message !== null && status.phase === 'attention' && <p className="muted">{message}</p>}
 			<Denied status={status} syncable={syncable} config={config} />
 			{/*
 			 * Beside the message that names the op, and only there: `stuck`
@@ -1181,11 +1163,12 @@ const DeviceRows = ({
  * the compensating control for holding a bearer in IndexedDB, where `httpOnly`
  * cannot protect it (docs/ARCHITECTURE.md §6), so it is asked for on open, and
  * how many other devices there are is said whether or not the list is open:
- * one more than the user has is what a theft looks like from here. The rows
- * fold behind that count (2026-10-02), each naming the device as its browser
- * did at sign-in ("Safari on iPhone"), since a row that says only "a device"
- * cannot be told from the one in the user's pocket. This one is not among
- * them.
+ * one more than the user has is what a theft looks like from here. The count
+ * is in the status line (`StatusLine`), where there is room for it and not for
+ * the rows: it is a button, beside the gear or the source's `⋯`, that opens
+ * them over everything. Each row names the device as its browser did at
+ * sign-in ("Safari on iPhone"), since a row that says only "a device" cannot
+ * be told from the one in the user's pocket. This one is not among them.
  *
  * Revoking is permanent in a way worth saying: the server spends a credential's
  * hash for ever, so the device that held it cannot be talked back into this
@@ -1197,7 +1180,6 @@ const Devices = ({
 	connectionId,
 	grants,
 	onChanged,
-	line,
 	gear,
 }: {
 	client: Client;
@@ -1218,15 +1200,9 @@ const Devices = ({
 	/** A device was removed: ask again. */
 	onChanged: () => void;
 	/**
-	 * In the status line at the foot of the sidebar (`StatusLine`), where there
-	 * is room for the count and not for the rows: the count is a button, beside
-	 * the gear, that opens them over everything. Still said without opening
-	 * anything, since the count is what the list is for.
-	 */
-	line: boolean;
-	/**
 	 * Where the focus goes when the list is put away with nobody left on it: the
-	 * count it was opened from went with the last of them.
+	 * count it was opened from went with the last of them. The gear, or the
+	 * source's `⋯`.
 	 */
 	gear?: RefObject<HTMLButtonElement | null>;
 }) => {
@@ -1241,58 +1217,42 @@ const Devices = ({
 	// taken away from under the focus.
 	if (others.length === 0 && !open) return null;
 
-	if (line) {
-		return (
-			<>
-				{others.length > 0 && (
-					<button
-						ref={count}
-						type="button"
-						className="icon icon-quiet account-devices-count"
-						aria-label={devicesLine(others.length)}
-						title={devicesLine(others.length)}
-						onClick={() => {
-							setOpen(true);
-						}}
-					>
-						<Icon name="device" />
-						<span aria-hidden="true">{others.length}</span>
-					</button>
-				)}
-				{open && (
-					<InfoDialog
-						title="Other devices signed in on this account"
-						onClose={() => {
-							setOpen(false);
-							if (others.length === 0) gear?.current?.focus();
-						}}
-						returnFocus={count}
-					>
-						<div className="account-devices">
-							{others.length === 0 ? (
-								<p>No other device is signed in on this account.</p>
-							) : (
-								<DeviceRows others={others} revoking={revoking} />
-							)}
-						</div>
-					</InfoDialog>
-				)}
-			</>
-		);
-	}
-
 	return (
-		<div className="account-devices">
-			{/* Shut until asked for: it is there to check now and then, and open
-			    it is a row per device under everything the panel says. */}
-			<details>
-				<summary className="muted">
-					<Icon name="chevron" />
-					{devicesLine(others.length)}
-				</summary>
-				<DeviceRows others={others} revoking={revoking} />
-			</details>
-		</div>
+		<>
+			{others.length > 0 && (
+				<button
+					ref={count}
+					type="button"
+					className="icon icon-quiet account-devices-count"
+					aria-label={devicesLine(others.length)}
+					title={devicesLine(others.length)}
+					onClick={() => {
+						setOpen(true);
+					}}
+				>
+					<Icon name="device" />
+					<span aria-hidden="true">{others.length}</span>
+				</button>
+			)}
+			{open && (
+				<InfoDialog
+					title="Other devices signed in on this account"
+					onClose={() => {
+						setOpen(false);
+						if (others.length === 0) gear?.current?.focus();
+					}}
+					returnFocus={count}
+				>
+					<div className="account-devices">
+						{others.length === 0 ? (
+							<p>No other device is signed in on this account.</p>
+						) : (
+							<DeviceRows others={others} revoking={revoking} />
+						)}
+					</div>
+				</InfoDialog>
+			)}
+		</>
 	);
 };
 
@@ -1539,7 +1499,7 @@ const storageItems = ({
 	download: readonly OptionsMenuItem[];
 	/** The ways to import (`importItems`), or none where an import is held back. */
 	imports: readonly OptionsMenuItem[];
-	/** What the provider keeps from the app, where it is asked for from the gear. */
+	/** What the provider keeps from the app (`unseenItem`). */
 	about: readonly OptionsMenuItem[];
 	stranded: boolean;
 	/** Whether the disconnect question is open. */
@@ -1586,32 +1546,12 @@ const storageItems = ({
 };
 
 /**
- * Which source this is and whose, at the top of its panel in a compact
- * window's source dropdown. Nothing at the foot of the sidebar, whose status
- * line names the source, with the account in its tooltip.
- */
-const SourceHeading = ({
-	line,
-	label,
-	displayName,
-}: {
-	line: boolean;
-	label: string;
-	displayName: string | null;
-}) =>
-	line ? null : (
-		<p>
-			Syncing with {label}
-			{displayName !== null && <span className="muted"> · {displayName}</span>}
-		</p>
-	);
-
-/**
- * Where a connected source's panel ends. In a compact window's source dropdown
- * that is the `⋯` at the end of the source's row. At the foot of the sidebar it
- * is the status line (`StatusLine`): how syncing is going, the count of the
- * other devices, and the gear, whose menu also opens what the provider keeps
- * from the app — said there over everything, the line having no room for it.
+ * Where a connected source's panel ends: the status line (`StatusLine`), with
+ * how syncing is going, the count of the other devices, and — at the foot of
+ * the sidebar — the gear. In a compact window's source dropdown the gear's
+ * items are the `⋯` at the end of the source's row instead. Either menu also
+ * opens what the provider keeps from the app, said over everything, the line
+ * having no room for it.
  */
 const ConnectedFoot = ({
 	slot,
@@ -1642,7 +1582,10 @@ const ConnectedFoot = ({
 	status: SchedulerStatus;
 	label: string;
 	displayName: string | null;
-	/** The gear, where the focus goes back to once a question is put away. */
+	/**
+	 * The gear, or the source's `⋯`: where the focus goes back to once a
+	 * question is put away.
+	 */
 	openButton: RefObject<HTMLButtonElement | null>;
 	client: Client;
 	database: NotesDatabase;
@@ -1656,14 +1599,10 @@ const ConnectedFoot = ({
 		phase: status.phase,
 		download: downloadable ? downloadItem(holds, downloading) : [],
 		imports: downloadable ? importItems(importing) : [],
-		about:
-			slot === undefined
-				? unseenItem(bound.provider, label, () => {
-						setAbout(true);
-					})
-				: [],
+		about: unseenItem(bound.provider, label, () => {
+			setAbout(true);
+		}),
 	});
-	if (slot !== undefined) return <ActionsMenu slot={slot} items={items} />;
 	const said = lineStatus(status, label, isSyncable(bound));
 	const count = syncCount(status.progress, label);
 	// Who the account is, which the line has no room for, and the whole of
@@ -1692,12 +1631,14 @@ const ConnectedFoot = ({
 					connectionId={bound.connectionId}
 					grants={grants}
 					onChanged={onGrantsChanged}
-					line
 					gear={openButton}
 				/>
-				<GearMenu items={items} triggerRef={openButton} />
+				{slot === undefined && <GearMenu items={items} triggerRef={openButton} />}
 			</StatusLine>
 			{count !== undefined && <SyncBar count={count} />}
+			{slot !== undefined && (
+				<ActionsMenu slot={slot} items={items} triggerRef={openButton} />
+			)}
 		</>
 	);
 };
@@ -1741,9 +1682,6 @@ const Connected = ({
 }: ConnectedProps) => {
 	const [step, setStep] = useState<Step>({ kind: 'closed' });
 	const [rescanning, setRescanning] = useState(false);
-	// Ends in a status line, at the foot of the sidebar, rather than in a
-	// compact window's source dropdown.
-	const line = slot === undefined;
 	const [trouble, setTrouble] = useState<string | null>(null);
 	const status = useSyncStatus(sync);
 	// Only ever this source's. Named once per render, so the click below is
@@ -1872,7 +1810,6 @@ const Connected = ({
 
 	return (
 		<section ref={panel} className="account" aria-label="Storage">
-			<SourceHeading line={line} label={label} displayName={displayName} />
 			<SyncState
 				client={client}
 				database={database}
@@ -1885,9 +1822,7 @@ const Connected = ({
 				{...(navigate === undefined ? {} : { navigate })}
 				rescanning={rescanning}
 				onRescanning={setRescanning}
-				line={line}
 			/>
-			{!line && <UnseenAtProvider provider={bound.provider} />}
 			{/*
 			 * Not while an import is filling the source, when the archive would be
 			 * whatever part of it had arrived; nor while the disconnect question
@@ -1901,16 +1836,6 @@ const Connected = ({
 			 * add to the very list being asked about.
 			 */}
 			{downloadable && <ImportNotes importing={importing} />}
-			{!line && (
-				<Devices
-					client={client}
-					database={database}
-					connectionId={connectionId}
-					grants={devices.grants}
-					onChanged={devices.ask}
-					line={false}
-				/>
-			)}
 			{(problem ?? trouble) !== null && (
 				<p className="muted" role="alert">
 					{problem ?? trouble}

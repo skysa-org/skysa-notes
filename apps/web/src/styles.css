@@ -2508,10 +2508,10 @@ button.danger {
 	cursor: default;
 }
 
-/* The foot of the sidebar, when nothing needs the user (`StatusLine`): the
+/* Where the panel ends, when nothing needs the user (`StatusLine`): the
    source and how it is going, and at the end the count of the other devices
-   and the gear. The words wrap in their own column, so a long one does not
-   push the buttons off the line. */
+   and, at the foot of the sidebar, the gear. The words wrap in their own
+   column, so a long one does not push the buttons off the line. */
 .account-line {
 	display: flex;
 	align-items: center;
@@ -2562,52 +2562,15 @@ button.icon.account-devices-count {
 	margin-block-start: 0.5rem;
 }
 
-/* The devices signed in to a source (`Devices`): one row each, what the device
-   is on the left and Remove at the end. The label wraps in its own column, so
-   in a narrow sidebar "last used 9:48 AM" breaks across lines beside the
-   button rather than around it. No bullets: it is a list for a screen reader,
-   and rows to the eye. */
-.account-devices,
-.account-unseen {
+/* The devices signed in to a source (`Devices`), opened over everything from
+   their count: one row each, what the device is on the left and Remove at the
+   end. The label wraps in its own column, so "last used 9:48 AM" breaks across
+   lines beside the button rather than around it. No bullets: it is a list for
+   a screen reader, and rows to the eye. */
+.account-devices {
 	display: flex;
 	flex-direction: column;
 	gap: 0.35rem;
-}
-
-/* Its count, and the way into the rows: as tall as anything else pressed in
-   the panel, its marker the app's chevron rather than the browser's
-   triangle, turned down while it is open. */
-.account-devices summary,
-.account-unseen summary {
-	display: flex;
-	align-items: center;
-	gap: 0.35rem;
-	min-height: var(--control);
-	cursor: pointer;
-	list-style: none;
-}
-
-.account-devices summary::-webkit-details-marker,
-.account-unseen summary::-webkit-details-marker {
-	display: none;
-}
-
-.account-devices summary .toolbar-icon,
-.account-unseen summary .toolbar-icon {
-	flex: none;
-	transform: rotate(-90deg);
-}
-
-.account-devices details[open] > summary .toolbar-icon,
-.account-unseen details[open] > summary .toolbar-icon {
-	transform: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-	.account-devices summary .toolbar-icon,
-	.account-unseen summary .toolbar-icon {
-		transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
-	}
 }
 
 .account-devices ul {
@@ -2630,9 +2593,8 @@ button.icon.account-devices-count {
 	min-width: 0;
 }
 
-.account .account-devices button {
+.account-devices li > button {
 	flex: none;
-	padding: 0.15rem 0.5rem;
 }
 
 /* ---- Compact window ----------------------------------------------------- */

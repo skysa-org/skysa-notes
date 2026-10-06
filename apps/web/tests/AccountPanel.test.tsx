@@ -149,9 +149,10 @@ const settled = () => new Promise((resolve) => setTimeout(resolve, 50));
 type User = ReturnType<typeof userEvent.setup>;
 
 /**
- * The line a connected source's panel ends in at the foot of the sidebar: the
- * source, and how its syncing is going, with who the account is in its
- * tooltip. Found by that tooltip, which only a connected source's line has.
+ * The line a connected source's panel ends in, at the foot of the sidebar and
+ * in a compact window's source dropdown alike: the source, and how its syncing
+ * is going, with who the account is in its tooltip. Found by that tooltip,
+ * which only a connected source's line has.
  */
 const statusLine = (label = 'Dropbox'): Promise<HTMLElement> =>
 	screen.findByTitle(new RegExp(`^Syncing with ${label}`));
@@ -367,8 +368,8 @@ const sentNote = async (db: NotesDatabase, title: string) => {
 
 /**
  * The panel as a compact window's source dropdown has it (`SourcePanel`): its
- * actions in the `⋯` at the end of the showing source's row, and no status
- * line.
+ * actions in the `⋯` at the end of the showing source's row, rather than
+ * behind a gear at the end of its status line.
  */
 const renderDropdown = (
 	client: Client,
@@ -4413,9 +4414,9 @@ describe('returnPath', () => {
 });
 
 /**
- * In a compact window's source dropdown the panel's actions are the header's
- * `⋯`, as the notebooks' are, and the panel says how syncing is going and
- * nothing more (`SourcePanel`'s `account`).
+ * In a compact window's source dropdown the panel's actions are the showing
+ * source's `⋯`, as each notebook's are, and the panel ends in the status line
+ * the sidebar's foot ends in, without the gear (`SourcePanel`'s `account`).
  */
 describe('AccountPanel, in the source dropdown of a compact window', () => {
 	const onedrive = {
@@ -4431,7 +4432,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 	 * Dropbox showing, and OneDrive beside it, each holding a note, and a server
 	 * that answers each credential with its own account.
 	 */
-	const connected = async (sync: FakeSync) => {
+	const connected = async (sync: FakeSync, answers: Answers = {}) => {
 		const db = freshDatabase();
 		await bindConnection(db, {
 			connectionId: 'c2',
@@ -4446,7 +4447,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		await holding(db, 'c1', 'sk1_c1');
 		await createNote(db, { title: 'Kept', connectionId: 'c1' });
 		await showConnection(db, 'c1');
-		const base = clientWith();
+		const base = clientWith(answers);
 		const client: Client = {
 			...base,
 			withCredential: (credential: string) =>
@@ -4460,7 +4461,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				}) as unknown as ApiClient,
 		};
 		renderDropdown(client, db, sync);
-		await screen.findByText(/Syncing with Dropbox/);
+		await statusLine();
 		return db;
 	};
 
@@ -4572,14 +4573,41 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(document.activeElement).toBe(menu.getByRole('button', { name: 'Rename' }));
 	});
 
-	it('says how far a long run has got in a sentence, with the bar under it', async () => {
+	it('ends in the line the foot of the sidebar ends in, with no gear', async () => {
+		const sync = fakeSync({ phase: 'idle', lastSyncAt: Date.now() });
+		await connected(sync);
+		const storage = within(screen.getByRole('region', { name: 'Storage' }));
+
+		const line = await naming('ada@example.com');
+		expect(line.textContent).toMatch(/^Dropbox · Synced \d/);
+		expect(line.getAttribute('title')).toBe('Syncing with Dropbox · ada@example.com');
+		// Said once, in the line: not again as a heading or a sentence over it.
+		expect(storage.queryByText(/Syncing with/)).toBeNull();
+		expect(storage.queryByText(/^Synced/)).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Storage options' })).toBeNull();
+
+		sync.say({ phase: 'offline' });
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Offline');
+		});
+		expect(storage.queryByText(/^Offline\./)).toBeNull();
+	});
+
+	it('says how far a long run has got in the line, with the bar under it', async () => {
 		const sync = fakeSync({
 			phase: 'syncing',
 			progress: { stage: 'receiving', done: 25, total: 400 },
 		});
 		await connected(sync);
 
-		expect(await screen.findByText('Receiving notes from Dropbox: 25 of 400.')).toBeTruthy();
+		const line = await naming('ada@example.com');
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Receiving 25 of 400');
+		});
+		expect(line.getAttribute('title')).toBe(
+			'Syncing with Dropbox · ada@example.com\nReceiving notes from Dropbox: 25 of 400.'
+		);
+		expect(screen.queryByText('Receiving notes from Dropbox: 25 of 400.')).toBeNull();
 		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
 		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['25', '400']);
 
@@ -4609,7 +4637,81 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		await waitFor(async () => {
 			expect(await activeConnectionId(db)).toBe('c2');
 		});
-		expect(await screen.findByText(/Syncing with OneDrive/)).toBeTruthy();
+		expect(await statusLine('OneDrive')).toBeTruthy();
+	});
+
+	it('counts the other devices in the line, and opens them over everything', async () => {
+		const user = userEvent.setup();
+		const here = { id: 'g1', createdAt: 1, lastUsedAt: 1, expired: false, current: true };
+		const other = { id: 'g2', createdAt: 2, lastUsedAt: 2, expired: false, current: false };
+		const grants = vi
+			.fn<ApiClient['grants']>()
+			.mockResolvedValueOnce({ ok: true, value: [here, other] })
+			.mockResolvedValue({ ok: true, value: [here] });
+		await connected(fakeSync({ phase: 'idle' }), { grants });
+
+		// Beside the words, as at the foot of the sidebar, and not as rows.
+		const count = await screen.findByRole('button', {
+			name: '1 other device signed in on this account',
+		});
+		expect(count.parentElement).toBe((await statusLine()).parentElement);
+		expect(screen.queryByText(/other devices? signed in/)).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+
+		await user.click(count);
+		const dialog = await screen.findByRole('dialog', {
+			name: 'Other devices signed in on this account',
+		});
+		// Pressed inside it, the dropdown under it stays open.
+		await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+		await waitFor(() => {
+			expect(
+				within(dialog).getByText('No other device is signed in on this account.')
+			).toBeTruthy();
+		});
+		expect(screen.queryByRole('button', { name: /other devices? signed in/ })).toBeNull();
+
+		await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+		expect(screen.queryByRole('dialog')).toBeNull();
+		// With the count gone, to the source's `⋯`, which is where the gear's
+		// items are here.
+		expect(document.activeElement).toBe(await rowOptions('Dropbox'));
+	});
+
+	it('says Google Drive hides what the app did not put in its folder, from the `⋯`', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		const gdrive = { ...dropbox, provider: 'gdrive' as const, accountId: 'g-sub' };
+		await bindConnection(db, { connectionId: 'c1', provider: 'gdrive' });
+		await holding(db, 'c1');
+		renderDropdown(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: gdrive }) }),
+			db
+		);
+
+		expect(await statusLine('Google Drive')).toBeTruthy();
+		const summary = UNSEEN_AT_PROVIDER.gdrive?.summary ?? '';
+		const detail = UNSEEN_AT_PROVIDER.gdrive?.detail ?? '';
+		// Not in the panel: in the source's `⋯`, before the way to let it go.
+		expect(screen.queryByText(summary)).toBeNull();
+		expect(screen.queryByText(detail)).toBeNull();
+		const options = await rowOptions('Google Drive');
+		await user.click(options);
+		await waitFor(() => {
+			expect(labels('Google Drive')).toEqual([
+				'Rename',
+				'About Google Drive…',
+				'Disconnect…',
+			]);
+		});
+
+		await user.click(screen.getByRole('button', { name: 'About Google Drive…' }));
+
+		const dialog = await screen.findByRole('dialog', { name: summary });
+		expect(within(dialog).getByText(detail)).toBeTruthy();
+		await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(document.activeElement).toBe(options);
 	});
 
 	it('asks another source’s questions in its own panel, once it is showing', async () => {
