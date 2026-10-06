@@ -18,6 +18,7 @@ import {
 	flowStateOf,
 	type Jar,
 	newCredential,
+	recordingHub,
 	SECRETS_KEY,
 	testConfig,
 } from './harness.js';
@@ -959,7 +960,7 @@ describe("the gate's connect code", () => {
 
 describe('what the server is allowed to know', () => {
 	it('never says a credential or its hash back, anywhere in the flow', async () => {
-		const app = buildApp();
+		const app = buildApp({ relay: recordingHub().hub });
 		const credential = newCredential();
 		const secret = credential.slice('sk1_'.length);
 		const hash = await hashCredential(credential);
@@ -978,6 +979,18 @@ describe('what the server is allowed to know', () => {
 		const token = await app.request('/api/token', { method: 'POST', credential });
 
 		const grants = await app.request('/api/connection/grants', { credential });
+
+		// The change relay's ticket, and the upgrade it opens. The ticket is the
+		// one thing here that goes in a URL, so it most of all must carry neither.
+		const ticket = await app.request('/api/connection/relay/ticket', {
+			method: 'POST',
+			credential,
+		});
+		const { ticket: opens }: { ticket: string } = await ticket.clone().json();
+		const socket = await app.request(`/api/relay?ticket=${opens}`, {
+			headers: { upgrade: 'websocket' },
+		});
+		expect([ticket.status, socket.status]).toEqual([200, 200]);
 
 		// The two that take things away, on an app of their own so the rest of
 		// this still has a connection to ask about: a device signed out, which
@@ -1009,16 +1022,25 @@ describe('what the server is allowed to know', () => {
 		// Not by reading the code: by generating a secret this test knows and
 		// looking for it in everything the server ever sends.
 		const surfaces = await Promise.all(
-			[started, callback, connection, token, grants, refused, signedOut, disconnected].map(
-				async (response) => ({
-					cookies: response.headers.getSetCookie().join('\n'),
-					// Everything a page, a log, a proxy or a referrer could keep.
-					visible: [
-						response.headers.get('location') ?? '',
-						await response.clone().text(),
-					].join('\n'),
-				})
-			)
+			[
+				started,
+				callback,
+				connection,
+				token,
+				grants,
+				ticket,
+				socket,
+				refused,
+				signedOut,
+				disconnected,
+			].map(async (response) => ({
+				cookies: response.headers.getSetCookie().join('\n'),
+				// Everything a page, a log, a proxy or a referrer could keep.
+				visible: [
+					response.headers.get('location') ?? '',
+					await response.clone().text(),
+				].join('\n'),
+			}))
 		);
 
 		for (const { cookies, visible } of surfaces) {

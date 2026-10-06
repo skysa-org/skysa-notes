@@ -125,6 +125,14 @@ const statement = (db: DatabaseSync, sql: string, params: readonly Param[]) => {
 					meta: meta(Number(result.changes), result.lastInsertRowid),
 				};
 			}),
+
+		/**
+		 * One statement of a `batch`. D1 answers each with its rows, so a
+		 * `returning()` inside a batch gets them; `run` would answer none, and
+		 * drizzle would map that to an empty list without a word.
+		 */
+		batched: () =>
+			/^\s*select\b/i.test(sql) || /\breturning\b/i.test(sql) ? self.all() : self.run(),
 	};
 	return self;
 };
@@ -144,11 +152,13 @@ export const createD1 = (): D1Database & { close: () => void } => {
 
 		// D1's batch is one implicit transaction. `begin`/`commit` here means a
 		// failure half way leaves nothing behind, as it would in production.
-		batch: async (statements: readonly { run: () => Promise<unknown> }[]) => {
+		batch: async (
+			statements: readonly { run: () => Promise<unknown>; batched?: () => Promise<unknown> }[]
+		) => {
 			db.exec('BEGIN');
 			try {
 				const results = [];
-				for (const stmt of statements) results.push(await stmt.run());
+				for (const stmt of statements) results.push(await (stmt.batched ?? stmt.run)());
 				db.exec('COMMIT');
 				return results;
 			} catch (error) {

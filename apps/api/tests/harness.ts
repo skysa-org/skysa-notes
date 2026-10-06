@@ -8,6 +8,7 @@ import {
 	toBase64Url,
 } from '../src/crypto.js';
 import { type AppConfig, parseEnv } from '../src/env.js';
+import type { RelayHub, RelayMember } from '../src/relay/hub.js';
 import { answerCookieName, flowCookieName } from '../src/session.js';
 import { createD1 } from './d1.js';
 
@@ -260,6 +261,32 @@ export const dropboxStub = (script: DropboxScript = {}) => {
 };
 
 /**
+ * A relay hub that remembers what it was asked and holds no sockets: Node has
+ * no `WebSocketPair`, so what the routes decide is tested here and what a real
+ * hub does with a socket is tested against the hub itself.
+ *
+ * Its `connect` answers 200 with the member it was handed. A `101` is what a
+ * real hub sends, and a status Node's `Response` refuses to construct.
+ */
+export const recordingHub = (options: { failRevoke?: boolean } = {}) => {
+	const connects: { request: Request; member: RelayMember }[] = [];
+	const revokes: { connectionId: string; grantIds: readonly string[] | undefined }[] = [];
+	const hub: RelayHub = {
+		connect: (request, member) => {
+			connects.push({ request, member });
+			return Promise.resolve(Response.json({ connected: member }));
+		},
+		revoke: (connectionId, grantIds) => {
+			revokes.push({ connectionId, grantIds });
+			return options.failRevoke === true
+				? Promise.reject(new Error('hub unreachable'))
+				: Promise.resolve();
+		},
+	};
+	return { hub, connects, revokes };
+};
+
+/**
  * A credential exactly as the PWA makes one: 32 random bytes the browser keeps,
  * behind a version prefix. The server is only ever told its hash.
  */
@@ -313,6 +340,7 @@ export const buildApp = (
 		providerTimeoutMs: options.providerTimeoutMs ?? 50,
 		...(options.entitlements === undefined ? {} : { entitlements: options.entitlements }),
 		...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
+		...(options.relay === undefined ? {} : { relay: options.relay }),
 	});
 
 	/**

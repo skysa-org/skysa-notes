@@ -125,7 +125,16 @@ export const randomBase64Url = (bytes: number): string =>
  */
 const FLOW_COOKIE_INFO = 'skysa:flow-cookie:v1';
 
-export const signingKey = async (base64: string): Promise<CryptoKey> => {
+/** The relay ticket's key (`src/relay/ticket.ts`): sealed, not signed, so it says nothing. */
+const RELAY_TICKET_INFO = 'skysa:relay-ticket:v1';
+
+/** HKDF over `SECRETS_KEY`, under a label of the caller's. */
+const derive = async (
+	base64: string,
+	info: string,
+	algorithm: Parameters<typeof crypto.subtle.deriveKey>[2],
+	usages: Parameters<typeof crypto.subtle.deriveKey>[4]
+): Promise<CryptoKey> => {
 	const material = await crypto.subtle.importKey('raw', fromBase64(base64), 'HKDF', false, [
 		'deriveKey',
 	]);
@@ -137,14 +146,32 @@ export const signingKey = async (base64: string): Promise<CryptoKey> => {
 			name: 'HKDF',
 			hash: 'SHA-256',
 			salt: new Uint8Array(0),
-			info: new TextEncoder().encode(FLOW_COOKIE_INFO),
+			info: new TextEncoder().encode(info),
 		},
 		material,
-		{ name: 'HMAC', hash: 'SHA-256' },
+		algorithm,
 		false,
-		['sign', 'verify']
+		usages
 	);
 };
+
+export const signingKey = (base64: string): Promise<CryptoKey> =>
+	derive(base64, FLOW_COOKIE_INFO, { name: 'HMAC', hash: 'SHA-256' }, ['sign', 'verify']);
+
+/**
+ * AES-256-GCM for the change relay's tickets. Its own key rather than the one
+ * that seals refresh tokens, for the reason above: a ticket goes out in a URL,
+ * and nothing a URL carries should be open-able by the key that guards the
+ * secrets in D1. The id is fixed because a ticket lives for seconds — there is
+ * nothing to rotate across.
+ */
+export const ticketKey = async (base64: string): Promise<SecretKey> => ({
+	id: 'relay-ticket',
+	key: await derive(base64, RELAY_TICKET_INFO, { name: 'AES-GCM', length: 256 }, [
+		'encrypt',
+		'decrypt',
+	]),
+});
 
 export const sign = async (key: CryptoKey, value: string): Promise<string> =>
 	toBase64Url(
