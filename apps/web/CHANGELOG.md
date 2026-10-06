@@ -1,5 +1,13 @@
 # @skysa/web
 
+## 0.20.2
+
+### Patch Changes
+
+- 62f79e6: While the clipboard holds anything it is highlighted, with a tint of the brand's colour, an edge in that colour and a soft glow around it, in place of the shading inside its edges. It stays the full width of the sidebar. The edge thickens inward, so the items never move, and the glow grows while files are dragged over the window, and most with them over the clipboard.
+- 30d577e: The app moves more smoothly, and all of a piece. Hover, selection and anything switched on fade in rather than blink. Menus open out of the button that opened them, upward where they rise from the foot of the sidebar or of a phone's note. Dialogs and the command palette rise in as the page behind them dims, and notices slide up from the bottom. A notebook's notebooks, new clipboard items and the find bar fade in. With reduced motion turned on in the system settings, nothing moves and only colours fade.
+- @skysa/core@0.20.2
+
 ## 0.20.1
 
 ### Patch Changes
