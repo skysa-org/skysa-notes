@@ -77,6 +77,10 @@ export const bearerFrom = (header: string | undefined | null): string | undefine
 	return token;
 };
 
+/** Used within `GRANT_IDLE_DAYS`: the one test of idleness every lookup shares. */
+const notIdle = (now: number) =>
+	gt(schema.grants.lastUsedAt, new Date(now - GRANT_IDLE_DAYS * DAY_MS));
+
 export interface Bearer {
 	/** Its `connectionId` is known non-null: `grantHolder` only returns live ones. */
 	grant: typeof schema.grants.$inferSelect;
@@ -121,7 +125,7 @@ export const grantHolder = async (
 		where: and(
 			eq(schema.grants.secretHash, hash),
 			isNotNull(schema.grants.connectionId),
-			gt(schema.grants.lastUsedAt, new Date(now - GRANT_IDLE_DAYS * DAY_MS))
+			notIdle(now)
 		),
 	});
 	if (grant?.connectionId === undefined || grant.connectionId === null) return undefined;
@@ -135,6 +139,29 @@ export const grantHolder = async (
 
 	await touch(db, grant, now);
 	return { grant, connection };
+};
+
+/**
+ * Whether a grant the server named itself — in a relay ticket — still reaches
+ * that connection: not revoked, not disconnected, not pruned, not idle past its
+ * expiry. The same test `grantHolder` makes, by id instead of by hash, since
+ * the socket that asks carries no credential. Does not touch `lastUsedAt`:
+ * the ticket was asked for with the bearer, which already did.
+ */
+export const liveGrant = async (
+	db: Database,
+	grantId: string,
+	connectionId: string,
+	now = Date.now()
+): Promise<boolean> => {
+	const grant = await db.query.grants.findFirst({
+		where: and(
+			eq(schema.grants.id, grantId),
+			eq(schema.grants.connectionId, connectionId),
+			notIdle(now)
+		),
+	});
+	return grant !== undefined;
 };
 
 /**

@@ -9,10 +9,12 @@ import { randomBase64Url, type SealedSecret, sealOAuthSecret } from '../crypto.j
 import { type Database, schema } from '../db/client.js';
 import { deviceLabel } from '../device.js';
 import { connectCodeSchema, knownCode, readCodeCheck } from '../gate.js';
+import { sameOrigin, tooMany } from '../http.js';
 import { logFailure } from '../log.js';
 import { createPkcePair, createState } from '../oauth/pkce.js';
 import { oauthFor, type OAuthProviderKind } from '../oauth/providers.js';
 import { type FetchLike, ScopeNotGrantedError } from '../oauth/types.js';
+import { closeSockets } from '../relay/hub.js';
 import {
 	clearFlowState,
 	flowExpiry,
@@ -79,22 +81,6 @@ const startBody = z.object({
 	/** What was typed into the gate's code field, for the policy at the callback. */
 	connectCode: connectCodeSchema,
 });
-
-/**
- * Was this request made by a page on this deployment's own origin?
- *
- * `hono/csrf` is mounted too, but it only inspects form and text content types
- * — it leans on CORS preflight for JSON, which is sound for a fetch a browser
- * makes and says nothing about one it does not. `/start` writes a
- * caller-supplied value into a cookie that decides where a live credential ends
- * up, so it checks for itself.
- *
- * Either signal is enough. `Sec-Fetch-Site` is sent by current browsers and
- * cannot be set by script; `Origin` is sent on every POST and is what older
- * ones have. A request with neither is not a browser on this origin.
- */
-const sameOrigin = (c: Context<AppEnv>, appOrigin: string): boolean =>
-	c.req.header('sec-fetch-site') === 'same-origin' || c.req.header('origin') === appOrigin;
 
 const codeBody = z.object({ code: connectCodeSchema });
 
@@ -367,15 +353,15 @@ export const connectRoutes = (doFetch: FetchLike) => {
 			now: Date.now(),
 		});
 
-		return answer(committed ? 'ok' : 'failed');
+		if (committed === undefined) return answer('failed');
+
+		// A device the cap just evicted may have a relay socket open; it closes
+		// now rather than within the hour.
+		await closeSockets(c.get('relay'), committed.connectionId, committed.pruned);
+		return answer('ok');
 	});
 
 	return app;
-};
-
-const tooMany = (c: Context<AppEnv>, retryAfter: number | undefined): Response => {
-	if (retryAfter !== undefined) c.header('Retry-After', String(Math.ceil(retryAfter)));
-	return c.json({ error: 'rate_limited' }, 429);
 };
 
 interface CommitInput {
@@ -413,18 +399,26 @@ interface CommitInput {
  * permanent-looking refusal. Bounded at one all the same: a second disagreement
  * is not a race.
  */
-const commit = async (db: Database, input: CommitInput): Promise<boolean> => {
+const commit = async (db: Database, input: CommitInput): Promise<Stored | undefined> => {
 	const first = await attempt(db, input, 'storing the connection failed');
-	if (first === 'ok') return true;
+	if (typeof first === 'object') return first;
 
-	return (await attempt(db, input, 'storing the connection failed on retry')) === 'ok';
+	const second = await attempt(db, input, 'storing the connection failed on retry');
+	return typeof second === 'object' ? second : undefined;
 };
 
+/** What a commit did: the row the grant is on, and the grants the cap evicted. */
+interface Stored {
+	readonly connectionId: string;
+	readonly pruned: readonly string[];
+}
+
 /**
- * `ok` stored it. `claimed` means the hash is bound somewhere else — spent, or
- * read against a connection id this attempt could not see. `failed` is a throw.
+ * A `Stored` stored it. `claimed` means the hash is bound somewhere else —
+ * spent, or read against a connection id this attempt could not see. `failed`
+ * is a throw.
  */
-type Attempt = 'ok' | 'claimed' | 'failed';
+type Attempt = Stored | 'claimed' | 'failed';
 
 const attempt = async (db: Database, input: CommitInput, whenItFails: string): Promise<Attempt> =>
 	store(db, input).catch((error: unknown) => {
@@ -471,7 +465,7 @@ const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
 		secretKeyId: sealed.keyId,
 	};
 
-	await db.batch([
+	const [, , pruned] = await db.batch([
 		db
 			.insert(schema.connections)
 			.values({
@@ -541,8 +535,10 @@ const store = async (db: Database, input: CommitInput): Promise<Attempt> => {
 							.limit(MAX_GRANTS_PER_CONNECTION)
 					)
 				)
-			),
+			)
+			// Which ones, so the callback can close their relay sockets.
+			.returning({ id: schema.grants.id }),
 	]);
 
-	return 'ok';
+	return { connectionId, pruned: pruned.map((row) => row.id) };
 };

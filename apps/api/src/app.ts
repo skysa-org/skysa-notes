@@ -10,7 +10,7 @@ import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 
 import { type Bearer, bearerFrom, grantHolder } from './credentials.js';
-import { importSecretKey, type SecretKey, signingKey } from './crypto.js';
+import { importSecretKey, type SecretKey, signingKey, ticketKey } from './crypto.js';
 import { createDb, type Database } from './db/client.js';
 import type { AppConfig } from './env.js';
 import { checkGate } from './gate.js';
@@ -22,8 +22,10 @@ import { checkGate } from './gate.js';
  */
 export { type AppConfig, parseEnv } from './env.js';
 import type { FetchLike } from './oauth/types.js';
+import type { RelayHub } from './relay/hub.js';
 import { connectRoutes } from './routes/connect.js';
 import { connectionRoutes } from './routes/connections.js';
+import { relayRoutes } from './routes/relay.js';
 import { tokenRoutes } from './routes/token.js';
 
 export type Bindings = {
@@ -46,6 +48,10 @@ export type Variables = {
 	secretKey: SecretKey;
 	/** HMAC key for the short-lived OAuth flow cookie. Derived, not the same key. */
 	signingKey: CryptoKey;
+	/** AES-GCM key for the relay's tickets. Derived too, and a third key. */
+	ticketKey: SecretKey;
+	/** The change relay, where the deployment runs one. */
+	relay: RelayHub | undefined;
 };
 
 export type AppEnv = { Bindings: Bindings; Variables: Variables };
@@ -67,6 +73,14 @@ export interface CreateAppOptions {
 	 * it (CLAUDE.md).
 	 */
 	rateLimiter?: RateLimiter;
+	/**
+	 * The change relay (docs/ARCHITECTURE.md §6, "Change relay"): what carries
+	 * a "something changed" between a connection's devices. None by default,
+	 * and then there is no relay at all — `/config` does not offer one and its
+	 * routes answer 404. `src/worker.ts` passes the Durable Object hub when the
+	 * operator turns it on.
+	 */
+	relay?: RelayHub;
 	/**
 	 * How the app reaches the provider's OAuth endpoints. Injected so tests can
 	 * drive the whole flow without a network, and so an operator could route
@@ -91,6 +105,7 @@ export const createApp = (options: CreateAppOptions) => {
 		config,
 		entitlements = alwaysAllowed,
 		rateLimiter = neverLimited,
+		relay,
 		providerTimeoutMs = 10_000,
 	} = options;
 	const gate = checkGate(entitlements.gate, entitlements.checkCode !== undefined);
@@ -113,14 +128,15 @@ export const createApp = (options: CreateAppOptions) => {
 	 * settled promise. A Map rather than a mutable binding, matching the isolate
 	 * cache in `src/worker.ts`.
 	 */
-	const keys = new Map<'keys', Promise<readonly [SecretKey, CryptoKey]>>();
-	const keyPair = (): Promise<readonly [SecretKey, CryptoKey]> => {
+	const keys = new Map<'keys', Promise<readonly [SecretKey, CryptoKey, SecretKey]>>();
+	const keySet = (): Promise<readonly [SecretKey, CryptoKey, SecretKey]> => {
 		const cached = keys.get('keys');
 		if (cached !== undefined) return cached;
 
 		const built = Promise.all([
 			importSecretKey(config.secretsKey, config.secretsKeyId),
 			signingKey(config.secretsKey),
+			ticketKey(config.secretsKey),
 		] as const);
 		keys.set('keys', built);
 		return built;
@@ -129,13 +145,15 @@ export const createApp = (options: CreateAppOptions) => {
 	const app = new Hono<AppEnv>().basePath('/api');
 
 	app.use('*', async (c, next) => {
-		const [secretKey, hmacKey] = await keyPair();
+		const [secretKey, hmacKey, relayKey] = await keySet();
 		c.set('db', createDb(c.env.DB));
 		c.set('config', config);
 		c.set('entitlements', entitlements);
 		c.set('rateLimiter', rateLimiter);
 		c.set('secretKey', secretKey);
 		c.set('signingKey', hmacKey);
+		c.set('ticketKey', relayKey);
+		c.set('relay', relay);
 		await next();
 	});
 
@@ -159,6 +177,10 @@ export const createApp = (options: CreateAppOptions) => {
 	 * Set after `next()`, so it is the last word: a route cannot opt out by
 	 * setting its own, and none should want to.
 	 *
+	 * Except a `101`, the relay's upgrade, which is not a response anything
+	 * stores. Setting a header after the fact makes Hono copy the response, and
+	 * a copy is not the one that holds the socket.
+	 *
 	 * The service worker is already `NetworkOnly` for `/api/*` (`apps/web/pwa.ts`);
 	 * this is the same rule for the caches it does not control, and the client
 	 * asks with `cache: 'no-store'` from its side (`apps/web/src/api/client.ts`).
@@ -166,7 +188,7 @@ export const createApp = (options: CreateAppOptions) => {
 	 */
 	app.use('*', async (c, next) => {
 		await next();
-		c.header('Cache-Control', 'no-store');
+		if (c.res.status !== 101) c.header('Cache-Control', 'no-store');
 	});
 
 	/**
@@ -196,6 +218,8 @@ export const createApp = (options: CreateAppOptions) => {
 			authMode: config.authMode,
 			providers: config.enabledProviders,
 			...(gate === undefined ? {} : { connectGate: gate }),
+			// Only where there is one: an app that is not told polls as it always has.
+			...(relay === undefined ? {} : { relay: true }),
 		})
 	);
 
@@ -228,6 +252,7 @@ export const createApp = (options: CreateAppOptions) => {
 	app.route('/', connectRoutes(doFetch));
 	app.route('/', tokenRoutes(doFetch));
 	app.route('/', connectionRoutes(doFetch));
+	app.route('/', relayRoutes(relay));
 
 	app.notFound((c) => c.json({ error: 'not_found' }, 404));
 

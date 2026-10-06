@@ -9,6 +9,7 @@ import type { Connection } from '../db/schema.js';
 import { logFailure } from '../log.js';
 import { oauthFor } from '../oauth/providers.js';
 import type { FetchLike } from '../oauth/types.js';
+import { closeSockets } from '../relay/hub.js';
 
 /**
  * The connection the caller's credential reaches, and the devices that hold it.
@@ -182,6 +183,15 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 				)
 			)
 			.returning({ id: schema.connections.id });
+
+		// After the writes, not before: a socket that reconnects in between is
+		// then refused by the upgrade's grant check rather than let back in.
+		// Every device's sockets when the account went with this one.
+		await closeSockets(
+			c.get('relay'),
+			connection.id,
+			gone.length === 0 ? [target.id] : undefined
+		);
 		if (gone.length === 0) return c.json({ ok: true, disconnected: false });
 		return c.json({ ok: true, disconnected: true, revoked: await withdraw(c, connection) });
 	});
@@ -203,6 +213,7 @@ export const connectionRoutes = (doFetch: FetchLike) => {
 			.get('db')
 			.delete(schema.connections)
 			.where(eq(schema.connections.id, connection.id));
+		await closeSockets(c.get('relay'), connection.id);
 		return c.json({ ok: true, revoked });
 	});
 
