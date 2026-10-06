@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ClipboardPanel } from '../src/components/ClipboardPanel.js';
+import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/ClipboardPanel.js';
 import { type SystemClipboard, type SystemRead } from '../src/components/systemClipboard.js';
 import { type FileBrowser } from '../src/editor/fileActions.js';
 import { type ObjectUrlCache } from '../src/editor/objectUrls.js';
@@ -101,25 +101,45 @@ const seeded = async (db: NotesDatabase, inputs: readonly ClipInput[]) => {
 };
 
 describe('the clipboard panel', () => {
-	it('says what it is for while it holds nothing', async () => {
+	it('says what it is for, and how an item is used, while it holds nothing', async () => {
 		await setup();
-		expect(
-			await screen.findByText('What you paste here is on your other devices too.')
-		).toBeDefined();
+		const empty = await screen.findByText(
+			'What you paste here is on your other devices too. Click or tap an item to use it.'
+		);
+		expect(empty.className).toContain('clipboard-empty');
+		expect(region().className).not.toContain('clipboard-filled');
 	});
 
-	it('puts what Paste reads at the top, waiting to send, and asks for it to be sent', async () => {
-		const { sync, rows } = await setup({
+	it('glows while it holds anything', async () => {
+		const { db } = await setup();
+		await seeded(db, [{ kind: 'text', text: 'kept' }]);
+
+		await waitFor(() => {
+			expect(region().className).toContain('clipboard-filled');
+		});
+	});
+
+	it('puts what Paste reads at the top, greyed out under a spinner until it is up, and asks for it to be sent', async () => {
+		const { db, sync, rows } = await setup({
 			read: () =>
 				Promise.resolve({ kind: 'read', inputs: [{ kind: 'text', text: 'call Ana' }] }),
 		});
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Paste' }));
 
 		const button = await screen.findByRole('button', { name: 'Copy text, waiting to send' });
-		expect(button.textContent).toContain('call Ana');
-		expect(button.textContent).toContain('Waiting to send');
+		expect(button.textContent).toBe('call Ana');
+		const [item] = items();
+		expect(item?.className).toContain('clipboard-pending');
+		expect(item?.querySelector('.clipboard-progress')).not.toBeNull();
 		expect((await rows()).map((row) => row.state)).toEqual(['pending']);
 		expect(sync.clipboard.flush).toHaveBeenCalledWith('c1');
+
+		const [row] = await rows();
+		if (row === undefined) throw new Error('no row');
+		await db.clips.put({ ...row, state: 'sent', remoteId: 'r1', version: 'v1' });
+		await screen.findByRole('button', { name: 'Copy text' });
+		expect(items()[0]?.className).not.toContain('clipboard-pending');
+		expect(items()[0]?.querySelector('.clipboard-progress')).toBeNull();
 	});
 
 	it('says why when the browser will not let Paste read the clipboard', async () => {
@@ -177,6 +197,49 @@ describe('the clipboard panel', () => {
 		expect(await rows()).toHaveLength(2);
 	});
 
+	it('says where files dragged over the window can go, and glows brighter with them over it', async () => {
+		await setup();
+		const files = { types: ['Files'] };
+		const hint = () => within(region()).queryByText('Drop here to add to clipboard');
+		expect(hint()).toBeNull();
+
+		fireEvent.dragEnter(document.body, { dataTransfer: files });
+		expect(hint()).not.toBeNull();
+		expect(region().className).toContain('clipboard-drop-ready');
+		expect(region().className).not.toContain('clipboard-drop-over');
+
+		fireEvent.dragEnter(region(), { dataTransfer: files });
+		expect(region().className).toContain('clipboard-drop-over');
+		// From the panel onto an item in it: entered before it is left.
+		fireEvent.dragEnter(screen.getByRole('button', { name: 'Paste' }), { dataTransfer: files });
+		fireEvent.dragLeave(region(), { dataTransfer: files });
+		expect(region().className).toContain('clipboard-drop-over');
+		fireEvent.dragLeave(screen.getByRole('button', { name: 'Paste' }), { dataTransfer: files });
+		expect(region().className).not.toContain('clipboard-drop-over');
+		expect(region().className).toContain('clipboard-drop-ready');
+
+		fireEvent.drop(document.body, { dataTransfer: files });
+		expect(hint()).toBeNull();
+		expect(region().className).not.toContain('clipboard-drop-ready');
+	});
+
+	it('says nothing of a drag that carries no files, and lets go of one that has gone quiet', async () => {
+		await setup();
+		fireEvent.dragEnter(document.body, { dataTransfer: { types: ['text/plain'] } });
+		expect(region().className).not.toContain('clipboard-drop-ready');
+
+		// Let go of where nothing takes it: no drop, and no leave that evens the count.
+		fireEvent.dragEnter(document.body, { dataTransfer: { types: ['Files'] } });
+		fireEvent.dragEnter(region(), { dataTransfer: { types: ['Files'] } });
+		expect(region().className).toContain('clipboard-drop-ready');
+		await waitFor(
+			() => {
+				expect(region().className).not.toContain('clipboard-drop-ready');
+			},
+			{ timeout: DRAG_GONE_MS * 3 }
+		);
+	});
+
 	it('takes the files Add a file picks', async () => {
 		const { pick, rows } = await setup();
 		pick.mockResolvedValueOnce([new File(['x'], 'notes.zip')]);
@@ -221,6 +284,10 @@ describe('the clipboard panel', () => {
 		await waitFor(() => {
 			expect(said().textContent).toBe('Copied.');
 		});
+		// Shown over the item it is about, and said, not shown, under the list.
+		expect(items()[1]?.querySelector('.clipboard-done')?.textContent).toBe('Copied');
+		expect(items()[0]?.querySelector('.clipboard-done')).toBeNull();
+		expect(said().className).toContain('clipboard-said-quiet');
 		expect(written.map((entry) => entry.type)).toEqual(['text/plain']);
 		expect(await written[0]?.blob.text()).toBe('first');
 	});
@@ -255,6 +322,7 @@ describe('the clipboard panel', () => {
 		await waitFor(() => {
 			expect(said().textContent).toBe('Saved.');
 		});
+		expect(items()[0]?.querySelector('.clipboard-done')?.textContent).toBe('Saved');
 		expect(saved.map((entry) => entry.name)).toEqual(['q3-report.pdf']);
 		expect(await saved[0]?.file.text()).toBe('%PDF');
 	});
@@ -270,6 +338,9 @@ describe('the clipboard panel', () => {
 				'That is not on this device, and this device is offline.'
 			);
 		});
+		// Too long to sit over an item, and shown under the list.
+		expect(said().className).not.toContain('clipboard-said-quiet');
+		expect(items()[0]?.querySelector('.clipboard-done')).toBeNull();
 	});
 
 	it('removes an item, and asks for that to be sent', async () => {

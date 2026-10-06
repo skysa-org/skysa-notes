@@ -36,10 +36,12 @@ import {
 
 /**
  * A source's clipboard, shared by its devices (docs/ARCHITECTURE.md §7, "The
- * clipboard"), drawn above the status line wherever the storage panel is: at
- * the foot of the sidebar, and at the foot of a compact window's source
- * dropdown. Shown where the user has asked for it on this device, from the
- * storage menu.
+ * clipboard"), a section of its own just before the storage panel, wherever
+ * that is: at the foot of the sidebar, and at the foot of a compact window's
+ * source dropdown. Shown where the user has asked for it on this device, from
+ * the storage menu. It glows a little in the brand's colour while it holds
+ * anything, and more while files are dragged over the window, most of all
+ * over itself, where they can be dropped.
  *
  * Things come in by Paste, which reads the browser's clipboard (text or a
  * picture); by a keyboard paste or a drop on the panel, and by "Add a file",
@@ -106,12 +108,26 @@ const bytesOf = (read: FileRead): ArrayBuffer => {
 	throw new NotHad(read.state);
 };
 
+/** "Copied." as it is shown over the item, where a full stop has no sentence to end. */
+const withoutStop = (words: string): string => words.replace(/\.$/, '');
+
 const messageOf = (error: unknown): string =>
 	error instanceof NotHad ? error.message : 'That could not be put on the clipboard.';
 
-/** What is said, for a moment: a "Copied", or what went wrong. */
-const useSaying = (): readonly [string, (words: string) => void] => {
-	const [said, setSaid] = useState('');
+/**
+ * What is said, for a moment: a "Copied" or a "Saved", over the item it is
+ * about, or what went wrong, under the list.
+ */
+interface Said {
+	readonly words: string;
+	/** The item it is about, which it is shown over. */
+	readonly item?: string;
+}
+
+const SAID_NOTHING: Said = { words: '' };
+
+const useSaying = (): readonly [Said, (words: string, item?: string) => void] => {
+	const [said, setSaid] = useState<Said>(SAID_NOTHING);
 	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	useEffect(
 		() => () => {
@@ -119,18 +135,79 @@ const useSaying = (): readonly [string, (words: string) => void] => {
 		},
 		[]
 	);
-	const say = useCallback((words: string) => {
+	const say = useCallback((words: string, item?: string) => {
 		clearTimeout(timer.current);
-		setSaid(words);
+		setSaid(item === undefined ? { words } : { words, item });
 		timer.current = setTimeout(() => {
-			setSaid('');
+			setSaid(SAID_NOTHING);
 		}, SAID_MS);
 	}, []);
 	return [said, say] as const;
 };
 
 /** Files a drag carries, and not a note or a notebook dragged in the sidebar. */
-const carriesFiles = (event: DragEvent): boolean => event.dataTransfer.types.includes('Files');
+const holdsFiles = (data: DataTransfer | null): boolean => data?.types.includes('Files') === true;
+
+const carriesFiles = (event: DragEvent): boolean => holdsFiles(event.dataTransfer);
+
+/**
+ * How long a drag over the window can go without a `dragover` before it is
+ * taken to have gone. A drag held still goes on sending them, a few a second.
+ */
+export const DRAG_GONE_MS = 1000;
+
+/**
+ * Whether files are being dragged over the window, anywhere in it, so the panel
+ * can say where they can be dropped. Each element a drag enters and leaves says
+ * so, bubbling to the window, and the two are counted. A drop ends it, and so
+ * does a drag that stops sending `dragover`: one let go of where nothing takes
+ * it, or out of the window, may leave the count where it was.
+ */
+const useFilesDragged = (): boolean => {
+	const [dragged, setDragged] = useState(false);
+	const depth = useRef(0);
+	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	useEffect(() => {
+		const end = () => {
+			depth.current = 0;
+			clearTimeout(timer.current);
+			setDragged(false);
+		};
+		const alive = () => {
+			clearTimeout(timer.current);
+			timer.current = setTimeout(end, DRAG_GONE_MS);
+		};
+		const enter = (event: globalThis.DragEvent) => {
+			if (!holdsFiles(event.dataTransfer)) return;
+			depth.current += 1;
+			setDragged(true);
+			alive();
+		};
+		const over = (event: globalThis.DragEvent) => {
+			if (holdsFiles(event.dataTransfer)) alive();
+		};
+		const leave = (event: globalThis.DragEvent) => {
+			if (!holdsFiles(event.dataTransfer)) return;
+			depth.current -= 1;
+			if (depth.current <= 0) end();
+		};
+		window.addEventListener('dragenter', enter);
+		window.addEventListener('dragover', over);
+		window.addEventListener('dragleave', leave);
+		// Caught on the way down: whatever takes the drop may stop it there.
+		window.addEventListener('drop', end, true);
+		window.addEventListener('dragend', end, true);
+		return () => {
+			window.removeEventListener('dragenter', enter);
+			window.removeEventListener('dragover', over);
+			window.removeEventListener('dragleave', leave);
+			window.removeEventListener('drop', end, true);
+			window.removeEventListener('dragend', end, true);
+			clearTimeout(timer.current);
+		};
+	}, []);
+	return dragged;
+};
 
 /** The default cache: a URL per picture, kept for every view of it. */
 const thumbnails = createObjectUrlCache();
@@ -163,7 +240,9 @@ const Thumbnail = ({
 
 interface ItemProps extends Required<Omit<ClipboardPanelProps, 'pick'>> {
 	clip: ClipRecord;
-	say: (words: string) => void;
+	say: (words: string, item?: string) => void;
+	/** What was just said of this item — "Copied", "Saved" — shown over it. */
+	done: string | undefined;
 }
 
 const ClipItem = ({
@@ -175,6 +254,7 @@ const ClipItem = ({
 	browser,
 	urls,
 	say,
+	done,
 }: ItemProps) => {
 	const read = readClipName(clip.name);
 	const held = useLiveQuery(
@@ -193,7 +273,7 @@ const ClipItem = ({
 				.then((got) => saveBytes(got, read.label, clip.name, browser))
 				.then(
 					() => {
-						say('Saved.');
+						say('Saved.', clip.name);
 					},
 					(error: unknown) => {
 						say(messageOf(error));
@@ -208,7 +288,7 @@ const ClipItem = ({
 				: bytes().then((got) => asPng(got, contentTypeOf(clip.name) ?? ''));
 		void system.write(read.kind === 'text' ? 'text/plain' : 'image/png', blob).then(
 			() => {
-				say('Copied.');
+				say('Copied.', clip.name);
 			},
 			(error: unknown) => {
 				say(messageOf(error));
@@ -223,40 +303,50 @@ const ClipItem = ({
 
 	return (
 		<li className={pending ? 'clipboard-item clipboard-pending' : 'clipboard-item'}>
-			<button
-				type="button"
-				className="clipboard-choose"
-				aria-label={pending ? `${what}, waiting to send` : what}
-				title={what}
-				onClick={choose}
-			>
-				{read.kind === 'text' && (
-					<span className="clipboard-text">{clip.preview ?? ''}</span>
+			<div className="clipboard-cell">
+				<button
+					type="button"
+					className="clipboard-choose"
+					aria-label={pending ? `${what}, waiting to send` : what}
+					title={pending ? `${what} (waiting to send)` : what}
+					onClick={choose}
+				>
+					{read.kind === 'text' && (
+						<span className="clipboard-text">{clip.preview ?? ''}</span>
+					)}
+					{read.kind === 'image' &&
+						(held === undefined ? (
+							<span className="clipboard-icon" aria-hidden="true">
+								<Icon name="image" />
+							</span>
+						) : (
+							<Thumbnail
+								connectionId={connectionId}
+								name={clip.name}
+								bytes={held.bytes}
+								urls={urls}
+							/>
+						))}
+					{read.kind === 'file' && (
+						<>
+							<span className="clipboard-icon" aria-hidden="true">
+								<Icon name={FILE_ICONS[fileKind(read.label)]} />
+							</span>
+							<span className="clipboard-name">{read.label}</span>
+							<span className="clipboard-size muted">{sizeOf(clip.size)}</span>
+						</>
+					)}
+				</button>
+				{/* Said by the button's name; drawn over it, which is greyed out
+				    until it is up, so the spinner is not. */}
+				{pending && <span className="clipboard-progress" aria-hidden="true" />}
+				{done !== undefined && (
+					<span className="clipboard-done" aria-hidden="true">
+						<Icon name="check" />
+						{done}
+					</span>
 				)}
-				{read.kind === 'image' &&
-					(held === undefined ? (
-						<span className="clipboard-icon" aria-hidden="true">
-							<Icon name="image" />
-						</span>
-					) : (
-						<Thumbnail
-							connectionId={connectionId}
-							name={clip.name}
-							bytes={held.bytes}
-							urls={urls}
-						/>
-					))}
-				{read.kind === 'file' && (
-					<>
-						<span className="clipboard-icon" aria-hidden="true">
-							<Icon name={FILE_ICONS[fileKind(read.label)]} />
-						</span>
-						<span className="clipboard-name">{read.label}</span>
-						<span className="clipboard-size muted">{sizeOf(clip.size)}</span>
-					</>
-				)}
-				{pending && <span className="clipboard-waiting muted">Waiting to send</span>}
-			</button>
+			</div>
 			<button
 				type="button"
 				className="icon icon-quiet clipboard-remove"
@@ -285,6 +375,15 @@ export const ClipboardPanel = ({
 }: ClipboardPanelProps) => {
 	const clips = useLiveQuery(() => listClips(database, connectionId), [database, connectionId]);
 	const [said, say] = useSaying();
+	const dragged = useFilesDragged();
+	// Over the panel itself, counted as the window's drag is: a drag moving
+	// from one of its items to the next enters the one before it leaves the other.
+	const [over, setOver] = useState(false);
+	const overDepth = useRef(0);
+	const notOver = () => {
+		overDepth.current = 0;
+		setOver(false);
+	};
 
 	const add = useCallback(
 		async (inputs: readonly ClipInput[]) => {
@@ -325,13 +424,30 @@ export const ClipboardPanel = ({
 		else void add([{ kind: 'text', text }]);
 	};
 
+	const classes = [
+		'clipboard',
+		clips !== undefined && clips.length > 0 ? 'clipboard-filled' : '',
+		dragged ? 'clipboard-drop-ready' : '',
+		dragged && over ? 'clipboard-drop-over' : '',
+	].filter((name) => name !== '');
+
 	return (
 		<section
-			className="clipboard"
+			className={classes.join(' ')}
 			aria-label="Clipboard"
 			// Focusable by a click anywhere in it, so a keyboard paste lands here.
 			tabIndex={-1}
 			onPaste={onPaste}
+			onDragEnter={(event) => {
+				if (!carriesFiles(event)) return;
+				overDepth.current += 1;
+				setOver(true);
+			}}
+			onDragLeave={(event) => {
+				if (!carriesFiles(event)) return;
+				overDepth.current -= 1;
+				if (overDepth.current <= 0) notOver();
+			}}
 			onDragOver={(event) => {
 				if (!carriesFiles(event)) return;
 				event.preventDefault();
@@ -340,6 +456,7 @@ export const ClipboardPanel = ({
 			onDrop={(event) => {
 				if (!carriesFiles(event)) return;
 				event.preventDefault();
+				notOver();
 				addFiles(filesToAttach(event.dataTransfer, 'drop'), false);
 			}}
 		>
@@ -375,18 +492,34 @@ export const ClipboardPanel = ({
 							browser={browser}
 							urls={urls}
 							say={say}
+							done={said.item === clip.name ? withoutStop(said.words) : undefined}
 						/>
 					))}
 				</ul>
 			)}
 			{clips?.length === 0 && (
 				<p className="clipboard-empty muted">
-					What you paste here is on your other devices too.
+					What you paste here is on your other devices too. Click or tap an item to use
+					it.
 				</p>
 			)}
-			<p className="clipboard-said muted" role="status">
-				{said}
+			{/* Announced either way. Shown here only for what is not about one
+			    item, which is shown over that item instead. */}
+			<p
+				className={
+					said.item === undefined
+						? 'clipboard-said muted'
+						: 'clipboard-said clipboard-said-quiet'
+				}
+				role="status"
+			>
+				{said.words}
 			</p>
+			{dragged && (
+				<p className="clipboard-drop-hint" aria-hidden="true">
+					Drop here to add to clipboard
+				</p>
+			)}
 		</section>
 	);
 };

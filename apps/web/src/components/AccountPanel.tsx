@@ -1839,68 +1839,10 @@ const Connected = ({
 	});
 
 	return (
-		<section ref={panel} className="account" aria-label="Storage">
-			<SyncState
-				client={client}
-				database={database}
-				sync={sync}
-				bound={bound}
-				label={label}
-				reconnectable={answer(config)?.authMode === 'storage-first'}
-				config={config}
-				returnTo={returnTo}
-				{...(navigate === undefined ? {} : { navigate })}
-				rescanning={rescanning}
-				onRescanning={setRescanning}
-			/>
-			{/*
-			 * Not while an import is filling the source, when the archive would be
-			 * whatever part of it had arrived; nor while the disconnect question
-			 * is open, which offers its own download of what was never sent.
-			 */}
-			{downloadable && <DownloadAll holds={holds} downloading={downloading} />}
-			{/*
-			 * Held back as the download is, and for a like reason: notes written
-			 * in while a first import is filling the source would meet its files
-			 * as they arrive, and an import beside the disconnect question would
-			 * add to the very list being asked about.
-			 */}
-			{downloadable && <ImportNotes importing={importing} />}
-			{(problem ?? trouble) !== null && (
-				<p className="muted" role="alert">
-					{problem ?? trouble}
-				</p>
-			)}
-			{step.kind === 'pushing' && (
-				<div
-					className="account-confirm"
-					role="group"
-					aria-label="Sending your last changes"
-				>
-					<p className="muted">Sending your last changes…</p>
-					<button ref={cancelButton} type="button" className="ghost" onClick={cancel}>
-						Cancel
-					</button>
-				</div>
-			)}
-			{step.kind === 'asking' && (
-				<DisconnectDialog
-					label={label}
-					displayName={displayName}
-					listed={step.listed}
-					targets={targets}
-					failing={step.failing}
-					busy={busy}
-					others={stillSignedIn(devices.grants)}
-					onServer={step.onServer}
-					leftAtProvider={<LeftAtProvider provider={bound.provider} />}
-					stopped={stoppedBy(status, step.listed)}
-					download={download}
-					onAnswer={answered}
-					onCancel={cancel}
-					cancelRef={cancelButton}
-				/>
-			)}
+		<>
+			{/* Its own section, before the storage panel and ruled off from it
+			    the width of the sidebar: what is on it is the user's, not how
+			    the source is doing. */}
 			{showsClipboard(bound) && (
 				<ClipboardPanel
 					connectionId={connectionId}
@@ -1909,40 +1851,103 @@ const Connected = ({
 					{...(pick === undefined ? {} : { pick })}
 				/>
 			)}
-			<ConnectedFoot
-				slot={slot}
-				bound={bound}
-				status={status}
-				label={label}
-				displayName={displayName}
-				rescanning={rescanning}
-				onRescan={() => {
-					setRescanning(true);
-				}}
-				downloadable={downloadable}
-				holds={holds}
-				downloading={downloading}
-				importing={importing}
-				stranded={stranded}
-				open={open}
-				disconnectBlocked={disconnectBlocked}
-				syncNow={() => {
-					void sync.syncNow();
-				}}
-				onClipboard={() => {
-					const shown = showsClipboard(bound);
-					void setClipboardShown(database, connectionId, !shown).then(() => {
-						if (!shown) void sync.clipboard.refresh(connectionId);
-					});
-				}}
-				ask={ask}
-				openButton={openButton}
-				client={client}
-				database={database}
-				grants={devices.grants}
-				onGrantsChanged={devices.ask}
-			/>
-		</section>
+			<section ref={panel} className="account" aria-label="Storage">
+				<SyncState
+					client={client}
+					database={database}
+					sync={sync}
+					bound={bound}
+					label={label}
+					reconnectable={answer(config)?.authMode === 'storage-first'}
+					config={config}
+					returnTo={returnTo}
+					{...(navigate === undefined ? {} : { navigate })}
+					rescanning={rescanning}
+					onRescanning={setRescanning}
+				/>
+				{/*
+				 * Not while an import is filling the source, when the archive would be
+				 * whatever part of it had arrived; nor while the disconnect question
+				 * is open, which offers its own download of what was never sent.
+				 */}
+				{downloadable && <DownloadAll holds={holds} downloading={downloading} />}
+				{/*
+				 * Held back as the download is, and for a like reason: notes written
+				 * in while a first import is filling the source would meet its files
+				 * as they arrive, and an import beside the disconnect question would
+				 * add to the very list being asked about.
+				 */}
+				{downloadable && <ImportNotes importing={importing} />}
+				{(problem ?? trouble) !== null && (
+					<p className="muted" role="alert">
+						{problem ?? trouble}
+					</p>
+				)}
+				{step.kind === 'pushing' && (
+					<div
+						className="account-confirm"
+						role="group"
+						aria-label="Sending your last changes"
+					>
+						<p className="muted">Sending your last changes…</p>
+						<button ref={cancelButton} type="button" className="ghost" onClick={cancel}>
+							Cancel
+						</button>
+					</div>
+				)}
+				{step.kind === 'asking' && (
+					<DisconnectDialog
+						label={label}
+						displayName={displayName}
+						listed={step.listed}
+						targets={targets}
+						failing={step.failing}
+						busy={busy}
+						others={stillSignedIn(devices.grants)}
+						onServer={step.onServer}
+						leftAtProvider={<LeftAtProvider provider={bound.provider} />}
+						stopped={stoppedBy(status, step.listed)}
+						download={download}
+						onAnswer={answered}
+						onCancel={cancel}
+						cancelRef={cancelButton}
+					/>
+				)}
+				<ConnectedFoot
+					slot={slot}
+					bound={bound}
+					status={status}
+					label={label}
+					displayName={displayName}
+					rescanning={rescanning}
+					onRescan={() => {
+						setRescanning(true);
+					}}
+					downloadable={downloadable}
+					holds={holds}
+					downloading={downloading}
+					importing={importing}
+					stranded={stranded}
+					open={open}
+					disconnectBlocked={disconnectBlocked}
+					syncNow={() => {
+						void sync.syncNow();
+					}}
+					onClipboard={() => {
+						const shown = showsClipboard(bound);
+						void setClipboardShown(database, connectionId, !shown).then(() => {
+							if (!shown) void sync.clipboard.refresh(connectionId);
+						});
+					}}
+					ask={ask}
+					openButton={openButton}
+					client={client}
+					database={database}
+					grants={devices.grants}
+					onGrantsChanged={devices.ask}
+				/>
+			</section>
+		</>
 	);
 };
 
