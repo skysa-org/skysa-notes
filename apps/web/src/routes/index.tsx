@@ -32,6 +32,7 @@ import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
+import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
 import {
 	connectCodeAskedAt,
@@ -1523,6 +1524,11 @@ const Home = () => {
 					}
 				/>
 			)}
+			{/*
+			 * Under the bar rather than over it: the bar is the top of the window
+			 * to a compact window's search, which hangs from it to the foot.
+			 */}
+			<InstallBanner />
 			{/*
 			 * For as long as a detached source is the one showing, and not
 			 * dismissable: its notes look like any others, can be opened and

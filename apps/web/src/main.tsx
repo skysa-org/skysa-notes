@@ -1,6 +1,9 @@
 // First: before any module that builds a zod schema (see the module).
 import './jitless.js';
 import './styles.css';
+// Listening for Chromium's install offer from the start, which can come before
+// the banner that shows it has mounted (see the module).
+import './install/installPrompt.js';
 
 import { createRouter, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
