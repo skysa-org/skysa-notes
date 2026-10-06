@@ -857,7 +857,7 @@ const OverflowItems = ({
 				})}
 			>
 				<Icon name="link" />
-				<span>Link…</span>
+				<span>Link</span>
 			</button>
 		) : (
 			commandsIn(slot.id).map((command) => (

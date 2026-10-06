@@ -513,7 +513,7 @@ const unseenItem = (
 	onOpen: () => void
 ): OptionsMenuItem[] =>
 	provider !== undefined && UNSEEN_AT_PROVIDER[provider] !== undefined
-		? [{ label: `About ${label}…`, onChoose: onOpen }]
+		? [{ label: `About ${label}`, onChoose: onOpen }]
 		: [];
 
 const UnseenDialog = ({
@@ -1534,7 +1534,7 @@ const storageItems = ({
 			? []
 			: [
 					{
-						label: 'Disconnect…',
+						label: 'Disconnect',
 						onChoose: () => {
 							ask(true);
 						},

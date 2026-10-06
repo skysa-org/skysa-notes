@@ -193,14 +193,14 @@ export type Importing = ReturnType<typeof useImportNotes>;
 /** The two ways in, as items of a source's `⋯` menu. */
 export const importItems = (importing: Importing): OptionsMenuItem[] => [
 	{
-		label: 'Import a folder…',
+		label: 'Import a folder',
 		onChoose: () => {
 			importing.start('folder');
 		},
 		disabled: importing.busy,
 	},
 	{
-		label: 'Import files…',
+		label: 'Import files',
 		onChoose: () => {
 			importing.start('files');
 		},

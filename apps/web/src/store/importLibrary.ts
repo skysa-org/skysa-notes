@@ -291,7 +291,7 @@ const unpack = async (file: File, path: string): Promise<Picked> => {
 /**
  * Whether a picked file is an archive to unpack: one picked as a file, or one
  * a folder picker handed over with no path inside a folder — which is what a
- * phone's picker does, having no folders to offer, when "Import a folder…"
+ * phone's picker does, having no folders to offer, when "Import a folder"
  * opens it.
  */
 const unpacks = (file: File, how: 'folder' | 'files'): boolean =>

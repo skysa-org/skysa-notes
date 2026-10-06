@@ -321,7 +321,7 @@ describe('the note’s own menu', () => {
 		const { note, user } = await openMinutes();
 
 		await user.click(screen.getByRole('button', { name: 'Options for “Minutes”' }));
-		await user.click(screen.getByRole('button', { name: 'Move to notebook…' }));
+		await user.click(screen.getByRole('button', { name: 'Move to notebook' }));
 		await user.click(await screen.findByRole('button', { name: 'Move “Minutes” into Work' }));
 
 		await waitFor(async () => {
@@ -338,7 +338,7 @@ describe('the note’s own menu', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Options for “Minutes”' }));
 		const items = screen.getByRole('group', { name: 'Note “Minutes”' });
-		expect(within(items).queryByRole('button', { name: 'Move to notebook…' })).toBeNull();
+		expect(within(items).queryByRole('button', { name: 'Move to notebook' })).toBeNull();
 		expect(within(items).getByRole('button', { name: 'Delete' })).toBeDefined();
 	});
 });

@@ -1059,7 +1059,7 @@ export const SourcePanel = ({
 					]
 				: []),
 			...download,
-			{ label: 'Disconnect…', onChoose: show('disconnect'), danger: true },
+			{ label: 'Disconnect', onChoose: show('disconnect'), danger: true },
 		];
 	};
 
