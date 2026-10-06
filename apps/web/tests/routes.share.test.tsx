@@ -7,6 +7,7 @@ import { routeTree } from '../src/routeTree.gen';
 import { SHARE_CACHE } from '../src/share/received.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import { hashIn, placeIn } from './entry.js';
 import { fakeCaches } from './fakeCaches.js';
 
 /**
@@ -40,7 +41,7 @@ describe('a share arriving in the URL', () => {
 		await createFolder(db, { name: 'Work' });
 		const router = createRouter({
 			routeTree,
-			history: createMemoryHistory({ initialEntries: [`/?folder=Work&share=${ID}`] }),
+			history: createMemoryHistory({ initialEntries: [`/?share=${ID}#/Work/`] }),
 		});
 		render(<RouterProvider router={router} />);
 
@@ -48,9 +49,12 @@ describe('a share arriving in the URL', () => {
 		expect(
 			await screen.findByRole('dialog', { name: 'Nothing was added to the clipboard' })
 		).toBeDefined();
+		// Taken out of the query, and where the user is stays as it was.
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: 'Work' });
+			expect(router.state.location.search).toEqual({});
+			expect(placeIn(router)).toMatchObject({ folder: 'Work' });
 		});
+		expect(hashIn(router)).toMatch(/^\/work\//);
 
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
 		await waitFor(() => {

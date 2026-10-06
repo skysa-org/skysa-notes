@@ -142,8 +142,10 @@ describe('the service worker', () => {
 	});
 
 	it('answers a deep link into the app with the shell', () => {
+		// A link to a note is `/#/Work/plan`, and a fragment is never part of
+		// the request; what another page leaves for the app is in the query.
 		expect(shellAnswers('/')).toBe(true);
-		expect(shellAnswers('/?folder=Work&note=3f2a')).toBe(true);
+		expect(shellAnswers('/?connect=ok')).toBe(true);
 	});
 
 	it("leaves any other page on the origin to the network, such as an operator's", () => {

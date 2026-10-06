@@ -173,6 +173,32 @@ export const useNote = (id: string | undefined): NoteRecord | undefined => {
 };
 
 /**
+ * Every notebook and live note in a source, read for one question — `key` —
+ * and nothing while there is none: what a link naming a place by its names is
+ * read against (`findNamedPlace` in `routes/place.ts`). `undefined` until read
+ * for this key in this source, so an answer read for another is never handed
+ * back for this one.
+ */
+export const useSourceContents = (
+	connectionId: string | undefined,
+	key: string | undefined
+): { folders: string[]; notes: NoteRecord[] } | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined || key === undefined
+				? undefined
+				: {
+						connectionId,
+						key,
+						folders: await folderTree(db, { connectionId }),
+						notes: await listNotes(db, { connectionId }),
+					},
+		[connectionId, key]
+	);
+	return result?.connectionId === connectionId && result?.key === key ? result : undefined;
+};
+
+/**
  * Where the user was in a source, on this device (`store/lastOpen.ts`).
  * `undefined` until it has been read, for this source: a value read for the
  * source showing a moment ago is another source's place.

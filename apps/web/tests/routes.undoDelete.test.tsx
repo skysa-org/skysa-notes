@@ -10,6 +10,7 @@ import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { createNote, getNote, purgeNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { placeIn } from './entry.js';
 
 /**
  * Delete is one click and asks nothing, so the way back is the whole of its
@@ -83,7 +84,7 @@ describe('deleting a note', () => {
 		await user.click(within(notice).getByRole('button', { name: 'Undo' }));
 
 		expect(await screen.findByDisplayValue('Alpha')).toBeTruthy();
-		expect(router.state.location.search).toMatchObject({ note: id });
+		expect(placeIn(router)).toMatchObject({ note: id });
 		expect((await getNote(db, id))?.deletedLocally).toBe(0);
 		// The delete is withdrawn rather than left to run behind the restore.
 		expect(await opsFor(id)).toEqual(['write']);

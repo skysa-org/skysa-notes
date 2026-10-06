@@ -176,7 +176,7 @@ describe('a notebook with nothing in it', () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		await createNote(db, { folderPath: 'Archive', title: 'Kept', body: 'Kept\n' });
 		const user = userEvent.setup();
-		await openApp('/?folder=Work');
+		await openApp('/#/Work/');
 		await begun();
 
 		await user.click(screen.getByRole('button', { name: /^Archive/ }));

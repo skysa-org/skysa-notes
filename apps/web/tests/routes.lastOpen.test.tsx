@@ -10,6 +10,7 @@ import { createFolder, deleteFolder } from '../src/store/folders.js';
 import { getLastOpen, rememberOpen } from '../src/store/lastOpen.js';
 import { createNote, deleteNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { noteUrl, placeIn } from './entry.js';
 
 /**
  * Whichever way a notebook comes to be showing — clicked, restored at start, a
@@ -73,7 +74,7 @@ describe('a notebook the app opens by itself', () => {
 		await showing('Newer');
 		// Written to the URL, so a reload lands on the same note.
 		await waitFor(() => {
-			expect(router.state.location.search).toMatchObject({ folder: 'Work' });
+			expect(placeIn(router)).toMatchObject({ folder: 'Work' });
 		});
 	});
 
@@ -82,7 +83,7 @@ describe('a notebook the app opens by itself', () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		await noteAt('Archive', 'Kept', 1_000);
 		const going = await noteAt('Work', 'Going', 1_000);
-		await openApp(`/?folder=Work&note=${going.id}`);
+		await openApp(noteUrl(going));
 		await showing('Going');
 
 		await deleteFolder(db, 'Work');
@@ -145,7 +146,7 @@ describe('where the user was, on this device', () => {
 		await noteAt('Work', 'Older', 1_000);
 		await noteAt('Work', 'Newer', 2_000);
 		const user = userEvent.setup();
-		await openApp('/?folder=Work');
+		await openApp('/#/Work/');
 		await showing('Newer');
 		await user.click(screen.getByRole('button', { name: /^Older/ }));
 		await showing('Older');

@@ -123,7 +123,7 @@ describe('createFolder and a name another notebook already folds onto', () => {
 	 * holds `Work`, the folded check finds nothing wrong with `work/Meetings` —
 	 * and `ensureFolder` then writes the row `work`, leaving the two spellings
 	 * this function exists to prevent, created by this function. A stale
-	 * `?folder=` link in the address bar is enough to send one in.
+	 * link in the address bar, `#/work/`, is enough to send one in.
 	 */
 	it('creates under the spelling the store already uses for the parent', async () => {
 		await createFolder(db, { name: 'Work' });

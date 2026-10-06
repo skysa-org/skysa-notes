@@ -182,7 +182,7 @@ export const createFolder = async (
 			// `Work`, the folded check sees nothing wrong with `work/Meetings` and
 			// `ensureFolder` then writes the row `work` — leaving the two spellings
 			// this function exists to prevent, created by this function. A stale
-			// `?folder=` link is enough to send one in.
+			// link to a notebook is enough to send one in.
 			const path = joinPath(spellingOf(input.parentPath ?? '', existing), name);
 
 			const wanted = foldPath(path);
