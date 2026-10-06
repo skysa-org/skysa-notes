@@ -186,6 +186,16 @@ export interface SyncSchedulerOptions {
 	 * and tells them when it has. Polling goes on as it is.
 	 */
 	relay?: RelayFactory;
+	/**
+	 * When to look again after the relay's last notice, each counted from it:
+	 * a provider's change feed can trail the write the notice is about.
+	 */
+	afterNoticeMs?: readonly number[];
+	/**
+	 * How long after a pull that met the clipboard's folder to list it again:
+	 * a provider's listing can trail its change feed.
+	 */
+	relistMs?: number;
 }
 
 export interface SyncScheduler {
@@ -304,6 +314,34 @@ const messageOf = (error: unknown): string =>
  */
 const RETRY_AFTER_CAP_MS = 15 * 60_000;
 
+/**
+ * When a device looks again after the change relay's last notice. The notice
+ * comes as soon as the other device's write has been answered, and the round it
+ * starts asks the provider what changed straight away — before Google Drive's
+ * change feed shows the write, which takes it 1.4–2.8 s on an idle account and
+ * longer under load (docs/ARCHITECTURE.md §5.1). That round finds nothing, the
+ * feed has the write a moment later, and nothing asked again until the poll a
+ * minute on. Counted from the last notice, so a burst of them is looked at
+ * again once it is over.
+ */
+const AFTER_NOTICE_MS: readonly number[] = [3000, 10_000];
+
+/**
+ * How long after a pull met the clipboard's folder to list it a second time.
+ * Drive's search goes on listing a file for a moment after it is trashed
+ * (docs/ARCHITECTURE.md §5.1), and a listing taken in that moment, by a pull
+ * that met the trashing soon after, keeps the item. The feed has moved on by
+ * then, so nothing else would ask again.
+ */
+const RELIST_MS = 3000;
+
+/**
+ * `next`: the poll, or a backoff's retry. `debounce`: a local edit's sync.
+ * `notice`: a look after the relay's last notice. `relist`: the clipboard's
+ * second listing.
+ */
+type Timer = 'next' | 'debounce' | 'notice' | 'relist';
+
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
 	const { db, client, createProvider } = options;
 	const environment = options.environment ?? browserEnvironment();
@@ -314,10 +352,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const maxAttempts = options.maxAttempts ?? MAX_OP_ATTEMPTS;
 	const blockedRetryMs = options.blockedRetryMs ?? 15 * 60_000;
 	const progressMs = options.progressMs ?? 150;
+	const afterNoticeMs = options.afterNoticeMs ?? AFTER_NOTICE_MS;
+	const relistMs = options.relistMs ?? RELIST_MS;
 
 	const current = new Map<'session', Session>();
 	const generations = new Map<'count', number>([['count', 0]]);
-	const timers = new Map<'next' | 'debounce', () => void>();
+	const timers = new Map<Timer, () => void>();
 	const unsubscribers = new Set<() => void>();
 	const sessionUnsubscribers = new Set<() => void>();
 	const listeners = new Set<(status: SchedulerStatus) => void>();
@@ -352,12 +392,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		});
 	};
 
-	const cancel = (timer: 'next' | 'debounce') => {
+	const cancel = (timer: Timer) => {
 		timers.get(timer)?.();
 		timers.delete(timer);
 	};
 
-	const arm = (timer: 'next' | 'debounce', ms: number, callback: () => void) => {
+	const arm = (timer: Timer, ms: number, callback: () => void) => {
 		cancel(timer);
 		timers.set(
 			timer,
@@ -608,6 +648,23 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const nudge = (session: Session): Promise<void> =>
 		backingOff(session) ? Promise.resolve() : run(session, 'nudged');
 
+	/** The looks after the relay's last notice from the `from`th on (`AFTER_NOTICE_MS`). */
+	const lookAgain = (session: Session, from: number) => {
+		const at = afterNoticeMs[from];
+		if (at === undefined) return;
+		arm('notice', at - (afterNoticeMs[from - 1] ?? 0), () => {
+			lookAgain(session, from + 1);
+			// A hidden tab looks on coming forward.
+			if (environment.isVisible()) void nudge(session);
+		});
+	};
+
+	/** Another device has pushed: a round now, and the looks after it. */
+	const noticed = (session: Session) => {
+		void nudge(session);
+		lookAgain(session, 0);
+	};
+
 	/**
 	 * An op out of attempts is left alone, not given up on: after a while it is
 	 * tried again, since most things that fail that often in a row — an outage,
@@ -697,7 +754,12 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await synced(session, result.outcome);
 		// Not waited for: a refresh downloads, and a flush waits for this run to
 		// end before it sends anything (`sync/clipboard.ts`).
-		if (result.outcome.clipboard === true) void clipboard.refresh(session.connectionId);
+		if (result.outcome.clipboard === true) {
+			void clipboard.refresh(session.connectionId);
+			arm('relist', relistMs, () => {
+				void clipboard.refresh(session.connectionId);
+			});
+		}
 		void clipboard.flush(session.connectionId);
 	};
 
@@ -770,6 +832,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		sessionUnsubscribers.clear();
 		cancel('next');
 		cancel('debounce');
+		cancel('notice');
+		cancel('relist');
 		cancelProgress();
 		current.get('session')?.abort.abort();
 		current.delete('session');
@@ -899,10 +963,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 					: options.relay?.({
 							connectionId,
 							environment,
-							// Another device has pushed. A nudge, which a backoff in
+							// Another device has pushed. Nudges, which a backoff in
 							// progress is left to.
 							onChanged: () => {
-								void nudge(session);
+								noticed(session);
 							},
 						}),
 		};
