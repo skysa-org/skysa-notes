@@ -1,5 +1,19 @@
 # @skysa/api
 
+## 0.18.0
+
+### Minor Changes
+
+- 90fe489: The change relay can be turned on: `RELAY = "true"` in `wrangler.toml`'s `[vars]`. Its hub is a Durable Object per connection, `ConnectionRelay`, bound as `RELAY_HUB`. It is declared in `wrangler.toml` whether or not the relay is on, and it costs nothing while nobody addresses it. With the relay on, a device that has pushed tells the connection's other devices, which then sync within a second or two. Read docs/self-hosting.md, "Instant updates between devices", first: the server learns when each connection is edited, and on Workers Free the relay spends the request cap that token refresh shares.
+  
+  **For an operator with a Worker entry of their own:** it must now `export { ConnectionRelay }`, from `@skysa/api/relay` outside `apps/api/src`, because `wrangler.toml` binds that class and a deploy whose entry does not export it is refused. `RELAY = "true"` without the binding refuses to boot.
+- 8d385c7: `createApp` takes an optional `relay`, a `RelayHub`, for the change relay (docs/ARCHITECTURE.md §6, "Change relay"). With one, `/api/config` says `relay: true`, a device holding a connection can ask `POST /api/connection/relay/ticket` for a 30-second ticket, and `GET /api/relay?ticket=…` hands a same-origin WebSocket upgrade to the hub. Before that, the upgrade checks the ticket and that its grant is still live. Signing a device out, revoking one, disconnecting and the grant cap's eviction each tell the hub to close the sockets that went with them. Without a hub, which is the default, nothing changes and both routes answer 404.
+
+### Patch Changes
+
+- Updated dependencies [d555ebc]
+  - @skysa/core@0.18.0
+
 ## 0.17.1
 
 ### Patch Changes
