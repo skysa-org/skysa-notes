@@ -67,6 +67,13 @@ const rawEnvSchema = z.object({
 	/** Allow the WebDAV proxy to reach private/LAN addresses. Off by default. */
 	WEBDAV_ALLOW_PRIVATE: booleanish.default(false),
 
+	/**
+	 * Run the change relay (docs/ARCHITECTURE.md §6, "Change relay"). Off by
+	 * default: it tells the server when each connection is edited, and on
+	 * Workers Free it spends the daily request cap that token refresh shares.
+	 */
+	RELAY: booleanish.default(false),
+
 	GOOGLE_CLIENT_ID: z.string().optional(),
 	GOOGLE_CLIENT_SECRET: z.string().optional(),
 	MICROSOFT_CLIENT_ID: z.string().optional(),
@@ -86,6 +93,8 @@ export type AppConfig = {
 	secretsKey: string;
 	secretsKeyId: string;
 	webdavAllowPrivate: boolean;
+	/** Whether the operator turned the change relay on. The entry decides what carries it. */
+	relay: boolean;
 	oauth: {
 		gdrive?: { clientId: string; clientSecret: string };
 		onedrive?: { clientId: string; clientSecret: string; tenant: string };
@@ -193,6 +202,7 @@ export const parseEnv = (raw: unknown): AppConfig => {
 		secretsKey: env.SECRETS_KEY,
 		secretsKeyId: env.SECRETS_KEY_ID,
 		webdavAllowPrivate: env.WEBDAV_ALLOW_PRIVATE,
+		relay: env.RELAY,
 		oauth,
 	};
 };

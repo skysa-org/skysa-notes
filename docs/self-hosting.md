@@ -352,11 +352,14 @@ it. Apps from before holds existed refuse an answer longer than a day, so give
 long holds once your deployment's app has been updated.
 
 This goes in a Worker entry of your own. Copy `apps/api/src/worker.ts`, change
-its one `createApp({ config: parseEnv(env) })` to pass `entitlements` as well,
-and point `main` in `wrangler.toml` at your copy. Beside the original in
-`apps/api/src`, its relative imports work as they are. Anywhere else, import
-`createApp` and `parseEnv` from `@skysa/api` instead. The stock entry never
-sets a gate.
+its `createApp({ … })` call to pass `entitlements` as well, and point `main` in
+`wrangler.toml` at your copy. Beside the original in `apps/api/src`, its
+relative imports work as they are. Anywhere else, import `createApp` and
+`parseEnv` from `@skysa/api` instead, and `ConnectionRelay` and
+`durableObjectRelay` from `@skysa/api/relay`. Keep the copy's
+`export { ConnectionRelay }` whether or not you run the relay: `wrangler.toml`
+binds that class, and a deploy whose entry does not export it is refused. The
+stock entry never sets a gate.
 
 Keep the copy's `try`/`catch`. `createApp` checks the gate and throws on any of
 these:
@@ -370,6 +373,62 @@ these:
 The entry then logs the problem and answers `server_misconfigured`, rather
 than showing a broken link to your users. The link is served in its
 normalized form, so `https:example.com` goes out as `https://example.com/`.
+
+## Instant updates between devices (optional)
+
+Off by default. With it off, a device finds another device's edits the next
+time it syncs: within a minute while the app is open, and at once when it is
+brought back to the front. With it on, it finds them within a second or two.
+A device that has just sent its changes says so over a WebSocket to the Worker,
+and the Worker tells the account's other devices, which then sync.
+
+**What it costs you in privacy terms.** No note content and no file names pass
+through it: the message is "something changed", nothing else. But the Worker
+does learn *when* each connected account is edited, and from which device,
+which it otherwise would not — without it, it sees a token refresh about once
+an hour. Nothing per message is logged by the app; Cloudflare's own request
+logs record each socket being opened. Tell your users if that matters to them.
+
+**What it costs in requests.** Each device opens a socket each time the app
+comes to the front: a ticket request, the upgrade, and a Durable Object
+request. Roughly 80 Worker requests per active user per day, plus a few hundred
+WebSocket messages billed at 20:1 as Durable Object requests.
+
+- On **Workers Paid** that is about $0.0007 per active user per month
+  (Cloudflare's published prices, 2026-10).
+- On **Workers Free** the cost is the daily cap instead. 80 requests per user
+  per day against 100k, shared with token refresh, puts an instance with a
+  thousand daily users most of the way to the cap — and at the cap, sync stops
+  for everyone until 00:00 UTC. For more than a handful of people, turn this on
+  only on Paid. Durable Objects themselves are available on Free.
+
+**Turning it on.** The Durable Object it needs (`ConnectionRelay`, bound as
+`RELAY_HUB`) is already declared in `wrangler.toml`, so there is nothing to
+create. Set `RELAY = "true"` in `[vars]` in `wrangler.toml`, deploy, and check:
+
+```sh
+curl -s https://notes.example.com/api/config
+# … "relay":true …
+```
+
+Apps open at the time pick it up the next time they load. Polling carries on
+as before: the relay hears nothing about edits made in the folder by other
+tools, such as the provider's own app, and a device whose socket has dropped
+still syncs. Locally, put `RELAY="true"` in `apps/api/.dev.vars`.
+
+**Turning it off** is `RELAY = "false"` and a deploy. The class can stay
+declared; an object nothing addresses costs nothing. To remove it entirely,
+delete the `[[durable_objects.bindings]]` block and add a migration that
+deletes the class, then deploy:
+
+```toml
+[[migrations]]
+tag = "v2"
+deleted_classes = ["ConnectionRelay"]
+```
+
+The `[[migrations]]` block with `tag = "v1"` stays: Cloudflare applies
+migrations in order and remembers which it has.
 
 ## Updating
 
@@ -396,6 +455,7 @@ them, not just the first. The three that catch people:
 | `APP_ORIGIN: Invalid input: expected string, received undefined` | No default exists; set it. (`Invalid URL` instead means it is set but malformed — the scheme is what is usually missing.) |
 | `SECRETS_KEY: SECRETS_KEY must be base64 of exactly 32 bytes` | Regenerate: `openssl rand -base64 32` |
 | `DROPBOX_CLIENT_SECRET: required because ENABLED_PROVIDERS includes "dropbox"` | Register that provider's app, or drop it from `ENABLED_PROVIDERS` |
+| `RELAY: true, but the RELAY_HUB Durable Object binding is missing from wrangler.toml` | Put back the `[[durable_objects.bindings]]` block, or set `RELAY = "false"` |
 
 `AUTH_MODE=account-first` is refused the same way — *"account-first is not
 implemented and will not be"*. Sign-in separate from storage was dropped in

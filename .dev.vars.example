@@ -26,6 +26,12 @@ SECRETS_KEY_ID="k1"
 # today.
 WEBDAV_ALLOW_PRIVATE="false"
 
+# The change relay: other devices update within seconds of a push. Off by
+# default — it tells the server when each account is edited, and on Workers
+# Free it spends the request cap token refresh shares. Read
+# docs/self-hosting.md, "Instant updates between devices", before turning it on.
+RELAY="false"
+
 # Google Cloud console — required when ENABLED_PROVIDERS includes gdrive.
 # Create an OAuth client of type *Web application* with this redirect URI:
 #   <APP_ORIGIN>/api/auth/connect/gdrive/callback

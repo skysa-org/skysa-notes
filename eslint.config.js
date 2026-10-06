@@ -281,10 +281,41 @@ export default tseslint.config(
 							message:
 								'the Worker runs without nodejs_compat — Web Crypto and fetch only.',
 						},
+						{
+							// The rest of apps/api runs under Node in the tests and
+							// knows the runtime only through createApp's seams.
+							group: ['cloudflare:*'],
+							message:
+								'only src/worker.ts and src/relay/durableObject.ts may name the Workers runtime.',
+						},
 					],
 				},
 			],
 		},
+	},
+	{
+		// The two modules that are the Workers runtime's own: the entry, and the
+		// Durable Object class it exports, which has to extend `DurableObject`
+		// and reach its state through `this.ctx`. Node built-ins stay refused.
+		files: ['apps/api/src/worker.ts', 'apps/api/src/relay/durableObject.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['node:*', 'fs', 'path', 'stream'],
+							message:
+								'the Worker runs without nodejs_compat — Web Crypto and fetch only.',
+						},
+					],
+				},
+			],
+		},
+	},
+	{
+		files: ['apps/api/src/relay/durableObject.ts'],
+		rules: { 'functional/no-this-expressions': 'off' },
 	},
 	{
 		// Only worker.ts may read *configuration*. Per-request bindings still
