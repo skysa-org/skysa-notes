@@ -4,7 +4,7 @@ import { createRouter } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 
 import { loadBrand } from '../brand.js';
-import { PWA_WORKBOX, pwaManifest, pwaOptions } from '../pwa.js';
+import { PWA_WORKBOX, pwaManifest, pwaOptions, receiveShare } from '../pwa.js';
 import { routeTree } from '../src/routeTree.gen';
 
 /**
@@ -40,6 +40,30 @@ const workbox = PWA_WORKBOX;
 const shellAnswers = (pathAndSearch: string): boolean =>
 	!(workbox.navigateFallbackDenylist ?? []).some((pattern) => pattern.test(pathAndSearch)) &&
 	(workbox.navigateFallbackAllowlist ?? []).some((pattern) => pattern.test(pathAndSearch));
+
+/** The page the worker serves from, for a same-origin request. */
+const APP = 'https://notes.example';
+
+/**
+ * The runtime rule the worker answers a request with, decided as Workbox's
+ * router decides it: the first whose method is the request's and whose pattern
+ * matches.
+ */
+const ruleFor = (href: string, method = 'GET') => {
+	const url = new URL(href);
+	return (workbox.runtimeCaching ?? []).find((rule) => {
+		if ((rule.method ?? 'GET') !== method) return false;
+		const pattern = rule.urlPattern;
+		if (pattern instanceof RegExp) return pattern.test(href);
+		if (typeof pattern === 'function') {
+			const asked = { url, sameOrigin: url.origin === APP } as unknown as Parameters<
+				typeof pattern
+			>[0];
+			return Boolean(pattern(asked));
+		}
+		return pattern === href;
+	});
+};
 
 describe('the web app manifest', () => {
 	it('names the app, for the install prompt and the home screen', () => {
@@ -78,6 +102,18 @@ describe('the web app manifest', () => {
 			const [width, height] = (icon.sizes ?? '').split('x').map(Number);
 			expect(pngSize(icon.src)).toEqual({ width, height });
 		});
+	});
+
+	it('is a share target, posting what is shared to its own worker', () => {
+		// docs/ARCHITECTURE.md §8, "Shared to the app". POST, so what is shared
+		// never sits in a URL, which a log keeps; multipart, so files come too.
+		const target = manifest.share_target;
+		expect(target?.action).toBe('/share');
+		expect(target?.method).toBe('POST');
+		expect(target?.enctype).toBe('multipart/form-data');
+		expect(target?.action.startsWith(manifest.scope ?? '')).toBe(true);
+		expect(target?.params).toMatchObject({ title: 'title', text: 'text', url: 'url' });
+		expect(target?.params.files).toEqual([{ name: 'files', accept: ['*/*'] }]);
 	});
 
 	it('is themed, so the app does not open as a white browser window', () => {
@@ -141,11 +177,27 @@ describe('the service worker', () => {
 	});
 
 	it('never answers for the API from a cache', () => {
-		const api = (workbox.runtimeCaching ?? []).find(
-			(rule) => typeof rule.urlPattern === 'function'
-		);
-		expect(api?.handler).toBe('NetworkOnly');
-		expect(api?.options).toBeUndefined();
+		['GET', 'POST'].forEach((method) => {
+			const api = ruleFor(`${APP}/api/connection`, method);
+			if (method === 'GET') {
+				expect(api?.handler).toBe('NetworkOnly');
+				expect(api?.options).toBeUndefined();
+			}
+			// A POST to the API matches no rule, and goes to the network as it is.
+			if (method === 'POST') expect(api).toBeUndefined();
+		});
+	});
+
+	it('answers a share itself, and nothing else with the share handler', () => {
+		// The share sheet's POST never reaches the network (docs/ARCHITECTURE.md §8).
+		expect(ruleFor(`${APP}/share`, 'POST')?.handler).toBe(receiveShare);
+		// Not a GET to the same path, which is no share, nor a POST anywhere else.
+		expect(ruleFor(`${APP}/share`, 'GET')).toBeUndefined();
+		expect(ruleFor(`${APP}/share/x`, 'POST')).toBeUndefined();
+		expect(ruleFor(`${APP}/api/share`, 'POST')).toBeUndefined();
+		expect(ruleFor('https://elsewhere.example/share', 'POST')).toBeUndefined();
+		// And the shell does not answer a navigation to it either.
+		expect(shellAnswers('/share')).toBe(false);
 	});
 
 	it('waits to be told before taking over a page', () => {

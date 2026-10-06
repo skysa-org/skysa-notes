@@ -1,5 +1,7 @@
 import { ENTITLEMENT_CODES, type EntitlementCode, ROOT } from '@skysa/core';
 
+import { isShareId } from '../share/received.js';
+
 /**
  * What the URL says about which folder and note are open. Split out from the
  * route so it can be tested without rendering the app, because the round trip
@@ -35,6 +37,11 @@ export interface AppSearch {
 	 * window. `code` is the only value. Read once and removed, as `connect` is.
 	 */
 	enter?: 'code';
+	/**
+	 * Something shared to the app, kept by the service worker under this id
+	 * (`src/share/`). Read once and removed.
+	 */
+	share?: string;
 }
 
 /**
@@ -88,4 +95,5 @@ export const parseSearch = (search: Record<string, unknown>): AppSearch => ({
 	connect: CONNECT_OUTCOMES.find((outcome) => outcome === search.connect),
 	code: ENTITLEMENT_CODES.find((code) => code === search.code),
 	enter: search.enter === 'code' ? 'code' : undefined,
+	share: typeof search.share === 'string' && isShareId(search.share) ? search.share : undefined,
 });
