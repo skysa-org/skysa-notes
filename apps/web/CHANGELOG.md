@@ -1,5 +1,16 @@
 # @skysa/web
 
+## 0.20.0
+
+### Minor Changes
+
+- 3b0c428: The browser's Back and Forward buttons now move between the notes and notebooks you opened, including back into another source after switching to it. The address bar names the open note by its notebooks and its name, as lowercase words joined by hyphens, such as `/#/work-stuff/projects/q3-plan`. A link or bookmark to a note opens it, including one typed with the names as they are, and the address follows the note when it is renamed. The page title says where you are: `Work > Projects > Q3 plan`. Notebook and note names stay in the part of the address after `#`, which the browser never sends to the server. Links from earlier versions, which named a note by `?note=`, now open wherever you last were.
+
+### Patch Changes
+
+- b072a30: With instant updates between devices turned on, a change made on another device no longer sometimes waits a minute to arrive. Google Drive takes a few seconds to report a change, and a device used to ask it once and then wait for the next minute's sync. It now looks again a few seconds later. This was most noticeable with the clipboard: an item added, or several removed one after another, could take a minute to show on your other devices. An item removed from the clipboard on another device also no longer stays on this one until the next change to the clipboard.
+- @skysa/core@0.20.0
+
 ## 0.19.0
 
 ### Minor Changes
