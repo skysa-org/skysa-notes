@@ -110,6 +110,17 @@ describe('parseEnv', () => {
 		).toBe(false);
 	});
 
+	it('leaves the change relay off unless it is asked for', () => {
+		expect(parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav' }).relay).toBe(false);
+		expect(parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav', RELAY: 'false' }).relay).toBe(
+			false
+		);
+		expect(parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav', RELAY: 'true' }).relay).toBe(true);
+		expect(() => parseEnv({ ...base, ENABLED_PROVIDERS: 'webdav', RELAY: 'yes' })).toThrow(
+			/RELAY/
+		);
+	});
+
 	it('rejects a missing or malformed APP_ORIGIN', () => {
 		expect(() => parseEnv({ SECRETS_KEY: 'x', ENABLED_PROVIDERS: 'webdav' })).toThrow(
 			/APP_ORIGIN/

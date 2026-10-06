@@ -1,5 +1,9 @@
 import { createApp } from './app.js';
 import { parseEnv } from './env.js';
+import { durableObjectRelay } from './relay/durableObject.js';
+
+/** The change relay's Durable Object, which the runtime finds by this export. */
+export { ConnectionRelay } from './relay/durableObject.js';
 
 /**
  * The default Worker entry: the only module in `apps/api` that reads the
@@ -15,15 +19,35 @@ type AppOrError = ReturnType<typeof createApp> | Error;
  */
 const cache = new Map<'singleton', AppOrError>();
 
-const build = (env: Env): AppOrError => {
+/**
+ * The relay's binding is declared in wrangler.toml whether or not it is used,
+ * but a deployment can drop it; the generated `Env` cannot know that.
+ */
+type WorkerEnv = Omit<Env, 'RELAY_HUB'> & { RELAY_HUB?: Env['RELAY_HUB'] };
+
+const build = (env: WorkerEnv): AppOrError => {
 	try {
-		return createApp({ config: parseEnv(env) });
+		const config = parseEnv(env);
+		if (config.relay && env.RELAY_HUB === undefined) {
+			// The same shape as `parseEnv`'s refusals, so the operator reads one kind
+			// of message for every way the environment is wrong.
+			throw new Error(
+				'Invalid environment:\n  RELAY: true, but the RELAY_HUB Durable Object binding ' +
+					'is missing from wrangler.toml (docs/self-hosting.md)'
+			);
+		}
+		return createApp({
+			config,
+			...(config.relay && env.RELAY_HUB !== undefined
+				? { relay: durableObjectRelay(env.RELAY_HUB) }
+				: {}),
+		});
 	} catch (err) {
 		return err instanceof Error ? err : new Error(String(err));
 	}
 };
 
-const appFor = (env: Env): AppOrError => {
+const appFor = (env: WorkerEnv): AppOrError => {
 	const cached = cache.get('singleton');
 	if (cached !== undefined) return cached;
 
@@ -33,7 +57,11 @@ const appFor = (env: Env): AppOrError => {
 };
 
 export default {
-	fetch: (request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> => {
+	fetch: (
+		request: Request,
+		env: WorkerEnv,
+		ctx: ExecutionContext
+	): Response | Promise<Response> => {
 		const app = appFor(env);
 
 		if (app instanceof Error) {
@@ -48,4 +76,4 @@ export default {
 
 		return app.fetch(request, env, ctx);
 	},
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<WorkerEnv>;
