@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 0.18.2
+
+### Patch Changes
+
+- 2a543dc: Menu items no longer end in "…". "Disconnect…", "Import a folder…", "Import files…", "About Google Drive…", "Move to notebook…" and the format toolbar's "Link…" now read like every other menu item: "Disconnect", "Import a folder", and so on.
+- @skysa/core@0.18.2
+
 ## 0.18.1
 
 ### Patch Changes
