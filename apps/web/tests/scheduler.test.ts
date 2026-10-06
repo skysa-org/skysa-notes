@@ -4,6 +4,7 @@ import {
 	createFakeProvider,
 	type FakeProvider,
 	RateLimitError,
+	type RemoteEntry,
 	type StorageProvider,
 } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -2104,23 +2105,26 @@ describe('files beside notes, read for showing (#187)', () => {
 	});
 });
 
-describe('the clipboard (§7)', () => {
-	/** Another device's paste, straight into the folder. */
-	const pastedElsewhere = async (h: Harness) => {
-		await h.remote.fake.createFolder(CLIPBOARD_FOLDER);
-		await h.remote.fake.createFile(
-			`${CLIPBOARD_FOLDER}/20261006T153012123Z-text-3f9a1c2b.txt`,
-			new TextEncoder().encode('from the phone')
-		);
-	};
+/** Another device's paste, straight into the folder. */
+const pastedElsewhere = async (fake: FakeProvider) => {
+	await fake.createFolder(CLIPBOARD_FOLDER);
+	await fake.createFile(
+		`${CLIPBOARD_FOLDER}/20261006T153012123Z-text-3f9a1c2b.txt`,
+		new TextEncoder().encode('from the phone')
+	);
+};
 
+/** What the clipboard shows: each item's preview. */
+const previews = async (db: NotesDatabase) => (await db.clips.toArray()).map((row) => row.preview);
+
+describe('the clipboard (§7)', () => {
 	it('reads it again after a round that met its folder, where it is shown', async () => {
 		const db = await bound();
 		await setClipboardShown(db, 'c1', true);
 		const h = started(db);
 		await reaches(h.scheduler, 'idle');
 
-		await pastedElsewhere(h);
+		await pastedElsewhere(h.remote.fake);
 		await focused(h);
 
 		await vi.waitFor(async () => {
@@ -2130,12 +2134,52 @@ describe('the clipboard (§7)', () => {
 		});
 	});
 
+	it('lists it again a moment later, where the listing still named what the feed said was gone', async () => {
+		const db = await bound();
+		await setClipboardShown(db, 'c1', true);
+		// Drive's search goes on listing a file for a moment after it is trashed.
+		const theRemote = remote();
+		const stale = new Map<'listing', RemoteEntry[]>();
+		const h = started(db, {
+			createProvider: (input) => {
+				const provider = theRemote.factory(input);
+				if (provider === undefined) return undefined;
+				return {
+					...provider,
+					list: async (path) => {
+						const held = path === CLIPBOARD_FOLDER ? stale.get('listing') : undefined;
+						stale.delete('listing');
+						return held ?? provider.list(path);
+					},
+				};
+			},
+		});
+		await pastedElsewhere(theRemote.fake);
+		await focused(h);
+		await vi.waitFor(async () => {
+			expect(await previews(db)).toEqual(['from the phone']);
+		});
+
+		// Let go of on the other device, and listed as it was once more.
+		const listed = await theRemote.fake.list(CLIPBOARD_FOLDER);
+		stale.set('listing', listed);
+		await Promise.all(listed.map((entry) => theRemote.fake.delete(entry)));
+		await focused(h);
+		await quiet();
+		expect(await previews(db)).toEqual(['from the phone']);
+
+		h.env.advance(3000);
+		await vi.waitFor(async () => {
+			expect(await previews(db)).toEqual([]);
+		});
+	});
+
 	it('reads nothing of it where it is not shown', async () => {
 		const db = await bound();
 		const h = started(db);
 		await reaches(h.scheduler, 'idle');
 
-		await pastedElsewhere(h);
+		await pastedElsewhere(h.remote.fake);
 		await focused(h);
 		await quiet();
 
@@ -2224,6 +2268,79 @@ describe('the change relay', () => {
 			expect(h.remote.pulls()).toBe(before + 1);
 		});
 		expect(only().connectionId).toBe('c1');
+	});
+
+	it('looks again 3 and 10 seconds after the last notice, and then leaves it to the poll', async () => {
+		const db = await bound();
+		const { relay, only } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+		const before = h.remote.pulls();
+		const pulled = async (count: number) => {
+			await vi.waitFor(() => {
+				expect(h.remote.pulls()).toBe(before + count);
+			});
+			await quiet();
+			expect(h.remote.pulls()).toBe(before + count);
+		};
+
+		only().changed();
+		await pulled(1);
+		h.env.advance(2000);
+		// A burst: the looks are counted from the last of it.
+		only().changed();
+		await pulled(2);
+		h.env.advance(2999);
+		await pulled(2);
+		h.env.advance(1);
+		await pulled(3);
+		h.env.advance(7000);
+		await pulled(4);
+		h.env.advance(INTERVAL - 1);
+		await pulled(4);
+	});
+
+	it('finds a paste the feed showed only after the round the notice started', async () => {
+		const db = await bound();
+		await setClipboardShown(db, 'c1', true);
+		const { relay, only } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+		const before = h.remote.pulls();
+
+		only().changed();
+		await vi.waitFor(() => {
+			expect(h.remote.pulls()).toBe(before + 1);
+		});
+		await reaches(h.scheduler, 'idle');
+		// The feed shows the other device's write a moment after the notice.
+		await pastedElsewhere(h.remote.fake);
+		await quiet();
+		expect(await previews(db)).toEqual([]);
+
+		h.env.advance(3000);
+		await vi.waitFor(async () => {
+			expect(await previews(db)).toEqual(['from the phone']);
+		});
+	});
+
+	it('does not look again from a hidden tab, which looks on coming forward', async () => {
+		const db = await bound();
+		const { relay, only } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+
+		only().changed();
+		await vi.waitFor(() => {
+			expect(h.scheduler.status().phase).toBe('idle');
+		});
+		await quiet();
+		const before = h.remote.pulls();
+		h.env.state.visible = false;
+		h.env.advance(10_000);
+		await quiet();
+
+		expect(h.remote.pulls()).toBe(before);
 	});
 
 	it('tells the other devices after a round that pushed, and not after one that only pulled', async () => {
