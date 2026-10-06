@@ -1,5 +1,20 @@
 # @skysa/web
 
+## 0.19.0
+
+### Minor Changes
+
+- 3306900: While the app runs in a browser tab, a banner under the top bar offers to install it. In Chrome and Edge, on a desktop or Android, its Install button opens the browser's install prompt. On an iPhone or iPad it says to tap Share, then Add to Home Screen, and in Safari on a Mac it says to choose File › Add to Dock. Browsers that cannot install the app are not offered it. The banner goes once the app is installed or opened as an installed app, and dismissing it hides it for good on that device.
+- ac23b8f: The installed app is a share target on Android and ChromeOS. Text, links and files shared to it from the system's share sheet go on the clipboard of the source showing, once the user says so. The app always asks, naming what came, and offers to show the clipboard where it is hidden. Files over 25 MB are left out and named. Notes kept on this device only, and a source no longer connected, have no clipboard, and the app says so. The service worker answers the share itself and keeps it on the device until the page has asked; nothing shared is sent to the server.
+- 1fe2319: A clipboard a source's devices share. "Show clipboard" in a connected source's storage menu (the gear, or the source's `⋯` on a phone) puts a Clipboard region above the status line, on this device. Paste reads text or a picture from the system clipboard. A keyboard paste or a drop on the region, or "Add a file", adds files of up to 25 MB. Each item shows as a text preview, a thumbnail or a file card. Pressing one copies text or a picture back to the clipboard and saves a file. It keeps the last 10 items, newest first, and pasting something already there moves it to the top. Items are files in a hidden `.clipboard` folder in the app folder. A paste is kept on the device at once and sent when online, and where the instance runs the change relay, the source's other devices show it within a second or two. Not offered for notes kept on this device only. Turning it off only hides it, and disconnecting a source drops its clipboard from the device.
+  
+  `@skysa/core` exports the clipboard's naming (`clipName`, `readClipName`, `clipStamp`, `clipPath`, `isClipPath`) and its folder and cap (`CLIPBOARD_FOLDER`, `CLIPBOARD_ITEMS`). A sync's outcome now says when a pull met that folder (`SyncOutcome.clipboard`).
+
+### Patch Changes
+
+- Updated dependencies [1fe2319]
+  - @skysa/core@0.19.0
+
 ## 0.18.2
 
 ### Patch Changes
