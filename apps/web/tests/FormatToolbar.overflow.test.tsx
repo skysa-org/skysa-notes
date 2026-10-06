@@ -26,6 +26,9 @@ const GROUP = 10;
 const EVERYTHING = TEXT_STYLE + 10 * SLOT + 6 * GROUP;
 
 let barWidth = EVERYTHING;
+/** The gap between two slots in one group, which the stylesheet has and the
+    made-up layout leaves out but where a test puts it back. */
+let slotGap = 0;
 
 const widthOf = (element: HTMLElement): number => {
 	if (element.dataset.slot !== undefined) {
@@ -33,7 +36,10 @@ const widthOf = (element: HTMLElement): number => {
 	}
 	if (element.dataset.group !== undefined) {
 		const slots = [...element.querySelectorAll<HTMLElement>('[data-slot]')];
-		return slots.reduce((sum, slot) => sum + widthOf(slot), GROUP);
+		return slots.reduce(
+			(sum, slot) => sum + widthOf(slot),
+			GROUP + Math.max(0, slots.length - 1) * slotGap
+		);
 	}
 	if (element.dataset.overflow !== undefined) return SLOT;
 	return 0;
@@ -46,6 +52,7 @@ const original = {
 
 beforeEach(() => {
 	barWidth = EVERYTHING;
+	slotGap = 0;
 	Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
 		configurable: true,
 		get(this: HTMLElement) {
@@ -267,5 +274,26 @@ describe('the toolbar on a bar too narrow for it', () => {
 		editor.redraw();
 
 		expect(within(bar()).getByRole('button', { name: /^Text style/ }).tabIndex).toBe(0);
+	});
+
+	it('settles on a bar whose groups are narrower for every slot that goes', async () => {
+		// The gaps between a group's slots go with the slots, so the group
+		// measured with one of them in the menu costs less than it did whole.
+		// Charged that, the slot fitted again, came back, cost the gap again
+		// and did not fit: round and round until React gave up, and took the
+		// note with it (2026-10-06, a window dragged through about 1080px).
+		slotGap = 2;
+		// Whole, the groups of three and the group of two cost 4 and 2 more.
+		const gapped = EVERYTHING + 2 * 4 + 2;
+		barWidth = gapped - 1;
+		await harness('plain\n');
+
+		// The code block alone does not make room, as the overflow button
+		// takes its place; the indentation goes with it. Charged its whole
+		// width still, the Insert group does not then look as if all of it
+		// fits again.
+		expect(within(bar()).queryByRole('button', { name: 'Code block' })).toBeNull();
+		expect(within(bar()).queryByRole('button', { name: 'Increase indent' })).toBeNull();
+		expect(overflow()).not.toBeNull();
 	});
 });
