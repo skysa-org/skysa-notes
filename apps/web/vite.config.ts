@@ -22,6 +22,9 @@ export default defineConfig({
 	define: {
 		// The marker file records which version of the app first connected.
 		'import.meta.env.VITE_APP_VERSION': JSON.stringify(version),
+		// What the install banner calls the app: the brand's name, as the
+		// manifest and the page's title have it.
+		'import.meta.env.VITE_APP_NAME': JSON.stringify(brand.name),
 	},
 	plugins: [
 		tanstackRouter({ target: 'react', autoCodeSplitting: true }),

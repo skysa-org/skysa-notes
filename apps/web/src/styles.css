@@ -2442,6 +2442,36 @@ button.danger {
 	background: var(--surface);
 }
 
+/* The offer to install the app (`InstallBanner.tsx`): its words, the
+   Install button where the browser has one, and the dismissal at the end. */
+.install-banner {
+	display: flex;
+	align-items: center;
+	gap: var(--space-s);
+	padding-block: var(--space-2xs);
+	color: var(--fg);
+}
+
+.install-banner-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.install-banner button.install-banner-install {
+	flex: none;
+	font: inherit;
+	padding: 0.25rem 0.75rem;
+	border-radius: 0.375rem;
+	border: 1px solid var(--border);
+	background: var(--bg);
+	color: var(--fg);
+	cursor: pointer;
+}
+
+.install-banner button.icon {
+	flex: none;
+}
+
 /* Words are at stake, so it is not allowed to read as a footnote. */
 .banner-alert {
 	color: var(--fg);
