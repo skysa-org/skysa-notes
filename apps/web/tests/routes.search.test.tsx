@@ -64,20 +64,23 @@ describe('the query string as the app receives it', () => {
 	});
 
 	it('still hands over what is valid', async () => {
-		const router = await openAt('/?note=n1&folder=Work');
+		// Read once and taken out, so it is seen by what it does.
+		await openAt('/?connect=denied');
 
-		expect(received(router)).toMatchObject({ note: 'n1', folder: 'Work' });
+		expect((await screen.findByRole('alert')).textContent).toMatch(/cancelled/);
 	});
 
 	it('does not write the refused keys back into the URL', async () => {
 		// `connect=ok` is taken out by a navigation as the app opens, which
-		// re-serialises the rest — the explicit `undefined`s included.
-		const router = await openAt('/?note={"a":1}&folder=Work&connect=ok');
+		// re-serialises the rest — the explicit `undefined`s included, and the
+		// folder and note an older link put in the query, which the hash and the
+		// history entry carry now.
+		const router = await openAt('/?note={"a":1}&folder=Work&connect=ok&code=lapsed');
 
 		await waitFor(() => {
 			expect(router.state.location.searchStr).not.toContain('connect');
 		});
-		expect(router.state.location.searchStr).toBe('?folder=Work');
+		expect(router.state.location.searchStr).toBe('');
 		expect(router.state.location.href).not.toContain('undefined');
 	});
 });

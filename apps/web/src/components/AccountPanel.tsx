@@ -1,4 +1,4 @@
-import { parentPath, type ProviderKind, type SyncProgress } from '@skysa/core';
+import { type ProviderKind, type SyncProgress } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -24,7 +24,7 @@ import { answer, type Asked } from '../api/instanceConfig.js';
 import { Icon } from '../editor/icons.js';
 import { type pickFiles } from '../editor/pickFiles.js';
 import { failedAt, saying } from '../errors/reached.js';
-import { folderToSearch } from '../routes/search.js';
+import { noteLink } from '../routes/place.js';
 import { setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { connectedSources } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
@@ -844,7 +844,7 @@ const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: stri
 	if (note === undefined || note.deletedLocally === 1) return null;
 	return (
 		<p className="muted">
-			<Link to="/" search={{ folder: folderToSearch(parentPath(note.path)), note: note.id }}>
+			<Link to="/" {...noteLink(note)}>
 				Open the note
 			</Link>
 		</p>

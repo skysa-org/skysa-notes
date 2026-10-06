@@ -9,6 +9,7 @@ import { db } from '../src/store/db.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { noteUrl } from './entry.js';
 import { updateNote } from './noteRows.js';
 
 /**
@@ -63,7 +64,7 @@ describe('undoing the delete of a note the editor held an older edit to', () => 
 		const note = await createNote(db, { title: 'Alpha', body: 'before\n' });
 		const router = createRouter({
 			routeTree,
-			history: createMemoryHistory({ initialEntries: [`/?note=${note.id}`] }),
+			history: createMemoryHistory({ initialEntries: [noteUrl(note)] }),
 		});
 		render(<RouterProvider router={router} />);
 		await waitFor(() => {

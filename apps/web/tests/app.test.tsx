@@ -1,4 +1,9 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
+import {
+	type AnyRouter,
+	createMemoryHistory,
+	createRouter,
+	RouterProvider,
+} from '@tanstack/react-router';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +14,7 @@ import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import { KEEP_ASKED_KEY } from '../src/store/keeping.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
+import { hashIn, placeIn } from './entry.js';
 
 /**
  * The whole app, through the real router, because the pieces below it are each
@@ -71,12 +77,13 @@ const open = async (url: string, pane: string) => {
 };
 
 /**
- * What the URL says, less the note open. An empty notebook begins a note, and
- * the URL names it, so a test about the rest of the URL leaves it out.
+ * What the URL says, less the note open: its query, and where the user is
+ * (`placeIn`). An empty notebook begins a note, and the URL names it, so a test
+ * about the rest of the URL leaves it out.
  */
-const besideTheNote = (router: { state: { location: { search: object } } }) => {
-	const { note: _note, ...rest } = router.state.location.search as Record<string, unknown>;
-	return rest;
+const besideTheNote = (router: AnyRouter) => {
+	const { note: _note, ...place } = placeIn(router);
+	return { ...(router.state.location.search as Record<string, unknown>), ...place };
 };
 
 /** A notebook with a note in it, which opens on that note and begins none. */
@@ -94,7 +101,7 @@ const looseNote = (title: string) => createNote(db, { title });
 describe('the app', () => {
 	it('says how connecting storage went, once, and takes it out of the URL', async () => {
 		await createFolder(db, { name: 'Work' });
-		const router = await open('/?folder=Work&connect=ok', 'Work');
+		const router = await open('/?connect=ok#/Work/', 'Work');
 
 		expect((await screen.findByRole('status')).textContent).toMatch(/Storage connected/);
 		await waitFor(() => {
@@ -160,7 +167,7 @@ describe('the app', () => {
 		// connect starts from a path without it (`returnPath`) — but the URL is
 		// meant to say only where the user is.
 		await createFolder(db, { name: 'Work' });
-		const router = await open('/?folder=Work&code=lapsed', 'Work');
+		const router = await open('/?code=lapsed#/Work/', 'Work');
 
 		await waitFor(() => {
 			expect(besideTheNote(router)).toEqual({ folder: 'Work' });
@@ -170,7 +177,7 @@ describe('the app', () => {
 
 	it('says which kind of refusal it was, and takes that out of the URL too', async () => {
 		await createFolder(db, { name: 'Work' });
-		const router = await open('/?folder=Work&connect=refused&code=lapsed', 'Work');
+		const router = await open('/?connect=refused&code=lapsed#/Work/', 'Work');
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(
 			/access to sync on this server has lapsed, so storage was not connected/
@@ -187,7 +194,7 @@ describe('the app', () => {
 		const user = userEvent.setup();
 		await createFolder(db, { name: 'Work' });
 		await createFolder(db, { name: 'Play' });
-		await open('/?folder=Play&connect=denied', 'Play');
+		await open('/?connect=denied#/Play/', 'Play');
 		expect(await screen.findByText(/was cancelled/)).toBeTruthy();
 
 		await user.click(screen.getByRole('button', { name: 'Work' }));
@@ -320,27 +327,29 @@ describe('the app', () => {
 		// The heading and the list are separate live queries: the pane can be
 		// renamed a tick before its notes arrive.
 		expect(await screen.findByText('Scratch')).toBeDefined();
-		// The root is spelled `/` in the URL. With nothing open, the row opens
-		// the first loose note as a notebook would, and that arrives a read
-		// after the folder does.
+		// With nothing open, the row opens the first loose note as a notebook
+		// would, and that arrives a read after the folder does. A loose note's
+		// path is its name alone, the root being no notebook.
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: '/', note: scratch.id });
+			expect(placeIn(router)).toEqual({ folder: '', note: scratch.id });
 		});
+		expect(hashIn(router)).toBe('/scratch');
 	});
 
 	it('comes back to the loose notes after a reload', async () => {
-		// The point of the `/` sentinel: written as an empty param it would be
-		// dropped, and the root would be unreachable by link or bookmark.
+		// The point of the hash's `/`: the root's path is `''`, which no hash
+		// could tell from no hash at all, and the loose notes would be
+		// unreachable by link or bookmark.
 		await createFolder(db, { name: 'Work' });
 		await looseNote('Scratch');
-		await open('/?folder=%2F', 'Loose notes');
+		await open('/#/', 'Loose notes');
 
 		expect(screen.getByText('Scratch')).toBeDefined();
 	});
 
 	it('cannot create a note in the loose notes', async () => {
 		await looseNote('Scratch');
-		await open('/?folder=%2F', 'Loose notes');
+		await open('/#/', 'Loose notes');
 
 		expect(screen.getByRole('button', { name: 'New note' }).hasAttribute('disabled')).toBe(
 			true
@@ -360,7 +369,7 @@ describe('the app', () => {
 
 	it('falls back to a notebook when a stale link asks for an empty root', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=%2F', 'Work');
+		await open('/#/', 'Work');
 
 		expect(looseRow()).toBeNull();
 	});
@@ -377,9 +386,9 @@ describe('the app', () => {
 		// That the new notebook is a sibling rather than a child is pinned in
 		// `Sidebar.test.tsx`, at the callback: `createFolder` maps `''` and
 		// `undefined` to the same path, so only the argument can tell them apart.
-		// What this adds is the URL leaving the sentinel behind afterwards.
+		// What this adds is the URL leaving the root behind afterwards.
 		await looseNote('Scratch');
-		const router = await open('/?folder=%2F', 'Loose notes');
+		const router = await open('/#/', 'Loose notes');
 
 		await userEvent.click(screen.getByRole('button', { name: 'New notebook' }));
 		await userEvent.type(screen.getByLabelText('New notebook name'), 'Work{Enter}');
@@ -422,7 +431,7 @@ describe('searching', () => {
 	});
 
 	it('finds a note in a notebook the user is not in, and says which one', async () => {
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 
 		await type('heap');
 
@@ -434,7 +443,7 @@ describe('searching', () => {
 	});
 
 	it('marks the word it matched inside the note', async () => {
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 
 		await type('heap');
 
@@ -446,21 +455,22 @@ describe('searching', () => {
 	it('opens a match in its own notebook, not in the one behind the search', async () => {
 		// Without this the sidebar highlights Work while a note from Garden is
 		// open beside it, and emptying the field leaves that note in no list.
-		const router = await open('/?folder=Work', 'Work');
+		const router = await open('/#/Work/', 'Work');
 		await type('heap');
 		const match = await screen.findByRole('option', { name: /Compost/ });
 
 		await userEvent.click(match);
 
 		await waitFor(() => {
-			expect(router.state.location.search).toMatchObject({ folder: 'Garden' });
+			expect(placeIn(router)).toMatchObject({ folder: 'Garden' });
 		});
 		const compost = (await db.notes.toArray()).find((note) => note.title === 'Compost');
-		expect(router.state.location.search).toMatchObject({ note: compost?.id });
+		expect(placeIn(router)).toMatchObject({ note: compost?.id });
+		expect(hashIn(router)).toBe('/garden/compost');
 	});
 
 	it('ends the search when a match is chosen: the field empties and the list goes', async () => {
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		await type('heap');
 
 		await userEvent.click(await screen.findByRole('option', { name: /Compost/ }));
@@ -471,7 +481,7 @@ describe('searching', () => {
 	});
 
 	it('takes the list away when the field is emptied', async () => {
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		await type('heap');
 		expect(await screen.findByRole('option', { name: /Compost/ })).toBeDefined();
 
@@ -485,7 +495,7 @@ describe('searching', () => {
 	it('follows an edit made while the search is open', async () => {
 		// The results are a live query over the notes table, not a snapshot
 		// taken when the user stopped typing.
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		await type('kingfisher');
 		expect(await screen.findByText(/Nothing matches/)).toBeDefined();
 
@@ -498,7 +508,7 @@ describe('searching', () => {
 	});
 
 	it('says plainly when nothing matches', async () => {
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 
 		await type('bicycle');
 
@@ -514,7 +524,7 @@ describe('the command palette', () => {
 
 	it('opens on the chord and lists what the app can do', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 
 		await openPalette();
 
@@ -527,7 +537,7 @@ describe('the command palette', () => {
 
 	it('makes a note when the command is run, and opens it', async () => {
 		await workWithANote();
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		await screen.findByDisplayValue('Plans');
 
 		await openPalette();
@@ -539,7 +549,7 @@ describe('the command palette', () => {
 
 	it('puts the cursor in the search field when asked to search', async () => {
 		await workWithANote();
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 
 		await openPalette();
 		await userEvent.keyboard('search{Enter}');
@@ -553,7 +563,7 @@ describe('the command palette', () => {
 
 	it('closes on Escape without doing anything', async () => {
 		await workWithANote();
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		await screen.findByDisplayValue('Plans');
 
 		await openPalette();
@@ -571,7 +581,7 @@ describe('the command palette', () => {
 		// key is what is left. That is what `reachable` is for: in the search
 		// field the same key is the letter the user typed.
 		await workWithANote();
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		await screen.findByDisplayValue('Plans');
 
 		const search = screen.getByRole('combobox', { name: 'Search notes' });
@@ -638,7 +648,7 @@ describe('the command palette', () => {
 				title: 'Plan',
 				body: '# Plan\n',
 			});
-			await open('/?folder=Work', 'Work');
+			await open('/#/Work/', 'Work');
 
 			await openPalette();
 			await userEvent.keyboard('download all{Enter}');
@@ -690,7 +700,7 @@ describe('asking the browser to keep the notes', () => {
 	it('asks once, when the first note is made on a device with nothing connected', async () => {
 		const keeper = standIn();
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 		// Not on load, and not for a note begun and not written in: in Firefox
 		// the request is a prompt, and nothing is stored yet to keep.
 		await screen.findByDisplayValue('Untitled');
@@ -722,7 +732,7 @@ describe('asking the browser to keep the notes', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		await finishImport(db, 'c1');
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work', 'Work');
+		await open('/#/Work/', 'Work');
 
 		await screen.findByDisplayValue('Untitled');
 		await userEvent.keyboard('Plans{Enter}');

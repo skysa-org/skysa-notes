@@ -66,7 +66,7 @@ const alertsIn = (node: Node): HTMLElement[] => {
 describe('a refused connect, on an instance with a gate', () => {
 	it("offers the operator's way forward beside the refusal", async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=refused&code=not_allowed');
+		await open('/?connect=refused&code=not_allowed#/Work/');
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(
@@ -97,7 +97,7 @@ describe('a refused connect, on an instance with a gate', () => {
 		observer.observe(document.body, { childList: true, subtree: true });
 		await createFolder(db, { name: 'Work' });
 
-		await open('/?folder=Work&connect=refused&code=lapsed');
+		await open('/?connect=refused&code=lapsed#/Work/');
 		await within(await screen.findByRole('alert')).findByRole('link', { name: 'See plans' });
 		observer.disconnect();
 
@@ -106,7 +106,7 @@ describe('a refused connect, on an instance with a gate', () => {
 
 	it('offers it for a refusal whose kind the policy did not say', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=refused');
+		await open('/?connect=refused#/Work/');
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(/cannot sync on this server/);
@@ -115,7 +115,7 @@ describe('a refused connect, on an instance with a gate', () => {
 
 	it('offers nothing beside an outcome that is not a refusal', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=failed');
+		await open('/?connect=failed#/Work/');
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(/could not be connected/);
@@ -130,7 +130,7 @@ describe("a refused connect that carried the gate's code", () => {
 	it('says the code was not accepted, and lets go of it for the next one', async () => {
 		holdConnectCode('K7QM-2XRD', 900);
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=refused&code=not_allowed');
+		await open('/?connect=refused&code=not_allowed#/Work/');
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(
@@ -144,7 +144,7 @@ describe("a refused connect that carried the gate's code", () => {
 	it('says the same where the policy did not say which kind of no', async () => {
 		holdConnectCode('K7QM-2XRD', 900);
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=refused');
+		await open('/?connect=refused#/Work/');
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/code you entered/);
 	});
@@ -152,7 +152,7 @@ describe("a refused connect that carried the gate's code", () => {
 	it('says a lapse as a lapse, and keeps the code, which may be good', async () => {
 		holdConnectCode('K7QM-2XRD', 900);
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=refused&code=lapsed');
+		await open('/?connect=refused&code=lapsed#/Work/');
 
 		const toast = await screen.findByRole('alert');
 		expect(toast.textContent).toMatch(/access to sync on this server has lapsed/);
@@ -162,7 +162,7 @@ describe("a refused connect that carried the gate's code", () => {
 
 	it('says nothing of a code when none was held', async () => {
 		await createFolder(db, { name: 'Work' });
-		await open('/?folder=Work&connect=refused&code=not_allowed');
+		await open('/?connect=refused&code=not_allowed#/Work/');
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/not allowed to sync/);
 	});

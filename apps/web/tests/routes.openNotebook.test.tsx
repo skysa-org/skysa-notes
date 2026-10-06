@@ -9,6 +9,7 @@ import { createFolder } from '../src/store/folders.js';
 import type * as Notes from '../src/store/notes.js';
 import { createNote, getNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
+import { noteUrl } from './entry.js';
 
 /**
  * The store answers a list of notes at once under test, and one test needs it
@@ -90,7 +91,7 @@ describe('opening a notebook', () => {
 		await db.notes.update([LOCAL_CONNECTION_ID, older.id], { createdAt: 1_000 });
 		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Work&note=${older.id}`);
+		await openApp(noteUrl(older));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Older');
 		});
@@ -114,7 +115,7 @@ describe('opening a notebook', () => {
 		});
 		await createNote(db, { folderPath: 'Projects', title: 'Overview', body: 'Overview\n' });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Projects/Alpha&note=${reading.id}`);
+		await openApp(noteUrl(reading));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Reading');
 		});
@@ -136,7 +137,7 @@ describe('opening a notebook', () => {
 		});
 		await createNote(db, { folderPath: 'Work', title: 'Minutes', body: 'Minutes\n' });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Archive&note=${reading.id}`);
+		await openApp(noteUrl(reading));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Reading');
 		});
@@ -157,7 +158,7 @@ describe('opening a notebook', () => {
 			body: 'Reading\n',
 		});
 		const user = userEvent.setup();
-		await openApp(`/?folder=Archive&note=${reading.id}`);
+		await openApp(noteUrl(reading));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Reading');
 		});
@@ -183,7 +184,7 @@ describe('opening a notebook', () => {
 		});
 		await createNote(db, { title: 'Scratch', body: 'Scratch\n' });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Work&note=${reading.id}`);
+		await openApp(noteUrl(reading));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Reading');
 		});
@@ -204,12 +205,12 @@ describe('opening a notebook', () => {
 		await db.notes.update([LOCAL_CONNECTION_ID, newer.id], { createdAt: 2_000 });
 		await db.notes.update([LOCAL_CONNECTION_ID, going.id], { createdAt: 3_000 });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Work&note=${going.id}`);
+		await openApp(noteUrl(going));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Going');
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Options for “Going”' }));
+		await user.click(await screen.findByRole('button', { name: 'Options for “Going”' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		// The most recent of what is left, not an empty pane.
@@ -222,12 +223,12 @@ describe('opening a notebook', () => {
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
 		const only = await createNote(db, { folderPath: 'Work', title: 'Only', body: 'Only\n' });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Work&note=${only.id}`);
+		await openApp(noteUrl(only));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Only');
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Options for “Only”' }));
+		await user.click(await screen.findByRole('button', { name: 'Options for “Only”' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		await waitFor(() => {
@@ -254,13 +255,13 @@ describe('opening a notebook', () => {
 		const open = await createNote(db, { folderPath: 'Work', title: 'Open', body: 'Open\n' });
 		const other = await createNote(db, { folderPath: 'Work', title: 'Other', body: 'Other\n' });
 		const user = userEvent.setup();
-		await openApp(`/?folder=Work&note=${open.id}`);
+		await openApp(noteUrl(open));
 		await waitFor(() => {
 			expect(titleField()?.value).toBe('Open');
 		});
 
 		const list = screen.getByRole('region', { name: 'Notes' });
-		fireEvent.contextMenu(within(list).getByRole('button', { name: /^Other/ }), {
+		fireEvent.contextMenu(await within(list).findByRole('button', { name: /^Other/ }), {
 			clientX: 300,
 			clientY: 120,
 		});

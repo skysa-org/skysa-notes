@@ -1,24 +1,16 @@
-import { ENTITLEMENT_CODES, type EntitlementCode, ROOT } from '@skysa/core';
+import { ENTITLEMENT_CODES, type EntitlementCode } from '@skysa/core';
 
 import { isShareId } from '../share/received.js';
 
 /**
- * What the URL says about which folder and note are open. Split out from the
- * route so it can be tested without rendering the app, because the round trip
- * through the URL is where the root folder is easy to lose: `ROOT` is `''`, and
- * an empty search param is indistinguishable from an absent one. The URL
- * therefore spells the root `/`, and the two are translated here — nothing
- * inside the app has to know about the sentinel.
+ * What the query string says: the messages other pages leave for the app on
+ * the way in — a connect's outcome, an operator's way back, a share — each read
+ * once and taken out. Where the user is is not here: it is in the hash and the
+ * history entry (`place.ts`). Split out from the route so it can be tested
+ * without rendering the app.
  */
 
 export interface AppSearch {
-	/**
-	 * Absent until a notebook is picked — by the user, or by the app once it has
-	 * opened a note: the one open last on this device, or the first
-	 * (`useOpenPlace`).
-	 */
-	folder?: string;
-	note?: string;
 	/**
 	 * How connecting a storage account went, set by `apps/api` on the way back
 	 * from the provider. Read once and removed.
@@ -66,14 +58,11 @@ export const CONNECT_OUTCOMES = [
 
 export type ConnectOutcome = (typeof CONNECT_OUTCOMES)[number];
 
-const ROOT_SEARCH = '/';
-
-/** A URL `folder` value as a folder path. */
-export const folderFromSearch = (value: string | undefined): string | undefined =>
-	value === ROOT_SEARCH ? ROOT : value;
-
-/** A folder path as a URL `folder` value. */
-export const folderToSearch = (path: string): string => (path === ROOT ? ROOT_SEARCH : path);
+/** Keys the query string no longer carries (`parseSearch`). */
+export interface RetiredSearch {
+	folder?: undefined;
+	note?: undefined;
+}
 
 /**
  * Anything at all can arrive in the query string — a hand-edited URL, a stale
@@ -88,10 +77,14 @@ export const folderToSearch = (path: string): string => (path === ROOT ? ROOT_SE
  * and `?note={"a":1}` reached `db.notes.get` as an object and took the app
  * down from a link. An explicit `undefined` overrides the raw value in the
  * spread, and `stringifySearch` drops it again on the way back to the URL.
+ *
+ * `folder` and `note` are refused outright. They said where the user was until
+ * that moved to the hash (2026-10-06), and a link from before then would
+ * otherwise carry them along through every navigation after it.
  */
-export const parseSearch = (search: Record<string, unknown>): AppSearch => ({
-	folder: typeof search.folder === 'string' && search.folder !== '' ? search.folder : undefined,
-	note: typeof search.note === 'string' && search.note !== '' ? search.note : undefined,
+export const parseSearch = (search: Record<string, unknown>): AppSearch & RetiredSearch => ({
+	folder: undefined,
+	note: undefined,
 	connect: CONNECT_OUTCOMES.find((outcome) => outcome === search.connect),
 	code: ENTITLEMENT_CODES.find((code) => code === search.code),
 	enter: search.enter === 'code' ? 'code' : undefined,

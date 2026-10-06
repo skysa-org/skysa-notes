@@ -6,6 +6,7 @@ import { routeTree } from '../src/routeTree.gen';
 import { dropConnectCode } from '../src/store/connectCode.js';
 import { db } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
+import { placeIn } from './entry.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -73,12 +74,14 @@ const atTheField = async () => {
 
 describe('back from getting a connect code', () => {
 	it('opens the + menu at the code field, and takes the ask out of the URL', async () => {
-		const router = await open('/?folder=Work&enter=code', 1400);
+		const router = await open('/?enter=code#/Work/', 1400);
 
 		await atTheField();
 		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ folder: 'Work' });
+			expect(router.state.location.search).toEqual({});
 		});
+		// Where the user is stays as it was.
+		expect(placeIn(router)).toMatchObject({ folder: 'Work' });
 	});
 
 	it('opens the sources dropdown first in a compact window', async () => {
@@ -92,7 +95,7 @@ describe('back from getting a connect code', () => {
 	});
 
 	it('opens nothing without being asked', async () => {
-		await open('/?folder=Work', 1400);
+		await open('/#/Work/', 1400);
 
 		await screen.findByRole('button', { name: /Connect storage provider/ });
 		expect(screen.queryByRole('group', { name: 'Storage providers' })).toBeNull();

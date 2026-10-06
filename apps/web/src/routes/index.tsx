@@ -7,7 +7,7 @@ import {
 	rebasePath,
 	ROOT,
 } from '@skysa/core';
-import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router';
+import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '../api/client.js';
@@ -41,7 +41,7 @@ import {
 	heldConnectCodeShown,
 	holdAcceptedCode,
 } from '../store/connectCode.js';
-import { showConnection } from '../store/connection.js';
+import { type ConnectedSource, showConnection } from '../store/connection.js';
 import {
 	activeConnectionId,
 	db,
@@ -74,6 +74,7 @@ import {
 	useNoteToOpen,
 	useOpenNotebooks,
 	usePinnedTree,
+	useSourceContents,
 	useSources,
 } from '../store/hooks.js';
 import { keeping } from '../store/keeping.js';
@@ -94,18 +95,26 @@ import { createRenamings, type Renamings } from '../store/renaming.js';
 import { findFolder, type FolderNode, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
-	type AppSearch,
-	type ConnectOutcome,
-	folderFromSearch,
-	folderToSearch,
-	parseSearch,
-} from './search.js';
+	findNamedPlace,
+	fragmentOf,
+	heldPlace,
+	type NamedPlace,
+	type Place,
+	placeHash,
+	placeState,
+	placeTitle,
+	readPlaceHash,
+	samePlace,
+} from './place.js';
+import { type AppSearch, type ConnectOutcome, parseSearch } from './search.js';
 
 /**
  * The app. Which folder and note are open lives in the URL rather than in
- * component state, so reloading or following a link lands the user where it
- * says; and on the device (`store/lastOpen.ts`), so reopening the PWA at its
- * start URL, or showing a source again, lands them where they were.
+ * component state — by path in the hash, by id in the history entry
+ * (`place.ts`) — so reloading, following a link, or going Back or Forward
+ * lands the user where it says; and on the device (`store/lastOpen.ts`), so
+ * reopening the PWA at its start URL, or showing a source again, lands them
+ * where they were.
  */
 
 /**
@@ -259,7 +268,13 @@ const useEnterCode = (
 	useEffect(() => {
 		if (enter === undefined) return;
 		if (compact) setPanel('sources');
-		void navigate({ search: ({ enter: _enter, ...rest }) => rest, replace: true });
+		void navigate({
+			search: ({ enter: _enter, ...rest }) => rest,
+			// Where the user is stays as it was (`place.ts`).
+			hash: true,
+			state: true,
+			replace: true,
+		});
 	}, [enter, compact, setPanel, navigate]);
 	return asked;
 };
@@ -479,6 +494,8 @@ const useConnectNotice = (
 		if (connect === undefined && code === undefined) return;
 		void navigate({
 			search: ({ connect: _outcome, code: _code, ...rest }) => rest,
+			hash: true,
+			state: true,
 			replace: true,
 		});
 	}, [connect, code, navigate]);
@@ -509,47 +526,131 @@ const useConnectNotice = (
 	return { connectNotice, dismissConnect };
 };
 
+/** The page's title with no note open: the brand's name (`brand.ts`). */
+const APP_NAME = import.meta.env.VITE_APP_NAME ?? '';
+
 /**
- * Whether the notebook and note in the URL were chosen in another source than
- * the one showing — true from the moment the source changes until they have
- * been taken out of the URL.
- *
- * Each source is its own notebooks and its own notes (§6), so a path or an id
- * from one names nothing in another, or worse, names something: a notebook
- * called "Inbox" in both would open the new source's "Inbox", not where the
- * user last was in it. So the URL is emptied of both when the source changes,
- * however it changed — a tab, a search answer in another source, a connect,
- * a disconnect — and the source's remembered place takes over.
- *
- * The first source known is the one the URL was opened in. A URL naming
- * nothing belongs to whichever source is showing.
+ * What the history entry in front says about where the user is (`place.ts`):
+ * the place it holds, if it holds one, and its hash as written. `index` is the
+ * entry's position in the tab's history, which a replace keeps and Back,
+ * Forward and a push move.
  */
-const useUrlFromElsewhere = (
+interface Entry {
+	fragment: string;
+	held: ReturnType<typeof heldPlace>;
+	index: number;
+}
+
+const useEntry = (): Entry => {
+	const href = useRouterState({ select: (state) => state.location.href });
+	const state = useRouterState({ select: (state) => state.location.state });
+	const held = useMemo(() => heldPlace(state), [state]);
+	return { fragment: fragmentOf(href), held, index: state.__TSR_index };
+};
+
+/**
+ * Whose place the entry in front is, beside the source showing. Each source is
+ * its own notebooks and its own notes (§6), so a path or an id from one names
+ * nothing in another, or worse, names something: a notebook called "Inbox" in
+ * both would open the wrong one. How the entry came to be in front says what
+ * to do with it:
+ *
+ * - `here`: the source showing's place, or no place at all — a link or an
+ *   address typed, which is read in whichever source is showing.
+ * - `left`: the source changed under it — a tab, a search answer in another
+ *   source, a connect, or another window of the app showing another source.
+ *   It is kept, for Back to come to, and the new source's place is pushed.
+ * - `returning`: Back or Forward came to it. Its source is shown again, and
+ *   the entry is where the user is in it.
+ * - `stale`: in front as the app opened, from a source shown since in another
+ *   window, or one Back came to that is no longer offered — let go of, or the
+ *   device's own notes once they have all gone into the first source
+ *   connected (`connectedSources`). Replaced.
+ */
+type Standing = 'here' | 'left' | 'returning' | 'stale';
+
+const useStanding = (
+	entry: Entry,
 	activeConnection: string | undefined,
-	search: Pick<AppSearch, 'folder' | 'note'>
-): boolean => {
-	const navigate = useNavigate({ from: Route.fullPath });
-	const [urlSource, setUrlSource] = useState<string | undefined>(undefined);
-	const placed = search.folder !== undefined || search.note !== undefined;
-	const elsewhere =
-		urlSource !== undefined && activeConnection !== undefined && urlSource !== activeConnection;
+	sources: readonly ConnectedSource[] | undefined
+): Standing => {
+	const source = entry.held?.connectionId;
+	const [seen, setSeen] = useState<{
+		index: number;
+		active: string | undefined;
+		source: string | undefined;
+		standing: Standing;
+	}>();
+	const changed =
+		seen === undefined ||
+		seen.index !== entry.index ||
+		seen.active !== activeConnection ||
+		seen.source !== source;
+	const standing: Standing = !changed
+		? seen.standing
+		: source === undefined || activeConnection === undefined || source === activeConnection
+			? 'here'
+			: seen?.active === undefined
+				? 'stale'
+				: seen.index === entry.index
+					? 'left'
+					: 'returning';
 	// In render rather than an effect (React's "adjusting state when a prop
-	// changes"), so that no render reads the URL as the wrong source's.
-	if (
-		activeConnection !== undefined &&
-		urlSource !== activeConnection &&
-		(urlSource === undefined || !placed)
-	) {
-		setUrlSource(activeConnection);
-	}
+	// changes"), so that no render reads another source's place as this one's.
+	if (changed) setSeen({ index: entry.index, active: activeConnection, source, standing });
+	// Known once the sources are: a source not among them is not one to show.
+	const offered =
+		sources === undefined ? undefined : sources.some((each) => each.connectionId === source);
 	useEffect(() => {
-		if (!elsewhere) return;
-		void navigate({
-			search: ({ folder: _folder, note: _note, ...rest }) => rest,
-			replace: true,
+		if (standing !== 'returning' || source === undefined || offered === undefined) {
+			return undefined;
+		}
+		const asking = { current: true };
+		const stale = () => {
+			setSeen((now) => (now?.index === entry.index ? { ...now, standing: 'stale' } : now));
+		};
+		if (!offered) {
+			stale();
+			return undefined;
+		}
+		void showConnection(db, source).then((shown) => {
+			if (!shown && asking.current) stale();
 		});
-	}, [elsewhere, navigate]);
-	return elsewhere;
+		return () => {
+			asking.current = false;
+		};
+	}, [standing, source, offered, entry.index]);
+	return standing;
+};
+
+/** Go somewhere: a step of the user's own, pushed, or put in place of the entry. */
+type Go = (place: Place, how: { replace: boolean; notePath?: string | undefined }) => void;
+
+/**
+ * An entry with no place of its own — a link, or an address typed — is read by
+ * name, once (`findNamedPlace`). What it names is written into the entry by id
+ * (`place.ts`), and the entry goes by that from then on. Until then
+ * `resolving` holds off showing a notebook, or choosing a note in one: the
+ * slugs say which only once the source's names have been read.
+ */
+const useNamedPlace = (
+	entry: Entry,
+	activeConnection: string | undefined,
+	go: Go
+): { resolving: boolean } => {
+	const { held, fragment } = entry;
+	const named = useMemo(
+		(): NamedPlace => (held === undefined ? readPlaceHash(fragment) : {}),
+		[held, fragment]
+	);
+	const asking = named.folder === undefined ? undefined : fragment;
+	const contents = useSourceContents(activeConnection, asking);
+	useEffect(() => {
+		if (contents === undefined) return;
+		const { folder, note } = findNamedPlace(named, contents.folders, contents.notes);
+		go({ folder, note: note?.id }, { replace: true, notePath: note?.path });
+	}, [named, contents, go]);
+	return { resolving: asking !== undefined };
 };
 
 /** The remembered notebook as `selectedFolderPath` takes it: `null` for none. */
@@ -699,10 +800,11 @@ const useDrafts = ({
  * The notebook is the URL's, else the one open last on this device, else the
  * first (`selectedFolderPath`). The note is the URL's while it is there to
  * show, else the one open last in that notebook, else the notebook's first
- * (`pickNote`) — and that answer is written to the URL, so the note list, the
- * editor and a reload all agree on it. A notebook with no notes in it starts
- * one (`useDrafts`), unless it is the loose notes, where the app makes none
- * (§12.6), or `startable` says notes are still arriving.
+ * (`pickNote`) — and that answer is written to the URL, in place of the entry
+ * it was worked out on, so the note list, the editor, a reload and Back all
+ * agree on it. A notebook with no notes in it starts one (`useDrafts`), unless
+ * it is the loose notes, where the app makes none (§12.6), or `startable` says
+ * notes are still arriving.
  *
  * One path for every way a notebook comes to be showing: clicked, restored at
  * start, fallen back to after a delete, or a source's first notebook as a
@@ -711,16 +813,17 @@ const useDrafts = ({
  * beside an empty pane.
  */
 const useOpenPlace = ({
-	search,
 	activeConnection,
+	sources,
 	tree,
 	looseNoteCount,
 	pins,
 	startable,
 	onStoreFailed,
 }: {
-	search: AppSearch;
 	activeConnection: string | undefined;
+	/** The sources offered, which Back may show again. */
+	sources: readonly ConnectedSource[] | undefined;
 	tree: FolderNode[] | undefined;
 	looseNoteCount: number | undefined;
 	/** What the source has pinned: a notebook opens on a pinned note first. */
@@ -733,17 +836,40 @@ const useOpenPlace = ({
 	startable: boolean;
 	onStoreFailed: () => void;
 }) => {
+	const router = useRouter();
 	const navigate = useNavigate({ from: Route.fullPath });
-	const elsewhere = useUrlFromElsewhere(activeConnection, search);
-	const requestedFolder = elsewhere ? undefined : search.folder;
-	const noteId = elsewhere ? undefined : search.note;
-	const lastOpen = useLastOpen(activeConnection);
-	const folder = selectedFolderPath(
-		tree,
-		folderFromSearch(requestedFolder),
-		looseNoteCount,
-		rememberedFolder(lastOpen)
+	const entry = useEntry();
+	const standing = useStanding(entry, activeConnection, sources);
+
+	const go = useCallback<Go>(
+		(place, { replace, notePath }) => {
+			if (activeConnection === undefined) return;
+			void navigate({
+				// Whatever the query holds is another page's message, read and
+				// taken out on its own.
+				search: true,
+				hash: placeHash(place.folder, notePath),
+				state: placeState(activeConnection, place),
+				replace,
+			});
+		},
+		[activeConnection, navigate]
 	);
+
+	const { resolving } = useNamedPlace(entry, activeConnection, go);
+	// The entry's place in the source showing; nothing, while it is another's.
+	const here: Place = standing !== 'here' ? {} : (entry.held ?? {});
+	const requestedFolder = here.folder;
+	const noteId = here.note;
+	/** Whether the entry says where the user is, or is about to. */
+	const settled = standing !== 'returning' && !resolving;
+
+	const lastOpen = useLastOpen(activeConnection);
+	// None while a link is read, rather than the one remembered a moment
+	// before the one it names.
+	const folder = resolving
+		? undefined
+		: selectedFolderPath(tree, requestedFolder, looseNoteCount, rememberedFolder(lastOpen));
 	const remembered = folder === undefined ? undefined : lastOpen?.notes[folder];
 	const pinnedNotes = pins?.notes;
 	const toOpen = useNoteToOpen({
@@ -752,7 +878,7 @@ const useOpenPlace = ({
 		open: noteId,
 		remembered,
 		pinned: pinnedNotes,
-		ready: lastOpen !== undefined && !elsewhere,
+		ready: lastOpen !== undefined && settled,
 	});
 
 	const found = useNote(noteId);
@@ -766,10 +892,15 @@ const useOpenPlace = ({
 	});
 	const { draft, begin } = drafts;
 	const begun = drafts.open;
+	const openNote = storedNote ?? begun;
 
 	useEffect(() => {
 		// A note begun is open, though it is not in the store to be found.
 		if (begun !== undefined || activeConnection === undefined) return undefined;
+		// Not while the entry is about to say: a live query keeps its last
+		// answer until the next, and an answer from before Back came to another
+		// source's entry would be written over it.
+		if (!settled) return undefined;
 		// The note the URL names is there to show, so there is nothing to choose
 		// (`pickNote` answers the same). Asked here, not left to that answer: it
 		// can be one worked out while the note was still begun and not stored —
@@ -780,17 +911,32 @@ const useOpenPlace = ({
 		if (toOpen === undefined || toOpen.folder !== folder || toOpen.open !== noteId) {
 			return undefined;
 		}
-		const show = (pick: string | undefined) => {
-			if (pick === noteId) return;
-			void navigate({
-				// And only onto the URL it was worked out from: the user may have
-				// clicked somewhere else while the store was answering.
-				search: (current) =>
-					current.folder === requestedFolder && current.note === noteId
-						? { ...current, folder: folderToSearch(toOpen.folder), note: pick }
-						: current,
-				replace: true,
-			});
+		const workedOutOn = entry.index;
+		const show = (pick: NoteRecord | string | undefined) => {
+			const id = typeof pick === 'object' ? pick.id : pick;
+			// Where the source changed under the entry, the source's place is a
+			// step of its own even when it names no note.
+			if (id === noteId && standing !== 'left') return;
+			// And only onto the entry it was worked out from, as it was then: the
+			// user may have clicked somewhere else while the store was answering.
+			// The history's own, which a navigation moves at once, where the
+			// router's follows a moment later.
+			const now = router.history.location.state;
+			const held = heldPlace(now);
+			const stillHere = held?.connectionId === activeConnection ? held : {};
+			if (
+				now.__TSR_index !== workedOutOn ||
+				!samePlace(stillHere, { folder: requestedFolder, note: noteId })
+			) {
+				return;
+			}
+			go(
+				{ folder: toOpen.folder, note: id },
+				{
+					replace: standing !== 'left',
+					notePath: typeof pick === 'object' ? pick.path : undefined,
+				}
+			);
 		};
 		if (!beginsHere(toOpen, startable)) {
 			show(toOpen.pick ?? undefined);
@@ -816,7 +962,7 @@ const useOpenPlace = ({
 			remembered,
 			pinned: pinnedNotes,
 		}).then((again) => {
-			if (asking.current) show(again ?? blank()?.id);
+			if (asking.current) show(again ?? blank());
 		});
 		return () => {
 			asking.current = false;
@@ -828,7 +974,11 @@ const useOpenPlace = ({
 		requestedFolder,
 		remembered,
 		pinnedNotes,
-		navigate,
+		router,
+		go,
+		standing,
+		settled,
+		entry.index,
 		begun,
 		storedNote,
 		startable,
@@ -837,8 +987,26 @@ const useOpenPlace = ({
 		begin,
 	]);
 
+	// The hash says by path what the entry holds by id, and follows the note
+	// when it is renamed or moved, here or on another device.
+	const { held, fragment } = entry;
+	useEffect(() => {
+		if (standing !== 'here' || held === undefined) return;
+		// Not read yet, or gone: the note chosen in its place says the rest.
+		if (held.note !== undefined && openNote?.id !== held.note) return;
+		const hash = placeHash(held.folder, openNote?.path);
+		if (hash !== fragment) {
+			void navigate({ search: true, hash, state: true, replace: true });
+		}
+	}, [standing, held, fragment, openNote, navigate]);
+
+	const title = placeTitle(openNote, APP_NAME);
+	useEffect(() => {
+		document.title = title;
+	}, [title]);
+
 	useRememberOpen({
-		connectionId: activeConnection,
+		connectionId: settled ? activeConnection : undefined,
 		folder,
 		noteId,
 		openNote: storedNote,
@@ -849,11 +1017,12 @@ const useOpenPlace = ({
 		folder,
 		noteId,
 		/** The note open: stored, or begun and not yet. */
-		openNote: storedNote ?? begun,
+		openNote,
 		storedNote,
 		begun,
 		begin,
 		noteDraft: drafts.noteDraft,
+		go,
 	};
 };
 
@@ -917,8 +1086,7 @@ const useBegunInView = (begun: NoteRecord | undefined, shut: (panel: null) => vo
 };
 
 const Home = () => {
-	const search = Route.useSearch();
-	const { connect, code, enter, share } = search;
+	const { connect, code, enter, share } = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
 	// Where a connect started from the tab bar should come back to.
 	const href = useRouterState({ select: (state) => state.location.href });
@@ -962,15 +1130,15 @@ const Home = () => {
 	}, []);
 
 	const place = useOpenPlace({
-		search,
 		activeConnection,
+		sources,
 		tree,
 		looseNoteCount,
 		pins,
 		startable: canBegin(source, held),
 		onStoreFailed: noteNotMade,
 	});
-	const { folder, noteId, openNote, storedNote } = place;
+	const { folder, noteId, openNote, storedNote, go } = place;
 	const { stored, notes, unsavedNoteId } = useListedNotes(folder, place.begun, pins);
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
@@ -1021,7 +1189,12 @@ const Home = () => {
 	// view once it has it, which in a compact window is in the sources
 	// dropdown.
 	const shareRead = useCallback(() => {
-		void navigate({ search: ({ share: _share, ...rest }) => rest, replace: true });
+		void navigate({
+			search: ({ share: _share, ...rest }) => rest,
+			hash: true,
+			state: true,
+			replace: true,
+		});
 	}, [navigate]);
 	const shareAdded = useCallback(() => {
 		if (compact) setPanel('sources');
@@ -1041,13 +1214,27 @@ const Home = () => {
 	 */
 	const searchField = useRef<HTMLInputElement>(null);
 
-	const select = (next: Partial<AppSearch>) => {
+	/**
+	 * Go somewhere in the source showing: `next` over the notebook and note
+	 * open. A step of the user's own is pushed, so Back undoes it; `replace`
+	 * is for keeping the URL true to what has changed under it — a notebook
+	 * renamed or moved, a delete, an undo. `note` is the note going to, where
+	 * the caller has it, so the hash can name it at once.
+	 */
+	const select = (
+		next: Place,
+		{ replace = false, note }: { replace?: boolean; note?: NoteRecord } = {}
+	) => {
 		// Anything else the user does answers the banner: it is about the name they
 		// just tried, not about the app, and leaving it up means a message about a
 		// notebook they have since moved on from sits there for the session.
 		setProblem(null);
 		dismissConnect();
-		void navigate({ search: (current) => ({ ...current, ...next }), replace: true });
+		const to: Place = { folder, note: noteId, ...next };
+		const going =
+			note ??
+			[openNote, ...(notes ?? [])].find((each) => each !== undefined && each.id === to.note);
+		go(to, { replace, notePath: going?.path });
 	};
 
 	/**
@@ -1061,11 +1248,7 @@ const Home = () => {
 	 */
 	const openFolder = (path: string) => {
 		const keep = openNote !== undefined && noteIsUnder(openNote.path, path);
-		select(
-			keep
-				? { folder: folderToSearch(path) }
-				: { folder: folderToSearch(path), note: undefined }
-		);
+		select(keep ? { folder: path } : { folder: path, note: undefined });
 	};
 
 	/**
@@ -1083,12 +1266,13 @@ const Home = () => {
 		setSearchOpen(false);
 		setPanel(null);
 		if (note.connectionId === activeConnection) {
-			select({ folder: folderToSearch(parentPath(note.path)), note: note.id });
+			select({ folder: parentPath(note.path), note: note.id }, { note });
 			return;
 		}
-		// Another source: the URL is emptied as the source changes
-		// (`useUrlFromElsewhere`), so the way to arrive somewhere in it is to be
-		// remembered there first.
+		// Another source: the entry in front is the old source's and is kept for
+		// Back, and the new source's place goes after it (`useStanding`). That
+		// place is the one remembered there, so the way to arrive somewhere in
+		// it is to be remembered there first.
 		setProblem(null);
 		dismissConnect();
 		void rememberOpen(db, note.connectionId, parentPath(note.path), note.id).then(() =>
@@ -1157,10 +1341,10 @@ const Home = () => {
 				// Back where it was, open. By the row's own path, not the one it
 				// was deleted at: once sync has purged the row the note is made
 				// again, under a conflict name if something took the old one.
-				select({
-					note: restored.id,
-					folder: folderToSearch(parentPath(restored.path)),
-				});
+				select(
+					{ note: restored.id, folder: parentPath(restored.path) },
+					{ replace: true, note: restored }
+				);
 			})
 			// The notice stays, and for as long as it takes: the note is still
 			// deleted, still offered, and what it holds may be in no other place.
@@ -1185,7 +1369,7 @@ const Home = () => {
 			folder,
 			(stored ?? []).map((note) => basename(note.path))
 		);
-		if (made !== undefined) select({ folder: folderToSearch(folder), note: made.id });
+		if (made !== undefined) select({ folder, note: made.id }, { note: made });
 	};
 
 	const onCreateFolder = (parentPath: string | undefined, name: string) => {
@@ -1236,7 +1420,7 @@ const Home = () => {
 				// Same reason the move below rebases: the URL names the open
 				// notebook by path, and this has changed it.
 				if (folder !== undefined && isWithin(folder, path)) {
-					select({ folder: folderToSearch(rebasePath(folder, path, to)) });
+					select({ folder: rebasePath(folder, path, to) }, { replace: true });
 				}
 			})
 			.catch((error: unknown) => {
@@ -1264,10 +1448,13 @@ const Home = () => {
 				// alone the app opens a notebook that has gone — `selectedFolderPath`
 				// falls back to the first one, but only once something asks it to.
 				if (goneFolder || goneNote) {
-					select({
-						...(goneFolder ? { folder: undefined } : {}),
-						...(goneNote ? { note: undefined } : {}),
-					});
+					select(
+						{
+							...(goneFolder ? { folder: undefined } : {}),
+							...(goneNote ? { note: undefined } : {}),
+						},
+						{ replace: true }
+					);
 				}
 			})
 			.catch(() => {
@@ -1369,7 +1556,7 @@ const Home = () => {
 					// left, which is the disagreement opening a search result also
 					// has to avoid.
 					if (noteIdRef.current === move.id) {
-						select({ folder: folderToSearch(move.into) });
+						select({ folder: move.into }, { replace: true });
 					}
 				})
 				.catch(() => {
@@ -1386,7 +1573,7 @@ const Home = () => {
 				// there and `selectedFolderPath` falls back to the first one, so
 				// moving the notebook you are in throws you out of it.
 				if (folder !== undefined && isWithin(folder, move.from)) {
-					select({ folder: folderToSearch(rebasePath(folder, move.from, move.to)) });
+					select({ folder: rebasePath(folder, move.from, move.to) }, { replace: true });
 				}
 			})
 			.catch((error: unknown) => {

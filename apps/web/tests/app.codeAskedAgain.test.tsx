@@ -77,7 +77,7 @@ const passFrom = (hours: number) => {
 	);
 };
 
-const open = async (url = '/?folder=Work') => {
+const open = async (url = '/#/Work/') => {
 	const router = createRouter({
 		routeTree,
 		history: createMemoryHistory({ initialEntries: [url] }),
@@ -159,7 +159,7 @@ describe('what the gate holds, asked about again as the app loads', () => {
 		codeAnswer = () =>
 			Promise.resolve(Response.json({ accepted: true, expiresIn: 86_400, hold: RENEWED }));
 
-		await open('/?folder=Work&connect=refused&code=not_allowed');
+		await open('/?connect=refused&code=not_allowed#/Work/');
 
 		const toast = await screen.findByRole('alert');
 		// Nothing was typed this time, so nothing typed was turned down.
@@ -174,7 +174,7 @@ describe('what the gate holds, asked about again as the app loads', () => {
 		passFrom(0.5);
 		codeAnswer = () => Promise.resolve(Response.json({ accepted: false }));
 
-		await open('/?folder=Work&connect=refused&code=not_allowed');
+		await open('/?connect=refused&code=not_allowed#/Work/');
 
 		await waitFor(() => {
 			expect(heldConnectCode()).toBeUndefined();
@@ -191,7 +191,7 @@ describe('what the gate holds, asked about again as the app loads', () => {
 	it('asks nothing about a code a refused connect has just let go of', async () => {
 		holdConnectCode('K7QM-2XRD', 900);
 
-		await open('/?folder=Work&connect=refused&code=not_allowed');
+		await open('/?connect=refused&code=not_allowed#/Work/');
 		await screen.findByRole('alert');
 		await screen.findByRole('button', { name: /Connect storage provider/ });
 

@@ -2467,8 +2467,9 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			},
 		});
 
+		// By path, as a link reads, and by id in the entry it opens.
 		const link = await screen.findByRole('link', { name: 'Open the note' });
-		expect(link.getAttribute('href')).toContain(note.id);
+		expect(link.getAttribute('href')).toBe('/#/work/plan');
 	});
 
 	it('offers nothing to open for a notebook, or for a note already deleted', async () => {
