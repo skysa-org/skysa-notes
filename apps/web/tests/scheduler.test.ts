@@ -1,5 +1,6 @@
 import {
 	AuthError,
+	CLIPBOARD_FOLDER,
 	createFakeProvider,
 	type FakeProvider,
 	RateLimitError,
@@ -8,6 +9,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient } from '../src/api/client.js';
+import { addClips, setClipboardShown } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
@@ -280,6 +282,8 @@ const reconnectAtOnce = (db: NotesDatabase) =>
 			db.credentials,
 			db.files,
 			db.fileBytes,
+			db.clips,
+			db.clipBytes,
 		],
 		() => reconnect(db)
 	);
@@ -2097,6 +2101,83 @@ describe('files beside notes, read for showing (#187)', () => {
 		expect(await scheduler.readFile('c2', row.id)).toEqual({ state: 'unavailable' });
 		env.state.online = false;
 		expect(await scheduler.readFile('c1', row.id)).toEqual({ state: 'offline' });
+	});
+});
+
+describe('the clipboard (§7)', () => {
+	/** Another device's paste, straight into the folder. */
+	const pastedElsewhere = async (h: Harness) => {
+		await h.remote.fake.createFolder(CLIPBOARD_FOLDER);
+		await h.remote.fake.createFile(
+			`${CLIPBOARD_FOLDER}/20261006T153012123Z-text-3f9a1c2b.txt`,
+			new TextEncoder().encode('from the phone')
+		);
+	};
+
+	it('reads it again after a round that met its folder, where it is shown', async () => {
+		const db = await bound();
+		await setClipboardShown(db, 'c1', true);
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+
+		await pastedElsewhere(h);
+		await focused(h);
+
+		await vi.waitFor(async () => {
+			expect((await db.clips.toArray()).map((row) => row.preview)).toEqual([
+				'from the phone',
+			]);
+		});
+	});
+
+	it('reads nothing of it where it is not shown', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+
+		await pastedElsewhere(h);
+		await focused(h);
+		await quiet();
+
+		expect(await db.clips.count()).toBe(0);
+		expect(h.remote.fake.callLog().filter((call) => call.op === 'list')).toEqual([]);
+	});
+
+	it('sends what was pasted here before the session began, once the round has found the folder', async () => {
+		const db = await bound();
+		await setClipboardShown(db, 'c1', true);
+		await addClips(db, 'c1', [{ kind: 'text', text: 'waiting' }]);
+		const h = started(db);
+
+		await vi.waitFor(async () => {
+			expect((await db.clips.toArray()).map((row) => row.state)).toEqual(['sent']);
+		});
+		expect(await h.remote.fake.list(CLIPBOARD_FOLDER)).toHaveLength(1);
+	});
+
+	it('tells the other devices once what was pasted here is up', async () => {
+		const db = await bound();
+		await setClipboardShown(db, 'c1', true);
+		const links: { told: number }[] = [];
+		const relay = vi.fn<RelayFactory>(() => {
+			const link = { told: 0 };
+			links.push(link);
+			return {
+				pushed: () => {
+					link.told += 1;
+				},
+				close: () => undefined,
+			};
+		});
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+		const before = links[0]?.told ?? 0;
+
+		await addClips(db, 'c1', [{ kind: 'text', text: 'hello' }]);
+		await h.scheduler.clipboard.flush('c1');
+
+		expect(links[0]?.told).toBe(before + 1);
+		expect(await h.remote.fake.list(CLIPBOARD_FOLDER)).toHaveLength(1);
 	});
 });
 

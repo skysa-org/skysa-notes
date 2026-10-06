@@ -22,6 +22,7 @@ import {
 } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
+import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
 import { type RelayFactory, type RelayLink } from './relay.js';
 import { createDexieSyncStore } from './store.js';
@@ -227,6 +228,12 @@ export interface SyncScheduler {
 		fileId: string,
 		signal?: AbortSignal
 	) => Promise<FileRead>;
+	/**
+	 * A source's clipboard, through the session running for it
+	 * (`sync/clipboard.ts`): read again, sent, and an item's bytes read. Each
+	 * does nothing, or answers `unavailable`, for a source not being synced.
+	 */
+	readonly clipboard: ClipboardSync;
 }
 
 /**
@@ -418,6 +425,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				...pushed,
 				pulled: pulled.pulled,
 				conflicts: [...pulled.conflicts, ...pushed.conflicts],
+				...(pulled.clipboard === true ? { clipboard: true } : {}),
 			},
 			pulledAt,
 		};
@@ -687,6 +695,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// the connection's other devices to pull.
 		if (result.outcome.pushed > 0) session.relay?.pushed();
 		await synced(session, result.outcome);
+		// Not waited for: a refresh downloads, and a flush waits for this run to
+		// end before it sends anything (`sync/clipboard.ts`).
+		if (result.outcome.clipboard === true) void clipboard.refresh(session.connectionId);
+		void clipboard.flush(session.connectionId);
 	};
 
 	/**
@@ -900,6 +912,11 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		publish({ phase: 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
 		watchEdits(session);
 		void run(session);
+		// What the clipboard holds now, and what was pasted here while nothing
+		// sent it. Neither waits for the run: a refresh asks only for the
+		// folder, and a flush waits for the run itself.
+		void clipboard.refresh(connectionId);
+		void clipboard.flush(connectionId);
 	};
 
 	const reader = createFileReader({
@@ -911,6 +928,32 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			const provider = session?.provider;
 			if (session?.connectionId !== connectionId || provider === undefined) return undefined;
 			return { provider, withAuth: (work) => withAuth(session, work) };
+		},
+	});
+
+	/** Settles once the session has no run in flight, however many follow each other. */
+	const idle = async (session: Session): Promise<void> => {
+		const running = session.inFlight.get('run');
+		if (running === undefined) return;
+		await running.catch(() => undefined);
+		await idle(session);
+	};
+
+	const clipboard = createClipboardSync({
+		db,
+		isOnline: environment.isOnline,
+		sessionFor: (connectionId) => {
+			const session = current.get('session');
+			const provider = session?.provider;
+			if (session?.connectionId !== connectionId || provider === undefined) return undefined;
+			return {
+				provider,
+				withAuth: (work) => withAuth(session, work),
+				told: () => {
+					session.relay?.pushed();
+				},
+				idle: () => idle(session),
+			};
 		},
 	});
 
@@ -1045,5 +1088,6 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		},
 
 		readFile: reader.read,
+		clipboard,
 	};
 };

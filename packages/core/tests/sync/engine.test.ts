@@ -3116,6 +3116,63 @@ describe('authorization', () => {
 	});
 });
 
+describe("the clipboard's folder", () => {
+	// Items a connection's devices share through `.clipboard/` (§7, "The
+	// clipboard"). The engine decides nothing about them, as about any hidden
+	// path; it only says it met one, so the clipboard is read again.
+	const clip = (name: string) =>
+		provider.createFile(`.clipboard/${name}`, new TextEncoder().encode('copied'));
+
+	it('says a round met it, and makes nothing of it', async () => {
+		await engine.pull();
+		await provider.createFolder('.clipboard');
+		await clip('20261006T153012123Z-text-3f9a1c2b.txt');
+
+		const result = await engine.pull();
+
+		expect(result).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
+		expect(store.notes()).toEqual([]);
+		expect(store.files()).toEqual([]);
+		expect(store.folders()).toEqual([]);
+	});
+
+	it('says a scan met it', async () => {
+		await provider.createFolder('.clipboard');
+		await clip('20261006T153012123Z-pasted-image-3f9a1c2b.png');
+
+		expect(await engine.pull()).toMatchObject({ status: 'ok', clipboard: true });
+		expect(store.files()).toEqual([]);
+	});
+
+	it('says an item went', async () => {
+		await provider.createFolder('.clipboard');
+		const item = await clip('20261006T153012123Z-text-3f9a1c2b.txt');
+		await engine.pull();
+		await provider.delete(item);
+
+		expect(await engine.pull()).toMatchObject({ pulled: 0, clipboard: true });
+	});
+
+	it('says nothing of a round that did not meet it', async () => {
+		await provider.createFolder('.clipboard');
+		await engine.pull();
+		await remoteFile('a.md', 'x\n');
+		await provider.write('.cache', 'binary\n', {});
+
+		const result = await engine.pull();
+
+		expect(result.pulled).toBe(1);
+		expect(result.clipboard).toBeUndefined();
+	});
+
+	it('carries it through a whole sync', async () => {
+		await engine.pull();
+		await provider.createFolder('.clipboard');
+
+		expect((await engine.sync()).clipboard).toBe(true);
+	});
+});
+
 describe('deletions that are not about a note', () => {
 	it('says nothing when a file we never imported is deleted', async () => {
 		// The app owns the folder but not everything in it. A file it does not

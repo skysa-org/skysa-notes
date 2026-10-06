@@ -75,7 +75,7 @@ interface Download {
  * The bytes as a buffer of their own: an adapter may hand over a view into a
  * larger one, and stored whole, that would keep the rest of it too.
  */
-const ownBuffer = (bytes: Uint8Array<ArrayBuffer>): ArrayBuffer =>
+export const ownBuffer = (bytes: Uint8Array<ArrayBuffer>): ArrayBuffer =>
 	bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
 		? bytes.buffer
 		: bytes.slice().buffer;

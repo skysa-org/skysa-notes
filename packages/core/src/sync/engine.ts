@@ -1,4 +1,5 @@
 import { contentTypeOf } from '../attachments.js';
+import { isClipPath } from '../clipboard.js';
 import { NOTE_EXTENSION } from '../config.js';
 import { contentHash } from '../hash.js';
 import { parseNoteFile } from '../markdown/note.js';
@@ -108,6 +109,12 @@ export interface SyncOutcome {
 	 * when there are none.
 	 */
 	waitingUploads?: number;
+	/**
+	 * The pull met something in the clipboard's folder, which it decides
+	 * nothing about, so whoever shows the clipboard can read it again
+	 * (docs/ARCHITECTURE.md §7, "The clipboard"). Absent when it did not.
+	 */
+	clipboard?: true;
 }
 
 export interface SyncEngineOptions {
@@ -189,6 +196,12 @@ interface ScanCount {
 	reading: number;
 	listing: boolean;
 }
+
+/** The flag for an outcome whose pull met the clipboard's folder, or nothing. */
+const clipboardIn = (entries: readonly ChangeEntry[]): { clipboard?: true } =>
+	entries.some((entry) => entry.path !== undefined && isClipPath(entry.path))
+		? { clipboard: true }
+		: {};
 
 /** A file the pull would make a note of, by the rule `decide` applies. */
 const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
@@ -3288,6 +3301,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		pulled: number;
 		conflicts: readonly string[];
 		seen: ReadonlySet<string>;
+		/** Whether a page so far met the clipboard's folder. */
+		clipboard?: true;
 	}
 
 	/**
@@ -3323,7 +3338,11 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		});
 		await store.applyPull({ changes, cursor: round.cursor });
 		letGo(round.entries);
-		return ok({ pulled: changes.length, conflicts: conflictPathsIn(changes) });
+		return ok({
+			pulled: changes.length,
+			conflicts: conflictPathsIn(changes),
+			...clipboardIn(round.entries),
+		});
 	};
 
 	/**
@@ -3376,8 +3395,13 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		upload: boolean
 	): Promise<SyncOutcome> => {
 		const [set, ...rest] = pages;
-		if (set === undefined)
-			return ok({ pulled: progress.pulled, conflicts: progress.conflicts });
+		if (set === undefined) {
+			return ok({
+				pulled: progress.pulled,
+				conflicts: progress.conflicts,
+				...(progress.clipboard === true ? { clipboard: true } : {}),
+			});
+		}
 		const more = rest.length > 0;
 		const queue = await store.pendingOps();
 		const unread = unreadMap(await store.unreadable());
@@ -3415,6 +3439,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				pulled: progress.pulled + batch.length,
 				conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
 				seen,
+				...(progress.clipboard === true ? { clipboard: true } : clipboardIn(set.entries)),
 			},
 			upload
 		);
@@ -4940,6 +4965,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			...pushed,
 			pulled: pulled.pulled,
 			conflicts: [...pulled.conflicts, ...pushed.conflicts],
+			...(pulled.clipboard === true ? { clipboard: true } : {}),
 		};
 	};
 
