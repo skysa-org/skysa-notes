@@ -2008,7 +2008,7 @@ describe('AccountPanel, showing the clipboard', () => {
 		return db;
 	};
 
-	it('shows it above the status line once asked, on this device, and hides it again', async () => {
+	it('shows it before the storage panel once asked, on this device, and hides it again', async () => {
 		const user = userEvent.setup();
 		const db = await connectedHere();
 		const sync = fakeSync({ phase: 'idle' });
@@ -2018,11 +2018,12 @@ describe('AccountPanel, showing the clipboard', () => {
 		await choose(user, 'Show clipboard');
 
 		const region = await screen.findByRole('region', { name: 'Clipboard' });
-		const line = await statusLine();
-		// Directly above the line the panel ends in.
-		expect(
-			region.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING
-		).toBeTruthy();
+		const storage = screen.getByRole('region', { name: 'Storage' });
+		// A section of its own, just before the panel and ruled off from it
+		// the whole width, not a part of it.
+		expect(storage.contains(region)).toBe(false);
+		expect(region.nextElementSibling).toBe(storage);
+		expect(storage.contains(await statusLine())).toBe(true);
 		expect((await db.syncState.get('c1'))?.clipboard).toBe(true);
 		// What the other devices have pasted is read as it is shown.
 		await waitFor(() => {
