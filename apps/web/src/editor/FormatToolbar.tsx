@@ -214,12 +214,21 @@ const measureFit = (
 	bar.querySelectorAll<HTMLElement>('[data-slot]').forEach((slot) => {
 		memory.widths.set(slot.dataset.slot ?? '', slot.offsetWidth);
 	});
+	// The most a group has been seen to cost, never less. Part of it in the
+	// menu, it is narrower by the gaps that went with those slots (and by a
+	// pixel of rounding either way), and charged that, the slots it gave up
+	// fitted again: back on the bar they cost the gaps again and did not fit,
+	// and the bar went round between the two until React gave up on it.
 	bar.querySelectorAll<HTMLElement>('[data-group]').forEach((group) => {
 		const inside = [...group.querySelectorAll<HTMLElement>('[data-slot]')].reduce(
 			(sum, slot) => sum + slot.offsetWidth,
 			0
 		);
-		memory.groupCost.set(group.dataset.group ?? '', group.offsetWidth - inside);
+		const id = group.dataset.group ?? '';
+		memory.groupCost.set(
+			id,
+			Math.max(memory.groupCost.get(id) ?? 0, group.offsetWidth - inside)
+		);
 	});
 	const overflow = bar.querySelector<HTMLElement>('[data-overflow]');
 	if (overflow !== null) memory.overflowWidth = overflow.offsetWidth;

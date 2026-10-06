@@ -25,10 +25,12 @@ export interface FitInput {
 	slots: readonly FitSlot[];
 	/**
 	 * What a group costs beyond its slots — its padding, its separator, the
-	 * gaps between its slots — for each group as last measured. Charged in full
-	 * while any of the group is shown, which over-counts a gap or two once
-	 * part of it has gone: erring towards one more slot in the menu rather than
-	 * one slot hanging off the end of the bar.
+	 * gaps between its slots — for each group, the most it has been measured
+	 * at. Charged in full while any of the group is shown, which over-counts a
+	 * gap or two once part of it has gone: erring towards one more slot in the
+	 * menu rather than one slot hanging off the end of the bar. Never the less
+	 * it costs with part of it gone, or a slot would fit, come back, not fit,
+	 * and go again for ever.
 	 */
 	groupCost: ReadonlyMap<string, number>;
 	/** The gap between one group and the next. */
