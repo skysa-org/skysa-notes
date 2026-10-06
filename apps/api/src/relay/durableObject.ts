@@ -1,3 +1,4 @@
+import { RELAY_PING, RELAY_PONG } from '@skysa/core';
 import { DurableObject } from 'cloudflare:workers';
 import { z } from 'zod';
 
@@ -82,7 +83,7 @@ const roomSocket = (ws: WebSocket): RoomSocket => {
 export class ConnectionRelay extends DurableObject {
 	constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
 		super(ctx, env);
-		ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+		ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(RELAY_PING, RELAY_PONG));
 	}
 
 	/** The upgrade, already authorized by `GET /api/relay`. */

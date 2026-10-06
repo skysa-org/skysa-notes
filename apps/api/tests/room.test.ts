@@ -1,12 +1,14 @@
+import {
+	RELAY_CHANGED as CHANGED,
+	RELAY_CLOSE,
+	RELAY_PUSHED_INTERVAL_MS as PUSHED_INTERVAL_MS,
+} from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
-import { RELAY_CLOSE } from '../src/relay/hub.js';
 import {
-	CHANGED,
 	MAX_FRAME_BYTES,
 	onFrame,
 	onRevoke,
-	PUSHED_INTERVAL_MS,
 	type RoomSocket,
 	type Seat,
 } from '../src/relay/room.js';

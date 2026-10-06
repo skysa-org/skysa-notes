@@ -126,6 +126,15 @@ export {
 	showsInline,
 } from './attachments.js';
 
+export {
+	RELAY_CHANGED,
+	RELAY_CLOSE,
+	RELAY_PING,
+	RELAY_PONG,
+	RELAY_PUSHED,
+	RELAY_PUSHED_INTERVAL_MS,
+} from './relay.js';
+
 export * from './hash.js';
 export * from './markdown/index.js';
 export * from './paths.js';

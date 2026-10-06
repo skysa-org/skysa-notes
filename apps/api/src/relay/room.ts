@@ -1,6 +1,5 @@
+import { RELAY_CHANGED, RELAY_CLOSE, RELAY_PUSHED_INTERVAL_MS } from '@skysa/core';
 import { z } from 'zod';
-
-import { RELAY_CLOSE } from './hub.js';
 
 /**
  * What one connection's relay does with a frame, apart from the runtime that
@@ -28,16 +27,6 @@ export interface RoomSocket {
 	readonly send: (text: string) => void;
 	readonly close: (code: number, reason: string) => void;
 }
-
-/** What every other device is sent. */
-export const CHANGED = JSON.stringify({ t: 'changed' });
-
-/**
- * One `pushed` a second per socket is passed on, and the rest are dropped. A
- * device pushes at most once a round, and its rounds are seconds apart; more
- * than this is a device misbehaving, which the others should not pay for.
- */
-export const PUSHED_INTERVAL_MS = 1000;
 
 /** Far larger than either message, and small enough to refuse before parsing. */
 export const MAX_FRAME_BYTES = 256;
@@ -81,7 +70,7 @@ export const onFrame = (
 		from.close(POLICY_VIOLATION, 'unexpected message');
 		return;
 	}
-	if (now - from.seat.lastPushedAt < PUSHED_INTERVAL_MS) return;
+	if (now - from.seat.lastPushedAt < RELAY_PUSHED_INTERVAL_MS) return;
 	from.reseat({ ...from.seat, lastPushedAt: now });
 
 	everyone
@@ -89,7 +78,7 @@ export const onFrame = (
 		.filter((socket) => socket.seat.grantId !== from.seat.grantId)
 		.forEach((socket) => {
 			if (expired(socket, now)) socket.close(RELAY_CLOSE.expired, 'expired');
-			else socket.send(CHANGED);
+			else socket.send(RELAY_CHANGED);
 		});
 };
 

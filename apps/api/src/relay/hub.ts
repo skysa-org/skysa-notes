@@ -42,17 +42,6 @@ export interface RelayHub {
 export const RELAY_SOCKET_MS = 60 * 60 * 1000;
 
 /**
- * Close codes the client acts on. In the 4000–4999 range RFC 6455 §7.4.2
- * leaves to applications.
- */
-export const RELAY_CLOSE = {
-	/** Past `until`: reconnect with a new ticket. */
-	expired: 4001,
-	/** The grant was revoked or the connection disconnected: do not reconnect. */
-	revoked: 4003,
-} as const;
-
-/**
  * Tell the hub a grant has gone. Best effort: the database is what decides who
  * may connect, and it has already been written — a hub that could not be
  * reached leaves a socket that hears "changed" until it expires, and must not

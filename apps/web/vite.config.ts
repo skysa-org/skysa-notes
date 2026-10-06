@@ -37,6 +37,8 @@ export default defineConfig({
 			'/api': {
 				target: API_DEV_ORIGIN,
 				changeOrigin: false,
+				// The change relay's socket, `/api/relay`, where the instance runs one.
+				ws: true,
 			},
 		},
 	},

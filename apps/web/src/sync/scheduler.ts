@@ -23,6 +23,7 @@ import {
 import { updateLive } from '../store/detached.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { createFileReader, type FileRead } from './fileReads.js';
+import { type RelayFactory, type RelayLink } from './relay.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
 
@@ -178,6 +179,12 @@ export interface SyncSchedulerOptions {
 	blockedRetryMs?: number;
 	/** How often, at most, progress is published: it can arrive every file. */
 	progressMs?: number;
+	/**
+	 * The change relay, where the instance runs one (`sync/relay.ts`): how this
+	 * device hears that another has pushed without waiting for its next poll,
+	 * and tells them when it has. Polling goes on as it is.
+	 */
+	relay?: RelayFactory;
 }
 
 export interface SyncScheduler {
@@ -254,6 +261,8 @@ interface Session {
 	readonly stuck: Map<'op', StuckOp>;
 	/** Aborted when the session ends, and every provider request with it. */
 	readonly abort: AbortController;
+	/** Absent with no relay, and for a session that has nothing to sync with. */
+	readonly relay: RelayLink | undefined;
 }
 
 /** What one run came to, before it is turned into a status. */
@@ -674,6 +683,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			return;
 		}
 		if (result.pulledAt !== undefined) publish({ ...status(), lastSyncAt: result.pulledAt });
+		// Whatever the rest of the round came to: what was pushed is there for
+		// the connection's other devices to pull.
+		if (result.outcome.pushed > 0) session.relay?.pushed();
 		await synced(session, result.outcome);
 	};
 
@@ -869,8 +881,22 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			blockedSince: new Map(),
 			stuck: new Map(),
 			abort,
+			relay:
+				provider === undefined
+					? undefined
+					: options.relay?.({
+							connectionId,
+							environment,
+							// Another device has pushed. A nudge, which a backoff in
+							// progress is left to.
+							onChanged: () => {
+								void nudge(session);
+							},
+						}),
 		};
 		current.set('session', session);
+		const { relay } = session;
+		if (relay !== undefined) sessionUnsubscribers.add(relay.close);
 		publish({ phase: 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
 		watchEdits(session);
 		void run(session);
