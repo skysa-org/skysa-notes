@@ -3153,6 +3153,17 @@ describe("the clipboard's folder", () => {
 		expect(await engine.pull()).toMatchObject({ pulled: 0, clipboard: true });
 	});
 
+	it('says it may have met it, for something gone by its id alone', async () => {
+		// An id feed's path comes from its tree, and an item this device sent
+		// is not in it until the feed reports it back: let go of on another
+		// device first, it is an id and nothing else.
+		await engine.pull();
+
+		const result = await pullNow([{ deleted: true, remoteId: 'an-item-pasted-here' }]);
+
+		expect(result).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
+	});
+
 	it('says nothing of a round that did not meet it', async () => {
 		await provider.createFolder('.clipboard');
 		await engine.pull();

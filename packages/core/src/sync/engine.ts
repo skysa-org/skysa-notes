@@ -112,7 +112,8 @@ export interface SyncOutcome {
 	/**
 	 * The pull met something in the clipboard's folder, which it decides
 	 * nothing about, so whoever shows the clipboard can read it again
-	 * (docs/ARCHITECTURE.md §7, "The clipboard"). Absent when it did not.
+	 * (docs/ARCHITECTURE.md §7, "The clipboard"). Also set for a deletion by id
+	 * alone, which may have been an item there. Absent otherwise.
 	 */
 	clipboard?: true;
 }
@@ -197,9 +198,16 @@ interface ScanCount {
 	listing: boolean;
 }
 
-/** The flag for an outcome whose pull met the clipboard's folder, or nothing. */
+/**
+ * The flag for an outcome whose pull met the clipboard's folder, or may have,
+ * or nothing. A deletion by id alone may have: an id feed's path comes from its
+ * tree, and an item this device pasted is not in the tree until the feed
+ * reports it back. Let go of on another device before then, it is an id and
+ * nothing else, and the folder would never be read again for it. Counted, it
+ * costs one listing where the clipboard is shown.
+ */
 const clipboardIn = (entries: readonly ChangeEntry[]): { clipboard?: true } =>
-	entries.some((entry) => entry.path !== undefined && isClipPath(entry.path))
+	entries.some((entry) => entry.path === undefined || isClipPath(entry.path))
 		? { clipboard: true }
 		: {};
 

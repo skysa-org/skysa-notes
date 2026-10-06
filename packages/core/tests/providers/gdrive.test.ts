@@ -1242,6 +1242,30 @@ describe('changes', () => {
 		});
 	});
 
+	it('name an item sent here and trashed elsewhere before they reported it by its id alone, which a pull counts as the clipboard', async () => {
+		// A picture pasted on a phone and removed from a desktop before the
+		// phone's next pull. The phone's tree learns what it uploads only from
+		// the feed, and the feed reports the file once, already in the trash.
+		const { stub, provider } = stubbed();
+		await provider.ensureRoot();
+		await provider.createFolder('.clipboard');
+		const store = createMemoryStore();
+		const engine = createSyncEngine({ provider, store, now: () => AT });
+		await engine.pull();
+		const { cursor } = await drainChanges(provider);
+		const item = await provider.createFile(
+			'.clipboard/20261006T153012123Z-pasted-image-3f9a1c2b.png',
+			new Uint8Array([1, 2, 3]),
+			{ contentType: 'image/png' }
+		);
+
+		await over(stub.fetch).delete(item);
+
+		const { entries } = await drainChanges(provider, cursor);
+		expect(entries).toEqual([{ deleted: true, remoteId: item.remoteId }]);
+		expect(await engine.pull()).toMatchObject({ status: 'ok', pulled: 0, clipboard: true });
+	});
+
 	it('reset on a page token Drive will not take', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);
