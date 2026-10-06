@@ -6,8 +6,20 @@ export {
 	PROVIDER_KINDS,
 	NOTE_EXTENSION,
 	HIDDEN_PREFIX,
+	CLIPBOARD_FOLDER,
+	CLIPBOARD_ITEMS,
 	type ProviderKind,
 } from './config.js';
+
+export {
+	clipName,
+	clipPath,
+	clipStamp,
+	isClipPath,
+	readClipName,
+	type ClipKind,
+	type ClipName,
+} from './clipboard.js';
 
 export {
 	buildMarker,

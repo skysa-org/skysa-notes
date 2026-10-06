@@ -153,6 +153,19 @@ export const saveFile = async (request: FileRequest): Promise<void> => {
 	await deliver(request.browser ?? browserFiles, file, request.label);
 };
 
+/**
+ * Save bytes this device already has, under the name the user knows them by:
+ * an item on a source's clipboard, which no note links (docs/ARCHITECTURE.md
+ * §7, "The clipboard"). `storedName` is what it is stored as, whose extension
+ * `downloadName` holds the label to.
+ */
+export const saveBytes = (
+	bytes: ArrayBuffer,
+	label: string,
+	storedName: string,
+	browser: FileBrowser = browserFiles
+): Promise<void> => deliver(browser, new File([bytes], storedName), label);
+
 /** The file's name as the link has it, for deciding before the bytes come. */
 const namedIn = (href: string): string => href.slice(href.lastIndexOf('/') + 1);
 

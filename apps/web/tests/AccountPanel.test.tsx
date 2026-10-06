@@ -226,6 +226,13 @@ const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 		resync: vi.fn(() => Promise.resolve()),
 		// Nothing to stop: resolves straight away with a release that does nothing.
 		halt: vi.fn(() => Promise.resolve(() => undefined)),
+		// The clipboard's own tests are in `ClipboardPanel.test.tsx`; here,
+		// only what the panel asks of it.
+		clipboard: {
+			refresh: vi.fn(() => Promise.resolve()),
+			flush: vi.fn(() => Promise.resolve()),
+			read: vi.fn(() => Promise.resolve({ state: 'gone' as const })),
+		},
 		say: (next: Partial<SchedulerStatus>) => {
 			const status: SchedulerStatus = { phase: 'idle', conflicts: [], ...next };
 			box.set('status', status);
@@ -816,7 +823,7 @@ describe('AccountPanel, downloading every note', () => {
 		await openGear(user);
 		// What syncing offers is still there; the download is not, nor the
 		// imports beside it, nor a second way to disconnect.
-		expect(gearLabels()).toEqual(['Sync now', 'Re-scan from scratch']);
+		expect(gearLabels()).toEqual(['Sync now', 'Re-scan from scratch', 'Show clipboard']);
 	});
 
 	it('is not offered while a later source is still importing, when it would be half of one', async () => {
@@ -1038,6 +1045,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Download all notes',
 				'Import a folder',
 				'Import files',
+				'Show clipboard',
 				'Disconnect',
 			]);
 		});
@@ -1988,6 +1996,66 @@ describe('AccountPanel, with an account connected', () => {
 		expect(pending?.credential).not.toBe('sk1_held');
 		expect(started[0]?.hash).toBe(await hashCredential(pending?.credential ?? ''));
 		expect(started[0]?.returnTo).toBe('/?folder=Work');
+	});
+});
+
+describe('AccountPanel, showing the clipboard', () => {
+	const connectedHere = async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		return db;
+	};
+
+	it('shows it above the status line once asked, on this device, and hides it again', async () => {
+		const user = userEvent.setup();
+		const db = await connectedHere();
+		const sync = fakeSync({ phase: 'idle' });
+		renderPanel(clientWith(), db, '/', sync);
+
+		expect(screen.queryByRole('region', { name: 'Clipboard' })).toBeNull();
+		await choose(user, 'Show clipboard');
+
+		const region = await screen.findByRole('region', { name: 'Clipboard' });
+		const line = await statusLine();
+		// Directly above the line the panel ends in.
+		expect(
+			region.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		expect((await db.syncState.get('c1'))?.clipboard).toBe(true);
+		// What the other devices have pasted is read as it is shown.
+		await waitFor(() => {
+			expect(sync.clipboard.refresh).toHaveBeenCalledWith('c1');
+		});
+
+		await choose(user, 'Hide clipboard');
+		await waitFor(() => {
+			expect(screen.queryByRole('region', { name: 'Clipboard' })).toBeNull();
+		});
+		expect((await db.syncState.get('c1'))?.clipboard).toBeUndefined();
+	});
+
+	it('is not offered while the first import holds the source', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Kept' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'idle' }));
+
+		await openGear(user);
+		expect(gearLabels()).not.toContain('Show clipboard');
+	});
+
+	it('is not offered with nothing connected', async () => {
+		const user = userEvent.setup();
+		renderPanel(clientWith(), freshDatabase());
+
+		await screen.findByText(NOTHING_CONNECTED);
+		await settled();
+		await openGear(user);
+		expect(gearLabels()).not.toContain('Show clipboard');
 	});
 });
 
@@ -4512,6 +4580,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Download all notes',
 				'Import a folder',
 				'Import files',
+				'Show clipboard',
 				'Disconnect',
 			]);
 		});

@@ -25,6 +25,7 @@ import { Icon } from '../editor/icons.js';
 import { type pickFiles } from '../editor/pickFiles.js';
 import { failedAt, saying } from '../errors/reached.js';
 import { folderToSearch } from '../routes/search.js';
+import { setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { connectedSources } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
 import {
@@ -65,6 +66,7 @@ import {
 import { isLongRun } from '../sync/progress.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/scheduler.js';
+import { ClipboardPanel } from './ClipboardPanel.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
@@ -93,7 +95,10 @@ import { useEscape } from './useEscape.js';
 
 type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
 
-type Sync = Pick<SyncScheduler, 'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt'>;
+type Sync = Pick<
+	SyncScheduler,
+	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'clipboard'
+>;
 
 export interface AccountPanelProps {
 	client?: Client;
@@ -1485,6 +1490,7 @@ const storageItems = ({
 	onRescan,
 	download,
 	imports,
+	clipboard,
 	about,
 	stranded,
 	open,
@@ -1499,6 +1505,8 @@ const storageItems = ({
 	download: readonly OptionsMenuItem[];
 	/** The ways to import (`importItems`), or none where an import is held back. */
 	imports: readonly OptionsMenuItem[];
+	/** Showing or hiding the clipboard (`clipboardItem`). */
+	clipboard: readonly OptionsMenuItem[];
 	/** What the provider keeps from the app (`unseenItem`). */
 	about: readonly OptionsMenuItem[];
 	stranded: boolean;
@@ -1517,6 +1525,7 @@ const storageItems = ({
 			: []),
 		...download,
 		...imports,
+		...clipboard,
 		...about,
 		...(stranded && !open
 			? [
@@ -1546,6 +1555,20 @@ const storageItems = ({
 };
 
 /**
+ * Show the source's clipboard on this device, or stop (docs/ARCHITECTURE.md
+ * §7, "The clipboard"). Said as what choosing it does, as a notebook's "Pin to
+ * top" is. Not while a first import holds the source, as "Sync now" is not.
+ */
+const clipboardItem = (
+	bound: SyncStateRecord,
+	phase: SchedulerStatus['phase'],
+	onChoose: () => void
+): OptionsMenuItem[] =>
+	importingHere(bound) || phase === 'local'
+		? []
+		: [{ label: showsClipboard(bound) ? 'Hide clipboard' : 'Show clipboard', onChoose }];
+
+/**
  * Where a connected source's panel ends: the status line (`StatusLine`), with
  * how syncing is going, the count of the other devices, and — at the foot of
  * the sidebar — the gear. In a compact window's source dropdown the gear's
@@ -1568,9 +1591,15 @@ const ConnectedFoot = ({
 	holds,
 	downloading,
 	importing,
+	onClipboard,
 	...actions
-}: Omit<Parameters<typeof storageItems>[0], 'about' | 'phase' | 'download' | 'imports'> & {
+}: Omit<
+	Parameters<typeof storageItems>[0],
+	'about' | 'phase' | 'download' | 'imports' | 'clipboard'
+> & {
 	slot: AccountSlot | undefined;
+	/** Show or hide the clipboard. */
+	onClipboard: () => void;
 	/**
 	 * Whether the source can be downloaded or imported into now: not while a
 	 * first import is filling it, nor while the disconnect question is open.
@@ -1599,6 +1628,7 @@ const ConnectedFoot = ({
 		phase: status.phase,
 		download: downloadable ? downloadItem(holds, downloading) : [],
 		imports: downloadable ? importItems(importing) : [],
+		clipboard: clipboardItem(bound, status.phase, onClipboard),
 		about: unseenItem(bound.provider, label, () => {
 			setAbout(true);
 		}),
@@ -1871,6 +1901,14 @@ const Connected = ({
 					cancelRef={cancelButton}
 				/>
 			)}
+			{showsClipboard(bound) && (
+				<ClipboardPanel
+					connectionId={connectionId}
+					database={database}
+					sync={sync}
+					{...(pick === undefined ? {} : { pick })}
+				/>
+			)}
 			<ConnectedFoot
 				slot={slot}
 				bound={bound}
@@ -1890,6 +1928,12 @@ const Connected = ({
 				disconnectBlocked={disconnectBlocked}
 				syncNow={() => {
 					void sync.syncNow();
+				}}
+				onClipboard={() => {
+					const shown = showsClipboard(bound);
+					void setClipboardShown(database, connectionId, !shown).then(() => {
+						if (!shown) void sync.clipboard.refresh(connectionId);
+					});
 				}}
 				ask={ask}
 				openButton={openButton}

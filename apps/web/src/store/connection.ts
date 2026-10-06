@@ -106,7 +106,7 @@ export const accountKey = (provider: ProviderKind, accountId: string | null | un
 
 type Scope = Pick<
 	NotesDatabase,
-	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes'
+	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes' | 'clips' | 'clipBytes'
 >;
 
 /** `accountId` on a `syncState` row, or nothing where the API did not name one. */
@@ -608,6 +608,8 @@ const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T>
 			db.credentials,
 			db.files,
 			db.fileBytes,
+			db.clips,
+			db.clipBytes,
 		],
 		work
 	);
@@ -756,6 +758,7 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		// Gone home, every row: the source they waited under has nothing left to
 		// stand for. It held no credential, cursor or token to let go of.
 		await db.syncState.bulkDelete(from);
+		await forgetClips(db, from);
 		// The same connection, back: the rows it kept never left it.
 		const waiting =
 			current?.detached === undefined
@@ -1129,7 +1132,25 @@ const forgetRows = async (db: Scope, connectionId: string): Promise<void> => {
 	await db.opQueue.where('connectionId').equals(connectionId).delete();
 	await db.files.where('connectionId').equals(connectionId).delete();
 	await db.fileBytes.where('connectionId').equals(connectionId).delete();
+	await forgetClips(db, [connectionId]);
 };
+
+/**
+ * A source's clipboard (docs/ARCHITECTURE.md §7, "The clipboard"), which only a
+ * live binding has: it goes when the source is let go of or detached, an item
+ * not yet sent with it. Those are copies of what was pasted, not the library,
+ * and a detached source has no remote to send them to.
+ *
+ * Dexie's own promise, not an `async` function's: one more native layer between
+ * a transaction and its awaits is one more than Dexie follows the transaction
+ * through, and what comes after it then runs outside, committing it early.
+ */
+const forgetClips = (db: Scope, connectionIds: readonly string[]) =>
+	db.clips
+		.where('connectionId')
+		.anyOf(connectionIds)
+		.delete()
+		.then(() => db.clipBytes.where('connectionId').anyOf(connectionIds).delete());
 
 /** Of `files`, the ones whose current bytes this device holds: the ones `placeFiles` can send. */
 const withBytes = async (db: Scope, files: readonly FileRecord[]): Promise<FileRecord[]> => {
@@ -1326,6 +1347,7 @@ export const detachConnection = (db: NotesDatabase, input: DetachInput): Promise
 			return { applied: true, gone: state };
 		}
 		await db.credentials.delete(connectionId);
+		await forgetClips(db, [connectionId]);
 		// Still the source showing, if it was: the user is looking at what they
 		// have to decide about, and moving them off it would hide it again.
 		await db.syncState.put(detachedFrom(state, input.reason ?? 'revoked', Date.now()));
@@ -1429,6 +1451,7 @@ export const releaseConnection = (
 				(file) => !seen.files.has(file.id)
 			);
 			await db.credentials.delete(connectionId);
+			await forgetClips(db, [connectionId]);
 			await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
 			// Held text is the one of the two the user can do something about, so
 			// it is what they are told about where both are true.
@@ -1592,6 +1615,7 @@ export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<Mov
 			(file) => !seen.files.has(file.id)
 		);
 		await db.credentials.delete(connectionId);
+		await forgetClips(db, [connectionId]);
 		await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
 		return { outcome: held.length > 0 ? 'holding' : 'detached' };
 	}).then(({ outcome, gone }) => {

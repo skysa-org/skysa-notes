@@ -32,3 +32,13 @@ export const NOTE_EXTENSION = '.md';
 
 /** Anything at a path segment starting with this is invisible to the UI. */
 export const HIDDEN_PREFIX = '.';
+
+/**
+ * The clipboard's folder at the root of the app folder (docs/ARCHITECTURE.md
+ * §3, §7 "The clipboard"). Hidden, so the engine makes nothing of it and the
+ * notebooks never show it.
+ */
+export const CLIPBOARD_FOLDER = '.clipboard';
+
+/** How many items the clipboard keeps; a paste past this lets go of the oldest. */
+export const CLIPBOARD_ITEMS = 10;

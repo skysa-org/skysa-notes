@@ -144,6 +144,14 @@ export interface SyncStateRecord {
 	 * every row until someone renames one.
 	 */
 	label?: string;
+	/**
+	 * The clipboard is shown for this source, here (docs/ARCHITECTURE.md §7,
+	 * "The clipboard"). This device only, as `label` is: one device showing it
+	 * says nothing about another, and the items stay in the folder whichever
+	 * shows them. Not indexed, so it needs no version of its own; dropped with
+	 * the binding (`detachedFrom`), so a source connected again starts without.
+	 */
+	clipboard?: true;
 	/** Opaque provider cursor; persisted only after a batch commits. */
 	cursor?: string;
 	rootId?: string;
@@ -306,6 +314,35 @@ export interface FileBytesRecord {
 	lastUsedAt: number;
 }
 
+/**
+ * An item on a source's clipboard (docs/ARCHITECTURE.md §7, "The clipboard"),
+ * keyed by connection and by its name in `CLIPBOARD_FOLDER`, which says when it
+ * was pasted and what it is (`readClipName`). Its bytes, where this device
+ * holds them, are in `clipBytes`, so listing the clipboard never reads 25 MB.
+ *
+ * `pending`: pasted here and not uploaded yet, its bytes the only copy.
+ * `sent`: the remote has it. `removing`: the user removed it and the remote
+ * has not been told yet; shown nowhere.
+ */
+export interface ClipRecord {
+	connectionId: string;
+	name: string;
+	state: 'pending' | 'sent' | 'removing';
+	remoteId?: string;
+	version?: string;
+	/** In bytes. */
+	size: number;
+	/** The start of a text, for showing it without reading its bytes. */
+	preview?: string;
+}
+
+/** A clipboard item's bytes, an `ArrayBuffer` for the reason `FileBytesRecord` gives. */
+export interface ClipBytesRecord {
+	connectionId: string;
+	name: string;
+	bytes: ArrayBuffer;
+}
+
 export interface OpQueueRecord {
 	seq?: number;
 	connectionId: string;
@@ -338,6 +375,8 @@ export type NotesDatabase = Dexie & {
 	credentials: Table<CredentialRecord, string>;
 	files: Table<FileRecord, [string, string]>;
 	fileBytes: Table<FileBytesRecord, [string, string]>;
+	clips: Table<ClipRecord, [string, string]>;
+	clipBytes: Table<ClipBytesRecord, [string, string]>;
 };
 
 export const DATABASE_NAME = 'skysa-notes';
@@ -467,6 +506,14 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		files: '[connectionId+id], connectionId, [connectionId+path], [connectionId+remoteId]',
 		fileBytes: '[connectionId+id], connectionId, [pinned+lastUsedAt]',
 		opQueue: '++seq, connectionId, noteId, path, fileId',
+	});
+
+	// The clipboard a source's devices share (docs/ARCHITECTURE.md §7). Apart
+	// from `files` and `fileBytes`: those are the library's, and what counts
+	// unsent work, exports, cleans up and evicts there would take these in too.
+	db.version(7).stores({
+		clips: '[connectionId+name], connectionId',
+		clipBytes: '[connectionId+name], connectionId',
 	});
 
 	// A build with a later version than the last one above, opening this database
