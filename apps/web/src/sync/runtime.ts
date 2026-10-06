@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { api } from '../api/client.js';
 import { db } from '../store/db.js';
 import { createProviderFactory } from './providers.js';
+import { createRelayFactory } from './relay.js';
 import { createSyncScheduler, type SchedulerStatus, type SyncScheduler } from './scheduler.js';
 
 /**
@@ -18,6 +19,9 @@ export const syncScheduler: SyncScheduler = createSyncScheduler({
 	db,
 	client: api,
 	createProvider: createProviderFactory({ appVersion: APP_VERSION }),
+	// Asks `/config` first, so an instance without a relay is never asked for
+	// a ticket (`sync/relay.ts`).
+	relay: createRelayFactory({ db, client: api }),
 });
 
 /** What the scheduler says now, re-rendering whenever that changes. */

@@ -70,6 +70,10 @@ const configSchema = z.object({
 	// rather than failing the config: the app then offers the buttons, which
 	// grants nothing — the server still decides at the callback.
 	connectGate: gateSchema.optional().catch(undefined),
+	// Present, and true, where the instance runs the change relay
+	// (docs/ARCHITECTURE.md §6, "Change relay"). Anything else is no relay, and
+	// the app polls as it always has.
+	relay: z.boolean().optional().catch(undefined),
 });
 
 export type InstanceConfig = z.infer<typeof configSchema>;
@@ -131,6 +135,11 @@ const codeCheckSchema = z.discriminatedUnion('accepted', [
 ]);
 
 export type CodeCheck = z.infer<typeof codeCheckSchema>;
+
+/** Opaque: the server sealed it, and only the server reads it. */
+const relayTicketSchema = z.object({ ticket: z.string().min(1).max(512), expiresIn: z.number() });
+
+export type RelayTicket = z.infer<typeof relayTicketSchema>;
 
 const tokenSchema = z.object({ accessToken: z.string().min(1), expiresAt: z.number() });
 
@@ -268,6 +277,13 @@ export interface ApiClient {
 	readonly signOut: () => Promise<Result<{ disconnected: boolean }>>;
 	/** Mint a provider access token. No id, for the same reason. */
 	readonly token: () => Promise<Result<AccessToken>>;
+	/**
+	 * A ticket to open the change relay's socket with, good for seconds: a
+	 * browser cannot send `Authorization` on a WebSocket, and the credential
+	 * never goes in a URL (docs/ARCHITECTURE.md §6, "Change relay"). Throws,
+	 * with status 404, where the instance runs no relay.
+	 */
+	readonly relayTicket: () => Promise<Result<RelayTicket>>;
 	/**
 	 * Ask where to send the browser to connect an account.
 	 *
@@ -411,6 +427,8 @@ export const createApiClient = (options: ApiClientOptions = {}): ApiClient => {
 		},
 
 		token: () => call('/token', tokenSchema, { method: 'POST' }, onDeviceClock),
+
+		relayTicket: () => call('/connection/relay/ticket', relayTicketSchema, { method: 'POST' }),
 
 		withCredential: rebind,
 

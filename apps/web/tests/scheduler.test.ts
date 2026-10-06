@@ -13,6 +13,7 @@ import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { createNote, saveNoteBody } from '../src/store/notes.js';
 import { type FileRead } from '../src/sync/fileReads.js';
+import { type RelayFactory } from '../src/sync/relay.js';
 import {
 	createSyncScheduler,
 	type ProviderFactory,
@@ -2096,5 +2097,107 @@ describe('files beside notes, read for showing (#187)', () => {
 		expect(await scheduler.readFile('c2', row.id)).toEqual({ state: 'unavailable' });
 		env.state.online = false;
 		expect(await scheduler.readFile('c1', row.id)).toEqual({ state: 'offline' });
+	});
+});
+
+describe('the change relay', () => {
+	/** Links as the scheduler asks for them, with a way to say another device pushed. */
+	const relayed = () => {
+		const links: {
+			connectionId: string;
+			told: number;
+			closed: boolean;
+			changed: () => void;
+		}[] = [];
+		const relay = vi.fn<RelayFactory>(({ connectionId, onChanged }) => {
+			const link = { connectionId, told: 0, closed: false, changed: onChanged };
+			links.push(link);
+			return {
+				pushed: () => {
+					link.told += 1;
+				},
+				close: () => {
+					link.closed = true;
+				},
+			};
+		});
+		const only = () => {
+			expect(links).toHaveLength(1);
+			const [link] = links;
+			if (link === undefined) throw new Error('no link');
+			return link;
+		};
+		return { relay, links, only };
+	};
+
+	it('runs a round when another device says it has pushed', async () => {
+		const db = await bound();
+		const { relay, only } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+		const before = h.remote.pulls();
+
+		only().changed();
+
+		await vi.waitFor(() => {
+			expect(h.remote.pulls()).toBe(before + 1);
+		});
+		expect(only().connectionId).toBe('c1');
+	});
+
+	it('tells the other devices after a round that pushed, and not after one that only pulled', async () => {
+		const db = await bound();
+		const { relay, only } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+		const before = only().told;
+
+		const note = await createNote(db, { title: 'Sent', body: 'sent\n' });
+		await nextTimer(h);
+		expect(h.remote.fake.contentAt(note.path)).toContain('sent');
+		expect(only().told).toBe(before + 1);
+
+		await focused(h);
+		expect(only().told).toBe(before + 1);
+	});
+
+	it('lets the link go with its session, and gives the next session its own', async () => {
+		const db = await bound('c1');
+		const { relay, links } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+
+		await bindConnection(db, { ...ACCOUNT, connectionId: 'c2' });
+		await holdCredential(db, 'c2');
+		await vi.waitFor(() => {
+			expect(links.map((link) => [link.connectionId, link.closed])).toEqual([
+				['c1', true],
+				['c2', false],
+			]);
+		});
+
+		h.scheduler.stop();
+		expect(links.map((link) => link.closed)).toEqual([true, true]);
+	});
+
+	it('lets the link go when the device is disconnected', async () => {
+		const db = await bound();
+		const { relay, only } = relayed();
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+
+		await detachConnection(db, { connectionId: 'c1' });
+		await reaches(h.scheduler, 'local');
+
+		expect(only().closed).toBe(true);
+	});
+
+	it('opens no link for a source this build has no adapter for', async () => {
+		const db = await bound();
+		const { relay } = relayed();
+		const h = started(db, { relay, createProvider: () => undefined });
+		await reaches(h.scheduler, 'attention');
+
+		expect(relay).not.toHaveBeenCalled();
 	});
 });

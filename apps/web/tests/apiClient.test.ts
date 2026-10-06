@@ -388,6 +388,48 @@ describe('the API client', () => {
 		expect(calls[0]?.init?.headers).toMatchObject({ authorization: 'Bearer sk1_mine' });
 	});
 
+	it('reads whether the instance runs the change relay, and anything but a yes as a no', async () => {
+		const config = (relay: unknown) =>
+			createApiClient({
+				fetch: answering(200, { authMode: 'storage-first', providers: [], relay }).fetch,
+			}).config();
+
+		expect((await config(true)).relay).toBe(true);
+		expect((await config(false)).relay).toBe(false);
+		// A Worker from before the relay, or one saying something this app does
+		// not understand, keeps the config: the app polls as it always did.
+		expect((await config(undefined)).relay).toBeUndefined();
+		expect((await config('yes')).relay).toBeUndefined();
+	});
+
+	it('asks for a relay ticket with the credential, and nothing else', async () => {
+		const { fetch, calls } = answering(200, { ticket: 'sealed.ticket', expiresIn: 30 });
+
+		expect(await createApiClient({ fetch }).withCredential('sk1_mine').relayTicket()).toEqual({
+			ok: true,
+			value: { ticket: 'sealed.ticket', expiresIn: 30 },
+		});
+		expect(calls[0]?.url).toBe('/api/connection/relay/ticket');
+		expect(calls[0]?.init?.method).toBe('POST');
+		expect(calls[0]?.init?.body).toBeUndefined();
+		expect(calls[0]?.init?.headers).toMatchObject({ authorization: 'Bearer sk1_mine' });
+	});
+
+	it('says a relay ticket was refused, and throws a 404 where there is no relay', async () => {
+		const revoked = answering(401, { error: 'credential_revoked' });
+		expect(await createApiClient({ fetch: revoked.fetch }).relayTicket()).toEqual({
+			ok: false,
+			refusal: 'credential_revoked',
+		});
+
+		const off = answering(404, { error: 'relay_disabled' });
+		const thrown = await createApiClient({ fetch: off.fetch })
+			.relayTicket()
+			.catch((error: unknown) => error);
+		expect(thrown).toBeInstanceOf(ApiError);
+		expect((thrown as ApiError).status).toBe(404);
+	});
+
 	it("moves a token's expiry onto this device's clock", async () => {
 		vi.useFakeTimers({ now: Date.parse('2026-09-16T12:00:00Z') });
 		try {
