@@ -588,7 +588,7 @@ describe('the source panel, in a compact window', () => {
 		await user.click(
 			await within(panel()).findByRole('button', { name: 'Options for “OneDrive”' })
 		);
-		await user.click(screen.getByRole('button', { name: 'Disconnect…' }));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
 
 		await waitFor(async () => {
 			expect((await connectedSources(db)).find((source) => source.active)?.connectionId).toBe(

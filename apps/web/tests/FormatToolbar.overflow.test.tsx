@@ -177,7 +177,7 @@ describe('the toolbar on a bar too narrow for it', () => {
 		(overflow() as HTMLElement).focus();
 		await user.keyboard('{Enter}');
 
-		screen.getByRole('button', { name: 'Link…' }).focus();
+		screen.getByRole('button', { name: 'Link' }).focus();
 		await user.keyboard('{Enter}');
 
 		expect(document.activeElement).toBe(screen.getByLabelText('Link to'));
@@ -206,7 +206,7 @@ describe('the toolbar on a bar too narrow for it', () => {
 			'Increase indent',
 			'Code block',
 			'Attach files',
-			'Link…',
+			'Link',
 		]);
 		expect(within(bar()).queryByRole('group', { name: 'Insert' })).toBeNull();
 	});
@@ -227,7 +227,7 @@ describe('the toolbar on a bar too narrow for it', () => {
 		editor.withCtx(selecting('plain'));
 
 		await press(overflow() as HTMLElement);
-		await press(screen.getByRole('button', { name: 'Link…' }));
+		await press(screen.getByRole('button', { name: 'Link' }));
 		await userEvent.type(screen.getByLabelText('Link to'), 'https://example.com{Enter}');
 
 		expect(editor.markdown()).toContain('[plain](https://example.com)');

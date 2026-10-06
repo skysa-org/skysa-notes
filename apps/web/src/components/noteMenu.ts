@@ -20,7 +20,7 @@ export const noteMenuItems = ({
 	onDelete: () => void;
 }): OptionsMenuItem[] => [
 	...pinItem(pinned, onPin),
-	...(onMove === undefined ? [] : [{ label: 'Move to notebook…', onChoose: onMove }]),
+	...(onMove === undefined ? [] : [{ label: 'Move to notebook', onChoose: onMove }]),
 	{ label: 'Delete', onChoose: onDelete, danger: true },
 ];
 

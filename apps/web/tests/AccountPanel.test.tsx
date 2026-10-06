@@ -429,15 +429,11 @@ describe('AccountPanel, with nothing connected', () => {
 		await settled();
 		await openGear(user);
 		// Nothing to download on a device that holds nothing.
-		expect(gearLabels()).toEqual(['Import a folder…', 'Import files…']);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files']);
 
 		await createNote(db, { title: 'First' });
 		await waitFor(() => {
-			expect(gearLabels()).toEqual([
-				'Download all notes',
-				'Import a folder…',
-				'Import files…',
-			]);
+			expect(gearLabels()).toEqual(['Download all notes', 'Import a folder', 'Import files']);
 		});
 		// None of it is a button in the panel any more: the gear is the one.
 		expect(
@@ -814,7 +810,7 @@ describe('AccountPanel, downloading every note', () => {
 		renderPanel(clientWith(), db, '/', fakeSync());
 
 		await offered(user, 'Download all notes');
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		await screen.findByRole('button', { name: 'Disconnect' });
 		await openGear(user);
@@ -1034,19 +1030,19 @@ describe('AccountPanel, with an account connected', () => {
 			sync
 		);
 
-		await offered(user, 'Disconnect…');
+		await offered(user, 'Disconnect');
 		await waitFor(() => {
 			expect(gearLabels()).toEqual([
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
-				'Import a folder…',
-				'Import files…',
-				'Disconnect…',
+				'Import a folder',
+				'Import files',
+				'Disconnect',
 			]);
 		});
 		const menu = within(screen.getByRole('group', { name: 'Storage' }));
-		expect(menu.getByRole('button', { name: 'Disconnect…' }).className).toContain('danger');
+		expect(menu.getByRole('button', { name: 'Disconnect' }).className).toContain('danger');
 		// None of it is a button in the panel any more: the gear is the one.
 		expect(
 			within(screen.getByRole('region', { name: 'Storage' }))
@@ -1077,9 +1073,9 @@ describe('AccountPanel, with an account connected', () => {
 			fakeSync()
 		);
 
-		await offered(user, 'Disconnect…');
-		expect(gearLabels()).toEqual(['Disconnect…']);
-		await choose(user, 'Disconnect…');
+		await offered(user, 'Disconnect');
+		expect(gearLabels()).toEqual(['Disconnect']);
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Disconnect' });
 
 		// And not that while the question it asks is open, which is the way on.
@@ -1106,7 +1102,7 @@ describe('AccountPanel, with an account connected', () => {
 		});
 		renderPanel(client, db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		expect(signOut).not.toHaveBeenCalled();
 		// What it says is what happens, and by the account's name.
 		expect(
@@ -1149,7 +1145,7 @@ describe('AccountPanel, with an account connected', () => {
 		// The store will not give the bytes up.
 		const failing = () =>
 			vi.spyOn(db.fileBytes, 'bulkGet').mockRejectedValue(new Error('disk'));
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		const failed = failing();
 
 		await user.click(await screen.findByRole('button', { name: 'Download them' }));
@@ -1187,7 +1183,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(
 			await screen.findByText(
@@ -1227,7 +1223,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Discard them…' }));
 		// Two steps, and the second one says what it costs.
 		expect(
@@ -1259,7 +1255,7 @@ describe('AccountPanel, with an account connected', () => {
 			fakeSync({ phase: 'offline' })
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(
 			await screen.findByText(
@@ -1284,11 +1280,11 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Discard them…' });
 		await user.keyboard('{Escape}');
 
-		expect(await offered(user, 'Disconnect…')).toBeTruthy();
+		expect(await offered(user, 'Disconnect')).toBeTruthy();
 		expect(signOut).not.toHaveBeenCalled();
 		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
 		expect((await db.syncState.get('c1'))?.detached).toBeUndefined();
@@ -1307,7 +1303,7 @@ describe('AccountPanel, with an account connected', () => {
 
 		expect(await statusLine('OneDrive')).toBeTruthy();
 		expect(screen.queryByRole('link', { name: 'microsoft.com/consent' })).toBeNull();
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Disconnect' });
 
 		expect(
@@ -1357,7 +1353,7 @@ describe('AccountPanel, with an account connected', () => {
 				pick
 			);
 
-			await choose(user, 'Import a folder…');
+			await choose(user, 'Import a folder');
 			const dialog = await screen.findByRole('alertdialog', {
 				name: 'Import into Google Drive?',
 			});
@@ -1390,7 +1386,7 @@ describe('AccountPanel, with an account connected', () => {
 			const { pick, asked } = picker([new File(['# One'], 'one.md')]);
 			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
 
-			await choose(user, 'Import files…');
+			await choose(user, 'Import files');
 			expect(asked[0]?.accept).toContain('.zip');
 			const dialog = await screen.findByRole('alertdialog', {
 				name: 'Import into this device?',
@@ -1407,7 +1403,7 @@ describe('AccountPanel, with an account connected', () => {
 			const { pick } = picker([inFolder('old/.DS_Store', 'x')]);
 			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
 
-			await choose(user, 'Import a folder…');
+			await choose(user, 'Import a folder');
 
 			expect(
 				await screen.findByText('Nothing to import: no notes or files were found.')
@@ -1426,10 +1422,10 @@ describe('AccountPanel, with an account connected', () => {
 
 			expect(await statusLine()).toBeTruthy();
 			const menu = await openGear(user);
-			expect(within(menu).queryByRole('button', { name: 'Import a folder…' })).toBeNull();
-			expect(within(menu).queryByRole('button', { name: 'Import files…' })).toBeNull();
+			expect(within(menu).queryByRole('button', { name: 'Import a folder' })).toBeNull();
+			expect(within(menu).queryByRole('button', { name: 'Import files' })).toBeNull();
 			// Only the way to let the source go, which an import does not hold up.
-			expect(gearLabels()).toEqual(['Disconnect…']);
+			expect(gearLabels()).toEqual(['Disconnect']);
 		});
 	});
 
@@ -1453,9 +1449,9 @@ describe('AccountPanel, with an account connected', () => {
 		expect(screen.queryByText(summary)).toBeNull();
 		expect(screen.queryByText(detail)).toBeNull();
 		await openGear(user);
-		expect(gearLabels()).toEqual(['About Google Drive…', 'Disconnect…']);
+		expect(gearLabels()).toEqual(['About Google Drive', 'Disconnect']);
 
-		await choose(user, 'About Google Drive…');
+		await choose(user, 'About Google Drive');
 
 		// Over everything, with the focus on its Close.
 		const dialog = await screen.findByRole('dialog', { name: summary });
@@ -1480,7 +1476,7 @@ describe('AccountPanel, with an account connected', () => {
 		expect(await statusLine()).toBeTruthy();
 		await openGear(user);
 		// Nothing about Dropbox before the way to let it go.
-		expect(gearLabels()).toEqual(['Disconnect…']);
+		expect(gearLabels()).toEqual(['Disconnect']);
 		expect(screen.queryByText(UNSEEN_AT_PROVIDER.gdrive?.summary ?? '')).toBeNull();
 	});
 
@@ -1510,7 +1506,7 @@ describe('AccountPanel, with an account connected', () => {
 				}),
 				db
 			);
-			await choose(user, 'Disconnect…');
+			await choose(user, 'Disconnect');
 			await screen.findByRole('button', { name: 'Disconnect' });
 			return { user, db, signOut };
 		};
@@ -1582,7 +1578,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		expect(await screen.findByText(/Its notes are removed from this device/)).toBeTruthy();
 		expect(screen.queryByText(/keeps this app’s access/)).toBeNull();
 		expect(screen.queryByRole('link', { name: 'microsoft.com/consent' })).toBeNull();
@@ -1602,11 +1598,11 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Disconnect' });
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
-		expect(await offered(user, 'Disconnect…')).toBeTruthy();
+		expect(await offered(user, 'Disconnect')).toBeTruthy();
 		expect(signOut).not.toHaveBeenCalled();
 	});
 
@@ -1623,7 +1619,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/would not disconnect/);
@@ -1663,7 +1659,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
@@ -1678,7 +1674,7 @@ describe('AccountPanel, with an account connected', () => {
 		renderPanel(clientWith({ connection: () => new Promise(() => undefined) }), db);
 
 		const item = await within(await openGear(user)).findByRole('button', {
-			name: 'Disconnect…',
+			name: 'Disconnect',
 		});
 
 		expect(item.hasAttribute('disabled')).toBe(true);
@@ -1694,7 +1690,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Disconnect' });
 		await waitFor(() => {
 			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
@@ -1729,7 +1725,7 @@ describe('AccountPanel, with an account connected', () => {
 		const elsewhere = document.createElement('textarea');
 		document.body.append(elsewhere);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 		elsewhere.focus();
 		answer.get('fail')?.();
@@ -1752,7 +1748,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/could not disconnect/);
@@ -1785,7 +1781,7 @@ describe('AccountPanel, with an account connected', () => {
 				db
 			);
 
-			await choose(user, 'Disconnect…');
+			await choose(user, 'Disconnect');
 			await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
 			// The call did leave the device, so the wording that sends the user to
@@ -1812,7 +1808,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		// Everything after the server's yes is this device's own work, so this is
 		// where the store is made to refuse: the account really is disconnected.
 		const refused = vi
@@ -1851,7 +1847,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 
 		const problem = await screen.findByText(/The server cannot be reached/);
@@ -1876,7 +1872,7 @@ describe('AccountPanel, with an account connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 		await choose(user, 'Stop syncing on this device');
 		// The store is broken only once the question is up: the list it is about
@@ -1919,12 +1915,12 @@ describe('AccountPanel, with an account connected', () => {
 		);
 		// Not on offer before the server has refused anything.
 		const menu = await openGear(user);
-		await within(menu).findByRole('button', { name: 'Disconnect…' });
+		await within(menu).findByRole('button', { name: 'Disconnect' });
 		expect(
 			within(menu).queryByRole('button', { name: 'Stop syncing on this device' })
 		).toBeNull();
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 		await choose(user, 'Stop syncing on this device');
 		// The same question again, with no server behind it.
@@ -2219,7 +2215,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			await connected(fakeSync({ phase: 'attention', refusal: 'reauthorize_required' }), {
 				config,
 			});
-			await offered(user, 'Disconnect…');
+			await offered(user, 'Disconnect');
 
 			expect(screen.getByText('Dropbox needs to be connected again.')).toBeTruthy();
 			expect(screen.queryByRole('button', { name: 'Connect again' })).toBeNull();
@@ -2538,7 +2534,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 		await openGear(user);
 		// Nothing about syncing at all, and the rest as ever.
-		expect(gearLabels()).toEqual(['Import a folder…', 'Import files…', 'Disconnect…']);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Disconnect']);
 	});
 
 	it('says when a note was edited in two places at once', async () => {
@@ -2846,7 +2842,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		// it is going, and no gear with syncing and disconnecting in it.
 		expect(screen.queryByRole('button', { name: 'Storage options' })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Disconnect…' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull();
 		expect(screen.queryByTitle(/Syncing with/)).toBeNull();
 		// It holds no credential, and there is nothing an answer could change.
 		await new Promise((resolve) => setTimeout(resolve, 50));
@@ -3219,7 +3215,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox', accountId: 'dbid:1' });
 		await holding(db, 'c1');
 		renderPanel(clientWith(), db);
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Disconnect' });
 		// Moved there by an effect after the render that shows the question, so
 		// waited for: under a loaded full run the question can be found first.
@@ -3422,7 +3418,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		);
 		renderPanel(answering(db, { signOut }), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(
 			await screen.findByRole('button', { name: 'Move 1 note to OneDrive · ms:1…' })
 		);
@@ -3450,7 +3446,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const { db, unsent } = await withSomewhereToPutIt(true);
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: /^Move/ });
 
 		const choices = screen.getAllByRole('radio');
@@ -3475,7 +3471,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const { db, unsent } = await withSomewhereToPutIt();
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: /^Move/ }));
 		const step = await screen.findByRole('group', { name: 'Move to another source' });
 
@@ -3485,7 +3481,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await user.keyboard('{Escape}');
 
 		expect(screen.queryByRole('button', { name: 'Move them' })).toBeNull();
-		expect(await offered(user, 'Disconnect…')).toBeTruthy();
+		expect(await offered(user, 'Disconnect')).toBeTruthy();
 		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
 	});
 
@@ -3502,7 +3498,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await deleteNote(db, doomed.id, { connectionId: 'c1' });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(await screen.findByText('2 notes not yet sent · 1 delete')).toBeTruthy();
 		expect(
@@ -3535,7 +3531,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await db.notes.update(['c1', unsent.id], { path: 'Ideas/unsent.md' });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Discard them…' }));
 		await user.click(await screen.findByRole('button', { name: 'Discard for good' }));
 
@@ -3562,7 +3558,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		);
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		const named = await screen.findByRole('list', { name: 'Notes that have not been sent' });
 
 		expect(named.querySelectorAll('li').length).toBe(5);
@@ -3582,7 +3578,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const withdraw = beforeClosing(() => Promise.resolve([JSON.stringify(['c1', unsent.id])]));
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/could not be saved yet/);
 		expect(screen.getByRole('button', { name: /^Move/ }).hasAttribute('disabled')).toBe(true);
@@ -3614,7 +3610,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await createNote(db, { title: 'Unsent' });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(
 			await screen.findByRole('button', {
@@ -3633,7 +3629,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await deleteNote(db, doomed.id, { connectionId: 'c1' });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(await screen.findByRole('button', { name: 'Discard them…' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
@@ -3651,7 +3647,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await db.syncState.update('c1', { resumeUnverified: true });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(
 			await screen.findByText(
@@ -3684,7 +3680,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await db.notes.update(['c1', rows[0]?.id ?? ''], { path: 'Ideas/unsent.md' });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(
 			await screen.findByText(
@@ -3708,7 +3704,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		});
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(
 			await screen.findByText('1 note not yet sent · 1 file not yet uploaded')
@@ -3728,7 +3724,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await db.folders.put({ connectionId: 'c1', path: 'Empty', createdAt: 0 });
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		expect(await screen.findByText('1 note not yet sent · 1 notebook')).toBeTruthy();
 
 		await user.click(
@@ -3745,7 +3741,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const { db, unsent } = await withSomewhereToPutIt();
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Discard them…' }));
 		const step = await screen.findByRole('group', { name: 'Discard for good' });
 
@@ -3756,7 +3752,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await user.keyboard('{Escape}');
 
 		expect(screen.queryByRole('button', { name: 'Discard for good' })).toBeNull();
-		expect(await offered(user, 'Disconnect…')).toBeTruthy();
+		expect(await offered(user, 'Disconnect')).toBeTruthy();
 		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
 	});
 
@@ -3765,7 +3761,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const { db } = await withSomewhereToPutIt();
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: /^Move/ }));
 		const step = await screen.findByRole('group', { name: 'Move to another source' });
 		// The step's own Cancel, which goes back rather than closing the question.
@@ -3780,7 +3776,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const { db, unsent } = await withSomewhereToPutIt();
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Discard them…' });
 		// Only now does a save begin failing: the dialog's own guard was computed
 		// before the question was asked, and cannot know about this.
@@ -3812,7 +3808,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 			sync.syncNow.mockImplementation(() => new Promise(() => undefined));
 			renderPanel(answering(db), db, '/', sync);
 
-			await choose(user, 'Disconnect…');
+			await choose(user, 'Disconnect');
 			expect(await screen.findByText('Sending your last changes…')).toBeTruthy();
 			expect(sync.syncNow).toHaveBeenCalledTimes(1);
 			expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
@@ -3840,7 +3836,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const sync = fakeSync({ phase: 'attention', error: 'boom' });
 		renderPanel(answering(db), db, '/', sync);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 
 		expect(await screen.findByRole('button', { name: /^Move/ })).toBeTruthy();
 		expect(sync.syncNow).not.toHaveBeenCalled();
@@ -3852,7 +3848,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const shown = await noteById(db, unsent.id);
 		renderPanel(answering(db), db);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: /^Move/ }));
 		await user.click(await screen.findByRole('button', { name: 'Move them' }));
 		await statusLine('OneDrive');
@@ -3984,7 +3980,7 @@ describe('AccountPanel, with more than one source connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 		expect(await offered(user, 'Stop syncing on this device')).toBeTruthy();
 
@@ -3996,7 +3992,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		// Dropbox, the one the user asked about, stayed live on the server.
 		expect(screen.queryByRole('alert')).toBeNull();
 		const menu = await openGear(user);
-		await within(menu).findByRole('button', { name: 'Disconnect…' });
+		await within(menu).findByRole('button', { name: 'Disconnect' });
 		expect(
 			within(menu).queryByRole('button', { name: 'Stop syncing on this device' })
 		).toBeNull();
@@ -4026,7 +4022,7 @@ describe('AccountPanel, with more than one source connected', () => {
 			db
 		);
 
-		await choose(user, 'Disconnect…');
+		await choose(user, 'Disconnect');
 		await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
 		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
 		expect(await statusLine('OneDrive')).toBeTruthy();
@@ -4036,9 +4032,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		expect(await statusLine()).toBeTruthy();
 		const dropboxMenu = await openGear(user);
 		expect(
-			within(dropboxMenu)
-				.getByRole('button', { name: 'Disconnect…' })
-				.hasAttribute('disabled')
+			within(dropboxMenu).getByRole('button', { name: 'Disconnect' }).hasAttribute('disabled')
 		).toBe(true);
 
 		await user.click(await screen.findByRole('button', { name: 'OneDrive' }));
@@ -4050,7 +4044,7 @@ describe('AccountPanel, with more than one source connected', () => {
 		// Not OneDrive's failure, and not said under its name.
 		expect(screen.queryByRole('alert')).toBeNull();
 		const oneDriveMenu = await openGear(user);
-		await within(oneDriveMenu).findByRole('button', { name: 'Disconnect…' });
+		await within(oneDriveMenu).findByRole('button', { name: 'Disconnect' });
 		expect(
 			within(oneDriveMenu).queryByRole('button', { name: 'Stop syncing on this device' })
 		).toBeNull();
@@ -4516,12 +4510,12 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
-				'Import a folder…',
-				'Import files…',
-				'Disconnect…',
+				'Import a folder',
+				'Import files',
+				'Disconnect',
 			]);
 		});
-		expect(menu.getByRole('button', { name: 'Disconnect…' }).className).toContain('danger');
+		expect(menu.getByRole('button', { name: 'Disconnect' }).className).toContain('danger');
 
 		await user.click(menu.getByRole('button', { name: 'Sync now' }));
 		expect(sync.syncNow).toHaveBeenCalledTimes(1);
@@ -4546,11 +4540,11 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 
 		const menu = await openOptions(user);
 		await waitFor(() => {
-			expect(menu.getByRole('button', { name: 'Disconnect…' }).hasAttribute('disabled')).toBe(
+			expect(menu.getByRole('button', { name: 'Disconnect' }).hasAttribute('disabled')).toBe(
 				false
 			);
 		});
-		await user.click(menu.getByRole('button', { name: 'Disconnect…' }));
+		await user.click(menu.getByRole('button', { name: 'Disconnect' }));
 		// The note here was never sent, so the question is what becomes of it.
 		const storage = within(screen.getByRole('region', { name: 'Storage' }));
 		expect(await storage.findByRole('button', { name: 'Download them' })).toBeTruthy();
@@ -4628,7 +4622,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
-				'Disconnect…',
+				'Disconnect',
 			]);
 		});
 
@@ -4698,14 +4692,10 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		const options = await rowOptions('Google Drive');
 		await user.click(options);
 		await waitFor(() => {
-			expect(labels('Google Drive')).toEqual([
-				'Rename',
-				'About Google Drive…',
-				'Disconnect…',
-			]);
+			expect(labels('Google Drive')).toEqual(['Rename', 'About Google Drive', 'Disconnect']);
 		});
 
-		await user.click(screen.getByRole('button', { name: 'About Google Drive…' }));
+		await user.click(screen.getByRole('button', { name: 'About Google Drive' }));
 
 		const dialog = await screen.findByRole('dialog', { name: summary });
 		expect(within(dialog).getByText(detail)).toBeTruthy();
@@ -4725,7 +4715,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 		await openOptions(user, 'Dropbox');
-		await user.click(screen.getByRole('button', { name: 'Disconnect…' }));
+		await user.click(screen.getByRole('button', { name: 'Disconnect' }));
 		// Dropbox is showing now, in a panel of its own, and asks about the note
 		// it never sent.
 		await waitFor(async () => {
@@ -4754,8 +4744,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		await screen.findByRole('group', { name: 'Source “This device”' });
 		expect(labels('This device')).toEqual([
 			'Download all notes',
-			'Import a folder…',
-			'Import files…',
+			'Import a folder',
+			'Import files',
 		]);
 	});
 });
