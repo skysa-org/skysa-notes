@@ -6,6 +6,7 @@ import {
 	createNoteAttachments,
 	LARGE_PICTURE_BYTES,
 	type NoteAttachmentsOptions,
+	pictureUrls,
 	useNoteAttachments,
 } from '../src/components/noteAttachments.js';
 import type { AttachmentProblem, Shown } from '../src/editor/attachHost.js';
@@ -73,7 +74,7 @@ const setup = (answer: FileRead = { state: 'ready', bytes: bufferOf('far') }) =>
 	const host = createNoteAttachments({ db, note: () => where.current, readFile, urls });
 	const show = (href: string, large?: boolean): Promise<Shown> =>
 		host.show(href, { signal: new AbortController().signal, large });
-	return { db, where, readFile, host, show, made, revoked };
+	return { db, where, readFile, host, show, urls, made, revoked };
 };
 
 const urlOf = (shown: Shown): string | undefined =>
@@ -216,7 +217,7 @@ describe('a picture beside the open note', () => {
 		expect(heard).toHaveBeenCalledTimes(1);
 	});
 
-	it('lets go of every URL it made when the note closes', async () => {
+	it('lets go of every URL it handed out when the note closes', async () => {
 		const { db, host, show, revoked } = setup();
 		await db.files.put(row('notes/a.png'));
 		await db.files.put(row('notes/b.png'));
@@ -224,8 +225,62 @@ describe('a picture beside the open note', () => {
 		await show('b.png');
 
 		host.dispose();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(revoked.sort()).toEqual(['blob:test/1', 'blob:test/2']);
+	});
+
+	it('draws a picture another host shows from the same URL, made once', async () => {
+		const { db, readFile, urls, made } = setup();
+		await db.files.put(row('notes/cat.png'));
+		const where = { connectionId: 'c1', id: 'n2', path: 'notes/other.md' };
+		const card = createNoteAttachments({ db, note: () => where, readFile, urls });
+		const editor = createNoteAttachments({ db, note: () => where, readFile, urls });
+		const signal = new AbortController().signal;
+
+		const first = await card.show('cat.png', { signal });
+		const second = await editor.show('cat.png', { signal });
+
+		expect(urlOf(second)).toBe(urlOf(first));
+		expect(made).toHaveLength(1);
+	});
+
+	it("draws from the app's one cache of URLs unless given another", async () => {
+		const { db, readFile } = setup();
+		await db.files.put(row('notes/cat.png'));
+		const where = { connectionId: 'c1', id: 'n2', path: 'notes/other.md' };
+		const acquire = vi
+			.spyOn(pictureUrls, 'acquire')
+			.mockReturnValue({ url: 'blob:shared/1', release: () => undefined });
+
+		const shown = await createNoteAttachments({ db, note: () => where, readFile }).show(
+			'cat.png',
+			{ signal: new AbortController().signal }
+		);
+
+		expect(urlOf(shown)).toBe('blob:shared/1');
+		expect(acquire).toHaveBeenCalledTimes(1);
+		acquire.mockRestore();
+	});
+
+	it('lets go of only what it handed out, not what another host still shows', async () => {
+		const { db, readFile, urls, revoked } = setup();
+		await db.files.put(row('notes/cat.png'));
+		const where = { connectionId: 'c1', id: 'n2', path: 'notes/other.md' };
+		const card = createNoteAttachments({ db, note: () => where, readFile, urls });
+		const editor = createNoteAttachments({ db, note: () => where, readFile, urls });
+		const signal = new AbortController().signal;
+		await card.show('cat.png', { signal });
+		const shown = await editor.show('cat.png', { signal });
+
+		card.dispose();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(revoked).toEqual([]);
+
+		if (shown.state === 'ready') shown.release();
+		editor.dispose();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(revoked).toEqual(['blob:test/1']);
 	});
 });
 
