@@ -8,6 +8,7 @@ import {
 } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
+import { t } from '../i18n/t.js';
 import { PROGRAMMATIC_META } from './dirty.js';
 import { type Ancestor, ancestor, ancestors, isTask, LIST_ITEM } from './lists.js';
 
@@ -108,7 +109,10 @@ const checkbox =
 		input.setAttribute('type', 'checkbox');
 		input.setAttribute('class', 'task-checkbox');
 		input.setAttribute('contenteditable', 'false');
-		input.setAttribute('aria-label', checked ? 'Done' : 'Not done');
+		input.setAttribute(
+			'aria-label',
+			checked ? t('editor.task.done') : t('editor.task.notDone')
+		);
 		if (checked) input.setAttribute('checked', '');
 
 		// On the press, not on the change: inside a contenteditable surface the

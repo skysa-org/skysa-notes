@@ -2,7 +2,12 @@ import { type Catalog } from '../catalog.js';
 import { account } from './account.js';
 import { common } from './common.js';
 import { connect } from './connect.js';
+import { editor } from './editor.js';
+import { firstImport } from './firstImport.js';
+import { scheduler } from './scheduler.js';
 import { shell } from './shell.js';
+import { sources } from './sources.js';
+import { unsent } from './unsent.js';
 
 /**
  * The English catalog, and the one every other is checked against: its keys
@@ -14,4 +19,9 @@ export const en = {
 	shell,
 	account,
 	connect,
+	sources,
+	unsent,
+	firstImport,
+	scheduler,
+	editor,
 } as const satisfies Catalog;

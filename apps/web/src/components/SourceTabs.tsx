@@ -12,6 +12,8 @@ import {
 
 import { api, type ApiClient, ApiError } from '../api/client.js';
 import { answer, useInstanceConfig } from '../api/instanceConfig.js';
+import { rich } from '../i18n/rich.js';
+import { t } from '../i18n/t.js';
 import {
 	connectCodeHeldUntil,
 	heldConnectCode,
@@ -117,7 +119,7 @@ const useSourceChoices = (
 		),
 		// "Connect another account" once there is one; before that, what
 		// connecting is (`CONNECT_FIRST_LABEL`).
-		connectLabel: anyConnected(ordered) ? 'Connect another account' : CONNECT_FIRST_LABEL,
+		connectLabel: anyConnected(ordered) ? t('sources.connectAnother') : CONNECT_FIRST_LABEL,
 		// The bar is the only place connections are made or chosen, so it is
 		// here from the start — with nothing connected it is the `+` and nothing
 		// else, which is the whole of what there is to offer. It goes away
@@ -150,7 +152,7 @@ export const SourceTabs = ({
 
 	return (
 		<div className="source-tabs">
-			<nav aria-label="Sources">
+			<nav aria-label={t('sources.title')}>
 				<ul>
 					{ordered.map((source) => (
 						<li key={source.connectionId}>
@@ -214,12 +216,12 @@ export const SourceTabs = ({
 					{adding && (
 						<Menu
 							className="source-add-menu"
-							label="Storage providers"
+							label={t('sources.providers')}
 							frame={addFrame}
 							onClose={stopAdding}
 						>
 							<p className="source-add-heading">
-								{first ? 'Choose a storage provider' : connectLabel}
+								{first ? t('sources.chooseProvider') : connectLabel}
 							</p>
 							<ConnectChoice
 								gate={gate}
@@ -249,37 +251,52 @@ const SourceTab = ({
 	name: string;
 	/** With the width the tab is taking, so replacing it moves nothing. */
 	onShow: (width: number) => void;
-}) => (
-	<button
-		type="button"
-		className={source.active ? 'source-tab source-tab-active' : 'source-tab'}
-		// Said outright rather than left to be assembled from the two spans
-		// below. The name from contents is not simply their text: it joins the
-		// pieces by its own rules, so "A source" and " — disconnected" came out
-		// as a name no caller could predict — and a test looking for the tab by
-		// what it plainly says could not find it. Exactly the visible words, so
-		// it still satisfies WCAG 2.5.3.
-		aria-label={source.detached === undefined ? name : `${name} — disconnected`}
-		// The tab the user is on, said once. `aria-current` is what a screen
-		// reader announces; "showing" in the text as well would be read twice.
-		{...(source.active ? { 'aria-current': 'true' as const } : {})}
-		onClick={(event) => {
-			onShow(event.currentTarget.offsetWidth);
-		}}
-	>
-		<ProviderIcon kind={sourceKind(source)} />
-		{/* The name once more on `data-name`, for the hidden bold copy that
-		    holds the tab's width — see `.source-tab-name` in the stylesheet. */}
-		<span className="source-tab-name" data-name={name}>
-			<span>{name}</span>
+}) => {
+	// The name once more on `data-name`, for the hidden bold copy that holds
+	// the tab's width — see `.source-tab-name` in the stylesheet.
+	const shownName = (words: string) => (
+		<span className="source-tab-name" data-name={words}>
+			<span>{words}</span>
 		</span>
-		{source.detached !== undefined && (
-			// Not an icon alone: a source that syncs nowhere is the one thing
-			// about this bar a user must not have to infer from a colour.
-			<span className="source-tab-detached"> — disconnected</span>
-		)}
-	</button>
-);
+	);
+	return (
+		<button
+			type="button"
+			className={source.active ? 'source-tab source-tab-active' : 'source-tab'}
+			// Said outright rather than left to be assembled from the two spans
+			// below. The name from contents is not simply their text: it joins the
+			// pieces by its own rules, so "A source" and " — disconnected" came out
+			// as a name no caller could predict — and a test looking for the tab by
+			// what it plainly says could not find it. Exactly the visible words, so
+			// it still satisfies WCAG 2.5.3.
+			aria-label={
+				source.detached === undefined
+					? name
+					: t('sources.disconnected.label', { source: name })
+			}
+			// The tab the user is on, said once. `aria-current` is what a screen
+			// reader announces; "showing" in the text as well would be read twice.
+			{...(source.active ? { 'aria-current': 'true' as const } : {})}
+			onClick={(event) => {
+				onShow(event.currentTarget.offsetWidth);
+			}}
+		>
+			<ProviderIcon kind={sourceKind(source)} />
+			{source.detached === undefined
+				? shownName(name)
+				: // Not an icon alone: a source that syncs nowhere is the one thing
+					// about this bar a user must not have to infer from a colour.
+					rich(
+						'sources.disconnected.shown',
+						{
+							name: shownName,
+							state: (words) => <span className="source-tab-detached">{words}</span>,
+						},
+						{ source: name }
+					)}
+		</button>
+	);
+};
 
 /**
  * The tab, become its own name, with the provider's mark still in front of it.
@@ -349,7 +366,7 @@ const RenameField = ({
 			<input
 				ref={field}
 				className="source-tab-rename"
-				aria-label={`Rename ${name}`}
+				aria-label={t('sources.rename', { name })}
 				value={draft}
 				maxLength={LABEL_LIMIT}
 				onChange={(event) => {
@@ -450,9 +467,6 @@ const GateLink = ({ action }: { action: ConnectGate['action'] }) => (
 	</a>
 );
 
-/** What is said under the field when the code could not be asked about. */
-const NOT_CHECKED = 'The code could not be checked. Try again.';
-
 /**
  * Asks the operator's policy about a code, and holds it — or what the policy
  * gave in its place — for as long as the policy says where it is accepted.
@@ -464,16 +478,18 @@ const askAbout = async (
 	client: Pick<ApiClient, 'checkConnectCode'>,
 	code: string
 ): Promise<string | undefined> => {
+	// What is said under the field when the code could not be asked about.
+	const notChecked = () => t('sources.code.notChecked');
 	try {
 		const result = await client.checkConnectCode(code);
-		if (!result.ok) return NOT_CHECKED;
-		if (!result.value.accepted) return result.value.reason ?? 'That code was not accepted.';
+		if (!result.ok) return notChecked();
+		if (!result.value.accepted) return result.value.reason ?? t('sources.code.notAccepted');
 		holdAcceptedCode(code, result.value);
 		return undefined;
 	} catch (error) {
 		return error instanceof ApiError && error.status === 429
-			? 'Too many tries from here. Wait a minute, then try again.'
-			: NOT_CHECKED;
+			? t('sources.code.tooMany')
+			: notChecked();
 	}
 };
 
@@ -604,8 +620,8 @@ const ConnectCodeForm = ({
 				{/* Both words, one of them hidden, so the button is as wide as the
 				    longer and the menu does not change width while it asks. */}
 				<button type="submit" className="connect-code-use" disabled={blank}>
-					<span aria-hidden={checking}>Use code</span>
-					<span aria-hidden={!checking}>Checking…</span>
+					<span aria-hidden={checking}>{t('sources.code.use')}</span>
+					<span aria-hidden={!checking}>{t('sources.code.checking')}</span>
 				</button>
 			</span>
 			<span className="connect-code-said" id={`${id}-said`} role="status">
@@ -653,29 +669,31 @@ const ConnectCodeLine = ({
 	held === undefined ? (
 		<p className="connect-code-line">
 			<button type="button" className="link-button" onClick={onOpen}>
-				Have a code? Enter it
+				{t('sources.code.enter')}
 			</button>
 		</p>
 	) : (
 		<p className="connect-code-line">
 			<span>
-				{held.shown ? (
-					<>
-						{label}: <code title={held.code}>{held.code}</code>
-					</>
-				) : (
-					<>{label} accepted on this device</>
-				)}{' '}
+				{held.shown
+					? rich(
+							'sources.code.held',
+							{ code: (words) => <code title={words}>{words}</code> },
+							{ label, value: held.code }
+						)
+					: t('sources.code.accepted', { label })}{' '}
 				<button
 					type="button"
 					className="link-button"
-					aria-label={`Change ${label}`}
+					aria-label={t('sources.code.changeLabel', { label })}
 					onClick={onOpen}
 				>
-					Change
+					{t('sources.code.change')}
 				</button>
 			</span>
-			<span className="connect-code-until">Good until {untilFormat(held.until)}</span>
+			<span className="connect-code-until">
+				{t('sources.code.until', { time: untilFormat(held.until) })}
+			</span>
 		</p>
 	);
 
@@ -810,7 +828,7 @@ const ConnectChoice = ({
 							move('buttons');
 						}}
 					>
-						Already have access? Connect storage
+						{t('sources.haveAccess')}
 					</button>
 				)}
 			</div>
@@ -1030,7 +1048,7 @@ export const SourcePanel = ({
 			? []
 			: [
 					{
-						label: 'Rename',
+						label: t('sources.options.rename'),
 						onChoose: () => {
 							setRenaming(source.connectionId);
 						},
@@ -1046,7 +1064,7 @@ export const SourcePanel = ({
 		};
 		const download =
 			holding?.has(source.connectionId) === true
-				? [{ label: 'Download all notes', onChoose: show('download') }]
+				? [{ label: t('sources.options.download'), onChoose: show('download') }]
 				: [];
 		const syncable = source.provider !== undefined && CONNECTABLE.includes(source.provider);
 		if (source.connectionId === LOCAL_CONNECTION_ID) return download;
@@ -1054,19 +1072,19 @@ export const SourcePanel = ({
 			...renameItem(source),
 			...(syncable
 				? [
-						{ label: 'Sync now', onChoose: show() },
-						{ label: 'Re-scan from scratch', onChoose: show('rescan') },
+						{ label: t('sources.options.sync'), onChoose: show() },
+						{ label: t('sources.options.rescan'), onChoose: show('rescan') },
 					]
 				: []),
 			...download,
-			{ label: 'Disconnect', onChoose: show('disconnect'), danger: true },
+			{ label: t('sources.options.disconnect'), onChoose: show('disconnect'), danger: true },
 		];
 	};
 
 	return (
-		<section className="source-panel" aria-label="Sources">
+		<section className="source-panel" aria-label={t('sources.title')}>
 			<div className="pane-header">
-				<h2>Sources</h2>
+				<h2>{t('sources.title')}</h2>
 				<div className="pane-actions">
 					<div className="source-add" ref={addFrame}>
 						<button
@@ -1084,12 +1102,12 @@ export const SourcePanel = ({
 						{adding && offerable.length > 0 && (
 							<Menu
 								className="source-add-menu"
-								label="Storage providers"
+								label={t('sources.providers')}
 								frame={addFrame}
 								onClose={stopAdding}
 							>
 								<p className="source-add-heading">
-									{first ? 'Choose a storage provider' : connectLabel}
+									{first ? t('sources.chooseProvider') : connectLabel}
 								</p>
 								<ConnectChoice
 									gate={gate}
@@ -1136,7 +1154,7 @@ export const SourcePanel = ({
 									aria-label={
 										source.detached === undefined
 											? name
-											: `${name} — disconnected`
+											: t('sources.disconnected.label', { source: name })
 									}
 									{...(source.active ? { 'aria-current': 'true' as const } : {})}
 									onClick={() => {
@@ -1148,13 +1166,20 @@ export const SourcePanel = ({
 									<span className="row-marked">
 										<ProviderIcon kind={sourceKind(source)} />
 										<span className="row-label">
-											{name}
-											{source.detached !== undefined && (
-												<span className="source-tab-detached">
-													{' '}
-													— disconnected
-												</span>
-											)}
+											{source.detached === undefined
+												? name
+												: rich(
+														'sources.disconnected.shown',
+														{
+															name: (words) => words,
+															state: (words) => (
+																<span className="source-tab-detached">
+																	{words}
+																</span>
+															),
+														},
+														{ source: name }
+													)}
 										</span>
 									</span>
 								</button>
@@ -1206,7 +1231,7 @@ export const useShowingSource = (
 	const { ordered } = useSourceChoices(db, client);
 	const showing = ordered.find((source) => source.active);
 	return showing === undefined
-		? { name: 'Storage', kind: undefined }
+		? { name: t('sources.storage'), kind: undefined }
 		: {
 				name: shownSourceName(showing.connectionId, tabName(showing, ordered), renaming),
 				kind: sourceKind(showing),
