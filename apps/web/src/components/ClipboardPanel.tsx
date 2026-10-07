@@ -1,4 +1,5 @@
 import {
+	type ClipName,
 	contentTypeOf,
 	fileKind,
 	MAX_ATTACHMENT_BYTES,
@@ -21,6 +22,7 @@ import { browserFiles, type FileBrowser, saveBytes } from '../editor/fileActions
 import { FILE_ICONS, Icon } from '../editor/icons.js';
 import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { pickFiles } from '../editor/pickFiles.js';
+import { t } from '../i18n/t.js';
 import { addClips, type ClipInput, listClips, removeClip } from '../store/clipboard.js';
 import { type ClipRecord, type NotesDatabase } from '../store/db.js';
 import { type FileRead } from '../sync/fileReads.js';
@@ -75,30 +77,31 @@ const pasteKeys = (): string => chordLabel(parseChord('Mod+V'));
 
 const tooLarge = (names: readonly string[]): string => {
 	const [name] = names;
-	return names.length === 1 && name !== undefined
-		? `${name === '' ? 'That' : name} is larger than ${String(MEGABYTES)} MB, the most the clipboard takes.`
-		: `${String(names.length)} items are larger than ${String(MEGABYTES)} MB, the most the clipboard takes.`;
+	if (names.length !== 1 || name === undefined) {
+		return t('clipboard.tooLarge.several', { count: names.length, megabytes: MEGABYTES });
+	}
+	return name === ''
+		? t('clipboard.tooLarge.unnamed', { megabytes: MEGABYTES })
+		: t('clipboard.tooLarge.named', { name, megabytes: MEGABYTES });
 };
 
 const NOT_READ: Readonly<Record<Exclude<SystemRead['kind'], 'read'>, () => string>> = {
-	empty: () => 'There is nothing on the clipboard to paste.',
-	refused: () =>
-		`The browser did not let the clipboard be read. Press ${pasteKeys()} here instead.`,
-	unsupported: () =>
-		`This browser does not let a button read the clipboard. Press ${pasteKeys()} here instead.`,
+	empty: () => t('clipboard.notRead.empty'),
+	refused: () => t('clipboard.notRead.refused', { keys: pasteKeys() }),
+	unsupported: () => t('clipboard.notRead.unsupported', { keys: pasteKeys() }),
 };
 
-const NOT_HAD: Readonly<Record<Exclude<FileRead['state'], 'ready' | 'aborted'>, string>> = {
-	gone: 'That is no longer on the clipboard.',
-	offline: 'That is not on this device, and this device is offline.',
-	unavailable: 'That is not on this device, and its storage cannot be read from now.',
-	failed: 'That could not be downloaded.',
+const NOT_HAD: Readonly<Record<Exclude<FileRead['state'], 'ready' | 'aborted'>, () => string>> = {
+	gone: () => t('clipboard.notHad.gone'),
+	offline: () => t('clipboard.notHad.offline'),
+	unavailable: () => t('clipboard.notHad.unavailable'),
+	failed: () => t('clipboard.notHad.failed'),
 };
 
 /** Why an item's bytes did not come, as a throw a promise chain can carry. */
 class NotHad extends Error {
 	constructor(readonly state: keyof typeof NOT_HAD) {
-		super(NOT_HAD[state]);
+		super(NOT_HAD[state]());
 	}
 }
 
@@ -109,11 +112,18 @@ const bytesOf = (read: FileRead): ArrayBuffer => {
 	throw new NotHad(read.state);
 };
 
-/** "Copied." as it is shown over the item, where a full stop has no sentence to end. */
-const withoutStop = (words: string): string => words.replace(/\.$/, '');
-
 const messageOf = (error: unknown): string =>
-	error instanceof NotHad ? error.message : 'That could not be put on the clipboard.';
+	error instanceof NotHad ? error.message : t('clipboard.notCopied');
+
+/**
+ * What is said of one item: the item, and the words shown over it — "Copied"
+ * as against the "Copied." announced, since there a full stop has no sentence
+ * to end.
+ */
+interface About {
+	readonly item: string;
+	readonly mark: string;
+}
 
 /**
  * What is said, for a moment: a "Copied" or a "Saved", over the item it is
@@ -122,12 +132,12 @@ const messageOf = (error: unknown): string =>
 interface Said {
 	readonly words: string;
 	/** The item it is about, which it is shown over. */
-	readonly item?: string;
+	readonly about?: About;
 }
 
 const SAID_NOTHING: Said = { words: '' };
 
-const useSaying = (): readonly [Said, (words: string, item?: string) => void] => {
+const useSaying = (): readonly [Said, (words: string, about?: About) => void] => {
 	const [said, setSaid] = useState<Said>(SAID_NOTHING);
 	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	useEffect(
@@ -136,9 +146,9 @@ const useSaying = (): readonly [Said, (words: string, item?: string) => void] =>
 		},
 		[]
 	);
-	const say = useCallback((words: string, item?: string) => {
+	const say = useCallback((words: string, about?: About) => {
 		clearTimeout(timer.current);
-		setSaid(item === undefined ? { words } : { words, item });
+		setSaid(about === undefined ? { words } : { words, about });
 		timer.current = setTimeout(() => {
 			setSaid(SAID_NOTHING);
 		}, SAID_MS);
@@ -239,9 +249,46 @@ const Thumbnail = ({
 	return <img ref={image} className="clipboard-thumb" alt="" />;
 };
 
+/**
+ * What an item's buttons are called: what pressing it does — a text or a
+ * picture is copied, a file saved — and, until it has gone up, that it is
+ * waiting to.
+ */
+const itemWords = (
+	{ kind, label: name }: ClipName,
+	pending: boolean
+): { label: string; title: string; remove: string } => {
+	switch (kind) {
+		case 'text':
+			return {
+				label: t(pending ? 'clipboard.item.copyTextPending' : 'clipboard.item.copyText'),
+				title: t(
+					pending ? 'clipboard.item.copyTextPendingTitle' : 'clipboard.item.copyText'
+				),
+				remove: t('clipboard.item.removeText'),
+			};
+		case 'image':
+			return {
+				label: t(pending ? 'clipboard.item.copyPending' : 'clipboard.item.copy', { name }),
+				title: t(pending ? 'clipboard.item.copyPendingTitle' : 'clipboard.item.copy', {
+					name,
+				}),
+				remove: t('clipboard.item.remove', { name }),
+			};
+		case 'file':
+			return {
+				label: t(pending ? 'clipboard.item.savePending' : 'clipboard.item.save', { name }),
+				title: t(pending ? 'clipboard.item.savePendingTitle' : 'clipboard.item.save', {
+					name,
+				}),
+				remove: t('clipboard.item.remove', { name }),
+			};
+	}
+};
+
 interface ItemProps extends Required<Omit<ClipboardPanelProps, 'pick'>> {
 	clip: ClipRecord;
-	say: (words: string, item?: string) => void;
+	say: (words: string, about?: About) => void;
 	/** What was just said of this item — "Copied", "Saved" — shown over it. */
 	done: string | undefined;
 }
@@ -274,7 +321,10 @@ const ClipItem = ({
 				.then((got) => saveBytes(got, read.label, clip.name, browser))
 				.then(
 					() => {
-						say('Saved.', clip.name);
+						say(t('clipboard.saved'), {
+							item: clip.name,
+							mark: t('clipboard.savedMark'),
+						});
 					},
 					(error: unknown) => {
 						say(messageOf(error));
@@ -289,7 +339,7 @@ const ClipItem = ({
 				: bytes().then((got) => asPng(got, contentTypeOf(clip.name) ?? ''));
 		void system.write(read.kind === 'text' ? 'text/plain' : 'image/png', blob).then(
 			() => {
-				say('Copied.', clip.name);
+				say(t('clipboard.copied'), { item: clip.name, mark: t('clipboard.copiedMark') });
 			},
 			(error: unknown) => {
 				say(messageOf(error));
@@ -297,10 +347,7 @@ const ClipItem = ({
 		);
 	};
 
-	const what =
-		read.kind === 'file'
-			? `Save ${read.label}`
-			: `Copy ${read.kind === 'text' ? 'text' : read.label}`;
+	const what = itemWords(read, pending);
 
 	return (
 		<li className={pending ? 'clipboard-item clipboard-pending' : 'clipboard-item'}>
@@ -308,8 +355,8 @@ const ClipItem = ({
 				<button
 					type="button"
 					className="clipboard-choose"
-					aria-label={pending ? `${what}, waiting to send` : what}
-					title={pending ? `${what} (waiting to send)` : what}
+					aria-label={what.label}
+					title={what.title}
 					onClick={choose}
 				>
 					{read.kind === 'text' && (
@@ -351,8 +398,8 @@ const ClipItem = ({
 			<button
 				type="button"
 				className="icon icon-quiet clipboard-remove"
-				aria-label={`Remove ${read.kind === 'text' ? 'text' : read.label}`}
-				title="Remove"
+				aria-label={what.remove}
+				title={t('clipboard.item.removeTitle')}
 				onClick={() => {
 					void removeClip(database, connectionId, clip.name).then(() =>
 						sync.clipboard.flush(connectionId)
@@ -435,7 +482,7 @@ export const ClipboardPanel = ({
 	return (
 		<section
 			className={classes.join(' ')}
-			aria-label="Clipboard"
+			aria-label={t('clipboard.title')}
 			// Focusable by a click anywhere in it, so a keyboard paste lands here.
 			tabIndex={-1}
 			onPaste={onPaste}
@@ -462,12 +509,12 @@ export const ClipboardPanel = ({
 			}}
 		>
 			<div className="clipboard-head">
-				<span className="clipboard-title">Clipboard</span>
+				<span className="clipboard-title">{t('clipboard.title')}</span>
 				<button
 					type="button"
 					className="icon icon-quiet"
-					aria-label="Add a file"
-					title="Add a file"
+					aria-label={t('clipboard.addFile')}
+					title={t('clipboard.addFile')}
 					onClick={() => {
 						void pick().then((files) => {
 							addFiles(files, false);
@@ -477,7 +524,7 @@ export const ClipboardPanel = ({
 					<Icon name="paperclip" />
 				</button>
 				<button type="button" className="clipboard-paste" onClick={paste}>
-					Paste
+					{t('clipboard.paste')}
 				</button>
 			</div>
 			{clips !== undefined && clips.length > 0 && (
@@ -493,22 +540,17 @@ export const ClipboardPanel = ({
 							browser={browser}
 							urls={urls}
 							say={say}
-							done={said.item === clip.name ? withoutStop(said.words) : undefined}
+							done={said.about?.item === clip.name ? said.about.mark : undefined}
 						/>
 					))}
 				</ul>
 			)}
-			{clips?.length === 0 && (
-				<p className="clipboard-empty muted">
-					What you paste here is on your other devices too. Click or tap an item to use
-					it.
-				</p>
-			)}
+			{clips?.length === 0 && <p className="clipboard-empty muted">{t('clipboard.empty')}</p>}
 			{/* Announced either way. Shown here only for what is not about one
 			    item, which is shown over that item instead. */}
 			<p
 				className={
-					said.item === undefined
+					said.about === undefined
 						? 'clipboard-said muted'
 						: 'clipboard-said clipboard-said-quiet'
 				}
@@ -518,7 +560,7 @@ export const ClipboardPanel = ({
 			</p>
 			{dragged && (
 				<p className="clipboard-drop-hint" aria-hidden="true">
-					Drop here to add to clipboard
+					{t('clipboard.dropHint')}
 				</p>
 			)}
 		</section>

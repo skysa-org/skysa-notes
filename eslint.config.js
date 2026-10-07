@@ -49,16 +49,10 @@ const SHOWN_PROP =
  * it.
  */
 const WORDS_NOT_MOVED_YET = [
-	'apps/web/src/components/AccountPanel.tsx',
-	'apps/web/src/components/ClipboardPanel.tsx',
 	'apps/web/src/components/CompactBar.tsx',
-	'apps/web/src/components/ConnectButton.tsx',
 	'apps/web/src/components/DeletedNotice.tsx',
 	'apps/web/src/components/FindBar.tsx',
-	'apps/web/src/components/ImportNotes.tsx',
 	'apps/web/src/components/Outline.tsx',
-	'apps/web/src/components/ScratchControls.tsx',
-	'apps/web/src/components/Scratchpad.tsx',
 	'apps/web/src/components/SearchField.tsx',
 	'apps/web/src/install/InstallBanner.tsx',
 	'apps/web/src/routes/index.tsx',

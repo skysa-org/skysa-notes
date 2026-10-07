@@ -7,6 +7,7 @@ import {
 	readClipName,
 } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { type ClipRecord, type NotesDatabase, type SyncStateRecord } from './db.js';
 import { updateLive } from './detached.js';
 
@@ -72,7 +73,8 @@ interface Prepared {
 	readonly hash: string;
 }
 
-const labelOf = (input: ClipInput): string => (input.kind === 'text' ? 'Text' : input.name);
+const labelOf = (input: ClipInput): string =>
+	input.kind === 'text' ? t('clipboard.text') : input.name;
 
 const bytesOf = (input: ClipInput): ArrayBuffer =>
 	input.kind === 'text' ? encoder.encode(input.text).slice().buffer : input.bytes;
