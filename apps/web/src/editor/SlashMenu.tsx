@@ -3,6 +3,7 @@ import { useInstance } from '@milkdown/react';
 import { usePluginViewContext } from '@prosemirror-adapter/react';
 import { useEffect, useRef, useState } from 'react';
 
+import { t } from '../i18n/t.js';
 import { SLASH_COMMANDS } from './commands.js';
 import { moveHighlight, slashItems, slashKeyAction, textBeforeCursor } from './slash.js';
 
@@ -109,7 +110,7 @@ export const SlashMenu = () => {
 	});
 
 	return (
-		<div className="slash-menu" ref={host} role="listbox" aria-label="Insert">
+		<div className="slash-menu" ref={host} role="listbox" aria-label={t('editor.slashMenu')}>
 			{items.map((item, position) => (
 				<button
 					type="button"

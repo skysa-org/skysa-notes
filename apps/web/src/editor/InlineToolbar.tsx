@@ -6,6 +6,7 @@ import { usePluginViewContext } from '@prosemirror-adapter/react';
 import { useEffect, useRef } from 'react';
 
 import { COARSE_POINTER, mediaMatches } from '../components/layout.js';
+import { t } from '../i18n/t.js';
 import { codeBlockAround } from './codeTools.js';
 import { INLINE_COMMANDS } from './commands.js';
 import { onPress } from './press.js';
@@ -96,7 +97,12 @@ export const InlineToolbar = () => {
 	});
 
 	return (
-		<div className="inline-toolbar" ref={host} role="toolbar" aria-label="Selection formatting">
+		<div
+			className="inline-toolbar"
+			ref={host}
+			role="toolbar"
+			aria-label={t('editor.selectionToolbar')}
+		>
 			{INLINE_COMMANDS.map((command) => (
 				<button
 					type="button"

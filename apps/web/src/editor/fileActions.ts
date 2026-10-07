@@ -1,6 +1,7 @@
 import { contentTypeOf, downloadName, opensInTab, safeOpenType } from '@skysa/core';
 
 import { COARSE_POINTER } from '../components/layout.js';
+import { t } from '../i18n/t.js';
 import { DOWNLOAD_GRACE_MS } from '../store/exportNotes.js';
 import type { AttachmentHost, AttachmentProblem, Fetched } from './attachHost.js';
 
@@ -79,23 +80,38 @@ export const browserFiles: FileBrowser = {
 	},
 };
 
-/** What to tell the user about a file that did not come, by its name. */
+/** What to tell the user about a file that did not come, by its name, where it has one. */
 const PROBLEMS: Readonly<
 	Record<Exclude<Fetched['state'], 'ready' | 'aborted'>, (label: string) => AttachmentProblem>
 > = {
 	missing: (label) => ({
-		message: `${label} could not be found beside this note.`,
+		message:
+			label === ''
+				? t('editor.fileProblem.missing.unnamed')
+				: t('editor.fileProblem.missing.named', { name: label }),
 		tone: 'warning',
 	}),
 	offline: (label) => ({
-		message: `${label} is not on this device, and this device is offline.`,
+		message:
+			label === ''
+				? t('editor.fileProblem.offline.unnamed')
+				: t('editor.fileProblem.offline.named', { name: label }),
 		tone: 'warning',
 	}),
 	unavailable: (label) => ({
-		message: `${label} is not on this device, and its storage cannot be read from now.`,
+		message:
+			label === ''
+				? t('editor.fileProblem.unavailable.unnamed')
+				: t('editor.fileProblem.unavailable.named', { name: label }),
 		tone: 'warning',
 	}),
-	failed: (label) => ({ message: `${label} could not be downloaded.`, tone: 'error' }),
+	failed: (label) => ({
+		message:
+			label === ''
+				? t('editor.fileProblem.failed.unnamed')
+				: t('editor.fileProblem.failed.named', { name: label }),
+		tone: 'error',
+	}),
 };
 
 export interface FileRequest {
@@ -111,8 +127,7 @@ export interface FileRequest {
 const fetched = async ({ host, href, label }: FileRequest): Promise<File | undefined> => {
 	const got = await host.fetchFile(href);
 	if (got.state === 'ready') return got.file;
-	if (got.state !== 'aborted')
-		host.report(PROBLEMS[got.state](label === '' ? 'That file' : label));
+	if (got.state !== 'aborted') host.report(PROBLEMS[got.state](label));
 	return undefined;
 };
 
