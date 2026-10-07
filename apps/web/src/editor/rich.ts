@@ -40,6 +40,7 @@ import {
 	toLf,
 } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from './attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { attachmentSchema, attachmentViewPlugin, chipKey, claimsClick } from './attachment.js';
@@ -456,7 +457,7 @@ export const createRichEditor = ({
 			if (attachments !== undefined) ctx.set(attachHostCtx.key, attachments);
 			ctx.update(editorViewOptionsCtx, (options) => ({
 				...options,
-				attributes: { class: 'editor-rich-surface', 'aria-label': 'Note body' },
+				attributes: { class: 'editor-rich-surface', 'aria-label': t('editor.noteBody') },
 				// Ahead of every keymap, which a plugin's would not be.
 				handleKeyDown: chipKey,
 				handleClickOn: (_view, _pos, node, _nodePos, event) => claimsClick(node, event),

@@ -3,6 +3,7 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import { $view } from '@milkdown/kit/utils';
 
+import { t } from '../i18n/t.js';
 import type { CodeDisplayStore } from './codeDisplay.js';
 import { iconElement, type IconName } from './icons.js';
 import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
@@ -31,7 +32,7 @@ import { CODE_LANGUAGES, findCodeLanguage } from './languages.js';
  * promises, since `editor/autoLanguage.ts` is watching such a block and will
  * fill it in the moment the text says what it is.
  */
-const DETECT = 'Detect language';
+const DETECT = t('editor.codeBlock.detect');
 
 /** The word in the file, which may be an alias or something never heard of. */
 const languageOf = (node: ProseNode): string => {
@@ -116,7 +117,7 @@ const codeBlockView =
 		// Attributes rather than properties, which is how the repo's rules would
 		// rather a DOM object were built (`editor/tasks.ts` says the same).
 		picker.setAttribute('class', 'code-tool-language');
-		picker.setAttribute('aria-label', 'Code block language');
+		picker.setAttribute('aria-label', t('editor.codeBlock.language'));
 		picker.replaceChildren(...languageOptions(held.current));
 		picker.addEventListener('change', () => {
 			const at = getPos();
@@ -133,7 +134,7 @@ const codeBlockView =
 			view.focus();
 		});
 
-		const copy = toolButton('Copy code', 'copy', () => {
+		const copy = toolButton(t('editor.codeBlock.copy'), 'copy', () => {
 			// Asked for rather than assumed, the way the sync scheduler asks for
 			// `navigator.locks`: the type says every browser has one, and a test
 			// environment and an older browser both look like none.
@@ -153,7 +154,7 @@ const codeBlockView =
 				.catch(() => undefined);
 		});
 
-		const remove = toolButton('Delete code block', 'trash', () => {
+		const remove = toolButton(t('editor.codeBlock.delete'), 'trash', () => {
 			const at = getPos();
 			if (at === undefined) return;
 			view.dispatch(view.state.tr.delete(at, at + held.current.nodeSize));
@@ -161,7 +162,7 @@ const codeBlockView =
 		});
 
 		const wrap = toolButton(
-			'Wrap long lines',
+			t('editor.codeBlock.wrap'),
 			'wrap',
 			() => {
 				display.set({ ...display.get(), wrap: !display.get().wrap });
@@ -170,7 +171,7 @@ const codeBlockView =
 		);
 
 		const numbers = toolButton(
-			'Line numbers',
+			t('editor.codeBlock.lineNumbers'),
 			'line-numbers',
 			() => {
 				display.set({ ...display.get(), lineNumbers: !display.get().lineNumbers });
@@ -181,7 +182,7 @@ const codeBlockView =
 		const bar = document.createElement('div');
 		bar.setAttribute('class', 'code-block-tools');
 		bar.setAttribute('role', 'group');
-		bar.setAttribute('aria-label', 'Code block');
+		bar.setAttribute('aria-label', t('editor.codeBlock.label'));
 		// Nothing in the bar is part of the note, so it is not part of the
 		// editable surface either: a cursor must not be able to land in it, and
 		// its own DOM changes are not document changes.

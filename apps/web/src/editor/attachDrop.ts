@@ -12,6 +12,7 @@ import {
 import { dropPoint } from '@milkdown/kit/prose/transform';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
+import { t } from '../i18n/t.js';
 import { settleAfter } from '../store/heldEdits.js';
 import { addProblem, closedProblem, filesToAttach } from './addFiles.js';
 import { type Added, attachHostCtx, type AttachmentHost } from './attachHost.js';
@@ -50,7 +51,7 @@ const placeholder = (name: string) => (): HTMLElement => {
 	const element = document.createElement('span');
 	element.setAttribute('class', 'attachment-pending');
 	element.setAttribute('aria-busy', 'true');
-	element.append(iconElement('file'), `Adding ${name}…`);
+	element.append(iconElement('file'), t('editor.attach.adding', { name }));
 	return element;
 };
 

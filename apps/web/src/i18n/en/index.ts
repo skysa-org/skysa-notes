@@ -1,5 +1,6 @@
 import { type Catalog } from '../catalog.js';
 import { common } from './common.js';
+import { editor } from './editor.js';
 import { shell } from './shell.js';
 
 /**
@@ -10,4 +11,5 @@ import { shell } from './shell.js';
 export const en = {
 	common,
 	shell,
+	editor,
 } as const satisfies Catalog;
