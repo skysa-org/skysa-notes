@@ -1,5 +1,9 @@
 import { type Catalog } from '../catalog.js';
+import { attachedFiles } from './attachedFiles.js';
 import { common } from './common.js';
+import { notebooks } from './notebooks.js';
+import { notes } from './notes.js';
+import { rows } from './rows.js';
 import { shell } from './shell.js';
 
 /**
@@ -10,4 +14,8 @@ import { shell } from './shell.js';
 export const en = {
 	common,
 	shell,
+	notebooks,
+	notes,
+	rows,
+	attachedFiles,
 } as const satisfies Catalog;

@@ -1,5 +1,6 @@
 import { ancestorPaths, basename, isScratchPath, parentPath, ROOT } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { pinnedFirst } from './pins.js';
 import { SCRATCHPAD_LABEL } from './scratchpad.js';
 
@@ -134,7 +135,7 @@ export const listedUnder = <T extends Readonly<{ path: string }>>(
  * belongs to no notebook, which is a shape the remote folder can hand us — the
  * app itself never creates one (docs/ARCHITECTURE.md §12.6).
  */
-export const LOOSE_NOTES_LABEL = 'Loose notes';
+export const LOOSE_NOTES_LABEL = t('notebooks.looseNotes');
 
 /**
  * What to call a folder in a pane heading. Only the root needs a name, and the

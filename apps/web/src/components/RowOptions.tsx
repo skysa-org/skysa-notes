@@ -1,5 +1,9 @@
 import { Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
+
+/** Which of the catalog's words are about each kind of row. */
+const KINDS = { Notebook: 'notebook', Note: 'note', Source: 'source' } as const;
 
 /**
  * A row's own `⋯`: what can be done to the notebook, note or source on that
@@ -24,17 +28,17 @@ export const RowOptions = ({
 }: {
 	/** What the row is called, so each button says which row it is about. */
 	name: string;
-	/** What the row is: "Notebook", "Note", "Source". */
-	kind: string;
+	/** What the row is, which picks the words for it (`rows.*` in the catalog). */
+	kind: 'Notebook' | 'Note' | 'Source';
 	items: readonly OptionsMenuItem[];
 	disabled?: boolean;
 	align?: 'start' | 'end';
 }) => (
 	<div className="row-options">
 		<OptionsMenu
-			label={`Options for “${name}”`}
-			title={`${kind} options`}
-			groupLabel={`${kind} “${name}”`}
+			label={t('rows.options', { name })}
+			title={t(`rows.${KINDS[kind]}.options`)}
+			groupLabel={t(`rows.${KINDS[kind]}.menu`, { name })}
 			triggerClassName="icon icon-quiet"
 			trigger={<Icon name="overflow" />}
 			disabled={disabled || items.length === 0}

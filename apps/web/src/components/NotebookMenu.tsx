@@ -1,3 +1,4 @@
+import { t } from '../i18n/t.js';
 import { pinItem } from './noteMenu.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
@@ -33,9 +34,9 @@ export const notebookMenuItems = (
 	{ pinned, onPin, onNewInside, onRename, onMove, onFiles, onDelete }: NotebookActions
 ): OptionsMenuItem[] => [
 	...pinItem(pinned, onPin),
-	{ label: `New notebook inside “${name}”`, onChoose: onNewInside },
-	{ label: 'Rename', onChoose: onRename },
-	{ label: 'Move', onChoose: onMove },
-	...(onFiles === undefined ? [] : [{ label: 'Attached files', onChoose: onFiles }]),
-	{ label: 'Delete', onChoose: onDelete, danger: true },
+	{ label: t('notebooks.menu.newInside', { name }), onChoose: onNewInside },
+	{ label: t('notebooks.menu.rename'), onChoose: onRename },
+	{ label: t('notebooks.menu.move'), onChoose: onMove },
+	...(onFiles === undefined ? [] : [{ label: t('notebooks.menu.files'), onChoose: onFiles }]),
+	{ label: t('notebooks.menu.delete'), onChoose: onDelete, danger: true },
 ];
