@@ -1,5 +1,13 @@
 # @skysa/web
 
+## 0.21.1
+
+### Patch Changes
+
+- 7c4541b: On a phone, or in any window too narrow for three columns, the notebook dropdown now shows the notebook's full path, as the heading over the notes does, instead of its name alone. When the bar is short of room the path is shortened in the middle: the notebooks it is in give way first (`Work/Proj…/Q3`), and the notebook's own name last.
+- Updated dependencies [7c4541b]
+  - @skysa/core@0.21.1
+
 ## 0.21.0
 
 ### Minor Changes
