@@ -24,7 +24,7 @@ import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';
 import { cardLines, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
-import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
+import { keepOpenings, noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
 import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
 import { useCardMotion, useEasedHeight } from './cardMotion.js';
 import { useElementWidth } from './layout.js';
@@ -472,6 +472,8 @@ export const Scratchpad = ({
 		() => scratchGroups((notes ?? []).filter((note) => note.id !== takingId)),
 		[notes, takingId]
 	);
+	// Every card asks for its opening on every draw (`keepOpenings`).
+	keepOpenings('scratchpad', notes?.length ?? 0);
 	const both = cards.pinned.length > 0 && cards.others.length > 0;
 	const card = (note: NoteRecord, style: CSSProperties | undefined, measure: Measure) => (
 		<Card

@@ -1,38 +1,62 @@
-import { previewBlocks, type PreviewLine, previewLines } from '@skysa/core';
+import { previewBlocks, type PreviewLine, previewLineText } from '@skysa/core';
 
 import { isCreatedLine, isTimeLine } from './createdLine.js';
 
 /**
  * A note's visible text, parsed once per body.
  *
- * `previewLines` is a parse (`packages/core/src/markdown/preview.ts`): about a
- * millisecond for a 300-word note and ten for a 3000-word one. The note list
- * and the search answers ask it again on every render, and a note list renders
- * on every keystroke in the note beside it, so the answer is kept, by the body
- * it is for. A body is its own key: the same text is the same answer, and an
- * edit is a new key rather than a stale entry to invalidate.
+ * `previewBlocks` is a parse (`packages/core/src/markdown/preview.ts`): about a
+ * millisecond for a 300-word note and ten for a 3000-word one. The note list,
+ * the scratchpad's cards and the search answers ask it again on every render,
+ * and a list renders on every keystroke in the note beside it, so the answer is
+ * kept, by the body it is for. A body is its own key: the same text is the same
+ * answer, and an edit is a new key rather than a stale entry to invalidate.
+ *
+ * One parse serves both shapes of answer. The blocks — each line with how it
+ * is set, which a card draws — are what is kept, and the lines of text a list
+ * row joins are read off them (`previewLineText`), kept beside them for as long
+ * as they are. A card's wall asks for the lines and the card for the blocks of
+ * the same body, and they were two parses.
  *
  * Bounded, oldest first out, because the keys are whole bodies: it holds what
  * the screen keeps asking about, not every version of every note the tab has
- * seen.
+ * seen. At least `LIMIT`, and more while a longer list is shown
+ * (`keepOpenings`): a bound under the rows drawn is no cache, since drawing the
+ * list again asks for every row in the order the last draw put them out.
  */
 
 const LIMIT = 400;
 
+/** How much more than the lists' rows is kept: what is drawn beside them, such as search answers. */
+const ROOM = 1.25;
+
+/** The longest each list has been, by name: the note list and the scratchpad can both be drawn. */
+const lists = new Map<string, number>();
+
 /**
- * A parse of `body`, kept in `seen` for the next time it is asked for.
+ * Keep room for `list`'s `count` rows, each asking for its opening on every
+ * draw. Only ever grows: a list shown once is likely shown again, and what it
+ * keeps is the openings of notes that are on the device anyway.
+ */
+export const keepOpenings = (list: string, count: number): void => {
+	if (count > (lists.get(list) ?? 0)) lists.set(list, count);
+};
+
+/** The most kept: `LIMIT`, or more once longer lists have been shown. */
+const most = (): number =>
+	Math.max(LIMIT, Math.ceil([...lists.values()].reduce((sum, each) => sum + each, 0) * ROOM));
+
+const seen = new Map<string, readonly PreviewLine[]>();
+
+/**
+ * The blocks of `body`, kept in `seen` for the next time they are asked for.
  *
  * `keep: false` for a body being typed (`store/liveEdits.ts`), which is asked
  * once and never again: one kept per keystroke would push every other note's
  * answer out within a paragraph, and the whole list would be parsed again the
  * next time it drew.
  */
-const remembered = <T>(
-	seen: Map<string, T>,
-	body: string,
-	parse: (body: string) => T,
-	{ keep = true }: { keep?: boolean }
-): T => {
+const blocksOf = (body: string, { keep = true }: { keep?: boolean }): readonly PreviewLine[] => {
 	const known = seen.get(body);
 	if (known !== undefined) {
 		// To the back of the queue: asked again, so kept longest.
@@ -40,28 +64,36 @@ const remembered = <T>(
 		seen.set(body, known);
 		return known;
 	}
-	const answer = parse(body);
+	const answer = previewBlocks(body);
 	if (!keep) return answer;
 	seen.set(body, answer);
-	if (seen.size > LIMIT) {
+	if (seen.size > most()) {
 		const oldest = seen.keys().next();
 		if (oldest.done !== true) seen.delete(oldest.value);
 	}
 	return answer;
 };
 
-const seenLines = new Map<string, readonly string[]>();
+/** The lines of text read off each kept set of blocks, gone with them. */
+const linesRead = new WeakMap<readonly PreviewLine[], readonly string[]>();
+
+/** The readable lines of blocks, as `previewLines` gives them: blanks dropped. */
+const linesOf = (blocks: readonly PreviewLine[]): readonly string[] => {
+	const known = linesRead.get(blocks);
+	if (known !== undefined) return known;
+	const lines = blocks.map(previewLineText).filter((line) => line !== '');
+	linesRead.set(blocks, lines);
+	return lines;
+};
 
 export const visibleLines = (body: string, options: { keep?: boolean } = {}): readonly string[] =>
-	remembered(seenLines, body, previewLines, options);
-
-const seenBlocks = new Map<string, readonly PreviewLine[]>();
+	linesOf(blocksOf(body, options));
 
 /** The visible lines with how each is set, which a scratchpad card draws. */
 export const visibleBlocks = (
 	body: string,
 	options: { keep?: boolean } = {}
-): readonly PreviewLine[] => remembered(seenBlocks, body, previewBlocks, options);
+): readonly PreviewLine[] => blocksOf(body, options);
 
 /** The whole body's visible text as one line, which an excerpt is cut from. */
 export const visibleText = (body: string): string => visibleLines(body).join(' ');
