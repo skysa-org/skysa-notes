@@ -63,79 +63,209 @@ const isChip = (link: Link): boolean => {
  */
 const apart = (words: string): string => ` ${words} `;
 
-/** What a chip says: its words, or the file's name where it has none, as the editor shows it. */
-const chipWords = (link: Link): string => {
-	const words = link.children.map(inline).join('');
-	return words === '' ? hrefFileName(link.url) : words;
-};
+/** How a run of a line's words is set, as the rich editor sets them. */
+export type PreviewMark = 'strong' | 'emphasis' | 'delete' | 'code' | 'link';
 
-/** What a run of inline content looks like on screen. */
-const inline = (node: PhrasingContent): string => {
+/** Words set one way: a line is a row of these. */
+export interface PreviewRun {
+	readonly text: string;
+	readonly marks: readonly PreviewMark[];
+}
+
+/** What an item's first line starts with: its bullet, its number, or its box. */
+export type PreviewMarker = Readonly<
+	{ kind: 'bullet' } | { kind: 'number'; value: number } | { kind: 'task'; checked: boolean }
+>;
+
+/**
+ * One line of a body as the rich editor shows it: its words, set as they are
+ * there, and what the line is — a heading's, a list item's, a quote's or a
+ * code block's — where that changes how it is drawn.
+ */
+export interface PreviewLine {
+	readonly runs: readonly PreviewRun[];
+	/** How many lists deep it is: 0 outside one. */
+	readonly depth: number;
+	/** A heading's level, 1 to 6. */
+	readonly heading?: number;
+	/** An item's first line: what it starts with. */
+	readonly marker?: PreviewMarker;
+	/** A line of a quote. */
+	readonly quote?: true;
+	/** A line of a code block, which keeps every character in it. */
+	readonly code?: true;
+}
+
+/** What a line is, apart from its words. */
+type LineKind = Omit<PreviewLine, 'runs'>;
+
+/** A run of inline content as it looks on screen, in runs of one style each. */
+const inline = (node: PhrasingContent, marks: readonly PreviewMark[]): PreviewRun[] => {
+	const inside = (mark: PreviewMark | undefined) =>
+		'children' in node
+			? node.children.flatMap((child) =>
+					inline(
+						child,
+						mark === undefined || marks.includes(mark) ? marks : [...marks, mark]
+					)
+				)
+			: [];
 	switch (node.type) {
 		// Inline html is shown as written, as the rich editor shows it: an atom
 		// holding the tag.
 		case 'text':
-		case 'inlineCode':
 		case 'html':
-			return node.value;
+			return [{ text: node.value, marks }];
+		case 'inlineCode':
+			return [{ text: node.value, marks: [...marks, 'code'] }];
 		case 'break':
-			return '\n';
+			return [{ text: '\n', marks }];
 		case 'image':
 		case 'imageReference':
-			return apart(node.alt ?? '');
+			return [{ text: apart(node.alt ?? ''), marks }];
 		// The rich editor cannot show a footnote at all, and sends the note to raw
 		// mode (§7) — where this is what is on screen.
 		case 'footnoteReference':
-			return `[^${node.label ?? node.identifier}]`;
+			return [{ text: `[^${node.label ?? node.identifier}]`, marks }];
 		case 'link':
-			return isChip(node) ? apart(chipWords(node)) : node.children.map(inline).join('');
+			return isChip(node) ? [{ text: apart(chipWords(node)), marks }] : inside('link');
 		case 'emphasis':
+			return inside('emphasis');
 		case 'strong':
+			return inside('strong');
 		case 'delete':
+			return inside('delete');
 		case 'linkReference':
-			return node.children.map(inline).join('');
+			return inside('link');
 		default:
-			return '';
+			return [];
 	}
 };
+
+/** What a chip says: its words, or the file's name where it has none, as the editor shows it. */
+const chipWords = (link: Link): string => {
+	const words = textOf(link.children.flatMap((child) => inline(child, [])));
+	return words === '' ? hrefFileName(link.url) : words;
+};
+
+const textOf = (runs: readonly PreviewRun[]): string => runs.map((run) => run.text).join('');
 
 const isEditorBreak = (paragraph: Paragraph): boolean => {
 	const [only, ...rest] = paragraph.children;
 	return rest.length === 0 && only?.type === 'html' && EDITOR_BREAK.test(only.value);
 };
 
+/** Runs as lines, at the breaks inside them. */
+const atBreaks = (runs: readonly PreviewRun[]): PreviewRun[][] => {
+	const pieces = runs.flatMap((run) =>
+		run.text.split('\n').map((text, at) => ({ run: { ...run, text }, opens: at > 0 }))
+	);
+	const starts = [0, ...pieces.flatMap((piece, at) => (piece.opens ? [at] : []))];
+	return starts.map((start, at) => pieces.slice(start, starts[at + 1]).map(({ run }) => run));
+};
+
+/** Plain words, a line of them to each line of `text`. */
+const plainLines = (text: string, marks: readonly PreviewMark[] = []): PreviewRun[][] =>
+	text.split('\n').map((line) => [{ text: line, marks }]);
+
+const phrasing = (children: readonly PhrasingContent[]): PreviewRun[][] =>
+	atBreaks(children.flatMap((child) => inline(child, [])));
+
 /** The lines a block puts on screen, before whitespace is collapsed. */
-const blockLines = (node: RootContent): string[] => {
+const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
+	const as = (lines: readonly PreviewRun[][], more: Partial<LineKind> = {}): PreviewLine[] =>
+		lines.map((runs) => ({ ...kind, ...more, runs }));
 	switch (node.type) {
 		case 'paragraph':
-			return isEditorBreak(node) ? [] : node.children.map(inline).join('').split('\n');
+			return isEditorBreak(node) ? [] : as(phrasing(node.children));
 		case 'heading':
-			return node.children.map(inline).join('').split('\n');
+			return as(phrasing(node.children), { heading: node.depth });
 		case 'code':
-			return node.value.split('\n');
+			return as(plainLines(node.value), { code: true });
 		case 'html':
-			return EDITOR_BREAK.test(node.value) ? [] : node.value.split('\n');
+			return EDITOR_BREAK.test(node.value) ? [] : as(plainLines(node.value));
 		case 'table':
-			return node.children.map((row) =>
-				row.children.map((cell) => cell.children.map(inline).join('')).join(' ')
+			return as(
+				node.children.map((row) =>
+					row.children.flatMap((cell, at) => [
+						...(at === 0 ? [] : [{ text: ' ', marks: [] }]),
+						...cell.children.flatMap((child) => inline(child, [])),
+					])
+				)
 			);
 		case 'blockquote':
+			return node.children.flatMap((child) => blockLines(child, { ...kind, quote: true }));
 		case 'list':
+			return node.children.flatMap((item, at) =>
+				blockLines(item, {
+					...kind,
+					depth: kind.depth + 1,
+					marker:
+						typeof item.checked === 'boolean'
+							? { kind: 'task', checked: item.checked }
+							: node.ordered === true
+								? { kind: 'number', value: (node.start ?? 1) + at }
+								: { kind: 'bullet' },
+				})
+			);
+		// The marker is the item's first line's; the lines after it are the
+		// item's too, under its words.
 		case 'listItem':
+			return node.children
+				.flatMap((child) => blockLines(child, { ...kind, marker: undefined }))
+				.map((line, at) =>
+					at === 0 && kind.marker !== undefined ? { ...line, marker: kind.marker } : line
+				);
 		case 'footnoteDefinition':
-			return node.children.flatMap(blockLines);
+			return node.children.flatMap((child) => blockLines(child, kind));
 		// A thematic break, a link definition: nothing a reader sees as words.
 		default:
 			return [];
 	}
 };
 
-/** The readable lines of a body, in order, whitespace collapsed and blanks dropped. */
-export const previewLines = (body: string): string[] =>
+/**
+ * A line's runs with whitespace collapsed as `previewLines` collapses it — a
+ * run of it, however it falls across the runs, is one space, and none at
+ * either end — and the runs it leaves empty dropped. A run's leading space
+ * goes where the run before it ends in one: if that one was nothing but a
+ * space and went itself, it went for the same reason, so the one before it
+ * ends in a space too.
+ */
+const collapsed = (runs: readonly PreviewRun[]): PreviewRun[] => {
+	const squeezed = runs
+		.map((run) => ({ ...run, text: run.text.replace(/\s+/g, ' ') }))
+		.filter((run) => run.text !== '');
+	const spaced = squeezed
+		.map((run, at) =>
+			at === 0 || squeezed[at - 1]?.text.endsWith(' ') === true
+				? { ...run, text: run.text.replace(/^ /, '') }
+				: run
+		)
+		.filter((run) => run.text !== '');
+	const last = spaced.at(-1);
+	if (last === undefined) return [];
+	const end = last.text.replace(/ $/, '');
+	return end === '' ? spaced.slice(0, -1) : [...spaced.slice(0, -1), { ...last, text: end }];
+};
+
+/**
+ * The readable lines of a body, in order, each with how it is set: what a
+ * scratchpad card draws (`apps/web/src/components/Scratchpad.tsx`). Whitespace
+ * is collapsed and blank lines dropped, so the words of each are exactly
+ * `previewLines`'s.
+ */
+export const previewBlocks = (body: string): PreviewLine[] =>
 	parse(body)
-		.children.flatMap(blockLines)
-		.map((line) => line.replace(/\s+/g, ' ').trim())
-		.filter((line) => line !== '');
+		.children.flatMap((node) => blockLines(node, { depth: 0 }))
+		.map((line) => ({ ...line, runs: collapsed(line.runs) }))
+		.filter((line) => line.runs.length > 0);
+
+/** A preview line's words, as one string. */
+export const previewLineText = (line: PreviewLine): string => textOf(line.runs);
+
+/** The readable lines of a body, in order, whitespace collapsed and blanks dropped. */
+export const previewLines = (body: string): string[] => previewBlocks(body).map(previewLineText);
 
 /**
  * One line of readable text for the whole body, which is what an excerpt is cut

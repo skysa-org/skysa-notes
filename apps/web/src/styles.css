@@ -3138,6 +3138,13 @@ button.icon.account-devices-count {
 	--tint: var(--scratch-pink);
 }
 
+/* A scratch note's editor is a surface of its own, coloured or not: a card
+   opening in a compact window grows over the wall from the card's place, and
+   goes back into it the same way, and would show the cards through it. */
+.scratch-editor {
+	background: var(--bg);
+}
+
 /* The glow, wherever a scratch note is coloured: its card, its editor, and
    the dialog a card opens in. */
 .scratch-card[data-color],
@@ -3245,6 +3252,11 @@ button.icon.account-devices-count {
 	background: var(--bg);
 	box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
 	transition: box-shadow var(--duration-state) var(--ease-out);
+}
+
+/* What is in the box, at its own height while the box eases to it. */
+.take-note-inner {
+	border-radius: inherit;
 }
 
 .take-note.taking {
@@ -3434,6 +3446,18 @@ button.icon.account-devices-count {
 	border-color: transparent;
 }
 
+/* Open, it is where its editor is, grown out of this place on the wall
+   (`cardMotion.ts`), and the place is kept for it to go back into. */
+.scratch-card[data-open] {
+	opacity: 0;
+}
+
+/* A card open in a compact window (`CardSheet`): no box of its own, so the
+   note pane in it is the column's. */
+.card-sheet {
+	display: contents;
+}
+
 @media (prefers-color-scheme: dark) {
 	.scratch-card {
 		background: var(--surface);
@@ -3464,13 +3488,86 @@ button.icon.account-devices-count {
 	cursor: pointer;
 }
 
+/* The whole card opens it, its foot included, all but the tools along that
+   foot: the button is pressed anywhere on the card, and the tools' row lets a
+   press between and beside them through to it. */
+.scratch-card-open::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+}
+
 .scratch-card-title {
 	font-size: 0.95rem;
 	font-weight: 600;
 }
 
+/* A card's lines set as the note's are: an item's bullet, number or box
+   before its words, which wrap under themselves; a heading's words heavier;
+   a quote ruled off; code in the code face; and a task that is done struck
+   through, as the editor has it. */
 .scratch-card-line {
-	display: block;
+	display: flex;
+	gap: 0.4em;
+}
+
+.scratch-card-words {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.scratch-card-marker {
+	flex: none;
+	min-width: 1em;
+	text-align: center;
+	color: var(--muted);
+}
+
+.scratch-card-box {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 0.85em;
+	height: 0.85em;
+	margin: 0.3em 0.075em 0;
+	border: 1.5px solid var(--muted);
+	border-radius: 0.2em;
+	color: var(--bg);
+}
+
+.scratch-card-box[data-checked='true'] {
+	background: var(--muted);
+}
+
+.scratch-card-box > .toolbar-icon {
+	width: 0.7em;
+	height: 0.7em;
+}
+
+.scratch-card-line[data-heading] {
+	font-weight: 600;
+}
+
+.scratch-card-line[data-quote] {
+	padding-inline-start: 0.6em;
+	border-inline-start: 2px solid var(--border);
+	color: var(--muted);
+}
+
+.scratch-card-line[data-code],
+.scratch-card-words code {
+	font-family: var(--font-mono);
+	font-size: 0.9em;
+}
+
+.scratch-card-line[data-done] > .scratch-card-words {
+	color: var(--muted);
+	text-decoration: line-through;
+}
+
+.scratch-card-link {
+	text-decoration: underline;
 }
 
 .scratch-card-open > .dot {
@@ -3484,13 +3581,16 @@ button.icon.account-devices-count {
    show them on. A pin that is on stays, to say so. Their room is kept either
    way, so a card is the same height with them and without. */
 .scratch-card-tools {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 2px;
 	padding: 0 var(--space-2xs) var(--space-2xs);
+	pointer-events: none;
 }
 
 .scratch-card-tools > * {
+	pointer-events: auto;
 	opacity: 0;
 	transition: opacity var(--duration-state) var(--ease-out);
 }
@@ -3514,6 +3614,20 @@ button.icon.account-devices-count {
 
 .scratch-card-tools > .pin-button[aria-pressed='true'] {
 	color: var(--on-fg);
+}
+
+/* A note's colour and `⋯` are lit while their menu is open, as the toolbar's
+   menus beside them are (`.toolbar-button-on`), on the card and under the
+   editor alike. On a card, its tools stay shown while one is open: the menu is
+   drawn outside the card, so the pointer on it is not on the card. */
+.scratch-card-tools button.icon.icon-quiet[aria-expanded='true'],
+.scratch-bar button.icon.icon-quiet[aria-expanded='true'] {
+	color: var(--on-fg);
+	background: var(--on-bg);
+}
+
+.scratch-card-tools:has([aria-expanded='true']) > * {
+	opacity: 1;
 }
 
 .scratch-empty {
@@ -3774,6 +3888,30 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 			transform: translateX(var(--slide-in));
 		}
 	}
+}
+
+/* A card open in a compact window covers the scratchpad rather than taking
+   its place: the wall is laid out under it, hidden — `visibility`, which
+   keeps it from the focus and a screen reader too — but for while the card
+   grows out of it (`cardMotion.ts`), and is there at once, not opening out of
+   its trigger, for the card to go back into as it closes. */
+.compact .app-shell[data-card] > .scratchpad {
+	display: flex;
+	clip-path: none;
+	opacity: 1;
+	visibility: hidden;
+	transition: none;
+}
+
+/* And with no card open and nothing over it, the scratchpad is what a compact
+   window shows, as it is — in the moment between a card closing and its pane
+   being opened again, which is no time to open it out of its trigger. */
+.compact .app-shell[data-wall] > .scratchpad {
+	display: flex;
+	clip-path: none;
+	opacity: 1;
+	pointer-events: auto;
+	transition: none;
 }
 
 /* A row narrow enough to wrap a three-line excerpt is a row tall enough to

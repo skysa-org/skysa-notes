@@ -1,6 +1,13 @@
-import { type ScratchColor } from '@skysa/core';
+import {
+	type PreviewLine,
+	previewLineText,
+	type PreviewMark,
+	type PreviewMarker,
+	type ScratchColor,
+} from '@skysa/core';
 import {
 	type CSSProperties,
+	Fragment,
 	type ReactNode,
 	useCallback,
 	useDeferredValue,
@@ -16,8 +23,9 @@ import { Icon } from '../editor/icons.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';
-import { cardText, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
-import { noteOpening, openingLines } from '../store/visibleText.js';
+import { cardLines, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
+import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
+import { useCardMotion, useEasedHeight } from './cardMotion.js';
 import { useElementWidth } from './layout.js';
 import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
 import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
@@ -120,36 +128,116 @@ const TakeNote = ({
 	onClose: () => void;
 }) => {
 	const [box, setBox] = useState<HTMLDivElement | null>(null);
+	const [inner, setInner] = useState<HTMLDivElement | null>(null);
 	const keeper = useRef<HTMLInputElement>(null);
 	const taking = editor !== undefined && editor !== null;
 	useCloseTaking(taking, box, onClose);
+	useEasedHeight(box, inner, taking);
 	return (
 		<div ref={setBox} className={taking ? 'take-note taking' : 'take-note'}>
-			{/* Holds the focus, and with it a phone's keyboard, from the press
-			    until the editor it opens is there to take it: a phone opens its
-			    keyboard only for a field focused in the press itself. */}
-			<input ref={keeper} className={FOCUS_KEEPER} tabIndex={-1} aria-hidden="true" />
-			{taking ? (
-				editor
-			) : (
-				<button
-					type="button"
-					className="take-note-prompt"
-					onClick={() => {
-						keeper.current?.focus();
-						onTake();
-					}}
-				>
-					Take a note…
-				</button>
-			)}
+			<div ref={setInner} className="take-note-inner">
+				{/* Holds the focus, and with it a phone's keyboard, from the press
+				    until the editor it opens is there to take it: a phone opens its
+				    keyboard only for a field focused in the press itself. */}
+				<input ref={keeper} className={FOCUS_KEEPER} tabIndex={-1} aria-hidden="true" />
+				{taking ? (
+					editor
+				) : (
+					<button
+						type="button"
+						className="take-note-prompt"
+						onClick={() => {
+							keeper.current?.focus();
+							onTake();
+						}}
+					>
+						Take a note…
+					</button>
+				)}
+			</div>
 		</div>
+	);
+};
+
+/** A note's opening lines after its name and the date it was made, as a list row has them (`noteOpening`). */
+const opening = (
+	body: string,
+	note: Readonly<{ title: string; createdAt: number }>,
+	options: { keep: boolean }
+): readonly PreviewLine[] => {
+	const lines = openingBlocks(body, options);
+	const after = noteOpening(lines.map(previewLineText), note);
+	return lines.slice(lines.length - after.length);
+};
+
+/** The element each mark is drawn in. */
+const MARK_TAG = {
+	strong: 'strong',
+	emphasis: 'em',
+	delete: 's',
+	code: 'code',
+} as const satisfies Record<Exclude<PreviewMark, 'link'>, string>;
+
+/** Words in their marks. A link is only drawn as one: the card is a button, and one press opens it. */
+const marked = (text: string, marks: readonly PreviewMark[]): ReactNode =>
+	marks.reduce<ReactNode>((inside, mark) => {
+		if (mark === 'link') return <span className="scratch-card-link">{inside}</span>;
+		const Tag = MARK_TAG[mark];
+		return <Tag>{inside}</Tag>;
+	}, text);
+
+/** A list's bullets by depth, as a browser draws them: disc, circle, square. */
+const BULLETS = ['•', '◦', '▪'] as const;
+
+/** What an item's first line starts with. Out of the card's name, which is its words. */
+const Marker = ({ marker, depth }: { marker: PreviewMarker; depth: number }) => {
+	if (marker.kind === 'task') {
+		return (
+			<span className="scratch-card-box" data-checked={marker.checked} aria-hidden="true">
+				{marker.checked && <Icon name="check" />}
+			</span>
+		);
+	}
+	return (
+		<span className="scratch-card-marker" aria-hidden="true">
+			{marker.kind === 'number'
+				? `${String(marker.value)}.`
+				: BULLETS[(depth - 1) % BULLETS.length]}
+		</span>
+	);
+};
+
+/**
+ * One line of a card, set as it is in the note: its marks, and an item's
+ * bullet, number or box before its words, which wrap under themselves. A
+ * line of a list is in by its depth, and an item's later lines by one more,
+ * to stand under its words.
+ */
+const CardLine = ({ line }: { line: PreviewLine }) => {
+	const indent = line.marker === undefined ? line.depth : line.depth - 1;
+	return (
+		<span
+			className="scratch-card-line"
+			data-heading={line.heading}
+			data-quote={line.quote}
+			data-code={line.code}
+			data-done={line.marker?.kind === 'task' && line.marker.checked ? true : undefined}
+			style={indent > 0 ? { paddingInlineStart: `${String(indent * 1.4)}em` } : undefined}
+		>
+			{line.marker !== undefined && <Marker marker={line.marker} depth={line.depth} />}
+			<span className="scratch-card-words">
+				{line.runs.map((run, at) => (
+					<Fragment key={at}>{marked(run.text, run.marks)}</Fragment>
+				))}
+			</span>
+		</span>
 	);
 };
 
 /** One note's card: its name if it has one, and the opening of what it says. */
 const Card = ({
 	note: row,
+	open,
 	liveEdits,
 	style,
 	measure,
@@ -159,6 +247,8 @@ const Card = ({
 	onDelete,
 }: {
 	note: NoteRecord;
+	/** Open, and so not on the wall: its editor is where it went (`useCardMotion`). */
+	open: boolean;
 	liveEdits: LiveEdits | undefined;
 	style: CSSProperties | undefined;
 	measure: Measure;
@@ -173,23 +263,23 @@ const Card = ({
 	// A name its first heading gives it shows through as it is typed.
 	const named = !isUnnamed(row) || note.title !== row.title;
 	const typing = note.body !== row.body;
-	const lines = cardText(noteOpening(openingLines(note.body, { keep: !typing }), note));
-	const name = named ? note.title : (lines[0] ?? 'Empty note');
+	const lines = cardLines(opening(note.body, note, { keep: !typing }));
+	const first = lines[0];
+	const name = named ? note.title : first === undefined ? 'Empty note' : previewLineText(first);
 	return (
 		<article
 			ref={measure}
 			className="scratch-card"
 			data-id={row.id}
 			data-color={marks.color}
+			data-open={open || undefined}
 			style={style}
 		>
 			<button type="button" className="scratch-card-open" data-card={row.id} onClick={onOpen}>
 				{named && <span className="scratch-card-title">{note.title}</span>}
 				{lines.map((line, at) => (
 					// Lines of one note, in order, and drawn again whole when it changes.
-					<span key={at} className="scratch-card-line">
-						{line}
-					</span>
+					<CardLine key={at} line={line} />
 				))}
 				{!named && lines.length === 0 && (
 					<span className="scratch-card-line muted">Empty note</span>
@@ -375,6 +465,7 @@ export const Scratchpad = ({
 		<Card
 			key={note.id}
 			note={note}
+			open={note.id === openId}
 			liveEdits={liveEdits}
 			style={style}
 			measure={measure}
@@ -430,16 +521,20 @@ export const Scratchpad = ({
  * whose React events would bubble here — is the menu's alone.
  */
 export const ScratchModal = ({
+	id,
 	color,
 	onClose,
 	children,
 }: {
+	/** The note open: the card it grows out of, and goes back into. */
+	id: string;
 	color: ScratchColor | undefined;
 	onClose: () => void;
 	children: ReactNode;
 }) => {
 	const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
 	const [backdrop, setBackdrop] = useState<HTMLDivElement | null>(null);
+	useCardMotion(backdrop, dialog, id, { dim: true });
 	const close = useRef(onClose);
 	useEffect(() => {
 		close.current = onClose;
@@ -481,5 +576,22 @@ export const ScratchModal = ({
 			</div>
 		</div>,
 		document.body
+	);
+};
+
+/**
+ * A card open in a compact window: its note pane, the whole window under the
+ * bar, grown out of the card and gone back into it (`useCardMotion`). A box of
+ * no size of its own (`display: contents`), so the pane in it is the column's
+ * as it is everywhere else.
+ */
+export const CardSheet = ({ id, children }: { id: string; children: ReactNode }) => {
+	const [sheet, setSheet] = useState<HTMLDivElement | null>(null);
+	const pane = sheet?.firstElementChild;
+	useCardMotion(sheet, pane instanceof HTMLElement ? pane : null, id);
+	return (
+		<div ref={setSheet} className="card-sheet">
+			{children}
+		</div>
 	);
 };

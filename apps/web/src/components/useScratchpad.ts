@@ -1,6 +1,6 @@
 import { basename, parentPath, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { useRouter } from '@tanstack/react-router';
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { Place } from '../routes/place.js';
 import { db, type NoteRecord } from '../store/db.js';
@@ -94,10 +94,16 @@ export const useScratchpad = ({
 	// In a compact window the scratchpad is the notes' pane, and with no card
 	// open it is all there is to show: opened as the scratchpad opens, and
 	// again as a card closes, and what shutting the notebooks over it, or the
-	// sources, goes back to.
-	useEffect(() => {
+	// sources, goes back to. A card open is the column's, over it, and shuts
+	// it. Both before the window is drawn, so a card going back into the wall
+	// finds it there, and one growing out of it finds nothing shut over it.
+	useLayoutEffect(() => {
 		if (active && compact && noteId === undefined) setPanel('notes');
 	}, [active, compact, noteId, setPanel]);
+	const cardId = card?.id;
+	useLayoutEffect(() => {
+		if (compact && cardId !== undefined) setPanel(null);
+	}, [compact, cardId, setPanel]);
 	const resting = active && compact && card === undefined;
 	useEffect(() => {
 		setRest(resting ? 'notes' : null);
@@ -150,7 +156,6 @@ export const useScratchpad = ({
 	const open = (note: NoteRecord) => {
 		pushed.current = note.id;
 		select({ folder: SCRATCHPAD_FOLDER, note: note.id }, { note });
-		if (compact) setPanel(null);
 	};
 
 	/** Close the card open: Back, where opening it was the step before. */
@@ -260,6 +265,16 @@ export const useScratchpad = ({
 		},
 		/** How the note open goes into a notebook, where it is a scratch note's. */
 		moveOpen: active ? promote : undefined,
+		/**
+		 * What the shell says of the scratchpad in a compact window, under
+		 * `panel` (styles.css): a card open over it, which it stays drawn under
+		 * to grow out of and go back into; or it with nothing over it, which is
+		 * what shows.
+		 */
+		shellProps: (panel: Pane | null) => ({
+			'data-card': compact && card !== undefined ? '' : undefined,
+			'data-wall': resting && panel === null ? '' : undefined,
+		}),
 		/** The note pane's part in it (`ScratchEditing`). */
 		editing: {
 			onClose: taking ? closeTake : close,

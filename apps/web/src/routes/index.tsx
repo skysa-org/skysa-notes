@@ -32,7 +32,7 @@ import {
 	type NoteViewHandle,
 	type ScratchEditing,
 } from '../components/NoteView.js';
-import { ScratchModal, Scratchpad } from '../components/Scratchpad.js';
+import { CardSheet, ScratchModal, Scratchpad } from '../components/Scratchpad.js';
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
@@ -1857,7 +1857,9 @@ const Home = () => {
 	const noteColumn = () => {
 		if (!inScratchpad) return noteEditor();
 		if (!compact) return null;
-		if (scratch.card !== undefined) return noteEditor(scratch.editing);
+		if (scratch.card !== undefined) {
+			return <CardSheet id={scratch.card.id}>{noteEditor(scratch.editing)}</CardSheet>;
+		}
 		return <section className="note-view empty" aria-label="Note" />;
 	};
 
@@ -1882,7 +1884,11 @@ const Home = () => {
 	const scratchOverlays = () => (
 		<>
 			{scratch.modal && scratch.card !== undefined && (
-				<ScratchModal color={scratchMarks(scratch.card).color} onClose={scratch.close}>
+				<ScratchModal
+					id={scratch.card.id}
+					color={scratchMarks(scratch.card).color}
+					onClose={scratch.close}
+				>
 					{noteEditor(scratch.editing)}
 				</ScratchModal>
 			)}
@@ -1980,7 +1986,7 @@ const Home = () => {
 
 			{/* `data-panel` is which pane a compact window is showing as a
 			    dropdown; the stylesheet ignores it in a wide one. */}
-			<div className="app-shell" {...shellProps}>
+			<div className="app-shell" {...shellProps} {...scratch.shellProps(panel)}>
 				{/* Positioned, like the two panes in a compact window, so it is
 				    never a grid item and takes no column. */}
 				<SourceDropdown

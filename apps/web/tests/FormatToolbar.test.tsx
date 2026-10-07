@@ -1,7 +1,7 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -488,7 +488,12 @@ describe('FormatToolbar, with only the basic tools', () => {
 
 		expect(
 			screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))
-		).toEqual(['Text formatting', 'Lists', 'Link']);
+		).toEqual(['Text formatting', 'Lists', 'Insert', 'Link']);
+		expect(
+			within(screen.getByRole('group', { name: 'Insert' }))
+				.getAllByRole('button')
+				.map((button) => button.getAttribute('aria-label') ?? button.textContent)
+		).toEqual(['Attach files']);
 		expect(screen.queryByRole('button', { name: /Text style/ })).toBeNull();
 		expect(screen.queryByRole('button', { name: 'Strikethrough' })).toBeNull();
 		expect(screen.queryByRole('button', { name: /Code block/ })).toBeNull();
@@ -511,5 +516,15 @@ describe('FormatToolbar, with only the basic tools', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Bold' }));
 
 		expect(markdown()).toBe('**plain** words\n');
+	});
+
+	it('asks for files to put in the note, as the whole bar does', async () => {
+		await harness('plain\n', BASIC_SLOTS);
+		const click = vi.spyOn(HTMLInputElement.prototype, 'click');
+
+		fireEvent.mouseDown(screen.getByRole('button', { name: 'Attach files' }));
+
+		expect(click).toHaveBeenCalledOnce();
+		document.querySelector('input[type="file"]')?.dispatchEvent(new Event('cancel'));
 	});
 });

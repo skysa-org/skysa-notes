@@ -1,4 +1,4 @@
-import { previewLines } from '@skysa/core';
+import { previewBlocks, type PreviewLine, previewLines } from '@skysa/core';
 
 import { isCreatedLine, isTimeLine } from './createdLine.js';
 
@@ -19,15 +19,20 @@ import { isCreatedLine, isTimeLine } from './createdLine.js';
 
 const LIMIT = 400;
 
-const seen = new Map<string, readonly string[]>();
-
 /**
+ * A parse of `body`, kept in `seen` for the next time it is asked for.
+ *
  * `keep: false` for a body being typed (`store/liveEdits.ts`), which is asked
  * once and never again: one kept per keystroke would push every other note's
  * answer out within a paragraph, and the whole list would be parsed again the
  * next time it drew.
  */
-export const visibleLines = (body: string, { keep = true } = {}): readonly string[] => {
+const remembered = <T>(
+	seen: Map<string, T>,
+	body: string,
+	parse: (body: string) => T,
+	{ keep = true }: { keep?: boolean }
+): T => {
 	const known = seen.get(body);
 	if (known !== undefined) {
 		// To the back of the queue: asked again, so kept longest.
@@ -35,15 +40,28 @@ export const visibleLines = (body: string, { keep = true } = {}): readonly strin
 		seen.set(body, known);
 		return known;
 	}
-	const lines = previewLines(body);
-	if (!keep) return lines;
-	seen.set(body, lines);
+	const answer = parse(body);
+	if (!keep) return answer;
+	seen.set(body, answer);
 	if (seen.size > LIMIT) {
 		const oldest = seen.keys().next();
 		if (oldest.done !== true) seen.delete(oldest.value);
 	}
-	return lines;
+	return answer;
 };
+
+const seenLines = new Map<string, readonly string[]>();
+
+export const visibleLines = (body: string, options: { keep?: boolean } = {}): readonly string[] =>
+	remembered(seenLines, body, previewLines, options);
+
+const seenBlocks = new Map<string, readonly PreviewLine[]>();
+
+/** The visible lines with how each is set, which a scratchpad card draws. */
+export const visibleBlocks = (
+	body: string,
+	options: { keep?: boolean } = {}
+): readonly PreviewLine[] => remembered(seenBlocks, body, previewBlocks, options);
 
 /** The whole body's visible text as one line, which an excerpt is cut from. */
 export const visibleText = (body: string): string => visibleLines(body).join(' ');
@@ -64,10 +82,20 @@ const OPENING = 2_000;
  * one thing it can hide is a reference link's definition further down, and
  * then the link shows as the brackets the user typed.
  */
-export const openingLines = (body: string, options: { keep?: boolean } = {}): readonly string[] => {
-	if (body.length <= OPENING) return visibleLines(body, options);
+export const openingLines = (body: string, options: { keep?: boolean } = {}): readonly string[] =>
+	visibleLines(opening(body), options);
+
+/** The same opening's lines with how each is set (`visibleBlocks`). */
+export const openingBlocks = (
+	body: string,
+	options: { keep?: boolean } = {}
+): readonly PreviewLine[] => visibleBlocks(opening(body), options);
+
+/** A body to its first `OPENING` characters, and on to the end of the line they end in. */
+const opening = (body: string): string => {
+	if (body.length <= OPENING) return body;
 	const end = body.indexOf('\n', OPENING);
-	return visibleLines(end === -1 ? body : body.slice(0, end), options);
+	return end === -1 ? body : body.slice(0, end);
 };
 
 /**

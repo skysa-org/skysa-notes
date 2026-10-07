@@ -1,4 +1,4 @@
-import { readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
+import { type PreviewLine, previewLineText, readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
@@ -16,7 +16,7 @@ import {
 import {
 	CARD_LINES,
 	CARD_WORDS,
-	cardText,
+	cardLines,
 	getScratchpadShown,
 	scratchGroups,
 	scratchMarks,
@@ -186,28 +186,55 @@ describe('the scratchpad’s groups', () => {
 describe('what a card shows', () => {
 	const words = (count: number, from = 0) =>
 		Array.from({ length: count }, (_, at) => `w${String(at + from)}`).join(' ');
+	const plain = (text: string): PreviewLine => ({ depth: 0, runs: [{ text, marks: [] }] });
+	const texts = (lines: readonly PreviewLine[]) => lines.map(previewLineText);
 
 	it('is every line of a short note, each still a line', () => {
-		expect(cardText(['Milk', 'Eggs and bread'])).toEqual(['Milk', 'Eggs and bread']);
+		expect(texts(cardLines([plain('Milk'), plain('Eggs and bread')]))).toEqual([
+			'Milk',
+			'Eggs and bread',
+		]);
 	});
 
 	it(`is the first ${String(CARD_WORDS)} words of a long one, cut with "…"`, () => {
-		const shown = cardText([words(40), words(40, 40)]);
-		expect(shown).toEqual([words(40), `${words(CARD_WORDS - 40, 40)}…`]);
+		const shown = cardLines([plain(words(40)), plain(words(40, 40))]);
+		expect(texts(shown)).toEqual([words(40), `${words(CARD_WORDS - 40, 40)}…`]);
 	});
 
 	it('ends in "…" where whole lines are left out', () => {
-		expect(cardText([words(CARD_WORDS), 'more'])).toEqual([`${words(CARD_WORDS)}…`]);
+		expect(texts(cardLines([plain(words(CARD_WORDS)), plain('more')]))).toEqual([
+			`${words(CARD_WORDS)}…`,
+		]);
 	});
 
 	it(`is no more than ${String(CARD_LINES)} lines`, () => {
-		const lines = Array.from({ length: CARD_LINES + 3 }, (_, at) => `line${String(at)}`);
-		const shown = cardText(lines);
+		const lines = Array.from({ length: CARD_LINES + 3 }, (_, at) => plain(`line${String(at)}`));
+		const shown = cardLines(lines);
 		expect(shown).toHaveLength(CARD_LINES);
-		expect(shown.at(-1)).toBe(`line${String(CARD_LINES - 1)}…`);
+		expect(shown.at(-1)?.runs.at(-1)?.text).toBe(`line${String(CARD_LINES - 1)}…`);
 	});
 
 	it('is nothing for a note with nothing in it', () => {
-		expect(cardText([])).toEqual([]);
+		expect(cardLines([])).toEqual([]);
+	});
+
+	it('keeps how a line is set, cut inside its marks', () => {
+		const item: PreviewLine = {
+			depth: 1,
+			marker: { kind: 'bullet' },
+			runs: [
+				{ text: 'one ', marks: [] },
+				{ text: 'two three', marks: ['strong'] },
+			],
+		};
+		const [, cut] = cardLines([plain(words(CARD_WORDS - 2)), item]);
+		expect(cut).toEqual({
+			depth: 1,
+			marker: { kind: 'bullet' },
+			runs: [
+				{ text: 'one ', marks: [] },
+				{ text: 'two…', marks: ['strong'] },
+			],
+		});
 	});
 });

@@ -134,6 +134,54 @@ describe('what a card shows', () => {
 		expect(line?.textContent).toBe(`${words.slice(0, CARD_WORDS).join(' ')}…`);
 	});
 
+	it('sets its words as the note does', () => {
+		renderPad({
+			notes: [
+				card('1', {
+					body: '**Bold**, *slanted*, `code` and [a link](https://example.com)\n',
+				}),
+			],
+		});
+		const words = document.querySelector('.scratch-card-words');
+		expect(words?.querySelector('strong')?.textContent).toBe('Bold');
+		expect(words?.querySelector('em')?.textContent).toBe('slanted');
+		expect(words?.querySelector('code')?.textContent).toBe('code');
+		expect(words?.querySelector('.scratch-card-link')?.textContent).toBe('a link');
+		// Words only: one press opens the card, wherever on it.
+		expect(words?.querySelector('a')).toBeNull();
+	});
+
+	it('draws a list’s bullets, numbers and boxes, out of the card’s name', () => {
+		renderPad({
+			notes: [
+				card('1', { body: '- Milk\n  - oat\n\n3. Third\n\n- [ ] Eggs\n- [x] Bread\n' }),
+			],
+		});
+		const lines = [...document.querySelectorAll<HTMLElement>('.scratch-card-line')];
+		expect(
+			lines.map((line) => line.querySelector('.scratch-card-marker')?.textContent)
+		).toEqual(['•', '◦', '3.', undefined, undefined]);
+		const boxes = lines.map((line) => line.querySelector<HTMLElement>('.scratch-card-box'));
+		expect(boxes.map((box) => box?.dataset.checked)).toEqual([
+			undefined,
+			undefined,
+			undefined,
+			'false',
+			'true',
+		]);
+		expect(lines[4]?.dataset.done).toBe('true');
+		for (const line of lines) {
+			expect(
+				line
+					.querySelector('.scratch-card-marker, .scratch-card-box')
+					?.getAttribute('aria-hidden')
+			).toBe('true');
+		}
+		expect(
+			screen.getByRole('button', { name: /^Milk\s?oat\s?Third\s?Eggs\s?Bread$/ })
+		).toBeDefined();
+	});
+
 	it('shows its colour, for the glow to be drawn by', () => {
 		renderPad({ notes: [card('1', { body: 'Milk\n', frontmatter: 'color: teal\n' })] });
 		expect(document.querySelector<HTMLElement>('.scratch-card')?.dataset.color).toBe('teal');
@@ -274,7 +322,7 @@ describe('a card open in a dialog', () => {
 	const renderModal = () => {
 		const onClose = vi.fn();
 		render(
-			<ScratchModal color="green" onClose={onClose}>
+			<ScratchModal id="1" color="green" onClose={onClose}>
 				<button type="button">Inside</button>
 			</ScratchModal>
 		);

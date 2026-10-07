@@ -158,9 +158,9 @@ const SLOT_OF_STOP: Record<string, string> = { outdent: 'indentation', indent: '
 
 /**
  * The bar a scratch note has (docs/ARCHITECTURE.md §7, "The scratchpad"): the
- * marks and the lists, and a link. A scratch note is jotted, not laid out — no
- * headings, no code blocks, no files — and a bar of six fits a phone with
- * nothing in the overflow menu.
+ * marks and the lists, a file and a link. A scratch note is jotted, not laid
+ * out — no headings, no code blocks — but a photo or a receipt is as quickly
+ * kept as a line of text (the owner's ask, 2026-10-07).
  */
 export const BASIC_SLOTS: readonly string[] = [
 	'strong',
@@ -168,6 +168,7 @@ export const BASIC_SLOTS: readonly string[] = [
 	'bullet-list',
 	'ordered-list',
 	'task-list',
+	'attach',
 	'link',
 ];
 
