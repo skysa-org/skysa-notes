@@ -3314,13 +3314,13 @@ button.icon.account-devices-count {
 	text-align: start;
 }
 
-/* A notebook inside another says the notebooks it is in before its own name,
-   as the notes' heading does, shortened in its middle to fit (`PathLabel`):
-   the whole path sizes the label, unseen, and the shortened one is drawn over
-   it. Until it is measured that is the whole path, cut at its end. The label
-   clips rather than ending in an ellipsis of its own: drawn where the unseen
-   path overflows it, in the label's colour, that one showed. */
-.compact-picker-path {
+/* A notebook's path and a note's name, shortened in their middle to fit
+   (`MiddleLabel`): the whole of it sizes the label, unseen, and the shortened
+   one is drawn over it. Until it is measured that is the whole, cut at its
+   end. The label clips rather than ending in an ellipsis of its own: drawn
+   where the unseen whole overflows it, in the label's colour, that one
+   showed. */
+.compact-picker-middle {
 	position: relative;
 	text-overflow: clip;
 }

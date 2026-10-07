@@ -178,31 +178,31 @@ export const useCompactLayout = () => {
 
 /**
  * What the notebook dropdown says: its path, as the notes' heading does, so a
- * notebook inside another says which notebooks it is in. `lead` is the
- * notebooks it is in, which give way first when the bar is short of room
- * (`PathLabel`).
+ * notebook inside another says which notebooks it is in. `keep` is its own
+ * name, which the notebooks it is in give way before when the bar is short of
+ * room (`MiddleLabel`).
  */
-const notebookLabel = (folder: string | undefined): { value: string; lead?: string } => {
+const notebookLabel = (folder: string | undefined): { value: string; keep?: string } => {
 	if (folder === undefined) return { value: 'Notebooks' };
 	const value = folderLabel(folder);
 	const parent = parentPath(folder);
-	return parent === ROOT ? { value } : { value, lead: parent };
+	return parent === ROOT ? { value } : { value, keep: value.slice(parent.length) };
 };
 
 /**
- * `value` shortened in its middle to `room` (`middleEllipsis`), keeping the
- * part after `lead` whole for longest, or `value` as it is with nothing to
- * measure. Measured by a canvas, scaled to the width the page laid `whole` —
- * the whole of `value` — out at, so the two agree about the font.
+ * `value` shortened in its middle to `room` (`middleEllipsis`), keeping `keep`
+ * at its end whole for longest, or `value` as it is with nothing to measure.
+ * Measured by a canvas, scaled to the width the page laid `whole` — the whole
+ * of `value` — out at, so the two agree about the font.
  */
 const fitted = (
 	whole: Element | null | undefined,
 	room: number | undefined,
 	value: string,
-	lead: string
+	keep: string
 ): string => {
 	if (whole === null || whole === undefined || room === undefined) return value;
-	// The whole path fits by the page's own measure, which also laid out `room`.
+	// The whole of it fits by the page's own measure, which also laid out `room`.
 	const width = whole.getBoundingClientRect().width;
 	if (width <= room) return value;
 	const context = document.createElement('canvas').getContext('2d');
@@ -215,32 +215,33 @@ const fitted = (
 	// the end off what was shortened already.
 	return middleEllipsis(
 		value,
-		value.slice(lead.length),
+		keep,
 		(text) => context.measureText(text).width * scale <= room - 1
 	);
 };
 
 /**
- * A notebook's path, shortened in its middle to the room the bar gives it
- * (`fitted`): the notebooks it is in give way before its own name.
+ * A trigger's words, shortened in their middle to the room the bar gives them
+ * (`fitted`): a notebook's path, whose own name the notebooks it is in give
+ * way before, and a note's name, cut alike from both ends.
  *
- * The whole path is in the label, unseen, so the bar gives the label the room
- * the whole path asks for, as it does any trigger's words, and the shortened
+ * The whole of it is in the label, unseen, so the bar gives the label the
+ * room the whole asks for, as it does any trigger's words, and the shortened
  * one is drawn over it — shortening what sizes the label would hand the room
  * back and ask for it again. Measured again when the room changes and once
- * the fonts have arrived; until then, and in jsdom, it is the whole path, cut
- * at its end by the stylesheet.
+ * the fonts have arrived; until then, and in jsdom, it is the whole, cut at
+ * its end by the stylesheet.
  */
-const PathLabel = ({ value, lead }: { value: string; lead: string }) => {
+const MiddleLabel = ({ value, keep }: { value: string; keep: string }) => {
 	const [label, setLabel] = useState<HTMLSpanElement | null>(null);
 	const room = useElementWidth(label);
 	const fonts = useFontsStatus();
 	const shown = useMemo(
-		() => (fonts === 'loading' ? value : fitted(label?.firstElementChild, room, value, lead)),
-		[label, room, fonts, value, lead]
+		() => (fonts === 'loading' ? value : fitted(label?.firstElementChild, room, value, keep)),
+		[label, room, fonts, value, keep]
 	);
 	return (
-		<span ref={setLabel} className="compact-picker-label compact-picker-path">
+		<span ref={setLabel} className="compact-picker-label compact-picker-middle">
 			<span className="compact-picker-whole">{value}</span>
 			<span className="compact-picker-shown">{shown}</span>
 		</span>
@@ -251,7 +252,7 @@ const PaneTrigger = ({
 	pane,
 	name,
 	value,
-	lead,
+	keep,
 	icon,
 	panel,
 	onPanel,
@@ -262,10 +263,12 @@ const PaneTrigger = ({
 	/** What is chosen now. Truncated on screen, whole in the tooltip. */
 	value: string;
 	/**
-	 * The start of `value` that gives way first, so the rest — a notebook's own
-	 * name, after the notebooks it is in — is cut last (`PathLabel`).
+	 * Given, `value` is shortened in its middle rather than at its end
+	 * (`MiddleLabel`), and this, its end, is kept whole for longest: a
+	 * notebook's own name after the notebooks it is in. `''` keeps nothing
+	 * whole, and cuts both ends alike.
 	 */
-	lead?: string;
+	keep?: string;
 	/** Shown in place of `value`, which is then in the tooltip and the name only. */
 	icon?: ReactNode;
 	panel: Pane | null;
@@ -285,10 +288,10 @@ const PaneTrigger = ({
 		}}
 	>
 		{icon ??
-			(lead === undefined ? (
+			(keep === undefined ? (
 				<span className="compact-picker-label">{value}</span>
 			) : (
-				<PathLabel value={value} lead={lead} />
+				<MiddleLabel value={value} keep={keep} />
 			))}
 		<span className="compact-picker-chevron">
 			<Icon name="chevron" />
@@ -451,6 +454,7 @@ export const CompactBar = ({
 					pane="notes"
 					name="Note"
 					value={title}
+					keep=""
 					panel={panel}
 					onPanel={onPanel}
 				/>
