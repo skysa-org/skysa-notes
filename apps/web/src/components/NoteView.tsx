@@ -390,7 +390,7 @@ const NoteBody = ({
 	useCommand({
 		id: 'note.attach',
 		label: t('notes.commands.attach'),
-		group: t('notes.commands.group'),
+		group: t('shell.commands.group.note'),
 		enabled: mode !== undefined,
 		run: attachments.pick,
 	});
@@ -494,7 +494,7 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null, scratch
 	useCommand({
 		id: 'note.outline',
 		label: showOutline ? t('notes.commands.hideOutline') : t('notes.commands.showOutline'),
-		group: t('notes.commands.group'),
+		group: t('shell.commands.group.note'),
 		// A scratch note's editor has no outline.
 		enabled: noteId !== undefined && !scratch,
 		run: toggleOutline,
@@ -866,7 +866,7 @@ export const NoteView = ({
 	useCommand({
 		id: 'note.find',
 		label: t('notes.commands.find'),
-		group: t('notes.commands.group'),
+		group: t('shell.commands.group.note'),
 		chord: FIND,
 		enabled: noteId !== undefined,
 		run: () => {
@@ -880,7 +880,7 @@ export const NoteView = ({
 	useCommand({
 		id: 'note.toggleMode',
 		label: t(`notes.commands.editAs.${otherMode(mode ?? 'rich')}`),
-		group: t('notes.commands.group'),
+		group: t('shell.commands.group.note'),
 		chord: MODE_TOGGLE,
 		// A scratch note's editor has no other editor to go to, but a note held
 		// in raw mode can still ask the rich one again.

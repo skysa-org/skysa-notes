@@ -68,9 +68,8 @@ export const notebooks = {
 		files: 'Attached files',
 		delete: 'Delete',
 	},
-	/** In the command palette, under `group`, about the open notebook. */
+	/** In the command palette, in the group `shell.commands.group.notebook`, about the open notebook. */
 	commands: {
-		group: 'Notebook',
 		rename: 'Rename notebook',
 		delete: 'Delete notebook',
 	},

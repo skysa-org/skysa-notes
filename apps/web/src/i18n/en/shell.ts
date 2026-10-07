@@ -43,7 +43,11 @@ export const shell = {
 	},
 	/** What the palette lists that the screen as a whole can do. */
 	commands: {
-		/** The palette's groups, shown beside each command and searched with it. */
+		/**
+		 * The palette's groups, shown beside each command and searched with it.
+		 * Every part of the app that registers a command uses these, so a group is
+		 * one word in every language.
+		 */
 		group: {
 			app: 'App',
 			note: 'Note',

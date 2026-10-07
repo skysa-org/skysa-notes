@@ -1056,7 +1056,7 @@ export const Sidebar = ({
 	useCommand({
 		id: 'notebook.rename',
 		label: t('notebooks.commands.rename'),
-		group: t('notebooks.commands.group'),
+		group: t('shell.commands.group.notebook'),
 		enabled: manageable,
 		run: () => {
 			setRenaming(open ?? null);
@@ -1071,7 +1071,7 @@ export const Sidebar = ({
 	useCommand({
 		id: 'notebook.delete',
 		label: t('notebooks.commands.delete'),
-		group: t('notebooks.commands.group'),
+		group: t('shell.commands.group.notebook'),
 		enabled: manageable,
 		run: () => {
 			setDeleting(open ?? null);
