@@ -88,7 +88,7 @@ const APPROXIMATE_CLUSTER = /\p{M}+|\P{M}\p{M}*(?:\u200d\P{M}\p{M}*)*/gu;
  * What a reader would call the characters: an emoji joined from four code
  * points is one, and so is a letter with the accents stacked on it.
  */
-const clusters = (text: string): readonly string[] => {
+export const clusters = (text: string): readonly string[] => {
 	// Asked of the value rather than the type: the lib says it is always there,
 	// and it is not.
 	const segmenter = (Intl as Partial<typeof Intl>).Segmenter;

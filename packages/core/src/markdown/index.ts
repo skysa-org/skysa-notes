@@ -36,6 +36,7 @@ export {
 } from './attachments.js';
 export {
 	attachmentName,
+	clusters,
 	foldName,
 	noteFilename,
 	normalizeTag,

@@ -80,6 +80,31 @@ describe('the compact bar', () => {
 		expect(panel()).toBeNull();
 	});
 
+	it('says the notebooks a notebook is in before its name, as the notes’ heading does', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createFolder(db, { parentPath: 'Work', name: 'Projects' });
+		await createFolder(db, { parentPath: 'Work/Projects', name: 'Q3' });
+		await createNote(db, { folderPath: 'Work/Projects/Q3', title: 'Budget', body: 'Budget\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Work');
+		});
+
+		// From `Work`'s notes, which list those of the notebooks inside it.
+		await user.click(noteTrigger());
+		await user.click(await screen.findByRole('button', { name: /^Budget/ }));
+
+		await waitFor(() => {
+			expect(notebookTrigger().getAttribute('aria-label')).toBe('Notebook: Work/Projects/Q3');
+		});
+		// What shows, shortened in its middle where the bar is short of room
+		// (`middleEllipsis`); jsdom lays nothing out, so here it is all there.
+		expect(notebookTrigger().querySelector('.compact-picker-shown')?.textContent).toBe(
+			'Work/Projects/Q3'
+		);
+	});
+
 	it('is the ordinary bar again once the window is wide enough', async () => {
 		await openApp(961);
 

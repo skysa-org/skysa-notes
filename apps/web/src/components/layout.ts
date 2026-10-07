@@ -96,6 +96,33 @@ export const useElementWidth = (element: Element | null): number | undefined => 
 };
 
 /**
+ * The page's fonts, where there are any to ask about. Asked of the value
+ * rather than the type: the lib says it is always there, and jsdom has none.
+ */
+const pageFonts = (): FontFaceSet | undefined =>
+	typeof document === 'undefined' ? undefined : (document as Partial<Document>).fonts;
+
+const fontsLoading = (changed: () => void) => {
+	const fonts = pageFonts();
+	if (fonts === undefined) return noSubscription();
+	fonts.addEventListener('loadingdone', changed);
+	return () => {
+		fonts.removeEventListener('loadingdone', changed);
+	};
+};
+
+const fontsStatus = (): FontFaceSetLoadStatus => pageFonts()?.status ?? 'loaded';
+
+/**
+ * Whether the page's fonts are still arriving, and a re-render as each one
+ * does: text measured outside the layout, as a canvas measures it, was
+ * measured in the fallback font until then. A brand can bring its own
+ * (docs/ARCHITECTURE.md §8, "Brand").
+ */
+export const useFontsStatus = (): FontFaceSetLoadStatus =>
+	useSyncExternalStore(fontsLoading, fontsStatus);
+
+/**
  * Whether `query` matches now, for code outside React that asks each time it
  * needs to know rather than following the answer.
  */
