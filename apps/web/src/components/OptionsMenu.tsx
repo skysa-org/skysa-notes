@@ -72,6 +72,8 @@ export interface OptionsMenuProps {
 	rises?: boolean;
 	/** The button, for whoever has to put the focus back on it. */
 	triggerRef?: RefObject<HTMLButtonElement | null>;
+	/** It has been opened: for whoever needs to know which of two menus was. */
+	onOpen?: () => void;
 }
 
 /** The gap between a button and the card it opens, as `.toolbar-panel` has it. */
@@ -88,6 +90,7 @@ export const OptionsMenu = ({
 	align = 'end',
 	rises = false,
 	triggerRef,
+	onOpen,
 }: OptionsMenuProps) => {
 	/** Where the card is open, under the button, or null while it is shut. */
 	const [open, setOpen] = useState<MenuPoint | null>(null);
@@ -114,6 +117,7 @@ export const OptionsMenu = ({
 						x: align === 'start' ? edge.left : edge.right,
 						y: rises ? edge.top - DROP : edge.bottom + DROP,
 					});
+					onOpen?.();
 				}}
 			>
 				{trigger}
