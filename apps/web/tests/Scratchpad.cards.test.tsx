@@ -162,14 +162,14 @@ describe('a card’s buttons', () => {
 	it('colour it from the palette, the colour it has pressed, and take it away', () => {
 		const yellow = card('1', { body: 'Milk\n', frontmatter: 'color: yellow\n' });
 		const calls = renderPad({ notes: [yellow] });
-		fireEvent.click(screen.getByRole('button', { name: 'Colour' }));
-		const colours = screen.getByRole('group', { name: 'Colour' });
+		fireEvent.click(screen.getByRole('button', { name: 'Color' }));
+		const colours = screen.getByRole('group', { name: 'Color' });
 		expect(
 			within(colours)
 				.getAllByRole('button')
 				.map((button) => button.textContent)
 		).toEqual([
-			'No colour',
+			'No color',
 			'Red',
 			'Orange',
 			'Yellow',
@@ -185,8 +185,8 @@ describe('a card’s buttons', () => {
 		fireEvent.click(within(colours).getByRole('button', { name: 'Blue' }));
 		expect(calls.onMark).toHaveBeenLastCalledWith(yellow, { color: 'blue' });
 
-		fireEvent.click(screen.getByRole('button', { name: 'Colour' }));
-		fireEvent.click(screen.getByRole('button', { name: 'No colour' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Color' }));
+		fireEvent.click(screen.getByRole('button', { name: 'No color' }));
 		expect(calls.onMark).toHaveBeenLastCalledWith(yellow, { color: undefined });
 	});
 

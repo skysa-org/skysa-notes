@@ -6,6 +6,7 @@ import {
 	type StructuralDifference,
 } from '@skysa/core';
 import {
+	type ReactNode,
 	type Ref,
 	useCallback,
 	useDeferredValue,
@@ -350,6 +351,7 @@ const NoteBody = ({
 	onBody,
 	onAdded,
 	basic,
+	toolbarEnd,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -372,6 +374,8 @@ const NoteBody = ({
 	onAdded: (path: string) => void;
 	/** A scratch note's editor (`RichEditorProps.basic`). */
 	basic: boolean;
+	/** On the toolbar's row, in rich text (`RichEditorProps.toolbarEnd`). */
+	toolbarEnd: ReactNode;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
 	const attachments = useNoteAttachments(note, {
@@ -418,6 +422,7 @@ const NoteBody = ({
 					toolbar={toolbar}
 					attachments={attachments}
 					basic={basic}
+					toolbarEnd={toolbarEnd}
 				/>
 			)}
 			{showOutline && (
@@ -1021,10 +1026,6 @@ const NotePath = ({ path, renamings }: { path: string; renamings: Renamings | un
 	);
 };
 
-/**
- * The note's own controls at the end of its header: where it is, the format
- * toggle in a compact window, the editor tabs, the outline.
- */
 /** Make a scratch note a note, where that is offered: only once it is stored. */
 const moveOf = (scratch: ScratchScreen, note: NoteRecord): (() => void) | undefined => {
 	const { onMove, onDelete } = scratch;
@@ -1034,6 +1035,25 @@ const moveOf = (scratch: ScratchScreen, note: NoteRecord): (() => void) | undefi
 	};
 };
 
+/** A scratch note's own bar: its colour, its `⋯` and Close. */
+const barOf = (scratch: ScratchScreen | undefined, note: NoteRecord): ReactNode =>
+	scratch === undefined ? undefined : (
+		<ScratchBar
+			name={note.title}
+			color={scratch.marks.color}
+			onColor={(color) => {
+				scratch.onMark({ color });
+			}}
+			onMove={moveOf(scratch, note)}
+			onDelete={scratch.onDelete}
+			onClose={scratch.onClose}
+		/>
+	);
+
+/**
+ * The note's own controls at the end of its header: where it is, the format
+ * toggle in a compact window, the editor tabs, the outline.
+ */
 const NoteActions = ({
 	note,
 	mode,
@@ -1256,18 +1276,9 @@ const NoteScreen = ({
 			onBody={onBody}
 			onAdded={onAdded}
 			basic={scratch !== undefined}
+			// On the toolbar's row; under the note in Markdown, which has none.
+			toolbarEnd={mode === 'rich' ? barOf(scratch, note) : undefined}
 		/>
-		{scratch !== undefined && (
-			<ScratchBar
-				name={note.title}
-				color={scratch.marks.color}
-				onColor={(color) => {
-					scratch.onMark({ color });
-				}}
-				onMove={moveOf(scratch, note)}
-				onDelete={scratch.onDelete}
-				onClose={scratch.onClose}
-			/>
-		)}
+		{mode !== 'rich' && barOf(scratch, note)}
 	</section>
 );

@@ -399,10 +399,9 @@ export const Scratchpad = ({
 	const empty = notes !== undefined && cards.pinned.length + cards.others.length === 0;
 
 	return (
+		// No heading: its row in the sidebar, or the bar in a compact window,
+		// says where the user is.
 		<section className="scratchpad" aria-label={SCRATCHPAD_LABEL}>
-			<div className="pane-header">
-				<h2>{SCRATCHPAD_LABEL}</h2>
-			</div>
 			<div className="scratchpad-scroll">
 				<TakeNote editor={editor} onTake={onTake} onClose={onCloseTake} />
 				{empty && (

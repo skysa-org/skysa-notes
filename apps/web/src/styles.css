@@ -3190,7 +3190,10 @@ button.icon.account-devices-count {
 		0 0 0 3.5px var(--fg);
 }
 
-/* Its row, above the notebooks' heading, apart from them by the same rule. */
+/* Its row, above the notebooks' heading, apart from them by the same rule,
+   and as tall as the headings at the top of the other columns (`.pane-header`
+   with a button in it), so the rules under the three line up. Its mark on
+   the gutter, where their words begin. */
 .scratchpad-row {
 	border-block-end: 1px solid var(--border);
 }
@@ -3199,6 +3202,7 @@ button.icon.account-devices-count {
 	flex-direction: row;
 	align-items: center;
 	gap: var(--space-s);
+	min-block-size: calc(var(--control) + 2 * var(--bar-block));
 }
 
 .scratchpad-row .toolbar-icon {
@@ -3312,6 +3316,33 @@ button.icon.account-devices-count {
 
 .take-note .editor-rich-surface {
 	min-height: 4.5rem;
+}
+
+/* The basic toolbar and the note's own bar on one row (`toolbarEnd`): the
+   toolbar has what the bar leaves it, and puts what does not fit there behind
+   its More tools, as it would at the window's edge. */
+.editor-toolbar-row {
+	display: flex;
+	align-items: center;
+	border-block-start: 1px solid var(--border);
+}
+
+/* No width of its own to ask for (`width: 0`), so the row is never wider than
+   the box it is in for want of room for every tool: the toolbar is given the
+   room, and measures what fits in it. */
+.editor-toolbar-row .format-toolbar {
+	flex: 1 1 0;
+	width: 0;
+	border-block-start: 0;
+}
+
+/* Ruled off from the tools as their groups are from each other, so on a
+   phone, where some tools are behind More tools, its `⋯` is the note's and
+   reads as apart from the toolbar's. */
+.editor-toolbar-row .scratch-bar {
+	flex: none;
+	padding-inline-start: var(--space-2xs);
+	border-inline-start: 1px solid var(--border);
 }
 
 .scratch-bar {
@@ -3798,9 +3829,15 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 }
 
 @media (hover: hover) {
-	.compact-picker:hover {
+	button.compact-picker:hover {
 		background: var(--hover-bg);
 	}
+}
+
+/* A scratch card's name (`CardName`): said where a note's dropdown would be,
+   but nothing to press. */
+.compact-picker-static {
+	cursor: default;
 }
 
 /* The chevron right after the words rather than at the far end of the share,

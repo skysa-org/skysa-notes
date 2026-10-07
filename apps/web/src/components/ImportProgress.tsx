@@ -178,7 +178,7 @@ const ImportBody = ({
 			{/* Polite: it changes every few files, and a reader should hear it
 			    when it has a moment, not be interrupted by every count. */}
 			<p id={messageId} role="status" aria-live="polite">
-				{busy ? 'Cancelling…' : importMessage(status, label)}
+				{busy ? 'Canceling…' : importMessage(status, label)}
 			</p>
 			{bar === undefined ? (
 				<progress className="import-bar" aria-label="Import progress" />

@@ -65,7 +65,7 @@ const openScratchpad = async () => {
 	const user = userEvent.setup();
 	const router = await openApp();
 	await user.click(await row());
-	await screen.findByRole('heading', { name: 'Scratchpad', level: 2 });
+	await screen.findByRole('region', { name: 'Scratchpad' });
 	return { user, router };
 };
 
@@ -109,7 +109,7 @@ describe('the scratchpad’s row', () => {
 			})
 		);
 
-		expect(await screen.findByRole('heading', { name: 'Scratchpad', level: 2 })).toBeDefined();
+		expect(await screen.findByRole('region', { name: 'Scratchpad' })).toBeDefined();
 		expect(hashIn(router)).toBe('scratchpad');
 	});
 });
@@ -125,6 +125,11 @@ describe('a card', () => {
 		const open = await screen.findByRole('dialog', { name: 'Scratch note' });
 		expect(within(open).getByLabelText<HTMLInputElement>('Note title').value).toBe('Trip');
 		expect(hashIn(router)).toBe('scratchpad/trip');
+		// Its colour, `⋯` and Close on the toolbar's row, after the tools.
+		const row = within(open).getByRole('toolbar', { name: 'Formatting' }).parentElement!;
+		expect(row.classList.contains('editor-toolbar-row')).toBe(true);
+		expect(within(row).getByRole('group', { name: 'Scratch note' })).toBeDefined();
+		expect(within(row).getByRole('button', { name: 'Color' })).toBeDefined();
 		expect(document.title).toContain('Scratchpad > Trip');
 
 		router.history.back();
@@ -339,6 +344,8 @@ describe('searching', () => {
 describe('in a window too narrow for three panes', () => {
 	const notebookTrigger = () => screen.getByRole('button', { name: /^Notebook: / });
 	const noteTrigger = () => screen.queryByRole('button', { name: /^Note: / });
+	/** A card's name in the bar: said, but nothing to press (`CardName`). */
+	const cardName = () => document.querySelector<HTMLElement>('.compact-picker-static');
 	const panel = () => document.querySelector('.app-shell')?.getAttribute('data-panel');
 
 	it('slides to the scratchpad, says so in the bar, and opens a card over the whole window', async () => {
@@ -361,8 +368,11 @@ describe('in a window too narrow for three panes', () => {
 		await user.click(await screen.findByRole('button', { name: /^Trip/ }));
 
 		await waitFor(() => {
-			expect(noteTrigger()?.getAttribute('aria-label')).toBe('Note: Trip');
+			expect(cardName()?.title).toBe('Trip');
 		});
+		expect(cardName()?.tagName).toBe('SPAN');
+		expect(cardName()?.querySelector('.compact-picker-chevron')).toBeNull();
+		expect(noteTrigger()).toBeNull();
 		expect(panel()).toBeNull();
 		// The note's own pane, not a dialog over the scratchpad.
 		expect(dialog()).toBeNull();
@@ -370,9 +380,60 @@ describe('in a window too narrow for three panes', () => {
 
 		router.history.back();
 		await waitFor(() => {
-			expect(noteTrigger()).toBeNull();
+			expect(cardName()).toBeNull();
 		});
 		expect(panel()).toBe('notes');
+	});
+
+	it('goes back to the scratchpad as the notebooks over it are shut, however they are', async () => {
+		fake = windowWidth(390);
+		await inbox();
+		await scratch({ body: 'Milk\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+		await user.click(await row());
+		await waitFor(() => {
+			expect(panel()).toBe('notes');
+		});
+
+		// Its own trigger again.
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notebooks');
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notes');
+
+		// Escape.
+		await user.click(notebookTrigger());
+		await user.keyboard('{Escape}');
+		expect(panel()).toBe('notes');
+
+		// Its row, chosen again.
+		await user.click(notebookTrigger());
+		await user.click(await row());
+		expect(panel()).toBe('notes');
+		expect(screen.getByRole('button', { name: /^Milk/ })).toBeDefined();
+	});
+
+	it('shuts to the card, not the scratchpad, while a card is open', async () => {
+		fake = windowWidth(390);
+		await inbox();
+		await scratch({ title: 'Trip', body: 'Lisbon\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+		await user.click(await row());
+		await user.click(await screen.findByRole('button', { name: /^Trip/ }));
+		await waitFor(() => {
+			expect(panel()).toBeNull();
+		});
+
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notebooks');
+		await user.keyboard('{Escape}');
+
+		expect(panel()).toBeNull();
+		expect(cardName()?.title).toBe('Trip');
 	});
 
 	it('names no note in the bar for a card with no name', async () => {
@@ -391,5 +452,6 @@ describe('in a window too narrow for three panes', () => {
 		});
 		expect(notebookTrigger().getAttribute('aria-label')).toBe('Notebook: Scratchpad');
 		expect(noteTrigger()).toBeNull();
+		expect(cardName()).toBeNull();
 	});
 });

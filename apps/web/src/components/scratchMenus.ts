@@ -29,7 +29,7 @@ export const colorItems = (
 	onColor: (color: ScratchColor | undefined) => void
 ): OptionsMenuItem[] => [
 	{
-		label: 'No colour',
+		label: 'No color',
 		swatch: '',
 		pressed: current === undefined,
 		onChoose: () => {

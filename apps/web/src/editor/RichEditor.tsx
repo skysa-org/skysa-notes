@@ -6,7 +6,14 @@ import type { Ctx } from '@milkdown/kit/ctx';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
 import type { StructuralDifference } from '@skysa/core';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from 'react';
 
 import { useCodeDisplay } from '../store/hooks.js';
 import type { AttachmentHost } from './attachHost.js';
@@ -70,6 +77,12 @@ export interface RichEditorProps {
 	 * built.
 	 */
 	basic?: boolean;
+	/**
+	 * What shares the toolbar's row at the bottom, after it: a scratch note's
+	 * own bar. The toolbar has what is left of the row, and puts what does not
+	 * fit there behind its More tools.
+	 */
+	toolbarEnd?: ReactNode;
 }
 
 /**
@@ -112,6 +125,7 @@ const EditorBody = ({
 	toolbar = 'top',
 	attachments,
 	basic = false,
+	toolbarEnd,
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
@@ -257,9 +271,15 @@ const EditorBody = ({
 			<Milkdown />
 			{/* After the note in the document as well as on screen, so the tab
 			    order and what the eye sees agree. */}
-			{toolbar === 'bottom' && (
-				<EditorToolbar store={format} run={run} placement="bottom" basic={basic} />
-			)}
+			{toolbar === 'bottom' &&
+				(toolbarEnd === undefined ? (
+					<EditorToolbar store={format} run={run} placement="bottom" basic={basic} />
+				) : (
+					<div className="editor-toolbar-row">
+						<EditorToolbar store={format} run={run} placement="bottom" basic={basic} />
+						{toolbarEnd}
+					</div>
+				))}
 		</>
 	);
 };

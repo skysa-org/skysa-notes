@@ -49,9 +49,9 @@ export const ColorMenu = ({
 	align?: 'start' | 'end';
 }) => (
 	<OptionsMenu
-		label="Colour"
-		title="Colour"
-		groupLabel="Colour"
+		label="Color"
+		title="Color"
+		groupLabel="Color"
 		triggerClassName="icon icon-quiet"
 		trigger={<Icon name="palette" />}
 		items={colorItems(color, onColor)}
@@ -66,7 +66,7 @@ export const CardMenu = ({
 	onMove,
 	onDelete,
 	rises = false,
-	align = 'end',
+	align = 'start',
 }: {
 	/** What the card is called, for a screen reader. */
 	name: string;
@@ -110,7 +110,7 @@ export const ScratchBar = ({
 	<div className="scratch-bar" role="group" aria-label="Scratch note">
 		<ColorMenu color={color} onColor={onColor} rises />
 		{onDelete !== undefined && (
-			<CardMenu name={name} onMove={onMove} onDelete={onDelete} rises align="start" />
+			<CardMenu name={name} onMove={onMove} onDelete={onDelete} rises />
 		)}
 		<button type="button" className="scratch-close" onClick={onClose}>
 			Close

@@ -171,7 +171,7 @@ const connectMessage = (
 		// connected either, which is not what they will assume from a screen
 		// that looks the same as before they started.
 		case 'denied':
-			return { message: 'Connecting storage was cancelled.', tone: 'warning' };
+			return { message: 'Connecting storage was canceled.', tone: 'warning' };
 		case 'failed':
 			return {
 				message: 'The storage account could not be connected. Try again.',
@@ -1293,6 +1293,8 @@ const Home = () => {
 		compact,
 		panel,
 		setPanel,
+		setRest,
+		barPanel,
 		searchOpen,
 		setSearchOpen,
 		setOrigins,
@@ -1650,6 +1652,7 @@ const Home = () => {
 		select,
 		compact,
 		setPanel,
+		setRest,
 		noteView,
 		onDeleted: (note) => {
 			setDeleted(note);
@@ -1661,10 +1664,7 @@ const Home = () => {
 			setProblem({ message, tone: 'error' });
 		},
 	});
-	const openScratchpad = () => {
-		select({ folder: SCRATCHPAD_FOLDER, note: undefined });
-	};
-	useOpenWhenShown(activeConnection, scratchpadShown, openScratchpad);
+	useOpenWhenShown(activeConnection, scratchpadShown, scratch.show);
 
 	/**
 	 * Escape puts down whatever is being moved, from wherever the focus is. On
@@ -1923,7 +1923,7 @@ const Home = () => {
 					liveEdits={liveEdits}
 					renamings={renamings}
 					panel={panel}
-					onPanel={setPanel}
+					onPanel={barPanel}
 					query={query}
 					onQuery={onQuery}
 					results={results}
@@ -2021,7 +2021,7 @@ const Home = () => {
 						if (activeConnection !== undefined)
 							void setNotebookPinned(db, activeConnection, path, pinned);
 					}}
-					scratchpad={scratchpadRow(scratchpadShown, inScratchpad, openScratchpad)}
+					scratchpad={scratchpadRow(scratchpadShown, inScratchpad, scratch.show)}
 				/>
 
 				{inScratchpad ? (

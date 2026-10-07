@@ -113,7 +113,7 @@ describe('the app', () => {
 		await createFolder(db, { name: 'Work' });
 		await open('/?connect=denied', 'Work');
 
-		expect((await screen.findByRole('alert')).textContent).toMatch(/cancelled/);
+		expect((await screen.findByRole('alert')).textContent).toMatch(/canceled/);
 	});
 
 	it('ignores an outcome the server cannot send', async () => {
@@ -195,12 +195,12 @@ describe('the app', () => {
 		await createFolder(db, { name: 'Work' });
 		await createFolder(db, { name: 'Play' });
 		await open('/?connect=denied#/Play/', 'Play');
-		expect(await screen.findByText(/was cancelled/)).toBeTruthy();
+		expect(await screen.findByText(/was canceled/)).toBeTruthy();
 
 		await user.click(screen.getByRole('button', { name: 'Work' }));
 
 		await waitFor(() => {
-			expect(screen.queryByText(/was cancelled/)).toBeNull();
+			expect(screen.queryByText(/was canceled/)).toBeNull();
 		});
 	});
 

@@ -49,6 +49,7 @@ export const useScratchpad = ({
 	select,
 	compact,
 	setPanel,
+	setRest,
 	noteView,
 	onDeleted,
 	pickUp,
@@ -64,6 +65,8 @@ export const useScratchpad = ({
 	select: Select;
 	compact: boolean;
 	setPanel: (pane: Pane | null) => void;
+	/** What a compact window shows as a pane over it is shut (`usePanel`). */
+	setRest: (pane: Pane | null) => void;
 	/** The note pane, while one is mounted: it holds what autosave has not stored. */
 	noteView: RefObject<NoteViewHandle | null>;
 	/** A card deleted from the wall, for its undo. */
@@ -90,12 +93,27 @@ export const useScratchpad = ({
 
 	// In a compact window the scratchpad is the notes' pane, and with no card
 	// open it is all there is to show: opened as the scratchpad opens, and
-	// again as a card closes.
+	// again as a card closes, and what shutting the notebooks over it, or the
+	// sources, goes back to.
 	useEffect(() => {
 		if (active && compact && noteId === undefined) setPanel('notes');
 	}, [active, compact, noteId, setPanel]);
+	const resting = active && compact && card === undefined;
+	useEffect(() => {
+		setRest(resting ? 'notes' : null);
+	}, [resting, setRest]);
 
 	const scope = (note: NoteRecord) => ({ connectionId: note.connectionId });
+
+	/**
+	 * Open the scratchpad, from its row or as it is shown: a step, unless it is
+	 * open already with no card, and in a compact window its pane, whatever
+	 * was open over it.
+	 */
+	const show = () => {
+		if (!active || noteId !== undefined) select({ folder: SCRATCHPAD_FOLDER, note: undefined });
+		if (compact) setPanel('notes');
+	};
 
 	/** Begin a note in the box. Stored at its first edit, as any draft is. */
 	const take = () => {
@@ -251,6 +269,7 @@ export const useScratchpad = ({
 			focusBody: taking || !touch,
 		} satisfies ScratchEditing,
 		naming,
+		show,
 		take,
 		closeTake,
 		open,

@@ -126,6 +126,8 @@ const notebookOpen = (selectedFolder: string | undefined): string | undefined =>
 /**
  * The scratchpad's row, above the notebooks: not one of them, so it is never a
  * place to put something being moved, and is not offered while something is.
+ * As tall as the headings at the top of the other columns, so the rules under
+ * them line up across the window.
  */
 const ScratchpadRow = ({
 	selected,
