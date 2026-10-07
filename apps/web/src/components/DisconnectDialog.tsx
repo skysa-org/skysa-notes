@@ -1,5 +1,6 @@
 import { type ReactNode, type RefObject, useEffect, useState } from 'react';
 
+import { t } from '../i18n/t.js';
 import { type ConnectedSource } from '../store/connection.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
 import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
@@ -74,9 +75,6 @@ export interface DisconnectDialogProps {
 	cancelRef: RefObject<HTMLButtonElement | null>;
 }
 
-const counted = (count: number, one: string, many: string): string =>
-	`${String(count)} ${count === 1 ? one : many}`;
-
 /**
  * "3 notes not yet sent · 1 rename · 2 deletes", in the order they matter. The
  * notebooks by the same rule the headline counts by (`countedFolders`), so the
@@ -86,26 +84,31 @@ const counted = (count: number, one: string, many: string): string =>
 const summary = (listed: Unsynced): string =>
 	[
 		...(listed.notes.length > 0
-			? [`${counted(listed.notes.length, 'note', 'notes')} not yet sent`]
+			? [t('unsent.counted.notesNotSent', { count: listed.notes.length })]
 			: []),
-		...(listed.renames.length > 0 ? [counted(listed.renames.length, 'rename', 'renames')] : []),
-		...(listed.deletes.length > 0 ? [counted(listed.deletes.length, 'delete', 'deletes')] : []),
+		...(listed.renames.length > 0
+			? [t('unsent.counted.renames', { count: listed.renames.length })]
+			: []),
+		...(listed.deletes.length > 0
+			? [t('unsent.counted.deletes', { count: listed.deletes.length })]
+			: []),
 		...(countedFolders(listed).length > 0
-			? [counted(countedFolders(listed).length, 'notebook', 'notebooks')]
+			? [t('unsent.counted.notebooks', { count: countedFolders(listed).length })]
 			: []),
 		...(listed.rmdirs.length > 0
-			? [counted(listed.rmdirs.length, 'notebook delete', 'notebook deletes')]
+			? [t('unsent.counted.notebookDeletes', { count: listed.rmdirs.length })]
 			: []),
 		...(listed.files.length > 0
-			? [`${counted(listed.files.length, 'file', 'files')} not yet uploaded`]
+			? [t('unsent.counted.filesNotYetUploaded', { count: listed.files.length })]
 			: []),
 	].join(' · ');
 
-/** Why the last push could not clear this, where the user should wait instead. */
-const WHY: Record<'offline' | 'blocked', string> = {
-	offline: 'this device is offline',
-	blocked: 'a change has been refused too many times',
-};
+/**
+ * Why the last push could not clear this, where the user should wait instead:
+ * said after the headline.
+ */
+const why = (stopped: 'offline' | 'blocked'): string =>
+	stopped === 'offline' ? t('unsent.disconnect.offline') : t('unsent.disconnect.blocked');
 
 /**
  * The headline, which has to be true of the list underneath it.
@@ -119,10 +122,8 @@ const WHY: Record<'offline' | 'blocked', string> = {
  * thing is to say why it looks like that and that waiting is the answer.
  */
 const headline = (listed: Unsynced, label: string): string => {
-	if (listed.unverified) {
-		return `Everything this device holds for ${label} is listed below. This source was connected again and its files have not been checked against ${label} yet, so nothing here can be told apart from work that was never sent. Most of it is probably already there. Cancel, and connecting again while this device is online settles it.`;
-	}
-	return `${counted(countOf(listed), 'change', 'changes')} on this device ${countOf(listed) === 1 ? 'has' : 'have'} not reached ${label}, and cannot once it is disconnected.`;
+	if (listed.unverified) return t('unsent.disconnect.unverified', { provider: label });
+	return t('unsent.disconnect.headline', { count: countOf(listed), provider: label });
 };
 
 /**
@@ -131,15 +132,31 @@ const headline = (listed: Unsynced, label: string): string => {
  * before the user answers, since the two are different things to agree to.
  */
 const elsewhere = (others: number | undefined): string => {
-	if (others === undefined) {
-		return 'Other devices connected to it stay connected. If this is the last one, the account is disconnected too.';
-	}
-	if (others === 0) {
-		return 'This is the only device connected to it, so the account is disconnected too.';
-	}
+	if (others === undefined) return t('unsent.disconnect.others.unknown');
+	if (others === 0) return t('unsent.disconnect.others.none');
+	// One is "the other device", which is not a count, and so its own message
+	// rather than a plural's `one`: in some languages that is 21 as well.
 	return others === 1
-		? 'The other device connected to it stays connected and keeps syncing.'
-		: `The ${String(others)} other devices connected to it stay connected and keep syncing.`;
+		? t('unsent.disconnect.others.single')
+		: t('unsent.disconnect.others.several', { count: others });
+};
+
+/**
+ * The second step's question. A single note is "this note", which is not a
+ * count, and so its own message rather than a plural's `one`: in some
+ * languages that is 21 as well.
+ */
+const discardQuestion = (listed: Unsynced, label: string): string => {
+	const count = listed.notes.length;
+	if (count === 0) return t('unsent.discard.unsentOnly');
+	if (listed.unverified) {
+		return count === 1
+			? t('unsent.disconnect.discardNoteUnverified', { provider: label })
+			: t('unsent.disconnect.discardNotesUnverified', { count, provider: label });
+	}
+	return count === 1
+		? t('unsent.disconnect.discardNote')
+		: t('unsent.disconnect.discardNotes', { count });
 };
 
 const Titles = ({ notes }: { notes: readonly NoteRecord[] }) => {
@@ -148,15 +165,15 @@ const Titles = ({ notes }: { notes: readonly NoteRecord[] }) => {
 	if (named.length === 0) return null;
 	return (
 		<>
-			<ul aria-label="Notes that have not been sent">
+			<ul aria-label={t('unsent.disconnect.notes')}>
 				{named.map((note) => (
 					<li key={noteRef(note)}>{note.title}</li>
 				))}
 			</ul>
 			{rest.length > 0 && (
 				<details>
-					<summary>{`… and ${String(rest.length)} more`}</summary>
-					<ul aria-label="The rest of the notes that have not been sent">
+					<summary>{t('unsent.disconnect.more', { count: rest.length })}</summary>
+					<ul aria-label={t('unsent.disconnect.rest')}>
 						{rest.map((note) => (
 							<li key={noteRef(note)}>{note.title}</li>
 						))}
@@ -218,7 +235,7 @@ export const DisconnectDialog = ({
 
 	const cancel = (
 		<button ref={cancelRef} type="button" className="ghost" onClick={onCancel} disabled={busy}>
-			Cancel
+			{t('common.cancel')}
 		</button>
 	);
 
@@ -226,9 +243,9 @@ export const DisconnectDialog = ({
 	// question is only whether to disconnect.
 	if (isEmpty(listed)) {
 		return (
-			<div className="account-confirm" role="group" aria-label="Disconnect">
+			<div className="account-confirm" role="group" aria-label={t('unsent.disconnect.group')}>
 				<p className="muted">
-					{`Disconnect ${named} from this device? Its notes are removed from this device. Nothing is deleted from ${label}; connect it again to get them back.`}
+					{t('unsent.disconnect.plain', { name: named, provider: label })}
 				</p>
 				{after}
 				<button
@@ -238,7 +255,7 @@ export const DisconnectDialog = ({
 						onAnswer('discard');
 					}}
 				>
-					Disconnect
+					{t('unsent.disconnect.confirm')}
 				</button>
 				{cancel}
 			</div>
@@ -247,16 +264,8 @@ export const DisconnectDialog = ({
 
 	if (discarding) {
 		return (
-			<div className="account-confirm" role="group" aria-label="Discard for good">
-				<p>
-					{listed.notes.length === 0
-						? 'Discard what this source never sent?'
-						: `Discard ${listed.notes.length === 1 ? 'this note' : `these ${String(listed.notes.length)} notes`}?${
-								listed.unverified
-									? ` Most are probably still in ${label}, but this device has not been able to check, so it cannot promise it. This cannot be undone.`
-									: ' They exist nowhere else. This cannot be undone.'
-							}`}
-				</p>
+			<div className="account-confirm" role="group" aria-label={t('unsent.discard.forGood')}>
+				<p>{discardQuestion(listed, label)}</p>
 				<Titles notes={listed.notes} />
 				<button
 					type="button"
@@ -265,10 +274,10 @@ export const DisconnectDialog = ({
 						onAnswer('discard');
 					}}
 				>
-					Discard for good
+					{t('unsent.discard.forGood')}
 				</button>
 				<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
-					Download them first
+					{t('unsent.discard.downloadFirst')}
 				</button>
 				{failure}
 				{cancel}
@@ -276,17 +285,19 @@ export const DisconnectDialog = ({
 		);
 	}
 
+	const leaves = canMove(listed, targets) ? leftBehind(listed, label) : null;
 	return (
-		<div className="account-confirm" role="group" aria-label="Disconnect">
+		<div className="account-confirm" role="group" aria-label={t('unsent.disconnect.group')}>
 			<p className="muted">
 				{headline(listed, label)}
-				{stopped !== null &&
-					` They cannot be sent right now (${WHY[stopped]}). Cancel and try again later to keep them.`}
+				{stopped !== null && ` ${why(stopped)}`}
 			</p>
 			<p className="muted">{summary(listed)}</p>
 			<Titles notes={listed.notes} />
-			{canMove(listed, targets) && leftBehind(listed, label) !== null && (
-				<p className="muted">{`Moving takes the notes, not the rest: ${leftBehind(listed, label) ?? ''}`}</p>
+			{leaves !== null && (
+				<p className="muted">
+					{t('unsent.disconnect.movingLeaves', { leftBehind: leaves })}
+				</p>
 			)}
 			{/*
 			 * The one thing here that is about a note's text rather than a row:
@@ -295,8 +306,7 @@ export const DisconnectDialog = ({
 			 */}
 			{failing && (
 				<p className="muted" role="alert">
-					A note here has text that could not be saved yet, so it cannot be listed. Copy
-					it somewhere safe first; the note says how.
+					{t('unsent.cannotList')}
 				</p>
 			)}
 			{after}
@@ -317,10 +327,10 @@ export const DisconnectDialog = ({
 					setDiscarding(true);
 				}}
 			>
-				Discard them…
+				{t('unsent.disconnect.discardThem')}
 			</button>
 			<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
-				Download them
+				{t('unsent.disconnect.downloadThem')}
 			</button>
 			{failure}
 			{cancel}

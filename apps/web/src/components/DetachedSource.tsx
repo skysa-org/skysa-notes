@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 
+import { LOCALE, t } from '../i18n/t.js';
 import {
 	connectedSources,
 	type MoveOutcome,
@@ -12,7 +13,7 @@ import { holdsTextFor } from '../store/detached.js';
 import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
-import { PROVIDER_LABELS, sourceName } from '../sync/account.js';
+import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../sync/account.js';
 import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
 import { useEscape } from './useEscape.js';
 
@@ -53,32 +54,31 @@ export interface DetachedSourceProps {
 	notice?: string | null;
 }
 
-/** "1 change", "3 changes". */
-const changes = (count: number): string => (count === 1 ? '1 change' : `${String(count)} changes`);
-
-const counted = (count: number, one: string, many: string): string =>
-	`${String(count)} ${count === 1 ? one : many}`;
+/** A list of counts, "1 rename, 2 deletes", as the language writes one. */
+const counts = new Intl.ListFormat(LOCALE, { type: 'unit', style: 'long' });
 
 /** What is going besides the notes listed by title, or nothing to add. */
 const alsoGoing = (unsynced: Unsynced): string | null => {
 	const parts = [
 		...(unsynced.renames.length > 0
-			? [counted(unsynced.renames.length, 'rename', 'renames')]
+			? [t('unsent.counted.renames', { count: unsynced.renames.length })]
 			: []),
 		...(unsynced.deletes.length > 0
-			? [counted(unsynced.deletes.length, 'delete', 'deletes')]
+			? [t('unsent.counted.deletes', { count: unsynced.deletes.length })]
 			: []),
 		...(unsynced.folders.length > 0
-			? [counted(unsynced.folders.length, 'notebook', 'notebooks')]
+			? [t('unsent.counted.notebooks', { count: unsynced.folders.length })]
 			: []),
 		...(unsynced.rmdirs.length > 0
-			? [counted(unsynced.rmdirs.length, 'notebook delete', 'notebook deletes')]
+			? [t('unsent.counted.notebookDeletes', { count: unsynced.rmdirs.length })]
 			: []),
 		...(unsynced.files.length > 0
-			? [counted(unsynced.files.length, 'file not uploaded', 'files not uploaded')]
+			? [t('unsent.counted.filesNotUploaded', { count: unsynced.files.length })]
 			: []),
 	];
-	return parts.length === 0 ? null : `Also never sent, and also forgotten: ${parts.join(', ')}.`;
+	return parts.length === 0
+		? null
+		: t('unsent.detached.alsoGoing', { list: counts.format(parts) });
 };
 
 /**
@@ -88,11 +88,11 @@ const alsoGoing = (unsynced: Unsynced): string | null => {
  * plainly, with the way to withdraw it, which is Discard.
  */
 const stillOwed = (unsynced: Unsynced, bound: SyncStateRecord): string | null => {
-	if (unsynced.deletes.length === 0) return null;
-	const where = bound.provider === undefined ? 'the account' : PROVIDER_LABELS[bound.provider];
-	return unsynced.deletes.length === 1
-		? `1 note deleted here will be deleted from ${where} when you reconnect, even if it has been changed there since. Discard withdraws that.`
-		: `${String(unsynced.deletes.length)} notes deleted here will be deleted from ${where} when you reconnect, even if they have been changed there since. Discard withdraws that.`;
+	const count = unsynced.deletes.length;
+	if (count === 0) return null;
+	return bound.provider === undefined
+		? t('unsent.detached.stillOwedUnknown', { count })
+		: t('unsent.detached.stillOwed', { count, provider: PROVIDER_LABELS[bound.provider] });
 };
 
 /**
@@ -100,8 +100,7 @@ const stillOwed = (unsynced: Unsynced, bound: SyncStateRecord): string | null =>
  * source around it are kept rather than removed with the rest, so the text has
  * somewhere to land when it can be written.
  */
-const HELD_BACK =
-	'A note here has text that could not be saved, so the note and this source have been kept. Open the note and copy the text somewhere safe; the note says how.';
+const heldBack = (): string => t('unsent.detached.heldBack');
 
 /**
  * What is left to say of a move, where what happened was not quite what was
@@ -110,17 +109,17 @@ const HELD_BACK =
 const wentAs = (outcome: MoveOutcome): string | null => {
 	switch (outcome) {
 		case 'detached':
-			return 'Something was written in this source after the list was shown. It was not on the list, so it has been kept here.';
+			return t('unsent.detached.movedAs.kept');
 		case 'holding':
-			return HELD_BACK;
+			return heldBack();
 		case 'reconnected':
-			return 'This source was connected again meanwhile. Nothing has been moved.';
+			return t('unsent.detached.movedAs.reconnected');
 		case 'no-target':
-			return 'That source is not connected any more, so nothing was moved.';
+			return t('unsent.detached.movedAs.noTarget');
 		case 'unverified':
-			return 'This source has not been checked against its account yet, so what it holds cannot be told apart from work that was never sent. Nothing was moved.';
+			return t('unsent.detached.movedAs.unverified');
 		case 'nothing-to-move':
-			return 'There was nothing here to move, so nothing was moved.';
+			return t('unsent.detached.movedAs.nothing');
 		case 'released':
 			return null;
 	}
@@ -129,14 +128,16 @@ const wentAs = (outcome: MoveOutcome): string | null => {
 /**
  * What the second step asks. A source can be left holding nothing — the one
  * unsent note deleted since — and then there is nothing to lose and the
- * question is only whether to take it off the list.
+ * question is only whether to take it off the list. A single note is "this
+ * note", which is not a count, and so its own message rather than a plural's
+ * `one`: in some languages that is 21 as well.
  */
 const question = (unsynced: Unsynced): string => {
-	if (isEmpty(unsynced)) return 'Remove this source from this device? Nothing in it is waiting.';
-	if (unsynced.notes.length === 0) return 'Discard what this source never sent?';
+	if (isEmpty(unsynced)) return t('unsent.detached.remove');
+	if (unsynced.notes.length === 0) return t('unsent.discard.unsentOnly');
 	return unsynced.notes.length === 1
-		? 'Discard this note?'
-		: `Discard these ${String(unsynced.notes.length)} notes?`;
+		? t('unsent.detached.discardNote')
+		: t('unsent.detached.discardNotes', { count: unsynced.notes.length });
 };
 
 /**
@@ -159,19 +160,19 @@ const DiscardConfirm = ({
 	onDiscard: () => void;
 	onCancel: () => void;
 }) => (
-	<div className="account-confirm" role="group" aria-label="Discard for good">
+	<div className="account-confirm" role="group" aria-label={t('unsent.discard.forGood')}>
 		<p className="muted">{question(listed)}</p>
 		{listed.notes.length > 0 && (
-			<ul aria-label="Notes to discard">
+			<ul aria-label={t('unsent.detached.toDiscard')}>
 				{listed.notes.map((note) => (
 					<li key={noteRef(note)}>{note.title}</li>
 				))}
 			</ul>
 		)}
 		{alsoGoing(listed) !== null && <p className="muted">{alsoGoing(listed)}</p>}
-		{!isEmpty(listed) && <p>These exist nowhere else. This cannot be undone.</p>}
+		{!isEmpty(listed) && <p>{t('unsent.detached.nowhereElse')}</p>}
 		<button type="button" disabled={busy} onClick={onDiscard}>
-			{isEmpty(listed) ? 'Remove' : 'Discard for good'}
+			{isEmpty(listed) ? t('unsent.detached.removeButton') : t('unsent.discard.forGood')}
 		</button>
 		<button
 			type="button"
@@ -180,10 +181,10 @@ const DiscardConfirm = ({
 				download(listed);
 			}}
 		>
-			Download them first
+			{t('unsent.discard.downloadFirst')}
 		</button>
 		<button ref={cancelRef} type="button" className="ghost" disabled={busy} onClick={onCancel}>
-			Cancel
+			{t('common.cancel')}
 		</button>
 	</div>
 );
@@ -230,7 +231,7 @@ export const DetachedSource = ({
 		focusNext.current = null;
 	}, [confirming]);
 
-	const name = sourceName(bound) ?? 'A source';
+	const name = sourceName(bound) ?? UNKNOWN_LABEL;
 	const held = unsynced === undefined ? undefined : countOf(unsynced);
 
 	// A download that fails says so here, in the panel's own alert: one that
@@ -254,16 +255,14 @@ export const DetachedSource = ({
 				// This source's notes only: a save failing in some other source is
 				// that source's problem, and no reason to hold this one up.
 				if (holdsTextFor(settled, connectionId)) {
-					setProblem(
-						'A note here has text that could not be saved yet, so it cannot be listed. Copy it somewhere safe first; the note says how.'
-					);
+					setProblem(t('unsent.cannotList'));
 					return;
 				}
 				focusNext.current = 'cancel';
 				setListed(await unsyncedIn(database, connectionId));
 			})
 			.catch(() => {
-				setProblem('That did not work. Nothing has been discarded.');
+				setProblem(t('unsent.detached.notDiscarded'));
 			})
 			.finally(() => {
 				setBusy(false);
@@ -289,9 +288,7 @@ export const DetachedSource = ({
 		void settleEditors()
 			.then(async (settled) => {
 				if (holdsTextFor(settled, connectionId)) {
-					setProblem(
-						'A note here has text that could not be saved yet, so it cannot be moved. Copy it somewhere safe first; the note says how.'
-					);
+					setProblem(t('unsent.detached.cannotMove'));
 					return;
 				}
 				const outcome = await moveUnsyncedTo(database, {
@@ -304,7 +301,7 @@ export const DetachedSource = ({
 				setProblem(wentAs(outcome));
 			})
 			.catch(() => {
-				setProblem('That did not work. Nothing has been moved.');
+				setProblem(t('unsent.detached.notMoved'));
 			})
 			.finally(() => {
 				setBusy(false);
@@ -328,21 +325,15 @@ export const DetachedSource = ({
 				})
 			)
 			.then((outcome) => {
-				if (outcome === 'detached') {
-					setProblem(
-						'Something was written in this source after the list was shown. It was not on the list, so it has been kept.'
-					);
-				}
-				if (outcome === 'holding') setProblem(HELD_BACK);
+				if (outcome === 'detached') setProblem(t('unsent.detached.discardedAs.kept'));
+				if (outcome === 'holding') setProblem(heldBack());
 				if (outcome === 'reconnected') {
-					setProblem(
-						'This source was connected again meanwhile. Nothing has been discarded.'
-					);
+					setProblem(t('unsent.detached.discardedAs.reconnected'));
 				}
 				if (outcome === 'released') onReleased?.();
 			})
 			.catch(() => {
-				setProblem('That did not work. Nothing has been discarded.');
+				setProblem(t('unsent.detached.notDiscarded'));
 			})
 			.finally(() => {
 				setBusy(false);
@@ -351,25 +342,21 @@ export const DetachedSource = ({
 	};
 
 	return (
-		<section ref={panel} className="account" aria-label="Storage">
-			<p>{name} is disconnected</p>
+		<section ref={panel} className="account" aria-label={t('unsent.detached.panel')}>
+			<p>{t('unsent.detached.title', { source: name })}</p>
 			{held !== undefined && (
 				<p className="muted">
 					{held === 0
-						? 'Nothing here is waiting to be sent.'
-						: `${changes(held)} here ${held === 1 ? 'was' : 'were'} never sent, and ${held === 1 ? 'is' : 'are'} kept on this device until you reconnect, download or discard ${held === 1 ? 'it' : 'them'}.`}{' '}
-					Everything else of this source’s was removed from this device, and comes back
-					when it is connected again.
+						? t('unsent.detached.nothingWaiting')
+						: t('unsent.detached.waiting', { count: held })}{' '}
+					{t('unsent.detached.restRemoved')}
 				</p>
 			)}
 			{unsynced !== undefined && stillOwed(unsynced, bound) !== null && (
 				<p className="muted">{stillOwed(unsynced, bound)}</p>
 			)}
 			{bound.provider === undefined && (
-				<p className="muted">
-					This device no longer knows which account it was, so it cannot be connected
-					again from here.
-				</p>
+				<p className="muted">{t('unsent.detached.unknownAccount')}</p>
 			)}
 			{(problem ?? notice) !== null && (
 				<p className="muted" role="alert">
@@ -399,7 +386,7 @@ export const DetachedSource = ({
 					if (unsynced !== undefined) save(unsynced);
 				}}
 			>
-				Download
+				{t('unsent.detached.download')}
 			</button>
 			{listed === null ? (
 				<button
@@ -409,7 +396,7 @@ export const DetachedSource = ({
 					disabled={busy}
 					onClick={ask}
 				>
-					Discard…
+					{t('unsent.detached.discard')}
 				</button>
 			) : (
 				<DiscardConfirm
