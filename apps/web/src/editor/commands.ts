@@ -17,6 +17,7 @@ import type { MarkType } from '@milkdown/kit/prose/model';
 import type { EditorState } from '@milkdown/kit/prose/state';
 import { callCommand } from '@milkdown/kit/utils';
 
+import { t } from '../i18n/t.js';
 import { attachPicked } from './attachDrop.js';
 import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
@@ -34,7 +35,11 @@ import { applyList } from './lists.js';
 export interface EditorCommand {
 	id: string;
 	label: string;
-	/** Extra words that should find this command, beyond its label. */
+	/**
+	 * Extra words that should find this command, beyond its label. Never
+	 * shown, so not in the catalog: markdown's own names among them (`h1`,
+	 * `hr`) are the same in every language.
+	 */
 	keywords: readonly string[];
 	apply: (ctx: Ctx) => void;
 }
@@ -179,77 +184,77 @@ export const clearLink = (ctx: Ctx): void => {
 
 const HEADING_1: EditorCommand = {
 	id: 'heading-1',
-	label: 'Heading 1',
+	label: t('editor.commands.heading1'),
 	keywords: ['h1', 'title'],
 	apply: run(wrapInHeadingCommand, 1),
 };
 
 const HEADING_2: EditorCommand = {
 	id: 'heading-2',
-	label: 'Heading 2',
+	label: t('editor.commands.heading2'),
 	keywords: ['h2', 'section'],
 	apply: run(wrapInHeadingCommand, 2),
 };
 
 const HEADING_3: EditorCommand = {
 	id: 'heading-3',
-	label: 'Heading 3',
+	label: t('editor.commands.heading3'),
 	keywords: ['h3'],
 	apply: run(wrapInHeadingCommand, 3),
 };
 
 const HEADING_4: EditorCommand = {
 	id: 'heading-4',
-	label: 'Heading 4',
+	label: t('editor.commands.heading4'),
 	keywords: ['h4'],
 	apply: run(wrapInHeadingCommand, 4),
 };
 
 const HEADING_5: EditorCommand = {
 	id: 'heading-5',
-	label: 'Heading 5',
+	label: t('editor.commands.heading5'),
 	keywords: ['h5'],
 	apply: run(wrapInHeadingCommand, 5),
 };
 
 const HEADING_6: EditorCommand = {
 	id: 'heading-6',
-	label: 'Heading 6',
+	label: t('editor.commands.heading6'),
 	keywords: ['h6'],
 	apply: run(wrapInHeadingCommand, 6),
 };
 
 const PLAIN_TEXT: EditorCommand = {
 	id: 'paragraph',
-	label: 'Plain text',
+	label: t('editor.commands.plainText'),
 	keywords: ['paragraph', 'body', 'normal'],
 	apply: run(turnIntoTextCommand),
 };
 
 const BULLET_LIST: EditorCommand = {
 	id: 'bullet-list',
-	label: 'Bulleted list',
+	label: t('editor.commands.bulletList'),
 	keywords: ['ul', 'unordered', 'bullets'],
 	apply: applyList('bullet'),
 };
 
 const ORDERED_LIST: EditorCommand = {
 	id: 'ordered-list',
-	label: 'Numbered list',
+	label: t('editor.commands.orderedList'),
 	keywords: ['ol', 'ordered', 'numbers'],
 	apply: applyList('ordered'),
 };
 
 const TASK_LIST: EditorCommand = {
 	id: 'task-list',
-	label: 'Task list',
+	label: t('editor.commands.taskList'),
 	keywords: ['todo', 'checkbox', 'checklist'],
 	apply: applyList('task'),
 };
 
 const QUOTE: EditorCommand = {
 	id: 'quote',
-	label: 'Quote',
+	label: t('editor.commands.quote'),
 	keywords: ['blockquote', 'citation'],
 	apply: run(wrapInBlockquoteCommand),
 };
@@ -295,70 +300,70 @@ const toggleCodeBlock = (ctx: Ctx): void => {
 
 const CODE_BLOCK: EditorCommand = {
 	id: 'code-block',
-	label: 'Code block',
+	label: t('editor.commands.codeBlock'),
 	keywords: ['pre', 'fence', 'snippet'],
 	apply: toggleCodeBlock,
 };
 
 const TABLE: EditorCommand = {
 	id: 'table',
-	label: 'Table',
+	label: t('editor.commands.table'),
 	keywords: ['grid', 'rows', 'columns'],
 	apply: run(insertTableCommand),
 };
 
 const DIVIDER: EditorCommand = {
 	id: 'divider',
-	label: 'Divider',
+	label: t('editor.commands.divider'),
 	keywords: ['hr', 'rule', 'separator', 'line'],
 	apply: run(insertHrCommand),
 };
 
 const BOLD: EditorCommand = {
 	id: 'strong',
-	label: 'Bold',
+	label: t('editor.commands.bold'),
 	keywords: ['strong'],
 	apply: run(toggleStrongCommand),
 };
 
 const ITALIC: EditorCommand = {
 	id: 'emphasis',
-	label: 'Italic',
+	label: t('editor.commands.italic'),
 	keywords: ['emphasis'],
 	apply: run(toggleEmphasisCommand),
 };
 
 const STRIKETHROUGH: EditorCommand = {
 	id: 'strike',
-	label: 'Strikethrough',
+	label: t('editor.commands.strikethrough'),
 	keywords: ['strike'],
 	apply: run(toggleStrikethroughCommand),
 };
 
 const INLINE_CODE: EditorCommand = {
 	id: 'code',
-	label: 'Code',
+	label: t('editor.commands.code'),
 	keywords: ['inline code', 'monospace'],
 	apply: run(toggleInlineCodeCommand),
 };
 
 const CLEAR_FORMATTING: EditorCommand = {
 	id: 'clear-formatting',
-	label: 'Clear formatting',
+	label: t('editor.commands.clearFormatting'),
 	keywords: ['plain', 'remove', 'reset'],
 	apply: clearFormatting,
 };
 
 const OUTDENT: EditorCommand = {
 	id: 'outdent',
-	label: 'Decrease indent',
+	label: t('editor.commands.outdent'),
 	keywords: ['lift', 'unindent', 'outdent'],
 	apply: run(liftListItemCommand),
 };
 
 const INDENT: EditorCommand = {
 	id: 'indent',
-	label: 'Increase indent',
+	label: t('editor.commands.indent'),
 	keywords: ['sink', 'nest', 'indent'],
 	apply: run(sinkListItemCommand),
 };
@@ -370,14 +375,14 @@ const INDENT: EditorCommand = {
  */
 const IMAGE: EditorCommand = {
 	id: 'image',
-	label: 'Image',
+	label: t('editor.commands.image'),
 	keywords: ['picture', 'photo', 'attach', 'upload'],
 	apply: attachPicked('image/*'),
 };
 
 const FILE: EditorCommand = {
 	id: 'file',
-	label: 'File',
+	label: t('editor.commands.file'),
 	keywords: ['attachment', 'attach', 'upload', 'document'],
 	apply: attachPicked(),
 };
@@ -385,7 +390,7 @@ const FILE: EditorCommand = {
 /** The toolbar's paperclip: any file, a picture among them. */
 const ATTACH: EditorCommand = {
 	id: 'attach',
-	label: 'Attach files',
+	label: t('editor.commands.attach'),
 	keywords: ['attachment', 'upload', 'image', 'picture', 'photo', 'file'],
 	apply: attachPicked(),
 };

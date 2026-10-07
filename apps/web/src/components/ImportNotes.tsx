@@ -2,6 +2,7 @@ import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { useState } from 'react';
 
 import { pickFiles } from '../editor/pickFiles.js';
+import { t } from '../i18n/t.js';
 import { type NotesDatabase } from '../store/db.js';
 import {
 	bringsAnything,
@@ -41,85 +42,118 @@ type Step =
 	| { kind: 'asking'; plan: ImportPlan }
 	| { kind: 'importing' };
 
-const counted = (count: number, one: string, many: string): string =>
-	`${count.toLocaleString('en')} ${count === 1 ? one : many}`;
-
 /** "a, b, c and 4 more": enough to find them by, not a wall of paths. */
 const NAMED = 3;
 const named = (paths: readonly string[]): string => {
-	const shown = paths.slice(0, NAMED).join(', ');
+	const [first = '', second = '', third = ''] = paths;
 	const more = paths.length - NAMED;
-	return more > 0 ? `${shown} and ${String(more)} more` : shown;
+	// A second count, inside a sentence that counts the paths already: a plural
+	// of its own, which that sentence is given as `{names}`.
+	if (more > 0) return t('importing.named.andMore', { first, second, third, count: more });
+	if (paths.length === NAMED) return t('importing.named.three', { first, second, third });
+	if (paths.length === 2) return t('importing.named.pair', { first, second });
+	return first;
 };
 
-const WHY: Record<SkipReason, (count: number) => string> = {
-	'not-text': (count) =>
-		`${counted(count, 'note is', 'notes are')} not UTF-8 text, which this app leaves alone. Save ${count === 1 ? 'it' : 'them'} as UTF-8 and import again`,
-	hidden: (count) =>
-		`${counted(count, 'note has', 'notes have')} a name, or ${count === 1 ? 'is' : 'are'} in a folder, beginning with a dot, which this app keeps hidden`,
-	'too-large': (count) =>
-		`${counted(count, 'file is', 'files are')} over ${String(MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB, the most a file beside a note can be`,
-	unreadable: (count) =>
-		`${counted(count, 'file', 'files')} could not be read from ${count === 1 ? 'its' : 'their'} archive`,
+const WHY: Record<SkipReason, (count: number, names: string) => string> = {
+	'not-text': (count, names) => t('importing.leftOut.notText', { count, names }),
+	hidden: (count, names) => t('importing.leftOut.hidden', { count, names }),
+	'too-large': (count, names) =>
+		t('importing.leftOut.tooLarge', {
+			count,
+			names,
+			megabytes: MAX_ATTACHMENT_BYTES / (1024 * 1024),
+		}),
+	unreadable: (count, names) => t('importing.leftOut.unreadable', { count, names }),
 };
 
 /** One line per reason anything stays out, each naming a few of them. */
 export const leftOut = (skipped: readonly Skipped[]): string[] =>
 	(Object.keys(WHY) as SkipReason[]).flatMap((reason) => {
 		const paths = skipped.filter((each) => each.reason === reason).map((each) => each.path);
-		return paths.length === 0
-			? []
-			: [`Left out: ${WHY[reason](paths.length)}: ${named(paths)}.`];
+		return paths.length === 0 ? [] : [WHY[reason](paths.length, named(paths))];
 	});
 
+/**
+ * The question's first sentence: what comes in, and where. One that counts
+ * two or three kinds of thing is chosen on the first of them, and is given the
+ * others as plurals of their own (`importing.counts`).
+ */
+const whatComesIn = ({ notes, files, folders }: ImportPlan, label: string): string => {
+	if (notes.length === 0 && files.length === 0) {
+		return t('importing.question.emptyNotebooks', { count: folders.length, label });
+	}
+	const filesSaid = t('importing.counts.files', { count: files.length });
+	if (folders.length === 0) {
+		if (files.length === 0) {
+			return t('importing.question.notes', { count: notes.length, label });
+		}
+		if (notes.length === 0) {
+			return t('importing.question.files', { count: files.length, label });
+		}
+		return t('importing.question.notesAndFiles', {
+			count: notes.length,
+			files: filesSaid,
+			label,
+		});
+	}
+	const notebooks = t('importing.counts.notebooks', { count: folders.length });
+	if (files.length === 0) {
+		return t('importing.question.notesInNotebooks', { count: notes.length, notebooks, label });
+	}
+	if (notes.length === 0) {
+		return t('importing.question.filesInNotebooks', { count: files.length, notebooks, label });
+	}
+	return t('importing.question.notesAndFilesInNotebooks', {
+		count: notes.length,
+		files: filesSaid,
+		notebooks,
+		label,
+	});
+};
+
 /** What an import would bring, as the user is asked about it. */
-export const importQuestion = (plan: ImportPlan, label: string): string[] => {
-	const things = [
-		...(plan.notes.length > 0 ? [counted(plan.notes.length, 'note', 'notes')] : []),
-		...(plan.files.length > 0 ? [counted(plan.files.length, 'file', 'files')] : []),
-	];
-	const what =
-		things.length === 0
-			? counted(plan.folders.length, 'empty notebook', 'empty notebooks')
-			: `${things.join(' and ')}${plan.folders.length > 0 ? `, in ${counted(plan.folders.length, 'notebook', 'notebooks')},` : ''}`;
-	return [
-		`${what} will be added to ${label}, beside what is there. Nothing there is changed or replaced; a name that is taken gets a number.`,
-		...leftOut(plan.skipped),
-		...(plan.renamed.length > 0
-			? [
-					`${counted(plan.renamed.length, 'name has', 'names have')} a character storage providers refuse, changed to _: ${named(plan.renamed)}.`,
-				]
-			: []),
-	];
+export const importQuestion = (plan: ImportPlan, label: string): string[] => [
+	`${whatComesIn(plan, label)} ${t('importing.question.unchanged')}`,
+	...leftOut(plan.skipped),
+	...(plan.renamed.length > 0
+		? [
+				t('importing.question.renamed', {
+					count: plan.renamed.length,
+					names: named(plan.renamed),
+				}),
+			]
+		: []),
+];
+
+/** The first sentence once an import is through: what came in. */
+const whatCameIn = ({ notes, files, folders }: ImportOutcome): string => {
+	if (notes === 0 && files === 0) return t('importing.outcome.notebooks', { count: folders });
+	if (files === 0) return t('importing.outcome.notes', { count: notes });
+	if (notes === 0) return t('importing.outcome.files', { count: files });
+	// Two counts: chosen on the notes, and given the files as a plural of their own.
+	return t('importing.outcome.notesAndFiles', {
+		count: notes,
+		files: t('importing.counts.files', { count: files }),
+	});
 };
 
 /** What to say once an import is through. */
-export const importOutcome = (outcome: ImportOutcome, label: string, syncs: boolean): string => {
-	const things = [
-		...(outcome.notes > 0 ? [counted(outcome.notes, 'note', 'notes')] : []),
-		...(outcome.files > 0 ? [counted(outcome.files, 'file', 'files')] : []),
-	];
-	const what =
-		things.length === 0
-			? `Imported ${counted(outcome.folders, 'notebook', 'notebooks')}.`
-			: `Imported ${things.join(' and ')}.`;
-	return [
-		what,
-		...(syncs ? [`They go up to ${label} as it syncs.`] : []),
+export const importOutcome = (outcome: ImportOutcome, label: string, syncs: boolean): string =>
+	[
+		whatCameIn(outcome),
+		...(syncs ? [t('importing.outcome.syncs', { label })] : []),
 		...(outcome.numbered > 0
-			? [
-					`${counted(outcome.numbered, 'note', 'notes')} took a numbered name, a note there having ${outcome.numbered === 1 ? 'its' : 'theirs'} already.`,
-				]
+			? [t('importing.outcome.numbered', { count: outcome.numbered })]
 			: []),
 		...(outcome.present > 0
-			? [`${counted(outcome.present, 'file was', 'files were')} there already.`]
+			? [t('importing.outcome.present', { count: outcome.present })]
 			: []),
 	].join(' ');
-};
 
 /** Said when what was picked holds nothing to bring in. */
 export const nothingToImport = (plan: ImportPlan): string =>
-	['Nothing to import: no notes or files were found.', ...leftOut(plan.skipped)].join(' ');
+	[t('importing.nothing'), ...leftOut(plan.skipped)].join(' ');
 
 /**
  * Picking, reading, asking and importing, for one source. `start` is called
@@ -155,8 +189,8 @@ export const useImportNotes = (
 				setStep({ kind: 'idle' });
 				setSaid(
 					error instanceof ImportTooLargeError
-						? `That is more than ${String(MAX_IMPORT_BYTES / 1024 ** 3)} GB to import at once, so nothing was imported. Import it a notebook at a time.`
-						: 'The files could not be read, so nothing was imported.'
+						? t('importing.tooLarge', { gigabytes: MAX_IMPORT_BYTES / 1024 ** 3 })
+						: t('importing.unreadable')
 				);
 			});
 	};
@@ -172,8 +206,8 @@ export const useImportNotes = (
 			.catch((error: unknown) => {
 				setSaid(
 					error instanceof ImportRefusedError
-						? `${label} cannot take an import now, so nothing was imported.`
-						: 'The notes could not be imported, so nothing was changed. Try again.'
+						? t('importing.refused', { label })
+						: t('importing.failed')
 				);
 			})
 			.finally(() => {
@@ -193,14 +227,14 @@ export type Importing = ReturnType<typeof useImportNotes>;
 /** The two ways in, as items of a source's `⋯` menu. */
 export const importItems = (importing: Importing): OptionsMenuItem[] => [
 	{
-		label: 'Import a folder',
+		label: t('importing.importFolder'),
 		onChoose: () => {
 			importing.start('folder');
 		},
 		disabled: importing.busy,
 	},
 	{
-		label: 'Import files',
+		label: t('importing.importFiles'),
 		onChoose: () => {
 			importing.start('files');
 		},
@@ -218,12 +252,12 @@ export const ImportNotes = ({ importing }: { importing: Importing }) => {
 		<>
 			{step.kind === 'reading' && (
 				<p className="muted" role="status">
-					Reading the files…
+					{t('importing.reading')}
 				</p>
 			)}
 			{step.kind === 'importing' && (
 				<p className="muted" role="status">
-					Importing…
+					{t('importing.importing')}
 				</p>
 			)}
 			{said !== null && step.kind === 'idle' && (
@@ -233,8 +267,8 @@ export const ImportNotes = ({ importing }: { importing: Importing }) => {
 			)}
 			{step.kind === 'asking' && (
 				<ConfirmDialog
-					title={`Import into ${importing.label}?`}
-					confirmLabel="Import"
+					title={t('importing.title', { label: importing.label })}
+					confirmLabel={t('importing.confirm')}
 					tone="primary"
 					onConfirm={importing.confirm}
 					onCancel={importing.cancel}

@@ -2,6 +2,7 @@ import type { Node as ProseNode } from '@milkdown/kit/prose/model';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view';
 
+import { t } from '../i18n/t.js';
 import { PROGRAMMATIC_META } from './dirty.js';
 
 /**
@@ -69,8 +70,8 @@ const tailButton = (view: EditorView): HTMLElement => {
 	button.setAttribute('class', 'editor-tail');
 	// A real button, so the keyboard has the same way out that the mouse does:
 	// inside a trailing code block every arrow key leads back into the code.
-	button.setAttribute('aria-label', 'Add a paragraph after this block');
-	button.setAttribute('title', 'Add a paragraph');
+	button.setAttribute('aria-label', t('editor.tail.label'));
+	button.setAttribute('title', t('editor.tail.title'));
 	button.setAttribute('contenteditable', 'false');
 	button.addEventListener('click', (event) => {
 		event.preventDefault();

@@ -50,26 +50,7 @@ const SHOWN_PROP =
  */
 const WORDS_NOT_MOVED_YET = [
 	'apps/web/src/components/AccountPanel.tsx',
-	'apps/web/src/components/AttachedFiles.tsx',
-	'apps/web/src/components/ClipboardPanel.tsx',
 	'apps/web/src/components/ConnectButton.tsx',
-	'apps/web/src/components/DetachedSource.tsx',
-	'apps/web/src/components/DisconnectDialog.tsx',
-	'apps/web/src/components/ImportNotes.tsx',
-	'apps/web/src/components/ImportProgress.tsx',
-	'apps/web/src/components/MoveUnsent.tsx',
-	'apps/web/src/components/NoteList.tsx',
-	'apps/web/src/components/NoteView.tsx',
-	'apps/web/src/components/RowOptions.tsx',
-	'apps/web/src/components/RowRename.tsx',
-	'apps/web/src/components/ScratchControls.tsx',
-	'apps/web/src/components/Scratchpad.tsx',
-	'apps/web/src/components/Sidebar.tsx',
-	'apps/web/src/components/SourceTabs.tsx',
-	'apps/web/src/components/unsupported.tsx',
-	'apps/web/src/editor/FormatToolbar.tsx',
-	'apps/web/src/editor/InlineToolbar.tsx',
-	'apps/web/src/editor/SlashMenu.tsx',
 ];
 
 const INLINE_WORDS = [

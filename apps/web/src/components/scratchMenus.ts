@@ -1,5 +1,6 @@
 import { SCRATCH_COLORS, type ScratchColor } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
@@ -9,18 +10,21 @@ import { type OptionsMenuItem } from './OptionsMenu.js';
  */
 
 /** What making a scratch card a note is called, wherever it is offered. */
-export const MOVE_LABEL = 'Move to notebook';
+export const MOVE_LABEL = t('scratchpad.menu.move');
 
-/** Each colour's name, as a menu says it. */
+/**
+ * Each colour's name, as a menu says it. Only the name: what a note's
+ * frontmatter holds is the colour's id (`color: red`), whatever the language.
+ */
 export const COLOR_LABELS: Readonly<Record<ScratchColor, string>> = {
-	red: 'Red',
-	orange: 'Orange',
-	yellow: 'Yellow',
-	green: 'Green',
-	teal: 'Teal',
-	blue: 'Blue',
-	purple: 'Purple',
-	pink: 'Pink',
+	red: t('scratchpad.color.red'),
+	orange: t('scratchpad.color.orange'),
+	yellow: t('scratchpad.color.yellow'),
+	green: t('scratchpad.color.green'),
+	teal: t('scratchpad.color.teal'),
+	blue: t('scratchpad.color.blue'),
+	purple: t('scratchpad.color.purple'),
+	pink: t('scratchpad.color.pink'),
 };
 
 /** The colours to choose from, the one the card has pressed. */
@@ -29,7 +33,7 @@ export const colorItems = (
 	onColor: (color: ScratchColor | undefined) => void
 ): OptionsMenuItem[] => [
 	{
-		label: 'No color',
+		label: t('scratchpad.color.none'),
 		swatch: '',
 		pressed: current === undefined,
 		onChoose: () => {
@@ -58,5 +62,5 @@ export const cardMenuItems = ({
 	onDelete: () => void;
 }): OptionsMenuItem[] => [
 	...(onMove === undefined ? [] : [{ label: MOVE_LABEL, onChoose: onMove }]),
-	{ label: 'Delete', onChoose: onDelete, danger: true },
+	{ label: t('scratchpad.menu.delete'), onChoose: onDelete, danger: true },
 ];
