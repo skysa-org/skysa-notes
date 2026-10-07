@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 import { useSuspendShortcuts } from '../commands/context.js';
 import { FILE_ICONS, Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { activeConnectionId, db, type NotesDatabase } from '../store/db.js';
 import {
 	type AttachedFile,
@@ -42,18 +43,28 @@ export interface AttachedFilesProps {
 
 /** A size as a person reads one. */
 export const sizeOf = (bytes: number): string => {
-	if (bytes < 1024) return bytes === 1 ? '1 byte' : `${String(bytes)} bytes`;
-	if (bytes < 1024 * 1024) return `${String(Math.round(bytes / 1024))} KB`;
-	return `${String(Math.round((bytes / (1024 * 1024)) * 10) / 10)} MB`;
+	if (bytes < 1024) return t('attachedFiles.size.bytes', { count: bytes });
+	if (bytes < 1024 * 1024) {
+		return t('attachedFiles.size.kilobytes', { count: Math.round(bytes / 1024) });
+	}
+	return t('attachedFiles.size.megabytes', {
+		count: Math.round((bytes / (1024 * 1024)) * 10) / 10,
+	});
 };
 
 /** Where a file is linked from, in words: the notes, a deleted one said so. */
 export const linkedFrom = (file: AttachedFile): string =>
 	file.linkedBy.length === 0
-		? 'Not in any note'
-		: `In ${file.linkedBy
-				.map((note) => (note.deleted ? `${note.title} (deleted)` : note.title))
-				.join(', ')}`;
+		? t('attachedFiles.notLinked')
+		: t('attachedFiles.linkedIn', {
+				notes: file.linkedBy
+					.map((note) =>
+						note.deleted
+							? t('attachedFiles.deletedNote', { title: note.title })
+							: note.title
+					)
+					.join(', '),
+			});
 
 const FileRow = ({
 	file,
@@ -97,21 +108,21 @@ const FileRow = ({
 					ref={deleteButton}
 					type="button"
 					className="danger attached-file-delete"
-					aria-label={`Delete ${file.name}`}
+					aria-label={t('attachedFiles.deleteLabel', { name: file.name })}
 					onClick={() => {
 						setAsking(true);
 					}}
 				>
-					Delete
+					{t('attachedFiles.delete')}
 				</button>
 			)}
 			{offered && asking && (
 				<span
 					className="attached-file-confirm"
 					role="group"
-					aria-label={`Delete ${file.name}`}
+					aria-label={t('attachedFiles.deleteLabel', { name: file.name })}
 				>
-					<span>Delete it for good?</span>
+					<span>{t('attachedFiles.confirm')}</span>
 					<button
 						type="button"
 						className="danger"
@@ -124,7 +135,7 @@ const FileRow = ({
 							});
 						}}
 					>
-						Delete
+						{t('attachedFiles.delete')}
 					</button>
 					<button
 						ref={keepButton}
@@ -134,7 +145,7 @@ const FileRow = ({
 							setAsking(false);
 						}}
 					>
-						Keep
+						{t('attachedFiles.keep')}
 					</button>
 				</span>
 			)}
@@ -202,9 +213,9 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 		try {
 			const gone = await deleteUnlinkedFiles(database, connectionId, [file.id]);
 			// Linked since the list was drawn: the live list shows by what.
-			if (gone.length === 0) setProblem(`${file.name} was kept: a note may link it now.`);
+			if (gone.length === 0) setProblem(t('attachedFiles.kept', { name: file.name }));
 		} catch {
-			setProblem(`${file.name} could not be deleted.`);
+			setProblem(t('attachedFiles.failed', { name: file.name }));
 		}
 		close.current?.focus();
 	};
@@ -218,15 +229,12 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 				aria-modal="true"
 				aria-labelledby={titleId}
 			>
-				<h2 id={titleId}>{`Attached files in “${name}”`}</h2>
+				<h2 id={titleId}>{t('attachedFiles.title', { name })}</h2>
 				{files !== undefined && files.length === 0 && (
-					<p className="muted">No files in this notebook.</p>
+					<p className="muted">{t('attachedFiles.none')}</p>
 				)}
 				{held === false && files !== undefined && files.length > 0 && (
-					<p className="muted">
-						Not every note in this storage is on this device yet, so a file here may be
-						in one that is not. Nothing can be deleted until they all are.
-					</p>
+					<p className="muted">{t('attachedFiles.notAllHere')}</p>
 				)}
 				{files !== undefined && files.length > 0 && (
 					<ul className="attached-file-list">
@@ -247,7 +255,7 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 				)}
 				<div className="modal-actions">
 					<button ref={close} type="button" onClick={onClose}>
-						Close
+						{t('common.close')}
 					</button>
 				</div>
 			</div>

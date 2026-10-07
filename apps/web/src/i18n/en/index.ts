@@ -1,7 +1,11 @@
 import { type Catalog } from '../catalog.js';
+import { attachedFiles } from './attachedFiles.js';
 import { common } from './common.js';
 import { editor } from './editor.js';
 import { firstImport } from './firstImport.js';
+import { notebooks } from './notebooks.js';
+import { notes } from './notes.js';
+import { rows } from './rows.js';
 import { scheduler } from './scheduler.js';
 import { shell } from './shell.js';
 import { sources } from './sources.js';
@@ -15,6 +19,10 @@ import { unsent } from './unsent.js';
 export const en = {
 	common,
 	shell,
+	notebooks,
+	notes,
+	rows,
+	attachedFiles,
 	sources,
 	unsent,
 	firstImport,
