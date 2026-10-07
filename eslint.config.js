@@ -49,8 +49,6 @@ const SHOWN_PROP =
  * it.
  */
 const WORDS_NOT_MOVED_YET = [
-	'apps/web/src/components/AccountPanel.tsx',
-	'apps/web/src/components/ConnectButton.tsx',
 ];
 
 const INLINE_WORDS = [

@@ -5,6 +5,7 @@ import {
 	type FetchLike,
 } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { type ProviderFactory } from './scheduler.js';
 
 /**
@@ -83,8 +84,9 @@ const deadline = (ms: number, init: RequestInit) => {
 	const due = (): void => {
 		const earned = credit.get('ms') ?? 0;
 		credit.set('ms', 0);
+		// The timeout's words reach the storage panel, as what went wrong.
 		if (earned > 0) timer.set('due', setTimeout(due, earned));
-		else controller.abort(new DOMException('the provider took too long', 'TimeoutError'));
+		else controller.abort(new DOMException(t('account.status.timedOut'), 'TimeoutError'));
 	};
 	timer.set('due', setTimeout(due, ms + sending(init.body) / SLOWEST_BYTES_PER_MS));
 	return {

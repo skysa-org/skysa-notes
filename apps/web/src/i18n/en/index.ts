@@ -1,7 +1,9 @@
 import { type Catalog } from '../catalog.js';
+import { account } from './account.js';
 import { attachedFiles } from './attachedFiles.js';
 import { clipboard } from './clipboard.js';
 import { common } from './common.js';
+import { connect } from './connect.js';
 import { editor } from './editor.js';
 import { exporting } from './exporting.js';
 import { find } from './find.js';
@@ -31,6 +33,8 @@ export const en = {
 	search,
 	install,
 	share,
+	account,
+	connect,
 	importing,
 	exporting,
 	clipboard,
