@@ -1,5 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
+import { t } from '../i18n/t.js';
+
 /**
  * Where a row's name starts: in from the pane's edge by the gutter, by a step
  * per level it is nested, and by the room a notebook's chevron takes
@@ -64,7 +66,7 @@ export const RowRename = ({
 		<input
 			ref={field}
 			className="row-rename"
-			aria-label={`Rename ${name}`}
+			aria-label={t('rows.rename', { name })}
 			value={draft}
 			{...(maxLength === undefined ? {} : { maxLength })}
 			onChange={(event) => {

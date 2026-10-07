@@ -1,6 +1,8 @@
 import type { StructuralDifference } from '@skysa/core';
 import { type ReactNode, useCallback, useState } from 'react';
 
+import { rich } from '../i18n/rich.js';
+import { t } from '../i18n/t.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { getNote, setNoteEditorMode } from '../store/notes.js';
 
@@ -124,30 +126,30 @@ export const useUnsupported = (
  * and whoever they report it to, nothing to look for (2026-10-04).
  */
 const NAMES: Record<string, string> = {
-	blockquote: 'a quote',
-	break: 'a line break',
-	code: 'a code block',
-	definition: 'a link reference definition',
-	delete: 'strikethrough',
-	emphasis: 'emphasis',
-	footnoteDefinition: 'a footnote',
-	footnoteReference: 'a footnote reference',
-	heading: 'a heading',
-	image: 'an image',
-	imageReference: 'a reference-style image',
-	inlineCode: 'inline code',
-	link: 'a link',
-	linkReference: 'a reference-style link',
-	list: 'a list',
-	listItem: 'a list item',
-	paragraph: 'a paragraph',
-	strong: 'bold text',
-	table: 'a table',
-	tableCell: 'a table cell',
-	tableRow: 'a table row',
-	thematicBreak: 'a divider',
-	toml: 'frontmatter',
-	yaml: 'frontmatter',
+	blockquote: t('notes.unsupported.names.blockquote'),
+	break: t('notes.unsupported.names.break'),
+	code: t('notes.unsupported.names.code'),
+	definition: t('notes.unsupported.names.definition'),
+	delete: t('notes.unsupported.names.delete'),
+	emphasis: t('notes.unsupported.names.emphasis'),
+	footnoteDefinition: t('notes.unsupported.names.footnoteDefinition'),
+	footnoteReference: t('notes.unsupported.names.footnoteReference'),
+	heading: t('notes.unsupported.names.heading'),
+	image: t('notes.unsupported.names.image'),
+	imageReference: t('notes.unsupported.names.imageReference'),
+	inlineCode: t('notes.unsupported.names.inlineCode'),
+	link: t('notes.unsupported.names.link'),
+	linkReference: t('notes.unsupported.names.linkReference'),
+	list: t('notes.unsupported.names.list'),
+	listItem: t('notes.unsupported.names.listItem'),
+	paragraph: t('notes.unsupported.names.paragraph'),
+	strong: t('notes.unsupported.names.strong'),
+	table: t('notes.unsupported.names.table'),
+	tableCell: t('notes.unsupported.names.tableCell'),
+	tableRow: t('notes.unsupported.names.tableRow'),
+	thematicBreak: t('notes.unsupported.names.thematicBreak'),
+	toml: t('notes.unsupported.names.frontmatter'),
+	yaml: t('notes.unsupported.names.frontmatter'),
 };
 
 /**
@@ -161,29 +163,53 @@ const seen = (text: string): string =>
 		(char) => `U+${(char.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`
 	);
 
+/** What the banner's `<code>` is drawn as. */
+const CODE = { code: (words: string) => <code>{words}</code> };
+
 const what = (lost: StructuralDifference): ReactNode => {
 	// The note as a whole: nothing in it is the one thing to point at.
 	if (lost.type === 'root') return undefined;
 	if (lost.type === 'html') {
-		return lost.value === undefined ? (
-			'some HTML'
-		) : (
-			<>
-				the HTML <code>{lost.value}</code>
-			</>
-		);
+		return lost.value === undefined
+			? t('notes.unsupported.what.someHtml')
+			: rich('notes.unsupported.what.html', CODE, { value: lost.value });
 	}
-	const named = NAMES[lost.type] ?? (
-		<>
-			markdown of the kind <code>{lost.type}</code>
-		</>
-	);
-	if (lost.value === undefined) return lost.type === 'text' ? 'some text' : named;
-	return (
-		<>
-			{lost.type === 'text' ? 'the text' : named} <code>“{seen(lost.value)}”</code>
-		</>
-	);
+	if (lost.type === 'text') {
+		return lost.value === undefined
+			? t('notes.unsupported.what.someText')
+			: rich('notes.unsupported.what.text', CODE, { value: seen(lost.value) });
+	}
+	const name = NAMES[lost.type];
+	if (name === undefined) {
+		return lost.value === undefined
+			? rich('notes.unsupported.what.kind', CODE, { type: lost.type })
+			: rich('notes.unsupported.what.kindWithValue', CODE, {
+					type: lost.type,
+					value: seen(lost.value),
+				});
+	}
+	return lost.value === undefined
+		? name
+		: rich('notes.unsupported.what.named', CODE, { name, value: seen(lost.value) });
+};
+
+/**
+ * Why the note stays in markdown, with what the rich editor could not show
+ * named where the sentence has room for it (`<what></what>`), and on which
+ * line where that is known.
+ */
+const whyItStays = (lost: StructuralDifference, named: ReactNode): ReactNode => {
+	const tags = { what: () => named };
+	if (lost.line === undefined) {
+		return lost.added === true
+			? rich('notes.unsupported.wouldAdd', tags)
+			: rich('notes.unsupported.cannotShow', tags);
+	}
+	// A place in the file rather than an amount of anything, so as it is.
+	const at = { line: String(lost.line) };
+	return lost.added === true
+		? rich('notes.unsupported.wouldAddOnLine', tags, at)
+		: rich('notes.unsupported.cannotShowOnLine', tags, at);
 };
 
 export const UnsupportedBanner = ({
@@ -194,26 +220,10 @@ export const UnsupportedBanner = ({
 	retryable: boolean;
 }) => {
 	const named = what(lost);
-	const where = lost.line === undefined ? '' : ` on line ${String(lost.line)}`;
 	return (
 		<p className="banner" role="status">
-			{named === undefined ? (
-				'This note uses markdown the rich editor has no way to show'
-			) : lost.added === true ? (
-				<>
-					The rich editor would add {named}
-					{where} that this note does not have
-				</>
-			) : (
-				<>
-					The rich editor has no way to show {named}
-					{where}
-				</>
-			)}
-			, so this note stays in markdown mode. Nothing in it has been changed.{' '}
-			{retryable
-				? 'Switch to rich text to try again.'
-				: 'Change it here, then switch to rich text to try again.'}
+			{named === undefined ? t('notes.unsupported.whole') : whyItStays(lost, named)}{' '}
+			{retryable ? t('notes.unsupported.retry') : t('notes.unsupported.changeFirst')}
 		</p>
 	);
 };

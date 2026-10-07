@@ -1,6 +1,7 @@
 import { type ScratchColor } from '@skysa/core';
 
 import { Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { OptionsMenu } from './OptionsMenu.js';
 import { cardMenuItems, colorItems } from './scratchMenus.js';
 
@@ -27,9 +28,9 @@ export const PinButton = ({
 	<button
 		type="button"
 		className={`${className} pin-button`}
-		aria-label="Pin"
+		aria-label={t('scratchpad.pin.label')}
 		aria-pressed={pinned}
-		title={pinned ? 'Unpin' : 'Pin to the top'}
+		title={pinned ? t('scratchpad.pin.unpin') : t('scratchpad.pin.pin')}
 		onClick={onToggle}
 	>
 		<Icon name="pin" />
@@ -49,9 +50,9 @@ export const ColorMenu = ({
 	align?: 'start' | 'end';
 }) => (
 	<OptionsMenu
-		label="Color"
-		title="Color"
-		groupLabel="Color"
+		label={t('scratchpad.color.menu')}
+		title={t('scratchpad.color.menu')}
+		groupLabel={t('scratchpad.color.menu')}
 		triggerClassName="icon icon-quiet"
 		trigger={<Icon name="palette" />}
 		items={colorItems(color, onColor)}
@@ -76,9 +77,9 @@ export const CardMenu = ({
 	align?: 'start' | 'end';
 }) => (
 	<OptionsMenu
-		label={`Options for “${name}”`}
-		title="Note options"
-		groupLabel={`Note “${name}”`}
+		label={t('scratchpad.menu.options', { name })}
+		title={t('scratchpad.menu.title')}
+		groupLabel={t('scratchpad.menu.group', { name })}
 		triggerClassName="icon icon-quiet"
 		trigger={<Icon name="overflow" />}
 		items={cardMenuItems({ onMove, onDelete })}
@@ -107,13 +108,13 @@ export const ScratchBar = ({
 	onDelete: (() => void) | undefined;
 	onClose: () => void;
 }) => (
-	<div className="scratch-bar" role="group" aria-label="Scratch note">
+	<div className="scratch-bar" role="group" aria-label={t('scratchpad.note')}>
 		<ColorMenu color={color} onColor={onColor} rises />
 		{onDelete !== undefined && (
 			<CardMenu name={name} onMove={onMove} onDelete={onDelete} rises />
 		)}
 		<button type="button" className="scratch-close" onClick={onClose}>
-			Close
+			{t('common.close')}
 		</button>
 	</div>
 );

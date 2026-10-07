@@ -3,6 +3,7 @@ import { createContext, type ReactNode, useContext, useEffect, useState } from '
 
 import { type AttachmentHost, NO_ATTACHMENTS, type Shown } from '../editor/attachHost.js';
 import { FILE_ICONS, Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { useNoteAttachments } from './noteAttachments.js';
 
@@ -117,7 +118,7 @@ const CardPicture = ({ embed, words }: { embed: Embedded<'image'>; words: string
 					}}
 				/>
 			) : (
-				words.trim() || 'Picture'
+				words.trim() || t('scratchpad.card.picture')
 			)}
 		</span>
 	);

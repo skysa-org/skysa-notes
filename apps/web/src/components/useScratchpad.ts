@@ -2,6 +2,7 @@ import { basename, parentPath, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { useRouter } from '@tanstack/react-router';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { t } from '../i18n/t.js';
 import type { Place } from '../routes/place.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { settleEditors } from '../store/heldEdits.js';
@@ -168,7 +169,7 @@ export const useScratchpad = ({
 
 	const mark = (note: NoteRecord, change: MarkChange) => {
 		void setScratchMarks(db, note.id, change, scope(note)).catch(() => {
-			onProblem('That note could not be changed.');
+			onProblem(t('scratchpad.problem.changed'));
 		});
 	};
 
@@ -189,7 +190,7 @@ export const useScratchpad = ({
 				onDeleted(row ?? note);
 			})
 			.catch(() => {
-				onProblem('That note could not be deleted.');
+				onProblem(t('scratchpad.problem.deleted'));
 			});
 	};
 
@@ -229,7 +230,7 @@ export const useScratchpad = ({
 		setNaming(undefined);
 		if (note === undefined) return;
 		void renameNote(db, note.id, name, scope(note)).then(carry, () => {
-			onProblem('That note could not be named.');
+			onProblem(t('scratchpad.problem.named'));
 		});
 	};
 
