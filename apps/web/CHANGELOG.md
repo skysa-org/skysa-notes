@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 0.21.2
+
+### Patch Changes
+
+- d3c7c96: On a phone, or in any window too narrow for three columns, a long note name in the note dropdown is now shortened in the middle, as a notebook's path is, rather than at its end: `Forecas…ond half`, so two notes that start alike can still be told apart.
+- @skysa/core@0.21.2
+
 ## 0.21.1
 
 ### Patch Changes
