@@ -12,6 +12,7 @@ import {
 import { liveQuery } from 'dexie';
 
 import { type ApiClient, type Denial, type Refusal } from '../api/client.js';
+import { t } from '../i18n/t.js';
 import { bindingCount, finishImport, verifyResume } from '../store/connection.js';
 import {
 	activeConnectionId,
@@ -686,7 +687,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		if (outcome.status === 'retry') {
 			failed(
 				session,
-				outcome.error ?? 'Sync failed',
+				outcome.error ?? t('scheduler.failed'),
 				outcome.conflicts,
 				outcome.retryAfterMs
 			);
@@ -787,7 +788,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			publish({
 				...status(),
 				phase: 'attention',
-				error: 'This app cannot sync with this storage provider yet.',
+				error: t('scheduler.unsupported'),
 			});
 			return;
 		}

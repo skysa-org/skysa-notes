@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { api, type ApiClient } from '../api/client.js';
 import { useSuspendShortcuts } from '../commands/context.js';
 import { saying } from '../errors/reached.js';
+import { t } from '../i18n/t.js';
 import { db, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
@@ -26,38 +27,46 @@ import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
  * into a source with nothing in it yet that offered to make a notebook.
  */
 
-const count = (n: number): string => n.toLocaleString();
-
 /** What the import is doing, in a sentence. Exported for its tests. */
 export const importMessage = (status: SchedulerStatus, label: string): string => {
 	switch (status.phase) {
 		case 'syncing':
 			return progressMessage(status.progress, label);
 		case 'idle':
-			return 'Finishing…';
+			return t('firstImport.finishing');
 		case 'offline':
-			return 'Offline. The import carries on when the connection is back.';
+			return t('firstImport.offline');
 		case 'retrying':
-			return `Could not reach ${label}. Trying again shortly.`;
+			return t('firstImport.retrying', { provider: label });
 		case 'attention':
-			return `The import has stopped: ${status.error ?? 'something went wrong'}. Cancel, and connect ${label} again.`;
+			return status.error === undefined
+				? t('firstImport.stoppedUnknown', { provider: label })
+				: t('firstImport.stopped', { error: status.error, provider: label });
 		case 'local':
-			return 'Getting ready…';
+			return t('firstImport.gettingReady');
 	}
 };
 
 const progressMessage = (progress: SyncProgress | undefined, label: string): string => {
-	if (progress === undefined) return 'Getting ready…';
+	if (progress === undefined) return t('firstImport.gettingReady');
 	if (progress.stage === 'uploading') {
-		return `Uploading notes to ${label}: ${count(progress.done)} of ${count(progress.total)}.`;
+		return t('firstImport.uploading', {
+			provider: label,
+			done: progress.done,
+			total: progress.total,
+		});
 	}
 	if (progress.stage === 'receiving') {
-		return `Downloading notes from ${label}: ${count(progress.done)} of ${count(progress.total)}.`;
+		return t('firstImport.downloading', {
+			provider: label,
+			done: progress.done,
+			total: progress.total,
+		});
 	}
 	const { found, done } = progress;
 	return progress.listing
-		? `Looking for notes in ${label}: ${count(found)} found so far.`
-		: `Downloading notes from ${label}: ${count(done)} of ${count(found)}.`;
+		? t('firstImport.listing', { provider: label, count: found })
+		: t('firstImport.downloading', { provider: label, done, total: found });
 };
 
 /** How full the bar is, or nothing for a bar that cannot know. */
@@ -102,13 +111,13 @@ const outcomeMessage = (result: CancelImportResult, label: string): Cancelling =
 	if (!result.ok) {
 		return {
 			kind: 'unreached',
-			message: `The server would not disconnect ${label}, so the import goes on.`,
+			message: t('firstImport.refused', { provider: label }),
 		};
 	}
 	if (result.outcome === 'written') {
 		return {
 			kind: 'said',
-			message: `Something has been written in ${label} since it was connected, so it is kept. Disconnect it from the storage panel to decide what becomes of that.`,
+			message: t('firstImport.written', { provider: label }),
 		};
 	}
 	// Cancelled, or finished first: either way this is about to go.
@@ -139,10 +148,10 @@ const useCancel = (
 				setState({
 					kind: 'unreached',
 					message: saying(error, {
-						answered: `The server could not disconnect ${label}, so the import goes on.`,
-						unreachable: `The server cannot be reached, so ${label} is still connected there and the import goes on.`,
-						device: 'Something on this device went wrong. Try again.',
-						unknown: 'Something went wrong. Try again.',
+						answered: t('firstImport.notCanceled.answered', { provider: label }),
+						unreachable: t('firstImport.notCanceled.unreachable', { provider: label }),
+						device: t('firstImport.notCanceled.device'),
+						unknown: t('firstImport.notCanceled.unknown'),
 					}),
 				});
 			});
@@ -155,7 +164,9 @@ export interface ImportPanelProps extends ImportSeams {
 }
 
 const labelOf = (source: SyncStateRecord): string =>
-	source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
+	source.provider === undefined
+		? t('firstImport.unknownProvider')
+		: PROVIDER_LABELS[source.provider];
 
 /** The words, the bar and the buttons, wherever they are shown. */
 const ImportBody = ({
@@ -178,14 +189,14 @@ const ImportBody = ({
 			{/* Polite: it changes every few files, and a reader should hear it
 			    when it has a moment, not be interrupted by every count. */}
 			<p id={messageId} role="status" aria-live="polite">
-				{busy ? 'Canceling…' : importMessage(status, label)}
+				{busy ? t('firstImport.canceling') : importMessage(status, label)}
 			</p>
 			{bar === undefined ? (
-				<progress className="import-bar" aria-label="Import progress" />
+				<progress className="import-bar" aria-label={t('firstImport.progress')} />
 			) : (
 				<progress
 					className="import-bar"
-					aria-label="Import progress"
+					aria-label={t('firstImport.progress')}
 					value={bar.value}
 					max={Math.max(bar.max, 1)}
 				/>
@@ -211,7 +222,7 @@ const ImportBody = ({
 						cancel(true);
 					}}
 				>
-					{state.kind === 'unreached' ? 'Try again' : 'Cancel'}
+					{state.kind === 'unreached' ? t('common.tryAgain') : t('common.cancel')}
 				</button>
 				{state.kind === 'unreached' && (
 					<>
@@ -221,10 +232,10 @@ const ImportBody = ({
 								cancel(false);
 							}}
 						>
-							Cancel here anyway
+							{t('firstImport.cancelHere')}
 						</button>
 						<button type="button" onClick={dismiss}>
-							Keep importing
+							{t('firstImport.keepImporting')}
 						</button>
 					</>
 				)}
@@ -279,7 +290,7 @@ export const ImportDialog = (props: ImportPanelProps) => {
 				aria-labelledby={titleId}
 				aria-describedby={messageId}
 			>
-				<h2 id={titleId}>Connecting {labelOf(source)}</h2>
+				<h2 id={titleId}>{t('firstImport.title', { provider: labelOf(source) })}</h2>
 				<ImportBody {...props} cancelRef={cancel} messageId={messageId} />
 			</div>
 		</div>,
