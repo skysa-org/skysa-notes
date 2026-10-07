@@ -1,5 +1,6 @@
 import { type Catalog } from '../catalog.js';
 import { common } from './common.js';
+import { editor } from './editor.js';
 import { firstImport } from './firstImport.js';
 import { scheduler } from './scheduler.js';
 import { shell } from './shell.js';
@@ -18,4 +19,5 @@ export const en = {
 	unsent,
 	firstImport,
 	scheduler,
+	editor,
 } as const satisfies Catalog;

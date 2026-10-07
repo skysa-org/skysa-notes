@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { flushSync } from 'react-dom';
 
+import { t } from '../i18n/t.js';
 import {
 	clearLink,
 	type EditorCommand,
@@ -128,6 +129,9 @@ const isOff = (command: EditorCommand, format: FormatState): boolean => {
 	return false;
 };
 
+/** The groups the bar's controls are drawn in. */
+type Group = 'textStyle' | 'textFormatting' | 'lists' | 'indentation' | 'insert' | 'link';
+
 /**
  * The bar's slots, in the order they are drawn, and the group each is drawn
  * in. A slot is what goes into the overflow menu as one: a button, a menu, or
@@ -136,22 +140,32 @@ const isOff = (command: EditorCommand, format: FormatState): boolean => {
  */
 interface Slot {
 	id: string;
-	group: string;
+	group: Group;
 }
 
 const SLOTS: readonly Slot[] = [
-	{ id: 'text-style', group: 'Text style' },
-	{ id: 'strong', group: 'Text formatting' },
-	{ id: 'emphasis', group: 'Text formatting' },
-	{ id: 'more-formatting', group: 'Text formatting' },
-	{ id: 'bullet-list', group: 'Lists' },
-	{ id: 'ordered-list', group: 'Lists' },
-	{ id: 'task-list', group: 'Lists' },
-	{ id: 'indentation', group: 'Indentation' },
-	{ id: 'code-block', group: 'Insert' },
-	{ id: 'attach', group: 'Insert' },
-	{ id: 'link', group: 'Link' },
+	{ id: 'text-style', group: 'textStyle' },
+	{ id: 'strong', group: 'textFormatting' },
+	{ id: 'emphasis', group: 'textFormatting' },
+	{ id: 'more-formatting', group: 'textFormatting' },
+	{ id: 'bullet-list', group: 'lists' },
+	{ id: 'ordered-list', group: 'lists' },
+	{ id: 'task-list', group: 'lists' },
+	{ id: 'indentation', group: 'indentation' },
+	{ id: 'code-block', group: 'insert' },
+	{ id: 'attach', group: 'insert' },
+	{ id: 'link', group: 'link' },
 ];
+
+/** What each group is called, as a screen reader hears it. */
+const GROUP_LABELS: Readonly<Record<Group, string>> = {
+	textStyle: t('editor.toolbar.groups.textStyle'),
+	textFormatting: t('editor.toolbar.groups.textFormatting'),
+	lists: t('editor.toolbar.groups.lists'),
+	indentation: t('editor.toolbar.groups.indentation'),
+	insert: t('editor.toolbar.groups.insert'),
+	link: t('editor.toolbar.groups.link'),
+};
 
 /** The slot a tab stop is in, where it is not a slot of its own. */
 const SLOT_OF_STOP: Record<string, string> = { outdent: 'indentation', indent: 'indentation' };
@@ -658,15 +672,14 @@ const TextStyleMenu = ({
 	stop: ReturnType<ReturnType<typeof useRoving>['stop']>;
 }) => {
 	const current = TEXT_STYLES.find((style) => style.level === format.level);
+	const shown = current?.command.label ?? t('editor.commands.plainText');
 
 	return (
 		<ToolbarPopover
 			id="text-style"
-			label="Text style"
-			announce={`Text style: ${current?.command.label ?? 'Plain text'}`}
-			trigger={
-				<span className="toolbar-style">{current?.command.label ?? 'Plain text'}</span>
-			}
+			label={t('editor.toolbar.textStyle')}
+			announce={t('editor.toolbar.textStyleNow', { style: shown })}
+			trigger={<span className="toolbar-style">{shown}</span>}
 			open={open}
 			setOpen={setOpen}
 			stop={stop}
@@ -731,7 +744,7 @@ const MoreFormatting = ({
 }) => (
 	<ToolbarPopover
 		id="more-formatting"
-		label="More formatting"
+		label={t('editor.toolbar.moreFormatting')}
 		trigger={<Icon name="more" />}
 		open={open}
 		setOpen={setOpen}
@@ -750,6 +763,12 @@ const MoreFormatting = ({
 		))}
 	</ToolbarPopover>
 );
+
+/**
+ * What the empty address field shows: the start of an address, which is the
+ * same in every language and so stays out of the catalog.
+ */
+const ADDRESS_START = 'https://';
 
 /**
  * The field inside the link panel.
@@ -786,13 +805,13 @@ const LinkForm = ({
 				close();
 			}}
 		>
-			<label htmlFor="toolbar-link-url">Link to</label>
+			<label htmlFor="toolbar-link-url">{t('editor.toolbar.linkTo')}</label>
 			<input
 				id="toolbar-link-url"
 				ref={field}
 				type="url"
 				inputMode="url"
-				placeholder="https://"
+				placeholder={ADDRESS_START}
 				value={href}
 				onChange={(event) => {
 					setHref(event.target.value);
@@ -800,7 +819,7 @@ const LinkForm = ({
 			/>
 			<div className="toolbar-link-actions">
 				<button type="submit" disabled={href.trim() === ''}>
-					Apply
+					{t('editor.toolbar.applyLink')}
 				</button>
 				{current !== null && (
 					<button
@@ -810,7 +829,7 @@ const LinkForm = ({
 							close();
 						}}
 					>
-						Remove
+						{t('editor.toolbar.removeLink')}
 					</button>
 				)}
 			</div>
@@ -839,7 +858,7 @@ const LinkPanel = ({
 }) => (
 	<ToolbarPopover
 		id="link"
-		label="Link"
+		label={t('editor.toolbar.link')}
 		trigger={<Icon name="link" />}
 		open={open}
 		setOpen={setOpen}
@@ -909,7 +928,7 @@ const OverflowItems = ({
 					})}
 				>
 					<Icon name="link" />
-					<span>Link</span>
+					<span>{t('editor.toolbar.link')}</span>
 				</button>
 			) : (
 				commandsIn(slot.id).map((command) => (
@@ -1012,7 +1031,7 @@ export const FormatToolbar = ({
 		.filter(({ id }) => !hidden.has(id))
 		.reduce(
 			(drawn, { id, group }) => drawn.set(group, [...(drawn.get(group) ?? []), id]),
-			new Map<string, string[]>()
+			new Map<Group, string[]>()
 		);
 
 	return (
@@ -1025,7 +1044,7 @@ export const FormatToolbar = ({
 				}
 				ref={root}
 				role="toolbar"
-				aria-label="Formatting"
+				aria-label={t('editor.toolbar.label')}
 				aria-orientation="horizontal"
 				onKeyDown={onKeyDown}
 			>
@@ -1034,7 +1053,7 @@ export const FormatToolbar = ({
 						key={group}
 						className="toolbar-group"
 						role="group"
-						aria-label={group}
+						aria-label={GROUP_LABELS[group]}
 						data-group={group}
 					>
 						{ids.map((id) => (
@@ -1048,7 +1067,7 @@ export const FormatToolbar = ({
 				{hidden.size > 0 && (
 					<ToolbarPopover
 						id="overflow"
-						label="More tools"
+						label={t('editor.toolbar.moreTools')}
 						trigger={<Icon name="overflow" />}
 						chevron={false}
 						className="toolbar-overflow"
