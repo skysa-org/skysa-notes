@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	basename,
 	isHidden,
+	isScratchPath,
 	isWithin,
 	joinPath,
 	normalizePath,
@@ -97,6 +98,26 @@ describe('isHidden', () => {
 
 	it('leaves ordinary paths visible', () => {
 		expect(isHidden('work/standup.md')).toBe(false);
+	});
+
+	it('leaves the scratchpad at the root to sync, and nothing hidden inside it', () => {
+		expect(isHidden('.scratchpad')).toBe(false);
+		expect(isHidden('.scratchpad/untitled.md')).toBe(false);
+		expect(isHidden('.scratchpad/pasted-image-3f9a1c2b.png')).toBe(false);
+		expect(isHidden('.scratchpad/.DS_Store')).toBe(true);
+		expect(isHidden('work/.scratchpad/a.md')).toBe(true);
+		expect(isHidden('.Scratchpad/a.md')).toBe(true);
+		expect(isHidden('.clipboard/a.txt')).toBe(true);
+	});
+});
+
+describe('isScratchPath', () => {
+	it('is the scratchpad folder and what is in it, and nothing else', () => {
+		expect(isScratchPath('.scratchpad')).toBe(true);
+		expect(isScratchPath('.scratchpad/untitled.md')).toBe(true);
+		expect(isScratchPath('scratchpad/untitled.md')).toBe(false);
+		expect(isScratchPath('.scratchpadding/a.md')).toBe(false);
+		expect(isScratchPath('work/a.md')).toBe(false);
 	});
 });
 

@@ -3184,6 +3184,41 @@ describe("the clipboard's folder", () => {
 	});
 });
 
+describe("the scratchpad's folder", () => {
+	// Notes the scratchpad shows, in `.scratchpad/` (§7, "The scratchpad"):
+	// hidden from the notebooks by its dot, but notes all the same, synced as
+	// any are. The clipboard's folder beside it stays hidden.
+	it('brings a scratch note and its folder in', async () => {
+		await provider.createFolder('.scratchpad');
+		await remoteFile('.scratchpad/untitled.md', 'milk, eggs\n');
+
+		const result = await engine.pull();
+
+		expect(result.status).toBe('ok');
+		expect(noteAt('.scratchpad/untitled.md')?.content).toBe('milk, eggs\n');
+		expect(store.folders().map((folder) => folder.path)).toEqual(['.scratchpad']);
+		expect(result.clipboard).toBeUndefined();
+	});
+
+	it('sends one written here', async () => {
+		store.put({ id: 'n1', path: '.scratchpad/untitled.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: '.scratchpad/untitled.md' });
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.contentAt('.scratchpad/untitled.md')).toBe('mine\n');
+		expect(noteAt('.scratchpad/untitled.md')?.dirty).toBe(false);
+	});
+
+	it('passes over what is hidden inside it', async () => {
+		await provider.createFolder('.scratchpad');
+		await remoteFile('.scratchpad/.draft.md', 'x\n');
+
+		await engine.pull();
+
+		expect(store.notes()).toEqual([]);
+	});
+});
+
 describe('deletions that are not about a note', () => {
 	it('says nothing when a file we never imported is deleted', async () => {
 		// The app owns the folder but not everything in it. A file it does not

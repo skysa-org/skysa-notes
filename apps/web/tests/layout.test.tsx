@@ -256,3 +256,63 @@ describe('the search results', () => {
 		expect(declarations('.search-results ul')).toContain('display: block');
 	});
 });
+
+describe('the scratchpad’s row', () => {
+	it('is as tall as the headings beside it', () => {
+		expect(declarations('.scratchpad-row > button.row')).toContain(
+			'min-block-size: calc(var(--control) + 2 * var(--bar-block))'
+		);
+	});
+
+	it('starts at the gutter on a touch screen too, its mark and name across', () => {
+		// The touch rule for rows centres them along their main axis, which
+		// for a row of words is top to bottom and for this one side to side.
+		const own = declarations('.scratchpad-row > button.row');
+		expect(own).toContain('flex-direction: row');
+		expect(own).toContain('justify-content: start');
+	});
+});
+
+describe('the formatting toolbar', () => {
+	it('puts More tools straight after the last tool shown, not out at the far end', () => {
+		// jsdom lays nothing out, so what is held is that no margin takes up
+		// the room the tools leave and sets the button apart from them, and
+		// that it is drawn back to a group's own gap from the last of them.
+		const own = declarations('.toolbar-overflow');
+		expect(own).not.toMatch(/margin[\w-]*: auto/);
+		expect(own).toContain('margin-inline-start: calc(var(--space-3xs) - 2 * var(--space-2xs))');
+	});
+});
+
+describe('a scratch card', () => {
+	/** The declarations of the rules for `selector` alone. */
+	const rule = (selector: string): string =>
+		styles
+			.split('}')
+			.filter((block) => block.split('{')[0]?.split('*/').at(-1)?.trim() === selector)
+			.map((block) => block.split('{')[1] ?? '')
+			.join(' ');
+
+	it('opens from anywhere on it but its tools, along its foot as much as above it', () => {
+		// jsdom lays nothing out, so what is held is the shape of it: the open
+		// button's press stretched over the whole card, and the row of tools
+		// over it letting a press through but where a tool is.
+		expect(rule('.scratch-card')).toMatch(/position: relative;/);
+		expect(rule('.scratch-card-open::before')).toMatch(/position: absolute;\s+inset: 0;/);
+		const row = rule('.scratch-card-tools');
+		expect(row).toMatch(/position: relative;/);
+		expect(row).toMatch(/pointer-events: none;/);
+		expect(rule('.scratch-card-tools > *')).toMatch(/pointer-events: auto;/);
+	});
+
+	it('lights its colour and ⋯ while their menu is open, as the toolbar does its own', () => {
+		const lit = rule('.toolbar-button-on');
+		expect(lit).toMatch(/color: var\(--on-fg\);\s+background: var\(--on-bg\);/);
+		const own = rule(
+			".scratch-card-tools button.icon.icon-quiet[aria-expanded='true'],\n.scratch-bar button.icon.icon-quiet[aria-expanded='true']"
+		);
+		expect(own).toBe(lit);
+		// Drawn outside the card, the menu takes the pointer off it.
+		expect(rule(".scratch-card-tools:has([aria-expanded='true']) > *")).toMatch(/opacity: 1;/);
+	});
+});

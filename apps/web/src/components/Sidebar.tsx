@@ -1,10 +1,11 @@
-import { ancestorPaths, basename, ROOT } from '@skysa/core';
+import { ancestorPaths, basename, isScratchPath, ROOT } from '@skysa/core';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 import { useCommand } from '../commands/context.js';
 import { Icon } from '../editor/icons.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
+import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
 import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
 import { AttachedFiles } from './AttachedFiles.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -103,7 +104,53 @@ export interface SidebarProps {
 	 * in the tree (`withPins`), which comes in that order.
 	 */
 	onPinFolder?: (path: string, pinned: boolean) => void;
+	/**
+	 * The source's scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"), a
+	 * row above the notebooks while this device shows it: open or not, and the
+	 * way to open it.
+	 */
+	scratchpad?: { selected: boolean; onSelect: () => void } | undefined;
 }
+
+/**
+ * The notebook the palette's commands are about, of the folder selected. The
+ * root is selectable while it holds loose notes and is not a notebook: it
+ * cannot be renamed, moved or deleted, and a notebook made "inside" it is a
+ * top-level one anyway. Nor is the scratchpad one.
+ */
+const notebookOpen = (selectedFolder: string | undefined): string | undefined =>
+	selectedFolder === undefined || selectedFolder === ROOT || isScratchPath(selectedFolder)
+		? undefined
+		: selectedFolder;
+
+/**
+ * The scratchpad's row, above the notebooks: not one of them, so it is never a
+ * place to put something being moved, and is not offered while something is.
+ * As tall as the headings at the top of the other columns, so the rules under
+ * them line up across the window.
+ */
+const ScratchpadRow = ({
+	selected,
+	onSelect,
+	moving,
+}: {
+	selected: boolean;
+	onSelect: () => void;
+	moving: boolean;
+}) => (
+	<div className="scratchpad-row">
+		<button
+			type="button"
+			className={selected ? 'row selected' : 'row'}
+			aria-current={selected ? 'true' : undefined}
+			disabled={moving}
+			onClick={onSelect}
+		>
+			<Icon name="scratchpad" />
+			<span className="row-label">{SCRATCHPAD_LABEL}</span>
+		</button>
+	</div>
+);
 
 /**
  * Inline rather than a `prompt()`: a modal browser dialog blocks the page, is
@@ -897,6 +944,7 @@ export const Sidebar = ({
 	openNotebooks,
 	onOpenNotebooks,
 	onPinFolder,
+	scratchpad,
 }: SidebarProps) => {
 	/** Where a notebook is being made, or null. `undefined` is the top level. */
 	const [creating, setCreating] = useState<{ parent: string | undefined } | null>(null);
@@ -926,13 +974,8 @@ export const Sidebar = ({
 	const drop = onDrop ?? (() => undefined);
 	const cancel = onCancelMove ?? (() => undefined);
 
-	/**
-	 * The notebook the palette's commands are about. The root is selectable while
-	 * it holds loose notes and is not a notebook: it cannot be renamed, moved or
-	 * deleted, and a notebook made "inside" it is a top-level one anyway.
-	 */
-	const open =
-		selectedFolder === undefined || selectedFolder === ROOT ? undefined : selectedFolder;
+	/** The notebook the palette's commands are about (`notebookOpen`). */
+	const open = notebookOpen(selectedFolder);
 	const manageable = open !== undefined && moving === null;
 	const going = deleting === null ? undefined : nodeAt(tree ?? [], deleting);
 
@@ -1029,6 +1072,13 @@ export const Sidebar = ({
 
 	return (
 		<nav className="sidebar" aria-label="Notebooks">
+			{scratchpad !== undefined && (
+				<ScratchpadRow
+					selected={scratchpad.selected}
+					onSelect={scratchpad.onSelect}
+					moving={moving !== null}
+				/>
+			)}
 			<div className="pane-header">
 				<h2>Notebooks</h2>
 				<div className="pane-actions">

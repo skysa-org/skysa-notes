@@ -35,6 +35,7 @@ import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createKeeping, type Keeping } from '../src/store/keeping.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
+import { getScratchpadShown } from '../src/store/scratchpad.js';
 import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
@@ -360,10 +361,10 @@ const tab = async (name: string): Promise<HTMLElement> =>
 const NOTHING_CONNECTED = 'On this device only';
 
 /**
- * Nothing is connected, as the panel says it in a compact window's source
- * dropdown, where it has no status line.
+ * Nothing is connected, and something could be: the way to it, as a compact
+ * window's source dropdown points at it, its `+` having no words.
  */
-const KEPT_HERE_ONLY = /Notes are kept on this device only/;
+const CONNECT_ABOVE = 'Use + above to connect storage.';
 
 /** A note the remote has in full, as a sync leaves it. */
 const sentNote = async (db: NotesDatabase, title: string) => {
@@ -422,7 +423,6 @@ describe('AccountPanel, with nothing connected', () => {
 			await screen.findByRole('button', { name: 'Connect storage provider' })
 		).toBeTruthy();
 		expect(screen.queryByText(/above to/)).toBeNull();
-		expect(screen.queryByText(KEPT_HERE_ONLY)).toBeNull();
 	});
 
 	it('ends in a line saying where the notes are, with the download and the imports behind the gear', async () => {
@@ -436,11 +436,16 @@ describe('AccountPanel, with nothing connected', () => {
 		await settled();
 		await openGear(user);
 		// Nothing to download on a device that holds nothing.
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files']);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Hide scratchpad']);
 
 		await createNote(db, { title: 'First' });
 		await waitFor(() => {
-			expect(gearLabels()).toEqual(['Download all notes', 'Import a folder', 'Import files']);
+			expect(gearLabels()).toEqual([
+				'Download all notes',
+				'Import a folder',
+				'Import files',
+				'Hide scratchpad',
+			]);
 		});
 		// None of it is a button in the panel any more: the gear is the one.
 		expect(
@@ -619,20 +624,14 @@ describe('AccountPanel, with nothing connected', () => {
 		// In a compact window's source dropdown, where the panel points at the
 		// `+` above it: not where the `+` has nothing to offer.
 		renderDropdown(offering(['webdav']), freshDatabase());
-		await screen.findByText(KEPT_HERE_ONLY);
+		await screen.findByText(NOTHING_CONNECTED);
 		await settled();
-		expect(screen.getByText(KEPT_HERE_ONLY).textContent).toBe(
-			'Notes are kept on this device only.'
-		);
+		expect(screen.queryByText(CONNECT_ABOVE)).toBeNull();
 		cleanup();
 
 		// Where it has something, it does.
 		renderDropdown(offering(['webdav', 'dropbox']), freshDatabase());
-		await waitFor(() => {
-			expect(screen.getByText(KEPT_HERE_ONLY).textContent).toBe(
-				'Notes are kept on this device only. Use + above to connect storage.'
-			);
-		});
+		expect(await screen.findByText(CONNECT_ABOVE)).toBeTruthy();
 	});
 
 	it('offers OneDrive and Google Drive alongside Dropbox', async () => {
@@ -823,7 +822,12 @@ describe('AccountPanel, downloading every note', () => {
 		await openGear(user);
 		// What syncing offers is still there; the download is not, nor the
 		// imports beside it, nor a second way to disconnect.
-		expect(gearLabels()).toEqual(['Sync now', 'Re-scan from scratch', 'Show clipboard']);
+		expect(gearLabels()).toEqual([
+			'Sync now',
+			'Re-scan from scratch',
+			'Show clipboard',
+			'Hide scratchpad',
+		]);
 	});
 
 	it('is not offered while a later source is still importing, when it would be half of one', async () => {
@@ -1046,6 +1050,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
+				'Hide scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -2060,6 +2065,58 @@ describe('AccountPanel, showing the clipboard', () => {
 	});
 });
 
+describe('AccountPanel, showing the scratchpad', () => {
+	it('hides a connected source’s, on this device, and shows it again', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'idle' }));
+
+		// Shown until it is hidden.
+		await choose(user, 'Hide scratchpad');
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, 'c1')).toBe(false);
+		});
+		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(true);
+
+		await choose(user, 'Show scratchpad');
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, 'c1')).toBe(true);
+		});
+	});
+
+	it('hides the device’s own, with nothing connected, as the clipboard is not', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		renderPanel(clientWith(), db);
+
+		await screen.findByText(NOTHING_CONNECTED);
+		await settled();
+		await choose(user, 'Hide scratchpad');
+
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(false);
+		});
+		await openGear(user);
+		expect(gearLabels()).toContain('Show scratchpad');
+	});
+
+	it('is not offered while the first import holds the source', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Kept' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'idle' }));
+
+		await openGear(user);
+		expect(gearLabels()).not.toContain('Show scratchpad');
+		expect(gearLabels()).not.toContain('Hide scratchpad');
+	});
+});
+
 describe('AccountPanel, reporting how syncing is going', () => {
 	const connected = async (sync: FakeSync, answers: Answers = {}) => {
 		const db = freshDatabase();
@@ -2604,7 +2661,12 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 		await openGear(user);
 		// Nothing about syncing at all, and the rest as ever.
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Disconnect']);
+		expect(gearLabels()).toEqual([
+			'Import a folder',
+			'Import files',
+			'Hide scratchpad',
+			'Disconnect',
+		]);
 	});
 
 	it('says when a note was edited in two places at once', async () => {
@@ -4560,7 +4622,12 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		const storage = screen.getByRole('region', { name: 'Storage' });
 
 		const options = await rowOptions('Dropbox');
-		expect(within(storage).queryByRole('button')).toBeNull();
+		// The panel's one button is the gear, which has the same.
+		expect(
+			within(storage)
+				.getAllByRole('button')
+				.map((each) => each.getAttribute('aria-label'))
+		).toEqual(['Storage options']);
 		// On the row, as every notebook's and note's is: the header has only
 		// its `+`.
 		const row = within(sources()).getByRole('button', { name: 'Dropbox' });
@@ -4583,6 +4650,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
+				'Hide scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -4638,7 +4706,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(document.activeElement).toBe(menu.getByRole('button', { name: 'Rename' }));
 	});
 
-	it('ends in the line the foot of the sidebar ends in, with no gear', async () => {
+	it('ends in the line the foot of the sidebar ends in, gear and all', async () => {
+		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle', lastSyncAt: Date.now() });
 		await connected(sync);
 		const storage = within(screen.getByRole('region', { name: 'Storage' }));
@@ -4649,7 +4718,25 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		// Said once, in the line: not again as a heading or a sentence over it.
 		expect(storage.queryByText(/Syncing with/)).toBeNull();
 		expect(storage.queryByText(/^Synced/)).toBeNull();
-		expect(screen.queryByRole('button', { name: 'Storage options' })).toBeNull();
+
+		// At the line's end, as at the foot of the sidebar (2026-10-07), with
+		// what the source's `⋯` has, but its name, which the row is.
+		const gear = screen.getByRole('button', { name: 'Storage options' });
+		expect(gear.parentElement?.parentElement).toBe(line.parentElement);
+		await user.click(gear);
+		await waitFor(() => {
+			expect(gearLabels()).toEqual([
+				'Sync now',
+				'Re-scan from scratch',
+				'Download all notes',
+				'Import a folder',
+				'Import files',
+				'Show clipboard',
+				'Hide scratchpad',
+				'Disconnect',
+			]);
+		});
+		await user.keyboard('{Escape}');
 
 		sync.say({ phase: 'offline' });
 		await waitFor(() => {
@@ -4738,8 +4825,36 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 
 		await user.click(within(dialog).getByRole('button', { name: 'Close' }));
 		expect(screen.queryByRole('dialog')).toBeNull();
-		// With the count gone, to the source's `⋯`, which is where the gear's
-		// items are here.
+		// With the count gone, to the gear beside it.
+		expect(document.activeElement).toBe(
+			screen.getByRole('button', { name: 'Storage options' })
+		);
+	});
+
+	it('puts the focus back on whichever menu a question was asked from', async () => {
+		const user = userEvent.setup();
+		await connected(fakeSync({ phase: 'idle' }));
+		const gear = screen.getByRole('button', { name: 'Storage options' });
+		const storage = within(screen.getByRole('region', { name: 'Storage' }));
+
+		await user.click(gear);
+		const items = within(await screen.findByRole('group', { name: 'Storage' }));
+		await waitFor(() => {
+			expect(items.getByRole('button', { name: 'Disconnect' }).hasAttribute('disabled')).toBe(
+				false
+			);
+		});
+		// The question is drawn again once it has counted what is unsent, so
+		// its Cancel is pressed only once that has come.
+		await user.click(items.getByRole('button', { name: 'Disconnect' }));
+		await storage.findByRole('button', { name: 'Download them' });
+		await user.click(storage.getByRole('button', { name: 'Cancel' }));
+		expect(document.activeElement).toBe(gear);
+
+		const menu = await openOptions(user);
+		await user.click(menu.getByRole('button', { name: 'Disconnect' }));
+		await storage.findByRole('button', { name: 'Download them' });
+		await user.click(storage.getByRole('button', { name: 'Cancel' }));
 		expect(document.activeElement).toBe(await rowOptions('Dropbox'));
 	});
 
@@ -4803,11 +4918,14 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		const db = freshDatabase();
 		renderDropdown(clientWith(), db);
 
-		await waitFor(() => {
-			expect(screen.getByText(KEPT_HERE_ONLY).textContent).toBe(
-				'Notes are kept on this device only. Use + above to connect storage.'
-			);
-		});
+		expect(await screen.findByText(CONNECT_ABOVE)).toBeTruthy();
+		// The line the sidebar's foot ends in, and its gear, which has what
+		// can be done here before there is a note to give the device a row.
+		expect(screen.getByText(NOTHING_CONNECTED)).toBeTruthy();
+		await settled();
+		await openGear(user);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Hide scratchpad']);
+		await user.keyboard('{Escape}');
 
 		await createNote(db, { title: 'Loose' });
 		const options = await rowOptions('This device');
@@ -4817,6 +4935,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 			'Download all notes',
 			'Import a folder',
 			'Import files',
+			'Hide scratchpad',
 		]);
 	});
 });

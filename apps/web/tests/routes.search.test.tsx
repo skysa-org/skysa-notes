@@ -67,7 +67,7 @@ describe('the query string as the app receives it', () => {
 		// Read once and taken out, so it is seen by what it does.
 		await openAt('/?connect=denied');
 
-		expect((await screen.findByRole('alert')).textContent).toMatch(/cancelled/);
+		expect((await screen.findByRole('alert')).textContent).toMatch(/canceled/);
 	});
 
 	it('does not write the refused keys back into the URL', async () => {

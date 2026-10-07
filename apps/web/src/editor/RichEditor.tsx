@@ -6,14 +6,26 @@ import type { Ctx } from '@milkdown/kit/ctx';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { ProsemirrorAdapterProvider, usePluginViewFactory } from '@prosemirror-adapter/react';
 import type { StructuralDifference } from '@skysa/core';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from 'react';
 
 import { useCodeDisplay } from '../store/hooks.js';
 import type { AttachmentHost } from './attachHost.js';
 import { richFindTarget } from './findRich.js';
 import { useOfferFindTarget } from './findTarget.js';
 import { createFormatStore, type FormatStore, readFormat } from './format.js';
-import { FormatToolbar, type FormatToolbarProps, type ToolbarPlacement } from './FormatToolbar.js';
+import {
+	BASIC_SLOTS,
+	FormatToolbar,
+	type FormatToolbarProps,
+	type ToolbarPlacement,
+} from './FormatToolbar.js';
 import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
@@ -59,6 +71,18 @@ export interface RichEditorProps {
 	 * is now, so it needs no rebuilding when the note moves.
 	 */
 	attachments?: AttachmentHost;
+	/**
+	 * A scratch note's editor (docs/ARCHITECTURE.md §7, "The scratchpad"): the
+	 * basic bar (`BASIC_SLOTS`) and no slash menu. Read when the editor is
+	 * built.
+	 */
+	basic?: boolean;
+	/**
+	 * What shares the toolbar's row at the bottom, after it: a scratch note's
+	 * own bar. The toolbar has what is left of the row, and puts what does not
+	 * fit there behind its More tools.
+	 */
+	toolbarEnd?: ReactNode;
 }
 
 /**
@@ -73,13 +97,22 @@ const EditorToolbar = ({
 	store,
 	run,
 	placement,
+	basic,
 }: {
 	store: FormatStore;
 	run: FormatToolbarProps['run'];
 	placement: ToolbarPlacement;
+	basic: boolean;
 }) => {
 	const format = useSyncExternalStore(store.subscribe, store.get);
-	return <FormatToolbar format={format} run={run} placement={placement} />;
+	return (
+		<FormatToolbar
+			format={format}
+			run={run}
+			placement={placement}
+			only={basic ? BASIC_SLOTS : undefined}
+		/>
+	);
 };
 
 const EditorBody = ({
@@ -91,6 +124,8 @@ const EditorBody = ({
 	onAdopted,
 	toolbar = 'top',
 	attachments,
+	basic = false,
+	toolbarEnd,
 }: RichEditorProps) => {
 	// Read inside callbacks, so changing them does not rebuild the editor.
 	const notify = useRef(onUserEdit);
@@ -143,7 +178,7 @@ const EditorBody = ({
 					format.set(readFormat(state));
 				},
 				menus: {
-					slash: { view: pluginView({ component: SlashMenu }) },
+					slash: basic ? undefined : { view: pluginView({ component: SlashMenu }) },
 					tooltip: { view: pluginView({ component: InlineToolbar }) },
 				},
 				attachments,
@@ -230,11 +265,21 @@ const EditorBody = ({
 
 	return (
 		<>
-			{toolbar === 'top' && <EditorToolbar store={format} run={run} placement="top" />}
+			{toolbar === 'top' && (
+				<EditorToolbar store={format} run={run} placement="top" basic={basic} />
+			)}
 			<Milkdown />
 			{/* After the note in the document as well as on screen, so the tab
 			    order and what the eye sees agree. */}
-			{toolbar === 'bottom' && <EditorToolbar store={format} run={run} placement="bottom" />}
+			{toolbar === 'bottom' &&
+				(toolbarEnd === undefined ? (
+					<EditorToolbar store={format} run={run} placement="bottom" basic={basic} />
+				) : (
+					<div className="editor-toolbar-row">
+						<EditorToolbar store={format} run={run} placement="bottom" basic={basic} />
+						{toolbarEnd}
+					</div>
+				))}
 		</>
 	);
 };

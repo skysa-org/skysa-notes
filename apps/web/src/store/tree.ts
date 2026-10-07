@@ -1,6 +1,7 @@
-import { ancestorPaths, basename, parentPath, ROOT } from '@skysa/core';
+import { ancestorPaths, basename, isScratchPath, parentPath, ROOT } from '@skysa/core';
 
 import { pinnedFirst } from './pins.js';
+import { SCRATCHPAD_LABEL } from './scratchpad.js';
 
 /**
  * Flat folder paths in, a nested tree out. Kept pure and separate from the
@@ -135,8 +136,14 @@ export const listedUnder = <T extends Readonly<{ path: string }>>(
  */
 export const LOOSE_NOTES_LABEL = 'Loose notes';
 
-/** What to call a folder in a pane heading. Only the root needs a name. */
-export const folderLabel = (path: string): string => (path === ROOT ? LOOSE_NOTES_LABEL : path);
+/**
+ * What to call a folder in a pane heading. Only the root needs a name, and the
+ * scratchpad's folder, which is no notebook and is not called by its path.
+ */
+export const folderLabel = (path: string): string => {
+	if (path === ROOT) return LOOSE_NOTES_LABEL;
+	return isScratchPath(path) ? SCRATCHPAD_LABEL : path;
+};
 
 /**
  * Is `path` a folder that can be open? The root only while it holds loose

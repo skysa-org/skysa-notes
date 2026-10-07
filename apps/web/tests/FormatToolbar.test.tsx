@@ -1,12 +1,12 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readFormat } from '../src/editor/format.js';
-import { FormatToolbar } from '../src/editor/FormatToolbar.js';
+import { BASIC_SLOTS, FormatToolbar } from '../src/editor/FormatToolbar.js';
 import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 
 /**
@@ -19,7 +19,7 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 
 const editors: Editor[] = [];
 
-const harness = async (body: string) => {
+const harness = async (body: string, only?: readonly string[]) => {
 	const root = document.createElement('div');
 	document.body.append(root);
 	const editor = await createRichEditor({ root, body, onUserEdit: () => undefined }).create();
@@ -28,6 +28,7 @@ const harness = async (body: string) => {
 	const withCtx = <T,>(action: (ctx: Ctx) => T): T => editor.action(action);
 	const toolbar = (
 		<FormatToolbar
+			only={only}
 			format={withCtx((ctx) => readFormat(ctx.get(editorViewCtx).state))}
 			run={(apply) => {
 				withCtx(apply);
@@ -43,6 +44,7 @@ const harness = async (body: string) => {
 		redraw: () =>
 			rerender(
 				<FormatToolbar
+					only={only}
 					format={withCtx((ctx) => readFormat(ctx.get(editorViewCtx).state))}
 					run={(apply) => {
 						withCtx(apply);
@@ -476,5 +478,53 @@ describe('FormatToolbar', () => {
 		expect(document.activeElement).toBe(bold);
 		expect(bold.getAttribute('tabindex')).toBe('0');
 		expect(style.getAttribute('tabindex')).toBe('-1');
+	});
+});
+
+describe('FormatToolbar, with only the basic tools', () => {
+	// A scratch note's (docs/ARCHITECTURE.md §7, "The scratchpad").
+	it('draws those, and none of the rest', async () => {
+		await harness('plain\n', BASIC_SLOTS);
+
+		expect(
+			screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))
+		).toEqual(['Text formatting', 'Lists', 'Insert', 'Link']);
+		expect(
+			within(screen.getByRole('group', { name: 'Insert' }))
+				.getAllByRole('button')
+				.map((button) => button.getAttribute('aria-label') ?? button.textContent)
+		).toEqual(['Attach files']);
+		expect(screen.queryByRole('button', { name: /Text style/ })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Strikethrough' })).toBeNull();
+		expect(screen.queryByRole('button', { name: /Code block/ })).toBeNull();
+	});
+
+	it('begins its one stop in the tab order at the first of them', async () => {
+		await harness('plain\n', BASIC_SLOTS);
+
+		const bold = screen.getByRole('button', { name: 'Bold' });
+		expect(bold.getAttribute('tabindex')).toBe('0');
+		bold.focus();
+		await userEvent.keyboard('{ArrowRight}');
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Italic' }));
+	});
+
+	it('still writes what it promises', async () => {
+		const { withCtx, markdown } = await harness('plain words\n', BASIC_SLOTS);
+		withCtx(selecting('plain'));
+
+		fireEvent.click(screen.getByRole('button', { name: 'Bold' }));
+
+		expect(markdown()).toBe('**plain** words\n');
+	});
+
+	it('asks for files to put in the note, as the whole bar does', async () => {
+		await harness('plain\n', BASIC_SLOTS);
+		const click = vi.spyOn(HTMLInputElement.prototype, 'click');
+
+		fireEvent.mouseDown(screen.getByRole('button', { name: 'Attach files' }));
+
+		expect(click).toHaveBeenCalledOnce();
+		document.querySelector('input[type="file"]')?.dispatchEvent(new Event('cancel'));
 	});
 });

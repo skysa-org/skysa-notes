@@ -8,6 +8,7 @@ import {
 	useEffect,
 	useLayoutEffect,
 	useMemo,
+	useRef,
 	useState,
 } from 'react';
 
@@ -78,7 +79,9 @@ const originStyle = (origins: Origins): CSSProperties =>
 const PANE_ELEMENT: Record<Pane, string> = {
 	sources: '.source-panel',
 	notebooks: '.sidebar',
-	notes: '.note-list',
+	// The scratchpad is in the notes' place (docs/ARCHITECTURE.md §7, "The
+	// scratchpad").
+	notes: '.note-list, .scratchpad',
 };
 
 /**
@@ -101,6 +104,12 @@ const slide = (from: Pane, to: Pane): Slide =>
  * straight from one to the other (`from`, for the stylesheet to slide them
  * along), and the ways it shuts: Escape, and a press anywhere that is neither
  * in it nor on something that keeps it.
+ *
+ * Shut, a pane gives way to the one under it, which is the note, or nothing —
+ * except where the route says there is a pane to rest on (`setRest`): the
+ * scratchpad, with no card open over it, has nothing under it but its own
+ * pane, and shutting the notebooks over it goes back to it, not to an empty
+ * window.
  */
 export const usePanel = () => {
 	const [{ panel, from }, setShown] = useState<{ panel: Pane | null; from: Pane | null }>({
@@ -112,11 +121,18 @@ export const usePanel = () => {
 			next === shown.panel ? shown : { panel: next, from: next === null ? null : shown.panel }
 		);
 	}, []);
+	const rest = useRef<Pane | null>(null);
+	const setRest = useCallback((pane: Pane | null) => {
+		rest.current = pane;
+	}, []);
+	const shut = useCallback(() => {
+		setPanel(rest.current);
+	}, [setPanel]);
 
 	useEffect(() => {
 		if (panel === null) return undefined;
 		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') setPanel(null);
+			if (event.key === 'Escape') shut();
 		};
 		const away = (event: PointerEvent) => {
 			const target = event.target;
@@ -129,7 +145,7 @@ export const usePanel = () => {
 			// on a row — and what is chosen in it, a rename or a delete, happens
 			// in the panel, which has to stay open for it. Each shuts itself.
 			if (target.closest('.app-frame') === null) return;
-			setPanel(null);
+			shut();
 		};
 		document.addEventListener('keydown', onKey);
 		document.addEventListener('pointerdown', away);
@@ -137,9 +153,9 @@ export const usePanel = () => {
 			document.removeEventListener('keydown', onKey);
 			document.removeEventListener('pointerdown', away);
 		};
-	}, [panel, setPanel]);
+	}, [panel, shut]);
 
-	return [panel, setPanel, from] as const;
+	return { panel, setPanel, from, setRest, shut };
 };
 
 /**
@@ -150,18 +166,28 @@ export const usePanel = () => {
  */
 export const useCompactLayout = () => {
 	const compact = useMediaQuery(COMPACT);
-	const [open, setPanel, openedFrom] = usePanel();
+	const { panel: open, setPanel, from: openedFrom, setRest, shut } = usePanel();
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [origins, setOrigins] = useState<Origins>();
 	// Nothing is a dropdown in a wide window, and one left open there is not
 	// one to find open again when the window is next narrowed.
 	const panel = compact ? open : null;
 	const from = panel === null ? null : openedFrom;
+	/** The bar's own way to open and shut a pane: shut, it rests where `setRest` says. */
+	const barPanel = useCallback(
+		(pane: Pane | null) => {
+			if (pane === null) shut();
+			else setPanel(pane);
+		},
+		[setPanel, shut]
+	);
 
 	return {
 		compact,
 		panel,
 		setPanel,
+		setRest,
+		barPanel,
 		searchOpen,
 		setSearchOpen,
 		setOrigins,
@@ -299,6 +325,17 @@ const PaneTrigger = ({
 	</button>
 );
 
+/**
+ * A scratch card's name, open over the whole window: said, as a note's would
+ * be, but not a dropdown, since a card is not one of a list to choose from.
+ * Back, or its Close, is the way out of it.
+ */
+const CardName = ({ title }: { title: string }) => (
+	<span className="compact-picker compact-picker-static" title={title}>
+		<MiddleLabel value={title} keep="" />
+	</span>
+);
+
 export interface CompactBarProps {
 	/** The open notebook's path, or undefined when none is. */
 	folder: string | undefined;
@@ -325,6 +362,13 @@ export interface CompactBarProps {
 	fieldRef: RefObject<HTMLInputElement | null>;
 	/** Where the triggers are, for the panels to open out of (`Origins`). */
 	onOrigins?: (origins: Origins) => void;
+	/**
+	 * The scratchpad is open (docs/ARCHITECTURE.md §7, "The scratchpad"): the
+	 * notebook's dropdown says so, as `folderLabel` has it, and there is no
+	 * note's dropdown — only the name of a card open with one, which the route
+	 * gives as `note`.
+	 */
+	scratchpad?: boolean;
 }
 
 /**
@@ -350,6 +394,7 @@ export const CompactBar = ({
 	onSearchOpen,
 	fieldRef,
 	onOrigins,
+	scratchpad = false,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const renaming = useRenaming(renamings);
@@ -375,7 +420,9 @@ export const CompactBar = ({
 		const trigger = (pane: Pane) => bar.querySelector(`.compact-picker[data-pane='${pane}']`);
 		const sources = trigger('sources');
 		const notebooks = trigger('notebooks');
-		const notes = trigger('notes');
+		// None in the scratchpad: the scratchpad opens out of the notebook's,
+		// which says "Scratchpad".
+		const notes = trigger('notes') ?? notebooks;
 		if (sources === null || notebooks === null || notes === null) return;
 		const across = bar.getBoundingClientRect();
 		const from = (each: Element) => {
@@ -450,14 +497,18 @@ export const CompactBar = ({
 					panel={panel}
 					onPanel={onPanel}
 				/>
-				<PaneTrigger
-					pane="notes"
-					name="Note"
-					value={title}
-					keep=""
-					panel={panel}
-					onPanel={onPanel}
-				/>
+				{scratchpad ? (
+					note !== undefined && <CardName title={title} />
+				) : (
+					<PaneTrigger
+						pane="notes"
+						name="Note"
+						value={title}
+						keep=""
+						panel={panel}
+						onPanel={onPanel}
+					/>
+				)}
 			</div>
 			{fieldFits ? (
 				field

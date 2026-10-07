@@ -1,4 +1,6 @@
-import { previewLines } from '@skysa/core';
+import { previewBlocks, type PreviewLine, previewLines } from '@skysa/core';
+
+import { isCreatedLine, isTimeLine } from './createdLine.js';
 
 /**
  * A note's visible text, parsed once per body.
@@ -17,15 +19,20 @@ import { previewLines } from '@skysa/core';
 
 const LIMIT = 400;
 
-const seen = new Map<string, readonly string[]>();
-
 /**
+ * A parse of `body`, kept in `seen` for the next time it is asked for.
+ *
  * `keep: false` for a body being typed (`store/liveEdits.ts`), which is asked
  * once and never again: one kept per keystroke would push every other note's
  * answer out within a paragraph, and the whole list would be parsed again the
  * next time it drew.
  */
-export const visibleLines = (body: string, { keep = true } = {}): readonly string[] => {
+const remembered = <T>(
+	seen: Map<string, T>,
+	body: string,
+	parse: (body: string) => T,
+	{ keep = true }: { keep?: boolean }
+): T => {
 	const known = seen.get(body);
 	if (known !== undefined) {
 		// To the back of the queue: asked again, so kept longest.
@@ -33,15 +40,28 @@ export const visibleLines = (body: string, { keep = true } = {}): readonly strin
 		seen.set(body, known);
 		return known;
 	}
-	const lines = previewLines(body);
-	if (!keep) return lines;
-	seen.set(body, lines);
+	const answer = parse(body);
+	if (!keep) return answer;
+	seen.set(body, answer);
 	if (seen.size > LIMIT) {
 		const oldest = seen.keys().next();
 		if (oldest.done !== true) seen.delete(oldest.value);
 	}
-	return lines;
+	return answer;
 };
+
+const seenLines = new Map<string, readonly string[]>();
+
+export const visibleLines = (body: string, options: { keep?: boolean } = {}): readonly string[] =>
+	remembered(seenLines, body, previewLines, options);
+
+const seenBlocks = new Map<string, readonly PreviewLine[]>();
+
+/** The visible lines with how each is set, which a scratchpad card draws. */
+export const visibleBlocks = (
+	body: string,
+	options: { keep?: boolean } = {}
+): readonly PreviewLine[] => remembered(seenBlocks, body, previewBlocks, options);
 
 /** The whole body's visible text as one line, which an excerpt is cut from. */
 export const visibleText = (body: string): string => visibleLines(body).join(' ');
@@ -62,8 +82,70 @@ const OPENING = 2_000;
  * one thing it can hide is a reference link's definition further down, and
  * then the link shows as the brackets the user typed.
  */
-export const openingLines = (body: string, options: { keep?: boolean } = {}): readonly string[] => {
-	if (body.length <= OPENING) return visibleLines(body, options);
+export const openingLines = (body: string, options: { keep?: boolean } = {}): readonly string[] =>
+	visibleLines(opening(body), options);
+
+/** The same opening's lines with how each is set (`visibleBlocks`). */
+export const openingBlocks = (
+	body: string,
+	options: { keep?: boolean } = {}
+): readonly PreviewLine[] => visibleBlocks(opening(body), options);
+
+/** A body to its first `OPENING` characters, and on to the end of the line they end in. */
+const opening = (body: string): string => {
+	if (body.length <= OPENING) return body;
 	const end = body.indexOf('\n', OPENING);
-	return visibleLines(end === -1 ? body : body.slice(0, end), options);
+	return end === -1 ? body : body.slice(0, end);
+};
+
+/**
+ * Whether a line is the note's title written out again.
+ *
+ * The line is parsed text, and a title derived from a heading is too, so the
+ * two usually agree as they stand. Emphasis characters are still ignored on
+ * both sides, for a title that was *written* rather than derived — `title:` in
+ * frontmatter, spelled `**Alpha**` above a `# Alpha` — and on both sides
+ * because the parse removes only the characters that were emphasis: a title of
+ * `setup_guide` keeps its underscore, and stripping one side alone would leave
+ * "setupguide" against "setup_guide" and print the heading twice.
+ */
+const bare = (text: string): string => text.replaceAll(/[*_`]/g, '').trim();
+
+const isTitle = (line: string | undefined, title: string): boolean =>
+	line !== undefined && bare(line) === bare(title);
+
+/**
+ * A note's opening, after its title: what a list row (`NoteList`) and a
+ * scratchpad card (`Scratchpad`) show of it. `previewLines` decides what a
+ * readable line is — the visible text, as the rich editor shows it, and the
+ * same rule the search excerpt is cut by — and the title is dropped from the
+ * front of them so the row does not say it twice.
+ *
+ * Dropped by *identity*, not by position. Taking the first line on the
+ * assumption that it is the heading was wrong in both directions: a note
+ * beginning with the `<br />` the editor writes for an empty paragraph has no
+ * heading on line one, and lost a line of the user's own writing instead — and
+ * a note whose heading comes after an introduction had the introduction eaten
+ * and the heading shown. Comparing against the title the row is already
+ * displaying is the question actually being asked.
+ *
+ * So is a line that says only when the note was made, as OneNote puts under
+ * every title (`isCreatedLine`), above the title or below it, and a time of
+ * day on the line after it: the list is in that order already, and the line
+ * was all the row had room for.
+ */
+export const noteOpening = (
+	lines: readonly string[],
+	note: Readonly<{ title: string; createdAt: number }>,
+	passed: { title?: true; date?: true } = {}
+): readonly string[] => {
+	const [line, ...rest] = lines;
+	if (passed.title === undefined && isTitle(line, note.title))
+		return noteOpening(rest, note, { ...passed, title: true });
+	if (passed.date === undefined && isCreatedLine(line, note.createdAt))
+		return noteOpening(isTimeLine(rest[0]) ? rest.slice(1) : rest, note, {
+			...passed,
+			date: true,
+		});
+	return lines;
 };

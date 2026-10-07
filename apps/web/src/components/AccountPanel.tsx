@@ -49,6 +49,7 @@ import {
 import { settleEditors } from '../store/heldEdits.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
 import { getNote } from '../store/notes.js';
+import { getScratchpadShown, setScratchpadShown } from '../store/scratchpad.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
 	type AccountState,
@@ -558,10 +559,12 @@ const ActionsMenu = ({
 	slot,
 	items,
 	triggerRef,
+	onOpen,
 }: {
 	slot: AccountSlot;
 	items: readonly OptionsMenuItem[];
 	triggerRef?: RefObject<HTMLButtonElement | null>;
+	onOpen?: () => void;
 }) => {
 	// First, as a notebook's menu has it: what the source is called, then what
 	// can be done with it.
@@ -581,6 +584,7 @@ const ActionsMenu = ({
 					disabled={all.length === 0}
 					items={all}
 					{...(triggerRef === undefined ? {} : { triggerRef })}
+					{...(onOpen === undefined ? {} : { onOpen })}
 				/>,
 				slot.menuIn
 			);
@@ -589,9 +593,9 @@ const ActionsMenu = ({
 /**
  * Where the panel ends, once there is nothing to ask the user: the source and
  * how it is going, in one line, with a connected source's count of its other
- * devices at the line's end — and, at the foot of the sidebar, the gear with
- * everything that can be done to it, which a compact window's source dropdown
- * has in the source's `⋯` instead. What needs the user — a reconnect, a
+ * devices at the line's end, and the gear with everything that can be done to
+ * it — at the foot of the sidebar, and of a compact window's source dropdown,
+ * where the source's `⋯` has the same. What needs the user — a reconnect, a
  * problem, a question being asked — is drawn above the line while it lasts,
  * so the line is where the panel ends whatever is going on.
  */
@@ -620,9 +624,11 @@ const StatusLine = ({
 const GearMenu = ({
 	items,
 	triggerRef,
+	onOpen,
 }: {
 	items: readonly OptionsMenuItem[];
 	triggerRef?: RefObject<HTMLButtonElement | null>;
+	onOpen?: () => void;
 }) => (
 	<OptionsMenu
 		label="Storage options"
@@ -634,8 +640,31 @@ const GearMenu = ({
 		items={items}
 		rises
 		{...(triggerRef === undefined ? {} : { triggerRef })}
+		{...(onOpen === undefined ? {} : { onOpen })}
 	/>
 );
+
+/**
+ * The gear and, in a compact window, the source's `⋯` — two menus of one
+ * list — and `openButton` kept on the one opened last, which is where the
+ * focus goes back to once a question asked from it is put away. The gear,
+ * until either is opened. Each has its own ref: a menu's button is also where
+ * it is anchored, so the two cannot share one.
+ */
+const useMenuButtons = (openButtonRef: RefObject<HTMLButtonElement | null>) => {
+	const gear = useRef<HTMLButtonElement>(null);
+	const dots = useRef<HTMLButtonElement>(null);
+	useEffect(() => {
+		openButtonRef.current ??= gear.current;
+	});
+	const onGear = useCallback(() => {
+		openButtonRef.current = gear.current;
+	}, [openButtonRef]);
+	const onDots = useCallback(() => {
+		openButtonRef.current = dots.current;
+	}, [openButtonRef]);
+	return { gear, dots, onGear, onDots };
+};
 
 /**
  * What another source's `⋯` asked of this one (`SourceAsk`), once this one is
@@ -770,19 +799,17 @@ const NotConnected = ({
 		settings?.authMode === 'storage-first'
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
-	const items = [...downloadItem(holds, downloading), ...importItems(importing)];
+	const scratchpad = useScratchpadItem(database, LOCAL_CONNECTION_ID);
+	const items = [...downloadItem(holds, downloading), ...importItems(importing), ...scratchpad];
 
 	return (
 		<section className="account" aria-label="Storage">
-			{/* Said by the status line, at the foot of the sidebar, with the way
-			    to connect beside it in the bar above, in words while nothing is
-			    connected. In a compact window's source dropdown the way is the
-			    `+` in its header, which never has words. */}
-			{slot !== undefined && (
-				<p className="muted">
-					Notes are kept on this device only.
-					{offerable.length > 0 && ' Use + above to connect storage.'}
-				</p>
+			{/* Where the notes are is said by the status line. The way to
+			    connect is beside it in the bar above, in words, at the foot of
+			    the sidebar; in a compact window's source dropdown it is the `+`
+			    in its header, which never has words, so it is said here. */}
+			{slot !== undefined && offerable.length > 0 && (
+				<p className="muted">Use + above to connect storage.</p>
 			)}
 			{settings?.authMode === 'account-first' && (
 				<p className="muted">
@@ -814,13 +841,10 @@ const NotConnected = ({
 			)}
 			<DownloadAll holds={holds} downloading={downloading} />
 			<ImportNotes importing={importing} />
-			{slot === undefined ? (
-				<StatusLine text="On this device only" title={null}>
-					<GearMenu items={items} />
-				</StatusLine>
-			) : (
-				<ActionsMenu slot={slot} items={items} />
-			)}
+			<StatusLine text="On this device only" title={null}>
+				<GearMenu items={items} />
+			</StatusLine>
+			{slot !== undefined && <ActionsMenu slot={slot} items={items} />}
 		</section>
 	);
 };
@@ -1491,6 +1515,7 @@ const storageItems = ({
 	download,
 	imports,
 	clipboard,
+	scratchpad,
 	about,
 	stranded,
 	open,
@@ -1507,6 +1532,8 @@ const storageItems = ({
 	imports: readonly OptionsMenuItem[];
 	/** Showing or hiding the clipboard (`clipboardItem`). */
 	clipboard: readonly OptionsMenuItem[];
+	/** Showing or hiding the scratchpad (`useScratchpadItem`). */
+	scratchpad: readonly OptionsMenuItem[];
 	/** What the provider keeps from the app (`unseenItem`). */
 	about: readonly OptionsMenuItem[];
 	stranded: boolean;
@@ -1526,6 +1553,7 @@ const storageItems = ({
 		...download,
 		...imports,
 		...clipboard,
+		...scratchpad,
 		...about,
 		...(stranded && !open
 			? [
@@ -1569,10 +1597,34 @@ const clipboardItem = (
 		: [{ label: showsClipboard(bound) ? 'Hide clipboard' : 'Show clipboard', onChoose }];
 
 /**
+ * Show the source's scratchpad on this device, or stop (docs/ARCHITECTURE.md
+ * §7, "The scratchpad"). Offered for every source, the device's own among
+ * them, since a scratch note is a note like any other and needs no sync to be
+ * one. Shown, the route opens it (`useOpenWhenShown`); hidden, its notes stay
+ * where they are, and come back as they were.
+ */
+const useScratchpadItem = (database: NotesDatabase, connectionId: string): OptionsMenuItem[] => {
+	const shown = useLiveQuery(
+		() => getScratchpadShown(database, connectionId),
+		[database, connectionId]
+	);
+	return shown === undefined
+		? []
+		: [
+				{
+					label: shown ? 'Hide scratchpad' : 'Show scratchpad',
+					onChoose: () => {
+						void setScratchpadShown(database, connectionId, !shown);
+					},
+				},
+			];
+};
+
+/**
  * Where a connected source's panel ends: the status line (`StatusLine`), with
- * how syncing is going, the count of the other devices, and — at the foot of
- * the sidebar — the gear. In a compact window's source dropdown the gear's
- * items are the `⋯` at the end of the source's row instead. Either menu also
+ * how syncing is going, the count of the other devices, and the gear. In a
+ * compact window's source dropdown the gear's items are also the `⋯` at the
+ * end of the source's row, as every source's row has one. Either menu also
  * opens what the provider keeps from the app, said over everything, the line
  * having no room for it.
  */
@@ -1595,7 +1647,7 @@ const ConnectedFoot = ({
 	...actions
 }: Omit<
 	Parameters<typeof storageItems>[0],
-	'about' | 'phase' | 'download' | 'imports' | 'clipboard'
+	'about' | 'phase' | 'download' | 'imports' | 'clipboard' | 'scratchpad'
 > & {
 	slot: AccountSlot | undefined;
 	/** Show or hide the clipboard. */
@@ -1612,8 +1664,8 @@ const ConnectedFoot = ({
 	label: string;
 	displayName: string | null;
 	/**
-	 * The gear, or the source's `⋯`: where the focus goes back to once a
-	 * question is put away.
+	 * The gear, or the source's `⋯`, whichever was opened last: where the
+	 * focus goes back to once a question is put away (`useMenuButtons`).
 	 */
 	openButton: RefObject<HTMLButtonElement | null>;
 	client: Client;
@@ -1622,6 +1674,8 @@ const ConnectedFoot = ({
 	onGrantsChanged: () => void;
 }) => {
 	const [about, setAbout] = useState(false);
+	const menus = useMenuButtons(openButton);
+	const scratchpad = useScratchpadItem(database, bound.connectionId);
 	const items = storageItems({
 		...actions,
 		bound,
@@ -1629,6 +1683,8 @@ const ConnectedFoot = ({
 		download: downloadable ? downloadItem(holds, downloading) : [],
 		imports: downloadable ? importItems(importing) : [],
 		clipboard: clipboardItem(bound, status.phase, onClipboard),
+		// Not while a first import holds the source, as the clipboard is not.
+		scratchpad: importingHere(bound) ? [] : scratchpad,
 		about: unseenItem(bound.provider, label, () => {
 			setAbout(true);
 		}),
@@ -1663,11 +1719,16 @@ const ConnectedFoot = ({
 					onChanged={onGrantsChanged}
 					gear={openButton}
 				/>
-				{slot === undefined && <GearMenu items={items} triggerRef={openButton} />}
+				<GearMenu items={items} triggerRef={menus.gear} onOpen={menus.onGear} />
 			</StatusLine>
 			{count !== undefined && <SyncBar count={count} />}
 			{slot !== undefined && (
-				<ActionsMenu slot={slot} items={items} triggerRef={openButton} />
+				<ActionsMenu
+					slot={slot}
+					items={items}
+					triggerRef={menus.dots}
+					onOpen={menus.onDots}
+				/>
 			)}
 		</>
 	);

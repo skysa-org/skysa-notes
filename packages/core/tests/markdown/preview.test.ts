@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { previewLines, previewText } from '../../src/markdown/preview.js';
+import { previewBlocks, previewLines, previewText } from '../../src/markdown/preview.js';
 
 /**
  * What a note list and a search excerpt are allowed to show. The rule these all
@@ -248,5 +248,135 @@ describe('markers that belong to something else', () => {
 
 	it('leaves a line holding two breaks, which nothing but a person writes', () => {
 		expect(previewLines('<br /><br />\n')).toEqual(['<br /><br />']);
+	});
+});
+
+describe('how each line is set', () => {
+	/** A body's lines as [text, marks] runs, the rest of each line left out. */
+	const runs = (body: string) =>
+		previewBlocks(body).map((line) => line.runs.map((run) => [run.text, run.marks]));
+
+	it('keeps the marks the editor draws, a run to each', () => {
+		expect(
+			runs('**bold**, *slanted*, ~~gone~~, `code` and [a link](https://example.com)\n')
+		).toEqual([
+			[
+				['bold', ['strong']],
+				[', ', []],
+				['slanted', ['emphasis']],
+				[', ', []],
+				['gone', ['delete']],
+				[', ', []],
+				['code', ['code']],
+				[' and ', []],
+				['a link', ['link']],
+			],
+		]);
+	});
+
+	it('keeps a mark inside another, once', () => {
+		expect(runs('**bold *and slanted* bold**\n')).toEqual([
+			[
+				['bold ', ['strong']],
+				['and slanted', ['strong', 'emphasis']],
+				[' bold', ['strong']],
+			],
+		]);
+	});
+
+	it('collapses whitespace however it falls across the runs, as the plain lines do', () => {
+		const body = 'one\t[two ](https://example.com)  three\n';
+		expect(runs(body)).toEqual([
+			[
+				['one ', []],
+				['two ', ['link']],
+				['three', []],
+			],
+		]);
+		expect(previewLines(body)).toEqual(['one two three']);
+	});
+
+	it('ends a line at a hard break, the marks going on into the next', () => {
+		expect(runs('**one\\\ntwo**\n')).toEqual([[['one', ['strong']]], [['two', ['strong']]]]);
+	});
+
+	it('gives an item’s first line its bullet, number or box, and its depth', () => {
+		const lines = previewBlocks(
+			'- one\n  - inner\n\n3. three\n4. four\n\n- [ ] to do\n- [x] done\n'
+		).map(({ runs: _, ...line }) => line);
+		expect(lines).toEqual([
+			{ depth: 1, marker: { kind: 'bullet' } },
+			{ depth: 2, marker: { kind: 'bullet' } },
+			{ depth: 1, marker: { kind: 'number', value: 3 } },
+			{ depth: 1, marker: { kind: 'number', value: 4 } },
+			{ depth: 1, marker: { kind: 'task', checked: false } },
+			{ depth: 1, marker: { kind: 'task', checked: true } },
+		]);
+	});
+
+	it('puts an item’s later lines under its words, with no marker of their own', () => {
+		const [first, more] = previewBlocks('- one\n\n  more of it\n');
+		expect(first?.marker).toEqual({ kind: 'bullet' });
+		expect(more).toEqual({
+			depth: 1,
+			marker: undefined,
+			runs: [{ text: 'more of it', marks: [] }],
+		});
+	});
+
+	it('says which lines are a heading’s, a quote’s and a code block’s', () => {
+		const [heading, quote, code] = previewBlocks('## Two\n\n> said\n\n```\nx  = 1\n```\n');
+		expect(heading).toMatchObject({ heading: 2, depth: 0 });
+		expect(quote).toMatchObject({ quote: true, runs: [{ text: 'said', marks: [] }] });
+		expect(code).toMatchObject({ code: true, runs: [{ text: 'x = 1', marks: [] }] });
+	});
+});
+
+describe('a picture or a file’s chip in a line', () => {
+	it('is drawn there, as what it is, and still read as its words', () => {
+		const [line] = previewBlocks(
+			'see ![Beach](beach-1a2b3c4d.jpg) and [Q3 report](q3-report-1a2b3c4d.pdf) now\n'
+		);
+		expect(line?.runs).toEqual([
+			{ text: 'see ', marks: [] },
+			{
+				text: 'Beach ',
+				marks: [],
+				embed: { kind: 'image', src: 'beach-1a2b3c4d.jpg', alt: 'Beach' },
+			},
+			{ text: 'and ', marks: [] },
+			{
+				text: 'Q3 report ',
+				marks: [],
+				embed: {
+					kind: 'file',
+					href: 'q3-report-1a2b3c4d.pdf',
+					name: 'Q3 report',
+					fileName: 'q3-report-1a2b3c4d.pdf',
+				},
+			},
+			{ text: 'now', marks: [] },
+		]);
+	});
+
+	it('is a line of its own with no words, where the picture has none, but no line of words', () => {
+		const body = 'Receipt\n\n![](pasted-image-1a2b3c4d.png)\n\nPaid\n';
+		expect(previewBlocks(body).map((line) => line.runs)).toEqual([
+			[{ text: 'Receipt', marks: [] }],
+			[
+				{
+					text: '',
+					marks: [],
+					embed: { kind: 'image', src: 'pasted-image-1a2b3c4d.png', alt: '' },
+				},
+			],
+			[{ text: 'Paid', marks: [] }],
+		]);
+		expect(previewLines(body)).toEqual(['Receipt', 'Paid']);
+	});
+
+	it('is only words where the note gives its address elsewhere', () => {
+		const [line] = previewBlocks('![Beach][b]\n\n[b]: beach-1a2b3c4d.jpg\n');
+		expect(line?.runs).toEqual([{ text: 'Beach', marks: [] }]);
 	});
 });

@@ -94,6 +94,14 @@ export interface SplitDocument {
 const KNOWN_KEYS = ['id', 'title', 'created', 'updated', 'tags'] as const;
 
 /**
+ * The fields the app may write: the ones it reads of every note, and a
+ * scratch note's pin and colour (docs/ARCHITECTURE.md §7, "The scratchpad").
+ * Those two are not in the vocabulary below: `Color: blue` can open a
+ * sentence, and they are not what makes a block metadata.
+ */
+const WRITTEN_KEYS = [...KNOWN_KEYS, 'pinned', 'color'] as const;
+
+/**
  * Keys that mean "this block is metadata", used to settle one question only:
  * whether a block of YAML the parser had to repair was meant as frontmatter.
  *
@@ -352,6 +360,13 @@ export interface NoteFrontmatter {
 	created?: string;
 	updated?: string;
 	tags?: string[];
+	/**
+	 * A scratch note pinned to the top of the scratchpad: read only when it is
+	 * `true`, and written by deleting the key when it is not.
+	 */
+	pinned?: boolean;
+	/** A scratch note's highlight, by name (`SCRATCH_COLORS` in `scratchpad.ts`). */
+	color?: string;
 }
 
 const asString = (value: unknown): string | undefined => {
@@ -459,6 +474,11 @@ export const readFrontmatter = (frontmatter: string | null): NoteFrontmatter => 
 		created: asString(record.created),
 		updated: asString(record.updated),
 		tags: asTags(record.tags),
+		pinned: record.pinned === true ? true : undefined,
+		color:
+			typeof record.color === 'string' && record.color.trim() !== ''
+				? record.color
+				: undefined,
 	});
 };
 
@@ -558,7 +578,7 @@ const withIdSpelled = (written: string, source: string): string => {
 	return `${written.slice(0, node.range[0])}${source}${written.slice(node.range[1])}`;
 };
 
-type KnownKey = (typeof KNOWN_KEYS)[number];
+type KnownKey = (typeof WRITTEN_KEYS)[number];
 
 /** `created` and `updated` are read as an instant, not as a spelling of one. */
 const isTime = (value: string | undefined): value is string =>
@@ -636,7 +656,7 @@ const stringified = (doc: Document): string | undefined => {
  */
 const changes = (
 	key: KnownKey,
-	value: string | readonly string[] | undefined,
+	value: string | readonly string[] | boolean | undefined,
 	doc: Document,
 	record: Record<string, unknown>
 ): boolean => {
@@ -644,6 +664,7 @@ const changes = (
 	const current = record[key];
 	// `id:` with nothing after it is not a value anyone wrote.
 	if (current === undefined || current === null) return true;
+	if (typeof value === 'boolean') return current !== value;
 	if (typeof value !== 'string') return !sameList(asTags(current) ?? [], value);
 
 	if (key === 'created') return false;
@@ -869,7 +890,7 @@ const isAnchored = (doc: Document, key: KnownKey): boolean => {
  * came, like one that does not parse.
  */
 export const writeFrontmatter = (frontmatter: string | null, patch: NoteFrontmatter): string => {
-	const entries = KNOWN_KEYS.filter((key) => key in patch).map(
+	const entries = WRITTEN_KEYS.filter((key) => key in patch).map(
 		(key) => [key, patch[key]] as const
 	);
 

@@ -97,9 +97,13 @@ export interface RichEditorSetup {
 	 * edit callback it is not a claim that anybody typed anything.
 	 */
 	onStateChange?: (state: EditorState) => void;
-	/** Plugin view specs for the slash menu and the formatting toolbar. */
+	/**
+	 * Plugin view specs for the slash menu and the formatting toolbar. No
+	 * slash menu where none is given: a scratch note's editor has none
+	 * (docs/ARCHITECTURE.md §7, "The scratchpad").
+	 */
 	menus?: {
-		slash: PluginSpec<unknown>;
+		slash?: PluginSpec<unknown>;
 		tooltip: PluginSpec<unknown>;
 	};
 	/**
@@ -467,7 +471,7 @@ export const createRichEditor = ({
 				},
 			}));
 			if (menus === undefined) return;
-			ctx.set(slash.key, menus.slash);
+			if (menus.slash !== undefined) ctx.set(slash.key, menus.slash);
 			ctx.set(tooltip.key, menus.tooltip);
 		})
 		.use(attachHostCtx)
@@ -480,7 +484,7 @@ export const createRichEditor = ({
 		.use(gfm)
 		.use(history)
 		.use(clipboard)
-		.use(menus === undefined ? [] : [slash, tooltip].flat())
+		.use(menus === undefined ? [] : [menus.slash === undefined ? [] : slash, tooltip].flat())
 		// Always, since a plugin cannot be added to a running editor and one with
 		// no query costs a string search per block of a note.
 		.use($prose(findPlugin))

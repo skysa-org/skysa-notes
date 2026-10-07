@@ -20,7 +20,17 @@ export {
 } from './frontmatter.js';
 export { readTime } from './time.js';
 export { headings, type Heading } from './outline.js';
-export { previewLines, previewText } from './preview.js';
+export {
+	previewBlocks,
+	type PreviewLine,
+	previewLines,
+	previewLineText,
+	type PreviewMark,
+	type PreviewMarker,
+	type PreviewEmbed,
+	type PreviewRun,
+	previewText,
+} from './preview.js';
 export {
 	attachmentHref,
 	attachmentLabel,
