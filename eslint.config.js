@@ -43,14 +43,6 @@ const RESTRICTED_SYNTAX = [
 const LETTERS = '/[A-Za-z]/';
 const SHOWN_PROP =
 	'JSXAttribute[name.name=/^(aria-(label|description|roledescription|valuetext|placeholder)|title|placeholder|alt|label|text|message|description|[a-z]+(Label|Text|Title|Message))$/]';
-/**
- * The components whose words are still written into them, until the change that
- * moves each one's into the catalog takes it off this list. Nothing is added to
- * it.
- */
-const WORDS_NOT_MOVED_YET = [
-];
-
 const INLINE_WORDS = [
 	`JSXText[value=${LETTERS}]`,
 	`${SHOWN_PROP} > Literal[value=${LETTERS}]`,
@@ -260,7 +252,6 @@ export default tseslint.config(
 
 	{
 		files: ['apps/web/src/**/*.tsx'],
-		ignores: WORDS_NOT_MOVED_YET,
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...INLINE_WORDS] },
 	},
 

@@ -209,8 +209,8 @@ const connectMessage = (
 
 /**
  * A refused connect, by the kind of no the operator's policy gave. The storage
- * panel says the same reasons in its own sentence (`refusedMessage` in
- * `sync/account.ts`); here each is a whole one about the connect.
+ * panel says the same reasons in its own sentences (`refusedSentence` in
+ * `AccountPanel.tsx`); here each is a whole one about the connect.
  */
 const refusedText = (code: EntitlementCode | undefined): string => {
 	switch (code) {
