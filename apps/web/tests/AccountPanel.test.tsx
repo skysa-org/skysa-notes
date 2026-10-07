@@ -4842,13 +4842,17 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				false
 			);
 		});
+		// The question is drawn again once it has counted what is unsent, so
+		// its Cancel is pressed only once that has come.
 		await user.click(items.getByRole('button', { name: 'Disconnect' }));
-		await user.click(await storage.findByRole('button', { name: 'Cancel' }));
+		await storage.findByRole('button', { name: 'Download them' });
+		await user.click(storage.getByRole('button', { name: 'Cancel' }));
 		expect(document.activeElement).toBe(gear);
 
 		const menu = await openOptions(user);
 		await user.click(menu.getByRole('button', { name: 'Disconnect' }));
-		await user.click(await storage.findByRole('button', { name: 'Cancel' }));
+		await storage.findByRole('button', { name: 'Download them' });
+		await user.click(storage.getByRole('button', { name: 'Cancel' }));
 		expect(document.activeElement).toBe(await rowOptions('Dropbox'));
 	});
 

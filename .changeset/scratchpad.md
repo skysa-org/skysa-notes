@@ -8,3 +8,5 @@ A scratchpad for quick notes, for every source, the device's own notes included.
 Labels are spelled the American way where they were not: "Canceling…" while an import is called off, and "Connecting storage was canceled."
 
 On a phone, or in any window too narrow for three columns, the source dropdown now ends with the storage gear, as the sidebar does on a wide screen. It has what the source's ⋯ has, and is there before the device has a note to give it a row.
+
+When the formatting toolbar is short of room, its More tools button now sits straight after the last tool it shows, instead of out at the bar's far end with a gap between them.

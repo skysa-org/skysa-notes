@@ -2384,7 +2384,7 @@ button.danger {
 	align-items: center;
 	gap: var(--space-2xs);
 	/* The first control's words on the gutter — "Plain text" over the note's
-	   first line — and the More tools glyph on it at the other end. */
+	   first line — and the same margin kept at the other end. */
 	padding: var(--space-2xs) calc(var(--gutter) - var(--space-2xs) - var(--control-inline));
 	background: var(--surface);
 	border-block-end: 1px solid var(--border);
@@ -2420,10 +2420,14 @@ button.danger {
 	gap: 0.125rem;
 }
 
-/* At the far end, and its panel hung from its right-hand edge so that it
-   opens back over the bar rather than off the side of the window. */
+/* Straight after the last tool shown, as close to it as the tools in a group
+   are to each other — back over the group's end padding and the bar's gap —
+   not out at the far end with whatever room is left over between them. The
+   fit still charges it the gap, so the bar is only ever a little roomier for
+   it. Its panel is hung from its right-hand edge, so it opens back over the
+   bar rather than off the side of the window. */
 .toolbar-overflow {
-	margin-inline-start: auto;
+	margin-inline-start: calc(var(--space-3xs) - 2 * var(--space-2xs));
 }
 
 .toolbar-overflow .toolbar-panel {

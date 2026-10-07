@@ -272,3 +272,14 @@ describe('the scratchpad’s row', () => {
 		expect(own).toContain('justify-content: start');
 	});
 });
+
+describe('the formatting toolbar', () => {
+	it('puts More tools straight after the last tool shown, not out at the far end', () => {
+		// jsdom lays nothing out, so what is held is that no margin takes up
+		// the room the tools leave and sets the button apart from them, and
+		// that it is drawn back to a group's own gap from the last of them.
+		const own = declarations('.toolbar-overflow');
+		expect(own).not.toMatch(/margin[\w-]*: auto/);
+		expect(own).toContain('margin-inline-start: calc(var(--space-3xs) - 2 * var(--space-2xs))');
+	});
+});
