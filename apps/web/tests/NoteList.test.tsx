@@ -1,9 +1,10 @@
 import { ROOT } from '@skysa/core';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteList } from '../src/components/NoteList.js';
 import { type NoteRecord } from '../src/store/db.js';
+import { createRenamings } from '../src/store/renaming.js';
 
 /**
  * The note list has three ways of being empty — still loading, no notebook to
@@ -310,6 +311,61 @@ describe('NoteList', () => {
 	it('can create a note once a notebook is open', () => {
 		renderList();
 		expect(createButton().hasAttribute('disabled')).toBe(false);
+	});
+
+	describe('with notebooks inside the open one', () => {
+		const inside = (title: string, folder: string): NoteRecord => ({
+			...note(title),
+			path: `${folder}/${title}.md`,
+		});
+		const notes = [
+			note('Plan'),
+			inside('Standup', 'work/meetings'),
+			inside('Retro', 'work/meetings'),
+			inside('Budget', 'work/meetings/q3'),
+		];
+		const groupOf = (title: string) =>
+			screen
+				.getByRole('button', { name: new RegExp(`^${title}`) })
+				.closest('section.note-group');
+
+		it('lists their notes after its own, each notebook’s under its name from here', () => {
+			renderList({ notes });
+
+			expect(groupOf('Plan')).toBeNull();
+			expect(
+				screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+			).toEqual(['meetings', 'meetings/q3']);
+			const meetings = screen.getByRole('region', { name: 'meetings' });
+			expect(
+				within(meetings)
+					.getAllByRole('button', { name: /^(?!Options)/ })
+					.map((row) => row.querySelector('.note-title')?.textContent)
+			).toEqual(['Standup', 'Retro']);
+			expect(groupOf('Budget')).toBe(screen.getByRole('region', { name: 'meetings/q3' }));
+		});
+
+		it('hands over the note chosen, which says which notebook it is in', () => {
+			const onSelectNote = vi.fn();
+			renderList({ notes, onSelectNote });
+
+			fireEvent.click(screen.getByRole('button', { name: /^Budget/ }));
+
+			expect(onSelectNote).toHaveBeenCalledWith(notes[3]);
+		});
+
+		it('names a notebook inside as it is being renamed', () => {
+			const renamings = createRenamings();
+			renderList({ notes, renamings });
+
+			act(() => {
+				renamings.typed('notebook', 'work/meetings', 'Standups');
+			});
+
+			expect(
+				screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)
+			).toEqual(['Standups', 'Standups/q3']);
+		});
 	});
 
 	describe('at the root', () => {

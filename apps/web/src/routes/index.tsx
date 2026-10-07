@@ -70,7 +70,7 @@ import {
 	useLooseNoteCount,
 	useNote,
 	useNoteSearch,
-	useNotesInFolder,
+	useNotesUnderFolder,
 	useNoteToOpen,
 	useOpenNotebooks,
 	usePinnedTree,
@@ -89,10 +89,10 @@ import {
 	undeleteNote,
 } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
-import { pinnedFirst, type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
+import { type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
-import { findFolder, type FolderNode, selectedFolderPath } from '../store/tree.js';
+import { findFolder, type FolderNode, listedUnder, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
 	findNamedPlace,
@@ -1044,31 +1044,41 @@ const canBegin = (
 ): boolean => source !== undefined && source?.importing === undefined && held === undefined;
 
 /**
- * The open notebook's notes, the pinned first (`store/pins.ts`), and the note
- * begun in it as the newest, though the store has no row for it yet: at the
- * top of the ones that are not pinned. The pins come with the tree
- * (`usePinnedTree`), which is read before any notebook is open.
+ * The open notebook's notes, then those of the notebooks inside it, a notebook's
+ * together and in the sidebar's order (`listedUnder`), the pinned first in each
+ * (`store/pins.ts`); and the note begun in it as the newest, though the store
+ * has no row for it yet: at the top of its own that are not pinned. The pins
+ * come with the tree (`usePinnedTree`), which is read before any notebook is
+ * open.
+ *
+ * `own` is the notebook's own stored notes, which are what a new note's name
+ * must not repeat.
  */
 const useListedNotes = (
 	folder: string | undefined,
 	begun: NoteRecord | undefined,
-	pins: Pins | undefined
+	pins: Pins | undefined,
+	tree: FolderNode[] | undefined
 ) => {
-	const stored = useNotesInFolder(folder);
+	const stored = useNotesUnderFolder(folder);
+	const own = useMemo(
+		() => stored?.filter((note) => parentPath(note.path) === folder),
+		[stored, folder]
+	);
 	const notes = useMemo(() => {
-		if (stored === undefined) return undefined;
+		if (stored === undefined || folder === undefined) return undefined;
 		const pinned = (note: NoteRecord) => pins?.notes.has(note.id) === true;
-		const sorted = pinnedFirst(stored, pinned);
+		const sorted = listedUnder(stored, folder, tree, pinned);
 		if (
 			begun === undefined ||
 			parentPath(begun.path) !== folder ||
 			stored.some((note) => note.id === begun.id)
 		)
 			return sorted;
-		const at = sorted.filter(pinned).length;
+		const at = sorted.filter((note) => parentPath(note.path) === folder && pinned(note)).length;
 		return [...sorted.slice(0, at), begun, ...sorted.slice(at)];
-	}, [stored, begun, folder, pins]);
-	return { stored, notes, unsavedNoteId: begun?.id };
+	}, [stored, begun, folder, pins, tree]);
+	return { own, notes, unsavedNoteId: begun?.id };
 };
 
 /**
@@ -1139,7 +1149,7 @@ const Home = () => {
 		onStoreFailed: noteNotMade,
 	});
 	const { folder, noteId, openNote, storedNote, go } = place;
-	const { stored, notes, unsavedNoteId } = useListedNotes(folder, place.begun, pins);
+	const { own, notes, unsavedNoteId } = useListedNotes(folder, place.begun, pins, tree);
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
 	const noteView = useRef<NoteViewHandle>(null);
@@ -1367,7 +1377,7 @@ const Home = () => {
 		if (folder === undefined || folder === ROOT) return;
 		const made = place.begin(
 			folder,
-			(stored ?? []).map((note) => basename(note.path))
+			(own ?? []).map((note) => basename(note.path))
 		);
 		if (made !== undefined) select({ folder, note: made.id }, { note: made });
 	};
@@ -1788,8 +1798,11 @@ const Home = () => {
 					notes={notes}
 					renamings={renamings}
 					selectedNoteId={noteId}
-					onSelectNote={(id) => {
-						select({ note: id });
+					// A note listed from a notebook inside the open one opens that
+					// notebook with it, as a search result does: the sidebar then
+					// lights the notebook the note is in.
+					onSelectNote={(note) => {
+						select({ folder: parentPath(note.path), note: note.id }, { note });
 						setPanel(null);
 					}}
 					onCreateNote={() => {
