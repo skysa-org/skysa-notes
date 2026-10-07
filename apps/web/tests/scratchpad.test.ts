@@ -47,13 +47,38 @@ const scratch = (input: { title?: string; body?: string } = {}) =>
 	createNote(db, { ...scope, folderPath: SCRATCHPAD_FOLDER, ...input });
 
 describe('whether a source shows its scratchpad', () => {
-	it('is hidden until it is shown, on this device, for that source alone', async () => {
-		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(false);
-		await setScratchpadShown(db, LOCAL_CONNECTION_ID, true);
+	/** A source connected on this device. */
+	const connect = (connectionId: string) =>
+		db.syncState.put({ connectionId, clientId: 'this-browser' });
+
+	it('is shown until it is hidden, on this device, for that source alone', async () => {
+		await connect('c1');
 		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(true);
+		expect(await getScratchpadShown(db, 'c1')).toBe(true);
+		await setScratchpadShown(db, 'c1', false);
 		expect(await getScratchpadShown(db, 'c1')).toBe(false);
+		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(true);
+		await setScratchpadShown(db, 'c1', true);
+		expect(await getScratchpadShown(db, 'c1')).toBe(true);
+	});
+
+	it('is hidden on a source connected after it was last hidden, and on none there already', async () => {
+		await connect('c1');
 		await setScratchpadShown(db, LOCAL_CONNECTION_ID, false);
-		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(false);
+		// Connected before: it shows what it did.
+		expect(await getScratchpadShown(db, 'c1')).toBe(true);
+		// Connected after: hidden, as the device's own was left.
+		await connect('c2');
+		expect(await getScratchpadShown(db, 'c2')).toBe(false);
+		await setScratchpadShown(db, 'c1', false);
+		expect(await getScratchpadShown(db, 'c2')).toBe(false);
+	});
+
+	it('is shown on a source connected after it was last shown', async () => {
+		await setScratchpadShown(db, LOCAL_CONNECTION_ID, false);
+		await setScratchpadShown(db, LOCAL_CONNECTION_ID, true);
+		await connect('c1');
+		expect(await getScratchpadShown(db, 'c1')).toBe(true);
 	});
 
 	it('leaves the notes where they are when it is hidden', async () => {

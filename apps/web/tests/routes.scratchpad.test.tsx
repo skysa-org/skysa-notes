@@ -70,15 +70,17 @@ const openScratchpad = async () => {
 };
 
 describe('the scratchpad’s row', () => {
-	it('is offered only once the scratchpad is shown', async () => {
+	it('is offered until the scratchpad is hidden', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Inbox' });
 		await scratch({ body: 'Milk\n' });
 		await openApp();
 		await screen.findByRole('heading', { name: 'Inbox' });
-		expect(screen.queryByRole('button', { name: 'Scratchpad' })).toBeNull();
-
-		await setScratchpadShown(db, LOCAL_CONNECTION_ID, true);
 		expect(await row()).toBeDefined();
+
+		await setScratchpadShown(db, LOCAL_CONNECTION_ID, false);
+		await waitFor(() => {
+			expect(screen.queryByRole('button', { name: 'Scratchpad' })).toBeNull();
+		});
 	});
 
 	it('opens the scratchpad in place of the notes, and is no notebook', async () => {
@@ -98,6 +100,7 @@ describe('the scratchpad’s row', () => {
 
 	it('is where the storage menu’s "Show scratchpad" goes', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Inbox' });
+		await setScratchpadShown(db, LOCAL_CONNECTION_ID, false);
 		const user = userEvent.setup();
 		const router = await openApp();
 		await screen.findByRole('heading', { name: 'Inbox' });
@@ -321,6 +324,7 @@ describe('searching', () => {
 	it('finds a scratch note only while its scratchpad is shown, and opens its card', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Inbox' });
 		await scratch({ title: 'Trip', body: 'Trip\n\nthe heron lake\n' });
+		await setScratchpadShown(db, LOCAL_CONNECTION_ID, false);
 		const user = userEvent.setup();
 		await openApp();
 		const search = screen.getByRole('combobox', { name: 'Search notes' });

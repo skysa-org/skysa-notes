@@ -41,8 +41,11 @@ const list = () => screen.getByRole('region', { name: 'Notes' });
 const rowTitles = () =>
 	[...list().querySelectorAll('.note-title')].map((title) => title.textContent);
 const sidebar = () => screen.getByRole('navigation', { name: 'Notebooks' });
+/** The notebooks' rows, the scratchpad's above them left out. */
 const notebookNames = () =>
-	[...sidebar().querySelectorAll('.row-label')].map((label) => label.textContent);
+	[...sidebar().querySelectorAll('.row-label')]
+		.filter((label) => label.closest('.scratchpad-row') === null)
+		.map((label) => label.textContent);
 
 const choose = async (row: string, item: string) => {
 	await userEvent.click(screen.getByRole('button', { name: `Options for “${row}”` }));

@@ -8,8 +8,8 @@ import {
 	scratchColor,
 } from '@skysa/core';
 
-import { type NoteRecord, type NotesDatabase } from './db.js';
-import { getPreference, setPreference } from './prefs.js';
+import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
+import { getPreference } from './prefs.js';
 
 /**
  * The scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"): quick notes that
@@ -25,25 +25,59 @@ export const SCRATCHPAD_LABEL = 'Scratchpad';
 const shownKey = (connectionId: string): string => `scratchpad:${connectionId}`;
 
 /**
+ * The key for whether a source this device has not shown or hidden the
+ * scratchpad of yet shows it: as the user last chose for any.
+ */
+const NEW_SOURCES_KEY = 'scratchpadNewSources';
+
+/** Shown, unless the user's last choice for a source was to hide it. */
+const shownByDefault = async (db: NotesDatabase): Promise<boolean> =>
+	(await getPreference(db, NEW_SOURCES_KEY)) !== 'false';
+
+/**
  * Whether this device shows a source's scratchpad. Per device and per source,
  * as the clipboard is, but kept in `prefs` rather than on the source's
  * `syncState` row: the device's own notes have a scratchpad too, and no row.
- * Hidden unless it was shown.
+ * Shown until it is hidden — and for a source never shown or hidden, as the
+ * last was set: hidden on the device's own notes, it is hidden on a source
+ * connected next (the owner's choice, 2026-10-07).
  */
 export const getScratchpadShown = async (
 	db: NotesDatabase,
 	connectionId: string
-): Promise<boolean> => (await getPreference(db, shownKey(connectionId))) === 'true';
+): Promise<boolean> => {
+	const own = await getPreference(db, shownKey(connectionId));
+	return own === undefined ? shownByDefault(db) : own === 'true';
+};
 
 /**
  * Show or hide a source's scratchpad on this device. Hiding it leaves its notes
  * where they are, synced as before, and shows them again as they were.
+ *
+ * It is what a source connected from now on starts as, too; but not one there
+ * now, never shown or hidden itself, which keeps what it shows: each of those
+ * is held at it first. Otherwise hiding the device's own scratchpad would hide
+ * the one of a source connected a minute ago.
  */
 export const setScratchpadShown = (
 	db: NotesDatabase,
 	connectionId: string,
 	shown: boolean
-): Promise<void> => setPreference(db, shownKey(connectionId), String(shown));
+): Promise<void> =>
+	db.transaction('rw', db.prefs, db.syncState, async () => {
+		const showing = String(await shownByDefault(db));
+		const others = [LOCAL_CONNECTION_ID, ...(await db.syncState.toCollection().primaryKeys())]
+			.filter((id) => id !== connectionId)
+			.map(shownKey);
+		const held = await db.prefs.bulkGet(others);
+		await db.prefs.bulkPut([
+			...others
+				.filter((_, at) => held[at] === undefined)
+				.map((key) => ({ key, value: showing })),
+			{ key: shownKey(connectionId), value: String(shown) },
+			{ key: NEW_SOURCES_KEY, value: String(shown) },
+		]);
+	});
 
 /** Is this note one of the scratchpad's, rather than a notebook's? */
 export const isScratchNote = (note: Pick<NoteRecord, 'path'>): boolean => isScratchPath(note.path);

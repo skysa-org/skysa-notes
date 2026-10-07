@@ -436,7 +436,7 @@ describe('AccountPanel, with nothing connected', () => {
 		await settled();
 		await openGear(user);
 		// Nothing to download on a device that holds nothing.
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Show scratchpad']);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Hide scratchpad']);
 
 		await createNote(db, { title: 'First' });
 		await waitFor(() => {
@@ -444,7 +444,7 @@ describe('AccountPanel, with nothing connected', () => {
 				'Download all notes',
 				'Import a folder',
 				'Import files',
-				'Show scratchpad',
+				'Hide scratchpad',
 			]);
 		});
 		// None of it is a button in the panel any more: the gear is the one.
@@ -826,7 +826,7 @@ describe('AccountPanel, downloading every note', () => {
 			'Sync now',
 			'Re-scan from scratch',
 			'Show clipboard',
-			'Show scratchpad',
+			'Hide scratchpad',
 		]);
 	});
 
@@ -1050,7 +1050,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
-				'Show scratchpad',
+				'Hide scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -2066,7 +2066,7 @@ describe('AccountPanel, showing the clipboard', () => {
 });
 
 describe('AccountPanel, showing the scratchpad', () => {
-	it('shows a connected source’s, on this device, and hides it again', async () => {
+	it('hides a connected source’s, on this device, and shows it again', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
 		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
@@ -2074,32 +2074,33 @@ describe('AccountPanel, showing the scratchpad', () => {
 		await holding(db, 'c1');
 		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'idle' }));
 
-		await choose(user, 'Show scratchpad');
-		await waitFor(async () => {
-			expect(await getScratchpadShown(db, 'c1')).toBe(true);
-		});
-		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(false);
-
+		// Shown until it is hidden.
 		await choose(user, 'Hide scratchpad');
 		await waitFor(async () => {
 			expect(await getScratchpadShown(db, 'c1')).toBe(false);
 		});
+		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(true);
+
+		await choose(user, 'Show scratchpad');
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, 'c1')).toBe(true);
+		});
 	});
 
-	it('shows the device’s own, with nothing connected, as the clipboard is not', async () => {
+	it('hides the device’s own, with nothing connected, as the clipboard is not', async () => {
 		const user = userEvent.setup();
 		const db = freshDatabase();
 		renderPanel(clientWith(), db);
 
 		await screen.findByText(NOTHING_CONNECTED);
 		await settled();
-		await choose(user, 'Show scratchpad');
+		await choose(user, 'Hide scratchpad');
 
 		await waitFor(async () => {
-			expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(true);
+			expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(false);
 		});
 		await openGear(user);
-		expect(gearLabels()).toContain('Hide scratchpad');
+		expect(gearLabels()).toContain('Show scratchpad');
 	});
 
 	it('is not offered while the first import holds the source', async () => {
@@ -2112,6 +2113,7 @@ describe('AccountPanel, showing the scratchpad', () => {
 
 		await openGear(user);
 		expect(gearLabels()).not.toContain('Show scratchpad');
+		expect(gearLabels()).not.toContain('Hide scratchpad');
 	});
 });
 
@@ -2662,7 +2664,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(gearLabels()).toEqual([
 			'Import a folder',
 			'Import files',
-			'Show scratchpad',
+			'Hide scratchpad',
 			'Disconnect',
 		]);
 	});
@@ -4648,7 +4650,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
-				'Show scratchpad',
+				'Hide scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -4730,7 +4732,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
-				'Show scratchpad',
+				'Hide scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -4922,7 +4924,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(screen.getByText(NOTHING_CONNECTED)).toBeTruthy();
 		await settled();
 		await openGear(user);
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Show scratchpad']);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Hide scratchpad']);
 		await user.keyboard('{Escape}');
 
 		await createNote(db, { title: 'Loose' });
@@ -4933,7 +4935,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 			'Download all notes',
 			'Import a folder',
 			'Import files',
-			'Show scratchpad',
+			'Hide scratchpad',
 		]);
 	});
 });
