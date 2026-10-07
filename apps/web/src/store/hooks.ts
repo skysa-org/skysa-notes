@@ -15,7 +15,7 @@ import {
 import { holdsAnything } from './exportNotes.js';
 import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
-import { getLastOpen, type LastOpen, pickNote } from './lastOpen.js';
+import { getLastOpen, type LastOpen, noteIsUnder, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere } from './notes.js';
 import { getOpenNotebooks } from './openNotebooks.js';
 import { getPins, type Pins, pinsFromKey, pinsKey } from './pins.js';
@@ -119,7 +119,10 @@ export const usePinnedTree = (): PinnedTree => {
 };
 
 /**
- * Notes in a folder. With no folder open there is nothing to list.
+ * Notes under a folder: in it, or in a notebook inside it, at any depth
+ * (`noteIsUnder`), which is what its list shows (`listedUnder`). The loose
+ * notes are only those at the root. With no folder open there is nothing to
+ * list.
  *
  * The result carries the folder it describes, and a result for any other folder
  * is reported as still loading. `useLiveQuery` keeps its last value across a
@@ -127,11 +130,14 @@ export const usePinnedTree = (): PinnedTree => {
  * for a frame under the new folder's heading — a list that says "Loose notes"
  * above a note from a notebook, which is worse than a moment of "Loading…".
  */
-export const useNotesInFolder = (folderPath: string | undefined): NoteRecord[] | undefined => {
+export const useNotesUnderFolder = (folderPath: string | undefined): NoteRecord[] | undefined => {
 	const result = useLiveQuery(
 		async () => ({
 			folderPath,
-			notes: folderPath === undefined ? [] : await listNotes(db, { folderPath }),
+			notes:
+				folderPath === undefined
+					? []
+					: (await listNotes(db)).filter((note) => noteIsUnder(note.path, folderPath)),
 		}),
 		[folderPath]
 	);

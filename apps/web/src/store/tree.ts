@@ -90,6 +90,44 @@ export const findFolder = (tree: readonly FolderNode[], path: string): FolderNod
 		undefined
 	);
 
+/** A notebook and every notebook inside it, at any depth, as the sidebar lists them. */
+const inSidebarOrder = (node: FolderNode): string[] => [
+	node.path,
+	...node.children.flatMap(inSidebarOrder),
+];
+
+/**
+ * A notebook's list, from every note under it: its own notes first, then each
+ * notebook's inside it, at any depth, together and in the order the sidebar
+ * has the notebooks — the pinned first at each level (`withPins`), and each
+ * notebook before the ones inside it. In each, the pinned notes first, and
+ * otherwise the order the notes came in.
+ *
+ * The tree and the notes are separate queries, so a note can arrive in a
+ * notebook the tree does not have yet — one just made by a move or a pull.
+ * Its notes go after the rest, by the notebook's path, rather than nowhere.
+ */
+export const listedUnder = <T extends Readonly<{ path: string }>>(
+	notes: readonly T[],
+	folder: string,
+	tree: readonly FolderNode[] | undefined,
+	pinned: (note: T) => boolean
+): T[] => {
+	const node = tree === undefined ? undefined : findFolder(tree, folder);
+	const known = node === undefined ? [folder] : inSidebarOrder(node);
+	const byNotebook = notes.reduce(
+		(groups, note) =>
+			groups.set(parentPath(note.path), [...(groups.get(parentPath(note.path)) ?? []), note]),
+		new Map<string, T[]>()
+	);
+	const unknown = [...byNotebook.keys()]
+		.filter((path) => !known.includes(path))
+		.sort((a, b) => a.localeCompare(b));
+	return [...known, ...unknown].flatMap((path) =>
+		pinnedFirst(byNotebook.get(path) ?? [], pinned)
+	);
+};
+
 /**
  * What the root of the app folder is called when it holds notes. A note there
  * belongs to no notebook, which is a shape the remote folder can hand us — the

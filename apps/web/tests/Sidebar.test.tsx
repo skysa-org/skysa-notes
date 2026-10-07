@@ -446,7 +446,7 @@ describe('renaming a notebook', () => {
 		renderSidebar({ tree: counted, selectedFolder: 'work' });
 		const row = screen.getByRole('button', { name: /^work/ });
 		expect(row.classList.contains('selected')).toBe(true);
-		expect(within(row).getByText('2')).toBeDefined();
+		expect(within(row).getByText('3')).toBeDefined();
 
 		await openMenu('work');
 		await userEvent.click(await screen.findByRole('button', { name: 'Rename' }));
@@ -455,7 +455,7 @@ describe('renaming a notebook', () => {
 		// to draw the row as it was: the highlight's class, and the count.
 		const editing = screen.getByRole('textbox', { name: 'Rename work' }).parentElement;
 		expect(editing?.classList.contains('selected')).toBe(true);
-		expect(within(editing as HTMLElement).getByText('2')).toBeDefined();
+		expect(within(editing as HTMLElement).getByText('3')).toBeDefined();
 	});
 
 	it('is abandoned by Escape, and the row comes back', async () => {
@@ -794,11 +794,14 @@ describe('opening and shutting a notebook', () => {
 		expect(toggle('work').getAttribute('aria-expanded')).toBe('false');
 	});
 
-	it('lists what is inside once it is open, counting only its own', () => {
+	it('lists what is inside once it is open, still counting all it holds', () => {
 		renderSidebar({ tree: counted });
 
 		expect(screen.getByRole('button', { name: /^meetings/ })).toBeDefined();
-		expect(screen.getByRole('button', { name: /^work/ }).textContent).toBe('work2');
+		// Its list shows the notes inside `meetings` too (`listedUnder`), so
+		// opening it changes what is listed beside it, not what it holds.
+		expect(screen.getByRole('button', { name: /^work/ }).textContent).toBe('work3');
+		expect(screen.getByRole('button', { name: /^meetings/ }).textContent).toBe('meetings1');
 		expect(toggle('work').getAttribute('aria-expanded')).toBe('true');
 	});
 

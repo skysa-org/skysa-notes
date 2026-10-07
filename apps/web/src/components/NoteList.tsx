@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { parentPath, ROOT } from '@skysa/core';
 import { type ReactNode, useDeferredValue, useId, useState } from 'react';
 
 import { isCreatedLine, isTimeLine } from '../store/createdLine.js';
@@ -14,7 +14,8 @@ import { RowOptions } from './RowOptions.js';
 /**
  * The middle pane: the notes in the selected notebook, newest first by when
  * each was made (`listNotes`), with any pinned on this device above the rest
- * (`store/pins.ts`). Each row still says when its note was last
+ * (`store/pins.ts`); then the notes in the notebooks inside it, at any depth,
+ * each notebook's under its name (`listedUnder`). Each row still says when its note was last
  * edited; that is what it says, not where it sits. A row says what is being
  * typed into its note as it is typed, not once autosave has stored it
  * (`store/liveEdits.ts`), so the list and the editor beside it never disagree.
@@ -26,9 +27,15 @@ import { RowOptions } from './RowOptions.js';
  */
 
 export interface NoteListProps {
+	/**
+	 * The notebook's own notes first, then each notebook's inside it, a
+	 * notebook's together (`listedUnder`): each run of a notebook inside it is
+	 * listed under that notebook's name.
+	 */
 	notes: NoteRecord[] | undefined;
 	selectedNoteId: string | undefined;
-	onSelectNote: (id: string) => void;
+	/** The note, so one from a notebook inside this one can open that notebook. */
+	onSelectNote: (note: NoteRecord) => void;
 	onCreateNote: () => void;
 	/**
 	 * Ask the sidebar for a new notebook, for the empty state's "Create a
@@ -285,6 +292,66 @@ const NoteRow = ({
 };
 
 /**
+ * The notes by the notebook each is in, in the order they come: the list hands
+ * them over a notebook's together, its own first (`listedUnder`).
+ */
+const byNotebook = (notes: readonly NoteRecord[]): [string, NoteRecord[]][] => [
+	...notes
+		.reduce(
+			(groups, note) =>
+				groups.set(parentPath(note.path), [
+					...(groups.get(parentPath(note.path)) ?? []),
+					note,
+				]),
+			new Map<string, NoteRecord[]>()
+		)
+		.entries(),
+];
+
+/**
+ * Where a notebook inside the open one is, from the open one: `Projects/Q3`
+ * under `Work`, as the pane's heading spells a path. As both are being typed
+ * when either is being renamed, as the heading is.
+ */
+const GroupName = ({
+	path,
+	folderPath,
+	renamings,
+}: {
+	path: string;
+	folderPath: string;
+	renamings: Renamings | undefined;
+}) => {
+	const renaming = useRenaming(renamings);
+	const shown = shownFolder(path, renaming);
+	const from = `${shownFolder(folderPath, renaming)}/`;
+	return shown.startsWith(from) ? shown.slice(from.length) : shown;
+};
+
+/** The notes of one notebook inside the open one, under its name. */
+const NoteGroup = ({
+	path,
+	folderPath,
+	renamings,
+	children,
+}: {
+	path: string;
+	folderPath: string;
+	renamings: Renamings | undefined;
+	children: ReactNode;
+}) => {
+	const nameId = useId();
+	return (
+		<section className="note-group" aria-labelledby={nameId}>
+			<h3 id={nameId} className="note-group-name">
+				<GroupName path={path} folderPath={folderPath} renamings={renamings} />
+			</h3>
+			<ul>{children}</ul>
+		</section>
+	);
+};
+
+/**
  * The open notebook's name, as it is being typed when it is being renamed.
  * Its own component, so a keystroke redraws the heading and not the list.
  */
@@ -325,6 +392,39 @@ export const NoteList = ({
 		onCreateNote,
 		onCreateNotebook,
 	});
+	const row = (note: NoteRecord) => {
+		const stored = note.id !== unsavedNoteId;
+		return (
+			<NoteRow
+				key={note.id}
+				note={note}
+				selected={note.id === selectedNoteId}
+				onSelect={() => {
+					onSelectNote(note);
+				}}
+				meta={editedAt(note.updatedAt)}
+				liveEdits={liveEdits}
+				onPickUp={
+					onPickUpNote === undefined || !stored
+						? undefined
+						: () => {
+								onPickUpNote(note);
+							}
+				}
+				onCancelMove={onCancelMove}
+				moving={note.id === movingNoteId}
+				pinned={pinnedNoteIds?.has(note.id) === true}
+				items={menuFor === undefined || !stored ? [] : menuFor(note)}
+				{...(menuFor === undefined || !stored
+					? {}
+					: {
+							onMenu: (at: MenuPoint) => {
+								setMenu({ note, at });
+							},
+						})}
+			/>
+		);
+	};
 
 	return (
 		<section className="note-list" aria-label="Notes">
@@ -351,43 +451,22 @@ export const NoteList = ({
 
 			{placeholder !== undefined && <p className="muted placeholder">{placeholder}</p>}
 
-			{notes !== undefined && notes.length > 0 && (
-				<ul>
-					{notes.map((note) => {
-						const stored = note.id !== unsavedNoteId;
-						return (
-							<NoteRow
-								key={note.id}
-								note={note}
-								selected={note.id === selectedNoteId}
-								onSelect={() => {
-									onSelectNote(note.id);
-								}}
-								meta={editedAt(note.updatedAt)}
-								liveEdits={liveEdits}
-								onPickUp={
-									onPickUpNote === undefined || !stored
-										? undefined
-										: () => {
-												onPickUpNote(note);
-											}
-								}
-								onCancelMove={onCancelMove}
-								moving={note.id === movingNoteId}
-								pinned={pinnedNoteIds?.has(note.id) === true}
-								items={menuFor === undefined || !stored ? [] : menuFor(note)}
-								{...(menuFor === undefined || !stored
-									? {}
-									: {
-											onMenu: (at: MenuPoint) => {
-												setMenu({ note, at });
-											},
-										})}
-							/>
-						);
-					})}
-				</ul>
-			)}
+			{notes !== undefined &&
+				folderPath !== undefined &&
+				byNotebook(notes).map(([path, inIt]) =>
+					path === folderPath ? (
+						<ul key={path}>{inIt.map(row)}</ul>
+					) : (
+						<NoteGroup
+							key={path}
+							path={path}
+							folderPath={folderPath}
+							renamings={renamings}
+						>
+							{inIt.map(row)}
+						</NoteGroup>
+					)
+				)}
 
 			{menu !== null && menuFor !== undefined && (
 				<FloatingMenu

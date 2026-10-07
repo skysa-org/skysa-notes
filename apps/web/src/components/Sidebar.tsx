@@ -42,8 +42,8 @@ import { rowIndent, RowRename } from './RowRename.js';
  * it is once the user has opened it and stays on this device
  * (`store/openNotebooks.ts`). A library brought in from elsewhere can be
  * hundreds of notebooks nested three deep, and listed whole it was a column
- * to scroll through to find anything. Shut, a notebook counts every note
- * inside it, so the number says what is behind it.
+ * to scroll through to find anything. A notebook counts every note inside
+ * it, at every depth, open or shut, as its list shows them all (`listedUnder`).
  */
 
 export interface SidebarProps {
@@ -392,7 +392,10 @@ const Row = ({
 	);
 };
 
-/** Every live note beneath a notebook, which is what deleting it would take. */
+/**
+ * Every live note beneath a notebook: what its row counts, what its list
+ * shows, and what deleting it would take.
+ */
 const notesUnder = (node: FolderNode): number =>
 	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
 
@@ -573,9 +576,9 @@ const FolderRows = ({
 			const toggle = (to: boolean) => {
 				onToggle(node.path, to);
 			};
-			// Shut, it counts what it holds at every depth: the notes that are
-			// in it and the ones it hides.
-			const count = hasChildren && !open ? notesUnder(node) : node.noteCount;
+			// What it holds at every depth, open or shut, which is what its
+			// list shows: opening it does not change what is in it.
+			const count = notesUnder(node);
 			return (
 				<li key={node.path}>
 					<div

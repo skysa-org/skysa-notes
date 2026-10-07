@@ -7,6 +7,7 @@ import {
 	findFolder,
 	folderLabel,
 	type FolderNode,
+	listedUnder,
 	selectedFolderPath,
 	withPins,
 } from '../src/store/tree.js';
@@ -108,6 +109,83 @@ describe('withPins', () => {
 
 	it('leaves the tree as it was with nothing pinned', () => {
 		expect(shape(withPins(tree, new Set()))).toEqual(shape(tree));
+	});
+});
+
+describe('listedUnder', () => {
+	const tree = buildFolderTree({
+		paths: ['Work', 'Work/Meetings', 'Work/Projects', 'Work/Projects/Q3', 'Home'],
+	});
+	// In the order the store hands them over: newest first, every notebook
+	// mixed together.
+	const notes = [
+		{ path: 'Work/Projects/Q3/budget.md' },
+		{ path: 'Work/plan.md' },
+		{ path: 'Work/Meetings/standup.md' },
+		{ path: 'Work/Projects/launch.md' },
+		{ path: 'Work/todo.md' },
+		{ path: 'Work/Meetings/retro.md' },
+	];
+	const paths = (listed: readonly { path: string }[]) => listed.map((note) => note.path);
+	const none = () => false;
+
+	it('lists its own notes first, then each notebook inside it, at any depth, as the sidebar has them', () => {
+		expect(paths(listedUnder(notes, 'Work', tree, none))).toEqual([
+			'Work/plan.md',
+			'Work/todo.md',
+			'Work/Meetings/standup.md',
+			'Work/Meetings/retro.md',
+			'Work/Projects/launch.md',
+			'Work/Projects/Q3/budget.md',
+		]);
+	});
+
+	it('follows the pinned notebooks to the top of their level, as the sidebar does', () => {
+		const pinned = withPins(tree, new Set(['Work/Projects']));
+
+		expect(paths(listedUnder(notes, 'Work', pinned, none))).toEqual([
+			'Work/plan.md',
+			'Work/todo.md',
+			'Work/Projects/launch.md',
+			'Work/Projects/Q3/budget.md',
+			'Work/Meetings/standup.md',
+			'Work/Meetings/retro.md',
+		]);
+	});
+
+	it('puts the pinned notes first in each notebook, not at the top of the list', () => {
+		const pinned = (note: { path: string }) =>
+			note.path === 'Work/todo.md' || note.path === 'Work/Meetings/retro.md';
+
+		expect(paths(listedUnder(notes, 'Work', tree, pinned))).toEqual([
+			'Work/todo.md',
+			'Work/plan.md',
+			'Work/Meetings/retro.md',
+			'Work/Meetings/standup.md',
+			'Work/Projects/launch.md',
+			'Work/Projects/Q3/budget.md',
+		]);
+	});
+
+	it('lists from a notebook inside another only what is under it', () => {
+		const under = notes.filter((note) => note.path.startsWith('Work/Projects/'));
+
+		expect(paths(listedUnder(under, 'Work/Projects', tree, none))).toEqual([
+			'Work/Projects/launch.md',
+			'Work/Projects/Q3/budget.md',
+		]);
+	});
+
+	it('keeps a note in a notebook the tree does not have yet, after the rest', () => {
+		const arrived = [{ path: 'Work/Archive/old.md' }, ...notes];
+
+		expect(paths(listedUnder(arrived, 'Work', tree, none)).at(-1)).toBe('Work/Archive/old.md');
+		// And before the tree has loaded at all, its own still come first.
+		expect(paths(listedUnder(arrived, 'Work', undefined, none)).slice(0, 2)).toEqual([
+			'Work/plan.md',
+			'Work/todo.md',
+		]);
+		expect(listedUnder(arrived, 'Work', undefined, none)).toHaveLength(arrived.length);
 	});
 });
 
