@@ -8,6 +8,7 @@ import {
 	useContext,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from 'react';
@@ -127,16 +128,18 @@ const isOff = (command: EditorCommand, format: FormatState): boolean => {
 	return false;
 };
 
-/** The first control in the bar, and so the one that carries the tab stop. */
-const FIRST_STOP = 'text-style';
-
 /**
  * The bar's slots, in the order they are drawn, and the group each is drawn
  * in. A slot is what goes into the overflow menu as one: a button, a menu, or
  * — for indentation — the pair, since either without the other is half a
  * control.
  */
-const SLOTS: readonly { id: string; group: string }[] = [
+interface Slot {
+	id: string;
+	group: string;
+}
+
+const SLOTS: readonly Slot[] = [
 	{ id: 'text-style', group: 'Text style' },
 	{ id: 'strong', group: 'Text formatting' },
 	{ id: 'emphasis', group: 'Text formatting' },
@@ -152,6 +155,30 @@ const SLOTS: readonly { id: string; group: string }[] = [
 
 /** The slot a tab stop is in, where it is not a slot of its own. */
 const SLOT_OF_STOP: Record<string, string> = { outdent: 'indentation', indent: 'indentation' };
+
+/**
+ * The bar a scratch note has (docs/ARCHITECTURE.md §7, "The scratchpad"): the
+ * marks and the lists, and a link. A scratch note is jotted, not laid out — no
+ * headings, no code blocks, no files — and a bar of six fits a phone with
+ * nothing in the overflow menu.
+ */
+export const BASIC_SLOTS: readonly string[] = [
+	'strong',
+	'emphasis',
+	'bullet-list',
+	'ordered-list',
+	'task-list',
+	'link',
+];
+
+/**
+ * The first control in the bar, and so the one that carries the tab stop:
+ * the first slot drawn, or the first of the pair where that is indentation.
+ */
+const firstStop = (slots: readonly Slot[]): string => {
+	const first = slots[0]?.id ?? 'text-style';
+	return first === 'indentation' ? 'outdent' : first;
+};
 
 /**
  * What goes into the overflow menu first, when the bar is too narrow for all
@@ -206,7 +233,8 @@ const pixels = (value: string): number => Number.parseFloat(value) || 0;
 /** Measure what is on the bar, and work out what fits. */
 const measureFit = (
 	bar: HTMLElement | null,
-	memory: FitMemory
+	memory: FitMemory,
+	slots: readonly Slot[]
 ): ReadonlySet<string> | undefined => {
 	if (bar === null || bar.clientWidth === 0) return undefined;
 	const style = getComputedStyle(bar);
@@ -234,7 +262,7 @@ const measureFit = (
 	if (overflow !== null) memory.overflowWidth = overflow.offsetWidth;
 
 	return fitToolbar({
-		slots: SLOTS.map((slot) => ({ ...slot, width: memory.widths.get(slot.id) ?? 0 })),
+		slots: slots.map((slot) => ({ ...slot, width: memory.widths.get(slot.id) ?? 0 })),
 		groupCost: memory.groupCost,
 		gap: pixels(style.columnGap),
 		available:
@@ -258,7 +286,10 @@ const measureFit = (
  * A bar with no width — jsdom, where nothing is laid out, or a toolbar not on
  * screen — is left alone, with everything in it.
  */
-const useToolbarFit = (root: RefObject<HTMLDivElement | null>): ReadonlySet<string> => {
+const useToolbarFit = (
+	root: RefObject<HTMLDivElement | null>,
+	slots: readonly Slot[]
+): ReadonlySet<string> => {
 	const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
 	const memory = useRef<FitMemory>({
 		widths: new Map(),
@@ -271,7 +302,7 @@ const useToolbarFit = (root: RefObject<HTMLDivElement | null>): ReadonlySet<stri
 	// React has nothing to render again.
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	useLayoutEffect(() => {
-		const next = measureFit(root.current, memory.current);
+		const next = measureFit(root.current, memory.current, slots);
 		if (next !== undefined) setHidden((current) => (sameFit(current, next) ? current : next));
 	});
 
@@ -281,7 +312,7 @@ const useToolbarFit = (root: RefObject<HTMLDivElement | null>): ReadonlySet<stri
 		// Synchronously, so a window being dragged narrower never shows a
 		// frame with the bar running off its end.
 		const observer = new ResizeObserver(() => {
-			const next = measureFit(bar, memory.current);
+			const next = measureFit(bar, memory.current, slots);
 			if (next === undefined) return;
 			flushSync(() => {
 				setHidden((current) => (sameFit(current, next) ? current : next));
@@ -291,7 +322,7 @@ const useToolbarFit = (root: RefObject<HTMLDivElement | null>): ReadonlySet<stri
 		return () => {
 			observer.disconnect();
 		};
-	}, [root]);
+	}, [root, slots]);
 
 	return hidden;
 };
@@ -305,11 +336,15 @@ const useToolbarFit = (root: RefObject<HTMLDivElement | null>): ReadonlySet<stri
  * DOM rather than from a list kept beside it, so the order on screen and the
  * order the arrows follow are the same thing.
  */
-const useRoving = (root: RefObject<HTMLDivElement | null>, hidden: ReadonlySet<string>) => {
-	const [chosen, setAt] = useState<string>(FIRST_STOP);
+const useRoving = (
+	root: RefObject<HTMLDivElement | null>,
+	hidden: ReadonlySet<string>,
+	first: string
+) => {
+	const [chosen, setAt] = useState<string>(first);
 	// The control holding the stop can go into the overflow menu when the bar
 	// narrows, and a bar whose one tab stop is not drawn is a bar Tab skips.
-	const at = hidden.has(SLOT_OF_STOP[chosen] ?? chosen) ? FIRST_STOP : chosen;
+	const at = hidden.has(SLOT_OF_STOP[chosen] ?? chosen) ? first : chosen;
 
 	const move = (delta: number, from: 'here' | 'edge') => {
 		const stops = [
@@ -320,7 +355,7 @@ const useRoving = (root: RefObject<HTMLDivElement | null>, hidden: ReadonlySet<s
 		const next = stops.at((index + delta + stops.length) % stops.length);
 		if (next === undefined) return;
 		next.focus();
-		setAt(next.dataset.stop ?? FIRST_STOP);
+		setAt(next.dataset.stop ?? first);
 	};
 
 	const onKeyDown = (event: ReactKeyboardEvent) => {
@@ -846,40 +881,47 @@ const commandsIn = (slot: string): readonly EditorCommand[] => {
  * Mounted with the panel, so the form is gone again the next time it opens.
  */
 const OverflowItems = ({
+	slots,
 	hidden,
 	format,
 	run,
 	close,
-}: FormatToolbarProps & { hidden: ReadonlySet<string>; close: () => void }) => {
+}: FormatToolbarProps & {
+	slots: readonly Slot[];
+	hidden: ReadonlySet<string>;
+	close: () => void;
+}) => {
 	const [linking, setLinking] = useState(false);
 	if (linking) return <LinkForm href={format.link} run={run} close={close} />;
 
-	return SLOTS.filter((slot) => hidden.has(slot.id)).flatMap((slot) =>
-		slot.id === 'link' ? (
-			<button
-				key={slot.id}
-				type="button"
-				className="toolbar-item"
-				aria-pressed={format.link !== null}
-				{...onPress(() => {
-					setLinking(true);
-				})}
-			>
-				<Icon name="link" />
-				<span>Link</span>
-			</button>
-		) : (
-			commandsIn(slot.id).map((command) => (
-				<MenuCommand
-					key={command.id}
-					command={command}
-					format={format}
-					run={run}
-					close={close}
-				/>
-			))
-		)
-	);
+	return slots
+		.filter((slot) => hidden.has(slot.id))
+		.flatMap((slot) =>
+			slot.id === 'link' ? (
+				<button
+					key={slot.id}
+					type="button"
+					className="toolbar-item"
+					aria-pressed={format.link !== null}
+					{...onPress(() => {
+						setLinking(true);
+					})}
+				>
+					<Icon name="link" />
+					<span>Link</span>
+				</button>
+			) : (
+				commandsIn(slot.id).map((command) => (
+					<MenuCommand
+						key={command.id}
+						command={command}
+						format={format}
+						run={run}
+						close={close}
+					/>
+				))
+			)
+		);
 };
 
 /**
@@ -893,10 +935,19 @@ export const FormatToolbar = ({
 	format,
 	run,
 	placement = 'top',
-}: FormatToolbarProps & { placement?: ToolbarPlacement }) => {
+	only,
+}: FormatToolbarProps & {
+	placement?: ToolbarPlacement;
+	/** The slots to draw, by id (`BASIC_SLOTS`); every one, unsaid. */
+	only?: readonly string[];
+}) => {
 	const root = useRef<HTMLDivElement>(null);
-	const hidden = useToolbarFit(root);
-	const { onKeyDown, stop } = useRoving(root, hidden);
+	const slots = useMemo(
+		() => (only === undefined ? SLOTS : SLOTS.filter(({ id }) => only.includes(id))),
+		[only]
+	);
+	const hidden = useToolbarFit(root, slots);
+	const { onKeyDown, stop } = useRoving(root, hidden, firstStop(slots));
 	/** At most one panel is open, so which one is the whole of the state. */
 	const [open, setOpen] = useState<string | null>(null);
 	const opener = (id: string) => (wanted: boolean) => {
@@ -926,7 +977,7 @@ export const FormatToolbar = ({
 						run={run}
 						open={openNow === id}
 						setOpen={opener(id)}
-						stop={stop(FIRST_STOP)}
+						stop={stop(id)}
 					/>
 				);
 			case 'more-formatting':
@@ -956,10 +1007,12 @@ export const FormatToolbar = ({
 
 	// The slots still on the bar, grouped; a group with nothing left in it is
 	// not drawn, and its separator goes with it.
-	const groups = SLOTS.filter(({ id }) => !hidden.has(id)).reduce(
-		(drawn, { id, group }) => drawn.set(group, [...(drawn.get(group) ?? []), id]),
-		new Map<string, string[]>()
-	);
+	const groups = slots
+		.filter(({ id }) => !hidden.has(id))
+		.reduce(
+			(drawn, { id, group }) => drawn.set(group, [...(drawn.get(group) ?? []), id]),
+			new Map<string, string[]>()
+		);
 
 	return (
 		<Placement.Provider value={placement}>
@@ -1003,6 +1056,7 @@ export const FormatToolbar = ({
 						stop={stop('overflow')}
 					>
 						<OverflowItems
+							slots={slots}
 							hidden={hidden}
 							format={format}
 							run={run}

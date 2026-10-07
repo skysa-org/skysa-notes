@@ -1,4 +1,4 @@
-import { HIDDEN_PREFIX } from './config.js';
+import { HIDDEN_PREFIX, SCRATCHPAD_FOLDER } from './config.js';
 
 /**
  * Paths are POSIX, relative to the app-owned root folder, and never begin or end
@@ -64,11 +64,20 @@ export const replaceBasename = (path: string, name: string): string =>
 	joinPath(parentPath(path), name);
 
 /**
- * Anything under a dot-prefixed segment is invisible to the UI, which is how the
- * marker file and any provider bookkeeping stay out of the way.
+ * Anything under a dot-prefixed segment is invisible to the UI and passed over
+ * by sync, which is how the marker file, the clipboard and any provider
+ * bookkeeping stay out of the way.
+ *
+ * Except the scratchpad's folder at the root: what is in it is notes, synced as
+ * any are, which the scratchpad shows and the notebooks do not
+ * (`isScratchPath`). Its dot keeps it out of other tools' lists of folders. A
+ * dot-prefixed name inside it is hidden as anywhere else.
  */
 export const isHidden = (path: string): boolean =>
-	pathSegments(path).some((segment) => segment.startsWith(HIDDEN_PREFIX));
+	pathSegments(path).some(
+		(segment, at) =>
+			segment.startsWith(HIDDEN_PREFIX) && !(at === 0 && segment === SCRATCHPAD_FOLDER)
+	);
 
 /** True when `path` is `folder` itself or sits anywhere beneath it. */
 export const isWithin = (path: string, folder: string): boolean => {
@@ -77,6 +86,12 @@ export const isWithin = (path: string, folder: string): boolean => {
 	if (base === ROOT) return true;
 	return target === base || target.startsWith(`${base}${SEPARATOR}`);
 };
+
+/**
+ * The scratchpad's folder, or anything in it: a scratch note, a file beside
+ * one. Never a notebook, a notebook's note or anything the tree counts.
+ */
+export const isScratchPath = (path: string): boolean => isWithin(path, SCRATCHPAD_FOLDER);
 
 /**
  * Rewrite a path that sits under `from` so it sits under `to` instead. Used when

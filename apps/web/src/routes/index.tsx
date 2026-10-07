@@ -2,10 +2,12 @@ import {
 	basename,
 	type ConnectGate,
 	type EntitlementCode,
+	isScratchPath,
 	isWithin,
 	parentPath,
 	rebasePath,
 	ROOT,
+	SCRATCHPAD_FOLDER,
 } from '@skysa/core';
 import { createFileRoute, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +22,7 @@ import { CompactBar, type Pane, useCompactLayout } from '../components/CompactBa
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
+import { NameDialog } from '../components/NameDialog.js';
 import { NoteList } from '../components/NoteList.js';
 import { noteMenuItems } from '../components/noteMenu.js';
 import {
@@ -27,11 +30,14 @@ import {
 	type NoteDraft,
 	NoteView,
 	type NoteViewHandle,
+	type ScratchEditing,
 } from '../components/NoteView.js';
+import { ScratchModal, Scratchpad } from '../components/Scratchpad.js';
 import { SearchField } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
+import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
 import {
@@ -74,6 +80,7 @@ import {
 	useNoteToOpen,
 	useOpenNotebooks,
 	usePinnedTree,
+	useScratchpadShown,
 	useSourceContents,
 	useSources,
 } from '../store/hooks.js';
@@ -83,6 +90,7 @@ import { createLiveEdits } from '../store/liveEdits.js';
 import {
 	createNote,
 	draftNote,
+	isUnnamed,
 	moveNote,
 	saveNoteBody,
 	setNoteEditorMode,
@@ -92,6 +100,7 @@ import { setNotebooksOpen } from '../store/openNotebooks.js';
 import { type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
+import { scratchMarks } from '../store/scratchpad.js';
 import { findFolder, type FolderNode, listedUnder, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
 import {
@@ -100,6 +109,7 @@ import {
 	heldPlace,
 	type NamedPlace,
 	type Place,
+	placeFolder,
 	placeHash,
 	placeState,
 	placeTitle,
@@ -287,11 +297,17 @@ const useEnterCode = (
 const useNoteMove = (
 	openNote: NoteRecord | undefined,
 	moving: Moving | null,
-	pickUp: (what: Moving) => void
+	pickUp: (what: Moving) => void,
+	/** A scratch note's way into a notebook, which names it first (`useScratchpad`). */
+	promote: ((note: NoteRecord) => void) | undefined
 ): void => {
 	const offered = openNote !== undefined && moving === null;
 	const move = () => {
 		if (openNote === undefined) return;
+		if (promote !== undefined) {
+			promote(openNote);
+			return;
+		}
 		pickUp({ kind: 'note', id: openNote.id, path: openNote.path, name: openNote.title });
 	};
 
@@ -819,6 +835,7 @@ const useOpenPlace = ({
 	looseNoteCount,
 	pins,
 	startable,
+	scratchpad,
 	onStoreFailed,
 }: {
 	activeConnection: string | undefined;
@@ -834,6 +851,11 @@ const useOpenPlace = ({
 	 * not arrived yet.
 	 */
 	startable: boolean;
+	/**
+	 * Whether the source shows its scratchpad on this device, which is when
+	 * the scratchpad can be open; `undefined` until read.
+	 */
+	scratchpad: boolean | undefined;
 	onStoreFailed: () => void;
 }) => {
 	const router = useRouter();
@@ -869,12 +891,20 @@ const useOpenPlace = ({
 	// before the one it names.
 	const folder = resolving
 		? undefined
-		: selectedFolderPath(tree, requestedFolder, looseNoteCount, rememberedFolder(lastOpen));
+		: openFolderPath(
+				tree,
+				requestedFolder,
+				looseNoteCount,
+				rememberedFolder(lastOpen),
+				scratchpad
+			);
+	const inScratchpad = folder === SCRATCHPAD_FOLDER;
 	const remembered = folder === undefined ? undefined : lastOpen?.notes[folder];
 	const pinnedNotes = pins?.notes;
 	const toOpen = useNoteToOpen({
 		connectionId: activeConnection,
-		folder,
+		// The scratchpad opens on its cards, never on a note: nothing to pick.
+		folder: inScratchpad ? undefined : folder,
 		open: noteId,
 		remembered,
 		pinned: pinnedNotes,
@@ -987,6 +1017,13 @@ const useOpenPlace = ({
 		begin,
 	]);
 
+	// The scratchpad, open as the place remembered or fallen back to, is put
+	// in the entry as a notebook the app opens by itself is (`show` above).
+	useEffect(() => {
+		if (!inScratchpad || !settled || requestedFolder === SCRATCHPAD_FOLDER) return;
+		go({ folder: SCRATCHPAD_FOLDER }, { replace: standing !== 'left' });
+	}, [inScratchpad, settled, requestedFolder, standing, go]);
+
 	// The hash says by path what the entry holds by id, and follows the note
 	// when it is renamed or moved, here or on another device.
 	const { held, fragment } = entry;
@@ -1000,7 +1037,11 @@ const useOpenPlace = ({
 		}
 	}, [standing, held, fragment, openNote, navigate]);
 
-	const title = placeTitle(openNote, APP_NAME);
+	const title = placeTitle(
+		openNote === undefined ? undefined : { ...openNote, named: !isUnnamed(openNote) },
+		APP_NAME,
+		folder
+	);
 	useEffect(() => {
 		document.title = title;
 	}, [title]);
@@ -1009,7 +1050,9 @@ const useOpenPlace = ({
 		connectionId: settled ? activeConnection : undefined,
 		folder,
 		noteId,
-		openNote: storedNote,
+		// The scratchpad is remembered, and not the card open in it: the app
+		// opens on the cards, not on one of them over the rest.
+		openNote: inScratchpad ? undefined : storedNote,
 		lastOpen,
 	});
 
@@ -1027,12 +1070,69 @@ const useOpenPlace = ({
 };
 
 /**
+ * Which notebook to open, as `selectedFolderPath` has it, or the scratchpad
+ * (docs/ARCHITECTURE.md §7, "The scratchpad"): asked for, or remembered with
+ * nothing asked for, while the source shows it. Not yet known while whether it
+ * does is still being read. A scratchpad hidden is a notebook deleted: the
+ * place falls back as from one.
+ */
+const openFolderPath = (
+	tree: FolderNode[] | undefined,
+	requested: string | undefined,
+	looseNoteCount: number | undefined,
+	remembered: string | null | undefined,
+	scratchpad: boolean | undefined
+): string | undefined => {
+	const asked = (requested ?? remembered) === SCRATCHPAD_FOLDER;
+	if (asked && scratchpad === true) return SCRATCHPAD_FOLDER;
+	if (asked && scratchpad === undefined) return undefined;
+	return selectedFolderPath(
+		tree,
+		requested === SCRATCHPAD_FOLDER ? undefined : requested,
+		looseNoteCount,
+		remembered === SCRATCHPAD_FOLDER ? null : remembered
+	);
+};
+
+/**
  * Whether the store's answer is a notebook with nothing in it, where
  * `useOpenPlace` begins a note: not the loose notes, which the app never adds
  * to, and not while `startable` says notes are still arriving.
  */
 const beginsHere = ({ folder, pick }: NoteToOpen, startable: boolean): boolean =>
 	pick === null && startable && folder !== ROOT;
+
+/**
+ * Whether a new note can be made here. The root holds loose notes that came
+ * from the remote folder and the app does not add to them, so there is
+ * nowhere to put a note until a notebook is open (docs/ARCHITECTURE.md
+ * §12.6). The scratchpad's goes in its box, which is not there under a card
+ * open over it.
+ */
+const canMakeNote = (folder: string | undefined, modal: boolean): boolean =>
+	folder !== undefined && folder !== ROOT && !modal;
+
+/**
+ * Whether the folder open is a notebook, which can be moved: not the root,
+ * which holds the loose notes, and not the scratchpad.
+ */
+const isNotebook = (folder: string | undefined): folder is string =>
+	folder !== undefined && folder !== ROOT && !isScratchPath(folder);
+
+/**
+ * Whether the app behind is out of reach: held by a source's first import, or
+ * under a scratch card's dialog, which keeps the focus to itself.
+ */
+const covered = (held: SyncStateRecord | undefined, modal: boolean): boolean =>
+	held !== undefined || modal;
+
+/** The sidebar's scratchpad row, while this device shows the source's scratchpad. */
+const scratchpadRow = (
+	shown: boolean | undefined,
+	selected: boolean,
+	onSelect: () => void
+): { selected: boolean; onSelect: () => void } | undefined =>
+	shown === true ? { selected, onSelect } : undefined;
 
 /**
  * Whether an empty notebook may begin a note (`useOpenPlace`): once the source
@@ -1060,7 +1160,9 @@ const useListedNotes = (
 	pins: Pins | undefined,
 	tree: FolderNode[] | undefined
 ) => {
-	const stored = useNotesUnderFolder(folder);
+	// The scratchpad lists its cards itself (`useScratchpad`).
+	const listed = folder !== undefined && isScratchPath(folder) ? undefined : folder;
+	const stored = useNotesUnderFolder(listed);
 	const own = useMemo(
 		() => stored?.filter((note) => parentPath(note.path) === folder),
 		[stored, folder]
@@ -1089,7 +1191,8 @@ const useListedNotes = (
  * and left the cursor in a field nobody could see.
  */
 const useBegunInView = (begun: NoteRecord | undefined, shut: (panel: null) => void) => {
-	const id = begun?.id;
+	// Not a note begun in the scratchpad's box, which is in the pane that is open.
+	const id = begun === undefined || isScratchPath(begun.path) ? undefined : begun.id;
 	useEffect(() => {
 		if (id !== undefined) shut(null);
 	}, [id, shut]);
@@ -1139,6 +1242,7 @@ const Home = () => {
 		setProblem({ message: 'That note could not be made.', tone: 'error' });
 	}, []);
 
+	const scratchpadShown = useScratchpadShown(activeConnection);
 	const place = useOpenPlace({
 		activeConnection,
 		sources,
@@ -1146,9 +1250,12 @@ const Home = () => {
 		looseNoteCount,
 		pins,
 		startable: canBegin(source, held),
+		scratchpad: scratchpadShown,
 		onStoreFailed: noteNotMade,
 	});
 	const { folder, noteId, openNote, storedNote, go } = place;
+	/** The scratchpad is open, in the notes' place (docs/ARCHITECTURE.md §7). */
+	const inScratchpad = folder === SCRATCHPAD_FOLDER;
 	const { own, notes, unsavedNoteId } = useListedNotes(folder, place.begun, pins, tree);
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
@@ -1276,7 +1383,8 @@ const Home = () => {
 		setSearchOpen(false);
 		setPanel(null);
 		if (note.connectionId === activeConnection) {
-			select({ folder: parentPath(note.path), note: note.id }, { note });
+			// A scratch note opens as its card, over the scratchpad.
+			select({ folder: placeFolder(note.path), note: note.id }, { note });
 			return;
 		}
 		// Another source: the entry in front is the old source's and is kept for
@@ -1285,7 +1393,7 @@ const Home = () => {
 		// it is to be remembered there first.
 		setProblem(null);
 		dismissConnect();
-		void rememberOpen(db, note.connectionId, parentPath(note.path), note.id).then(() =>
+		void rememberOpen(db, note.connectionId, placeFolder(note.path), note.id).then(() =>
 			showConnection(db, note.connectionId)
 		);
 	};
@@ -1350,9 +1458,12 @@ const Home = () => {
 				}
 				// Back where it was, open. By the row's own path, not the one it
 				// was deleted at: once sync has purged the row the note is made
-				// again, under a conflict name if something took the old one.
+				// again, under a conflict name if something took the old one. A
+				// scratch note is back on the wall, its card not opened over it.
 				select(
-					{ note: restored.id, folder: parentPath(restored.path) },
+					isScratchPath(restored.path)
+						? { folder: SCRATCHPAD_FOLDER, note: undefined }
+						: { note: restored.id, folder: parentPath(restored.path) },
 					{ replace: true, note: restored }
 				);
 			})
@@ -1372,6 +1483,11 @@ const Home = () => {
 	 * name selected, and stored only once the user writes in it (`useDrafts`).
 	 */
 	const onCreateNote = () => {
+		// The scratchpad's new note is its box's.
+		if (inScratchpad) {
+			scratch.take();
+			return;
+		}
 		// The root holds loose notes that arrived from the remote folder; the app
 		// does not add to them (docs/ARCHITECTURE.md §12.6).
 		if (folder === undefined || folder === ROOT) return;
@@ -1525,6 +1641,31 @@ const Home = () => {
 		if (compact) setPanel('notebooks');
 	};
 
+	const scratch = useScratchpad({
+		active: inScratchpad,
+		connectionId: activeConnection,
+		noteId,
+		openNote,
+		begin: place.begin,
+		select,
+		compact,
+		setPanel,
+		noteView,
+		onDeleted: (note) => {
+			setDeleted(note);
+			setBeside(null);
+		},
+		pickUp,
+		moving,
+		onProblem: (message) => {
+			setProblem({ message, tone: 'error' });
+		},
+	});
+	const openScratchpad = () => {
+		select({ folder: SCRATCHPAD_FOLDER, note: undefined });
+	};
+	useOpenWhenShown(activeConnection, scratchpadShown, openScratchpad);
+
 	/**
 	 * Escape puts down whatever is being moved, from wherever the focus is. On
 	 * the document rather than on the sidebar: a move started from the palette
@@ -1553,12 +1694,19 @@ const Home = () => {
 		setProblem(null);
 
 		if (move.kind === 'note') {
+			// A scratch note made a note is followed into its notebook: making
+			// it one was the point (docs/ARCHITECTURE.md §7, "The scratchpad").
+			const promoted = moving.kind === 'note' && isScratchPath(moving.path);
 			// What the editor holds is saved first: a file pasted into the note
 			// a moment ago is carried by the links its body has stored
 			// (`carryLinkedFiles`), and left behind by one that has not been.
 			void settleEditors()
 				.then(() => moveNote(db, move.id, move.into))
 				.then(() => {
+					if (promoted) {
+						select({ folder: move.into, note: move.id });
+						return;
+					}
 					// Only when it is the note in front. A note dragged out of the
 					// list the user is reading leaves it, which is the whole of what
 					// they asked for; the one they are *writing in* would otherwise
@@ -1614,10 +1762,7 @@ const Home = () => {
 		label: 'New note',
 		group: 'Note',
 		chord: NEW_NOTE,
-		// The root holds loose notes that came from the remote folder and the app
-		// does not add to them, so there is nowhere to put a note until a notebook
-		// is open (docs/ARCHITECTURE.md §12.6).
-		enabled: folder !== undefined && folder !== ROOT,
+		enabled: canMakeNote(folder, scratch.modal),
 		run: onCreateNote,
 	});
 
@@ -1658,20 +1803,101 @@ const Home = () => {
 		id: 'notebook.move',
 		label: 'Move notebook',
 		group: 'Notebook',
-		// The root is not a notebook and cannot be moved, and neither can a
-		// second thing while one is already in the air.
-		enabled: folder !== undefined && folder !== ROOT && moving === null,
+		// Nor can a second thing while one is already in the air.
+		enabled: isNotebook(folder) && moving === null,
 		run: () => {
-			if (folder === undefined || folder === ROOT) return;
+			if (!isNotebook(folder)) return;
 			pickUp({ kind: 'notebook', path: folder, name: basename(folder) });
 		},
 	});
 
 	// A note begun and not stored has nowhere to move from yet.
-	useNoteMove(storedNote, moving, pickUp);
+	useNoteMove(storedNote, moving, pickUp, scratch.moveOpen);
 	useKeepOnInstall();
 
 	useShortcuts();
+
+	/**
+	 * The note pane. One is ever mounted, wherever the note open is shown — the
+	 * third column, the scratchpad's box, a card's dialog — since the commands
+	 * it registers and the edits it holds are the open note's alone.
+	 */
+	const noteEditor = (scratchNote?: ScratchEditing) => (
+		<NoteView
+			ref={noteView}
+			note={openNote}
+			draft={place.noteDraft}
+			liveEdits={liveEdits}
+			renamings={renamings}
+			onProblem={setProblem}
+			scratch={scratchNote}
+			{...emptyPaneOffers({
+				folder,
+				nothingYet: tree?.length === 0 && looseNoteCount === 0,
+				onCreateNote,
+				onCreateNotebook: askNewNotebook,
+			})}
+			// The next note along follows by itself: a tombstone is not a note
+			// to show, so the one open last in the notebook, or its first,
+			// takes its place (`useOpenPlace`). Not in the scratchpad, whose
+			// card or box closes instead.
+			onDeleted={(note, displaced) => {
+				setDeleted(note);
+				setBeside(displaced ?? null);
+				scratch.deleted(note);
+			}}
+		/>
+	);
+
+	/**
+	 * What is in the note's column in the scratchpad: in a compact window, the
+	 * card open, full screen; nothing open, an empty pane behind the
+	 * scratchpad's. In a wide one the scratchpad has the column too.
+	 */
+	const noteColumn = () => {
+		if (!inScratchpad) return noteEditor();
+		if (!compact) return null;
+		if (scratch.card !== undefined) return noteEditor(scratch.editing);
+		return <section className="note-view empty" aria-label="Note" />;
+	};
+
+	/** The scratchpad, in the notes' place. */
+	const scratchPane = () => (
+		<Scratchpad
+			notes={scratch.notes}
+			takingId={scratch.takingId}
+			editor={scratch.taking ? noteEditor(scratch.editing) : undefined}
+			onTake={scratch.take}
+			onCloseTake={scratch.closeTake}
+			openId={scratch.card?.id}
+			onOpen={scratch.open}
+			onMark={scratch.mark}
+			onMove={scratch.offered}
+			onDelete={scratch.remove}
+			liveEdits={liveEdits}
+		/>
+	);
+
+	/** What the scratchpad puts over the page: a card's dialog, and the name it asks for. */
+	const scratchOverlays = () => (
+		<>
+			{scratch.modal && scratch.card !== undefined && (
+				<ScratchModal color={scratchMarks(scratch.card).color} onClose={scratch.close}>
+					{noteEditor(scratch.editing)}
+				</ScratchModal>
+			)}
+			{scratch.naming !== undefined && (
+				<NameDialog
+					title="Name this note"
+					text="A note in a notebook goes by its name. Give this one a name, then choose the notebook it goes in."
+					label="Name"
+					confirmLabel="Name it"
+					onConfirm={scratch.named}
+					onCancel={scratch.cancelNaming}
+				/>
+			)}
+		</>
+	);
 
 	return (
 		// `app-shell` is a three-column grid with exactly three children. A banner
@@ -1680,7 +1906,7 @@ const Home = () => {
 		// above the panes goes in the frame around them instead. The toasts are
 		// not laid out at all — they are fixed to the viewport — but they are
 		// here for the same reason: a stack in the grid would take a column.
-		<div className={frameClassName} inert={held !== undefined}>
+		<div className={frameClassName} inert={covered(held, scratch.modal)}>
 			{/*
 			 * Above everything, because it says which app this is: each source
 			 * is its own notes, its own notebooks and its own sync (§6), so the
@@ -1690,7 +1916,10 @@ const Home = () => {
 			{compact ? (
 				<CompactBar
 					folder={folder}
-					note={openNote}
+					// In the scratchpad, a card's name after "Scratchpad", and
+					// only a card's that has one.
+					note={scratch.barNote(openNote)}
+					scratchpad={inScratchpad}
 					liveEdits={liveEdits}
 					renamings={renamings}
 					panel={panel}
@@ -1792,90 +2021,82 @@ const Home = () => {
 						if (activeConnection !== undefined)
 							void setNotebookPinned(db, activeConnection, path, pinned);
 					}}
+					scratchpad={scratchpadRow(scratchpadShown, inScratchpad, openScratchpad)}
 				/>
 
-				<NoteList
-					notes={notes}
-					renamings={renamings}
-					selectedNoteId={noteId}
-					// A note listed from a notebook inside the open one opens that
-					// notebook with it, as a search result does: the sidebar then
-					// lights the notebook the note is in.
-					onSelectNote={(note) => {
-						select({ folder: parentPath(note.path), note: note.id }, { note });
-						setPanel(null);
-					}}
-					onCreateNote={() => {
-						onCreateNote();
-						setPanel(null);
-					}}
-					onCreateNotebook={askNewNotebook}
-					folderPath={folder}
-					// Both queries, not just the tree: the notebooks alone cannot tell
-					// an empty app from one whose notes all sit loose at the root.
-					storeLoaded={tree !== undefined && looseNoteCount !== undefined}
-					onPickUpNote={(note) => {
-						setMoving({ kind: 'note', id: note.id, path: note.path, name: note.title });
-					}}
-					onCancelMove={cancelMove}
-					movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
-					unsavedNoteId={unsavedNoteId}
-					liveEdits={liveEdits}
-					// The note's own menu, about the note on the row its `⋯` or
-					// a right-click is on, which need not be the one open. Delete goes through the note pane,
-					// which holds what autosave has not stored yet.
-					pinnedNoteIds={pins?.notes}
-					menuFor={(note) =>
-						noteMenuItems({
-							pinned: pins?.notes.has(note.id),
-							onPin: () => {
-								void setNotePinned(
-									db,
-									note.connectionId,
-									note.id,
-									pins?.notes.has(note.id) !== true
-								);
-							},
-							onMove:
-								moving === null
-									? () => {
-											pickUp({
-												kind: 'note',
-												id: note.id,
-												path: note.path,
-												name: note.title,
-											});
-										}
-									: undefined,
-							onDelete: () => {
-								noteView.current?.deleteNote(note);
-							},
-						})
-					}
-				/>
+				{inScratchpad ? (
+					scratchPane()
+				) : (
+					<NoteList
+						notes={notes}
+						renamings={renamings}
+						selectedNoteId={noteId}
+						// A note listed from a notebook inside the open one opens that
+						// notebook with it, as a search result does: the sidebar then
+						// lights the notebook the note is in.
+						onSelectNote={(note) => {
+							select({ folder: parentPath(note.path), note: note.id }, { note });
+							setPanel(null);
+						}}
+						onCreateNote={() => {
+							onCreateNote();
+							setPanel(null);
+						}}
+						onCreateNotebook={askNewNotebook}
+						folderPath={folder}
+						// Both queries, not just the tree: the notebooks alone cannot tell
+						// an empty app from one whose notes all sit loose at the root.
+						storeLoaded={tree !== undefined && looseNoteCount !== undefined}
+						onPickUpNote={(note) => {
+							setMoving({
+								kind: 'note',
+								id: note.id,
+								path: note.path,
+								name: note.title,
+							});
+						}}
+						onCancelMove={cancelMove}
+						movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
+						unsavedNoteId={unsavedNoteId}
+						liveEdits={liveEdits}
+						// The note's own menu, about the note on the row its `⋯` or
+						// a right-click is on, which need not be the one open. Delete goes through the note pane,
+						// which holds what autosave has not stored yet.
+						pinnedNoteIds={pins?.notes}
+						menuFor={(note) =>
+							noteMenuItems({
+								pinned: pins?.notes.has(note.id),
+								onPin: () => {
+									void setNotePinned(
+										db,
+										note.connectionId,
+										note.id,
+										pins?.notes.has(note.id) !== true
+									);
+								},
+								onMove:
+									moving === null
+										? () => {
+												pickUp({
+													kind: 'note',
+													id: note.id,
+													path: note.path,
+													name: note.title,
+												});
+											}
+										: undefined,
+								onDelete: () => {
+									noteView.current?.deleteNote(note);
+								},
+							})
+						}
+					/>
+				)}
 
-				<NoteView
-					ref={noteView}
-					note={openNote}
-					draft={place.noteDraft}
-					liveEdits={liveEdits}
-					renamings={renamings}
-					onProblem={setProblem}
-					{...emptyPaneOffers({
-						folder,
-						nothingYet: tree?.length === 0 && looseNoteCount === 0,
-						onCreateNote,
-						onCreateNotebook: askNewNotebook,
-					})}
-					// The next note along follows by itself: a tombstone is not a note
-					// to show, so the one open last in the notebook, or its first,
-					// takes its place (`useOpenPlace`).
-					onDeleted={(note, displaced) => {
-						setDeleted(note);
-						setBeside(displaced ?? null);
-					}}
-				/>
+				{noteColumn()}
 			</div>
+
+			{scratchOverlays()}
 
 			{/*
 			 * One stack for everything this screen floats over the page. Two

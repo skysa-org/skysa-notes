@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { ROOT, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -6,6 +6,7 @@ import {
 	fragmentOf,
 	heldPlace,
 	noteLink,
+	placeFolder,
 	placeHash,
 	placeState,
 	placeTitle,
@@ -225,5 +226,67 @@ describe('the page title', () => {
 
 	it('is the app’s name with no note open', () => {
 		expect(placeTitle(undefined, 'Notes')).toBe('Notes');
+	});
+});
+
+describe('the scratchpad’s place', () => {
+	const notes = [
+		{ id: 's1', path: '.scratchpad/shopping.md' },
+		{ id: 's2', path: '.scratchpad/untitled-2.md' },
+		{ id: 'n1', path: 'Shopping/shopping.md' },
+	];
+	const found = (fragment: string) =>
+		findNamedPlace(readPlaceHash(fragment), ['Shopping', '.scratchpad'], notes);
+
+	it('is `#scratchpad`, and a card open in it its name after a slash', () => {
+		expect(placeHash(SCRATCHPAD_FOLDER, undefined)).toBe('scratchpad');
+		expect(placeHash(SCRATCHPAD_FOLDER, '.scratchpad/Shopping List.md')).toBe(
+			'scratchpad/shopping-list'
+		);
+	});
+
+	it('is read back from its hash, a card and all', () => {
+		expect(found('scratchpad')).toEqual({ folder: SCRATCHPAD_FOLDER });
+		expect(found('scratchpad/shopping')).toEqual({ folder: SCRATCHPAD_FOLDER, note: notes[0] });
+		expect(found('scratchpad/untitled-2')).toEqual({
+			folder: SCRATCHPAD_FOLDER,
+			note: notes[1],
+		});
+	});
+
+	it('is the scratchpad itself for a card that is not there, or a hash it cannot read', () => {
+		expect(found('scratchpad/gone')).toEqual({ folder: SCRATCHPAD_FOLDER });
+		expect(found('scratchpad/a/b')).toEqual({ folder: SCRATCHPAD_FOLDER });
+		expect(found('scratchpad/')).toEqual({ folder: SCRATCHPAD_FOLDER });
+	});
+
+	it('is never reached by a notebook’s hash, nor a notebook by its', () => {
+		expect(found('/scratchpad/')).toEqual({});
+		expect(found('/shopping/shopping')).toEqual({ folder: 'Shopping', note: notes[2] });
+	});
+
+	it('is where a link to a scratch note goes', () => {
+		const link = noteLink({ id: 's1', connectionId: 'c1', path: '.scratchpad/shopping.md' });
+		expect(link.hash).toBe('scratchpad/shopping');
+		expect(heldPlace(link.state)).toEqual({
+			connectionId: 'c1',
+			folder: SCRATCHPAD_FOLDER,
+			note: 's1',
+		});
+		expect(placeFolder('.scratchpad/deeper/note.md')).toBe(SCRATCHPAD_FOLDER);
+		expect(placeFolder('Work/plan.md')).toBe('Work');
+	});
+
+	it('is titled "Scratchpad", and after it the name of a card open that has one', () => {
+		expect(placeTitle(undefined, 'Notes', SCRATCHPAD_FOLDER)).toBe('Scratchpad');
+		expect(
+			placeTitle({ path: '.scratchpad/trip.md', title: 'Trip', named: true }, 'Notes')
+		).toBe('Scratchpad > Trip');
+		expect(
+			placeTitle(
+				{ path: '.scratchpad/untitled.md', title: 'Untitled', named: false },
+				'Notes'
+			)
+		).toBe('Scratchpad');
 	});
 });

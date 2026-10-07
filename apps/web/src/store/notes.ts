@@ -4,6 +4,7 @@ import {
 	conflictPath,
 	contentHash,
 	deriveTitle,
+	isScratchPath,
 	joinPath,
 	normalizeTag,
 	NOTE_EXTENSION,
@@ -11,6 +12,7 @@ import {
 	parseNoteFile,
 	readFrontmatter,
 	replaceBasename,
+	SCRATCHPAD_FOLDER,
 	serializeNoteFile,
 	uniqueFilename,
 	UNTITLED_SLUG,
@@ -70,10 +72,26 @@ export interface NoteScope {
 	connectionId?: string;
 }
 
+/**
+ * Whether `path` is at the fallback filename: `untitled.md`, and in the
+ * scratchpad `untitled-2.md` and on as well. Most scratch notes are never
+ * named, so the second is as unnamed as the first; in a notebook a numbered one
+ * may be another tool's file, whose name is its own (docs/ARCHITECTURE.md §7,
+ * "The scratchpad").
+ */
+const atFallbackName = (path: string): boolean => {
+	const name = basename(path);
+	if (name === `${UNTITLED_SLUG}${NOTE_EXTENSION}`) return true;
+	const numbered = `${UNTITLED_SLUG}-`;
+	if (!isScratchPath(path) || !name.startsWith(numbered) || !name.endsWith(NOTE_EXTENSION)) {
+		return false;
+	}
+	return /^\d+$/u.test(name.slice(numbered.length, -NOTE_EXTENSION.length));
+};
+
 /** A note still sitting at the fallback filename, with no title of its own. */
 export const isUnnamed = (note: NoteRecord): boolean =>
-	basename(note.path) === `${UNTITLED_SLUG}${NOTE_EXTENSION}` &&
-	readFrontmatter(note.frontmatter).title === undefined;
+	atFallbackName(note.path) && readFrontmatter(note.frontmatter).title === undefined;
 
 /**
  * Everything a note needs written back to its file.
@@ -303,6 +321,28 @@ export const listNotes = async (
 		)
 		.sort(newestFirst);
 };
+
+/**
+ * A source's scratch notes (docs/ARCHITECTURE.md §7, "The scratchpad"), newest
+ * made first, as `listNotes` has them. Read by the range of their paths rather
+ * than through every note the source holds: the scratchpad is re-listed on
+ * every write to the notes table.
+ */
+export const listScratchNotes = async (
+	db: NotesDatabase,
+	connectionId: string
+): Promise<NoteRecord[]> =>
+	(
+		await db.notes
+			.where('[connectionId+path]')
+			.between(
+				[connectionId, `${SCRATCHPAD_FOLDER}/`],
+				[connectionId, `${SCRATCHPAD_FOLDER}/\uffff`]
+			)
+			.toArray()
+	)
+		.filter((note) => note.deletedLocally === 0 && isScratchPath(note.path))
+		.sort(newestFirst);
 
 /**
  * Every live note on the device, whichever source it is in. For search, which
@@ -766,8 +806,43 @@ export const moveNote = async (
 			// Ahead of the note's own ops, which `applyEdit` queues once this
 			// returns: a file lands before the note that links it.
 			await carryLinkedFiles(db, note, folderPath);
-			return { path: joinPath(folderPath, filename) };
+			// A scratch note made a note (docs/ARCHITECTURE.md §7, "The
+			// scratchpad") leaves its pin and colour behind: they are the
+			// scratchpad's, and nothing in a notebook reads them.
+			const promoted = isScratchPath(note.path) && !isScratchPath(folderPath);
+			return {
+				path: joinPath(folderPath, filename),
+				...(promoted
+					? {
+							frontmatter: writeFrontmatter(note.frontmatter, {
+								pinned: undefined,
+								color: undefined,
+							}),
+						}
+					: {}),
+			};
 		},
+		scope
+	);
+
+/**
+ * Pin a scratch note to the top of the scratchpad, or give it a colour, in its
+ * frontmatter (`pinned`, `color`), so every device shows it so. An edit to the
+ * file like any other, and synced as one: the owner chose these to travel with
+ * the note (docs/ARCHITECTURE.md §7, "The scratchpad"), where a notebook's pins
+ * stay on the device. A key left out of `marks` is left as it is; one given as
+ * `undefined` is taken out.
+ */
+export const setScratchMarks = (
+	db: NotesDatabase,
+	id: string,
+	marks: { pinned?: true | undefined; color?: string | undefined },
+	scope: NoteScope = {}
+): Promise<NoteRecord> =>
+	applyEdit(
+		db,
+		id,
+		(note) => ({ frontmatter: writeFrontmatter(note.frontmatter, marks) }),
 		scope
 	);
 

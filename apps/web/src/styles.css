@@ -3065,6 +3065,489 @@ button.icon.account-devices-count {
 	flex: none;
 }
 
+/* ---- Scratchpad ---------------------------------------------------------- */
+
+/*
+ * A source's scratchpad (`Scratchpad.tsx`, docs/ARCHITECTURE.md §7, "The
+ * scratchpad"): a box to take a note in, and its notes under it as a wall of
+ * cards. In a wide window it has the notes' column and the note's together;
+ * in a compact one it is the notes' dropdown.
+ *
+ * A card's colour is the clipboard's glow in that colour: a gradient of it
+ * over the card, an edge in it and a glow outside. Each colour has a value
+ * for each theme, the dark one lifted as `--accent` is, so the glow reads
+ * against a dark page.
+ */
+:root {
+	--scratch-red: #dc2626;
+	--scratch-orange: #ea580c;
+	--scratch-yellow: #ca8a04;
+	--scratch-green: #16a34a;
+	--scratch-teal: #0d9488;
+	--scratch-blue: #2563eb;
+	--scratch-purple: #9333ea;
+	--scratch-pink: #db2777;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--scratch-red: #f87171;
+		--scratch-orange: #fb923c;
+		--scratch-yellow: #facc15;
+		--scratch-green: #4ade80;
+		--scratch-teal: #2dd4bf;
+		--scratch-blue: #60a5fa;
+		--scratch-purple: #c084fc;
+		--scratch-pink: #f472b6;
+	}
+}
+
+[data-color='red'] {
+	--tint: var(--scratch-red);
+}
+
+[data-color='orange'] {
+	--tint: var(--scratch-orange);
+}
+
+[data-color='yellow'] {
+	--tint: var(--scratch-yellow);
+}
+
+[data-color='green'] {
+	--tint: var(--scratch-green);
+}
+
+[data-color='teal'] {
+	--tint: var(--scratch-teal);
+}
+
+[data-color='blue'] {
+	--tint: var(--scratch-blue);
+}
+
+[data-color='purple'] {
+	--tint: var(--scratch-purple);
+}
+
+[data-color='pink'] {
+	--tint: var(--scratch-pink);
+}
+
+/* The glow, wherever a scratch note is coloured: its card, its editor, and
+   the dialog a card opens in. */
+.scratch-card[data-color],
+.scratch-editor[data-color] {
+	--scratch-glow: 22%;
+	background: linear-gradient(
+		160deg,
+		var(--bg) 0%,
+		color-mix(in srgb, var(--tint) 14%, var(--bg)) 100%
+	);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--tint) 42%, transparent),
+		0 0 12px color-mix(in srgb, var(--tint) var(--scratch-glow), transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+	.scratch-card[data-color],
+	.scratch-editor[data-color] {
+		--scratch-glow: 28%;
+		background: linear-gradient(
+			160deg,
+			color-mix(in srgb, var(--tint) 24%, var(--surface)) 0%,
+			var(--surface) 78%
+		);
+	}
+}
+
+/* A colour the system takes away still says there is one. */
+@media (forced-colors: active) {
+	.scratch-card[data-color],
+	.scratch-editor[data-color] {
+		outline: 2px solid CanvasText;
+		outline-offset: -2px;
+	}
+}
+
+/* A colour to choose, before its name in the menu; an empty ring for none. */
+.swatch {
+	flex: none;
+	width: 1rem;
+	height: 1rem;
+	border-radius: 50%;
+	background: var(--tint, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent);
+}
+
+.toolbar-item[aria-pressed='true'] {
+	font-weight: 600;
+}
+
+.toolbar-item[aria-pressed='true'] > .swatch {
+	box-shadow:
+		0 0 0 2px var(--bg),
+		0 0 0 3.5px var(--fg);
+}
+
+/* Its row, above the notebooks' heading, apart from them by the same rule. */
+.scratchpad-row {
+	border-block-end: 1px solid var(--border);
+}
+
+.scratchpad-row > button.row {
+	flex-direction: row;
+	align-items: center;
+	gap: var(--space-s);
+}
+
+.scratchpad-row .toolbar-icon {
+	flex: none;
+	color: var(--muted);
+}
+
+.scratchpad {
+	grid-column: 2 / -1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	overflow-y: auto;
+	background: var(--bg);
+}
+
+.scratchpad-scroll {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-l);
+	padding: var(--space-l) var(--gutter) 4rem;
+}
+
+/* One line, as wide as a reader's line and no wider, until it is pressed. */
+.take-note {
+	position: relative;
+	width: 100%;
+	max-width: 36rem;
+	margin-inline: auto;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--bg);
+	box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+	transition: box-shadow var(--duration-state) var(--ease-out);
+}
+
+.take-note.taking {
+	box-shadow: 0 4px 16px rgb(0 0 0 / 0.14);
+}
+
+.take-note-prompt {
+	display: block;
+	width: 100%;
+	padding: var(--space-m) var(--gutter);
+	font: inherit;
+	text-align: start;
+	color: var(--muted);
+	background: none;
+	border: 0;
+	border-radius: inherit;
+	cursor: text;
+}
+
+/* Holds the focus between a press and the editor it opens (`TakeNote`):
+   there to be focused, and nowhere to be seen. 16px, so that a phone does not
+   zoom in to it. */
+.focus-keeper {
+	position: absolute;
+	inset-block-start: 0;
+	inset-inline-start: 0;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	font-size: 16px;
+	border: 0;
+	opacity: 0;
+	pointer-events: none;
+}
+
+/* The editor of a scratch note: a title and a pin over the note, the basic
+   bar under it, and the note's own bar under that. In the box it is as tall
+   as what is in it, and grows as it is written in. */
+.scratch-editor .note-header {
+	border-block-end: 0;
+	padding-block-end: 0;
+}
+
+.scratch-editor .note-title-input::placeholder {
+	color: var(--muted);
+	font-weight: 600;
+}
+
+.scratch-editor .format-toolbar {
+	background: transparent;
+}
+
+.scratch-editor .format-toolbar-bottom {
+	padding-block-end: var(--space-2xs);
+}
+
+.scratch-editor .editor-rich-surface {
+	padding-block-end: var(--gutter);
+}
+
+.take-note .scratch-editor {
+	overflow: visible;
+	border-radius: inherit;
+}
+
+/* `.note-body` lays the editor out in a row, so the editor keeps its share of
+   the width there and gives up only its scrolling. */
+.take-note .note-body,
+.take-note .editor-rich [data-milkdown-root] {
+	flex: none;
+	overflow: visible;
+}
+
+.take-note .editor {
+	overflow: visible;
+}
+
+.take-note .editor-rich-surface {
+	min-height: 4.5rem;
+}
+
+.scratch-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2xs);
+	padding: var(--space-2xs) calc(var(--gutter) - var(--control-inline));
+	padding-block-end: max(var(--space-2xs), env(safe-area-inset-bottom));
+}
+
+.scratch-close {
+	margin-inline-start: auto;
+	padding: 0.3rem 0.8rem;
+	font: inherit;
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: 0.375rem;
+	cursor: pointer;
+}
+
+@media (hover: hover) {
+	.scratch-close:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* Two groups, the pinned and the rest, a step further apart than anything
+   else on the page, and each named only while there are both. */
+.scratch-group + .scratch-group {
+	margin-block-start: var(--space-l);
+}
+
+.scratch-group-name {
+	margin: 0 0 var(--space-s);
+	font-size: 0.7rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+
+/* Until the wall has a width to place cards by, and where nothing is laid
+   out: a grid of cards at their widest, near enough for one frame. */
+.scratch-wall {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 15rem));
+	justify-content: center;
+	align-items: start;
+	gap: 12px;
+}
+
+/* Placed (`masonry.ts`): each card at its own place, the wall as tall as its
+   tallest column. Physical, since the places are. */
+.scratch-wall.placed {
+	display: block;
+	position: relative;
+}
+
+.scratch-wall.placed > .scratch-card {
+	position: absolute;
+	top: 0;
+	left: 0;
+	transition: transform var(--duration-m) var(--ease-out);
+}
+
+.scratch-card {
+	position: relative;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--bg);
+	transition: box-shadow var(--duration-state) var(--ease-out);
+}
+
+.scratch-card[data-color] {
+	border-color: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+	.scratch-card {
+		background: var(--surface);
+	}
+}
+
+@media (hover: hover) {
+	.scratch-card:not([data-color]):hover {
+		box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+	}
+}
+
+.scratch-card-open {
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+	width: 100%;
+	padding: var(--space-m) var(--space-m) var(--space-2xs);
+	font: inherit;
+	font-size: 0.875rem;
+	line-height: 1.5;
+	text-align: start;
+	color: var(--fg);
+	background: none;
+	border: 0;
+	border-radius: inherit;
+	overflow-wrap: anywhere;
+	cursor: pointer;
+}
+
+.scratch-card-title {
+	font-size: 0.95rem;
+	font-weight: 600;
+}
+
+.scratch-card-line {
+	display: block;
+}
+
+.scratch-card-open > .dot {
+	position: absolute;
+	inset-block-start: 0.5rem;
+	inset-inline-end: 0.5rem;
+}
+
+/* What can be done to a card, along its foot: shown with the pointer over it
+   or the focus in it, and always on a touch screen, which has no hover to
+   show them on. A pin that is on stays, to say so. Their room is kept either
+   way, so a card is the same height with them and without. */
+.scratch-card-tools {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 0 var(--space-2xs) var(--space-2xs);
+}
+
+.scratch-card-tools > * {
+	opacity: 0;
+	transition: opacity var(--duration-state) var(--ease-out);
+}
+
+.scratch-card:focus-within .scratch-card-tools > *,
+.scratch-card-tools > .pin-button[aria-pressed='true'] {
+	opacity: 1;
+}
+
+@media (hover: hover) {
+	.scratch-card:hover .scratch-card-tools > * {
+		opacity: 1;
+	}
+}
+
+@media (hover: none) {
+	.scratch-card-tools > * {
+		opacity: 1;
+	}
+}
+
+.scratch-card-tools > .pin-button[aria-pressed='true'] {
+	color: var(--on-fg);
+}
+
+.scratch-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-s);
+	margin-block-start: 3rem;
+	text-align: center;
+}
+
+.scratch-empty > .toolbar-icon {
+	width: 2rem;
+	height: 2rem;
+}
+
+/* A card open in a wide window: its editor in a dialog over the wall, as tall
+   as what is in it, and scrolling inside itself past most of the window. */
+.scratch-modal {
+	--arrive-y: 0.5rem;
+	--arrive-scale: 0.98;
+	display: flex;
+	flex-direction: column;
+	width: min(40rem, 100%);
+	max-height: min(85dvh, 48rem);
+	border: 1px solid var(--border);
+	border-radius: 0.75rem;
+	background: var(--bg);
+	box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+	overflow: hidden;
+	outline: none;
+	animation: arrive var(--duration-l) var(--ease-out);
+}
+
+.scratch-modal > .note-view {
+	flex: 0 1 auto;
+	min-height: 0;
+	border-radius: inherit;
+}
+
+.scratch-modal .note-body {
+	flex: 0 1 auto;
+	min-height: 0;
+}
+
+.scratch-modal .editor-rich [data-milkdown-root] {
+	flex: 0 1 auto;
+}
+
+.scratch-modal .editor-rich-surface {
+	min-height: 8rem;
+}
+
+/* A menu opened from inside the dialog, which is drawn on the page's body
+   beside it, goes over it rather than under its backdrop. */
+body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
+	z-index: 110;
+}
+
+/* The name a note is asked for before it goes into a notebook (`NameDialog`). */
+.name-field {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	margin-block-end: 1rem;
+	padding: 0.4rem 0.6rem;
+	font: inherit;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+}
+
 /* ---- Compact window ----------------------------------------------------- */
 
 /*
@@ -3090,7 +3573,8 @@ button.icon.account-devices-count {
    from moving the page behind it. */
 .compact .source-panel,
 .compact .sidebar,
-.compact .note-list {
+.compact .note-list,
+.compact .scratchpad {
 	display: none;
 	position: absolute;
 	inset: 0;
@@ -3135,6 +3619,16 @@ button.icon.account-devices-count {
 	display: block;
 }
 
+.compact .app-shell[data-panel='notes'] > .scratchpad {
+	display: flex;
+}
+
+/* The one column a compact grid has: placed in the second, as in a wide
+   window, it would be laid out in an empty track past the window's edge. */
+.compact .scratchpad {
+	grid-column: auto;
+}
+
 /* Each panel opens out of its trigger and shuts back into it: from a strip as
    wide as the trigger, along the top of the panel right under it, out to the
    whole window — so which of the three was opened is never in doubt. Where the
@@ -3151,7 +3645,8 @@ button.icon.account-devices-count {
 	--from-right: var(--notebooks-right, 0px);
 }
 
-.compact .note-list {
+.compact .note-list,
+.compact .scratchpad {
 	--from-left: var(--notes-left, 0px);
 	--from-right: var(--notes-right, 0px);
 }
@@ -3163,7 +3658,8 @@ button.icon.account-devices-count {
 	   since the panel is already on its way out. */
 	.compact .source-panel,
 	.compact .sidebar,
-	.compact .note-list {
+	.compact .note-list,
+	.compact .scratchpad {
 		clip-path: inset(0 var(--from-right) 100% var(--from-left) round 0.5rem);
 		opacity: 0;
 		pointer-events: none;
@@ -3178,7 +3674,8 @@ button.icon.account-devices-count {
 	   from one trigger to the next. */
 	.compact .app-shell[data-panel='sources'] > .source-panel,
 	.compact .app-shell[data-panel='notebooks'] > .sidebar,
-	.compact .app-shell[data-panel='notes'] > .note-list {
+	.compact .app-shell[data-panel='notes'] > .note-list,
+	.compact .app-shell[data-panel='notes'] > .scratchpad {
 		z-index: 16;
 		clip-path: inset(0 round 0);
 		opacity: 1;
@@ -3208,7 +3705,8 @@ button.icon.account-devices-count {
 
 	.compact .app-shell[data-from='sources'] > .source-panel,
 	.compact .app-shell[data-from='notebooks'] > .sidebar,
-	.compact .app-shell[data-from='notes'] > .note-list {
+	.compact .app-shell[data-from='notes'] > .note-list,
+	.compact .app-shell[data-from='notes'] > .scratchpad {
 		clip-path: inset(0 round 0);
 		opacity: 1;
 		transform: translateX(var(--slide-out));
@@ -3222,14 +3720,16 @@ button.icon.account-devices-count {
 	@starting-style {
 		.compact .app-shell[data-panel='sources'] > .source-panel,
 		.compact .app-shell[data-panel='notebooks'] > .sidebar,
-		.compact .app-shell[data-panel='notes'] > .note-list {
+		.compact .app-shell[data-panel='notes'] > .note-list,
+		.compact .app-shell[data-panel='notes'] > .scratchpad {
 			clip-path: inset(0 var(--from-right) 100% var(--from-left) round 0.5rem);
 			opacity: 0;
 		}
 
 		.compact .app-shell[data-from][data-panel='sources'] > .source-panel,
 		.compact .app-shell[data-from][data-panel='notebooks'] > .sidebar,
-		.compact .app-shell[data-from][data-panel='notes'] > .note-list {
+		.compact .app-shell[data-from][data-panel='notes'] > .note-list,
+		.compact .app-shell[data-from][data-panel='notes'] > .scratchpad {
 			clip-path: inset(0 round 0);
 			opacity: 1;
 			transform: translateX(var(--slide-in));

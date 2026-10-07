@@ -304,6 +304,47 @@ describe('writeFrontmatter', () => {
 		expect(readFrontmatter(yaml)).toEqual({ id: 'abc', title: 'Old' });
 	});
 
+	describe("a scratch note's pin and colour", () => {
+		it('writes and reads them', () => {
+			const yaml = writeFrontmatter('id: abc\n', { pinned: true, color: 'yellow' });
+			expect(yaml).toBe('id: abc\npinned: true\ncolor: yellow\n');
+			expect(readFrontmatter(yaml)).toEqual({ id: 'abc', pinned: true, color: 'yellow' });
+		});
+
+		it('writes them into a note that had no frontmatter', () => {
+			expect(writeFrontmatter(null, { pinned: true })).toBe('pinned: true\n');
+		});
+
+		it('unpins and clears by taking the key out', () => {
+			const yaml = writeFrontmatter('id: abc\npinned: true\ncolor: teal\n', {
+				pinned: undefined,
+				color: undefined,
+			});
+			expect(yaml).toBe('id: abc\n');
+		});
+
+		it('changes nothing, byte for byte, when the patch says what the file says', () => {
+			const source = 'id: abc\npinned:   true # mine\ncolor: "yellow"\n';
+			expect(writeFrontmatter(source, { pinned: true, color: 'yellow' })).toBe(source);
+		});
+
+		it('reads a pin only when it is true', () => {
+			expect(readFrontmatter('pinned: yes').pinned).toBeUndefined();
+			expect(readFrontmatter('pinned: "true"').pinned).toBeUndefined();
+			expect(readFrontmatter('pinned: false').pinned).toBeUndefined();
+			expect(readFrontmatter('color: ""').color).toBeUndefined();
+		});
+
+		it('writes over a pin that is not true', () => {
+			expect(writeFrontmatter('pinned: false\n', { pinned: true })).toBe('pinned: true\n');
+		});
+
+		it('is not what makes a repaired block metadata', () => {
+			const source = 'Color: blue and green, mostly\n\nNext: the: rest';
+			expect(splitFrontmatter(`---\n${source}\n---\nbody`).frontmatter).toBeNull();
+		});
+	});
+
 	it('never rewrites YAML it cannot parse', () => {
 		const broken = ': : :';
 		expect(writeFrontmatter(broken, { title: 'New' })).toBe(broken);

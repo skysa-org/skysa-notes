@@ -42,3 +42,10 @@ export const CLIPBOARD_FOLDER = '.clipboard';
 
 /** How many items the clipboard keeps; a paste past this lets go of the oldest. */
 export const CLIPBOARD_ITEMS = 10;
+
+/**
+ * The scratchpad's folder at the root of the app folder (docs/ARCHITECTURE.md
+ * §3, §7 "The scratchpad"). Hidden from the notebooks, but not from sync: the
+ * notes in it are notes, which the scratchpad shows and nothing else does.
+ */
+export const SCRATCHPAD_FOLDER = '.scratchpad';

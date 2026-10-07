@@ -1,4 +1,4 @@
-import { ROOT } from '@skysa/core';
+import { isScratchPath, ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo } from 'react';
 
@@ -16,7 +16,7 @@ import { holdsAnything } from './exportNotes.js';
 import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
 import { getLastOpen, type LastOpen, noteIsUnder, pickNote } from './lastOpen.js';
-import { getNote, listNotes, listNotesEverywhere } from './notes.js';
+import { getNote, listNotes, listNotesEverywhere, listScratchNotes } from './notes.js';
 import { getOpenNotebooks } from './openNotebooks.js';
 import { getPins, type Pins, pinsFromKey, pinsKey } from './pins.js';
 import {
@@ -25,6 +25,7 @@ import {
 	getFormatToolbarShown,
 	setCodeDisplay,
 } from './prefs.js';
+import { getScratchpadShown, isScratchNote } from './scratchpad.js';
 import { createNoteSearch, type NoteHit } from './search.js';
 import { buildFolderTree, type FolderNode, withPins } from './tree.js';
 
@@ -106,10 +107,12 @@ export const usePinnedTree = (): PinnedTree => {
 			listFilePaths(db, { connectionId }),
 			getPins(db, connectionId),
 		]);
+		// The scratchpad's folder is no notebook, and its notes and files are
+		// no notebook's (docs/ARCHITECTURE.md §7, "The scratchpad").
 		const tree = buildFolderTree({
-			paths,
-			notePaths: notes.map((note) => note.path),
-			filePaths,
+			paths: paths.filter((path) => !isScratchPath(path)),
+			notePaths: notes.map((note) => note.path).filter((path) => !isScratchPath(path)),
+			filePaths: filePaths.filter((path) => !isScratchPath(path)),
 		});
 		return { tree: withPins(tree, pins.notebooks), pinned: pinsKey(pins) };
 	}, []);
@@ -376,7 +379,7 @@ export const useNoteSearch = (query: string): NoteHit[] | undefined => {
 	// for cannot answer "where did I write that". Opening a match is what takes
 	// them to the right place.
 	const read = useLiveQuery(
-		async () => ({ searching, notes: searching ? await listNotesEverywhere(db) : [] }),
+		async () => ({ searching, notes: searching ? await searchable() : [] }),
 		[searching, search]
 	);
 
@@ -399,6 +402,57 @@ export const useNoteSearch = (query: string): NoteHit[] | undefined => {
 		search.refresh(indexed.notes);
 		return searching ? search.find(query) : [];
 	}, [indexed, query, searching, search]);
+};
+
+/**
+ * Every note a search may find: all of them, but a scratch note only where its
+ * source's scratchpad is shown on this device, since that is the only place
+ * one can be opened (docs/ARCHITECTURE.md §7, "The scratchpad").
+ */
+const searchable = async (): Promise<NoteRecord[]> => {
+	const notes = await listNotesEverywhere(db);
+	const sources = [...new Set(notes.filter(isScratchNote).map((note) => note.connectionId))];
+	const shown = new Set(
+		(
+			await Promise.all(
+				sources.map(async (id) => ((await getScratchpadShown(db, id)) ? id : undefined))
+			)
+		).filter((id) => id !== undefined)
+	);
+	return notes.filter((note) => !isScratchNote(note) || shown.has(note.connectionId));
+};
+
+/**
+ * The notes of a source's scratchpad, newest made first; `undefined` until read
+ * for this source.
+ */
+export const useScratchNotes = (connectionId: string | undefined): NoteRecord[] | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined
+				? undefined
+				: {
+						connectionId,
+						notes: await listScratchNotes(db, connectionId),
+					},
+		[connectionId]
+	);
+	return result?.connectionId === connectionId ? result?.notes : undefined;
+};
+
+/**
+ * Whether a source shows its scratchpad on this device; `undefined` until read
+ * for this source.
+ */
+export const useScratchpadShown = (connectionId: string | undefined): boolean | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined
+				? undefined
+				: { connectionId, shown: await getScratchpadShown(db, connectionId) },
+		[connectionId]
+	);
+	return result?.connectionId === connectionId ? result?.shown : undefined;
 };
 
 /** Count of notes with unpushed edits, for the sync indicator in Phase 2. */

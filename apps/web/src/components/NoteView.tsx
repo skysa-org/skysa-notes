@@ -1,5 +1,10 @@
 import { EditorView } from '@codemirror/view';
-import { frontmatterIsEditable, headings, type StructuralDifference } from '@skysa/core';
+import {
+	frontmatterIsEditable,
+	headings,
+	type ScratchColor,
+	type StructuralDifference,
+} from '@skysa/core';
 import {
 	type Ref,
 	useCallback,
@@ -31,9 +36,11 @@ import {
 	renameNote,
 	saveNoteBody,
 	setNoteEditorMode,
+	setScratchMarks,
 } from '../store/notes.js';
 import { setFormatToolbarShown } from '../store/prefs.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
+import { type ScratchMarks, scratchMarks } from '../store/scratchpad.js';
 import { FindBar } from './FindBar.js';
 import {
 	COARSE_POINTER,
@@ -46,6 +53,8 @@ import {
 } from './layout.js';
 import { useNoteAttachments } from './noteAttachments.js';
 import { Outline } from './Outline.js';
+import { PinButton, ScratchBar } from './ScratchControls.js';
+import { FOCUS_KEEPER } from './Scratchpad.js';
 import { UnsupportedBanner, useUnsupported } from './unsupported.js';
 import { useFileCleanup } from './useFileCleanup.js';
 
@@ -111,8 +120,24 @@ export interface NoteViewProps {
 	 * could not be opened — for the route to say over the page (#187).
 	 */
 	onProblem?: (problem: AttachmentProblem) => void;
+	/**
+	 * Given for a scratch note (docs/ARCHITECTURE.md §7, "The scratchpad"): a
+	 * smaller editor, with no path, no editor tabs and no outline, the basic
+	 * formatting bar at its foot and the note's own controls under that.
+	 */
+	scratch?: ScratchEditing | undefined;
 	/** For the route, which offers Delete on every note in the list. */
 	ref?: Ref<NoteViewHandle>;
+}
+
+/** What a scratch note's editor is handed (`NoteViewProps.scratch`). */
+export interface ScratchEditing {
+	/** Close it: the card open, or the note being taken. */
+	onClose: () => void;
+	/** Make it a note in a notebook; unsaid while that cannot be offered. */
+	onMove: ((note: NoteRecord) => void) | undefined;
+	/** Put the caret in the body as it opens. */
+	focusBody: boolean;
 }
 
 /** What the note pane can do with a note that is not stored yet. */
@@ -150,6 +175,7 @@ const TitleField = ({
 	startFocused,
 	onRename,
 	onDone,
+	blankWhenUnnamed = false,
 }: {
 	note: NoteRecord;
 	/** Where the name is said as it is typed, for the list to show it. */
@@ -162,6 +188,12 @@ const TitleField = ({
 	onRename: (title: string) => void;
 	/** Enter: the name is done, and the writing comes next. */
 	onDone: () => void;
+	/**
+	 * A scratch note's: a note with no name has an empty field that says
+	 * "Title", where a notebook's says "Untitled" (docs/ARCHITECTURE.md §7,
+	 * "The scratchpad"). A name its first heading gives it shows through.
+	 */
+	blankWhenUnnamed?: boolean;
 }) => {
 	const [draft, setDraft] = useState<string | null>(null);
 	const field = useRef<HTMLInputElement>(null);
@@ -212,12 +244,15 @@ const TitleField = ({
 		if (given) onRename(trimmed);
 	};
 
+	const blank = blankWhenUnnamed && isUnnamed(note) && shown.title === note.title;
+
 	return (
 		<input
 			ref={field}
 			className="note-title-input"
 			aria-label="Note title"
-			value={draft ?? shown.title}
+			placeholder={blankWhenUnnamed ? 'Title' : undefined}
+			value={draft ?? (blank ? '' : shown.title)}
 			onChange={(event) => {
 				setDraft(event.target.value);
 				liveEdits?.naming(ref, event.target.value);
@@ -314,6 +349,7 @@ const NoteBody = ({
 	onAdopted,
 	onBody,
 	onAdded,
+	basic,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -334,6 +370,8 @@ const NoteBody = ({
 	onBody: (element: HTMLDivElement | null) => void;
 	/** A file was put in the note (`useFileCleanup`). */
 	onAdded: (path: string) => void;
+	/** A scratch note's editor (`RichEditorProps.basic`). */
+	basic: boolean;
 }) => {
 	const body = useRef<HTMLDivElement>(null);
 	const attachments = useNoteAttachments(note, {
@@ -379,6 +417,7 @@ const NoteBody = ({
 					onAdopted={onAdopted}
 					toolbar={toolbar}
 					attachments={attachments}
+					basic={basic}
 				/>
 			)}
 			{showOutline && (
@@ -423,7 +462,7 @@ const NoteBody = ({
  * without it. Once asked for it stays, on this device, until it is asked away
  * again — a reload included (`FORMAT_TOOLBAR_KEY`).
  */
-const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
+const useNoteLayout = (noteId: string | undefined, body: Element | null, scratch: boolean) => {
 	const compact = useMediaQuery(COMPACT);
 	const width = useElementWidth(body);
 	const outlineFits = width === undefined || width >= rems(OUTLINE_FITS_AT);
@@ -449,7 +488,8 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null) => {
 		id: 'note.outline',
 		label: showOutline ? 'Hide outline' : 'Show outline',
 		group: 'Note',
-		enabled: noteId !== undefined,
+		// A scratch note's editor has no outline.
+		enabled: noteId !== undefined && !scratch,
 		run: toggleOutline,
 	});
 
@@ -519,6 +559,110 @@ const focusEditor = (body: Element | null): void => {
 	editor.querySelector<HTMLElement>('.ProseMirror')?.focus();
 };
 
+/**
+ * Is the caret already in a field — the title, a search — that it must not be
+ * taken from? Not the one that only keeps it for the editor (`FOCUS_KEEPER`).
+ */
+const inAField = (): boolean => {
+	const active = document.activeElement;
+	return (
+		active instanceof HTMLElement &&
+		!active.classList.contains(FOCUS_KEEPER) &&
+		(active.isContentEditable ||
+			active instanceof HTMLTextAreaElement ||
+			active instanceof HTMLInputElement)
+	);
+};
+
+/**
+ * The caret into a scratch note's body as it opens (`ScratchEditing`), once
+ * there is an editor to put it in: the rich editor is built a frame or more
+ * after the note mounts. Given up after a second, and never taken from a field
+ * the user has got to first.
+ */
+const useFocusBody = (wanted: boolean, noteId: string | undefined, body: Element | null) => {
+	useEffect(() => {
+		if (!wanted || noteId === undefined || body === null) return undefined;
+		const state = { frame: 0, left: 60 };
+		const attempt = () => {
+			const editor = body.querySelector<HTMLElement>('.ProseMirror');
+			if (editor !== null) {
+				if (!inAField()) editor.focus();
+				return;
+			}
+			state.left -= 1;
+			if (state.left > 0) state.frame = requestAnimationFrame(attempt);
+		};
+		state.frame = requestAnimationFrame(attempt);
+		return () => {
+			cancelAnimationFrame(state.frame);
+		};
+	}, [wanted, noteId, body]);
+};
+
+/**
+ * Which editor a note is shown in. One the rich editor cannot represent is
+ * held in raw mode; a scratch note is otherwise always rich, since its editor
+ * has no tabs to change it with; any other is in the one it was left in.
+ */
+const editorModeOf = (
+	note: NoteRecord | undefined,
+	locked: boolean,
+	scratch: boolean,
+	defaultMode: EditorMode | undefined
+): EditorMode | undefined => {
+	if (locked) return 'raw';
+	if (scratch) return 'rich';
+	return note?.editorMode ?? defaultMode;
+};
+
+/** A change to a scratch note's marks: a key given is set, or taken away as `undefined`. */
+type MarkChange = { pinned?: true | undefined; color?: ScratchColor | undefined };
+
+/** What a scratch note's screen is handed: its editing, and its marks. */
+interface ScratchScreen extends ScratchEditing {
+	marks: ScratchMarks;
+	onMark: (change: MarkChange) => void;
+	/** Unsaid for a draft, which has nothing stored to delete. */
+	onDelete: (() => void) | undefined;
+}
+
+const scratchScreen = (
+	scratch: ScratchEditing | undefined,
+	note: NoteRecord,
+	onMark: (change: MarkChange) => void,
+	deleteOne: ((note: NoteRecord) => void) | undefined
+): ScratchScreen | undefined =>
+	scratch === undefined
+		? undefined
+		: {
+				...scratch,
+				marks: scratchMarks(note),
+				onMark,
+				onDelete:
+					deleteOne === undefined
+						? undefined
+						: () => {
+								deleteOne(note);
+							},
+			};
+
+/** Pin or colour a scratch note, storing it first if it is a draft. */
+const useScratchMarking = (note: NoteRecord | undefined, draft: NoteDraft | undefined) =>
+	useCallback(
+		(change: MarkChange) => {
+			if (note === undefined) return;
+			const { id, connectionId } = note;
+			const marked = () => setScratchMarks(db, id, change, { connectionId });
+			if (draft === undefined) {
+				void marked();
+				return;
+			}
+			void draft.store().then((stored) => (stored ? marked() : undefined));
+		},
+		[note, draft]
+	);
+
 export const NoteView = ({
 	note,
 	onDeleted,
@@ -528,6 +672,7 @@ export const NoteView = ({
 	liveEdits,
 	renamings,
 	onProblem,
+	scratch,
 	ref: handle,
 }: NoteViewProps) => {
 	const noteId = note?.id;
@@ -678,7 +823,8 @@ export const NoteView = ({
 
 	useImperativeHandle(handle, () => ({ deleteNote: deleteOne }), [deleteOne]);
 
-	const mode: EditorMode | undefined = locked ? 'raw' : (note?.editorMode ?? defaultMode);
+	const mode = editorModeOf(note, locked, scratch !== undefined, defaultMode);
+	const mark = useScratchMarking(note, draft);
 
 	const { retry, retryable } = unsupported;
 	const toggleMode = useCallback(() => {
@@ -705,7 +851,8 @@ export const NoteView = ({
 	// The element the outline shares the room of, as state rather than a ref:
 	// a note opening mounts it, and the width has to be asked of the new one.
 	const [body, setBody] = useState<HTMLDivElement | null>(null);
-	const layout = useNoteLayout(noteId, body);
+	const layout = useNoteLayout(noteId, body, scratch !== undefined);
+	useFocusBody(scratch?.focusBody === true, noteId, body);
 
 	// A count of askings rather than a boolean: asking again with the bar already
 	// open re-focuses and selects its field, which is what `Mod+F` does
@@ -731,7 +878,12 @@ export const NoteView = ({
 		label: `Edit as ${MODE_LABELS[otherMode(mode ?? 'rich')].toLowerCase()}`,
 		group: 'Note',
 		chord: MODE_TOGGLE,
-		enabled: noteId !== undefined && mode !== undefined && (!locked || retryable),
+		// A scratch note's editor has no other editor to go to, but a note held
+		// in raw mode can still ask the rich one again.
+		enabled:
+			noteId !== undefined &&
+			mode !== undefined &&
+			(scratch === undefined ? !locked || retryable : locked && retryable),
 		run: toggleMode,
 	});
 
@@ -778,6 +930,12 @@ export const NoteView = ({
 				// editor no longer shows over the text it does.
 				onAdopted={overtaken}
 				onAdded={addedInVisit}
+				scratch={scratchScreen(
+					scratch,
+					note,
+					mark,
+					draft === undefined ? deleteOne : undefined
+				)}
 			/>
 		</FindTargetProvider>
 	);
@@ -863,6 +1021,87 @@ const NotePath = ({ path, renamings }: { path: string; renamings: Renamings | un
 	);
 };
 
+/**
+ * The note's own controls at the end of its header: where it is, the format
+ * toggle in a compact window, the editor tabs, the outline.
+ */
+/** Make a scratch note a note, where that is offered: only once it is stored. */
+const moveOf = (scratch: ScratchScreen, note: NoteRecord): (() => void) | undefined => {
+	const { onMove, onDelete } = scratch;
+	if (onMove === undefined || onDelete === undefined) return undefined;
+	return () => {
+		onMove(note);
+	};
+};
+
+const NoteActions = ({
+	note,
+	mode,
+	lost,
+	retryable,
+	toggleMode,
+	layout,
+	renamings,
+}: {
+	note: NoteRecord;
+	mode: EditorMode | undefined;
+	lost: StructuralDifference | undefined;
+	retryable: boolean;
+	toggleMode: () => void;
+	layout: ReturnType<typeof useNoteLayout>;
+	renamings: Renamings | undefined;
+}) => {
+	// Whether there is an outline to open. A button for a rail that would be
+	// empty is a button that does nothing when pressed.
+	const outlined = useMemo(() => headings(note.body).length > 0, [note.body]);
+	return (
+		<div className="note-actions">
+			<NotePath path={note.path} renamings={renamings} />
+			{layout.compact && mode === 'rich' && (
+				<button
+					type="button"
+					className="note-icon"
+					onClick={layout.toggleToolbar}
+					aria-label="Format"
+					aria-pressed={layout.toolbar === 'bottom'}
+					title={
+						layout.toolbar === 'bottom'
+							? 'Hide the formatting toolbar'
+							: 'Show the formatting toolbar'
+					}
+				>
+					<Icon name="format" />
+				</button>
+			)}
+			{mode !== undefined && (
+				<ModeTabs
+					mode={mode}
+					locked={lost !== undefined}
+					retryable={retryable}
+					toggleMode={toggleMode}
+				/>
+			)}
+			{/* At the right-hand edge: the rail it opens is the note's, and
+			    is drawn there. */}
+			{outlined && (
+				<button
+					type="button"
+					className="note-icon"
+					onClick={layout.toggleOutline}
+					aria-label="Outline"
+					aria-pressed={layout.showOutline}
+					// Pressing it while the flyout is open closes it, so a
+					// press outside the flyout that lands here is not one.
+					data-outline-toggle=""
+					title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
+				>
+					<Icon name="outline" />
+				</button>
+			)}
+		</div>
+	);
+};
+
 const NoteScreen = ({
 	note,
 	mode,
@@ -885,6 +1124,7 @@ const NoteScreen = ({
 	onUnsupported,
 	onAdopted,
 	onAdded,
+	scratch,
 }: {
 	note: NoteRecord;
 	mode: EditorMode | undefined;
@@ -911,122 +1151,123 @@ const NoteScreen = ({
 	onUnsupported: (lost: StructuralDifference) => void;
 	onAdopted: () => void;
 	onAdded: (path: string) => void;
-}) => {
-	// Whether there is an outline to open. A button for a rail that would be
-	// empty is a button that does nothing when pressed.
-	const outlined = useMemo(() => headings(note.body).length > 0, [note.body]);
-
-	return (
-		<section className="note-view" aria-label="Note">
-			<header className="note-header">
-				<TitleField
-					key={noteRef(note)}
+	/** A scratch note's editor, and what it is marked with. */
+	scratch: ScratchScreen | undefined;
+}) => (
+	<section
+		className={scratch === undefined ? 'note-view' : 'note-view scratch-editor'}
+		aria-label="Note"
+		data-color={scratch?.marks.color}
+	>
+		<header className="note-header">
+			<TitleField
+				key={noteRef(note)}
+				note={note}
+				liveEdits={liveEdits}
+				// A scratch note's caret goes to its body (`ScratchEditing`).
+				startFocused={begun && scratch === undefined}
+				onRename={onRename}
+				onDone={onTitleDone}
+				blankWhenUnnamed={scratch !== undefined}
+			/>
+			{scratch === undefined ? (
+				<NoteActions
 					note={note}
-					liveEdits={liveEdits}
-					startFocused={begun}
-					onRename={onRename}
-					onDone={onTitleDone}
+					mode={mode}
+					lost={lost}
+					retryable={retryable}
+					toggleMode={toggleMode}
+					layout={layout}
+					renamings={renamings}
 				/>
+			) : (
 				<div className="note-actions">
-					<NotePath path={note.path} renamings={renamings} />
-					{layout.compact && mode === 'rich' && (
-						<button
-							type="button"
-							className="note-icon"
-							onClick={layout.toggleToolbar}
-							aria-label="Format"
-							aria-pressed={layout.toolbar === 'bottom'}
-							title={
-								layout.toolbar === 'bottom'
-									? 'Hide the formatting toolbar'
-									: 'Show the formatting toolbar'
-							}
-						>
-							<Icon name="format" />
-						</button>
-					)}
-					{mode !== undefined && (
+					{lost !== undefined && mode !== undefined && (
 						<ModeTabs
 							mode={mode}
-							locked={lost !== undefined}
+							locked
 							retryable={retryable}
 							toggleMode={toggleMode}
 						/>
 					)}
-					{/* At the right-hand edge: the rail it opens is the note's, and
-					    is drawn there. */}
-					{outlined && (
-						<button
-							type="button"
-							className="note-icon"
-							onClick={layout.toggleOutline}
-							aria-label="Outline"
-							aria-pressed={layout.showOutline}
-							// Pressing it while the flyout is open closes it, so a
-							// press outside the flyout that lands here is not one.
-							data-outline-toggle=""
-							title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
-						>
-							<Icon name="outline" />
-						</button>
-					)}
+					<PinButton
+						pinned={scratch.marks.pinned}
+						onToggle={() => {
+							scratch.onMark({ pinned: scratch.marks.pinned ? undefined : true });
+						}}
+					/>
 				</div>
-			</header>
-
-			{/*
-			 * An alert, and it stays for as long as it is true. It does not say "this
-			 * note": a held edit may be to the note that was open before this one.
-			 * Nor what went wrong, which the app cannot tell — only what is safe to
-			 * do about it.
-			 */}
-			{unsaved && (
-				<p className="banner banner-alert" role="alert">
-					Changes are not being saved on this device. Copy your text somewhere safe, then
-					reload.
-				</p>
 			)}
+		</header>
 
-			{lost !== undefined && <UnsupportedBanner lost={lost} retryable={retryable} />}
+		{/*
+		 * An alert, and it stays for as long as it is true. It does not say "this
+		 * note": a held edit may be to the note that was open before this one.
+		 * Nor what went wrong, which the app cannot tell — only what is safe to
+		 * do about it.
+		 */}
+		{unsaved && (
+			<p className="banner banner-alert" role="alert">
+				Changes are not being saved on this device. Copy your text somewhere safe, then
+				reload.
+			</p>
+		)}
 
-			{/*
-			 * A rename or a tag edit cannot reach a file whose frontmatter has a
-			 * YAML error in it: the app will not rewrite a block it had to guess
-			 * at, so the change lands in the app and not in the file, and the next
-			 * sync reads the old values back over it. Saying so is the difference
-			 * between a limitation and a note that quietly refuses to be renamed.
-			 */}
-			{/*
-			 * `role="note"`, not `status`: this is true of the note from the moment
-			 * it opens, so it is a standing remark rather than something that has
-			 * just happened — and two live regions announcing at once is one too
-			 * many when a note is also in the rich editor's unsupported state.
-			 */}
-			{!frontmatterIsEditable(note.frontmatter) && (
-				<p className="banner" role="note">
-					There is a YAML error in this note’s frontmatter, so its title and tags cannot
-					be saved back to the file — the text is left exactly as it is rather than
-					guessed at. Everything else about the note works as usual.
-				</p>
-			)}
+		{lost !== undefined && <UnsupportedBanner lost={lost} retryable={retryable} />}
 
-			{finding > 0 && <FindBar focusToken={finding} onClose={onClose} />}
+		{/*
+		 * A rename or a tag edit cannot reach a file whose frontmatter has a
+		 * YAML error in it: the app will not rewrite a block it had to guess
+		 * at, so the change lands in the app and not in the file, and the next
+		 * sync reads the old values back over it. Saying so is the difference
+		 * between a limitation and a note that quietly refuses to be renamed.
+		 */}
+		{/*
+		 * `role="note"`, not `status`: this is true of the note from the moment
+		 * it opens, so it is a standing remark rather than something that has
+		 * just happened — and two live regions announcing at once is one too
+		 * many when a note is also in the rich editor's unsupported state.
+		 */}
+		{!frontmatterIsEditable(note.frontmatter) && (
+			<p className="banner" role="note">
+				There is a YAML error in this note’s frontmatter, so its title and tags cannot be
+				saved back to the file — the text is left exactly as it is rather than guessed at.
+				Everything else about the note works as usual.
+			</p>
+		)}
 
-			<NoteBody
-				note={note}
-				mode={mode}
-				showOutline={layout.showOutline}
-				flyout={layout.flyout}
-				focusEditor={!layout.touch}
-				onCloseOutline={layout.closeOutline}
-				toolbar={layout.toolbar}
-				onUserEdit={onUserEdit}
-				onProblem={onProblem}
-				draft={draft}
-				onUnsupported={onUnsupported}
-				onAdopted={onAdopted}
-				onBody={onBody}
-				onAdded={onAdded}
+		{finding > 0 && <FindBar focusToken={finding} onClose={onClose} />}
+
+		<NoteBody
+			note={note}
+			mode={mode}
+			showOutline={scratch === undefined && layout.showOutline}
+			flyout={layout.flyout}
+			focusEditor={!layout.touch}
+			onCloseOutline={layout.closeOutline}
+			// Always shown, at the foot: a scratch note's bar is short enough
+			// for a phone, and its only way to a list.
+			toolbar={scratch === undefined ? layout.toolbar : 'bottom'}
+			onUserEdit={onUserEdit}
+			onProblem={onProblem}
+			draft={draft}
+			onUnsupported={onUnsupported}
+			onAdopted={onAdopted}
+			onBody={onBody}
+			onAdded={onAdded}
+			basic={scratch !== undefined}
+		/>
+		{scratch !== undefined && (
+			<ScratchBar
+				name={note.title}
+				color={scratch.marks.color}
+				onColor={(color) => {
+					scratch.onMark({ color });
+				}}
+				onMove={moveOf(scratch, note)}
+				onDelete={scratch.onDelete}
+				onClose={scratch.onClose}
 			/>
-		</section>
-	);
-};
+		)}
+	</section>
+);

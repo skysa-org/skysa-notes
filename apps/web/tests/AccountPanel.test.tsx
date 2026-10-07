@@ -35,6 +35,7 @@ import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createKeeping, type Keeping } from '../src/store/keeping.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
+import { getScratchpadShown } from '../src/store/scratchpad.js';
 import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
@@ -436,11 +437,16 @@ describe('AccountPanel, with nothing connected', () => {
 		await settled();
 		await openGear(user);
 		// Nothing to download on a device that holds nothing.
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files']);
+		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Show scratchpad']);
 
 		await createNote(db, { title: 'First' });
 		await waitFor(() => {
-			expect(gearLabels()).toEqual(['Download all notes', 'Import a folder', 'Import files']);
+			expect(gearLabels()).toEqual([
+				'Download all notes',
+				'Import a folder',
+				'Import files',
+				'Show scratchpad',
+			]);
 		});
 		// None of it is a button in the panel any more: the gear is the one.
 		expect(
@@ -823,7 +829,12 @@ describe('AccountPanel, downloading every note', () => {
 		await openGear(user);
 		// What syncing offers is still there; the download is not, nor the
 		// imports beside it, nor a second way to disconnect.
-		expect(gearLabels()).toEqual(['Sync now', 'Re-scan from scratch', 'Show clipboard']);
+		expect(gearLabels()).toEqual([
+			'Sync now',
+			'Re-scan from scratch',
+			'Show clipboard',
+			'Show scratchpad',
+		]);
 	});
 
 	it('is not offered while a later source is still importing, when it would be half of one', async () => {
@@ -1046,6 +1057,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
+				'Show scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -2060,6 +2072,56 @@ describe('AccountPanel, showing the clipboard', () => {
 	});
 });
 
+describe('AccountPanel, showing the scratchpad', () => {
+	it('shows a connected source’s, on this device, and hides it again', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'idle' }));
+
+		await choose(user, 'Show scratchpad');
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, 'c1')).toBe(true);
+		});
+		expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(false);
+
+		await choose(user, 'Hide scratchpad');
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, 'c1')).toBe(false);
+		});
+	});
+
+	it('shows the device’s own, with nothing connected, as the clipboard is not', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		renderPanel(clientWith(), db);
+
+		await screen.findByText(NOTHING_CONNECTED);
+		await settled();
+		await choose(user, 'Show scratchpad');
+
+		await waitFor(async () => {
+			expect(await getScratchpadShown(db, LOCAL_CONNECTION_ID)).toBe(true);
+		});
+		await openGear(user);
+		expect(gearLabels()).toContain('Hide scratchpad');
+	});
+
+	it('is not offered while the first import holds the source', async () => {
+		const user = userEvent.setup();
+		const db = freshDatabase();
+		await createNote(db, { title: 'Kept' });
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		renderPanel(clientWith(), db, '/', fakeSync({ phase: 'idle' }));
+
+		await openGear(user);
+		expect(gearLabels()).not.toContain('Show scratchpad');
+	});
+});
+
 describe('AccountPanel, reporting how syncing is going', () => {
 	const connected = async (sync: FakeSync, answers: Answers = {}) => {
 		const db = freshDatabase();
@@ -2604,7 +2666,12 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 		await openGear(user);
 		// Nothing about syncing at all, and the rest as ever.
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Disconnect']);
+		expect(gearLabels()).toEqual([
+			'Import a folder',
+			'Import files',
+			'Show scratchpad',
+			'Disconnect',
+		]);
 	});
 
 	it('says when a note was edited in two places at once', async () => {
@@ -4583,6 +4650,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import a folder',
 				'Import files',
 				'Show clipboard',
+				'Show scratchpad',
 				'Disconnect',
 			]);
 		});
@@ -4817,6 +4885,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 			'Download all notes',
 			'Import a folder',
 			'Import files',
+			'Show scratchpad',
 		]);
 	});
 });

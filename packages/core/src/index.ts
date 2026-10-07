@@ -8,8 +8,11 @@ export {
 	HIDDEN_PREFIX,
 	CLIPBOARD_FOLDER,
 	CLIPBOARD_ITEMS,
+	SCRATCHPAD_FOLDER,
 	type ProviderKind,
 } from './config.js';
+
+export { SCRATCH_COLORS, scratchColor, type ScratchColor } from './scratchpad.js';
 
 export {
 	clipName,

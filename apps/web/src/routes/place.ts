@@ -1,4 +1,6 @@
-import { basename, parentPath, ROOT } from '@skysa/core';
+import { basename, isScratchPath, parentPath, ROOT, SCRATCHPAD_FOLDER } from '@skysa/core';
+
+import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
 
 /**
  * Where the user is — which notebook is open, and which note — as the URL
@@ -88,11 +90,30 @@ const spell = (path: string): string =>
 		.join('/');
 
 /**
+ * The scratchpad's hash (docs/ARCHITECTURE.md §7, "The scratchpad"), with a
+ * card's name after a `/` while one is open: `#scratchpad/shopping`. Outside
+ * the `/` that begins every notebook's, so no notebook's name can be read as it.
+ */
+const SCRATCHPAD_HASH = 'scratchpad';
+
+/**
+ * The folder a note's place names: the notebook it is in, or the scratchpad
+ * for a note in the scratchpad's folder, at whatever depth another tool put it.
+ */
+export const placeFolder = (notePath: string): string =>
+	isScratchPath(notePath) ? SCRATCHPAD_FOLDER : parentPath(notePath);
+
+/**
  * The hash, without its `#`, for a notebook and the path of the note open in
  * it: the note's path where there is one, since that says the notebook too,
  * and the notebook's with a closing `/` where there is not. `''` for neither.
  */
 export const placeHash = (folder: string | undefined, notePath: string | undefined): string => {
+	if (folder !== undefined && isScratchPath(folder)) {
+		return notePath === undefined
+			? SCRATCHPAD_HASH
+			: `${SCRATCHPAD_HASH}/${spell(stem(basename(notePath)))}`;
+	}
 	if (notePath !== undefined) return `/${spell(stem(notePath))}`;
 	if (folder === undefined) return '';
 	return folder === ROOT ? '/' : `/${spell(folder)}/`;
@@ -115,6 +136,15 @@ const decodeNames = (spelled: string): string[] | undefined => {
  * was, as it does with no hash at all.
  */
 export const readPlaceHash = (fragment: string): NamedPlace => {
+	if (fragment === SCRATCHPAD_HASH) return { folder: SCRATCHPAD_FOLDER };
+	if (fragment.startsWith(`${SCRATCHPAD_HASH}/`)) {
+		// One name, a card's; anything more or less is the scratchpad itself.
+		const names = decodeNames(fragment.slice(SCRATCHPAD_HASH.length + 1));
+		const name = names?.length === 1 ? names[0] : undefined;
+		return name === undefined || name === ''
+			? { folder: SCRATCHPAD_FOLDER }
+			: { folder: SCRATCHPAD_FOLDER, note: urlSlug(stem(name)) };
+	}
 	if (!fragment.startsWith('/')) return {};
 	if (fragment === '/') return { folder: ROOT };
 	const notebook = fragment.endsWith('/');
@@ -145,6 +175,17 @@ export const findNamedPlace = <Note extends { path: string }>(
 	notes: readonly Note[]
 ): { folder?: string; note?: Note } => {
 	if (named.folder === undefined) return {};
+	if (named.folder === SCRATCHPAD_FOLDER) {
+		const [note] = notes
+			.filter(
+				(each) =>
+					isScratchPath(each.path) && urlSlug(stem(basename(each.path))) === named.note
+			)
+			.sort((a, b) => byPath(a.path, b.path));
+		return note === undefined
+			? { folder: SCRATCHPAD_FOLDER }
+			: { folder: SCRATCHPAD_FOLDER, note };
+	}
 	if (named.note !== undefined) {
 		const [note] = notes
 			.filter(
@@ -211,7 +252,7 @@ export const noteLink = (note: {
 	connectionId: string;
 	path: string;
 }): { hash: string; state: PlaceState } => {
-	const folder = parentPath(note.path);
+	const folder = placeFolder(note.path);
 	return {
 		hash: placeHash(folder, note.path),
 		state: placeState(note.connectionId, { folder, note: note.id }),
@@ -224,13 +265,24 @@ export const TITLE_SEPARATOR = ' > ';
  * The page's title for the note open: the notebooks it is in, outermost first,
  * and its title — `Work > Projects > Q3 plan`. A loose note is its title alone,
  * as the root is not a notebook. With nothing open, the app's own name.
+ *
+ * In the scratchpad, `Scratchpad`, and `Scratchpad > Shopping` while a card
+ * with a name is open: one without (`named: false`) is a card, not a title.
  */
 export const placeTitle = (
-	note: { path: string; title: string } | undefined,
-	appName: string
+	note: { path: string; title: string; named?: boolean } | undefined,
+	appName: string,
+	folder?: string
 ): string => {
-	if (note === undefined) return appName;
-	const folder = parentPath(note.path);
-	const notebooks = folder === ROOT ? [] : folder.split('/');
+	if (note !== undefined && isScratchPath(note.path)) {
+		return note.named === false
+			? SCRATCHPAD_LABEL
+			: [SCRATCHPAD_LABEL, note.title].join(TITLE_SEPARATOR);
+	}
+	if (note === undefined) {
+		return folder !== undefined && isScratchPath(folder) ? SCRATCHPAD_LABEL : appName;
+	}
+	const notebook = parentPath(note.path);
+	const notebooks = notebook === ROOT ? [] : notebook.split('/');
 	return [...notebooks, note.title].join(TITLE_SEPARATOR);
 };

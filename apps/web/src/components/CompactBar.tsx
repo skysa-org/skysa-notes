@@ -78,7 +78,9 @@ const originStyle = (origins: Origins): CSSProperties =>
 const PANE_ELEMENT: Record<Pane, string> = {
 	sources: '.source-panel',
 	notebooks: '.sidebar',
-	notes: '.note-list',
+	// The scratchpad is in the notes' place (docs/ARCHITECTURE.md §7, "The
+	// scratchpad").
+	notes: '.note-list, .scratchpad',
 };
 
 /**
@@ -325,6 +327,12 @@ export interface CompactBarProps {
 	fieldRef: RefObject<HTMLInputElement | null>;
 	/** Where the triggers are, for the panels to open out of (`Origins`). */
 	onOrigins?: (origins: Origins) => void;
+	/**
+	 * The scratchpad is open (docs/ARCHITECTURE.md §7, "The scratchpad"): the
+	 * notebook's dropdown says so, as `folderLabel` has it, and there is a
+	 * note's only for a card open with a name, which the route gives as `note`.
+	 */
+	scratchpad?: boolean;
 }
 
 /**
@@ -350,6 +358,7 @@ export const CompactBar = ({
 	onSearchOpen,
 	fieldRef,
 	onOrigins,
+	scratchpad = false,
 }: CompactBarProps) => {
 	const searching = searchOpen || query !== '';
 	const renaming = useRenaming(renamings);
@@ -375,7 +384,9 @@ export const CompactBar = ({
 		const trigger = (pane: Pane) => bar.querySelector(`.compact-picker[data-pane='${pane}']`);
 		const sources = trigger('sources');
 		const notebooks = trigger('notebooks');
-		const notes = trigger('notes');
+		// None in the scratchpad with no card named open: the scratchpad opens
+		// out of the notebook's, which says "Scratchpad".
+		const notes = trigger('notes') ?? notebooks;
 		if (sources === null || notebooks === null || notes === null) return;
 		const across = bar.getBoundingClientRect();
 		const from = (each: Element) => {
@@ -450,14 +461,16 @@ export const CompactBar = ({
 					panel={panel}
 					onPanel={onPanel}
 				/>
-				<PaneTrigger
-					pane="notes"
-					name="Note"
-					value={title}
-					keep=""
-					panel={panel}
-					onPanel={onPanel}
-				/>
+				{!(scratchpad && note === undefined) && (
+					<PaneTrigger
+						pane="notes"
+						name="Note"
+						value={title}
+						keep=""
+						panel={panel}
+						onPanel={onPanel}
+					/>
+				)}
 			</div>
 			{fieldFits ? (
 				field

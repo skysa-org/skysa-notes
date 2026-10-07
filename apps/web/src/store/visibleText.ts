@@ -1,5 +1,7 @@
 import { previewLines } from '@skysa/core';
 
+import { isCreatedLine, isTimeLine } from './createdLine.js';
+
 /**
  * A note's visible text, parsed once per body.
  *
@@ -66,4 +68,56 @@ export const openingLines = (body: string, options: { keep?: boolean } = {}): re
 	if (body.length <= OPENING) return visibleLines(body, options);
 	const end = body.indexOf('\n', OPENING);
 	return visibleLines(end === -1 ? body : body.slice(0, end), options);
+};
+
+/**
+ * Whether a line is the note's title written out again.
+ *
+ * The line is parsed text, and a title derived from a heading is too, so the
+ * two usually agree as they stand. Emphasis characters are still ignored on
+ * both sides, for a title that was *written* rather than derived — `title:` in
+ * frontmatter, spelled `**Alpha**` above a `# Alpha` — and on both sides
+ * because the parse removes only the characters that were emphasis: a title of
+ * `setup_guide` keeps its underscore, and stripping one side alone would leave
+ * "setupguide" against "setup_guide" and print the heading twice.
+ */
+const bare = (text: string): string => text.replaceAll(/[*_`]/g, '').trim();
+
+const isTitle = (line: string | undefined, title: string): boolean =>
+	line !== undefined && bare(line) === bare(title);
+
+/**
+ * A note's opening, after its title: what a list row (`NoteList`) and a
+ * scratchpad card (`Scratchpad`) show of it. `previewLines` decides what a
+ * readable line is — the visible text, as the rich editor shows it, and the
+ * same rule the search excerpt is cut by — and the title is dropped from the
+ * front of them so the row does not say it twice.
+ *
+ * Dropped by *identity*, not by position. Taking the first line on the
+ * assumption that it is the heading was wrong in both directions: a note
+ * beginning with the `<br />` the editor writes for an empty paragraph has no
+ * heading on line one, and lost a line of the user's own writing instead — and
+ * a note whose heading comes after an introduction had the introduction eaten
+ * and the heading shown. Comparing against the title the row is already
+ * displaying is the question actually being asked.
+ *
+ * So is a line that says only when the note was made, as OneNote puts under
+ * every title (`isCreatedLine`), above the title or below it, and a time of
+ * day on the line after it: the list is in that order already, and the line
+ * was all the row had room for.
+ */
+export const noteOpening = (
+	lines: readonly string[],
+	note: Readonly<{ title: string; createdAt: number }>,
+	passed: { title?: true; date?: true } = {}
+): readonly string[] => {
+	const [line, ...rest] = lines;
+	if (passed.title === undefined && isTitle(line, note.title))
+		return noteOpening(rest, note, { ...passed, title: true });
+	if (passed.date === undefined && isCreatedLine(line, note.createdAt))
+		return noteOpening(isTimeLine(rest[0]) ? rest.slice(1) : rest, note, {
+			...passed,
+			date: true,
+		});
+	return lines;
 };

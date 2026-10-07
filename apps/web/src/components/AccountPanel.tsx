@@ -49,6 +49,7 @@ import {
 import { settleEditors } from '../store/heldEdits.js';
 import { type Keeping, keeping as browserKeeping } from '../store/keeping.js';
 import { getNote } from '../store/notes.js';
+import { getScratchpadShown, setScratchpadShown } from '../store/scratchpad.js';
 import { type Seen, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import {
 	type AccountState,
@@ -770,7 +771,8 @@ const NotConnected = ({
 		settings?.authMode === 'storage-first'
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
-	const items = [...downloadItem(holds, downloading), ...importItems(importing)];
+	const scratchpad = useScratchpadItem(database, LOCAL_CONNECTION_ID);
+	const items = [...downloadItem(holds, downloading), ...importItems(importing), ...scratchpad];
 
 	return (
 		<section className="account" aria-label="Storage">
@@ -1491,6 +1493,7 @@ const storageItems = ({
 	download,
 	imports,
 	clipboard,
+	scratchpad,
 	about,
 	stranded,
 	open,
@@ -1507,6 +1510,8 @@ const storageItems = ({
 	imports: readonly OptionsMenuItem[];
 	/** Showing or hiding the clipboard (`clipboardItem`). */
 	clipboard: readonly OptionsMenuItem[];
+	/** Showing or hiding the scratchpad (`useScratchpadItem`). */
+	scratchpad: readonly OptionsMenuItem[];
 	/** What the provider keeps from the app (`unseenItem`). */
 	about: readonly OptionsMenuItem[];
 	stranded: boolean;
@@ -1526,6 +1531,7 @@ const storageItems = ({
 		...download,
 		...imports,
 		...clipboard,
+		...scratchpad,
 		...about,
 		...(stranded && !open
 			? [
@@ -1569,6 +1575,30 @@ const clipboardItem = (
 		: [{ label: showsClipboard(bound) ? 'Hide clipboard' : 'Show clipboard', onChoose }];
 
 /**
+ * Show the source's scratchpad on this device, or stop (docs/ARCHITECTURE.md
+ * §7, "The scratchpad"). Offered for every source, the device's own among
+ * them, since a scratch note is a note like any other and needs no sync to be
+ * one. Shown, the route opens it (`useOpenWhenShown`); hidden, its notes stay
+ * where they are, and come back as they were.
+ */
+const useScratchpadItem = (database: NotesDatabase, connectionId: string): OptionsMenuItem[] => {
+	const shown = useLiveQuery(
+		() => getScratchpadShown(database, connectionId),
+		[database, connectionId]
+	);
+	return shown === undefined
+		? []
+		: [
+				{
+					label: shown ? 'Hide scratchpad' : 'Show scratchpad',
+					onChoose: () => {
+						void setScratchpadShown(database, connectionId, !shown);
+					},
+				},
+			];
+};
+
+/**
  * Where a connected source's panel ends: the status line (`StatusLine`), with
  * how syncing is going, the count of the other devices, and — at the foot of
  * the sidebar — the gear. In a compact window's source dropdown the gear's
@@ -1595,7 +1625,7 @@ const ConnectedFoot = ({
 	...actions
 }: Omit<
 	Parameters<typeof storageItems>[0],
-	'about' | 'phase' | 'download' | 'imports' | 'clipboard'
+	'about' | 'phase' | 'download' | 'imports' | 'clipboard' | 'scratchpad'
 > & {
 	slot: AccountSlot | undefined;
 	/** Show or hide the clipboard. */
@@ -1622,6 +1652,7 @@ const ConnectedFoot = ({
 	onGrantsChanged: () => void;
 }) => {
 	const [about, setAbout] = useState(false);
+	const scratchpad = useScratchpadItem(database, bound.connectionId);
 	const items = storageItems({
 		...actions,
 		bound,
@@ -1629,6 +1660,8 @@ const ConnectedFoot = ({
 		download: downloadable ? downloadItem(holds, downloading) : [],
 		imports: downloadable ? importItems(importing) : [],
 		clipboard: clipboardItem(bound, status.phase, onClipboard),
+		// Not while a first import holds the source, as the clipboard is not.
+		scratchpad: importingHere(bound) ? [] : scratchpad,
 		about: unseenItem(bound.provider, label, () => {
 			setAbout(true);
 		}),

@@ -36,6 +36,13 @@ export interface OptionsMenuItem {
 	danger?: boolean;
 	/** Shown but not offered, for now: a sync already running, say. */
 	disabled?: boolean;
+	/**
+	 * A colour drawn before the label, by name (`data-color`), for a choice of
+	 * colour: a scratch card's (`scratchMenus.ts`). `''` draws an empty one.
+	 */
+	swatch?: string;
+	/** For a choice that is one of a set: whether it is the one chosen now. */
+	pressed?: boolean;
 }
 
 export interface OptionsMenuProps {
@@ -166,11 +173,15 @@ const MenuCard = ({
 				type="button"
 				className={item.danger === true ? 'toolbar-item danger' : 'toolbar-item'}
 				disabled={item.disabled === true}
+				aria-pressed={item.pressed}
 				onClick={() => {
 					onChosen();
 					item.onChoose();
 				}}
 			>
+				{item.swatch !== undefined && (
+					<span className="swatch" data-color={item.swatch} aria-hidden="true" />
+				)}
 				{item.label}
 			</button>
 		))}

@@ -1029,3 +1029,43 @@ describe('a shut notebook, otherwise', () => {
 		expect(onOpenNotebooks).toHaveBeenCalledWith(['work'], true);
 	});
 });
+
+describe('the scratchpad’s row', () => {
+	// docs/ARCHITECTURE.md §7, "The scratchpad".
+	it('is drawn above the notebooks, only where the scratchpad is shown', () => {
+		renderSidebar({ scratchpad: { selected: false, onSelect: () => undefined } });
+
+		const row = screen.getByRole('button', { name: 'Scratchpad' });
+		const heading = screen.getByRole('heading', { name: 'Notebooks' });
+		expect(
+			row.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+		cleanup();
+
+		renderSidebar();
+		expect(screen.queryByRole('button', { name: 'Scratchpad' })).toBeNull();
+	});
+
+	it('opens it, is current while it is open, and no notebook is', () => {
+		const onSelect = vi.fn();
+		renderSidebar({ selectedFolder: '.scratchpad', scratchpad: { selected: true, onSelect } });
+
+		const row = screen.getByRole('button', { name: 'Scratchpad' });
+		expect(row.getAttribute('aria-current')).toBe('true');
+		expect(
+			screen.getByRole('button', { name: /^personal/ }).getAttribute('aria-current')
+		).toBeNull();
+		fireEvent.click(row);
+		expect(onSelect).toHaveBeenCalledOnce();
+	});
+
+	it('is no place to put a notebook that is being moved', () => {
+		renderSidebar({
+			scratchpad: { selected: false, onSelect: () => undefined },
+			moving: holding('work', 'work'),
+		});
+		expect(screen.getByRole('button', { name: 'Scratchpad' }).hasAttribute('disabled')).toBe(
+			true
+		);
+	});
+});
