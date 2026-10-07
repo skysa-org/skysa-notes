@@ -1,5 +1,7 @@
 import { type Catalog } from '../catalog.js';
+import { account } from './account.js';
 import { common } from './common.js';
+import { connect } from './connect.js';
 import { shell } from './shell.js';
 
 /**
@@ -10,4 +12,6 @@ import { shell } from './shell.js';
 export const en = {
 	common,
 	shell,
+	account,
+	connect,
 } as const satisfies Catalog;

@@ -3,6 +3,7 @@ import { type ReactNode, useRef, useState } from 'react';
 
 import { type ApiClient } from '../api/client.js';
 import { failedAt, saying } from '../errors/reached.js';
+import { t } from '../i18n/t.js';
 import { heldConnectCode } from '../store/connectCode.js';
 import { pileContents } from '../store/connection.js';
 import { beginConnect } from '../store/credentials.js';
@@ -53,22 +54,22 @@ export interface ConnectButtonProps {
 
 type Pile = Awaited<ReturnType<typeof pileContents>>;
 
-const counted = (count: number, one: string, many: string) =>
-	`${String(count)} ${count === 1 ? one : many}`;
-
 /** "Your 2 notebooks and 5 notes …", leaving out a count of nothing. */
 export const pileMoveMessage = ({ notebooks, notes }: Pile, provider: string): string => {
-	const held = [
-		...(notebooks > 0 ? [counted(notebooks, 'notebook', 'notebooks')] : []),
-		...(notes > 0 ? [counted(notes, 'note', 'notes')] : []),
-	].join(' and ');
-	const them = notebooks + notes === 1 ? 'it' : 'them';
-	return `Your ${held} on this device will move into ${provider} and sync there. Cancel to keep ${them} on this device only.`;
+	if (notes === 0) return t('connect.move.notebooks', { count: notebooks, provider });
+	if (notebooks === 0) return t('connect.move.notes', { count: notes, provider });
+	// Two counts in one sentence: its form is chosen by the notes, and the
+	// notebooks are counted by a plural of their own.
+	return t('connect.move.both', {
+		count: notes,
+		provider,
+		notebooks: t('connect.move.notebookCount', { count: notebooks }),
+	});
 };
 
-const MESSAGES: Partial<Record<string, string>> = {
-	forbidden_origin: 'The server would not start connecting from this page. Reload and try again.',
-	not_found: 'This deployment does not offer that provider.',
+const MESSAGES: Partial<Record<string, () => string>> = {
+	forbidden_origin: () => t('connect.refused.forbiddenOrigin'),
+	not_found: () => t('connect.refused.notFound'),
 };
 
 export const ConnectButton = ({
@@ -120,10 +121,7 @@ export const ConnectButton = ({
 						: client.startConnect(provider, credentialHash, returnTo, connectCode)
 				);
 				if (!result.ok) {
-					setFailed(
-						MESSAGES[result.refusal] ??
-							'The server would not start connecting. Try again.'
-					);
+					setFailed(MESSAGES[result.refusal]?.() ?? t('connect.refused.declined'));
 					setBusy(false);
 					return;
 				}
@@ -134,15 +132,14 @@ export const ConnectButton = ({
 					saying(error, {
 						// "could not", against the refusal's "would not" above: one
 						// is the server failing, the other the server deciding.
-						answered: 'The server could not start connecting. Try again.',
-						unreachable:
-							'The server cannot be reached, so nothing was connected. Try again.',
+						answered: t('connect.failed.answered'),
+						unreachable: t('connect.failed.unreachable'),
 						// The credential is written down before the server is
 						// asked, so this half really did leave nothing connected.
-						device: 'Something on this device went wrong, so nothing was connected. Try again.',
+						device: t('connect.failed.device'),
 						// Neither call, so it is after the server answered, and
 						// whether a flow was begun is not this to say.
-						unknown: 'Something went wrong. Try again.',
+						unknown: t('connect.failed.unknown'),
 					})
 				);
 				setBusy(false);
@@ -165,8 +162,8 @@ export const ConnectButton = ({
 			</button>
 			{asking !== null && (
 				<ConfirmDialog
-					title={`Move your notes to ${PROVIDER_LABELS[provider]}?`}
-					confirmLabel="Connect and move"
+					title={t('connect.move.title', { provider: PROVIDER_LABELS[provider] })}
+					confirmLabel={t('connect.move.confirm')}
 					tone="primary"
 					returnFocus={startButton}
 					onConfirm={() => {
