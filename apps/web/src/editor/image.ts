@@ -7,6 +7,7 @@ import type { NodeSchema } from '@milkdown/kit/transformer';
 import { $prose, $view } from '@milkdown/kit/utils';
 import { classifyHref } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { attachHostCtx, type AttachmentHost, type Shown } from './attachHost.js';
 import { barButton } from './attachment.js';
 
@@ -37,26 +38,47 @@ import { barButton } from './attachment.js';
 
 type State = Shown['state'] | 'loading' | 'blocked' | 'broken';
 
-/** What is said under a picture that is not shown, after its alt text. */
-const REASONS: Readonly<Partial<Record<State, string>>> = {
-	missing: 'not found beside this note',
-	offline: 'not downloaded yet, and this device is offline',
-	unavailable: 'not on this device',
-	failed: 'could not be downloaded',
-	unsupported: 'not a kind of picture this app shows',
-	blocked: 'its address is not one this app loads',
-	broken: 'could not be shown',
+/** What is said under a picture that is not shown: its alt text, where it has one, and why. */
+const REASONS: Readonly<Partial<Record<State, (alt: string) => string>>> = {
+	missing: (alt) =>
+		alt === ''
+			? t('editor.image.status.missing.unnamed')
+			: t('editor.image.status.missing.named', { name: alt }),
+	offline: (alt) =>
+		alt === ''
+			? t('editor.image.status.offline.unnamed')
+			: t('editor.image.status.offline.named', { name: alt }),
+	unavailable: (alt) =>
+		alt === ''
+			? t('editor.image.status.unavailable.unnamed')
+			: t('editor.image.status.unavailable.named', { name: alt }),
+	failed: (alt) =>
+		alt === ''
+			? t('editor.image.status.failed.unnamed')
+			: t('editor.image.status.failed.named', { name: alt }),
+	unsupported: (alt) =>
+		alt === ''
+			? t('editor.image.status.unsupported.unnamed')
+			: t('editor.image.status.unsupported.named', { name: alt }),
+	blocked: (alt) =>
+		alt === ''
+			? t('editor.image.status.blocked.unnamed')
+			: t('editor.image.status.blocked.named', { name: alt }),
+	broken: (alt) =>
+		alt === ''
+			? t('editor.image.status.broken.unnamed')
+			: t('editor.image.status.broken.named', { name: alt }),
 };
 
 /** What the button under a picture that is not shown does about it, where anything can. */
 const OFFERS: Readonly<Partial<Record<State, string>>> = {
-	large: 'Show',
-	failed: 'Try again',
-	offline: 'Try again',
+	large: t('editor.image.show'),
+	failed: t('common.tryAgain'),
+	offline: t('common.tryAgain'),
 };
 
-const megabytes = (size: number): string =>
-	`${String(Math.round((size / (1024 * 1024)) * 10) / 10)} MB`;
+/** A size in megabytes, to a tenth of one. */
+const megabytes = (size: number): number => Math.round((size / (1024 * 1024)) * 10) / 10;
 
 const attributeOf = (node: ProseNode, name: 'src' | 'alt' | 'title'): string => {
 	const value: unknown = node.attrs[name];
@@ -128,7 +150,7 @@ const imageView =
 		action.setAttribute('class', 'note-image-action');
 		action.setAttribute('hidden', '');
 
-		const remover = barButton('trash', 'Remove from note');
+		const remover = barButton('trash', t('editor.attachment.remove'));
 		const actions = document.createElement('span');
 		actions.setAttribute('class', 'attachment-actions note-image-actions');
 		actions.setAttribute('hidden', '');
@@ -138,12 +160,20 @@ const imageView =
 		dom.setAttribute('class', 'note-image');
 		dom.append(img, reason, action, actions);
 
-		const reasonFor = (next: State): string | undefined => {
-			if (next === 'large') return `${megabytes(size.current)}, not downloaded yet`;
+		const reasonFor = (next: State, alt: string): string | undefined => {
+			const mb = megabytes(size.current);
+			if (next === 'large') {
+				return alt === ''
+					? t('editor.image.status.large.unnamed', { size: mb })
+					: t('editor.image.status.large.named', { name: alt, size: mb });
+			}
 			// A download the user waits on, which may be long, says so.
-			if (next === 'loading' && wanted.current)
-				return `downloading ${megabytes(size.current)}`;
-			return REASONS[next];
+			if (next === 'loading' && wanted.current) {
+				return alt === ''
+					? t('editor.image.status.downloading.unnamed', { size: mb })
+					: t('editor.image.status.downloading.named', { name: alt, size: mb });
+			}
+			return REASONS[next]?.(alt);
 		};
 
 		const say = (next: State, bytes?: number) => {
@@ -152,11 +182,7 @@ const imageView =
 			dom.setAttribute('data-state', next);
 			if (next === 'loading') dom.setAttribute('aria-busy', 'true');
 			else dom.removeAttribute('aria-busy');
-			const alt = attributeOf(held.current, 'alt');
-			const why = reasonFor(next);
-			reason.replaceChildren(
-				why === undefined ? '' : `${alt === '' ? 'Picture' : alt}: ${why}`
-			);
+			reason.replaceChildren(reasonFor(next, attributeOf(held.current, 'alt')) ?? '');
 			const offer = OFFERS[next];
 			action.toggleAttribute('hidden', offer === undefined);
 			action.replaceChildren(offer ?? '');

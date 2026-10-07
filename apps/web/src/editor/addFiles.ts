@@ -1,5 +1,6 @@
 import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import type { Added, AttachmentProblem } from './attachHost.js';
 
 /**
@@ -41,6 +42,17 @@ export const filesToAttach = (data: Carried | null, how: 'paste' | 'drop'): File
 
 const MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
 
+/** One file by its name, where it has one; several counted. */
+const closedMessage = (names: readonly string[]): string => {
+	const [name] = names;
+	if (names.length !== 1 || name === undefined) {
+		return t('editor.attach.closed.several', { count: names.length });
+	}
+	return name === ''
+		? t('editor.attach.closed.unnamed')
+		: t('editor.attach.closed.named', { name });
+};
+
 /**
  * What to tell the user about files a paste, drop or pick put in an editor that
  * closed before they could go in, by their names: the note was left, or the
@@ -48,32 +60,37 @@ const MEGABYTES = MAX_ATTACHMENT_BYTES / (1024 * 1024);
  * adding it again puts it in — the same bytes are the same file, so no second
  * copy is made.
  */
-export const closedProblem = (names: readonly string[]): AttachmentProblem => {
-	const [name] = names;
-	return {
-		message:
-			names.length === 1 && name !== undefined
-				? `The editor closed before ${name === '' ? 'the file' : name} could go in. Add it again to put it in.`
-				: `The editor closed before ${String(names.length)} files could go in. Add them again to put them in.`,
-		tone: 'warning',
-	};
-};
+export const closedProblem = (names: readonly string[]): AttachmentProblem => ({
+	message: closedMessage(names),
+	tone: 'warning',
+});
 
 /** What to tell the user about a file that was not added, by its name; nothing where it was. */
 export const addProblem = (name: string, added: Added): AttachmentProblem | undefined => {
-	const label = name === '' ? 'That file' : name;
 	if (added.state === 'failed') {
-		return { message: `${label} could not be added to the note.`, tone: 'error' };
+		return {
+			message:
+				name === ''
+					? t('editor.attach.failed.unnamed')
+					: t('editor.attach.failed.named', { name }),
+			tone: 'error',
+		};
 	}
 	if (added.state !== 'refused') return undefined;
 	if (added.reason === 'too-large') {
 		return {
-			message: `${label} is over ${String(MEGABYTES)} MB, the most a file beside a note can be.`,
+			message:
+				name === ''
+					? t('editor.attach.tooLarge.unnamed', { size: MEGABYTES })
+					: t('editor.attach.tooLarge.named', { name, size: MEGABYTES }),
 			tone: 'warning',
 		};
 	}
 	return {
-		message: `${label} cannot be added: a .md file beside a note is another note.`,
+		message:
+			name === ''
+				? t('editor.attach.isNote.unnamed')
+				: t('editor.attach.isNote.named', { name }),
 		tone: 'warning',
 	};
 };

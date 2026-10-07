@@ -1,3 +1,5 @@
+import { t } from '../i18n/t.js';
+
 /**
  * Which editor a note is open in.
  *
@@ -17,6 +19,6 @@ export const isEditorMode = (value: unknown): value is EditorMode =>
 export const otherMode = (mode: EditorMode): EditorMode => (mode === 'rich' ? 'raw' : 'rich');
 
 export const MODE_LABELS: Record<EditorMode, string> = {
-	rich: 'Rich text',
-	raw: 'Markdown',
+	rich: t('editor.mode.rich'),
+	raw: t('editor.mode.raw'),
 };

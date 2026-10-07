@@ -4,8 +4,9 @@ import { NodeSelection } from '@milkdown/kit/prose/state';
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { MarkdownNode } from '@milkdown/kit/transformer';
 import { $nodeSchema, $view } from '@milkdown/kit/utils';
-import { fileKind, fileKindLabel, isAttachmentHref } from '@skysa/core';
+import { fileKind, isAttachmentHref } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { type FileBrowser, openFile, saveFile } from './fileActions.js';
 import { FILE_ICONS, iconElement, type IconName } from './icons.js';
@@ -179,9 +180,9 @@ export const attachmentView =
 		chip.setAttribute('role', 'link');
 		chip.append(icon, name);
 
-		const opener = barButton('open', 'Open');
-		const saver = barButton('download', 'Download');
-		const remover = barButton('trash', 'Remove from note');
+		const opener = barButton('open', t('editor.attachment.open'));
+		const saver = barButton('download', t('editor.attachment.download'));
+		const remover = barButton('trash', t('editor.attachment.remove'));
 		const actions = document.createElement('span');
 		actions.setAttribute('class', 'attachment-actions');
 		actions.setAttribute('hidden', '');
@@ -197,7 +198,8 @@ export const attachmentView =
 			const kind = fileKind(nameIn(attributeOf(node, 'href')));
 			name.replaceChildren(shown);
 			icon.replaceChildren(iconElement(FILE_ICONS[kind]));
-			chip.setAttribute('aria-label', `${shown}, ${fileKindLabel(kind)}`);
+			// Keyed by the file's kind, which the catalog has a message for each of.
+			chip.setAttribute('aria-label', t(`editor.attachment.chip.${kind}`, { name: shown }));
 			const title = titleOf(node);
 			if (title === null || title === '') chip.removeAttribute('title');
 			else chip.setAttribute('title', title);
