@@ -3198,8 +3198,12 @@ button.icon.account-devices-count {
 	border-block-end: 1px solid var(--border);
 }
 
+/* A row across rather than a column, so `start`: the touch screen's
+   `justify-content: center` for rows, which centres their words top to
+   bottom, would centre these side to side. */
 .scratchpad-row > button.row {
 	flex-direction: row;
+	justify-content: start;
 	align-items: center;
 	gap: var(--space-s);
 	min-block-size: calc(var(--control) + 2 * var(--bar-block));

@@ -256,3 +256,19 @@ describe('the search results', () => {
 		expect(declarations('.search-results ul')).toContain('display: block');
 	});
 });
+
+describe('the scratchpad’s row', () => {
+	it('is as tall as the headings beside it', () => {
+		expect(declarations('.scratchpad-row > button.row')).toContain(
+			'min-block-size: calc(var(--control) + 2 * var(--bar-block))'
+		);
+	});
+
+	it('starts at the gutter on a touch screen too, its mark and name across', () => {
+		// The touch rule for rows centres them along their main axis, which
+		// for a row of words is top to bottom and for this one side to side.
+		const own = declarations('.scratchpad-row > button.row');
+		expect(own).toContain('flex-direction: row');
+		expect(own).toContain('justify-content: start');
+	});
+});
