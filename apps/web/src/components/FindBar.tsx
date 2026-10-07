@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { EMPTY_QUERY, type FindQuery, type FindTarget, type Located } from '../editor/find.js';
 import { useFindTarget } from '../editor/findTarget.js';
+import { t } from '../i18n/t.js';
 
 /**
  * Find and replace, over whichever editor is open.
@@ -35,8 +36,8 @@ const NOTHING: Located = { total: 0, current: null };
 /** "3 of 17", or why there is no number to show. */
 const countLabel = (query: FindQuery, located: Located): string => {
 	if (query.search === '') return '';
-	if (located.total === 0) return 'No results';
-	return `${String(located.current ?? 1)} of ${String(located.total)}`;
+	if (located.total === 0) return t('find.noResults');
+	return t('find.position', { current: located.current ?? 1, total: located.total });
 };
 
 export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
@@ -118,13 +119,13 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 	};
 
 	return (
-		<div className="find-bar" role="search" aria-label="Find in note">
+		<div className="find-bar" role="search" aria-label={t('find.bar')}>
 			<div className="find-row">
 				<input
 					ref={field}
 					className="find-input"
-					aria-label="Find"
-					placeholder="Find"
+					aria-label={t('find.field')}
+					placeholder={t('find.field')}
 					value={query.search}
 					onChange={(event) => {
 						change({ ...query, search: event.target.value });
@@ -144,7 +145,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 				</span>
 				<button
 					type="button"
-					aria-label="Previous match"
+					aria-label={t('find.previous')}
 					onClick={() => {
 						act((editor) => editor.next(query, true));
 					}}
@@ -153,7 +154,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 				</button>
 				<button
 					type="button"
-					aria-label="Next match"
+					aria-label={t('find.next')}
 					onClick={() => {
 						act((editor) => editor.next(query));
 					}}
@@ -163,30 +164,30 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 				<button
 					type="button"
 					aria-pressed={query.caseSensitive}
-					aria-label="Match case"
-					title="Match case"
+					aria-label={t('find.matchCase')}
+					title={t('find.matchCase')}
 					onClick={() => {
 						change({ ...query, caseSensitive: !query.caseSensitive });
 					}}
 				>
-					Aa
+					{t('find.matchCaseIcon')}
 				</button>
 				<button
 					type="button"
 					aria-pressed={query.wholeWord}
-					aria-label="Whole word"
-					title="Whole word"
+					aria-label={t('find.wholeWord')}
+					title={t('find.wholeWord')}
 					onClick={() => {
 						change({ ...query, wholeWord: !query.wholeWord });
 					}}
 				>
-					ab
+					{t('find.wholeWordIcon')}
 				</button>
 				<button
 					type="button"
 					aria-pressed={query.regexp}
-					aria-label="Regular expression"
-					title="Regular expression"
+					aria-label={t('find.regexp')}
+					title={t('find.regexp')}
 					onClick={() => {
 						change({ ...query, regexp: !query.regexp });
 					}}
@@ -196,15 +197,15 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 				<button
 					type="button"
 					aria-expanded={replacing}
-					aria-label={replacing ? 'Hide replace' : 'Show replace'}
-					title="Replace"
+					aria-label={replacing ? t('find.hideReplace') : t('find.showReplace')}
+					title={t('find.replaceToggle')}
 					onClick={() => {
 						setReplacing(!replacing);
 					}}
 				>
 					⇄
 				</button>
-				<button type="button" aria-label="Close find" onClick={close}>
+				<button type="button" aria-label={t('find.close')} onClick={close}>
 					✕
 				</button>
 			</div>
@@ -212,8 +213,8 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 				<div className="find-row">
 					<input
 						className="find-input"
-						aria-label="Replace with"
-						placeholder="Replace with"
+						aria-label={t('find.replaceWith')}
+						placeholder={t('find.replaceWith')}
 						value={query.replace}
 						onChange={(event) => {
 							change({ ...query, replace: event.target.value });
@@ -228,7 +229,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 							act((editor) => editor.replace(query));
 						}}
 					>
-						Replace
+						{t('find.replace')}
 					</button>
 					<button
 						type="button"
@@ -236,7 +237,7 @@ export const FindBar = ({ focusToken, onClose }: FindBarProps) => {
 							act((editor) => editor.replaceAll(query));
 						}}
 					>
-						All
+						{t('find.replaceAll')}
 					</button>
 				</div>
 			)}

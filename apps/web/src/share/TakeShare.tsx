@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { InfoDialog } from '../components/InfoDialog.js';
+import { LOCALE, t } from '../i18n/t.js';
 import { addClips, setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { type ConnectedSource } from '../store/connection.js';
 import { db as appDatabase, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
@@ -55,7 +56,11 @@ const excerpt = (text: string): string => {
 	return line.length > EXCERPT_CHARS ? `${line.slice(0, EXCERPT_CHARS).trimEnd()}…` : line;
 };
 
-/** What came, in a phrase: `“Meeting at 3pm…” and q3.pdf`. */
+/**
+ * What came, in a phrase: `“Meeting at 3pm…” and q3.pdf`. The text and the
+ * files, and the files' names, are listed as the language lists things
+ * (`Intl.ListFormat`), which is where its "and" and its commas come from.
+ */
 export const whatCame = ({ inputs }: Received): string => {
 	const text = inputs.find((input) => input.kind === 'text');
 	const files = inputs.flatMap((input) => (input.kind === 'file' ? [input.name] : []));
@@ -65,23 +70,25 @@ export const whatCame = ({ inputs }: Received): string => {
 			? undefined
 			: files.length === 1 && only !== undefined
 				? only
-				: `${String(files.length)} files (${files.join(', ')})`;
-	const quoted = text === undefined ? undefined : `“${excerpt(text.text)}”`;
-	return [quoted, named].filter((part) => part !== undefined).join(' and ');
+				: t('share.came.files', {
+						count: files.length,
+						names: new Intl.ListFormat(LOCALE, { type: 'unit' }).format(files),
+					});
+	const quoted =
+		text === undefined ? undefined : t('share.came.text', { text: excerpt(text.text) });
+	return new Intl.ListFormat(LOCALE).format([quoted, named].filter((part) => part !== undefined));
 };
 
 const leftOut = (names: readonly string[]): string => {
 	const [name] = names;
 	return names.length === 1 && name !== undefined
-		? `${name} is larger than ${String(MEGABYTES)} MB, the most the clipboard takes, and is left out.`
-		: `${String(names.length)} files are larger than ${String(MEGABYTES)} MB, the most the clipboard takes, and are left out.`;
+		? t('share.tooLarge.named', { name, size: MEGABYTES })
+		: t('share.tooLarge.counted', { count: names.length, size: MEGABYTES });
 };
 
 /** Why a source has no clipboard to take a share. */
 const notConnected = (source: SyncStateRecord | null, name: string): string =>
-	source === null
-		? 'The clipboard is shared through connected storage, and notes kept on this device only have none. Connect a storage account, show its clipboard, and share again.'
-		: `${name} is no longer connected, and the clipboard is shared through connected storage. Reconnect it, show its clipboard, and share again.`;
+	source === null ? t('share.noClipboard') : t('share.notConnected', { source: name });
 
 /** A source whose clipboard a share can go on: connected, and not let go of. */
 const takesClips = (source: SyncStateRecord | null): source is SyncStateRecord =>
@@ -131,12 +138,12 @@ export const TakeShare = ({
 	if (held.failed === true || !takesClips(source) || received.inputs.length === 0) {
 		const why =
 			held.failed === true
-				? 'It could not be kept on this device. Share it again to try once more.'
+				? t('share.notKept')
 				: received.inputs.length === 0
 					? leftOut(received.tooLarge)
 					: notConnected(source, name);
 		return (
-			<InfoDialog title="Nothing was added to the clipboard" onClose={done}>
+			<InfoDialog title={t('share.notAdded')} onClose={done}>
 				<p>{why}</p>
 			</InfoDialog>
 		);
@@ -154,8 +161,8 @@ export const TakeShare = ({
 
 	return (
 		<ConfirmDialog
-			title="Add to the clipboard?"
-			confirmLabel={shown ? 'Add to clipboard' : 'Show clipboard and add'}
+			title={t('share.ask')}
+			confirmLabel={shown ? t('share.add') : t('share.showAndAdd')}
 			tone="primary"
 			onConfirm={() => {
 				void add().then(done, () => {
@@ -164,8 +171,9 @@ export const TakeShare = ({
 			}}
 			onCancel={done}
 		>
-			{`${whatCame(received)} will go on ${name}'s clipboard, which its other devices show too.`}
-			{shown ? '' : ' This shows the clipboard on this device.'}
+			{/* Whole sentences, one after another. */}
+			{t('share.goesOn', { what: whatCame(received), source: name })}
+			{shown ? '' : ` ${t('share.showsHere')}`}
 			{received.tooLarge.length > 0 ? ` ${leftOut(received.tooLarge)}` : ''}
 		</ConfirmDialog>
 	);

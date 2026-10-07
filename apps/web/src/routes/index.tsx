@@ -38,6 +38,7 @@ import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
+import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
 import { TakeShare } from '../share/TakeShare.js';
 import {
@@ -102,7 +103,7 @@ import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { findFolder, type FolderNode, listedUnder, selectedFolderPath } from '../store/tree.js';
-import { PROVIDER_LABELS, refusedMessage, sourceName, tabName } from '../sync/account.js';
+import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import {
 	findNamedPlace,
 	fragmentOf,
@@ -166,30 +167,29 @@ const connectMessage = (
 ): Notice | undefined => {
 	switch (outcome) {
 		case 'ok':
-			return { message: 'Storage connected. Your notes will sync with it.', tone: 'success' };
+			return { message: t('shell.connect.ok'), tone: 'success' };
 		// The user's own choice, and nothing is broken — but nothing is
 		// connected either, which is not what they will assume from a screen
 		// that looks the same as before they started.
 		case 'denied':
-			return { message: 'Connecting storage was canceled.', tone: 'warning' };
+			return { message: t('shell.connect.denied'), tone: 'warning' };
 		case 'failed':
 			return {
-				message: 'The storage account could not be connected. Try again.',
+				message: t('shell.connect.failed'),
 				tone: 'error',
 			};
 		// A warning rather than an error: this one worked exactly as it was
 		// asked to, and what to do about it is a tickbox away.
 		case 'partial':
 			return {
-				message:
-					'Access to your files was not granted, so storage was not connected. Connect again and leave that permission ticked.',
+				message: t('shell.connect.partial'),
 				tone: 'warning',
 			};
 		// Trying again will not help: this server will not have the account.
 		// What might is whatever its operator offers instead, when they do.
 		case 'refused':
 			return {
-				message: `${codeRefused ? 'The code you entered was not accepted or has expired' : refusedMessage(code)}, so storage was not connected.`,
+				message: codeRefused ? t('shell.connect.refused.code') : refusedText(code),
 				tone: 'error',
 				action: gate?.action,
 			};
@@ -199,12 +199,29 @@ const connectMessage = (
 		// not known there, and the storage tabs already say, so it is not guessed.
 		case 'expired':
 			return {
-				message:
-					'Connecting storage did not finish. If it is not connected, connect it again.',
+				message: t('shell.connect.expired'),
 				tone: 'warning',
 			};
 		default:
 			return undefined;
+	}
+};
+
+/**
+ * A refused connect, by the kind of no the operator's policy gave. The storage
+ * panel says the same reasons in its own sentence (`refusedMessage` in
+ * `sync/account.ts`); here each is a whole one about the connect.
+ */
+const refusedText = (code: EntitlementCode | undefined): string => {
+	switch (code) {
+		case 'not_allowed':
+			return t('shell.connect.refused.notAllowed');
+		case 'lapsed':
+			return t('shell.connect.refused.lapsed');
+		case 'limit_reached':
+			return t('shell.connect.refused.limitReached');
+		case undefined:
+			return t('shell.connect.refused.cannotSync');
 	}
 };
 
@@ -313,8 +330,8 @@ const useNoteMove = (
 
 	useCommand({
 		id: 'note.move',
-		label: 'Move note to notebook',
-		group: 'Note',
+		label: t('shell.commands.moveNote'),
+		group: t('shell.commands.group.note'),
 		enabled: offered,
 		run: move,
 	});
@@ -343,8 +360,8 @@ const useDownloadCommand = ({
 	const holds = useHoldsAnything(connectionId);
 	useCommand({
 		id: 'app.download',
-		label: 'Download all notes',
-		group: 'App',
+		label: t('shell.commands.download'),
+		group: t('shell.commands.group.app'),
 		enabled: connectionId !== undefined && source?.importing === undefined && holds === true,
 		run: () => {
 			if (connectionId === undefined) return;
@@ -540,6 +557,27 @@ const useConnectNotice = (
 			? undefined
 			: connectMessage(outcome, refusedAs, gate, codeRefused);
 	return { connectNotice, dismissConnect };
+};
+
+/**
+ * A deleted note brought back into a source that has been disconnected, which
+ * is said by name where it has one (`sourceName`).
+ */
+const backDisconnected = (title: string, source: string | undefined): string =>
+	source === undefined
+		? t('shell.note.backDisconnectedUnnamed', { title })
+		: t('shell.note.backDisconnected', { title, source });
+
+/**
+ * What the banner across the top says while a disconnected source is showing:
+ * by its name and its storage's, where it has them (`sourceName`, which has a
+ * name for every source with a provider).
+ */
+const detachedText = (source: SyncStateRecord): string => {
+	const name = sourceName(source);
+	return source.provider === undefined || name === undefined
+		? t('shell.detached.unnamed')
+		: t('shell.detached.named', { source: name, provider: PROVIDER_LABELS[source.provider] });
 };
 
 /** The page's title with no note open: the brand's name (`brand.ts`). */
@@ -1239,7 +1277,7 @@ const Home = () => {
 	// refuse — but the same silence if it happens: the user types into a note
 	// that is nowhere, and the failure goes to the console.
 	const noteNotMade = useCallback(() => {
-		setProblem({ message: 'That note could not be made.', tone: 'error' });
+		setProblem({ message: t('shell.note.notMade'), tone: 'error' });
 	}, []);
 
 	const scratchpadShown = useScratchpadShown(activeConnection);
@@ -1448,11 +1486,11 @@ const Home = () => {
 					setProblem(
 						home?.detached === undefined
 							? {
-									message: `“${restored.title}” is back, in the source it was deleted from.`,
+									message: t('shell.note.back', { title: restored.title }),
 									tone: 'success',
 								}
 							: {
-									message: `“${restored.title}” is back, in ${sourceName(home) ?? 'its source'}, which is disconnected. Reconnect it, or download the note.`,
+									message: backDisconnected(restored.title, sourceName(home)),
 									tone: 'warning',
 								}
 					);
@@ -1474,7 +1512,7 @@ const Home = () => {
 			.catch(() => {
 				setUndoFailed(noteRef(deleted));
 				setProblem({
-					message: 'That note could not be brought back. Try again.',
+					message: t('shell.note.notBack'),
 					tone: 'error',
 				});
 			});
@@ -1513,10 +1551,10 @@ const Home = () => {
 				setProblem(
 					error instanceof FolderExistsError
 						? {
-								message: `There is already a notebook called “${error.folderName}” here.`,
+								message: t('shell.notebook.existsHere', { name: error.folderName }),
 								tone: 'warning',
 							}
-						: { message: 'That notebook could not be made.', tone: 'error' }
+						: { message: t('shell.notebook.notMade'), tone: 'error' }
 				);
 			});
 	};
@@ -1555,10 +1593,10 @@ const Home = () => {
 				setProblem(
 					error instanceof FolderExistsError
 						? {
-								message: `There is already a notebook called “${error.folderName}” here.`,
+								message: t('shell.notebook.existsHere', { name: error.folderName }),
 								tone: 'warning',
 							}
-						: { message: 'That notebook could not be renamed.', tone: 'error' }
+						: { message: t('shell.notebook.notRenamed'), tone: 'error' }
 				);
 			});
 	};
@@ -1586,7 +1624,7 @@ const Home = () => {
 				}
 			})
 			.catch(() => {
-				setProblem({ message: 'That notebook could not be deleted.', tone: 'error' });
+				setProblem({ message: t('shell.notebook.notDeleted'), tone: 'error' });
 			});
 	};
 
@@ -1718,7 +1756,7 @@ const Home = () => {
 					}
 				})
 				.catch(() => {
-					setProblem({ message: 'That note could not be moved.', tone: 'error' });
+					setProblem({ message: t('shell.note.notMoved'), tone: 'error' });
 				});
 			return;
 		}
@@ -1738,18 +1776,20 @@ const Home = () => {
 				setProblem(
 					error instanceof FolderExistsError
 						? {
-								message: `There is already a notebook called “${error.folderName}” there.`,
+								message: t('shell.notebook.existsThere', {
+									name: error.folderName,
+								}),
 								tone: 'warning',
 							}
-						: { message: 'That notebook could not be moved.', tone: 'error' }
+						: { message: t('shell.notebook.notMoved'), tone: 'error' }
 				);
 			});
 	};
 
 	useCommand({
 		id: 'app.palette',
-		label: 'Show all commands',
-		group: 'App',
+		label: t('shell.commands.palette'),
+		group: t('shell.commands.group.app'),
 		chord: PALETTE,
 		enabled: true,
 		run: () => {
@@ -1759,8 +1799,8 @@ const Home = () => {
 
 	useCommand({
 		id: 'note.new',
-		label: 'New note',
-		group: 'Note',
+		label: t('shell.commands.newNote'),
+		group: t('shell.commands.group.note'),
 		chord: NEW_NOTE,
 		enabled: canMakeNote(folder, scratch.modal),
 		run: onCreateNote,
@@ -1768,8 +1808,8 @@ const Home = () => {
 
 	useCommand({
 		id: 'app.search',
-		label: 'Search notes',
-		group: 'App',
+		label: t('shell.commands.search'),
+		group: t('shell.commands.group.app'),
 		chord: FIND,
 		enabled: true,
 		run: () => {
@@ -1785,8 +1825,8 @@ const Home = () => {
 
 	useCommand({
 		id: 'note.undoDelete',
-		label: 'Undo delete',
-		group: 'Note',
+		label: t('shell.commands.undoDelete'),
+		group: t('shell.commands.group.note'),
 		enabled: deleted !== null,
 		run: undoDelete,
 	});
@@ -1801,8 +1841,8 @@ const Home = () => {
 	 */
 	useCommand({
 		id: 'notebook.move',
-		label: 'Move notebook',
-		group: 'Notebook',
+		label: t('shell.commands.moveNotebook'),
+		group: t('shell.commands.group.notebook'),
 		// Nor can a second thing while one is already in the air.
 		enabled: isNotebook(folder) && moving === null,
 		run: () => {
@@ -1860,7 +1900,7 @@ const Home = () => {
 		if (scratch.card !== undefined) {
 			return <CardSheet id={scratch.card.id}>{noteEditor(scratch.editing)}</CardSheet>;
 		}
-		return <section className="note-view empty" aria-label="Note" />;
+		return <section className="note-view empty" aria-label={t('shell.notePane')} />;
 	};
 
 	/** The scratchpad, in the notes' place. */
@@ -1894,10 +1934,10 @@ const Home = () => {
 			)}
 			{scratch.naming !== undefined && (
 				<NameDialog
-					title="Name this note"
-					text="A note in a notebook goes by its name. Give this one a name, then choose the notebook it goes in."
-					label="Name"
-					confirmLabel="Name it"
+					title={t('shell.nameNote.title')}
+					text={t('shell.nameNote.text')}
+					label={t('shell.nameNote.label')}
+					confirmLabel={t('shell.nameNote.confirm')}
 					onConfirm={scratch.named}
 					onCancel={scratch.cancelNaming}
 				/>
@@ -1970,10 +2010,7 @@ const Home = () => {
 			 */}
 			{source?.detached !== undefined && (
 				<p className="banner" role="note">
-					{sourceName(source) ?? 'This source'} is disconnected. What is here has changes{' '}
-					{source.provider === undefined ? 'it' : PROVIDER_LABELS[source.provider]} was
-					never sent, and nothing written here is synced. Reconnect it, or download or
-					discard them, from the storage panel.
+					{detachedText(source)}
 				</p>
 			)}
 			{paletteOpen && (

@@ -1,5 +1,9 @@
 import { type Catalog } from '../catalog.js';
 import { common } from './common.js';
+import { find } from './find.js';
+import { install } from './install.js';
+import { search } from './search.js';
+import { share } from './share.js';
 import { shell } from './shell.js';
 
 /**
@@ -10,4 +14,8 @@ import { shell } from './shell.js';
 export const en = {
 	common,
 	shell,
+	find,
+	search,
+	install,
+	share,
 } as const satisfies Catalog;
