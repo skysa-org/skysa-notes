@@ -82,11 +82,10 @@ describe('the parses a list costs', () => {
 			(_, at) => `# ${prefix} ${String(at)}\n\nWords of note ${String(at)}.\n`
 		);
 
-	it('is one parse for a body asked for as lines and as blocks', () => {
+	it('is one parse for an opening asked for as lines and as blocks', () => {
 		const body = '# Card\n\n- one\n- two\n';
 		openingLines(body);
 		openingBlocks(body);
-		visibleLines(body);
 		expect(parses.count).toBe(1);
 	});
 
@@ -99,7 +98,7 @@ describe('the parses a list costs', () => {
 		expect(parses.count).toBe(1_000);
 	});
 
-	it('keeps room for two lists drawn at once', () => {
+	it('keeps room for two lists, so going between them parses neither again', () => {
 		const list = bodies('Listed', 700);
 		const cards = bodies('Card', 700);
 		keepOpenings('test-a', list.length);
@@ -111,6 +110,29 @@ describe('the parses a list costs', () => {
 
 	it('gives the same lines while their parse is kept', () => {
 		const body = 'Kept.\n';
-		expect(openingLines(body)).toBe(visibleLines(body));
+		expect(openingLines(body)).toBe(openingLines(body));
+	});
+
+	// More than any list in this file has made room for, so a kept one would push a row out.
+	const MANY = 4_000;
+
+	it('loses nothing to a body being typed', () => {
+		const rows = bodies('Typed beside', 300);
+		rows.forEach((body) => openingLines(body));
+		const before = parses.count;
+		Array.from({ length: MANY }, (_, at) => `Typed, keystroke ${String(at)}.\n`).forEach(
+			(typed) => openingLines(typed, { keep: false })
+		);
+		rows.forEach((body) => openingLines(body));
+		expect(parses.count).toBe(before + MANY);
+	});
+
+	it('loses no list row to the whole bodies a search is cut from', () => {
+		const rows = bodies('Searched beside', 300);
+		rows.forEach((body) => openingLines(body));
+		const before = parses.count;
+		bodies('Answer', MANY).forEach((body) => visibleText(body));
+		rows.forEach((body) => openingLines(body));
+		expect(parses.count).toBe(before + MANY);
 	});
 });

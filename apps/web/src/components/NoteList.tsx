@@ -343,7 +343,7 @@ export const NoteList = ({
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
-	// Every row asks for its opening on every draw (`keepOpenings`).
+	// Each row asks for its opening when it is drawn (`keepOpenings`).
 	keepOpenings('notes', notes?.length ?? 0);
 	const placeholder = placeholderFor({
 		notes,
