@@ -8,6 +8,7 @@ import {
 	scratchColor,
 } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
 import { getPreference } from './prefs.js';
 
@@ -19,7 +20,7 @@ import { getPreference } from './prefs.js';
  */
 
 /** What the scratchpad is called wherever the app names it. */
-export const SCRATCHPAD_LABEL = 'Scratchpad';
+export const SCRATCHPAD_LABEL = t('scratchpad.label');
 
 /** The key for whether a source shows its scratchpad on this device. */
 const shownKey = (connectionId: string): string => `scratchpad:${connectionId}`;

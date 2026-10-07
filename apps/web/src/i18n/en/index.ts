@@ -1,12 +1,16 @@
 import { type Catalog } from '../catalog.js';
 import { attachedFiles } from './attachedFiles.js';
+import { clipboard } from './clipboard.js';
 import { common } from './common.js';
 import { editor } from './editor.js';
+import { exporting } from './exporting.js';
 import { firstImport } from './firstImport.js';
+import { importing } from './importing.js';
 import { notebooks } from './notebooks.js';
 import { notes } from './notes.js';
 import { rows } from './rows.js';
 import { scheduler } from './scheduler.js';
+import { scratchpad } from './scratchpad.js';
 import { shell } from './shell.js';
 import { sources } from './sources.js';
 import { unsent } from './unsent.js';
@@ -19,6 +23,10 @@ import { unsent } from './unsent.js';
 export const en = {
 	common,
 	shell,
+	importing,
+	exporting,
+	clipboard,
+	scratchpad,
 	notebooks,
 	notes,
 	rows,

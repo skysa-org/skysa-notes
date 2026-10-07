@@ -1,5 +1,13 @@
-import { ancestorPaths, basename, normalizePath, parentPath, ROOT } from '@skysa/core';
+import {
+	ancestorPaths,
+	basename,
+	normalizePath,
+	NOTE_EXTENSION,
+	parentPath,
+	ROOT,
+} from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import {
 	type FileBytesRecord,
 	type FileRecord,
@@ -169,7 +177,7 @@ const joined = (parts: readonly Uint8Array[]): Bytes => {
 };
 
 /** What a file is called when nothing is left of the name it came with. */
-const UNNAMED = 'untitled.md';
+const unnamed = (): string => `${t('exporting.unnamedFile')}${NOTE_EXTENSION}`;
 
 /**
  * The name an entry is written under: the one notion of a file's path that the
@@ -192,7 +200,7 @@ const UNNAMED = 'untitled.md';
  */
 export const entryName = (path: string): string => {
 	const name = safeName(path);
-	return name === '' ? UNNAMED : name;
+	return name === '' ? unnamed() : name;
 };
 
 /** `entryName` without the stand-in: a folder named nothing is the root, and is no entry. */
@@ -644,7 +652,10 @@ const holdsFile = (db: NotesDatabase, connectionId: string): Promise<boolean> =>
  * The notes first, so a file at a note's name — which the app never makes —
  * is the numbered one.
  */
-export const downloadLibrary = (library: Library, filename = `notes-${today()}.zip`): void => {
+export const downloadLibrary = (
+	library: Library,
+	filename = `${t('exporting.fileName', { date: today() })}.zip`
+): void => {
 	save(zipParts([...filesOf(library.notes), ...library.files], library.folders), filename);
 };
 
@@ -703,8 +714,7 @@ export interface DownloadAnswer {
 }
 
 /** Said once an incomplete archive has been handed over (`downloadSource`). */
-export const INCOMPLETE_DOWNLOAD =
-	'Downloaded, but a note here has text that could not be saved, and the archive does not have it. Copy that text somewhere safe; the note says how.';
+export const INCOMPLETE_DOWNLOAD = t('exporting.incomplete');
 
 /**
  * What to tell the user once an archive has been handed over, if anything:
@@ -716,7 +726,7 @@ export const INCOMPLETE_DOWNLOAD =
 export const downloadNotice = ({ incomplete, missing }: DownloadAnswer): string | null => {
 	if (incomplete) return INCOMPLETE_DOWNLOAD;
 	if (missing === 0) return null;
-	return `Downloaded, without ${missing === 1 ? '1 file' : `${String(missing)} files`} this device has no current copy of. ${missing === 1 ? 'It is' : 'They are'} still in the source's storage.`;
+	return t('exporting.missing', { count: missing });
 };
 
 /**
@@ -726,15 +736,14 @@ export const downloadNotice = ({ incomplete, missing }: DownloadAnswer): string 
  */
 export const downloadProblem = (error: unknown): string => {
 	if (!(error instanceof ArchiveLimitError)) {
-		return 'The notes could not be downloaded. Try again.';
+		return t('exporting.failed');
 	}
 	switch (error.limit) {
 		case 'entries':
-			// In English's digits, as every other word of it is.
-			return `There are too many notes, notebooks and files here for one archive, which holds at most ${(ZIP64_ENTRIES - 1).toLocaleString('en')}. Nothing was downloaded.`;
+			return t('exporting.tooMany', { most: ZIP64_ENTRIES - 1 });
 		case 'bytes':
-			return 'These notes and files come to more than one archive can hold, which is 4 GB. Nothing was downloaded.';
+			return t('exporting.tooLarge');
 		case 'name':
-			return 'A note, notebook or file here has a path too long to put in an archive. Nothing was downloaded.';
+			return t('exporting.tooLong');
 	}
 };
