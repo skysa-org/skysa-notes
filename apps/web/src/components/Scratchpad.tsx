@@ -20,6 +20,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';
@@ -152,7 +153,7 @@ const TakeNote = ({
 							onTake();
 						}}
 					>
-						Take a note…
+						{t('scratchpad.take')}
 					</button>
 				)}
 			</div>
@@ -275,8 +276,8 @@ const Card = ({
 	const name = named
 		? note.title
 		: first === undefined
-			? 'Empty note'
-			: previewLineText(first) || 'Picture';
+			? t('scratchpad.card.emptyNote')
+			: previewLineText(first) || t('scratchpad.card.pictureOnly');
 	const shown = lines.map((line, at) => (
 		// Lines of one note, in order, and drawn again whole when it changes.
 		<CardLine key={at} line={line} />
@@ -294,10 +295,16 @@ const Card = ({
 				{named && <span className="scratch-card-title">{note.title}</span>}
 				{hasPictures(lines) ? <CardFiles note={row}>{shown}</CardFiles> : shown}
 				{!named && lines.length === 0 && (
-					<span className="scratch-card-line muted">Empty note</span>
+					<span className="scratch-card-line muted">
+						{t('scratchpad.card.emptyNote')}
+					</span>
 				)}
 				{note.dirty === 1 && (
-					<span className="dot" title="Not yet synced" aria-label="Not yet synced" />
+					<span
+						className="dot"
+						title={t('scratchpad.card.notSynced')}
+						aria-label={t('scratchpad.card.notSynced')}
+					/>
 				)}
 			</button>
 			<div className="scratch-card-tools">
@@ -510,14 +517,24 @@ export const Scratchpad = ({
 				{empty && (
 					<p className="muted placeholder scratch-empty">
 						<Icon name="scratchpad" />
-						Notes you take here show up as cards.
+						{t('scratchpad.empty')}
 					</p>
 				)}
 				{cards.pinned.length > 0 && (
-					<Wall notes={cards.pinned} label="Pinned" labelled={both} card={card} />
+					<Wall
+						notes={cards.pinned}
+						label={t('scratchpad.pinned')}
+						labelled={both}
+						card={card}
+					/>
 				)}
 				{cards.others.length > 0 && (
-					<Wall notes={cards.others} label="Others" labelled={both} card={card} />
+					<Wall
+						notes={cards.others}
+						label={t('scratchpad.others')}
+						labelled={both}
+						card={card}
+					/>
 				)}
 			</div>
 		</section>
@@ -580,7 +597,7 @@ export const ScratchModal = ({
 				className="scratch-modal"
 				role="dialog"
 				aria-modal="true"
-				aria-label="Scratch note"
+				aria-label={t('scratchpad.note')}
 				data-color={color}
 				tabIndex={-1}
 			>

@@ -1,5 +1,9 @@
 import { type Catalog } from '../catalog.js';
+import { clipboard } from './clipboard.js';
 import { common } from './common.js';
+import { exporting } from './exporting.js';
+import { importing } from './importing.js';
+import { scratchpad } from './scratchpad.js';
 import { shell } from './shell.js';
 
 /**
@@ -10,4 +14,8 @@ import { shell } from './shell.js';
 export const en = {
 	common,
 	shell,
+	importing,
+	exporting,
+	clipboard,
+	scratchpad,
 } as const satisfies Catalog;
