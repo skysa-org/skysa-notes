@@ -52,6 +52,12 @@ const shell = () => document.querySelector('.app-shell') as HTMLElement;
 const panel = () => shell().getAttribute('data-panel');
 const notebookTrigger = () => screen.getByRole('button', { name: /^Notebook: / });
 const noteTrigger = () => screen.getByRole('button', { name: /^Note: / });
+/**
+ * What a trigger shows. One shortened in its middle (`MiddleLabel`) holds its
+ * whole words too, unseen, to size it by.
+ */
+const shownOn = (trigger: HTMLElement) =>
+	trigger.querySelector('.compact-picker-shown')?.textContent ?? trigger.textContent;
 
 /** Two notebooks with a note in each. Home sorts first, so it is the one open. */
 const twoNotebooks = async () => {
@@ -71,7 +77,7 @@ describe('the compact bar', () => {
 		});
 		// The notebook's newest note opens with it, as in a wide window.
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Groceries');
+			expect(shownOn(noteTrigger())).toBe('Groceries');
 		});
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 		expect(screen.queryByRole('navigation', { name: 'Sources' })).toBeNull();
@@ -100,9 +106,10 @@ describe('the compact bar', () => {
 		});
 		// What shows, shortened in its middle where the bar is short of room
 		// (`middleEllipsis`); jsdom lays nothing out, so here it is all there.
-		expect(notebookTrigger().querySelector('.compact-picker-shown')?.textContent).toBe(
-			'Work/Projects/Q3'
-		);
+		expect(shownOn(notebookTrigger())).toBe('Work/Projects/Q3');
+		// Its note's name is shortened the same way, and named whole.
+		expect(shownOn(noteTrigger())).toBe('Budget');
+		expect(noteTrigger().querySelector('.compact-picker-whole')?.textContent).toBe('Budget');
 	});
 
 	it('is the ordinary bar again once the window is wide enough', async () => {
@@ -130,7 +137,7 @@ describe('the compact bar', () => {
 		expect(notebookTrigger().textContent).toBe('Work');
 		// The notebook's first note comes with it, as it does in a wide window.
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Minutes');
+			expect(shownOn(noteTrigger())).toBe('Minutes');
 		});
 		expect(await screen.findByRole('button', { name: /^Minutes/ })).toBeDefined();
 	});
@@ -195,7 +202,7 @@ describe('the compact bar', () => {
 
 		expect(panel()).toBeNull();
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Groceries');
+			expect(shownOn(noteTrigger())).toBe('Groceries');
 		});
 	});
 
@@ -358,7 +365,7 @@ describe('a note begun in a compact window', () => {
 		// A new notebook has nothing in it, so a note begins there and takes
 		// the cursor — which it cannot do from under the dropdown.
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Untitled');
+			expect(shownOn(noteTrigger())).toBe('Untitled');
 		});
 		expect(panel()).toBeNull();
 		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('false');
@@ -376,7 +383,7 @@ describe('a note begun in a compact window', () => {
 
 		expect(panel()).toBeNull();
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Untitled');
+			expect(shownOn(noteTrigger())).toBe('Untitled');
 		});
 		expect(panel()).toBeNull();
 	});
@@ -386,7 +393,7 @@ describe('a note begun in a compact window', () => {
 		const user = userEvent.setup();
 		await openApp();
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Groceries');
+			expect(shownOn(noteTrigger())).toBe('Groceries');
 		});
 		await user.click(noteTrigger());
 		fireEvent.contextMenu(await screen.findByRole('button', { name: /^Groceries/ }));
@@ -394,7 +401,7 @@ describe('a note begun in a compact window', () => {
 		expect(panel()).toBe('notes');
 
 		await waitFor(() => {
-			expect(noteTrigger().textContent).toBe('Untitled');
+			expect(shownOn(noteTrigger())).toBe('Untitled');
 		});
 		expect(panel()).toBeNull();
 	});
@@ -423,7 +430,7 @@ describe('searching in a compact window', () => {
 		expect(screen.queryByRole('combobox', { name: 'Search notes' })).toBeNull();
 		expect(screen.getByRole('button', { name: 'Search notes' })).toBeDefined();
 		expect(notebookTrigger().textContent).toBe('Work');
-		expect(noteTrigger().textContent).toBe('Minutes');
+		expect(shownOn(noteTrigger())).toBe('Minutes');
 	});
 
 	it('gives the bar back on Close', async () => {

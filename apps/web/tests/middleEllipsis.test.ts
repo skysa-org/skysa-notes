@@ -43,6 +43,16 @@ describe('middleEllipsis', () => {
 		expect(middleEllipsis('👩‍💻 Code/Q3', '/Q3', atMost(5))).toBe('👩‍💻…/Q3');
 	});
 
+	it('cuts a name with nothing to keep whole evenly from both ends', () => {
+		expect(middleEllipsis('Forecast of the second half', '', atMost(27))).toBe(
+			'Forecast of the second half'
+		);
+		expect(middleEllipsis('Forecast of the second half', '', atMost(19))).toBe(
+			'Forecast…econd half'
+		);
+		expect(middleEllipsis('Forecast of the second half', '', atMost(3))).toBe('F…f');
+	});
+
 	it('gives the shortest it makes when nothing fits, for the box to clip', () => {
 		expect(middleEllipsis('Work/Projects/Q3', '/Q3', atMost(1))).toBe('W…3');
 	});
