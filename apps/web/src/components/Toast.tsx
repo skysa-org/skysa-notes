@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 
+import { t } from '../i18n/t.js';
+
 /**
  * What a toast is about. It decides the colour, the weight of the words, and
  * how the message announces.
@@ -107,7 +109,7 @@ export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 				</a>
 			)}
 			<button type="button" className="ghost" onClick={onDismiss}>
-				Dismiss
+				{t('common.dismiss')}
 			</button>
 		</div>
 	);

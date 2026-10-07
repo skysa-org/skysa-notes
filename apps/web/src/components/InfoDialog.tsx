@@ -2,6 +2,7 @@ import { type ReactNode, type RefObject, useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom';
 
 import { useSuspendShortcuts } from '../commands/context.js';
+import { t } from '../i18n/t.js';
 
 /**
  * Something the app has to say at more length than the place it is asked from
@@ -81,7 +82,7 @@ export const InfoDialog = ({ title, children, onClose, returnFocus }: InfoDialog
 				{children}
 				<div className="modal-actions">
 					<button ref={close} type="button" onClick={onClose}>
-						Close
+						{t('common.close')}
 					</button>
 				</div>
 			</div>

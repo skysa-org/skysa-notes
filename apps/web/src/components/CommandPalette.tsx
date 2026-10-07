@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { chordLabel } from '../commands/chord.js';
 import { useCommands, useSuspendShortcuts } from '../commands/context.js';
 import { type Command } from '../commands/registry.js';
+import { t } from '../i18n/t.js';
 
 /**
  * One list of everything the app can be asked to do, opened with a chord and
@@ -149,7 +150,12 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 				if (event.target === event.currentTarget) onClose();
 			}}
 		>
-			<div className="palette" role="dialog" aria-modal="true" aria-label="Commands">
+			<div
+				className="palette"
+				role="dialog"
+				aria-modal="true"
+				aria-label={t('shell.palette.list')}
+			>
 				{/* The keys are handled on the field rather than on the dialog
 				    because the field is where focus is from the moment this opens,
 				    and it is the element a keyboard user is actually addressing. */}
@@ -193,8 +199,8 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 						}
 					}}
 					className="palette-field"
-					aria-label="Search commands"
-					placeholder="Type a command"
+					aria-label={t('shell.palette.search')}
+					placeholder={t('shell.palette.placeholder')}
 					value={query}
 					onChange={(event) => {
 						setQuery(event.target.value);
@@ -218,10 +224,10 @@ export const CommandPalette = ({ onClose }: CommandPaletteProps) => {
 
 				{shown.length === 0 ? (
 					<p className="muted placeholder" role="status">
-						Nothing matches “{query}”.
+						{t('shell.palette.noMatch', { query })}
 					</p>
 				) : (
-					<ul id="palette-list" role="listbox" aria-label="Commands">
+					<ul id="palette-list" role="listbox" aria-label={t('shell.palette.list')}>
 						{shown.map((command, index) => (
 							// The row is the option, with nothing focusable inside
 							// it: ARIA gives `option` presentational children, so a

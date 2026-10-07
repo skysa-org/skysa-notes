@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
+import { t } from '../i18n/t.js';
 import { subscribeTabState, tabState } from '../store/staleTab.js';
 
 /**
@@ -45,11 +46,9 @@ export const StaleTabGate = ({
 			</div>
 			{state === 'stale' && copying && (
 				<div className="update-prompt tab-stale-bar" role="alert">
-					<span>
-						This tab is out of date and cannot save. Copy what you need, then reload.
-					</span>
+					<span>{t('shell.staleTab.cannotSave')}</span>
 					<button type="button" onClick={reload}>
-						Reload
+						{t('common.reload')}
 					</button>
 				</div>
 			)}
@@ -62,14 +61,11 @@ export const StaleTabGate = ({
 						aria-labelledby="tab-notice-title"
 						aria-describedby="tab-notice-text"
 					>
-						<h2 id="tab-notice-title">This tab is out of date</h2>
-						<p id="tab-notice-text">
-							A newer version of the app is open in another tab, and this one can no
-							longer save. Reload to carry on here.
-						</p>
+						<h2 id="tab-notice-title">{t('shell.staleTab.title')}</h2>
+						<p id="tab-notice-text">{t('shell.staleTab.text')}</p>
 						<div className="tab-notice-actions">
 							<button ref={button} type="button" onClick={reload}>
-								Reload
+								{t('common.reload')}
 							</button>
 							<button
 								type="button"
@@ -77,7 +73,7 @@ export const StaleTabGate = ({
 									setCopying(true);
 								}}
 							>
-								Copy my text first
+								{t('shell.staleTab.copyFirst')}
 							</button>
 						</div>
 					</div>
@@ -85,10 +81,7 @@ export const StaleTabGate = ({
 			)}
 			{state === 'waiting' && (
 				<div className="update-prompt" role="status">
-					<span>
-						Waiting for an older tab of this app to finish. If this does not go away,
-						close the other tabs.
-					</span>
+					<span>{t('shell.staleTab.waiting')}</span>
 				</div>
 			)}
 		</>
