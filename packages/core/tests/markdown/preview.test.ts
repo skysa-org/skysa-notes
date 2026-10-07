@@ -331,3 +331,52 @@ describe('how each line is set', () => {
 		expect(code).toMatchObject({ code: true, runs: [{ text: 'x = 1', marks: [] }] });
 	});
 });
+
+describe('a picture or a file’s chip in a line', () => {
+	it('is drawn there, as what it is, and still read as its words', () => {
+		const [line] = previewBlocks(
+			'see ![Beach](beach-1a2b3c4d.jpg) and [Q3 report](q3-report-1a2b3c4d.pdf) now\n'
+		);
+		expect(line?.runs).toEqual([
+			{ text: 'see ', marks: [] },
+			{
+				text: 'Beach ',
+				marks: [],
+				embed: { kind: 'image', src: 'beach-1a2b3c4d.jpg', alt: 'Beach' },
+			},
+			{ text: 'and ', marks: [] },
+			{
+				text: 'Q3 report ',
+				marks: [],
+				embed: {
+					kind: 'file',
+					href: 'q3-report-1a2b3c4d.pdf',
+					name: 'Q3 report',
+					fileName: 'q3-report-1a2b3c4d.pdf',
+				},
+			},
+			{ text: 'now', marks: [] },
+		]);
+	});
+
+	it('is a line of its own with no words, where the picture has none, but no line of words', () => {
+		const body = 'Receipt\n\n![](pasted-image-1a2b3c4d.png)\n\nPaid\n';
+		expect(previewBlocks(body).map((line) => line.runs)).toEqual([
+			[{ text: 'Receipt', marks: [] }],
+			[
+				{
+					text: '',
+					marks: [],
+					embed: { kind: 'image', src: 'pasted-image-1a2b3c4d.png', alt: '' },
+				},
+			],
+			[{ text: 'Paid', marks: [] }],
+		]);
+		expect(previewLines(body)).toEqual(['Receipt', 'Paid']);
+	});
+
+	it('is only words where the note gives its address elsewhere', () => {
+		const [line] = previewBlocks('![Beach][b]\n\n[b]: beach-1a2b3c4d.jpg\n');
+		expect(line?.runs).toEqual([{ text: 'Beach', marks: [] }]);
+	});
+});

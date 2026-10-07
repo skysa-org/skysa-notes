@@ -27,6 +27,7 @@ export {
 	previewLineText,
 	type PreviewMark,
 	type PreviewMarker,
+	type PreviewEmbed,
 	type PreviewRun,
 	previewText,
 } from './preview.js';

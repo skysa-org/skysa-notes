@@ -25,6 +25,7 @@ import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';
 import { cardLines, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
 import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
+import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
 import { useCardMotion, useEasedHeight } from './cardMotion.js';
 import { useElementWidth } from './layout.js';
 import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
@@ -227,7 +228,13 @@ const CardLine = ({ line }: { line: PreviewLine }) => {
 			{line.marker !== undefined && <Marker marker={line.marker} depth={line.depth} />}
 			<span className="scratch-card-words">
 				{line.runs.map((run, at) => (
-					<Fragment key={at}>{marked(run.text, run.marks)}</Fragment>
+					<Fragment key={at}>
+						{run.embed === undefined ? (
+							marked(run.text, run.marks)
+						) : (
+							<CardEmbed embed={run.embed} words={run.text} />
+						)}
+					</Fragment>
 				))}
 			</span>
 		</span>
@@ -265,7 +272,15 @@ const Card = ({
 	const typing = note.body !== row.body;
 	const lines = cardLines(opening(note.body, note, { keep: !typing }));
 	const first = lines[0];
-	const name = named ? note.title : first === undefined ? 'Empty note' : previewLineText(first);
+	const name = named
+		? note.title
+		: first === undefined
+			? 'Empty note'
+			: previewLineText(first) || 'Picture';
+	const shown = lines.map((line, at) => (
+		// Lines of one note, in order, and drawn again whole when it changes.
+		<CardLine key={at} line={line} />
+	));
 	return (
 		<article
 			ref={measure}
@@ -277,10 +292,7 @@ const Card = ({
 		>
 			<button type="button" className="scratch-card-open" data-card={row.id} onClick={onOpen}>
 				{named && <span className="scratch-card-title">{note.title}</span>}
-				{lines.map((line, at) => (
-					// Lines of one note, in order, and drawn again whole when it changes.
-					<CardLine key={at} line={line} />
-				))}
+				{hasPictures(lines) ? <CardFiles note={row}>{shown}</CardFiles> : shown}
 				{!named && lines.length === 0 && (
 					<span className="scratch-card-line muted">Empty note</span>
 				)}

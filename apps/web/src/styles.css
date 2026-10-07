@@ -3488,6 +3488,28 @@ button.icon.account-devices-count {
 	cursor: pointer;
 }
 
+/* A picture in a card, where it is in the note: whole, as wide as the card
+   and no taller than about six of its lines (`PICTURE_LINES`). Until it is
+   got, its words, in their place among the others. A chip is the editor's
+   own (`.attachment-chip`), at the card's size. */
+.scratch-card-picture[data-state='ready'] {
+	display: block;
+	margin-block: 0.2rem;
+}
+
+.scratch-card-picture > img {
+	display: block;
+	width: auto;
+	max-width: 100%;
+	height: auto;
+	max-height: 8rem;
+	border-radius: 0.25rem;
+}
+
+.scratch-card-chip {
+	vertical-align: bottom;
+}
+
 /* The whole card opens it, its foot included, all but the tools along that
    foot: the button is pressed anywhere on the card, and the tools' row lets a
    press between and beside them through to it. */

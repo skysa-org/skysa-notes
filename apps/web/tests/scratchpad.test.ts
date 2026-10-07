@@ -18,6 +18,7 @@ import {
 	CARD_WORDS,
 	cardLines,
 	getScratchpadShown,
+	PICTURE_LINES,
 	scratchGroups,
 	scratchMarks,
 	setScratchpadShown,
@@ -236,5 +237,36 @@ describe('what a card shows', () => {
 				{ text: 'two…', marks: ['strong'] },
 			],
 		});
+	});
+
+	const picture = (alt: string): PreviewLine => ({
+		depth: 0,
+		runs: [{ text: alt, marks: [], embed: { kind: 'image', src: 'beach.jpg', alt } }],
+	});
+
+	it('keeps a picture with no words, and as much room for it as a picture takes', () => {
+		const lines = [plain('Receipt'), picture(''), picture(''), plain('Paid')];
+		const shown = cardLines(lines);
+		// The second picture would be more than the card's lines.
+		expect(1 + 2 * PICTURE_LINES).toBeGreaterThan(CARD_LINES);
+		expect(shown).toHaveLength(2);
+		expect(shown[1]?.runs).toEqual([...picture('').runs, { text: '…', marks: [] }]);
+	});
+
+	it('cuts a line at a picture or a chip only whole', () => {
+		const chip: PreviewLine = {
+			depth: 0,
+			runs: [
+				{ text: 'see ', marks: [] },
+				{
+					text: 'Q3 report',
+					marks: [],
+					embed: { kind: 'file', href: 'q3.pdf', name: 'Q3 report', fileName: 'q3.pdf' },
+				},
+				{ text: ' later', marks: [] },
+			],
+		};
+		const [, cut] = cardLines([plain(words(CARD_WORDS - 2)), chip]);
+		expect(cut?.runs).toEqual([chip.runs[0], chip.runs[1], { text: '…', marks: [] }]);
 	});
 });

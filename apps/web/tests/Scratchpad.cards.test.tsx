@@ -151,6 +151,37 @@ describe('what a card shows', () => {
 		expect(words?.querySelector('a')).toBeNull();
 	});
 
+	it('draws a picture where it is in the note, and says it in the card’s name', async () => {
+		renderPad({
+			notes: [card('1', { body: 'Beach\n\n![The bay](https://example.com/bay.jpg)\n' })],
+		});
+		const picture = await screen.findByRole('img', { name: 'The bay' });
+		expect(picture.getAttribute('src')).toBe('https://example.com/bay.jpg');
+		expect(picture.getAttribute('referrerpolicy')).toBe('no-referrer');
+		expect(picture.closest('.scratch-card-picture')?.getAttribute('data-state')).toBe('ready');
+		expect(screen.getByRole('button', { name: /^Beach\s?The bay$/ })).toBeDefined();
+	});
+
+	it('says a picture in words until it is got', async () => {
+		renderPad({ notes: [card('1', { body: '![The bay](bay-1a2b3c4d.jpg)\n' })] });
+		// Not beside the note on this device, nor anywhere to get it from.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(screen.queryByRole('img')).toBeNull();
+		expect(document.querySelector('.scratch-card-picture')?.textContent).toBe('The bay');
+	});
+
+	it('draws a file’s chip as the editor does: its kind and its name', () => {
+		renderPad({
+			notes: [card('1', { body: 'Paid: [Lamp receipt](lamp-receipt-1a2b3c4d.pdf)\n' })],
+		});
+		const chip = document.querySelector('.scratch-card-chip');
+		expect(chip?.classList.contains('attachment-chip')).toBe(true);
+		expect(chip?.querySelector('.attachment-icon svg')).not.toBeNull();
+		expect(chip?.querySelector('.attachment-icon')?.getAttribute('aria-hidden')).toBe('true');
+		expect(chip?.querySelector('.attachment-name')?.textContent).toBe('Lamp receipt');
+		expect(screen.getByRole('button', { name: /^Paid:\s?Lamp receipt$/ })).toBeDefined();
+	});
+
 	it('draws a list’s bullets, numbers and boxes, out of the card’s name', () => {
 		renderPad({
 			notes: [

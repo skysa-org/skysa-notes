@@ -66,10 +66,24 @@ const apart = (words: string): string => ` ${words} `;
 /** How a run of a line's words is set, as the rich editor sets them. */
 export type PreviewMark = 'strong' | 'emphasis' | 'delete' | 'code' | 'link';
 
+/**
+ * A picture or a file's chip, as the rich editor draws it in a line: what a
+ * scratchpad card draws there too (`apps/web/src/components/Scratchpad.tsx`).
+ * The run it is on still says it in words — its alt text, the chip's name —
+ * for all that reads only words, so `previewLines` is the same with or
+ * without it.
+ */
+export type PreviewEmbed = Readonly<
+	| { kind: 'image'; src: string; alt: string }
+	| { kind: 'file'; href: string; name: string; fileName: string }
+>;
+
 /** Words set one way: a line is a row of these. */
 export interface PreviewRun {
 	readonly text: string;
 	readonly marks: readonly PreviewMark[];
+	/** A picture or a chip, where the run is one: drawn whole, or not at all. */
+	readonly embed?: PreviewEmbed;
 }
 
 /** What an item's first line starts with: its bullet, its number, or its box. */
@@ -121,6 +135,15 @@ const inline = (node: PhrasingContent, marks: readonly PreviewMark[]): PreviewRu
 		case 'break':
 			return [{ text: '\n', marks }];
 		case 'image':
+			return [
+				{
+					text: apart(node.alt ?? ''),
+					marks,
+					embed: { kind: 'image', src: node.url, alt: node.alt ?? '' },
+				},
+			];
+		// Its address is in a definition elsewhere in the note, which a line
+		// cannot see: its words.
 		case 'imageReference':
 			return [{ text: apart(node.alt ?? ''), marks }];
 		// The rich editor cannot show a footnote at all, and sends the note to raw
@@ -128,7 +151,7 @@ const inline = (node: PhrasingContent, marks: readonly PreviewMark[]): PreviewRu
 		case 'footnoteReference':
 			return [{ text: `[^${node.label ?? node.identifier}]`, marks }];
 		case 'link':
-			return isChip(node) ? [{ text: apart(chipWords(node)), marks }] : inside('link');
+			return isChip(node) ? [chip(node, marks)] : inside('link');
 		case 'emphasis':
 			return inside('emphasis');
 		case 'strong':
@@ -146,6 +169,15 @@ const inline = (node: PhrasingContent, marks: readonly PreviewMark[]): PreviewRu
 const chipWords = (link: Link): string => {
 	const words = textOf(link.children.flatMap((child) => inline(child, [])));
 	return words === '' ? hrefFileName(link.url) : words;
+};
+
+const chip = (link: Link, marks: readonly PreviewMark[]): PreviewRun => {
+	const name = chipWords(link);
+	return {
+		text: apart(name),
+		marks,
+		embed: { kind: 'file', href: link.url, name, fileName: hrefFileName(link.url) },
+	};
 };
 
 const textOf = (runs: readonly PreviewRun[]): string => runs.map((run) => run.text).join('');
@@ -233,20 +265,22 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
  * ends in a space too.
  */
 const collapsed = (runs: readonly PreviewRun[]): PreviewRun[] => {
+	// A picture with no words is still a picture.
+	const kept = (run: PreviewRun) => run.text !== '' || run.embed !== undefined;
 	const squeezed = runs
 		.map((run) => ({ ...run, text: run.text.replace(/\s+/g, ' ') }))
-		.filter((run) => run.text !== '');
+		.filter(kept);
 	const spaced = squeezed
 		.map((run, at) =>
 			at === 0 || squeezed[at - 1]?.text.endsWith(' ') === true
 				? { ...run, text: run.text.replace(/^ /, '') }
 				: run
 		)
-		.filter((run) => run.text !== '');
+		.filter(kept);
 	const last = spaced.at(-1);
 	if (last === undefined) return [];
-	const end = last.text.replace(/ $/, '');
-	return end === '' ? spaced.slice(0, -1) : [...spaced.slice(0, -1), { ...last, text: end }];
+	const end = { ...last, text: last.text.replace(/ $/, '') };
+	return kept(end) ? [...spaced.slice(0, -1), end] : spaced.slice(0, -1);
 };
 
 /**
@@ -264,8 +298,14 @@ export const previewBlocks = (body: string): PreviewLine[] =>
 /** A preview line's words, as one string. */
 export const previewLineText = (line: PreviewLine): string => textOf(line.runs);
 
-/** The readable lines of a body, in order, whitespace collapsed and blanks dropped. */
-export const previewLines = (body: string): string[] => previewBlocks(body).map(previewLineText);
+/**
+ * The readable lines of a body, in order, whitespace collapsed and blanks
+ * dropped — a line that is only a picture with no words among them.
+ */
+export const previewLines = (body: string): string[] =>
+	previewBlocks(body)
+		.map(previewLineText)
+		.filter((line) => line !== '');
 
 /**
  * One line of readable text for the whole body, which is what an excerpt is cut

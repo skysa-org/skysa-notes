@@ -99,14 +99,27 @@ export const CARD_WORDS = 60;
 /** And in no more lines than this, so a list of one word a line is not a card a screen tall. */
 export const CARD_LINES = 12;
 
-/** A line's runs up to `end` characters into its words, the run there cut short. */
+/**
+ * How many of those a line with a picture in it takes: about as tall as the
+ * card draws one at most (`.scratch-card-picture`), so a card is no taller
+ * for its pictures than for words — two, at most.
+ */
+export const PICTURE_LINES = 6;
+
+const heightOf = (line: PreviewLine): number =>
+	line.runs.some((run) => run.embed?.kind === 'image') ? PICTURE_LINES : 1;
+
+/**
+ * A line's runs up to `end` characters into its words, the run there cut
+ * short; a picture or a chip, there whole or not at all.
+ */
 const runsTo = (runs: readonly PreviewRun[], end: number): readonly PreviewRun[] =>
-	runs
-		.map((run, at) => {
-			const start = runs.slice(0, at).reduce((sum, each) => sum + each.text.length, 0);
-			return { ...run, text: run.text.slice(0, Math.max(0, end - start)) };
-		})
-		.filter((run) => run.text !== '');
+	runs.flatMap((run, at) => {
+		const start = runs.slice(0, at).reduce((sum, each) => sum + each.text.length, 0);
+		if (run.embed !== undefined) return start < end ? [run] : [];
+		const text = run.text.slice(0, Math.max(0, end - start));
+		return text === '' ? [] : [{ ...run, text }];
+	});
 
 /** A line's first `count` words, and nothing after them. */
 const firstWords = (line: PreviewLine, count: number): PreviewLine => {
@@ -116,12 +129,13 @@ const firstWords = (line: PreviewLine, count: number): PreviewLine => {
 		: { ...line, runs: runsTo(line.runs, last.index + last[0].length) };
 };
 
-/** A line with "…" at its end, set as the words it follows. */
+/** A line with "…" at its end, set as the words it follows — after a picture or a chip, on its own. */
 const trailing = (line: PreviewLine): PreviewLine => {
 	const last = line.runs.at(-1);
-	return last === undefined
-		? line
-		: { ...line, runs: [...line.runs.slice(0, -1), { ...last, text: `${last.text}…` }] };
+	if (last === undefined) return line;
+	if (last.embed !== undefined)
+		return { ...line, runs: [...line.runs, { text: '…', marks: [] }] };
+	return { ...line, runs: [...line.runs.slice(0, -1), { ...last, text: `${last.text}…` }] };
 };
 
 /**
@@ -130,17 +144,25 @@ const trailing = (line: PreviewLine): PreviewLine => {
  * `CARD_LINES`. A note with more ends in "…" where it was cut.
  */
 export const cardLines = (lines: readonly PreviewLine[]): readonly PreviewLine[] => {
-	const start = { kept: [] as readonly PreviewLine[], left: CARD_WORDS, cut: false };
+	const start = {
+		kept: [] as readonly PreviewLine[],
+		left: CARD_WORDS,
+		room: CARD_LINES,
+		cut: false,
+	};
 	const { kept, cut } = lines.reduce((card, line) => {
 		const words = previewLineText(line)
 			.split(/\s+/u)
 			.filter((word) => word !== '');
-		if (card.cut || words.length === 0) return card;
-		if (card.left <= 0 || card.kept.length >= CARD_LINES) return { ...card, cut: true };
+		const height = heightOf(line);
+		// A line of nothing but a picture with no words is still a picture.
+		if (card.cut || (words.length === 0 && height === 1)) return card;
+		if (card.left <= 0 || card.room < height) return { ...card, cut: true };
+		const room = card.room - height;
 		if (words.length <= card.left) {
-			return { ...card, kept: [...card.kept, line], left: card.left - words.length };
+			return { kept: [...card.kept, line], left: card.left - words.length, room, cut: false };
 		}
-		return { kept: [...card.kept, firstWords(line, card.left)], left: 0, cut: true };
+		return { kept: [...card.kept, firstWords(line, card.left)], left: 0, room, cut: true };
 	}, start);
 	const end = kept.at(-1);
 	return cut && end !== undefined ? [...kept.slice(0, -1), trailing(end)] : kept;
