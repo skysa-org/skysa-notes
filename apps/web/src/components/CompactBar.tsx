@@ -1,4 +1,4 @@
-import { basename, ROOT } from '@skysa/core';
+import { parentPath, ROOT } from '@skysa/core';
 import {
 	type CSSProperties,
 	type ReactNode,
@@ -7,6 +7,7 @@ import {
 	useDeferredValue,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useState,
 } from 'react';
 
@@ -15,7 +16,8 @@ import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { folderLabel } from '../store/tree.js';
-import { COMPACT, rems, useElementWidth, useMediaQuery } from './layout.js';
+import { COMPACT, rems, useElementWidth, useFontsStatus, useMediaQuery } from './layout.js';
+import { middleEllipsis } from './middleEllipsis.js';
 import { ProviderIcon } from './ProviderIcon.js';
 import { SearchField, type SearchFieldProps } from './SearchField.js';
 import { useShowingSource } from './SourceTabs.js';
@@ -174,16 +176,82 @@ export const useCompactLayout = () => {
 	};
 };
 
-/** What the notebook dropdown says: the notebook's own name, not its path. */
-const notebookLabel = (folder: string | undefined): string => {
-	if (folder === undefined) return 'Notebooks';
-	return folder === ROOT ? folderLabel(folder) : basename(folder);
+/**
+ * What the notebook dropdown says: its path, as the notes' heading does, so a
+ * notebook inside another says which notebooks it is in. `lead` is the
+ * notebooks it is in, which give way first when the bar is short of room
+ * (`PathLabel`).
+ */
+const notebookLabel = (folder: string | undefined): { value: string; lead?: string } => {
+	if (folder === undefined) return { value: 'Notebooks' };
+	const value = folderLabel(folder);
+	const parent = parentPath(folder);
+	return parent === ROOT ? { value } : { value, lead: parent };
+};
+
+/**
+ * `value` shortened in its middle to `room` (`middleEllipsis`), keeping the
+ * part after `lead` whole for longest, or `value` as it is with nothing to
+ * measure. Measured by a canvas, scaled to the width the page laid `whole` —
+ * the whole of `value` — out at, so the two agree about the font.
+ */
+const fitted = (
+	whole: Element | null | undefined,
+	room: number | undefined,
+	value: string,
+	lead: string
+): string => {
+	if (whole === null || whole === undefined || room === undefined) return value;
+	// The whole path fits by the page's own measure, which also laid out `room`.
+	const width = whole.getBoundingClientRect().width;
+	if (width <= room) return value;
+	const context = document.createElement('canvas').getContext('2d');
+	if (context === null) return value;
+	const style = getComputedStyle(whole);
+	context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+	const scale = width / context.measureText(value).width;
+	// A pixel to spare, for what a canvas and the page measure differently in
+	// a shorter string: a fraction over, and the stylesheet's own ellipsis cut
+	// the end off what was shortened already.
+	return middleEllipsis(
+		value,
+		value.slice(lead.length),
+		(text) => context.measureText(text).width * scale <= room - 1
+	);
+};
+
+/**
+ * A notebook's path, shortened in its middle to the room the bar gives it
+ * (`fitted`): the notebooks it is in give way before its own name.
+ *
+ * The whole path is in the label, unseen, so the bar gives the label the room
+ * the whole path asks for, as it does any trigger's words, and the shortened
+ * one is drawn over it — shortening what sizes the label would hand the room
+ * back and ask for it again. Measured again when the room changes and once
+ * the fonts have arrived; until then, and in jsdom, it is the whole path, cut
+ * at its end by the stylesheet.
+ */
+const PathLabel = ({ value, lead }: { value: string; lead: string }) => {
+	const [label, setLabel] = useState<HTMLSpanElement | null>(null);
+	const room = useElementWidth(label);
+	const fonts = useFontsStatus();
+	const shown = useMemo(
+		() => (fonts === 'loading' ? value : fitted(label?.firstElementChild, room, value, lead)),
+		[label, room, fonts, value, lead]
+	);
+	return (
+		<span ref={setLabel} className="compact-picker-label compact-picker-path">
+			<span className="compact-picker-whole">{value}</span>
+			<span className="compact-picker-shown">{shown}</span>
+		</span>
+	);
 };
 
 const PaneTrigger = ({
 	pane,
 	name,
 	value,
+	lead,
 	icon,
 	panel,
 	onPanel,
@@ -193,6 +261,11 @@ const PaneTrigger = ({
 	name: string;
 	/** What is chosen now. Truncated on screen, whole in the tooltip. */
 	value: string;
+	/**
+	 * The start of `value` that gives way first, so the rest — a notebook's own
+	 * name, after the notebooks it is in — is cut last (`PathLabel`).
+	 */
+	lead?: string;
 	/** Shown in place of `value`, which is then in the tooltip and the name only. */
 	icon?: ReactNode;
 	panel: Pane | null;
@@ -211,7 +284,12 @@ const PaneTrigger = ({
 			onPanel(panel === pane ? null : pane);
 		}}
 	>
-		{icon ?? <span className="compact-picker-label">{value}</span>}
+		{icon ??
+			(lead === undefined ? (
+				<span className="compact-picker-label">{value}</span>
+			) : (
+				<PathLabel value={value} lead={lead} />
+			))}
 		<span className="compact-picker-chevron">
 			<Icon name="chevron" />
 		</span>
@@ -302,7 +380,7 @@ export const CompactBar = ({
 			return { left: box.left - across.left, right: across.right - box.right };
 		};
 		onOrigins({ sources: from(sources), notebooks: from(notebooks), notes: from(notes) });
-	}, [bar, width, searching, onOrigins, source.kind, notebook, title]);
+	}, [bar, width, searching, onOrigins, source.kind, notebook.value, title]);
 
 	// The field appears because the icon was pressed, so the cursor goes into
 	// it; a keyboard user would otherwise have to find what they just opened.
@@ -365,7 +443,7 @@ export const CompactBar = ({
 				<PaneTrigger
 					pane="notebooks"
 					name="Notebook"
-					value={notebook}
+					{...notebook}
 					panel={panel}
 					onPanel={onPanel}
 				/>
