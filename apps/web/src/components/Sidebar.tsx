@@ -3,6 +3,8 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState 
 
 import { useCommand } from '../commands/context.js';
 import { Icon } from '../editor/icons.js';
+import { rich } from '../i18n/rich.js';
+import { t } from '../i18n/t.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
@@ -192,13 +194,13 @@ const NewFolderField = ({ parentPath, onCancel, onSubmit }: NewFolderFieldProps)
 			// apart and land in different places.
 			aria-label={
 				parentPath === undefined
-					? 'New notebook name'
-					: `Name for a notebook inside \u201c${basename(parentPath)}\u201d`
+					? t('notebooks.newName.label')
+					: t('notebooks.newName.insideLabel', { name: basename(parentPath) })
 			}
 			placeholder={
 				parentPath === undefined
-					? 'Notebook name'
-					: `Inside \u201c${basename(parentPath)}\u201d`
+					? t('notebooks.newName.placeholder')
+					: t('notebooks.newName.insidePlaceholder', { name: basename(parentPath) })
 			}
 			ref={field}
 			value={name}
@@ -233,9 +235,9 @@ const MoveHint = ({ moving, onCancel }: { moving: Moving; onCancel: () => void }
 		{/* The live region is the sentence alone: the way out is a control to
 		    reach, not news to be read out every time the hint changes. Escape
 		    still puts the thing down too (the route listens for it). */}
-		<span role="status">{`Moving “${moving.name}”. Choose where to put it.`}</span>{' '}
+		<span role="status">{t('notebooks.move.hint', { name: moving.name })}</span>{' '}
 		<button type="button" className="link-button" onClick={onCancel}>
-			Cancel
+			{t('common.cancel')}
 		</button>
 	</p>
 );
@@ -248,13 +250,12 @@ const MoveHint = ({ moving, onCancel }: { moving: Moving; onCancel: () => void }
 const destinationLabel = (
 	moving: Moving,
 	name: string,
-	landing: string | undefined,
+	landing: ((moving: Moving) => string) | undefined,
 	allowed: boolean
 ): string =>
-	allowed ? `Move “${moving.name}” ${landing ?? `into ${name}`}` : `${name} — cannot go here`;
-
-const howMany = (count: number, one: string, many: string): string[] =>
-	count === 0 ? [] : [`${String(count)} ${count === 1 ? one : many}`];
+	allowed
+		? (landing?.(moving) ?? t('notebooks.move.into', { name: moving.name, notebook: name }))
+		: t('notebooks.move.cannotGo', { notebook: name });
 
 /**
  * What deleting a notebook takes, in words. The files too: a file beside a note
@@ -262,10 +263,16 @@ const howMany = (count: number, one: string, many: string): string[] =>
  * place the user is told it will go.
  */
 const deletionOf = (name: string, noteCount: number, fileCount: number): string => {
-	const going = [...howMany(noteCount, 'note', 'notes'), ...howMany(fileCount, 'file', 'files')];
-	return going.length === 0
-		? `\u201c${name}\u201d will be deleted.`
-		: `\u201c${name}\u201d and the ${going.join(' and ')} in it will be deleted.`;
+	if (noteCount === 0 && fileCount === 0) return t('notebooks.delete.nothingInside', { name });
+	if (fileCount === 0) return t('notebooks.delete.notes', { name, count: noteCount });
+	if (noteCount === 0) return t('notebooks.delete.files', { name, count: fileCount });
+	// Two counts in one sentence: its words follow the notes', and the files
+	// are a phrase counted on its own.
+	return t('notebooks.delete.notesAndFiles', {
+		name,
+		count: noteCount,
+		files: t('notebooks.delete.fileCount', { count: fileCount }),
+	});
 };
 
 /**
@@ -292,8 +299,8 @@ const DeleteConfirm = ({
 	onCancel: () => void;
 }) => (
 	<ConfirmDialog
-		title="Delete notebook?"
-		confirmLabel="Delete"
+		title={t('notebooks.delete.title')}
+		confirmLabel={t('notebooks.delete.confirm')}
 		tone="danger"
 		onConfirm={onConfirm}
 		onCancel={onCancel}
@@ -307,10 +314,10 @@ interface RowProps {
 	path: string;
 	name: string;
 	/**
-	 * Where the thing lands, in words, when "into <name>" is not how to say it.
+	 * Putting the thing here, in words, when "into <name>" is not how to say it.
 	 * The top level is a place rather than a notebook: things go *to* it.
 	 */
-	landing?: string;
+	landing?: (moving: Moving) => string;
 	selected: boolean;
 	depth: number;
 	count?: number;
@@ -432,7 +439,7 @@ const Row = ({
 			{count !== undefined && count > 0 && <span className="count">{count}</span>}
 			{pinned && (
 				<span id={pinId} hidden>
-					Pinned
+					{t('rows.pinned')}
 				</span>
 			)}
 		</button>
@@ -486,7 +493,7 @@ const Disclosure = ({
 			className="row-disclosure"
 			tabIndex={moving === null ? -1 : 0}
 			aria-expanded={open}
-			aria-label={`Notebooks inside \u201c${name}\u201d`}
+			aria-label={t('notebooks.inside', { name })}
 			style={{
 				insetInlineStart: `calc(var(--gutter) - var(--disclosure-reach) + ${String(depth * 0.85)}rem)`,
 			}}
@@ -761,7 +768,7 @@ const toggleWith =
 	};
 
 /** The top level of the tree, which has no row of its own until one is needed. */
-const TOP_LEVEL_LABEL = 'Top level';
+const TOP_LEVEL_LABEL = t('notebooks.topLevel');
 
 /** Every file beneath a notebook, which deleting it takes as well. */
 const filesUnder = (node: FolderNode): number =>
@@ -815,15 +822,17 @@ const TreeBody = ({
 			nothing here to say — but "nothing" reads as an empty sidebar
 			beside a note list that says it is still loading. */}
 		{(tree === undefined || (tree.length === 0 && looseNoteCount === undefined)) && (
-			<li className="muted placeholder">Loading…</li>
+			<li className="muted placeholder">{t('notebooks.loading')}</li>
 		)}
 		{tree?.length === 0 && looseNoteCount === 0 && (
 			<li className="muted placeholder">
-				No notebooks yet.{' '}
-				<button type="button" className="link-button" onClick={onCreate}>
-					Create one
-				</button>{' '}
-				to start.
+				{rich('notebooks.empty', {
+					create: (words) => (
+						<button type="button" className="link-button" onClick={onCreate}>
+							{words}
+						</button>
+					),
+				})}
 			</li>
 		)}
 		{/* The only way to bring a nested notebook back out, and so it
@@ -838,7 +847,7 @@ const TreeBody = ({
 				<Row
 					path={ROOT}
 					name={TOP_LEVEL_LABEL}
-					landing="to the top level"
+					landing={(held) => t('notebooks.move.toTopLevel', { name: held.name })}
 					selected={false}
 					depth={0}
 					moving={moving}
@@ -1046,8 +1055,8 @@ export const Sidebar = ({
 
 	useCommand({
 		id: 'notebook.rename',
-		label: 'Rename notebook',
-		group: 'Notebook',
+		label: t('notebooks.commands.rename'),
+		group: t('notebooks.commands.group'),
 		enabled: manageable,
 		run: () => {
 			setRenaming(open ?? null);
@@ -1061,8 +1070,8 @@ export const Sidebar = ({
 
 	useCommand({
 		id: 'notebook.delete',
-		label: 'Delete notebook',
-		group: 'Notebook',
+		label: t('notebooks.commands.delete'),
+		group: t('notebooks.commands.group'),
 		enabled: manageable,
 		run: () => {
 			setDeleting(open ?? null);
@@ -1071,7 +1080,7 @@ export const Sidebar = ({
 	});
 
 	return (
-		<nav className="sidebar" aria-label="Notebooks">
+		<nav className="sidebar" aria-label={t('notebooks.title')}>
 			{scratchpad !== undefined && (
 				<ScratchpadRow
 					selected={scratchpad.selected}
@@ -1080,7 +1089,7 @@ export const Sidebar = ({
 				/>
 			)}
 			<div className="pane-header">
-				<h2>Notebooks</h2>
+				<h2>{t('notebooks.title')}</h2>
 				<div className="pane-actions">
 					<button
 						type="button"
@@ -1088,8 +1097,8 @@ export const Sidebar = ({
 						// Unconditionally the top level. What the `+` in a pane
 						// header makes is a notebook, and the top level is where
 						// notebooks live; anywhere else is asked for by name.
-						title="New notebook"
-						aria-label="New notebook"
+						title={t('notebooks.newNotebook')}
+						aria-label={t('notebooks.newNotebook')}
 						// A move is a mode, and a notebook made in the middle of one
 						// would land in a tree the user is holding a piece of.
 						disabled={moving !== null}
@@ -1174,7 +1183,7 @@ export const Sidebar = ({
 			{menu !== null && (
 				<FloatingMenu
 					at={menu.at}
-					label={`Notebook “${basename(menu.path)}”`}
+					label={t('rows.notebook.menu', { name: basename(menu.path) })}
 					items={notebookMenuItems(basename(menu.path), actionsFor(menu.path))}
 					onClose={() => {
 						setMenu(null);
