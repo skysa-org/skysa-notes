@@ -1,7 +1,9 @@
 import { type Catalog } from '../catalog.js';
+import { account } from './account.js';
 import { attachedFiles } from './attachedFiles.js';
 import { clipboard } from './clipboard.js';
 import { common } from './common.js';
+import { connect } from './connect.js';
 import { editor } from './editor.js';
 import { exporting } from './exporting.js';
 import { firstImport } from './firstImport.js';
@@ -23,6 +25,8 @@ import { unsent } from './unsent.js';
 export const en = {
 	common,
 	shell,
+	account,
+	connect,
 	importing,
 	exporting,
 	clipboard,
