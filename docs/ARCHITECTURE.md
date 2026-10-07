@@ -886,6 +886,18 @@ Measured on a real library (2,892 `.md` files and 62 others in 235 folders, 24 M
 - **Search finds scratch notes**, said to be in "Scratchpad", and opening one opens its card; the owner's choice. Only while that source's scratchpad is shown, since that is the only place one can be opened.
 - **Made a note** ("Move to notebook"): a card with no name is asked for one first (`NameDialog`), then it is picked up as a note moved from its list is, and dropped on a notebook. Its pin and colour are taken off as it goes (`moveNote`), and the app opens it there; the owner's choice. Cancel leaves it on the wall, named.
 
+### The app's words (2026-10-07)
+
+**Every word the app shows or reads out comes from one catalog**, `apps/web/src/i18n/`, rather than being written where it is said, so that a translation is a second catalog and not a change to every component. The owner asked for it on 2026-10-07, ahead of any translation, and chose the answers below. English is the only catalog so far, and the locale (`LOCALE` in `i18n/t.ts`) is settled when the page loads and never changes under it: choosing a language would be a reload, so nothing has to tell React that the words moved.
+
+- **Hand-rolled, with no dependency.** A catalog is plain data, in the shape a translation platform reads as JSON: a message is a string, or one string per plural category when it counts something, grouped into namespaces by the part of the app that says them (`en/*.ts`, put together in `en/index.ts`). `t(key, params)` looks one up by its dotted key. Nothing is compiled into a function at runtime, which would need the `eval` or `new Function` that `script-src 'self'` refuses (§9), and nothing a translator edits is code. i18next was the alternative: a dependency, and tens of kilobytes, for what is a hundred lines here.
+- **Typed.** The keys are the English catalog's, so a key that is not there, a placeholder not given, or params given to a message that takes none fails `tsc`. A catalog in another language is a `Translation<English>`: the same keys, each a string or a plural as in English, with words of its own.
+- **Placeholders** are `{name}`. A number is written in the catalog's locale (`Intl.NumberFormat`, so "1,028 notes"); one that is not a quantity, such as a year, is passed as a string.
+- **A plural is whole sentences.** `{ one, other }`, or whichever CLDR categories the language has, chosen by `Intl.PluralRules` from `count`. English's grammar used to be code — `count === 1 ? 'it' : 'them'`, a sentence glued from fragments — and no translation could have got past it. A message is a sentence or more, never a fragment the code puts together. A namespace may not have a key named after a plural category, since an object with `other` in it is read as a plural (`tests/i18n.test.tsx` holds the catalog to this and to closed tags and braces).
+- **Rich text** is `<name>…</name>` in the message and `rich(key, { name: (words) => … }, params)` where it is said. The tags are split out before the placeholders are filled, so a note named `<b>` stays a name.
+- **Text written into the user's files comes from the catalog too** — a new note's default name, a pasted picture's alt text, the names a download is given — the owner's choice: a German catalog would make `Unbenannt.md`. What is protocol stays English whatever the language: the conflict suffix ("Conflict rule" above), the app folder and its marker (§8, "Brand").
+- **ESLint refuses words written into JSX** in `apps/web/src`: text, and the text of the props that are shown or read out (`INLINE_WORDS` in `eslint.config.js`). A string in a `.ts` file cannot be told from a key by its syntax, so those are review's to catch. The components not moved yet are listed (`WORDS_NOT_MOVED_YET`), and the list only shrinks.
+
 ### Editor
 
 Two modes over one markdown string. Default is rich text; a toolbar/shortcut toggle (`Cmd/Ctrl+E`) switches to raw markdown. The mode is remembered per note and there's a global "default mode" preference.
@@ -1311,6 +1323,7 @@ apps/
       store/                  # Dexie db, notes.ts, folders.ts
       sync/                   # store.ts (SyncStore over Dexie), scheduler.ts (triggers, visibility, online events) — wraps core engine
       api/                    # typed client for apps/api
+      i18n/                   # the app's words: t(), rich(), and the English catalog in en/ (§7)
   api/                        # Hono on Cloudflare Workers
     wrangler.toml             # D1 binding, [assets] → ../web/dist
     src/

@@ -1,5 +1,7 @@
 import { useRegisterSW } from 'virtual:pwa-register/react';
 
+import { t } from '../i18n/t.js';
+
 /**
  * `registerType: 'prompt'` means a new build never swaps itself in underneath a
  * half-written note. The user decides when to reload.
@@ -14,12 +16,12 @@ export const UpdatePrompt = () => {
 
 	return (
 		<div className="update-prompt" role="status">
-			<span>A new version is available.</span>
+			<span>{t('shell.update.available')}</span>
 			<button type="button" onClick={() => void updateServiceWorker(true)}>
-				Reload
+				{t('common.reload')}
 			</button>
 			<button type="button" className="ghost" onClick={() => setNeedRefresh(false)}>
-				Later
+				{t('common.later')}
 			</button>
 		</div>
 	);

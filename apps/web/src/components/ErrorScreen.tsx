@@ -1,5 +1,7 @@
 import type { ErrorComponentProps } from '@tanstack/react-router';
 
+import { t } from '../i18n/t.js';
+
 /**
  * What is shown when rendering throws — a live query the store refused (quota,
  * an IndexedDB upgrade blocked by another tab), an editor that could not draw a
@@ -22,16 +24,13 @@ export const ErrorScreen = ({ error, reset }: ErrorComponentProps) => {
 
 	return (
 		<main className="error-screen" role="alert">
-			<h1>Something went wrong</h1>
-			<p>
-				The app hit an error it could not recover from by itself. The notes saved on this
-				device have not been touched.
-			</p>
+			<h1>{t('shell.error.title')}</h1>
+			<p>{t('shell.error.text')}</p>
 			<div className="error-actions">
 				{/* Renders the same screen again, which is enough when what failed has
 			    since passed — the other tab closed, the space freed. */}
 				<button type="button" onClick={reset}>
-					Try again
+					{t('common.tryAgain')}
 				</button>
 				<button
 					type="button"
@@ -39,12 +38,12 @@ export const ErrorScreen = ({ error, reset }: ErrorComponentProps) => {
 						window.location.reload();
 					}}
 				>
-					Reload
+					{t('common.reload')}
 				</button>
 			</div>
 			{message !== '' && (
 				<details>
-					<summary>What the error said</summary>
+					<summary>{t('shell.error.details')}</summary>
 					<pre>{message}</pre>
 				</details>
 			)}

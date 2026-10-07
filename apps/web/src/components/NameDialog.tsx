@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useSuspendShortcuts } from '../commands/context.js';
+import { t } from '../i18n/t.js';
 
 /**
  * A name the app has to have before it can go on, asked over everything: a
@@ -105,7 +106,7 @@ export const NameDialog = ({
 						{confirmLabel}
 					</button>
 					<button type="button" onClick={onCancel}>
-						Cancel
+						{t('common.cancel')}
 					</button>
 				</div>
 			</form>
