@@ -1,3 +1,4 @@
+import type * as DexieModule from 'dexie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createDatabase, type FileRecord, type NotesDatabase } from '../src/store/db.js';
@@ -10,15 +11,30 @@ import { watchSourceFiles } from '../src/store/sourceFiles.js';
  * source, however many listen.
  */
 
-/** How often the file paths were read. */
-const reads = vi.hoisted(() => ({ count: 0 }));
+/** How many live queries were started, how often the file paths were read, and whether the next read fails. */
+const counted = vi.hoisted(() => ({ queries: 0, reads: 0, failNext: false }));
+
+vi.mock('dexie', async (importOriginal) => {
+	const actual = await importOriginal<typeof DexieModule>();
+	return {
+		...actual,
+		liveQuery: (...args: Parameters<typeof actual.liveQuery>) => {
+			counted.queries += 1;
+			return actual.liveQuery(...args);
+		},
+	};
+});
 
 vi.mock('../src/store/files.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof Files>();
 	return {
 		...actual,
 		listFilePaths: (...args: Parameters<typeof Files.listFilePaths>) => {
-			reads.count += 1;
+			counted.reads += 1;
+			if (counted.failNext) {
+				counted.failNext = false;
+				return Promise.reject(new Error('unreadable'));
+			}
 			return actual.listFilePaths(...args);
 		},
 	};
@@ -27,7 +43,7 @@ vi.mock('../src/store/files.js', async (importOriginal) => {
 const opened: NotesDatabase[] = [];
 
 afterEach(async () => {
-	reads.count = 0;
+	Object.assign(counted, { queries: 0, reads: 0, failNext: false });
 	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
@@ -55,29 +71,21 @@ const eventually = async (test: () => boolean) => {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
 
 describe("hearing a source's files change", () => {
-	/** The reads `count` listeners cause, from the first through two changes. */
-	const readsFor = async (count: number) => {
+	it('is one query for fifty listeners, and each of them hears every change', async () => {
 		const db = freshDatabase();
-		const before = reads.count;
-		const heard = Array.from({ length: count }, () => vi.fn());
+		const heard = Array.from({ length: 50 }, () => vi.fn());
 		const stops = heard.map((listener) => watchSourceFiles(db, 'c1', listener));
 		await eventually(() => heard.every((listener) => listener.mock.calls.length === 1));
+
 		await db.files.put(row('notes/cat.png'));
 		await eventually(() => heard.every((listener) => listener.mock.calls.length === 2));
 		await db.files.put(row('notes/dog.png'));
 		await eventually(() => heard.every((listener) => listener.mock.calls.length === 3));
-		await settle();
+
+		expect(counted.queries).toBe(1);
 		stops.forEach((stop) => {
 			stop();
 		});
-		return reads.count - before;
-	};
-
-	it('is as many reads for fifty listeners as for one', async () => {
-		const one = await readsFor(1);
-		const fifty = await readsFor(50);
-		expect(one).toBeGreaterThan(0);
-		expect(fifty).toBe(one);
 	});
 
 	it('tells no one when a re-read finds the same files', async () => {
@@ -88,7 +96,7 @@ describe("hearing a source's files change", () => {
 		await eventually(() => listener.mock.calls.length === 1);
 
 		await db.files.put({ ...row('notes/cat.png'), size: 4 });
-		await eventually(() => reads.count >= 2);
+		await eventually(() => counted.reads >= 2);
 		await settle();
 
 		expect(listener).toHaveBeenCalledTimes(1);
@@ -115,16 +123,16 @@ describe("hearing a source's files change", () => {
 	it('stops reading once the last listener has stopped', async () => {
 		const db = freshDatabase();
 		const stops = [vi.fn(), vi.fn()].map((listener) => watchSourceFiles(db, 'c1', listener));
-		await eventually(() => reads.count >= 1);
+		await eventually(() => counted.reads >= 1);
 		stops.forEach((stop) => {
 			stop();
 		});
-		const before = reads.count;
+		const before = counted.reads;
 
 		await db.files.put(row('notes/cat.png'));
 		await settle();
 
-		expect(reads.count).toBe(before);
+		expect(counted.reads).toBe(before);
 	});
 
 	it('starts again for a listener after the last one stopped', async () => {
@@ -135,6 +143,24 @@ describe("hearing a source's files change", () => {
 
 		await db.files.put(row('notes/cat.png'));
 		await eventually(() => listener.mock.calls.length >= 1);
+		stop();
+	});
+
+	it('starts afresh for the next to listen once a read has failed', async () => {
+		const db = freshDatabase();
+		counted.failNext = true;
+		const first = watchSourceFiles(db, 'c1', vi.fn());
+		await eventually(() => counted.reads >= 1 && !counted.failNext);
+		await settle();
+		const listener = vi.fn();
+		const stop = watchSourceFiles(db, 'c1', listener);
+
+		await eventually(() => listener.mock.calls.length === 1);
+		await db.files.put(row('notes/cat.png'));
+		await eventually(() => listener.mock.calls.length === 2);
+
+		expect(counted.queries).toBe(2);
+		first();
 		stop();
 	});
 });

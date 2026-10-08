@@ -10,8 +10,8 @@ import { listFilePaths } from './files.js';
  * Each open note's host and each scratch card with a picture in it listens,
  * so that a picture that was missing is looked for again once a pull brings
  * its file (`useNoteAttachments`). Each used to run a query of its own over
- * every file row in the source, re-run on every write to the table: a wall of
- * fifty picture cards was fifty of them. Now the first to listen starts the
+ * every file row in the source, re-run whenever one of them was written: a
+ * wall of fifty picture cards was fifty of them. Now the first to listen starts the
  * query, the rest share it, and the last to stop ends it.
  */
 
@@ -45,8 +45,11 @@ const start = (db: NotesDatabase, connectionId: string, watches: Map<string, Wat
 			});
 		},
 		// A store that cannot be read says nothing: the views ask again as
-		// they would have anyway, on a sync or the network coming back.
-		error: () => undefined,
+		// they would have anyway, on a sync or the network coming back. A
+		// failed query is never run again, so the next to listen starts afresh.
+		error: () => {
+			if (watches.get(connectionId)?.listeners === listeners) watches.delete(connectionId);
+		},
 	});
 	const watch = { listeners, subscription };
 	watches.set(connectionId, watch);

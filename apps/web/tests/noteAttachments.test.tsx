@@ -253,14 +253,17 @@ describe('a picture beside the open note', () => {
 			.spyOn(pictureUrls, 'acquire')
 			.mockReturnValue({ url: 'blob:shared/1', release: () => undefined });
 
-		const shown = await createNoteAttachments({ db, note: () => where, readFile }).show(
-			'cat.png',
-			{ signal: new AbortController().signal }
-		);
+		try {
+			const shown = await createNoteAttachments({ db, note: () => where, readFile }).show(
+				'cat.png',
+				{ signal: new AbortController().signal }
+			);
 
-		expect(urlOf(shown)).toBe('blob:shared/1');
-		expect(acquire).toHaveBeenCalledTimes(1);
-		acquire.mockRestore();
+			expect(urlOf(shown)).toBe('blob:shared/1');
+			expect(acquire).toHaveBeenCalledTimes(1);
+		} finally {
+			acquire.mockRestore();
+		}
 	});
 
 	it('lets go of only what it handed out, not what another host still shows', async () => {
@@ -709,6 +712,10 @@ describe('the host of the open note', () => {
 
 	it('tells its views when a file arrives in the source, and when the network comes back', async () => {
 		const { db, heard } = await mounted();
+		// The source's files, read the first time.
+		await vi.waitFor(() => {
+			expect(heard).toHaveBeenCalled();
+		});
 		heard.mockClear();
 
 		await act(async () => {
