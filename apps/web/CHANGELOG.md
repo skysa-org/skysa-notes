@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.0.1
+
+### Patch Changes
+
+- ba00d11: Scratch notes made on another device before this one had the scratchpad now arrive: each source reads its storage once more after the update, downloading only what this device is missing.
+- @skysa/core@1.0.1
+
 ## 1.0.0
 
 ### Major Changes
