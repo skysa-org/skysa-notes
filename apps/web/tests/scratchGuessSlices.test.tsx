@@ -41,6 +41,7 @@ afterEach(() => {
 	cleanup();
 	widths?.restore();
 	widths = undefined;
+	Reflect.deleteProperty(document.documentElement, 'clientHeight');
 	vi.restoreAllMocks();
 });
 
@@ -92,6 +93,10 @@ const layOut = () => {
 	if (!(pane instanceof HTMLElement) || !(wall instanceof HTMLElement)) {
 		throw new Error('no scratchpad');
 	}
+	Object.defineProperty(document.documentElement, 'clientHeight', {
+		configurable: true,
+		value: 844,
+	});
 	Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 600 });
 	vi.spyOn(wall, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 1000, 0));
 	act(() => {
@@ -111,6 +116,26 @@ const whole = placeCards(
 	Array.from({ length: CARDS }, () => ONE_LINE),
 	1000
 );
+
+/** More cards than are windowed, placed: the scratchpad scrolled to its top. */
+const MANY = 300;
+const placedMany = async () => {
+	const many = Array.from({ length: MANY }, (_, at) => card(at));
+	const drawAgain = drawPad(many);
+	layOut();
+	await waitFor(() => {
+		expect(wallHeight()).toBe(
+			placeCards(
+				many.map(() => ONE_LINE),
+				1000
+			).height
+		);
+	});
+	return { many, drawAgain };
+};
+
+/** A sync's hundred cards, never placed, above the rest. */
+const arriving = () => Array.from({ length: 100 }, (_, at) => card(1000 + at));
 
 describe('the scratch wall, guessing its cards', () => {
 	it('places them from the top down, a slice at a time, where it placed them all at once', async () => {
@@ -184,6 +209,56 @@ describe('the scratch wall, guessing its cards', () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it('keeps the card the focus is in, and the wall, as cards arrive above them', async () => {
+		const { many, drawAgain } = await placedMany();
+		act(() => {
+			document.querySelector<HTMLElement>('[data-card="c20"]')?.focus();
+		});
+		const height = wallHeight();
+
+		drawAgain([...arriving(), ...many]);
+
+		// Still drawn, and the focus still in it, a hundred cards further down.
+		expect(drawn()).toContain('c20');
+		expect(document.activeElement?.getAttribute('data-card')).toBe('c20');
+		expect(wallHeight()).toBeGreaterThan(height);
+	});
+
+	it('draws no card listed to be measured ahead without its place, as cards arrive above them', async () => {
+		const { many, drawAgain } = await placedMany();
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			act(() => {
+				widths?.measure('.scratch-card', 80);
+			});
+			const onScreen = drawn().length;
+			act(() => {
+				vi.advanceTimersByTime(60);
+			});
+			// Cards after the screen, drawn to be measured.
+			expect(drawn().length).toBeGreaterThan(onScreen);
+
+			drawAgain([...arriving(), ...many]);
+
+			expect(
+				drawnCards().every((each) => each.style.transform.startsWith('translate('))
+			).toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('guesses at least one card a slice, however slow the clock', async () => {
+		// A clock a slice behind each time it is read, as a coarse one can be.
+		const clock = { now: 0 };
+		vi.spyOn(performance, 'now').mockImplementation(() => (clock.now += 100));
+		drawPad(newCards());
+
+		await waitFor(() => {
+			expect(drawn()).toHaveLength(CARDS);
+		});
 	});
 
 	it('guesses them again when the cards change width', async () => {

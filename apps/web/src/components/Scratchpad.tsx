@@ -452,6 +452,12 @@ const guessNow = (note: NoteRecord, width: number): number => {
  * third of a second on a phone, in the task that drew the scratchpad (#275).
  * A card is placed by the heights of every card before it, so the wall is
  * placed from the top down, and ends at the first card not guessed yet.
+ *
+ * Only what has never been placed waits for a slice. Cards arriving above
+ * cards with a height already — a sync's — are guessed now, whatever the
+ * clock says: a wall ending at the first of them let go of every card after
+ * it, the one the focus was in among them, and fell short of where the user
+ * was scrolled to.
  */
 const heightsFromTop = (
 	notes: readonly NoteRecord[],
@@ -461,10 +467,14 @@ const heightsFromTop = (
 	const until = performance.now() + SLICE_MS;
 	const heightOf = (note: NoteRecord): number | undefined =>
 		measured.get(note.id) ?? guessedAt(note, width);
-	const ends = notes.findIndex((note) => {
+	const known = notes.reduce((end, note, at) => (heightOf(note) === undefined ? end : at + 1), 0);
+	// At least one guess a slice, so a slow clock cannot keep the wall still.
+	const slice = { over: false };
+	const ends = notes.findIndex((note, at) => {
 		if (heightOf(note) !== undefined) return false;
-		if (performance.now() >= until) return true;
+		if (slice.over && at >= known) return true;
 		guessNow(note, width);
+		slice.over = performance.now() >= until;
 		return false;
 	});
 	return notes.slice(0, ends === -1 ? notes.length : ends).map((note) => heightOf(note) ?? 0);
@@ -501,7 +511,8 @@ const Wall = ({
 	// Each card's height, as drawn, by note id: what the wall places them by,
 	// and when each was last measured.
 	const { heights, measure, told, seen } = useHeights({ stamped: true });
-	// A slice of guesses each time the page has handed the thread back.
+	// A slice of guesses each time the page has handed the thread back. A
+	// slice a wall: with pinned cards, the two walls' share a task.
 	const [slices, setSlices] = useState(0);
 	const placed = useMemo(() => {
 		if (width === undefined) return undefined;
@@ -576,7 +587,9 @@ const Wall = ({
 			}),
 		[waiting]
 	);
-	const drawn = (note: NoteRecord, at: number) => near(note, at) || ahead.has(note.id);
+	// Listed to be measured while it had a place: none is drawn without one.
+	const drawn = (note: NoteRecord, at: number) =>
+		near(note, at) || (!unplaced(at) && ahead.has(note.id));
 	return (
 		<section className="scratch-group" aria-labelledby={labelled ? labelId : undefined}>
 			{labelled && (
