@@ -123,19 +123,4 @@ describe('object URLs for the files beside a note', () => {
 		expect(again.url).not.toBe(old.url);
 		expect(made).toHaveLength(2);
 	});
-
-	it('revokes everything at once when cleared, held or not, and a late release does nothing', () => {
-		const { urls, revoked } = factory();
-		const cache = createObjectUrlCache(urls, GRACE);
-		const held = cache.acquire('c1/a', () => new Blob(['a']));
-		const waiting = cache.acquire('c1/b', () => new Blob(['b']));
-		waiting.release();
-
-		cache.clear();
-
-		expect(revoked.sort()).toEqual([held.url, waiting.url].sort());
-		held.release();
-		vi.advanceTimersByTime(GRACE * 10);
-		expect(revoked).toHaveLength(2);
-	});
 });

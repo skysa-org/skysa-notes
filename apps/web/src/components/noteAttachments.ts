@@ -1,5 +1,4 @@
 import { basename, drawsFromData, safeOpenType, showsInline } from '@skysa/core';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { closedProblem } from '../editor/addFiles.js';
@@ -11,7 +10,7 @@ import type {
 	FileReceiver,
 	Shown,
 } from '../editor/attachHost.js';
-import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
+import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { pickFiles } from '../editor/pickFiles.js';
 import { db as appDb, type NoteRecord, type NotesDatabase } from '../store/db.js';
 import { heldFile } from '../store/fileCache.js';
@@ -20,8 +19,8 @@ import {
 	attachmentRefusal,
 	AttachmentRefusedError,
 	fileForLink,
-	listFilePaths,
 } from '../store/files.js';
+import { watchSourceFiles } from '../store/sourceFiles.js';
 import type { FileRead } from '../sync/fileReads.js';
 import { syncScheduler } from '../sync/runtime.js';
 import type { SyncScheduler } from '../sync/scheduler.js';
@@ -37,6 +36,16 @@ import type { SyncScheduler } from '../sync/scheduler.js';
  * when none shows it (`editor/objectUrls.ts`); an SVG is drawn from a `data:`
  * URL instead, never a `blob:` one (`drawsFromData` says why).
  */
+
+/**
+ * The URLs of every picture shown, app-wide (#276): the open note's editor and
+ * each scratch card drawing the same picture draw it from one URL, made from
+ * one copy of its bytes. Each host made its own, so a card open over its note
+ * held the picture twice, two blobs and two decodes. A view lets go of what it
+ * was given (`Shown.release`), and a host going away lets go of what it gave
+ * out (`dispose`); a URL nothing holds is revoked after the cache's grace.
+ */
+export const pictureUrls: ObjectUrlCache = createObjectUrlCache();
 
 /**
  * A picture larger than this is downloaded only when asked to: one held on the
@@ -73,7 +82,7 @@ export interface NoteAttachments extends AttachmentHost {
 	readonly pick: () => void;
 	/** Tell every view that what links resolve to may have changed. */
 	readonly notify: () => void;
-	/** Let go of every URL made for this note. */
+	/** Let go of every URL this host handed out and was not given back. */
 	readonly dispose: () => void;
 }
 
@@ -116,10 +125,23 @@ export const createNoteAttachments = ({
 	report = () => undefined,
 	store = () => Promise.resolve(true),
 	onAdded = () => undefined,
-	urls = createObjectUrlCache(),
+	urls = pictureUrls,
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
 	const listeners = new Set<() => void>();
+	// What this host has handed out and not been given back, let go of with it.
+	const handedOut = new Set<HeldUrl>();
+	const handOut = (held: HeldUrl): Shown => {
+		handedOut.add(held);
+		return {
+			state: 'ready',
+			url: held.url,
+			release: () => {
+				handedOut.delete(held);
+				held.release();
+			},
+		};
+	};
 	// Every editor that has offered itself and not gone, in the order they
 	// offered. The last is the one open now. More than one only while one
 	// editor is giving way to another, and that can go either way round: the
@@ -207,14 +229,14 @@ export const createNoteAttachments = ({
 			// is another picture, under another URL.
 			const key = [connectionId, file.id, file.remoteVersion ?? 'held'].join('\u0000');
 			const reused = svg ? undefined : urls.reuse(key);
-			if (reused !== undefined) return { state: 'ready', ...reused };
+			if (reused !== undefined) return handOut(reused);
 			const read = await bytesOf(connectionId, file, signal, large);
 			if ('state' in read) return read;
 			const blob = new Blob([read.bytes], {
 				type: svg ? 'image/svg+xml' : safeOpenType(name),
 			});
 			if (svg) return { state: 'ready', url: await dataUrl(blob), release: () => undefined };
-			return { state: 'ready', ...urls.acquire(key, () => blob) };
+			return handOut(urls.acquire(key, () => blob));
 		},
 
 		fetchFile: (href, signal) =>
@@ -256,7 +278,10 @@ export const createNoteAttachments = ({
 		},
 
 		dispose: () => {
-			urls.clear();
+			handedOut.forEach((held) => {
+				held.release();
+			});
+			handedOut.clear();
 		},
 	};
 };
@@ -339,13 +364,16 @@ export const useNoteAttachments = (
 		[host]
 	);
 
-	const files = useLiveQuery(
-		async () => (await listFilePaths(db, { connectionId: note.connectionId })).join('\n'),
-		[db, note.connectionId]
-	);
 	useEffect(() => {
 		host.notify();
-	}, [host, note.connectionId, note.path, files]);
+	}, [host, note.connectionId, note.path]);
+	useEffect(
+		() =>
+			watchSourceFiles(db, note.connectionId, () => {
+				host.notify();
+			}),
+		[host, db, note.connectionId]
+	);
 
 	useEffect(() => {
 		const online = () => {
