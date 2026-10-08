@@ -30,7 +30,7 @@ beforeEach(() => {
 	drawn.names = [];
 });
 
-const PATHS = ['archive', 'personal', 'work', 'work/meetings', 'work/plans'];
+const PATHS = ['archive', 'personal', 'work', 'work/meetings', 'work/plans', 'workshop'];
 const NOTES = ['work/meetings/monday.md', 'personal/list.md'];
 const build = (notePaths = NOTES) => buildFolderTree({ paths: PATHS, notePaths });
 
@@ -89,6 +89,12 @@ describe("a notebook's row", () => {
 		const drawAgain = drawSidebar({ selectedFolder: 'archive' });
 		drawAgain({ selectedFolder: 'work/meetings' });
 		expect(sorted()).toEqual(['archive', 'meetings', 'work']);
+	});
+
+	it('is not drawn again for a notebook whose name begins with its own', () => {
+		const drawAgain = drawSidebar({ selectedFolder: 'archive' });
+		drawAgain({ selectedFolder: 'workshop' });
+		expect(sorted()).toEqual(['archive', 'workshop']);
 	});
 
 	it('is drawn again as a drag comes on to it or leaves it, and no other is', () => {

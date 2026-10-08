@@ -53,13 +53,13 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 	// Each folder under its parent, once: asking every folder whether it is
 	// in each one was a quarter of a million asks for five hundred notebooks,
 	// on every autosave and every sync run.
-	const under = [...all].reduce((byParent, path) => {
+	const under = [...all].reduce((groups, path) => {
 		const parent = parentPath(path);
-		const siblings = byParent.get(parent);
-		if (siblings === undefined) return byParent.set(parent, [path]);
+		const siblings = groups.get(parent);
+		if (siblings === undefined) return groups.set(parent, [path]);
 		// eslint-disable-next-line functional/immutable-data
 		siblings.push(path);
-		return byParent;
+		return groups;
 	}, new Map<string, string[]>());
 
 	const childrenOf = (parent: string): FolderNode[] =>

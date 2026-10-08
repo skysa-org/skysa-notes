@@ -613,7 +613,11 @@ interface FolderRowsProps {
 	onDwell: (path: string) => void;
 }
 
-/** `path` is the notebook at `at`, or one inside it at any depth. */
+/**
+ * `path` is the notebook at `at`, or one inside it at any depth: `isWithin`,
+ * without its tidying of paths the tree's already are, as it is asked twice
+ * for every row on every draw of the sidebar.
+ */
 const within = (path: string | null | undefined, at: string): boolean =>
 	path !== null && path !== undefined && (path === at || path.startsWith(`${at}/`));
 
@@ -642,9 +646,13 @@ const FolderRows = ({ nodes, ...rest }: FolderRowsProps) => (
 				over={within(rest.over, node.path) ? rest.over : null}
 				renaming={within(rest.renaming, node.path) ? rest.renaming : null}
 				// Only an open row draws rows inside it, and needs to know which
-				// of those are open: a notebook opened or shut then redraws the
-				// rows open around it, and not every shut one.
-				openNotebooks={rest.openNotebooks.has(node.path) ? rest.openNotebooks : NONE_OPEN}
+				// of those are open: a notebook opened or shut then redraws every
+				// open row, and no shut one.
+				openNotebooks={
+					node.children.length > 0 && rest.openNotebooks.has(node.path)
+						? rest.openNotebooks
+						: NONE_OPEN
+				}
 			/>
 		))}
 	</>

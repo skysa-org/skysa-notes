@@ -157,6 +157,21 @@ describe('keptTree', () => {
 		expect(at(after, 'work')).toBe(at(before, 'work'));
 	});
 
+	it('is new from a notebook pinned up, in the new order, and the one beside it as it was', () => {
+		const before = build();
+		const after = keptTree(
+			before,
+			withPins(buildFolderTree({ paths: PATHS }), new Set(['work/plans']))
+		);
+		expect(at(after, 'work')?.children.map((node) => node.path)).toEqual([
+			'work/plans',
+			'work/meetings',
+		]);
+		expect(at(after, 'work')).not.toBe(at(before, 'work'));
+		expect(at(after, 'work/meetings')).toBe(at(before, 'work/meetings'));
+		expect(at(after, 'archive')).toBe(at(before, 'archive'));
+	});
+
 	it('is the tree built where there was none before', () => {
 		const next = build();
 		expect(keptTree(undefined, next)).toBe(next);
