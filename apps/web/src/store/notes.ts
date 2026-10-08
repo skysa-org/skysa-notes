@@ -9,11 +9,13 @@ import {
 	normalizeTag,
 	NOTE_EXTENSION,
 	parentPath,
+	type ParsedNoteFile,
 	parseNoteFile,
 	readFrontmatter,
 	replaceBasename,
 	SCRATCHPAD_FOLDER,
 	serializeNoteFile,
+	splitFrontmatter,
 	uniqueFilename,
 	UNTITLED_SLUG,
 	UNTITLED_TITLE,
@@ -1108,6 +1110,7 @@ export const importNoteFile = async (
 				hash: await Dexie.waitFor(contentHash(source)),
 				existing,
 				now,
+				parsed,
 			}),
 			...(input.remoteId === undefined ? {} : { remoteId: input.remoteId }),
 			...(input.remoteVersion === undefined ? {} : { remoteVersion: input.remoteVersion }),
@@ -1130,6 +1133,13 @@ export interface NoteFileInput {
 	/** The row this file replaces, if any. */
 	existing?: NoteRecord;
 	now: number;
+	/**
+	 * The file read (`parseNoteFile`, named by `path`), where the caller read it
+	 * before its transaction opened; read here where it did not. A read is most
+	 * of the cost of a note, and a transaction that does thousands holds every
+	 * other reader of the notes off until it is done (#275).
+	 */
+	parsed?: ParsedNoteFile;
 }
 
 /**
@@ -1152,11 +1162,11 @@ export interface NoteFileInput {
  * with some for the first time gains a blank line after the block
  * (`serializeNoteFile`), and reading the file back puts that line at the start
  * of the body, which the row never held. Every later pull of that file reads
- * it the same way.
+ * it the same way. Split, not read (`parseNoteFile`): only the body is
+ * wanted, and a read works out a title too, which is most of what it costs.
  */
 const sameBody = (existing: NoteRecord, parsed: { body: string }): boolean =>
-	existing.body === parsed.body ||
-	parseNoteFile(noteFile(existing), { filename: basename(existing.path) }).body === parsed.body;
+	existing.body === parsed.body || splitFrontmatter(noteFile(existing)).body === parsed.body;
 
 /**
  * When a note read from a file was last edited, as far as anyone here can say.
@@ -1187,7 +1197,7 @@ const editedAt = (
 };
 
 export const noteRecordFromFile = (input: NoteFileInput): NoteRecord => {
-	const parsed = parseNoteFile(input.source, { filename: basename(input.path) });
+	const parsed = input.parsed ?? parseNoteFile(input.source, { filename: basename(input.path) });
 	const { existing } = input;
 	return {
 		id: input.id,

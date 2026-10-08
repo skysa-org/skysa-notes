@@ -1,6 +1,7 @@
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord, noteRef } from './db.js';
+import { handBack, SLICE_MS } from './slices.js';
 import { titleShown } from './titles.js';
 import { visibleText } from './visibleText.js';
 
@@ -104,7 +105,8 @@ export interface NoteSearch {
 	/**
 	 * Make the index agree with these notes: whatever is not among them is
 	 * forgotten, whatever has changed is indexed again. A slice at a time
-	 * (`SLICE_MS`), so it can take many turns of the event loop.
+	 * (`SLICE_MS`, `store/slices.ts`), so it can take many turns of the event
+	 * loop.
 	 *
 	 * True once the index agrees with them; false if another refresh, or
 	 * `stop`, came first, in which case this one has let go: the index is the
@@ -120,35 +122,6 @@ export interface NoteSearch {
 	 */
 	readonly find: (query: string) => NoteHit[];
 }
-
-/**
- * How long a refresh holds the thread at a time, in milliseconds. A key
- * pressed while the index is being built waits for at most one slice, where
- * it waited for the whole build when it was one piece: a second, on a phone,
- * in which the field did not take a letter.
- */
-const SLICE_MS = 8;
-
-/**
- * The thread handed back for a turn, so whatever is waiting — a key, a frame —
- * goes before the next slice. A message rather than `setTimeout(0)`, which
- * browsers hold back to 4 ms once timeouts have nested five deep: a build of a
- * hundred slices would spend half as long again doing nothing.
- */
-const handBack = (): Promise<void> =>
-	new Promise((resolve) => {
-		const { port1, port2 } = new MessageChannel();
-		port1.addEventListener(
-			'message',
-			() => {
-				port1.close();
-				resolve();
-			},
-			{ once: true }
-		);
-		port1.start();
-		port2.postMessage(null);
-	});
 
 /**
  * The tokenizer, which has to be the one the corpus was indexed with: a query

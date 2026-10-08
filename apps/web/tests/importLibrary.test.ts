@@ -334,6 +334,31 @@ describe('importLibrary', () => {
 		expect(await liveNotes(db)).toEqual(['Plan.md', 'plan-2.md']);
 	});
 
+	it('titles a numbered note with nothing else to name it by the name it was given', async () => {
+		// Read by the name it was picked under before the import began, and read
+		// again by the one it took here, which is where its title comes from.
+		const db = await bound();
+		await importNoteFile(db, { ...scope, path: 'Work/Plan.md', source: '# Mine\n' });
+
+		await importLibrary(
+			db,
+			CONNECTION,
+			planImport(picked({ 'work/plan.md': 'no heading\n', 'work/other.md': 'nor here\n' }))
+		);
+
+		const titles = Object.fromEntries(
+			(await db.notes.where('connectionId').equals(CONNECTION).toArray()).map((note) => [
+				note.path,
+				note.title,
+			])
+		);
+		expect(titles).toEqual({
+			'Work/Plan.md': 'Mine',
+			'Work/plan-2.md': 'plan 2',
+			'Work/other.md': 'other',
+		});
+	});
+
 	it('imports the same archive twice as two copies, with ids of their own and the files once', async () => {
 		const db = await bound();
 		const archive = planImport(

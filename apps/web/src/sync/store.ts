@@ -1,4 +1,5 @@
 import {
+	basename,
 	conflictContent,
 	type ConflictResolution,
 	contentHash,
@@ -6,6 +7,8 @@ import {
 	normalizePath,
 	type OpOutcome,
 	parentPath,
+	type ParsedNoteFile,
+	parseNoteFile,
 	type PullBatch,
 	type PullChange,
 	rebasePath,
@@ -37,6 +40,7 @@ import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.j
 import { dropPictures, restampPicture } from '../store/pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
 import { queueMove, queueWrite } from '../store/queue.js';
+import { eachInSlices } from '../store/slices.js';
 
 /**
  * The sync engine's `SyncStore` port, over the app's own IndexedDB tables.
@@ -219,6 +223,22 @@ const contentsOf = (changes: readonly PullChange[]): string[] =>
 		return [];
 	});
 
+/**
+ * What a batch's files were found to be before its transaction opened: each
+ * one's digest, by its contents, and each pulled note's file read, by its
+ * change.
+ */
+interface Prepared {
+	hashes: ReadonlyMap<string, string>;
+	read: ReadonlyMap<PullChange, ParsedNoteFile>;
+}
+
+const readFor = (read: Prepared['read'], change: PullChange): ParsedNoteFile => {
+	const parsed = read.get(change);
+	if (parsed === undefined) throw new Error('A file reached the store without being read');
+	return parsed;
+};
+
 export const createDexieSyncStore = (
 	db: NotesDatabase,
 	options: DexieSyncStoreOptions
@@ -241,6 +261,23 @@ export const createDexieSyncStore = (
 		const hash = hashes.get(content);
 		if (hash === undefined) throw new Error('A file reached the store without being digested');
 		return hash;
+	};
+
+	/**
+	 * Every pulled note's file read, before the transaction opens and a slice at
+	 * a time (`store/slices.ts`). A read is most of what a note costs to apply:
+	 * read in the transaction, a first pull of a few thousand notes held every
+	 * other reader of the notes off for as long as all of them took (#275).
+	 */
+	const readAll = async (
+		changes: readonly PullChange[]
+	): Promise<ReadonlyMap<PullChange, ParsedNoteFile>> => {
+		const read = new Map<PullChange, ParsedNoteFile>();
+		await eachInSlices(changes, (change) => {
+			if (change.kind !== 'upsert-note') return;
+			read.set(change, parseNoteFile(change.content, { filename: basename(change.path) }));
+		});
+		return read;
 	};
 
 	/**
@@ -933,7 +970,7 @@ export const createDexieSyncStore = (
 	const upsertNote = async (
 		scope: Scope,
 		change: Extract<PullChange, { kind: 'upsert-note' }>,
-		hashes: ReadonlyMap<string, string>
+		{ hashes, read }: Prepared
 	): Promise<void> => {
 		// A file arriving is a note that is here again, whatever this tab did to
 		// the last one of that id (`store/deletedHere.ts`).
@@ -954,6 +991,7 @@ export const createDexieSyncStore = (
 				hash: hashFor(hashes, change.content),
 				existing,
 				now: now(),
+				parsed: readFor(read, change),
 			}),
 			remoteId: change.remote.remoteId,
 			remoteVersion: change.remote.version,
@@ -1032,7 +1070,7 @@ export const createDexieSyncStore = (
 	const applyChange = async (
 		scope: Scope,
 		change: PullChange,
-		hashes: ReadonlyMap<string, string>
+		prepared: Prepared
 	): Promise<void> => {
 		if (isFileChange(change)) {
 			await (change.kind === 'upsert-file'
@@ -1042,7 +1080,7 @@ export const createDexieSyncStore = (
 		}
 		switch (change.kind) {
 			case 'upsert-note':
-				await upsertNote(scope, change, hashes);
+				await upsertNote(scope, change, prepared);
 				return;
 			case 'adopt-version': {
 				const note = await requireNote(scope, change.id);
@@ -1120,7 +1158,7 @@ export const createDexieSyncStore = (
 				);
 				return;
 			case 'conflict':
-				await applyConflict(scope, change.resolution, hashes);
+				await applyConflict(scope, change.resolution, prepared.hashes);
 				return;
 		}
 	};
@@ -1312,13 +1350,16 @@ export const createDexieSyncStore = (
 			}),
 
 		applyPull: async (batch: PullBatch) => {
-			const hashes = await digestAll(contentsOf(batch.changes));
+			const prepared: Prepared = {
+				hashes: await digestAll(contentsOf(batch.changes)),
+				read: await readAll(batch.changes),
+			};
 			await inTransaction(async () => {
 				// One after another, in the order given: the engine decided each
 				// change against the store as the ones before it left it.
 				await batch.changes.reduce<Promise<void>>(async (pending, change) => {
 					await pending;
-					await applyChange(db, change, hashes);
+					await applyChange(db, change, prepared);
 				}, Promise.resolve());
 
 				if (batch.cursor === undefined) return;
