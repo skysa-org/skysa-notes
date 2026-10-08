@@ -1,6 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import type * as Core from '@skysa/core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { openingLines, visibleLines, visibleText } from '../src/store/visibleText.js';
+import {
+	keepOpenings,
+	openingBlocks,
+	openingLines,
+	visibleLines,
+	visibleText,
+} from '../src/store/visibleText.js';
+
+/** Every parse the cache asks core for. */
+const parses = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock('@skysa/core', async (importOriginal) => {
+	const actual = await importOriginal<typeof Core>();
+	return {
+		...actual,
+		previewBlocks: (body: string) => {
+			parses.count += 1;
+			return actual.previewBlocks(body);
+		},
+	};
+});
+
+beforeEach(() => {
+	parses.count = 0;
+});
 
 /**
  * The note list asks for a preview on every render, and renders on every
@@ -46,5 +71,68 @@ describe('a body being typed', () => {
 		expect(first).toEqual(['Typed once, and typed past.']);
 		// Not the same answer a second time: nothing was kept to give back.
 		expect(visibleLines(typed, { keep: false })).not.toBe(first);
+	});
+});
+
+describe('the parses a list costs', () => {
+	/** `count` distinct notes' bodies, as a long list's rows hold them. */
+	const bodies = (prefix: string, count: number) =>
+		Array.from(
+			{ length: count },
+			(_, at) => `# ${prefix} ${String(at)}\n\nWords of note ${String(at)}.\n`
+		);
+
+	it('is one parse for an opening asked for as lines and as blocks', () => {
+		const body = '# Card\n\n- one\n- two\n';
+		openingLines(body);
+		openingBlocks(body);
+		expect(parses.count).toBe(1);
+	});
+
+	it('is one parse per row of a list longer than the cache was, drawn again and again', () => {
+		const rows = bodies('Row', 1_000);
+		keepOpenings('test-list', rows.length);
+		rows.forEach((body) => openingLines(body));
+		rows.forEach((body) => openingLines(body));
+		rows.forEach((body) => openingLines(body));
+		expect(parses.count).toBe(1_000);
+	});
+
+	it('keeps room for two lists, so going between them parses neither again', () => {
+		const list = bodies('Listed', 700);
+		const cards = bodies('Card', 700);
+		keepOpenings('test-a', list.length);
+		keepOpenings('test-b', cards.length);
+		[...list, ...cards].forEach((body) => openingBlocks(body));
+		[...list, ...cards].forEach((body) => openingBlocks(body));
+		expect(parses.count).toBe(1_400);
+	});
+
+	it('gives the same lines while their parse is kept', () => {
+		const body = 'Kept.\n';
+		expect(openingLines(body)).toBe(openingLines(body));
+	});
+
+	// More than any list in this file has made room for, so a kept one would push a row out.
+	const MANY = 4_000;
+
+	it('loses nothing to a body being typed', () => {
+		const rows = bodies('Typed beside', 300);
+		rows.forEach((body) => openingLines(body));
+		const before = parses.count;
+		Array.from({ length: MANY }, (_, at) => `Typed, keystroke ${String(at)}.\n`).forEach(
+			(typed) => openingLines(typed, { keep: false })
+		);
+		rows.forEach((body) => openingLines(body));
+		expect(parses.count).toBe(before + MANY);
+	});
+
+	it('loses no list row to the whole bodies a search is cut from', () => {
+		const rows = bodies('Searched beside', 300);
+		rows.forEach((body) => openingLines(body));
+		const before = parses.count;
+		bodies('Answer', MANY).forEach(visibleText);
+		rows.forEach((body) => openingLines(body));
+		expect(parses.count).toBe(before + MANY);
 	});
 });
