@@ -8,6 +8,7 @@ import {
 	findFolder,
 	folderLabel,
 	type FolderNode,
+	keptTree,
 	listedUnder,
 	selectedFolderPath,
 	withPins,
@@ -110,6 +111,55 @@ describe('withPins', () => {
 
 	it('leaves the tree as it was with nothing pinned', () => {
 		expect(shape(withPins(tree, new Set()))).toEqual(shape(tree));
+	});
+});
+
+describe('keptTree', () => {
+	const PATHS = ['archive', 'work', 'work/meetings', 'work/plans'];
+	const build = (notePaths: string[] = [], paths = PATHS) =>
+		withPins(buildFolderTree({ paths, notePaths }), new Set());
+	const at = findFolder;
+
+	it('is the tree it was where nothing in it changed', () => {
+		const before = build(['work/plans/q3.md']);
+		expect(keptTree(before, build(['work/plans/q3.md']))).toBe(before);
+	});
+
+	it('is new from a changed notebook up, and the notebooks beside them as they were', () => {
+		const before = build();
+		const after = keptTree(before, build(['work/plans/q3.md']));
+		expect(after).not.toBe(before);
+		expect(at(after, 'work/plans')?.noteCount).toBe(1);
+		expect(at(after, 'work')).not.toBe(at(before, 'work'));
+		expect(at(after, 'work/meetings')).toBe(at(before, 'work/meetings'));
+		expect(at(after, 'archive')).toBe(at(before, 'archive'));
+	});
+
+	it('takes in a notebook made, and lets go of one gone', () => {
+		const before = build();
+		const made = keptTree(before, build([], [...PATHS, 'work/drafts']));
+		expect(at(made, 'work/drafts')).toBeDefined();
+		expect(at(made, 'archive')).toBe(at(before, 'archive'));
+
+		const gone = keptTree(before, build([], ['work', 'work/meetings', 'work/plans']));
+		expect(at(gone, 'archive')).toBeUndefined();
+		expect(at(gone, 'work')).toBe(at(before, 'work'));
+	});
+
+	it('is new for a notebook pinned', () => {
+		const before = build();
+		const after = keptTree(
+			before,
+			withPins(buildFolderTree({ paths: PATHS }), new Set(['archive']))
+		);
+		expect(at(after, 'archive')?.pinned).toBe(true);
+		expect(at(after, 'archive')).not.toBe(at(before, 'archive'));
+		expect(at(after, 'work')).toBe(at(before, 'work'));
+	});
+
+	it('is the tree built where there was none before', () => {
+		const next = build();
+		expect(keptTree(undefined, next)).toBe(next);
 	});
 });
 

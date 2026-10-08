@@ -28,7 +28,7 @@ import {
 } from './prefs.js';
 import { getScratchpadShown, isScratchNote } from './scratchpad.js';
 import { createNoteSearch, type NoteHit } from './search.js';
-import { buildFolderTree, type FolderNode, withPins } from './tree.js';
+import { buildFolderTree, type FolderNode, keptTree, withPins } from './tree.js';
 
 /**
  * Live reads from IndexedDB. `useLiveQuery` re-runs its query whenever a write
@@ -97,9 +97,13 @@ export interface PinnedTree {
  * by `pickNote` for the same reason, and are handed to them from here.
  *
  * The pins stay the same object while they are the same pins (`pinsKey`):
- * `pickNote` is asked again when they change.
+ * `pickNote` is asked again when they change. A notebook that has not changed
+ * since the read before is the node it was then, and the tree the tree it was
+ * where nothing in it changed (`keptTree`), so the sidebar redraws only the
+ * rows that did.
  */
 export const usePinnedTree = (): PinnedTree => {
+	const before = useRef<FolderNode[] | undefined>(undefined);
 	const result = useLiveQuery(async () => {
 		const connectionId = await activeConnectionId(db);
 		const [paths, notes, filePaths, pins] = await Promise.all([
@@ -115,7 +119,9 @@ export const usePinnedTree = (): PinnedTree => {
 			notePaths: notes.map((note) => note.path).filter((path) => !isScratchPath(path)),
 			filePaths: filePaths.filter((path) => !isScratchPath(path)),
 		});
-		return { tree: withPins(tree, pins.notebooks), pinned: pinsKey(pins) };
+		const kept = keptTree(before.current, withPins(tree, pins.notebooks));
+		before.current = kept;
+		return { tree: kept, pinned: pinsKey(pins) };
 	}, []);
 	const pinned = result?.pinned;
 	const pins = useMemo(() => (pinned === undefined ? undefined : pinsFromKey(pinned)), [pinned]);
