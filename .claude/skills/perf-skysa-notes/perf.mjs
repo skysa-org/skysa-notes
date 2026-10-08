@@ -43,13 +43,13 @@ const PROFILES = {
 		},
 	},
 	'phone-low': { cpu: 6 },
-	desktop: {
-		cpu: 1,
-		options: { viewport: { width: 1400, height: 900 }, locale: 'en-US', timezoneId: 'UTC' },
-	},
 };
 PROFILES['phone-low'].options = PROFILES.phone.options;
+// Phones only: the scenarios find their way round the phone's layout, its
+// panes and its pickers, and tap.
 const profile = PROFILES[args.profile];
+if (profile === undefined)
+	throw new Error(`--profile is one of ${Object.keys(PROFILES).join(', ')}`);
 const targets = args.target.map((spec) => {
 	const at = spec.indexOf('=');
 	return { name: spec.slice(0, at), url: spec.slice(at + 1) };
@@ -113,27 +113,52 @@ const delta = (before, after) => ({
 });
 
 /**
- * The page time of the frame after `test(arg)` turns true, or null at `timeout`.
- * Sent as an expression, which CDP evaluates outside the page's CSP.
+ * The page time of the frame after `test(arg)` turns true. Sent as an
+ * expression, which CDP evaluates outside the page's CSP. A wait that never
+ * ends throws, so the run is an error rather than a time; an `optional` one
+ * gives null.
  */
-const until = (page, test, arg, timeout = 120_000) =>
-	page.evaluate(
+const until = async (page, test, arg, { timeout = 120_000, optional = false } = {}) => {
+	const at = await page.evaluate(
 		`window.__perf.until(() => (${test.toString()})(${JSON.stringify(arg ?? null)}), ${timeout})`
 	);
+	if (at === null && !optional) {
+		const waited = JSON.stringify(arg ?? test.toString().slice(0, 100));
+		throw new Error(`waited ${timeout} ms for ${waited}`);
+	}
+	return at;
+};
 const now = (page) => page.evaluate(() => performance.now());
 const quiet = (page, ms = 1_000) => page.evaluate((ms) => window.__perf.quiet(ms), ms);
 const reset = (page) => page.evaluate(() => window.__perf.reset());
 const summary = (page) => page.evaluate(() => window.__perf.summary());
 /** Until at least `n` elements match `selector`. */
-const untilCount = (page, selector, n = 1, timeout) =>
-	until(
-		page,
-		(arg) => document.querySelectorAll(arg.selector).length >= arg.n,
-		{ selector, n },
-		timeout
-	);
+const untilCount = (page, selector, n = 1) =>
+	until(page, (arg) => document.querySelectorAll(arg.selector).length >= arg.n, {
+		selector,
+		n,
+	});
 
-/** Scroll the nearest scroller of `selector` to its end with touch flings; frame intervals while it runs. */
+/**
+ * Tap `locator`; the page time the touch reached the page. Playwright waits for
+ * the element to be still, scrolls to it and hit-tests it before it touches,
+ * all on the slowed thread, and none of that is the app's time.
+ */
+const tap = async (page, locator) => {
+	await page.evaluate(() => {
+		window.__perf.touched = null;
+	});
+	await locator.tap();
+	const at = await page.evaluate(() => window.__perf.touched);
+	if (at === null) throw new Error('the tap never reached the page');
+	return at;
+};
+
+/**
+ * Scroll the nearest scroller of `selector` to its end with touch flings: how
+ * far it went, whether it got there, and the frame intervals while it ran. A
+ * scroller that never moved throws.
+ */
 const fling = async (page, cdp, selector) => {
 	const box = await page.evaluate((selector) => {
 		const start = document.querySelector(selector);
@@ -145,9 +170,20 @@ const fling = async (page, cdp, selector) => {
 		const rect = scroller.getBoundingClientRect();
 		return { x: rect.left + rect.width / 2, y: rect.top + Math.min(rect.height / 2, 400) };
 	}, selector);
+	const where = () =>
+		page.evaluate(() => {
+			const scroller = document.querySelector('[data-perf-scroller]');
+			return {
+				top: scroller.scrollTop,
+				end: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4,
+			};
+		});
+	const from = await where();
 	await page.evaluate(() => window.__perf.startFrames());
 	const started = Date.now();
-	for (let i = 0; i < 40; i += 1) {
+	let at = from;
+	// Until the end, or three flings in a row that moved nothing.
+	for (let flings = 0, still = 0; flings < 400 && !at.end && still < 3; flings += 1) {
 		await cdp.send('Input.synthesizeScrollGesture', {
 			x: Math.round(box.x),
 			y: Math.round(box.y),
@@ -155,16 +191,17 @@ const fling = async (page, cdp, selector) => {
 			speed: 3000,
 			gestureSourceType: 'touch',
 		});
-		const end = await page.evaluate(() => {
-			const scroller = document.querySelector('[data-perf-scroller]');
-			return scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 4;
-		});
-		if (end) break;
+		const next = await where();
+		still = next.top === at.top ? still + 1 : 0;
+		at = next;
 	}
 	const frames = await page.evaluate(() => window.__perf.stopFrames());
+	if (at.top === from.top) throw new Error(`flinging ${selector} scrolled nothing`);
 	const sorted = [...frames].sort((a, b) => a - b);
 	return {
 		scrollMs: Date.now() - started,
+		scrolledPx: at.top - from.top,
+		reachedEnd: at.end ? 1 : 0,
 		frameP95: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
 		frameMax: sorted.at(-1) ?? 0,
 		slowFrames: frames.filter((frame) => frame > 50).length,
@@ -191,7 +228,9 @@ const SCENARIOS = {
 	cold: {
 		needs: (m) => m.big !== undefined,
 		run: async ({ page, cdp, manifest, base }) => {
-			await page.goto(`${base}${manifest.big.hash}`);
+			// Not waiting for `load`: a list up before it would be timed at the
+			// first look, not when it came.
+			await page.goto(`${base}${manifest.big.hash}`, { waitUntil: 'commit' });
 			const listed = await untilCount(page, '.note-list li.row-item', manifest.big.rows);
 			const edited = await untilCount(page, '.editor-rich-surface');
 			const settled = await quiet(page);
@@ -220,8 +259,7 @@ const SCENARIOS = {
 			await quiet(page, 500);
 			const before = await counters(cdp);
 			await reset(page);
-			const start = await now(page);
-			await row.tap();
+			const start = await tap(page, row);
 			const listed = await untilCount(page, '.note-list li.row-item', manifest.big.rows);
 			const settled = await quiet(page);
 			return {
@@ -270,8 +308,7 @@ const SCENARIOS = {
 				if ((await shut.count()) === 0) break;
 				await shut.evaluate((element) => element.setAttribute('data-perf-tap', ''));
 				await shut.scrollIntoViewIfNeeded();
-				const start = await now(page);
-				await shut.tap();
+				const start = await tap(page, shut);
 				const opened = await until(
 					page,
 					() =>
@@ -311,8 +348,7 @@ const SCENARIOS = {
 			await quiet(page, 500);
 			const before = await counters(cdp);
 			await reset(page);
-			const start = await now(page);
-			await row.tap();
+			const start = await tap(page, row);
 			const cards = await untilCount(page, '.scratch-card', manifest.counts.scratch);
 			const placed = await until(
 				page,
@@ -328,9 +364,7 @@ const SCENARIOS = {
 				document.querySelector('[data-perf-scroller]')?.scrollTo(0, 0)
 			);
 			await quiet(page, 500);
-			const open = page.locator('.scratch-card-open').first();
-			const opening = await now(page);
-			await open.tap();
+			const opening = await tap(page, page.locator('.scratch-card-open').first());
 			const opened = await untilCount(
 				page,
 				'.card-sheet .editor-rich-surface, [role="dialog"] .editor-rich-surface'
@@ -348,7 +382,7 @@ const SCENARIOS = {
 		},
 	},
 
-	/** Type into a note in Big, its 1,200-row list mounted behind it, and let autosave run. */
+	/** Type into a note in Big, its list mounted behind it, and let autosave run. */
 	typing: {
 		needs: (m) => m.typing !== undefined,
 		run: async ({ page, cdp, manifest, base }) => {
@@ -361,33 +395,39 @@ const SCENARIOS = {
 			await quiet(page, 500);
 			const before = await counters(cdp);
 			await reset(page);
-			await page.keyboard.type(' the quick brown fox jumps over the lazy dog'.repeat(3), {
-				delay: 120,
-			});
+			const typed = ' the quick brown fox jumps over the lazy dog'.repeat(3);
+			await page.keyboard.type(typed, { delay: 120 });
 			// Autosave waits 2 s after the last key.
 			await page.waitForTimeout(3_000);
 			await quiet(page);
-			const events = await page.evaluate(() =>
+			// Event Timing reports only what took 16 ms or more: a key not in
+			// it was quicker, and counts as 0 here.
+			const slow = await page.evaluate(() =>
 				window.__perf.events
-					.filter((event) =>
-						['keydown', 'keypress', 'beforeinput', 'input', 'keyup'].includes(
-							event.name
-						)
-					)
+					.filter((event) => event.name === 'keydown')
 					.map((event) => event.duration)
 			);
-			const sorted = [...events].sort((a, b) => a - b);
+			const keys = [...slow, ...Array(Math.max(0, typed.length - slow.length)).fill(0)].sort(
+				(a, b) => a - b
+			);
+			const done = await summary(page);
+			if (done.idbWrites === 0)
+				throw new Error('nothing was saved: the keys never reached the note');
 			return {
-				slowKeys: events.length,
-				keyP95: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
-				keyMax: sorted.at(-1) ?? 0,
-				...(await summary(page)),
+				slowKeys: slow.length,
+				keyP95: keys[Math.floor(keys.length * 0.95)] ?? 0,
+				keyMax: keys.at(-1) ?? 0,
+				...done,
 				...delta(before, await counters(cdp)),
 			};
 		},
 	},
 
-	/** Type a rare word into search and wait for the first answer. */
+	/**
+	 * A rare word put into search at once, until every note holding it is
+	 * listed. Typed a letter at a time, the first letter alone would list
+	 * notes, and that would be the time.
+	 */
 	search: {
 		run: async ({ page, cdp, manifest, base }) => {
 			await page.goto(`${base}#/`);
@@ -399,11 +439,16 @@ const SCENARIOS = {
 			await quiet(page, 500);
 			const before = await counters(cdp);
 			await reset(page);
-			const start = await now(page);
-			await field.pressSequentially(manifest.search.rare.word, { delay: 150 });
+			await page.evaluate(() => {
+				window.__perf.typed = null;
+			});
+			await field.fill(manifest.search.rare.word);
+			const start = await page.evaluate(() => window.__perf.typed);
+			if (start === null) throw new Error('the word never reached the field');
 			const answered = await untilCount(
 				page,
-				'[role="listbox"][aria-label="Search results"] [role="option"]'
+				'[role="listbox"][aria-label="Search results"] [role="option"]',
+				manifest.search.rare.hits
 			);
 			const settled = await quiet(page);
 			return {
@@ -435,6 +480,7 @@ const SCENARIOS = {
 			await untilCount(page, '.editor-rich-surface, .note-list');
 			await quiet(page);
 			const idle = memory();
+			const before = await counters(cdp);
 			await reset(page);
 			const start = await now(page);
 			await page.goto(`${base}#scratchpad`);
@@ -451,7 +497,7 @@ const SCENARIOS = {
 						(img) => img.complete && img.naturalWidth > 0
 					).length >= n,
 				manifest.pictures.cards,
-				60_000
+				{ timeout: 60_000, optional: true }
 			);
 			await quiet(page);
 			const held = memory();
@@ -465,7 +511,7 @@ const SCENARIOS = {
 				rendererMB: held.rendererMB,
 				gpuMB: held.gpuMB,
 				...(await summary(page)),
-				...delta({ script: 0, task: 0, layout: 0, style: 0 }, await counters(cdp)),
+				...delta(before, await counters(cdp)),
 			};
 		},
 	},
@@ -500,7 +546,7 @@ const pictureNote = async ({ page, cdp, base }, note) => {
 				(img) => img.complete && img.naturalWidth > 0
 			).length >= n,
 		note.images,
-		90_000
+		{ timeout: 90_000, optional: true }
 	);
 	await quiet(page);
 	const held = memory();
@@ -566,8 +612,9 @@ const chosen = wanted.filter((name) => SCENARIOS[name].needs?.(manifest) ?? true
 const results = Object.fromEntries(seeded.map((target) => [target.name, {}]));
 for (const scenario of chosen) {
 	for (let run = 0; run < warmup + runs; run += 1) {
-		// Interleaved, so a drift in the machine falls on every target alike.
-		for (const target of seeded) {
+		// Interleaved, so a drift in the machine falls on every target alike,
+		// and in turn about (ABBA), so none is always the one after another.
+		for (const target of run % 2 === 0 ? seeded : [...seeded].reverse()) {
 			try {
 				const metrics = await once(target, target.template, scenario, manifest);
 				if (run < warmup) continue;
@@ -578,12 +625,12 @@ for (const scenario of chosen) {
 				});
 				console.error(`  ${scenario} ${target.name} #${run - warmup + 1}`);
 			} catch (error) {
-				console.error(
-					`  ${scenario} ${target.name} #${run + 1} failed: ${error.message.split('\n')[0]}`
-				);
-				((results[target.name][scenario] ??= {}).errors ??= []).push(
-					error.message.split('\n')[0]
-				);
+				const said = error.message.split('\n')[0];
+				const which = run < warmup ? `warmup ${run + 1}` : `#${run - warmup + 1}`;
+				console.error(`  ${scenario} ${target.name} ${which} failed: ${said}`);
+				// A warmup is not measured, nor is its failing.
+				if (run >= warmup)
+					((results[target.name][scenario] ??= {}).errors ??= []).push(said);
 			}
 		}
 	}

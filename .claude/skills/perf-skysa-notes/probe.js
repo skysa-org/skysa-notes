@@ -35,6 +35,28 @@
 		{ durationThreshold: 16 }
 	);
 
+	// When a touch, and text put into a field, first reached the page: the
+	// start of what the app does about it. The harness sets each to null
+	// before it acts, and reads it after.
+	perf.touched = null;
+	perf.typed = null;
+	for (const type of ['touchstart', 'pointerdown']) {
+		addEventListener(
+			type,
+			(event) => {
+				perf.touched ??= event.timeStamp;
+			},
+			{ capture: true, passive: true }
+		);
+	}
+	addEventListener(
+		'input',
+		(event) => {
+			perf.typed ??= event.timeStamp;
+		},
+		{ capture: true, passive: true }
+	);
+
 	// IndexedDB: rows read per store, and writes.
 	const count = (store, rows) => {
 		perf.idb.reads[store] = (perf.idb.reads[store] ?? 0) + rows;

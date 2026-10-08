@@ -42,7 +42,7 @@ node gen-library.mjs --preset pics    # 20 × 12 MP, 10 × 48 MP and 20 picture 
 | s | 1,000 | 60 | 3 | 200 | 600 (300 + 300 in 10) |
 | m | 3,000 | 250 | 4 | 600 | 1,200 (600 + 600 in 20) |
 | l | 10,000 | 600 | 5 | 2,000 | 3,000 (1,500 + 1,500 in 40) |
-| pics | 48 | 3 | 1 | 20 + 20 picture cards | — |
+| pics | 48 + 2 picture notes | 4 (with Pictures) | 1 | 20 + 20 picture cards | — |
 
 Seeded, so a preset is the same bytes every time (`manifest.json` holds their
 hashes and what each scenario should find). Photos are made once in Chromium
@@ -58,8 +58,10 @@ node compare.mjs $PERF_DIR/results/<file>.json --md     # for a PR
 
 The first run on a build seeds its profile (seconds for text, about 10 s for
 the photos). A profile belongs to an origin, so each port has its own, and a
-new build gets a new one. `--profile phone-low` slows the CPU 6×;
-`--profile desktop` is 1400×900 at full speed. `--shots` saves a screenshot of
+new build, or a library generated again with other options, gets a new one.
+Seeding checks that every note and file in the library arrived. `--profile
+phone-low` slows the CPU 6×; there is no desktop profile, as the scenarios find
+their way round the phone's layout and tap. `--shots` saves a screenshot of
 each scenario's end.
 
 | scenario | what | main metrics |
@@ -69,11 +71,21 @@ each scenario's end.
 | scrollList | fling Big's list to the end | `frameP95`, `slowFrames`, `tbt` |
 | tree | open shut notebooks one tap at a time, fling the tree | `tapP50`, `tapMax`, `nodes` |
 | scratch | tap the scratchpad, fling the wall, open a card | `cardsMs`, `placedMs`, `openMs`, `tbt` |
-| typing | type 135 keys into a note in Big, then autosave | `tbt`, `longest`, `idbNotes`, `keyP95` |
-| search | type a rare word in search | `answerMs`, `longest` |
+| typing | type 132 keys into a note in Big, then autosave | `tbt`, `longest`, `idbNotes`, `keyP95` |
+| search | put a rare word into search at once, until every note holding it is listed | `answerMs`, `longest` |
 | pictures / pictures48 | open the 12 MP / 48 MP note, fling it, leave | `decodedMB`, `rendererMB`, `leftRendererMB`, `firstMs` |
 | cards | the scratchpad with picture cards, flung through | `decodedMB`, `rendererMB`, `firstMs` |
 
+- A time after a tap (openBig's `listedMs`, `tapP50`, `cardsMs`, `openMs`) starts when
+  the touch reached the page, not when Playwright was asked to tap: it first
+  waits for the element to be still and hit-tests it, on the slowed thread.
+- A wait that never ends is an error in the results, never a time. Only
+  `allDrawn` may be 0.
+- `scrolledPx` and `reachedEnd` say how far a fling went; one that moves
+  nothing is an error.
+- `keyP95`/`keyMax` are over every key typed; a key Event Timing did not
+  report (under 16 ms) counts as 0. `slowKeys` is the keys that took 16 ms or
+  more.
 - `tbt` is the long tasks' time over 50 ms, `longest` the longest task, from the
   page's `longtask` entries.
 - `idbNotes`/`idbRows` count IndexedDB rows read (the probe wraps the IDB
@@ -87,8 +99,12 @@ each scenario's end.
   run, so it is a check on `decodedMB` rather than a measure of its own.
 - `scriptMs`/`taskMs`/`layoutMs` are CDP `Performance.getMetrics` deltas.
 
-A change counts as better or worse when it moved 10% (5% for counts) and the
-interquartile ranges do not overlap; otherwise it is `≈`.
+A change counts as better or worse when it moved 10% (5% for counts of what
+the app does: rows read, writes, nodes, pictures drawn) and the interquartile
+ranges do not overlap, or every sample on each side was the same; otherwise it
+is `≈`. A change from 0 is shown as the change itself, not a percentage. `taps`
+and `idleRendererMB` say what a run did or started from, and get no verdict.
+Targets run in turn about (ABBA), so none is always run after another.
 
 ## What emulation does not tell you
 
@@ -111,3 +127,10 @@ Import the same zips there, into a separate origin from real notes.
   later misses the first long tasks.
 - Close other heavy work while measuring (`pgrep -fl 'vitest|vite build'`);
   `loadavg` is recorded in each result.
+
+## Afterwards
+
+Stop the `vite preview` servers, and remove the worktrees once their branches
+are merged (`git -C <repo> worktree remove ../skysa-perf/branch`). The
+profiles and libraries in `$PERF_DIR` can stay; they are keyed by build, and
+a new build seeds its own.

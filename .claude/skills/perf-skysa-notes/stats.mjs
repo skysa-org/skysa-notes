@@ -34,33 +34,32 @@ const round = (value) =>
 			? value.toFixed(1)
 			: value.toFixed(2);
 
-/** Counts are exact; a time or a size is noisy. */
-const COUNTS = new Set([
-	'idbRows',
-	'idbNotes',
-	'idbWrites',
-	'nodes',
-	'longtasks',
-	'taps',
-	'drawn',
-	'allDrawn',
-	'slowKeys',
-]);
+/** Counts of things the app does, which move by less from run to run than a time does. */
+const COUNTS = new Set(['idbRows', 'idbNotes', 'idbWrites', 'nodes', 'drawn', 'allDrawn']);
+
+/** Higher is better for these. */
+const MORE = new Set(['drawn', 'allDrawn', 'scrolledPx', 'reachedEnd']);
+
+/** No better or worse for these: they say what a run did, or what it started from. */
+const NEUTRAL = new Set(['taps', 'idleRendererMB']);
+
+/** Every sample on both sides the same: nothing to tell from noise. */
+const exact = (a, b) => a.min === a.max && b.min === b.max;
 
 /**
  * A's and B's medians, and what the change is: better or worse only when it
  * moved by more than the noise allows — 10% for times and sizes, 5% for
- * counts — and the interquartile ranges do not overlap.
+ * counts — and the interquartile ranges do not overlap, unless every sample on
+ * each side was the same.
  */
 export const verdict = (name, a, b) => {
-	if (a === undefined || b === undefined) return '';
-	const change =
-		a.median === 0 ? (b.median === 0 ? 0 : Infinity) : (b.median - a.median) / a.median;
+	if (a === undefined || b === undefined || NEUTRAL.has(name)) return '';
+	if (a.median === b.median) return '≈';
+	const change = a.median === 0 ? Infinity : (b.median - a.median) / a.median;
 	const threshold = COUNTS.has(name) ? 0.05 : 0.1;
 	const apart = b.p75 < a.p25 || b.p25 > a.p75;
-	const higherIsBetter = name === 'allDrawn' || name === 'drawn';
-	if (Math.abs(change) < threshold || (!apart && !COUNTS.has(name))) return '≈';
-	return change < 0 !== higherIsBetter ? 'better' : 'worse';
+	if (Math.abs(change) < threshold || !(apart || exact(a, b))) return '≈';
+	return change < 0 !== MORE.has(name) ? 'better' : 'worse';
 };
 
 /** One row per scenario and metric, one column per target, and the change from the first. */
@@ -82,9 +81,14 @@ export const table = (out, { markdown = false } = {}) => {
 			const first = cells[0];
 			const changes = cells.slice(1).map((cell) => {
 				if (first === undefined || cell === undefined) return '';
-				const pct =
-					first.median === 0 ? 0 : ((cell.median - first.median) / first.median) * 100;
-				return `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}% ${verdict(metric, first, cell)}`;
+				const moved = verdict(metric, first, cell);
+				if (first.median === 0) {
+					// No percentage of nothing: the change itself.
+					const by = cell.median - first.median;
+					return `${by >= 0 ? '+' : ''}${round(by)} ${moved}`.trim();
+				}
+				const pct = ((cell.median - first.median) / first.median) * 100;
+				return `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}% ${moved}`.trim();
 			});
 			rows.push([scenario, metric, ...shown, ...changes]);
 		}

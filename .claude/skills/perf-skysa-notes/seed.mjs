@@ -88,8 +88,15 @@ export const seededProfile = async (url, lib) => {
 	const manifest = JSON.parse(readFileSync(join(library, 'manifest.json'), 'utf8'));
 	const build = await buildId(url);
 	const port = new URL(url).port;
-	const dir = join(PERF_DIR, 'profiles', `${port}-${build}-${manifest.preset}-${manifest.seed}`);
-	const done = join(dir, '..', `${port}-${build}-${manifest.preset}-${manifest.seed}.json`);
+	// The zips' own hashes too: a library generated again with other options is
+	// another profile, though its preset and seed are the same.
+	const zips = createHash('sha256')
+		.update(JSON.stringify(manifest.hashes))
+		.digest('hex')
+		.slice(0, 10);
+	const name = `${port}-${build}-${manifest.preset}-${manifest.seed}-${zips}`;
+	const dir = join(PERF_DIR, 'profiles', name);
+	const done = join(dir, '..', `${name}.json`);
 	if (existsSync(done)) return { dir, manifest, seed: JSON.parse(readFileSync(done, 'utf8')) };
 	rmSync(dir, { recursive: true, force: true });
 	mkdirSync(dir, { recursive: true });
@@ -106,6 +113,17 @@ export const seededProfile = async (url, lib) => {
 	const counts = await storedCounts(page);
 	const estimate = await page.evaluate(() => navigator.storage.estimate());
 	await context.close();
+	// A profile that does not hold the library is no profile to measure in.
+	const short = ['notes', 'files']
+		.filter((what) => (counts[what] ?? 0) !== manifest.counts[what])
+		.map(
+			(what) =>
+				`${what}: ${counts[what] ?? 0} stored, ${manifest.counts[what]} in the library`
+		);
+	if (short.length > 0) {
+		rmSync(dir, { recursive: true, force: true });
+		throw new Error(`seeding ${lib} into ${url} went wrong: ${short.join('; ')}`);
+	}
 	const seed = { url, build, imports, counts, usage: estimate.usage, ms: Date.now() - started };
 	writeFileSync(done, `${JSON.stringify(seed, null, '\t')}\n`);
 	return { dir, manifest, seed };
