@@ -1,6 +1,7 @@
 import { toString as nodeToString } from 'mdast-util-to-string';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { toLf } from '../../src/markdown/lineEndings.js';
 import * as pipeline from '../../src/markdown/pipeline.js';
 import { deriveTitle, UNTITLED_TITLE } from '../../src/markdown/title.js';
 
@@ -17,6 +18,9 @@ const wholeBody = (body: string): string =>
 		.find((text) => text !== '') ?? UNTITLED_TITLE;
 
 const titleOf = (body: string): string => deriveTitle({ body });
+
+/** Prose with no line a heading may be, longer than any body here, to put under one. */
+const TAIL = 'beans and peas and more beans.\n\n'.repeat(16);
 
 describe('the first heading, read only as far as it', () => {
 	afterEach(() => {
@@ -52,8 +56,18 @@ describe('the first heading, read only as far as it', () => {
 		['a hashtag, not a heading', '#spring\n\n# Spring\n'],
 		['no heading', 'Just prose.\n'],
 		['nothing', ''],
+		['an underline under a definition, then under a paragraph', '[r]: /u\n===\nfoo\n---\n'],
+		['a definition whose title is on the next line', '[r]: /u\n"Title"\n===\n# After\n'],
+		['a quote carried on lazily', '> a\nb\n===\n# After\n'],
+		['a table of one column', '| a |\n---\n# After\n'],
+		['a heading indented with a tab', '\t# not this\n\n# This\n'],
+		['a byte order mark', '\uFEFF# Spring\n'],
 	])('agrees with the whole body for %s', (_, body) => {
 		expect(titleOf(body)).toBe(wholeBody(body));
+		// Short, the body is read whole, past half of it before any heading;
+		// with more under it, it is read as far as its heading.
+		const long = `${body}\n${TAIL}`;
+		expect(titleOf(long)).toBe(wholeBody(long));
 	});
 
 	it.each<[string, string]>([
@@ -75,6 +89,19 @@ describe('the first heading, read only as far as it', () => {
 		const body = `${'beans and peas and more beans.\n\n'.repeat(50)}---\n\nthe end\n`;
 
 		expect(titleOf(body)).toBe(UNTITLED_TITLE);
+
+		expect(parse.mock.calls.map(([markdown]) => markdown)).toEqual([body]);
+	});
+
+	it('reads the whole body at once where the first line like a heading ends past half of it', () => {
+		const parse = vi.spyOn(pipeline, 'parse');
+		// A heading that holds a reference, read as far as it, would be read
+		// again whole: two reads where it took one.
+		const body = `# [Spring] ${'and more '.repeat(40)}\nthe end\n`;
+		const whole = wholeBody(body);
+		parse.mockClear();
+
+		expect(titleOf(body)).toBe(whole);
 
 		expect(parse.mock.calls.map(([markdown]) => markdown)).toEqual([body]);
 	});
@@ -114,10 +141,15 @@ describe('the first heading, over bodies put together at random', () => {
 		'more words',
 		'# Heading',
 		'## Second',
+		'### Closed ###',
+		'#\tAfter a tab',
+		'###### Sixth',
+		'# Heading \\#',
 		'#',
 		'#hashtag',
 		'   # Indented three',
 		'    # Indented four',
+		'\t# Indented with a tab',
 		'===',
 		'---',
 		'-',
@@ -132,13 +164,23 @@ describe('the first heading, over bodies put together at random', () => {
 		'-->',
 		'<div>',
 		'</div>',
+		'<script>',
+		'</script>',
+		'<pre>',
+		'<?php',
+		'?>',
+		'<![CDATA[',
+		']]>',
+		'<custom-tag>',
 		'| a | b |',
 		'| - | - |',
+		'| a |',
 		'# [Ref]',
 		'# [Ref][r]',
 		'# Note[^1]',
 		'[ref]: https://example.com',
 		'[r]: https://example.com',
+		'"A title on the next line"',
 		'[^1]: a footnote',
 		'# *Emphasis* and `code`',
 		'Heading \\',
@@ -149,9 +191,16 @@ describe('the first heading, over bodies put together at random', () => {
 	const bodyFrom = (seed: number): string => {
 		const random = mulberry32(seed);
 		const pick = <T>(from: readonly T[]): T => from[Math.floor(random() * from.length)] as T;
-		const ending = pick(ENDINGS);
+		// Most bodies keep to one line ending; some mix them, line by line.
+		const one = pick(ENDINGS);
+		const ending = random() < 0.8 ? () => one : () => pick(ENDINGS);
 		const lines = Array.from({ length: 1 + Math.floor(random() * 12) }, () => pick(LINES));
-		return lines.join(ending) + (random() < 0.7 ? ending : '');
+		const body = lines.map((line) => line + ending()).join('');
+		const start = random() < 0.1 ? '\uFEFF' : '';
+		// Half of them long enough under their lines to be read as far as a
+		// heading, rather than whole for being past half of it.
+		const tail = random() < 0.5 ? TAIL : '';
+		return start + (random() < 0.7 ? body : body.slice(0, -1)) + tail;
 	};
 
 	it('agrees with a parse of the whole body', () => {
@@ -161,5 +210,20 @@ describe('the first heading, over bodies put together at random', () => {
 			.map(({ seed, body }) => ({ seed, body, read: titleOf(body), whole: wholeBody(body) }));
 
 		expect(disagreements).toEqual([]);
-	});
+	}, 20_000);
+
+	it('answers many of them from what it read as far as a heading', () => {
+		const parse = vi.spyOn(pipeline, 'parse');
+		const answered = Array.from({ length: 4000 }, (_, seed) => bodyFrom(seed)).filter(
+			(body) => {
+				parse.mockClear();
+				titleOf(body);
+				const [read] = parse.mock.calls;
+				return parse.mock.calls.length === 1 && (read?.[0].length ?? 0) < toLf(body).length;
+			}
+		);
+		parse.mockRestore();
+
+		expect(answered.length).toBeGreaterThan(1000);
+	}, 20_000);
 });
