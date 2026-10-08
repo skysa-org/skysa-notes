@@ -71,28 +71,52 @@ export const rems = (count: number): number => {
  * `undefined` is also what jsdom gets, having no layout, and the callers read
  * it as "plenty of room" — so every test that does not ask for a width gets
  * the layout the app has always had, as it does from `useMediaQuery`.
+ *
+ * Measured on the first draw with the element, so its width is there on that
+ * draw and not one later, and then each time the observer says it changed,
+ * which it says just after the browser has laid the page out and before it
+ * paints. Measured on every draw instead, as it was, it made the browser lay
+ * the page out there and then: in a compact window, on every keystroke in a
+ * note, for the compact bar's width.
  */
 export const useElementWidth = (element: Element | null): number | undefined => {
-	const subscribe = useCallback(
-		(changed: () => void) => {
-			if (element === null || typeof ResizeObserver === 'undefined') {
-				return noSubscription();
-			}
-			const observer = new ResizeObserver(changed);
-			observer.observe(element);
-			return () => {
-				observer.disconnect();
-			};
-		},
-		[element]
-	);
-
-	const width = useCallback(() => {
-		const measured = element?.getBoundingClientRect().width ?? 0;
-		return measured > 0 ? measured : undefined;
+	const store = useMemo(() => {
+		const measured: { current: number | undefined } = { current: undefined };
+		const first = { current: true };
+		const measure = () => {
+			const width = element?.getBoundingClientRect().width ?? 0;
+			measured.current = width > 0 ? width : undefined;
+		};
+		return {
+			subscribe: (changed: () => void) => {
+				if (element === null || typeof ResizeObserver === 'undefined') {
+					return noSubscription();
+				}
+				const observer = new ResizeObserver((entries?: readonly ResizeObserverEntry[]) => {
+					// The border box, as `getBoundingClientRect` gives it, without
+					// a transform the element is drawn under for a moment, which the
+					// observer would never say had gone.
+					const box = entries?.at(-1)?.borderBoxSize.at(0)?.inlineSize;
+					if (box === undefined) measure();
+					else measured.current = box > 0 ? box : undefined;
+					changed();
+				});
+				observer.observe(element, { box: 'border-box' });
+				return () => {
+					observer.disconnect();
+				};
+			},
+			width: () => {
+				if (first.current) {
+					first.current = false;
+					measure();
+				}
+				return measured.current;
+			},
+		};
 	}, [element]);
 
-	return useSyncExternalStore(subscribe, width);
+	return useSyncExternalStore(store.subscribe, store.width);
 };
 
 /**

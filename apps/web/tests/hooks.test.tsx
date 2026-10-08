@@ -1,3 +1,4 @@
+import { SCRATCHPAD_FOLDER } from '@skysa/core';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -12,6 +13,7 @@ import {
 	useNoteSearch,
 	useNotesUnderFolder,
 	usePinnedTree,
+	useScratchNotes,
 } from '../src/store/hooks.js';
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
 import { setNotebookPinned, setNotePinned } from '../src/store/pins.js';
@@ -84,6 +86,28 @@ describe('useNotesUnderFolder', () => {
 		});
 		expect(before).toBeDefined();
 		expect(result.current?.find((note) => note.id === plan.id)).toBe(before);
+	});
+});
+
+describe('useScratchNotes', () => {
+	it('hands back a card unchanged since the read before as the same object', async () => {
+		const milk = await createNote(db, { folderPath: SCRATCHPAD_FOLDER, body: 'Milk\n' });
+		const eggs = await createNote(db, { folderPath: SCRATCHPAD_FOLDER, body: 'Eggs\n' });
+		const { result } = renderHook(() => useScratchNotes(LOCAL_CONNECTION_ID));
+		await waitFor(() => {
+			expect(result.current).toHaveLength(2);
+		});
+		const before = result.current?.find((note) => note.id === milk.id);
+
+		await db.notes.update([LOCAL_CONNECTION_ID, eggs.id], { body: 'Eggs, a dozen\n' });
+
+		await waitFor(() => {
+			expect(result.current?.find((note) => note.id === eggs.id)?.body).toBe(
+				'Eggs, a dozen\n'
+			);
+		});
+		expect(before).toBeDefined();
+		expect(result.current?.find((note) => note.id === milk.id)).toBe(before);
 	});
 });
 

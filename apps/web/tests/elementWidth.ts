@@ -13,13 +13,23 @@
 export interface FakeWidths {
 	/** Give every element `selector` matches this width, and tell its observers. */
 	resize: (selector: string, width: number) => void;
+	/**
+	 * Tell the observers of every element `selector` matches that its border
+	 * box is `width` wide, as a browser's observer does, and leave what
+	 * `getBoundingClientRect` says as it was: an element drawn under a
+	 * transform, whose box the observer gives without it.
+	 */
+	report: (selector: string, width: number) => void;
+	/** How many observers watch an element `selector` matches. */
+	watching: (selector: string) => number;
 	/** Put jsdom back as it was. */
 	restore: () => void;
 }
 
 export const elementWidths = (initial: Record<string, number>): FakeWidths => {
 	const widths = new Map(Object.entries(initial));
-	const observers = new Set<{ callback: () => void; watched: Set<Element> }>();
+	type Told = (entries?: readonly ResizeObserverEntry[]) => void;
+	const observers = new Set<{ callback: Told; watched: Set<Element> }>();
 
 	const widthOf = (element: Element): number =>
 		[...widths].find(([selector]) => element.matches(selector))?.[1] ?? 0;
@@ -40,7 +50,7 @@ export const elementWidths = (initial: Record<string, number>): FakeWidths => {
 		/* eslint-enable functional/no-this-expressions */
 	});
 
-	const observer = (callback: () => void) => {
+	const observer = (callback: Told) => {
 		const entry = { callback, watched: new Set<Element>() };
 		observers.add(entry);
 		return {
@@ -60,7 +70,7 @@ export const elementWidths = (initial: Record<string, number>): FakeWidths => {
 	// its constructor returns.
 	class FakeResizeObserver {
 		// eslint-disable-next-line functional/prefer-tacit -- a constructor cannot be one
-		constructor(callback: () => void) {
+		constructor(callback: Told) {
 			return observer(callback);
 		}
 	}
@@ -80,6 +90,25 @@ export const elementWidths = (initial: Record<string, number>): FakeWidths => {
 					callback();
 				});
 		},
+		report: (selector, width) => {
+			[...observers].forEach(({ callback, watched }) => {
+				const told = [...watched].filter((element) => element.matches(selector));
+				if (told.length === 0) return;
+				callback(
+					told.map(
+						(target) =>
+							({
+								target,
+								borderBoxSize: [{ inlineSize: width, blockSize: 0 }],
+							}) as unknown as ResizeObserverEntry
+					)
+				);
+			});
+		},
+		watching: (selector) =>
+			[...observers].filter(({ watched }) =>
+				[...watched].some((element) => element.matches(selector))
+			).length,
 		restore: () => {
 			if (original !== undefined) {
 				Object.defineProperty(Element.prototype, 'getBoundingClientRect', original);
