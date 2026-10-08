@@ -4853,6 +4853,13 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 		min-height: var(--tap);
 	}
 
+	/* On a touch screen the caret says the title is being written in, and a
+	   ring round it as well, a scratch note's and a notebook note's alike, is
+	   a box drawn round the heading every time it is tapped. */
+	.note-title-input:focus {
+		outline: none;
+	}
+
 	/* Under a picture not shown: Show, Try again. */
 	.note-image-action {
 		min-height: var(--tap);
