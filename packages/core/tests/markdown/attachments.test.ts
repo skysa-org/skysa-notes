@@ -297,6 +297,16 @@ describe('attachmentLabel', () => {
 	])('%o → %s', (input, label) => {
 		expect(attachmentLabel(input)).toBe(label);
 	});
+
+	it('says what the caller gives it, where the name gives nothing', () => {
+		const words = { pastedImage: 'Eingefügtes Bild', image: 'Bild', file: 'Anhang' };
+		expect(attachmentLabel({ name: 'image.png', kind: 'image', pasted: true, words })).toBe(
+			'Eingefügtes Bild'
+		);
+		expect(attachmentLabel({ name: '', kind: 'image', words })).toBe('Bild');
+		expect(attachmentLabel({ name: '  ', kind: 'file', words })).toBe('Anhang');
+		expect(attachmentLabel({ name: 'Holiday.JPG', kind: 'image', words })).toBe('Holiday');
+	});
 });
 
 describe('attachmentMarkdown', () => {

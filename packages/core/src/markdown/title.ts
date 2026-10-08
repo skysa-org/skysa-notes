@@ -22,6 +22,13 @@ const firstHeadingText = (body: string): string | undefined =>
 		.map((node) => nodeToString(node).trim())
 		.find((text) => text !== '');
 
+/**
+ * The title of a note with nothing to take a name from: kept, and compared, as
+ * it is, in every language. An app shows it in the user's (docs/ARCHITECTURE.md
+ * §7, "The app's words"); as a name it is `UNTITLED_SLUG`.
+ */
+export const UNTITLED_TITLE = 'Untitled';
+
 /** Strip the extension and turn slug separators back into spaces. */
 export const titleFromFilename = (filename: string): string => {
 	const withoutExtension = foldName(filename).endsWith(NOTE_EXTENSION)
@@ -44,5 +51,5 @@ export const deriveTitle = (input: DeriveTitleInput): string => {
 		if (fromFilename) return fromFilename;
 	}
 
-	return 'Untitled';
+	return UNTITLED_TITLE;
 };

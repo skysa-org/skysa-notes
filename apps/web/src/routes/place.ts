@@ -1,6 +1,7 @@
 import { basename, isScratchPath, parentPath, ROOT, SCRATCHPAD_FOLDER } from '@skysa/core';
 
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
+import { titleShown } from '../store/titles.js';
 
 /**
  * Where the user is — which notebook is open, and which note — as the URL
@@ -277,12 +278,12 @@ export const placeTitle = (
 	if (note !== undefined && isScratchPath(note.path)) {
 		return note.named === false
 			? SCRATCHPAD_LABEL
-			: [SCRATCHPAD_LABEL, note.title].join(TITLE_SEPARATOR);
+			: [SCRATCHPAD_LABEL, titleShown(note.title)].join(TITLE_SEPARATOR);
 	}
 	if (note === undefined) {
 		return folder !== undefined && isScratchPath(folder) ? SCRATCHPAD_LABEL : appName;
 	}
 	const notebook = parentPath(note.path);
 	const notebooks = notebook === ROOT ? [] : notebook.split('/');
-	return [...notebooks, note.title].join(TITLE_SEPARATOR);
+	return [...notebooks, titleShown(note.title)].join(TITLE_SEPARATOR);
 };

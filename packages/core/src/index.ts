@@ -134,7 +134,6 @@ export {
 	downloadName,
 	drawsFromData,
 	fileKind,
-	fileKindLabel,
 	type FileKind,
 	opensInTab,
 	safeOpenType,

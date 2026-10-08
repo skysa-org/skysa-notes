@@ -201,8 +201,12 @@ export const normalizeTag = (tag: string): string | undefined => toSlug(tag) || 
  * accepts spaces and capitals in a directory name — so unlike a note filename,
  * which is derived from a title, this only removes what would actually break.
  * See docs/ARCHITECTURE.md §3.
+ *
+ * `unnamed` is the name for one with nothing usable in it: a word in the
+ * user's language, which the app gives (docs/ARCHITECTURE.md §7, "The app's
+ * words").
  */
-export const sanitizeFolderName = (name: string): string => {
+export const sanitizeFolderName = (name: string, unnamed = 'Untitled'): string => {
 	const cleaned = truncate(
 		name
 			.normalize('NFC')
@@ -216,7 +220,7 @@ export const sanitizeFolderName = (name: string): string => {
 		// Again, for whatever the cut left at the end.
 	).replace(/[.\s]+$/, '');
 
-	if (cleaned === '') return 'Untitled';
+	if (cleaned === '') return unnamed;
 	return RESERVED.test(cleaned) ? `${cleaned} folder` : cleaned;
 };
 

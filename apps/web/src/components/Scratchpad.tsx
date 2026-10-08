@@ -25,6 +25,7 @@ import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';
 import { cardLines, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
+import { titleShown } from '../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
 import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
 import { useCardMotion, useEasedHeight } from './cardMotion.js';
@@ -274,7 +275,7 @@ const Card = ({
 	const lines = cardLines(opening(note.body, note, { keep: !typing }));
 	const first = lines[0];
 	const name = named
-		? note.title
+		? titleShown(note.title)
 		: first === undefined
 			? t('scratchpad.card.emptyNote')
 			: previewLineText(first) || t('scratchpad.card.pictureOnly');
@@ -292,7 +293,7 @@ const Card = ({
 			style={style}
 		>
 			<button type="button" className="scratch-card-open" data-card={row.id} onClick={onOpen}>
-				{named && <span className="scratch-card-title">{note.title}</span>}
+				{named && <span className="scratch-card-title">{titleShown(note.title)}</span>}
 				{hasPictures(lines) ? <CardFiles note={row}>{shown}</CardFiles> : shown}
 				{!named && lines.length === 0 && (
 					<span className="scratch-card-line muted">

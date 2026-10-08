@@ -10,6 +10,7 @@ import { useScratchNotes } from '../store/hooks.js';
 import { deleteNote, getNote, isUnnamed, renameNote, setScratchMarks } from '../store/notes.js';
 import type { Moving } from '../store/rearrange.js';
 import { scratchMarks } from '../store/scratchpad.js';
+import { titleShown } from '../store/titles.js';
 import { visibleLines } from '../store/visibleText.js';
 import type { Pane } from './CompactBar.js';
 import { COARSE_POINTER, useMediaQuery } from './layout.js';
@@ -212,7 +213,7 @@ export const useScratchpad = ({
 			.then(() => getNote(db, note.id, scope(note)))
 			.then((row) => {
 				if (row === undefined || row.deletedLocally !== 0) return;
-				pickUp({ kind: 'note', id: row.id, path: row.path, name: row.title });
+				pickUp({ kind: 'note', id: row.id, path: row.path, name: titleShown(row.title) });
 			});
 	};
 

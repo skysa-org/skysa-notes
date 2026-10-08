@@ -179,26 +179,48 @@ export const attachmentHref = (name: string): string =>
 const UNSHOWABLE = /[\u0000-\u001f\u007f-\u009f]|\p{Surrogate}/gu;
 
 /**
+ * The words a link to a file shows where the file's name gives none, which go
+ * into the note: the app's, in the user's language (docs/ARCHITECTURE.md §7,
+ * "The app's words"). English where nobody says otherwise.
+ */
+export interface AttachmentWords {
+	/** A picture pasted from the clipboard, whose name (`image.png`) says nothing. */
+	pastedImage: string;
+	/** A picture whose name is only an extension. */
+	image: string;
+	/** Any other file with no name. */
+	file: string;
+}
+
+const ENGLISH_ATTACHMENT_WORDS: AttachmentWords = {
+	pastedImage: 'Pasted image',
+	image: 'Image',
+	file: 'Attachment',
+};
+
+/**
  * The words a link shows for a file: an image's name without its extension,
  * as alt text — what it is a picture of, if anything — and any other file's
  * name whole, since the extension is part of what a reader is told. A pasted
  * image's name is the clipboard's (`image.png`) and says nothing, so it is
- * "Pasted image".
+ * `words.pastedImage`.
  */
 export const attachmentLabel = ({
 	name,
 	kind,
 	pasted = false,
+	words = ENGLISH_ATTACHMENT_WORDS,
 }: {
 	name: string;
 	kind: AttachmentKind;
 	pasted?: boolean;
+	words?: AttachmentWords;
 }): string => {
-	if (pasted && kind === 'image') return 'Pasted image';
+	if (pasted && kind === 'image') return words.pastedImage;
 	const clean = name.replace(UNSHOWABLE, ' ').trim();
-	if (kind === 'file') return clean === '' ? 'Attachment' : clean;
+	if (kind === 'file') return clean === '' ? words.file : clean;
 	const stem = clean.slice(0, clean.length - extensionPart(clean).length).trim();
-	return stem === '' ? 'Image' : stem;
+	return stem === '' ? words.image : stem;
 };
 
 /**

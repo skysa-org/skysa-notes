@@ -102,6 +102,7 @@ import { type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { scratchMarks } from '../store/scratchpad.js';
+import { titleShown } from '../store/titles.js';
 import { findFolder, type FolderNode, listedUnder, selectedFolderPath } from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import {
@@ -325,7 +326,12 @@ const useNoteMove = (
 			promote(openNote);
 			return;
 		}
-		pickUp({ kind: 'note', id: openNote.id, path: openNote.path, name: openNote.title });
+		pickUp({
+			kind: 'note',
+			id: openNote.id,
+			path: openNote.path,
+			name: titleShown(openNote.title),
+		});
 	};
 
 	useCommand({
@@ -1486,11 +1492,16 @@ const Home = () => {
 					setProblem(
 						home?.detached === undefined
 							? {
-									message: t('shell.note.back', { title: restored.title }),
+									message: t('shell.note.back', {
+										title: titleShown(restored.title),
+									}),
 									tone: 'success',
 								}
 							: {
-									message: backDisconnected(restored.title, sourceName(home)),
+									message: backDisconnected(
+										titleShown(restored.title),
+										sourceName(home)
+									),
 									tone: 'warning',
 								}
 					);
@@ -2095,7 +2106,7 @@ const Home = () => {
 								kind: 'note',
 								id: note.id,
 								path: note.path,
-								name: note.title,
+								name: titleShown(note.title),
 							});
 						}}
 						onCancelMove={cancelMove}
@@ -2124,7 +2135,7 @@ const Home = () => {
 													kind: 'note',
 													id: note.id,
 													path: note.path,
-													name: note.title,
+													name: titleShown(note.title),
 												});
 											}
 										: undefined,
@@ -2164,7 +2175,7 @@ const Home = () => {
 						// A second delete is a new notice with a new clock, not the
 						// first one's time running on under another note's name.
 						key={noteRef(deleted)}
-						title={deleted.title}
+						title={titleShown(deleted.title)}
 						onUndo={undoDelete}
 						onDismiss={dismissDeleted}
 						keep={undoFailed === noteRef(deleted)}

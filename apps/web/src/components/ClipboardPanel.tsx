@@ -249,16 +249,20 @@ const Thumbnail = ({
 	return <img ref={image} className="clipboard-thumb" alt="" />;
 };
 
+/** What an item is called, on screen and saved: its own name, or the app's for a picture with none. */
+const nameOf = ({ label }: ClipName): string => label ?? t('clipboard.image');
+
 /**
  * What an item's buttons are called: what pressing it does — a text or a
  * picture is copied, a file saved — and, until it has gone up, that it is
  * waiting to.
  */
 const itemWords = (
-	{ kind, label: name }: ClipName,
+	read: ClipName,
 	pending: boolean
 ): { label: string; title: string; remove: string } => {
-	switch (kind) {
+	const name = nameOf(read);
+	switch (read.kind) {
 		case 'text':
 			return {
 				label: t(pending ? 'clipboard.item.copyTextPending' : 'clipboard.item.copyText'),
@@ -318,7 +322,7 @@ const ClipItem = ({
 	const choose = () => {
 		if (read.kind === 'file') {
 			void bytes()
-				.then((got) => saveBytes(got, read.label, clip.name, browser))
+				.then((got) => saveBytes(got, nameOf(read), clip.name, browser))
 				.then(
 					() => {
 						say(t('clipboard.saved'), {
@@ -378,9 +382,9 @@ const ClipItem = ({
 					{read.kind === 'file' && (
 						<>
 							<span className="clipboard-icon" aria-hidden="true">
-								<Icon name={FILE_ICONS[fileKind(read.label)]} />
+								<Icon name={FILE_ICONS[fileKind(nameOf(read))]} />
 							</span>
-							<span className="clipboard-name">{read.label}</span>
+							<span className="clipboard-name">{nameOf(read)}</span>
 							<span className="clipboard-size muted">{sizeOf(clip.size)}</span>
 						</>
 					)}
