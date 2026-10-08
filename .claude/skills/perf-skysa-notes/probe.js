@@ -6,7 +6,7 @@
 		since: 0,
 		longtasks: [],
 		events: [],
-		idb: { reads: {}, rows: 0, writes: 0 },
+		idb: { reads: {}, rows: 0, keys: {}, writes: 0 },
 		frames: [],
 		framing: false,
 	};
@@ -57,10 +57,14 @@
 		{ capture: true, passive: true }
 	);
 
-	// IndexedDB: rows read per store, and writes.
+	// IndexedDB: rows read per store — a row is a value, cloned — and keys read
+	// apart, since a key is no row; and writes.
 	const count = (store, rows) => {
 		perf.idb.reads[store] = (perf.idb.reads[store] ?? 0) + rows;
 		perf.idb.rows += rows;
+	};
+	const countKeys = (store, keys) => {
+		perf.idb.keys[store] = (perf.idb.keys[store] ?? 0) + keys;
 	};
 	const storeName = (source) =>
 		source instanceof IDBIndex ? source.objectStore.name : source.name;
@@ -74,10 +78,13 @@
 				request.addEventListener('success', () => {
 					const { result } = request;
 					if (method === 'count') return;
-					count(
-						name,
-						Array.isArray(result) ? result.length : result === undefined ? 0 : 1
-					);
+					const many = Array.isArray(result)
+						? result.length
+						: result === undefined
+							? 0
+							: 1;
+					if (method === 'getAllKeys' || method === 'getKey') countKeys(name, many);
+					else count(name, many);
 				});
 				return request;
 			};
@@ -88,7 +95,9 @@
 				const request = original.apply(this, args);
 				const name = storeName(this);
 				request.addEventListener('success', () => {
-					if (request.result) count(name, 1);
+					if (!request.result) return;
+					if (method === 'openKeyCursor') countKeys(name, 1);
+					else count(name, 1);
 				});
 				return request;
 			};
@@ -107,7 +116,7 @@
 		perf.since = performance.now();
 		perf.longtasks = perf.longtasks.filter((task) => task.start + task.duration > perf.since);
 		perf.events = [];
-		perf.idb = { reads: {}, rows: 0, writes: 0 };
+		perf.idb = { reads: {}, rows: 0, keys: {}, writes: 0 };
 	};
 
 	perf.frames = [];
@@ -185,6 +194,7 @@
 			longtasks: tasks.length,
 			idbRows: perf.idb.rows,
 			idbNotes: perf.idb.reads.notes ?? 0,
+			idbNoteKeys: perf.idb.keys.notes ?? 0,
 			idbWrites: perf.idb.writes,
 			nodes: document.getElementsByTagName('*').length,
 		};
