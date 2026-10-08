@@ -571,10 +571,13 @@ const SCENARIOS = {
 	},
 
 	/**
-	 * The library imported into an emptied device, at the phone's CPU: the
-	 * archive read and asked about, then from Import to "Imported", with what
-	 * the page could not do meanwhile. At desktop width, where the storage
-	 * menu is (`seed.mjs`).
+	 * The library's notes (its first archive) imported into an emptied device,
+	 * at the phone's CPU: the archive read and asked about, then from Import to
+	 * "Imported", with what the page could not do meanwhile. At desktop width,
+	 * where the storage menu is (`seed.mjs`). Both times take in a little of
+	 * Playwright's own: `readMs` sending the archive, `importMs` its checks
+	 * before the click, run on the slowed thread. The same for every build, so
+	 * an A/B holds; neither is the app's time alone.
 	 */
 	importing: {
 		run: async ({ page, cdp, manifest, base }) => {

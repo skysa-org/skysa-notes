@@ -14,6 +14,8 @@ import {
 	type ParsedNoteFile,
 	parseNoteFile,
 	pathSegments,
+	titleFromFilename,
+	UNTITLED_TITLE,
 	withoutNul,
 } from '@skysa/core';
 
@@ -543,8 +545,11 @@ export const importLibrary = async (
 	connectionId: string,
 	plan: ImportPlan
 ): Promise<ImportOutcome> => {
-	const hashes = await Promise.all(plan.notes.map((note) => contentHash(note.source)));
-	const read = await readAll(plan.notes);
+	// Together: the digests are made off the thread, and the reading on it.
+	const [hashes, read] = await Promise.all([
+		Promise.all(plan.notes.map((note) => contentHash(note.source))),
+		readAll(plan.notes),
+	]);
 	const now = Date.now();
 	return db.transaction(
 		'rw',
@@ -663,6 +668,17 @@ const readNote = (note: ImportPlan['notes'][number]): ParsedNoteFile =>
 	parseNoteFile(note.source, { filename: basename(note.path) });
 
 /**
+ * Whether a note read under its name in the archive has a title of its own,
+ * from its frontmatter or a heading, which outranks any name: it is titled the
+ * same under the name it is numbered to here. Where its title is its name's,
+ * or there is none, the name may be what titles it, and the new one would
+ * title it otherwise. Asked so that an archive imported again, every name
+ * taken, is not read again note by note in the transaction.
+ */
+const ownTitle = (note: ImportPlan['notes'][number], parsed: ParsedNoteFile): boolean =>
+	parsed.title !== titleFromFilename(basename(note.path)) && parsed.title !== UNTITLED_TITLE;
+
+/**
  * Every note's file read, before the transaction opens and a slice at a time
  * (`store/slices.ts`). Read in the transaction, in one piece, a library of a
  * few thousand notes held the page still for twelve seconds on a phone, and
@@ -735,8 +751,8 @@ const placeNotes = (
 				now,
 				// Read by the name it was picked under, which is its name here
 				// unless a note here had it. A numbered one is read again by its
-				// new name, the title of a note with no other.
-				...(free ? { parsed } : {}),
+				// new name only where its title may be its old name's.
+				...(free || ownTitle(note, parsed) ? { parsed } : {}),
 			}),
 			dirty: 1,
 		};

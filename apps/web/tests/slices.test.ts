@@ -57,6 +57,7 @@ describe('work done a slice at a time', () => {
 	});
 
 	it('is done before it returns when it fits in a slice', () => {
+		vi.spyOn(performance, 'now').mockReturnValue(0);
 		const done: number[] = [];
 
 		void eachInSlices(counting(3), (item) => {
@@ -64,6 +65,22 @@ describe('work done a slice at a time', () => {
 		});
 
 		expect(done).toEqual(counting(3));
+	});
+
+	it('hands the thread back every few hundred items, however fast they go', async () => {
+		// A clock that never moves: no slice ever runs out of time.
+		vi.spyOn(performance, 'now').mockReturnValue(0);
+		const done: number[] = [];
+
+		const working = eachInSlices(counting(1000), (item) => {
+			done.push(item);
+		});
+		const first = done.length;
+		expect(first).toBeGreaterThan(0);
+		expect(first).toBeLessThan(1000);
+
+		await working;
+		expect(done).toEqual(counting(1000));
 	});
 
 	it('does nothing for nothing', async () => {

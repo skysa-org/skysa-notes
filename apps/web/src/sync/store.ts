@@ -1350,10 +1350,12 @@ export const createDexieSyncStore = (
 			}),
 
 		applyPull: async (batch: PullBatch) => {
-			const prepared: Prepared = {
-				hashes: await digestAll(contentsOf(batch.changes)),
-				read: await readAll(batch.changes),
-			};
+			// Together: the digests are made off the thread, and the reading on it.
+			const [hashes, read] = await Promise.all([
+				digestAll(contentsOf(batch.changes)),
+				readAll(batch.changes),
+			]);
+			const prepared: Prepared = { hashes, read };
 			await inTransaction(async () => {
 				// One after another, in the order given: the engine decided each
 				// change against the store as the ones before it left it.

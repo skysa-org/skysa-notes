@@ -34,9 +34,16 @@ export const handBack = (): Promise<void> =>
 	});
 
 /**
+ * The most items a slice takes, however fast they go: each slice copies the
+ * items it may take, and copying all of those left, slice after slice, is
+ * work that grows with the square of them.
+ */
+const SLICE_ITEMS = 256;
+
+/**
  * `work` done to every item from `from` on, in order, the thread handed back
- * after each `SLICE_MS`. The first slice is done before this returns, so a
- * handful of items is done at once.
+ * after each `SLICE_MS`, or `SLICE_ITEMS`. The first slice is done before this
+ * returns, so a handful of items is done at once.
  */
 export const eachInSlices = async <T>(
 	items: readonly T[],
@@ -45,7 +52,7 @@ export const eachInSlices = async <T>(
 ): Promise<void> => {
 	const until = performance.now() + SLICE_MS;
 	const next = { current: from };
-	items.slice(from).some((item) => {
+	items.slice(from, from + SLICE_ITEMS).some((item) => {
 		work(item);
 		next.current += 1;
 		return performance.now() >= until;

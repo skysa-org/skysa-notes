@@ -125,6 +125,48 @@ describe('a note’s file, brought in', () => {
 		expect(titles).toEqual(['Minutes', 'Plan', 'loose']);
 	});
 
+	it('is not read again in an import’s transaction when its name is taken, unless its name may title it', async () => {
+		// The same archive imported twice: every name taken, every note
+		// numbered. Only a note whose title may be its old name's is read again,
+		// by its new name.
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: CONNECTION, provider: 'dropbox' });
+		await finishImport(db, CONNECTION);
+		const archive = () =>
+			planImport({
+				files: Object.entries({
+					'Work/plan.md': '# Plan for spring\n',
+					'Work/minutes.md': '---\ntitle: "Minutes"\n---\n\nwords\n',
+					'Work/notes.md': '# notes\n',
+					'loose.md': 'no heading\n',
+					'_.md': 'nor here\n',
+				}).map(([path, text]) => ({ path, bytes: new TextEncoder().encode(text) })),
+				folders: [],
+				skipped: [],
+			});
+		await importLibrary(db, CONNECTION, archive());
+		reads.made = [];
+
+		await importLibrary(db, CONNECTION, archive());
+
+		expect(reads.made.filter((read) => read.inTransaction)).toHaveLength(3);
+		const titles = Object.fromEntries(
+			(await db.notes.toArray()).map((note) => [note.path, note.title])
+		);
+		expect(titles).toMatchObject({
+			'Work/plan-2.md': 'Plan for spring',
+			'Work/minutes-2.md': 'Minutes',
+			// Its heading is its name's title: read again, and its heading still
+			// titles it.
+			'Work/notes-2.md': 'notes',
+			'loose-2.md': 'loose 2',
+			// A name that titles nothing, and a note with no title at all: the
+			// name it is numbered to titles it.
+			'_.md': 'Untitled',
+			'untitled.md': 'untitled',
+		});
+	});
+
 	it('is read once when it is imported on its own', async () => {
 		const db = freshDatabase();
 		await db.syncState.put({ connectionId: CONNECTION, clientId: 'this-browser' });
