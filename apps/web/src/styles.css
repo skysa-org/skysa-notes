@@ -3389,6 +3389,20 @@ button.icon.account-devices-count {
 	align-items: center;
 	gap: var(--space-2xs);
 	padding: var(--space-2xs) calc(var(--gutter) - var(--control-inline));
+}
+
+/* A card open in a compact window (`CardSheet`) is the one whose foot is the
+   window's, so the phone's home indicator is kept clear of its tools there
+   and not in the box on the wall or the dialog. The row's, kept clear as one:
+   given to the note's bar alone, it made the bar taller than the toolbar
+   beside it, its buttons at its top and the toolbar's in its middle. Clear
+   by as much as a note's own bar is (`.format-toolbar-bottom`). */
+.card-sheet .editor-toolbar-row {
+	padding-block-end: max(0px, env(safe-area-inset-bottom) - var(--space-2xs));
+}
+
+/* In Markdown, the note's bar alone under the note. */
+.card-sheet .note-view > .scratch-bar {
 	padding-block-end: max(var(--space-2xs), env(safe-area-inset-bottom));
 }
 
