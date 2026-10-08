@@ -2,7 +2,13 @@ import { ROOT } from '@skysa/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createDatabase, LOCAL_CONNECTION_ID, type NotesDatabase } from '../src/store/db.js';
-import { getLastOpen, noteIsUnder, pickNote, rememberOpen } from '../src/store/lastOpen.js';
+import {
+	getLastOpen,
+	lastWritten,
+	noteIsUnder,
+	pickNote,
+	rememberOpen,
+} from '../src/store/lastOpen.js';
 import { createNote, deleteNote } from '../src/store/notes.js';
 import { updateNote } from './noteRows.js';
 
@@ -44,6 +50,26 @@ describe('remembering where the user was', () => {
 
 		expect((await getLastOpen(db, LOCAL_CONNECTION_ID)).folder).toBe('Work');
 		expect((await getLastOpen(db, 'c-dropbox')).folder).toBe('Inbox');
+	});
+
+	it('writes nothing where it would change nothing', async () => {
+		await rememberOpen(db, LOCAL_CONNECTION_ID, 'Work', 'w1');
+		const was = lastWritten(db, LOCAL_CONNECTION_ID);
+		const puts: unknown[] = [];
+		db.prefs.hook('creating', (key) => {
+			puts.push(key);
+		});
+		db.prefs.hook('updating', (_changes, key) => {
+			puts.push(key);
+		});
+
+		// The same place again, and the notebook again with no note in it.
+		await rememberOpen(db, LOCAL_CONNECTION_ID, 'Work', 'w1');
+		await rememberOpen(db, LOCAL_CONNECTION_ID, 'Work');
+
+		expect(puts).toEqual([]);
+		// Nor handed out as this tab's newest write.
+		expect(lastWritten(db, LOCAL_CONNECTION_ID)).toBe(was);
 	});
 
 	it('forgets the notebooks opened longest ago once it holds two hundred', async () => {

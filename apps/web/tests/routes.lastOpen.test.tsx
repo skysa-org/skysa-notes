@@ -1,5 +1,5 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,13 +22,20 @@ import { noteUrl, placeIn } from './entry.js';
 
 const DROPBOX = 'c-dropbox';
 
-/** How much later than its read the store says where the user was. */
-const store = vi.hoisted(() => ({ lateBy: 0 }));
+/**
+ * How much later than its read the store says where the user was, and how
+ * many times it has been told.
+ */
+const store = vi.hoisted(() => ({ lateBy: 0, told: 0 }));
 
 vi.mock('../src/store/lastOpen.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof LastOpenModule>();
 	return {
 		...actual,
+		rememberOpen: (...args: Parameters<typeof actual.rememberOpen>) => {
+			store.told += 1;
+			return actual.rememberOpen(...args);
+		},
 		getLastOpen: async (...args: Parameters<typeof actual.getLastOpen>) => {
 			const lastOpen = await actual.getLastOpen(...args);
 			if (store.lateBy > 0) await new Promise((resolve) => setTimeout(resolve, store.lateBy));
@@ -39,6 +46,7 @@ vi.mock('../src/store/lastOpen.js', async (importOriginal) => {
 
 afterEach(async () => {
 	store.lateBy = 0;
+	store.told = 0;
 	cleanup();
 	await db.notes.clear();
 	await db.folders.clear();
@@ -199,6 +207,42 @@ describe('where the user was, on this device', () => {
 		// And still the one remembered there, not the newest written over it.
 		await waitFor(async () => {
 			expect((await getLastOpen(db, LOCAL_CONNECTION_ID)).notes.Work).toBe(older.id);
+		});
+	});
+
+	it('is not written back and forth by two tabs showing two notebooks', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Home' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		const chores = await noteAt('Home', 'Chores', 1_000);
+		const plan = await noteAt('Work', 'Plan', 1_000);
+		// Two tabs on one device: two apps over the one database.
+		await openApp('/#/Work/');
+		await showing('Plan');
+		const other = render(
+			<RouterProvider
+				router={createRouter({
+					routeTree,
+					history: createMemoryHistory({ initialEntries: ['/#/Home/'] }),
+				})}
+			/>
+		).container;
+		await waitFor(() => {
+			expect(within(other).queryByLabelText<HTMLInputElement>('Note title')?.value).toBe(
+				'Chores'
+			);
+		});
+		// Each has said where it is, and been told where the other is.
+		await new Promise((resolve) => setTimeout(resolve, 200));
+		const said = store.told;
+
+		await new Promise((resolve) => setTimeout(resolve, 300));
+
+		// Each tab's place is its own to say, and neither has moved.
+		expect(store.told).toBe(said);
+		// The place on record is the last one either tab moved to.
+		expect(await getLastOpen(db, LOCAL_CONNECTION_ID)).toEqual({
+			folder: 'Home',
+			notes: { Work: plan.id, Home: chores.id },
 		});
 	});
 
