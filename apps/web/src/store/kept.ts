@@ -28,3 +28,35 @@ export const keepRows = (list: string, count: number): void => {
 /** Room for every row the lists have shown, and a quarter more; `floor` at least. */
 export const roomFor = (floor: number): number =>
 	Math.max(floor, Math.ceil([...lists.values()].reduce((sum, each) => sum + each, 0) * ROOM));
+
+/**
+ * What `make` answers for a key, kept by the key for the next time it is asked,
+ * at most `most()` of them. The least recently asked goes first, not the
+ * first kept: a list drawn again asks for every row, and anything else asked in
+ * between — a search answer, a card's new frontmatter — is what should go.
+ *
+ * `keep: false` answers without keeping, for a key asked once and never again
+ * (a body being typed): one kept per keystroke would push every row out.
+ */
+export const keptAnswers = <Answer>(
+	most: () => number
+): ((key: string, make: (key: string) => Answer, keep?: boolean) => Answer) => {
+	const seen = new Map<string, Answer>();
+	return (key, make, keep = true) => {
+		const known = seen.get(key);
+		if (known !== undefined) {
+			// To the back of the queue: asked again, so kept longest.
+			seen.delete(key);
+			seen.set(key, known);
+			return known;
+		}
+		const answer = make(key);
+		if (!keep) return answer;
+		seen.set(key, answer);
+		if (seen.size > most()) {
+			const oldest = seen.keys().next();
+			if (oldest.done !== true) seen.delete(oldest.value);
+		}
+		return answer;
+	};
+};

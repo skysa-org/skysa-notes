@@ -1,7 +1,7 @@
 import { previewBlocks, type PreviewLine, previewLineText } from '@skysa/core';
 
 import { isCreatedLine, isTimeLine } from './createdLine.js';
-import { roomFor } from './kept.js';
+import { keptAnswers, roomFor } from './kept.js';
 
 /**
  * A note's visible text, parsed once per body.
@@ -31,45 +31,25 @@ import { roomFor } from './kept.js';
 
 const LIMIT = 400;
 
-/** Parses kept, by the text they are of, and how many may be. */
-interface Kept {
-	readonly seen: Map<string, readonly PreviewLine[]>;
-	readonly most: () => number;
-}
-
-const openings: Kept = { seen: new Map(), most: () => roomFor(LIMIT) };
-
-const wholes: Kept = { seen: new Map(), most: () => LIMIT };
+type Parse = readonly PreviewLine[];
 
 /**
- * The blocks of `body`, kept for the next time they are asked for.
+ * The blocks of a body, kept for the next time they are asked for (`keptAnswers`).
  *
  * `keep: false` for a body being typed (`store/liveEdits.ts`), which is asked
  * once and never again: one kept per keystroke would push every other note's
  * answer out within a paragraph, and the whole list would be parsed again the
  * next time it drew.
  */
+const openings = keptAnswers<Parse>(() => roomFor(LIMIT));
+
+const wholes = keptAnswers<Parse>(() => LIMIT);
+
 const blocksOf = (
-	{ seen, most }: Kept,
+	kept: typeof openings,
 	body: string,
 	{ keep = true }: { keep?: boolean }
-): readonly PreviewLine[] => {
-	const known = seen.get(body);
-	if (known !== undefined) {
-		// To the back of the queue: asked again, so kept longest.
-		seen.delete(body);
-		seen.set(body, known);
-		return known;
-	}
-	const answer = previewBlocks(body);
-	if (!keep) return answer;
-	seen.set(body, answer);
-	if (seen.size > most()) {
-		const oldest = seen.keys().next();
-		if (oldest.done !== true) seen.delete(oldest.value);
-	}
-	return answer;
-};
+): Parse => kept(body, previewBlocks, keep);
 
 /** The lines of text read off each kept set of blocks, gone with them. */
 const linesRead = new WeakMap<readonly PreviewLine[], readonly string[]>();

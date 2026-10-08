@@ -98,6 +98,28 @@ describe('the parses a list costs', () => {
 		expect(parses.count).toBe(1_000);
 	});
 
+	it('lets go of what was asked least lately, not of what was kept first', async () => {
+		// The store as a tab starts with it: the tests above drew longer lists.
+		vi.resetModules();
+		const [kept, text] = await Promise.all([
+			import('../src/store/kept.js'),
+			import('../src/store/visibleText.js'),
+		]);
+		// Room for 500: the list's 400 and a hundred more.
+		const rows = bodies('Drawn', 400);
+		kept.keepRows('list', rows.length);
+		const draw = () => {
+			rows.forEach((body) => text.openingLines(body));
+		};
+		draw();
+		// Each a note asked about once, between draws.
+		bodies('Once', 200).forEach((body) => {
+			text.openingLines(body);
+			draw();
+		});
+		expect(parses.count).toBe(400 + 200);
+	});
+
 	it('keeps room for two lists, so going between them parses neither again', () => {
 		const list = bodies('Listed', 700);
 		const cards = bodies('Card', 700);
