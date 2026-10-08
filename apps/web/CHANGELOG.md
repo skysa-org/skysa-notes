@@ -1,5 +1,13 @@
 # @skysa/web
 
+## 1.0.3
+
+### Patch Changes
+
+- c8f0ef4: On a phone, the compact bar no longer shortens a notebook's or a note's name that has room to show whole — `Bugs` was showing as `B…s` — and a long name chosen after another is shortened to the room it has, not cut as though it were as long as the one before.
+- 3b4646d: On an iPhone, the toolbar under a scratch note is no longer stretched tall: opened over the whole screen, its buttons sit in one row clear of the home indicator, and in the box on the scratchpad and in the dialog on a wide screen it no longer leaves room for one.
+- @skysa/core@1.0.3
+
 ## 1.0.2
 
 ### Patch Changes
