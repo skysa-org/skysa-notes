@@ -1,5 +1,15 @@
 import { ancestorPaths, basename, isScratchPath, ROOT } from '@skysa/core';
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import {
+	type KeyboardEvent,
+	memo,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from 'react';
 
 import { useCommand } from '../commands/context.js';
 import { Icon } from '../editor/icons.js';
@@ -603,8 +613,70 @@ interface FolderRowsProps {
 	onDwell: (path: string) => void;
 }
 
-const FolderRows = ({
-	nodes,
+/**
+ * `path` is the notebook at `at`, or one inside it at any depth: `isWithin`,
+ * without its tidying of paths the tree's already are, as it is asked twice
+ * for every row on every draw of the sidebar.
+ */
+const within = (path: string | null | undefined, at: string): boolean =>
+	path !== null && path !== undefined && (path === at || path.startsWith(`${at}/`));
+
+/** No notebook open, which is how every one starts. */
+const NONE_OPEN: ReadonlySet<string> = new Set();
+
+/**
+ * The notebooks at one level, each a row of its own that is drawn again only
+ * when something about it changes (`FolderItem`).
+ */
+const FolderRows = ({ nodes, ...rest }: FolderRowsProps) => (
+	<>
+		{nodes.map((node) => (
+			<FolderItem
+				key={node.path}
+				node={node}
+				{...rest}
+				// Each row is told of the notebook selected, the one under the
+				// pointer and the one being renamed only where it is the row or
+				// one inside it: a new selection, or a drag from one row to the
+				// next, then redraws the rows above the two it was and is, and
+				// not the hundreds beside them.
+				selectedFolder={
+					within(rest.selectedFolder, node.path) ? rest.selectedFolder : undefined
+				}
+				over={within(rest.over, node.path) ? rest.over : null}
+				renaming={within(rest.renaming, node.path) ? rest.renaming : null}
+				// Only an open row draws rows inside it, and needs to know which
+				// of those are open: a notebook opened or shut then redraws every
+				// open row, and no shut one.
+				openNotebooks={
+					node.children.length > 0 && rest.openNotebooks.has(node.path)
+						? rest.openNotebooks
+						: NONE_OPEN
+				}
+			/>
+		))}
+	</>
+);
+
+/**
+ * Every live note beneath a notebook, at any depth, kept by node: a node is
+ * the same object until something under it changes (`keptTree`), and the
+ * count is asked for on every draw of its row.
+ */
+const beneath = new WeakMap<FolderNode, number>();
+const countBeneath = (node: FolderNode): number => {
+	const known = beneath.get(node);
+	if (known !== undefined) return known;
+	const count = notesUnder(node);
+	beneath.set(node, count);
+	return count;
+};
+
+type FolderItemProps = Omit<FolderRowsProps, 'nodes'> & { node: FolderNode };
+
+/** One notebook's row, and the rows of the notebooks inside it when it is open. */
+const FolderItemView = ({
+	node,
 	depth,
 	selectedFolder,
 	onSelectFolder,
@@ -622,136 +694,131 @@ const FolderRows = ({
 	openNotebooks,
 	onToggle,
 	onDwell,
-}: FolderRowsProps) => (
-	<>
-		{nodes.map((node) => {
-			const hasChildren = node.children.length > 0;
-			const open = hasChildren && openNotebooks.has(node.path);
-			const toggle = (to: boolean) => {
-				onToggle(node.path, to);
-			};
-			// What it holds at every depth, open or shut, which is what its
-			// list shows: opening it does not change what is in it.
-			const count = notesUnder(node);
-			return (
-				<li key={node.path}>
-					<div
-						className="row-item"
-						// On the row's box rather than its button, which may be
-						// disabled for the move, and then is not where the pointer lands.
-						onDragOver={
-							moving !== null && hasChildren && !open
-								? () => {
-										onDwell(node.path);
-									}
-								: undefined
-						}
-					>
-						{hasChildren && (
-							<Disclosure
-								path={node.path}
-								name={node.name}
-								depth={depth}
-								open={open}
-								onToggle={() => {
-									toggle(!open);
-								}}
-								moving={moving}
-								onOver={onOver}
-								onDrop={onDrop}
-							/>
-						)}
-						{node.path === renaming ? (
-							<RowRename
-								name={node.name}
-								depth={depth}
-								selected={node.path === selectedFolder}
-								count={count}
-								onDraft={(text) => {
-									onDraft(node.path, text);
-								}}
-								onDone={(chosen) => {
-									onRenamed(node.path, chosen);
-								}}
-							/>
-						) : (
-							<Row
-								path={node.path}
-								name={node.name}
-								selected={node.path === selectedFolder}
-								depth={depth}
-								count={count}
-								moving={moving}
-								over={over}
-								onOver={onOver}
-								onSelect={() => {
-									onSelectFolder(node.path);
-								}}
-								onDrop={onDrop}
-								onPickUp={() => {
-									onPickUp({
-										kind: 'notebook',
-										path: node.path,
-										name: node.name,
-									});
-								}}
-								onCancelMove={onCancelMove}
-								onMenu={(at) => {
-									onMenu(node.path, at);
-								}}
-								onKeyDown={treeKeys(hasChildren, open, toggle)}
-								expanded={hasChildren ? open : undefined}
-								pinned={node.pinned === true}
-							/>
-						)}
-						{/* Not while its name is being typed, when the row is a field;
+}: FolderItemProps) => {
+	const hasChildren = node.children.length > 0;
+	const open = hasChildren && openNotebooks.has(node.path);
+	const toggle = (to: boolean) => {
+		onToggle(node.path, to);
+	};
+	// What it holds at every depth, open or shut, which is what its
+	// list shows: opening it does not change what is in it.
+	const count = countBeneath(node);
+	return (
+		<li>
+			<div
+				className="row-item"
+				// On the row's box rather than its button, which may be
+				// disabled for the move, and then is not where the pointer lands.
+				onDragOver={
+					moving !== null && hasChildren && !open
+						? () => {
+								onDwell(node.path);
+							}
+						: undefined
+				}
+			>
+				{hasChildren && (
+					<Disclosure
+						path={node.path}
+						name={node.name}
+						depth={depth}
+						open={open}
+						onToggle={() => {
+							toggle(!open);
+						}}
+						moving={moving}
+						onOver={onOver}
+						onDrop={onDrop}
+					/>
+				)}
+				{node.path === renaming ? (
+					<RowRename
+						name={node.name}
+						depth={depth}
+						selected={node.path === selectedFolder}
+						count={count}
+						onDraft={(text) => {
+							onDraft(node.path, text);
+						}}
+						onDone={(chosen) => {
+							onRenamed(node.path, chosen);
+						}}
+					/>
+				) : (
+					<Row
+						path={node.path}
+						name={node.name}
+						selected={node.path === selectedFolder}
+						depth={depth}
+						count={count}
+						moving={moving}
+						over={over}
+						onOver={onOver}
+						onSelect={() => {
+							onSelectFolder(node.path);
+						}}
+						onDrop={onDrop}
+						onPickUp={() => {
+							onPickUp({
+								kind: 'notebook',
+								path: node.path,
+								name: node.name,
+							});
+						}}
+						onCancelMove={onCancelMove}
+						onMenu={(at) => {
+							onMenu(node.path, at);
+						}}
+						onKeyDown={treeKeys(hasChildren, open, toggle)}
+						expanded={hasChildren ? open : undefined}
+						pinned={node.pinned === true}
+					/>
+				)}
+				{/* Not while its name is being typed, when the row is a field;
 				    nor while something is being moved, when the rows are only
 				    places to put it. */}
-						{node.path !== renaming && (
-							<RowOptions
-								name={node.name}
-								kind="Notebook"
-								items={itemsFor(node.path)}
-								disabled={moving !== null}
-								// Rightwards, over the note list: the sidebar is at the
-								// window's left edge, and a card opened leftwards from its
-								// end has a sidebar's width to fit in.
-								align="start"
-							/>
-						)}
-					</div>
-					{open && (
-						<ul>
-							<FolderRows
-								nodes={node.children}
-								depth={depth + 1}
-								selectedFolder={selectedFolder}
-								onSelectFolder={onSelectFolder}
-								moving={moving}
-								over={over}
-								onOver={onOver}
-								onPickUp={onPickUp}
-								onDrop={onDrop}
-								onCancelMove={onCancelMove}
-								renaming={renaming}
-								onDraft={onDraft}
-								onRenamed={onRenamed}
-								onMenu={onMenu}
-								itemsFor={itemsFor}
-								openNotebooks={openNotebooks}
-								onToggle={onToggle}
-								onDwell={onDwell}
-							/>
-						</ul>
-					)}
-				</li>
-			);
-		})}
-	</>
-);
+				{node.path !== renaming && (
+					<RowOptions
+						name={node.name}
+						kind="Notebook"
+						items={() => itemsFor(node.path)}
+						disabled={moving !== null}
+						// Rightwards, over the note list: the sidebar is at the
+						// window's left edge, and a card opened leftwards from its
+						// end has a sidebar's width to fit in.
+						align="start"
+					/>
+				)}
+			</div>
+			{open && (
+				<ul>
+					<FolderRows
+						nodes={node.children}
+						depth={depth + 1}
+						selectedFolder={selectedFolder}
+						onSelectFolder={onSelectFolder}
+						moving={moving}
+						over={over}
+						onOver={onOver}
+						onPickUp={onPickUp}
+						onDrop={onDrop}
+						onCancelMove={onCancelMove}
+						renaming={renaming}
+						onDraft={onDraft}
+						onRenamed={onRenamed}
+						onMenu={onMenu}
+						itemsFor={itemsFor}
+						openNotebooks={openNotebooks}
+						onToggle={onToggle}
+						onDwell={onDwell}
+					/>
+				</ul>
+			)}
+		</li>
+	);
+};
 
-/** No notebook open, which is how every one starts. */
-const NONE_OPEN: ReadonlySet<string> = new Set();
+const FolderItem = memo(FolderItemView);
 
 /** Notebooks opened, by whoever keeps which are open. */
 const opener =
@@ -799,112 +866,143 @@ const TreeBody = ({
 	looseNoteCount,
 	onCreate,
 	selectedFolder,
-	onSelectFolder,
 	moving,
 	over,
-	onOver,
-	onPickUp,
-	onDrop,
-	onCancelMove,
 	renaming,
-	onDraft,
-	onRenamed,
-	onMenu,
-	itemsFor,
 	openNotebooks = NONE_OPEN,
-	onToggle,
-	onDwell,
-}: TreeBodyProps) => (
-	// Room for a chevron before every name, so the names stand in one column,
-	// only where some notebook has one.
-	<ul className={tree?.some((node) => node.children.length > 0) ? 'tree nested' : 'tree'}>
-		{/* With no notebooks and the loose notes not yet counted there is
+	...given
+}: TreeBodyProps) => {
+	// The sidebar's handlers are made again on each of its draws. The rows are
+	// handed ones that stay the same and call those given last, so a row is
+	// drawn again only when what it shows changes (`FolderItem`); set before the
+	// browser paints, so an event never reaches the ones before.
+	const latest = useRef(given);
+	useLayoutEffect(() => {
+		latest.current = given;
+	});
+	const onSelectFolder = useCallback((path: string) => {
+		latest.current.onSelectFolder(path);
+	}, []);
+	const onOver = useCallback((path: string | null) => {
+		latest.current.onOver(path);
+	}, []);
+	const onPickUp = useCallback((moving: Moving) => {
+		latest.current.onPickUp(moving);
+	}, []);
+	const onDrop = useCallback((into: string) => {
+		latest.current.onDrop(into);
+	}, []);
+	const onCancelMove = useCallback(() => {
+		latest.current.onCancelMove();
+	}, []);
+	const onDraft = useCallback((path: string, text: string) => {
+		latest.current.onDraft(path, text);
+	}, []);
+	const onRenamed = useCallback((path: string, chosen?: string) => {
+		latest.current.onRenamed(path, chosen);
+	}, []);
+	const onMenu = useCallback((path: string, at: MenuPoint) => {
+		latest.current.onMenu(path, at);
+	}, []);
+	const itemsFor = useCallback((path: string) => latest.current.itemsFor(path), []);
+	const onToggle = useCallback((path: string, open: boolean) => {
+		latest.current.onToggle(path, open);
+	}, []);
+	const onDwell = useCallback((path: string) => {
+		latest.current.onDwell(path);
+	}, []);
+	return (
+		// Room for a chevron before every name, so the names stand in one column,
+		// only where some notebook has one.
+		<ul className={tree?.some((node) => node.children.length > 0) ? 'tree nested' : 'tree'}>
+			{/* With no notebooks and the loose notes not yet counted there is
 			nothing here to say — but "nothing" reads as an empty sidebar
 			beside a note list that says it is still loading. */}
-		{(tree === undefined || (tree.length === 0 && looseNoteCount === undefined)) && (
-			<li className="muted placeholder">{t('notebooks.loading')}</li>
-		)}
-		{tree?.length === 0 && looseNoteCount === 0 && (
-			<li className="muted placeholder">
-				{rich('notebooks.empty', {
-					create: (words) => (
-						<button type="button" className="link-button" onClick={onCreate}>
-							{words}
-						</button>
-					),
-				})}
-			</li>
-		)}
-		{/* The only way to bring a nested notebook back out, and so it
+			{(tree === undefined || (tree.length === 0 && looseNoteCount === undefined)) && (
+				<li className="muted placeholder">{t('notebooks.loading')}</li>
+			)}
+			{tree?.length === 0 && looseNoteCount === 0 && (
+				<li className="muted placeholder">
+					{rich('notebooks.empty', {
+						create: (words) => (
+							<button type="button" className="link-button" onClick={onCreate}>
+								{words}
+							</button>
+						),
+					})}
+				</li>
+			)}
+			{/* The only way to bring a nested notebook back out, and so it
 			appears exactly when something can land there — which is never
 			for a note, and not for a notebook already at the top. It is a
 			second row for the same directory as "Loose notes" below, and
 			deliberately not the same row: that one holds notes and this one
 			is where notebooks live, which is the distinction the root has
 			always had here. */}
-		{moving !== null && canDrop(moving, ROOT) && (
-			<li className="row-item">
-				<Row
-					path={ROOT}
-					name={TOP_LEVEL_LABEL}
-					landing={(held) => t('notebooks.move.toTopLevel', { name: held.name })}
-					selected={false}
+			{moving !== null && canDrop(moving, ROOT) && (
+				<li className="row-item">
+					<Row
+						path={ROOT}
+						name={TOP_LEVEL_LABEL}
+						landing={(held) => t('notebooks.move.toTopLevel', { name: held.name })}
+						selected={false}
+						depth={0}
+						moving={moving}
+						over={over}
+						onOver={onOver}
+						onSelect={() => undefined}
+						onDrop={onDrop}
+						onCancelMove={onCancelMove}
+					/>
+				</li>
+			)}
+			{tree !== undefined && (
+				<FolderRows
+					nodes={tree}
 					depth={0}
+					selectedFolder={selectedFolder}
+					onSelectFolder={onSelectFolder}
 					moving={moving}
 					over={over}
 					onOver={onOver}
-					onSelect={() => undefined}
+					onPickUp={onPickUp}
 					onDrop={onDrop}
 					onCancelMove={onCancelMove}
+					renaming={renaming}
+					onDraft={onDraft}
+					onRenamed={onRenamed}
+					onMenu={onMenu}
+					itemsFor={itemsFor}
+					openNotebooks={openNotebooks}
+					onToggle={onToggle}
+					onDwell={onDwell}
 				/>
-			</li>
-		)}
-		{tree !== undefined && (
-			<FolderRows
-				nodes={tree}
-				depth={0}
-				selectedFolder={selectedFolder}
-				onSelectFolder={onSelectFolder}
-				moving={moving}
-				over={over}
-				onOver={onOver}
-				onPickUp={onPickUp}
-				onDrop={onDrop}
-				onCancelMove={onCancelMove}
-				renaming={renaming}
-				onDraft={onDraft}
-				onRenamed={onRenamed}
-				onMenu={onMenu}
-				itemsFor={itemsFor}
-				openNotebooks={openNotebooks}
-				onToggle={onToggle}
-				onDwell={onDwell}
-			/>
-		)}
-		{/* A row like the notebooks', the room for a `⋯` and all, so its count
+			)}
+			{/* A row like the notebooks', the room for a `⋯` and all, so its count
 		    lines up with theirs; it has none, since it is not a notebook and
 		    cannot be renamed, moved or deleted. */}
-		{looseNoteCount !== undefined && looseNoteCount > 0 && (
-			<li className="row-item">
-				<Row
-					path={ROOT}
-					name={LOOSE_NOTES_LABEL}
-					selected={selectedFolder === ROOT}
-					depth={0}
-					count={looseNoteCount}
-					moving={moving}
-					over={over}
-					onOver={onOver}
-					onSelect={() => {
-						onSelectFolder(ROOT);
-					}}
-					onDrop={onDrop}
-					onCancelMove={onCancelMove}
-				/>
-			</li>
-		)}
-	</ul>
-);
+			{looseNoteCount !== undefined && looseNoteCount > 0 && (
+				<li className="row-item">
+					<Row
+						path={ROOT}
+						name={LOOSE_NOTES_LABEL}
+						selected={selectedFolder === ROOT}
+						depth={0}
+						count={looseNoteCount}
+						moving={moving}
+						over={over}
+						onOver={onOver}
+						onSelect={() => {
+							onSelectFolder(ROOT);
+						}}
+						onDrop={onDrop}
+						onCancelMove={onCancelMove}
+					/>
+				</li>
+			)}
+		</ul>
+	);
+};
 
 /**
  * The notebook open in the note list is shown in the sidebar too: when one is

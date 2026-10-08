@@ -166,6 +166,25 @@ describe('usePinnedTree', () => {
 		});
 		expect(result.current.pins).not.toBe(before);
 	});
+
+	it('hands back a notebook unchanged since the read before as the same node', async () => {
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Home' });
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Work' });
+		const { result } = renderHook(usePinnedTree);
+		const at = (path: string) => result.current.tree?.find((node) => node.path === path);
+		await waitFor(() => {
+			expect(result.current.tree).toHaveLength(2);
+		});
+		const home = at('Home');
+
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+
+		await waitFor(() => {
+			expect(at('Work')?.noteCount).toBe(1);
+		});
+		expect(home).toBeDefined();
+		expect(at('Home')).toBe(home);
+	});
 });
 
 describe('useNote', () => {

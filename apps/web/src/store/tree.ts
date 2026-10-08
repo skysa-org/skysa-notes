@@ -50,10 +50,20 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 
 	const seed = [...input.paths, ...notePaths.map(parentPath)].filter((path) => path !== ROOT);
 	const all = new Set(seed.flatMap((path) => [...ancestorPaths(path), path]));
+	// Each folder under its parent, once: asking every folder whether it is
+	// in each one was a quarter of a million asks for five hundred notebooks,
+	// on every autosave and every sync run.
+	const under = [...all].reduce((groups, path) => {
+		const parent = parentPath(path);
+		const siblings = groups.get(parent);
+		if (siblings === undefined) return groups.set(parent, [path]);
+		// eslint-disable-next-line functional/immutable-data
+		siblings.push(path);
+		return groups;
+	}, new Map<string, string[]>());
 
 	const childrenOf = (parent: string): FolderNode[] =>
-		[...all]
-			.filter((path) => parentPath(path) === parent)
+		[...(under.get(parent) ?? [])]
 			.sort((a, b) => a.localeCompare(b))
 			.map((path) => ({
 				path,
@@ -64,6 +74,35 @@ export const buildFolderTree = (input: BuildFolderTreeInput): FolderNode[] => {
 			}));
 
 	return childrenOf(ROOT);
+};
+
+/** Two nodes that say the same of their notebook, their own fields compared. */
+const sameNode = (a: FolderNode, b: FolderNode): boolean =>
+	a.path === b.path &&
+	a.name === b.name &&
+	a.noteCount === b.noteCount &&
+	a.fileCount === b.fileCount &&
+	a.pinned === b.pinned;
+
+/**
+ * `next`, with each notebook that has not changed since `before` — nor has
+ * anything inside it — handed back as the node it was then, and the whole
+ * tree as it was where nothing in it changed. The tree is built again on every
+ * autosave and sync run, and a row, or the note list's order, that compares
+ * what it is given by identity is then only redone for what changed.
+ */
+export const keptTree = (before: FolderNode[] | undefined, next: FolderNode[]): FolderNode[] => {
+	if (before === undefined) return next;
+	const was = new Map(before.map((node) => [node.path, node]));
+	const kept = next.map((node) => {
+		const old = was.get(node.path);
+		const children = keptTree(old?.children, node.children);
+		if (old !== undefined && sameNode(old, node) && children === old.children) return old;
+		return children === node.children ? node : { ...node, children };
+	});
+	return kept.length === before.length && kept.every((node, at) => node === before[at])
+		? before
+		: kept;
 };
 
 /**
