@@ -72,21 +72,23 @@ export const rems = (count: number): number => {
  * it as "plenty of room" — so every test that does not ask for a width gets
  * the layout the app has always had, as it does from `useMediaQuery`.
  *
- * Measured when the element is first watched, and then each time the observer
- * says it changed, which it says just after the browser has laid the page out.
- * Measured on every draw instead, as it was, it made the browser lay the page
- * out there and then: on every keystroke in a note, for the note's own width.
+ * Measured on the first draw with the element, so its width is there on that
+ * draw and not one later, and then each time the observer says it changed,
+ * which it says just after the browser has laid the page out and before it
+ * paints. Measured on every draw instead, as it was, it made the browser lay
+ * the page out there and then: in a compact window, on every keystroke in a
+ * note, for the compact bar's width.
  */
 export const useElementWidth = (element: Element | null): number | undefined => {
 	const store = useMemo(() => {
 		const measured: { current: number | undefined } = { current: undefined };
+		const first = { current: true };
 		const measure = () => {
 			const width = element?.getBoundingClientRect().width ?? 0;
 			measured.current = width > 0 ? width : undefined;
 		};
 		return {
 			subscribe: (changed: () => void) => {
-				measure();
 				if (element === null || typeof ResizeObserver === 'undefined') {
 					return noSubscription();
 				}
@@ -104,7 +106,13 @@ export const useElementWidth = (element: Element | null): number | undefined => 
 					observer.disconnect();
 				};
 			},
-			width: () => measured.current,
+			width: () => {
+				if (first.current) {
+					first.current = false;
+					measure();
+				}
+				return measured.current;
+			},
 		};
 	}, [element]);
 

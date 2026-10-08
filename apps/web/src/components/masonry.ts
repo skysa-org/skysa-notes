@@ -55,7 +55,7 @@ export const placeCards = (heights: readonly number[], width: number): Wall => {
 	// seven hundred, on every draw.
 	const tops = Array.from({ length: columns }, () => 0);
 	const places = heights.map((height): Placed => {
-		// The first column where a height that is not a number leaves none shortest.
+		// Never -1, which would write past the columns, should a height not be a number.
 		const shortest = Math.max(0, tops.indexOf(Math.min(...tops)));
 		const top = tops[shortest] ?? 0;
 		// eslint-disable-next-line functional/immutable-data

@@ -71,6 +71,22 @@ const Measured = () => {
 	);
 };
 
+/** One measured element put in place of another, as a note's body is when another note opens. */
+const Swapped = ({ wide }: { wide: boolean }) => {
+	const [element, setElement] = useState<HTMLDivElement | null>(null);
+	const width = useElementWidth(element);
+	return (
+		<>
+			<div
+				key={wide ? 'wide' : 'narrow'}
+				className={wide ? 'wide' : 'narrow'}
+				ref={setElement}
+			/>
+			<p>{width === undefined ? 'unmeasured' : `${String(width)}px`}</p>
+		</>
+	);
+};
+
 describe('useElementWidth', () => {
 	it('reports nothing where nothing is laid out', () => {
 		// jsdom, again: every element is 0px, and 0px is not a width anything
@@ -90,7 +106,7 @@ describe('useElementWidth', () => {
 		expect(screen.getByText('420px')).toBeDefined();
 	});
 
-	it('measures when it starts watching and when the width changes, and not on every draw', () => {
+	it('measures on its first draw with the element and when the width changes, and not on every draw', () => {
 		widths = elementWidths({ '.measured': 700 });
 		// Measuring on a draw makes the browser lay the page out there and then.
 		const measured = vi.spyOn(Element.prototype, 'getBoundingClientRect');
@@ -98,9 +114,9 @@ describe('useElementWidth', () => {
 			const { rerender } = render(<Measured />);
 			expect(screen.getByText('700px')).toBeDefined();
 			const once = measured.mock.calls.length;
-			// Once, when it starts watching. A browser's observer also reports at
-			// once, with the width in what it reports; this fake reports nothing
-			// until a resize, and so is measured.
+			// Once, on the first draw with the element. A browser's observer then
+			// reports at once, with the width in what it reports; this fake
+			// reports nothing until a resize, and so is measured.
 			expect(once).toBe(1);
 
 			rerender(<Measured />);
@@ -115,6 +131,44 @@ describe('useElementWidth', () => {
 		} finally {
 			measured.mockRestore();
 		}
+	});
+
+	it('takes the width the observer reports, not one drawn under a transform', () => {
+		widths = elementWidths({ '.measured': 700 });
+		const { rerender } = render(<Measured />);
+		expect(screen.getByText('700px')).toBeDefined();
+
+		// Laid out 640px wide, and drawn wider for a moment, as a card is
+		// while it grows open.
+		act(() => {
+			widths?.report('.measured', 640);
+		});
+		rerender(<Measured />);
+		expect(screen.getByText('640px')).toBeDefined();
+	});
+
+	it('reports nothing once the element has no width, as when it is hidden', () => {
+		widths = elementWidths({ '.measured': 700 });
+		render(<Measured />);
+		act(() => {
+			widths?.report('.measured', 0);
+		});
+		expect(screen.getByText('unmeasured')).toBeDefined();
+	});
+
+	it('measures an element put in place of the one it watched, and stops watching that one', () => {
+		widths = elementWidths({ '.wide': 900, '.narrow': 300 });
+		const { rerender } = render(<Swapped wide />);
+		expect(screen.getByText('900px')).toBeDefined();
+
+		rerender(<Swapped wide={false} />);
+		expect(screen.getByText('300px')).toBeDefined();
+		expect(widths.watching('.wide')).toBe(0);
+
+		act(() => {
+			widths?.report('.narrow', 280);
+		});
+		expect(screen.getByText('280px')).toBeDefined();
 	});
 });
 

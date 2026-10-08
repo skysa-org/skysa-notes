@@ -522,7 +522,8 @@ export const Scratchpad = ({
 		() => scratchGroups((notes ?? []).filter((note) => note.id !== takingId)),
 		[notes, takingId]
 	);
-	// Every card asks for its opening and its frontmatter on every draw.
+	// Every card's marks are asked for on every read (`scratchGroups`), and the
+	// opening of a card drawn again, or not measured yet.
 	keepRows('scratchpad', notes?.length ?? 0);
 	const both = cards.pinned.length > 0 && cards.others.length > 0;
 	// The handlers this is given are made again on each draw of the page. The
