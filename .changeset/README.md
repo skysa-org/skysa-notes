@@ -70,10 +70,17 @@ only a major version asks them to do anything beyond the routine steps under
 - **major** — anything the operator, or the people using the instance, must
   act on: a setting, secret or binding that must now be set, or one renamed or
   removed (removing `AUTH_MODE`, issue #118, is one; a new one with a default
-  is not); a migration the routine steps cannot apply;
-  a change that makes every device reconnect; a `brand.json` field that changes
-  meaning; a storage layout older builds can only open read-only. The summary
-  says what to do.
+  is not); a migration the routine steps cannot apply; a change that makes
+  every device reconnect; a `brand.json` field that changes meaning; a storage
+  layout older builds can only open read-only. The summary says what to do.
+
+No bump is licence to strand what people already have. Notes, files and
+settings written by any earlier release — on the device or in the user's own
+storage — keep working after an update. Where a change cannot read them as they
+are, it ships with the upgrade path that carries them forward, in the same
+release and tested against data in the old shape. Before 1.0 nothing had been
+released, so code for an obsolete shape was simply deleted; that is no longer
+an option.
 
 The summary is read by people deciding whether to upgrade an instance they run.
 Write it for them: what changed for a user, not which function was renamed.
