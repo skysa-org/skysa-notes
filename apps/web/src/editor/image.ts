@@ -285,7 +285,11 @@ const imageView =
 		/** The file, as a chip asks for one: by the name the user knows it by. */
 		const request = () => {
 			const src = attributeOf(held.current, 'src');
-			return { host, href: src, label: savedAs(attributeOf(held.current, 'alt'), nameIn(src)) };
+			return {
+				host,
+				href: src,
+				label: savedAs(attributeOf(held.current, 'alt'), nameIn(src)),
+			};
 		};
 
 		/** Say the bar is busy while `work` runs: the whole picture may be a download. */
