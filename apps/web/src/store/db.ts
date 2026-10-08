@@ -1,4 +1,4 @@
-import { type ProviderKind } from '@skysa/core';
+import { type PictureInfo, type PictureVariant, type ProviderKind } from '@skysa/core';
 import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
@@ -343,6 +343,45 @@ export interface ClipBytesRecord {
 	bytes: ArrayBuffer;
 }
 
+/** A smaller copy of a picture, as `PictureRecord` keeps what is known of it. */
+export interface PictureCopyRecord {
+	/** What it was written as: WebP, or PNG or JPEG where the browser writes no WebP. */
+	type: string;
+	width: number;
+	height: number;
+	/** In bytes. */
+	size: number;
+	/** For evicting the least recently used. */
+	lastUsedAt: number;
+}
+
+/**
+ * What this device knows of a picture beside a note (#276, `store/pictures.ts`):
+ * what its header says, and the smaller copies made of it. Never in the
+ * user's folder; made again from the original wherever they are not here.
+ *
+ * Stamped with the remote id and version of the original they were read
+ * from, both absent while it exists only here: once its row is bound to other
+ * bytes, all of it is another picture's.
+ */
+export interface PictureRecord {
+	connectionId: string;
+	fileId: string;
+	remoteId?: string;
+	version?: string;
+	/** What its header says (`imageInfo`); `null` where it says nothing the app reads. */
+	info: PictureInfo | null;
+	copies: Partial<Record<PictureVariant, PictureCopyRecord>>;
+}
+
+/** A copy's bytes, apart from its record, as a file's are from its row. */
+export interface PictureBytesRecord {
+	connectionId: string;
+	fileId: string;
+	variant: PictureVariant;
+	bytes: ArrayBuffer;
+}
+
 export interface OpQueueRecord {
 	seq?: number;
 	connectionId: string;
@@ -377,6 +416,8 @@ export type NotesDatabase = Dexie & {
 	fileBytes: Table<FileBytesRecord, [string, string]>;
 	clips: Table<ClipRecord, [string, string]>;
 	clipBytes: Table<ClipBytesRecord, [string, string]>;
+	pictures: Table<PictureRecord, [string, string]>;
+	pictureBytes: Table<PictureBytesRecord, [string, string, PictureVariant]>;
 };
 
 export const DATABASE_NAME = 'skysa-notes';
@@ -514,6 +555,15 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	db.version(7).stores({
 		clips: '[connectionId+name], connectionId',
 		clipBytes: '[connectionId+name], connectionId',
+	});
+
+	// Smaller copies of pictures (#276), made on this device and kept apart from
+	// `files` and `fileBytes` as the clipboard is: they are nobody's work, never
+	// sent or exported, and have a budget of their own. The bytes apart from the
+	// records, so that eviction and a use written back never rewrite them.
+	db.version(8).stores({
+		pictures: '[connectionId+fileId], connectionId',
+		pictureBytes: '[connectionId+fileId+variant], [connectionId+fileId], connectionId',
 	});
 
 	// A build with a later version than the last one above, opening this database
