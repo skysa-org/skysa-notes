@@ -36,15 +36,7 @@ import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
 import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
 import { queueByNotebook } from './queue.js';
-import {
-	countOf,
-	isEmpty,
-	type Seen,
-	unseenIn,
-	type Unsynced,
-	unsyncedIn,
-	wasSeen,
-} from './unsynced.js';
+import { isEmpty, type Seen, unseenIn, type Unsynced, unsyncedIn, wasSeen } from './unsynced.js';
 
 /**
  * Which storage account the notes on this device belong to.
@@ -1724,10 +1716,12 @@ export interface ConnectedSource {
 	/** Whether this is the one the app is showing. */
 	active: boolean;
 	/**
-	 * A source this device no longer reaches, and how much it holds that was
-	 * never sent — which is the whole reason it is still listed.
+	 * A source this device no longer reaches, still listed for what it holds
+	 * that was never sent. How much is the detached source's panel's to count
+	 * (`unsyncedIn`): counted here, it read every note of the source each time
+	 * a sync run wrote its `syncState` row, which re-runs this list (#275).
 	 */
-	detached?: { unsent: number };
+	detached?: true;
 }
 
 /**
@@ -1779,25 +1773,15 @@ export const connectedSources = async (
 		!held && (await own('notes')) + (await own('folders')) > 0
 			? [{ connectionId: LOCAL_CONNECTION_ID, active: active === LOCAL_CONNECTION_ID }]
 			: [];
-	const connected = await states.reduce<Promise<ConnectedSource[]>>(async (sofar, state) => {
-		const listed = await sofar;
-		const detached =
-			state.detached === undefined
-				? {}
-				: { detached: { unsent: countOf(await unsyncedIn(db, state.connectionId)) } };
-		return [
-			...listed,
-			{
-				connectionId: state.connectionId,
-				...(state.provider === undefined ? {} : { provider: state.provider }),
-				...accountOn(state.accountId),
-				...nameOn(state.displayName),
-				...(state.label === undefined ? {} : { label: state.label }),
-				...(state.boundAt === undefined ? {} : { boundAt: state.boundAt }),
-				active: state.connectionId === active,
-				...detached,
-			},
-		];
-	}, Promise.resolve([]));
+	const connected = states.map((state): ConnectedSource => ({
+		connectionId: state.connectionId,
+		...(state.provider === undefined ? {} : { provider: state.provider }),
+		...accountOn(state.accountId),
+		...nameOn(state.displayName),
+		...(state.label === undefined ? {} : { label: state.label }),
+		...(state.boundAt === undefined ? {} : { boundAt: state.boundAt }),
+		active: state.connectionId === active,
+		...(state.detached === undefined ? {} : { detached: true }),
+	}));
 	return [...connected, ...pile];
 };

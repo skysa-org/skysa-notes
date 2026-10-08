@@ -452,7 +452,7 @@ describe('letting a source go', () => {
 		expect(await pathsUnder(db, ADA.connectionId)).toEqual(['unsent.md']);
 	});
 
-	it('is listed for what it is, with how much it holds', async () => {
+	it('is listed for what it is, and what it holds counted apart', async () => {
 		const db = await connected();
 		await bindConnection(db, BOB);
 		await createFolder(db, { ...ada, name: 'New' });
@@ -467,8 +467,7 @@ describe('letting a source go', () => {
 				accountId: 'dbid:ada',
 				displayName: 'ada@example.com',
 				active: false,
-				// The two notes. The notebook goes up with the note inside it.
-				detached: { unsent: 2 },
+				detached: true,
 			},
 			{
 				connectionId: BOB.connectionId,
@@ -481,7 +480,31 @@ describe('letting a source go', () => {
 				active: true,
 			},
 		]);
+		// The two notes. The notebook goes up with the note inside it.
 		expect(countOf(await unsyncedIn(db, ADA.connectionId))).toBe(2);
+	});
+
+	it('is listed without a read of its notes, which every sync run would repeat', async () => {
+		const db = await connected();
+		await bindConnection(db, BOB);
+		await createNote(db, { ...ada, title: 'One' });
+		await createNote(db, { ...ada, title: 'Two' });
+		await detachConnection(db, { connectionId: ADA.connectionId });
+		const read: string[] = [];
+		const reading = (note: NoteRecord) => {
+			read.push(note.connectionId);
+			return note;
+		};
+		db.notes.hook('reading', reading);
+		try {
+			expect((await connectedSources(db)).map((source) => source.connectionId)).toContain(
+				ADA.connectionId
+			);
+		} finally {
+			db.notes.hook('reading').unsubscribe(reading);
+		}
+
+		expect(read).toEqual([]);
 	});
 });
 
@@ -847,8 +870,9 @@ describe('a save that arrives after its source has gone', () => {
 		expect(await connectedSources(db)).toContainEqual({
 			connectionId: ADA.connectionId,
 			active: false,
-			detached: { unsent: 1 },
+			detached: true,
 		});
+		expect(countOf(await unsyncedIn(db, ADA.connectionId))).toBe(1);
 		// Bob's source is still the one showing, and is live.
 		expect(await activeConnectionId(db)).toBe(BOB.connectionId);
 	});
