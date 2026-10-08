@@ -498,6 +498,51 @@ describe('a picture shown at the size a view draws it', () => {
 		expect(asked).toHaveLength(2);
 	});
 
+	it('says at once that it is too large to download unasked, rather than at its turn', async () => {
+		const answers: (() => void)[] = [];
+		const { db, show, readFile, asked } = fitted(
+			undefined,
+			(want) =>
+				new Promise((resolve) => {
+					answers.push(() => {
+						resolve(madeAs(want));
+					});
+				})
+		);
+		const large = LARGE_PICTURE_BYTES + 1;
+		await db.files.put(row('notes/a.png'));
+		await db.files.put(row('notes/map.png', { size: large }));
+		await db.files.put(row('notes/held.png', { size: large }));
+		await db.fileBytes.put({
+			connectionId: 'c1',
+			id: 'notes/held.png',
+			bytes: photo,
+			version: 'v1',
+			pinned: 0,
+			lastUsedAt: 0,
+		});
+
+		const a = show('a.png');
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(1);
+		});
+		// While the copy asked for before it is being made.
+		expect(await show('map.png')).toEqual({ state: 'large', size: large });
+		expect(readFile.mock.calls.map(([, id]) => id)).toEqual(['notes/a.png']);
+
+		// One on the device is copied, at its turn.
+		const held = show('held.png');
+		answers[0]?.();
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(2);
+		});
+		answers[1]?.();
+		expect(await a).toMatchObject({ state: 'ready' });
+		expect(await held).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(asked).toHaveLength(2);
+		expect(readFile).toHaveBeenCalledTimes(1);
+	});
+
 	it('is shown as it is where the browser makes no copies, its size kept for next time', async () => {
 		const db = freshDatabase();
 		const readFile = vi.fn<NoteAttachmentsOptions['readFile']>(() =>

@@ -32,7 +32,7 @@ import {
 	type NotesDatabase,
 	type PictureRecord,
 } from '../store/db.js';
-import { heldFile } from '../store/fileCache.js';
+import { heldFile, holdsBytes } from '../store/fileCache.js';
 import {
 	addAttachment,
 	attachmentRefusal,
@@ -181,6 +181,25 @@ const urlKey = (connectionId: string, file: FileRecord, variant?: PictureVariant
 		file.remoteVersion ?? 'held',
 		...(variant === undefined ? [] : [variant]),
 	].join('\u0000');
+
+/**
+ * A picture drawn as it is, from its bytes. Made here, apart from anything
+ * else a function holds: a closure made beside another shares what either
+ * holds, and a copy's would keep the original it was made from.
+ */
+const asItIs = (
+	key: string,
+	bytes: ArrayBuffer,
+	type: string,
+	size: PictureSize | undefined
+): Drawable => ({ key, blob: () => new Blob([bytes], { type }), size });
+
+/** A picture drawn from a copy made of it, holding nothing but the copy (`asItIs`). */
+const fromCopy = (key: string, copy: Blob, size: PictureSize): Drawable => ({
+	key,
+	blob: () => copy,
+	size,
+});
 
 const dataUrl = (blob: Blob): Promise<string> =>
 	new Promise((resolve, reject) => {
@@ -384,16 +403,18 @@ export const createNoteAttachments = ({
 		const type = safeOpenType(name);
 		const info =
 			known === undefined ? (imageInfo(new Uint8Array(read.bytes)) ?? null) : known.info;
-		const shownAsItIs: Drawable = {
-			key: urlKey(connectionId, file),
-			blob: () => new Blob([read.bytes], { type }),
-			size: info === null ? undefined : sizeOf(info),
-		};
+		const shownAsItIs = () =>
+			asItIs(
+				urlKey(connectionId, file),
+				read.bytes,
+				type,
+				info === null ? undefined : sizeOf(info)
+			);
 		const wanted =
 			info === null || known?.refused === true ? undefined : pictureVariant(info, fit);
 		if (info === null || wanted === undefined) {
 			if (known === undefined) await keep(file, { info });
-			return shownAsItIs;
+			return shownAsItIs();
 		}
 		const shrunk = await shrinker.shrink(new Blob([read.bytes], { type }), {
 			width: wanted.width,
@@ -410,16 +431,12 @@ export const createNoteAttachments = ({
 					height: shrunk.height,
 				},
 			});
-			return {
-				key: urlKey(connectionId, file, wanted.variant),
-				blob: () => shrunk.copy,
-				size: sizeOf(info),
-			};
+			return fromCopy(urlKey(connectionId, file, wanted.variant), shrunk.copy, sizeOf(info));
 		}
 		// One the browser could not draw is not asked of it again, until its
 		// file is other bytes; one missed is, next time it is shown.
 		await keep(file, shrunk.kind === 'refused' ? { info, refused: true } : { info });
-		return shownAsItIs;
+		return shownAsItIs();
 	};
 
 	/**
@@ -445,6 +462,12 @@ export const createNoteAttachments = ({
 			if (wanted === undefined) return original(connectionId, file, name, options, known);
 			const held = await copyShown(connectionId, file, wanted.variant, sizeOf(known.info));
 			if (held !== undefined) return held;
+		}
+		// Too large to download unasked, and not on this device: said at once,
+		// not at a turn behind every copy asked for before it.
+		if (!large && file.size > LARGE_PICTURE_BYTES && !(await holdsBytes(db, file))) {
+			const said: Shown = { state: 'large', size: file.size };
+			return (await standIn(connectionId, file, known, fit)) ?? said;
 		}
 		const made = await turns(
 			[

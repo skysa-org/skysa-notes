@@ -33,12 +33,25 @@ export const oneAtATime = <T>(): Turns<T> => {
 	>();
 	const start = (key: string, work: () => Promise<T>) => {
 		const askers = { current: 0 };
+		const over = () => {
+			if (waiting.get(key)?.askers === askers) waiting.delete(key);
+		};
 		const done = queue.current
-			.then(() => (askers.current > 0 ? work() : undefined))
-			.finally(() => {
-				if (waiting.get(key)?.askers === askers) waiting.delete(key);
-			});
-		queue.current = done.catch(() => undefined);
+			.then(() => {
+				if (askers.current > 0) return work();
+				// Gone at once: one who asks between here and the `finally`
+				// starts the work afresh, rather than joining work passed over.
+				over();
+				return undefined;
+			})
+			.finally(over);
+		// The order alone. What the work came to is its askers': held here, the
+		// last copy made would keep the original it was made from for as long
+		// as the app is open.
+		queue.current = done.then(
+			() => undefined,
+			() => undefined
+		);
 		const entry = { askers, done };
 		waiting.set(key, entry);
 		return entry;
@@ -47,13 +60,16 @@ export const oneAtATime = <T>(): Turns<T> => {
 		if (signal.aborted) return Promise.resolve(undefined);
 		const entry = waiting.get(key) ?? start(key, work);
 		entry.askers.current += 1;
-		signal.addEventListener(
-			'abort',
-			() => {
-				entry.askers.current -= 1;
-			},
-			{ once: true }
-		);
+		const stop = () => {
+			entry.askers.current -= 1;
+		};
+		signal.addEventListener('abort', stop, { once: true });
+		// Taken off once the work is done. A view's signal lasts as long as the
+		// view, and what the work came to, held by it, would last as long.
+		const off = () => {
+			signal.removeEventListener('abort', stop);
+		};
+		void entry.done.then(off, off);
 		return entry.done;
 	};
 };

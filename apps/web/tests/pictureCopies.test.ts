@@ -124,6 +124,46 @@ describe('work done one piece at a time', () => {
 		expect(await next).toBe('b');
 	});
 
+	it('starts afresh for one who asks just as the work was passed over', async () => {
+		/** `count` turns of the microtask queue. */
+		const later = (count: number): Promise<void> =>
+			count === 0 ? Promise.resolve() : Promise.resolve().then(() => later(count - 1));
+		// Whatever moment between the turn and the end of the work passed over.
+		const askAfter = async (count: number) => {
+			const turns = oneAtATime<string>();
+			const ahead = deferred('ahead');
+			const leaving = new AbortController();
+			void turns('ahead', asking(), ahead.work);
+			void turns('cat', leaving.signal, () => Promise.resolve('passed'));
+			await settled();
+			leaving.abort();
+			ahead.finish();
+			await later(count);
+			return turns('cat', asking(), () => Promise.resolve('copy'));
+		};
+
+		const answers = await Promise.all(
+			Array.from({ length: 16 }, (_, count) => askAfter(count))
+		);
+
+		// Joined before its turn, or started again after: never passed over.
+		expect(answers).not.toContain(undefined);
+	});
+
+	it('lets go of the signal once the work is done', async () => {
+		const turns = oneAtATime<string>();
+		// A view's, which lasts as long as the view.
+		const view = new AbortController();
+		const added = vi.spyOn(view.signal, 'addEventListener');
+		const removed = vi.spyOn(view.signal, 'removeEventListener');
+
+		expect(await turns('cat', view.signal, () => Promise.resolve('copy'))).toBe('copy');
+		await settled();
+
+		expect(added).toHaveBeenCalledTimes(1);
+		expect(removed).toHaveBeenCalledWith('abort', added.mock.calls[0]?.[1]);
+	});
+
 	it('starts again under a key whose work has ended', async () => {
 		const turns = oneAtATime<number>();
 		const count = { current: 0 };

@@ -324,11 +324,6 @@ describe('a picture beside the note', () => {
 	});
 });
 
-// remark gives a picture with no title the title `null`, and Milkdown passed it
-// on; from prosemirror-model 1.25.12 a node is checked against its schema as it
-// is made, the schema says a title is a string, and the parse threw. Every
-// note with a picture in it then failed the rich editor's check once it was
-// opened again — only in a build whose lockfile had 1.25.12, the deployed one.
 /**
  * A picture drawn from a copy the width the editor draws it (#276), in a box
  * the picture's own size, held before anything is drawn in it.
@@ -396,6 +391,11 @@ describe('a picture drawn from a copy', () => {
 	});
 });
 
+// remark gives a picture with no title the title `null`, and Milkdown passed it
+// on; from prosemirror-model 1.25.12 a node is checked against its schema as it
+// is made, the schema says a title is a string, and the parse threw. Every
+// note with a picture in it then failed the rich editor's check once it was
+// opened again — only in a build whose lockfile had 1.25.12, the deployed one.
 describe('a picture read from the note', () => {
 	it.each([
 		['with no title', '![Pasted image](pasted-image-3b8fbf95.png)\n', ''],
