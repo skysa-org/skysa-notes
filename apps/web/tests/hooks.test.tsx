@@ -10,6 +10,7 @@ import {
 	useLooseNoteCount,
 	useNote,
 	useNoteSearch,
+	useNotesUnderFolder,
 	usePinnedTree,
 } from '../src/store/hooks.js';
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
@@ -61,6 +62,28 @@ describe('useLooseNoteCount', () => {
 		await purgeNote(db, loose.id);
 
 		expect(await count()).toBe(0);
+	});
+});
+
+describe('useNotesUnderFolder', () => {
+	it('hands back a note unchanged since the read before as the same object', async () => {
+		const plan = await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		const retro = await createNote(db, { title: 'Retro', folderPath: 'Work' });
+		const { result } = renderHook(() => useNotesUnderFolder('Work'));
+		await waitFor(() => {
+			expect(result.current).toHaveLength(2);
+		});
+		const before = result.current?.find((note) => note.id === plan.id);
+
+		await db.notes.update([LOCAL_CONNECTION_ID, retro.id], { body: 'Retro, edited\n' });
+
+		await waitFor(() => {
+			expect(result.current?.find((note) => note.id === retro.id)?.body).toBe(
+				'Retro, edited\n'
+			);
+		});
+		expect(before).toBeDefined();
+		expect(result.current?.find((note) => note.id === plan.id)).toBe(before);
 	});
 });
 

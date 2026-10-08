@@ -56,7 +56,11 @@ export interface OptionsMenuProps {
 	triggerClassName: string;
 	trigger: ReactNode;
 	disabled?: boolean;
-	items: readonly OptionsMenuItem[];
+	/**
+	 * Or what makes them, asked when the card opens: a list's rows each have a
+	 * menu, and only the one opened is ever read.
+	 */
+	items: readonly OptionsMenuItem[] | (() => readonly OptionsMenuItem[]);
 	/**
 	 * Which edge of the button the card lines up with. `end` (the default)
 	 * opens it back across the bar, for a button at the bar's end; `start` the
@@ -128,7 +132,7 @@ export const OptionsMenu = ({
 					align={align}
 					rises={rises}
 					label={groupLabel}
-					items={items}
+					items={typeof items === 'function' ? items() : items}
 					anchor={button}
 					onClose={() => {
 						setOpen(null);

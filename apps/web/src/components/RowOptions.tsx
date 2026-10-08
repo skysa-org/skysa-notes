@@ -30,7 +30,8 @@ export const RowOptions = ({
 	name: string;
 	/** What the row is, which picks the words for it (`rows.*` in the catalog). */
 	kind: 'Notebook' | 'Note' | 'Source';
-	items: readonly OptionsMenuItem[];
+	/** Or what makes them, when it is opened; then `disabled` where there are none. */
+	items: readonly OptionsMenuItem[] | (() => readonly OptionsMenuItem[]);
 	disabled?: boolean;
 	align?: 'start' | 'end';
 }) => (
@@ -41,7 +42,7 @@ export const RowOptions = ({
 			groupLabel={t(`rows.${KINDS[kind]}.menu`, { name })}
 			triggerClassName="icon icon-quiet"
 			trigger={<Icon name="overflow" />}
-			disabled={disabled || items.length === 0}
+			disabled={disabled || (typeof items !== 'function' && items.length === 0)}
 			align={align}
 			items={items}
 		/>

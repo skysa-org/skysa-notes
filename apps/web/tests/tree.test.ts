@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	buildFolderTree,
+	byParent,
 	containsPath,
 	findFolder,
 	folderLabel,
@@ -378,5 +379,18 @@ describe('folderLabel', () => {
 
 	it('leaves a notebook path alone', () => {
 		expect(folderLabel('work/meetings')).toBe('work/meetings');
+	});
+});
+
+describe('byParent', () => {
+	it('groups notes by notebook, in the order each notebook and each note came', () => {
+		const notes = ['b/1.md', 'a/1.md', 'b/2.md', 'top.md', 'a/2.md'].map((path) => ({ path }));
+		expect(
+			[...byParent(notes)].map(([folder, inIt]) => [folder, inIt.map(({ path }) => path)])
+		).toEqual([
+			['b', ['b/1.md', 'b/2.md']],
+			['a', ['a/1.md', 'a/2.md']],
+			[ROOT, ['top.md']],
+		]);
 	});
 });
