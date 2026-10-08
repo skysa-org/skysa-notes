@@ -141,6 +141,18 @@ export {
 } from './attachments.js';
 
 export {
+	imageInfo,
+	MAX_COPY_PIXELS,
+	PICTURE_WIDTHS,
+	pictureVariant,
+	THUMB_BOX,
+	type PictureFormat,
+	type PictureInfo,
+	type PictureVariant,
+	type PictureVariantSize,
+} from './pictures.js';
+
+export {
 	RELAY_CHANGED,
 	RELAY_CLOSE,
 	RELAY_PING,
