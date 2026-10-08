@@ -1,4 +1,5 @@
 import { parentPath, ROOT } from '@skysa/core';
+import { type RouterHistory, useRouter, useRouterState } from '@tanstack/react-router';
 import {
 	type CSSProperties,
 	type ReactNode,
@@ -101,39 +102,139 @@ const slide = (from: Pane, to: Pane): Slide =>
 	PANES.indexOf(to) > PANES.indexOf(from) ? 'onward' : 'back';
 
 /**
+ * What a history entry holds about the dropdowns, beside its place
+ * (`routes/place.ts`): which one is open over the place, and whether opening
+ * it was the step that made the entry (docs/ARCHITECTURE.md §7, "A dropdown
+ * is a step on a phone").
+ */
+declare module '@tanstack/react-router' {
+	interface HistoryState {
+		panel?: Pane;
+		opened?: true;
+	}
+}
+
+/**
+ * The dropdown an entry holds open, or none. Anything can be in
+ * `history.state`, so it is taken only in the shape written here.
+ */
+export const heldPanel = (state: unknown): Pane | null => {
+	if (typeof state !== 'object' || state === null || !('panel' in state)) return null;
+	const { panel } = state;
+	return PANES.find((pane) => pane === panel) ?? null;
+};
+
+/** Whether opening the entry's dropdown was the step that made the entry. */
+export const openedHere = (state: unknown): boolean =>
+	typeof state === 'object' && state !== null && 'opened' in state && state.opened === true;
+
+/**
+ * What a place put in place of the entry keeps of its dropdown: the dropdown,
+ * and that opening it made the entry only while the place is the one it was
+ * opened over. Once it is not, the entry before is another place, and Back to
+ * it is no way to shut a dropdown.
+ */
+export const panelKept = (state: unknown, samePlace: boolean): { panel?: Pane; opened?: true } => {
+	const panel = heldPanel(state);
+	if (panel === null) return {};
+	return samePlace && openedHere(state) ? { panel, opened: true } : { panel };
+};
+
+/**
+ * Open `next` over the entry's place, or shut what is open, in the history.
+ * Opened over nothing, it is a step, pushed, so Back shuts it; one swapped for
+ * another takes its place. Shut, it is Back where opening it made the entry,
+ * and taken out of the entry where it came with a place, as a notebook chosen
+ * comes with its notes. Resolves once the history says so, which for Back is
+ * a moment later: a step pushed before then would be the one Back undid.
+ */
+const holdPanel = (history: RouterHistory, next: Pane | null): Promise<void> => {
+	const { href, state } = history.location;
+	const now = heldPanel(state);
+	if (next === now) return Promise.resolve();
+	const { panel: _panel, opened: _opened, ...rest } = state;
+	if (next !== null) {
+		if (now === null) history.push(href, { ...rest, panel: next, opened: true });
+		else
+			history.replace(href, {
+				...rest,
+				panel: next,
+				...(openedHere(state) ? { opened: true } : {}),
+			});
+		return Promise.resolve();
+	}
+	if (!openedHere(state)) {
+		history.replace(href, rest);
+		return Promise.resolve();
+	}
+	return new Promise((landed) => {
+		const stop = history.subscribe(() => {
+			stop();
+			landed();
+		});
+		history.back();
+	});
+};
+
+/**
  * The pane open as a dropdown, the one it took the place of if it went
  * straight from one to the other (`from`, for the stylesheet to slide them
  * along), and the ways it shuts: Escape, and a press anywhere that is neither
  * in it nor on something that keeps it.
  *
+ * It is the history entry's (`holdPanel`), so that Back on a phone goes back
+ * through what was on screen: from a note to the notes it was chosen from, to
+ * the notebooks before them, and from a dropdown open to the note under it.
+ * Back was a step between places only, and Chrome on Android, which shows the
+ * entry Back is going to while the swipe is under way, showed the dropdown it
+ * had been left from, so that the place Back opened looked like a row the
+ * swipe had tapped.
+ *
  * Shut, a pane gives way to the one under it, which is the note, or nothing —
  * except where the route says there is a pane to rest on (`setRest`): the
  * scratchpad, with no card open over it, has nothing under it but its own
  * pane, and shutting the notebooks over it goes back to it, not to an empty
- * window.
+ * window. Nothing is a dropdown in a wide window, where an entry's is not
+ * shown, and nothing opens one.
  */
-export const usePanel = () => {
-	const [{ panel, from }, setShown] = useState<{ panel: Pane | null; from: Pane | null }>({
-		panel: null,
+export const usePanel = (compact: boolean) => {
+	const router = useRouter();
+	const held = useRouterState({ select: (state) => heldPanel(state.location.state) });
+	const [rest, setRest] = useState<Pane | null>(null);
+	const panel = compact ? (held ?? rest) : null;
+	// What it went straight from, worked out as it changes, in render, so
+	// that no frame shows the panel without it.
+	const [shown, setShown] = useState<{ panel: Pane | null; from: Pane | null }>({
+		panel,
 		from: null,
 	});
-	const setPanel = useCallback((next: Pane | null) => {
-		setShown((shown) =>
-			next === shown.panel ? shown : { panel: next, from: next === null ? null : shown.panel }
-		);
-	}, []);
-	const rest = useRef<Pane | null>(null);
-	const setRest = useCallback((pane: Pane | null) => {
-		rest.current = pane;
-	}, []);
-	const shut = useCallback(() => {
-		setPanel(rest.current);
-	}, [setPanel]);
+	if (shown.panel !== panel) setShown({ panel, from: panel === null ? null : shown.panel });
+	const latest = useRef({ compact, rest });
+	useLayoutEffect(() => {
+		latest.current = { compact, rest };
+	});
+	/** Open a pane, or shut one with `null`, resolving once the history has it. */
+	const showPanel = useCallback(
+		(next: Pane | null): Promise<void> => {
+			const { compact: narrow, rest: under } = latest.current;
+			if (!narrow) return Promise.resolve();
+			// The pane rested on is there with nothing open over it.
+			return holdPanel(router.history, next === under ? null : next);
+		},
+		[router]
+	);
+	const setPanel = useCallback(
+		(next: Pane | null) => {
+			void showPanel(next);
+		},
+		[showPanel]
+	);
+	const shut = useCallback(() => showPanel(null), [showPanel]);
 
 	useEffect(() => {
 		if (panel === null) return undefined;
 		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') shut();
+			if (event.key === 'Escape') void shut();
 		};
 		const away = (event: PointerEvent) => {
 			const target = event.target;
@@ -146,7 +247,7 @@ export const usePanel = () => {
 			// on a row — and what is chosen in it, a rename or a delete, happens
 			// in the panel, which has to stay open for it. Each shuts itself.
 			if (target.closest('.app-frame') === null) return;
-			shut();
+			void shut();
 		};
 		document.addEventListener('keydown', onKey);
 		document.addEventListener('pointerdown', away);
@@ -156,7 +257,7 @@ export const usePanel = () => {
 		};
 	}, [panel, shut]);
 
-	return { panel, setPanel, from, setRest, shut };
+	return { panel, setPanel, from: panel === null ? null : shown.from, setRest, shut };
 };
 
 /**
@@ -167,28 +268,17 @@ export const usePanel = () => {
  */
 export const useCompactLayout = () => {
 	const compact = useMediaQuery(COMPACT);
-	const { panel: open, setPanel, from: openedFrom, setRest, shut } = usePanel();
+	const { panel, setPanel, from, setRest, shut } = usePanel(compact);
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [origins, setOrigins] = useState<Origins>();
-	// Nothing is a dropdown in a wide window, and one left open there is not
-	// one to find open again when the window is next narrowed.
-	const panel = compact ? open : null;
-	const from = panel === null ? null : openedFrom;
-	/** The bar's own way to open and shut a pane: shut, it rests where `setRest` says. */
-	const barPanel = useCallback(
-		(pane: Pane | null) => {
-			if (pane === null) shut();
-			else setPanel(pane);
-		},
-		[setPanel, shut]
-	);
 
 	return {
 		compact,
 		panel,
 		setPanel,
+		/** Shut the dropdown, resolving once the history has it shut (`holdPanel`). */
+		shutPanel: shut,
 		setRest,
-		barPanel,
 		searchOpen,
 		setSearchOpen,
 		setOrigins,

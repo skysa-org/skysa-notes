@@ -1,6 +1,6 @@
 import { readFrontmatter, SCRATCHPAD_FOLDER } from '@skysa/core';
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -438,6 +438,37 @@ describe('in a window too narrow for three panes', () => {
 
 		expect(panel()).toBeNull();
 		expect(cardName()?.title).toBe('Trip');
+	});
+
+	it('goes back to the scratchpad from the notebooks over it, then to the notebooks it came from', async () => {
+		fake = windowWidth(390);
+		await inbox();
+		await scratch({ body: 'Milk\n' });
+		const user = userEvent.setup();
+		const router = await openApp();
+		await user.click(notebookTrigger());
+		await user.click(await row());
+		await waitFor(() => {
+			expect(panel()).toBe('notes');
+		});
+
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notebooks');
+		act(() => {
+			router.history.back();
+		});
+		await waitFor(() => {
+			expect(panel()).toBe('notes');
+		});
+		expect(notebookTrigger().getAttribute('aria-label')).toBe('Notebook: Scratchpad');
+
+		act(() => {
+			router.history.back();
+		});
+		await waitFor(() => {
+			expect(notebookTrigger().getAttribute('aria-label')).toBe('Notebook: Inbox');
+		});
+		expect(panel()).toBe('notebooks');
 	});
 
 	it('names no note in the bar for a card with no name', async () => {
