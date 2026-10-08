@@ -6,6 +6,7 @@ import {
 	useDeferredValue,
 	useId,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from 'react';
@@ -22,6 +23,15 @@ import { noteOpening, openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 import { RowOptions } from './RowOptions.js';
+import {
+	besideOf,
+	indicesIn,
+	type Measure,
+	topsOf,
+	useFocusedItem,
+	useHeights,
+	useScrollSpan,
+} from './windowing.js';
 
 /**
  * The middle pane: the notes in the selected notebook, newest first by when
@@ -31,6 +41,11 @@ import { RowOptions } from './RowOptions.js';
  * edited; that is what it says, not where it sits. A row says what is being
  * typed into its note as it is typed, not once autosave has stored it
  * (`store/liveEdits.ts`), so the list and the editor beside it never disagree.
+ *
+ * A list longer than `WINDOWED_ABOVE` draws only its rows near the screen
+ * (`windowing.ts`; docs/ARCHITECTURE.md §7, "Large libraries"), and those the
+ * user is at wherever they are: the selected, the focused, the one being
+ * dragged and the one whose menu is open.
  *
  * It used to show a search's answers too, in place of the notebook's notes.
  * They hang from the search field now (`SearchField`), so the notebook the user
@@ -190,6 +205,18 @@ interface NoteRowProps {
 	onMenu?: (note: NoteRecord, at: MenuPoint) => void;
 	/** Pinned to the top of the list on this device. */
 	pinned: boolean;
+	/**
+	 * Where the list is windowed, what its row is told, each a value or a
+	 * function that stays the same so the row is still drawn again only when
+	 * what it shows changes: how it is measured; how many rows its run has,
+	 * drawn or not, and its place among them from 1; and that the focus came
+	 * into the row or one of its menus, or went out.
+	 */
+	measure?: Measure | undefined;
+	of?: number | undefined;
+	at?: number | undefined;
+	onFocusIn?: ((id: string) => void) | undefined;
+	onFocusOut?: (() => void) | undefined;
 }
 
 const NoteRowView = ({
@@ -203,13 +230,33 @@ const NoteRowView = ({
 	menuFor,
 	onMenu,
 	pinned,
+	measure,
+	of,
+	at,
+	onFocusIn,
+	onFocusOut,
 }: NoteRowProps) => {
 	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
 	// preview is a parse.
 	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
 	const pinId = useId();
 	return (
-		<li className="row-item">
+		<li
+			className="row-item"
+			{...(measure === undefined
+				? {}
+				: { ref: measure, 'data-id': row.id, 'aria-setsize': of, 'aria-posinset': at })}
+			// From its menu too, which is a portal: React's events come up
+			// through it.
+			onFocus={
+				onFocusIn === undefined
+					? undefined
+					: () => {
+							onFocusIn(row.id);
+						}
+			}
+			onBlur={onFocusOut}
+		>
 			<button
 				type="button"
 				className={[
@@ -297,17 +344,25 @@ const NoteGroup = ({
 	path,
 	folderPath,
 	renamings,
+	measure,
 	children,
 }: {
 	path: string;
 	folderPath: string;
 	renamings: Renamings | undefined;
+	/** Where the list is windowed, how its name is measured. */
+	measure: Measure | undefined;
 	children: ReactNode;
 }) => {
 	const nameId = useId();
 	return (
 		<section className="note-group" aria-labelledby={nameId}>
-			<h3 id={nameId} className="note-group-name">
+			<h3
+				id={nameId}
+				className="note-group-name"
+				ref={measure}
+				data-id={measure === undefined ? undefined : path}
+			>
 				<GroupName path={path} folderPath={folderPath} renamings={renamings} />
 			</h3>
 			<ul>{children}</ul>
@@ -332,6 +387,82 @@ const Heading = ({
 		: folderLabel(shownFolder(folderPath, renaming));
 };
 
+/** Above this many rows, a list draws only those near the screen (`windowing.ts`, #275). */
+export const WINDOWED_ABOVE = 150;
+
+/**
+ * A row's height and a notebook's name's before any has been measured, in
+ * pixels: a title, a date and a line of the note; a line of small capitals.
+ * Once some have been, the others are taken to be as tall as those are.
+ */
+const ROW_GUESS = 64;
+const NAME_GUESS = 30;
+
+const meanOr = (heights: ReadonlyMap<string, number>, guess: number): number =>
+	heights.size === 0
+		? guess
+		: [...heights.values()].reduce((sum, height) => sum + height, 0) / heights.size;
+
+/**
+ * One notebook's notes, in a list: the open notebook's own, or one inside it
+ * under its name. `start` is where it starts among the list's items, a name
+ * being an item before the rows under it.
+ */
+interface Run {
+	readonly path: string;
+	readonly notes: readonly NoteRecord[];
+	readonly named: boolean;
+	readonly start: number;
+}
+
+const runsOf = (notes: readonly NoteRecord[], folderPath: string): readonly Run[] => {
+	const next = { current: 0 };
+	return [...byParent(notes)].map(([path, inIt]) => {
+		const named = path !== folderPath;
+		const start = next.current;
+		next.current += (named ? 1 : 0) + inIt.length;
+		return { path, notes: inIt, named, start };
+	});
+};
+
+/**
+ * A run's rows in a windowed list: those near the screen (`near`) or kept
+ * drawn, and in place of each stretch of the others an empty item as tall as
+ * they are. Nothing where none of the run is to be drawn, its name included.
+ */
+const windowRows = (
+	run: Run,
+	tops: readonly number[],
+	near: Readonly<{ first: number; end: number }>,
+	kept: ReadonlySet<string>,
+	row: (note: NoteRecord, place: Readonly<{ at: number; of: number }>) => ReactNode
+): ReactNode[] | undefined => {
+	const from = run.start + (run.named ? 1 : 0);
+	const drawn = run.notes.map(
+		(note, at) => (from + at >= near.first && from + at < near.end) || kept.has(note.id)
+	);
+	const nameNear = run.named && run.start >= near.first && run.start < near.end;
+	if (!nameNear && !drawn.includes(true)) return undefined;
+	const skipped = (start: number, end: number, after: string) => (
+		<li
+			key={`skipped-${after}`}
+			className="rows-skipped"
+			aria-hidden="true"
+			style={{ height: (tops[from + end] ?? 0) - (tops[from + start] ?? 0) }}
+		/>
+	);
+	const gap = { start: 0 };
+	const rows = run.notes.flatMap((note, at) => {
+		if (!drawn[at]) return [];
+		const before = gap.start < at ? [skipped(gap.start, at, note.id)] : [];
+		gap.start = at + 1;
+		return [...before, row(note, { at: at + 1, of: run.notes.length })];
+	});
+	return gap.start < run.notes.length
+		? [...rows, skipped(gap.start, run.notes.length, 'end')]
+		: rows;
+};
+
 export const NoteList = ({
 	notes,
 	selectedNoteId,
@@ -351,6 +482,44 @@ export const NoteList = ({
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
+	const windowed = notes !== undefined && notes.length > WINDOWED_ABOVE;
+	/** The row the focus is in, or in its menu: drawn wherever it is scrolled to. */
+	const { focusedId, focusIn, focusOut } = useFocusedItem();
+	const [scroller, setScroller] = useState<HTMLElement | null>(null);
+	const [content, setContent] = useState<HTMLDivElement | null>(null);
+	// Not listened for at all where every row is drawn.
+	const span = useScrollSpan(windowed ? scroller : null, windowed ? content : null);
+	const rowHeights = useHeights();
+	const nameHeights = useHeights();
+	const runs = useMemo(
+		() => (notes === undefined || folderPath === undefined ? [] : runsOf(notes, folderPath)),
+		[notes, folderPath]
+	);
+	// Each item's top, where the list is windowed: as measured, where it has been.
+	const tops = useMemo(() => {
+		if (!windowed) return undefined;
+		const row = meanOr(rowHeights.heights, ROW_GUESS);
+		const name = meanOr(nameHeights.heights, NAME_GUESS);
+		return topsOf(
+			runs.flatMap((run) => [
+				...(run.named ? [nameHeights.heights.get(run.path) ?? name] : []),
+				...run.notes.map((note) => rowHeights.heights.get(note.id) ?? row),
+			])
+		);
+	}, [windowed, runs, rowHeights.heights, nameHeights.heights]);
+	const near = tops === undefined || span === undefined ? undefined : indicesIn(tops, span);
+	// The rows the user is at, drawn wherever they are, and the rows either
+	// side of the one the focus is in.
+	const order = useMemo(() => runs.flatMap((run) => run.notes), [runs]);
+	const kept = new Set(
+		[
+			selectedNoteId,
+			movingNoteId,
+			focusedId,
+			menu?.note.id,
+			...besideOf(order, focusedId),
+		].filter((id) => id !== undefined)
+	);
 	// The handlers this list is given are made again on each draw of the page.
 	// The rows are handed these instead, which stay the same and call the ones
 	// given last, so that a row is drawn again only when what it shows changes.
@@ -381,11 +550,19 @@ export const NoteList = ({
 		onCreateNote,
 		onCreateNotebook,
 	});
-	const row = (note: NoteRecord) => {
+	const row = (note: NoteRecord, place?: Readonly<{ at: number; of: number }>) => {
 		const stored = note.id !== unsavedNoteId;
 		return (
 			<NoteRow
 				key={note.id}
+				{...(place === undefined
+					? {}
+					: {
+							...place,
+							measure: rowHeights.measure,
+							onFocusIn: focusIn,
+							onFocusOut: focusOut,
+						})}
 				note={note}
 				selected={note.id === selectedNoteId}
 				onSelect={select}
@@ -402,7 +579,7 @@ export const NoteList = ({
 	};
 
 	return (
-		<section className="note-list" aria-label={t('notes.list.title')}>
+		<section ref={setScroller} className="note-list" aria-label={t('notes.list.title')}>
 			<div className="pane-header">
 				<h2>
 					<Heading folderPath={folderPath} renamings={renamings} />
@@ -426,22 +603,40 @@ export const NoteList = ({
 
 			{placeholder !== undefined && <p className="muted placeholder">{placeholder}</p>}
 
-			{notes !== undefined &&
-				folderPath !== undefined &&
-				[...byParent(notes)].map(([path, inIt]) =>
-					path === folderPath ? (
-						<ul key={path}>{inIt.map(row)}</ul>
-					) : (
-						<NoteGroup
-							key={path}
-							path={path}
-							folderPath={folderPath}
-							renamings={renamings}
-						>
-							{inIt.map(row)}
-						</NoteGroup>
-					)
-				)}
+			{notes !== undefined && folderPath !== undefined && (
+				<div ref={setContent} className="note-rows">
+					{runs.map((run) => {
+						const rows =
+							tops === undefined || near === undefined
+								? run.notes.map((note) => row(note))
+								: windowRows(run, tops, near, kept, row);
+						if (rows === undefined && tops !== undefined) {
+							const end = run.start + (run.named ? 1 : 0) + run.notes.length;
+							return (
+								<div
+									key={run.path}
+									className="rows-skipped"
+									aria-hidden="true"
+									style={{ height: (tops[end] ?? 0) - (tops[run.start] ?? 0) }}
+								/>
+							);
+						}
+						return run.named ? (
+							<NoteGroup
+								key={run.path}
+								path={run.path}
+								folderPath={folderPath}
+								renamings={renamings}
+								measure={windowed ? nameHeights.measure : undefined}
+							>
+								{rows}
+							</NoteGroup>
+						) : (
+							<ul key={run.path}>{rows}</ul>
+						);
+					})}
+				</div>
+			)}
 
 			{menu !== null && menuFor !== undefined && (
 				<FloatingMenu

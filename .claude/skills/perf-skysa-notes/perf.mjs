@@ -27,6 +27,7 @@ const { values: args } = parseArgs({
 		scenarios: { type: 'string', default: 'all' },
 		label: { type: 'string', default: '' },
 		shots: { type: 'boolean', default: false },
+		cpuprofile: { type: 'boolean', default: false },
 		deadline: { type: 'string', default: '600' },
 	},
 });
@@ -92,8 +93,16 @@ const memory = () => {
 	};
 };
 
+/** The sessions being profiled (`--cpuprofile`): from the first counters taken, what is measured. */
+const profiling = new WeakSet();
+
 /** CDP's counters, in ms and MB, after a garbage collection. */
 const counters = async (cdp) => {
+	if (args.cpuprofile && !profiling.has(cdp)) {
+		profiling.add(cdp);
+		await cdp.send('Profiler.enable');
+		await cdp.send('Profiler.start');
+	}
 	await cdp.send('HeapProfiler.collectGarbage');
 	const { metrics } = await cdp.send('Performance.getMetrics');
 	const value = (name) => metrics.find((metric) => metric.name === name)?.value ?? 0;
@@ -139,6 +148,21 @@ const untilCount = (page, selector, n = 1) =>
 		selector,
 		n,
 	});
+
+/**
+ * Until a list of `rows` notes is drawn: every row, or, where the list draws
+ * only the rows near the screen (#275), those, which say they are of more
+ * (`aria-setsize`). Either way, what the user sees of it.
+ */
+const untilListed = (page, rows) =>
+	until(
+		page,
+		(arg) => {
+			const drawn = document.querySelectorAll('.note-list li.row-item');
+			return drawn.length >= arg.rows || drawn[0]?.hasAttribute('aria-setsize') === true;
+		},
+		{ rows }
+	);
 
 /**
  * Tap `locator`; the page time the touch reached the page. Playwright waits for
@@ -247,7 +271,7 @@ const SCENARIOS = {
 			// Not waiting for `load`: a list up before it would be timed at the
 			// first look, not when it came.
 			await page.goto(`${base}${manifest.big.hash}`, { waitUntil: 'commit' });
-			const listed = await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			const listed = await untilListed(page, manifest.big.rows);
 			const edited = await untilCount(page, '.editor-rich-surface');
 			const settled = await quiet(page);
 			return {
@@ -276,7 +300,7 @@ const SCENARIOS = {
 			const before = await counters(cdp);
 			await reset(page);
 			const start = await tap(page, row);
-			const listed = await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			const listed = await untilListed(page, manifest.big.rows);
 			const settled = await quiet(page);
 			return {
 				listedMs: listed - start,
@@ -292,7 +316,7 @@ const SCENARIOS = {
 		needs: (m) => m.big !== undefined,
 		run: async ({ page, cdp, manifest, base }) => {
 			await page.goto(`${base}${manifest.big.hash}`);
-			await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			await untilListed(page, manifest.big.rows);
 			await quiet(page);
 			await page.locator('.compact-picker[data-pane="notes"]').tap();
 			await page.locator('.note-list').waitFor({ state: 'visible' });
@@ -405,7 +429,7 @@ const SCENARIOS = {
 		run: async ({ page, cdp, manifest, base }) => {
 			await page.goto(`${base}${manifest.typing.hash}`);
 			await untilCount(page, '.editor-rich-surface');
-			await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			await untilListed(page, manifest.big.rows);
 			await quiet(page);
 			await page.locator('.editor-rich-surface').tap();
 			await page.keyboard.press('ControlOrMeta+End');
@@ -748,6 +772,17 @@ const once = async (target, template, scenario, manifest) => {
 		await cdp.send('Performance.enable');
 		await cdp.send('Emulation.setCPUThrottlingRate', { rate: profile.cpu });
 		const result = await SCENARIOS[scenario].run({ page, cdp, manifest, base: target.url });
+		if (profiling.has(cdp)) {
+			const { profile: taken } = await cdp.send('Profiler.stop');
+			writeFileSync(
+				join(
+					PERF_DIR,
+					'results',
+					`${target.name}-${scenario}-${String(counted.runs)}.cpuprofile`
+				),
+				JSON.stringify(taken)
+			);
+		}
 		if (args.shots)
 			await page.screenshot({
 				path: join(PERF_DIR, 'results', `${target.name}-${scenario}.png`),
