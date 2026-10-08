@@ -57,19 +57,24 @@ const still = async (read: readonly string[]): Promise<void> => {
 	if (read.length !== before) await still(read);
 };
 
-/** Until the source's row says it ran at `at`, and a moment after. */
-const seenRunAt = async (at: number) => {
-	await new Promise<void>((resolve) => {
-		const watching = liveQuery(() => db.syncState.get(DROPBOX)).subscribe((state) => {
-			if (state?.lastSyncAt !== at) return;
-			watching.unsubscribe();
-			resolve();
+/**
+ * A query watching the source's row, as the screen's own do, once it has read
+ * the row as it stands: what it hands back is kept until a write has made it
+ * read the row again, with a run at `at` in it.
+ */
+const watchForRun = (at: number): Promise<{ told: Promise<void> }> =>
+	new Promise((ready) => {
+		const told = new Promise<void>((resolve) => {
+			const watching = liveQuery(() => db.syncState.get(DROPBOX)).subscribe((state) => {
+				if (state?.lastSyncAt !== at) {
+					ready({ told });
+					return;
+				}
+				watching.unsubscribe();
+				resolve();
+			});
 		});
 	});
-	// The queries over notes were told of the write when this one was, and
-	// read alongside it.
-	await pause(100);
-};
 
 describe('a sync run that brings nothing', () => {
 	it('reads no notes for the tree, the list or the loose count', async () => {
@@ -107,8 +112,12 @@ describe('a sync run that brings nothing', () => {
 			const before = read.length;
 
 			const at = Date.now();
+			const { told } = await watchForRun(at);
 			await updateLive(db, DROPBOX, (live) => ({ ...live, lastSyncAt: at }));
-			await seenRunAt(at);
+			await told;
+			// The queries over notes were told of the write when this one was,
+			// and read alongside it.
+			await pause(100);
 
 			expect(read.slice(before)).toEqual([]);
 		} finally {
