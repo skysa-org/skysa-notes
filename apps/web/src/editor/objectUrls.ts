@@ -44,8 +44,6 @@ export interface ObjectUrlCache {
 	 * need not read the bytes again only to find a URL already made of them.
 	 */
 	readonly reuse: (key: string) => HeldUrl | undefined;
-	/** Revoke every URL now, held or not. For a whole editor going away. */
-	readonly clear: () => void;
 }
 
 /** How long a URL nothing holds is kept, for a view rebuilt in the meantime. */
@@ -95,8 +93,8 @@ export const createObjectUrlCache = (
 				if (released.has('once')) return;
 				released.add('once');
 				entry.holds.current -= 1;
-				// Cleared meanwhile, or held again by someone else.
-				if (entries.get(key) !== entry || entry.holds.current > 0) return;
+				// Held again by someone else.
+				if (entry.holds.current > 0) return;
 				entry.pending.current = setTimeout(() => {
 					forget(key, entry);
 				}, graceMs);
@@ -109,11 +107,6 @@ export const createObjectUrlCache = (
 		reuse: (key) => {
 			const entry = entries.get(key);
 			return entry === undefined ? undefined : hold(key, entry);
-		},
-		clear: () => {
-			entries.forEach((entry, key) => {
-				forget(key, entry);
-			});
 		},
 	};
 };
