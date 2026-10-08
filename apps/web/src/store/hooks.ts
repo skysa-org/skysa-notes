@@ -435,16 +435,15 @@ const searchable = async (): Promise<NoteRecord[]> => {
  * for this source.
  */
 export const useScratchNotes = (connectionId: string | undefined): NoteRecord[] | undefined => {
-	const result = useLiveQuery(
-		async () =>
-			connectionId === undefined
-				? undefined
-				: {
-						connectionId,
-						notes: await listScratchNotes(db, connectionId),
-					},
-		[connectionId]
-	);
+	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
+	const result = useLiveQuery(async () => {
+		if (connectionId === undefined) return undefined;
+		// A card unchanged since the read before is the object it was then, so
+		// it is not drawn again (`keptRows`).
+		const notes = keptRows(before.current, await listScratchNotes(db, connectionId));
+		before.current = new Map(notes.map((note) => [note.id, note]));
+		return { connectionId, notes };
+	}, [connectionId]);
 	return result?.connectionId === connectionId ? result?.notes : undefined;
 };
 
