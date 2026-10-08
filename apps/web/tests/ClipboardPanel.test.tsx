@@ -71,7 +71,6 @@ const setup = async ({ read }: { read?: () => Promise<SystemRead> } = {}) => {
 			release: () => undefined,
 		}),
 		reuse: () => undefined,
-		clear: () => undefined,
 	};
 	const pick = vi.fn(() => Promise.resolve<File[]>([]));
 	render(
