@@ -482,6 +482,28 @@ describe('searching in a compact window', () => {
 		expect(screen.getByRole('combobox', { name: 'Search notes' })).toHaveProperty('value', '');
 	});
 
+	it('keeps a search going as the window narrows into a compact one', async () => {
+		// The query is held above both bars (`SearchQuery`), so the field the
+		// answers came from is still there, with what was typed in it, and
+		// the answers under it again.
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp(1400);
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'heron');
+		expect(await screen.findByRole('option', { name: /Minutes/ })).toBeDefined();
+
+		act(() => {
+			fake?.resize(400);
+		});
+
+		expect(screen.getByRole('combobox', { name: 'Search notes' })).toHaveProperty(
+			'value',
+			'heron'
+		);
+		expect(screen.getByRole('button', { name: 'Close search' })).toBeDefined();
+		expect(await screen.findByRole('option', { name: /Minutes/ })).toBeDefined();
+	});
+
 	it('goes back to the icon when the bar narrows under it', async () => {
 		widths = elementWidths({ '.compact-bar': 900 });
 		await openApp(900);

@@ -22,15 +22,17 @@ import { noteById } from './noteRows.js';
 const reads = { count: 0, slowly: 2, delay: 60 };
 
 // Hoisted above the imports above, which is what lets the hook see the slow
-// read: `listNotes` is what `useNoteSearch` calls, and how long it takes is the
-// only thing this test needs to control.
+// read: `listNotesEverywhere` is what `useNoteSearch` calls, and how long it
+// takes is the only thing this test needs to control. (It once wrapped
+// `listNotes`, which the hook had stopped calling, and so slowed nothing and
+// raced nothing; the last assertion is there so that cannot happen quietly.)
 vi.mock('../src/store/notes.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof Notes>();
 	return {
 		...actual,
-		listNotes: async (...args: Parameters<typeof actual.listNotes>) => {
+		listNotesEverywhere: async (...args: Parameters<typeof actual.listNotesEverywhere>) => {
 			reads.count += 1;
-			const notes = await actual.listNotes(...args);
+			const notes = await actual.listNotesEverywhere(...args);
 			if (reads.count === reads.slowly) {
 				await new Promise((resolve) => setTimeout(resolve, reads.delay));
 			}
@@ -82,5 +84,7 @@ describe('a read overtaken by a later one', () => {
 		await settle(50);
 
 		expect(result.current).toEqual([]);
+		// The slow read happened: without it there was no race to lose.
+		expect(reads.count).toBeGreaterThanOrEqual(reads.slowly);
 	});
 });

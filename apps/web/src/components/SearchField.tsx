@@ -1,8 +1,17 @@
 import { parentPath } from '@skysa/core';
-import { type RefObject, useEffect, useId, useRef, useState } from 'react';
+import {
+	type ReactNode,
+	type RefObject,
+	useDeferredValue,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+} from 'react';
 
 import { t } from '../i18n/t.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
+import { useNoteSearch } from '../store/hooks.js';
 import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
 import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
@@ -32,6 +41,14 @@ export interface SearchFieldProps {
 	/** Matches for `query`, or undefined while the first one is being answered. */
 	results?: readonly NoteHit[] | undefined;
 	/**
+	 * The query `results` answer, where that is not `query`: a step behind it
+	 * while the answers to the latest letter are worked out (`NoteSearchField`).
+	 * The list goes by this — whether there is one, and what it says about
+	 * itself — so it never says that nothing matches, or that it is still
+	 * looking, about a letter nobody has asked it about yet.
+	 */
+	asked?: string;
+	/**
 	 * A match was chosen. The note, not its id: a match can be in any source,
 	 * and an id names a note only inside its own. The field has emptied itself
 	 * by the time this is called.
@@ -50,6 +67,8 @@ export interface SearchFieldProps {
 	 * while it is in use.
 	 */
 	onDismiss?: () => void;
+	/** The field took the cursor (true) or lost it (false). */
+	onFocusChange?: (focused: boolean) => void;
 }
 
 /** What the list says about itself, above the matches or instead of them. */
@@ -114,6 +133,8 @@ export const SearchField = ({
 	sourceName,
 	fieldRef,
 	onDismiss,
+	asked = query,
+	onFocusChange,
 }: SearchFieldProps) => {
 	const frame = useRef<HTMLDivElement>(null);
 	const ownField = useRef<HTMLInputElement>(null);
@@ -122,7 +143,10 @@ export const SearchField = ({
 	const [at, setAt] = useState(0);
 	const id = useId();
 
-	const searching = query.trim() !== '';
+	// Both: the answers are for `asked`, and an empty field is no search
+	// whatever was last asked — the list of the letters just deleted is not
+	// left under it for a frame, for Enter to open one of.
+	const searching = query.trim() !== '' && asked.trim() !== '';
 	const shown = searching ? (results ?? []).slice(0, SEARCH_LIMIT) : [];
 	const listed = open && searching;
 	const cursor = shown.length === 0 ? 0 : Math.min(at, shown.length - 1);
@@ -173,6 +197,15 @@ export const SearchField = ({
 					}}
 					onFocus={() => {
 						setOpen(true);
+						onFocusChange?.(true);
+					}}
+					onBlur={(event) => {
+						// Not when the window lost the focus and the field kept
+						// it — another app, another tab — which coming back gives
+						// to the field again, and the search with it.
+						if (!document.hasFocus() && document.activeElement === event.currentTarget)
+							return;
+						onFocusChange?.(false);
 					}}
 					onKeyDown={(event) => {
 						if (event.key === 'Escape') {
@@ -212,7 +245,7 @@ export const SearchField = ({
 					    often stays silent about a region that appears with its
 					    words already in it. */}
 					<p className="muted placeholder" role="status">
-						{statusFor(query, results)}
+						{statusFor(asked, results)}
 					</p>
 					{shown.length > 0 && (
 						<ul id={`${id}-list`} role="listbox" aria-label={t('search.results')}>
@@ -254,4 +287,45 @@ export const SearchField = ({
 			)}
 		</div>
 	);
+};
+
+/**
+ * The search field with the notes' answers: they are searched for here, so the
+ * index is this field's, and goes when it does (`useNoteSearch`). It is begun
+ * as the field takes the cursor rather than at the first letter.
+ *
+ * The answers follow the field a step behind (`useDeferredValue`): a letter goes
+ * into the field at once, and its matches and their excerpts are worked out
+ * where the next letter can cut in. Worked out with the letter, they held every
+ * key on a phone for a fifth of a second, for matches the next key would
+ * replace (#275). Until they are ready the last letter's stay up.
+ */
+export const NoteSearchField = (
+	props: Omit<SearchFieldProps, 'results' | 'asked' | 'onFocusChange'>
+) => {
+	const [focused, setFocused] = useState(false);
+	const asked = useDeferredValue(props.query);
+	const results = useNoteSearch(asked, focused);
+	return <SearchField {...props} results={results} asked={asked} onFocusChange={setFocused} />;
+};
+
+/**
+ * What is in the search field, held here rather than by the page around it, so
+ * a letter typed draws the bar and the field again and not the page: on every
+ * keystroke, the sidebar, the list and the note beside them were all drawn
+ * again for nothing (#275). Above both bars, the compact and the wide, so a
+ * query outlives the window changing from one to the other.
+ *
+ * Component state and not the URL, unlike the open folder and note: those are
+ * where the user *is*, and a reload should land there. A half-typed query is
+ * not a place — reopening the app into somebody's last search, with the
+ * notebooks hidden behind its results, is not where they left off.
+ */
+export const SearchQuery = ({
+	children,
+}: {
+	children: (query: string, onQuery: (query: string) => void) => ReactNode;
+}) => {
+	const [query, setQuery] = useState('');
+	return children(query, setQuery);
 };

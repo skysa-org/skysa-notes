@@ -23,6 +23,10 @@ import { visibleText } from './visibleText.js';
  * only while a search is open, and drops it when the search closes, rather than
  * carrying one for a feature nobody is using (docs/ARCHITECTURE.md §7).
  *
+ * And *how fast*: indexing a few thousand notes takes a phone about a second
+ * (#275), so it is done a slice at a time, with the thread handed back between
+ * slices, and a refresh begun while another is still going takes over from it.
+ *
  * Not `routes/search.ts`, which is the query string.
  */
 
@@ -73,7 +77,15 @@ export interface Excerpt {
 
 export interface NoteHit {
 	readonly note: NoteRecord;
-	/** One line of the body around the first match, or the start of it. */
+	/**
+	 * One line of the body around the first match, or the start of it. Worked
+	 * out the first time it is read, which is as its row is drawn: an excerpt
+	 * reads the whole body as markdown, and made for every match as the search
+	 * ran, fifty of them were one piece of work a keystroke on a phone waited a
+	 * fifth of a second for (#275). Made in each row's drawing, they are work
+	 * a deferred draw can stop between, for the next key; and one past the
+	 * fifty shown is never made at all.
+	 */
 	readonly excerpt: readonly Excerpt[];
 }
 
@@ -91,15 +103,52 @@ export const SEARCH_LIMIT = 50;
 export interface NoteSearch {
 	/**
 	 * Make the index agree with these notes: whatever is not among them is
-	 * forgotten, whatever has changed is indexed again.
+	 * forgotten, whatever has changed is indexed again. A slice at a time
+	 * (`SLICE_MS`), so it can take many turns of the event loop.
+	 *
+	 * True once the index agrees with them; false if another refresh, or
+	 * `stop`, came first, in which case this one has let go: the index is the
+	 * later refresh's to finish, or nobody's. Until it settles the index is
+	 * part of the way there: `find` answers from what it has so far.
 	 */
-	readonly refresh: (notes: readonly NoteRecord[]) => void;
+	readonly refresh: (notes: readonly NoteRecord[]) => Promise<boolean>;
+	/** Let go of any refresh still going, at its next slice. */
+	readonly stop: () => void;
 	/**
 	 * Best first, at most `SEARCH_LIMIT + 1` of them. An empty or
 	 * all-punctuation query matches nothing.
 	 */
 	readonly find: (query: string) => NoteHit[];
 }
+
+/**
+ * How long a refresh holds the thread at a time, in milliseconds. A key
+ * pressed while the index is being built waits for at most one slice, where
+ * it waited for the whole build when it was one piece: a second, on a phone,
+ * in which the field did not take a letter.
+ */
+const SLICE_MS = 8;
+
+/**
+ * The thread handed back for a turn, so whatever is waiting — a key, a frame —
+ * goes before the next slice. A message rather than `setTimeout(0)`, which
+ * browsers hold back to 4 ms once timeouts have nested five deep: a build of a
+ * hundred slices would spend half as long again doing nothing.
+ */
+const handBack = (): Promise<void> =>
+	new Promise((resolve) => {
+		const { port1, port2 } = new MessageChannel();
+		port1.addEventListener(
+			'message',
+			() => {
+				port1.close();
+				resolve();
+			},
+			{ once: true }
+		);
+		port1.start();
+		port2.postMessage(null);
+	});
 
 /**
  * The tokenizer, which has to be the one the corpus was indexed with: a query
@@ -261,6 +310,18 @@ const excerptOf = (body: string, terms: readonly string[]): Excerpt[] => {
 	];
 };
 
+/** A match, its excerpt made when it is first read (`NoteHit`) and kept from then. */
+const hitOf = (note: NoteRecord, terms: readonly string[]): NoteHit => {
+	const made: { current?: readonly Excerpt[] } = {};
+	return {
+		note,
+		get excerpt() {
+			made.current ??= excerptOf(note.body, terms);
+			return made.current;
+		},
+	};
+};
+
 export const createNoteSearch = (): NoteSearch => {
 	const index = new MiniSearch<Indexed>({
 		fields: ['title', 'tags', 'body'],
@@ -271,8 +332,49 @@ export const createNoteSearch = (): NoteSearch => {
 	});
 	const held = new Map<string, string>();
 	const rows = new Map<string, NoteRecord>();
+	/**
+	 * Which refresh is the one going on. Each refresh, and `stop`, moves it on,
+	 * and a refresh that finds it moved past its own lets go: two going at once
+	 * would each write the index from their own notes, and the one that wrote
+	 * last would win whether or not its notes were the newer.
+	 */
+	const generation = { current: 0 };
 
-	const refresh = (notes: readonly NoteRecord[]): void => {
+	/** One note brought up to date in the index. */
+	const take = (note: NoteRecord): void => {
+		const ref = noteRef(note);
+		// Always, even when the indexed fields have not moved: the row carries
+		// things the index does not — whether the note is dirty, when it was
+		// edited — and the results are drawn from these.
+		rows.set(ref, note);
+		const now = fingerprint(note);
+		if (held.get(ref) === now) return;
+		if (held.has(ref)) index.replace(indexed(note));
+		else index.add(indexed(note));
+		held.set(ref, now);
+	};
+
+	/** The notes from `from` on, a slice at a time, for as long as refresh `mine` is the one going on. */
+	const takeFrom = async (
+		notes: readonly NoteRecord[],
+		from: number,
+		mine: number
+	): Promise<boolean> => {
+		const until = performance.now() + SLICE_MS;
+		const next = { current: from };
+		notes.slice(from).some((note) => {
+			take(note);
+			next.current += 1;
+			return performance.now() >= until;
+		});
+		if (next.current >= notes.length) return true;
+		await handBack();
+		if (generation.current !== mine) return false;
+		return takeFrom(notes, next.current, mine);
+	};
+
+	const refresh = (notes: readonly NoteRecord[]): Promise<boolean> => {
+		generation.current += 1;
 		const live = new Set(notes.map(noteRef));
 		[...held.keys()]
 			.filter((ref) => !live.has(ref))
@@ -281,18 +383,13 @@ export const createNoteSearch = (): NoteSearch => {
 				held.delete(ref);
 				rows.delete(ref);
 			});
-		notes.forEach((note) => {
-			const ref = noteRef(note);
-			// Always, even when the indexed fields have not moved: the row carries
-			// things the index does not — whether the note is dirty, when it was
-			// edited — and the results are drawn from these.
-			rows.set(ref, note);
-			const now = fingerprint(note);
-			if (held.get(ref) === now) return;
-			if (held.has(ref)) index.replace(indexed(note));
-			else index.add(indexed(note));
-			held.set(ref, now);
-		});
+		// Begun at once, so a refresh that fits in a slice — what a note saved
+		// under an open search asks for — is done before this returns.
+		return takeFrom(notes, 0, generation.current);
+	};
+
+	const stop = (): void => {
+		generation.current += 1;
 	};
 
 	const find = (query: string): NoteHit[] => {
@@ -339,15 +436,15 @@ export const createNoteSearch = (): NoteSearch => {
 				.sort(
 					(one, two) => two.score - one.score || two.note.updatedAt - one.note.updatedAt
 				)
-				// Cut before the excerpts are made: a short query can match every
-				// note there is, and each excerpt walks a whole body. Nobody reads
-				// the six hundredth match, and the row for it is built and rendered
-				// on every keystroke. One past what the pane shows, so it can tell
-				// whether anything was left out.
+				// Cut before anything is made of them: a short query can match
+				// every note there is. Nobody reads the six hundredth match, and
+				// the row for it is built and rendered on every keystroke. One
+				// past what the pane shows, so it can tell whether anything was
+				// left out.
 				.slice(0, SEARCH_LIMIT + 1)
-				.map(({ note, terms }) => ({ note, excerpt: excerptOf(note.body, terms) }))
+				.map(({ note, terms }) => hitOf(note, terms))
 		);
 	};
 
-	return { refresh, find };
+	return { refresh, stop, find };
 };

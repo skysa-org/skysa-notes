@@ -520,6 +520,56 @@ const SCENARIOS = {
 		},
 	},
 
+	/**
+	 * Search as it is used on a phone: the field opened and typed into at once,
+	 * a letter at a time. First the rare word, from the moment the field has
+	 * the cursor, so its keys arrive while the search is still getting ready;
+	 * then, over it, a word in most notes, whose every key lists a full page of
+	 * matches. `answerMs` is from the tap to the rare word's notes listed.
+	 */
+	searchTyping: {
+		run: async ({ page, cdp, manifest, base }) => {
+			const options = '[role="listbox"][aria-label="Search results"] [role="option"]';
+			await page.goto(`${base}#/`);
+			await untilCount(page, '.editor-rich-surface, .note-list');
+			await quiet(page);
+			const before = await counters(cdp);
+			await reset(page);
+			const opened = await tap(page, page.locator('button[aria-label="Search notes"]'));
+			await until(
+				page,
+				() => document.activeElement?.getAttribute('aria-label') === 'Search notes'
+			);
+			const { word, hits } = manifest.search.rare;
+			await page.keyboard.type(word, { delay: 120 });
+			const answered = await untilCount(page, options, hits);
+			await quiet(page, 500);
+			// Over the rare word rather than after emptying the field, which
+			// would be a search closed and opened again.
+			await page.locator('input[aria-label="Search notes"]').selectText();
+			const common = 'lantern';
+			await page.keyboard.type(common, { delay: 120 });
+			await quiet(page);
+			const slow = await page.evaluate(() =>
+				window.__perf.events
+					.filter((event) => event.name === 'keydown')
+					.map((event) => event.duration)
+			);
+			const typed = word.length + common.length;
+			const keys = [...slow, ...Array(Math.max(0, typed - slow.length)).fill(0)].sort(
+				(a, b) => a - b
+			);
+			return {
+				answerMs: answered - opened,
+				slowKeys: slow.length,
+				keyP95: keys[Math.floor(keys.length * 0.95)] ?? 0,
+				keyMax: keys.at(-1) ?? 0,
+				...(await summary(page)),
+				...delta(before, await counters(cdp)),
+			};
+		},
+	},
+
 	/** A note of twenty 12 MP photos: first picture, scrolled through, then left. */
 	pictures: {
 		needs: (m) => m.pictures !== undefined,

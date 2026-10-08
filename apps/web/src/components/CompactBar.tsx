@@ -22,7 +22,7 @@ import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useFontsStatus, useMediaQuery } from './layout.js';
 import { middleEllipsis } from './middleEllipsis.js';
 import { ProviderIcon } from './ProviderIcon.js';
-import { SearchField, type SearchFieldProps } from './SearchField.js';
+import { NoteSearchField, type SearchFieldProps } from './SearchField.js';
 import { useShowingSource } from './SourceTabs.js';
 
 /**
@@ -351,7 +351,6 @@ export interface CompactBarProps {
 	onPanel: (panel: Pane | null) => void;
 	query: string;
 	onQuery: (query: string) => void;
-	results: SearchFieldProps['results'];
 	onChoose: SearchFieldProps['onChoose'];
 	sourceName: SearchFieldProps['sourceName'];
 	/**
@@ -389,7 +388,6 @@ export const CompactBar = ({
 	onPanel,
 	query,
 	onQuery,
-	results,
 	onChoose,
 	sourceName,
 	searchOpen,
@@ -449,10 +447,9 @@ export const CompactBar = ({
 
 	const field = (
 		<div className={fieldFits ? 'compact-search compact-search-beside' : 'compact-search'}>
-			<SearchField
+			<NoteSearchField
 				query={query}
 				onQuery={onQuery}
-				results={results}
 				onChoose={onChoose}
 				sourceName={sourceName}
 				fieldRef={fieldRef}

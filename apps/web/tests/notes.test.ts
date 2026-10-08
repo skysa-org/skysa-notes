@@ -1,7 +1,8 @@
 import { parseNoteFile, splitFrontmatter } from '@skysa/core';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, noteKey, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, noteKey, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
 import { listFolders } from '../src/store/folders.js';
 import {
 	createNote,
@@ -10,6 +11,7 @@ import {
 	importNoteFile,
 	listDirtyNotes,
 	listNotes,
+	listNotesEverywhere,
 	moveNote,
 	noteFile,
 	noteFileContents,
@@ -293,6 +295,74 @@ describe('listNotes', () => {
 
 		expect(await listNotes(db)).toEqual([]);
 		expect((await listNotes(db, { includeDeleted: true })).map((n) => n.id)).toEqual([note.id]);
+	});
+});
+
+describe('listNotesEverywhere', () => {
+	/** A row as the store holds one, put there whole. */
+	const row = (connectionId: string, at: number, deletedLocally: 0 | 1 = 0): NoteRecord => ({
+		connectionId,
+		id: `n${String(at).padStart(3, '0')}`,
+		path: `n${String(at)}.md`,
+		title: `Note ${String(at)}`,
+		body: '',
+		frontmatter: null,
+		tags: [],
+		contentHash: '',
+		dirty: 0,
+		deletedLocally,
+		createdAt: 0,
+		updatedAt: 0,
+	});
+	const named = (notes: readonly NoteRecord[]) =>
+		notes.map((note) => `${note.connectionId}/${note.id}`).sort();
+
+	it('lists every live note in every source, though there are more than it reads at once', async () => {
+		// Hundreds in each source, so it goes on from where a page stopped, both
+		// inside a source and from one source into the next.
+		const rows = ['a', 'b'].flatMap((source) =>
+			Array.from({ length: 300 }, (__, at) => row(source, at, at % 100 === 7 ? 1 : 0))
+		);
+		await db.notes.bulkPut(rows);
+
+		const listed = await listNotesEverywhere(db);
+
+		expect(listed).toHaveLength(594);
+		expect(named(listed)).toEqual(named(rows.filter((note) => note.deletedLocally === 0)));
+	});
+
+	it.each([249, 250, 251, 500])(
+		'lists all of %i notes, a page or two of them exactly',
+		async (count) => {
+			const rows = Array.from({ length: count }, (__, at) => row('a', at));
+			await db.notes.bulkPut(rows);
+
+			expect(named(await listNotesEverywhere(db))).toEqual(named(rows));
+		}
+	);
+
+	it('reads every page as the notes stood when it began, though a sync writes as it reads', async () => {
+		await db.notes.bulkPut(Array.from({ length: 300 }, (__, at) => row('a', at)));
+		// A note on the first page and one on the second, changed together as the
+		// first is read: an answer with one changed and not the other is a
+		// library that never was.
+		const written: { current?: Promise<unknown> } = {};
+		db.notes.hook('reading', (note) => {
+			written.current ??= Dexie.ignoreTransaction(() =>
+				db.notes.bulkPut([
+					{ ...row('a', 0), title: 'Changed' },
+					{ ...row('a', 299), title: 'Changed' },
+				])
+			);
+			return note;
+		});
+
+		const listed = await listNotesEverywhere(db);
+		await written.current;
+
+		const titleOf = (id: string) => listed.find((note) => note.id === id)?.title;
+		expect([titleOf('n000'), titleOf('n299')]).toEqual(['Note 0', 'Note 299']);
+		expect((await db.notes.get(['a', 'n299']))?.title).toBe('Changed');
 	});
 });
 
