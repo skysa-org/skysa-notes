@@ -27,6 +27,7 @@ import { keepRows } from '../store/kept.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { isUnnamed } from '../store/notes.js';
 import { cardLines, scratchGroups, scratchMarks, SCRATCHPAD_LABEL } from '../store/scratchpad.js';
+import { handBack, SLICE_MS } from '../store/slices.js';
 import { titleShown } from '../store/titles.js';
 import { noteOpening, openingBlocks, openingLines } from '../store/visibleText.js';
 import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
@@ -420,6 +421,65 @@ interface WallWindow {
 	readonly onMeasured: () => void;
 }
 
+/**
+ * Each card's height guessed at a width, kept with the note it was guessed
+ * for: a note unchanged since the read before is the object it was then
+ * (`keptRows`), so a card is guessed once, and again only once it changes or
+ * the cards are another width.
+ */
+const guessed = new WeakMap<NoteRecord, Readonly<{ width: number; height: number }>>();
+
+/** A card's height as guessed before at `width`, if it was. */
+const guessedAt = (note: NoteRecord, width: number): number | undefined => {
+	const kept = guessed.get(note);
+	return kept?.width === width ? kept.height : undefined;
+};
+
+/** A card's height guessed now at `width`, and kept. */
+const guessNow = (note: NoteRecord, width: number): number => {
+	const height = guessHeight(
+		{ title: !isUnnamed(note), lines: openingLines(note.body).slice(0, 12) },
+		width
+	);
+	guessed.set(note, { width, height });
+	return height;
+};
+
+/**
+ * The heights of the cards from the top that have one to be placed by,
+ * measured or guessed, guessing while a slice lasts (`SLICE_MS`). A guess
+ * reads the card's text, which for a first look at six hundred cards was a
+ * third of a second on a phone, in the task that drew the scratchpad (#275).
+ * A card is placed by the heights of every card before it, so the wall is
+ * placed from the top down, and ends at the first card not guessed yet.
+ *
+ * Only what has never been placed waits for a slice. Cards arriving above
+ * cards with a height already — a sync's — are guessed now, whatever the
+ * clock says: a wall ending at the first of them let go of every card after
+ * it, the one the focus was in among them, and fell short of where the user
+ * was scrolled to.
+ */
+const heightsFromTop = (
+	notes: readonly NoteRecord[],
+	measured: ReadonlyMap<string, number>,
+	width: number
+): number[] => {
+	const until = performance.now() + SLICE_MS;
+	const heightOf = (note: NoteRecord): number | undefined =>
+		measured.get(note.id) ?? guessedAt(note, width);
+	const known = notes.reduce((end, note, at) => (heightOf(note) === undefined ? end : at + 1), 0);
+	// At least one guess a slice, so a slow clock cannot keep the wall still.
+	const slice = { over: false };
+	const ends = notes.findIndex((note, at) => {
+		if (heightOf(note) !== undefined) return false;
+		if (slice.over && at >= known) return true;
+		guessNow(note, width);
+		slice.over = performance.now() >= until;
+		return false;
+	});
+	return notes.slice(0, ends === -1 ? notes.length : ends).map((note) => heightOf(note) ?? 0);
+};
+
 /** Whether a card at `y`, `height` tall, meets `span`. */
 const meets = (y: number, height: number, { top, bottom }: Span): boolean =>
 	y < bottom && y + height > top;
@@ -451,19 +511,27 @@ const Wall = ({
 	// Each card's height, as drawn, by note id: what the wall places them by,
 	// and when each was last measured.
 	const { heights, measure, told, seen } = useHeights({ stamped: true });
+	// A slice of guesses each time the page has handed the thread back. A
+	// slice a wall: with pinned cards, the two walls' share a task.
+	const [slices, setSlices] = useState(0);
 	const placed = useMemo(() => {
 		if (width === undefined) return undefined;
-		const guessWidth = Math.min(CARD_MAX, width / 2);
-		const tall = notes.map(
-			(note) =>
-				heights.get(note.id) ??
-				guessHeight(
-					{ title: !isUnnamed(note), lines: openingLines(note.body).slice(0, 12) },
-					guessWidth
-				)
-		);
+		// Read only to place the cards again, as each slice is done.
+		void slices;
+		const tall = heightsFromTop(notes, heights, Math.min(CARD_MAX, width / 2));
 		return { wall: placeCards(tall, width), tall };
-	}, [notes, heights, width]);
+	}, [notes, heights, width, slices]);
+	const unguessed = placed !== undefined && placed.tall.length < notes.length;
+	useEffect(() => {
+		if (!unguessed) return undefined;
+		const gone = { current: false };
+		void handBack().then(() => {
+			if (!gone.current) setSlices((done) => done + 1);
+		});
+		return () => {
+			gone.current = true;
+		};
+	}, [unguessed, placed]);
 	const wall = placed?.wall;
 	// What was measured before the cards were this wide is to be measured again.
 	const [measuredAt, setMeasuredAt] = useState({ cardWidth: wall?.cardWidth, told });
@@ -471,7 +539,10 @@ const Wall = ({
 		setMeasuredAt({ cardWidth: wall?.cardWidth, told });
 	// Not listened for at all where every card is drawn.
 	const span = useScrollSpan(windowed?.scroller ?? null, windowed === undefined ? null : element);
+	/** Whether a card has a place on the wall yet: none until it has been guessed. */
+	const unplaced = (at: number): boolean => placed !== undefined && at >= placed.tall.length;
 	const near = (note: NoteRecord, at: number): boolean => {
+		if (unplaced(at)) return false;
 		if (windowed === undefined || windowed.kept.has(note.id)) return true;
 		// Nothing laid out at all draws everything, as it does once placed.
 		if (placed === undefined) return span === undefined || at < FIRST_CARDS;
@@ -497,7 +568,10 @@ const Wall = ({
 			? []
 			: notes
 					.filter(
-						(note, at) => (seen.get(note.id) ?? 0) <= measuredAt.told && !near(note, at)
+						(note, at) =>
+							(seen.get(note.id) ?? 0) <= measuredAt.told &&
+							!near(note, at) &&
+							!unplaced(at)
 					)
 					.slice(0, AHEAD)
 					.map((note) => note.id)
@@ -513,7 +587,9 @@ const Wall = ({
 			}),
 		[waiting]
 	);
-	const drawn = (note: NoteRecord, at: number) => near(note, at) || ahead.has(note.id);
+	// Listed to be measured while it had a place: none is drawn without one.
+	const drawn = (note: NoteRecord, at: number) =>
+		near(note, at) || (!unplaced(at) && ahead.has(note.id));
 	return (
 		<section className="scratch-group" aria-labelledby={labelled ? labelId : undefined}>
 			{labelled && (

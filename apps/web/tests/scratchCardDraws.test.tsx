@@ -3,8 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
+import type * as Slices from '../src/store/slices.js';
 import type * as VisibleText from '../src/store/visibleText.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
+
+// Drawn once placed, which is once guessed: one slice guesses every card
+// (`tests/scratchGuessSlices.test.tsx` has them guessed a slice at a time).
+vi.mock('../src/store/slices.js', async (importOriginal) => ({
+	...(await importOriginal<typeof Slices>()),
+	SLICE_MS: Number.POSITIVE_INFINITY,
+}));
 
 /**
  * The page draws the scratchpad again on every autosave and sync run, and

@@ -8,7 +8,15 @@ import {
 	WALL_WINDOWED_ABOVE,
 } from '../src/components/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
+import type * as Slices from '../src/store/slices.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
+
+// Where the cards are placed, not when: one slice guesses every card's height
+// (`tests/scratchGuessSlices.test.tsx` has them guessed a slice at a time).
+vi.mock('../src/store/slices.js', async (importOriginal) => ({
+	...(await importOriginal<typeof Slices>()),
+	SLICE_MS: Number.POSITIVE_INFINITY,
+}));
 
 /**
  * A scratchpad of many cards draws only those placed near the screen (#275;
