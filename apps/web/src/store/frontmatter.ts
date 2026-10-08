@@ -5,13 +5,15 @@ import { keptAnswers, roomFor } from './kept.js';
 /**
  * A note's frontmatter, read once per block (#275).
  *
- * `readFrontmatter` is a YAML parse, and the scratchpad asks it of every card
+ * `readFrontmatter` is a YAML parse, and the scratchpad asked it of every card
  * on every draw: whether the card is named (`isUnnamed`), and its pin and
  * colour (`scratchMarks`). A scratchpad is drawn again on every write to the
  * notes table — every autosave of every note — and a wall of six hundred
- * cards was some two and a half thousand parses each time: the marks are asked
- * three times a card, and a cache of 400 missed every one of them past 400
- * cards. A block is a string, so the same one asked again is a lookup, and one
+ * cards was some two and a half thousand parses each time: the marks were
+ * asked three times a card, and a cache of 400 missed every one of them past
+ * 400 cards. (Now a card's block is read for its pin only if it says `pinned`,
+ * `scratchGroups`, and for the rest as the card is drawn or its height
+ * guessed.) A block is a string, so the same one asked again is a lookup, and one
  * edited is a new key rather than a stale entry.
  *
  * Kept for as many rows as the lists have shown (`store/kept.ts`), the least
