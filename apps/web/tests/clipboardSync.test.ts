@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	addClips,
 	type ClipInput,
+	keepClipThumb,
 	listClips,
 	removeClip,
 	setClipboardShown,
@@ -329,12 +330,33 @@ describe('reading the folder again', () => {
 		const theirs = await pastedElsewhere(await textName('theirs', AT), 'theirs');
 		await sync.refresh('c1');
 		const [mine = ''] = (await addClips(db, 'c1', [text('mine')], AT + 1)).added;
+		await keepClipThumb(db, { connectionId: 'c1', name: basename(theirs.path) });
 		await fake.delete(theirs);
 
 		await sync.refresh('c1');
 
 		expect((await listClips(db, 'c1')).map((row) => row.name)).toEqual([mine]);
 		expect(await db.clipBytes.get(['c1', basename(theirs.path)])).toBeUndefined();
+		expect(await db.clipThumbs.count()).toBe(0);
+	});
+
+	it('reads again, and draws afresh, a picture another device wrote over', async () => {
+		const { db, sync, fake, pastedElsewhere } = await setup();
+		const picture = clipName({ at: AT, hash: 'a'.repeat(8), name: 'x.png', pasted: true });
+		const entry = await pastedElsewhere(picture, 'PNG');
+		await sync.refresh('c1');
+		await keepClipThumb(db, {
+			connectionId: 'c1',
+			name: picture,
+			thumb: { bytes: encode('thumb').slice().buffer, type: 'image/webp' },
+		});
+
+		await fake.write(entry.path, 'PNG, again', { expectedVersion: entry.version });
+		await sync.refresh('c1');
+
+		const held = await db.clipBytes.get(['c1', picture]);
+		expect(held === undefined ? undefined : decode(held.bytes)).toBe('PNG, again');
+		expect(await db.clipThumbs.get(['c1', picture])).toBeUndefined();
 	});
 
 	it('ignores a file in the folder the app did not name', async () => {

@@ -184,12 +184,13 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 		}
 		if (row.state === 'removing' || row.version === entry.version) return;
 		await db.clipBytes.delete([connectionId, name]);
+		await db.clipThumbs.delete([connectionId, name]);
 		await db.clips.put({ ...row, ...remote, size: entry.size ?? row.size });
 	};
 
 	/** The table, as the folder's listing says it should be. */
 	const reconcile = (connectionId: string, items: readonly RemoteEntry[]): Promise<void> =>
-		db.transaction('rw', [db.syncState, db.clips, db.clipBytes], async () => {
+		db.transaction('rw', [db.syncState, db.clips, db.clipBytes, db.clipThumbs], async () => {
 			if (!showsClipboard(await db.syncState.get(connectionId))) return;
 			const rows = await db.clips.where('connectionId').equals(connectionId).toArray();
 			const listed = new Set(items.map((entry) => basename(entry.path)));
@@ -197,6 +198,7 @@ export const createClipboardSync = (options: ClipboardSyncOptions): ClipboardSyn
 			const gone = rows.filter((row) => row.state !== 'pending' && !listed.has(row.name));
 			await db.clips.bulkDelete(gone.map((row) => [connectionId, row.name]));
 			await db.clipBytes.bulkDelete(gone.map((row) => [connectionId, row.name]));
+			await db.clipThumbs.bulkDelete(gone.map((row) => [connectionId, row.name]));
 			const byName = new Map(rows.map((row) => [row.name, row]));
 			await Promise.all(
 				items.map((entry) => take(connectionId, byName.get(basename(entry.path)), entry))

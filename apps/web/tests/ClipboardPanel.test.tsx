@@ -7,6 +7,7 @@ import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/ClipboardPanel.j
 import { type SystemClipboard, type SystemRead } from '../src/components/systemClipboard.js';
 import { type FileBrowser } from '../src/editor/fileActions.js';
 import { type ObjectUrlCache } from '../src/editor/objectUrls.js';
+import { type PictureShrinker } from '../src/pictures/shrinker.js';
 import { addClips, type ClipInput } from '../src/store/clipboard.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { type FileRead } from '../src/sync/fileReads.js';
@@ -26,7 +27,36 @@ afterEach(async () => {
 
 const encode = (value: string): ArrayBuffer => new TextEncoder().encode(value).slice().buffer;
 
-const setup = async ({ read }: { read?: () => Promise<SystemRead> } = {}) => {
+const be32 = (value: number): number[] => [
+	(value >>> 24) & 255,
+	(value >>> 16) & 255,
+	(value >>> 8) & 255,
+	value & 255,
+];
+
+const chunk = (type: string, data: readonly number[] = []): number[] => [
+	...be32(data.length),
+	...[...type].map((char) => char.charCodeAt(0)),
+	...data,
+	0,
+	0,
+	0,
+	0,
+];
+
+/** A PNG's header and nothing to draw: all `imageInfo` reads, which is all that reads it here. */
+const pngOf = (width: number, height: number): ArrayBuffer =>
+	new Uint8Array([
+		...[...'\x89PNG\r\n\x1a\n'].map((char) => char.charCodeAt(0)),
+		...chunk('IHDR', [...be32(width), ...be32(height), 8, 2, 0, 0, 0]),
+		...chunk('IDAT', [0]),
+		...chunk('IEND'),
+	]).buffer;
+
+const setup = async ({
+	read,
+	shrinker,
+}: { read?: () => Promise<SystemRead>; shrinker?: PictureShrinker } = {}) => {
 	const db = createDatabase(`clipboard-panel-${crypto.randomUUID()}`);
 	opened.push(db);
 	await db.syncState.put({
@@ -65,11 +95,15 @@ const setup = async ({ read }: { read?: () => Promise<SystemRead> } = {}) => {
 		share: () => Promise.resolve(),
 		urlFor: () => 'blob:unused',
 	};
+	const drawn: Blob[] = [];
 	const urls: ObjectUrlCache = {
-		acquire: (key) => ({
-			url: `blob:${key.split('\u0000')[1] ?? ''}`,
-			release: () => undefined,
-		}),
+		acquire: (key, blob) => {
+			drawn.push(blob());
+			return {
+				url: `blob:${key.split('\u0000').slice(1).join('/')}`,
+				release: () => undefined,
+			};
+		},
 		reuse: () => undefined,
 	};
 	const pick = vi.fn(() => Promise.resolve<File[]>([]));
@@ -82,10 +116,11 @@ const setup = async ({ read }: { read?: () => Promise<SystemRead> } = {}) => {
 			browser={browser}
 			urls={urls}
 			pick={pick}
+			{...(shrinker === undefined ? {} : { shrinker })}
 		/>
 	);
 	const rows = () => db.clips.where('connectionId').equals('c1').toArray();
-	return { db, sync, written, saved, pick, rows };
+	return { db, sync, written, saved, pick, rows, drawn };
 };
 
 const region = () => screen.getByRole('region', { name: 'Clipboard' });
@@ -299,6 +334,34 @@ describe('the clipboard panel', () => {
 		await waitFor(() => {
 			expect(button.querySelector('img')?.getAttribute('src')).toBe(`blob:${name ?? ''}`);
 		});
+		await userEvent.setup().click(button);
+		await waitFor(() => {
+			expect(written.map((entry) => entry.type)).toEqual(['image/png']);
+		});
+	});
+
+	it('draws a picture from a thumb made of it, and copies the picture itself', async () => {
+		const shrinker: PictureShrinker = {
+			shrink: (_picture, { width }) =>
+				Promise.resolve({
+					kind: 'made',
+					copy: new Blob(['thumb'], { type: 'image/webp' }),
+					width,
+					height: 384,
+				}),
+		};
+		const { db, written, drawn } = await setup({ shrinker });
+		const [name] = await seeded(db, [
+			{ kind: 'file', name: '', type: 'image/png', bytes: pngOf(4000, 3000), pasted: true },
+		]);
+
+		const button = await screen.findByRole('button', { name: 'Copy Image, waiting to send' });
+		await waitFor(() => {
+			expect(button.querySelector('img')?.getAttribute('src')).toBe(
+				`blob:${name ?? ''}/thumb`
+			);
+		});
+		expect(await Promise.all(drawn.map((blob) => blob.text()))).toEqual(['thumb']);
 		await userEvent.setup().click(button);
 		await waitFor(() => {
 			expect(written.map((entry) => entry.type)).toEqual(['image/png']);

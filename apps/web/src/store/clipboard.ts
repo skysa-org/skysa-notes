@@ -8,7 +8,12 @@ import {
 } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { type ClipRecord, type NotesDatabase, type SyncStateRecord } from './db.js';
+import {
+	type ClipRecord,
+	type ClipThumbRecord,
+	type NotesDatabase,
+	type SyncStateRecord,
+} from './db.js';
 import { updateLive } from './detached.js';
 
 /**
@@ -118,6 +123,7 @@ const sameHash = (a: string, b: string): boolean =>
  */
 const letGo = async (db: NotesDatabase, row: ClipRecord): Promise<void> => {
 	await db.clipBytes.delete([row.connectionId, row.name]);
+	await db.clipThumbs.delete([row.connectionId, row.name]);
 	if (row.state === 'pending') {
 		await db.clips.delete([row.connectionId, row.name]);
 		return;
@@ -153,41 +159,45 @@ export const addClips = async (
 				hash: await bytesHash(new Uint8Array(bytes)),
 			}))
 	);
-	const added = await db.transaction('rw', [db.syncState, db.clips, db.clipBytes], async () => {
-		if ((await liveState(db, connectionId)) === undefined) return [];
-		const held = await db.clips.where('connectionId').equals(connectionId).toArray();
-		const newest = held.reduce<number | undefined>((latest, row) => {
-			const at = readClipName(row.name)?.at;
-			return at === undefined || (latest !== undefined && latest >= at) ? latest : at;
-		}, undefined);
-		const first = clipStamp(now, newest);
-		const items = prepared.map((item, index) => ({
-			row: {
-				connectionId,
-				name: nameFor(item, first + index),
-				state: 'pending',
-				size: item.bytes.byteLength,
-				...(item.input.kind === 'text'
-					? { preview: item.input.text.slice(0, PREVIEW_CHARS) }
-					: {}),
-			} satisfies ClipRecord,
-			bytes: item.bytes,
-		}));
-		const rows = items.map(({ row }) => row);
-		await db.clips.bulkAdd(rows);
-		await db.clipBytes.bulkAdd(
-			items.map(({ row, bytes }) => ({ connectionId, name: row.name, bytes }))
-		);
-		const shown = [...held.filter((row) => row.state !== 'removing'), ...rows];
-		await Promise.all(leaving(shown).map((row) => letGo(db, row)));
-		return rows.map((row) => row.name);
-	});
+	const added = await db.transaction(
+		'rw',
+		[db.syncState, db.clips, db.clipBytes, db.clipThumbs],
+		async () => {
+			if ((await liveState(db, connectionId)) === undefined) return [];
+			const held = await db.clips.where('connectionId').equals(connectionId).toArray();
+			const newest = held.reduce<number | undefined>((latest, row) => {
+				const at = readClipName(row.name)?.at;
+				return at === undefined || (latest !== undefined && latest >= at) ? latest : at;
+			}, undefined);
+			const first = clipStamp(now, newest);
+			const items = prepared.map((item, index) => ({
+				row: {
+					connectionId,
+					name: nameFor(item, first + index),
+					state: 'pending',
+					size: item.bytes.byteLength,
+					...(item.input.kind === 'text'
+						? { preview: item.input.text.slice(0, PREVIEW_CHARS) }
+						: {}),
+				} satisfies ClipRecord,
+				bytes: item.bytes,
+			}));
+			const rows = items.map(({ row }) => row);
+			await db.clips.bulkAdd(rows);
+			await db.clipBytes.bulkAdd(
+				items.map(({ row, bytes }) => ({ connectionId, name: row.name, bytes }))
+			);
+			const shown = [...held.filter((row) => row.state !== 'removing'), ...rows];
+			await Promise.all(leaving(shown).map((row) => letGo(db, row)));
+			return rows.map((row) => row.name);
+		}
+	);
 	return { added, tooLarge };
 };
 
 /** Take an item off a source's clipboard, here at once and on the remote when it can be. */
 export const removeClip = (db: NotesDatabase, connectionId: string, name: string): Promise<void> =>
-	db.transaction('rw', [db.clips, db.clipBytes], async () => {
+	db.transaction('rw', [db.clips, db.clipBytes, db.clipThumbs], async () => {
 		const row = await db.clips.get([connectionId, name]);
 		if (row === undefined || row.state === 'removing') return;
 		await letGo(db, row);
@@ -198,3 +208,16 @@ export const listClips = async (db: NotesDatabase, connectionId: string): Promis
 	(await db.clips.where('connectionId').equals(connectionId).toArray())
 		.filter((row) => row.state !== 'removing')
 		.sort((a, b) => b.name.localeCompare(a.name));
+
+/**
+ * Keep the thumb made of a picture on the clipboard (#276), or that it is
+ * drawn as it is (`thumb` absent), while its item is still there. Answers
+ * whether it was kept.
+ */
+export const keepClipThumb = (db: NotesDatabase, record: ClipThumbRecord): Promise<boolean> =>
+	db.transaction('rw', [db.clips, db.clipThumbs], async () => {
+		const row = await db.clips.get([record.connectionId, record.name]);
+		if (row === undefined || row.state === 'removing') return false;
+		await db.clipThumbs.put(record);
+		return true;
+	});

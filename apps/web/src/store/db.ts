@@ -343,6 +343,19 @@ export interface ClipBytesRecord {
 	bytes: ArrayBuffer;
 }
 
+/**
+ * How the clipboard's panel draws a picture on it (#276): from a thumb made on
+ * this device from its bytes, or as it is — small enough already, or one the
+ * browser could not copy. Keyed as its item is, whose name is stamped with its
+ * bytes' hash, so it never stands for other bytes; it goes with the item.
+ */
+export interface ClipThumbRecord {
+	connectionId: string;
+	name: string;
+	/** Absent where the picture is drawn as it is. */
+	thumb?: Readonly<{ bytes: ArrayBuffer; type: string }>;
+}
+
 /** A smaller copy of a picture, as `PictureRecord` keeps what is known of it. */
 export interface PictureCopyRecord {
 	/** What it was written as: WebP, or PNG or JPEG where the browser writes no WebP. */
@@ -421,6 +434,7 @@ export type NotesDatabase = Dexie & {
 	fileBytes: Table<FileBytesRecord, [string, string]>;
 	clips: Table<ClipRecord, [string, string]>;
 	clipBytes: Table<ClipBytesRecord, [string, string]>;
+	clipThumbs: Table<ClipThumbRecord, [string, string]>;
 	pictures: Table<PictureRecord, [string, string]>;
 	pictureBytes: Table<PictureBytesRecord, [string, string, PictureVariant]>;
 };
@@ -569,6 +583,12 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	db.version(8).stores({
 		pictures: '[connectionId+fileId], connectionId',
 		pictureBytes: '[connectionId+fileId+variant], [connectionId+fileId], connectionId',
+	});
+
+	// The thumbs the clipboard's panel draws its pictures from (#276), apart
+	// from the items' bytes so that drawing ten never reads 250 MB.
+	db.version(9).stores({
+		clipThumbs: '[connectionId+name], connectionId',
 	});
 
 	// A build with a later version than the last one above, opening this database

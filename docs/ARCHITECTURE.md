@@ -501,6 +501,7 @@ fileBytes    [connectionId + id], bytes (ArrayBuffer), version?, pinned (0|1), l
 clips        [connectionId + name], state ('pending'|'sent'|'removing'), remoteId?, version?,
              size, preview? (a text's first 500 characters)
 clipBytes    [connectionId + name], bytes (ArrayBuffer)
+clipThumbs   [connectionId + name], thumb? { bytes (ArrayBuffer), type } (absent: drawn as it is)
 pictures     [connectionId + fileId], remoteId?, version? (the original's, as read),
              info (what its header says, or null), copies { [variant]: type, width, height,
              size, lastUsedAt }
@@ -877,7 +878,9 @@ Measured on a real library (2,892 `.md` files and 62 others in 235 folders, 24 M
 - **Drive deletes to its trash**, so an item let go of stays in the user's Drive trash until it is emptied.
 - **The cap keeps the folder small.** Every provider's change feed reports each item that comes and goes to every device, hidden or not, so ten is also all a pull ever has to pass over there.
 - **On this device only.** Turning it off hides the region and stops refreshing. The items stay in the folder and in the tables.
-- **Dropped with the source.** Letting a source go (disconnect, detach, or a reconnect's bind taking over a detached row) deletes its clips and their bytes, pending ones included. A clip is a copy of what the user pasted, not something written in the library, and a detached source has no remote to send it to. A detached source's row loses `clipboard`, so a reconnect starts with it hidden.
+- **Dropped with the source.** Letting a source go (disconnect, detach, or a reconnect's bind taking over a detached row) deletes its clips, their bytes and their thumbs, pending ones included. A clip is a copy of what the user pasted, not something written in the library, and a detached source has no remote to send it to. A detached source's row loses `clipboard`, so a reconnect starts with it hidden.
+
+**Pictures drawn from thumbs (2026-10-08, #276).** The panel draws a picture 6rem tall, so it draws it from a thumb (`components/clipPictures.ts`), made on this device from the item's bytes as a scratch card's is ("Drawn from a copy" below) and kept in `clipThumbs`, beside the item and gone with it: removed, pushed out by newer ones, let go of by another device, or written over there. What the panel watches is whether the bytes or the thumb are here, by key; it never holds an item's bytes to draw it, as it did, ten photos' worth at once. A picture a thumb would not shrink, or one the browser could not make a thumb of, is drawn as it is, and that is kept said; a thumb missed is asked for again the next time. The bytes are still fetched as they come (the owner's choice): a picture is pasted whole, and the panel is where it is pasted from.
 
 ### The scratchpad (2026-10-07)
 
