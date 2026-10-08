@@ -41,6 +41,7 @@ import {
 	useFocusedItem,
 	useHeights,
 	useScrollSpan,
+	whenIdle,
 } from './windowing.js';
 
 /**
@@ -291,12 +292,9 @@ const CardView = ({
 	open: boolean;
 	liveEdits: LiveEdits | undefined;
 	measure: Measure;
-	/**
-	 * Where the wall is windowed: the focus came into the card, or into one of
-	 * its menus, or went out (`useFocusedItem`).
-	 */
-	onFocusIn: ((id: string) => void) | undefined;
-	onFocusOut: (() => void) | undefined;
+	/** The focus came into the card, or into one of its menus, or went out (`useFocusedItem`). */
+	onFocusIn: (id: string) => void;
+	onFocusOut: () => void;
 	onOpen: (note: NoteRecord) => void;
 	onMark: (note: NoteRecord, change: MarkChange) => void;
 	onMove: ((note: NoteRecord) => void) | undefined;
@@ -333,13 +331,9 @@ const CardView = ({
 			}
 			// From its menus too, which are portals: React's events come up
 			// through them.
-			onFocus={
-				onFocusIn === undefined
-					? undefined
-					: () => {
-							onFocusIn(row.id);
-						}
-			}
+			onFocus={() => {
+				onFocusIn(row.id);
+			}}
 			onBlur={onFocusOut}
 		>
 			<button
@@ -411,10 +405,19 @@ export const WALL_WINDOWED_ABOVE = 100;
  */
 const FIRST_CARDS = 40;
 
+/**
+ * How many cards a windowed wall measures at a time, ahead of the screen: few
+ * enough that drawing them is no long task on a slow phone.
+ */
+const AHEAD = 8;
+
 /** Where the wall is windowed: the scroller it is drawn in, and the cards drawn wherever they are. */
 interface WallWindow {
 	readonly scroller: HTMLElement | null;
 	readonly kept: ReadonlySet<string>;
+	/** Whether either wall has measured a card, and how a wall says it has. */
+	readonly measuring: boolean;
+	readonly onMeasured: () => void;
 }
 
 /** Whether a card at `y`, `height` tall, meets `span`. */
@@ -445,8 +448,9 @@ const Wall = ({
 	const labelId = useId();
 	const [element, setElement] = useState<HTMLDivElement | null>(null);
 	const width = useElementWidth(element);
-	// Each card's height, as drawn, by note id: what the wall places them by.
-	const { heights, measure } = useHeights();
+	// Each card's height, as drawn, by note id: what the wall places them by,
+	// and when each was last measured.
+	const { heights, measure, told, seen } = useHeights({ stamped: true });
 	const placed = useMemo(() => {
 		if (width === undefined) return undefined;
 		const guessWidth = Math.min(CARD_MAX, width / 2);
@@ -461,9 +465,13 @@ const Wall = ({
 		return { wall: placeCards(tall, width), tall };
 	}, [notes, heights, width]);
 	const wall = placed?.wall;
+	// What was measured before the cards were this wide is to be measured again.
+	const [measuredAt, setMeasuredAt] = useState({ cardWidth: wall?.cardWidth, told });
+	if (measuredAt.cardWidth !== wall?.cardWidth)
+		setMeasuredAt({ cardWidth: wall?.cardWidth, told });
 	// Not listened for at all where every card is drawn.
 	const span = useScrollSpan(windowed?.scroller ?? null, windowed === undefined ? null : element);
-	const drawn = (note: NoteRecord, at: number): boolean => {
+	const near = (note: NoteRecord, at: number): boolean => {
 		if (windowed === undefined || windowed.kept.has(note.id)) return true;
 		// Nothing laid out at all draws everything, as it does once placed.
 		if (placed === undefined) return span === undefined || at < FIRST_CARDS;
@@ -472,6 +480,40 @@ const Wall = ({
 			span === undefined || place === undefined || meets(place.y, placed.tall[at] ?? 0, span)
 		);
 	};
+	// Every card measured ahead of the screen, a few at a time while the page
+	// has nothing else to do. A card is placed by the heights of the cards
+	// before it, so one measured only as it was scrolled to moved the cards
+	// after it, there on the screen, into other columns; measured ahead, each
+	// is placed where it will stay. Only once a card has been measured, on
+	// either wall (the rest can be wholly under pinned cards that fill the
+	// screen): until then, as in a test, none can be.
+	const measuredOne = seen.size > 0;
+	const onMeasured = windowed?.onMeasured;
+	useEffect(() => {
+		if (measuredOne) onMeasured?.();
+	}, [measuredOne, onMeasured]);
+	const waiting = JSON.stringify(
+		windowed === undefined || placed === undefined || !windowed.measuring
+			? []
+			: notes
+					.filter(
+						(note, at) => (seen.get(note.id) ?? 0) <= measuredAt.told && !near(note, at)
+					)
+					.slice(0, AHEAD)
+					.map((note) => note.id)
+	);
+	const [ahead, setAhead] = useState<ReadonlySet<string>>(() => new Set());
+	useEffect(
+		() =>
+			whenIdle(() => {
+				const next = JSON.parse(waiting) as readonly string[];
+				setAhead((current) =>
+					next.length === 0 && current.size === 0 ? current : new Set(next)
+				);
+			}),
+		[waiting]
+	);
+	const drawn = (note: NoteRecord, at: number) => near(note, at) || ahead.has(note.id);
 	return (
 		<section className="scratch-group" aria-labelledby={labelled ? labelId : undefined}>
 			{labelled && (
@@ -568,10 +610,17 @@ export const Scratchpad = ({
 	}, []);
 	// The cards in the order they are on the page, which Tab goes through.
 	const order = useMemo(() => [...cards.pinned, ...cards.others], [cards]);
+	// Whether either wall has measured a card (`Wall`).
+	const [measuring, setMeasuring] = useState(false);
+	const measured = useCallback(() => {
+		setMeasuring(true);
+	}, []);
 	const windowed =
 		order.length > WALL_WINDOWED_ABOVE
 			? {
 					scroller,
+					measuring,
+					onMeasured: measured,
 					// And the cards either side of the one the focus is in.
 					kept: new Set(
 						[openLast, focusedId, ...besideOf(order, focusedId)].filter(
@@ -588,8 +637,10 @@ export const Scratchpad = ({
 			liveEdits={liveEdits}
 			{...place}
 			measure={measure}
-			onFocusIn={windowed === undefined ? undefined : focusIn}
-			onFocusOut={windowed === undefined ? undefined : focusOut}
+			// Followed even where every card is drawn, so that one the focus is
+			// in stays when a sync takes the wall past the number windowed.
+			onFocusIn={focusIn}
+			onFocusOut={focusOut}
 			onOpen={open}
 			onMark={mark}
 			onMove={onMove === undefined ? undefined : move}

@@ -20,6 +20,12 @@ export interface FakeWidths {
 	 * transform, whose box the observer gives without it.
 	 */
 	report: (selector: string, width: number) => void;
+	/**
+	 * Tell the observers of every element `selector` matches that its border
+	 * box is `height` tall, as a browser's observer does of an element once
+	 * it is drawn: the scratch wall's cards, which it places by their heights.
+	 */
+	measure: (selector: string, height: number) => void;
 	/** How many observers watch an element `selector` matches. */
 	watching: (selector: string) => number;
 	/** Put jsdom back as it was. */
@@ -100,6 +106,21 @@ export const elementWidths = (initial: Record<string, number>): FakeWidths => {
 							({
 								target,
 								borderBoxSize: [{ inlineSize: width, blockSize: 0 }],
+							}) as unknown as ResizeObserverEntry
+					)
+				);
+			});
+		},
+		measure: (selector, height) => {
+			[...observers].forEach(({ callback, watched }) => {
+				const told = [...watched].filter((element) => element.matches(selector));
+				if (told.length === 0) return;
+				callback(
+					told.map(
+						(target) =>
+							({
+								target,
+								borderBoxSize: [{ inlineSize: widthOf(target), blockSize: height }],
 							}) as unknown as ResizeObserverEntry
 					)
 				);

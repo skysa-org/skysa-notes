@@ -262,6 +262,42 @@ describe('a long note list', () => {
 		expect(document.activeElement).toBe(options);
 	});
 
+	it('keeps the row the focus is in when the window loses the focus, not the row', async () => {
+		render(<NoteList {...listProps(notesOf(300))} />);
+		scrollTo(0);
+		const row = rowButton('Note 1');
+		act(() => {
+			row.focus();
+		});
+		scrollTo(200 * GUESS);
+
+		// Another window takes the focus: the row keeps it, and is told it went.
+		const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+		try {
+			act(() => {
+				row.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+			});
+			await new Promise((settled) => setTimeout(settled, 10));
+			expect(drawn()).toContain('Note 1');
+			expect(document.activeElement).toBe(row);
+		} finally {
+			hasFocus.mockRestore();
+		}
+	});
+
+	it('keeps the row the focus is in when a sync takes the list past 150', () => {
+		const { rerender } = render(<NoteList {...listProps(notesOf(150))} />);
+		scrollTo(0);
+		act(() => {
+			rowButton('Note 1').focus();
+		});
+
+		rerender(<NoteList {...listProps(notesOf(300))} />);
+		scrollTo(200 * GUESS);
+		expect(drawn()).toContain('Note 1');
+		expect(drawn()).not.toContain('Note 3');
+	});
+
 	it('keeps the row being moved drawn', () => {
 		const { rerender } = render(<NoteList {...listProps(notesOf(300))} movingNoteId="n3" />);
 		scrollTo(200 * GUESS);

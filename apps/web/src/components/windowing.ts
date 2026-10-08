@@ -11,6 +11,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
  * everything is drawn.
  */
 
+/** The elements from `element` up to `top`, and not `top` itself. */
+const between = (element: HTMLElement | null, top: HTMLElement): readonly HTMLElement[] =>
+	element === null || element === top ? [] : [element, ...between(element.parentElement, top)];
+
 /** What of a list is on screen: from `top` to `bottom`, in pixels from the list's own top. */
 export interface Span {
 	readonly top: number;
@@ -122,6 +126,14 @@ export const useScrollSpan = (
 					typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
 				observer?.observe(scroller);
 				observer?.observe(content);
+				// And what lies between: a box over the content that grows or
+				// shrinks moves the content with no scroll (the scratchpad's
+				// take-note box as it closes).
+				if (scroller.contains(content)) {
+					between(content.parentElement, scroller).forEach((element) => {
+						observer?.observe(element);
+					});
+				}
 				// What moved between the first draw and this.
 				update();
 				return () => {
@@ -141,6 +153,15 @@ export const useScrollSpan = (
 	return useSyncExternalStore(store.subscribe, store.span, () => NO_SPAN);
 };
 
+/** What `useHeights` has been told. */
+interface Measured {
+	readonly heights: ReadonlyMap<string, number>;
+	/** How many times the observer has told of a height. */
+	readonly told: number;
+	/** Each item's last telling, by that count: kept where asked for (`stamped`). */
+	readonly seen: ReadonlyMap<string, number>;
+}
+
 /**
  * Each item's height, as drawn, by its key: what a windowed list or the
  * scratch wall places its items by. One observer for every item, and a new
@@ -151,16 +172,25 @@ export const useScrollSpan = (
  * what the observer says of every item once its list is hidden (a phone's
  * list behind the note open beside it). Kept, it put every item at the top,
  * where every one of them met the screen, and the hidden list drew them all.
+ *
+ * `stamped`, it also says when each item was last measured (`seen`, against
+ * `told`), its height changed or not: the scratch wall measures again what it
+ * measured at another width. Not by default, where it would draw the list
+ * again each time a row it had measured was drawn again.
  */
-export const useHeights = () => {
-	const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
+export const useHeights = ({ stamped = false }: { stamped?: boolean } = {}) => {
+	const [measured, setMeasured] = useState<Measured>(() => ({
+		heights: new Map(),
+		told: 0,
+		seen: new Map(),
+	}));
 	const observer = useMemo(
 		() =>
 			typeof ResizeObserver === 'undefined'
 				? undefined
 				: new ResizeObserver((entries) => {
-						setHeights((current) => {
-							const changed = entries
+						setMeasured((current) => {
+							const told = entries
 								.map(
 									(entry) =>
 										[
@@ -169,13 +199,29 @@ export const useHeights = () => {
 												entry.target.getBoundingClientRect().height,
 										] as const
 								)
-								.filter(([id, height]) => height > 0 && current.get(id) !== height);
-							return changed.length === 0
-								? current
-								: new Map([...current, ...changed]);
+								.filter(([, height]) => height > 0);
+							const changed = told.filter(
+								([id, height]) => current.heights.get(id) !== height
+							);
+							if (changed.length === 0 && !(stamped && told.length > 0))
+								return current;
+							const count = current.told + 1;
+							return {
+								heights:
+									changed.length === 0
+										? current.heights
+										: new Map([...current.heights, ...changed]),
+								told: count,
+								seen: stamped
+									? new Map([
+											...current.seen,
+											...told.map(([id]) => [id, count] as const),
+										])
+									: current.seen,
+							};
 						});
 					}),
-		[]
+		[stamped]
 	);
 	useEffect(
 		() => () => {
@@ -193,7 +239,24 @@ export const useHeights = () => {
 		},
 		[observer]
 	);
-	return { heights, measure };
+	return { ...measured, measure };
+};
+
+/**
+ * Run `run` once the page has nothing else to do, or soon where the browser
+ * cannot say (Safari has no `requestIdleCallback`); and the way not to.
+ */
+export const whenIdle = (run: () => void): (() => void) => {
+	if (typeof requestIdleCallback === 'function') {
+		const id = requestIdleCallback(run, { timeout: 2000 });
+		return () => {
+			cancelIdleCallback(id);
+		};
+	}
+	const id = setTimeout(run, 50);
+	return () => {
+		clearTimeout(id);
+	};
 };
 
 /** A ref that observes its element's height (`useHeights`). */
@@ -217,6 +280,10 @@ export const useFocusedItem = () => {
 	const focusOut = useCallback(() => {
 		clearTimeout(settling.current);
 		settling.current = setTimeout(() => {
+			// The window lost the focus, not the item, which still holds it: the
+			// browser gives it back to the same element on return, so it stays.
+			const active = document.activeElement;
+			if (!document.hasFocus() && active !== null && active !== document.body) return;
 			setFocusedId(undefined);
 		}, 0);
 	}, []);

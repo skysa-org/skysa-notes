@@ -70,8 +70,8 @@ const props = (notes: readonly NoteRecord[], changed: Partial<ScratchpadProps> =
 const drawn = () =>
 	[...document.querySelectorAll<HTMLElement>('.scratch-card')].map((each) => each.dataset.id);
 
-/** The page laid out, and the scratchpad scrolled to `to`. */
-const scrollTo = (to: number) => {
+/** The page laid out, the wall `width` across, and the scratchpad scrolled to `to`. */
+const scrollTo = (to: number, width = 1000) => {
 	const pane = document.querySelector('.scratchpad');
 	const wall = document.querySelector('.scratch-wall');
 	if (!(pane instanceof HTMLElement) || !(wall instanceof HTMLElement)) {
@@ -82,11 +82,14 @@ const scrollTo = (to: number) => {
 		value: 844,
 	});
 	Object.defineProperty(pane, 'clientHeight', { configurable: true, value: SCREEN });
-	vi.spyOn(wall, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, ABOVE - to, 1000, 0));
+	vi.spyOn(wall, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, ABOVE - to, width, 0));
 	act(() => {
 		pane.dispatchEvent(new Event('scroll'));
 	});
 };
+
+const wallHeight = () =>
+	Number.parseFloat(document.querySelector<HTMLElement>('.scratch-wall')?.style.height ?? '');
 
 const drawPad = (notes: readonly NoteRecord[], changed: Partial<ScratchpadProps> = {}) => {
 	// One at a time: a second laid over the first would leave the first behind.
@@ -254,6 +257,209 @@ describe('a scratchpad of many cards', () => {
 		await new Promise((settled) => setTimeout(settled, 10));
 		expect(drawn()).toContain('c4');
 		expect(document.activeElement).toBe(other);
+	});
+
+	it('measures every card ahead of the screen, a few at a time, so each is placed by its own height', () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			drawPad(cardsOf(300));
+			scrollTo(0);
+			const ever = new Set<string | undefined>();
+			// The browser measures each card as it is drawn, 80px tall where
+			// it was guessed at 45, and the page has time to spare between.
+			const measureAll = (height: number) => {
+				for (let round = 0; round < 100; round += 1) {
+					drawn().forEach((id) => ever.add(id));
+					act(() => {
+						widths?.measure('.scratch-card', height);
+					});
+					act(() => {
+						vi.advanceTimersByTime(60);
+					});
+				}
+			};
+			measureAll(80);
+
+			expect(ever.size).toBe(300);
+			// Seventy-five rows of four, each card as tall as it was measured.
+			expect(wallHeight()).toBe(75 * 80 + 74 * 12);
+			// And the cards drawn to be measured are let go of.
+			expect(drawn()).not.toContain('c299');
+
+			// A narrower wall: two columns of narrower cards, every card
+			// measured again at its new width, drawn or not.
+			scrollTo(0, 400);
+			act(() => {
+				widths?.resize('.scratch-wall', 400);
+			});
+			measureAll(100);
+			expect(wallHeight()).toBe(150 * 100 + 149 * 12);
+
+			// Wider again, and each card as tall as it was at 400: measured
+			// again all the same, every one of them.
+			ever.clear();
+			scrollTo(0);
+			act(() => {
+				widths?.resize('.scratch-wall', 1000);
+			});
+			measureAll(100);
+			expect(ever.size).toBe(300);
+			expect(wallHeight()).toBe(75 * 100 + 74 * 12);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('draws no card ahead of the screen until a card has been measured', () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			drawPad(cardsOf(300));
+			scrollTo(ABOVE + 60 * STRIDE);
+			const near = drawn();
+			// Time to spare, and nothing measured: as where cards cannot be.
+			act(() => {
+				vi.advanceTimersByTime(1000);
+			});
+			expect(drawn()).toEqual(near);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('measures the rest ahead too when pinned cards fill the screen over them', () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const notes = cardsOf(300).map((each, at) =>
+				at < 60 ? { ...each, frontmatter: 'pinned: true\n' } : each
+			);
+			drawPad(notes);
+			scrollTo(0);
+			// The rest's wall under the pinned, more than a screen below.
+			const rest = document.querySelectorAll('.scratch-wall')[1];
+			if (!(rest instanceof HTMLElement)) throw new Error('no second wall');
+			vi.spyOn(rest, 'getBoundingClientRect').mockReturnValue(
+				new DOMRect(0, ABOVE + 3 * SCREEN + 400, 1000, 0)
+			);
+			act(() => {
+				document.querySelector('.scratchpad')?.dispatchEvent(new Event('scroll'));
+			});
+			expect(rest.querySelectorAll('.scratch-card')).toHaveLength(0);
+
+			const ever = new Set<string | undefined>();
+			for (let round = 0; round < 100; round += 1) {
+				drawn().forEach((id) => ever.add(id));
+				act(() => {
+					widths?.measure('.scratch-card', 80);
+				});
+				act(() => {
+					vi.advanceTimersByTime(60);
+				});
+			}
+			expect(ever.size).toBe(300);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('measures on past a card drawn and not measured again', () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			drawPad(cardsOf(300));
+			scrollTo(0);
+			act(() => {
+				widths?.measure('.scratch-card', 80);
+			});
+			// Narrower cards, and the ones on screen never measured again: as
+			// the cards drawn before the wall had a width are not, where
+			// placing them left them as wide as they were. Each card drawn
+			// afresh is measured.
+			scrollTo(0, 400);
+			act(() => {
+				widths?.resize('.scratch-wall', 400);
+			});
+			const onScreen = drawn().map((id) => `:not([data-id="${String(id)}"])`);
+			const ever = new Set(drawn());
+			for (let round = 0; round < 100; round += 1) {
+				act(() => {
+					widths?.measure(`.scratch-card${onScreen.join('')}`, 100);
+				});
+				act(() => {
+					vi.advanceTimersByTime(60);
+				});
+				drawn().forEach((id) => ever.add(id));
+			}
+			expect(ever.size).toBe(300);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('keeps the card the focus is in when the window loses the focus, not the card', async () => {
+		drawPad(cardsOf(300));
+		scrollTo(0);
+		const opener = document.querySelector<HTMLElement>('[data-card="c1"]');
+		act(() => {
+			opener?.focus();
+		});
+		scrollTo(ABOVE + 60 * STRIDE);
+
+		// Another window takes the focus: the card keeps it, and is told it went.
+		const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+		try {
+			act(() => {
+				opener?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+			});
+			await new Promise((settled) => setTimeout(settled, 10));
+			expect(drawn()).toContain('c1');
+			expect(document.activeElement).toBe(opener);
+		} finally {
+			hasFocus.mockRestore();
+		}
+	});
+
+	it('keeps the card the focus is in when a sync takes the wall past 100', () => {
+		const drawAgain = drawPad(cardsOf(100));
+		scrollTo(0);
+		act(() => {
+			document.querySelector<HTMLElement>('[data-card="c1"]')?.focus();
+		});
+
+		drawAgain({ notes: cardsOf(300) });
+		scrollTo(ABOVE + 60 * STRIDE);
+		expect(drawn()).toContain('c1');
+		expect(drawn()).not.toContain('c3');
+	});
+
+	it('keeps the card drawn while the focus is in its menu', async () => {
+		drawPad(cardsOf(300));
+		scrollTo(0);
+		await userEvent.click(screen.getByRole('button', { name: 'Options for “card 4”' }));
+		const item = await screen.findByRole('button', { name: /Delete/ });
+		act(() => {
+			item.focus();
+		});
+
+		scrollTo(ABOVE + 60 * STRIDE);
+		expect(drawn()).toContain('c4');
+	});
+
+	it('draws the cards come on screen when what is over the wall shrinks, with no scroll', () => {
+		drawPad(cardsOf(300));
+		scrollTo(ABOVE + 20 * STRIDE);
+		expect(drawn()).not.toContain('c200');
+
+		// The take-note box closing over a long note: the wall goes up three
+		// screens, and nothing is scrolled.
+		const wall = document.querySelector('.scratch-wall');
+		if (!(wall instanceof HTMLElement)) throw new Error('no wall');
+		vi.spyOn(wall, 'getBoundingClientRect').mockReturnValue(
+			new DOMRect(0, -(20 * STRIDE) - 3 * SCREEN, 1000, 0)
+		);
+		expect(widths?.watching('.scratchpad-scroll')).toBeGreaterThan(0);
+		act(() => {
+			widths?.resize('.scratchpad-scroll', 1000);
+		});
+		expect(drawn()).toContain('c200');
 	});
 
 	it('draws only its first cards before the wall has a width to place them by', () => {
