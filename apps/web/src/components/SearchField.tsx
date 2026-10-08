@@ -1,6 +1,7 @@
 import { parentPath } from '@skysa/core';
 import { type RefObject, useEffect, useId, useRef, useState } from 'react';
 
+import { t } from '../i18n/t.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
 import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
 import { folderLabel } from '../store/tree.js';
@@ -52,13 +53,11 @@ export interface SearchFieldProps {
 
 /** What the list says about itself, above the matches or instead of them. */
 const statusFor = (query: string, results: readonly NoteHit[] | undefined): string => {
-	if (results === undefined) return 'Searching…';
-	if (results.length === 0) return `Nothing matches “${query}”.`;
+	if (results === undefined) return t('search.searching');
+	if (results.length === 0) return t('search.noMatch', { query });
 	// The search hands back one more than is shown for exactly this, so a search
 	// that matched exactly the limit is not told it was cut short.
-	return results.length <= SEARCH_LIMIT
-		? ''
-		: `Showing the first ${String(SEARCH_LIMIT)}. Add a word to narrow the search.`;
+	return results.length <= SEARCH_LIMIT ? '' : t('search.limited', { count: SEARCH_LIMIT });
 };
 
 /**
@@ -158,8 +157,8 @@ export const SearchField = ({
 					// browser offers its own way to empty one.
 					type="search"
 					className="note-search"
-					aria-label="Search notes"
-					placeholder="Search notes"
+					aria-label={t('search.field')}
+					placeholder={t('search.field')}
 					role="combobox"
 					aria-autocomplete="list"
 					aria-expanded={listed}
@@ -215,7 +214,7 @@ export const SearchField = ({
 						{statusFor(query, results)}
 					</p>
 					{shown.length > 0 && (
-						<ul id={`${id}-list`} role="listbox" aria-label="Search results">
+						<ul id={`${id}-list`} role="listbox" aria-label={t('search.results')}>
 							{shown.map((hit, index) => (
 								// The row is the option, with nothing focusable in it:
 								// ARIA gives `option` presentational children.

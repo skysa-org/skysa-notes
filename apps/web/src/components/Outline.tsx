@@ -2,6 +2,8 @@ import { EditorView } from '@codemirror/view';
 import { type Heading, headings } from '@skysa/core';
 import { type RefObject, useEffect, useMemo, useRef } from 'react';
 
+import { t } from '../i18n/t.js';
+
 /**
  * The note's headings, down the side, as somewhere to jump to.
  *
@@ -173,7 +175,7 @@ export const Outline = ({ body, editor, onClose, focusEditor = true }: OutlinePr
 		<nav
 			ref={nav}
 			className={onClose === undefined ? 'outline' : 'outline outline-flyout'}
-			aria-label="Outline"
+			aria-label={t('shell.outline.label')}
 		>
 			<ol>
 				{found.map((heading) => (

@@ -1,4 +1,4 @@
-import { APP_FOLDER_NAME, type EntitlementCode, type ProviderKind } from '@skysa/core';
+import { APP_FOLDER_NAME, type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';
@@ -711,27 +711,4 @@ const releasing = async (
 					holding,
 				});
 	return { ok: true, outcome };
-};
-
-/**
- * Why the server would not have the account, by the kind of refusal its
- * operator's policy gave (`ENTITLEMENT_CODES`). With none, what it always
- * said: a refusal is still a refusal from a policy that does not say which.
- * Words only for the codes this build knows, which is every code the server
- * will send — it drops the rest (`knownCode` in `apps/api`). Said in the
- * refused toast (`routes/index.tsx`), which goes on with what came of it, so
- * without a full stop; the storage panel says the same as a sentence of its
- * own (`account.status.refused` in the catalog).
- */
-export const refusedMessage = (code: EntitlementCode | undefined): string => {
-	switch (code) {
-		case 'not_allowed':
-			return t('account.refused.notAllowed');
-		case 'lapsed':
-			return t('account.refused.lapsed');
-		case 'limit_reached':
-			return t('account.refused.limitReached');
-		case undefined:
-			return t('account.refused.unspecified');
-	}
 };

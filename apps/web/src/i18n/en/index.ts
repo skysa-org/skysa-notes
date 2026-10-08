@@ -6,13 +6,17 @@ import { common } from './common.js';
 import { connect } from './connect.js';
 import { editor } from './editor.js';
 import { exporting } from './exporting.js';
+import { find } from './find.js';
 import { firstImport } from './firstImport.js';
 import { importing } from './importing.js';
+import { install } from './install.js';
 import { notebooks } from './notebooks.js';
 import { notes } from './notes.js';
 import { rows } from './rows.js';
 import { scheduler } from './scheduler.js';
 import { scratchpad } from './scratchpad.js';
+import { search } from './search.js';
+import { share } from './share.js';
 import { shell } from './shell.js';
 import { sources } from './sources.js';
 import { unsent } from './unsent.js';
@@ -25,6 +29,10 @@ import { unsent } from './unsent.js';
 export const en = {
 	common,
 	shell,
+	find,
+	search,
+	install,
+	share,
 	account,
 	connect,
 	importing,

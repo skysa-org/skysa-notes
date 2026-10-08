@@ -68,9 +68,8 @@ export const notes = {
 			locked: 'This note has to stay in markdown mode until it is changed',
 		},
 	},
-	/** In the command palette, under `group`, about the open note. */
+	/** In the command palette, in the group `shell.commands.group.note`, about the open note. */
 	commands: {
-		group: 'Note',
 		attach: 'Attach files',
 		showOutline: 'Show outline',
 		hideOutline: 'Hide outline',
