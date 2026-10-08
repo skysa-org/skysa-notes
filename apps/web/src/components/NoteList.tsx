@@ -1,5 +1,14 @@
-import { parentPath, ROOT } from '@skysa/core';
-import { type ReactNode, useDeferredValue, useId, useState } from 'react';
+import { ROOT } from '@skysa/core';
+import {
+	memo,
+	type ReactNode,
+	useCallback,
+	useDeferredValue,
+	useId,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from 'react';
 
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
@@ -8,7 +17,7 @@ import { keepRows } from '../store/kept.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { titleShown } from '../store/titles.js';
-import { folderLabel } from '../store/tree.js';
+import { byParent, folderLabel } from '../store/tree.js';
 import { noteOpening, openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
@@ -156,37 +165,43 @@ const Preview = ({ note, typing }: { note: NoteRecord; typing: boolean }) => {
 	return text === '' ? null : <span className="note-preview">{text}</span>;
 };
 
+/**
+ * A row is handed its note and what it shows of the list's state as values,
+ * and the list's handlers as functions that stay the same from one draw to the
+ * next (`NoteList`), so it is drawn again only when one of those changes: an
+ * autosave redraws the row of the note saved, and not the thousand beside it.
+ */
 interface NoteRowProps {
 	note: NoteRecord;
 	selected: boolean;
-	onSelect: () => void;
-	/** The line under the title: when it was edited. */
-	meta: string;
+	onSelect: (note: NoteRecord) => void;
 	liveEdits: LiveEdits | undefined;
 	/** Missing where the pane was rendered without anywhere to drag a note to. */
-	onPickUp?: () => void;
-	onCancelMove?: () => void;
+	onPickUp?: ((note: NoteRecord) => void) | undefined;
+	onCancelMove: () => void;
 	/** True while this is the row being moved. */
 	moving: boolean;
+	/**
+	 * What its `⋯` and its right-click offer, made when one is opened. Missing
+	 * where the note has no menu: a note not stored yet, or a list given none.
+	 */
+	menuFor?: (note: NoteRecord) => readonly OptionsMenuItem[];
 	/** A right-click, where the note has a menu. */
-	onMenu?: (at: MenuPoint) => void;
-	/** What its `⋯` and its right-click offer: none for a note not stored yet. */
-	items: readonly OptionsMenuItem[];
+	onMenu?: (note: NoteRecord, at: MenuPoint) => void;
 	/** Pinned to the top of the list on this device. */
 	pinned: boolean;
 }
 
-const NoteRow = ({
+const NoteRowView = ({
 	note: row,
 	selected,
 	onSelect,
-	meta,
 	liveEdits,
 	onPickUp,
 	onCancelMove,
 	moving,
+	menuFor,
 	onMenu,
-	items,
 	pinned,
 }: NoteRowProps) => {
 	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
@@ -206,11 +221,13 @@ const NoteRow = ({
 						extra === undefined ? className : `${className} ${extra}`,
 					'row'
 				)}
-				onClick={onSelect}
+				onClick={() => {
+					onSelect(row);
+				}}
 				onContextMenu={(event) => {
 					if (onMenu === undefined) return;
 					event.preventDefault();
-					onMenu(menuPoint(event));
+					onMenu(row, menuPoint(event));
 				}}
 				aria-current={selected ? 'true' : undefined}
 				// Said beside the name rather than in it, as a notebook's is.
@@ -222,7 +239,7 @@ const NoteRow = ({
 					// another application receives if the note is dropped outside.
 					event.dataTransfer.effectAllowed = 'move';
 					event.dataTransfer.setData('text/plain', titleShown(note.title));
-					onPickUp();
+					onPickUp(row);
 				}}
 				onDragEnd={onCancelMove}
 			>
@@ -236,7 +253,7 @@ const NoteRow = ({
 						/>
 					)}
 				</span>
-				<span className="note-meta">{meta}</span>
+				<span className="note-meta">{editedAt(row.updatedAt)}</span>
 				<Preview note={note} typing={note.body !== row.body} />
 				{pinned && (
 					<span id={pinId} hidden>
@@ -244,27 +261,16 @@ const NoteRow = ({
 					</span>
 				)}
 			</button>
-			<RowOptions name={titleShown(note.title)} kind="Note" items={items} />
+			<RowOptions
+				name={titleShown(note.title)}
+				kind="Note"
+				items={menuFor === undefined ? [] : () => menuFor(row)}
+			/>
 		</li>
 	);
 };
 
-/**
- * The notes by the notebook each is in, in the order they come: the list hands
- * them over a notebook's together, its own first (`listedUnder`).
- */
-const byNotebook = (notes: readonly NoteRecord[]): [string, NoteRecord[]][] => [
-	...notes
-		.reduce(
-			(groups, note) =>
-				groups.set(parentPath(note.path), [
-					...(groups.get(parentPath(note.path)) ?? []),
-					note,
-				]),
-			new Map<string, NoteRecord[]>()
-		)
-		.entries(),
-];
+const NoteRow = memo(NoteRowView);
 
 /**
  * Where a notebook inside the open one is, from the open one: `Projects/Q3`
@@ -345,6 +351,27 @@ export const NoteList = ({
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
+	// The handlers this list is given are made again on each draw of the page.
+	// The rows are handed these instead, which stay the same and call the ones
+	// given last, so that a row is drawn again only when what it shows changes.
+	// Set before the browser paints, so an event never reaches the ones before.
+	const given = useRef({ onSelectNote, onPickUpNote, onCancelMove, menuFor });
+	useLayoutEffect(() => {
+		given.current = { onSelectNote, onPickUpNote, onCancelMove, menuFor };
+	});
+	const select = useCallback((note: NoteRecord) => {
+		given.current.onSelectNote(note);
+	}, []);
+	const pickUp = useCallback((note: NoteRecord) => {
+		given.current.onPickUpNote?.(note);
+	}, []);
+	const cancelMove = useCallback(() => {
+		given.current.onCancelMove?.();
+	}, []);
+	const itemsFor = useCallback((note: NoteRecord) => given.current.menuFor?.(note) ?? [], []);
+	const openMenu = useCallback((note: NoteRecord, at: MenuPoint) => {
+		setMenu({ note, at });
+	}, []);
 	// Each row asks for its opening when it is drawn.
 	keepRows('notes', notes?.length ?? 0);
 	const placeholder = placeholderFor({
@@ -361,29 +388,15 @@ export const NoteList = ({
 				key={note.id}
 				note={note}
 				selected={note.id === selectedNoteId}
-				onSelect={() => {
-					onSelectNote(note);
-				}}
-				meta={editedAt(note.updatedAt)}
+				onSelect={select}
 				liveEdits={liveEdits}
-				onPickUp={
-					onPickUpNote === undefined || !stored
-						? undefined
-						: () => {
-								onPickUpNote(note);
-							}
-				}
-				onCancelMove={onCancelMove}
+				onPickUp={onPickUpNote === undefined || !stored ? undefined : pickUp}
+				onCancelMove={cancelMove}
 				moving={note.id === movingNoteId}
 				pinned={pinnedNoteIds?.has(note.id) === true}
-				items={menuFor === undefined || !stored ? [] : menuFor(note)}
 				{...(menuFor === undefined || !stored
 					? {}
-					: {
-							onMenu: (at: MenuPoint) => {
-								setMenu({ note, at });
-							},
-						})}
+					: { menuFor: itemsFor, onMenu: openMenu })}
 			/>
 		);
 	};
@@ -415,7 +428,7 @@ export const NoteList = ({
 
 			{notes !== undefined &&
 				folderPath !== undefined &&
-				byNotebook(notes).map(([path, inIt]) =>
+				[...byParent(notes)].map(([path, inIt]) =>
 					path === folderPath ? (
 						<ul key={path}>{inIt.map(row)}</ul>
 					) : (
