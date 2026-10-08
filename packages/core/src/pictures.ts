@@ -82,7 +82,8 @@ const PNG_SIGNATURE = '\x89PNG\r\n\x1a\n';
 /**
  * A PNG: its size and colour type from IHDR, always the first chunk, and the
  * chunks before its first IDAT, where an APNG's `acTL` and a see-through
- * colour's `tRNS` have to be.
+ * colour's `tRNS` have to be. One that ends before its first IDAT is not
+ * read: the chunks it is missing might have said either.
  */
 const png = (view: DataView): PictureInfo | undefined => {
 	if (text(view, 12, 4) !== 'IHDR') return undefined;
@@ -91,16 +92,16 @@ const png = (view: DataView): PictureInfo | undefined => {
 	const colorType = u8(view, 25);
 	if (!sized(width, height) || colorType === undefined) return undefined;
 	const chunks = new Map<string, number>();
-	walk(8, (at) => {
+	const reached = walk(8, (at): Step<true> => {
 		const length = u32(view, at);
 		const type = text(view, at + 4, 4);
-		if (length === undefined || type === undefined || type === 'IDAT' || type === 'IEND') {
-			return undefined;
-		}
+		if (length === undefined || type === undefined || type === 'IEND') return undefined;
+		if (type === 'IDAT') return { found: true };
 		chunks.set(type, at + 8);
 		// Its length, name and CRC around what it holds.
 		return { next: at + 12 + length };
 	});
+	if (reached === undefined) return undefined;
 	const control = chunks.get('acTL');
 	const frames = control === undefined ? undefined : u32(view, control);
 	return {
@@ -116,18 +117,24 @@ const png = (view: DataView): PictureInfo | undefined => {
 
 /**
  * The orientation in a JPEG's EXIF: a TIFF header at `tiff`, and in its first
- * directory the entry tagged 0x0112. `undefined` where there is none to read.
+ * directory the entry tagged 0x0112, within the segment that ends at `end`.
+ * `undefined` where there is none to read.
  */
-const exifOrientation = (view: DataView, tiff: number): number | undefined => {
+const exifOrientation = (view: DataView, tiff: number, end: number): number | undefined => {
 	const order = text(view, tiff, 2);
 	const little = order === 'II' ? true : order === 'MM' ? false : undefined;
 	if (little === undefined || u16(view, tiff + 2, little) !== 42) return undefined;
 	const directory = u32(view, tiff + 4, little);
 	const count = directory === undefined ? undefined : u16(view, tiff + directory, little);
 	if (directory === undefined || count === undefined) return undefined;
+	const first = tiff + directory + 2;
+	// Only the entries of 12 bytes the segment has room for: a count may say
+	// up to 65,535 whatever the segment holds, and a file of small segments
+	// each saying so would take minutes to read.
+	const room = Math.floor((Math.min(end, view.byteLength) - first) / 12);
 	const entry = Array.from(
-		{ length: count },
-		(_, index) => tiff + directory + 2 + index * 12
+		{ length: Math.max(0, Math.min(count, room)) },
+		(_, index) => first + index * 12
 	).find((at) => u16(view, at, little) === 0x0112);
 	const value = entry === undefined ? undefined : u16(view, entry + 8, little);
 	return value !== undefined && value >= 1 && value <= 8 ? value : undefined;
@@ -137,39 +144,52 @@ const exifOrientation = (view: DataView, tiff: number): number | undefined => {
 const startsFrame = (marker: number): boolean =>
 	marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
 
+/** The markers that stand alone, with no length after them: TEM, the restarts, and the start. */
+const standsAlone = (marker: number): boolean =>
+	marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8);
+
 /**
- * A JPEG: its segments from the start, as far as the first frame's header,
- * which gives its size, reading on the way the orientation its camera wrote
- * into EXIF, which comes before it.
+ * A JPEG: its segments from the start, as far as its data, among them the
+ * first frame's header, which gives its size, and the orientation its camera
+ * wrote into EXIF. A browser reads both from anywhere before the data, and
+ * the orientation from the first EXIF alone, so this does too. One that ends
+ * before its data is not read: an EXIF it is missing might have turned it.
  */
 const jpeg = (view: DataView): PictureInfo | undefined => {
-	const marks = new Map<'orientation', number>();
-	const frame = walk(2, (at): Step<{ width: number; height: number }> => {
-		if (u8(view, at) !== 0xff) return undefined;
+	const marks = new Map<'width' | 'height' | 'exif' | 'orientation', number>();
+	const reached = walk(2, (at): Step<true> => {
+		const lead = u8(view, at);
 		const marker = u8(view, at + 1);
-		if (marker === undefined) return undefined;
+		if (lead === undefined || marker === undefined) return undefined;
+		// Something other than a segment: what was read before it stands.
+		if (lead !== 0xff) return { found: true };
 		// Fill before a marker.
 		if (marker === 0xff) return { next: at + 1 };
-		// Markers that stand alone, with no length after them.
-		if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) return { next: at + 2 };
-		// The end, or the picture's data itself, with no frame header before it.
-		if (marker === 0xd9 || marker === 0xda) return undefined;
+		if (standsAlone(marker)) return { next: at + 2 };
+		// The picture's data, after which nothing more is read of it; or its end.
+		if (marker === 0xda || marker === 0xd9) return { found: true };
 		const length = u16(view, at + 2);
 		if (length === undefined || length < 2) return undefined;
-		if (marker === 0xe1 && text(view, at + 4, 6) === 'Exif\0\0') {
-			const orientation = exifOrientation(view, at + 10);
+		const end = at + 2 + length;
+		// `Exif` and a nul, and any byte after it, as Chrome takes it.
+		if (marker === 0xe1 && !marks.has('exif') && text(view, at + 4, 5) === 'Exif\0') {
+			marks.set('exif', at);
+			const orientation = exifOrientation(view, at + 10, end);
 			if (orientation !== undefined) marks.set('orientation', orientation);
 		}
-		if (startsFrame(marker)) {
+		if (startsFrame(marker) && !marks.has('width')) {
 			const height = u16(view, at + 5);
 			const width = u16(view, at + 7);
-			return sized(width, height)
-				? { found: { width: width ?? 0, height: height ?? 0 } }
-				: undefined;
+			if (!sized(width, height)) return undefined;
+			marks.set('width', width ?? 0);
+			marks.set('height', height ?? 0);
 		}
-		return { next: at + 2 + length };
+		return { next: end };
 	});
-	if (frame === undefined) return undefined;
+	const frame = { width: marks.get('width'), height: marks.get('height') };
+	if (reached === undefined || frame.width === undefined || frame.height === undefined) {
+		return undefined;
+	}
 	const orientation = marks.get('orientation') ?? 1;
 	// 5 to 8 are a quarter turn, each with or without a mirror.
 	const turned = orientation >= 5;
@@ -195,18 +215,21 @@ const pastBlocks = (view: DataView, from: number): number | undefined =>
 	});
 
 /**
- * A GIF: its size from the screen it describes, and its blocks walked as far
- * as a second frame, which makes it one that moves. A transparent colour in
- * a frame's control block, before then, makes it one that is see-through.
+ * A GIF: its size from the screen it describes, grown to its first frame
+ * where that is larger, as browsers draw it; and its blocks walked as far as
+ * a second frame, which makes it one that moves. A transparent colour in a
+ * frame's control block before then, or a first frame that leaves some of
+ * the screen uncovered, makes it one that is see-through. One that ends
+ * before a second frame or its end is not read: it might have moved.
  */
 const gif = (view: DataView): PictureInfo | undefined => {
-	const width = u16(view, 6, true);
-	const height = u16(view, 8, true);
+	const screen = { width: u16(view, 6, true), height: u16(view, 8, true) };
 	const flags = u8(view, 10);
-	if (!sized(width, height) || flags === undefined) return undefined;
-	const marks = new Map<'frames' | 'alpha', number>();
-	walk(13 + colorTable(flags), (at): Step<true> => {
+	if (!sized(screen.width, screen.height) || flags === undefined) return undefined;
+	const marks = new Map<'frames' | 'alpha' | 'left' | 'top' | 'right' | 'bottom', number>();
+	const reached = walk(13 + colorTable(flags), (at): Step<true> => {
 		const introducer = u8(view, at);
+		if (introducer === undefined) return undefined;
 		if (introducer === 0x21) {
 			// A graphic control block, with its transparent colour flag set.
 			if (u8(view, at + 1) === 0xf9 && ((u8(view, at + 3) ?? 0) & 0x01) === 1) {
@@ -219,21 +242,44 @@ const gif = (view: DataView): PictureInfo | undefined => {
 			const frames = (marks.get('frames') ?? 0) + 1;
 			marks.set('frames', frames);
 			if (frames > 1) return { found: true };
+			const left = u16(view, at + 1, true);
+			const top = u16(view, at + 3, true);
+			const across = u16(view, at + 5, true);
+			const down = u16(view, at + 7, true);
 			const local = u8(view, at + 9);
-			if (local === undefined) return undefined;
+			if (
+				left === undefined ||
+				top === undefined ||
+				across === undefined ||
+				down === undefined ||
+				local === undefined
+			) {
+				return undefined;
+			}
+			marks.set('left', left);
+			marks.set('top', top);
+			marks.set('right', left + across);
+			marks.set('bottom', top + down);
 			// The descriptor, its own colour table, and the code size before the data.
 			const next = pastBlocks(view, at + 10 + colorTable(local) + 1);
 			return next === undefined ? undefined : { next };
 		}
-		// Its end, or nothing a GIF holds.
-		return undefined;
+		// Its end, or nothing a GIF holds, where a browser stops too.
+		return { found: true };
 	});
+	const right = marks.get('right');
+	const bottom = marks.get('bottom');
+	if (reached === undefined || right === undefined || bottom === undefined) return undefined;
+	const width = Math.max(screen.width ?? 0, right);
+	const height = Math.max(screen.height ?? 0, bottom);
+	const covered =
+		marks.get('left') === 0 && marks.get('top') === 0 && right >= width && bottom >= height;
 	return {
 		format: 'gif',
-		width: width ?? 0,
-		height: height ?? 0,
+		width,
+		height,
 		animated: (marks.get('frames') ?? 0) > 1,
-		alpha: marks.has('alpha'),
+		alpha: marks.has('alpha') || !covered,
 		orientation: 1,
 	};
 };
@@ -281,6 +327,9 @@ const webp = (view: DataView): PictureInfo | undefined => {
 	return undefined;
 };
 
+/** The bits a BMP's pixel may have: anything else is not one. */
+const BMP_BITS: ReadonlySet<number> = new Set([1, 4, 8, 16, 24, 32]);
+
 /**
  * A BMP, by the header after its file header: the old 12-byte one, or one of
  * 40 bytes or more, whose height is negative for rows stored top down. One of
@@ -294,7 +343,14 @@ const bmp = (view: DataView): PictureInfo | undefined => {
 	const stored = old ? u16(view, 20, true) : i32(view, 22, true);
 	const bits = old ? u16(view, 24, true) : u16(view, 28, true);
 	const height = stored === undefined ? undefined : Math.abs(stored);
-	if ((!old && header < 40) || !sized(width, height) || bits === undefined) return undefined;
+	if (
+		(!old && header < 40) ||
+		!sized(width, height) ||
+		bits === undefined ||
+		!BMP_BITS.has(bits)
+	) {
+		return undefined;
+	}
 	return {
 		format: 'bmp',
 		width: width ?? 0,
@@ -307,9 +363,12 @@ const bmp = (view: DataView): PictureInfo | undefined => {
 
 /**
  * What a picture's bytes say about it, or `undefined` for one this does not
- * read: SVG, AVIF, HEIC, a header cut short, or not a picture at all. The
- * whole file is best: a GIF is walked as far as its second frame to know
- * whether it moves, and a JPEG as far as its first frame's header.
+ * read: SVG, AVIF, HEIC, not a picture at all, or one cut short. It is
+ * handed the whole file: a GIF is walked as far as its second frame to know
+ * whether it moves, a PNG as far as its data to know whether it moves or is
+ * see-through, and a JPEG as far as its data to know how it is turned. One
+ * that ends before then is not read, rather than taken to be still, opaque
+ * or upright.
  */
 export const imageInfo = (bytes: Uint8Array): PictureInfo | undefined => {
 	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -371,8 +430,11 @@ export const pictureVariant = (
 	picture: Pick<PictureInfo, 'width' | 'height' | 'animated'>,
 	want: 'thumb' | Readonly<{ width: number }>
 ): PictureVariantSize | undefined => {
-	if (picture.animated) return undefined;
 	const { width, height } = picture;
+	// A size kept from somewhere else, which `imageInfo` would not have given.
+	if (picture.animated || !(width > 0 && height > 0 && Number.isFinite(width * height))) {
+		return undefined;
+	}
 	const step =
 		want === 'thumb'
 			? undefined

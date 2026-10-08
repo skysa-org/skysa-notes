@@ -66,11 +66,12 @@ const segment = (marker: number, data: readonly number[]): number[] => [
 ];
 
 /** EXIF holding one orientation, in either byte order. */
-const exif = (orientation: number, little: boolean): number[] => {
+const exif = (orientation: number, little: boolean, sixth = 0): number[] => {
 	const u16 = little ? le16 : be16;
 	const u32 = little ? le32 : be32;
 	return segment(0xe1, [
-		...[...'Exif\0\0'].map((char) => char.charCodeAt(0)),
+		...[...'Exif\0'].map((char) => char.charCodeAt(0)),
+		sixth,
 		...[...(little ? 'II' : 'MM')].map((char) => char.charCodeAt(0)),
 		...u16(42),
 		...u32(8),
@@ -115,19 +116,20 @@ const jpeg = (...segments: number[][]): Uint8Array =>
 
 // ---- GIF ----
 
-/** A frame: its control block, if any, its descriptor, and its data in sub-blocks of `blockSize`. */
+/**
+ * A frame: its control block, if any, its descriptor, with the box it is
+ * drawn in on the screen, and its data in sub-blocks of `blockSize`.
+ */
 const frame = ({
 	transparent = false,
 	control = true,
+	box = [0, 0, 1, 1] as readonly [number, number, number, number],
 	data = 4,
 	blockSize = 255,
 } = {}): number[] => [
 	...(control ? [0x21, 0xf9, 4, transparent ? 0x01 : 0x00, 10, 0, 0, 0] : []),
 	0x2c,
-	...le16(0),
-	...le16(0),
-	...le16(1),
-	...le16(1),
+	...box.flatMap(le16),
 	0x00,
 	// The code size, then the data.
 	2,
@@ -223,6 +225,15 @@ describe('imageInfo', () => {
 			expect(imageInfo(png(10, 10, { before: [control(12)] }))?.animated).toBe(true);
 			expect(imageInfo(png(10, 10, { before: [control(1)] }))?.animated).toBe(false);
 		});
+
+		it('is not read where it ends before its data, which a chunk it is missing could have made move', () => {
+			const moving = png(10, 10, { before: [chunk('acTL', [...be32(12), ...be32(0)])] });
+			const data = moving.findIndex(
+				(_, at) => String.fromCharCode(...moving.subarray(at, at + 4)) === 'IDAT'
+			);
+			expect(imageInfo(moving.subarray(0, data - 4))).toBeUndefined();
+			expect(imageInfo(moving.subarray(0, 40))).toBeUndefined();
+		});
 	});
 
 	describe('a JPEG', () => {
@@ -269,12 +280,56 @@ describe('imageInfo', () => {
 			expect(imageInfo(jpeg())).toBeUndefined();
 			const whole = jpeg(exif(6, true), sof(4032, 3024));
 			expect(imageInfo(whole.subarray(0, whole.length - 30))).toBeUndefined();
+			// Past its frame's header, but not yet at its data: an EXIF could still come.
+			expect(imageInfo(whole.subarray(0, whole.length - 14))).toBeUndefined();
+		});
+
+		it('is turned as a browser turns it: by its first EXIF, wherever before its data that is', () => {
+			expect(imageInfo(jpeg(exif(6, true), exif(3, true), sof(40, 30)))?.orientation).toBe(6);
+			expect(imageInfo(jpeg(sof(40, 30), exif(6, false)))).toMatchObject({
+				width: 30,
+				height: 40,
+				orientation: 6,
+			});
+			expect(imageInfo(jpeg(exif(6, true, 0x01), sof(40, 30)))?.orientation).toBe(6);
+		});
+
+		it('reads no more of its EXIF than the segment holds, whatever its count says', () => {
+			// A directory that says 65,535 entries and holds one, then a segment
+			// whose bytes would read as an orientation entry, were it read on into.
+			const tiff = [...'II'].map((char) => char.charCodeAt(0));
+			const greedy = segment(0xe1, [
+				...[...'Exif\0\0'].map((char) => char.charCodeAt(0)),
+				...tiff,
+				...le16(42),
+				...le32(8),
+				...le16(0xffff),
+				...le16(0x011a),
+				...le16(5),
+				...le32(1),
+				...le32(0),
+			]);
+			const after = segment(0xe2, [
+				...Array.from({ length: 8 }, () => 0),
+				...le16(0x0112),
+				...le16(3),
+				...le32(1),
+				...le16(6),
+				0,
+				0,
+			]);
+			expect(imageInfo(jpeg(greedy, after, sof(40, 30)))?.orientation).toBe(1);
+			// A whole file of such segments is read quickly.
+			const many = jpeg(...Array.from({ length: 4000 }, () => greedy), sof(40, 30));
+			const started = performance.now();
+			expect(imageInfo(many)?.width).toBe(40);
+			expect(performance.now() - started).toBeLessThan(1000);
 		});
 	});
 
 	describe('a GIF', () => {
 		it('gives its screen size, and is still with one frame', () => {
-			expect(imageInfo(gif(320, 240, frame()))).toEqual({
+			expect(imageInfo(gif(320, 240, frame({ box: [0, 0, 320, 240] })))).toEqual({
 				format: 'gif',
 				width: 320,
 				height: 240,
@@ -293,8 +348,28 @@ describe('imageInfo', () => {
 		});
 
 		it('has alpha where a frame names a transparent colour', () => {
-			expect(imageInfo(gif(10, 10, frame({ transparent: true })))?.alpha).toBe(true);
-			expect(imageInfo(gif(10, 10, frame({ control: false })))?.alpha).toBe(false);
+			const box = [0, 0, 10, 10] as const;
+			expect(imageInfo(gif(10, 10, frame({ box, transparent: true })))?.alpha).toBe(true);
+			expect(imageInfo(gif(10, 10, frame({ box, control: false })))?.alpha).toBe(false);
+		});
+
+		it('is as large as its first frame, and see-through where that leaves the screen uncovered', () => {
+			expect(imageInfo(gif(10, 10, frame({ box: [0, 0, 20, 15] })))).toMatchObject({
+				width: 20,
+				height: 15,
+				alpha: false,
+			});
+			expect(imageInfo(gif(10, 10, frame({ box: [2, 2, 4, 4] })))).toMatchObject({
+				width: 10,
+				height: 10,
+				alpha: true,
+			});
+		});
+
+		it('is not read where it ends before a second frame or its end, or has no frame', () => {
+			const moving = gif(320, 240, frame({ data: 255 * 40 }), frame());
+			expect(imageInfo(moving.subarray(0, 2000))).toBeUndefined();
+			expect(imageInfo(gif(320, 240))).toBeUndefined();
 		});
 	});
 
@@ -346,6 +421,7 @@ describe('imageInfo', () => {
 				height: 600,
 				alpha: true,
 			});
+			expect(imageInfo(bmp(800, 600, 7))).toBeUndefined();
 		});
 	});
 
@@ -412,6 +488,14 @@ describe('pictureVariant', () => {
 			variant: 'w960',
 			width: 960,
 			height: 720,
+		});
+	});
+
+	it('makes no copy of a picture whose size is not a size', () => {
+		[Number.NaN, -1, 0, Number.POSITIVE_INFINITY].forEach((width) => {
+			expect(
+				pictureVariant({ width, height: 100, animated: false }, 'thumb')
+			).toBeUndefined();
 		});
 	});
 
