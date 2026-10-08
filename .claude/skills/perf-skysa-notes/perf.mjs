@@ -518,46 +518,95 @@ const SCENARIOS = {
 	/** The scratchpad with picture cards, flung through until every picture has drawn. */
 	cards: {
 		needs: (m) => m.pictures !== undefined,
-		run: async ({ page, cdp, manifest, base }) => {
-			await page.goto(`${base}#/`);
-			await untilCount(page, '.editor-rich-surface, .note-list');
-			await quiet(page);
-			const idle = memory();
-			const before = await counters(cdp);
-			await reset(page);
-			const start = await now(page);
-			await page.goto(`${base}#scratchpad`);
-			const first = await until(page, () =>
-				[...document.querySelectorAll('.scratch-card-picture img')].some(
-					(img) => img.complete && img.naturalWidth > 0
-				)
-			);
-			const scrolled = await fling(page, cdp, '.scratch-card');
-			const all = await until(
-				page,
-				(n) =>
-					[...document.querySelectorAll('.scratch-card-picture img')].filter(
-						(img) => img.complete && img.naturalWidth > 0
-					).length >= n,
-				manifest.pictures.cards,
-				{ timeout: 60_000, optional: true }
-			);
-			await quiet(page);
-			const held = memory();
-			const decoded = await decodedMB(page);
-			return {
-				firstMs: first - start,
-				allDrawn: all === null ? 0 : 1,
-				decodedMB: decoded,
-				...scrolled,
-				idleRendererMB: idle.rendererMB,
-				rendererMB: held.rendererMB,
-				gpuMB: held.gpuMB,
-				...(await summary(page)),
-				...delta(before, await counters(cdp)),
-			};
+		run: (context) => pictureCards(context),
+	},
+
+	/**
+	 * The picture cards shown again, measured the second time: drawn from the
+	 * thumbs made the first, each card's room held from the size read then.
+	 */
+	cardsAgain: {
+		needs: (m) => m.pictures !== undefined,
+		run: async (context) => {
+			await pictureCards(context);
+			// A page of its own, as the app opened again would be.
+			await context.page.reload();
+			return pictureCards(context);
 		},
 	},
+};
+
+/**
+ * Count each time a card already placed on the wall is placed somewhere else:
+ * the wall placing it again because one above it changed height.
+ */
+const watchMoves = (page) =>
+	page.evaluate(() => {
+		window.__cardMoves?.observer.disconnect();
+		const placed = (style) => /translate\([^)]*\)/.exec(style ?? '')?.[0];
+		const observer = new MutationObserver((records) => {
+			for (const record of records) {
+				const card = record.target;
+				if (!(card instanceof HTMLElement) || !card.classList.contains('scratch-card')) {
+					continue;
+				}
+				const was = placed(record.oldValue);
+				const is = placed(card.getAttribute('style'));
+				if (was !== undefined && is !== undefined && was !== is) {
+					window.__cardMoves.count += 1;
+				}
+			}
+		});
+		observer.observe(document.body, {
+			subtree: true,
+			attributes: true,
+			attributeFilter: ['style'],
+			attributeOldValue: true,
+		});
+		window.__cardMoves = { observer, count: 0 };
+	});
+
+/** The scratchpad with picture cards, opened and flung through. */
+const pictureCards = async ({ page, cdp, manifest, base }) => {
+	await page.goto(`${base}#/`);
+	await untilCount(page, '.editor-rich-surface, .note-list');
+	await quiet(page);
+	const idle = memory();
+	const before = await counters(cdp);
+	await watchMoves(page);
+	await reset(page);
+	const start = await now(page);
+	await page.goto(`${base}#scratchpad`);
+	const first = await until(page, () =>
+		[...document.querySelectorAll('.scratch-card-picture img')].some(
+			(img) => img.complete && img.naturalWidth > 0
+		)
+	);
+	const scrolled = await fling(page, cdp, '.scratch-card');
+	const all = await until(
+		page,
+		(n) =>
+			[...document.querySelectorAll('.scratch-card-picture img')].filter(
+				(img) => img.complete && img.naturalWidth > 0
+			).length >= n,
+		manifest.pictures.cards,
+		{ timeout: 60_000, optional: true }
+	);
+	await quiet(page);
+	const held = memory();
+	const decoded = await decodedMB(page);
+	return {
+		firstMs: first - start,
+		cardMoves: await page.evaluate(() => window.__cardMoves.count),
+		allDrawn: all === null ? 0 : 1,
+		decodedMB: decoded,
+		...scrolled,
+		idleRendererMB: idle.rendererMB,
+		rendererMB: held.rendererMB,
+		gpuMB: held.gpuMB,
+		...(await summary(page)),
+		...delta(before, await counters(cdp)),
+	};
 };
 
 const pictureNote = async ({ page, cdp, base }, note) => {

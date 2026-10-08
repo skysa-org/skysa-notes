@@ -43,6 +43,7 @@ const COUNTS = new Set([
 	'nodes',
 	'drawn',
 	'allDrawn',
+	'cardMoves',
 ]);
 
 /** Higher is better for these. */

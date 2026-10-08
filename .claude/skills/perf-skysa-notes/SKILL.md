@@ -91,7 +91,8 @@ Each run clones its profile into a directory of its own.
 | search | put a rare word into search at once, until every note holding it is listed | `answerMs`, `longest` |
 | pictures / pictures48 | open the 12 MP / 48 MP note, fling it, leave | `decodedMB`, `rendererMB`, `leftRendererMB`, `firstMs` |
 | picturesAgain / pictures48Again | the same, a second time in the same run: from what the first open left on the device, such as copies | as above |
-| cards | the scratchpad with picture cards, flung through | `decodedMB`, `rendererMB`, `firstMs` |
+| cards | the scratchpad with picture cards, flung through | `decodedMB`, `rendererMB`, `firstMs`, `cardMoves` (a placed card placed again) |
+| cardsAgain | the same after a reload: thumbs held, rooms known | `cardMoves`, `firstMs`, `decodedMB` |
 
 - A time after a tap (openBig's `listedMs`, `tapP50`, `cardsMs`, `openMs`) starts when
   the touch reached the page, not when Playwright was asked to tap: it first

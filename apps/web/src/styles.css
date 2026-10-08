@@ -3516,13 +3516,58 @@ button.icon.account-devices-count {
 	margin-block: 0.2rem;
 }
 
+.scratch-card-picture {
+	--card-picture-most: 8rem;
+}
+
 .scratch-card-picture > img {
 	display: block;
 	width: auto;
 	max-width: 100%;
 	height: auto;
-	max-height: 8rem;
+	max-height: var(--card-picture-most);
 	border-radius: 0.25rem;
+}
+
+/* The room it takes (`CardEmbed.tsx`, `Room`, #276), so the card is as tall
+   before it arrives as after and the wall does not place it again when it
+   does: the same as it is drawn in, where its size was known before, and
+   else the tallest a card draws a picture, the picture drawn whole inside it.
+   Its words meanwhile, in it. The picture fills it, whichever copy it is. */
+.scratch-card-picture[data-room] {
+	display: block;
+	overflow: hidden;
+	margin-block: 0.2rem;
+	border-radius: 0.25rem;
+}
+
+.scratch-card-picture[data-room]:not([data-state='ready']) {
+	color: var(--muted);
+	background: var(--surface);
+}
+
+.scratch-card-picture[data-room='sized'] {
+	inline-size: min(
+		100%,
+		var(--card-picture-width),
+		calc(var(--card-picture-most) * var(--card-picture-ratio))
+	);
+	aspect-ratio: var(--card-picture-ratio);
+}
+
+.scratch-card-picture[data-room='tallest'] {
+	block-size: var(--card-picture-most);
+}
+
+.scratch-card-picture[data-room] > img {
+	width: 100%;
+	height: 100%;
+	max-height: none;
+}
+
+.scratch-card-picture[data-room='tallest'] > img {
+	object-fit: contain;
+	object-position: left top;
 }
 
 .scratch-card-chip {
