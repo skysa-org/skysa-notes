@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { t } from '../i18n/t.js';
 import { type ConnectedSource } from '../store/connection.js';
 import { LOCAL_CONNECTION_ID } from '../store/db.js';
 import { countedFolders, movable, type Unsynced } from '../store/unsynced.js';
@@ -85,9 +86,6 @@ export const canMove = (listed: Unsynced, targets: readonly ConnectedSource[]): 
  */
 const targetName = (source: ConnectedSource): string => sourceName(source) ?? connectedName(source);
 
-const counted = (count: number, one: string, many: string): string =>
-	`${String(count)} ${count === 1 ? one : many}`;
-
 /**
  * What is *not* moved, and where it stays. An unsent rename and an unsent
  * delete are each about a file that only the account being left has: the rename
@@ -98,36 +96,66 @@ const counted = (count: number, one: string, many: string): string =>
  */
 export const leftBehind = (listed: Unsynced, from: string): string | null => {
 	const [deletes, renames] = [listed.deletes.length, listed.renames.length];
-	const parts = [
-		...(deletes > 0 ? [counted(deletes, 'delete', 'deletes')] : []),
-		...(renames > 0 ? [counted(renames, 'rename', 'renames')] : []),
-	];
-	if (parts.length === 0) return null;
-	const one = parts.length === 1 && deletes + renames === 1;
-	return `${parts.join(' and ')} ${one ? 'was' : 'were'} never sent; ${from} keeps those files as they are.`;
+	if (deletes > 0 && renames > 0) {
+		// Two counts in one sentence: chosen by the renames, with the deletes said.
+		return t('unsent.move.left.both', {
+			deletes: t('unsent.counted.deletes', { count: deletes }),
+			count: renames,
+			source: from,
+		});
+	}
+	if (deletes > 0) return t('unsent.move.left.deletes', { count: deletes, source: from });
+	if (renames > 0) return t('unsent.move.left.renames', { count: renames, source: from });
+	return null;
 };
 
 /**
  * What is going, in the user's terms: "2 notes", or "2 notes and 1 notebook"
  * where a notebook is going that is not simply one of those notes' own, and
  * "1 file" for each not uploaded yet that can go (`portable`). Both steps say
- * it the same way, and it is the same count the panel's headline uses
- * (`countedFolders`), so nothing the user is shown disagrees with anything
- * else. The notes are said even at none
+ * it the same way — the button that offers the move and the sentence that
+ * confirms it, which `step` picks — and it is the same count the panel's
+ * headline uses (`countedFolders`), so nothing the user is shown disagrees
+ * with anything else. The notes are said even at none
  * where nothing else is going either, which `canMove` never offers.
+ *
+ * A message counts one thing, so where more than one kind is going it is
+ * chosen by the last one named, and given the others already said.
  */
-const going = (listed: Unsynced): string => {
-	const folders = countedFolders(listed).length;
+const going = (listed: Unsynced, step: 'offer' | 'going', target: string): string => {
+	const notes = listed.notes.length;
+	const notebooks = countedFolders(listed).length;
 	const files = listed.portable.length;
-	const parts = [
-		...(listed.notes.length > 0 || folders + files === 0
-			? [counted(listed.notes.length, 'note', 'notes')]
-			: []),
-		...(folders > 0 ? [counted(folders, 'notebook', 'notebooks')] : []),
-		...(files > 0 ? [counted(files, 'file', 'files')] : []),
-	];
-	const last = parts.at(-1) ?? '';
-	return parts.length === 1 ? last : `${parts.slice(0, -1).join(', ')} and ${last}`;
+	const saidNotes = () => t('unsent.counted.notes', { count: notes });
+	const saidNotebooks = () => t('unsent.counted.notebooks', { count: notebooks });
+	if (notes === 0 && notebooks + files > 0) {
+		if (notebooks === 0) return t(`unsent.move.${step}.files`, { count: files, target });
+		if (files === 0) return t(`unsent.move.${step}.notebooks`, { count: notebooks, target });
+		return t(`unsent.move.${step}.notebooksFiles`, {
+			notebooks: saidNotebooks(),
+			count: files,
+			target,
+		});
+	}
+	if (notebooks > 0 && files > 0) {
+		return t(`unsent.move.${step}.all`, {
+			notes: saidNotes(),
+			notebooks: saidNotebooks(),
+			count: files,
+			target,
+		});
+	}
+	if (notebooks > 0) {
+		return t(`unsent.move.${step}.notesNotebooks`, {
+			notes: saidNotes(),
+			count: notebooks,
+			target,
+		});
+	}
+	if (files > 0) {
+		return t(`unsent.move.${step}.notesFiles`, { notes: saidNotes(), count: files, target });
+	}
+	return t(`unsent.move.${step}.notes`, { count: notes, target });
 };
 
 /**
@@ -139,7 +167,7 @@ const going = (listed: Unsynced): string => {
 const linkedNote = (listed: Unsynced, from: string): string | null =>
 	listed.linked.length === 0 && listed.portable.length === listed.files.length
 		? null
-		: `Pictures and files they link go with them where this device holds them; any it has never downloaded stay in ${from}.`;
+		: t('unsent.move.linked', { source: from });
 
 /**
  * Notes the account being left already has a file for, in an older version. The
@@ -178,7 +206,7 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 			<>
 				{targets.length > 1 && (
 					<fieldset className="account-targets">
-						<legend>Which source</legend>
+						<legend>{t('unsent.move.which')}</legend>
 						{targets.map((source) => (
 							<label key={source.connectionId}>
 								<input
@@ -203,7 +231,7 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 						setShown(listed);
 					}}
 				>
-					{`Move ${going(listed)} to ${into}…`}
+					{going(listed, 'offer', into)}
 				</button>
 			</>
 		);
@@ -213,11 +241,10 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 	const also = leftBehind(shown, from);
 	const linked = linkedNote(shown, from);
 	return (
-		<div className="account-confirm" role="group" aria-label="Move to another source">
+		<div className="account-confirm" role="group" aria-label={t('unsent.move.group')}>
 			<p>
-				{`${going(shown)} will be uploaded to ${into}.`}
-				{older > 0 &&
-					` ${String(older)} of them also ${older === 1 ? 'exists' : 'exist'} in ${from} in an older version, which stays there.`}
+				{going(shown, 'going', into)}
+				{older > 0 && ` ${t('unsent.move.alsoThere', { count: older, source: from })}`}
 				{also !== null && ` ${also}`}
 				{linked !== null && ` ${linked}`}
 			</p>
@@ -228,7 +255,7 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 					onMove(target.connectionId, shown);
 				}}
 			>
-				Move them
+				{t('unsent.move.confirm')}
 			</button>
 			<button
 				ref={cancelButton}
@@ -239,7 +266,7 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 					setShown(null);
 				}}
 			>
-				Cancel
+				{t('common.cancel')}
 			</button>
 		</div>
 	);

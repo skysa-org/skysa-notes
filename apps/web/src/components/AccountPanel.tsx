@@ -1,4 +1,4 @@
-import { type ProviderKind, type SyncProgress } from '@skysa/core';
+import { type EntitlementCode, type ProviderKind, type SyncProgress } from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -24,6 +24,8 @@ import { answer, type Asked } from '../api/instanceConfig.js';
 import { Icon } from '../editor/icons.js';
 import { type pickFiles } from '../editor/pickFiles.js';
 import { failedAt, saying } from '../errors/reached.js';
+import { rich } from '../i18n/rich.js';
+import { type MessageKey, t } from '../i18n/t.js';
 import { noteLink } from '../routes/place.js';
 import { setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { connectedSources } from '../store/connection.js';
@@ -60,7 +62,6 @@ import {
 	letGoOfSource,
 	type LetGoResult,
 	PROVIDER_LABELS,
-	refusedMessage,
 	UNSEEN_AT_PROVIDER,
 	type UnsentAnswer,
 } from '../sync/account.js';
@@ -158,29 +159,8 @@ export const returnPath = (href: string): string => {
  */
 const refusalMessage = (refusal: Refusal): string =>
 	refusal === 'not_entitled'
-		? 'This account cannot sync on this server, and it would not disconnect it either.'
-		: 'The server would not disconnect this account.';
-
-/**
- * What is not known about the outcome, which differs by what was asked of whom.
- *
- * Everything after the disconnect itself is this device's work
- * (`letGoOfSource`), so a failure of the device half can be one that ran before
- * the server was asked or one that ran after it said yes — the account gone at
- * the provider, its refresh token with it, and this device still bound to it.
- * Saying "the account was not disconnected" there was simply false. With
- * nothing asked of the server there is no such doubt, and the doubt is about
- * this device instead.
- *
- * Trying again is safe from either: a second attempt presents a credential the
- * server has already spent, which comes back `credential_revoked` or
- * `not_found`, and `disconnectAccount` counts both as the disconnect having
- * happened.
- */
-const mayHave = (onServer: boolean): string =>
-	onServer
-		? 'The account may already be disconnected; try again.'
-		: 'This device may still be syncing the account; try again.';
+		? t('account.disconnect.refused.notEntitled')
+		: t('account.disconnect.refused.declined');
 
 /**
  * Why a disconnect did not happen, where it failed rather than being refused.
@@ -196,13 +176,33 @@ const mayHave = (onServer: boolean): string =>
  * Which it was comes from `letGoOfSource`, which knows because it made the call
  * (`errors/reached.ts`), rather than from the shape or the words of the error.
  * What it does *not* know is whether the work landed, so no wording here says.
+ *
+ * And the last two say what is not known about the outcome, which differs by
+ * what was asked of whom (`onServer`).
+ *
+ * Everything after the disconnect itself is this device's work
+ * (`letGoOfSource`), so a failure of the device half can be one that ran before
+ * the server was asked or one that ran after it said yes — the account gone at
+ * the provider, its refresh token with it, and this device still bound to it.
+ * Saying "the account was not disconnected" there was simply false. With
+ * nothing asked of the server there is no such doubt, and the doubt is about
+ * this device instead.
+ *
+ * Trying again is safe from either: a second attempt presents a credential the
+ * server has already spent, which comes back `credential_revoked` or
+ * `not_found`, and `disconnectAccount` counts both as the disconnect having
+ * happened.
  */
 const failureMessage = (error: unknown, onServer: boolean): string =>
 	saying(error, {
-		answered: 'The server could not disconnect the account. Try again.',
-		unreachable: 'The server cannot be reached, so the account is still connected. Try again.',
-		device: `Something on this device went wrong. ${mayHave(onServer)}`,
-		unknown: `Something went wrong. ${mayHave(onServer)}`,
+		answered: t('account.disconnect.failed.answered'),
+		unreachable: t('account.disconnect.failed.unreachable'),
+		device: onServer
+			? t('account.disconnect.failed.deviceOnServer')
+			: t('account.disconnect.failed.deviceHere'),
+		unknown: onServer
+			? t('account.disconnect.failed.unknownOnServer')
+			: t('account.disconnect.failed.unknownHere'),
 	});
 
 /** A time today as a time, and any other as a date. */
@@ -213,13 +213,11 @@ const when = (at: number): string => {
 		: date.toLocaleDateString();
 };
 
-const counted = (n: number): string => n.toLocaleString();
-
 /**
- * How far a long run has got: a few words for the status line, the sentence
- * for its tooltip and for the panel in a compact window, and how full its bar
- * is — `null` while a scan is still listing, which knows how many so far and
- * not of how many.
+ * How far a long run has got: the status line, with a few words after the
+ * source's name, the sentence for its tooltip and for the panel in a compact
+ * window, and how full its bar is — `null` while a scan is still listing,
+ * which knows how many so far and not of how many.
  */
 interface SyncCount {
 	text: string;
@@ -231,11 +229,15 @@ interface SyncCount {
 const syncCount = (progress: SyncProgress | undefined, label: string): SyncCount | undefined => {
 	if (!isLongRun(progress)) return undefined;
 	if (progress.stage === 'scanning') return scanCount(progress, label);
-	const of = `${counted(progress.done)} of ${counted(progress.total)}`;
+	const of = { provider: label, done: progress.done, total: progress.total };
 	const bar = { value: progress.done, max: progress.total };
 	return progress.stage === 'uploading'
-		? { text: `Sending ${of}`, sentence: `Sending changes to ${label}: ${of}.`, bar }
-		: { text: `Receiving ${of}`, sentence: `Receiving notes from ${label}: ${of}.`, bar };
+		? { text: t('account.line.sending', of), sentence: t('account.status.sending', of), bar }
+		: {
+				text: t('account.line.receiving', of),
+				sentence: t('account.status.receiving', of),
+				bar,
+			};
 };
 
 const scanCount = (
@@ -244,15 +246,15 @@ const scanCount = (
 ): SyncCount => {
 	if (listing) {
 		return {
-			text: `Looking for notes: ${counted(found)} found`,
-			sentence: `Looking for notes in ${label}: ${counted(found)} found so far.`,
+			text: t('account.line.looking', { provider: label, count: found }),
+			sentence: t('account.status.looking', { provider: label, count: found }),
 			bar: null,
 		};
 	}
-	const of = `${counted(done)} of ${counted(found)}`;
+	const of = { provider: label, done, total: found };
 	return {
-		text: `Receiving ${of}`,
-		sentence: `Receiving notes from ${label}: ${of}.`,
+		text: t('account.line.receiving', of),
+		sentence: t('account.status.receiving', of),
 		bar: { value: done, max: found },
 	};
 };
@@ -263,11 +265,11 @@ const scanCount = (
  */
 const SyncBar = ({ count }: { count: SyncCount }) =>
 	count.bar === null ? (
-		<progress className="account-bar" aria-label="Sync progress" />
+		<progress className="account-bar" aria-label={t('account.progress')} />
 	) : (
 		<progress
 			className="account-bar"
-			aria-label="Sync progress"
+			aria-label={t('account.progress')}
 			value={count.bar.value}
 			max={Math.max(count.bar.max, 1)}
 		/>
@@ -286,15 +288,41 @@ const statusMessage = (
 		case 'local':
 			return null;
 		case 'syncing':
-			return syncCount(status.progress, label)?.sentence ?? 'Syncing…';
+			return syncCount(status.progress, label)?.sentence ?? t('account.status.syncing');
 		case 'idle':
-			return status.lastSyncAt === undefined ? 'Synced' : `Synced ${when(status.lastSyncAt)}`;
+			return status.lastSyncAt === undefined
+				? t('account.status.synced')
+				: t('account.status.syncedAt', { time: when(status.lastSyncAt) });
 		case 'offline':
-			return 'Offline. Changes are kept on this device and sync when the connection is back.';
+			return t('account.status.offline');
 		case 'retrying':
-			return `Could not sync with ${label}. Trying again shortly (${status.error ?? 'unknown error'}).`;
+			return t('account.status.retrying', { provider: label, error: errorOf(status) });
 		case 'attention':
 			return attentionMessage(status, label, syncable);
+	}
+};
+
+/** What went wrong, as the provider or the browser said it, for the end of a sentence. */
+const errorOf = ({ error }: { error?: string | undefined }): string =>
+	error ?? t('account.status.unknownError');
+
+/**
+ * Why the server will not sync the account, by the kind of refusal its
+ * operator's policy gave (`ENTITLEMENT_CODES`), as a sentence of its own. With
+ * none, what it always said: a refusal is still a refusal from a policy that
+ * does not say which. The connect toast says the same reasons in its own
+ * sentences (`refusedText` in `routes/index.tsx`).
+ */
+const refusedSentence = (code: EntitlementCode | undefined): string => {
+	switch (code) {
+		case 'not_allowed':
+			return t('account.status.refused.notAllowed');
+		case 'lapsed':
+			return t('account.status.refused.lapsed');
+		case 'limit_reached':
+			return t('account.status.refused.limitReached');
+		case undefined:
+			return t('account.status.refused.unspecified');
 	}
 };
 
@@ -305,11 +333,11 @@ const attentionMessage = (
 ): string | null => {
 	// Said as what to do, with the link, instead.
 	if (needsReconnect(status)) return null;
-	if (!syncable) return `This app cannot sync with ${label} yet.`;
-	if (status.refusal === 'not_entitled') return `${refusedMessage(status.denial?.code)}.`;
-	if (status.refusal === 'not_found') return `The server no longer has this ${label} connection.`;
+	if (!syncable) return t('account.status.cannotSync', { provider: label });
+	if (status.refusal === 'not_entitled') return refusedSentence(status.denial?.code);
+	if (status.refusal === 'not_found') return t('account.status.notFound', { provider: label });
 	if (status.stuck !== undefined) return stuckMessage(status.stuck, label);
-	return `Some changes could not be sent to ${label}. They will be tried again (${status.error ?? 'unknown error'}).`;
+	return t('account.status.notSent', { provider: label, error: errorOf(status) });
 };
 
 /**
@@ -324,23 +352,35 @@ const lineStatus = (
 	label: string,
 	syncable: boolean
 ): { text: string; title: string | null } => {
-	const said = (words: string, title: string | null = null) => ({
-		text: `${label} · ${words}`,
-		title,
-	});
+	const provider = { provider: label };
 	switch (status.phase) {
 		case 'local':
 			return { text: label, title: null };
 		case 'syncing':
 			return syncingLine(status.progress, label);
 		case 'idle':
-			return said(statusMessage(status, label, syncable) ?? 'Synced');
+			return {
+				text:
+					status.lastSyncAt === undefined
+						? t('account.line.synced', provider)
+						: t('account.line.syncedAt', {
+								...provider,
+								time: when(status.lastSyncAt),
+							}),
+				title: null,
+			};
 		case 'offline':
-			return said('Offline', statusMessage(status, label, syncable));
+			return {
+				text: t('account.line.offline', provider),
+				title: statusMessage(status, label, syncable),
+			};
 		case 'retrying':
-			return said('Trying again shortly', statusMessage(status, label, syncable));
+			return {
+				text: t('account.line.retrying', provider),
+				title: statusMessage(status, label, syncable),
+			};
 		case 'attention':
-			return said('Not syncing');
+			return { text: t('account.line.notSyncing', provider), title: null };
 	}
 };
 
@@ -353,9 +393,10 @@ const syncingLine = (
 	label: string
 ): { text: string; title: string | null } => {
 	const count = syncCount(progress, label);
-	if (count === undefined) return { text: `${label} · Syncing…`, title: null };
+	if (count === undefined)
+		return { text: t('account.line.syncing', { provider: label }), title: null };
 	return {
-		text: `${label} · ${count.text}`,
+		text: count.text,
 		title: [count.sentence, progress?.path].filter((line) => line !== undefined).join('\n'),
 	};
 };
@@ -369,17 +410,20 @@ const syncingLine = (
  * holding the queue up (§7, "A dead `rmdir` is given up on") — but it is a
  * queued operation like any other and a label that said nothing would be worse
  * than one that is never read.
+ *
+ * A whole sentence for each, since what the op was decides how the rest of it
+ * reads.
  */
-const OP_LABELS: Record<QueuedOperation, string> = {
-	write: 'the edit to',
-	move: 'the rename of',
-	delete: 'the deletion of',
-	mkdir: 'the new notebook',
-	rmdir: 'the removal of the notebook',
-	upload: 'the upload of',
-	'move-file': 'the move of the file to',
-	'delete-file': 'the deletion of the file',
-};
+const STUCK_MESSAGES = {
+	write: 'account.stuck.write',
+	move: 'account.stuck.move',
+	delete: 'account.stuck.delete',
+	mkdir: 'account.stuck.mkdir',
+	rmdir: 'account.stuck.rmdir',
+	upload: 'account.stuck.upload',
+	'move-file': 'account.stuck.moveFile',
+	'delete-file': 'account.stuck.deleteFile',
+} as const satisfies Record<QueuedOperation, MessageKey>;
 
 /**
  * Which op is stuck, by name and path, because "some changes could not be sent"
@@ -390,7 +434,12 @@ const OP_LABELS: Record<QueuedOperation, string> = {
  * are looking for.
  */
 const stuckMessage = (stuck: StuckOp, label: string): string =>
-	`${label} would not take ${OP_LABELS[stuck.op]} ${stuck.targetPath ?? stuck.path} after ${String(stuck.attempts)} tries (${stuck.error ?? 'unknown error'}). Everything queued behind it is waiting. “Sync now” tries again.`;
+	t(STUCK_MESSAGES[stuck.op], {
+		count: stuck.attempts,
+		provider: label,
+		path: stuck.targetPath ?? stuck.path,
+		error: errorOf(stuck),
+	});
 
 /** A problem that connecting the account again is the answer to. */
 const needsReconnect = (status: SchedulerStatus): boolean =>
@@ -400,10 +449,7 @@ const needsReconnect = (status: SchedulerStatus): boolean =>
 		status.refusal === 'reauthorize_required' ||
 		(status.refusal === undefined && status.error === 'authorization required'));
 
-const conflictMessage = (count: number): string =>
-	count === 1
-		? 'A note was edited here and elsewhere at once. Both versions are kept; the copy has "conflict" in its name.'
-		: `${String(count)} notes were edited here and elsewhere at once. Both versions of each are kept; the copies have "conflict" in their names.`;
+const conflictMessage = (count: number): string => t('account.conflicts', { count });
 
 /** How many of the files that could not be read are named before "and N more". */
 const UNREADABLE_NAMED = 5;
@@ -418,16 +464,14 @@ const byName = (one: string, two: string): number => one.localeCompare(two);
 const PathList = ({ paths }: { paths: readonly string[] }) => {
 	const named = paths.slice(0, UNREADABLE_NAMED);
 	const more = paths.length - named.length;
+	const list = named.map((path, at) => (
+		<Fragment key={path}>
+			{at > 0 && t('account.paths.separator')}
+			<bdi>{path}</bdi>
+		</Fragment>
+	));
 	return (
-		<>
-			{named.map((path, at) => (
-				<Fragment key={path}>
-					{at > 0 && ', '}
-					<bdi>{path}</bdi>
-				</Fragment>
-			))}
-			{more > 0 && `, … and ${String(more)} more`}
-		</>
+		<>{more > 0 ? rich('account.paths.more', { list: () => list }, { count: more }) : list}</>
 	);
 };
 
@@ -456,25 +500,23 @@ const UnreadableNotice = ({
 	if (only === undefined) return null;
 	return (
 		<p className="muted wrap-anywhere">
-			{paths.length === 1 ? (
-				<>
-					<bdi>{only}</bdi>
-					{` in ${label} is not UTF-8 text, so it is left alone: not shown here, not changed. Save it as UTF-8, or delete it, and it will be read.`}
-				</>
-			) : (
-				<>
-					{`${String(paths.length)} files in ${label} are not UTF-8 text, so they are left alone: `}
-					<PathList paths={paths} />
-					{`. Save them as UTF-8, or delete them, and they will be read.`}
-				</>
+			{rich(
+				'account.unreadable.files',
+				{
+					path: (words) => <bdi>{words}</bdi>,
+					paths: () => <PathList paths={paths} />,
+				},
+				{ count: paths.length, path: only, provider: label }
 			)}
+			{/* A sentence of its own, with a count of its own. */}
 			{moved.length > 0 && (
 				<>
-					{moved.length === 1
-						? ' A note of yours had that name; it is now at '
-						: ' Notes of yours had those names; they are now at '}
-					<PathList paths={moved} />
-					{'.'}
+					{' '}
+					{rich(
+						'account.unreadable.moved',
+						{ paths: () => <PathList paths={moved} /> },
+						{ count: moved.length }
+					)}
 				</>
 			)}
 		</p>
@@ -487,21 +529,22 @@ const UnreadableNotice = ({
  * address — are still here to come back to.
  */
 const LeftAtProvider = ({ provider }: { provider: ProviderKind | undefined }) => {
-	const left = provider === undefined ? undefined : LEFT_AT_PROVIDER[provider];
-	if (left === undefined) return null;
+	if (provider !== 'onedrive') return null;
+	const pages = LEFT_AT_PROVIDER.onedrive;
 	return (
 		<p className="muted">
-			{left.summary}{' '}
-			{left.places.map((place, index) => (
-				<Fragment key={place.href}>
-					{index > 0 && '; '}
-					<a href={place.href} target="_blank" rel="noreferrer">
-						{place.label}
-					</a>{' '}
-					for {place.accounts}
-				</Fragment>
-			))}
-			.
+			{rich('account.leftAtProvider.onedrive', {
+				consent: (words) => (
+					<a href={pages.consent} target="_blank" rel="noreferrer">
+						{words}
+					</a>
+				),
+				myApps: (words) => (
+					<a href={pages.myApps} target="_blank" rel="noreferrer">
+						{words}
+					</a>
+				),
+			})}
 		</p>
 	);
 };
@@ -519,7 +562,7 @@ const unseenItem = (
 	onOpen: () => void
 ): OptionsMenuItem[] =>
 	provider !== undefined && UNSEEN_AT_PROVIDER[provider] !== undefined
-		? [{ label: `About ${label}`, onChoose: onOpen }]
+		? [{ label: t('account.menu.about', { provider: label }), onChoose: onOpen }]
 		: [];
 
 const UnseenDialog = ({
@@ -571,14 +614,14 @@ const ActionsMenu = ({
 	const all =
 		slot.onRename === undefined
 			? items
-			: [{ label: 'Rename', onChoose: slot.onRename }, ...items];
+			: [{ label: t('account.menu.rename'), onChoose: slot.onRename }, ...items];
 	return slot.menuIn === null
 		? null
 		: createPortal(
 				<OptionsMenu
-					label={`Options for “${slot.name}”`}
-					title="Source options"
-					groupLabel={`Source “${slot.name}”`}
+					label={t('account.menu.sourceLabel', { name: slot.name })}
+					title={t('account.menu.sourceTitle')}
+					groupLabel={t('account.menu.sourceGroup', { name: slot.name })}
 					triggerClassName="icon icon-quiet"
 					trigger={<Icon name="overflow" />}
 					disabled={all.length === 0}
@@ -631,9 +674,9 @@ const GearMenu = ({
 	onOpen?: () => void;
 }) => (
 	<OptionsMenu
-		label="Storage options"
-		title="Storage options"
-		groupLabel="Storage"
+		label={t('account.menu.label')}
+		title={t('account.menu.label')}
+		groupLabel={t('account.menu.group')}
 		triggerClassName="icon icon-quiet"
 		trigger={<Icon name="gear" />}
 		disabled={items.length === 0}
@@ -741,7 +784,13 @@ const DownloadAll = ({
 /** The way to start it, as an item of the gear's menu or the `⋯`. */
 const downloadItem = (holds: boolean | undefined, downloading: Downloading): OptionsMenuItem[] =>
 	holds === true
-		? [{ label: 'Download all notes', onChoose: downloading.start, disabled: downloading.busy }]
+		? [
+				{
+					label: t('account.menu.downloadAll'),
+					onChoose: downloading.start,
+					disabled: downloading.busy,
+				},
+			]
 		: [];
 
 /**
@@ -784,7 +833,7 @@ const NotConnected = ({
 	const holds = useLiveQuery(() => holdsAnything(database, LOCAL_CONNECTION_ID), [database]);
 	const downloading = useDownloadAll(database, LOCAL_CONNECTION_ID, downloadAll);
 	const importing = useImportNotes(database, LOCAL_CONNECTION_ID, {
-		label: 'this device',
+		label: t('account.thisDevice'),
 		syncs: false,
 		...(pick === undefined ? {} : { pick }),
 	});
@@ -803,23 +852,19 @@ const NotConnected = ({
 	const items = [...downloadItem(holds, downloading), ...importItems(importing), ...scratchpad];
 
 	return (
-		<section className="account" aria-label="Storage">
+		<section className="account" aria-label={t('account.region')}>
 			{/* Where the notes are is said by the status line. The way to
 			    connect is beside it in the bar above, in words, at the foot of
 			    the sidebar; in a compact window's source dropdown it is the `+`
 			    in its header, which never has words, so it is said here. */}
 			{slot !== undefined && offerable.length > 0 && (
-				<p className="muted">Use + above to connect storage.</p>
+				<p className="muted">{t('account.local.useAdd')}</p>
 			)}
 			{settings?.authMode === 'account-first' && (
-				<p className="muted">
-					Connecting storage needs a sign-in this server does not offer yet.
-				</p>
+				<p className="muted">{t('account.local.signInMissing')}</p>
 			)}
 			{config.kind === 'unreachable' && (
-				<p className="muted">
-					Connecting storage needs the server, which cannot be reached.
-				</p>
+				<p className="muted">{t('account.local.unreachable')}</p>
 			)}
 			{/*
 			 * The one place the notes here are all there is, so the one place it
@@ -834,14 +879,11 @@ const NotConnected = ({
 			 * notes stay where they were (docs/ARCHITECTURE.md §8).
 			 */}
 			{holds === true && kept === 'not-kept' && (
-				<p className="muted">
-					This browser may clear them without warning. To keep them, connect storage or
-					download them.
-				</p>
+				<p className="muted">{t('account.local.mayClear')}</p>
 			)}
 			<DownloadAll holds={holds} downloading={downloading} />
 			<ImportNotes importing={importing} />
-			<StatusLine text="On this device only" title={null}>
+			<StatusLine text={t('account.local.line')} title={null}>
 				<GearMenu items={items} />
 			</StatusLine>
 			{slot !== undefined && <ActionsMenu slot={slot} items={items} />}
@@ -869,7 +911,7 @@ const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: stri
 	return (
 		<p className="muted">
 			<Link to="/" {...noteLink(note)}>
-				Open the note
+				{t('account.openNote')}
 			</Link>
 		</p>
 	);
@@ -968,8 +1010,8 @@ const SyncState = ({
 				<p className="muted">
 					{status.refusal === 'credential_revoked' ||
 					status.refusal === 'credential_required'
-						? `This device can no longer reach ${label}.`
-						: `${label} needs to be connected again.`}
+						? t('account.reconnect.cannotReach', { provider: label })
+						: t('account.reconnect.needed', { provider: label })}
 				</p>
 			)}
 			{/*
@@ -988,7 +1030,7 @@ const SyncState = ({
 					returnTo={returnTo}
 					{...(navigate === undefined ? {} : { navigate })}
 				>
-					Connect again
+					{t('account.reconnect.again')}
 				</ConnectButton>
 			)}
 			{message !== null && status.phase === 'attention' && <p className="muted">{message}</p>}
@@ -1014,11 +1056,7 @@ const SyncState = ({
 			 */}
 			{status.phase !== 'local' && syncable && rescanning && (
 				<div className="account-confirm">
-					<p className="muted">
-						Read everything in {label} again? This device compares every note with the
-						folder from scratch. Notes that are no longer in {label} are removed here
-						too, unless they have edits that have not been sent.
-					</p>
+					<p className="muted">{t('account.rescan.question', { provider: label })}</p>
 					<button
 						type="button"
 						disabled={status.phase === 'syncing'}
@@ -1027,7 +1065,7 @@ const SyncState = ({
 							void sync.resync();
 						}}
 					>
-						Re-scan
+						{t('account.rescan.confirm')}
 					</button>
 					<button
 						type="button"
@@ -1036,7 +1074,7 @@ const SyncState = ({
 							setRescanning(false);
 						}}
 					>
-						Cancel
+						{t('common.cancel')}
 					</button>
 				</div>
 			)}
@@ -1095,8 +1133,7 @@ const useGrants = (client: Client, database: NotesDatabase, connectionId: string
 const stillSignedIn = (grants: Asked<Grant[]>): number | undefined =>
 	answer(grants)?.filter((grant) => !grant.current && !grant.expired).length;
 
-const devicesLine = (count: number): string =>
-	`${count === 1 ? '1 other device' : `${String(count)} other devices`} signed in on this account`;
+const devicesLine = (count: number): string => t('account.devices.count', { count });
 
 /** Taking a device off the connection, and what went wrong if it did not come off. */
 const useRevoke = (
@@ -1126,19 +1163,17 @@ const useRevoke = (
 					onChanged();
 					return;
 				}
-				setProblem('That device is still signed in: the server would not remove it.');
+				setProblem(t('account.devices.stillSignedIn'));
 			})
 			.catch((error: unknown) => {
 				setProblem(
 					saying(error, {
-						answered: 'The server could not remove that device. Try again.',
-						unreachable:
-							'The server cannot be reached, so nothing was removed. Try again.',
-						device: 'Something on this device went wrong, so nothing was removed. Try again.',
+						answered: t('account.devices.failed.answered'),
+						unreachable: t('account.devices.failed.unreachable'),
+						device: t('account.devices.failed.device'),
 						// Neither call, so it happened after the revoke had already
 						// done whatever it did.
-						unknown:
-							'Something went wrong. That device may already have been removed; try again.',
+						unknown: t('account.devices.failed.unknown'),
 					})
 				);
 			})
@@ -1147,6 +1182,23 @@ const useRevoke = (
 			});
 	};
 	return { busy, problem, revoke };
+};
+
+/**
+ * What a device's row says of it: what its browser called it, where it called
+ * it anything, when it was last used, and whether the server has signed it out
+ * for being idle.
+ */
+const deviceRow = ({ device, lastUsedAt, expired }: Grant): string => {
+	const used = when(lastUsedAt);
+	if (device === undefined) {
+		return expired
+			? t('account.devices.unnamedIdle', { when: used })
+			: t('account.devices.unnamed', { when: used });
+	}
+	return expired
+		? t('account.devices.namedIdle', { device, when: used })
+		: t('account.devices.named', { device, when: used });
 };
 
 /** A row per other device, each with its Remove, and what went wrong with one. */
@@ -1158,13 +1210,10 @@ const DeviceRows = ({
 	revoking: ReturnType<typeof useRevoke>;
 }) => (
 	<>
-		<ul aria-label="Other devices">
+		<ul aria-label={t('account.devices.list')}>
 			{others.map((grant) => (
 				<li key={grant.id}>
-					<span className="muted">
-						{`${grant.device ?? 'A device'}, last used ${when(grant.lastUsedAt)}`}
-						{grant.expired && ' · signed out for being idle'}
-					</span>
+					<span className="muted">{deviceRow(grant)}</span>
 					<button
 						type="button"
 						disabled={revoking.busy !== null}
@@ -1172,7 +1221,7 @@ const DeviceRows = ({
 							revoking.revoke(grant.id);
 						}}
 					>
-						Remove
+						{t('account.devices.remove')}
 					</button>
 				</li>
 			))}
@@ -1265,7 +1314,7 @@ const Devices = ({
 			)}
 			{open && (
 				<InfoDialog
-					title="Other devices signed in on this account"
+					title={t('account.devices.title')}
 					onClose={() => {
 						setOpen(false);
 						if (others.length === 0) gear?.current?.focus();
@@ -1274,7 +1323,7 @@ const Devices = ({
 				>
 					<div className="account-devices">
 						{others.length === 0 ? (
-							<p>No other device is signed in on this account.</p>
+							<p>{t('account.devices.none')}</p>
 						) : (
 							<DeviceRows others={others} revoking={revoking} />
 						)}
@@ -1405,23 +1454,17 @@ const wentAs = (result: LetGoResult): Disconnecting | undefined => {
 		case 'released':
 			return undefined;
 		case 'detached':
-			return said(
-				'Something was written in this source after the list was shown. It was not on the list, so it has been kept.'
-			);
+			return said(t('account.disconnect.outcome.detached'));
 		case 'holding':
-			return said(
-				'A note here has text that could not be saved, so the note and this source have been kept rather than removed with it. Open the note and copy the text somewhere safe; the note says how.'
-			);
+			return said(t('account.disconnect.outcome.holding'));
 		case 'reconnected':
-			return said('This source was connected again meanwhile. Nothing has been changed.');
+			return said(t('account.disconnect.outcome.reconnected'));
 		case 'no-target':
-			return said('That source is not connected any more, so nothing was moved.');
+			return said(t('account.disconnect.outcome.noTarget'));
 		case 'unverified':
-			return said(
-				'This source has not been checked against its account yet, so what it holds could not be told apart from work that was never sent. Nothing was moved.'
-			);
+			return said(t('account.disconnect.outcome.unverified'));
 		case 'nothing-to-move':
-			return said('There was nothing here to move, so nothing was moved.');
+			return said(t('account.disconnect.outcome.nothingToMove'));
 	}
 };
 
@@ -1546,9 +1589,11 @@ const storageItems = ({
 	const syncing = phase === 'syncing';
 	const syncs = !importingHere(bound) && phase !== 'local';
 	return [
-		...(syncs ? [{ label: 'Sync now', onChoose: syncNow, disabled: syncing }] : []),
+		...(syncs
+			? [{ label: t('account.menu.syncNow'), onChoose: syncNow, disabled: syncing }]
+			: []),
 		...(syncs && isSyncable(bound) && !rescanning
-			? [{ label: 'Re-scan from scratch', onChoose: onRescan, disabled: syncing }]
+			? [{ label: t('account.menu.rescan'), onChoose: onRescan, disabled: syncing }]
 			: []),
 		...download,
 		...imports,
@@ -1558,7 +1603,7 @@ const storageItems = ({
 		...(stranded && !open
 			? [
 					{
-						label: 'Stop syncing on this device',
+						label: t('account.menu.stopHere'),
 						// The same question again, and nothing asked of the server:
 						// it has already refused, and nothing on it is touched.
 						onChoose: () => {
@@ -1571,7 +1616,7 @@ const storageItems = ({
 			? []
 			: [
 					{
-						label: 'Disconnect',
+						label: t('account.menu.disconnect'),
 						onChoose: () => {
 							ask(true);
 						},
@@ -1594,7 +1639,14 @@ const clipboardItem = (
 ): OptionsMenuItem[] =>
 	importingHere(bound) || phase === 'local'
 		? []
-		: [{ label: showsClipboard(bound) ? 'Hide clipboard' : 'Show clipboard', onChoose }];
+		: [
+				{
+					label: showsClipboard(bound)
+						? t('account.menu.hideClipboard')
+						: t('account.menu.showClipboard'),
+					onChoose,
+				},
+			];
 
 /**
  * Show the source's scratchpad on this device, or stop (docs/ARCHITECTURE.md
@@ -1612,7 +1664,9 @@ const useScratchpadItem = (database: NotesDatabase, connectionId: string): Optio
 		? []
 		: [
 				{
-					label: shown ? 'Hide scratchpad' : 'Show scratchpad',
+					label: shown
+						? t('account.menu.hideScratchpad')
+						: t('account.menu.showScratchpad'),
 					onChoose: () => {
 						void setScratchpadShown(database, connectionId, !shown);
 					},
@@ -1694,7 +1748,9 @@ const ConnectedFoot = ({
 	// Who the account is, which the line has no room for, and the whole of
 	// what it says about syncing, where that is more than its few words.
 	const title = [
-		`Syncing with ${label}${displayName === null ? '' : ` · ${displayName}`}`,
+		displayName === null
+			? t('account.title.syncing', { provider: label })
+			: t('account.title.syncingAs', { provider: label, account: displayName }),
 		said.title,
 	]
 		.filter((line) => line !== null)
@@ -1750,7 +1806,8 @@ type Step =
 
 /** How an import into a connected source names it, and picks its files. */
 const importInto = (bound: SyncStateRecord, pick: typeof pickFiles | undefined) => ({
-	label: bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider],
+	label:
+		bound.provider === undefined ? t('account.someStorage') : PROVIDER_LABELS[bound.provider],
 	syncs: true,
 	...(pick === undefined ? {} : { pick }),
 });
@@ -1824,7 +1881,8 @@ const Connected = ({
 	}, []);
 	useEscape(panel, open, cancel);
 
-	const label = bound.provider === undefined ? 'storage' : PROVIDER_LABELS[bound.provider];
+	const label =
+		bound.provider === undefined ? t('account.someStorage') : PROVIDER_LABELS[bound.provider];
 	const displayName = accountName(answer(account), bound);
 
 	const pushable = worthPushing(status);
@@ -1855,9 +1913,7 @@ const Connected = ({
 			.catch(() => {
 				if (asking.current !== mine) return;
 				setStep({ kind: 'closed' });
-				setTrouble(
-					'What is on this device could not be read, so nothing was disconnected.'
-				);
+				setTrouble(t('account.disconnect.unreadable'));
 			});
 	};
 
@@ -1912,7 +1968,7 @@ const Connected = ({
 					{...(pick === undefined ? {} : { pick })}
 				/>
 			)}
-			<section ref={panel} className="account" aria-label="Storage">
+			<section ref={panel} className="account" aria-label={t('account.region')}>
 				<SyncState
 					client={client}
 					database={database}
@@ -1948,11 +2004,11 @@ const Connected = ({
 					<div
 						className="account-confirm"
 						role="group"
-						aria-label="Sending your last changes"
+						aria-label={t('account.disconnect.sending')}
 					>
-						<p className="muted">Sending your last changes…</p>
+						<p className="muted">{t('account.disconnect.sendingNow')}</p>
 						<button ref={cancelButton} type="button" className="ghost" onClick={cancel}>
-							Cancel
+							{t('common.cancel')}
 						</button>
 					</div>
 				)}
@@ -2077,7 +2133,7 @@ const Detached = ({
 							returnTo={returnTo}
 							{...(navigate === undefined ? {} : { navigate })}
 						>
-							Reconnect
+							{t('account.reconnect.detached')}
 						</ConnectButton>
 					)
 				}

@@ -26,6 +26,8 @@ import { type EditorMode, MODE_LABELS, otherMode } from '../editor/mode.js';
 import { RawEditor } from '../editor/RawEditor.js';
 import { RichEditor, type RichEditorProps } from '../editor/RichEditor.js';
 import { type SaveContext, useAutosave } from '../editor/useAutosave.js';
+import { rich } from '../i18n/rich.js';
+import { t } from '../i18n/t.js';
 import { db, type NoteRecord, noteRef } from '../store/db.js';
 import { beforeClosing } from '../store/heldEdits.js';
 import { useDefaultEditorMode, useFormatToolbarShown } from '../store/hooks.js';
@@ -251,8 +253,8 @@ const TitleField = ({
 		<input
 			ref={field}
 			className="note-title-input"
-			aria-label="Note title"
-			placeholder={blankWhenUnnamed ? 'Title' : undefined}
+			aria-label={t('notes.view.titleLabel')}
+			placeholder={blankWhenUnnamed ? t('notes.view.titlePlaceholder') : undefined}
 			value={draft ?? (blank ? '' : shown.title)}
 			onChange={(event) => {
 				setDraft(event.target.value);
@@ -387,8 +389,8 @@ const NoteBody = ({
 	// slash menu are the rich editor's, and this is raw mode's only way.
 	useCommand({
 		id: 'note.attach',
-		label: 'Attach files',
-		group: 'Note',
+		label: t('notes.commands.attach'),
+		group: t('shell.commands.group.note'),
 		enabled: mode !== undefined,
 		run: attachments.pick,
 	});
@@ -491,8 +493,8 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null, scratch
 	}, []);
 	useCommand({
 		id: 'note.outline',
-		label: showOutline ? 'Hide outline' : 'Show outline',
-		group: 'Note',
+		label: showOutline ? t('notes.commands.hideOutline') : t('notes.commands.showOutline'),
+		group: t('shell.commands.group.note'),
 		// A scratch note's editor has no outline.
 		enabled: noteId !== undefined && !scratch,
 		run: toggleOutline,
@@ -525,27 +527,24 @@ const NothingOpen = ({
 	onCreateNotebook,
 }: Pick<NoteViewProps, 'onCreateNote' | 'onCreateNotebook'>) => {
 	if (onCreateNote !== undefined) {
-		return (
-			<>
-				Select a note, or{' '}
+		return rich('notes.view.nothingOpen', {
+			create: (words) => (
 				<button type="button" className="link-button" onClick={onCreateNote}>
-					create one
+					{words}
 				</button>
-				.
-			</>
-		);
+			),
+		});
 	}
 	if (onCreateNotebook !== undefined) {
-		return (
-			<>
+		return rich('notes.view.noNotebook', {
+			create: (words) => (
 				<button type="button" className="link-button" onClick={onCreateNotebook}>
-					Create a notebook
-				</button>{' '}
-				to start writing.
-			</>
-		);
+					{words}
+				</button>
+			),
+		});
 	}
-	return 'Select a note.';
+	return t('notes.view.selectNote');
 };
 
 /**
@@ -866,8 +865,8 @@ export const NoteView = ({
 	const [finding, setFinding] = useState(0);
 	useCommand({
 		id: 'note.find',
-		label: 'Find in note',
-		group: 'Note',
+		label: t('notes.commands.find'),
+		group: t('shell.commands.group.note'),
 		chord: FIND,
 		enabled: noteId !== undefined,
 		run: () => {
@@ -880,8 +879,8 @@ export const NoteView = ({
 	// second window listener cannot race this one for the same keystroke.
 	useCommand({
 		id: 'note.toggleMode',
-		label: `Edit as ${MODE_LABELS[otherMode(mode ?? 'rich')].toLowerCase()}`,
-		group: 'Note',
+		label: t(`notes.commands.editAs.${otherMode(mode ?? 'rich')}`),
+		group: t('shell.commands.group.note'),
 		chord: MODE_TOGGLE,
 		// A scratch note's editor has no other editor to go to, but a note held
 		// in raw mode can still ask the rich one again.
@@ -894,7 +893,7 @@ export const NoteView = ({
 
 	if (note === undefined) {
 		return (
-			<section className="note-view empty" aria-label="Note">
+			<section className="note-view empty" aria-label={t('notes.view.label')}>
 				<p className="muted placeholder">
 					<NothingOpen onCreateNote={onCreateNote} onCreateNotebook={onCreateNotebook} />
 				</p>
@@ -956,11 +955,10 @@ const tabTitle = (
 	locked: boolean,
 	retryable: boolean
 ): string => {
-	const name = MODE_LABELS[tab].toLowerCase();
-	if (current) return `Editing as ${name}`;
-	if (locked && retryable) return `Try the ${name} editor again (Ctrl/Cmd+E)`;
-	if (locked) return 'This note has to stay in markdown mode until it is changed';
-	return `Switch to ${name} (Ctrl/Cmd+E)`;
+	if (current) return t(`notes.view.mode.editing.${tab}`);
+	if (locked && retryable) return t(`notes.view.mode.retry.${tab}`);
+	if (locked) return t('notes.view.mode.locked');
+	return t(`notes.view.mode.switchTo.${tab}`);
 };
 
 /**
@@ -984,7 +982,7 @@ const ModeTabs = ({
 	retryable: boolean;
 	toggleMode: () => void;
 }) => (
-	<div className="mode-tabs" role="group" aria-label="Editor">
+	<div className="mode-tabs" role="group" aria-label={t('notes.view.editor')}>
 		{(['rich', 'raw'] as const).map((tab) => {
 			const current = tab === mode;
 			return (
@@ -1082,12 +1080,12 @@ const NoteActions = ({
 					type="button"
 					className="note-icon"
 					onClick={layout.toggleToolbar}
-					aria-label="Format"
+					aria-label={t('notes.view.format')}
 					aria-pressed={layout.toolbar === 'bottom'}
 					title={
 						layout.toolbar === 'bottom'
-							? 'Hide the formatting toolbar'
-							: 'Show the formatting toolbar'
+							? t('notes.view.hideToolbar')
+							: t('notes.view.showToolbar')
 					}
 				>
 					<Icon name="format" />
@@ -1108,12 +1106,16 @@ const NoteActions = ({
 					type="button"
 					className="note-icon"
 					onClick={layout.toggleOutline}
-					aria-label="Outline"
+					aria-label={t('notes.view.outline')}
 					aria-pressed={layout.showOutline}
 					// Pressing it while the flyout is open closes it, so a
 					// press outside the flyout that lands here is not one.
 					data-outline-toggle=""
-					title={layout.showOutline ? 'Hide the outline' : 'Show the outline'}
+					title={
+						layout.showOutline
+							? t('notes.view.hideOutline')
+							: t('notes.view.showOutline')
+					}
 				>
 					<Icon name="outline" />
 				</button>
@@ -1176,7 +1178,7 @@ const NoteScreen = ({
 }) => (
 	<section
 		className={scratch === undefined ? 'note-view' : 'note-view scratch-editor'}
-		aria-label="Note"
+		aria-label={t('notes.view.label')}
 		data-color={scratch?.marks.color}
 	>
 		<header className="note-header">
@@ -1228,8 +1230,7 @@ const NoteScreen = ({
 		 */}
 		{unsaved && (
 			<p className="banner banner-alert" role="alert">
-				Changes are not being saved on this device. Copy your text somewhere safe, then
-				reload.
+				{t('notes.view.unsaved')}
 			</p>
 		)}
 
@@ -1250,9 +1251,7 @@ const NoteScreen = ({
 		 */}
 		{!frontmatterIsEditable(note.frontmatter) && (
 			<p className="banner" role="note">
-				There is a YAML error in this note’s frontmatter, so its title and tags cannot be
-				saved back to the file — the text is left exactly as it is rather than guessed at.
-				Everything else about the note works as usual.
+				{t('notes.view.yamlError')}
 			</p>
 		)}
 

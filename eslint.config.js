@@ -43,40 +43,6 @@ const RESTRICTED_SYNTAX = [
 const LETTERS = '/[A-Za-z]/';
 const SHOWN_PROP =
 	'JSXAttribute[name.name=/^(aria-(label|description|roledescription|valuetext|placeholder)|title|placeholder|alt|label|text|message|description|[a-z]+(Label|Text|Title|Message))$/]';
-/**
- * The components whose words are still written into them, until the change that
- * moves each one's into the catalog takes it off this list. Nothing is added to
- * it.
- */
-const WORDS_NOT_MOVED_YET = [
-	'apps/web/src/components/AccountPanel.tsx',
-	'apps/web/src/components/AttachedFiles.tsx',
-	'apps/web/src/components/ClipboardPanel.tsx',
-	'apps/web/src/components/CompactBar.tsx',
-	'apps/web/src/components/ConnectButton.tsx',
-	'apps/web/src/components/DeletedNotice.tsx',
-	'apps/web/src/components/DetachedSource.tsx',
-	'apps/web/src/components/DisconnectDialog.tsx',
-	'apps/web/src/components/FindBar.tsx',
-	'apps/web/src/components/ImportNotes.tsx',
-	'apps/web/src/components/ImportProgress.tsx',
-	'apps/web/src/components/MoveUnsent.tsx',
-	'apps/web/src/components/NoteList.tsx',
-	'apps/web/src/components/NoteView.tsx',
-	'apps/web/src/components/Outline.tsx',
-	'apps/web/src/components/RowOptions.tsx',
-	'apps/web/src/components/RowRename.tsx',
-	'apps/web/src/components/ScratchControls.tsx',
-	'apps/web/src/components/Scratchpad.tsx',
-	'apps/web/src/components/SearchField.tsx',
-	'apps/web/src/components/Sidebar.tsx',
-	'apps/web/src/components/SourceTabs.tsx',
-	'apps/web/src/components/unsupported.tsx',
-	'apps/web/src/install/InstallBanner.tsx',
-	'apps/web/src/routes/index.tsx',
-	'apps/web/src/share/TakeShare.tsx',
-];
-
 const INLINE_WORDS = [
 	`JSXText[value=${LETTERS}]`,
 	`${SHOWN_PROP} > Literal[value=${LETTERS}]`,
@@ -286,7 +252,6 @@ export default tseslint.config(
 
 	{
 		files: ['apps/web/src/**/*.tsx'],
-		ignores: WORDS_NOT_MOVED_YET,
 		rules: { 'no-restricted-syntax': ['error', ...RESTRICTED_SYNTAX, ...INLINE_WORDS] },
 	},
 

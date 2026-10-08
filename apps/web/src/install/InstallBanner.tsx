@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 
 import { useMediaQuery } from '../components/layout.js';
 import { Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { db as appDatabase, type NotesDatabase } from '../store/db.js';
 import { dismissInstall, getInstallDismissed } from '../store/prefs.js';
 import { type Device, type ManualInstall, manualInstall, thisDevice } from './installHow.js';
@@ -30,18 +31,16 @@ export interface InstallBannerProps {
 	name?: string;
 }
 
-const APP_NAME = import.meta.env.VITE_APP_NAME ?? 'this app';
-
 const MANUAL: Readonly<Record<ManualInstall, (name: string) => string>> = {
-	'home-screen': (name) => `Install ${name}: tap Share, then Add to Home Screen.`,
-	dock: (name) => `Install ${name}: in Safari's File menu, choose Add to Dock.`,
+	'home-screen': (name) => t('install.homeScreen', { app: name }),
+	dock: (name) => t('install.dock', { app: name }),
 };
 
 export const InstallBanner = ({
 	database = appDatabase,
 	prompt = installPrompt,
 	device = thisDevice(),
-	name = APP_NAME,
+	name = import.meta.env.VITE_APP_NAME ?? t('install.thisApp'),
 }: InstallBannerProps) => {
 	const dismissed = useLiveQuery(() => getInstallDismissed(database), [database]);
 	// An installed app opens in a window of its own (`display: standalone` in
@@ -54,11 +53,9 @@ export const InstallBanner = ({
 	if (state.kind !== 'ready' && manual === undefined) return null;
 
 	return (
-		<aside className="banner install-banner" aria-label={`Install ${name}`}>
+		<aside className="banner install-banner" aria-label={t('install.label', { app: name })}>
 			<span className="install-banner-text">
-				{manual === undefined
-					? `Install ${name} to open it in a window of its own, offline too.`
-					: MANUAL[manual](name)}
+				{manual === undefined ? t('install.offer', { app: name }) : MANUAL[manual](name)}
 			</span>
 			{state.kind === 'ready' && (
 				<button
@@ -71,14 +68,14 @@ export const InstallBanner = ({
 						void state.install();
 					}}
 				>
-					Install
+					{t('install.install')}
 				</button>
 			)}
 			<button
 				type="button"
 				className="icon icon-quiet"
-				aria-label="Dismiss"
-				title="Don't show this again"
+				aria-label={t('common.dismiss')}
+				title={t('install.dontShowAgain')}
 				onClick={() => {
 					void dismissInstall(database);
 				}}

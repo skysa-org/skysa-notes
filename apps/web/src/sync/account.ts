@@ -1,7 +1,8 @@
-import { APP_FOLDER_NAME, type EntitlementCode, type ProviderKind } from '@skysa/core';
+import { APP_FOLDER_NAME, type ProviderKind } from '@skysa/core';
 
 import { type ApiClient, type Connection, type Refusal } from '../api/client.js';
 import { failedAt } from '../errors/reached.js';
+import { t } from '../i18n/t.js';
 import {
 	abandonImport,
 	accountKey,
@@ -59,42 +60,30 @@ import { type SyncScheduler } from './scheduler.js';
 /** Providers the app can sync with today. The rest arrive with their adapters. */
 export const CONNECTABLE: readonly ProviderKind[] = ['dropbox', 'onedrive', 'gdrive'];
 
-/** A page at the provider where the user withdraws the app's access. */
-export interface RevokePlace {
-	readonly label: string;
-	readonly href: string;
-	/** Whose accounts it is for, as the end of "… for {accounts}". */
-	readonly accounts: string;
-}
+export const PROVIDER_LABELS: Record<ProviderKind, string> = {
+	dropbox: 'Dropbox',
+	onedrive: 'OneDrive',
+	gdrive: 'Google Drive',
+	webdav: 'WebDAV',
+};
 
 /**
- * What disconnecting leaves behind at the provider, where it leaves anything.
- * Dropbox lets the server withdraw the app's access; Microsoft gives an app no
- * way to withdraw its own, so the user has to (docs/ARCHITECTURE.md §5.2). A grant an
- * administrator consented to cannot be removed by the user at all.
+ * What disconnecting leaves behind at the provider, where it leaves anything:
+ * the pages where the user withdraws the app's access, by the tag that links
+ * each in what the storage panel says (`account.leftAtProvider` in the
+ * catalog). Dropbox lets the server withdraw the app's access; Microsoft gives
+ * an app no way to withdraw its own, so the user has to
+ * (docs/ARCHITECTURE.md §5.2). A grant an administrator consented to cannot be
+ * removed by the user at all.
  * https://support.microsoft.com/en-us/account-billing/edit-or-revoke-application-permissions-in-the-my-apps-portal-169be2b4-ee26-4338-aea8-d19bb2f329ee
  * https://learn.microsoft.com/en-us/answers/questions/4375979/article-managing-apps-and-services-connected-to-ou
  */
-export const LEFT_AT_PROVIDER: Partial<
-	Record<ProviderKind, Readonly<{ summary: string; places: readonly RevokePlace[] }>>
-> = {
+export const LEFT_AT_PROVIDER = {
 	onedrive: {
-		summary:
-			'Microsoft keeps this app’s access to its folder after it is disconnected, until it is removed there:',
-		places: [
-			{
-				label: 'microsoft.com/consent',
-				href: 'https://microsoft.com/consent',
-				accounts: 'a personal account',
-			},
-			{
-				label: 'My Apps',
-				href: 'https://myapplications.microsoft.com/',
-				accounts: 'a work or school account, or ask your administrator',
-			},
-		],
+		consent: 'https://microsoft.com/consent',
+		myApps: 'https://myapplications.microsoft.com/',
 	},
-};
+} as const satisfies Partial<Record<ProviderKind, Readonly<Record<string, string>>>>;
 
 /**
  * What the app cannot see in its own folder, where that is less than everything
@@ -109,16 +98,12 @@ export const UNSEEN_AT_PROVIDER: Partial<
 	Record<ProviderKind, Readonly<{ summary: string; detail: string }>>
 > = {
 	gdrive: {
-		summary: 'Notes added on the Drive website do not appear here',
-		detail: `Google Drive lets this app see only the files it made. Notes added to the ${APP_FOLDER_NAME} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here. To bring notes in, use Import a folder or Import files here.`,
+		summary: t('account.unseen.gdrive.summary'),
+		detail: t('account.unseen.gdrive.detail', {
+			provider: PROVIDER_LABELS.gdrive,
+			folder: APP_FOLDER_NAME,
+		}),
 	},
-};
-
-export const PROVIDER_LABELS: Record<ProviderKind, string> = {
-	dropbox: 'Dropbox',
-	onedrive: 'OneDrive',
-	gdrive: 'Google Drive',
-	webdav: 'WebDAV',
 };
 
 /**
@@ -135,11 +120,11 @@ export const sourceName = (
 	if (source.provider === undefined) return undefined;
 	const account = source.displayName ?? source.accountId;
 	const provider = PROVIDER_LABELS[source.provider];
-	return account === undefined ? provider : `${provider} · ${account}`;
+	return account === undefined ? provider : t('account.sourceName', { provider, account });
 };
 
 /** The device's own pile, which is not a connection and so has no provider. */
-export const PILE_LABEL = 'This device';
+export const PILE_LABEL: string = t('account.pile');
 
 /**
  * A source whose row no longer says which provider it was: one brought back by
@@ -148,14 +133,14 @@ export const PILE_LABEL = 'This device';
  * "This device" would put two tabs of that name side by side, which is exactly
  * the state this bar exists to prevent.
  */
-export const UNKNOWN_LABEL = 'A source';
+export const UNKNOWN_LABEL: string = t('account.unknownSource');
 
 /**
  * What the way to connect is called while nothing is connected. Beside a tab
  * the `+` alone says "another account", but in a bar with nothing in it a bare
  * `+` is a control nobody can name, and it is the one thing to do there.
  */
-export const CONNECT_FIRST_LABEL = 'Connect storage provider';
+export const CONNECT_FIRST_LABEL: string = t('account.connectFirst');
 
 /**
  * Whether any account has been connected here, live or detached. The device's
@@ -198,7 +183,7 @@ export const tabName = (
 	const sameProvider = inOrder(all).filter((other) => other.provider === source.provider);
 	const place = sameProvider.findIndex((other) => other.connectionId === source.connectionId);
 	const provider = PROVIDER_LABELS[source.provider];
-	return place <= 0 ? provider : `${provider} ${String(place + 1)}`;
+	return place <= 0 ? provider : t('account.numbered', { provider, number: String(place + 1) });
 };
 
 /**
@@ -234,8 +219,11 @@ export const inOrder = <T extends Pick<ConnectedSource, 'connectionId' | 'boundA
  * one provider apart, which is the whole reason these are ever named in a list.
  */
 export const connectedName = (source: Pick<SyncStateRecord, 'provider' | 'accountId'>): string => {
-	const provider = source.provider === undefined ? 'storage' : PROVIDER_LABELS[source.provider];
-	return source.accountId === undefined ? provider : `${provider} · ${source.accountId}`;
+	const provider =
+		source.provider === undefined ? t('account.someStorage') : PROVIDER_LABELS[source.provider];
+	return source.accountId === undefined
+		? provider
+		: t('account.sourceName', { provider, account: source.accountId });
 };
 
 export type AccountState =
@@ -723,26 +711,4 @@ const releasing = async (
 					holding,
 				});
 	return { ok: true, outcome };
-};
-
-/**
- * Why the server would not have the account, by the kind of refusal its
- * operator's policy gave (`ENTITLEMENT_CODES`). With none, what it always
- * said: a refusal is still a refusal from a policy that does not say which.
- * Words only for the codes this build knows, which is every code the server
- * will send — it drops the rest (`knownCode` in `apps/api`). Said in the
- * refused toast (`routes/index.tsx`) and in the storage panel, so the two say
- * it the same way.
- */
-export const refusedMessage = (code: EntitlementCode | undefined): string => {
-	switch (code) {
-		case 'not_allowed':
-			return 'This account is not allowed to sync on this server';
-		case 'lapsed':
-			return "This account's access to sync on this server has lapsed";
-		case 'limit_reached':
-			return 'This server is at its limit for syncing accounts';
-		case undefined:
-			return 'This account cannot sync on this server';
-	}
 };

@@ -1,3 +1,4 @@
+import { t } from '../i18n/t.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
@@ -20,8 +21,8 @@ export const noteMenuItems = ({
 	onDelete: () => void;
 }): OptionsMenuItem[] => [
 	...pinItem(pinned, onPin),
-	...(onMove === undefined ? [] : [{ label: 'Move to notebook', onChoose: onMove }]),
-	{ label: 'Delete', onChoose: onDelete, danger: true },
+	...(onMove === undefined ? [] : [{ label: t('notes.menu.move'), onChoose: onMove }]),
+	{ label: t('notes.menu.delete'), onChoose: onDelete, danger: true },
 ];
 
 /** "Pin to top", or "Unpin" where it is pinned: a notebook's and a note's. */
@@ -31,4 +32,4 @@ export const pinItem = (
 ): OptionsMenuItem[] =>
 	onPin === undefined
 		? []
-		: [{ label: pinned === true ? 'Unpin' : 'Pin to top', onChoose: onPin }];
+		: [{ label: pinned === true ? t('rows.unpin') : t('rows.pin'), onChoose: onPin }];

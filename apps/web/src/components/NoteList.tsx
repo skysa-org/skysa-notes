@@ -1,6 +1,8 @@
 import { parentPath, ROOT } from '@skysa/core';
 import { type ReactNode, useDeferredValue, useId, useState } from 'react';
 
+import { rich } from '../i18n/rich.js';
+import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
@@ -105,29 +107,28 @@ const placeholderFor = ({
 	'notes' | 'folderPath' | 'storeLoaded' | 'onCreateNote' | 'onCreateNotebook'
 >): ReactNode => {
 	if (folderPath === undefined) {
-		if (!storeLoaded) return 'Loading…';
-		if (onCreateNotebook === undefined) return 'Create a notebook to start writing.';
-		return (
-			<>
-				<button type="button" className="link-button" onClick={onCreateNotebook}>
-					Create a notebook
-				</button>{' '}
-				to start writing.
-			</>
-		);
+		if (!storeLoaded) return t('notes.list.loading');
+		return rich('notes.list.noNotebook', {
+			create: (words) =>
+				onCreateNotebook === undefined ? (
+					words
+				) : (
+					<button type="button" className="link-button" onClick={onCreateNotebook}>
+						{words}
+					</button>
+				),
+		});
 	}
-	if (notes === undefined) return 'Loading…';
+	if (notes === undefined) return t('notes.list.loading');
 	if (notes.length > 0) return undefined;
-	if (folderPath === ROOT) return 'No notes here yet.';
-	return (
-		<>
-			No notes here yet.{' '}
+	if (folderPath === ROOT) return t('notes.list.empty');
+	return rich('notes.list.emptyCreate', {
+		create: (words) => (
 			<button type="button" className="link-button" onClick={onCreateNote}>
-				Create one
+				{words}
 			</button>
-			.
-		</>
-	);
+		),
+	});
 };
 
 /**
@@ -226,14 +227,18 @@ const NoteRow = ({
 				<span className="note-title">
 					{note.title}
 					{note.dirty === 1 && (
-						<span className="dot" title="Not yet synced" aria-label="Not yet synced" />
+						<span
+							className="dot"
+							title={t('notes.list.notSynced')}
+							aria-label={t('notes.list.notSynced')}
+						/>
 					)}
 				</span>
 				<span className="note-meta">{meta}</span>
 				<Preview note={note} typing={note.body !== row.body} />
 				{pinned && (
 					<span id={pinId} hidden>
-						Pinned
+						{t('rows.pinned')}
 					</span>
 				)}
 			</button>
@@ -314,7 +319,9 @@ const Heading = ({
 	renamings: Renamings | undefined;
 }) => {
 	const renaming = useRenaming(renamings);
-	return folderPath === undefined ? 'Notes' : folderLabel(shownFolder(folderPath, renaming));
+	return folderPath === undefined
+		? t('notes.list.title')
+		: folderLabel(shownFolder(folderPath, renaming));
 };
 
 export const NoteList = ({
@@ -378,7 +385,7 @@ export const NoteList = ({
 	};
 
 	return (
-		<section className="note-list" aria-label="Notes">
+		<section className="note-list" aria-label={t('notes.list.title')}>
 			<div className="pane-header">
 				<h2>
 					<Heading folderPath={folderPath} renamings={renamings} />
@@ -387,8 +394,8 @@ export const NoteList = ({
 					<button
 						type="button"
 						className="icon"
-						title="New note"
-						aria-label="New note"
+						title={t('notes.list.newNote')}
+						aria-label={t('notes.list.newNote')}
 						// Every note the app creates lives in a notebook, so there is
 						// nowhere to put one until a notebook is open. The root is not
 						// a notebook: loose notes are imported, never created here.
@@ -422,7 +429,7 @@ export const NoteList = ({
 			{menu !== null && menuFor !== undefined && (
 				<FloatingMenu
 					at={menu.at}
-					label={`Note “${menu.note.title}”`}
+					label={t('rows.note.menu', { name: menu.note.title })}
 					items={menuFor(menu.note)}
 					onClose={() => {
 						setMenu(null);

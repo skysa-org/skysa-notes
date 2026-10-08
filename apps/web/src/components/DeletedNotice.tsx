@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { t } from '../i18n/t.js';
+
 /**
  * How long a delete can be taken back from here. Long enough to notice the note
  * has gone and reach for the button; after it the note is still only as deleted
@@ -70,12 +72,12 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 				setFocused(false);
 			}}
 		>
-			<span>Deleted “{title}”.</span>
+			<span>{t('shell.deleted.text', { title })}</span>
 			<button type="button" onClick={onUndo}>
-				Undo
+				{t('shell.deleted.undo')}
 			</button>
 			<button type="button" className="ghost" onClick={onDismiss}>
-				Dismiss
+				{t('common.dismiss')}
 			</button>
 		</div>
 	);
