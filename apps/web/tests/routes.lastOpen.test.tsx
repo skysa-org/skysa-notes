@@ -1,12 +1,13 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { bindConnection, finishImport, showConnection } from '../src/store/connection.js';
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder, deleteFolder } from '../src/store/folders.js';
+import type * as LastOpenModule from '../src/store/lastOpen.js';
 import { getLastOpen, rememberOpen } from '../src/store/lastOpen.js';
 import { createNote, deleteNote } from '../src/store/notes.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
@@ -21,7 +22,23 @@ import { noteUrl, placeIn } from './entry.js';
 
 const DROPBOX = 'c-dropbox';
 
+/** How much later than its read the store says where the user was. */
+const store = vi.hoisted(() => ({ lateBy: 0 }));
+
+vi.mock('../src/store/lastOpen.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof LastOpenModule>();
+	return {
+		...actual,
+		getLastOpen: async (...args: Parameters<typeof actual.getLastOpen>) => {
+			const lastOpen = await actual.getLastOpen(...args);
+			if (store.lateBy > 0) await new Promise((resolve) => setTimeout(resolve, store.lateBy));
+			return lastOpen;
+		},
+	};
+});
+
 afterEach(async () => {
+	store.lateBy = 0;
 	cleanup();
 	await db.notes.clear();
 	await db.folders.clear();
@@ -156,6 +173,33 @@ describe('where the user was, on this device', () => {
 		await user.click(screen.getByRole('button', { name: /^Work/ }));
 
 		await showing('Older');
+	});
+
+	it('is the note a notebook goes back to while the store is slow to say so', async () => {
+		// As on a phone under load (#283): each read of where the user was
+		// answers late, and a write landing meanwhile starts it over, so the
+		// store's answer runs clicks behind the clicks.
+		store.lateBy = 30;
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await noteAt('Archive', 'Elsewhere', 1_000);
+		const older = await noteAt('Work', 'Older', 1_000);
+		await noteAt('Work', 'Newer', 2_000);
+		const user = userEvent.setup();
+		await openApp('/#/Work/');
+		await showing('Newer');
+		await user.click(screen.getByRole('button', { name: /^Older/ }));
+		await showing('Older');
+
+		await user.click(screen.getByRole('button', { name: /^Archive/ }));
+		await showing('Elsewhere');
+		await user.click(screen.getByRole('button', { name: /^Work/ }));
+
+		await showing('Older');
+		// And still the one remembered there, not the newest written over it.
+		await waitFor(async () => {
+			expect((await getLastOpen(db, LOCAL_CONNECTION_ID)).notes.Work).toBe(older.id);
+		});
 	});
 
 	it('is kept per source, and showing a source goes back to where it was in it', async () => {

@@ -1,6 +1,6 @@
 import { isScratchPath, ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import { type EditorMode } from '../editor/mode.js';
@@ -16,7 +16,14 @@ import { holdsAnything } from './exportNotes.js';
 import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
 import { keptRows } from './keptRows.js';
-import { getLastOpen, type LastOpen, noteIsUnder, pickNote } from './lastOpen.js';
+import {
+	getLastOpen,
+	type LastOpen,
+	lastWritten,
+	noteIsUnder,
+	onWritten,
+	pickNote,
+} from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere, listScratchNotes } from './notes.js';
 import { getOpenNotebooks } from './openNotebooks.js';
 import { getPins, type Pins, pinsFromKey, pinsKey } from './pins.js';
@@ -242,16 +249,23 @@ export const useSourceContents = (
  * Where the user was in a source, on this device (`store/lastOpen.ts`).
  * `undefined` until it has been read, for this source: a value read for the
  * source showing a moment ago is another source's place.
+ *
+ * Then what this tab wrote last, until the store has been read since it
+ * landed (`lastWritten`): the store's answer can be clicks behind. A write
+ * from another tab that lands after this tab's is read over it.
  */
 export const useLastOpen = (connectionId: string | undefined): LastOpen | undefined => {
-	const result = useLiveQuery(
-		async () =>
-			connectionId === undefined
-				? undefined
-				: { connectionId, lastOpen: await getLastOpen(db, connectionId) },
-		[connectionId]
+	const result = useLiveQuery(async () => {
+		if (connectionId === undefined) return undefined;
+		// Before the read, so what was written by then is what the read sees.
+		const seen = lastWritten(db, connectionId);
+		return { connectionId, seen, lastOpen: await getLastOpen(db, connectionId) };
+	}, [connectionId]);
+	const mine = useSyncExternalStore(onWritten, () =>
+		connectionId === undefined ? undefined : lastWritten(db, connectionId)
 	);
-	return result?.connectionId === connectionId ? result?.lastOpen : undefined;
+	if (result === undefined || result.connectionId !== connectionId) return undefined;
+	return mine !== undefined && mine !== result.seen ? mine : result.lastOpen;
 };
 
 /**

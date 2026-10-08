@@ -62,28 +62,57 @@ export const getLastOpen = async (db: NotesDatabase, connectionId: string): Prom
 	read((await db.prefs.get(keyFor(connectionId)))?.value);
 
 /**
+ * What this tab has written, ahead of the store's answer. A live query's
+ * answer follows a write by a read, and by another for each write that lands
+ * while it reads, since Dexie starts it over; and a click makes a write or
+ * two. So under load the store's answer can be clicks behind, and a notebook
+ * clicked meanwhile opened on what it said before — the newest note — which
+ * was then remembered over the note the user had left open there (#283).
+ * `useLastOpen` hands out what was written until the store has been read
+ * since it landed. A new object each write, so one can be told from the next.
+ */
+const written = new WeakMap<NotesDatabase, ReadonlyMap<string, LastOpen>>();
+const listeners = new Set<() => void>();
+
+/** What this tab wrote last for a source, once it has landed. */
+export const lastWritten = (db: NotesDatabase, connectionId: string): LastOpen | undefined =>
+	written.get(db)?.get(connectionId);
+
+/** Be told each time one of this tab's writes lands. */
+export const onWritten = (listener: () => void): (() => void) => {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+};
+
+/**
  * Remember `folder` as the notebook open in this source, and `noteId`, when
  * given, as the note open in it. Read and written in one transaction, so two
  * tabs remembering at once each keep the other's notebooks.
  */
-export const rememberOpen = (
+export const rememberOpen = async (
 	db: NotesDatabase,
 	connectionId: string,
 	folder: string,
 	noteId?: string
-): Promise<void> =>
-	db.transaction('rw', db.prefs, async () => {
+): Promise<void> => {
+	const lastOpen = await db.transaction('rw', db.prefs, async () => {
 		const before = await getLastOpen(db, connectionId);
 		// Taken out and put back, so the notebook is the newest in the order the
 		// limit drops from.
 		const { [folder]: _was, ...others } = before.notes;
 		const notes = noteId === undefined ? before.notes : { ...others, [folder]: noteId };
 		const kept = Object.entries(notes).slice(-LIMIT);
-		await db.prefs.put({
-			key: keyFor(connectionId),
-			value: JSON.stringify({ folder, notes: Object.fromEntries(kept) }),
-		});
+		const after: LastOpen = { folder, notes: Object.fromEntries(kept) };
+		await db.prefs.put({ key: keyFor(connectionId), value: JSON.stringify(after) });
+		return after;
 	});
+	written.set(db, new Map(written.get(db)).set(connectionId, lastOpen));
+	listeners.forEach((listener) => {
+		listener();
+	});
+};
 
 /**
  * Whether a note belongs to a notebook as far as which note to open is
