@@ -1,5 +1,57 @@
 # @skysa/web
 
+## 1.0.0
+
+### Major Changes
+
+- Version 1.0. An instance on 0.21 moves to it with nothing to do: no setting, secret, binding or database migration is new. From here on the number keeps semver's promise to the person running an instance — a major version is one they have to act on, and a minor or patch version never is.
+
+### Minor Changes
+
+- d544a21: A scratchpad for quick notes, for every source, the device's own notes included. It is shown for every source until it is hidden from the storage menu ("Hide scratchpad"), and a source connected after one was hidden starts hidden. It sits above the notebooks: a "Take a note…" box, and the notes taken as cards, the pinned first. A note there has the basic tools — bold, italic, lists, a link — and can have files attached. A card can be pinned and given a colour, which are kept in the note's file and so reach every device. A card shows its note as the note is set — bold, lists, boxes, headings, its pictures and files — and opens from a press anywhere on it but its tools. It opens in a dialog, or the whole window on a phone, growing out of the card and going back into it as it closes, and the "Take a note…" box eases open and shut. "Move to notebook" makes it a full note, named first if it has no name. Scratch notes are ordinary notes in a hidden `.scratchpad` folder, synced as any note is, and search finds them while the scratchpad is shown.
+  
+  Labels are spelled the American way where they were not: "Canceling…" while an import is called off, and "Connecting storage was canceled."
+  
+  On a phone, or in any window too narrow for three columns, the source dropdown now ends with the storage gear, as the sidebar does on a wide screen. It has what the source's ⋯ has, and is there before the device has a note to give it a row.
+  
+  When the formatting toolbar is short of room, its More tools button now sits straight after the last tool it shows, instead of out at the bar's far end with a gap between them.
+
+### Patch Changes
+
+- b45ae3f: The storage panel and the question before connecting now write their counts with a thousands separator, so "1,028 files" rather than "1028 files".
+- 453558c: Scratch cards draw their pictures from small copies, and hold each picture's room before it arrives, so the wall stops rearranging as pictures come in.
+- 724b3ec: The clipboard panel draws its pictures from small thumbnails made on the device, rather than decoding each full picture.
+- 445d4b6: A source let go of on this device no longer has all its notes read each time another source syncs.
+- 5060f63: The editors' words now come from the app's catalog. A size or a count of a thousand or more in what the editor says about a picture or a file is now written with a thousands separator: "1,024 MB", "1,028 files".
+- a68cbd3: The words the app writes into the user's files where a name gives none, the alt text of a pasted picture, the link text of a file with no name and the folder of a notebook given no usable name, now come from the app's catalog. `@skysa/core` takes them from its caller (`attachmentLabel`'s `words`, `sanitizeFolderName`'s `unnamed`). A note with no name stays `untitled.md` and `UNTITLED_TITLE` in every language, and is shown in the catalog's words (`notes.untitled`). `ClipName.label` is now `undefined` for a pasted text or a picture with no name of its own, and `fileKindLabel`, which nothing used, is gone. The English is unchanged.
+- 88d3e32: A scratchpad of hundreds of cards no longer reads every card's frontmatter again each time it is drawn.
+- 8eb2749: The find bar's match count and the number of files in something shared to the app are now written with a thousands separator, as in "1,028 of 2,048".
+- 7c5bc6b: A sync run that brings nothing no longer reads every note again for the notebooks, the note list and the loose-notes count.
+- c747751: Clicking back to a notebook soon after leaving it opens the note left open there, rather than its newest, on a busy device. Before, the newest note could open and was then remembered in its place.
+- f1e3ab3: The words of importing, downloading, the clipboard and the scratchpad come from the app's catalog, and a count of a thousand or more in them is now written with a separator ("and 1,028 more", "without 1,028 files") where it was not.
+- b89ffe1: A notebook of more than 150 notes draws only the rows near the screen, so a long list opens and scrolls faster on a phone.
+- 6e79839: The note list draws a row again only when what that row shows changes, so saving one note in a notebook of a thousand no longer redraws the other 999 rows.
+- ef0b330: The number of notes and files in the question asked before a notebook is deleted, and a file's size in a notebook's attached files and the clipboard, are now written with a thousands separator: "1,028 notes", "1,000 KB".
+- 5c581f7: A note's pictures are drawn from smaller copies made on the device, as wide as the editor draws them, one at a time; a picture's box keeps its size while it loads, and a copy stands in for a picture that cannot be downloaded now.
+- 5f2a655: A picture beside a note, selected, has Open full size and Download on its bar, as a file's chip has; Enter opens it, and Tab reaches its bar.
+- ab8ff78: A notebook or scratchpad with more than 400 notes no longer parses every note's preview again each time its list is drawn, which it was doing on every autosave of the note beside it. The cache of previews now grows with the lists on screen, and a scratchpad card's text is parsed once instead of twice.
+- c39a721: Importing a library, or pulling one into a device for the first time, reads its notes a little at a time before writing them, so a phone no longer stops answering until a few thousand notes are in, and the rest of the app can read the notes while they are being read.
+- 2740053: The scratchpad places its cards in one pass and draws a card again only when what that card shows changes, so opening a card on a large scratchpad takes a fifth less work.
+- cf35475: Opening a scratchpad of hundreds of cards no longer holds the page still while every card's height is guessed: the cards are guessed a few at a time from the top, and the wall grows as they are.
+- c0898e4: A scratchpad of hundreds of cards shows its first cards sooner: to find the pinned ones, only the frontmatter that says `pinned` is read.
+- d195e19: A scratchpad of more than 100 cards draws only the cards near the screen, so it opens and scrolls faster on a phone.
+- 9b6454e: Search builds its index as the field takes the cursor, a little at a time, so typing into it on a phone no longer stalls: the first letter is answered without a second's wait, and each letter goes into the field before its matches are drawn.
+- 26b1ffb: A picture shown in a note and on its scratch card at once is held in memory once instead of twice, and a scratchpad of picture cards watches its source's files with one query instead of one per card.
+- 2f88aa4: The sidebar builds its tree in one pass and draws a notebook's row again only when that row changes, so an autosave, a sync run or a drag over the notebooks no longer redraws every row of a large library.
+- 374d1f1: Counts in the source tabs, the disconnect and move questions, a disconnected source's panel and the first import's progress are now written with thousands separators in English digits ("1,240 found so far"), where they had no separator or followed the browser's language.
+- 5db5a77: Two tabs open on different notebooks of a source no longer write where the user is back and forth for as long as both are open.
+- Updated dependencies [a68cbd3]
+- Updated dependencies [678324c]
+- Updated dependencies [d544a21]
+- Updated dependencies [4014eed]
+- Updated dependencies
+  - @skysa/core@1.0.0
+
 ## 0.21.2
 
 ### Patch Changes

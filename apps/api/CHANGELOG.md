@@ -1,5 +1,20 @@
 # @skysa/api
 
+## 1.0.0
+
+### Major Changes
+
+- Version 1.0. An instance on 0.21 moves to it with nothing to do: no setting, secret, binding or database migration is new. From here on the number keeps semver's promise to the person running an instance — a major version is one they have to act on, and a minor or patch version never is.
+
+### Patch Changes
+
+- Updated dependencies [a68cbd3]
+- Updated dependencies [678324c]
+- Updated dependencies [d544a21]
+- Updated dependencies [4014eed]
+- Updated dependencies
+  - @skysa/core@1.0.0
+
 ## 0.21.2
 
 ### Patch Changes

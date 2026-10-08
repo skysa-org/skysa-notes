@@ -1,5 +1,27 @@
 # @skysa/core
 
+## 1.0.0
+
+### Major Changes
+
+- Version 1.0. An instance on 0.21 moves to it with nothing to do: no setting, secret, binding or database migration is new. From here on the number keeps semver's promise to the person running an instance — a major version is one they have to act on, and a minor or patch version never is.
+
+### Minor Changes
+
+- 678324c: Core reads a picture's size as drawn, its orientation, whether it moves and whether it has alpha from its header, without decoding it, and picks which smaller copy of it a view should be shown, or none.
+- d544a21: A scratchpad for quick notes, for every source, the device's own notes included. It is shown for every source until it is hidden from the storage menu ("Hide scratchpad"), and a source connected after one was hidden starts hidden. It sits above the notebooks: a "Take a note…" box, and the notes taken as cards, the pinned first. A note there has the basic tools — bold, italic, lists, a link — and can have files attached. A card can be pinned and given a colour, which are kept in the note's file and so reach every device. A card shows its note as the note is set — bold, lists, boxes, headings, its pictures and files — and opens from a press anywhere on it but its tools. It opens in a dialog, or the whole window on a phone, growing out of the card and going back into it as it closes, and the "Take a note…" box eases open and shut. "Move to notebook" makes it a full note, named first if it has no name. Scratch notes are ordinary notes in a hidden `.scratchpad` folder, synced as any note is, and search finds them while the scratchpad is shown.
+  
+  Labels are spelled the American way where they were not: "Canceling…" while an import is called off, and "Connecting storage was canceled."
+  
+  On a phone, or in any window too narrow for three columns, the source dropdown now ends with the storage gear, as the sidebar does on a wide screen. It has what the source's ⋯ has, and is there before the device has a note to give it a row.
+  
+  When the formatting toolbar is short of room, its More tools button now sits straight after the last tool it shows, instead of out at the bar's far end with a gap between them.
+
+### Patch Changes
+
+- a68cbd3: The words the app writes into the user's files where a name gives none, the alt text of a pasted picture, the link text of a file with no name and the folder of a notebook given no usable name, now come from the app's catalog. `@skysa/core` takes them from its caller (`attachmentLabel`'s `words`, `sanitizeFolderName`'s `unnamed`). A note with no name stays `untitled.md` and `UNTITLED_TITLE` in every language, and is shown in the catalog's words (`notes.untitled`). `ClipName.label` is now `undefined` for a pasted text or a picture with no name of its own, and `fileKindLabel`, which nothing used, is gone. The English is unchanged.
+- 4014eed: A note's title is found by reading its body only as far as its first heading, so reading a note costs about a tenth of what it did, which an import, a pull and an autosave of a note named by its heading all do.
+
 ## 0.21.2
 
 No changes in this release.
