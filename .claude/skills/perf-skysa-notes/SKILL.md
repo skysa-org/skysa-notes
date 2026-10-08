@@ -71,15 +71,20 @@ each scenario's end.
 | scratch | tap the scratchpad, fling the wall, open a card | `cardsMs`, `placedMs`, `openMs`, `tbt` |
 | typing | type 135 keys into a note in Big, then autosave | `tbt`, `longest`, `idbNotes`, `keyP95` |
 | search | type a rare word in search | `answerMs`, `longest` |
-| pictures / pictures48 | open the 12 MP / 48 MP note, fling it, leave | `rendererMB`, `leftRendererMB`, `firstMs` |
-| cards | the scratchpad with picture cards, flung through | `rendererMB`, `firstMs` |
+| pictures / pictures48 | open the 12 MP / 48 MP note, fling it, leave | `decodedMB`, `rendererMB`, `leftRendererMB`, `firstMs` |
+| cards | the scratchpad with picture cards, flung through | `decodedMB`, `rendererMB`, `firstMs` |
 
 - `tbt` is the long tasks' time over 50 ms, `longest` the longest task, from the
   page's `longtask` entries.
 - `idbNotes`/`idbRows` count IndexedDB rows read (the probe wraps the IDB
   prototypes).
-- `rendererMB` is the renderer processes' resident memory, from `ps`.
-  Decoded pictures show up there, as nothing in the web platform reports them.
+- `decodedMB` is what the pictures drawn take decoded: each `<img>`'s natural
+  width × height × 4: what a browser that decodes each picture whole holds
+  for them. Chromium may decode a JPEG at the size it is drawn, so its own
+  memory understates an iPhone's; this does not depend on either.
+- `rendererMB` is the renderer processes' resident memory, from `ps`. An idle
+  renderer is already about 440 MB, and it moves by tens of MB from run to
+  run, so it is a check on `decodedMB` rather than a measure of its own.
 - `scriptMs`/`taskMs`/`layoutMs` are CDP `Performance.getMetrics` deltas.
 
 A change counts as better or worse when it moved 10% (5% for counts) and the
