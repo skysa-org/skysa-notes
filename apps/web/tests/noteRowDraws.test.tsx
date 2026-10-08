@@ -71,6 +71,23 @@ describe('a row of the note list', () => {
 		expect(drawn.bodies).toEqual([]);
 	});
 
+	it('is not drawn again in a long list, which draws only some of its rows', () => {
+		// Laid out, and the list not yet: its first screens are drawn.
+		Object.defineProperty(document.documentElement, 'clientHeight', {
+			configurable: true,
+			value: 844,
+		});
+		try {
+			const many = Array.from({ length: 200 }, (_, at) => note(`Note ${String(at)}`));
+			const drawAgain = drawList({ notes: many });
+			expect(document.querySelectorAll('li[aria-setsize]').length).toBeGreaterThan(0);
+			drawAgain({ notes: many });
+			expect(drawn.bodies).toEqual([]);
+		} finally {
+			Reflect.deleteProperty(document.documentElement, 'clientHeight');
+		}
+	});
+
 	it('is drawn again for its own note changed, and no other is', () => {
 		const drawAgain = drawList();
 		drawAgain({ notes: [alpha, { ...beta, body: 'Beta edited\n', updatedAt: 1 }, gamma] });

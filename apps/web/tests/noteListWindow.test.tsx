@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -194,7 +194,7 @@ describe('a long note list', () => {
 		expect(after).toBe(49 * GUESS);
 	});
 
-	it('keeps the row the focus is in drawn while it is scrolled away from', () => {
+	it('keeps the row the focus is in drawn while it is scrolled away from, and the rows either side', async () => {
 		render(<NoteList {...listProps(notesOf(300))} />);
 		scrollTo(0);
 		const row = rowButton('Note 1');
@@ -203,13 +203,63 @@ describe('a long note list', () => {
 		});
 
 		scrollTo(200 * GUESS);
-		expect(drawn()).toContain('Note 1');
-		expect(drawn()).not.toContain('Note 2');
+		expect(drawn().slice(0, 3)).toEqual(['Note 0', 'Note 1', 'Note 2']);
+		expect(drawn()).not.toContain('Note 3');
 
 		act(() => {
 			row.blur();
 		});
-		expect(drawn()).not.toContain('Note 1');
+		await waitFor(() => {
+			expect(drawn()).not.toContain('Note 1');
+		});
+		expect(drawn()).not.toContain('Note 0');
+	});
+
+	it('goes with Tab and Shift+Tab from the focused row to the rows either side, scrolled away from', async () => {
+		render(<NoteList {...listProps(notesOf(300))} />);
+		scrollTo(0);
+		act(() => {
+			rowButton('Note 1').focus();
+		});
+		scrollTo(200 * GUESS);
+
+		await userEvent.tab();
+		expect(document.activeElement).toBe(rowButton('Note 2'));
+		await userEvent.tab();
+		expect(document.activeElement).toBe(rowButton('Note 3'));
+		await userEvent.tab({ shift: true });
+		await userEvent.tab({ shift: true });
+		await userEvent.tab({ shift: true });
+		expect(document.activeElement).toBe(rowButton('Note 0'));
+		expect(drawn()).not.toContain('Note 3');
+	});
+
+	it('keeps the row drawn while the focus moves within it, from its button to its options', async () => {
+		render(
+			<NoteList
+				{...listProps(notesOf(300))}
+				menuFor={() => [{ label: 'Pin', onChoose: () => undefined }]}
+			/>
+		);
+		scrollTo(0);
+		act(() => {
+			rowButton('Note 4').focus();
+		});
+		scrollTo(200 * GUESS);
+
+		// A browser's blur is drawn before the focus lands: React draws it in
+		// a microtask, which runs between the two.
+		act(() => {
+			rowButton('Note 4').blur();
+		});
+		expect(drawn()).toContain('Note 4');
+		const options = screen.getByRole('button', { name: 'Options for “Note 4”' });
+		act(() => {
+			options.focus();
+		});
+		await new Promise((settled) => setTimeout(settled, 10));
+		expect(drawn()).toContain('Note 4');
+		expect(document.activeElement).toBe(options);
 	});
 
 	it('keeps the row being moved drawn', () => {
@@ -294,5 +344,19 @@ describe('a long note list', () => {
 		expect(drawn().length).toBeLessThan(rows.length);
 		const [below = 0] = skipped();
 		expect(below).toBe((300 - drawn().length) * 80);
+
+		// A phone's list, hidden behind the note open beside it: every row
+		// it has is then 0 tall, and is not taken to be.
+		const measured = drawn();
+		scrollTo(0, 0);
+		const hidden = [...document.querySelectorAll('li.row-item')].map(
+			(target) =>
+				({ target, borderBoxSize: [{ blockSize: 0 }] }) as unknown as ResizeObserverEntry
+		);
+		act(() => {
+			for (const callback of told) callback(hidden, {} as ResizeObserver);
+		});
+		expect(drawn()).toEqual(measured);
+		expect(skipped()).toEqual([below]);
 	});
 });

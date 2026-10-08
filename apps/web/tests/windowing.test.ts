@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { indicesIn, topsOf } from '../src/components/windowing.js';
+import { besideOf, indicesIn, topsOf } from '../src/components/windowing.js';
 
 /** Which items of a long list are near the screen (#275), worked out without a layout. */
 
@@ -43,5 +43,20 @@ describe('indicesIn', () => {
 		expect(many[first + 1] ?? 0).toBeGreaterThan(100_000);
 		expect(many[end - 1] ?? 0).toBeLessThan(101_000);
 		expect(many[end] ?? 0).toBeGreaterThanOrEqual(101_000);
+	});
+});
+
+describe('besideOf', () => {
+	const items = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+
+	it('is the items either side, where there are any', () => {
+		expect(besideOf(items, 'b')).toEqual(['a', 'c']);
+		expect(besideOf(items, 'a')).toEqual(['b']);
+		expect(besideOf(items, 'c')).toEqual(['b']);
+	});
+
+	it('is none for an item not there, or none at all', () => {
+		expect(besideOf(items, 'z')).toEqual([]);
+		expect(besideOf(items, undefined)).toEqual([]);
 	});
 });

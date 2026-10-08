@@ -23,7 +23,15 @@ import { noteOpening, openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 import { RowOptions } from './RowOptions.js';
-import { indicesIn, type Measure, topsOf, useHeights, useScrollSpan } from './windowing.js';
+import {
+	besideOf,
+	indicesIn,
+	type Measure,
+	topsOf,
+	useFocusedItem,
+	useHeights,
+	useScrollSpan,
+} from './windowing.js';
 
 /**
  * The middle pane: the notes in the selected notebook, newest first by when
@@ -197,19 +205,18 @@ interface NoteRowProps {
 	onMenu?: (note: NoteRecord, at: MenuPoint) => void;
 	/** Pinned to the top of the list on this device. */
 	pinned: boolean;
-	/** Where the list is windowed: how its row is measured, and where in its run it is. */
-	windowed?: Windowed | undefined;
-}
-
-/** What a row of a windowed list is told (`NoteList`). */
-interface Windowed {
-	readonly measure: Measure;
-	/** How many rows its run has, all of them, drawn or not. */
-	readonly of: number;
-	/** Its place in the run, from 1. */
-	readonly at: number;
-	/** The focus came into the row, or into its menu, or went out. */
-	readonly onFocus: (id: string | undefined) => void;
+	/**
+	 * Where the list is windowed, what its row is told, each a value or a
+	 * function that stays the same so the row is still drawn again only when
+	 * what it shows changes: how it is measured; how many rows its run has,
+	 * drawn or not, and its place among them from 1; and that the focus came
+	 * into the row or one of its menus, or went out.
+	 */
+	measure?: Measure | undefined;
+	of?: number | undefined;
+	at?: number | undefined;
+	onFocusIn?: ((id: string) => void) | undefined;
+	onFocusOut?: (() => void) | undefined;
 }
 
 const NoteRowView = ({
@@ -223,7 +230,11 @@ const NoteRowView = ({
 	menuFor,
 	onMenu,
 	pinned,
-	windowed,
+	measure,
+	of,
+	at,
+	onFocusIn,
+	onFocusOut,
 }: NoteRowProps) => {
 	// Deferred, so a keystroke is never kept waiting on a row's redraw: the
 	// preview is a parse.
@@ -232,22 +243,19 @@ const NoteRowView = ({
 	return (
 		<li
 			className="row-item"
-			{...(windowed === undefined
+			{...(measure === undefined
 				? {}
-				: {
-						ref: windowed.measure,
-						'data-id': row.id,
-						'aria-setsize': windowed.of,
-						'aria-posinset': windowed.at,
-						// From its menu too, which is a portal: React's events
-						// come up through it.
-						onFocus: () => {
-							windowed.onFocus(row.id);
-						},
-						onBlur: () => {
-							windowed.onFocus(undefined);
-						},
-					})}
+				: { ref: measure, 'data-id': row.id, 'aria-setsize': of, 'aria-posinset': at })}
+			// From its menu too, which is a portal: React's events come up
+			// through it.
+			onFocus={
+				onFocusIn === undefined
+					? undefined
+					: () => {
+							onFocusIn(row.id);
+						}
+			}
+			onBlur={onFocusOut}
 		>
 			<button
 				type="button"
@@ -476,7 +484,7 @@ export const NoteList = ({
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
 	const windowed = notes !== undefined && notes.length > WINDOWED_ABOVE;
 	/** The row the focus is in, or in its menu: drawn wherever it is scrolled to. */
-	const [focusedId, setFocusedId] = useState<string>();
+	const { focusedId, focusIn, focusOut } = useFocusedItem();
 	const [scroller, setScroller] = useState<HTMLElement | null>(null);
 	const [content, setContent] = useState<HTMLDivElement | null>(null);
 	// Not listened for at all where every row is drawn.
@@ -500,9 +508,17 @@ export const NoteList = ({
 		);
 	}, [windowed, runs, rowHeights.heights, nameHeights.heights]);
 	const near = tops === undefined || span === undefined ? undefined : indicesIn(tops, span);
-	// The rows the user is at, drawn wherever they are.
+	// The rows the user is at, drawn wherever they are, and the rows either
+	// side of the one the focus is in.
+	const order = useMemo(() => runs.flatMap((run) => run.notes), [runs]);
 	const kept = new Set(
-		[selectedNoteId, movingNoteId, focusedId, menu?.note.id].filter((id) => id !== undefined)
+		[
+			selectedNoteId,
+			movingNoteId,
+			focusedId,
+			menu?.note.id,
+			...besideOf(order, focusedId),
+		].filter((id) => id !== undefined)
 	);
 	// The handlers this list is given are made again on each draw of the page.
 	// The rows are handed these instead, which stay the same and call the ones
@@ -539,11 +555,14 @@ export const NoteList = ({
 		return (
 			<NoteRow
 				key={note.id}
-				windowed={
-					place === undefined
-						? undefined
-						: { ...place, measure: rowHeights.measure, onFocus: setFocusedId }
-				}
+				{...(place === undefined
+					? {}
+					: {
+							...place,
+							measure: rowHeights.measure,
+							onFocusIn: focusIn,
+							onFocusOut: focusOut,
+						})}
 				note={note}
 				selected={note.id === selectedNoteId}
 				onSelect={select}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 /**
  * Drawing only what is near the screen, for a list too long to draw whole on a
@@ -146,6 +146,11 @@ export const useScrollSpan = (
  * scratch wall places its items by. One observer for every item, and a new
  * map only when a height has changed. `measure` is an item's ref, keyed by its
  * element's `data-id`.
+ *
+ * A height of 0 is not kept: no row or card is drawn that short, and it is
+ * what the observer says of every item once its list is hidden (a phone's
+ * list behind the note open beside it). Kept, it put every item at the top,
+ * where every one of them met the screen, and the hidden list drew them all.
  */
 export const useHeights = () => {
 	const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
@@ -164,7 +169,7 @@ export const useHeights = () => {
 												entry.target.getBoundingClientRect().height,
 										] as const
 								)
-								.filter(([id, height]) => current.get(id) !== height);
+								.filter(([id, height]) => height > 0 && current.get(id) !== height);
 							return changed.length === 0
 								? current
 								: new Map([...current, ...changed]);
@@ -193,3 +198,48 @@ export const useHeights = () => {
 
 /** A ref that observes its element's height (`useHeights`). */
 export type Measure = (element: HTMLElement | null) => (() => void) | undefined;
+
+/**
+ * The item the focus is in, or in one of its menus, which a windowed list
+ * draws wherever it is scrolled to, and the handlers its items say so by,
+ * which stay the same. It is let go of only once the focus has landed: a
+ * move within an item, or into its menu, is a blur and then a focus, and
+ * React draws the blur before the focus arrives, which would draw the list
+ * without the item the focus was going to.
+ */
+export const useFocusedItem = () => {
+	const [focusedId, setFocusedId] = useState<string>();
+	const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
+	const focusIn = useCallback((id: string) => {
+		clearTimeout(settling.current);
+		setFocusedId(id);
+	}, []);
+	const focusOut = useCallback(() => {
+		clearTimeout(settling.current);
+		settling.current = setTimeout(() => {
+			setFocusedId(undefined);
+		}, 0);
+	}, []);
+	useEffect(
+		() => () => {
+			clearTimeout(settling.current);
+		},
+		[]
+	);
+	return { focusedId, focusIn, focusOut };
+};
+
+/**
+ * The items either side of `id` in `order`, the order they are in on the
+ * page: where Tab and Shift+Tab go from it, which a windowed list draws so
+ * that they land on one, and the browser brings the list to it.
+ */
+export const besideOf = (
+	order: readonly Readonly<{ id: string }>[],
+	id: string | undefined
+): readonly string[] => {
+	const at = id === undefined ? -1 : order.findIndex((item) => item.id === id);
+	return at < 0
+		? []
+		: [order[at - 1]?.id, order[at + 1]?.id].filter((near) => near !== undefined);
+};
