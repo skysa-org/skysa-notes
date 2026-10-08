@@ -11,8 +11,11 @@ import {
 	normalizePath,
 	NOTE_EXTENSION,
 	parentPath,
+	type ParsedNoteFile,
 	parseNoteFile,
 	pathSegments,
+	titleFromFilename,
+	UNTITLED_TITLE,
 	withoutNul,
 } from '@skysa/core';
 
@@ -28,6 +31,7 @@ import { foldPath, freePath } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
 import { queueByNotebook } from './queue.js';
 import { readZip } from './readZip.js';
+import { eachInSlices } from './slices.js';
 
 /**
  * Notes into the app from files: a folder the user picks, or a ZIP — the one
@@ -533,14 +537,19 @@ const placeFolders = (
  * file names an id its source already had.
  *
  * The digests are worked out before the transaction opens: one awaited inside
- * it on a promise Dexie did not make would commit it early.
+ * it on a promise Dexie did not make would commit it early. So are the notes
+ * read (`readAll`), which is most of the work.
  */
 export const importLibrary = async (
 	db: NotesDatabase,
 	connectionId: string,
 	plan: ImportPlan
 ): Promise<ImportOutcome> => {
-	const hashes = await Promise.all(plan.notes.map((note) => contentHash(note.source)));
+	// Together: the digests are made off the thread, and the reading on it.
+	const [hashes, read] = await Promise.all([
+		Promise.all(plan.notes.map((note) => contentHash(note.source))),
+		readAll(plan.notes),
+	]);
 	const now = Date.now();
 	return db.transaction(
 		'rw',
@@ -561,7 +570,14 @@ export const importLibrary = async (
 				(path): FolderRecord => ({ connectionId, path, createdAt: now })
 			);
 			const files = placeFiles(connectionId, plan, fileRows, spellings, stamp);
-			const notes = placeNotes(connectionId, plan, noteRows, spellings, hashes, now);
+			const notes = placeNotes(
+				connectionId,
+				plan,
+				noteRows,
+				spellings,
+				{ hashes, read },
+				now
+			);
 
 			await db.folders.bulkPut(folders);
 			await db.files.bulkAdd(files.rows.map((file) => file.row));
@@ -647,6 +663,36 @@ const namesIn = (paths: Iterable<string>, folder: string): string[] => {
 	return [...paths].filter((path) => foldPath(parentPath(path)) === wanted).map(basename);
 };
 
+/** A note's file read, as its name in the archive has it. */
+const readNote = (note: ImportPlan['notes'][number]): ParsedNoteFile =>
+	parseNoteFile(note.source, { filename: basename(note.path) });
+
+/**
+ * Whether a note read under its name in the archive has a title of its own,
+ * from its frontmatter or a heading, which outranks any name: it is titled the
+ * same under the name it is numbered to here. Where its title is its name's,
+ * or there is none, the name may be what titles it, and the new one would
+ * title it otherwise. Asked so that an archive imported again, every name
+ * taken, is not read again note by note in the transaction.
+ */
+const ownTitle = (note: ImportPlan['notes'][number], parsed: ParsedNoteFile): boolean =>
+	parsed.title !== titleFromFilename(basename(note.path)) && parsed.title !== UNTITLED_TITLE;
+
+/**
+ * Every note's file read, before the transaction opens and a slice at a time
+ * (`store/slices.ts`). Read in the transaction, in one piece, a library of a
+ * few thousand notes held the page still for twelve seconds on a phone, and
+ * read each note twice (#275).
+ */
+const readAll = async (notes: ImportPlan['notes']): Promise<ParsedNoteFile[]> => {
+	const read: ParsedNoteFile[] = [];
+	await eachInSlices(notes, (note) => {
+		// eslint-disable-next-line functional/immutable-data
+		read.push(readNote(note));
+	});
+	return read;
+};
+
 /**
  * Where each note goes, and as whom. A name a live note holds there — or one
  * an earlier note of this import took — gives way to a numbered one
@@ -658,7 +704,7 @@ const placeNotes = (
 	plan: ImportPlan,
 	existing: readonly NoteRecord[],
 	spellings: Map<string, string>,
-	hashes: readonly string[],
+	{ hashes, read }: { hashes: readonly string[]; read: readonly ParsedNoteFile[] },
 	now: number
 ): { rows: NoteRecord[]; numbered: number } => {
 	const byFolder = new Map<string, string[]>();
@@ -691,7 +737,8 @@ const placeNotes = (
 			: freePath(wanted, byFolder.get(foldPath(parentPath(wanted))) ?? []);
 		if (!free) numbered.current += 1;
 		take(path);
-		const named = parseNoteFile(note.source, { filename: basename(path) }).id;
+		const parsed = read[index] ?? readNote(note);
+		const named = parsed.id;
 		const id = named === undefined || ids.has(named) ? crypto.randomUUID() : named;
 		ids.add(id);
 		const record: NoteRecord = {
@@ -702,6 +749,10 @@ const placeNotes = (
 				source: note.source,
 				hash: hashes[index] ?? '',
 				now,
+				// Read by the name it was picked under, which is its name here
+				// unless a note here had it. A numbered one is read again by its
+				// new name only where its title may be its old name's.
+				...(free || ownTitle(note, parsed) ? { parsed } : {}),
 			}),
 			dirty: 1,
 		};

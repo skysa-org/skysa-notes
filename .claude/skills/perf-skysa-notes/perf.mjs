@@ -14,7 +14,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { PERF_DIR, playwright } from './paths.mjs';
-import { cloneProfile, launch, seededProfile } from './seed.mjs';
+import { cloneProfile, launch, libraryDir, seededProfile } from './seed.mjs';
 import { summarize, table } from './stats.mjs';
 
 const { values: args } = parseArgs({
@@ -564,6 +564,66 @@ const SCENARIOS = {
 				slowKeys: slow.length,
 				keyP95: keys[Math.floor(keys.length * 0.95)] ?? 0,
 				keyMax: keys.at(-1) ?? 0,
+				...(await summary(page)),
+				...delta(before, await counters(cdp)),
+			};
+		},
+	},
+
+	/**
+	 * The library's notes (its first archive) imported into an emptied device,
+	 * at the phone's CPU: the archive read and asked about, then from Import to
+	 * "Imported", with what the page could not do meanwhile. At desktop width,
+	 * where the storage menu is (`seed.mjs`). Both times take in a little of
+	 * Playwright's own: `readMs` sending the archive, `importMs` its checks
+	 * before the click, run on the slowed thread. The same for every build, so
+	 * an A/B holds; neither is the app's time alone.
+	 */
+	importing: {
+		run: async ({ page, cdp, manifest, base }) => {
+			// The profile holds the library already: emptied on a page of the
+			// origin the app does not run in, so nothing holds the database open.
+			await page.goto(new URL('manifest.webmanifest', base).href);
+			await page.evaluate(
+				() =>
+					new Promise((resolve, reject) => {
+						const request = indexedDB.deleteDatabase('skysa-notes');
+						request.onsuccess = resolve;
+						request.onerror = () => reject(request.error);
+						request.onblocked = () => reject(new Error('the database is held open'));
+					})
+			);
+			await page.setViewportSize({ width: 1400, height: 900 });
+			await page.goto(`${base}#/`);
+			await page.getByRole('button', { name: 'Storage options' }).waitFor();
+			await quiet(page);
+			await page.getByRole('button', { name: 'Storage options' }).click();
+			const chooser = page.waitForEvent('filechooser');
+			await page.getByRole('button', { name: 'Import files', exact: true }).click();
+			const picked = await now(page);
+			await (await chooser).setFiles(join(libraryDir(args.lib), manifest.zips[0]));
+			const dialog = page.getByRole('alertdialog');
+			await dialog.waitFor({ timeout: 600_000 });
+			const asked = await now(page);
+			await quiet(page, 500);
+			const before = await counters(cdp);
+			await reset(page);
+			const start = await now(page);
+			await dialog.getByRole('button', { name: 'Import', exact: true }).click();
+			const imported = await until(
+				page,
+				() =>
+					[...document.querySelectorAll('[role="alert"]')].some((alert) =>
+						alert.textContent?.includes('Imported')
+					),
+				null,
+				{ timeout: 600_000 }
+			);
+			const settled = await quiet(page);
+			return {
+				readMs: asked - picked,
+				importMs: imported - start,
+				settledMs: Math.max(settled, imported) - start,
 				...(await summary(page)),
 				...delta(before, await counters(cdp)),
 			};
