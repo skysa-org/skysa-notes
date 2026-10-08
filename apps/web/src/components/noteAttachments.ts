@@ -23,7 +23,7 @@ import type {
 } from '../editor/attachHost.js';
 import { createObjectUrlCache, type HeldUrl, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { pickFiles } from '../editor/pickFiles.js';
-import { nearestCopy, oneAtATime, type Turns } from '../pictures/copies.js';
+import { copyTurns, nearestCopy } from '../pictures/copies.js';
 import { noShrinker, type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
 import {
 	db as appDb,
@@ -142,21 +142,6 @@ interface Drawable {
 type Made = Drawable | Exclude<Shown, { state: 'ready' }>;
 
 /**
- * Copies made one at a time for each shrinker, which for the app is one: a
- * note's editor, the cards and another note's editor all wait their turn
- * (`oneAtATime`).
- */
-const turnsOf = new WeakMap<PictureShrinker, Turns<Made>>();
-
-const turnsFor = (shrinker: PictureShrinker): Turns<Made> => {
-	const found = turnsOf.get(shrinker);
-	if (found !== undefined) return found;
-	const turns = oneAtATime<Made>();
-	turnsOf.set(shrinker, turns);
-	return turns;
-};
-
-/**
  * Where the original cannot be had now, a copy of another size is shown in
  * place of the one wanted, rather than nothing. Not where the file is gone:
  * the link is to nothing, whatever the device still holds.
@@ -227,7 +212,7 @@ export const createNoteAttachments = ({
 	now = Date.now,
 }: NoteAttachmentsOptions): NoteAttachments => {
 	const listeners = new Set<() => void>();
-	const turns = turnsFor(shrinker);
+	const turns = copyTurns<Made>(shrinker);
 	// What this host has handed out and not been given back, let go of with it.
 	const handedOut = new Set<HeldUrl>();
 	const handOut = (held: HeldUrl, size?: PictureSize): Shown => {

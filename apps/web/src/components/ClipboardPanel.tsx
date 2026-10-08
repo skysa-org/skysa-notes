@@ -4,7 +4,6 @@ import {
 	fileKind,
 	MAX_ATTACHMENT_BYTES,
 	readClipName,
-	safeOpenType,
 } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -23,11 +22,13 @@ import { FILE_ICONS, Icon } from '../editor/icons.js';
 import { createObjectUrlCache, type ObjectUrlCache } from '../editor/objectUrls.js';
 import { pickFiles } from '../editor/pickFiles.js';
 import { t } from '../i18n/t.js';
+import { type PictureShrinker, pictureShrinker } from '../pictures/shrinker.js';
 import { addClips, type ClipInput, listClips, removeClip } from '../store/clipboard.js';
 import { type ClipRecord, type NotesDatabase } from '../store/db.js';
 import { type FileRead } from '../sync/fileReads.js';
 import { type SyncScheduler } from '../sync/scheduler.js';
 import { sizeOf } from './AttachedFiles.js';
+import { clipPicture } from './clipPictures.js';
 import {
 	asPng,
 	fromFiles,
@@ -66,6 +67,8 @@ export interface ClipboardPanelProps {
 	browser?: FileBrowser;
 	/** Where a picture's URL comes from. Injected for the same reason. */
 	urls?: ObjectUrlCache;
+	/** What makes a picture's thumb (#276). Injected: jsdom has no worker to make one. */
+	shrinker?: PictureShrinker;
 }
 
 /** How long a "Copied" stays said. */
@@ -223,30 +226,64 @@ const useFilesDragged = (): boolean => {
 /** The default cache: a URL per picture, kept for every view of it. */
 const thumbnails = createObjectUrlCache();
 
-/** A picture's thumbnail, from the bytes this device holds. */
-const Thumbnail = ({
+/**
+ * A picture on the clipboard, drawn from its thumb (`clipPicture`) once this
+ * device holds its bytes or the thumb, and its icon until then. What is
+ * watched is whether they are here, by key, never the bytes themselves.
+ */
+const ClipPicture = ({
 	connectionId,
 	name,
-	bytes,
+	version,
+	database,
 	urls,
+	shrinker,
 }: {
 	connectionId: string;
 	name: string;
-	bytes: ArrayBuffer;
+	/** The version of it this device has (`ClipAt`). */
+	version: string | undefined;
+	database: NotesDatabase;
 	urls: ObjectUrlCache;
+	shrinker: PictureShrinker;
 }) => {
-	const image = useRef<HTMLImageElement>(null);
+	const here = useLiveQuery(async () => {
+		const key: [string, string] = [connectionId, name];
+		const [bytes, thumbs] = await Promise.all([
+			database.clipBytes.where('[connectionId+name]').equals(key).count(),
+			database.clipThumbs.where('[connectionId+name]').equals(key).count(),
+		]);
+		return bytes + thumbs > 0;
+	}, [database, connectionId, name]);
+	const [shown, setShown] = useState<{ name: string; url: string }>();
+	// Gone with its bytes and thumb, as a pull reads it again: its URL was let
+	// go of then, and may be revoked by the time they are back.
+	if (here === false && shown !== undefined) setShown(undefined);
 	useEffect(() => {
-		// The name is stamped with the bytes' hash, so it names them as well as
-		// the item, and one URL serves every view.
-		const held = urls.acquire(
-			`${connectionId}\u0000${name}`,
-			() => new Blob([bytes], { type: safeOpenType(name) })
-		);
-		if (image.current !== null) image.current.src = held.url;
-		return held.release;
-	}, [connectionId, name, bytes, urls]);
-	return <img ref={image} className="clipboard-thumb" alt="" />;
+		if (here !== true) return undefined;
+		const asking = new AbortController();
+		const kept = { current: (): void => undefined };
+		void clipPicture(database, shrinker, { connectionId, name, version }, asking.signal)
+			.catch(() => undefined)
+			.then((drawable) => {
+				if (drawable === undefined || asking.signal.aborted) return;
+				const held = urls.acquire(drawable.key, drawable.blob);
+				kept.current = held.release;
+				setShown({ name, url: held.url });
+			});
+		return () => {
+			asking.abort();
+			kept.current();
+		};
+	}, [here, database, shrinker, connectionId, name, version, urls]);
+	// Not once neither is here: another device wrote over it, and it is read again.
+	return here === true && shown?.name === name ? (
+		<img className="clipboard-thumb" src={shown.url} alt="" />
+	) : (
+		<span className="clipboard-icon" aria-hidden="true">
+			<Icon name="image" />
+		</span>
+	);
 };
 
 /** What an item is called, on screen and saved: its own name, or the app's for a picture with none. */
@@ -305,15 +342,11 @@ const ClipItem = ({
 	system,
 	browser,
 	urls,
+	shrinker,
 	say,
 	done,
 }: ItemProps) => {
 	const read = readClipName(clip.name);
-	const held = useLiveQuery(
-		async () =>
-			read?.kind === 'image' ? database.clipBytes.get([connectionId, clip.name]) : undefined,
-		[database, connectionId, clip.name, read?.kind]
-	);
 	if (read === undefined) return null;
 	const pending = clip.state === 'pending';
 
@@ -366,19 +399,16 @@ const ClipItem = ({
 					{read.kind === 'text' && (
 						<span className="clipboard-text">{clip.preview ?? ''}</span>
 					)}
-					{read.kind === 'image' &&
-						(held === undefined ? (
-							<span className="clipboard-icon" aria-hidden="true">
-								<Icon name="image" />
-							</span>
-						) : (
-							<Thumbnail
-								connectionId={connectionId}
-								name={clip.name}
-								bytes={held.bytes}
-								urls={urls}
-							/>
-						))}
+					{read.kind === 'image' && (
+						<ClipPicture
+							connectionId={connectionId}
+							name={clip.name}
+							version={clip.version}
+							database={database}
+							urls={urls}
+							shrinker={shrinker}
+						/>
+					)}
 					{read.kind === 'file' && (
 						<>
 							<span className="clipboard-icon" aria-hidden="true">
@@ -424,6 +454,7 @@ export const ClipboardPanel = ({
 	pick = pickFiles,
 	browser = browserFiles,
 	urls = thumbnails,
+	shrinker = pictureShrinker(),
 }: ClipboardPanelProps) => {
 	const clips = useLiveQuery(() => listClips(database, connectionId), [database, connectionId]);
 	const [said, say] = useSaying();
@@ -543,6 +574,7 @@ export const ClipboardPanel = ({
 							system={system}
 							browser={browser}
 							urls={urls}
+							shrinker={shrinker}
 							say={say}
 							done={said.about?.item === clip.name ? said.about.mark : undefined}
 						/>

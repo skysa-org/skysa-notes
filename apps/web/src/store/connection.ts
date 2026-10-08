@@ -115,6 +115,7 @@ type Scope = Pick<
 	| 'fileBytes'
 	| 'clips'
 	| 'clipBytes'
+	| 'clipThumbs'
 	| 'pictures'
 	| 'pictureBytes'
 >;
@@ -624,6 +625,7 @@ const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T>
 			db.fileBytes,
 			db.clips,
 			db.clipBytes,
+			db.clipThumbs,
 			db.pictures,
 			db.pictureBytes,
 		],
@@ -1168,7 +1170,8 @@ const forgetClips = (db: Scope, connectionIds: readonly string[]) =>
 		.where('connectionId')
 		.anyOf(connectionIds)
 		.delete()
-		.then(() => db.clipBytes.where('connectionId').anyOf(connectionIds).delete());
+		.then(() => db.clipBytes.where('connectionId').anyOf(connectionIds).delete())
+		.then(() => db.clipThumbs.where('connectionId').anyOf(connectionIds).delete());
 
 /** Of `files`, the ones whose current bytes this device holds: the ones `placeFiles` can send. */
 const withBytes = async (db: Scope, files: readonly FileRecord[]): Promise<FileRecord[]> => {

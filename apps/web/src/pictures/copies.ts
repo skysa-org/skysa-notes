@@ -1,6 +1,7 @@
 import type { PictureVariant } from '@skysa/core';
 
 import type { PictureRecord } from '../store/db.js';
+import type { PictureShrinker } from './shrinker.js';
 
 /**
  * How the app gets copies of pictures to show (#276): the order they are made
@@ -72,6 +73,21 @@ export const oneAtATime = <T>(): Turns<T> => {
 		void entry.done.then(off, off);
 		return entry.done;
 	};
+};
+
+const turnsOf = new WeakMap<PictureShrinker, Turns<unknown>>();
+
+/**
+ * The one order copies are made in by `shrinker`, which for the app is one: a
+ * note's editor, the scratch cards and the clipboard wait for one another, so
+ * only one original is read for a copy at a time (`oneAtATime`). Each asker's
+ * keys are its own — the clipboard's begin `clip` — so none joins another's
+ * work, and what each is answered is what its own work made.
+ */
+export const copyTurns = <T>(shrinker: PictureShrinker): Turns<T> => {
+	const turns = turnsOf.get(shrinker) ?? oneAtATime<unknown>();
+	turnsOf.set(shrinker, turns);
+	return turns as Turns<T>;
 };
 
 /**
