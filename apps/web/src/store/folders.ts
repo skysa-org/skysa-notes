@@ -20,6 +20,7 @@ import { deletedHere } from './deletedHere.js';
 import { handOverToCopies } from './files.js';
 import { foldPath, freePath } from './naming.js';
 import { forgetOpenNotebooks, moveOpenNotebooks } from './openNotebooks.js';
+import { dropPictures } from './pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from './pins.js';
 import {
 	queueDelete,
@@ -484,7 +485,17 @@ export const deleteFolder = async (
 
 	await db.transaction(
 		'rw',
-		[db.folders, db.notes, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
+		[
+			db.folders,
+			db.notes,
+			db.opQueue,
+			db.syncState,
+			db.prefs,
+			db.files,
+			db.fileBytes,
+			db.pictures,
+			db.pictureBytes,
+		],
 		async () => {
 			const connectionId = options.connectionId ?? (await activeConnectionId(db));
 			const folders = await db.folders.where('connectionId').equals(connectionId).toArray();
@@ -529,6 +540,7 @@ export const deleteFolder = async (
 			const keys = files.map((file): [string, string] => [file.connectionId, file.id]);
 			await db.files.bulkDelete(keys);
 			await db.fileBytes.bulkDelete(keys);
+			await dropPictures(db, keys);
 
 			// A notebook the remote never heard of: its `mkdir` is withdrawn rather
 			// than sent, or it would make a directory this device can no longer ask

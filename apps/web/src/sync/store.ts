@@ -34,6 +34,7 @@ import { heldBytesAreCurrent } from '../store/files.js';
 import { foldPath } from '../store/naming.js';
 import { noteFile, noteRecordFromFile } from '../store/notes.js';
 import { forgetOpenNotebooks, moveOpenNotebooks } from '../store/openNotebooks.js';
+import { dropPictures, restampPicture } from '../store/pictures.js';
 import { forgetPinnedNotebooks, movePinnedNotebooks } from '../store/pins.js';
 import { queueMove, queueWrite } from '../store/queue.js';
 
@@ -84,7 +85,15 @@ export interface DexieSyncStoreOptions {
 
 type Scope = Pick<
 	NotesDatabase,
-	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes' | 'prefs'
+	| 'notes'
+	| 'folders'
+	| 'opQueue'
+	| 'syncState'
+	| 'files'
+	| 'fileBytes'
+	| 'prefs'
+	| 'pictures'
+	| 'pictureBytes'
 >;
 
 /**
@@ -247,7 +256,17 @@ export const createDexieSyncStore = (
 	const inTransaction = <T>(work: () => Promise<T>): Promise<T> =>
 		db.transaction(
 			'rw',
-			[db.notes, db.folders, db.opQueue, db.syncState, db.prefs, db.files, db.fileBytes],
+			[
+				db.notes,
+				db.folders,
+				db.opQueue,
+				db.syncState,
+				db.prefs,
+				db.files,
+				db.fileBytes,
+				db.pictures,
+				db.pictureBytes,
+			],
 			async () => {
 				const state = await db.syncState.get(connectionId);
 				// Gone, or detached. A run that was at the network when the source
@@ -280,10 +299,11 @@ export const createDexieSyncStore = (
 	const ownFile = (scope: Scope, id: string): Promise<FileRecord | undefined> =>
 		scope.files.get(fileKey(id));
 
-	/** A row and whatever is held for it, together. */
+	/** A row and whatever is held for it, together, and whatever was read of its picture. */
 	const dropFile = async (scope: Scope, id: string): Promise<void> => {
 		await scope.files.delete(fileKey(id));
 		await scope.fileBytes.delete(fileKey(id));
+		await dropPictures(scope, [fileKey(id)]);
 	};
 
 	const fileOpsOf = async (scope: Scope, fileId: string): Promise<OpQueueRecord[]> =>
@@ -685,10 +705,16 @@ export const createDexieSyncStore = (
 		}, Promise.resolve());
 	};
 
-	/** Bytes that were held, kept as the remote version's now that it has them. */
+	/**
+	 * Bytes that were held, kept as the remote version's now that it has them;
+	 * and what was read of the picture they are, if they are one, which was
+	 * read while they were only here.
+	 */
 	const releaseBytes = async (scope: Scope, id: string, version: string): Promise<void> => {
 		const held = await scope.fileBytes.get(fileKey(id));
 		if (held !== undefined) await scope.fileBytes.put(cachedAs(held, version));
+		const file = await ownFile(scope, id);
+		if (file !== undefined) await restampPicture(scope, fileKey(id), {}, file);
 	};
 
 	const upsertFile = async (
@@ -879,6 +905,9 @@ export const createDexieSyncStore = (
 			remoteId: outcome.remote.remoteId,
 			remoteVersion: outcome.remote.version,
 		};
+		// What was read of its picture, as its bytes are.
+		if (same) await restampPicture(scope, fileKey(file.id), file, landed);
+		else await dropPictures(scope, [fileKey(file.id)]);
 		const queued = (await fileOpsOf(scope, file.id)).some(
 			(op) => op.op === 'move-file' && op.seq !== undefined
 		);

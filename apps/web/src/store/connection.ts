@@ -34,6 +34,7 @@ import { goneSources } from './goneSources.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freePath } from './naming.js';
 import { noteFile } from './notes.js';
+import { dropPictures, forgetPictures, restampPicture } from './pictures.js';
 import { queueByNotebook } from './queue.js';
 import {
 	countOf,
@@ -106,7 +107,16 @@ export const accountKey = (provider: ProviderKind, accountId: string | null | un
 
 type Scope = Pick<
 	NotesDatabase,
-	'notes' | 'folders' | 'opQueue' | 'syncState' | 'files' | 'fileBytes' | 'clips' | 'clipBytes'
+	| 'notes'
+	| 'folders'
+	| 'opQueue'
+	| 'syncState'
+	| 'files'
+	| 'fileBytes'
+	| 'clips'
+	| 'clipBytes'
+	| 'pictures'
+	| 'pictureBytes'
 >;
 
 /** `accountId` on a `syncState` row, or nothing where the API did not name one. */
@@ -279,6 +289,7 @@ const placeFiles = async (
 	if (only === undefined && !keep) {
 		await db.files.bulkDelete(leaving.map(fileKey));
 		await db.fileBytes.bulkDelete(leaving.map(fileKey));
+		await dropPictures(db, leaving.map(fileKey));
 	}
 	return placed;
 };
@@ -565,12 +576,15 @@ const cutLoose = async (db: Scope, connectionId: string): Promise<Moved> => {
 		if (held === undefined || !heldBytesAreCurrent(file, held)) {
 			await db.files.delete(fileKey(file));
 			await db.fileBytes.delete(fileKey(file));
+			await dropPictures(db, [fileKey(file)]);
 			return done;
 		}
 		const { remoteId: _remoteId, remoteVersion: _remoteVersion, ...loose } = file;
 		const { version: _version, ...bytes } = held;
 		await db.files.put(loose);
 		await db.fileBytes.put({ ...bytes, pinned: 1 });
+		// The same bytes, now only here: so is what was read of the picture they are.
+		await restampPicture(db, fileKey(file), file, {});
 		return [...done, loose];
 	}, Promise.resolve([]));
 	return { notes: cut, folders: unlinked, files: pending, linked: false };
@@ -610,6 +624,8 @@ const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T>
 			db.fileBytes,
 			db.clips,
 			db.clipBytes,
+			db.pictures,
+			db.pictureBytes,
 		],
 		work
 	);
@@ -1036,6 +1052,7 @@ const keepOnly = async (
 	const [kept, gone] = [files.filter(keeps), files.filter((file) => !keeps(file))];
 	await db.files.bulkDelete(gone.map(fileKey));
 	await db.fileBytes.bulkDelete(gone.map(fileKey));
+	await dropPictures(db, gone.map(fileKey));
 	const keptIds = new Set(kept.map((file) => file.id));
 
 	// Folded, as the providers compare: `Work` and `work` are one directory.
@@ -1133,6 +1150,7 @@ const forgetRows = async (db: Scope, connectionId: string): Promise<void> => {
 	await db.files.where('connectionId').equals(connectionId).delete();
 	await db.fileBytes.where('connectionId').equals(connectionId).delete();
 	await forgetClips(db, [connectionId]);
+	await forgetPictures(db, [connectionId]);
 };
 
 /**
