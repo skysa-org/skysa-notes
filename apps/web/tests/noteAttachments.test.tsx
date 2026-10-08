@@ -1,4 +1,4 @@
-import { MAX_ATTACHMENT_BYTES } from '@skysa/core';
+import { imageInfo, MAX_ATTACHMENT_BYTES } from '@skysa/core';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,8 +9,9 @@ import {
 	pictureUrls,
 	useNoteAttachments,
 } from '../src/components/noteAttachments.js';
-import type { AttachmentProblem, Shown } from '../src/editor/attachHost.js';
+import type { AttachmentProblem, Shown, ShowOptions } from '../src/editor/attachHost.js';
 import { createObjectUrlCache, type ObjectUrlFactory } from '../src/editor/objectUrls.js';
+import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import {
 	createDatabase,
 	type FileRecord,
@@ -18,6 +19,7 @@ import {
 	type NotesDatabase,
 } from '../src/store/db.js';
 import { createNote, draftNote } from '../src/store/notes.js';
+import { heldCopy, heldPicture, keepPicture } from '../src/store/pictures.js';
 import type { FileRead } from '../src/sync/fileReads.js';
 import type { SchedulerStatus, SyncScheduler } from '../src/sync/scheduler.js';
 
@@ -284,6 +286,306 @@ describe('a picture beside the open note', () => {
 		editor.dispose();
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(revoked).toEqual(['blob:test/1']);
+	});
+});
+
+const be32 = (value: number): number[] => [
+	(value >>> 24) & 255,
+	(value >>> 16) & 255,
+	(value >>> 8) & 255,
+	value & 255,
+];
+
+const chunk = (type: string, data: readonly number[] = []): number[] => [
+	...be32(data.length),
+	...[...type].map((char) => char.charCodeAt(0)),
+	...data,
+	0,
+	0,
+	0,
+	0,
+];
+
+/** A PNG's header and nothing to draw: all `imageInfo` reads, which is all that reads it here. */
+const pngOf = (width: number, height: number): ArrayBuffer =>
+	new Uint8Array([
+		...[...'\x89PNG\r\n\x1a\n'].map((char) => char.charCodeAt(0)),
+		...chunk('IHDR', [...be32(width), ...be32(height), 8, 2, 0, 0, 0]),
+		...chunk('IDAT', [0]),
+		...chunk('IEND'),
+	]).buffer;
+
+const photo = pngOf(4000, 3000);
+
+/** A copy as the browser would make it: `want` wide, at the photo's shape. */
+const madeAs = (want: { width: number }): Shrunk => ({
+	kind: 'made',
+	copy: new Blob(['copy'], { type: 'image/webp' }),
+	width: want.width,
+	height: Math.round((want.width * 3) / 4),
+});
+
+/** A shrinker that answers as told, or at once with a copy, keeping what it was asked. */
+const shrinkerOf = (answer: (want: { width: number }) => Promise<Shrunk> | Shrunk = madeAs) => {
+	const asked: { width: number; alpha: boolean }[] = [];
+	const shrinker: PictureShrinker = {
+		shrink: (_picture, { width, alpha }) => {
+			asked.push({ width, alpha });
+			return Promise.resolve(answer({ width }));
+		},
+	};
+	return { shrinker, asked };
+};
+
+/**
+ * The files beside `notes/day.md`, shown at the width an upright iPhone draws
+ * a note's pictures at, with copies made by `shrinker`.
+ */
+const fitted = (
+	answer: FileRead = { state: 'ready', bytes: photo },
+	shrink?: Parameters<typeof shrinkerOf>[0]
+) => {
+	const db = freshDatabase();
+	const where = { current: { connectionId: 'c1', id: 'n1', path: 'notes/day.md' } };
+	const readFile = vi.fn<NoteAttachmentsOptions['readFile']>(() => Promise.resolve(answer));
+	const { urls, made } = objectUrls();
+	const { shrinker, asked } = shrinkerOf(shrink);
+	const host = createNoteAttachments({ db, note: () => where.current, readFile, urls, shrinker });
+	const show = (href: string, options: Partial<ShowOptions> = {}): Promise<Shown> =>
+		host.show(href, { signal: new AbortController().signal, fit: { width: 1170 }, ...options });
+	return { db, where, readFile, host, show, made, asked };
+};
+
+/** Lets a URL nothing holds go, as the cache does once its grace is over. */
+const letGo = async (shown: Shown) => {
+	if (shown.state === 'ready') shown.release();
+	await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+describe('a picture shown at the size a view draws it', () => {
+	it('is drawn from a copy that wide, made once from its bytes and kept', async () => {
+		const { db, show, readFile, made, asked } = fitted();
+		await db.files.put(row('notes/cat.png'));
+
+		const first = await show('cat.png');
+
+		expect(first).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(asked).toEqual([{ width: 1280, alpha: false }]);
+		expect(made[0]?.type).toBe('image/webp');
+		expect(await heldCopy(db, 'c1', 'notes/cat.png', 'w1280', 0)).toMatchObject({
+			width: 1280,
+			height: 960,
+		});
+
+		await letGo(first);
+		expect(await show('cat.png')).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(asked).toHaveLength(1);
+		expect(readFile).toHaveBeenCalledTimes(1);
+		expect(await made[1]?.text()).toBe('copy');
+	});
+
+	it('is copied once for two views that want the same copy, whichever asks second', async () => {
+		const { db, show, readFile, asked } = fitted();
+		await db.files.put(row('notes/cat.png'));
+
+		const [phone, card] = await Promise.all([
+			show('cat.png'),
+			show('cat.png', { fit: { width: 1200 } }),
+		]);
+
+		expect([phone.state, card.state]).toEqual(['ready', 'ready']);
+		expect(asked).toHaveLength(1);
+		expect(readFile).toHaveBeenCalledTimes(1);
+	});
+
+	it('is drawn as it is where a copy would barely shrink it, and says its size', async () => {
+		const { db, host, show, made, asked } = fitted({ state: 'ready', bytes: pngOf(1200, 900) });
+		await db.files.put(row('notes/cat.png'));
+		expect(await host.size('cat.png')).toBeUndefined();
+
+		expect(await show('cat.png')).toMatchObject({ state: 'ready', width: 1200, height: 900 });
+
+		expect(asked).toEqual([]);
+		expect(made[0]?.type).toBe('image/png');
+		expect(await host.size('cat.png')).toEqual({ width: 1200, height: 900 });
+		expect(await host.size('dog.png')).toBeUndefined();
+	});
+
+	it('is a copy of another size where the original cannot be had now, and why where there is none', async () => {
+		const { db, show, made, readFile } = fitted({ state: 'offline' });
+		await db.files.put(row('notes/cat.png'));
+		await db.files.put(row('notes/map.png', { size: LARGE_PICTURE_BYTES + 1 }));
+		await db.files.put(row('notes/dog.png'));
+		const thumb = { variant: 'thumb', bytes: bufferOf('thumb'), type: 'image/webp' } as const;
+		const info = imageInfo(new Uint8Array(photo)) ?? null;
+		await keepPicture(
+			db,
+			row('notes/cat.png'),
+			{ info, copy: { ...thumb, width: 512, height: 384 } },
+			0
+		);
+		await keepPicture(
+			db,
+			row('notes/map.png'),
+			{ info, copy: { ...thumb, width: 512, height: 384 } },
+			0
+		);
+
+		// Offline, and too large to download unasked: the thumb stands in.
+		expect(await show('cat.png')).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(await show('map.png')).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(await Promise.all(made.map((blob) => blob.text()))).toEqual(['thumb', 'thumb']);
+		expect(readFile).toHaveBeenCalledTimes(1);
+		expect(await show('dog.png')).toEqual({ state: 'offline' });
+	});
+
+	it('is shown as it is, and not asked of the browser again, where it could not copy it', async () => {
+		const { db, show, made, asked } = fitted(undefined, () => ({ kind: 'refused' }));
+		await db.files.put(row('notes/cat.png'));
+
+		const first = await show('cat.png');
+		expect(first).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(made[0]?.type).toBe('image/png');
+		await letGo(first);
+		expect(await show('cat.png')).toMatchObject({ state: 'ready' });
+
+		expect(asked).toHaveLength(1);
+		expect(await heldPicture(db, 'c1', 'notes/cat.png')).toMatchObject({ refused: true });
+	});
+
+	it('is shown as it is where no copy was made this time, and asked for again the next', async () => {
+		const { db, show, asked } = fitted(undefined, () => ({ kind: 'missed' }));
+		await db.files.put(row('notes/cat.png'));
+
+		await letGo(await show('cat.png'));
+		expect(await show('cat.png')).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+
+		expect(asked).toHaveLength(2);
+	});
+
+	it('waits its turn, its original read only then, and has nothing made once it stops waiting', async () => {
+		const answers: (() => void)[] = [];
+		const { db, show, readFile, asked } = fitted(
+			undefined,
+			(want) =>
+				new Promise((resolve) => {
+					answers.push(() => {
+						resolve(madeAs(want));
+					});
+				})
+		);
+		await Promise.all(['a', 'b', 'c'].map((name) => db.files.put(row(`notes/${name}.png`))));
+		const leaving = new AbortController();
+
+		const a = show('a.png');
+		const b = show('b.png', { signal: leaving.signal });
+		const c = show('c.png');
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(1);
+		});
+		expect(readFile.mock.calls.map(([, id]) => id)).toEqual(['notes/a.png']);
+		leaving.abort();
+		answers[0]?.();
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(2);
+		});
+		answers[1]?.();
+
+		expect(await a).toMatchObject({ state: 'ready' });
+		expect(await b).toEqual({ state: 'aborted' });
+		expect(await c).toMatchObject({ state: 'ready' });
+		expect(readFile.mock.calls.map(([, id]) => id)).toEqual(['notes/a.png', 'notes/c.png']);
+		expect(asked).toHaveLength(2);
+	});
+
+	it('says at once that it is too large to download unasked, rather than at its turn', async () => {
+		const answers: (() => void)[] = [];
+		const { db, show, readFile, asked } = fitted(
+			undefined,
+			(want) =>
+				new Promise((resolve) => {
+					answers.push(() => {
+						resolve(madeAs(want));
+					});
+				})
+		);
+		const large = LARGE_PICTURE_BYTES + 1;
+		await db.files.put(row('notes/a.png'));
+		await db.files.put(row('notes/map.png', { size: large }));
+		await db.files.put(row('notes/held.png', { size: large }));
+		await db.fileBytes.put({
+			connectionId: 'c1',
+			id: 'notes/held.png',
+			bytes: photo,
+			version: 'v1',
+			pinned: 0,
+			lastUsedAt: 0,
+		});
+
+		const a = show('a.png');
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(1);
+		});
+		// While the copy asked for before it is being made.
+		expect(await show('map.png')).toEqual({ state: 'large', size: large });
+		expect(readFile.mock.calls.map(([, id]) => id)).toEqual(['notes/a.png']);
+
+		// One on the device is copied, at its turn.
+		const held = show('held.png');
+		answers[0]?.();
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(2);
+		});
+		answers[1]?.();
+		expect(await a).toMatchObject({ state: 'ready' });
+		expect(await held).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(asked).toHaveLength(2);
+		expect(readFile).toHaveBeenCalledTimes(1);
+	});
+
+	it('is shown as it is where the browser makes no copies, its size kept for next time', async () => {
+		const db = freshDatabase();
+		const readFile = vi.fn<NoteAttachmentsOptions['readFile']>(() =>
+			Promise.resolve({ state: 'ready', bytes: photo })
+		);
+		const { urls, made } = objectUrls();
+		const host = createNoteAttachments({
+			db,
+			note: () => ({ connectionId: 'c1', id: 'n1', path: 'notes/day.md' }),
+			readFile,
+			urls,
+			shrinker: noShrinker,
+		});
+		await db.files.put(row('notes/cat.png'));
+
+		const shown = await host.show('cat.png', {
+			signal: new AbortController().signal,
+			fit: { width: 1170 },
+		});
+
+		expect(shown).toMatchObject({ state: 'ready', width: 4000, height: 3000 });
+		expect(made[0]?.type).toBe('image/png');
+		expect(await host.size('cat.png')).toEqual({ width: 4000, height: 3000 });
+	});
+
+	it('is copied, once put in the note, from the bytes on this device', async () => {
+		const { db, where, host, show, readFile, asked } = fitted();
+		const note = await createNote(db, {
+			title: 'Day',
+			connectionId: 'c1',
+			folderPath: 'notes',
+		});
+		where.current = note;
+		const added = await host.add(new File([photo], 'cat.png', { type: 'image/png' }), {
+			pasted: false,
+		});
+
+		expect(await show(added.state === 'added' ? added.href : '')).toMatchObject({
+			state: 'ready',
+			width: 4000,
+		});
+		expect(asked).toEqual([{ width: 1280, alpha: false }]);
+		expect(readFile).not.toHaveBeenCalled();
 	});
 });
 

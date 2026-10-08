@@ -129,6 +129,21 @@ describe('a picture as this device keeps it', () => {
 		expect(await bytesHeld(db)).toEqual(['a:w960']);
 	});
 
+	it('stays refused by the browser while it is these bytes, and no longer once it is others', async () => {
+		const db = freshDatabase();
+		const file = boundRow('a');
+		await db.files.put(file);
+		await keepPicture(db, file, { info: INFO, refused: true }, 0);
+		// Read again without the browser asked, and still said.
+		await keepPicture(db, file, { info: INFO }, 0);
+		expect(await heldPicture(db, CONNECTION, 'a')).toMatchObject({ refused: true });
+
+		await db.files.put(boundRow('a', 'v2'));
+		await keepPicture(db, boundRow('a', 'v2'), { info: INFO }, 0);
+
+		expect(await heldPicture(db, CONNECTION, 'a')).not.toHaveProperty('refused');
+	});
+
 	it('is not kept for a row that has gone, or moved on from the bytes it was read from', async () => {
 		const db = freshDatabase();
 		expect(await keepPicture(db, boundRow('a'), { info: INFO, copy: made('thumb') }, 0)).toBe(

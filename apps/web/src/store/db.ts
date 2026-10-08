@@ -371,6 +371,11 @@ export interface PictureRecord {
 	version?: string;
 	/** What its header says (`imageInfo`); `null` where it says nothing the app reads. */
 	info: PictureInfo | null;
+	/**
+	 * The browser could not draw a copy of it: it is shown as it is, and no
+	 * copy is asked for again while the record stands for these bytes.
+	 */
+	refused?: true;
 	copies: Partial<Record<PictureVariant, PictureCopyRecord>>;
 }
 

@@ -90,6 +90,7 @@ Each run clones its profile into a directory of its own.
 | typing | type 132 keys into a note in Big, then autosave | `tbt`, `longest`, `idbNotes`, `keyP95` |
 | search | put a rare word into search at once, until every note holding it is listed | `answerMs`, `longest` |
 | pictures / pictures48 | open the 12 MP / 48 MP note, fling it, leave | `decodedMB`, `rendererMB`, `leftRendererMB`, `firstMs` |
+| picturesAgain / pictures48Again | the same, a second time in the same run: from what the first open left on the device, such as copies | as above |
 | cards | the scratchpad with picture cards, flung through | `decodedMB`, `rendererMB`, `firstMs` |
 
 - A time after a tap (openBig's `listedMs`, `tapP50`, `cardsMs`, `openMs`) starts when

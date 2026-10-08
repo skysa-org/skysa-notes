@@ -2069,6 +2069,19 @@ button.danger {
 	background: var(--surface);
 }
 
+/*
+ * The room it will take, where this device has read its size before
+ * (`editor/image.ts`, #276): as wide as the picture, or the line, and as tall
+ * as that makes it — however small, since the least room above is for a
+ * picture whose size is not known.
+ */
+.editor-rich-surface .note-image[data-state='loading'][data-sized] {
+	min-inline-size: 0;
+	min-block-size: 0;
+	inline-size: min(100%, var(--note-image-width));
+	aspect-ratio: var(--note-image-ratio);
+}
+
 .editor-rich-surface .note-image:not([data-state='ready'], [data-state='loading']) {
 	display: inline-flex;
 	flex-wrap: wrap;

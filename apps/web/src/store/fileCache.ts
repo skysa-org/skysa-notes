@@ -51,6 +51,16 @@ const touch = (db: NotesDatabase, key: [string, string], now: number): Promise<v
 	});
 
 /**
+ * Whether this device holds bytes for `file`, current or not: read by key
+ * alone, to decide something without reading up to 25 MB.
+ */
+export const holdsBytes = async (
+	db: NotesDatabase,
+	file: Pick<FileRecord, 'connectionId' | 'id'>
+): Promise<boolean> =>
+	(await db.fileBytes.where('[connectionId+id]').equals(fileKey(file)).count()) > 0;
+
+/**
  * The row and its current bytes, if any, with the use written back once it is
  * `TOUCH_AFTER_MS` stale. `undefined` where the source has no such file.
  *
