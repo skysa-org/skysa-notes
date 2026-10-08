@@ -3509,11 +3509,16 @@ button.icon.account-devices-count {
 
 /* A picture in a card, where it is in the note: whole, as wide as the card
    and no taller than about six of its lines (`PICTURE_LINES`). Until it is
-   got, its words, in their place among the others. A chip is the editor's
-   own (`.attachment-chip`), at the card's size. */
+   got, its words, in the room it will take (below), or among the others
+   where it takes none. A chip is the editor's own (`.attachment-chip`), at
+   the card's size. */
 .scratch-card-picture[data-state='ready'] {
 	display: block;
 	margin-block: 0.2rem;
+}
+
+.scratch-card-picture {
+	--card-picture-most: 8rem;
 }
 
 .scratch-card-picture > img {
@@ -3521,8 +3526,49 @@ button.icon.account-devices-count {
 	width: auto;
 	max-width: 100%;
 	height: auto;
-	max-height: 8rem;
+	max-height: var(--card-picture-most);
 	border-radius: 0.25rem;
+}
+
+/* The room it takes (`CardEmbed.tsx`, `Room`, #276), so the card is as tall
+   before it arrives as after and the wall does not place it again when it
+   does: the same as it is drawn in, where its size was known before, and
+   else the tallest a card draws a picture, the picture drawn whole inside it
+   and never larger than it is. Its words meanwhile, in it. Where its size is
+   known, the picture fills it, whichever copy it is. */
+.scratch-card-picture[data-room] {
+	display: block;
+	overflow: hidden;
+	margin-block: 0.2rem;
+	border-radius: 0.25rem;
+}
+
+.scratch-card-picture[data-room]:not([data-state='ready']) {
+	background: var(--hover-bg);
+}
+
+.scratch-card-picture[data-room='sized'] {
+	inline-size: min(
+		100%,
+		var(--card-picture-width),
+		calc(var(--card-picture-most) * var(--card-picture-ratio))
+	);
+	aspect-ratio: var(--card-picture-ratio);
+}
+
+.scratch-card-picture[data-room='tallest'] {
+	block-size: var(--card-picture-most);
+}
+
+.scratch-card-picture[data-room] > img {
+	width: 100%;
+	height: 100%;
+	max-height: none;
+}
+
+.scratch-card-picture[data-room='tallest'] > img {
+	object-fit: scale-down;
+	object-position: left top;
 }
 
 .scratch-card-chip {
