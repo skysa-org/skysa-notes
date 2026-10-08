@@ -1719,7 +1719,8 @@ export interface ConnectedSource {
 	 * A source this device no longer reaches, still listed for what it holds
 	 * that was never sent. How much is the detached source's panel's to count
 	 * (`unsyncedIn`): counted here, it read every note of the source each time
-	 * a sync run wrote its `syncState` row, which re-runs this list (#275).
+	 * a sync run wrote any source's `syncState` row, which re-runs this list
+	 * (#275).
 	 */
 	detached?: true;
 }
@@ -1757,10 +1758,7 @@ export const pileContents = async (
  * the only thing the list offers.
  */
 export const connectedSources = async (
-	db: Pick<
-		NotesDatabase,
-		'notes' | 'folders' | 'opQueue' | 'syncState' | 'prefs' | 'files' | 'fileBytes'
-	>
+	db: Pick<NotesDatabase, 'notes' | 'folders' | 'syncState' | 'prefs'>
 ): Promise<ConnectedSource[]> => {
 	const active = await activeConnectionId(db);
 	const states = await db.syncState.toArray();
