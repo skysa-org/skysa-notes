@@ -4,11 +4,12 @@ import { type ReactNode, useDeferredValue, useId, useState } from 'react';
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
+import { keepRows } from '../store/kept.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
-import { keepOpenings, noteOpening, openingLines } from '../store/visibleText.js';
+import { noteOpening, openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
 import { FloatingMenu, type MenuPoint, menuPoint, type OptionsMenuItem } from './OptionsMenu.js';
 import { RowOptions } from './RowOptions.js';
@@ -344,8 +345,8 @@ export const NoteList = ({
 }: NoteListProps) => {
 	/** A row right-clicked, and where: the note's menu is open there. */
 	const [menu, setMenu] = useState<{ note: NoteRecord; at: MenuPoint } | null>(null);
-	// Each row asks for its opening when it is drawn (`keepOpenings`).
-	keepOpenings('notes', notes?.length ?? 0);
+	// Each row asks for its opening when it is drawn.
+	keepRows('notes', notes?.length ?? 0);
 	const placeholder = placeholderFor({
 		notes,
 		folderPath,

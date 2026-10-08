@@ -1,6 +1,7 @@
 import { previewBlocks, type PreviewLine, previewLineText } from '@skysa/core';
 
 import { isCreatedLine, isTimeLine } from './createdLine.js';
+import { keptAnswers, roomFor } from './kept.js';
 
 /**
  * A note's visible text, parsed once per body.
@@ -21,7 +22,7 @@ import { isCreatedLine, isTimeLine } from './createdLine.js';
  * Bounded, oldest first out, because the keys are whole bodies: it holds what
  * the screen keeps asking about, not every version of every note the tab has
  * seen. Openings, which the lists draw, are kept for at least `LIMIT` notes and
- * more once a longer list has been shown (`keepOpenings`): a bound under the
+ * more once a longer list has been shown (`store/kept.ts`): a bound under the
  * rows drawn is no cache, since drawing the list again asks for every row in
  * the order the last draw put them out. Whole bodies, which a search answer is
  * cut from, are kept apart and for `LIMIT` at most, so a search through long
@@ -30,67 +31,25 @@ import { isCreatedLine, isTimeLine } from './createdLine.js';
 
 const LIMIT = 400;
 
-/** How much more than the lists' rows is kept: what is drawn beside them. */
-const ROOM = 1.25;
+type Parse = readonly PreviewLine[];
 
 /**
- * The longest each list has been, by name. Summed, though only one is drawn at
- * a time, so going between a notebook and the scratchpad parses neither again.
- */
-const lists = new Map<string, number>();
-
-/**
- * Keep room for `list`'s `count` rows, each asking for its opening when drawn.
- * Only ever grows: a list shown once is likely shown again, and what it keeps
- * is the openings of notes that are on the device anyway.
- */
-export const keepOpenings = (list: string, count: number): void => {
-	if (count > (lists.get(list) ?? 0)) lists.set(list, count);
-};
-
-/** Parses kept, by the text they are of, and how many may be. */
-interface Kept {
-	readonly seen: Map<string, readonly PreviewLine[]>;
-	readonly most: () => number;
-}
-
-const openings: Kept = {
-	seen: new Map(),
-	most: () =>
-		Math.max(LIMIT, Math.ceil([...lists.values()].reduce((sum, each) => sum + each, 0) * ROOM)),
-};
-
-const wholes: Kept = { seen: new Map(), most: () => LIMIT };
-
-/**
- * The blocks of `body`, kept for the next time they are asked for.
+ * The blocks of a body, kept for the next time they are asked for (`keptAnswers`).
  *
  * `keep: false` for a body being typed (`store/liveEdits.ts`), which is asked
  * once and never again: one kept per keystroke would push every other note's
  * answer out within a paragraph, and the whole list would be parsed again the
  * next time it drew.
  */
+const openings = keptAnswers<Parse>(() => roomFor(LIMIT));
+
+const wholes = keptAnswers<Parse>(() => LIMIT);
+
 const blocksOf = (
-	{ seen, most }: Kept,
+	kept: typeof openings,
 	body: string,
 	{ keep = true }: { keep?: boolean }
-): readonly PreviewLine[] => {
-	const known = seen.get(body);
-	if (known !== undefined) {
-		// To the back of the queue: asked again, so kept longest.
-		seen.delete(body);
-		seen.set(body, known);
-		return known;
-	}
-	const answer = previewBlocks(body);
-	if (!keep) return answer;
-	seen.set(body, answer);
-	if (seen.size > most()) {
-		const oldest = seen.keys().next();
-		if (oldest.done !== true) seen.delete(oldest.value);
-	}
-	return answer;
-};
+): Parse => kept(body, previewBlocks, keep);
 
 /** The lines of text read off each kept set of blocks, gone with them. */
 const linesRead = new WeakMap<readonly PreviewLine[], readonly string[]>();

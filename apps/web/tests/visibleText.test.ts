@@ -1,8 +1,8 @@
 import type * as Core from '@skysa/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { keepRows } from '../src/store/kept.js';
 import {
-	keepOpenings,
 	openingBlocks,
 	openingLines,
 	visibleLines,
@@ -91,18 +91,40 @@ describe('the parses a list costs', () => {
 
 	it('is one parse per row of a list longer than the cache was, drawn again and again', () => {
 		const rows = bodies('Row', 1_000);
-		keepOpenings('test-list', rows.length);
+		keepRows('test-list', rows.length);
 		rows.forEach((body) => openingLines(body));
 		rows.forEach((body) => openingLines(body));
 		rows.forEach((body) => openingLines(body));
 		expect(parses.count).toBe(1_000);
 	});
 
+	it('lets go of what was asked least lately, not of what was kept first', async () => {
+		// The store as a tab starts with it: the tests above drew longer lists.
+		vi.resetModules();
+		const [kept, text] = await Promise.all([
+			import('../src/store/kept.js'),
+			import('../src/store/visibleText.js'),
+		]);
+		// Room for 500: the list's 400 and a hundred more.
+		const rows = bodies('Drawn', 400);
+		kept.keepRows('list', rows.length);
+		const draw = () => {
+			rows.forEach((body) => text.openingLines(body));
+		};
+		draw();
+		// Each a note asked about once, between draws.
+		bodies('Once', 200).forEach((body) => {
+			text.openingLines(body);
+			draw();
+		});
+		expect(parses.count).toBe(400 + 200);
+	});
+
 	it('keeps room for two lists, so going between them parses neither again', () => {
 		const list = bodies('Listed', 700);
 		const cards = bodies('Card', 700);
-		keepOpenings('test-a', list.length);
-		keepOpenings('test-b', cards.length);
+		keepRows('test-a', list.length);
+		keepRows('test-b', cards.length);
 		[...list, ...cards].forEach((body) => openingBlocks(body));
 		[...list, ...cards].forEach((body) => openingBlocks(body));
 		expect(parses.count).toBe(1_400);

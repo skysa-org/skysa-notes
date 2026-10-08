@@ -36,6 +36,7 @@ import { deletedHere } from './deletedHere.js';
 import { ensureDetached } from './detached.js';
 import { carryLinkedFiles } from './files.js';
 import { ensureFolder } from './folders.js';
+import { frontmatterOf } from './frontmatter.js';
 import { movedRows } from './movedRows.js';
 import { foldPath, freeName } from './naming.js';
 import { queueDelete, queueMove, queueRestore, queueWrite } from './queue.js';
@@ -87,9 +88,13 @@ const atFallbackName = (path: string): boolean => {
 	return /^\d+$/u.test(name.slice(numbered.length, -NOTE_EXTENSION.length));
 };
 
-/** A note still sitting at the fallback filename, with no title of its own. */
+/**
+ * A note still sitting at the fallback filename, with no title of its own.
+ * Asked of every card on every draw of the scratchpad, so its frontmatter is
+ * read through the cache (`frontmatterOf`).
+ */
 export const isUnnamed = (note: NoteRecord): boolean =>
-	atFallbackName(note.path) && readFrontmatter(note.frontmatter).title === undefined;
+	atFallbackName(note.path) && frontmatterOf(note.frontmatter).title === undefined;
 
 /**
  * Everything a note needs written back to its file.
