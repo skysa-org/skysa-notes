@@ -12,6 +12,7 @@ import { noteRef, type NotesDatabase, type SyncStateRecord } from '../store/db.j
 import { holdsTextFor } from '../store/detached.js';
 import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
 import { settleEditors } from '../store/heldEdits.js';
+import { titleShown } from '../store/titles.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../sync/account.js';
 import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
@@ -165,7 +166,7 @@ const DiscardConfirm = ({
 		{listed.notes.length > 0 && (
 			<ul aria-label={t('unsent.detached.toDiscard')}>
 				{listed.notes.map((note) => (
-					<li key={noteRef(note)}>{note.title}</li>
+					<li key={noteRef(note)}>{titleShown(note.title)}</li>
 				))}
 			</ul>
 		)}

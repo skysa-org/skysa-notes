@@ -6,6 +6,7 @@ import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
+import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { keepOpenings, noteOpening, openingLines } from '../store/visibleText.js';
 import { editedAt } from './editedAt.js';
@@ -219,13 +220,13 @@ const NoteRow = ({
 					// Firefox starts no drag without data on it, and the title is what
 					// another application receives if the note is dropped outside.
 					event.dataTransfer.effectAllowed = 'move';
-					event.dataTransfer.setData('text/plain', note.title);
+					event.dataTransfer.setData('text/plain', titleShown(note.title));
 					onPickUp();
 				}}
 				onDragEnd={onCancelMove}
 			>
 				<span className="note-title">
-					{note.title}
+					{titleShown(note.title)}
 					{note.dirty === 1 && (
 						<span
 							className="dot"
@@ -242,7 +243,7 @@ const NoteRow = ({
 					</span>
 				)}
 			</button>
-			<RowOptions name={note.title} kind="Note" items={items} />
+			<RowOptions name={titleShown(note.title)} kind="Note" items={items} />
 		</li>
 	);
 };
@@ -431,7 +432,7 @@ export const NoteList = ({
 			{menu !== null && menuFor !== undefined && (
 				<FloatingMenu
 					at={menu.at}
-					label={t('rows.note.menu', { name: menu.note.title })}
+					label={t('rows.note.menu', { name: titleShown(menu.note.title) })}
 					items={menuFor(menu.note)}
 					onClose={() => {
 						setMenu(null);

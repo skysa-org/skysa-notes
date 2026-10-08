@@ -1,6 +1,7 @@
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord, noteRef } from './db.js';
+import { titleShown } from './titles.js';
 import { visibleText } from './visibleText.js';
 
 /**
@@ -39,7 +40,8 @@ interface Indexed {
 
 const indexed = (note: NoteRecord): Indexed => ({
 	id: noteRef(note),
-	title: note.title,
+	// As it is shown, so that it is found by what is on screen.
+	title: titleShown(note.title),
 	tags: note.tags.join(' '),
 	body: note.body,
 });

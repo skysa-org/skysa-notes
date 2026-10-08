@@ -15,6 +15,11 @@ export const clipboard = {
 	/** What a pasted text is called where a message names an item, as `{name}`. */
 	text: 'Text',
 	/**
+	 * What a picture pasted with no name of its own is called: on screen, as
+	 * `{name}`, and as the name it is saved under.
+	 */
+	image: 'Image',
+	/**
 	 * An item's buttons, by what pressing it does: a text or a picture is copied,
 	 * a file is saved. `{name}` is the item's name: `q3-report.pdf`, `Image`.
 	 * "Waiting to send" is an item not yet sent to the source's other devices.

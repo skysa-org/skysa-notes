@@ -3,6 +3,12 @@
  * and the open note around its editor.
  */
 export const notes = {
+	/**
+	 * What a note with nothing to take a name from is called, wherever its
+	 * title is shown. Only shown: the note is still `untitled.md` in the
+	 * user's folder, in every language.
+	 */
+	untitled: 'Untitled',
 	/** The middle pane, with the open notebook's notes. */
 	list: {
 		/** The pane's name, and its heading while no notebook is open. */

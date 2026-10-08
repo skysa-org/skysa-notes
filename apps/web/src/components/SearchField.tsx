@@ -4,6 +4,7 @@ import { type RefObject, useEffect, useId, useRef, useState } from 'react';
 import { t } from '../i18n/t.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
 import { type NoteHit, SEARCH_LIMIT } from '../store/search.js';
+import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { editedAt } from './editedAt.js';
 
@@ -231,7 +232,7 @@ export const SearchField = ({
 										choose(hit.note);
 									}}
 								>
-									<span className="note-title">{hit.note.title}</span>
+									<span className="note-title">{titleShown(hit.note.title)}</span>
 									{/* Which source and which notebook, because a
 									    search crosses all of them and two notes can
 									    share a title. */}

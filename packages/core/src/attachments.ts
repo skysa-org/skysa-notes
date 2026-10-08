@@ -97,23 +97,6 @@ export const showsInline = (name: string): boolean => INLINE.has(extensionOf(nam
  */
 export const drawsFromData = (name: string): boolean => extensionOf(name) === 'svg';
 
-const LABELS: Readonly<Record<FileKind, string>> = {
-	image: 'Image',
-	pdf: 'PDF',
-	document: 'Document',
-	text: 'Text',
-	spreadsheet: 'Spreadsheet',
-	presentation: 'Presentation',
-	archive: 'Archive',
-	audio: 'Audio',
-	video: 'Video',
-	code: 'Code',
-	file: 'File',
-};
-
-/** What a screen reader is told a chip is, after its name: "Q3 report.pdf, PDF". */
-export const fileKindLabel = (kind: FileKind): string => LABELS[kind];
-
 /**
  * The only types a file is opened in a tab as. Each is one a browser shows in a
  * viewer of its own that runs nothing of the file's in this origin.

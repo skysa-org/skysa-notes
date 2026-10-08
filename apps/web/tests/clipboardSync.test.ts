@@ -114,7 +114,11 @@ describe('pasting here', () => {
 		await addClips(db, 'c1', [text('second'), file('Q3 Report.pdf', '%PDF')], AT - 60_000);
 
 		const listed = (await listClips(db, 'c1')).map((row) => readClipName(row.name));
-		expect(listed.map((read) => read?.label)).toEqual(['q3-report.pdf', 'Text', 'Text']);
+		expect(listed.map((read) => read?.label ?? read?.kind)).toEqual([
+			'q3-report.pdf',
+			'text',
+			'text',
+		]);
 		expect(listed.map((read) => read?.at)).toEqual([AT + 2, AT + 1, AT]);
 	});
 

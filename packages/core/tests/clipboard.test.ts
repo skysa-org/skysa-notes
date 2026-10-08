@@ -43,13 +43,13 @@ describe('readClipName', () => {
 			at: AT,
 			hash: '3f9a1c2b',
 			kind: 'text',
-			label: 'Text',
+			label: undefined,
 		});
 		expect(
 			readClipName(
 				clipName({ at: AT, hash: HASH, name: 'x.png', type: 'image/png', pasted: true })
 			)
-		).toEqual({ at: AT, hash: '3f9a1c2b', kind: 'image', label: 'Image' });
+		).toEqual({ at: AT, hash: '3f9a1c2b', kind: 'image', label: undefined });
 		expect(readClipName(clipName({ at: AT, hash: HASH, name: 'Holiday.JPG' }))).toEqual({
 			at: AT,
 			hash: '3f9a1c2b',

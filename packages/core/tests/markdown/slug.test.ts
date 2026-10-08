@@ -253,6 +253,8 @@ describe('sanitizeFolderName', () => {
 	it('falls back for a name with nothing usable in it', () => {
 		expect(sanitizeFolderName('')).toBe('Untitled');
 		expect(sanitizeFolderName('///')).toBe('Untitled');
+		expect(sanitizeFolderName('///', 'Ohne Titel')).toBe('Ohne Titel');
+		expect(sanitizeFolderName('Q3', 'Ohne Titel')).toBe('Q3');
 	});
 
 	it('sidesteps Windows device names', () => {

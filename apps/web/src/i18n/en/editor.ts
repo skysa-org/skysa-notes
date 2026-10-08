@@ -231,5 +231,16 @@ export const editor = {
 			named: '{name} cannot be added: a .md file beside a note is another note.',
 			unnamed: 'That file cannot be added: a .md file beside a note is another note.',
 		},
+		/**
+		 * What the link to a file says, written into the note, where the file's
+		 * name gives nothing to say: a picture pasted from the clipboard, whose
+		 * name (`image.png`) is the browser's; a picture whose name is only an
+		 * extension; any other file with no name.
+		 */
+		linkText: {
+			pastedImage: 'Pasted image',
+			image: 'Image',
+			file: 'Attachment',
+		},
 	},
 } as const;

@@ -15,6 +15,7 @@ import {
 	showsInline,
 } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import {
 	activeConnectionId,
 	type FileBytesRecord,
@@ -220,7 +221,16 @@ export const addAttachment = async (
 	);
 	const stored = basename(file.path);
 	const kind: AttachmentKind = showsInline(stored) ? 'image' : 'file';
-	const label = attachmentLabel({ name: input.name, kind, pasted: input.pasted });
+	const label = attachmentLabel({
+		name: input.name,
+		kind,
+		pasted: input.pasted,
+		words: {
+			pastedImage: t('editor.attach.linkText.pastedImage'),
+			image: t('editor.attach.linkText.image'),
+			file: t('editor.attach.linkText.file'),
+		},
+	});
 	const href = attachmentHref(stored);
 	return {
 		fileId: file.id,

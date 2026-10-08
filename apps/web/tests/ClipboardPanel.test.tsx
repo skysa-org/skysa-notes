@@ -168,10 +168,8 @@ describe('the clipboard panel', () => {
 			clipboardData: { files: [new File(['%PDF'], 'q3.pdf')], getData: () => '' },
 		});
 		expect(await screen.findByText('q3.pdf')).toBeDefined();
-		expect((await rows()).map((row) => readClipName(row.name)?.label).sort()).toEqual([
-			'Text',
-			'q3.pdf',
-		]);
+		const read = (await rows()).map((row) => readClipName(row.name));
+		expect(read.map((name) => name?.label ?? name?.kind).sort()).toEqual(['q3.pdf', 'text']);
 	});
 
 	it('takes files dropped on it, and leaves a drag that carries none to whatever else wants it', async () => {

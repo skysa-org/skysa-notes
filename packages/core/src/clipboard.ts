@@ -25,8 +25,12 @@ export interface ClipName {
 	/** The hex of its SHA-256 the name carries, 8 to 16 characters. */
 	hash: string;
 	kind: ClipKind;
-	/** What it is called on screen and saved as: `q3-report.pdf`, `Text`, `Image`. */
-	label: string;
+	/**
+	 * Its own name, as it is shown and saved: `q3-report.pdf`. None for text, or
+	 * for a picture pasted with no name of its own, which the app calls
+	 * something in the user's language.
+	 */
+	label: string | undefined;
 }
 
 /** The name the stem of a pasted text takes. */
@@ -109,8 +113,10 @@ export const readClipName = (name: string): ClipName | undefined => {
 	);
 	// A month or an hour that is no such thing, which `Date.UTC` rolls over.
 	if (Number.isNaN(at) || stampOf(at) !== name.slice(0, 19)) return undefined;
-	if (stem === TEXT_STEM && extension === 'txt') return { at, hash, kind: 'text', label: 'Text' };
-	const label = stem === PASTED_IMAGE_STEM ? 'Image' : `${stem}.${extension}`;
+	if (stem === TEXT_STEM && extension === 'txt') {
+		return { at, hash, kind: 'text', label: undefined };
+	}
+	const label = stem === PASTED_IMAGE_STEM ? undefined : `${stem}.${extension}`;
 	// A picture the browser draws, and not an SVG: a picture here is drawn from
 	// a `blob:` URL, which is this app's origin (§9).
 	const image = showsInline(name) && extensionOf(name) !== 'svg';

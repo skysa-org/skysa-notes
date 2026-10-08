@@ -109,7 +109,8 @@ describe('something shared to the app', () => {
 			expect(onAdded).toHaveBeenCalled();
 		});
 		const rows = await clips();
-		expect(rows.map((row) => readClipName(row.name)?.label).sort()).toEqual(['Text', 'q3.pdf']);
+		const read = rows.map((row) => readClipName(row.name));
+		expect(read.map((name) => name?.label ?? name?.kind).sort()).toEqual(['q3.pdf', 'text']);
 		expect(rows.every((row) => row.state === 'pending')).toBe(true);
 		expect(sync.clipboard.flush).toHaveBeenCalledWith('c1');
 		expect(sync.clipboard.refresh).not.toHaveBeenCalled();
