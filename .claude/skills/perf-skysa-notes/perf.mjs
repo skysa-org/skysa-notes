@@ -163,13 +163,23 @@ const fling = async (page, cdp, selector) => {
 	const box = await page.evaluate((selector) => {
 		const start = document.querySelector(selector);
 		let element = start;
-		while (element && !/(auto|scroll)/.test(getComputedStyle(element).overflowY))
+		// The nearest that scrolls and has something to scroll.
+		while (
+			element &&
+			!(
+				/(auto|scroll)/.test(getComputedStyle(element).overflowY) &&
+				element.scrollHeight > element.clientHeight
+			)
+		)
 			element = element.parentElement;
 		const scroller = element ?? document.scrollingElement;
 		scroller.setAttribute('data-perf-scroller', '');
+		// From the top, wherever what came before left it.
+		scroller.scrollTo(0, 0);
 		const rect = scroller.getBoundingClientRect();
 		return { x: rect.left + rect.width / 2, y: rect.top + Math.min(rect.height / 2, 400) };
 	}, selector);
+	await quiet(page, 300);
 	const where = () =>
 		page.evaluate(() => {
 			const scroller = document.querySelector('[data-perf-scroller]');
@@ -321,7 +331,8 @@ const SCENARIOS = {
 				taps.push(opened - start);
 			}
 			const sorted = [...taps].sort((a, b) => a - b);
-			const scrolled = await fling(page, cdp, 'nav.sidebar button.row');
+			// The tree's own rows: the scratchpad's row is above its scroller.
+			const scrolled = await fling(page, cdp, 'nav.sidebar .tree button.row');
 			return {
 				taps: taps.length,
 				tapP50: sorted[Math.floor(sorted.length / 2)] ?? 0,
