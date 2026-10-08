@@ -131,7 +131,7 @@ describe('the parses a list costs', () => {
 		const rows = bodies('Searched beside', 300);
 		rows.forEach((body) => openingLines(body));
 		const before = parses.count;
-		bodies('Answer', MANY).forEach((body) => visibleText(body));
+		bodies('Answer', MANY).forEach(visibleText);
 		rows.forEach((body) => openingLines(body));
 		expect(parses.count).toBe(before + MANY);
 	});
