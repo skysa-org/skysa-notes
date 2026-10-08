@@ -35,7 +35,15 @@ const round = (value) =>
 			: value.toFixed(2);
 
 /** Counts of things the app does, which move by less from run to run than a time does. */
-const COUNTS = new Set(['idbRows', 'idbNotes', 'idbWrites', 'nodes', 'drawn', 'allDrawn']);
+const COUNTS = new Set([
+	'idbRows',
+	'idbNotes',
+	'idbNoteKeys',
+	'idbWrites',
+	'nodes',
+	'drawn',
+	'allDrawn',
+]);
 
 /** Higher is better for these. */
 const MORE = new Set(['drawn', 'allDrawn', 'scrolledPx', 'reachedEnd']);
