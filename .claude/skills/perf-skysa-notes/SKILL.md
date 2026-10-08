@@ -105,7 +105,8 @@ Each run clones its profile into a directory of its own.
   waits for the element to be still and hit-tests it, on the slowed thread.
 - Big's list is listed (`listedMs`) when every row is drawn, or, where the
   list draws only the rows near the screen (#275), when those are: their
-  `aria-setsize` says they are of more.
+  `aria-setsize` says they are of more. The scratchpad's cards are drawn
+  (`cardsMs`) when every card is, or the wall is placed with cards on it.
 - A wait that never ends is an error in the results, never a time. Only
   `allDrawn` may be 0.
 - `scrolledPx` and `reachedEnd` say how far a fling went; one that moves

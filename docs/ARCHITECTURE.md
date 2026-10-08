@@ -916,7 +916,11 @@ A phone holds a notebook of a thousand notes. A list that draws a thousand rows 
   A right-click menu closes when anything scrolls. A row says where it is among all of its notebook's (`aria-setsize`, `aria-posinset`), so a screen reader counts the rows not drawn.
 - **Before the list can be measured** it draws its first two screens (the window's height), not every row: drawn whole, the first draw would be the slow one.
 - **Where nothing is laid out**, as in a test, there is no screen to be near, and everything is drawn, so every test of the list as it was still holds.
-- **The cost: the browser's find-in-page sees only the rows drawn.** The app's own search sees every note.
+- **The scratchpad, above 100 cards,** draws the cards placed near the screen, by the same span. The wall keeps the height of all of them, so its scroll bar is as it was.
+  - A card is placed by its height as drawn (`useHeights`) or as guessed from its text (`guessHeight`, read from the caches under "It is a parse"). So a card not drawn yet may sit a little off where it will be, and is set right as it comes within a screen of being seen.
+  - Always drawn: the open card; the card open last, which closing grows the editor back into and gives the focus back to (`useCardMotion`, `useFocusBack`); and the card the focus is in, or in one of its menus, with the cards either side of it in the order Tab takes, the pinned and then the rest (`useFocusedItem`, `besideOf`, as the list's rows).
+  - Before the wall has a width to place cards by, it draws its first 40, not every one.
+- **The cost: the browser's find-in-page sees only the rows and cards drawn.** The app's own search sees every note.
 
 ### The app's words (2026-10-07)
 
