@@ -69,28 +69,14 @@ export const getLastOpen = async (db: NotesDatabase, connectionId: string): Prom
  * clicked meanwhile opened on what it said before — the newest note — which
  * was then remembered over the note the user had left open there (#283).
  * `useLastOpen` hands out what was written until the store has been read
- * since it landed.
+ * since it landed. A new object each write, so one can be told from the next.
  */
-export interface Written {
-	readonly lastOpen: LastOpen;
-	/** Which of this tab's writes it was, counting from one. */
-	readonly write: number;
-}
-
-interface Writes {
-	readonly landed: number;
-	readonly bySource: ReadonlyMap<string, Written>;
-}
-
-const writes = new WeakMap<NotesDatabase, Writes>();
+const written = new WeakMap<NotesDatabase, ReadonlyMap<string, LastOpen>>();
 const listeners = new Set<() => void>();
 
-/** How many of this tab's writes have landed: a read begun now sees them all. */
-export const writesLanded = (db: NotesDatabase): number => writes.get(db)?.landed ?? 0;
-
 /** What this tab wrote last for a source, once it has landed. */
-export const lastWritten = (db: NotesDatabase, connectionId: string): Written | undefined =>
-	writes.get(db)?.bySource.get(connectionId);
+export const lastWritten = (db: NotesDatabase, connectionId: string): LastOpen | undefined =>
+	written.get(db)?.get(connectionId);
 
 /** Be told each time one of this tab's writes lands. */
 export const onWritten = (listener: () => void): (() => void) => {
@@ -122,10 +108,7 @@ export const rememberOpen = async (
 		await db.prefs.put({ key: keyFor(connectionId), value: JSON.stringify(after) });
 		return after;
 	});
-	const before = writes.get(db);
-	const landed = (before?.landed ?? 0) + 1;
-	const bySource = new Map(before?.bySource).set(connectionId, { lastOpen, write: landed });
-	writes.set(db, { landed, bySource });
+	written.set(db, new Map(written.get(db)).set(connectionId, lastOpen));
 	listeners.forEach((listener) => {
 		listener();
 	});

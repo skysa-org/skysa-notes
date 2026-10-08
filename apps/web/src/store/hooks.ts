@@ -23,7 +23,6 @@ import {
 	noteIsUnder,
 	onWritten,
 	pickNote,
-	writesLanded,
 } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere, listScratchNotes } from './notes.js';
 import { getOpenNotebooks } from './openNotebooks.js';
@@ -252,23 +251,21 @@ export const useSourceContents = (
  * source showing a moment ago is another source's place.
  *
  * Then what this tab wrote last, until the store has been read since it
- * landed (`lastWritten`): the store's answer can be clicks behind. Another
- * tab's write is read after this one's, and so is handed out over it.
+ * landed (`lastWritten`): the store's answer can be clicks behind. A write
+ * from another tab that lands after this tab's is read over it.
  */
 export const useLastOpen = (connectionId: string | undefined): LastOpen | undefined => {
 	const result = useLiveQuery(async () => {
 		if (connectionId === undefined) return undefined;
-		// Counted before the read, so each write counted is one the read sees.
-		const since = writesLanded(db);
-		return { connectionId, since, lastOpen: await getLastOpen(db, connectionId) };
+		// Before the read, so what was written by then is what the read sees.
+		const seen = lastWritten(db, connectionId);
+		return { connectionId, seen, lastOpen: await getLastOpen(db, connectionId) };
 	}, [connectionId]);
-	const written = useSyncExternalStore(onWritten, () =>
+	const mine = useSyncExternalStore(onWritten, () =>
 		connectionId === undefined ? undefined : lastWritten(db, connectionId)
 	);
 	if (result === undefined || result.connectionId !== connectionId) return undefined;
-	return written !== undefined && written.write > result.since
-		? written.lastOpen
-		: result.lastOpen;
+	return mine !== undefined && mine !== result.seen ? mine : result.lastOpen;
 };
 
 /**

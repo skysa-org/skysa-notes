@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
@@ -68,12 +68,13 @@ describe('where the user was, as the app is handed it', () => {
 	});
 
 	it('is nothing this tab wrote for another source', async () => {
-		await rememberOpen(db, LOCAL_CONNECTION_ID, 'Work', 'w1');
-
 		const { result } = renderHook(() => useLastOpen('c-dropbox'));
-
 		await waitFor(() => {
 			expect(result.current).toEqual({ notes: {} });
 		});
+
+		await act(() => rememberOpen(db, LOCAL_CONNECTION_ID, 'Work', 'w1'));
+
+		expect(result.current).toEqual({ notes: {} });
 	});
 });
