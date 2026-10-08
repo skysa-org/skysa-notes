@@ -270,7 +270,8 @@ const ClipPicture = ({
 			kept.current();
 		};
 	}, [here, database, shrinker, connectionId, name, urls]);
-	return shown?.name === name ? (
+	// Not once neither is here: another device wrote over it, and it is read again.
+	return here === true && shown?.name === name ? (
 		<img className="clipboard-thumb" src={shown.url} alt="" />
 	) : (
 		<span className="clipboard-icon" aria-hidden="true">

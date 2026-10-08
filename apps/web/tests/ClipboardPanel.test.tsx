@@ -53,6 +53,20 @@ const pngOf = (width: number, height: number): ArrayBuffer =>
 		...chunk('IEND'),
 	]).buffer;
 
+/** A thumb as the browser would make it, `width` wide. */
+const thumbOf = (width: number) =>
+	({
+		kind: 'made',
+		copy: new Blob(['thumb'], { type: 'image/webp' }),
+		width,
+		height: 384,
+	}) as const;
+
+/** A shrinker that makes a thumb at once. */
+const thumbs = (): PictureShrinker => ({
+	shrink: (_picture, { width }) => Promise.resolve(thumbOf(width)),
+});
+
 const setup = async ({
 	read,
 	shrinker,
@@ -96,18 +110,24 @@ const setup = async ({
 		urlFor: () => 'blob:unused',
 	};
 	const drawn: Blob[] = [];
+	// The URLs held, by what they are drawn from; one let go of is taken out.
+	const held: string[] = [];
 	const urls: ObjectUrlCache = {
 		acquire: (key, blob) => {
 			drawn.push(blob());
+			const url = `blob:${key.split('\u0000').slice(1).join('/')}`;
+			held.push(url);
 			return {
-				url: `blob:${key.split('\u0000').slice(1).join('/')}`,
-				release: () => undefined,
+				url,
+				release: () => {
+					held.splice(held.indexOf(url), 1);
+				},
 			};
 		},
 		reuse: () => undefined,
 	};
 	const pick = vi.fn(() => Promise.resolve<File[]>([]));
-	render(
+	const { unmount } = render(
 		<ClipboardPanel
 			connectionId="c1"
 			database={db}
@@ -120,7 +140,7 @@ const setup = async ({
 		/>
 	);
 	const rows = () => db.clips.where('connectionId').equals('c1').toArray();
-	return { db, sync, written, saved, pick, rows, drawn };
+	return { db, sync, written, saved, pick, rows, drawn, held, unmount };
 };
 
 const region = () => screen.getByRole('region', { name: 'Clipboard' });
@@ -341,18 +361,10 @@ describe('the clipboard panel', () => {
 	});
 
 	it('draws a picture from a thumb made of it, and copies the picture itself', async () => {
-		const shrinker: PictureShrinker = {
-			shrink: (_picture, { width }) =>
-				Promise.resolve({
-					kind: 'made',
-					copy: new Blob(['thumb'], { type: 'image/webp' }),
-					width,
-					height: 384,
-				}),
-		};
-		const { db, written, drawn } = await setup({ shrinker });
+		const { db, written, drawn, held } = await setup({ shrinker: thumbs() });
+		const png = pngOf(4000, 3000);
 		const [name] = await seeded(db, [
-			{ kind: 'file', name: '', type: 'image/png', bytes: pngOf(4000, 3000), pasted: true },
+			{ kind: 'file', name: '', type: 'image/png', bytes: png, pasted: true },
 		]);
 
 		const button = await screen.findByRole('button', { name: 'Copy Image, waiting to send' });
@@ -362,10 +374,76 @@ describe('the clipboard panel', () => {
 			);
 		});
 		expect(await Promise.all(drawn.map((blob) => blob.text()))).toEqual(['thumb']);
+		expect(held).toEqual([`blob:${name ?? ''}/thumb`]);
 		await userEvent.setup().click(button);
 		await waitFor(() => {
 			expect(written.map((entry) => entry.type)).toEqual(['image/png']);
 		});
+		const copied = await written[0]?.blob.arrayBuffer();
+		expect(new Uint8Array(copied ?? new ArrayBuffer(0))).toEqual(new Uint8Array(png));
+	});
+
+	it('lets go of the URL a picture is drawn from, with its item', async () => {
+		const { db, held } = await setup({ shrinker: thumbs() });
+		await seeded(db, [
+			{ kind: 'file', name: '', type: 'image/png', bytes: pngOf(4000, 3000), pasted: true },
+		]);
+		await waitFor(() => {
+			expect(held).toHaveLength(1);
+		});
+
+		await userEvent.setup().click(screen.getByRole('button', { name: 'Remove Image' }));
+		await waitFor(() => {
+			expect(items()).toEqual([]);
+		});
+		expect(held).toEqual([]);
+	});
+
+	it('takes no URL for a thumb made after the panel was closed', async () => {
+		const made: (() => void)[] = [];
+		const shrinker: PictureShrinker = {
+			shrink: (_picture, { width }) =>
+				new Promise((resolve) => {
+					made.push(() => {
+						resolve(thumbOf(width));
+					});
+				}),
+		};
+		const { db, drawn, unmount } = await setup({ shrinker });
+		await seeded(db, [
+			{ kind: 'file', name: '', type: 'image/png', bytes: pngOf(4000, 3000), pasted: true },
+		]);
+		await waitFor(() => {
+			expect(made).toHaveLength(1);
+		});
+
+		unmount();
+		made[0]?.();
+		await waitFor(async () => {
+			expect(await db.clipThumbs.count()).toBe(1);
+		});
+		expect(drawn).toEqual([]);
+	});
+
+	it('draws its icon again while a picture another device wrote over is read again', async () => {
+		const { db } = await setup({ shrinker: thumbs() });
+		const [name = ''] = await seeded(db, [
+			{ kind: 'file', name: '', type: 'image/png', bytes: pngOf(4000, 3000), pasted: true },
+		]);
+		const button = await screen.findByRole('button', { name: 'Copy Image, waiting to send' });
+		await waitFor(() => {
+			expect(button.querySelector('img')).not.toBeNull();
+		});
+
+		// As a pull lets go of what it held of the item, to read it again.
+		await db.transaction('rw', db.clipBytes, db.clipThumbs, async () => {
+			await db.clipBytes.delete(['c1', name]);
+			await db.clipThumbs.delete(['c1', name]);
+		});
+		await waitFor(() => {
+			expect(button.querySelector('img')).toBeNull();
+		});
+		expect(button.querySelector('.clipboard-icon')).not.toBeNull();
 	});
 
 	it('saves a file when pressed, under the name it was added as', async () => {

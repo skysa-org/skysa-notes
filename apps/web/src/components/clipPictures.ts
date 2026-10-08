@@ -1,6 +1,6 @@
 import { imageInfo, pictureVariant, safeOpenType } from '@skysa/core';
 
-import { oneAtATime, type Turns } from '../pictures/copies.js';
+import { copyTurns } from '../pictures/copies.js';
 import { noShrinker, type PictureShrinker } from '../pictures/shrinker.js';
 import { keepClipThumb } from '../store/clipboard.js';
 import { type ClipThumbRecord, type NotesDatabase } from '../store/db.js';
@@ -18,17 +18,6 @@ export interface ClipDrawable {
 	readonly key: string;
 	readonly blob: () => Blob;
 }
-
-/** Thumbs made one at a time for each shrinker, which for the app is one (`oneAtATime`). */
-const turnsOf = new WeakMap<PictureShrinker, Turns<ClipDrawable | undefined>>();
-
-const turnsFor = (shrinker: PictureShrinker): Turns<ClipDrawable | undefined> => {
-	const found = turnsOf.get(shrinker);
-	if (found !== undefined) return found;
-	const turns = oneAtATime<ClipDrawable | undefined>();
-	turnsOf.set(shrinker, turns);
-	return turns;
-};
 
 const keyOf = (connectionId: string, name: string, thumb: boolean): string =>
 	[connectionId, name, ...(thumb ? ['thumb'] : [])].join('\u0000');
@@ -84,12 +73,16 @@ const makeThumb = async (
 ): Promise<ClipDrawable | undefined> => {
 	const madeMeanwhile = await db.clipThumbs.get([connectionId, name]);
 	if (madeMeanwhile !== undefined) return drawnAs(db, madeMeanwhile);
+	// The version the bytes are, read before them.
+	const version = (await db.clips.get([connectionId, name]))?.version;
 	const bytes = await bytesOf(db, connectionId, name);
 	if (bytes === undefined) return undefined;
+	// Kept where it can be; drawn where it cannot, a full device's too.
+	const keep = (record: ClipThumbRecord) => keepClipThumb(db, record, version).catch(() => false);
 	const info = imageInfo(new Uint8Array(bytes));
 	const wanted = info === undefined ? undefined : pictureVariant(info, 'thumb');
 	if (info === undefined || wanted === undefined) {
-		await keepClipThumb(db, { connectionId, name });
+		await keep({ connectionId, name });
 		return asItIs(connectionId, name, bytes);
 	}
 	const shrunk = await shrinker.shrink(new Blob([bytes], { type: safeOpenType(name) }), {
@@ -98,12 +91,12 @@ const makeThumb = async (
 	});
 	if (shrunk.kind === 'made') {
 		const thumb = { bytes: await shrunk.copy.arrayBuffer(), type: shrunk.copy.type };
-		await keepClipThumb(db, { connectionId, name, thumb });
+		await keep({ connectionId, name, thumb });
 		return fromThumb(connectionId, name, thumb);
 	}
 	// One the browser could not draw is not asked of it again; one missed is,
 	// the next time it is shown.
-	if (shrunk.kind === 'refused') await keepClipThumb(db, { connectionId, name });
+	if (shrunk.kind === 'refused') await keep({ connectionId, name });
 	return asItIs(connectionId, name, bytes);
 };
 
@@ -127,7 +120,10 @@ export const clipPicture = async (
 		const bytes = await bytesOf(db, connectionId, name);
 		return bytes === undefined ? undefined : asItIs(connectionId, name, bytes);
 	}
-	return turnsFor(shrinker)(keyOf(connectionId, name, true), signal, () =>
-		makeThumb(db, shrinker, connectionId, name)
+	// In the app's one order of copies, behind a note's and the cards'.
+	return copyTurns<ClipDrawable | undefined>(shrinker)(
+		['clip', keyOf(connectionId, name, true)].join('\u0000'),
+		signal,
+		() => makeThumb(db, shrinker, connectionId, name)
 	);
 };

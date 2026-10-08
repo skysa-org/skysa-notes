@@ -211,13 +211,21 @@ export const listClips = async (db: NotesDatabase, connectionId: string): Promis
 
 /**
  * Keep the thumb made of a picture on the clipboard (#276), or that it is
- * drawn as it is (`thumb` absent), while its item is still there. Answers
- * whether it was kept.
+ * drawn as it is (`thumb` absent), while its item is still there and still the
+ * version its bytes were read as (`version`, as the row said before they were
+ * read): one another device wrote over meanwhile is read again, and drawn
+ * afresh. Answers whether it was kept.
  */
-export const keepClipThumb = (db: NotesDatabase, record: ClipThumbRecord): Promise<boolean> =>
+export const keepClipThumb = (
+	db: NotesDatabase,
+	record: ClipThumbRecord,
+	version?: string
+): Promise<boolean> =>
 	db.transaction('rw', [db.clips, db.clipThumbs], async () => {
 		const row = await db.clips.get([record.connectionId, record.name]);
 		if (row === undefined || row.state === 'removing') return false;
+		// Read before it went up: the same bytes, since its name is their hash.
+		if (version !== undefined && row.version !== version) return false;
 		await db.clipThumbs.put(record);
 		return true;
 	});

@@ -2,6 +2,7 @@ import { CLIPBOARD_ITEMS } from '@skysa/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { clipPicture } from '../src/components/clipPictures.js';
+import { copyTurns } from '../src/pictures/copies.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import { addClips, keepClipThumb, removeClip } from '../src/store/clipboard.js';
 import { bindConnection, detachConnection, releaseConnection } from '../src/store/connection.js';
@@ -206,6 +207,94 @@ describe('a picture on the clipboard, as its panel draws it', () => {
 
 		expect(await drawn(db, shrinker, name)).toBeUndefined();
 		expect(asked).toEqual([]);
+	});
+
+	it('is drawn from its thumb where the device could not keep it', async () => {
+		const { db, pasted } = await setup();
+		const { shrinker } = shrinkerOf();
+		const name = await pasted();
+		// A phone with its storage full.
+		vi.spyOn(db.clipThumbs, 'put').mockRejectedValue(new Error('QuotaExceededError'));
+
+		expect(await drawn(db, shrinker, name)).toEqual({ key: ['thumb'], text: 'thumb' });
+		expect(await db.clipThumbs.count()).toBe(0);
+	});
+
+	it('waits its turn behind a copy a note or a card asked for first', async () => {
+		const { db, pasted } = await setup();
+		const { shrinker, asked } = shrinkerOf();
+		const name = await pasted();
+		const ahead = { finish: (): void => undefined };
+		const noteCopy = copyTurns<string>(shrinker)(
+			'c1\u0000notes/cat.png\u0000v1\u0000thumb\u0000false',
+			asking(),
+			() =>
+				new Promise<string>((resolve) => {
+					ahead.finish = () => {
+						resolve('copy');
+					};
+				})
+		);
+
+		const shown = drawn(db, shrinker, name);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(asked).toEqual([]);
+		ahead.finish();
+
+		expect(await noteCopy).toBe('copy');
+		expect((await shown)?.key).toEqual(['thumb']);
+		expect(asked).toHaveLength(1);
+	});
+
+	it('is not kept where another device wrote over it while it was made', async () => {
+		const { db, pasted } = await setup();
+		const answers: (() => void)[] = [];
+		const { shrinker } = shrinkerOf(
+			(want) =>
+				new Promise((resolve) => {
+					answers.push(() => {
+						resolve(madeAs(want));
+					});
+				})
+		);
+		const name = await pasted();
+		await db.clips.update(['c1', name], { state: 'sent', version: 'v1' });
+
+		const shown = drawn(db, shrinker, name);
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(1);
+		});
+		// As a pull takes the new version: bytes let go of, to be read again.
+		await db.clips.update(['c1', name], { version: 'v2' });
+		await db.clipBytes.delete(['c1', name]);
+		answers[0]?.();
+
+		expect((await shown)?.key).toEqual(['thumb']);
+		expect(await db.clipThumbs.count()).toBe(0);
+	});
+
+	it('is kept where it went up while it was made, which changes none of its bytes', async () => {
+		const { db, pasted } = await setup();
+		const answers: (() => void)[] = [];
+		const { shrinker } = shrinkerOf(
+			(want) =>
+				new Promise((resolve) => {
+					answers.push(() => {
+						resolve(madeAs(want));
+					});
+				})
+		);
+		const name = await pasted();
+
+		const shown = drawn(db, shrinker, name);
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(1);
+		});
+		await db.clips.update(['c1', name], { state: 'sent', version: 'v1' });
+		answers[0]?.();
+
+		expect((await shown)?.key).toEqual(['thumb']);
+		expect(await db.clipThumbs.count()).toBe(1);
 	});
 
 	it('is not made twice, where another made it while this one waited', async () => {
