@@ -11,7 +11,8 @@ const same = (a: unknown, b: unknown): boolean =>
 const sameRow = (a: NoteRecord, b: NoteRecord): boolean => {
 	const fields = Object.keys(a) as (keyof NoteRecord)[];
 	return (
-		fields.length === Object.keys(b).length && fields.every((field) => same(a[field], b[field]))
+		fields.length === Object.keys(b).length &&
+		fields.every((field) => Object.hasOwn(b, field) && same(a[field], b[field]))
 	);
 };
 

@@ -96,8 +96,14 @@ export const OptionsMenu = ({
 	triggerRef,
 	onOpen,
 }: OptionsMenuProps) => {
-	/** Where the card is open, under the button, or null while it is shut. */
-	const [open, setOpen] = useState<MenuPoint | null>(null);
+	/**
+	 * Where the card is open, under the button, or null while it is shut; and
+	 * the items, where they are made when it opens.
+	 */
+	const [open, setOpen] = useState<{
+		at: MenuPoint;
+		made: readonly OptionsMenuItem[] | undefined;
+	} | null>(null);
 	const own = useRef<HTMLButtonElement>(null);
 	const button = triggerRef ?? own;
 
@@ -118,8 +124,13 @@ export const OptionsMenu = ({
 					}
 					const edge = event.currentTarget.getBoundingClientRect();
 					setOpen({
-						x: align === 'start' ? edge.left : edge.right,
-						y: rises ? edge.top - DROP : edge.bottom + DROP,
+						at: {
+							x: align === 'start' ? edge.left : edge.right,
+							y: rises ? edge.top - DROP : edge.bottom + DROP,
+						},
+						// Made here, after the page has drawn what was pressed, and
+						// not while a draw is under way.
+						made: typeof items === 'function' ? items() : undefined,
 					});
 					onOpen?.();
 				}}
@@ -128,11 +139,11 @@ export const OptionsMenu = ({
 			</button>
 			{open !== null && (
 				<FloatingMenu
-					at={open}
+					at={open.at}
 					align={align}
 					rises={rises}
 					label={groupLabel}
-					items={typeof items === 'function' ? items() : items}
+					items={open.made ?? (typeof items === 'function' ? [] : items)}
 					anchor={button}
 					onClose={() => {
 						setOpen(null);

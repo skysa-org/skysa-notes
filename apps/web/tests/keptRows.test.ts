@@ -53,6 +53,12 @@ describe('keptRows', () => {
 		expect(read).not.toBe(before);
 	});
 
+	it('hands back the new read for a note that has as many fields, but other ones', () => {
+		const before = row('plan', { remoteId: undefined });
+		const [read] = keptRows(byId([before]), [row('plan', { remoteVersion: 'v1' })]);
+		expect(read).not.toBe(before);
+	});
+
 	it('keeps the order of the read, and its new notes', () => {
 		const before = [row('plan')];
 		const read = keptRows(byId(before), [row('new'), row('plan')]);

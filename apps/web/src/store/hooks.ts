@@ -140,7 +140,11 @@ export const usePinnedTree = (): PinnedTree => {
 export const useNotesUnderFolder = (folderPath: string | undefined): NoteRecord[] | undefined => {
 	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
 	const result = useLiveQuery(async () => {
-		if (folderPath === undefined) return { folderPath, notes: [] };
+		if (folderPath === undefined) {
+			// Nothing listed, so nothing to keep the last notebook's notes for.
+			before.current = new Map();
+			return { folderPath, notes: [] };
+		}
 		const notes = keptRows(
 			before.current,
 			(await listNotes(db)).filter((note) => noteIsUnder(note.path, folderPath))

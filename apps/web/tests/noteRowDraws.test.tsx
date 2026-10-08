@@ -109,4 +109,38 @@ describe('a row of the note list', () => {
 		expect(menuFor.mock.calls.every(([asked]) => asked === beta)).toBe(true);
 		expect(screen.getByRole('button', { name: 'Delete' })).toBeDefined();
 	});
+
+	it('opens on a right-click the menu the page gave last', () => {
+		const item = (label: string) => () => [{ label, onChoose: () => undefined }];
+		const drawAgain = drawList({ menuFor: item('First') });
+		drawAgain({ menuFor: item('Last') });
+
+		fireEvent.contextMenu(screen.getByRole('button', { name: /^Beta/ }));
+
+		expect(screen.getByRole('button', { name: 'Last' })).toBeDefined();
+		expect(screen.queryByRole('button', { name: 'First' })).toBeNull();
+	});
+
+	it('is drawn again as it starts moving, or is pinned, and no other is', () => {
+		const drawAgain = drawList();
+		drawAgain({ movingNoteId: beta.id });
+		expect(drawn.bodies).toEqual([beta.body]);
+
+		drawn.bodies = [];
+		drawAgain({ movingNoteId: beta.id, pinnedNoteIds: new Set([gamma.id]) });
+		expect(drawn.bodies).toEqual([gamma.body]);
+	});
+
+	it('offers its menu and its drag once its note is stored', () => {
+		const options = () => screen.getByRole('button', { name: 'Options for “Beta”' });
+		const row = () => screen.getByRole('button', { name: /^Beta/ });
+		const drawAgain = drawList({ unsavedNoteId: beta.id });
+		expect(options().hasAttribute('disabled')).toBe(true);
+		expect(row().getAttribute('draggable')).toBe('false');
+
+		drawAgain({ unsavedNoteId: undefined });
+
+		expect(options().hasAttribute('disabled')).toBe(false);
+		expect(row().getAttribute('draggable')).toBe('true');
+	});
 });
