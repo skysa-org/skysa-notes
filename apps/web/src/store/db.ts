@@ -591,6 +591,26 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		clipThumbs: '[connectionId+name], connectionId',
 	});
 
+	// Every source reads its remote once more, as "Re-scan" does: the cursor
+	// dropped and `rootId` kept (`resync` in `sync/scheduler.ts`). A build from
+	// before the scratchpad (#269) took `.scratchpad/` for hidden, so a cursor
+	// it moved on passed over every scratch note another device had sent by
+	// then, and a feed names a file again only when it changes: those notes
+	// never came, on a device that updated after they were made. A scan lists
+	// them, and reads nothing this device already holds at its version.
+	db.version(10)
+		.stores({})
+		.upgrade(async (tx) => {
+			const rows = (await tx.table('syncState').toArray()) as SyncStateRecord[];
+			await tx
+				.table('syncState')
+				.bulkPut(
+					rows
+						.filter((row) => row.cursor !== undefined)
+						.map(({ cursor: _cursor, ...kept }) => kept)
+				);
+		});
+
 	// A build with a later version than the last one above, opening this database
 	// in another tab, must find this tab stopped rather than still writing —
 	// `store/staleTab.ts` says why Dexie's default is not that.
