@@ -1,3 +1,5 @@
+import { t } from '../i18n/t.js';
+
 /**
  * Keyboard chords, as a thing to compare against an event and a thing to print.
  *
@@ -85,24 +87,26 @@ const onApple = (): boolean => {
 	return /mac|iphone|ipad|ipod/i.test(`${modern} ${navigator.platform} ${navigator.userAgent}`);
 };
 
-const KEY_LABELS: Record<string, string> = {
+// The arrows and Enter are symbols, as are the Apple modifiers below: the same
+// in every language. The keys that are words come from the catalog.
+const keyLabels = (): Record<string, string> => ({
 	arrowup: '↑',
 	arrowdown: '↓',
 	arrowleft: '←',
 	arrowright: '→',
 	enter: '↵',
-	escape: 'Esc',
-	' ': 'Space',
-};
+	escape: t('shell.keys.escape'),
+	' ': t('shell.keys.space'),
+});
 
 /** A chord as the user's own keyboard spells it. */
 export const chordLabel = (chord: Chord, apple = onApple()): string => {
 	const key =
-		KEY_LABELS[chord.key] ?? (chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
+		keyLabels()[chord.key] ?? (chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
 	const parts = [
-		...(chord.mod ? [apple ? '⌘' : 'Ctrl'] : []),
-		...(chord.alt ? [apple ? '⌥' : 'Alt'] : []),
-		...(chord.shift ? [apple ? '⇧' : 'Shift'] : []),
+		...(chord.mod ? [apple ? '⌘' : t('shell.keys.ctrl')] : []),
+		...(chord.alt ? [apple ? '⌥' : t('shell.keys.alt')] : []),
+		...(chord.shift ? [apple ? '⇧' : t('shell.keys.shift')] : []),
 		key,
 	];
 	// No separator on a Mac, where the symbols run together as the platform

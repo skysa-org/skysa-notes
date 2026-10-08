@@ -22,17 +22,6 @@ export const account = {
 	sourceName: '{provider} · {account}',
 	/** The second and later source at one provider: "Dropbox 2". `{number}` is which of them it is. */
 	numbered: '{provider} {number}',
-	/**
-	 * Why the server will not sync an account, by the kind of refusal its
-	 * operator gave. Said without a full stop: the connect toast goes on with
-	 * ", so storage was not connected." (`refusedMessage`).
-	 */
-	refused: {
-		notAllowed: 'This account is not allowed to sync on this server',
-		lapsed: "This account's access to sync on this server has lapsed",
-		limitReached: 'This server is at its limit for syncing accounts',
-		unspecified: 'This account cannot sync on this server',
-	},
 	/** What Google Drive keeps the app from seeing in its own folder. `{folder}` is the folder's name. */
 	unseen: {
 		gdrive: {
