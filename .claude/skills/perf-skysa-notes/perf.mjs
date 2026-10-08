@@ -7,10 +7,10 @@
 //
 // Writes $PERF_DIR/results/<time>-<label>-<lib>-<profile>.json and prints medians.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { PERF_DIR, playwright } from './paths.mjs';
@@ -27,6 +27,7 @@ const { values: args } = parseArgs({
 		scenarios: { type: 'string', default: 'all' },
 		label: { type: 'string', default: '' },
 		shots: { type: 'boolean', default: false },
+		deadline: { type: 'string', default: '600' },
 	},
 });
 
@@ -589,13 +590,73 @@ const pictureNote = async ({ page, cdp, base }, note) => {
 	};
 };
 
+/** A promise's answer, or `null` once `ms` have passed without one; the timer holds nothing open. */
+const within = (promise, ms) =>
+	Promise.race([promise, new Promise((done) => setTimeout(done, ms, null).unref())]);
+
+/**
+ * Where a run that will not end is, and a picture of it, so a stall is a
+ * finding, not a hang. The debugger is asked for the page's script stack;
+ * a main thread busy with a long task does not answer it (`Debugger.enable`
+ * waits behind the task), and is reported as busy, without a stack or a
+ * picture, which waits on the same thread. Enabling the debugger before the
+ * run would get the stack, at a cost to what is measured.
+ */
+const stuckAt = async (page, cdp, picture) => {
+	const enabled = await within(
+		cdp.send('Debugger.enable').then(() => 'on'),
+		5_000
+	).catch(() => 'gone');
+	if (enabled === 'gone') return 'its CDP session had closed';
+	if (enabled === null) return 'main thread busy (no answer to Debugger.enable in 5 s)';
+	const shot = await within(
+		page.screenshot({ path: picture, timeout: 10_000 }).then(() => ` (picture: ${picture})`),
+		12_000
+	).catch(() => null);
+	const paused = new Promise((done) => cdp.once('Debugger.paused', done));
+	await within(cdp.send('Debugger.pause'), 5_000).catch(() => undefined);
+	const stop = await within(paused, 10_000);
+	if (stop === null) return `main thread idle, waiting on something${shot ?? ''}`;
+	// The probe's own polling, where the harness is waiting on the page, is
+	// what a pause finds most often; the frames below it say what for.
+	const frames = stop.callFrames
+		.slice(0, 12)
+		.map(
+			(frame) =>
+				`${frame.functionName || '(anon)'} ${frame.url.split('/').pop()}:${frame.location.lineNumber + 1}`
+		)
+		.join(' < ');
+	return `paused at ${frames}${shot ?? ''}`;
+};
+
+/** A regular expression that matches `text` and only it. */
+const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const deadline = Number(args.deadline);
+if (!Number.isFinite(deadline) || deadline <= 0) {
+	throw new Error('--deadline is a number of seconds, more than 0');
+}
+
+/** Each run's profile its own, so nothing left of one run is in the next's. */
+const counted = { runs: 0 };
+
 const once = async (target, template, scenario, manifest) => {
-	const dir = cloneProfile(template, join(RUN_DIR, `${target.name}-${process.pid}`));
-	const context = await launch(dir, profile.options);
-	try {
-		await context.addInitScript({ path: new URL('./probe.js', import.meta.url).pathname });
-		const page = context.pages()[0] ?? (await context.newPage());
-		const cdp = await context.newCDPSession(page);
+	counted.runs += 1;
+	const dir = cloneProfile(
+		template,
+		join(RUN_DIR, `${target.name}-${process.pid}-${counted.runs}`)
+	);
+	// What has been made so far, so a run past its deadline can say where it
+	// was and still be closed.
+	const held = {};
+	const work = (async () => {
+		// Opening a context starts the browser and routes the API away
+		// (`launch`), which is where Chromium was seen to stall.
+		held.context = await launch(dir, profile.options);
+		await held.context.addInitScript({ path: new URL('./probe.js', import.meta.url).pathname });
+		const page = held.context.pages()[0] ?? (await held.context.newPage());
+		const cdp = await held.context.newCDPSession(page);
+		Object.assign(held, { page, cdp });
 		await cdp.send('Performance.enable');
 		await cdp.send('Emulation.setCPUThrottlingRate', { rate: profile.cpu });
 		const result = await SCENARIOS[scenario].run({ page, cdp, manifest, base: target.url });
@@ -604,9 +665,44 @@ const once = async (target, template, scenario, manifest) => {
 				path: join(PERF_DIR, 'results', `${target.name}-${scenario}.png`),
 			});
 		return result;
+	})();
+	const late = Symbol('late');
+	const timer = { id: undefined };
+	try {
+		// A run that ends while it is being looked at for being late is still
+		// late: the deadline decides, and the looking comes after.
+		const first = await Promise.race([
+			work,
+			new Promise((done) => {
+				timer.id = setTimeout(done, deadline * 1000, late);
+			}),
+		]);
+		if (first !== late) return first;
+		const where =
+			held.cdp === undefined
+				? `before the page was open (${held.context === undefined ? 'starting the browser' : 'opening its page'})`
+				: await stuckAt(
+						held.page,
+						held.cdp,
+						join(
+							PERF_DIR,
+							'results',
+							`stuck-${target.name}-${scenario}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`
+						)
+					);
+		throw new Error(`stuck past ${deadline} s: ${where}`);
 	} finally {
-		await context.close();
-		rmSync(dir, { recursive: true, force: true });
+		clearTimeout(timer.id);
+		work.catch(() => undefined);
+		await within(held.context?.close(), 15_000).catch(() => undefined);
+		// A browser that would not close is ended, by the profile it was given,
+		// which every one of its processes is started with.
+		spawnSync('pkill', ['-9', '-f', `user-data-dir=${literally(resolve(dir))}( |$)`]);
+		try {
+			rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+		} catch {
+			// Left in `runs/`: no later run takes its name.
+		}
 	}
 };
 

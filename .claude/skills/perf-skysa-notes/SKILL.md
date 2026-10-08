@@ -64,6 +64,22 @@ phone-low` slows the CPU 6×; there is no desktop profile, as the scenarios find
 their way round the phone's layout and tap. `--shots` saves a screenshot of
 each scenario's end.
 
+A run that hasn't ended after `--deadline` seconds (600) fails. It is
+recorded as an error and the measurement goes on. That is longer than every
+bounded wait in the longest scenario. The deadline is for the waits that have
+no bound: a `page.evaluate`, a CDP call, a browser that never finishes
+starting.
+
+The error says where the run was:
+- starting the browser, or opening its page;
+- the main thread busy, since a busy thread answers no debugger and so gives
+  no stack;
+- or the stack it was paused at, with a picture saved as
+  `results/stuck-<target>-<scenario>-<time>.png`.
+
+The browser is then ended by its profile, since a stalled one may not close.
+Each run clones its profile into a directory of its own.
+
 | scenario | what | main metrics |
 |---|---|---|
 | cold | open at `#/big/`, its list mounted behind the note | `listedMs`, `settledMs`, `tbt`, `idbNotes` |
@@ -128,7 +144,14 @@ Import the same zips there, into a separate origin from real notes.
 - The probe has to be loaded before the app (`addInitScript`); a probe loaded
   later misses the first long tasks.
 - Close other heavy work while measuring (`pgrep -fl 'vitest|vite build'`);
-  `loadavg` is recorded in each result.
+  `loadavg` is recorded in each result. Run one `perf.mjs` at a time
+  (`pgrep -fl perf.mjs`). Two at once skew each other's numbers, and stalled
+  browsers were seen only then.
+- Chromium sometimes stalls while starting: `launchPersistentContext` returns,
+  then the first call on the context never does. That is `context.route` in
+  `launch`, or adding the probe and opening the page. The deadline reports it as
+  "starting the browser" or "opening its page". A stalled browser ignores
+  SIGTERM, so it is ended with SIGKILL.
 
 ## Afterwards
 
