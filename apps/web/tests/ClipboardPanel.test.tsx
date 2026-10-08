@@ -115,7 +115,12 @@ const setup = async ({
 	const urls: ObjectUrlCache = {
 		acquire: (key, blob) => {
 			drawn.push(blob());
-			const url = `blob:${key.split('\u0000').slice(1).join('/')}`;
+			// Its name, version and kind, of those it has.
+			const url = `blob:${key
+				.split('\u0000')
+				.slice(1)
+				.filter((part) => part !== '')
+				.join('/')}`;
 			held.push(url);
 			return {
 				url,
@@ -425,18 +430,33 @@ describe('the clipboard panel', () => {
 		expect(drawn).toEqual([]);
 	});
 
-	it('draws its icon again while a picture another device wrote over is read again', async () => {
-		const { db } = await setup({ shrinker: thumbs() });
+	it('draws a picture another device wrote over from its new thumb, and its icon until then', async () => {
+		// The first thumb at once; the second when the test says.
+		const made: (() => void)[] = [];
+		const shrinker: PictureShrinker = {
+			shrink: (_picture, { width }) =>
+				made.length === 0
+					? (made.push(() => undefined), Promise.resolve(thumbOf(width)))
+					: new Promise((resolve) => {
+							made.push(() => {
+								resolve({ ...thumbOf(width), copy: new Blob(['new thumb']) });
+							});
+						}),
+		};
+		const { db, drawn } = await setup({ shrinker });
 		const [name = ''] = await seeded(db, [
 			{ kind: 'file', name: '', type: 'image/png', bytes: pngOf(4000, 3000), pasted: true },
 		]);
-		const button = await screen.findByRole('button', { name: 'Copy Image, waiting to send' });
+		await db.clips.update(['c1', name], { state: 'sent', version: 'v1' });
+		const button = await screen.findByRole('button', { name: 'Copy Image' });
 		await waitFor(() => {
-			expect(button.querySelector('img')).not.toBeNull();
+			expect(button.querySelector('img')?.getAttribute('src')).toBe(`blob:${name}/v1/thumb`);
 		});
 
-		// As a pull lets go of what it held of the item, to read it again.
-		await db.transaction('rw', db.clipBytes, db.clipThumbs, async () => {
+		// As a pull takes the version written over: what it held of the item
+		// let go of, and its bytes read again.
+		await db.transaction('rw', db.clips, db.clipBytes, db.clipThumbs, async () => {
+			await db.clips.update(['c1', name], { version: 'v2' });
 			await db.clipBytes.delete(['c1', name]);
 			await db.clipThumbs.delete(['c1', name]);
 		});
@@ -444,6 +464,19 @@ describe('the clipboard panel', () => {
 			expect(button.querySelector('img')).toBeNull();
 		});
 		expect(button.querySelector('.clipboard-icon')).not.toBeNull();
+		await db.clipBytes.put({ connectionId: 'c1', name, bytes: pngOf(3000, 4000) });
+
+		// Not the URL the old picture had, let go of with it, while the new
+		// thumb waits its turn.
+		await waitFor(() => {
+			expect(made).toHaveLength(2);
+		});
+		expect(button.querySelector('img')).toBeNull();
+		made[1]?.();
+		await waitFor(() => {
+			expect(button.querySelector('img')?.getAttribute('src')).toBe(`blob:${name}/v2/thumb`);
+		});
+		expect(await drawn.at(-1)?.text()).toBe('new thumb');
 	});
 
 	it('saves a file when pressed, under the name it was added as', async () => {

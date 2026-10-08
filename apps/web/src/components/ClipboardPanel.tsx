@@ -234,12 +234,15 @@ const thumbnails = createObjectUrlCache();
 const ClipPicture = ({
 	connectionId,
 	name,
+	version,
 	database,
 	urls,
 	shrinker,
 }: {
 	connectionId: string;
 	name: string;
+	/** The version of it this device has (`ClipAt`). */
+	version: string | undefined;
 	database: NotesDatabase;
 	urls: ObjectUrlCache;
 	shrinker: PictureShrinker;
@@ -253,11 +256,14 @@ const ClipPicture = ({
 		return bytes + thumbs > 0;
 	}, [database, connectionId, name]);
 	const [shown, setShown] = useState<{ name: string; url: string }>();
+	// Gone with its bytes and thumb, as a pull reads it again: its URL was let
+	// go of then, and may be revoked by the time they are back.
+	if (here === false && shown !== undefined) setShown(undefined);
 	useEffect(() => {
 		if (here !== true) return undefined;
 		const asking = new AbortController();
 		const kept = { current: (): void => undefined };
-		void clipPicture(database, shrinker, connectionId, name, asking.signal)
+		void clipPicture(database, shrinker, { connectionId, name, version }, asking.signal)
 			.catch(() => undefined)
 			.then((drawable) => {
 				if (drawable === undefined || asking.signal.aborted) return;
@@ -269,7 +275,7 @@ const ClipPicture = ({
 			asking.abort();
 			kept.current();
 		};
-	}, [here, database, shrinker, connectionId, name, urls]);
+	}, [here, database, shrinker, connectionId, name, version, urls]);
 	// Not once neither is here: another device wrote over it, and it is read again.
 	return here === true && shown?.name === name ? (
 		<img className="clipboard-thumb" src={shown.url} alt="" />
@@ -397,6 +403,7 @@ const ClipItem = ({
 						<ClipPicture
 							connectionId={connectionId}
 							name={clip.name}
+							version={clip.version}
 							database={database}
 							urls={urls}
 							shrinker={shrinker}

@@ -5,9 +5,8 @@ import { clipPicture } from '../src/components/clipPictures.js';
 import { copyTurns } from '../src/pictures/copies.js';
 import { noShrinker, type PictureShrinker, type Shrunk } from '../src/pictures/shrinker.js';
 import { addClips, keepClipThumb, removeClip } from '../src/store/clipboard.js';
-import { bindConnection, detachConnection, releaseConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection } from '../src/store/connection.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
-import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 
 /**
  * The pictures on a source's clipboard as its panel draws them (#276): from a
@@ -93,10 +92,12 @@ const drawn = async (
 	name: string,
 	signal: AbortSignal = asking()
 ) => {
-	const drawable = await clipPicture(db, shrinker, 'c1', name, signal);
+	// At the version this device has, as the panel asks.
+	const version = (await db.clips.get(['c1', name]))?.version;
+	const drawable = await clipPicture(db, shrinker, { connectionId: 'c1', name, version }, signal);
 	return drawable === undefined
 		? undefined
-		: { key: drawable.key.split('\u0000').slice(2), text: await drawable.blob().text() };
+		: { key: drawable.key.split('\u0000').slice(3), text: await drawable.blob().text() };
 };
 
 describe('a picture on the clipboard, as its panel draws it', () => {
@@ -297,6 +298,44 @@ describe('a picture on the clipboard, as its panel draws it', () => {
 		expect(await db.clipThumbs.count()).toBe(1);
 	});
 
+	it('is made afresh for a version written over elsewhere, not taken from the work on the old', async () => {
+		const { db, pasted } = await setup();
+		const answers: (() => void)[] = [];
+		const { shrinker, asked } = shrinkerOf(
+			(want) =>
+				new Promise((resolve) => {
+					answers.push(() => {
+						resolve(madeAs(want));
+					});
+				})
+		);
+		const name = await pasted();
+		await db.clips.update(['c1', name], { state: 'sent', version: 'v1' });
+		const old = drawn(db, shrinker, name);
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(1);
+		});
+
+		// As a pull takes the version written over, and reads its bytes again.
+		await db.transaction('rw', db.clips, db.clipBytes, async () => {
+			await db.clips.update(['c1', name], { version: 'v2' });
+			await db.clipBytes.put({ connectionId: 'c1', name, bytes: pngOf(3000, 4000) });
+		});
+		const fresh = drawn(db, shrinker, name);
+		// Asked while the old is still being made.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		answers[0]?.();
+		await old;
+		await vi.waitFor(() => {
+			expect(answers).toHaveLength(2);
+		});
+		answers[1]?.();
+
+		expect((await fresh)?.key).toEqual(['thumb']);
+		expect(asked.map(({ width }) => width)).toEqual([512, 288]);
+		expect(await db.clipThumbs.count()).toBe(1);
+	});
+
 	it('is not made twice, where another made it while this one waited', async () => {
 		const { db, pasted } = await setup();
 		const { shrinker, asked } = shrinkerOf();
@@ -371,7 +410,7 @@ describe('a picture’s thumb on the clipboard', () => {
 		expect(await db.clipThumbs.count()).toBe(0);
 	});
 
-	it('goes with a source the user lets go of', async () => {
+	it('goes with a source the user lets go of, as it is detached', async () => {
 		const db = createDatabase(`clip-pictures-${crypto.randomUUID()}`);
 		opened.push(db);
 		await bindConnection(db, {
@@ -383,12 +422,9 @@ describe('a picture’s thumb on the clipboard', () => {
 		await keepClipThumb(db, { connectionId: 'c1', name: 'picture.png' });
 		expect(await db.clipThumbs.count()).toBe(1);
 		await detachConnection(db, { connectionId: 'c1' });
-		const seen = seenIn(await unsyncedIn(db, 'c1'));
 
-		expect(await releaseConnection(db, { connectionId: 'c1', unsynced: 'discard', seen })).toBe(
-			'released'
-		);
-
+		// With its item, so none is made for it after.
 		expect(await db.clipThumbs.count()).toBe(0);
+		expect(await db.clips.count()).toBe(0);
 	});
 });
