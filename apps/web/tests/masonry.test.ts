@@ -65,6 +65,33 @@ describe('where the cards go', () => {
 	});
 });
 
+describe('a wall of many cards', () => {
+	/** One card at a time at the foot of the shortest column, the leftmost of those as tall. */
+	const oneByOne = (heights: readonly number[], columns: number) => {
+		const tops = Array.from({ length: columns }, () => 0);
+		return heights.map((height) => {
+			const shortest = tops.indexOf(Math.min(...tops));
+			const top = tops[shortest] ?? 0;
+			tops.splice(shortest, 1, top + height + CARD_GAP);
+			return { column: shortest, y: top };
+		});
+	};
+
+	it('puts each of seven hundred cards where one at a time would go', () => {
+		// Heights from a fixed sequence, so a failure is the same every run.
+		const heights = Array.from({ length: 700 }, (_, at) => 60 + ((at * 7919) % 241));
+		const width = 1000;
+		const wall = placeCards(heights, width);
+		const columns = columnCount(width);
+		expect(
+			wall.places.map(({ x, y }) => ({
+				column: Math.round((x - wall.left) / (wall.cardWidth + CARD_GAP)),
+				y,
+			}))
+		).toEqual(oneByOne(heights, columns));
+	});
+});
+
 describe('a card’s height before it is measured', () => {
 	it('grows with its lines, a long one counted as the lines it wraps to', () => {
 		const one = guessHeight({ title: false, lines: ['Milk'] }, 200);

@@ -50,18 +50,17 @@ export const placeCards = (heights: readonly number[], width: number): Wall => {
 	const cardWidth = Math.min(CARD_MAX, (width - CARD_GAP * (columns - 1)) / columns);
 	const across = cardWidth * columns + CARD_GAP * (columns - 1);
 	const left = Math.max(0, (width - across) / 2);
-	const start = {
-		places: [] as readonly Placed[],
-		tops: Array.from({ length: columns }, () => 0) as readonly number[],
-	};
-	const { places, tops } = heights.reduce((wall, height) => {
-		const shortest = wall.tops.indexOf(Math.min(...wall.tops));
-		const top = wall.tops[shortest] ?? 0;
-		return {
-			places: [...wall.places, { x: left + shortest * (cardWidth + CARD_GAP), y: top }],
-			tops: wall.tops.map((each, at) => (at === shortest ? each + height + CARD_GAP : each)),
-		};
-	}, start);
+	// The foot of each column, written to as each card goes on: the places
+	// copied for each card were a quarter of a million copies for a wall of
+	// seven hundred, on every draw.
+	const tops = Array.from({ length: columns }, () => 0);
+	const places = heights.map((height): Placed => {
+		const shortest = tops.indexOf(Math.min(...tops));
+		const top = tops[shortest] ?? 0;
+		// eslint-disable-next-line functional/immutable-data
+		tops[shortest] = top + height + CARD_GAP;
+		return { x: left + shortest * (cardWidth + CARD_GAP), y: top };
+	});
 	return { places, cardWidth, left, height: Math.max(0, Math.max(...tops) - CARD_GAP) };
 };
 

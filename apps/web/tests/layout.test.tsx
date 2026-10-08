@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { COMPACT, useElementWidth, useMediaQuery } from '../src/components/layout.js';
 import { elementWidths, type FakeWidths } from './elementWidth.js';
@@ -88,6 +88,30 @@ describe('useElementWidth', () => {
 			widths?.resize('.measured', 420);
 		});
 		expect(screen.getByText('420px')).toBeDefined();
+	});
+
+	it('measures when it starts watching and when the width changes, and not on every draw', () => {
+		widths = elementWidths({ '.measured': 700 });
+		// Measuring on a draw makes the browser lay the page out there and then.
+		const measured = vi.spyOn(Element.prototype, 'getBoundingClientRect');
+		try {
+			const { rerender } = render(<Measured />);
+			expect(screen.getByText('700px')).toBeDefined();
+			const once = measured.mock.calls.length;
+			expect(once).toBe(1);
+
+			rerender(<Measured />);
+			rerender(<Measured />);
+			expect(measured.mock.calls.length).toBe(once);
+
+			act(() => {
+				widths?.resize('.measured', 420);
+			});
+			expect(screen.getByText('420px')).toBeDefined();
+			expect(measured.mock.calls.length).toBe(once + 1);
+		} finally {
+			measured.mockRestore();
+		}
 	});
 });
 

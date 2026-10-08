@@ -6,13 +6,14 @@ import {
 	type ScratchColor,
 } from '@skysa/core';
 import {
-	type CSSProperties,
 	Fragment,
+	memo,
 	type ReactNode,
 	useCallback,
 	useDeferredValue,
 	useEffect,
 	useId,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -244,28 +245,46 @@ const CardLine = ({ line }: { line: PreviewLine }) => {
 	);
 };
 
-/** One note's card: its name if it has one, and the opening of what it says. */
-const Card = ({
+/**
+ * Where a card is on its wall, and how wide it is, once the wall has a width.
+ * Numbers rather than a style, so a card that has not moved compares equal.
+ */
+interface CardPlace {
+	readonly x: number;
+	readonly y: number;
+	readonly width: number;
+}
+
+/**
+ * One note's card: its name if it has one, and the opening of what it says.
+ *
+ * Handed its note, its place and the scratchpad's handlers, which stay the same
+ * from one draw to the next (`Scratchpad`), so it is drawn again only when one
+ * of those changes: a card saved, or moved by one above it growing, and not
+ * the wall around it.
+ */
+const CardView = ({
 	note: row,
 	open,
 	liveEdits,
-	style,
+	x,
+	y,
+	width,
 	measure,
 	onOpen,
 	onMark,
 	onMove,
 	onDelete,
-}: {
+}: Partial<CardPlace> & {
 	note: NoteRecord;
 	/** Open, and so not on the wall: its editor is where it went (`useCardMotion`). */
 	open: boolean;
 	liveEdits: LiveEdits | undefined;
-	style: CSSProperties | undefined;
 	measure: Measure;
-	onOpen: () => void;
-	onMark: (change: MarkChange) => void;
-	onMove: (() => void) | undefined;
-	onDelete: () => void;
+	onOpen: (note: NoteRecord) => void;
+	onMark: (note: NoteRecord, change: MarkChange) => void;
+	onMove: ((note: NoteRecord) => void) | undefined;
+	onDelete: (note: NoteRecord) => void;
 }) => {
 	// Deferred, as a note list row is: the card is a parse of what is typed.
 	const note = shownNote(row, useDeferredValue(useLiveEdit(liveEdits, row)));
@@ -291,9 +310,20 @@ const Card = ({
 			data-id={row.id}
 			data-color={marks.color}
 			data-open={open || undefined}
-			style={style}
+			style={
+				x === undefined || y === undefined
+					? undefined
+					: { width, transform: `translate(${String(x)}px, ${String(y)}px)` }
+			}
 		>
-			<button type="button" className="scratch-card-open" data-card={row.id} onClick={onOpen}>
+			<button
+				type="button"
+				className="scratch-card-open"
+				data-card={row.id}
+				onClick={() => {
+					onOpen(row);
+				}}
+			>
 				{named && <span className="scratch-card-title">{titleShown(note.title)}</span>}
 				{hasPictures(lines) ? <CardFiles note={row}>{shown}</CardFiles> : shown}
 				{!named && lines.length === 0 && (
@@ -314,20 +344,34 @@ const Card = ({
 					className="icon icon-quiet"
 					pinned={marks.pinned}
 					onToggle={() => {
-						onMark({ pinned: marks.pinned ? undefined : true });
+						onMark(row, { pinned: marks.pinned ? undefined : true });
 					}}
 				/>
 				<ColorMenu
 					color={marks.color}
 					onColor={(color) => {
-						onMark({ color });
+						onMark(row, { color });
 					}}
 				/>
-				<CardMenu name={name} onMove={onMove} onDelete={onDelete} />
+				<CardMenu
+					name={name}
+					onMove={
+						onMove === undefined
+							? undefined
+							: () => {
+									onMove(row);
+								}
+					}
+					onDelete={() => {
+						onDelete(row);
+					}}
+				/>
 			</div>
 		</article>
 	);
 };
+
+const Card = memo(CardView);
 
 /**
  * Each card's height, as drawn, by note id: what the wall places them by. One
@@ -392,7 +436,7 @@ const Wall = ({
 	label: string;
 	/** Whether the label is shown, which it is only beside the other wall. */
 	labelled: boolean;
-	card: (note: NoteRecord, style: CSSProperties | undefined, measure: Measure) => ReactNode;
+	card: (note: NoteRecord, place: CardPlace | undefined, measure: Measure) => ReactNode;
 }) => {
 	const labelId = useId();
 	const [element, setElement] = useState<HTMLDivElement | null>(null);
@@ -436,10 +480,7 @@ const Wall = ({
 						note,
 						wall === undefined || place === undefined
 							? undefined
-							: {
-									width: wall.cardWidth,
-									transform: `translate(${String(place.x)}px, ${String(place.y)}px)`,
-								},
+							: { x: place.x, y: place.y, width: wall.cardWidth },
 						measure
 					);
 				})}
@@ -484,30 +525,37 @@ export const Scratchpad = ({
 	// Every card asks for its opening and its frontmatter on every draw.
 	keepRows('scratchpad', notes?.length ?? 0);
 	const both = cards.pinned.length > 0 && cards.others.length > 0;
-	const card = (note: NoteRecord, style: CSSProperties | undefined, measure: Measure) => (
+	// The handlers this is given are made again on each draw of the page. The
+	// cards are handed these instead, which stay the same and call the ones
+	// given last, as the note list's rows are (`NoteList`).
+	const given = useRef({ onOpen, onMark, onMove, onDelete });
+	useLayoutEffect(() => {
+		given.current = { onOpen, onMark, onMove, onDelete };
+	});
+	const open = useCallback((note: NoteRecord) => {
+		given.current.onOpen(note);
+	}, []);
+	const mark = useCallback((note: NoteRecord, change: MarkChange) => {
+		given.current.onMark(note, change);
+	}, []);
+	const move = useCallback((note: NoteRecord) => {
+		given.current.onMove?.(note);
+	}, []);
+	const remove = useCallback((note: NoteRecord) => {
+		given.current.onDelete(note);
+	}, []);
+	const card = (note: NoteRecord, place: CardPlace | undefined, measure: Measure) => (
 		<Card
 			key={note.id}
 			note={note}
 			open={note.id === openId}
 			liveEdits={liveEdits}
-			style={style}
+			{...place}
 			measure={measure}
-			onOpen={() => {
-				onOpen(note);
-			}}
-			onMark={(change) => {
-				onMark(note, change);
-			}}
-			onMove={
-				onMove === undefined
-					? undefined
-					: () => {
-							onMove(note);
-						}
-			}
-			onDelete={() => {
-				onDelete(note);
-			}}
+			onOpen={open}
+			onMark={mark}
+			onMove={onMove === undefined ? undefined : move}
+			onDelete={remove}
 		/>
 	);
 	const empty = notes !== undefined && cards.pinned.length + cards.others.length === 0;
