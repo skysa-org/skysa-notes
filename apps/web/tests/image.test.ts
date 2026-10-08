@@ -24,6 +24,7 @@ afterEach(async () => {
 	await Promise.all(editors.splice(0).map((editor) => editor.destroy()));
 	document.body.replaceChildren();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 });
 
 interface Asked {
@@ -676,9 +677,36 @@ describe('a picture beside the note, opened or saved', () => {
 
 		expect(asked).toEqual(['cat-1a2b3c4d.png', 'my%20cat.png']);
 		expect(told.map((problem) => problem.message)).toEqual([
-			'cat could not be found beside this note.',
+			'cat.png could not be found beside this note.',
 			'my cat.png could not be found beside this note.',
 		]);
+	});
+
+	it('is saved under its alt text with its file’s extension, which the alt is written without', async () => {
+		const { host } = fileHost({
+			state: 'ready',
+			file: new File(['png'], 'cat-1a2b3c4d.png', { type: 'image/png' }),
+		});
+		const mounted = await selectedIn('A ![cat](cat-1a2b3c4d.png) here.\n', host);
+		vi.stubGlobal('matchMedia', () => ({ matches: false }));
+		vi.stubGlobal(
+			'URL',
+			class extends URL {
+				static override createObjectURL = () => 'blob:test/cat';
+				static override revokeObjectURL = () => undefined;
+			}
+		);
+		const saved: (string | null)[] = [];
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+			this: HTMLAnchorElement
+		) {
+			saved.push(this.getAttribute('download'));
+		});
+
+		mounted.button('Download')?.click();
+		await settled();
+
+		expect(saved).toEqual(['cat.png']);
 	});
 
 	it('opens on Enter while selected, and goes into its bar on Tab and back on Escape', async () => {
@@ -697,6 +725,16 @@ describe('a picture beside the note, opened or saved', () => {
 		key(document.activeElement, { key: 'Escape' });
 		expect(focus).toHaveBeenCalled();
 		expect(mounted.view.state.selection).toBeInstanceOf(NodeSelection);
+	});
+
+	it('leaves Enter to the editor where it opens nothing', async () => {
+		const { host, asked } = fileHost();
+		const mounted = await selectedIn('A ![cat](https://example.com/cat.png) here.\n', host);
+
+		key(mounted.view.dom, { key: 'Enter' });
+
+		expect(asked).toEqual([]);
+		expect(mounted.view.state.doc.childCount).toBe(2);
 	});
 
 	it('goes into its bar on Tab where it opens nothing, at Remove from note', async () => {

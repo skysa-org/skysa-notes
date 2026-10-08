@@ -124,6 +124,19 @@ const whenVisible = (element: Element, editor: Element, work: () => void): (() =
 	};
 };
 
+/**
+ * The name a picture is saved under: its alt text, with its file's extension
+ * on the end, since the app writes an alt without one (`attachmentLabel`) and
+ * `downloadName` takes a label only where it ends as the file does; the
+ * file's own name where it has no alt.
+ */
+const savedAs = (alt: string, stored: string): string => {
+	if (alt === '') return stored;
+	const dot = stored.lastIndexOf('.');
+	const extension = dot > 0 ? stored.slice(dot) : '';
+	return alt.toLowerCase().endsWith(extension.toLowerCase()) ? alt : `${alt}${extension}`;
+};
+
 const imageView =
 	(host: AttachmentHost, view: EditorView, getPos: () => number | undefined) =>
 	(initial: ProseNode): NodeView => {
@@ -272,8 +285,7 @@ const imageView =
 		/** The file, as a chip asks for one: by the name the user knows it by. */
 		const request = () => {
 			const src = attributeOf(held.current, 'src');
-			const alt = attributeOf(held.current, 'alt');
-			return { host, href: src, label: alt === '' ? nameIn(src) : alt };
+			return { host, href: src, label: savedAs(attributeOf(held.current, 'alt'), nameIn(src)) };
 		};
 
 		/** Say the bar is busy while `work` runs: the whole picture may be a download. */

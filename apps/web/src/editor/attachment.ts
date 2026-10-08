@@ -311,9 +311,9 @@ export const attachmentViewPlugin = $view(
 /**
  * The keys a chip or a picture selected whole takes: Enter opens it, as Enter
  * on a link does anywhere else, and Tab goes into its bar, which is the
- * keyboard's way to Download and Remove (Escape comes back). Asked before the keymaps (an editor
- * prop, not a plugin's): `splitBlock` would otherwise replace the chip with a
- * new paragraph, and in a list Tab would indent the item. Only the key alone:
+ * keyboard's way to Download and Remove (Escape comes back). Asked before the
+ * keymaps (an editor prop, not a plugin's): `splitBlock` would otherwise split
+ * the paragraph in front of it, and in a list Tab would indent the item. Only the key alone:
  * Mod+Enter ticks a task, and Shift+Tab is still the list's.
  */
 export const selectedKey = (view: EditorView, event: KeyboardEvent): boolean => {
