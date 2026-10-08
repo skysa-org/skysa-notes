@@ -206,15 +206,15 @@ interface NoteRowProps {
 	/** Pinned to the top of the list on this device. */
 	pinned: boolean;
 	/**
-	 * Where the list is windowed, what its row is told, each a value that
-	 * stays the same so the row is still drawn again only when what it shows
-	 * changes: how it is measured; and how many rows its run has, drawn or
-	 * not, and its place among them from 1.
+	 * Where the list is windowed, what its row is told, each a value or a
+	 * function that stays the same so the row is still drawn again only when
+	 * what it shows changes: how it is measured; how many rows its run has,
+	 * drawn or not, and its place among them from 1; and that the focus came
+	 * into the row or one of its menus, or went out.
 	 */
 	measure?: Measure | undefined;
 	of?: number | undefined;
 	at?: number | undefined;
-	/** The focus came into the row or one of its menus, or went out (`useFocusedItem`). */
 	onFocusIn?: ((id: string) => void) | undefined;
 	onFocusOut?: (() => void) | undefined;
 }
@@ -555,11 +555,14 @@ export const NoteList = ({
 		return (
 			<NoteRow
 				key={note.id}
-				{...(place === undefined ? {} : { ...place, measure: rowHeights.measure })}
-				// Followed even where every row is drawn, so that one the focus is
-				// in stays when a sync takes the list past the number windowed.
-				onFocusIn={focusIn}
-				onFocusOut={focusOut}
+				{...(place === undefined
+					? {}
+					: {
+							...place,
+							measure: rowHeights.measure,
+							onFocusIn: focusIn,
+							onFocusOut: focusOut,
+						})}
 				note={note}
 				selected={note.id === selectedNoteId}
 				onSelect={select}

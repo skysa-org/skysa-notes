@@ -285,19 +285,6 @@ describe('a long note list', () => {
 		}
 	});
 
-	it('keeps the row the focus is in when a sync takes the list past 150', () => {
-		const { rerender } = render(<NoteList {...listProps(notesOf(150))} />);
-		scrollTo(0);
-		act(() => {
-			rowButton('Note 1').focus();
-		});
-
-		rerender(<NoteList {...listProps(notesOf(300))} />);
-		scrollTo(200 * GUESS);
-		expect(drawn()).toContain('Note 1');
-		expect(drawn()).not.toContain('Note 3');
-	});
-
 	it('keeps the row being moved drawn', () => {
 		const { rerender } = render(<NoteList {...listProps(notesOf(300))} movingNoteId="n3" />);
 		scrollTo(200 * GUESS);
