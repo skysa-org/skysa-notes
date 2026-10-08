@@ -255,7 +255,8 @@ export const evictPictures = (
 			.filter((each) => !spared(each))
 			.toSorted(
 				(a, b) =>
-					Number(last.has(a)) - Number(last.has(b)) || a.copy.lastUsedAt - b.copy.lastUsedAt
+					Number(last.has(a)) - Number(last.has(b)) ||
+					a.copy.lastUsedAt - b.copy.lastUsedAt
 			);
 		// Written to as it goes, in the order they are let go of.
 		const left = { current: copies.reduce((sum, { copy }) => sum + copy.size, 0) };
