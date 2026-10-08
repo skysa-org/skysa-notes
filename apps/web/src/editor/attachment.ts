@@ -119,7 +119,7 @@ export const attachmentSchema = $nodeSchema(ATTACHMENT, () => ({
 }));
 
 /** The file's name as the link has it, decoded where it can be. */
-const nameIn = (href: string): string => {
+export const nameIn = (href: string): string => {
 	const written = href.slice(href.lastIndexOf('/') + 1);
 	try {
 		return decodeURIComponent(written);
@@ -152,14 +152,21 @@ const open = (host: AttachmentHost, node: ProseNode, browser?: FileBrowser): Pro
 /** A click that opens a chip rather than selecting it: Cmd or Ctrl held. */
 const opensOnClick = (event: MouseEvent): boolean => event.metaKey || event.ctrlKey;
 
-/** What the keyboard can do with a chip selected whole (`chipKey`). */
-interface ChipKeys {
-	readonly open: () => void;
+/** What the keyboard can do with a chip, or a picture, selected whole (`selectedKey`). */
+export interface SelectedKeys {
+	/** Open it, answering whether it does: a picture on the web opens nothing. */
+	readonly open: () => boolean;
 	readonly toBar: () => void;
 }
 
-/** Each chip's, by the element its view draws: the editor's props have only the view to ask. */
-const chipKeys = new WeakMap<Node, ChipKeys>();
+/**
+ * Each chip's and picture's, by the element its view draws: the editor's
+ * props have only the view to ask.
+ */
+export const selectedKeys = new WeakMap<Node, SelectedKeys>();
+
+/** The nodes drawn with a bar under them while selected whole: a chip, and a picture (`image.ts`). */
+const WITH_BAR: ReadonlySet<string> = new Set([ATTACHMENT, 'image']);
 
 export const attachmentView =
 	(
@@ -250,9 +257,10 @@ export const attachmentView =
 			event.preventDefault();
 			view.focus();
 		});
-		chipKeys.set(dom, {
+		selectedKeys.set(dom, {
 			open: () => {
 				busy(() => open(host, held.current, browser));
+				return true;
 			},
 			toBar: () => {
 				opener.focus();
@@ -301,23 +309,23 @@ export const attachmentViewPlugin = $view(
 );
 
 /**
- * The keys a chip selected whole takes: Enter opens it, as Enter on a link does
- * anywhere else, and Tab goes into its bar, which is the keyboard's way to
- * Download and Remove (Escape comes back). Asked before the keymaps (an editor
+ * The keys a chip or a picture selected whole takes: Enter opens it, as Enter
+ * on a link does anywhere else, and Tab goes into its bar, which is the
+ * keyboard's way to Download and Remove (Escape comes back). Asked before the keymaps (an editor
  * prop, not a plugin's): `splitBlock` would otherwise replace the chip with a
  * new paragraph, and in a list Tab would indent the item. Only the key alone:
  * Mod+Enter ticks a task, and Shift+Tab is still the list's.
  */
-export const chipKey = (view: EditorView, event: KeyboardEvent): boolean => {
+export const selectedKey = (view: EditorView, event: KeyboardEvent): boolean => {
 	if (event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return false;
 	if (event.key !== 'Enter' && event.key !== 'Tab') return false;
 	const { selection } = view.state;
-	if (!(selection instanceof NodeSelection) || selection.node.type.name !== ATTACHMENT)
+	if (!(selection instanceof NodeSelection) || !WITH_BAR.has(selection.node.type.name))
 		return false;
-	const keys = chipKeys.get(view.nodeDOM(selection.from) ?? view.dom);
+	const keys = selectedKeys.get(view.nodeDOM(selection.from) ?? view.dom);
 	if (keys === undefined) return false;
-	if (event.key === 'Enter') keys.open();
-	else keys.toBar();
+	if (event.key === 'Enter') return keys.open();
+	keys.toBar();
 	return true;
 };
 

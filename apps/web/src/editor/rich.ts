@@ -43,7 +43,7 @@ import {
 import { t } from '../i18n/t.js';
 import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from './attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
-import { attachmentSchema, attachmentViewPlugin, chipKey, claimsClick } from './attachment.js';
+import { attachmentSchema, attachmentViewPlugin, claimsClick, selectedKey } from './attachment.js';
 import { autoLanguagePlugin } from './autoLanguage.js';
 import { codeBlocksKeepAtoms, codeSpansHoldText } from './codeAtoms.js';
 import { codeBlockViewPlugin } from './codeBlock.js';
@@ -459,7 +459,7 @@ export const createRichEditor = ({
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': t('editor.noteBody') },
 				// Ahead of every keymap, which a plugin's would not be.
-				handleKeyDown: chipKey,
+				handleKeyDown: selectedKey,
 				handleClickOn: (_view, _pos, node, _nodePos, event) => claimsClick(node, event),
 				// Files, ahead of the clipboard plugin's paste and of ProseMirror's drop.
 				handlePaste: (view, event) =>

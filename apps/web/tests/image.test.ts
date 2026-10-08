@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	type AttachmentHost,
+	type AttachmentProblem,
+	type Fetched,
 	NO_ATTACHMENTS,
 	type Shown,
 	type ShowOptions,
@@ -584,5 +586,124 @@ describe('a picture selected whole', () => {
 		);
 
 		expect(view.state.doc.eq(before)).toBe(true);
+	});
+});
+
+/**
+ * A picture beside the note opens full size in a tab of its own, and saves,
+ * from its bar, as a chip's file does: whatever this view draws of it, the
+ * whole picture is one press away (#276).
+ */
+describe('a picture beside the note, opened or saved', () => {
+	const fileHost = (fetched: Fetched = { state: 'missing' }) => {
+		const asked: string[] = [];
+		const told: AttachmentProblem[] = [];
+		const host: AttachmentHost = {
+			...fakeHost().host,
+			fetchFile: (href) => {
+				asked.push(href);
+				return Promise.resolve(fetched);
+			},
+			report: (problem) => {
+				told.push(problem);
+			},
+		};
+		return { host, asked, told };
+	};
+
+	const selectedIn = async (body: string, host?: AttachmentHost) => {
+		const mounted = await mount(body, host);
+		mounted.view.dispatch(
+			mounted.view.state.tr.setSelection(NodeSelection.create(mounted.view.state.doc, 3))
+		);
+		const button = (label: string) =>
+			mounted.picture()?.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+		return { ...mounted, button };
+	};
+
+	const key = (target: EventTarget | null | undefined, init: KeyboardEventInit) =>
+		target?.dispatchEvent(
+			new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+		);
+
+	it('offers Open full size and Download, and a picture on the web neither', async () => {
+		const own = await selectedIn('A ![cat](cat-1a2b3c4d.png) here.\n');
+		expect(own.button('Open full size')?.hasAttribute('hidden')).toBe(false);
+		expect(own.button('Download')?.hasAttribute('hidden')).toBe(false);
+
+		const web = await selectedIn('A ![cat](https://example.com/cat.png) here.\n');
+		expect(web.button('Open full size')?.hasAttribute('hidden')).toBe(true);
+		expect(web.button('Download')?.hasAttribute('hidden')).toBe(true);
+		expect(web.button('Remove from note')?.hasAttribute('hidden')).toBe(false);
+	});
+
+	it('opens in the tab it opened while the press still counted, and is no edit', async () => {
+		const { host, asked } = fileHost({
+			state: 'ready',
+			file: new File(['png'], 'cat-1a2b3c4d.png', { type: 'image/png' }),
+		});
+		const mounted = await selectedIn('A ![cat](cat-1a2b3c4d.png) here.\n', host);
+		const dispatch = vi.spyOn(mounted.view, 'dispatch');
+		const replace = vi.fn();
+		const open = vi
+			.spyOn(window, 'open')
+			.mockReturnValue({ location: { replace }, close: vi.fn() } as unknown as Window);
+		vi.stubGlobal(
+			'URL',
+			class extends URL {
+				static override createObjectURL = () => 'blob:test/cat';
+				static override revokeObjectURL = () => undefined;
+			}
+		);
+
+		mounted.button('Open full size')?.click();
+		expect(open).toHaveBeenCalledWith('about:blank', '_blank');
+		await settled();
+
+		expect(asked).toEqual(['cat-1a2b3c4d.png']);
+		expect(replace).toHaveBeenCalledWith('blob:test/cat');
+		expect(dispatch).not.toHaveBeenCalled();
+		expect(mounted.onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('saves through the host, saying by its words, or its file’s name, what went wrong', async () => {
+		const { host, asked, told } = fileHost();
+		const named = await selectedIn('A ![cat](cat-1a2b3c4d.png) here.\n', host);
+		named.button('Download')?.click();
+		const unnamed = await selectedIn('A ![](my%20cat.png) here.\n', host);
+		unnamed.button('Download')?.click();
+		await settled();
+
+		expect(asked).toEqual(['cat-1a2b3c4d.png', 'my%20cat.png']);
+		expect(told.map((problem) => problem.message)).toEqual([
+			'cat could not be found beside this note.',
+			'my cat.png could not be found beside this note.',
+		]);
+	});
+
+	it('opens on Enter while selected, and goes into its bar on Tab and back on Escape', async () => {
+		const { host, asked } = fileHost();
+		const mounted = await selectedIn('A ![cat](cat-1a2b3c4d.png) here.\n', host);
+		const before = mounted.view.state.doc;
+		const focus = vi.spyOn(mounted.view, 'focus');
+		vi.spyOn(window, 'open').mockReturnValue(null);
+
+		key(mounted.view.dom, { key: 'Enter' });
+		expect(asked).toEqual(['cat-1a2b3c4d.png']);
+		expect(mounted.view.state.doc.eq(before)).toBe(true);
+
+		key(mounted.view.dom, { key: 'Tab' });
+		expect(document.activeElement).toBe(mounted.button('Open full size'));
+		key(document.activeElement, { key: 'Escape' });
+		expect(focus).toHaveBeenCalled();
+		expect(mounted.view.state.selection).toBeInstanceOf(NodeSelection);
+	});
+
+	it('goes into its bar on Tab where it opens nothing, at Remove from note', async () => {
+		const mounted = await selectedIn('A ![cat](https://example.com/cat.png) here.\n');
+
+		key(mounted.view.dom, { key: 'Tab' });
+
+		expect(document.activeElement).toBe(mounted.button('Remove from note'));
 	});
 });

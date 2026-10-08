@@ -406,13 +406,18 @@ describe('a chip', () => {
 		}
 	);
 
-	it('leaves Enter alone anywhere but on a chip, a picture selected whole included', async () => {
+	it('leaves Enter alone anywhere but on a chip or a picture selected whole', async () => {
 		const { host, asked } = fakeHost();
 		const { view } = await mount('A [a.zip](a.zip) ![b](b.png) c.\n', host);
 		const enter = () =>
 			view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		vi.spyOn(window, 'open').mockReturnValue(null);
 		view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
 		enter();
+		expect(asked).toEqual([]);
+
+		// A picture opens full size, as a chip opens (`image.ts`), rather than
+		// being split out of its paragraph.
 		const picture = { current: -1 };
 		view.state.doc.descendants((node, pos) => {
 			if (node.type.name === 'image') picture.current = pos;
@@ -422,7 +427,7 @@ describe('a chip', () => {
 		);
 		enter();
 
-		expect(asked).toEqual([]);
+		expect(asked).toEqual(['b.png']);
 	});
 
 	it('is taken out of the note by Remove, as an edit, leaving the words around it', async () => {
