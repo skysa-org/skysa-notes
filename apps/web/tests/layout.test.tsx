@@ -98,6 +98,9 @@ describe('useElementWidth', () => {
 			const { rerender } = render(<Measured />);
 			expect(screen.getByText('700px')).toBeDefined();
 			const once = measured.mock.calls.length;
+			// Once, when it starts watching. A browser's observer also reports at
+			// once, with the width in what it reports; this fake reports nothing
+			// until a resize, and so is measured.
 			expect(once).toBe(1);
 
 			rerender(<Measured />);

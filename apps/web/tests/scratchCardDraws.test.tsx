@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import type * as VisibleText from '../src/store/visibleText.js';
+import { elementWidths, type FakeWidths } from './elementWidth.js';
 
 /**
  * The page draws the scratchpad again on every autosave and sync run, and
@@ -24,7 +25,13 @@ vi.mock('../src/store/visibleText.js', async (importOriginal) => {
 	};
 });
 
-afterEach(cleanup);
+let widths: FakeWidths | undefined;
+
+afterEach(() => {
+	cleanup();
+	widths?.restore();
+	widths = undefined;
+});
 
 beforeEach(() => {
 	drawn.bodies = [];
@@ -87,6 +94,30 @@ describe('a scratchpad card', () => {
 		const drawAgain = drawPad({ openId: milk.id });
 		drawAgain({ openId: bread.id });
 		expect([...drawn.bodies].sort()).toEqual([bread.body, milk.body]);
+	});
+
+	it('is drawn again as the page offers to move it or stops offering', () => {
+		const drawAgain = drawPad();
+		drawAgain({ onMove: undefined });
+		expect([...drawn.bodies].sort()).toEqual([bread.body, eggs.body, milk.body]);
+	});
+
+	it('is not drawn again in the place it was, on a wall with a width', () => {
+		widths = elementWidths({ '.scratch-wall': 1000 });
+		const drawAgain = drawPad();
+		expect(document.querySelector('.scratch-wall.placed')).not.toBeNull();
+		drawAgain({ notes: [milk, eggs, bread] });
+		expect(drawn.bodies).toEqual([]);
+	});
+
+	it('is drawn again where the wall moves it', () => {
+		widths = elementWidths({ '.scratch-wall': 1000 });
+		drawPad();
+		// Four columns to two: every card is somewhere else.
+		act(() => {
+			widths?.resize('.scratch-wall', 520);
+		});
+		expect([...drawn.bodies].sort()).toEqual([bread.body, eggs.body, milk.body]);
 	});
 
 	it('calls the handlers the page gave last, though it was not drawn again', () => {

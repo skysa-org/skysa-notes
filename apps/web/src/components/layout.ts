@@ -90,11 +90,16 @@ export const useElementWidth = (element: Element | null): number | undefined => 
 				if (element === null || typeof ResizeObserver === 'undefined') {
 					return noSubscription();
 				}
-				const observer = new ResizeObserver(() => {
-					measure();
+				const observer = new ResizeObserver((entries?: readonly ResizeObserverEntry[]) => {
+					// The border box, as `getBoundingClientRect` gives it, without
+					// a transform the element is drawn under for a moment, which the
+					// observer would never say had gone.
+					const box = entries?.at(-1)?.borderBoxSize.at(0)?.inlineSize;
+					if (box === undefined) measure();
+					else measured.current = box > 0 ? box : undefined;
 					changed();
 				});
-				observer.observe(element);
+				observer.observe(element, { box: 'border-box' });
 				return () => {
 					observer.disconnect();
 				};
