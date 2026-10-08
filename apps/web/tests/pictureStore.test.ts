@@ -20,6 +20,7 @@ import {
 	keepPicture,
 	type MadeCopy,
 	PICTURE_BUDGET_BYTES,
+	THUMB_SHARE,
 } from '../src/store/pictures.js';
 import { seenIn, unsyncedIn } from '../src/store/unsynced.js';
 import { createDexieSyncStore } from '../src/sync/store.js';
@@ -166,7 +167,9 @@ describe('the copies a device keeps, over budget', () => {
 		await keepPicture(db, boundRow('c'), { info: INFO, copy: made('w960') }, 3);
 		await keepPicture(db, boundRow('c'), { info: INFO, copy: made('thumb') }, 4);
 
-		expect(await evictPictures(db, 250)).toBe(2);
+		// Both thumbs, 200 bytes, are within the share of 280 kept for them.
+		expect(200).toBeLessThanOrEqual(280 * THUMB_SHARE);
+		expect(await evictPictures(db, 280)).toBe(2);
 
 		// The two width copies went, b's the older; both thumbs, older still, stay.
 		expect(await bytesHeld(db)).toEqual(['a:thumb', 'c:thumb']);
@@ -191,6 +194,29 @@ describe('the copies a device keeps, over budget', () => {
 
 		expect((await db.pictures.toArray()).map((picture) => picture.fileId)).toEqual(['c']);
 		expect(await bytesHeld(db)).toEqual(['c:thumb']);
+	});
+
+	it('lets the oldest thumbs go as any copy does, past their share of the budget', async () => {
+		const db = freshDatabase();
+		await Promise.all(['a', 'b', 'c'].map((id) => db.files.put(boundRow(id))));
+		await keepPicture(db, boundRow('a'), { info: INFO, copy: made('thumb') }, 1);
+		await keepPicture(db, boundRow('b'), { info: INFO, copy: made('w1280') }, 2);
+		await keepPicture(db, boundRow('c'), { info: INFO, copy: made('thumb') }, 3);
+
+		// Room for one thumb in the share: a's, the older, goes before b's copy.
+		expect(await evictPictures(db, 100 / THUMB_SHARE + 100)).toBe(1);
+
+		expect(await bytesHeld(db)).toEqual(['b:w1280', 'c:thumb']);
+	});
+
+	it('never lets go of the copy it has just kept, though a thumb goes for it', async () => {
+		const db = freshDatabase();
+		await Promise.all(['a', 'b'].map((id) => db.files.put(boundRow(id))));
+		await keepPicture(db, boundRow('a'), { info: INFO, copy: made('thumb') }, 1, 150);
+
+		await keepPicture(db, boundRow('b'), { info: INFO, copy: made('w1280') }, 2, 150);
+
+		expect(await bytesHeld(db)).toEqual(['b:w1280']);
 	});
 
 	it('is kept within budget as each copy is kept', async () => {
@@ -248,6 +274,33 @@ describe('a picture beside a note, as it syncs', () => {
 			version: row?.remoteVersion,
 		});
 		expect(await heldCopy(db, CONNECTION, fileId, 'thumb', 0)).toBeDefined();
+	});
+
+	it('is not what was uploaded where the upload read its bytes again from elsewhere', async () => {
+		const { db, fake, engine } = await connected();
+		await createFolder(db, { ...scope, name: 'Play' });
+		const { note, fileId } = await noteWithPicture(db);
+		const other = await createNote(db, { ...scope, folderPath: 'Work', title: 'Also' });
+		const linked = await db.notes.get([CONNECTION, note.id]);
+		await saveNoteBody(db, other.id, linked?.body ?? '', undefined, scope);
+		expect((await engine.sync()).status).toBe('ok');
+		await db.fileBytes.clear();
+
+		// Moved away from a note that still links it: a copy of the file, made
+		// without its bytes, which the upload reads from the original.
+		await moveNote(db, note.id, 'Play', scope);
+		const copy = (await db.files.toArray()).find((file) => file.id !== fileId);
+		if (copy === undefined) throw new Error('no copy');
+		expect(copy.remoteId).toBeUndefined();
+		expect(await keepPicture(db, copy, { info: INFO, copy: made('thumb') }, 0)).toBe(true);
+		const original = await db.files.get([CONNECTION, fileId]);
+		fake.plantBytes(original?.path ?? '', new TextEncoder().encode('another photo'));
+
+		expect((await engine.sync()).status).toBe('ok');
+
+		const uploaded = await db.files.get([CONNECTION, copy.id]);
+		expect(new TextDecoder().decode(fake.bytesAt(uploaded?.path ?? ''))).toBe('another photo');
+		expect(await heldPicture(db, CONNECTION, copy.id)).toBeUndefined();
 	});
 
 	it('is still what was read of it once it has moved with its note', async () => {

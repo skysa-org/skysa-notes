@@ -30,6 +30,14 @@ import { fileKey } from './files.js';
  */
 export const PICTURE_BUDGET_BYTES = 96 * 1024 * 1024;
 
+/**
+ * The share of the budget the thumbs are let go of last within: the newest of
+ * them, up to that much. Past it the oldest go as any copy does, least
+ * recently used first, or a device with thousands of cards would keep no copy
+ * of a note's pictures beyond the one it had just made.
+ */
+export const THUMB_SHARE = 0.75;
+
 /** What a row is bound to: the bytes of a remote version, or none while it is only here. */
 type Bound = Pick<FileRecord, 'remoteId' | 'remoteVersion'>;
 
@@ -182,20 +190,43 @@ export const restampPicture = async (
 	await db.pictures.put({ ...rest, ...stampOf(to) });
 };
 
+/** One copy of one picture: the one just kept, which its own keeping never lets go of. */
+type CopyKey = Readonly<{ key: Key; variant: PictureVariant }>;
+
+/** The thumbs let go of last: the newest, as many as fit `THUMB_SHARE` of the budget. */
+const sheltered = <T extends { variant: PictureVariant; copy: PictureCopyRecord }>(
+	copies: readonly T[],
+	budget: number
+): ReadonlySet<T> => {
+	const room = { current: THUMB_SHARE * budget };
+	return new Set(
+		copies
+			.filter(({ variant }) => variant === 'thumb')
+			.toSorted((a, b) => b.copy.lastUsedAt - a.copy.lastUsedAt)
+			.filter(({ copy }) => {
+				if (copy.size > room.current) return false;
+				room.current -= copy.size;
+				return true;
+			})
+	);
+};
+
 /**
  * Let go of what is kept for pictures until the copies fit `budget`: first
  * every record whose row has gone or moved on to other bytes, then copies,
- * the least recently used first. The copies a note is shown from go before
- * any card's thumb, which a whole wall of cards needs at once. A record with
- * no copies left is kept, for its header: it costs a few bytes, and keeps a
- * picture's box the right size.
+ * the least recently used first. The newest thumbs, up to `THUMB_SHARE` of
+ * the budget, go after the copies a note is shown from, since a whole wall of
+ * cards needs its thumbs at once. `spare`, the copy just kept, never goes. A
+ * record with no copies left is kept, for its header: it costs a few bytes,
+ * and keeps a picture's box the right size.
  *
  * One transaction, so a copy kept while this runs is either counted or not
  * there yet. Answers how many records and copies it let go of.
  */
 export const evictPictures = (
 	db: NotesDatabase,
-	budget: number = PICTURE_BUDGET_BYTES
+	budget: number = PICTURE_BUDGET_BYTES,
+	spare?: CopyKey
 ): Promise<number> =>
 	db.transaction('rw', db.files, db.pictures, db.pictureBytes, async () => {
 		const pictures = await db.pictures.toArray();
@@ -214,11 +245,18 @@ export const evictPictures = (
 				copy,
 			}))
 		);
-		const order = copies.toSorted(
-			(a, b) =>
-				Number(a.variant === 'thumb') - Number(b.variant === 'thumb') ||
-				a.copy.lastUsedAt - b.copy.lastUsedAt
-		);
+		const last = sheltered(copies, budget);
+		const spared = ({ picture, variant }: (typeof copies)[number]) =>
+			spare !== undefined &&
+			variant === spare.variant &&
+			picture.connectionId === spare.key[0] &&
+			picture.fileId === spare.key[1];
+		const order = copies
+			.filter((each) => !spared(each))
+			.toSorted(
+				(a, b) =>
+					Number(last.has(a)) - Number(last.has(b)) || a.copy.lastUsedAt - b.copy.lastUsedAt
+			);
 		// Written to as it goes, in the order they are let go of.
 		const left = { current: copies.reduce((sum, { copy }) => sum + copy.size, 0) };
 		const evicted = order.filter(({ copy }) => {
@@ -250,13 +288,26 @@ export const evictPictures = (
 	});
 
 /**
+ * What the copies kept come to, stale ones included: from the records alone,
+ * which are small, and without holding up the library's files.
+ */
+const heldSize = async (db: NotesDatabase): Promise<number> =>
+	(await db.pictures.toArray()).reduce(
+		(sum, picture) =>
+			Object.values(picture.copies).reduce((more, copy) => more + copy.size, sum),
+		0
+	);
+
+/**
  * Keep what was read of a picture: what its header says, and the copy made
  * of it, if one was. Only while its row is still bound to the bytes it was
  * read from, which are `file`'s: a row deleted meanwhile, or bound to other
- * bytes, is another picture's. What was kept for other bytes goes now.
+ * bytes, is another picture's. What was kept for other bytes goes now. So
+ * `file` is the row as it was read *before* the bytes were — read after, it
+ * could be bound to bytes newer than the ones the copy was made from.
  *
- * Then lets go of what is over the budget, where a copy was kept. Answers
- * whether it was kept.
+ * Then, where a copy was kept and the copies are over the budget, lets go of
+ * others (`evictPictures`), never this one. Answers whether it was kept.
  */
 export const keepPicture = async (
 	db: NotesDatabase,
@@ -302,6 +353,9 @@ export const keepPicture = async (
 		}
 		return true;
 	});
-	if (kept && read.copy !== undefined) await evictPictures(db, budget);
+	const { copy } = read;
+	if (kept && copy !== undefined && (await heldSize(db)) > budget) {
+		await evictPictures(db, budget, { key: fileKey(file), variant: copy.variant });
+	}
 	return kept;
 };

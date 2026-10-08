@@ -712,7 +712,11 @@ export const createDexieSyncStore = (
 	 */
 	const releaseBytes = async (scope: Scope, id: string, version: string): Promise<void> => {
 		const held = await scope.fileBytes.get(fileKey(id));
-		if (held !== undefined) await scope.fileBytes.put(cachedAs(held, version));
+		// None held: what went up was read from somewhere else — a copy's
+		// original, read again for the upload — and can be newer than what its
+		// picture was read from, so that is not stamped as the upload's.
+		if (held === undefined) return;
+		await scope.fileBytes.put(cachedAs(held, version));
 		const file = await ownFile(scope, id);
 		if (file !== undefined) await restampPicture(scope, fileKey(id), {}, file);
 	};
