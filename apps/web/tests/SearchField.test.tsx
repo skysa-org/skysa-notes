@@ -168,6 +168,22 @@ describe('the answers', () => {
 		expect(screen.queryByText(/Nothing matches/)).toBeNull();
 	});
 
+	it('speak of the query their answers are for, while the field is a letter ahead', async () => {
+		// The answers follow the field a step behind (`NoteSearchField`), so
+		// "nothing matches" is said of what was looked for, and not of a letter
+		// nobody has looked for yet.
+		await searching({ results: [], asked: 'hero' });
+		expect(screen.getByRole('status').textContent).toBe('Nothing matches “hero”.');
+	});
+
+	it('say nothing at all before the first letter has been asked about', async () => {
+		// Neither "searching" nor "nothing matches": the answer is a moment
+		// away, and either would flash up and be gone at every first letter.
+		await searching({ results: undefined, asked: '' });
+		expect(screen.queryByRole('status')).toBeNull();
+		expect(field().getAttribute('aria-expanded')).toBe('false');
+	});
+
 	it('go on a press outside, and come back to the field', async () => {
 		const user = await searching({ results: [plain('Birds', 'a heron')] });
 

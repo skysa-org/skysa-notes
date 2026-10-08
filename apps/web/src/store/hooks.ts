@@ -1,6 +1,6 @@
 import { isScratchPath, ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo, useRef } from 'react';
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react';
 
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import { type EditorMode } from '../editor/mode.js';
@@ -27,7 +27,7 @@ import {
 	setCodeDisplay,
 } from './prefs.js';
 import { getScratchpadShown, isScratchNote } from './scratchpad.js';
-import { createNoteSearch, type NoteHit } from './search.js';
+import { createNoteSearch, type NoteHit, type NoteSearch } from './search.js';
 import { buildFolderTree, type FolderNode, keptTree, withPins } from './tree.js';
 
 /**
@@ -363,25 +363,30 @@ export const useHoldsAnything = (connectionId: string | undefined): boolean | un
 
 /**
  * Notes matching what the user has typed, across every notebook. `undefined`
- * only before the first query has resolved; an empty array means nothing
- * matched.
+ * only while the index for the search is first being built; an empty array
+ * means nothing matched, or nothing was asked.
  *
  * The index belongs to the component that is searching, so it is built when a
- * search begins and collected when that component goes — the app does not carry
- * an index for a feature nobody is using. An empty query empties it again rather
- * than merely skipping the search: the words of every note are a copy of the
- * corpus, and holding one because a search happened once is the kind of cost
- * nobody goes looking for.
+ * search begins and collected when it ends — the app does not carry an index
+ * for a feature nobody is using. A search begins when the field has the cursor
+ * (`focused`), not at the first letter: a phone takes about a second to index a
+ * few thousand notes, about as long as its user takes to start typing, so
+ * begun then it is ready, or nearly, when the letters come (#275). It ends when
+ * the field has neither the cursor nor anything in it: the words of every note
+ * are a copy of the corpus, and holding one because a search happened once is
+ * the kind of cost nobody goes looking for.
  *
  * A keystroke is answered from the index already in hand rather than waited for:
  * a query is pure, the notes behind it have not moved, and reporting "still
- * loading" between letters would blank the list at typing speed. Only the read
- * itself is ever waited for, and only when it is a read for a different question
- * than the one being asked.
+ * loading" between letters would blank the list at typing speed. Notes that
+ * change under an open search are indexed again behind it, and the answers move
+ * once they have been.
  */
-export const useNoteSearch = (query: string): NoteHit[] | undefined => {
-	const search = useMemo(createNoteSearch, []);
+export const useNoteSearch = (query: string, focused = false): NoteHit[] | undefined => {
 	const searching = query.trim() !== '';
+	const open = focused || searching;
+	// One index for each search, so the last one's goes with it.
+	const search = useMemo(() => (open ? createNoteSearch() : undefined), [open]);
 
 	// The notes are read for the search, not for the query: the database is
 	// asked when a search opens and whenever a note changes under it, and never
@@ -393,29 +398,50 @@ export const useNoteSearch = (query: string): NoteHit[] | undefined => {
 	// for cannot answer "where did I write that". Opening a match is what takes
 	// them to the right place.
 	const read = useLiveQuery(
-		async () => ({ searching, notes: searching ? await searchable() : [] }),
-		[searching, search]
+		async () => (search === undefined ? undefined : { search, notes: await searchable() }),
+		[search]
 	);
-
 	// `useLiveQuery` keeps its last value across a change of dependencies, so
-	// without this the empty read held while nobody was searching answers the
-	// first keystroke, and the pane says nothing matches a frame before the
-	// matches arrive.
-	const indexed = read?.searching === searching ? read : undefined;
+	// without this a search opened again would be answered from the read of the
+	// one before it.
+	const held = read?.search === search ? read : undefined;
+
+	// The index is made to agree with the read React is *holding*, not with
+	// whichever read finished last. Dexie aborts a superseded query but cannot
+	// un-run it: its callback still completes, so refreshing where the rows are
+	// read lets an overtaken read write the index after the winner. Here it is
+	// refreshed for the read held, and answers only once that refresh is done.
+	const [built, setBuilt] = useState<Readonly<{ search: NoteSearch }>>();
+	// A search that ends lets go of what it built, as it is drawn: the words
+	// of every note are not held for a search nobody is making, and a search
+	// begun again is not answered from the last one's.
+	if (built !== undefined && built.search !== search) setBuilt(undefined);
+	useEffect(() => {
+		if (held === undefined) return;
+		void held.search.refresh(held.notes).then((agrees) => {
+			// A refresh that a later one took over from leaves the answers to it.
+			if (!agrees) return;
+			// As a transition, so the answers it brings — a list of matches, each
+			// with its excerpt — are drawn a slice at a time, and a key pressed
+			// meanwhile goes first. Drawn as an ordinary update, they were the one
+			// long task left in a search on a phone (#275).
+			startTransition(() => {
+				setBuilt(held);
+			});
+		});
+	}, [held]);
+	// And stops building.
+	useEffect(() => {
+		if (search === undefined) return undefined;
+		return () => {
+			search.stop();
+		};
+	}, [search]);
 
 	return useMemo(() => {
-		if (indexed === undefined) return undefined;
-		// The index is made to agree with the read React is *holding*, not with
-		// whichever read finished last. Dexie aborts a superseded query but
-		// cannot un-run it: its callback still completes, so refreshing where the
-		// rows are read lets an overtaken read write the index after the winner —
-		// and since the winner's value is what the memo is keyed on, nothing
-		// would ever recompute over it. Two writes in quick succession, which is
-		// what a sync round under an open search looks like, is enough. Here it
-		// is keyed to the value it agrees with, and `refresh` is idempotent.
-		search.refresh(indexed.notes);
-		return searching ? search.find(query) : [];
-	}, [indexed, query, searching, search]);
+		if (!searching) return [];
+		return built?.search.find(query);
+	}, [built, query, searching]);
 };
 
 /**

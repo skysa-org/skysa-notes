@@ -33,7 +33,7 @@ import {
 	type ScratchEditing,
 } from '../components/NoteView.js';
 import { CardSheet, ScratchModal, Scratchpad } from '../components/Scratchpad.js';
-import { SearchField } from '../components/SearchField.js';
+import { NoteSearchField, SearchQuery } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
 import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
@@ -76,7 +76,6 @@ import {
 	useLastOpen,
 	useLooseNoteCount,
 	useNote,
-	useNoteSearch,
 	useNotesUnderFolder,
 	useNoteToOpen,
 	useOpenNotebooks,
@@ -1310,15 +1309,6 @@ const Home = () => {
 	}, [noteId]);
 
 	/**
-	 * What is in the search field. Component state and not the URL, unlike the
-	 * open folder and note: those are where the user *is*, and a reload should
-	 * land there. A half-typed query is not a place — reopening the app into
-	 * somebody's last search, with the notebooks hidden behind its results, is
-	 * not where they left off.
-	 */
-	const [query, setQuery] = useState('');
-	const results = useNoteSearch(query);
-	/**
 	 * What a search result calls the source it is in. Said only when there is
 	 * more than one: with a single source every row would say the same thing.
 	 */
@@ -1362,13 +1352,6 @@ const Home = () => {
 	const shareAdded = useCallback(() => {
 		if (compact) setPanel('sources');
 	}, [compact, setPanel]);
-	// The answers hang from the field, over whatever else is open; a dropdown
-	// left open under them would be a second list behind the first.
-	const onQuery = (next: string) => {
-		setQuery(next);
-		setPanel(null);
-	};
-
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	/**
 	 * The search field, so a command can put the cursor in it. A command that
@@ -1970,43 +1953,53 @@ const Home = () => {
 			 * panes below all mean something different depending on which of
 			 * these is lit.
 			 */}
-			{compact ? (
-				<CompactBar
-					folder={folder}
-					// In the scratchpad, a card's name after "Scratchpad", and
-					// only a card's that has one.
-					note={scratch.barNote(openNote)}
-					scratchpad={inScratchpad}
-					liveEdits={liveEdits}
-					renamings={renamings}
-					panel={panel}
-					onPanel={barPanel}
-					query={query}
-					onQuery={onQuery}
-					results={results}
-					onChoose={openResult}
-					sourceName={resultSourceName}
-					searchOpen={searchOpen}
-					onSearchOpen={setSearchOpen}
-					fieldRef={searchField}
-					onOrigins={setOrigins}
-				/>
-			) : (
-				<SourceTabs
-					returnTo={returnPath(href)}
-					enterCode={enterCode}
-					search={
-						<SearchField
+			<SearchQuery>
+				{(query, setQuery) =>
+					compact ? (
+						<CompactBar
+							folder={folder}
+							// In the scratchpad, a card's name after "Scratchpad",
+							// and only a card's that has one.
+							note={scratch.barNote(openNote)}
+							scratchpad={inScratchpad}
+							liveEdits={liveEdits}
+							renamings={renamings}
+							panel={panel}
+							onPanel={barPanel}
 							query={query}
-							onQuery={setQuery}
-							results={results}
+							onQuery={(next) => {
+								setQuery(next);
+								// The answers hang from the field, over whatever
+								// else is open; a dropdown left open under them
+								// would be a second list behind the first. Only
+								// when one is: shutting none draws the page again,
+								// once, for a letter that changed nothing in it.
+								if (panel !== null) setPanel(null);
+							}}
 							onChoose={openResult}
 							sourceName={resultSourceName}
+							searchOpen={searchOpen}
+							onSearchOpen={setSearchOpen}
 							fieldRef={searchField}
+							onOrigins={setOrigins}
 						/>
-					}
-				/>
-			)}
+					) : (
+						<SourceTabs
+							returnTo={returnPath(href)}
+							enterCode={enterCode}
+							search={
+								<NoteSearchField
+									query={query}
+									onQuery={setQuery}
+									onChoose={openResult}
+									sourceName={resultSourceName}
+									fieldRef={searchField}
+								/>
+							}
+						/>
+					)
+				}
+			</SearchQuery>
 			{/*
 			 * Under the bar rather than over it: the bar is the top of the window
 			 * to a compact window's search, which hangs from it to the foot.

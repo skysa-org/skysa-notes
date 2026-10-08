@@ -347,13 +347,40 @@ export const listScratchNotes = async (
 		.filter((note) => note.deletedLocally === 0 && isScratchPath(note.path))
 		.sort(newestFirst);
 
+/** How many notes `listNotesEverywhere` reads at a time. */
+const EVERYWHERE_PAGE = 250;
+
+/** `read`, and the live notes keyed after `after` (from the first, without it). */
+const everywhereAfter = async (
+	db: NotesDatabase,
+	after: NoteKey | undefined,
+	read: readonly NoteRecord[]
+): Promise<NoteRecord[]> => {
+	const page = await (
+		after === undefined
+			? db.notes.limit(EVERYWHERE_PAGE)
+			: db.notes.where(':id').above(after).limit(EVERYWHERE_PAGE)
+	).toArray();
+	const notes = [...read, ...page.filter((note) => note.deletedLocally === 0)];
+	const last = page.at(-1);
+	if (last === undefined || page.length < EVERYWHERE_PAGE) return notes;
+	return everywhereAfter(db, noteKey(last), notes);
+};
+
 /**
  * Every live note on the device, whichever source it is in. For search, which
  * is the one question asked across sources: everything else the app lists is
  * the showing source's, and goes through `listNotes`.
+ *
+ * A page at a time, in key order. Read in one, every note on the device came
+ * back as one answer, and a browser hands an answer over in one piece: on a
+ * phone, a tenth of a second for a few thousand notes in which a key pressed
+ * waited, as the search field took the cursor (#275). By the primary key and
+ * not the `deletedLocally` index, which cannot say where a page left off; the
+ * few notes deleted here and not yet anywhere else are read and dropped.
  */
 export const listNotesEverywhere = (db: NotesDatabase): Promise<NoteRecord[]> =>
-	db.notes.where('deletedLocally').equals(0).toArray();
+	everywhereAfter(db, undefined, []);
 
 /**
  * Read, change, write — as one transaction, because it is none of those things

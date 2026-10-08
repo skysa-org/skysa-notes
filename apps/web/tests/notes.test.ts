@@ -1,7 +1,7 @@
 import { parseNoteFile, splitFrontmatter } from '@skysa/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createDatabase, noteKey, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, noteKey, type NoteRecord, type NotesDatabase } from '../src/store/db.js';
 import { listFolders } from '../src/store/folders.js';
 import {
 	createNote,
@@ -10,6 +10,7 @@ import {
 	importNoteFile,
 	listDirtyNotes,
 	listNotes,
+	listNotesEverywhere,
 	moveNote,
 	noteFile,
 	noteFileContents,
@@ -293,6 +294,40 @@ describe('listNotes', () => {
 
 		expect(await listNotes(db)).toEqual([]);
 		expect((await listNotes(db, { includeDeleted: true })).map((n) => n.id)).toEqual([note.id]);
+	});
+});
+
+describe('listNotesEverywhere', () => {
+	/** A row as the store holds one, put there whole. */
+	const row = (connectionId: string, at: number, deletedLocally: 0 | 1 = 0): NoteRecord => ({
+		connectionId,
+		id: `n${String(at).padStart(3, '0')}`,
+		path: `n${String(at)}.md`,
+		title: `Note ${String(at)}`,
+		body: '',
+		frontmatter: null,
+		tags: [],
+		contentHash: '',
+		dirty: 0,
+		deletedLocally,
+		createdAt: 0,
+		updatedAt: 0,
+	});
+	const named = (notes: readonly NoteRecord[]) =>
+		notes.map((note) => `${note.connectionId}/${note.id}`).sort();
+
+	it('lists every live note in every source, though there are more than it reads at once', async () => {
+		// Hundreds in each source, so it goes on from where a page stopped, both
+		// inside a source and from one source into the next.
+		const rows = ['a', 'b'].flatMap((source) =>
+			Array.from({ length: 300 }, (__, at) => row(source, at, at % 100 === 7 ? 1 : 0))
+		);
+		await db.notes.bulkPut(rows);
+
+		const listed = await listNotesEverywhere(db);
+
+		expect(listed).toHaveLength(594);
+		expect(named(listed)).toEqual(named(rows.filter((note) => note.deletedLocally === 0)));
 	});
 });
 
