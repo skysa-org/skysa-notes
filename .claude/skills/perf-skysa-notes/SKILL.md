@@ -64,11 +64,21 @@ phone-low` slows the CPU 6×; there is no desktop profile, as the scenarios find
 their way round the phone's layout and tap. `--shots` saves a screenshot of
 each scenario's end.
 
-A run that hasn't ended after `--deadline` seconds (240) fails. It is
-recorded as an error and the measurement goes on. The error says where the run
-was: launching, opening the page, or the page's script stack if its main thread
-was busy. A picture of the page is saved as `results/stuck-<pid>.png`. The
-browser is then ended by its profile, since a stalled one may not close.
+A run that hasn't ended after `--deadline` seconds (600) fails. It is
+recorded as an error and the measurement goes on. That is longer than every
+bounded wait in the longest scenario. The deadline is for the waits that have
+no bound: a `page.evaluate`, a CDP call, a browser that never finishes
+starting.
+
+The error says where the run was:
+- starting the browser, or opening its page;
+- the main thread busy, since a busy thread answers no debugger and so gives
+  no stack;
+- or the stack it was paused at, with a picture saved as
+  `results/stuck-<target>-<scenario>-<time>.png`.
+
+The browser is then ended by its profile, since a stalled one may not close.
+Each run clones its profile into a directory of its own.
 
 | scenario | what | main metrics |
 |---|---|---|
@@ -138,8 +148,10 @@ Import the same zips there, into a separate origin from real notes.
   (`pgrep -fl perf.mjs`). Two at once skew each other's numbers, and stalled
   browsers were seen only then.
 - Chromium sometimes stalls while starting: `launchPersistentContext` returns,
-  then the first call on the context never does. The deadline catches it. A
-  stalled browser ignores SIGTERM, so it is ended with SIGKILL.
+  then the first call on the context never does. That is `context.route` in
+  `launch`, or adding the probe and opening the page. The deadline reports it as
+  "starting the browser" or "opening its page". A stalled browser ignores
+  SIGTERM, so it is ended with SIGKILL.
 
 ## Afterwards
 
