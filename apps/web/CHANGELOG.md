@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.0.2
+
+### Patch Changes
+
+- 4ec60fb: On a phone or tablet, a note's title no longer has a ring drawn round it while it is being typed in, in the scratchpad or in a notebook.
+- @skysa/core@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
