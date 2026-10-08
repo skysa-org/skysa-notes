@@ -59,7 +59,6 @@ const card = (label: string, at = 0): NoteRecord => ({
 	frontmatter: `id: ${label}-${String(at)}\ncolor: yellow\n`,
 	tags: [],
 	contentHash: 'h',
-	source: null,
 	dirty: 0,
 	deletedLocally: 0,
 	createdAt: 1,
