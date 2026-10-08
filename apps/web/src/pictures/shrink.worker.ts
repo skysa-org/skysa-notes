@@ -8,7 +8,7 @@
  */
 
 import type { ShrinkAnswer, ShrinkRequest } from './shrinker.js';
-import { COPY_QUALITY, copyType, halvings, type Size } from './steps.js';
+import { COPY_QUALITY, copyType, scaledTo } from './steps.js';
 
 /**
  * The worker's global, as much of it as is used here: the app is typed
@@ -26,7 +26,7 @@ const scope = globalThis as unknown as Scope;
 
 /**
  * Whether this browser writes WebP. One that cannot hands back a PNG instead,
- * as the spec asks of it; Safari did until 17. Asked once.
+ * as the spec asks of it: Safari never has (WebKit bug 226950). Asked once.
  */
 const writesWebp = (async () => {
 	const probe = new OffscreenCanvas(1, 1);
@@ -46,52 +46,58 @@ const empty = (canvas: OffscreenCanvas) => {
 	canvas.height = 0;
 };
 
-const draw = (from: OffscreenCanvas | ImageBitmap, size: Size): OffscreenCanvas => {
+/**
+ * The decoded picture on a canvas `width` wide. It is that wide already where
+ * the browser scaled it as it decoded it, as every one with a canvas off the
+ * page does; drawn to it in one step where not.
+ */
+const drawn = (decoded: ImageBitmap, width: number): OffscreenCanvas => {
+	const size = scaledTo(decoded, width);
 	const canvas = new OffscreenCanvas(size.width, size.height);
 	const context = canvas.getContext('2d');
 	if (context === null) throw new Error('No 2D context to draw a copy on');
 	// eslint-disable-next-line functional/immutable-data -- a context is set up by assigning to it
 	context.imageSmoothingQuality = 'high';
-	context.drawImage(from, 0, 0, size.width, size.height);
+	context.drawImage(decoded, 0, 0, size.width, size.height);
 	return canvas;
 };
 
-const shrink = async ({ picture, width, height, alpha }: ShrinkRequest): Promise<Blob> => {
-	const size = { width, height };
-	// Scaled as it is decoded, where the browser does that, which can spare
-	// it the whole picture's pixels; and turned as its camera said.
+const shrink = async ({
+	picture,
+	width,
+	alpha,
+}: ShrinkRequest): Promise<Omit<Extract<ShrinkAnswer, { copy: Blob }>, 'id'>> => {
+	// Scaled as it is decoded, which can spare the browser the whole picture's
+	// pixels, to the width alone: its height follows from the picture as the
+	// browser turns it, the way its camera said, which is every browser's
+	// default. Named, `imageOrientation: 'from-image'` is refused outright
+	// before Safari 17.2, Chrome 111 and Firefox 111.
 	const decoded = await createImageBitmap(picture, {
 		resizeWidth: width,
-		resizeHeight: height,
 		resizeQuality: 'high',
-		imageOrientation: 'from-image',
 	});
-	try {
-		const scaled = decoded.width === width && decoded.height === height;
-		const steps = scaled ? [size] : halvings(decoded, size);
-		const copy = steps.reduce<OffscreenCanvas | ImageBitmap>((from, step) => {
-			const next = draw(from, step);
-			if (from instanceof OffscreenCanvas) empty(from);
-			return next;
-		}, decoded);
-		if (!(copy instanceof OffscreenCanvas)) throw new Error('A copy was not drawn');
+	const canvas = (() => {
 		try {
-			return await copy.convertToBlob({
-				type: copyType(await writesWebp, alpha),
-				quality: COPY_QUALITY,
-			});
+			return drawn(decoded, width);
 		} finally {
-			empty(copy);
+			decoded.close();
 		}
+	})();
+	try {
+		const copy = await canvas.convertToBlob({
+			type: copyType(await writesWebp, alpha),
+			quality: COPY_QUALITY,
+		});
+		return { copy, width: canvas.width, height: canvas.height };
 	} finally {
-		decoded.close();
+		empty(canvas);
 	}
 };
 
 scope.addEventListener('message', ({ data }) => {
 	shrink(data).then(
-		(copy) => {
-			scope.postMessage({ id: data.id, copy });
+		(made) => {
+			scope.postMessage({ id: data.id, ...made });
 		},
 		(error: unknown) => {
 			scope.postMessage({ id: data.id, error: String(error) });
