@@ -184,6 +184,25 @@ describe('the answers', () => {
 		expect(field().getAttribute('aria-expanded')).toBe('false');
 	});
 
+	it('go as the field is emptied, before the answers have caught up with it', async () => {
+		// The answers are a step behind the field: emptied, it still has the
+		// last letters' matches for a moment, and they are not left under it
+		// for Enter to open one of.
+		const user = userEvent.setup();
+		render(
+			<SearchField
+				query=""
+				asked="heron"
+				results={[plain('Birds', 'a heron')]}
+				onQuery={() => undefined}
+			/>
+		);
+		await user.click(field());
+
+		expect(list()).toBeNull();
+		expect(field().getAttribute('aria-expanded')).toBe('false');
+	});
+
 	it('go on a press outside, and come back to the field', async () => {
 		const user = await searching({ results: [plain('Birds', 'a heron')] });
 

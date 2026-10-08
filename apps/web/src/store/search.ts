@@ -79,10 +79,12 @@ export interface NoteHit {
 	readonly note: NoteRecord;
 	/**
 	 * One line of the body around the first match, or the start of it. Worked
-	 * out the first time it is read, which is when its row is drawn: an excerpt
-	 * reads the whole body as markdown, and a keystroke that made one for every
-	 * match before any was shown was a keystroke a phone took a fifth of a
-	 * second over (#275).
+	 * out the first time it is read, which is as its row is drawn: an excerpt
+	 * reads the whole body as markdown, and made for every match as the search
+	 * ran, fifty of them were one piece of work a keystroke on a phone waited a
+	 * fifth of a second for (#275). Made in each row's drawing, they are work
+	 * a deferred draw can stop between, for the next key; and one past the
+	 * fifty shown is never made at all.
 	 */
 	readonly excerpt: readonly Excerpt[];
 }
@@ -105,9 +107,9 @@ export interface NoteSearch {
 	 * (`SLICE_MS`), so it can take many turns of the event loop.
 	 *
 	 * True once the index agrees with them; false if another refresh, or
-	 * `stop`, came first, in which case this one has let go and the index is
-	 * that one's to finish. Until it settles the index is part of the way
-	 * there: `find` answers from what it has so far.
+	 * `stop`, came first, in which case this one has let go: the index is the
+	 * later refresh's to finish, or nobody's. Until it settles the index is
+	 * part of the way there: `find` answers from what it has so far.
 	 */
 	readonly refresh: (notes: readonly NoteRecord[]) => Promise<boolean>;
 	/** Let go of any refresh still going, at its next slice. */

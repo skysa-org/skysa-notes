@@ -143,7 +143,10 @@ export const SearchField = ({
 	const [at, setAt] = useState(0);
 	const id = useId();
 
-	const searching = asked.trim() !== '';
+	// Both: the answers are for `asked`, and an empty field is no search
+	// whatever was last asked — the list of the letters just deleted is not
+	// left under it for a frame, for Enter to open one of.
+	const searching = query.trim() !== '' && asked.trim() !== '';
 	const shown = searching ? (results ?? []).slice(0, SEARCH_LIMIT) : [];
 	const listed = open && searching;
 	const cursor = shown.length === 0 ? 0 : Math.min(at, shown.length - 1);
@@ -196,7 +199,12 @@ export const SearchField = ({
 						setOpen(true);
 						onFocusChange?.(true);
 					}}
-					onBlur={() => {
+					onBlur={(event) => {
+						// Not when the window lost the focus and the field kept
+						// it — another app, another tab — which coming back gives
+						// to the field again, and the search with it.
+						if (!document.hasFocus() && document.activeElement === event.currentTarget)
+							return;
 						onFocusChange?.(false);
 					}}
 					onKeyDown={(event) => {

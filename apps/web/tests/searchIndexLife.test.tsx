@@ -7,7 +7,7 @@ import {
 	screen,
 	waitFor,
 } from '@testing-library/react';
-import { useState } from 'react';
+import { Component, type ReactNode, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NoteSearchField } from '../src/components/SearchField.js';
@@ -203,6 +203,28 @@ describe('the search field', () => {
 		expect(screen.queryByText('Searching…')).toBeNull();
 	});
 
+	it('keeps its index when the window loses the focus and the field keeps it', async () => {
+		// Another app, another tab: coming back gives the field the cursor
+		// again, and an index let go meanwhile would be a second's build again.
+		render(<Harness />);
+		act(() => {
+			field().focus();
+		});
+		await built();
+
+		const hasFocus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+		try {
+			act(() => {
+				field().dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+			});
+		} finally {
+			hasFocus.mockRestore();
+		}
+
+		expect(made.stops).toBe(0);
+		expect(document.activeElement).toBe(field());
+	});
+
 	it('lets its index go as it loses the cursor with nothing in it', async () => {
 		render(<Harness />);
 		act(() => {
@@ -215,5 +237,35 @@ describe('the search field', () => {
 		});
 
 		expect(made.stops).toBe(1);
+	});
+});
+
+/** What a page's root does with an error thrown as it is drawn: catch it, and say so. */
+class Caught extends Component<{ children: ReactNode }, { error?: Error }> {
+	override state: { error?: Error } = {};
+
+	static getDerivedStateFromError = (error: Error) => ({ error });
+
+	override render = () =>
+		/* eslint-disable functional/no-this-expressions -- a boundary has to be a class */
+		this.state.error === undefined ? this.props.children : <p>{this.state.error.message}</p>;
+	/* eslint-enable functional/no-this-expressions */
+}
+
+describe('an index that fails to build', () => {
+	it('is thrown where the answers are drawn, not left saying it is still looking', async () => {
+		made.instead = [() => Promise.reject(new Error('the index broke'))];
+		const Answers = () => {
+			const found = useNoteSearch('heap', true);
+			return <p>{found === undefined ? 'Searching…' : 'Answered'}</p>;
+		};
+
+		render(
+			<Caught>
+				<Answers />
+			</Caught>
+		);
+
+		expect(await screen.findByText('the index broke')).toBeDefined();
 	});
 });

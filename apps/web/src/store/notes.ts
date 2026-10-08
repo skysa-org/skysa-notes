@@ -380,7 +380,11 @@ const everywhereAfter = async (
  * few notes deleted here and not yet anywhere else are read and dropped.
  */
 export const listNotesEverywhere = (db: NotesDatabase): Promise<NoteRecord[]> =>
-	everywhereAfter(db, undefined, []);
+	// One transaction for every page: otherwise a sync that writes two notes
+	// together, one on a page read and one on a page to come, is read half
+	// done; and each page written under would set the live query asking again
+	// (§7, "Large libraries").
+	db.transaction('r', db.notes, () => everywhereAfter(db, undefined, []));
 
 /**
  * Read, change, write — as one transaction, because it is none of those things

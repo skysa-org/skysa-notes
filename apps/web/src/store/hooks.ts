@@ -412,23 +412,29 @@ export const useNoteSearch = (query: string, focused = false): NoteHit[] | undef
 	// read lets an overtaken read write the index after the winner. Here it is
 	// refreshed for the read held, and answers only once that refresh is done.
 	const [built, setBuilt] = useState<Readonly<{ search: NoteSearch }>>();
+	const [failed, setFailed] = useState<Error>();
 	// A search that ends lets go of what it built, as it is drawn: the words
 	// of every note are not held for a search nobody is making, and a search
 	// begun again is not answered from the last one's.
 	if (built !== undefined && built.search !== search) setBuilt(undefined);
 	useEffect(() => {
 		if (held === undefined) return;
-		void held.search.refresh(held.notes).then((agrees) => {
-			// A refresh that a later one took over from leaves the answers to it.
-			if (!agrees) return;
-			// As a transition, so the answers it brings — a list of matches, each
-			// with its excerpt — are drawn a slice at a time, and a key pressed
-			// meanwhile goes first. Drawn as an ordinary update, they were the one
-			// long task left in a search on a phone (#275).
-			startTransition(() => {
-				setBuilt(held);
-			});
-		});
+		void held.search.refresh(held.notes).then(
+			(agrees) => {
+				// A refresh that a later one took over from leaves the answers to it.
+				if (!agrees) return;
+				// As a transition, so the answers it brings — a list of matches,
+				// each with its excerpt — are drawn a slice at a time, and a key
+				// pressed meanwhile goes first. Drawn as an ordinary update, they
+				// were the one long task left in a search on a phone (#275).
+				startTransition(() => {
+					setBuilt(held);
+				});
+			},
+			(error: unknown) => {
+				setFailed(error instanceof Error ? error : new Error(String(error)));
+			}
+		);
 	}, [held]);
 	// And stops building.
 	useEffect(() => {
@@ -438,10 +444,15 @@ export const useNoteSearch = (query: string, focused = false): NoteHit[] | undef
 		};
 	}, [search]);
 
-	return useMemo(() => {
+	const answers = useMemo(() => {
 		if (!searching) return [];
 		return built?.search.find(query);
 	}, [built, query, searching]);
+	// A build that failed is thrown where the answers are drawn, as it was
+	// when the index was built as the page was: not left saying "Searching…"
+	// for ever.
+	if (failed !== undefined) throw failed;
+	return answers;
 };
 
 /**
