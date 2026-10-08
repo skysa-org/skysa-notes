@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { routeTree } from '../src/routeTree.gen.js';
 import { db } from '../src/store/db.js';
@@ -26,6 +26,7 @@ let widths: FakeWidths | undefined;
 
 afterEach(async () => {
 	cleanup();
+	vi.restoreAllMocks();
 	fake?.restore();
 	fake = undefined;
 	widths?.restore();
@@ -110,6 +111,78 @@ describe('the compact bar', () => {
 		// Its note's name is shortened the same way, and named whole.
 		expect(shownOn(noteTrigger())).toBe('Budget');
 		expect(noteTrigger().querySelector('.compact-picker-whole')?.textContent).toBe('Budget');
+	});
+
+	it('says a note’s whole name where it fits on a page laid out zoomed, as a phone lays it out', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', title: 'Bugs', body: 'Bugs\n' });
+		// The widths Chrome on a phone gave, laying the page out at its pixel
+		// ratio: the label is as wide as the whole name that sizes it, and the
+		// observer says so cut down to a 64th of a pixel.
+		widths = elementWidths({
+			'.compact-picker-middle': 31.803_571,
+			'.compact-picker-whole': 31.803_571,
+		});
+		// jsdom has no canvas; this one measures every character 8px wide.
+		vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+			font: '',
+			measureText: (text: string) => ({ width: [...text].length * 8 }),
+		} as unknown as CanvasRenderingContext2D);
+		await openApp();
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Bugs');
+		});
+
+		act(() => {
+			widths?.report('.compact-picker-middle', 31.796_875);
+		});
+		expect(shownOn(noteTrigger())).toBe('Bugs');
+
+		// Where it does not fit, it is still shortened in its middle.
+		act(() => {
+			widths?.resize('.compact-picker-middle', 28);
+		});
+		expect(shownOn(noteTrigger())).toBe('B…s');
+	});
+
+	it('shortens the name of a note chosen to the room it has, not by the one before', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, {
+			folderPath: 'Work',
+			title: 'Quarterly forecast, second half',
+			body: 'Quarterly forecast, second half\n',
+		});
+		await createNote(db, {
+			folderPath: 'Work',
+			title: 'Notes from the planning meeting about next year',
+			body: 'Notes from the planning meeting about next year\n',
+		});
+		// Both names longer than the room the bar has for either, so the label
+		// is as wide for the one as for the other, and laid out 8px a character
+		// as the canvas below measures them.
+		widths = elementWidths({
+			'.compact-picker-middle': 160,
+			'.compact-picker-whole': (element) => [...element.textContent].length * 8,
+		});
+		vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+			font: '',
+			measureText: (text: string) => ({ width: [...text].length * 8 }),
+		} as unknown as CanvasRenderingContext2D);
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Notes fro…next year');
+		});
+
+		await user.click(noteTrigger());
+		await user.click(await screen.findByRole('button', { name: /^Quarterly forecast/ }));
+
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe(
+				'Note: Quarterly forecast, second half'
+			);
+		});
+		expect(shownOn(noteTrigger())).toBe('Quarterly…cond half');
 	});
 
 	it('is the ordinary bar again once the window is wide enough', async () => {

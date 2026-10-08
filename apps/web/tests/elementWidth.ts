@@ -10,6 +10,12 @@
  * the window is dragged, or the columns beside the note fold away.
  */
 
+/**
+ * A width, or how wide an element is by what it holds: words measured as a
+ * browser would, laid out again when they change.
+ */
+export type FakeWidth = number | ((element: Element) => number);
+
 export interface FakeWidths {
 	/** Give every element `selector` matches this width, and tell its observers. */
 	resize: (selector: string, width: number) => void;
@@ -32,13 +38,15 @@ export interface FakeWidths {
 	restore: () => void;
 }
 
-export const elementWidths = (initial: Record<string, number>): FakeWidths => {
-	const widths = new Map(Object.entries(initial));
+export const elementWidths = (initial: Record<string, FakeWidth>): FakeWidths => {
+	const widths = new Map<string, FakeWidth>(Object.entries(initial));
 	type Told = (entries?: readonly ResizeObserverEntry[]) => void;
 	const observers = new Set<{ callback: Told; watched: Set<Element> }>();
 
-	const widthOf = (element: Element): number =>
-		[...widths].find(([selector]) => element.matches(selector))?.[1] ?? 0;
+	const widthOf = (element: Element): number => {
+		const width = [...widths].find(([selector]) => element.matches(selector))?.[1] ?? 0;
+		return typeof width === 'number' ? width : width(element);
+	};
 
 	// The one way to answer for any element is on the prototype, and a getter
 	// there is told which element through `this`.
