@@ -721,6 +721,12 @@ const rememberedFolder = (lastOpen: LastOpen | undefined): string | null | undef
  * with what is open: the notebook, and the note while it is one of that
  * notebook's. Written only once the memory has been read, so a place is never
  * remembered over one that was about to be restored.
+ *
+ * And only when this tab's place moves. The memory is the device's, and
+ * another tab showing another notebook writes its own place into it: told
+ * "not here" by the memory, two tabs wrote theirs back over each other for as
+ * long as both were open (#305). The place on record is the last one either
+ * tab moved to.
  */
 const useRememberOpen = ({
 	connectionId,
@@ -744,8 +750,13 @@ const useRememberOpen = ({
 		noteIsUnder(openNote.path, folder)
 			? openNote.id
 			: undefined;
+	// The place this tab said last, or found said already.
+	const said = useRef<string | undefined>(undefined);
 	useEffect(() => {
 		if (connectionId === undefined || folder === undefined || lastOpen === undefined) return;
+		const place = JSON.stringify([connectionId, folder, note ?? null]);
+		if (said.current === place) return;
+		said.current = place;
 		const known =
 			lastOpen.folder === folder && (note === undefined || lastOpen.notes[folder] === note);
 		if (known) return;
