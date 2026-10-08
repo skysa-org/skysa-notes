@@ -27,6 +27,7 @@ const { values: args } = parseArgs({
 		scenarios: { type: 'string', default: 'all' },
 		label: { type: 'string', default: '' },
 		shots: { type: 'boolean', default: false },
+		cpuprofile: { type: 'boolean', default: false },
 		deadline: { type: 'string', default: '600' },
 	},
 });
@@ -92,8 +93,16 @@ const memory = () => {
 	};
 };
 
+/** The sessions being profiled (`--cpuprofile`): from the first counters taken, what is measured. */
+const profiling = new WeakSet();
+
 /** CDP's counters, in ms and MB, after a garbage collection. */
 const counters = async (cdp) => {
+	if (args.cpuprofile && !profiling.has(cdp)) {
+		profiling.add(cdp);
+		await cdp.send('Profiler.enable');
+		await cdp.send('Profiler.start');
+	}
 	await cdp.send('HeapProfiler.collectGarbage');
 	const { metrics } = await cdp.send('Performance.getMetrics');
 	const value = (name) => metrics.find((metric) => metric.name === name)?.value ?? 0;
@@ -763,6 +772,17 @@ const once = async (target, template, scenario, manifest) => {
 		await cdp.send('Performance.enable');
 		await cdp.send('Emulation.setCPUThrottlingRate', { rate: profile.cpu });
 		const result = await SCENARIOS[scenario].run({ page, cdp, manifest, base: target.url });
+		if (profiling.has(cdp)) {
+			const { profile: taken } = await cdp.send('Profiler.stop');
+			writeFileSync(
+				join(
+					PERF_DIR,
+					'results',
+					`${target.name}-${scenario}-${String(counted.runs)}.cpuprofile`
+				),
+				JSON.stringify(taken)
+			);
+		}
 		if (args.shots)
 			await page.screenshot({
 				path: join(PERF_DIR, 'results', `${target.name}-${scenario}.png`),

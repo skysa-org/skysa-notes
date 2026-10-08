@@ -64,6 +64,12 @@ phone-low` slows the CPU 6×; there is no desktop profile, as the scenarios find
 their way round the phone's layout and tap. `--shots` saves a screenshot of
 each scenario's end.
 
+`--cpuprofile` writes a CPU profile of what each run measures, from its first
+counters to its end, to `$PERF_DIR/results/<target>-<scenario>-<n>.cpuprofile`
+(open it in Chrome's Performance panel). The build's source maps name the
+functions; sum the self time by source line to find what a metric moved by.
+Profiling slows the run, so its numbers are not for a PR.
+
 A run that hasn't ended after `--deadline` seconds (600) fails. It is
 recorded as an error and the measurement goes on. That is longer than every
 bounded wait in the longest scenario. The deadline is for the waits that have
