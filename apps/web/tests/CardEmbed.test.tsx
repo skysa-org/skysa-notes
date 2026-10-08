@@ -54,9 +54,9 @@ const fakeHost = () => {
 	return { host, asked, sizes, change };
 };
 
-const drawBay = (host: AttachmentHost, src = 'bay-1a2b3c4d.jpg') =>
+const drawBay = (host: AttachmentHost, src = 'bay-1a2b3c4d.jpg', note?: string) =>
 	render(
-		<CardHost.Provider value={host}>
+		<CardHost.Provider value={note === undefined ? { host } : { host, note }}>
 			<CardEmbed embed={{ kind: 'image', src, alt: 'The bay' }} words="The bay" />
 		</CardHost.Provider>
 	);
@@ -178,6 +178,92 @@ describe('a picture on a card', () => {
 
 		await screen.findByRole('img', { name: 'The bay' });
 		expect(roomOf(picture())).toEqual({ width: '4000px', ratio: '4000 / 3000' });
+	});
+
+	it('keeps its room whatever an ask it has stopped waiting on says', async () => {
+		const { host, asked, change } = fakeHost();
+		drawBay(host);
+		await waitFor(() => {
+			expect(asked).toHaveLength(1);
+		});
+		// A file arrived with a pull: asked again, and the first ask let go of.
+		change();
+		await waitFor(() => {
+			expect(asked).toHaveLength(2);
+		});
+		asked[1]?.answer({ state: 'ready', url: 'blob:bay', release: () => undefined, ...PHOTO });
+		await screen.findByRole('img', { name: 'The bay' });
+		// The first ask, answered last, from before the file was there.
+		asked[0]?.answer({ state: 'missing' });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(roomOf(picture())).toBe('tallest');
+		expect(screen.getByRole('img', { name: 'The bay' })).toBeDefined();
+	});
+
+	it('takes its room from its first frame when drawn again, its size read before', async () => {
+		const note = `c1\u0000notes/${crypto.randomUUID()}.md`;
+		const first = fakeHost();
+		const { unmount } = drawBay(first.host, 'bay-1a2b3c4d.jpg', note);
+		await waitFor(() => {
+			expect(first.sizes).toHaveLength(1);
+		});
+		first.sizes[0]?.(PHOTO);
+		await waitFor(() => {
+			expect(roomOf(picture())).not.toBe('tallest');
+		});
+		unmount();
+
+		// The scratchpad come back to: nothing read yet, this time.
+		drawBay(fakeHost().host, 'bay-1a2b3c4d.jpg', note);
+
+		expect(roomOf(picture())).toEqual({ width: '4000px', ratio: '4000 / 3000' });
+	});
+
+	it('takes the size it said as it came, the next time it is drawn', async () => {
+		const note = `c1\u0000notes/${crypto.randomUUID()}.md`;
+		const first = fakeHost();
+		const { unmount } = drawBay(first.host, 'bay-1a2b3c4d.jpg', note);
+		await waitFor(() => {
+			expect(first.asked).toHaveLength(1);
+		});
+		first.sizes[0]?.(undefined);
+		first.asked[0]?.answer({
+			state: 'ready',
+			url: 'blob:bay',
+			release: () => undefined,
+			...PHOTO,
+		});
+		await screen.findByRole('img', { name: 'The bay' });
+		expect(roomOf(picture())).toBe('tallest');
+		unmount();
+
+		drawBay(fakeHost().host, 'bay-1a2b3c4d.jpg', note);
+
+		expect(roomOf(picture())).toEqual({ width: '4000px', ratio: '4000 / 3000' });
+	});
+
+	it('takes no room for an SVG, which comes as it is', async () => {
+		const { host, asked } = fakeHost();
+		drawBay(host, 'map-1a2b3c4d.svg');
+		expect(roomOf(picture())).toBeUndefined();
+		await waitFor(() => {
+			expect(asked).toHaveLength(1);
+		});
+		asked[0]?.answer({
+			state: 'ready',
+			url: 'data:image/svg+xml,map',
+			release: () => undefined,
+		});
+		await screen.findByRole('img', { name: 'The bay' });
+		expect(roomOf(picture())).toBeUndefined();
+	});
+
+	it('keeps the tallest room where its size cannot be read', async () => {
+		const { host } = fakeHost();
+		drawBay({ ...host, size: () => Promise.reject(new Error('gone')) });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(roomOf(picture())).toBe('tallest');
 	});
 
 	it('gives its room back when the browser cannot draw it', async () => {

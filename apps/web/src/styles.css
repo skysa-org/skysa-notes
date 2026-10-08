@@ -3509,8 +3509,9 @@ button.icon.account-devices-count {
 
 /* A picture in a card, where it is in the note: whole, as wide as the card
    and no taller than about six of its lines (`PICTURE_LINES`). Until it is
-   got, its words, in their place among the others. A chip is the editor's
-   own (`.attachment-chip`), at the card's size. */
+   got, its words, in the room it will take (below), or among the others
+   where it takes none. A chip is the editor's own (`.attachment-chip`), at
+   the card's size. */
 .scratch-card-picture[data-state='ready'] {
 	display: block;
 	margin-block: 0.2rem;
@@ -3532,8 +3533,9 @@ button.icon.account-devices-count {
 /* The room it takes (`CardEmbed.tsx`, `Room`, #276), so the card is as tall
    before it arrives as after and the wall does not place it again when it
    does: the same as it is drawn in, where its size was known before, and
-   else the tallest a card draws a picture, the picture drawn whole inside it.
-   Its words meanwhile, in it. The picture fills it, whichever copy it is. */
+   else the tallest a card draws a picture, the picture drawn whole inside it
+   and never larger than it is. Its words meanwhile, in it. Where its size is
+   known, the picture fills it, whichever copy it is. */
 .scratch-card-picture[data-room] {
 	display: block;
 	overflow: hidden;
@@ -3542,8 +3544,7 @@ button.icon.account-devices-count {
 }
 
 .scratch-card-picture[data-room]:not([data-state='ready']) {
-	color: var(--muted);
-	background: var(--surface);
+	background: var(--hover-bg);
 }
 
 .scratch-card-picture[data-room='sized'] {
@@ -3566,7 +3567,7 @@ button.icon.account-devices-count {
 }
 
 .scratch-card-picture[data-room='tallest'] > img {
-	object-fit: contain;
+	object-fit: scale-down;
 	object-position: left top;
 }
 

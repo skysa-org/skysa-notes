@@ -1,10 +1,11 @@
-import { classifyHref, fileKind, type PreviewEmbed } from '@skysa/core';
+import { classifyHref, drawsFromData, fileKind, type PreviewEmbed } from '@skysa/core';
 import {
 	createContext,
 	type CSSProperties,
 	type ReactNode,
 	useContext,
 	useEffect,
+	useMemo,
 	useState,
 } from 'react';
 
@@ -24,11 +25,17 @@ import { useNoteAttachments } from './noteAttachments.js';
  * scratchpad"), where it is in the note and as the editor draws it: the
  * picture itself, got as the editor gets it, and the chip with its file's
  * icon and name. A picture not shown — not got yet, or not to be got — is its
- * words, as it was before it was drawn at all.
+ * words, in the room it will take while it is coming (`Room`).
  */
 
-/** Where a card's pictures are got from: `CardFiles` says, and a test may. */
-export const CardHost = createContext<AttachmentHost>(NO_ATTACHMENTS);
+/**
+ * Where a card's pictures are got from, and the note their links are relative
+ * to, which names what is remembered of them (`sizesRead`): `CardFiles` says,
+ * and a test may.
+ */
+export const CardHost = createContext<Readonly<{ host: AttachmentHost; note?: string }>>({
+	host: NO_ATTACHMENTS,
+});
 
 /**
  * Where a card's pictures are got from: the files beside its note, as its
@@ -38,7 +45,28 @@ export const CardHost = createContext<AttachmentHost>(NO_ATTACHMENTS);
  */
 export const CardFiles = ({ note, children }: { note: NoteRecord; children: ReactNode }) => {
 	const host = useNoteAttachments(note);
-	return <CardHost.Provider value={host}>{children}</CardHost.Provider>;
+	const { connectionId, path } = note;
+	const source = useMemo(
+		() => ({ host, note: `${connectionId}\u0000${path}` }),
+		[host, connectionId, path]
+	);
+	return <CardHost.Provider value={source}>{children}</CardHost.Provider>;
+};
+
+/**
+ * Pictures' sizes read this session, by note and link, so a card drawn again —
+ * the scratchpad come back to, a line edited — holds its rooms from its first
+ * frame, rather than once a read has answered. A few hundred bytes for a wall.
+ */
+const sizesRead = new Map<string, PictureSize>();
+
+const SIZES_KEPT = 2000;
+
+const remember = (key: string, size: PictureSize) => {
+	sizesRead.delete(key);
+	sizesRead.set(key, size);
+	const oldest = sizesRead.size > SIZES_KEPT ? sizesRead.keys().next().value : undefined;
+	if (oldest !== undefined) sizesRead.delete(oldest);
 };
 
 /** Whether `element` has been on screen: a picture is got only then, as in the editor. */
@@ -62,7 +90,7 @@ const useSeen = (element: Element | null): boolean => {
 interface CardPictureAt {
 	/** Once it is on screen and got; nothing until then, or where it cannot be. */
 	readonly url: string | undefined;
-	/** Its own size, where this device has read it before (`AttachmentHost.size`). */
+	/** Its own size, where this device has read it before (`AttachmentHost.size`, `sizesRead`). */
 	readonly size: PictureSize | undefined;
 	/** Not coming now: it was asked for, and the answer was why not. */
 	readonly gone: boolean;
@@ -76,13 +104,19 @@ interface CardPictureAt {
  * a pull, the network came back — and one that is, is let go of with the card.
  */
 const usePicture = (src: string, element: Element | null): CardPictureAt => {
-	const host = useContext(CardHost);
+	const { host, note } = useContext(CardHost);
 	const seen = useSeen(element);
+	const kind = classifyHref(src);
+	const key = note === undefined || kind !== 'relative' ? undefined : `${note}\u0000${src}`;
 	const [shown, setShown] = useState<{ src: string; url: string }>();
-	const [sized, setSized] = useState<{ src: string; size: PictureSize }>();
+	// Remembered from before this card was drawn, and only that: a size this
+	// drawing learns is for the next (`Room`).
+	const [sized, setSized] = useState(() => {
+		const size = key === undefined ? undefined : sizesRead.get(key);
+		return size === undefined ? undefined : { src, size };
+	});
 	const [gone, setGone] = useState<string>();
 	const [asks, setAsks] = useState(0);
-	const kind = classifyHref(src);
 	// On the web, or in the link itself, the address is the picture's.
 	const direct = kind === 'https' || kind === 'data';
 	const url = direct ? src : shown?.src === src ? shown.url : undefined;
@@ -98,14 +132,18 @@ const usePicture = (src: string, element: Element | null): CardPictureAt => {
 	useEffect(() => {
 		if (kind !== 'relative') return undefined;
 		const asking = new AbortController();
-		void host.size(src).then((size) => {
-			if (asking.signal.aborted || size === undefined) return;
-			setSized({ src, size });
-		});
+		void host
+			.size(src)
+			.catch(() => undefined)
+			.then((size) => {
+				if (asking.signal.aborted || size === undefined) return;
+				if (key !== undefined) remember(key, size);
+				setSized({ src, size });
+			});
 		return () => {
 			asking.abort();
 		};
-	}, [host, src, kind]);
+	}, [host, src, kind, key]);
 	useEffect(() => {
 		if (kind !== 'relative' || !seen) return undefined;
 		const asking = new AbortController();
@@ -114,24 +152,31 @@ const usePicture = (src: string, element: Element | null): CardPictureAt => {
 			.show(src, { signal: asking.signal, fit: 'thumb' })
 			.catch((): Shown => ({ state: 'failed' }))
 			.then((answer) => {
+				// Asked again meanwhile, or the card gone: what this ask says is
+				// nothing to this card now, whatever it is.
+				if (asking.signal.aborted) {
+					if (answer.state === 'ready') answer.release();
+					return;
+				}
 				if (answer.state === 'aborted') return;
 				if (answer.state !== 'ready') {
 					setGone(src);
 					return;
 				}
-				if (asking.signal.aborted) {
-					answer.release();
-					return;
-				}
 				kept.current = answer.release;
 				setShown({ src, url: answer.url });
 				setGone(undefined);
+				// For the next time the card is drawn; not this time (`Room`).
+				const { width, height } = answer;
+				if (key !== undefined && width !== undefined && height !== undefined) {
+					remember(key, { width, height });
+				}
 			});
 		return () => {
 			asking.abort();
 			kept.current();
 		};
-	}, [host, src, kind, seen, asks]);
+	}, [host, src, kind, key, seen, asks]);
 	return {
 		url,
 		size: sized?.src === src ? sized.size : undefined,
@@ -145,10 +190,10 @@ const usePicture = (src: string, element: Element | null): CardPictureAt => {
  * again when the picture arrives: as large as it is drawn, where this device
  * has read its size before — as wide as it is, or the card, and no taller
  * than the card draws any picture — and else that tallest, the picture drawn
- * inside it, for as long as the card is drawn. A size said only as the
- * picture comes is not taken: copies are made one at a time, so on a wall
- * seen for the first time pictures come one by one, and each would place the
- * wall again. The next time, the room is the picture's own.
+ * inside it at its size or smaller, for as long as the card is drawn. A size
+ * said only as the picture comes is not taken: copies are made one at a time,
+ * so on a wall seen for the first time pictures come one by one, and each
+ * would place the wall again. The next time, the room is the picture's own.
  */
 type Room = Readonly<{ size: PictureSize }> | 'tallest';
 
@@ -173,8 +218,10 @@ const CardPicture = ({ embed, words }: { embed: Embedded<'image'>; words: string
 	const drawn = url !== undefined && broken !== url;
 	const failed = url !== undefined && broken === url;
 	// One from beside the note, while it comes and once it has; none once it
-	// will not, and none for one from the web, which comes as it comes.
-	const coming = classifyHref(embed.src) === 'relative' && !gone && !failed;
+	// will not. None for one from the web, or an SVG, drawn from what it is at
+	// once: those come as they come, and an SVG's size is never kept.
+	const coming =
+		classifyHref(embed.src) === 'relative' && !drawsFromData(embed.src) && !gone && !failed;
 	const room: Room | undefined = !coming ? undefined : size === undefined ? 'tallest' : { size };
 	return (
 		<span

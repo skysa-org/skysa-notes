@@ -498,8 +498,7 @@ const SCENARIOS = {
 		needs: (m) => m.pictures !== undefined,
 		run: async (context) => {
 			await pictureNote(context, context.manifest.pictures.twelve);
-			// A page of its own, as the app opened again would be.
-			await context.page.reload();
+			await openedAgain(context);
 			return pictureNote(context, context.manifest.pictures.twelve);
 		},
 	},
@@ -509,8 +508,7 @@ const SCENARIOS = {
 		needs: (m) => m.pictures !== undefined,
 		run: async (context) => {
 			await pictureNote(context, context.manifest.pictures.fortyEight);
-			// A page of its own, as the app opened again would be.
-			await context.page.reload();
+			await openedAgain(context);
 			return pictureNote(context, context.manifest.pictures.fortyEight);
 		},
 	},
@@ -529,32 +527,42 @@ const SCENARIOS = {
 		needs: (m) => m.pictures !== undefined,
 		run: async (context) => {
 			await pictureCards(context);
-			// A page of its own, as the app opened again would be.
-			await context.page.reload();
+			await openedAgain(context);
 			return pictureCards(context);
 		},
 	},
 };
 
 /**
+ * A page of its own, as the app opened again would be: from the list, so
+ * nothing of what is measured next starts before it is asked for.
+ */
+const openedAgain = async ({ page, base }) => {
+	await page.goto(`${base}#/`);
+	await page.reload();
+};
+
+/**
  * Count each time a card already placed on the wall is placed somewhere else:
- * the wall placing it again because one above it changed height.
+ * the wall placing it again because one above it changed height. Once a
+ * placing, however many writes to its style it took.
  */
 const watchMoves = (page) =>
 	page.evaluate(() => {
 		window.__cardMoves?.observer.disconnect();
 		const placed = (style) => /translate\([^)]*\)/.exec(style ?? '')?.[0];
+		const last = new WeakMap();
 		const observer = new MutationObserver((records) => {
 			for (const record of records) {
 				const card = record.target;
 				if (!(card instanceof HTMLElement) || !card.classList.contains('scratch-card')) {
 					continue;
 				}
-				const was = placed(record.oldValue);
+				const was = last.get(card) ?? placed(record.oldValue);
 				const is = placed(card.getAttribute('style'));
-				if (was !== undefined && is !== undefined && was !== is) {
-					window.__cardMoves.count += 1;
-				}
+				if (is === undefined) continue;
+				last.set(card, is);
+				if (was !== undefined && was !== is) window.__cardMoves.count += 1;
 			}
 		});
 		observer.observe(document.body, {
