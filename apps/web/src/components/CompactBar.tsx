@@ -13,6 +13,7 @@ import {
 } from 'react';
 
 import { Icon } from '../editor/icons.js';
+import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
@@ -209,7 +210,7 @@ export const useCompactLayout = () => {
  * room (`MiddleLabel`).
  */
 const notebookLabel = (folder: string | undefined): { value: string; keep?: string } => {
-	if (folder === undefined) return { value: 'Notebooks' };
+	if (folder === undefined) return { value: t('shell.compact.noNotebook') };
 	const value = folderLabel(folder);
 	const parent = parentPath(folder);
 	return parent === ROOT ? { value } : { value, keep: value.slice(parent.length) };
@@ -276,7 +277,7 @@ const MiddleLabel = ({ value, keep }: { value: string; keep: string }) => {
 
 const PaneTrigger = ({
 	pane,
-	name,
+	label,
 	value,
 	keep,
 	icon,
@@ -284,8 +285,8 @@ const PaneTrigger = ({
 	onPanel,
 }: {
 	pane: Pane;
-	/** What the dropdown chooses, for a screen reader: "Source", "Note". */
-	name: string;
+	/** What the dropdown chooses and what is chosen, for a screen reader: "Note: Q3 plan". */
+	label: string;
 	/** What is chosen now. Truncated on screen, whole in the tooltip. */
 	value: string;
 	/**
@@ -305,7 +306,7 @@ const PaneTrigger = ({
 		className="compact-picker"
 		data-pane={pane}
 		{...{ [KEEPS_PANEL]: '' }}
-		aria-label={`${name}: ${value}`}
+		aria-label={label}
 		aria-haspopup="true"
 		aria-expanded={panel === pane}
 		title={value}
@@ -400,7 +401,7 @@ export const CompactBar = ({
 	const renaming = useRenaming(renamings);
 	const source = useShowingSource(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
-	const title = note === undefined ? 'Notes' : shownNote(note, edit).title;
+	const title = note === undefined ? t('shell.compact.noNote') : shownNote(note, edit).title;
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);
@@ -465,8 +466,8 @@ export const CompactBar = ({
 				<button
 					type="button"
 					className="compact-icon"
-					aria-label="Close search"
-					title="Close search"
+					aria-label={t('shell.compact.closeSearch')}
+					title={t('shell.compact.closeSearch')}
 					onClick={closeSearch}
 				>
 					<Icon name="close" />
@@ -484,7 +485,7 @@ export const CompactBar = ({
 				    button's name, and the panel it opens. */}
 				<PaneTrigger
 					pane="sources"
-					name="Source"
+					label={t('shell.compact.source', { value: source.name })}
 					value={source.name}
 					icon={<ProviderIcon kind={source.kind} />}
 					panel={panel}
@@ -492,7 +493,7 @@ export const CompactBar = ({
 				/>
 				<PaneTrigger
 					pane="notebooks"
-					name="Notebook"
+					label={t('shell.compact.notebook', { value: notebook.value })}
 					{...notebook}
 					panel={panel}
 					onPanel={onPanel}
@@ -502,7 +503,7 @@ export const CompactBar = ({
 				) : (
 					<PaneTrigger
 						pane="notes"
-						name="Note"
+						label={t('shell.compact.note', { value: title })}
 						value={title}
 						keep=""
 						panel={panel}
@@ -516,8 +517,8 @@ export const CompactBar = ({
 				<button
 					type="button"
 					className="compact-icon"
-					aria-label="Search notes"
-					title="Search notes"
+					aria-label={t('shell.compact.search')}
+					title={t('shell.compact.search')}
 					onClick={() => {
 						onSearchOpen(true);
 					}}
