@@ -81,7 +81,9 @@ describe('back from getting a connect code', () => {
 			expect(router.state.location.search).toEqual({});
 		});
 		// Where the user is stays as it was.
-		expect(placeIn(router)).toMatchObject({ folder: 'Work' });
+		await waitFor(() => {
+			expect(placeIn(router)).toMatchObject({ folder: 'Work' });
+		});
 	});
 
 	it('opens the sources dropdown first in a compact window', async () => {
