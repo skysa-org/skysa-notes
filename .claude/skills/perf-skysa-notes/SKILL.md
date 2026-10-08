@@ -97,6 +97,9 @@ Each run clones its profile into a directory of its own.
 - A time after a tap (openBig's `listedMs`, `tapP50`, `cardsMs`, `openMs`) starts when
   the touch reached the page, not when Playwright was asked to tap: it first
   waits for the element to be still and hit-tests it, on the slowed thread.
+- Big's list is listed (`listedMs`) when every row is drawn, or, where the
+  list draws only the rows near the screen (#275), when those are: their
+  `aria-setsize` says they are of more.
 - A wait that never ends is an error in the results, never a time. Only
   `allDrawn` may be 0.
 - `scrolledPx` and `reachedEnd` say how far a fling went; one that moves

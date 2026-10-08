@@ -34,6 +34,7 @@ import { useCardMotion, useEasedHeight } from './cardMotion.js';
 import { useElementWidth } from './layout.js';
 import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
 import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
+import { type Measure, useHeights } from './windowing.js';
 
 /**
  * The scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"): a box to take a
@@ -374,54 +375,6 @@ const CardView = ({
 const Card = memo(CardView);
 
 /**
- * Each card's height, as drawn, by note id: what the wall places them by. One
- * observer for every card, and a new map only when a height has changed.
- */
-const useCardHeights = () => {
-	const [heights, setHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
-	const observer = useMemo(
-		() =>
-			typeof ResizeObserver === 'undefined'
-				? undefined
-				: new ResizeObserver((entries) => {
-						setHeights((current) => {
-							const changed = entries
-								.map(
-									(entry) =>
-										[
-											(entry.target as HTMLElement).dataset.id ?? '',
-											entry.borderBoxSize[0]?.blockSize ??
-												entry.target.getBoundingClientRect().height,
-										] as const
-								)
-								.filter(([id, height]) => current.get(id) !== height);
-							return changed.length === 0
-								? current
-								: new Map([...current, ...changed]);
-						});
-					}),
-		[]
-	);
-	useEffect(
-		() => () => {
-			observer?.disconnect();
-		},
-		[observer]
-	);
-	const measure = useCallback(
-		(element: HTMLElement | null) => {
-			if (element === null || observer === undefined) return undefined;
-			observer.observe(element);
-			return () => {
-				observer.unobserve(element);
-			};
-		},
-		[observer]
-	);
-	return { heights, measure };
-};
-
-/**
  * One wall of cards: the pinned, or the rest. Placed by `placeCards` once the
  * wall has a width; until then — and where nothing is laid out, as in a test —
  * in a grid of their own, which is near enough for the first frame.
@@ -441,7 +394,8 @@ const Wall = ({
 	const labelId = useId();
 	const [element, setElement] = useState<HTMLDivElement | null>(null);
 	const width = useElementWidth(element);
-	const { heights, measure } = useCardHeights();
+	// Each card's height, as drawn, by note id: what the wall places them by.
+	const { heights, measure } = useHeights();
 	const wall = useMemo(() => {
 		if (width === undefined) return undefined;
 		const guessWidth = Math.min(CARD_MAX, width / 2);
@@ -488,8 +442,6 @@ const Wall = ({
 		</section>
 	);
 };
-
-type Measure = (element: HTMLElement | null) => (() => void) | undefined;
 
 /** The card that was open has the focus back when it closes, if nothing else took it. */
 const useFocusBack = (openId: string | undefined) => {

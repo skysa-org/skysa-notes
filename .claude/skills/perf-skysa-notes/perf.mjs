@@ -141,6 +141,21 @@ const untilCount = (page, selector, n = 1) =>
 	});
 
 /**
+ * Until a list of `rows` notes is drawn: every row, or, where the list draws
+ * only the rows near the screen (#275), those, which say they are of more
+ * (`aria-setsize`). Either way, what the user sees of it.
+ */
+const untilListed = (page, rows) =>
+	until(
+		page,
+		(arg) => {
+			const drawn = document.querySelectorAll('.note-list li.row-item');
+			return drawn.length >= arg.rows || drawn[0]?.hasAttribute('aria-setsize') === true;
+		},
+		{ rows }
+	);
+
+/**
  * Tap `locator`; the page time the touch reached the page. Playwright waits for
  * the element to be still, scrolls to it and hit-tests it before it touches,
  * all on the slowed thread, and none of that is the app's time.
@@ -247,7 +262,7 @@ const SCENARIOS = {
 			// Not waiting for `load`: a list up before it would be timed at the
 			// first look, not when it came.
 			await page.goto(`${base}${manifest.big.hash}`, { waitUntil: 'commit' });
-			const listed = await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			const listed = await untilListed(page, manifest.big.rows);
 			const edited = await untilCount(page, '.editor-rich-surface');
 			const settled = await quiet(page);
 			return {
@@ -276,7 +291,7 @@ const SCENARIOS = {
 			const before = await counters(cdp);
 			await reset(page);
 			const start = await tap(page, row);
-			const listed = await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			const listed = await untilListed(page, manifest.big.rows);
 			const settled = await quiet(page);
 			return {
 				listedMs: listed - start,
@@ -292,7 +307,7 @@ const SCENARIOS = {
 		needs: (m) => m.big !== undefined,
 		run: async ({ page, cdp, manifest, base }) => {
 			await page.goto(`${base}${manifest.big.hash}`);
-			await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			await untilListed(page, manifest.big.rows);
 			await quiet(page);
 			await page.locator('.compact-picker[data-pane="notes"]').tap();
 			await page.locator('.note-list').waitFor({ state: 'visible' });
@@ -405,7 +420,7 @@ const SCENARIOS = {
 		run: async ({ page, cdp, manifest, base }) => {
 			await page.goto(`${base}${manifest.typing.hash}`);
 			await untilCount(page, '.editor-rich-surface');
-			await untilCount(page, '.note-list li.row-item', manifest.big.rows);
+			await untilListed(page, manifest.big.rows);
 			await quiet(page);
 			await page.locator('.editor-rich-surface').tap();
 			await page.keyboard.press('ControlOrMeta+End');

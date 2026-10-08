@@ -1063,7 +1063,7 @@ button.icon:disabled {
 	white-space: nowrap;
 }
 
-.pane-header + .note-group .note-group-name {
+.pane-header + .note-rows > .note-group:first-child .note-group-name {
 	border-block-start: 0;
 }
 

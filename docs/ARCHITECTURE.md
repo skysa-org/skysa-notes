@@ -898,6 +898,23 @@ Measured on a real library (2,892 `.md` files and 62 others in 235 folders, 24 M
 - **Search finds scratch notes**, said to be in "Scratchpad", and opening one opens its card; the owner's choice. Only while that source's scratchpad is shown, since that is the only place one can be opened.
 - **Made a note** ("Move to notebook"): a card with no name is asked for one first (`NameDialog`), then it is picked up as a note moved from its list is, and dropped on a notebook. Its pin and colour are taken off as it goes (`moveNote`), and the app opens it there; the owner's choice. Cancel leaves it on the wall, named.
 
+### Large libraries (2026-10-08, #275)
+
+A phone holds a notebook of a thousand notes. A list that draws a thousand rows has a thousand rows to lay out, style and keep in memory, on a CPU a quarter as fast as a laptop's. So a long list draws only what is near the screen (`components/windowing.ts`).
+
+- **Above 150 rows**, the note list draws the rows that meet the screen and a screen above and below it. In place of the others is an empty item as tall as they are, so the list is as tall as it would be and the scroll bar the same. A notebook inside the open one that is wholly off screen, its name too, is one empty block. A list of 150 or fewer is drawn whole, as it always was.
+- **Heights are measured** where a row has been drawn (`useHeights`, one `ResizeObserver` for the list, as the scratch wall measures its cards), and taken to be the mean of those where it has not. A row is a line each of title, date and opening, so the guess is near enough that nothing is seen to move as rows are measured.
+- **Drawn again a few times a screen**, not every frame. The span drawn is said again only once the screen has moved a quarter of its height (`useScrollSpan`), and a screen beyond it is always drawn.
+- **What the user is at is drawn wherever it is:**
+  - the selected row;
+  - the row the focus is in, or in its menu (a portal, whose focus React brings up through the row), so Tab goes from row to row as it did;
+  - the row being dragged, so a drag's source never leaves the page under it.
+
+  A right-click menu closes when anything scrolls. A row says where it is among all of its notebook's (`aria-setsize`, `aria-posinset`), so a screen reader counts the rows not drawn.
+- **Before the list can be measured** it draws its first two screens (the window's height), not every row: drawn whole, the first draw would be the slow one.
+- **Where nothing is laid out**, as in a test, there is no screen to be near, and everything is drawn, so every test of the list as it was still holds.
+- **The cost: the browser's find-in-page sees only the rows drawn.** The app's own search sees every note.
+
 ### The app's words (2026-10-07)
 
 **Every word the app shows or reads out comes from one catalog**, `apps/web/src/i18n/`, rather than being written where it is said, so that a translation is a second catalog and not a change to every component. The owner asked for it on 2026-10-07, ahead of any translation, and chose the answers below. English is the only catalog so far, and the locale (`LOCALE` in `i18n/t.ts`) is settled when the page loads and never changes under it: choosing a language would be a reload, so nothing has to tell React that the words moved.
