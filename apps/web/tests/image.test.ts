@@ -696,17 +696,15 @@ describe('a picture beside the note, opened or saved', () => {
 				static override revokeObjectURL = () => undefined;
 			}
 		);
-		const saved: (string | null)[] = [];
-		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
-			this: HTMLAnchorElement
-		) {
-			saved.push(this.getAttribute('download'));
-		});
+		const click = vi
+			.spyOn(HTMLAnchorElement.prototype, 'click')
+			.mockImplementation(() => undefined);
 
 		mounted.button('Download')?.click();
 		await settled();
 
-		expect(saved).toEqual(['cat.png']);
+		const clicked = click.mock.contexts as HTMLAnchorElement[];
+		expect(clicked.map((link) => link.getAttribute('download'))).toEqual(['cat.png']);
 	});
 
 	it('opens on Enter while selected, and goes into its bar on Tab and back on Escape', async () => {
