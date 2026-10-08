@@ -153,6 +153,8 @@ export const editor = {
 		},
 		/** The button under a large picture that downloads it. */
 		show: 'Show',
+		/** On the bar over a picture beside the note, selected whole: it opens in a tab of its own. */
+		openFull: 'Open full size',
 	},
 	/** A file in a note that is not a picture, drawn as a chip. */
 	attachment: {

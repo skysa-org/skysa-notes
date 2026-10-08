@@ -2197,6 +2197,12 @@ button.danger {
 	display: none;
 }
 
+/* A picture on the web or in the link has no file to open or save: only
+   Remove from note is on its bar. */
+.attachment-action[hidden] {
+	display: none;
+}
+
 /* A picture's, over its top corner: under it, a tall one's is off the screen. */
 .attachment-actions.note-image-actions {
 	inset-block-start: 0.375rem;

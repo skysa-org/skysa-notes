@@ -9,7 +9,8 @@ import { classifyHref } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { attachHostCtx, type AttachmentHost, type Shown } from './attachHost.js';
-import { barButton } from './attachment.js';
+import { barButton, nameIn, selectedKeys } from './attachment.js';
+import { openFile, saveFile } from './fileActions.js';
 
 /**
  * A picture in a note (#187), shown where the markdown says it is.
@@ -123,6 +124,19 @@ const whenVisible = (element: Element, editor: Element, work: () => void): (() =
 	};
 };
 
+/**
+ * The name a picture is saved under: its alt text, with its file's extension
+ * on the end, since the app writes an alt without one (`attachmentLabel`) and
+ * `downloadName` takes a label only where it ends as the file does; the
+ * file's own name where it has no alt.
+ */
+const savedAs = (alt: string, stored: string): string => {
+	if (alt === '') return stored;
+	const dot = stored.lastIndexOf('.');
+	const extension = dot > 0 ? stored.slice(dot) : '';
+	return alt.toLowerCase().endsWith(extension.toLowerCase()) ? alt : `${alt}${extension}`;
+};
+
 const imageView =
 	(host: AttachmentHost, view: EditorView, getPos: () => number | undefined) =>
 	(initial: ProseNode): NodeView => {
@@ -150,11 +164,13 @@ const imageView =
 		action.setAttribute('class', 'note-image-action');
 		action.setAttribute('hidden', '');
 
+		const opener = barButton('open', t('editor.image.openFull'));
+		const saver = barButton('download', t('editor.attachment.download'));
 		const remover = barButton('trash', t('editor.attachment.remove'));
 		const actions = document.createElement('span');
 		actions.setAttribute('class', 'attachment-actions note-image-actions');
 		actions.setAttribute('hidden', '');
-		actions.append(remover);
+		actions.append(opener, saver, remover);
 
 		const dom = document.createElement('span');
 		dom.setAttribute('class', 'note-image');
@@ -249,12 +265,46 @@ const imageView =
 			};
 		};
 
+		/**
+		 * A picture beside the note, which opens full size and saves as a
+		 * chip's file does. One on the web, or in the link, does neither: it is
+		 * not the note's to hand over.
+		 */
+		const own = () => classifyHref(attributeOf(held.current, 'src')) === 'relative';
+
 		const describe = () => {
 			const alt = attributeOf(held.current, 'alt');
 			const title = attributeOf(held.current, 'title');
 			img.setAttribute('alt', alt);
 			if (title === '') img.removeAttribute('title');
 			else img.setAttribute('title', title);
+			opener.toggleAttribute('hidden', !own());
+			saver.toggleAttribute('hidden', !own());
+		};
+
+		/** The file, as a chip asks for one: by the name the user knows it by. */
+		const request = () => {
+			const src = attributeOf(held.current, 'src');
+			return {
+				host,
+				href: src,
+				label: savedAs(attributeOf(held.current, 'alt'), nameIn(src)),
+			};
+		};
+
+		/** Say the bar is busy while `work` runs: the whole picture may be a download. */
+		const busy = (work: () => Promise<void>) => {
+			actions.setAttribute('aria-busy', 'true');
+			void work().finally(() => {
+				actions.removeAttribute('aria-busy');
+			});
+		};
+
+		/** In a tab of its own, at the size it is, whatever this view shows of it. */
+		const openFull = (): boolean => {
+			if (!own()) return false;
+			busy(() => openFile(request()));
+			return true;
 		};
 
 		img.addEventListener('error', () => {
@@ -271,6 +321,24 @@ const imageView =
 		actions.addEventListener('mousedown', (event) => {
 			// The picture stays selected, and with it the bar.
 			event.preventDefault();
+		});
+		opener.addEventListener('click', () => {
+			openFull();
+		});
+		saver.addEventListener('click', () => {
+			busy(() => saveFile(request()));
+		});
+		// Back to the picture, still selected, from a bar reached with Tab.
+		actions.addEventListener('keydown', (event) => {
+			if (event.key !== 'Escape') return;
+			event.preventDefault();
+			view.focus();
+		});
+		selectedKeys.set(dom, {
+			open: openFull,
+			toBar: () => {
+				(own() ? opener : remover).focus();
+			},
 		});
 		// The user taking the picture out of the note: an edit like any other,
 		// so the note is dirty and saved.
