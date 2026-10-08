@@ -36,6 +36,7 @@ export {
 	attachmentLabel,
 	attachmentMarkdown,
 	type AttachmentKind,
+	type AttachmentWords,
 	classifyHref,
 	extensionOf,
 	type HrefKind,
@@ -55,7 +56,7 @@ export {
 	uniqueFilename,
 	UNTITLED_SLUG,
 } from './slug.js';
-export { deriveTitle, titleFromFilename, type DeriveTitleInput } from './title.js';
+export { deriveTitle, titleFromFilename, UNTITLED_TITLE, type DeriveTitleInput } from './title.js';
 export {
 	parseNoteFile,
 	serializeNoteFile,

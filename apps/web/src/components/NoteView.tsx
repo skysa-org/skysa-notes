@@ -44,6 +44,7 @@ import {
 import { setFormatToolbarShown } from '../store/prefs.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
 import { type ScratchMarks, scratchMarks } from '../store/scratchpad.js';
+import { titleShown } from '../store/titles.js';
 import { FindBar } from './FindBar.js';
 import {
 	COARSE_POINTER,
@@ -240,7 +241,12 @@ const TitleField = ({
 		cancelled.current = false;
 		setDraft(null);
 		const given =
-			!abandoned && trimmed !== undefined && trimmed !== '' && trimmed !== note.title;
+			!abandoned &&
+			trimmed !== undefined &&
+			trimmed !== '' &&
+			trimmed !== note.title &&
+			// What the field showed, given back: not a name, if it is not the title.
+			trimmed !== titleShown(note.title);
 		// Said as given, trimmed, until the row has it; or let go, and the row's
 		// name is the one shown again.
 		liveEdits?.naming(ref, given ? trimmed : undefined);
@@ -255,7 +261,7 @@ const TitleField = ({
 			className="note-title-input"
 			aria-label={t('notes.view.titleLabel')}
 			placeholder={blankWhenUnnamed ? t('notes.view.titlePlaceholder') : undefined}
-			value={draft ?? (blank ? '' : shown.title)}
+			value={draft ?? (blank ? '' : titleShown(shown.title))}
 			onChange={(event) => {
 				setDraft(event.target.value);
 				liveEdits?.naming(ref, event.target.value);
@@ -1037,7 +1043,7 @@ const moveOf = (scratch: ScratchScreen, note: NoteRecord): (() => void) | undefi
 const barOf = (scratch: ScratchScreen | undefined, note: NoteRecord): ReactNode =>
 	scratch === undefined ? undefined : (
 		<ScratchBar
-			name={note.title}
+			name={titleShown(note.title)}
 			color={scratch.marks.color}
 			onColor={(color) => {
 				scratch.onMark({ color });

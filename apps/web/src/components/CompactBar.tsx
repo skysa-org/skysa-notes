@@ -17,6 +17,7 @@ import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
+import { titleShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useFontsStatus, useMediaQuery } from './layout.js';
 import { middleEllipsis } from './middleEllipsis.js';
@@ -401,7 +402,8 @@ export const CompactBar = ({
 	const renaming = useRenaming(renamings);
 	const source = useShowingSource(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
-	const title = note === undefined ? t('shell.compact.noNote') : shownNote(note, edit).title;
+	const title =
+		note === undefined ? t('shell.compact.noNote') : titleShown(shownNote(note, edit).title);
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);

@@ -5,7 +5,6 @@ import {
 	downloadName,
 	drawsFromData,
 	fileKind,
-	fileKindLabel,
 	opensInTab,
 	safeOpenType,
 	showsInline,
@@ -29,11 +28,6 @@ describe('fileKind', () => {
 		['README', 'file'],
 	])('%s is %s', (name, kind) => {
 		expect(fileKind(name)).toBe(kind);
-	});
-
-	it('has a label for every kind', () => {
-		expect(fileKindLabel('pdf')).toBe('PDF');
-		expect(fileKindLabel('file')).toBe('File');
 	});
 });
 

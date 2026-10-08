@@ -4,6 +4,7 @@ import { t } from '../i18n/t.js';
 import { type ConnectedSource } from '../store/connection.js';
 import { type NoteRecord, noteRef } from '../store/db.js';
 import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
+import { titleShown } from '../store/titles.js';
 import { countedFolders, countOf, isEmpty, type Unsynced } from '../store/unsynced.js';
 import { type UnsentAnswer } from '../sync/account.js';
 import { canMove, leftBehind, MoveUnsent } from './MoveUnsent.js';
@@ -167,7 +168,7 @@ const Titles = ({ notes }: { notes: readonly NoteRecord[] }) => {
 		<>
 			<ul aria-label={t('unsent.disconnect.notes')}>
 				{named.map((note) => (
-					<li key={noteRef(note)}>{note.title}</li>
+					<li key={noteRef(note)}>{titleShown(note.title)}</li>
 				))}
 			</ul>
 			{rest.length > 0 && (
@@ -175,7 +176,7 @@ const Titles = ({ notes }: { notes: readonly NoteRecord[] }) => {
 					<summary>{t('unsent.disconnect.more', { count: rest.length })}</summary>
 					<ul aria-label={t('unsent.disconnect.rest')}>
 						{rest.map((note) => (
-							<li key={noteRef(note)}>{note.title}</li>
+							<li key={noteRef(note)}>{titleShown(note.title)}</li>
 						))}
 					</ul>
 				</details>

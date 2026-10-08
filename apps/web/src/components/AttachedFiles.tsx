@@ -13,6 +13,7 @@ import {
 	deleteUnlinkedFiles,
 	everyNoteHeld,
 } from '../store/fileLinks.js';
+import { titleShown } from '../store/titles.js';
 
 /**
  * The files in a notebook, each with the notes that link it under its name,
@@ -60,8 +61,8 @@ export const linkedFrom = (file: AttachedFile): string =>
 				notes: file.linkedBy
 					.map((note) =>
 						note.deleted
-							? t('attachedFiles.deletedNote', { title: note.title })
-							: note.title
+							? t('attachedFiles.deletedNote', { title: titleShown(note.title) })
+							: titleShown(note.title)
 					)
 					.join(', '),
 			});

@@ -8,6 +8,7 @@ import {
 	sanitizeFolderName,
 } from '@skysa/core';
 
+import { t } from '../i18n/t.js';
 import {
 	activeConnectionId,
 	type FileRecord,
@@ -141,7 +142,7 @@ export const createFolder = async (
 	db: NotesDatabase,
 	input: CreateFolderInput
 ): Promise<FolderRecord> => {
-	const name = sanitizeFolderName(input.name);
+	const name = sanitizeFolderName(input.name, t('notebooks.unnamed'));
 
 	// The check and the create are one step. `ensureFolder` is idempotent, so
 	// two concurrent creates of one name did no damage — but both passed the
@@ -462,7 +463,7 @@ export const renameFolder = async (
 	// Handed back, because the caller cannot work it out: the name is sanitised
 	// on the way in, and the open notebook is named by path in the URL — which
 	// this has just changed, for the notebook and for everything under it.
-	const to = joinPath(parentPath(path), sanitizeFolderName(name));
+	const to = joinPath(parentPath(path), sanitizeFolderName(name, t('notebooks.unnamed')));
 	await moveFolder(db, path, to, options);
 	return to;
 };

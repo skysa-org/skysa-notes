@@ -16,6 +16,7 @@ import {
 	serializeNoteFile,
 	uniqueFilename,
 	UNTITLED_SLUG,
+	UNTITLED_TITLE,
 	withoutNul,
 	writeFrontmatter,
 } from '@skysa/core';
@@ -65,9 +66,6 @@ const writerTables = (db: NotesDatabase) => [
  * flag, or the app would rewrite files it was only ever asked to display.
  * See docs/ARCHITECTURE.md §7.
  */
-
-/** What `deriveTitle` returns when a note has nothing to take a name from. */
-const UNTITLED_TITLE = 'Untitled';
 
 export interface NoteScope {
 	connectionId?: string;

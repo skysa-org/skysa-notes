@@ -7,6 +7,11 @@ export const notebooks = {
 	title: 'Notebooks',
 	/** The `+` in the sidebar's header, which makes a top-level notebook. */
 	newNotebook: 'New notebook',
+	/**
+	 * What a notebook is called when the name typed for it has nothing in it a
+	 * folder can be named: it is the folder's name in the user's storage.
+	 */
+	unnamed: 'Untitled',
 	/** The field a new notebook's name is typed into. */
 	newName: {
 		label: 'New notebook name',
