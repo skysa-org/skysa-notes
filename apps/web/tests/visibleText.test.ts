@@ -1,8 +1,8 @@
 import type * as Core from '@skysa/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { keepRows } from '../src/store/kept.js';
 import {
-	keepOpenings,
 	openingBlocks,
 	openingLines,
 	visibleLines,
@@ -91,7 +91,7 @@ describe('the parses a list costs', () => {
 
 	it('is one parse per row of a list longer than the cache was, drawn again and again', () => {
 		const rows = bodies('Row', 1_000);
-		keepOpenings('test-list', rows.length);
+		keepRows('test-list', rows.length);
 		rows.forEach((body) => openingLines(body));
 		rows.forEach((body) => openingLines(body));
 		rows.forEach((body) => openingLines(body));
@@ -101,8 +101,8 @@ describe('the parses a list costs', () => {
 	it('keeps room for two lists, so going between them parses neither again', () => {
 		const list = bodies('Listed', 700);
 		const cards = bodies('Card', 700);
-		keepOpenings('test-a', list.length);
-		keepOpenings('test-b', cards.length);
+		keepRows('test-a', list.length);
+		keepRows('test-b', cards.length);
 		[...list, ...cards].forEach((body) => openingBlocks(body));
 		[...list, ...cards].forEach((body) => openingBlocks(body));
 		expect(parses.count).toBe(1_400);

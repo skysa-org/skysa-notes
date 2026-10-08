@@ -1,15 +1,16 @@
 import {
 	isScratchPath,
+	type NoteFrontmatter,
 	type PreviewLine,
 	previewLineText,
 	type PreviewRun,
-	readFrontmatter,
 	type ScratchColor,
 	scratchColor,
 } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord, type NotesDatabase } from './db.js';
+import { frontmatterOf } from './frontmatter.js';
 import { getPreference } from './prefs.js';
 
 /**
@@ -92,27 +93,18 @@ export interface ScratchMarks {
 const NO_MARKS: ScratchMarks = { pinned: false, color: undefined };
 
 /**
- * The marks of each frontmatter block read so far. A block is a string, so the
- * same note asked again costs a lookup, and a block edited is a new key. A
- * scratchpad is re-listed on every write to the notes table — every autosave of
- * every note — and parsing each card's YAML again each time is the cost this
- * saves. Bounded, as `visibleText`'s cache is.
+ * The marks read off each frontmatter kept (`frontmatterOf`), gone with it: the
+ * same block asked again is the same marks, which a card is drawn from.
  */
-const marksCache = new Map<string, ScratchMarks>();
-const MARKS_KEPT = 400;
+const marksRead = new WeakMap<Readonly<NoteFrontmatter>, ScratchMarks>();
 
 export const scratchMarks = (note: Pick<NoteRecord, 'frontmatter'>): ScratchMarks => {
-	const { frontmatter } = note;
-	if (frontmatter === null) return NO_MARKS;
-	const known = marksCache.get(frontmatter);
+	if (note.frontmatter === null) return NO_MARKS;
+	const read = frontmatterOf(note.frontmatter);
+	const known = marksRead.get(read);
 	if (known !== undefined) return known;
-	const read = readFrontmatter(frontmatter);
 	const marks: ScratchMarks = { pinned: read.pinned === true, color: scratchColor(read.color) };
-	if (marksCache.size >= MARKS_KEPT) {
-		const oldest = marksCache.keys().next().value;
-		if (oldest !== undefined) marksCache.delete(oldest);
-	}
-	marksCache.set(frontmatter, marks);
+	marksRead.set(read, marks);
 	return marks;
 };
 
