@@ -8,7 +8,13 @@ import { $prose, $view } from '@milkdown/kit/utils';
 import { classifyHref } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { attachHostCtx, type AttachmentHost, type Shown } from './attachHost.js';
+import {
+	attachHostCtx,
+	type AttachmentHost,
+	type PictureSize,
+	type Shown,
+	type ShowOptions,
+} from './attachHost.js';
 import { barButton, nameIn, selectedKeys } from './attachment.js';
 import { openFile, saveFile } from './fileActions.js';
 
@@ -137,6 +143,15 @@ const savedAs = (alt: string, stored: string): string => {
 	return alt.toLowerCase().endsWith(extension.toLowerCase()) ? alt : `${alt}${extension}`;
 };
 
+/**
+ * The most a picture is drawn at in `editor`, in device pixels: its width, at
+ * the screen's density. A copy that wide is drawn in place of a larger
+ * picture (#276).
+ */
+const fitIn = (editor: HTMLElement): NonNullable<ShowOptions['fit']> => ({
+	width: Math.ceil(editor.clientWidth * window.devicePixelRatio),
+});
+
 const imageView =
 	(host: AttachmentHost, view: EditorView, getPos: () => number | undefined) =>
 	(initial: ProseNode): NodeView => {
@@ -209,13 +224,36 @@ const imageView =
 			say('ready');
 		};
 
+		// The picture's own size, where it is known, and the link it is known
+		// for: its box is held at it before anything is drawn in it, and the
+		// picture fills it whichever copy it is drawn from.
+		const sizedFor = { current: '' };
+		const hold = (size: PictureSize | undefined) => {
+			if (size === undefined) {
+				img.removeAttribute('width');
+				img.removeAttribute('height');
+				dom.removeAttribute('data-sized');
+				dom.style.removeProperty('--note-image-width');
+				dom.style.removeProperty('--note-image-ratio');
+				return;
+			}
+			img.setAttribute('width', String(size.width));
+			img.setAttribute('height', String(size.height));
+			dom.setAttribute('data-sized', '');
+			dom.style.setProperty('--note-image-width', `${String(size.width)}px`);
+			dom.style.setProperty(
+				'--note-image-ratio',
+				`${String(size.width)} / ${String(size.height)}`
+			);
+		};
+
 		/** Ask the host for the picture, and show whatever it answers. */
 		const ask = (src: string, large: boolean): (() => void) => {
 			const asking = new AbortController();
 			const kept = { current: (): void => undefined };
 			say('loading');
 			void host
-				.show(src, { signal: asking.signal, large })
+				.show(src, { signal: asking.signal, large, fit: fitIn(editor) })
 				// A host that throws — a store that cannot be read — is a picture
 				// that could not be got, and worth asking for again.
 				.catch((): Shown => ({ state: 'failed' }))
@@ -226,6 +264,8 @@ const imageView =
 					}
 					if (shown.state === 'ready') {
 						kept.current = shown.release;
+						const { width, height } = shown;
+						if (width !== undefined && height !== undefined) hold({ width, height });
 						draw(shown.url);
 						return;
 					}
@@ -242,6 +282,10 @@ const imageView =
 			showing.current.stop();
 			showing.current = { src, stop: () => undefined };
 			img.removeAttribute('src');
+			if (sizedFor.current !== src) {
+				sizedFor.current = src;
+				hold(undefined);
+			}
 			const kind = classifyHref(src);
 			if (kind === 'https' || kind === 'data') {
 				draw(src);
@@ -252,6 +296,21 @@ const imageView =
 				return;
 			}
 			say('loading');
+			// Before it is on its way, or even on screen: what this device has
+			// read of it before, so the lines below it are where they will be.
+			if (!dom.hasAttribute('data-sized')) {
+				void host
+					.size(src)
+					.catch(() => undefined)
+					.then((size) => {
+						if (
+							size !== undefined &&
+							sizedFor.current === src &&
+							state.current === 'loading'
+						)
+							hold(size);
+					});
+			}
 			const asked = { current: (): void => undefined };
 			const unwatch = whenVisible(dom, editor, () => {
 				asked.current = ask(src, wanted.current);

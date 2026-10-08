@@ -301,7 +301,8 @@ const heldSize = async (db: NotesDatabase): Promise<number> =>
 
 /**
  * Keep what was read of a picture: what its header says, and the copy made
- * of it, if one was. Only while its row is still bound to the bytes it was
+ * of it, if one was, or that the browser refused to draw one (`refused`),
+ * which stays said for as long as the record stands for these bytes. Only while its row is still bound to the bytes it was
  * read from, which are `file`'s: a row deleted meanwhile, or bound to other
  * bytes, is another picture's. What was kept for other bytes goes now. So
  * `file` is the row as it was read *before* the bytes were — read after, it
@@ -313,7 +314,7 @@ const heldSize = async (db: NotesDatabase): Promise<number> =>
 export const keepPicture = async (
 	db: NotesDatabase,
 	file: FileRecord,
-	read: Readonly<{ info: PictureInfo | null; copy?: MadeCopy }>,
+	read: Readonly<{ info: PictureInfo | null; copy?: MadeCopy; refused?: boolean }>,
 	now: number,
 	budget: number = PICTURE_BUDGET_BYTES
 ): Promise<boolean> => {
@@ -342,6 +343,7 @@ export const keepPicture = async (
 			fileId: row.id,
 			...stampOf(row),
 			info: read.info,
+			...(read.refused === true || still?.refused === true ? { refused: true } : {}),
 			copies,
 		});
 		if (copy !== undefined) {

@@ -174,6 +174,11 @@ const fling = async (page, cdp, selector) => {
 		)
 			element = element.parentElement;
 		const scroller = element ?? document.scrollingElement;
+		// Only this one: a fling before it in the same page marked its own,
+		// which can still be there, kept mounted out of sight.
+		document.querySelectorAll('[data-perf-scroller]').forEach((marked) => {
+			marked.removeAttribute('data-perf-scroller');
+		});
 		scroller.setAttribute('data-perf-scroller', '');
 		// From the top, wherever what came before left it.
 		scroller.scrollTo(0, 0);
@@ -482,6 +487,32 @@ const SCENARIOS = {
 	pictures48: {
 		needs: (m) => m.pictures !== undefined,
 		run: async (context) => pictureNote(context, context.manifest.pictures.fortyEight),
+	},
+
+	/**
+	 * The 12 MP note opened again, in the app loaded again: measured the
+	 * second time, from what the first left on the device — the copies made
+	 * of its pictures, where the build makes them.
+	 */
+	picturesAgain: {
+		needs: (m) => m.pictures !== undefined,
+		run: async (context) => {
+			await pictureNote(context, context.manifest.pictures.twelve);
+			// A page of its own, as the app opened again would be.
+			await context.page.reload();
+			return pictureNote(context, context.manifest.pictures.twelve);
+		},
+	},
+
+	/** The 48 MP note opened again, measured the second time. */
+	pictures48Again: {
+		needs: (m) => m.pictures !== undefined,
+		run: async (context) => {
+			await pictureNote(context, context.manifest.pictures.fortyEight);
+			// A page of its own, as the app opened again would be.
+			await context.page.reload();
+			return pictureNote(context, context.manifest.pictures.fortyEight);
+		},
 	},
 
 	/** The scratchpad with picture cards, flung through until every picture has drawn. */

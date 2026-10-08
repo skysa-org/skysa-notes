@@ -8,6 +8,7 @@ import {
 	type AttachmentProblem,
 	type Fetched,
 	NO_ATTACHMENTS,
+	type PictureSize,
 	type Shown,
 	type ShowOptions,
 } from '../src/editor/attachHost.js';
@@ -33,7 +34,7 @@ interface Asked {
 	answer: (shown: Shown) => void;
 }
 
-const fakeHost = () => {
+const fakeHost = (sizes: ReadonlyMap<string, PictureSize> = new Map()) => {
 	const asked: Asked[] = [];
 	const listeners = new Set<() => void>();
 	const host: AttachmentHost = {
@@ -42,6 +43,7 @@ const fakeHost = () => {
 			new Promise((resolve) => {
 				asked.push({ href, options, answer: resolve });
 			}),
+		size: (href) => Promise.resolve(sizes.get(href)),
 		changed: (listener) => {
 			listeners.add(listener);
 			return () => {
@@ -83,10 +85,11 @@ const mount = async (body: string, host: AttachmentHost = fakeHost().host, style
 /** A turn of the event loop, for an answer to reach the view. */
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-const ready = (url: string, release: () => void = () => undefined): Shown => ({
+const ready = (url: string, release: () => void = () => undefined, size?: PictureSize): Shown => ({
 	state: 'ready',
 	url,
 	release,
+	...size,
 });
 
 describe('a picture beside the note', () => {
@@ -326,6 +329,73 @@ describe('a picture beside the note', () => {
 // is made, the schema says a title is a string, and the parse threw. Every
 // note with a picture in it then failed the rich editor's check once it was
 // opened again — only in a build whose lockfile had 1.25.12, the deployed one.
+/**
+ * A picture drawn from a copy the width the editor draws it (#276), in a box
+ * the picture's own size, held before anything is drawn in it.
+ */
+describe('a picture drawn from a copy', () => {
+	it('is asked for as wide as the editor is in device pixels', async () => {
+		vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(390);
+		vi.stubGlobal('devicePixelRatio', 3);
+		const { host, asked } = fakeHost();
+
+		await mount('A ![cat](cat.png) here.\n', host);
+
+		expect(asked[0]?.options.fit).toEqual({ width: 1170 });
+	});
+
+	it('holds its box at the size this device read before, until it is drawn in it', async () => {
+		const { host, asked } = fakeHost(new Map([['cat.png', { width: 4000, height: 3000 }]]));
+		const { picture, img } = await mount('A ![cat](cat.png) here.\n', host);
+		await settled();
+
+		const box = picture() as HTMLElement | null;
+		expect(box?.getAttribute('data-state')).toBe('loading');
+		expect(box?.hasAttribute('data-sized')).toBe(true);
+		expect(box?.style.getPropertyValue('--note-image-width')).toBe('4000px');
+		expect(box?.style.getPropertyValue('--note-image-ratio')).toBe('4000 / 3000');
+
+		asked[0]?.answer(ready('blob:skysa/copy', undefined, { width: 4000, height: 3000 }));
+		await settled();
+		expect(img()?.getAttribute('src')).toBe('blob:skysa/copy');
+		expect([img()?.getAttribute('width'), img()?.getAttribute('height')]).toEqual([
+			'4000',
+			'3000',
+		]);
+	});
+
+	it('is drawn at the size the host says, which a picture it has not read before learns once shown', async () => {
+		const { host, asked } = fakeHost();
+		const { picture, img } = await mount('A ![cat](cat.png) here.\n', host);
+		await settled();
+		expect(picture()?.hasAttribute('data-sized')).toBe(false);
+
+		asked[0]?.answer(ready('blob:skysa/copy', undefined, { width: 640, height: 480 }));
+		await settled();
+
+		expect([img()?.getAttribute('width'), img()?.getAttribute('height')]).toEqual([
+			'640',
+			'480',
+		]);
+	});
+
+	it('lets go of the size once the link names another picture', async () => {
+		const { host, asked } = fakeHost(new Map([['cat.png', { width: 4000, height: 3000 }]]));
+		const { view, picture, img } = await mount('![cat](cat.png)\n', host);
+		asked[0]?.answer(ready('blob:skysa/cat', undefined, { width: 4000, height: 3000 }));
+		await settled();
+
+		view.dispatch(
+			view.state.tr.setNodeMarkup(1, undefined, { src: 'dog.png', alt: 'cat', title: '' })
+		);
+		await settled();
+
+		expect(picture()?.hasAttribute('data-sized')).toBe(false);
+		expect(img()?.hasAttribute('width')).toBe(false);
+		expect(asked.map((each) => each.href)).toEqual(['cat.png', 'dog.png']);
+	});
+});
+
 describe('a picture read from the note', () => {
 	it.each([
 		['with no title', '![Pasted image](pasted-image-3b8fbf95.png)\n', ''],

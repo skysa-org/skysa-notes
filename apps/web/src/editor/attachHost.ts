@@ -18,10 +18,20 @@ import type { AttachmentRefusal } from '../store/files.js';
  * than by the component that has the host.
  */
 
+/** A picture's width and height as drawn, in its own pixels. */
+export interface PictureSize {
+	readonly width: number;
+	readonly height: number;
+}
+
 /** What showing a picture came to. */
 export type Shown =
-	/** A URL to draw it from, and the way to let it go once nothing shows it. */
-	| { state: 'ready'; url: string; release: () => void }
+	/**
+	 * A URL to draw it from, and the way to let it go once nothing shows it.
+	 * With the picture's own size where it is known, which the box it is drawn
+	 * in takes whichever copy of it the URL is (#276).
+	 */
+	| ({ state: 'ready'; url: string; release: () => void } & Partial<PictureSize>)
 	/** The link names no file beside the note, or the source no longer has it. */
 	| { state: 'missing' }
 	| { state: 'offline' }
@@ -40,6 +50,12 @@ export interface ShowOptions {
 	readonly signal: AbortSignal;
 	/** Download it even if it is large: the user asked to see it. */
 	readonly large?: boolean;
+	/**
+	 * The most the view draws it at, in device pixels: `'thumb'` for a card's
+	 * box, or a width. A copy that size is drawn in its place where one is
+	 * worth having (`pictureVariant`). Without it, the picture as it is.
+	 */
+	readonly fit?: 'thumb' | Readonly<{ width: number }>;
 }
 
 /**
@@ -81,6 +97,12 @@ export interface AttachmentHost {
 	/** A picture, for a link relative to the note (`classifyHref`). */
 	readonly show: (href: string, options: ShowOptions) => Promise<Shown>;
 	/**
+	 * A picture's size, where this device has read it before: for the box it
+	 * is drawn in to be held before it is shown, so what is below it does not
+	 * move when it is.
+	 */
+	readonly size: (href: string) => Promise<PictureSize | undefined>;
+	/**
 	 * Any file, for a link relative to the note, whatever its size: the user
 	 * asked for it by opening or saving it.
 	 */
@@ -111,6 +133,7 @@ export type FileReceiver = (files: readonly File[]) => void;
 /** The host of an editor nobody gave one: it shows nothing beside a note. */
 export const NO_ATTACHMENTS: AttachmentHost = {
 	show: () => Promise.resolve({ state: 'unavailable' }),
+	size: () => Promise.resolve(undefined),
 	fetchFile: () => Promise.resolve({ state: 'unavailable' }),
 	report: () => undefined,
 	add: () => Promise.resolve({ state: 'unavailable' }),
