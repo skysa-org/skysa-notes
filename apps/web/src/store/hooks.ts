@@ -1,6 +1,6 @@
 import { isScratchPath, ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 
 import { codeDisplay, type CodeDisplayStore } from '../editor/codeDisplay.js';
 import { type EditorMode } from '../editor/mode.js';
@@ -15,6 +15,7 @@ import {
 import { holdsAnything } from './exportNotes.js';
 import { listFilePaths } from './files.js';
 import { folderTree } from './folders.js';
+import { keptRows } from './keptRows.js';
 import { getLastOpen, type LastOpen, noteIsUnder, pickNote } from './lastOpen.js';
 import { getNote, listNotes, listNotesEverywhere, listScratchNotes } from './notes.js';
 import { getOpenNotebooks } from './openNotebooks.js';
@@ -132,18 +133,25 @@ export const usePinnedTree = (): PinnedTree => {
  * change of dependencies, so without this the previous folder's notes are shown
  * for a frame under the new folder's heading — a list that says "Loose notes"
  * above a note from a notebook, which is worse than a moment of "Loading…".
+ *
+ * A note that has not changed since the read before is the object it was then
+ * (`keptRows`), so its row is not drawn again.
  */
 export const useNotesUnderFolder = (folderPath: string | undefined): NoteRecord[] | undefined => {
-	const result = useLiveQuery(
-		async () => ({
-			folderPath,
-			notes:
-				folderPath === undefined
-					? []
-					: (await listNotes(db)).filter((note) => noteIsUnder(note.path, folderPath)),
-		}),
-		[folderPath]
-	);
+	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
+	const result = useLiveQuery(async () => {
+		if (folderPath === undefined) {
+			// Nothing listed, so nothing to keep the last notebook's notes for.
+			before.current = new Map();
+			return { folderPath, notes: [] };
+		}
+		const notes = keptRows(
+			before.current,
+			(await listNotes(db)).filter((note) => noteIsUnder(note.path, folderPath))
+		);
+		before.current = new Map(notes.map((note) => [note.id, note]));
+		return { folderPath, notes };
+	}, [folderPath]);
 	// `result?.folderPath === folderPath` would be true for an unresolved query
 	// of the root, where both sides are `undefined`, and then read `.notes` off
 	// nothing at all.

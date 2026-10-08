@@ -99,6 +99,24 @@ const inSidebarOrder = (node: FolderNode): string[] => [
 ];
 
 /**
+ * The notes by the notebook each is in: the notebooks in the order their first
+ * note came, and each one's notes in the order they came. Added to in place: a
+ * copy of a notebook's notes for each note added to it is half a million
+ * copies for a notebook of a thousand, on every draw of the list.
+ */
+export const byParent = <T extends Readonly<{ path: string }>>(
+	notes: readonly T[]
+): Map<string, T[]> =>
+	notes.reduce((groups, note) => {
+		const folder = parentPath(note.path);
+		const group = groups.get(folder);
+		if (group === undefined) return groups.set(folder, [note]);
+		// eslint-disable-next-line functional/immutable-data
+		group.push(note);
+		return groups;
+	}, new Map<string, T[]>());
+
+/**
  * A notebook's list, from every note under it: its own notes first, then each
  * notebook's inside it, at any depth, together and in the order the sidebar
  * has the notebooks — the pinned first at each level (`withPins`), and each
@@ -117,13 +135,10 @@ export const listedUnder = <T extends Readonly<{ path: string }>>(
 ): T[] => {
 	const node = tree === undefined ? undefined : findFolder(tree, folder);
 	const known = node === undefined ? [folder] : inSidebarOrder(node);
-	const byNotebook = notes.reduce(
-		(groups, note) =>
-			groups.set(parentPath(note.path), [...(groups.get(parentPath(note.path)) ?? []), note]),
-		new Map<string, T[]>()
-	);
+	const byNotebook = byParent(notes);
+	const inTree = new Set(known);
 	const unknown = [...byNotebook.keys()]
-		.filter((path) => !known.includes(path))
+		.filter((path) => !inTree.has(path))
 		.sort((a, b) => a.localeCompare(b));
 	return [...known, ...unknown].flatMap((path) =>
 		pinnedFirst(byNotebook.get(path) ?? [], pinned)
