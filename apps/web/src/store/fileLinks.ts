@@ -3,6 +3,7 @@ import { basename, foldName, parentPath } from '@skysa/core';
 import type { FileRecord, NoteRecord, NotesDatabase, SyncStateRecord } from './db.js';
 import { fileKey, handOverToCopies } from './files.js';
 import { foldPath } from './naming.js';
+import { dropPictures } from './pictures.js';
 import { queueDeleteFile } from './queue.js';
 
 /**
@@ -230,6 +231,7 @@ const deleteUnnamed = async (
 	const keys = going.map(fileKey);
 	await db.files.bulkDelete(keys);
 	await db.fileBytes.bulkDelete(keys);
+	await dropPictures(db, keys);
 	return going.map((file) => file.path);
 };
 
@@ -246,15 +248,21 @@ export const deleteUnlinkedFiles = (
 	connectionId: string,
 	ids: readonly string[]
 ): Promise<string[]> =>
-	db.transaction('rw', [db.syncState, db.notes, db.files, db.fileBytes, db.opQueue], async () => {
-		if (!holdsEveryNote(await db.syncState.get(connectionId))) return [];
-		const found = await db.files.bulkGet(ids.map((id): [string, string] => [connectionId, id]));
-		return deleteUnnamed(
-			db,
-			connectionId,
-			found.filter((file): file is FileRecord => file !== undefined)
-		);
-	});
+	db.transaction(
+		'rw',
+		[db.syncState, db.notes, db.files, db.fileBytes, db.opQueue, db.pictures, db.pictureBytes],
+		async () => {
+			if (!holdsEveryNote(await db.syncState.get(connectionId))) return [];
+			const found = await db.files.bulkGet(
+				ids.map((id): [string, string] => [connectionId, id])
+			);
+			return deleteUnnamed(
+				db,
+				connectionId,
+				found.filter((file): file is FileRecord => file !== undefined)
+			);
+		}
+	);
 
 /**
  * `deleteUnlinkedFiles` for the files at `paths`, compared folded: the cleanup
@@ -270,15 +278,19 @@ export const deleteUnlinkedFilesAt = (
 	paths: readonly string[],
 	since: number
 ): Promise<string[] | undefined> =>
-	db.transaction('rw', [db.syncState, db.notes, db.files, db.fileBytes, db.opQueue], async () => {
-		const state = await db.syncState.get(connectionId);
-		if (!holdsEveryNote(state)) return undefined;
-		if (state !== undefined && (state.lastSyncAt ?? 0) < since) return undefined;
-		const wanted = new Set(paths.map(foldPath));
-		const files = await db.files
-			.where('connectionId')
-			.equals(connectionId)
-			.filter((file) => wanted.has(foldPath(file.path)))
-			.toArray();
-		return deleteUnnamed(db, connectionId, files);
-	});
+	db.transaction(
+		'rw',
+		[db.syncState, db.notes, db.files, db.fileBytes, db.opQueue, db.pictures, db.pictureBytes],
+		async () => {
+			const state = await db.syncState.get(connectionId);
+			if (!holdsEveryNote(state)) return undefined;
+			if (state !== undefined && (state.lastSyncAt ?? 0) < since) return undefined;
+			const wanted = new Set(paths.map(foldPath));
+			const files = await db.files
+				.where('connectionId')
+				.equals(connectionId)
+				.filter((file) => wanted.has(foldPath(file.path)))
+				.toArray();
+			return deleteUnnamed(db, connectionId, files);
+		}
+	);

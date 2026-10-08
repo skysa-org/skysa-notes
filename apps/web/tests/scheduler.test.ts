@@ -285,6 +285,8 @@ const reconnectAtOnce = (db: NotesDatabase) =>
 			db.fileBytes,
 			db.clips,
 			db.clipBytes,
+			db.pictures,
+			db.pictureBytes,
 		],
 		() => reconnect(db)
 	);
