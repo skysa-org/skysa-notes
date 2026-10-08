@@ -95,7 +95,8 @@ export const useElementWidth = (element: Element | null): number | undefined => 
 				const observer = new ResizeObserver((entries?: readonly ResizeObserverEntry[]) => {
 					// The border box, as `getBoundingClientRect` gives it, without
 					// a transform the element is drawn under for a moment, which the
-					// observer would never say had gone.
+					// observer would never say had gone. Where the page is laid out
+					// zoomed, as on a phone, it is cut down to a 64th of a pixel.
 					const box = entries?.at(-1)?.borderBoxSize.at(0)?.inlineSize;
 					if (box === undefined) measure();
 					else measured.current = box > 0 ? box : undefined;

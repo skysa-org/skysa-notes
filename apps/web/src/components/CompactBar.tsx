@@ -7,7 +7,6 @@ import {
 	useDeferredValue,
 	useEffect,
 	useLayoutEffect,
-	useMemo,
 	useRef,
 	useState,
 } from 'react';
@@ -218,19 +217,23 @@ const notebookLabel = (folder: string | undefined): { value: string; keep?: stri
 };
 
 /**
- * `value` shortened in its middle to `room` (`middleEllipsis`), keeping `keep`
- * at its end whole for longest, or `value` as it is with nothing to measure.
- * Measured by a canvas, scaled to the width the page laid `whole` — the whole
- * of `value` — out at, so the two agree about the font.
+ * `value` shortened in its middle to the room `label` has (`middleEllipsis`),
+ * keeping `keep` at its end whole for longest, or `value` as it is with
+ * nothing to measure. Measured by a canvas, scaled to the width the page laid
+ * the whole of `value` out at, so the two agree about the font.
+ *
+ * The room is the label's own `getBoundingClientRect`, taken with the whole's,
+ * and not the observer's width (`useElementWidth`), which says only when to
+ * measure again: where the page is laid out zoomed, as a phone lays it out at
+ * its pixel ratio, the observer's width is cut down to a 64th of a pixel, and
+ * a label exactly as wide as its whole came out a hair narrower — every name
+ * cut where it fitted, `Bugs` to `B…s`.
  */
-const fitted = (
-	whole: Element | null | undefined,
-	room: number | undefined,
-	value: string,
-	keep: string
-): string => {
-	if (whole === null || whole === undefined || room === undefined) return value;
-	// The whole of it fits by the page's own measure, which also laid out `room`.
+const fitted = (label: Element | null, value: string, keep: string): string => {
+	const whole = label?.firstElementChild;
+	if (label === null || whole === null || whole === undefined) return value;
+	// The whole of it fits by the page's own measure, which also laid out the room.
+	const room = label.getBoundingClientRect().width;
 	const width = whole.getBoundingClientRect().width;
 	if (width <= room) return value;
 	const context = document.createElement('canvas').getContext('2d');
@@ -259,19 +262,27 @@ const fitted = (
  * back and ask for it again. Measured again when the room changes and once
  * the fonts have arrived; until then, and in jsdom, it is the whole, cut at
  * its end by the stylesheet.
+ *
+ * Written in once the page has the new words in the label, before it is
+ * drawn, as the options menu is placed (`OptionsMenu`): worked out as the
+ * label was drawn again, the page still had the last words in it, and another
+ * note's name, given the same room as the one before, stayed cut as though it
+ * were as long as that one.
  */
 const MiddleLabel = ({ value, keep }: { value: string; keep: string }) => {
 	const [label, setLabel] = useState<HTMLSpanElement | null>(null);
+	const shown = useRef<HTMLSpanElement>(null);
 	const room = useElementWidth(label);
 	const fonts = useFontsStatus();
-	const shown = useMemo(
-		() => (fonts === 'loading' ? value : fitted(label?.firstElementChild, room, value, keep)),
-		[label, room, fonts, value, keep]
-	);
+	useLayoutEffect(() => {
+		if (shown.current === null) return;
+		shown.current.textContent =
+			fonts === 'loading' || room === undefined ? value : fitted(label, value, keep);
+	}, [label, room, fonts, value, keep]);
 	return (
 		<span ref={setLabel} className="compact-picker-label compact-picker-middle">
 			<span className="compact-picker-whole">{value}</span>
-			<span className="compact-picker-shown">{shown}</span>
+			<span ref={shown} className="compact-picker-shown" />
 		</span>
 	);
 };
