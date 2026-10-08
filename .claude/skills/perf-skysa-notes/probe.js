@@ -78,7 +78,9 @@
 				request.addEventListener('success', () => {
 					const { result } = request;
 					if (method === 'count') return;
-					const many = Array.isArray(result)
+					// `getAll*` hands back a list; `get` and `getKey` one answer or
+					// none, and a compound key is one answer though it is an array.
+					const many = method.startsWith('getAll')
 						? result.length
 						: result === undefined
 							? 0

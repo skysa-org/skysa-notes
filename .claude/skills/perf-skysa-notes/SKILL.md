@@ -90,8 +90,8 @@ each scenario's end.
   page's `longtask` entries.
 - `idbNotes`/`idbRows` count IndexedDB rows read, each a value cloned (the
   probe wraps the IDB prototypes). Keys are counted apart: `idbNoteKeys` is
-  the notes' keys read by key cursor or `getAllKeys`, a step each, with no
-  value cloned.
+  the notes' keys read by key cursor, `getAllKeys` or `getKey`, one each,
+  with no value cloned.
 - `decodedMB` is what the pictures drawn take decoded: each `<img>`'s natural
   width × height × 4: what a browser that decodes each picture whole holds
   for them. Chromium may decode a JPEG at the size it is drawn, so its own
