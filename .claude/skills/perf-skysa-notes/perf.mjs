@@ -165,6 +165,25 @@ const untilListed = (page, rows) =>
 	);
 
 /**
+ * Until a scratchpad of `count` cards is drawn: every card, or, where the wall
+ * draws only the cards near the screen (#275), a placed wall with cards on it.
+ * A wall that is not windowed is placed with every card at once, so on either
+ * it is the wall the user sees.
+ */
+const untilCards = (page, count) =>
+	until(
+		page,
+		(arg) => {
+			const drawn = document.querySelectorAll('.scratch-card').length;
+			return (
+				drawn >= arg.count ||
+				(drawn > 0 && document.querySelector('.scratch-wall.placed') !== null)
+			);
+		},
+		{ count }
+	);
+
+/**
  * Tap `locator`; the page time the touch reached the page. Playwright waits for
  * the element to be still, scrolls to it and hit-tests it before it touches,
  * all on the slowed thread, and none of that is the app's time.
@@ -390,7 +409,7 @@ const SCENARIOS = {
 			const before = await counters(cdp);
 			await reset(page);
 			const start = await tap(page, row);
-			const cards = await untilCount(page, '.scratch-card', manifest.counts.scratch);
+			const cards = await untilCards(page, manifest.counts.scratch);
 			const placed = await until(
 				page,
 				() =>

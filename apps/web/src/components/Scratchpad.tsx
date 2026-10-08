@@ -34,7 +34,15 @@ import { useCardMotion, useEasedHeight } from './cardMotion.js';
 import { useElementWidth } from './layout.js';
 import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
 import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
-import { type Measure, useHeights } from './windowing.js';
+import {
+	besideOf,
+	type Measure,
+	type Span,
+	useFocusedItem,
+	useHeights,
+	useScrollSpan,
+	whenIdle,
+} from './windowing.js';
 
 /**
  * The scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"): a box to take a
@@ -272,6 +280,8 @@ const CardView = ({
 	y,
 	width,
 	measure,
+	onFocusIn,
+	onFocusOut,
 	onOpen,
 	onMark,
 	onMove,
@@ -282,6 +292,9 @@ const CardView = ({
 	open: boolean;
 	liveEdits: LiveEdits | undefined;
 	measure: Measure;
+	/** The focus came into the card, or into one of its menus, or went out (`useFocusedItem`). */
+	onFocusIn: (id: string) => void;
+	onFocusOut: () => void;
 	onOpen: (note: NoteRecord) => void;
 	onMark: (note: NoteRecord, change: MarkChange) => void;
 	onMove: ((note: NoteRecord) => void) | undefined;
@@ -316,6 +329,12 @@ const CardView = ({
 					? undefined
 					: { width, transform: `translate(${String(x)}px, ${String(y)}px)` }
 			}
+			// From its menus too, which are portals: React's events come up
+			// through them.
+			onFocus={() => {
+				onFocusIn(row.id);
+			}}
+			onBlur={onFocusOut}
 		>
 			<button
 				type="button"
@@ -375,42 +394,126 @@ const CardView = ({
 const Card = memo(CardView);
 
 /**
+ * Above this many cards, the scratchpad draws only those near the screen
+ * (`windowing.ts`, #275; docs/ARCHITECTURE.md §7, "Large libraries").
+ */
+export const WALL_WINDOWED_ABOVE = 100;
+
+/**
+ * How many cards a windowed wall draws before it has a width to place them
+ * by: about two screens of a wide one, where a phone's shows fewer.
+ */
+const FIRST_CARDS = 40;
+
+/**
+ * How many cards a windowed wall measures at a time, ahead of the screen: few
+ * enough that drawing them is no long task on a slow phone.
+ */
+const AHEAD = 8;
+
+/** Where the wall is windowed: the scroller it is drawn in, and the cards drawn wherever they are. */
+interface WallWindow {
+	readonly scroller: HTMLElement | null;
+	readonly kept: ReadonlySet<string>;
+	/** Whether either wall has measured a card, and how a wall says it has. */
+	readonly measuring: boolean;
+	readonly onMeasured: () => void;
+}
+
+/** Whether a card at `y`, `height` tall, meets `span`. */
+const meets = (y: number, height: number, { top, bottom }: Span): boolean =>
+	y < bottom && y + height > top;
+
+/**
  * One wall of cards: the pinned, or the rest. Placed by `placeCards` once the
  * wall has a width; until then — and where nothing is laid out, as in a test —
- * in a grid of their own, which is near enough for the first frame.
+ * in a grid of their own, which is near enough for the first frame. Windowed,
+ * it draws the cards placed near the screen and those kept, and holds the
+ * height of all of them.
  */
 const Wall = ({
 	notes,
 	label,
 	labelled,
 	card,
+	windowed,
 }: {
 	notes: readonly NoteRecord[];
 	label: string;
 	/** Whether the label is shown, which it is only beside the other wall. */
 	labelled: boolean;
 	card: (note: NoteRecord, place: CardPlace | undefined, measure: Measure) => ReactNode;
+	windowed: WallWindow | undefined;
 }) => {
 	const labelId = useId();
 	const [element, setElement] = useState<HTMLDivElement | null>(null);
 	const width = useElementWidth(element);
-	// Each card's height, as drawn, by note id: what the wall places them by.
-	const { heights, measure } = useHeights();
-	const wall = useMemo(() => {
+	// Each card's height, as drawn, by note id: what the wall places them by,
+	// and when each was last measured.
+	const { heights, measure, told, seen } = useHeights({ stamped: true });
+	const placed = useMemo(() => {
 		if (width === undefined) return undefined;
 		const guessWidth = Math.min(CARD_MAX, width / 2);
-		return placeCards(
-			notes.map(
-				(note) =>
-					heights.get(note.id) ??
-					guessHeight(
-						{ title: !isUnnamed(note), lines: openingLines(note.body).slice(0, 12) },
-						guessWidth
-					)
-			),
-			width
+		const tall = notes.map(
+			(note) =>
+				heights.get(note.id) ??
+				guessHeight(
+					{ title: !isUnnamed(note), lines: openingLines(note.body).slice(0, 12) },
+					guessWidth
+				)
 		);
+		return { wall: placeCards(tall, width), tall };
 	}, [notes, heights, width]);
+	const wall = placed?.wall;
+	// What was measured before the cards were this wide is to be measured again.
+	const [measuredAt, setMeasuredAt] = useState({ cardWidth: wall?.cardWidth, told });
+	if (measuredAt.cardWidth !== wall?.cardWidth)
+		setMeasuredAt({ cardWidth: wall?.cardWidth, told });
+	// Not listened for at all where every card is drawn.
+	const span = useScrollSpan(windowed?.scroller ?? null, windowed === undefined ? null : element);
+	const near = (note: NoteRecord, at: number): boolean => {
+		if (windowed === undefined || windowed.kept.has(note.id)) return true;
+		// Nothing laid out at all draws everything, as it does once placed.
+		if (placed === undefined) return span === undefined || at < FIRST_CARDS;
+		const place = placed.wall.places[at];
+		return (
+			span === undefined || place === undefined || meets(place.y, placed.tall[at] ?? 0, span)
+		);
+	};
+	// Every card measured ahead of the screen, a few at a time while the page
+	// has nothing else to do. A card is placed by the heights of the cards
+	// before it, so one measured only as it was scrolled to moved the cards
+	// after it, there on the screen, into other columns; measured ahead, each
+	// is placed where it will stay. Only once a card has been measured, on
+	// either wall (the rest can be wholly under pinned cards that fill the
+	// screen): until then, as in a test, none can be.
+	const measuredOne = seen.size > 0;
+	const onMeasured = windowed?.onMeasured;
+	useEffect(() => {
+		if (measuredOne) onMeasured?.();
+	}, [measuredOne, onMeasured]);
+	const waiting = JSON.stringify(
+		windowed === undefined || placed === undefined || !windowed.measuring
+			? []
+			: notes
+					.filter(
+						(note, at) => (seen.get(note.id) ?? 0) <= measuredAt.told && !near(note, at)
+					)
+					.slice(0, AHEAD)
+					.map((note) => note.id)
+	);
+	const [ahead, setAhead] = useState<ReadonlySet<string>>(() => new Set());
+	useEffect(
+		() =>
+			whenIdle(() => {
+				const next = JSON.parse(waiting) as readonly string[];
+				setAhead((current) =>
+					next.length === 0 && current.size === 0 ? current : new Set(next)
+				);
+			}),
+		[waiting]
+	);
+	const drawn = (note: NoteRecord, at: number) => near(note, at) || ahead.has(note.id);
 	return (
 		<section className="scratch-group" aria-labelledby={labelled ? labelId : undefined}>
 			{labelled && (
@@ -429,6 +532,7 @@ const Wall = ({
 				style={wall === undefined ? undefined : { height: wall.height }}
 			>
 				{notes.map((note, at) => {
+					if (!drawn(note, at)) return null;
 					const place = wall?.places[at];
 					return card(
 						note,
@@ -470,6 +574,13 @@ export const Scratchpad = ({
 	liveEdits,
 }: ScratchpadProps) => {
 	useFocusBack(openId);
+	const [scroller, setScroller] = useState<HTMLElement | null>(null);
+	/** The card the focus is in, or in its menus: drawn wherever it is scrolled to. */
+	const { focusedId, focusIn, focusOut } = useFocusedItem();
+	// The card open, or open last: the editor goes back into it as it closes,
+	// and the focus comes back to it (`useCardMotion`, `useFocusBack`).
+	const [openLast, setOpenLast] = useState(openId);
+	if (openId !== undefined && openId !== openLast) setOpenLast(openId);
 	const cards = useMemo(
 		() => scratchGroups((notes ?? []).filter((note) => note.id !== takingId)),
 		[notes, takingId]
@@ -497,6 +608,27 @@ export const Scratchpad = ({
 	const remove = useCallback((note: NoteRecord) => {
 		given.current.onDelete(note);
 	}, []);
+	// The cards in the order they are on the page, which Tab goes through.
+	const order = useMemo(() => [...cards.pinned, ...cards.others], [cards]);
+	// Whether either wall has measured a card (`Wall`).
+	const [measuring, setMeasuring] = useState(false);
+	const measured = useCallback(() => {
+		setMeasuring(true);
+	}, []);
+	const windowed =
+		order.length > WALL_WINDOWED_ABOVE
+			? {
+					scroller,
+					measuring,
+					onMeasured: measured,
+					// And the cards either side of the one the focus is in.
+					kept: new Set(
+						[openLast, focusedId, ...besideOf(order, focusedId)].filter(
+							(id) => id !== undefined
+						)
+					),
+				}
+			: undefined;
 	const card = (note: NoteRecord, place: CardPlace | undefined, measure: Measure) => (
 		<Card
 			key={note.id}
@@ -505,6 +637,10 @@ export const Scratchpad = ({
 			liveEdits={liveEdits}
 			{...place}
 			measure={measure}
+			// Followed even where every card is drawn, so that one the focus is
+			// in stays when a sync takes the wall past the number windowed.
+			onFocusIn={focusIn}
+			onFocusOut={focusOut}
 			onOpen={open}
 			onMark={mark}
 			onMove={onMove === undefined ? undefined : move}
@@ -516,7 +652,7 @@ export const Scratchpad = ({
 	return (
 		// No heading: its row in the sidebar, or the bar in a compact window,
 		// says where the user is.
-		<section className="scratchpad" aria-label={SCRATCHPAD_LABEL}>
+		<section ref={setScroller} className="scratchpad" aria-label={SCRATCHPAD_LABEL}>
 			<div className="scratchpad-scroll">
 				<TakeNote editor={editor} onTake={onTake} onClose={onCloseTake} />
 				{empty && (
@@ -531,6 +667,7 @@ export const Scratchpad = ({
 						label={t('scratchpad.pinned')}
 						labelled={both}
 						card={card}
+						windowed={windowed}
 					/>
 				)}
 				{cards.others.length > 0 && (
@@ -539,6 +676,7 @@ export const Scratchpad = ({
 						label={t('scratchpad.others')}
 						labelled={both}
 						card={card}
+						windowed={windowed}
 					/>
 				)}
 			</div>
