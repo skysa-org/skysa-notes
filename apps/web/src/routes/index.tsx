@@ -1198,6 +1198,7 @@ const canBegin = (
  * must not repeat.
  */
 const useListedNotes = (
+	connectionId: string | undefined,
 	folder: string | undefined,
 	begun: NoteRecord | undefined,
 	pins: Pins | undefined,
@@ -1205,7 +1206,7 @@ const useListedNotes = (
 ) => {
 	// The scratchpad lists its cards itself (`useScratchpad`).
 	const listed = folder !== undefined && isScratchPath(folder) ? undefined : folder;
-	const stored = useNotesUnderFolder(listed);
+	const stored = useNotesUnderFolder(listed, connectionId);
 	const own = useMemo(
 		() => stored?.filter((note) => parentPath(note.path) === folder),
 		[stored, folder]
@@ -1264,8 +1265,8 @@ const Home = () => {
 		[activeConnection]
 	);
 	const sources = useSources();
-	const { tree, pins } = usePinnedTree();
-	const looseNoteCount = useLooseNoteCount();
+	const { tree, pins } = usePinnedTree(activeConnection);
+	const looseNoteCount = useLooseNoteCount(activeConnection);
 
 	/**
 	 * Why the last thing the user asked for did not happen. Creating a notebook
@@ -1299,7 +1300,13 @@ const Home = () => {
 	const { folder, noteId, openNote, storedNote, go } = place;
 	/** The scratchpad is open, in the notes' place (docs/ARCHITECTURE.md §7). */
 	const inScratchpad = folder === SCRATCHPAD_FOLDER;
-	const { own, notes, unsavedNoteId } = useListedNotes(folder, place.begun, pins, tree);
+	const { own, notes, unsavedNoteId } = useListedNotes(
+		activeConnection,
+		folder,
+		place.begun,
+		pins,
+		tree
+	);
 	// Read by a continuation that finishes after the user may have moved on.
 	/** The note pane, which deletes a note from the list's menu as from its own. */
 	const noteView = useRef<NoteViewHandle>(null);

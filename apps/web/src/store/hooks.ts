@@ -90,11 +90,16 @@ export interface PinnedTree {
  * query, so they come together: a notebook renamed or moved, or another source
  * shown, is never drawn with the pins from before.
  *
- * The source is asked for once and each read is given it, so there are no
- * more reads in a row than the tree had before the pins: a slower tree loses
- * the race to have a notebook just moved or made before the URL names it, and
- * the app falls back to another. The pins are not read by the notes' query or
- * by `pickNote` for the same reason, and are handed to them from here.
+ * The source is handed in (`useActiveConnectionId`), not asked for here, and
+ * each read is given it. Asked here, the query would read the source's
+ * `syncState` row, which every sync run writes its cursor to, and an idle sync
+ * would read every note in the source again for a tree that has not changed
+ * (#275). Handed in, there are no more reads in a row than the tree had before
+ * the pins: a slower tree loses the race to have a notebook just moved or made
+ * before the URL names it, and the app falls back to another. The pins are not
+ * read by the notes' query or by `pickNote` for the same reason, and are handed
+ * to them from here. Nothing is handed back while the tree held was read for
+ * another source, as `useLastOpen` has it.
  *
  * The pins stay the same object while they are the same pins (`pinsKey`):
  * `pickNote` is asked again when they change. A notebook that has not changed
@@ -102,10 +107,10 @@ export interface PinnedTree {
  * where nothing in it changed (`keptTree`), so the sidebar redraws only the
  * rows that did.
  */
-export const usePinnedTree = (): PinnedTree => {
+export const usePinnedTree = (connectionId: string | undefined): PinnedTree => {
 	const before = useRef<FolderNode[] | undefined>(undefined);
 	const result = useLiveQuery(async () => {
-		const connectionId = await activeConnectionId(db);
+		if (connectionId === undefined) return undefined;
 		const [paths, notes, filePaths, pins] = await Promise.all([
 			folderTree(db, { connectionId }),
 			listNotes(db, { connectionId }),
@@ -121,11 +126,12 @@ export const usePinnedTree = (): PinnedTree => {
 		});
 		const kept = keptTree(before.current, withPins(tree, pins.notebooks));
 		before.current = kept;
-		return { tree: kept, pinned: pinsKey(pins) };
-	}, []);
-	const pinned = result?.pinned;
+		return { connectionId, tree: kept, pinned: pinsKey(pins) };
+	}, [connectionId]);
+	const here = result?.connectionId === connectionId ? result : undefined;
+	const pinned = here?.pinned;
 	const pins = useMemo(() => (pinned === undefined ? undefined : pinsFromKey(pinned)), [pinned]);
-	return { tree: result?.tree, pins };
+	return { tree: here?.tree, pins };
 };
 
 /**
@@ -140,29 +146,40 @@ export const usePinnedTree = (): PinnedTree => {
  * for a frame under the new folder's heading — a list that says "Loose notes"
  * above a note from a notebook, which is worse than a moment of "Loading…".
  *
+ * The source is handed in, and the result carries it too, for the reason
+ * `usePinnedTree` gives: a sync run that brought nothing reads no notes.
+ *
  * A note that has not changed since the read before is the object it was then
  * (`keptRows`), so its row is not drawn again.
  */
-export const useNotesUnderFolder = (folderPath: string | undefined): NoteRecord[] | undefined => {
+export const useNotesUnderFolder = (
+	folderPath: string | undefined,
+	connectionId: string | undefined
+): NoteRecord[] | undefined => {
 	const before = useRef<ReadonlyMap<string, NoteRecord>>(new Map());
 	const result = useLiveQuery(async () => {
 		if (folderPath === undefined) {
 			// Nothing listed, so nothing to keep the last notebook's notes for.
 			before.current = new Map();
-			return { folderPath, notes: [] };
+			return { folderPath, connectionId, notes: [] };
 		}
+		if (connectionId === undefined) return undefined;
 		const notes = keptRows(
 			before.current,
-			(await listNotes(db)).filter((note) => noteIsUnder(note.path, folderPath))
+			(await listNotes(db, { connectionId })).filter((note) =>
+				noteIsUnder(note.path, folderPath)
+			)
 		);
 		before.current = new Map(notes.map((note) => [note.id, note]));
-		return { folderPath, notes };
-	}, [folderPath]);
+		return { folderPath, connectionId, notes };
+	}, [folderPath, connectionId]);
 	// `result?.folderPath === folderPath` would be true for an unresolved query
 	// of the root, where both sides are `undefined`, and then read `.notes` off
 	// nothing at all.
 	if (result === undefined) return undefined;
-	return result.folderPath === folderPath ? result.notes : undefined;
+	return result.folderPath === folderPath && result.connectionId === connectionId
+		? result.notes
+		: undefined;
 };
 
 /**
@@ -345,9 +362,23 @@ export const useCodeDisplay = (store: CodeDisplayStore = codeDisplay): void => {
  * normal case; a non-zero count only happens when a remote folder already had
  * loose `.md` files in it, and it is what makes the sidebar's "Loose notes" row
  * appear (docs/ARCHITECTURE.md §12.6).
+ *
+ * The source is handed in, and the count carries it, as `usePinnedTree` has
+ * it: an idle sync run counts nothing again.
  */
-export const useLooseNoteCount = (): number | undefined =>
-	useLiveQuery(async () => (await listNotes(db, { folderPath: ROOT })).length, []);
+export const useLooseNoteCount = (connectionId: string | undefined): number | undefined => {
+	const result = useLiveQuery(
+		async () =>
+			connectionId === undefined
+				? undefined
+				: {
+						connectionId,
+						count: (await listNotes(db, { connectionId, folderPath: ROOT })).length,
+					},
+		[connectionId]
+	);
+	return result?.connectionId === connectionId ? result?.count : undefined;
+};
 
 /**
  * Whether the source has anything a download of it would hold

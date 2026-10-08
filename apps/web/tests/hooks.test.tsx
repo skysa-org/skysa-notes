@@ -7,6 +7,7 @@ import { bindConnection, finishImport } from '../src/store/connection.js';
 import { ACTIVE_CONNECTION_KEY, db, LOCAL_CONNECTION_ID } from '../src/store/db.js';
 import { createFolder } from '../src/store/folders.js';
 import {
+	useActiveConnectionId,
 	useCodeDisplay,
 	useLooseNoteCount,
 	useNote,
@@ -36,7 +37,7 @@ beforeEach(async () => {
 });
 
 const count = async (): Promise<number | undefined> => {
-	const { result } = renderHook(useLooseNoteCount);
+	const { result } = renderHook(() => useLooseNoteCount(useActiveConnectionId()));
 	await waitFor(() => {
 		expect(result.current).not.toBeUndefined();
 	});
@@ -71,7 +72,7 @@ describe('useNotesUnderFolder', () => {
 	it('hands back a note unchanged since the read before as the same object', async () => {
 		const plan = await createNote(db, { title: 'Plan', folderPath: 'Work' });
 		const retro = await createNote(db, { title: 'Retro', folderPath: 'Work' });
-		const { result } = renderHook(() => useNotesUnderFolder('Work'));
+		const { result } = renderHook(() => useNotesUnderFolder('Work', LOCAL_CONNECTION_ID));
 		await waitFor(() => {
 			expect(result.current).toHaveLength(2);
 		});
@@ -126,7 +127,7 @@ describe('usePinnedTree', () => {
 		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: LOCAL_CONNECTION_ID });
 		const seen: (string[] | undefined)[] = [];
 		const { result } = renderHook(() => {
-			const showing = usePinnedTree();
+			const showing = usePinnedTree(useActiveConnectionId());
 			seen.push(names(showing.tree));
 			return showing;
 		});
@@ -147,7 +148,7 @@ describe('usePinnedTree', () => {
 
 	it('keeps the same pins while they are the same, and gives new ones when they change', async () => {
 		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Work' });
-		const { result } = renderHook(usePinnedTree);
+		const { result } = renderHook(() => usePinnedTree(LOCAL_CONNECTION_ID));
 		await waitFor(() => {
 			expect(result.current.pins).not.toBeUndefined();
 		});
@@ -170,7 +171,7 @@ describe('usePinnedTree', () => {
 	it('hands back a notebook unchanged since the read before as the same node', async () => {
 		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Home' });
 		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Work' });
-		const { result } = renderHook(usePinnedTree);
+		const { result } = renderHook(() => usePinnedTree(LOCAL_CONNECTION_ID));
 		const at = (path: string) => result.current.tree?.find((node) => node.path === path);
 		await waitFor(() => {
 			expect(result.current.tree).toHaveLength(2);
@@ -184,6 +185,32 @@ describe('usePinnedTree', () => {
 		});
 		expect(home).toBeDefined();
 		expect(at('Home')).toBe(home);
+	});
+});
+
+describe('the tree, the list and the loose count', () => {
+	it('never hand back what was read for the source shown before', async () => {
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Work' });
+		await createNote(db, { title: 'Plan', folderPath: 'Work' });
+		await createNote(db, { title: 'Loose' });
+		const { result, rerender } = renderHook(
+			(connectionId: string) => ({
+				tree: usePinnedTree(connectionId).tree?.map((node) => node.path),
+				listed: useNotesUnderFolder('Work', connectionId)?.map((note) => note.title),
+				loose: useLooseNoteCount(connectionId),
+			}),
+			{ initialProps: LOCAL_CONNECTION_ID }
+		);
+		await waitFor(() => {
+			expect(result.current).toEqual({ tree: ['Work'], listed: ['Plan'], loose: 1 });
+		});
+
+		rerender('dropbox-1');
+
+		expect(result.current).toEqual({ tree: undefined, listed: undefined, loose: undefined });
+		await waitFor(() => {
+			expect(result.current).toEqual({ tree: [], listed: [], loose: 0 });
+		});
 	});
 });
 

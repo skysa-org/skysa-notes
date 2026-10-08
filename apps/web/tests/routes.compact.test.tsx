@@ -129,7 +129,8 @@ describe('the compact bar', () => {
 		expect(panel()).toBe('notebooks');
 		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('true');
 
-		await user.click(screen.getByRole('button', { name: /^Work/ }));
+		// The notebooks are read for the source showing, once it has been.
+		await user.click(await screen.findByRole('button', { name: /^Work/ }));
 
 		// Its notes, to choose one from next.
 		expect(panel()).toBe('notes');
@@ -177,7 +178,8 @@ describe('the compact bar', () => {
 		await user.click(notebookTrigger());
 		expect(slide()).toEqual([undefined, undefined]);
 
-		await user.click(screen.getByRole('button', { name: /^Work/ }));
+		// The notebooks are read for the source showing, once it has been.
+		await user.click(await screen.findByRole('button', { name: /^Work/ }));
 		expect(panel()).toBe('notes');
 		expect(slide()).toEqual(['notebooks', 'onward']);
 
