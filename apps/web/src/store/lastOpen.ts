@@ -62,28 +62,74 @@ export const getLastOpen = async (db: NotesDatabase, connectionId: string): Prom
 	read((await db.prefs.get(keyFor(connectionId)))?.value);
 
 /**
+ * What this tab has written, ahead of the store's answer. A live query's
+ * answer follows a write by a read, and by another for each write that lands
+ * while it reads, since Dexie starts it over; and a click makes a write or
+ * two. So under load the store's answer can be clicks behind, and a notebook
+ * clicked meanwhile opened on what it said before — the newest note — which
+ * was then remembered over the note the user had left open there (#283).
+ * `useLastOpen` hands out what was written until the store has been read
+ * since it landed.
+ */
+export interface Written {
+	readonly lastOpen: LastOpen;
+	/** Which of this tab's writes it was, counting from one. */
+	readonly write: number;
+}
+
+interface Writes {
+	readonly landed: number;
+	readonly bySource: ReadonlyMap<string, Written>;
+}
+
+const writes = new WeakMap<NotesDatabase, Writes>();
+const listeners = new Set<() => void>();
+
+/** How many of this tab's writes have landed: a read begun now sees them all. */
+export const writesLanded = (db: NotesDatabase): number => writes.get(db)?.landed ?? 0;
+
+/** What this tab wrote last for a source, once it has landed. */
+export const lastWritten = (db: NotesDatabase, connectionId: string): Written | undefined =>
+	writes.get(db)?.bySource.get(connectionId);
+
+/** Be told each time one of this tab's writes lands. */
+export const onWritten = (listener: () => void): (() => void) => {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+};
+
+/**
  * Remember `folder` as the notebook open in this source, and `noteId`, when
  * given, as the note open in it. Read and written in one transaction, so two
  * tabs remembering at once each keep the other's notebooks.
  */
-export const rememberOpen = (
+export const rememberOpen = async (
 	db: NotesDatabase,
 	connectionId: string,
 	folder: string,
 	noteId?: string
-): Promise<void> =>
-	db.transaction('rw', db.prefs, async () => {
+): Promise<void> => {
+	const lastOpen = await db.transaction('rw', db.prefs, async () => {
 		const before = await getLastOpen(db, connectionId);
 		// Taken out and put back, so the notebook is the newest in the order the
 		// limit drops from.
 		const { [folder]: _was, ...others } = before.notes;
 		const notes = noteId === undefined ? before.notes : { ...others, [folder]: noteId };
 		const kept = Object.entries(notes).slice(-LIMIT);
-		await db.prefs.put({
-			key: keyFor(connectionId),
-			value: JSON.stringify({ folder, notes: Object.fromEntries(kept) }),
-		});
+		const after: LastOpen = { folder, notes: Object.fromEntries(kept) };
+		await db.prefs.put({ key: keyFor(connectionId), value: JSON.stringify(after) });
+		return after;
 	});
+	const before = writes.get(db);
+	const landed = (before?.landed ?? 0) + 1;
+	const bySource = new Map(before?.bySource).set(connectionId, { lastOpen, write: landed });
+	writes.set(db, { landed, bySource });
+	listeners.forEach((listener) => {
+		listener();
+	});
+};
 
 /**
  * Whether a note belongs to a notebook as far as which note to open is
