@@ -33,12 +33,13 @@ beforeEach(() => {
  */
 const fresh = async () => {
 	vi.resetModules();
-	const [{ frontmatterOf }, { keepRows }, { isUnnamed }, { scratchMarks }] = await Promise.all([
-		import('../src/store/frontmatter.js'),
-		import('../src/store/kept.js'),
-		import('../src/store/notes.js'),
-		import('../src/store/scratchpad.js'),
-	]);
+	const [{ frontmatterOf }, { keepRows }, { isUnnamed }, { scratchGroups, scratchMarks }] =
+		await Promise.all([
+			import('../src/store/frontmatter.js'),
+			import('../src/store/kept.js'),
+			import('../src/store/notes.js'),
+			import('../src/store/scratchpad.js'),
+		]);
 	/** One draw of the wall: what each card asks. */
 	const draw = (wall: readonly NoteRecord[]) => {
 		wall.forEach((note) => {
@@ -46,7 +47,7 @@ const fresh = async () => {
 			scratchMarks(note);
 		});
 	};
-	return { frontmatterOf, keepRows, isUnnamed, scratchMarks, draw };
+	return { frontmatterOf, keepRows, isUnnamed, scratchGroups, scratchMarks, draw };
 };
 
 /** An unnamed scratch note with a frontmatter block of its own. */
@@ -107,6 +108,23 @@ describe("a note's frontmatter", () => {
 			draw(wall);
 		});
 		expect(reads.count).toBe(400 + 200);
+	});
+
+	it('is read to group the wall only where it says `pinned`', async () => {
+		const { scratchGroups } = await fresh();
+		const pin = { ...card('Pin', 50), frontmatter: 'id: Pin-50\npinned: true\n' };
+		const unpinned = {
+			...card('Unpinned', 51),
+			frontmatter: 'id: Unpinned-51\npinned: false\n',
+		};
+		const wall = [...cards('Plain', 50), pin, unpinned];
+
+		const { pinned, others } = scratchGroups(wall);
+
+		expect(pinned).toEqual([pin]);
+		expect(others).toHaveLength(51);
+		// The two that say it, and none of the fifty that do not.
+		expect(reads.count).toBe(2);
 	});
 
 	it('is not read at all for a note with none', async () => {

@@ -207,6 +207,18 @@ describe('the scratchpad’s groups', () => {
 		expect(pinned.map((note) => note.id)).toEqual(['b', 'd']);
 		expect(others.map((note) => note.id)).toEqual(['a', 'c']);
 	});
+
+	it('are not fooled by a block that says pinned without pinning', () => {
+		const notes = [
+			{ id: 'a', frontmatter: 'title: Things that got pinned\n' },
+			{ id: 'b', frontmatter: 'pinned: false\n' },
+			{ id: 'c', frontmatter: '"pinned": true\n' },
+			{ id: 'd', frontmatter: '{ pinned: true, color: red }\n' },
+		];
+		const { pinned, others } = scratchGroups(notes);
+		expect(pinned.map((note) => note.id)).toEqual(['c', 'd']);
+		expect(others.map((note) => note.id)).toEqual(['a', 'b']);
+	});
 });
 
 describe('what a card shows', () => {

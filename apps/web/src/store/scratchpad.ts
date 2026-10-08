@@ -116,9 +116,20 @@ export const scratchMarks = (note: Pick<NoteRecord, 'frontmatter'>): ScratchMark
 export const scratchGroups = <T extends Pick<NoteRecord, 'frontmatter'>>(
 	notes: readonly T[]
 ): { pinned: T[]; others: T[] } => ({
-	pinned: notes.filter((note) => scratchMarks(note).pinned),
-	others: notes.filter((note) => !scratchMarks(note).pinned),
+	pinned: notes.filter(isPinned),
+	others: notes.filter((note) => !isPinned(note)),
 });
+
+/**
+ * Whether a card is pinned, which the wall asks of every card on every read.
+ * Only a block with the word `pinned` in it can pin its card — the app writes
+ * `pinned: true`, and takes the key out to unpin — so only those are read as
+ * YAML: the few pinned, of a wall of hundreds, where every card's was (#275).
+ * The one way past it is a key spelled with escapes inside quotes, which
+ * nothing writes.
+ */
+const isPinned = (note: Pick<NoteRecord, 'frontmatter'>): boolean =>
+	note.frontmatter?.includes('pinned') === true && scratchMarks(note).pinned;
 
 /** About how much of a note its card shows. */
 export const CARD_WORDS = 60;
