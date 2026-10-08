@@ -1,4 +1,9 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router';
+import {
+	createMemoryHistory,
+	createRouter,
+	type RouterHistory,
+	RouterProvider,
+} from '@tanstack/react-router';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -47,7 +52,19 @@ const openApp = async (width = 800) => {
 	});
 	render(<RouterProvider router={router} />);
 	await screen.findByRole('button', { name: 'New notebook' });
+	return router;
 };
+
+/** The Back an Android phone's swipe from the edge is. */
+const back = async (router: { history: RouterHistory }) => {
+	await act(async () => {
+		router.history.back();
+		await Promise.resolve();
+	});
+};
+
+/** Where the entry in front is in the history: a step pushed moves it on. */
+const step = (router: { history: RouterHistory }) => router.history.location.state.__TSR_index;
 
 const shell = () => document.querySelector('.app-shell') as HTMLElement;
 const panel = () => shell().getAttribute('data-panel');
@@ -423,6 +440,120 @@ describe('the compact bar', () => {
 
 		expect(panel()).toBe('notebooks');
 		await user.click(screen.getByRole('button', { name: /Move “Groceries” into Work/ }));
+		expect(panel()).toBeNull();
+	});
+});
+
+describe('Back in a compact window', () => {
+	it('shuts a dropdown open over the note', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		const router = await openApp();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Groceries');
+		});
+		const at = step(router);
+
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notebooks');
+		await back(router);
+
+		expect(panel()).toBeNull();
+		expect(step(router)).toBe(at);
+		expect(notebookTrigger().textContent).toBe('Home');
+		expect(shownOn(noteTrigger())).toBe('Groceries');
+	});
+
+	it('takes no step for a dropdown shut, however it is shut', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		const router = await openApp();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Groceries');
+		});
+		const at = step(router);
+
+		await user.click(notebookTrigger());
+		await user.keyboard('{Escape}');
+		expect(panel()).toBeNull();
+		expect(step(router)).toBe(at);
+
+		await user.click(noteTrigger());
+		fireEvent.pointerDown(screen.getByRole('region', { name: 'Note' }));
+		expect(panel()).toBeNull();
+		expect(step(router)).toBe(at);
+
+		// The note open, chosen again from its notes, is the same as shutting them.
+		await user.click(noteTrigger());
+		await user.click(await screen.findByRole('button', { name: /^Groceries/ }));
+		expect(panel()).toBeNull();
+		expect(step(router)).toBe(at);
+
+		// One swapped for another is still the one step.
+		await user.click(notebookTrigger());
+		await user.click(noteTrigger());
+		expect(panel()).toBe('notes');
+		expect(step(router)).toBe(at + 1);
+		await back(router);
+		expect(panel()).toBeNull();
+	});
+
+	it('goes back through the dropdowns a note was chosen from, then to the note before', async () => {
+		// Reported on Android: Back from a note opened another notebook. It was
+		// the one open before, under the notebooks it had been left from, which
+		// Chrome shows while the swipe is under way, so the notebook it opened
+		// looked like a row the swipe had tapped.
+		await twoNotebooks();
+		const user = userEvent.setup();
+		const router = await openApp();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Groceries');
+		});
+
+		await user.click(notebookTrigger());
+		await user.click(await screen.findByRole('button', { name: /^Work/ }));
+		expect(panel()).toBe('notes');
+		// The note the notebook opens on, chosen: a step, as any note chosen is.
+		await user.click(await screen.findByRole('button', { name: /^Minutes/ }));
+		expect(panel()).toBeNull();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Minutes');
+		});
+
+		await back(router);
+		expect(panel()).toBe('notes');
+		expect(notebookTrigger().textContent).toBe('Work');
+		expect(shell().dataset.from).toBeUndefined();
+
+		await back(router);
+		expect(panel()).toBe('notebooks');
+		// Slid back along the bar, as the bar's own triggers slide it.
+		expect([shell().dataset.from, shell().dataset.slide]).toEqual(['notes', 'back']);
+		await waitFor(() => {
+			expect(notebookTrigger().textContent).toBe('Home');
+		});
+
+		await back(router);
+		expect(panel()).toBeNull();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Groceries');
+		});
+	});
+
+	it('shows no dropdown from the history in a wide window', async () => {
+		await twoNotebooks();
+		const user = userEvent.setup();
+		const router = await openApp();
+		await user.click(notebookTrigger());
+		await user.click(await screen.findByRole('button', { name: /^Work/ }));
+		expect(panel()).toBe('notes');
+
+		act(() => {
+			fake?.resize(1200);
+		});
+		expect(panel()).toBeNull();
+		await user.click(await screen.findByRole('button', { name: /^Home/ }));
+		await back(router);
 		expect(panel()).toBeNull();
 	});
 });

@@ -94,20 +94,15 @@ export const useScratchpad = ({
 	const [naming, setNaming] = useState<NoteRecord>();
 
 	// In a compact window the scratchpad is the notes' pane, and with no card
-	// open it is all there is to show: opened as the scratchpad opens, and
+	// open it is all there is to show: there as the scratchpad opens, and
 	// again as a card closes, and what shutting the notebooks over it, or the
-	// sources, goes back to. A card open is the column's, over it, and shuts
-	// it. Both before the window is drawn, so a card going back into the wall
-	// finds it there, and one growing out of it finds nothing shut over it.
-	useLayoutEffect(() => {
-		if (active && compact && noteId === undefined) setPanel('notes');
-	}, [active, compact, noteId, setPanel]);
-	const cardId = card?.id;
-	useLayoutEffect(() => {
-		if (compact && cardId !== undefined) setPanel(null);
-	}, [compact, cardId, setPanel]);
+	// sources, goes back to. It is not a dropdown open over the place, which
+	// would be a step for Back to take (`usePanel`), but the pane the place
+	// rests on. A card open is the column's, and nothing rests under it.
+	// Before the window is drawn, so a card going back into the wall finds it
+	// there, and one growing out of it finds nothing shut over it.
 	const resting = active && compact && card === undefined;
-	useEffect(() => {
+	useLayoutEffect(() => {
 		setRest(resting ? 'notes' : null);
 	}, [resting, setRest]);
 
@@ -115,12 +110,12 @@ export const useScratchpad = ({
 
 	/**
 	 * Open the scratchpad, from its row or as it is shown: a step, unless it is
-	 * open already with no card, and in a compact window its pane, whatever
-	 * was open over it.
+	 * open already with no card, when it is the dropdown open over it that
+	 * shuts, onto its pane.
 	 */
 	const show = () => {
 		if (!active || noteId !== undefined) select({ folder: SCRATCHPAD_FOLDER, note: undefined });
-		if (compact) setPanel('notes');
+		else setPanel(null);
 	};
 
 	/** Begin a note in the box. Stored at its first edit, as any draft is. */

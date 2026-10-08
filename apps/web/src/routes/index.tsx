@@ -18,7 +18,14 @@ import { parseChord } from '../commands/chord.js';
 import { CommandsProvider, useCommand, useShortcuts } from '../commands/context.js';
 import { AccountPanel, returnPath } from '../components/AccountPanel.js';
 import { CommandPalette } from '../components/CommandPalette.js';
-import { CompactBar, type Pane, useCompactLayout } from '../components/CompactBar.js';
+import {
+	CompactBar,
+	heldPanel,
+	openedHere,
+	type Pane,
+	panelKept,
+	useCompactLayout,
+} from '../components/CompactBar.js';
 import { DeletedNotice } from '../components/DeletedNotice.js';
 import { ErrorScreen } from '../components/ErrorScreen.js';
 import { HeldImport } from '../components/ImportProgress.js';
@@ -278,11 +285,7 @@ const SourceDropdown = ({
  * the URL at once, so that a reload does not open it again. In a compact
  * window the `+` is in the sources dropdown, which opens first.
  */
-const useEnterCode = (
-	enter: AppSearch['enter'],
-	compact: boolean,
-	setPanel: (pane: Pane | null) => void
-): number => {
+const useEnterCode = (enter: AppSearch['enter'], compact: boolean): number => {
 	const navigate = useNavigate({ from: Route.fullPath });
 	const [asked, setAsked] = useState(0);
 	// Counted in render, as React has state follow a prop: the URL arriving
@@ -294,15 +297,15 @@ const useEnterCode = (
 	}
 	useEffect(() => {
 		if (enter === undefined) return;
-		if (compact) setPanel('sources');
 		void navigate({
 			search: ({ enter: _enter, ...rest }) => rest,
-			// Where the user is stays as it was (`place.ts`).
+			// Where the user is stays as it was (`place.ts`), with the sources
+			// open over it in one step, not a second after it (`usePanel`).
 			hash: true,
-			state: true,
+			state: (held) => (compact ? { ...held, panel: 'sources' } : held),
 			replace: true,
 		});
-	}, [enter, compact, setPanel, navigate]);
+	}, [enter, compact, navigate]);
 	return asked;
 };
 
@@ -682,8 +685,16 @@ const useStanding = (
 	return standing;
 };
 
-/** Go somewhere: a step of the user's own, pushed, or put in place of the entry. */
-type Go = (place: Place, how: { replace: boolean; notePath?: string | undefined }) => void;
+/**
+ * Go somewhere: a step of the user's own, pushed, or put in place of the
+ * entry. `panel` is the dropdown open over it in a compact window
+ * (`usePanel`): a step pushed has none unless it says, and one put in place
+ * keeps the entry's unless it says.
+ */
+type Go = (
+	place: Place,
+	how: { replace: boolean; notePath?: string | undefined; panel?: Pane | null }
+) => void;
 
 /**
  * An entry with no place of its own — a link, or an address typed — is read by
@@ -912,18 +923,41 @@ const useOpenPlace = ({
 	const standing = useStanding(entry, activeConnection, sources);
 
 	const go = useCallback<Go>(
-		(place, { replace, notePath }) => {
+		(place, { replace, notePath, panel }) => {
 			if (activeConnection === undefined) return;
+			const now = router.history.location.state;
+			const held = heldPlace(now);
+			const kept = replace
+				? panelKept(now, held?.connectionId === activeConnection && samePlace(held, place))
+				: {};
 			void navigate({
 				// Whatever the query holds is another page's message, read and
 				// taken out on its own.
 				search: true,
 				hash: placeHash(place.folder, notePath),
-				state: placeState(activeConnection, place),
+				state: {
+					...placeState(activeConnection, place),
+					...(panel === undefined ? kept : panel === null ? {} : { panel }),
+				},
 				replace,
 			});
 		},
-		[activeConnection, navigate]
+		[activeConnection, navigate, router]
+	);
+
+	/**
+	 * Whether the entry in front is a dropdown opened over `place`, in the
+	 * source showing: the step Back from it takes is to `place` itself.
+	 */
+	const openedOver = useCallback(
+		(place: Place): boolean => {
+			const now = router.history.location.state;
+			const held = heldPlace(now);
+			return (
+				openedHere(now) && held?.connectionId === activeConnection && samePlace(held, place)
+			);
+		},
+		[activeConnection, router]
 	);
 
 	const { resolving } = useNamedPlace(entry, activeConnection, go);
@@ -1013,6 +1047,8 @@ const useOpenPlace = ({
 				{
 					replace: standing !== 'left',
 					notePath: typeof pick === 'object' ? pick.path : undefined,
+					// A source chosen from its dropdown goes on to its notebooks.
+					...(standing === 'left' ? { panel: heldPanel(now) } : {}),
 				}
 			);
 		};
@@ -1069,8 +1105,13 @@ const useOpenPlace = ({
 	// in the entry as a notebook the app opens by itself is (`show` above).
 	useEffect(() => {
 		if (!inScratchpad || !settled || requestedFolder === SCRATCHPAD_FOLDER) return;
-		go({ folder: SCRATCHPAD_FOLDER }, { replace: standing !== 'left' });
-	}, [inScratchpad, settled, requestedFolder, standing, go]);
+		go(
+			{ folder: SCRATCHPAD_FOLDER },
+			standing === 'left'
+				? { replace: false, panel: heldPanel(router.history.location.state) }
+				: { replace: true }
+		);
+	}, [inScratchpad, settled, requestedFolder, standing, go, router]);
 
 	// The hash says by path what the entry holds by id, and follows the note
 	// when it is renamed or moved, here or on another device.
@@ -1114,6 +1155,7 @@ const useOpenPlace = ({
 		begin,
 		noteDraft: drafts.noteDraft,
 		go,
+		openedOver,
 	};
 };
 
@@ -1302,7 +1344,7 @@ const Home = () => {
 		scratchpad: scratchpadShown,
 		onStoreFailed: noteNotMade,
 	});
-	const { folder, noteId, openNote, storedNote, go } = place;
+	const { folder, noteId, openNote, storedNote, go, openedOver } = place;
 	/** The scratchpad is open, in the notes' place (docs/ARCHITECTURE.md §7). */
 	const inScratchpad = folder === SCRATCHPAD_FOLDER;
 	const { own, notes, unsavedNoteId } = useListedNotes(
@@ -1339,8 +1381,8 @@ const Home = () => {
 		compact,
 		panel,
 		setPanel,
+		shutPanel,
 		setRest,
-		barPanel,
 		searchOpen,
 		setSearchOpen,
 		setOrigins,
@@ -1348,7 +1390,7 @@ const Home = () => {
 		shellProps,
 	} = useCompactLayout();
 	useBegunInView(place.begun, setPanel);
-	const enterCode = useEnterCode(enter, compact, setPanel);
+	const enterCode = useEnterCode(enter, compact);
 	// Something shared to the app (`share/TakeShare.tsx`): out of the URL once
 	// read, so a reload does not ask again, and the clipboard brought into
 	// view once it has it, which in a compact window is in the sources
@@ -1381,7 +1423,11 @@ const Home = () => {
 	 */
 	const select = (
 		next: Place,
-		{ replace = false, note }: { replace?: boolean; note?: NoteRecord } = {}
+		{
+			replace = false,
+			note,
+			panel,
+		}: { replace?: boolean; note?: NoteRecord; panel?: Pane | null } = {}
 	) => {
 		// Anything else the user does answers the banner: it is about the name they
 		// just tried, not about the app, and leaving it up means a message about a
@@ -1389,10 +1435,18 @@ const Home = () => {
 		setProblem(null);
 		dismissConnect();
 		const to: Place = { folder, note: noteId, ...next };
+		// Where the user is already, under a dropdown opened over it: the note
+		// open, chosen again from its notes, shuts them, as Back would. Not
+		// where the dropdown came with the place, as a notebook's notes come
+		// with it: choosing from them is a step, for Back to come back to.
+		if (!replace && openedOver(to)) {
+			setPanel(panel ?? null);
+			return;
+		}
 		const going =
 			note ??
 			[openNote, ...(notes ?? [])].find((each) => each !== undefined && each.id === to.note);
-		go(to, { replace, notePath: going?.path });
+		go(to, { replace, notePath: going?.path, ...(panel === undefined ? {} : { panel }) });
 	};
 
 	/**
@@ -1402,11 +1456,12 @@ const Home = () => {
 	 * the note's own notebook used to clear it and leave an empty editor beside
 	 * a list, which was the reported bug. Anywhere else the note is let go, and
 	 * the notebook's own opens in its place (`useOpenPlace`): the one open last
-	 * in it on this device, or its first.
+	 * in it on this device, or its first. `panel` is what a compact window
+	 * opens over it, in the same step (`afterFolder`).
 	 */
-	const openFolder = (path: string) => {
+	const openFolder = (path: string, panel: Pane | null = null) => {
 		const keep = openNote !== undefined && noteIsUnder(openNote.path, path);
-		select(keep ? { folder: path } : { folder: path, note: undefined });
+		select(keep ? { folder: path } : { folder: path, note: undefined }, { panel });
 	};
 
 	/**
@@ -1420,9 +1475,9 @@ const Home = () => {
 	 */
 	const openResult = (note: NoteRecord) => {
 		// Done with: the field has emptied itself, and in a compact window the
-		// bar goes back to its dropdowns rather than staying a search.
+		// bar goes back to its dropdowns rather than staying a search. A
+		// dropdown open is shut by the step to the note, which has none.
 		setSearchOpen(false);
-		setPanel(null);
 		if (note.connectionId === activeConnection) {
 			// A scratch note opens as its card, over the scratchpad.
 			select({ folder: placeFolder(note.path), note: note.id }, { note });
@@ -1434,9 +1489,11 @@ const Home = () => {
 		// it is to be remembered there first.
 		setProblem(null);
 		dismissConnect();
-		void rememberOpen(db, note.connectionId, placeFolder(note.path), note.id).then(() =>
-			showConnection(db, note.connectionId)
-		);
+		// Shut first, as the new source's place is pushed with the dropdown the
+		// entry before it had open (`useOpenPlace`).
+		void shutPanel()
+			.then(() => rememberOpen(db, note.connectionId, placeFolder(note.path), note.id))
+			.then(() => showConnection(db, note.connectionId));
 	};
 
 	/**
@@ -1733,7 +1790,9 @@ const Home = () => {
 		// Put down first: the move is a round trip through the store and a mode
 		// left standing over it is one the user can drop a second copy of.
 		setMoving(null);
-		setPanel(null);
+		// And the dropdown shut before the move goes on: shutting it may be
+		// Back, which a step taken before it lands would be the one undone.
+		const shut = shutPanel();
 		if (move === undefined) return;
 		setProblem(null);
 
@@ -1744,7 +1803,8 @@ const Home = () => {
 			// What the editor holds is saved first: a file pasted into the note
 			// a moment ago is carried by the links its body has stored
 			// (`carryLinkedFiles`), and left behind by one that has not been.
-			void settleEditors()
+			void shut
+				.then(settleEditors)
 				.then(() => moveNote(db, move.id, move.into))
 				.then(() => {
 					if (promoted) {
@@ -1767,7 +1827,8 @@ const Home = () => {
 			return;
 		}
 
-		void moveFolder(db, move.from, move.to)
+		void shut
+			.then(() => moveFolder(db, move.from, move.to))
 			.then(() => {
 				// The open notebook is named by path in the URL, and the move has
 				// just changed it — for the notebook itself and for everything
@@ -1977,7 +2038,7 @@ const Home = () => {
 							liveEdits={liveEdits}
 							renamings={renamings}
 							panel={panel}
-							onPanel={barPanel}
+							onPanel={setPanel}
 							query={query}
 							onQuery={(next) => {
 								setQuery(next);
@@ -2055,8 +2116,7 @@ const Home = () => {
 					tree={tree}
 					selectedFolder={folder}
 					onSelectFolder={(path) => {
-						openFolder(path);
-						setPanel(afterFolder(path));
+						openFolder(path, afterFolder(path));
 					}}
 					onCreateFolder={onCreateFolder}
 					onRenameFolder={onRenameFolder}
@@ -2093,14 +2153,11 @@ const Home = () => {
 						// A note listed from a notebook inside the open one opens that
 						// notebook with it, as a search result does: the sidebar then
 						// lights the notebook the note is in.
+						// Each a step with no dropdown over it, which shuts the notes.
 						onSelectNote={(note) => {
 							select({ folder: parentPath(note.path), note: note.id }, { note });
-							setPanel(null);
 						}}
-						onCreateNote={() => {
-							onCreateNote();
-							setPanel(null);
-						}}
+						onCreateNote={onCreateNote}
 						onCreateNotebook={askNewNotebook}
 						folderPath={folder}
 						// Both queries, not just the tree: the notebooks alone cannot tell
