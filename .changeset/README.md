@@ -60,12 +60,20 @@ leaves a record that the question was asked.
 
 ## Which bump
 
-Pre-1.0, so the usual semver contract does not apply yet and the question is
-about how much a reader should care.
+Since 1.0 the number makes one promise, to the person running an instance:
+only a major version asks them to do anything beyond the routine steps under
+"Updating" in `docs/self-hosting.md` (pull, install, apply migrations, deploy).
 
 - **patch** — a fix, or anything invisible from outside.
-- **minor** — a feature, a new command, a provider, a schema migration.
-- **major** — reserved. Nothing here takes one before 1.0.
+- **minor** — a feature, a new command, a provider, a schema migration those
+  routine steps apply.
+- **major** — anything the operator, or the people using the instance, must
+  act on: a setting, secret or binding that must now be set, or one renamed or
+  removed (removing `AUTH_MODE`, issue #118, is one; a new one with a default
+  is not); a migration the routine steps cannot apply;
+  a change that makes every device reconnect; a `brand.json` field that changes
+  meaning; a storage layout older builds can only open read-only. The summary
+  says what to do.
 
 The summary is read by people deciding whether to upgrade an instance they run.
 Write it for them: what changed for a user, not which function was renamed.
