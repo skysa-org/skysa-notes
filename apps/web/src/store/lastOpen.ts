@@ -90,6 +90,12 @@ export const onWritten = (listener: () => void): (() => void) => {
  * Remember `folder` as the notebook open in this source, and `noteId`, when
  * given, as the note open in it. Read and written in one transaction, so two
  * tabs remembering at once each keep the other's notebooks.
+ *
+ * A write that would change nothing is not made: asked of the row as it
+ * stands in that transaction, after every write this tab asked for before and
+ * every other tab's that has landed. Asked of a live answer instead, which can
+ * be a write behind, a tab that moved and straight back would be taken to be
+ * where the memory says, and its first move would land after it.
  */
 export const rememberOpen = async (
 	db: NotesDatabase,
@@ -98,16 +104,20 @@ export const rememberOpen = async (
 	noteId?: string
 ): Promise<void> => {
 	const lastOpen = await db.transaction('rw', db.prefs, async () => {
-		const before = await getLastOpen(db, connectionId);
+		const row = await db.prefs.get(keyFor(connectionId));
+		const before = read(row?.value);
 		// Taken out and put back, so the notebook is the newest in the order the
 		// limit drops from.
 		const { [folder]: _was, ...others } = before.notes;
 		const notes = noteId === undefined ? before.notes : { ...others, [folder]: noteId };
 		const kept = Object.entries(notes).slice(-LIMIT);
 		const after: LastOpen = { folder, notes: Object.fromEntries(kept) };
-		await db.prefs.put({ key: keyFor(connectionId), value: JSON.stringify(after) });
+		const value = JSON.stringify(after);
+		if (value === row?.value) return undefined;
+		await db.prefs.put({ key: keyFor(connectionId), value });
 		return after;
 	});
+	if (lastOpen === undefined) return;
 	written.set(db, new Map(written.get(db)).set(connectionId, lastOpen));
 	listeners.forEach((listener) => {
 		listener();

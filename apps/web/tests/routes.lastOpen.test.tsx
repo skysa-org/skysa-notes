@@ -213,8 +213,8 @@ describe('where the user was, on this device', () => {
 	it('is not written back and forth by two tabs showing two notebooks', async () => {
 		await createFolder(db, { parentPath: undefined, name: 'Home' });
 		await createFolder(db, { parentPath: undefined, name: 'Work' });
-		await noteAt('Home', 'Chores', 1_000);
-		await noteAt('Work', 'Plan', 1_000);
+		const chores = await noteAt('Home', 'Chores', 1_000);
+		const plan = await noteAt('Work', 'Plan', 1_000);
 		// Two tabs on one device: two apps over the one database.
 		await openApp('/#/Work/');
 		await showing('Plan');
@@ -239,6 +239,11 @@ describe('where the user was, on this device', () => {
 
 		// Each tab's place is its own to say, and neither has moved.
 		expect(store.told).toBe(said);
+		// The place on record is the last one either tab moved to.
+		expect(await getLastOpen(db, LOCAL_CONNECTION_ID)).toEqual({
+			folder: 'Home',
+			notes: { Work: plan.id, Home: chores.id },
+		});
 	});
 
 	it('is kept per source, and showing a source goes back to where it was in it', async () => {
