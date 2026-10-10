@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.0.6
+
+### Patch Changes
+
+- 6d4bfbb: On Android, the installed app no longer shows a pale bar along the bottom of the screen in dark mode. The bar under the app now follows the phone's light or dark theme. Installed copies pick this up when Chrome next refreshes the app, without reinstalling.
+- @skysa/core@1.0.6
+
 ## 1.0.5
 
 ### Patch Changes
