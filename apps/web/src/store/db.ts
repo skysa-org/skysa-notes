@@ -2,6 +2,7 @@ import { type PictureInfo, type PictureVariant, type ProviderKind } from '@skysa
 import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
+import { letGoWhenFrozen } from './frozenTab.js';
 import { watchForNewerTab } from './staleTab.js';
 
 /**
@@ -615,6 +616,9 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// in another tab, must find this tab stopped rather than still writing —
 	// `store/staleTab.ts` says why Dexie's default is not that.
 	watchForNewerTab(db);
+	// And a frozen tab must not hold reads open that every other tab then waits
+	// behind — `store/frozenTab.ts`.
+	letGoWhenFrozen(db);
 
 	return db;
 };
