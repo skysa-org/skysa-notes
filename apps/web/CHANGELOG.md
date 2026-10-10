@@ -1,5 +1,13 @@
 # @skysa/web
 
+## 1.0.8
+
+### Patch Changes
+
+- 2ddc8e8: On a phone, a scratch card left open under the notebooks dropdown no longer flashes over the dropdowns when Back or Forward comes back to it or leaves it, or when a notebook is chosen there. It comes and goes under the dropdown, as a note does.
+- bcd2b29: On a phone, the notebook and the note open are no longer lit in their dropdowns, where what they mark is out of sight under the panel. And a scratch card closed by Back, then opened again from a search answer, now closes to the scratchpad from its Close, rather than going back to wherever the search was made.
+- @skysa/core@1.0.8
+
 ## 1.0.7
 
 ### Patch Changes
