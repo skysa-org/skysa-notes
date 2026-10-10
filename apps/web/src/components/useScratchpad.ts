@@ -42,11 +42,34 @@ const leftBlank = (note: NoteRecord): boolean => {
 	);
 };
 
+/**
+ * The card open, and the card pressed whose note is still being read. A card
+ * opens only once its note is read: it grows into its editor
+ * (`useCardMotion`), which is not there before. Until then the card pressed
+ * says so on the wall. Saying nothing, it looked as if the press had done
+ * nothing: a read held up behind another tab's write took minutes
+ * (2026-10-10).
+ */
+const cardOpen = (
+	/** The scratchpad is open, and the note open is not the one being taken. */
+	cards: boolean,
+	noteId: string | undefined,
+	openNote: NoteRecord | undefined,
+	opening: boolean
+): { card: NoteRecord | undefined; openingId: string | undefined } => {
+	if (!cards) return { card: undefined, openingId: undefined };
+	if (openNote?.id === noteId && openNote?.deletedLocally === 0) {
+		return { card: openNote, openingId: undefined };
+	}
+	return { card: undefined, openingId: opening ? noteId : undefined };
+};
+
 export const useScratchpad = ({
 	active,
 	connectionId,
 	noteId,
 	openNote,
+	opening,
 	begin,
 	select,
 	compact,
@@ -63,6 +86,8 @@ export const useScratchpad = ({
 	connectionId: string | undefined;
 	noteId: string | undefined;
 	openNote: NoteRecord | undefined;
+	/** Whether `noteId`'s note is still being read (`useNoteRead`). */
+	opening: boolean;
 	begin: (folderPath: string, taken: readonly string[]) => NoteRecord | undefined;
 	select: Select;
 	compact: boolean;
@@ -84,10 +109,7 @@ export const useScratchpad = ({
 	/** The note the box took last, which is open in the box while it is the one open. */
 	const [takingId, setTakingId] = useState<string>();
 	const taking = active && takingId !== undefined && takingId === noteId;
-	const card =
-		active && !taking && openNote?.id === noteId && openNote?.deletedLocally === 0
-			? openNote
-			: undefined;
+	const { card, openingId } = cardOpen(active && !taking, noteId, openNote, opening);
 	/** The card whose opening was pushed, which Back closes. */
 	const pushed = useRef<string>(undefined);
 	/** A card being named before it is moved (`NameDialog`). */
@@ -250,6 +272,7 @@ export const useScratchpad = ({
 		taking,
 		takingId: taking ? takingId : undefined,
 		card,
+		openingId,
 		/** A card open over the scratchpad, in a dialog: a wide window's. */
 		modal: !compact && card !== undefined,
 		/**

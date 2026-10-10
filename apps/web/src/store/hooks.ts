@@ -190,16 +190,6 @@ export const useNotesUnderFolder = (
 };
 
 /**
- * The open note, or `undefined` once it is gone — including gone as a tombstone.
- *
- * `db.notes.get` hands back a tombstoned row like any other, and a tombstone is a
- * note on its way out: the list and the sidebar have already dropped it, so
- * showing it here left a note fully editable in the right pane that nothing else
- * in the app admitted existed. Anything typed into it went into a row that is
- * purged once the delete reaches the provider. Reachable today with two tabs:
- * delete a note in one while it is open in the other.
- */
-/**
  * The source showing. A query of its own, so that what it reads — `prefs`, and
  * the `syncState` row every sync run writes its cursor to — is not in the
  * observed set of a query over notes: the answer is a string, which is the same
@@ -208,16 +198,43 @@ export const useNotesUnderFolder = (
 export const useActiveConnectionId = (): string | undefined =>
 	useLiveQuery(() => activeConnectionId(db), []);
 
-export const useNote = (id: string | undefined): NoteRecord | undefined => {
+/**
+ * The note `id` names in the source showing; `null` once it has been read and
+ * is not there, or is gone as a tombstone; and `undefined` until it has been
+ * read, or while there is no id. The pane says a note is opening, rather than
+ * that none is, only while the answer is `undefined` (2026-10-10): read behind
+ * a write that was held up, the answer can be a long time coming.
+ *
+ * An answer is handed back only for the note and source it was read for. A
+ * live query keeps its last answer until the next one, so without that, the
+ * note open a moment ago would stand in for the one asked for now.
+ *
+ * `db.notes.get` hands back a tombstoned row like any other, and a tombstone is a
+ * note on its way out: the list and the sidebar have already dropped it, so
+ * showing it here left a note fully editable in the right pane that nothing else
+ * in the app admitted existed. Anything typed into it went into a row that is
+ * purged once the delete reaches the provider. Reachable today with two tabs:
+ * delete a note in one while it is open in the other.
+ */
+export const useNoteRead = (id: string | undefined): NoteRecord | null | undefined => {
 	// In the source showing: an id names a note only inside its source.
 	const connectionId = useActiveConnectionId();
-	return useLiveQuery(async () => {
-		if (id === undefined) return undefined;
-		if (connectionId === undefined) return undefined;
-		const note = await getNote(db, id, { connectionId });
-		return note?.deletedLocally === 1 ? undefined : note;
-	}, [id, connectionId]);
+	// Each asking its own, so an answer is matched to the asking it was for and
+	// not only to its id: one note, then another still being read, then the
+	// first again, and the answer held is the first asking's — read before
+	// the second, and perhaps changed since.
+	const asked = useMemo(() => ({ id, connectionId }), [id, connectionId]);
+	const read = useLiveQuery(async () => {
+		if (asked.id === undefined || asked.connectionId === undefined) return undefined;
+		const note = await getNote(db, asked.id, { connectionId: asked.connectionId });
+		return { asked, note: note === undefined || note.deletedLocally === 1 ? null : note };
+	}, [asked]);
+	return read?.asked === asked ? read.note : undefined;
 };
+
+/** The same note, or `undefined` both while it is read and once it is not there. */
+export const useNote = (id: string | undefined): NoteRecord | undefined =>
+	useNoteRead(id) ?? undefined;
 
 /**
  * Every notebook and live note in a source, read for one question — `key` —

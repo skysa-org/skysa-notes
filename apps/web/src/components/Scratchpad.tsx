@@ -34,6 +34,7 @@ import { CardEmbed, CardFiles, hasPictures } from './CardEmbed.js';
 import { useCardMotion, useEasedHeight } from './cardMotion.js';
 import { useElementWidth } from './layout.js';
 import { CARD_MAX, guessHeight, placeCards } from './masonry.js';
+import { useOpeningNotice } from './opening.js';
 import { CardMenu, ColorMenu, PinButton } from './ScratchControls.js';
 import {
 	besideOf,
@@ -71,6 +72,8 @@ export interface ScratchpadProps {
 	onCloseTake: () => void;
 	/** The card open, if one is: the focus comes back to it when it closes. */
 	openId: string | undefined;
+	/** A card pressed whose note is still being read: it says so until it opens. */
+	openingId?: string | undefined;
 	onOpen: (note: NoteRecord) => void;
 	onMark: (note: NoteRecord, change: MarkChange) => void;
 	/** Make a card a note in a notebook; unsaid while something else is moving. */
@@ -276,6 +279,7 @@ interface CardPlace {
 const CardView = ({
 	note: row,
 	open,
+	opening: pressed,
 	liveEdits,
 	x,
 	y,
@@ -291,6 +295,8 @@ const CardView = ({
 	note: NoteRecord;
 	/** Open, and so not on the wall: its editor is where it went (`useCardMotion`). */
 	open: boolean;
+	/** Pressed, and its note still being read (`openingId`). */
+	opening: boolean;
 	liveEdits: LiveEdits | undefined;
 	measure: Measure;
 	/** The focus came into the card, or into one of its menus, or went out (`useFocusedItem`). */
@@ -341,6 +347,7 @@ const CardView = ({
 				type="button"
 				className="scratch-card-open"
 				data-card={row.id}
+				aria-busy={pressed || undefined}
 				onClick={() => {
 					onOpen(row);
 				}}
@@ -352,6 +359,7 @@ const CardView = ({
 						{t('scratchpad.card.emptyNote')}
 					</span>
 				)}
+				{pressed && <CardOpening />}
 				{note.dirty === 1 && (
 					<span
 						className="dot"
@@ -393,6 +401,16 @@ const CardView = ({
 };
 
 const Card = memo(CardView);
+
+/** What a card pressed says while its note is read, once that is taking a while. */
+const CardOpening = () => {
+	const late = useOpeningNotice();
+	return (
+		<span className="scratch-card-line muted" role="status">
+			{late ? t('notes.view.opening') : null}
+		</span>
+	);
+};
 
 /**
  * Above this many cards, the scratchpad draws only those near the screen
@@ -643,6 +661,7 @@ export const Scratchpad = ({
 	onTake,
 	onCloseTake,
 	openId,
+	openingId,
 	onOpen,
 	onMark,
 	onMove,
@@ -711,6 +730,7 @@ export const Scratchpad = ({
 			key={note.id}
 			note={note}
 			open={note.id === openId}
+			opening={note.id === openingId}
 			liveEdits={liveEdits}
 			{...place}
 			measure={measure}

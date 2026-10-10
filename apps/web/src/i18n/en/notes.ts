@@ -42,6 +42,8 @@ export const notes = {
 		/** The same with no notebook to put one in. `<create>` asks for a notebook. */
 		noNotebook: '<create>Create a notebook</create> to start writing.',
 		selectNote: 'Select a note.',
+		/** The pane while the note asked for is still being read, once that takes a while. */
+		opening: 'Opening the note…',
 		/** The name of the pair of tabs that choose the editor. */
 		editor: 'Editor',
 		/** A button that shows the formatting toolbar in a narrow window. */
