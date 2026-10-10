@@ -116,9 +116,18 @@ describe('the web app manifest', () => {
 		expect(target?.params.files).toEqual([{ name: 'files', accept: ['*/*'] }]);
 	});
 
-	it('is themed, so the app does not open as a white browser window', () => {
-		expect(manifest.theme_color).toBeDefined();
+	it("opens on the brand's background, so it does not start as a white window", () => {
 		expect(manifest.background_color).toBeDefined();
+	});
+
+	// Chrome paints an installed app's navigation bar with `theme_color`, and
+	// a manifest has no dark variant: the light colour was a pale bar under the
+	// app in dark mode. Without one, the bar follows the phone's theme.
+	it("names no theme colour, so the navigation bar follows the phone's theme", () => {
+		expect(manifest.theme_color).toBeUndefined();
+		// Named all the same: vite-plugin-pwa assigns the manifest over its own
+		// defaults, and a key left out would get the plugin's green.
+		expect(Object.hasOwn(manifest, 'theme_color')).toBe(true);
 	});
 });
 
