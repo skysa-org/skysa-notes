@@ -82,7 +82,7 @@ import {
 	useHoldsAnything,
 	useLastOpen,
 	useLooseNoteCount,
-	useNote,
+	useNoteRead,
 	useNotesUnderFolder,
 	useNoteToOpen,
 	useOpenNotebooks,
@@ -753,8 +753,8 @@ const useRememberOpen = ({
 	openNote: NoteRecord | undefined;
 	lastOpen: LastOpen | undefined;
 }) => {
-	// The note in the URL, by id: `useNote` keeps the note it last found while
-	// it looks for the next one, and that one is not open.
+	// The note in the URL, by id, and only once it is the one open: a note
+	// begun, or one a render behind the URL, is not.
 	const note =
 		openNote !== undefined &&
 		openNote.id === noteId &&
@@ -993,9 +993,12 @@ const useOpenPlace = ({
 		ready: lastOpen !== undefined && settled,
 	});
 
-	const found = useNote(noteId);
-	// By id: `useNote` keeps the note it last found while it looks for the next.
-	const storedNote = found?.id === noteId ? found : undefined;
+	const found = useNoteRead(noteId);
+	const storedNote = found ?? undefined;
+	// A note asked for and not read yet: the pane says it is opening rather
+	// than that nothing is open, which is what it said while the read was held
+	// up behind another tab's write (2026-10-10).
+	const opening = noteId !== undefined && found === undefined;
 	const drafts = useDrafts({
 		connectionId: activeConnection,
 		noteId,
@@ -1151,6 +1154,7 @@ const useOpenPlace = ({
 		/** The note open: stored, or begun and not yet. */
 		openNote,
 		storedNote,
+		opening,
 		begun,
 		begin,
 		noteDraft: drafts.noteDraft,
@@ -1344,7 +1348,7 @@ const Home = () => {
 		scratchpad: scratchpadShown,
 		onStoreFailed: noteNotMade,
 	});
-	const { folder, noteId, openNote, storedNote, go, openedOver } = place;
+	const { folder, noteId, openNote, storedNote, opening, go, openedOver } = place;
 	/** The scratchpad is open, in the notes' place (docs/ARCHITECTURE.md §7). */
 	const inScratchpad = folder === SCRATCHPAD_FOLDER;
 	const { own, notes, unsavedNoteId } = useListedNotes(
@@ -1749,6 +1753,7 @@ const Home = () => {
 		connectionId: activeConnection,
 		noteId,
 		openNote,
+		opening,
 		begin: place.begin,
 		select,
 		compact,
@@ -1933,6 +1938,7 @@ const Home = () => {
 		<NoteView
 			ref={noteView}
 			note={openNote}
+			opening={opening}
 			draft={place.noteDraft}
 			liveEdits={liveEdits}
 			renamings={renamings}
@@ -1979,6 +1985,7 @@ const Home = () => {
 			onTake={scratch.take}
 			onCloseTake={scratch.closeTake}
 			openId={scratch.card?.id}
+			openingId={scratch.openingId}
 			onOpen={scratch.open}
 			onMark={scratch.mark}
 			onMove={scratch.offered}

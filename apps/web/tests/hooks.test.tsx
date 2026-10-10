@@ -11,6 +11,7 @@ import {
 	useCodeDisplay,
 	useLooseNoteCount,
 	useNote,
+	useNoteRead,
 	useNoteSearch,
 	useNotesUnderFolder,
 	usePinnedTree,
@@ -19,6 +20,7 @@ import {
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
 import { setNotebookPinned, setNotePinned } from '../src/store/pins.js';
 import { getCodeDisplay, setCodeDisplay } from '../src/store/prefs.js';
+import { holdTheNotes } from './heldNotes.js';
 
 /**
  * `useLooseNoteCount` is what decides whether the sidebar's "Loose notes" row
@@ -241,6 +243,78 @@ describe('useNote', () => {
 
 		await waitFor(() => {
 			expect(result.current).toBeUndefined();
+		});
+	});
+});
+
+describe('useNoteRead', () => {
+	it('says nothing until the note is read, then hands it over', async () => {
+		const note = await createNote(db, { title: 'Open' });
+		const { result } = renderHook(() => useNoteRead(note.id));
+
+		expect(result.current).toBeUndefined();
+		await waitFor(() => {
+			expect(result.current?.id).toBe(note.id);
+		});
+	});
+
+	it('answers null once read for a note that is not there, or is a tombstone', async () => {
+		const note = await createNote(db, { title: 'Going' });
+		const missing = renderHook(() => useNoteRead('no-such-note'));
+		const going = renderHook(() => useNoteRead(note.id));
+		await waitFor(() => {
+			expect(missing.result.current).toBeNull();
+			expect(going.result.current?.id).toBe(note.id);
+		});
+
+		await deleteNote(db, note.id);
+
+		await waitFor(() => {
+			expect(going.result.current).toBeNull();
+		});
+	});
+
+	it('hands back no note read for another id while the next is read', async () => {
+		const first = await createNote(db, { title: 'First' });
+		const second = await createNote(db, { title: 'Second' });
+		const { result, rerender } = renderHook(({ id }) => useNoteRead(id), {
+			initialProps: { id: first.id },
+		});
+		await waitFor(() => {
+			expect(result.current?.id).toBe(first.id);
+		});
+
+		rerender({ id: second.id });
+
+		expect(result.current).toBeUndefined();
+		await waitFor(() => {
+			expect(result.current?.id).toBe(second.id);
+		});
+	});
+
+	it('hands back no earlier read of a note gone back to while the one between is read', async () => {
+		const first = await createNote(db, { title: 'First' });
+		const second = await createNote(db, { title: 'Second' });
+		const { result, rerender } = renderHook(({ id }) => useNoteRead(id), {
+			initialProps: { id: first.id },
+		});
+		await waitFor(() => {
+			expect(result.current?.id).toBe(first.id);
+		});
+		const release = await holdTheNotes(db.name);
+
+		try {
+			rerender({ id: second.id });
+			rerender({ id: first.id });
+
+			// The first read is from before the second note was asked for: what
+			// the note says now is still on its way.
+			expect(result.current).toBeUndefined();
+		} finally {
+			release();
+		}
+		await waitFor(() => {
+			expect(result.current?.id).toBe(first.id);
 		});
 	});
 });
