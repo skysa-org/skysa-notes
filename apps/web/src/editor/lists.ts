@@ -1,12 +1,9 @@
 import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
-import {
-	liftListItemCommand,
-	wrapInBulletListCommand,
-	wrapInOrderedListCommand,
-} from '@milkdown/kit/preset/commonmark';
+import { liftListItemCommand } from '@milkdown/kit/preset/commonmark';
 import type { Node as ProseNode, ResolvedPos } from '@milkdown/kit/prose/model';
-import type { EditorState } from '@milkdown/kit/prose/state';
+import { wrapInList } from '@milkdown/kit/prose/schema-list';
+import type { EditorState, Transaction } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { callCommand } from '@milkdown/kit/utils';
 
@@ -15,12 +12,13 @@ import { callCommand } from '@milkdown/kit/utils';
  *
  * Its own module because both the commands and the toolbar's reading of the
  * selection need the same answers — which list the cursor is in, and which of
- * the three kinds it is — and because the preset has no command for changing a
- * list's kind. `wrapInBulletListCommand` and its ordered twin are `wrapIn`:
- * they put a list *around* what is selected, which is right for a paragraph
- * and wrong for a list, where it either fails or nests a second list inside
- * the item. Switching a list from one kind to another is changing the node,
- * not wrapping it.
+ * the three kinds it is — and because the preset's list commands do neither
+ * job. `wrapInBulletListCommand` and its ordered twin are `wrapIn`: they put
+ * one list *around* what is selected, with one item around all of it, so three
+ * paragraphs selected became a single item holding three paragraphs. And in a
+ * list they either fail or nest a second list inside the item. Making a list
+ * is `wrapInList`, which gives each paragraph an item of its own; switching a
+ * list from one kind to another is changing the node, not wrapping it.
  */
 
 export const LIST_ITEM = 'list_item';
@@ -97,41 +95,45 @@ const itemAttrs = (kind: ListKind, attrs: ProseNode['attrs']): ProseNode['attrs'
 	checked: kind === 'task' ? attrs.checked === true : null,
 });
 
-/** Turn the paragraph the cursor is in into a list of this kind. */
-const makeList = (ctx: Ctx, kind: ListKind): void => {
-	callCommand(kind === 'ordered' ? wrapInOrderedListCommand.key : wrapInBulletListCommand.key)(
-		ctx
-	);
-	if (kind !== 'task') return;
-
-	const view = ctx.get(editorViewCtx);
-	const item = itemAround(view.state);
-	if (item === null) return;
-	view.dispatch(
-		view.state.tr.setNodeMarkup(item.pos, undefined, itemAttrs(kind, item.node.attrs))
-	);
-};
-
 /**
- * Change the list the cursor is in into one of another kind, item attributes
- * and all. The node keeps its size, so every item's position is where it was.
+ * Give the list and every item in it the attributes of this kind, on `tr`.
+ * The node keeps its size, so every item's position is where it was.
  */
-const convert = (view: EditorView, list: ListAround, kind: ListKind): void => {
-	const { state } = view;
-	const target = state.schema.nodes[kind === 'ordered' ? ORDERED : BULLET];
+const retype = (tr: Transaction, list: Ancestor, kind: ListKind): void => {
+	const target = tr.doc.type.schema.nodes[kind === 'ordered' ? ORDERED : BULLET];
 	if (target === undefined) return;
 
 	// Bullet and task are the same node type, so only the items change there.
 	const spread: unknown = list.node.attrs.spread;
 	const attrs = kind === 'ordered' ? { order: 1, spread } : { spread };
-	const tr =
-		list.node.type === target ? state.tr : state.tr.setNodeMarkup(list.pos, target, attrs);
+	if (list.node.type !== target) tr.setNodeMarkup(list.pos, target, attrs);
 
 	list.node.forEach((item, offset) => {
 		if (item.type.name !== LIST_ITEM) return;
 		tr.setNodeMarkup(list.pos + 1 + offset, undefined, itemAttrs(kind, item.attrs));
 	});
+};
 
+/**
+ * Turn the paragraphs the selection covers into a list of this kind, one item
+ * for each — what every editor does with lines selected and a list pressed. A
+ * single undo takes it back.
+ */
+const makeList = (view: EditorView, kind: ListKind): void => {
+	const type = view.state.schema.nodes[kind === 'ordered' ? ORDERED : BULLET];
+	if (type === undefined) return;
+
+	wrapInList(type)(view.state, (tr) => {
+		const made = ancestor(tr.selection.$from, LISTS);
+		if (made !== null) retype(tr, made, kind);
+		view.dispatch(tr);
+	});
+};
+
+/** Change the list the cursor is in into one of another kind, item attributes and all. */
+const convert = (view: EditorView, list: ListAround, kind: ListKind): void => {
+	const { tr } = view.state;
+	retype(tr, list, kind);
 	view.dispatch(tr);
 };
 
@@ -149,7 +151,7 @@ export const applyList =
 		const here = listAround(view.state);
 
 		if (here === null) {
-			makeList(ctx, kind);
+			makeList(view, kind);
 			return;
 		}
 		if (here.kind === kind) {
