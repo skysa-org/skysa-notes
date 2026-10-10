@@ -3,6 +3,7 @@ import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
+import { watchForHeldUp } from './heldUp.js';
 import { watchForNewerTab } from './staleTab.js';
 
 /**
@@ -619,6 +620,9 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// And a frozen tab must not hold reads open that every other tab then waits
 	// behind — `store/frozenTab.ts`.
 	letGoWhenFrozen(db);
+	// Whether another tab is holding this one up, for the sync's status to say
+	// (`store/heldUp.ts`).
+	watchForHeldUp(db);
 
 	return db;
 };

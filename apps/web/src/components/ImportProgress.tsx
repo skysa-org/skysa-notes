@@ -31,6 +31,8 @@ import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
 export const importMessage = (status: SchedulerStatus, label: string): string => {
 	switch (status.phase) {
 		case 'syncing':
+			// An import is a sync, held up on the device the same way.
+			if (status.waiting === true) return t('account.status.waiting');
 			return progressMessage(status.progress, label);
 		case 'idle':
 			return t('firstImport.finishing');

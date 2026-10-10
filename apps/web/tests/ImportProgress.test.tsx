@@ -44,6 +44,10 @@ describe('what an import says', () => {
 			'Downloading notes from Dropbox: 5 of 30.',
 		],
 		[syncing({ stage: 'uploading', done: 3, total: 9 }), 'Uploading notes to Dropbox: 3 of 9.'],
+		[
+			{ ...syncing({ stage: 'uploading', done: 3, total: 9 }), waiting: true },
+			'Syncing is waiting for another tab or window of this app to finish with the notes on this device. If this does not go away, close the app’s other tabs.',
+		],
 		[{ phase: 'idle', conflicts: [] }, 'Finishing…'],
 		[
 			{ phase: 'offline', conflicts: [] },

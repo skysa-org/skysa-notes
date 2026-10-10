@@ -288,6 +288,7 @@ const statusMessage = (
 		case 'local':
 			return null;
 		case 'syncing':
+			if (status.waiting === true) return t('account.status.waiting');
 			return syncCount(status.progress, label)?.sentence ?? t('account.status.syncing');
 		case 'idle':
 			return status.lastSyncAt === undefined
@@ -357,6 +358,13 @@ const lineStatus = (
 		case 'local':
 			return { text: label, title: null };
 		case 'syncing':
+			// Said over a count: how far it had got is not what is happening.
+			if (status.waiting === true) {
+				return {
+					text: t('account.line.waiting', provider),
+					title: t('account.status.waiting'),
+				};
+			}
 			return syncingLine(status.progress, label);
 		case 'idle':
 			return {

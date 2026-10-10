@@ -72,6 +72,8 @@ export const account = {
 	 */
 	line: {
 		syncing: '{provider} · Syncing…',
+		/** Syncing, held up on this device behind another tab or window of the app (`status.waiting`). */
+		waiting: '{provider} · Waiting for another tab',
 		synced: '{provider} · Synced',
 		syncedAt: '{provider} · Synced {time}',
 		offline: '{provider} · Offline',
@@ -98,6 +100,8 @@ export const account = {
 	 */
 	status: {
 		syncing: 'Syncing…',
+		waiting:
+			'Syncing is waiting for another tab or window of this app to finish with the notes on this device. If this does not go away, close the app’s other tabs.',
 		synced: 'Synced',
 		syncedAt: 'Synced {time}',
 		offline: 'Offline. Changes are kept on this device and sync when the connection is back.',
