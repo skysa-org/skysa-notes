@@ -1183,8 +1183,16 @@ button.row,
 	align-items: center;
 }
 
-button.row.selected,
-.row-editing.selected {
+/* The one open, lit — but not the notebook or the note in a compact window
+   (2026-10-10). There they are a dropdown over the note, not columns beside
+   it, so what the lit row said was open was under the panel, out of sight,
+   and the row read as one pressed or picked out. The bar says what is open,
+   and `aria-current` says it to a screen reader. The source showing stays
+   lit in its dropdown: the bar has only its mark, which two sources can
+   share. Left out in a `:where`, so the rule weighs what it did against
+   hover's. */
+button.row.selected:where(:not(.compact :is(.sidebar, .note-list) *)),
+.row-editing.selected:where(:not(.compact :is(.sidebar, .note-list) *)) {
 	background: color-mix(in srgb, var(--fg) 11%, transparent);
 	font-weight: 600;
 }
@@ -1203,7 +1211,7 @@ button.row.pinned {
 	}
 }
 
-button.row.pinned.selected {
+button.row.pinned.selected:where(:not(.compact :is(.sidebar, .note-list) *)) {
 	background: color-mix(in srgb, var(--accent) 19%, transparent);
 }
 

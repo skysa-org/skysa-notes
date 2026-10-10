@@ -112,6 +112,12 @@ export const useScratchpad = ({
 	const { card, openingId } = cardOpen(active && !taking, noteId, openNote, opening);
 	/** The card whose opening was pushed, which Back closes. */
 	const pushed = useRef<string>(undefined);
+	// Let go of once that card is no longer the one open, however it closed —
+	// Back too, which `close` does not hear — so the same card opened again
+	// some other way, from a search answer, is not taken to be the step before.
+	useEffect(() => {
+		if (pushed.current !== noteId) pushed.current = undefined;
+	}, [noteId]);
 	/** A card being named before it is moved (`NameDialog`). */
 	const [naming, setNaming] = useState<NoteRecord>();
 
