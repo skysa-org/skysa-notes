@@ -1,5 +1,13 @@
 # @skysa/web
 
+## 1.0.5
+
+### Patch Changes
+
+- 9f192f6: On a phone, tapping low in a note no longer leaves the cursor under the keyboard that the tap brings up: the note scrolls so the line being typed shows just above it, in rich text and Markdown alike.
+- 5e2c725: Selecting several paragraphs in rich text and pressing a list button now makes a list with one item per paragraph, rather than one item holding them all. One Undo takes it back.
+- @skysa/core@1.0.5
+
 ## 1.0.4
 
 ### Patch Changes
