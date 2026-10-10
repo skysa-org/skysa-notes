@@ -22,6 +22,7 @@ import {
 	type SyncStateRecord,
 } from '../store/db.js';
 import { updateLive } from '../store/detached.js';
+import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
@@ -81,6 +82,13 @@ export interface StuckOp {
 	readonly error?: string;
 }
 
+/**
+ * How long a run is held up on another tab before the status says so. A wait
+ * behind another tab's write that is going well is over in moments, and words
+ * that flashed up for it would be noise.
+ */
+export const SYNC_WAIT_MS = 5000;
+
 export interface SchedulerStatus {
 	readonly phase: SyncPhase;
 	/** When a sync last reached the end of a pull. Kept across reloads. */
@@ -103,6 +111,12 @@ export interface SchedulerStatus {
 	 * and only then (`onProgress` in the engine). What the import dialog shows.
 	 */
 	readonly progress?: SyncProgress;
+	/**
+	 * The run is under way and this tab has been waiting on another tab or
+	 * window of the app, for the database, for `SYNC_WAIT_MS` and is waiting
+	 * still (`store/heldUp.ts`). While `syncing`, and only then.
+	 */
+	readonly waiting?: true;
 }
 
 export type SchedulerEvent = 'focus' | 'visibilitychange' | 'online' | 'offline';
@@ -377,7 +391,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * the app says `syncing`, or after the op went through.
 	 */
 	const publish = (next: SchedulerStatus) => {
-		const { stuck: _carried, progress, ...rest } = next;
+		const { stuck: _carried, progress, waiting, ...rest } = next;
 		const stuck = current.get('session')?.stuck.get('op');
 		// Progress is about the run under way and nothing else: carried into
 		// `idle` by a `{ ...status() }`, the dialog would go on saying "318
@@ -386,6 +400,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			...rest,
 			...(stuck === undefined ? {} : { stuck }),
 			...(progress === undefined || rest.phase !== 'syncing' ? {} : { progress }),
+			// The same: a wait is the run's, and ends with it.
+			...(waiting === undefined || rest.phase !== 'syncing' ? {} : { waiting }),
 		};
 		statusBox.set('status', full);
 		listeners.forEach((listener) => {
@@ -803,6 +819,8 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			refusal: undefined,
 			denial: undefined,
 		});
+		// To the end of what it writes after, which can be held up as well.
+		const stopWatching = watchWaits(session);
 		// One engine at a time per connection, across sessions and tabs: a
 		// session ended mid-run, or another tab, may still be at the network.
 		const result = await environment
@@ -819,6 +837,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				failed(session, messageOf(error));
 			});
 		}
+		stopWatching();
 		const again = session.flags.delete('again');
 		const nudged = session.flags.delete('nudged') && !backingOff(session);
 		if ((again || nudged) && isCurrent(session)) await runOnce(session);
@@ -841,6 +860,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	};
 
 	// ----------------------------------------------------------- progress
+
+	/** The run's watch on waits (`watchWaits`), while one is under way. */
+	const watching = new Map<'run', { moved: () => void }>();
 
 	const pendingProgress = new Map<'at', SyncProgress>();
 	const progressTimer = new Map<'timer', () => void>();
@@ -867,10 +889,79 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				progressTimer.delete('timer');
 				return;
 			}
+			// Getting further is not waiting, whatever else is (`watchWaits`).
+			watching.get('run')?.moved();
 			publish({ ...status(), progress: latest });
 			progressTimer.set('timer', environment.setTimer(flush, progressMs));
 		};
 		flush();
+	};
+
+	/** The run has started, or stopped, waiting on another tab. */
+	const reportWaiting = (session: Session, waiting: boolean) => {
+		const now = status();
+		// Said already, either way: every wait that ends, however short, asks.
+		if (!isCurrent(session) || now.phase !== 'syncing' || (now.waiting === true) === waiting) {
+			return;
+		}
+		const { waiting: _was, ...rest } = now;
+		publish(waiting ? { ...rest, waiting } : rest);
+	};
+
+	/**
+	 * Follow, for as long as a run takes, whether this tab is held up on
+	 * another one (`store/heldUp.ts`), and say so once it has been for
+	 * `SYNC_WAIT_MS` with the run getting no further meanwhile. Any of the
+	 * tab's waits counts, not only the run's own: the run is the next to need
+	 * what is held. Progress is the run getting further, so it starts the time
+	 * again: a count going up under "Waiting for another tab" would be saying
+	 * two things at once. Returns the way to stop.
+	 */
+	const watchWaits = (session: Session): (() => void) => {
+		const held = heldUpOf(db);
+		if (held === undefined) return () => undefined;
+		const on = new Map<'wait', object>();
+		const timer = new Map<'timer', () => void>();
+		const stopTimer = () => {
+			timer.get('timer')?.();
+			timer.delete('timer');
+		};
+		const time = (wait: object) => {
+			stopTimer();
+			timer.set(
+				'timer',
+				environment.setTimer(() => {
+					timer.delete('timer');
+					// Only the wait it was set for.
+					if (held.waiting() === wait) reportWaiting(session, true);
+				}, SYNC_WAIT_MS)
+			);
+		};
+		const follow = () => {
+			const wait = held.waiting();
+			if (wait === on.get('wait')) return;
+			stopTimer();
+			if (wait === undefined) on.delete('wait');
+			else on.set('wait', wait);
+			reportWaiting(session, false);
+			if (wait !== undefined) time(wait);
+		};
+		follow();
+		const unsubscribe = held.subscribe(follow);
+		watching.set('run', {
+			moved: () => {
+				const wait = on.get('wait');
+				if (wait === undefined) return;
+				reportWaiting(session, false);
+				time(wait);
+			},
+		});
+		return () => {
+			watching.delete('run');
+			unsubscribe();
+			stopTimer();
+			reportWaiting(session, false);
+		};
 	};
 
 	/** Connections a cancel is holding still: no session starts for them. */

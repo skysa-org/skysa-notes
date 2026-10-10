@@ -2,6 +2,7 @@ import { type PictureInfo, type PictureVariant, type ProviderKind } from '@skysa
 import Dexie, { type Table } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
+import { watchForHeldUp } from './heldUp.js';
 import { watchForNewerTab } from './staleTab.js';
 
 /**
@@ -615,6 +616,9 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	// in another tab, must find this tab stopped rather than still writing —
 	// `store/staleTab.ts` says why Dexie's default is not that.
 	watchForNewerTab(db);
+	// Whether another tab is holding this one up, for the sync's status to say
+	// (`store/heldUp.ts`).
+	watchForHeldUp(db);
 
 	return db;
 };

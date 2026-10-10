@@ -2223,6 +2223,28 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(screen.queryByRole('progressbar')).toBeNull();
 	});
 
+	it('says when syncing is waiting for another tab, over its count, and goes back to the count after', async () => {
+		const progress = { stage: 'uploading', done: 120, total: 1000 } as const;
+		const sync = fakeSync({ phase: 'syncing', progress });
+		await connected(sync);
+		const line = await naming('ada@example.com');
+		const thousand = (1000).toLocaleString();
+		expect(line.textContent).toBe(`Dropbox · Sending 120 of ${thousand}`);
+
+		sync.say({ phase: 'syncing', progress, waiting: true });
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Waiting for another tab');
+		});
+		expect(line.title).toBe(
+			'Syncing with Dropbox · ada@example.com\nSyncing is waiting for another tab or window of this app to finish with the notes on this device. If this does not go away, close the app’s other tabs.'
+		);
+
+		sync.say({ phase: 'syncing', progress });
+		await waitFor(() => {
+			expect(line.textContent).toBe(`Dropbox · Sending 120 of ${thousand}`);
+		});
+	});
+
 	it('counts a re-scan as it finds notes, with a bar that does not know how many until it does', async () => {
 		const sync = fakeSync({
 			phase: 'syncing',
