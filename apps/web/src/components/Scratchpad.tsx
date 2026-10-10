@@ -850,14 +850,23 @@ export const ScratchModal = ({
 
 /**
  * A card open in a compact window: its note pane, the whole window under the
- * bar, grown out of the card and gone back into it (`useCardMotion`). A box of
- * no size of its own (`display: contents`), so the pane in it is the column's
- * as it is everywhere else.
+ * bar, grown out of the card and gone back into it (`useCardMotion`), unless
+ * it is `unseen`, under a dropdown open over it. A box of no size of its own
+ * (`display: contents`), so the pane in it is the column's as it is everywhere
+ * else.
  */
-export const CardSheet = ({ id, children }: { id: string; children: ReactNode }) => {
+export const CardSheet = ({
+	id,
+	unseen = false,
+	children,
+}: {
+	id: string;
+	unseen?: boolean;
+	children: ReactNode;
+}) => {
 	const [sheet, setSheet] = useState<HTMLDivElement | null>(null);
 	const pane = sheet?.firstElementChild;
-	useCardMotion(sheet, pane instanceof HTMLElement ? pane : null, id);
+	useCardMotion(sheet, pane instanceof HTMLElement ? pane : null, id, { unseen });
 	return (
 		<div ref={setSheet} className="card-sheet">
 			{children}

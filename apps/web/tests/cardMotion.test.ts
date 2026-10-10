@@ -1,7 +1,12 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { growOutOf, shrinkInto, useEasedHeight } from '../src/components/cardMotion.js';
+import {
+	growOutOf,
+	shrinkInto,
+	useCardMotion,
+	useEasedHeight,
+} from '../src/components/cardMotion.js';
 
 /**
  * A card growing into its editor and going back into it, and the box a note
@@ -257,6 +262,60 @@ describe('a card closing', () => {
 		const copy = document.body.querySelector(':scope > div[inert]')?.firstElementChild;
 		expect(of(copy as Element)[0]?.keyframes.at(-1)).toMatchObject({ opacity: 0 });
 		expect(cardCopies()).toEqual([]);
+	});
+});
+
+describe('a card under something drawn over it (`unseen`)', () => {
+	// What moves is a copy over the panels: a card open under a compact
+	// window's dropdown, shown again by Back or left by a place chosen there,
+	// grew or went over the dropdown (2026-10-10).
+	const mount = (unseen: boolean) => {
+		const { backdrop, dialog } = scene();
+		box(dialog, [300, 200, 800, 400]);
+		const hook = renderHook(
+			(props: { unseen: boolean }) => {
+				useCardMotion(backdrop, dialog, 'trip', props);
+			},
+			{ initialProps: { unseen } }
+		);
+		return { backdrop, ...hook };
+	};
+	/** Let go of as React lets it go: the effect undone, then off the page. */
+	const gone = async (backdrop: HTMLElement, unmount: () => void) => {
+		unmount();
+		backdrop.remove();
+		await Promise.resolve();
+	};
+	const ghost = () => document.body.querySelector(':scope > div[inert]');
+
+	it('neither grows out of the card nor goes back into it', async () => {
+		const { backdrop, unmount } = mount(true);
+		expect(animate).not.toHaveBeenCalled();
+
+		await gone(backdrop, unmount);
+		expect(animate).not.toHaveBeenCalled();
+		expect(ghost()).toBeNull();
+		expect(cardCopies()).toEqual([]);
+	});
+
+	it('goes back into the card as it was last drawn, once nothing is over it', async () => {
+		const { backdrop, rerender, unmount } = mount(true);
+		rerender({ unseen: false });
+		expect(animate).not.toHaveBeenCalled();
+
+		await gone(backdrop, unmount);
+		expect(ghost()).not.toBeNull();
+	});
+
+	it('goes with no motion once something is drawn over it, however it came', async () => {
+		const { backdrop, rerender, unmount } = mount(false);
+		expect(animate).toHaveBeenCalled();
+		animate.mockClear();
+		rerender({ unseen: true });
+
+		await gone(backdrop, unmount);
+		expect(animate).not.toHaveBeenCalled();
+		expect(ghost()).toBeNull();
 	});
 });
 
