@@ -41,6 +41,7 @@ import {
 } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
+import { richCaretAboveKeyboard } from './aboveKeyboard.js';
 import { attachOnDrop, attachOnPaste, pendingFiles, receivePicked } from './attachDrop.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { attachmentSchema, attachmentViewPlugin, claimsClick, selectedKey } from './attachment.js';
@@ -513,6 +514,8 @@ export const createRichEditor = ({
 		// preset draws a task item and offers no way to tick one.
 		.use($prose(() => taskPlugin))
 		.use($prose(() => keymap({ 'Mod-Enter': toggleTaskCommand })))
+		// The caret shown above a phone's keyboard as it comes up (`aboveKeyboard.ts`).
+		.use($prose(richCaretAboveKeyboard))
 		.use(onStateChange === undefined ? [] : $prose(() => watchState(onStateChange)))
 		// Ahead of the plugin that reports edits, though it need not be: an
 		// appended transaction is applied before any view hears of the change.
