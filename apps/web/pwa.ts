@@ -80,9 +80,24 @@ export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
 	name: brand.name,
 	short_name: brand.shortName,
 	description: brand.description,
-	// One value only: the manifest has no dark variant. The page's two
-	// `theme-color` tags take over once it is open.
-	theme_color: brand.colors.light.theme,
+	// No theme colour. On Android an installed app's navigation bar is
+	// painted with it, and a manifest has one value and no dark variant, so the
+	// light theme's colour put a pale bar under the app in dark mode. Without
+	// it the bar follows the phone's light or dark theme. The page's two
+	// `theme-color` tags colour the status bar once it is open (`brand.ts`).
+	// The page cannot paint the bar itself: Chrome draws an installed app
+	// edge to edge only for its media viewer (`supportsEdgeToEdge` in
+	// chrome/android/java/src/org/chromium/chrome/browser/customtabs/
+	// BaseCustomTabRootUiCoordinator.java; the bar's colour comes from
+	// `WebappIntentDataProvider.ColorProviderImpl.getNavigationBarColor`).
+	//
+	// Named, as `undefined`, because vite-plugin-pwa `Object.assign`s the
+	// manifest over defaults of its own, one of which is `theme_color:
+	// '#42b883'`; left out, the bar would be that green. `undefined` is
+	// dropped when the manifest is written out. The plugin warns at every
+	// build that an app without one cannot be installed; Chrome's install
+	// criteria do not ask for it.
+	theme_color: undefined,
 	background_color: brand.colors.background,
 	display: 'standalone',
 	start_url: '/',
