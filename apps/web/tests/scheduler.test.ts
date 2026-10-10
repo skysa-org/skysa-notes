@@ -731,10 +731,11 @@ describe('failures', () => {
 		// The backoff's own retry, and the outage is over.
 		h.remote.fake.setFault(undefined);
 		h.env.advance(BACKOFF - DEBOUNCE);
+		// The two writes are sent together, so either may land first.
 		await vi.waitFor(() => {
 			expect(h.remote.fake.contentAt(note.path)).toContain('three');
+			expect(h.remote.fake.contentAt(other.path)).toContain('other');
 		});
-		expect(h.remote.fake.contentAt(other.path)).toContain('other');
 		await reaches(h.scheduler, 'idle');
 
 		// And with nothing failing, focus syncs straight away again.
