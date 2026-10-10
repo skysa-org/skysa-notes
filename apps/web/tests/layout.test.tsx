@@ -236,6 +236,23 @@ describe('the compact panels', () => {
 	it('keeps the storage panel and the way to connect at the foot of the source panel', () => {
 		expect(declarations('.source-panel-foot')).toContain('margin-block-start: auto');
 	});
+
+	it('lights no notebook or note as the one open, which is under the panel', () => {
+		// Every selector that lights a row as the one open leaves a compact
+		// window's notebooks and notes out, and only them: the source showing
+		// stays lit in its dropdown.
+		const lit = styles
+			.replace(/\/\*[\s\S]*?\*\//g, '')
+			.split('}')
+			// A selector list's commas, not those inside `:is(…)`.
+			.flatMap((block) => (block.split('{')[0] ?? '').split(/,(?![^(]*\))/))
+			.map((selector) => selector.trim())
+			.filter((selector) => /\.row(-editing)?\b.*\.selected/.test(selector));
+		expect(lit).toHaveLength(3);
+		for (const selector of lit) {
+			expect(selector).toContain(':where(:not(.compact :is(.sidebar, .note-list) *))');
+		}
+	});
 });
 
 describe('the note header', () => {

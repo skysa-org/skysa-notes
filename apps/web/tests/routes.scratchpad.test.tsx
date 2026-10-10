@@ -162,6 +162,33 @@ describe('a card', () => {
 		expect(screen.getByRole('button', { name: /^Milk/ })).toBeDefined();
 	});
 
+	it('closes to the scratchpad when opened from a search, after Back closed it once', async () => {
+		// Close went Back, as if opening it had been the step before, which for
+		// a search answer it is not: from Inbox, it went back to Inbox.
+		await inbox();
+		await scratch({ title: 'Trip', body: 'Trip\n\nthe heron lake\n' });
+		const { user, router } = await openScratchpad();
+		await user.click(await screen.findByRole('button', { name: /^Trip/ }));
+		await screen.findByRole('dialog', { name: 'Scratch note' });
+		router.history.back();
+		await waitFor(() => {
+			expect(dialog()).toBeNull();
+		});
+
+		const sidebar = screen.getByRole('navigation', { name: 'Notebooks' });
+		await user.click(within(sidebar).getByRole('button', { name: /^Inbox/ }));
+		await screen.findByRole('heading', { name: 'Inbox' });
+		await user.type(screen.getByRole('combobox', { name: 'Search notes' }), 'heron');
+		await user.click(await screen.findByRole('option', { name: /Trip/ }));
+		const open = await screen.findByRole('dialog', { name: 'Scratch note' });
+		await user.click(within(open).getByRole('button', { name: 'Close' }));
+
+		await waitFor(() => {
+			expect(dialog()).toBeNull();
+		});
+		expect(hashIn(router)).toBe('scratchpad');
+	});
+
 	it('is pinned from the wall, and goes to the top', async () => {
 		await inbox();
 		const older = await scratch({ body: 'Milk\n' });
