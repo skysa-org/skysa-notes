@@ -445,20 +445,29 @@ export const shrinkInto = (
 
 /**
  * `element` grown out of card `id` as it is shown, and sent back into it as
- * it goes with `layer` (`growOutOf`, `shrinkInto`).
+ * it goes with `layer` (`growOutOf`, `shrinkInto`) — but not while it is
+ * `unseen`, under something drawn over it, when it comes and goes there with
+ * no motion of its own. What moves is a copy over the panels, so a card open
+ * under a compact window's dropdown, shown again by Back or left by a place
+ * chosen there, was drawn over the dropdown as it grew or went (2026-10-10).
  */
 export const useCardMotion = (
 	layer: HTMLElement | null,
 	element: HTMLElement | null,
 	id: string,
-	options: { dim?: boolean } = {}
+	options: { dim?: boolean; unseen?: boolean } = {}
 ): void => {
 	const dim = options.dim === true;
+	/** As it was when last drawn, which is what it was as it goes. */
+	const unseen = useRef(options.unseen === true);
+	useLayoutEffect(() => {
+		unseen.current = options.unseen === true;
+	});
 	useLayoutEffect(() => {
 		if (layer === null || element === null) return undefined;
-		growOutOf(element, id);
+		if (!unseen.current) growOutOf(element, id);
 		return () => {
-			shrinkInto(element, layer, id, { dim });
+			if (!unseen.current) shrinkInto(element, layer, id, { dim });
 		};
 	}, [layer, element, id, dim]);
 };

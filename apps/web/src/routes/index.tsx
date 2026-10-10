@@ -1971,7 +1971,13 @@ const Home = () => {
 		if (!inScratchpad) return noteEditor();
 		if (!compact) return null;
 		if (scratch.card !== undefined) {
-			return <CardSheet id={scratch.card.id}>{noteEditor(scratch.editing)}</CardSheet>;
+			// A pane open with a card open is a dropdown over it: nothing rests
+			// under a card (`useScratchpad`).
+			return (
+				<CardSheet id={scratch.card.id} unseen={panel !== null}>
+					{noteEditor(scratch.editing)}
+				</CardSheet>
+			);
 		}
 		return <section className="note-view empty" aria-label={t('shell.notePane')} />;
 	};
