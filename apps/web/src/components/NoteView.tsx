@@ -56,6 +56,7 @@ import {
 	useMediaQuery,
 } from './layout.js';
 import { useNoteAttachments } from './noteAttachments.js';
+import { useOpeningNotice } from './opening.js';
 import { Outline } from './Outline.js';
 import { PinButton, ScratchBar } from './ScratchControls.js';
 import { FOCUS_KEEPER } from './Scratchpad.js';
@@ -106,6 +107,13 @@ export interface NoteViewProps {
 	 * nothing anywhere to select is a dead end.
 	 */
 	onCreateNotebook?: () => void;
+	/**
+	 * A note asked for and not read yet (`useNoteRead`). The pane says nothing for a
+	 * moment, then that the note is opening, rather than that none is: read
+	 * behind a write that was held up, a note took minutes to arrive, and "Select
+	 * a note" over a note just pressed said it was not there (2026-10-10).
+	 */
+	opening?: boolean;
 	/**
 	 * Given while `note` is a draft: begun, on screen, and stored nowhere until
 	 * it is edited (`draftNote`). Leaving it unedited leaves nothing behind.
@@ -527,6 +535,16 @@ const useNoteLayout = (noteId: string | undefined, body: Element | null, scratch
 	};
 };
 
+/** What the pane says while the note asked for is read, once that is taking a while. */
+const Opening = () => {
+	const late = useOpeningNotice();
+	return (
+		<p className="muted placeholder" role="status">
+			{late ? t('notes.view.opening') : null}
+		</p>
+	);
+};
+
 /** What the empty pane says, offering what can be done from here. */
 const NothingOpen = ({
 	onCreateNote,
@@ -678,6 +696,7 @@ export const NoteView = ({
 	onDeleted,
 	onCreateNote,
 	onCreateNotebook,
+	opening = false,
 	draft,
 	liveEdits,
 	renamings,
@@ -899,10 +918,21 @@ export const NoteView = ({
 
 	if (note === undefined) {
 		return (
-			<section className="note-view empty" aria-label={t('notes.view.label')}>
-				<p className="muted placeholder">
-					<NothingOpen onCreateNote={onCreateNote} onCreateNotebook={onCreateNotebook} />
-				</p>
+			<section
+				className="note-view empty"
+				aria-label={t('notes.view.label')}
+				aria-busy={opening || undefined}
+			>
+				{opening ? (
+					<Opening />
+				) : (
+					<p className="muted placeholder">
+						<NothingOpen
+							onCreateNote={onCreateNote}
+							onCreateNotebook={onCreateNotebook}
+						/>
+					</p>
+				)}
 			</section>
 		);
 	}
