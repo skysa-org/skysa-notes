@@ -1,5 +1,6 @@
 import { type Editor, editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
+import { undo as undoCommand } from '@milkdown/kit/prose/history';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -25,12 +26,12 @@ const mount = async (body: string) => {
 	return <T>(action: (ctx: Ctx) => T): T => editor.action(action);
 };
 
-const cursorIn = (word: string) => (ctx: Ctx) => {
-	const view = ctx.get(editorViewCtx);
-	const { state } = view;
+/** Just inside the first occurrence of this word. */
+const positionOf = (ctx: Ctx, word: string): number => {
+	const { doc } = ctx.get(editorViewCtx).state;
 	const at = { current: -1 };
 
-	state.doc.descendants((node, pos) => {
+	doc.descendants((node, pos) => {
 		if (at.current >= 0) return false;
 		const text = node.text;
 		if (!node.isText || text === undefined || !text.includes(word)) return true;
@@ -39,7 +40,23 @@ const cursorIn = (word: string) => (ctx: Ctx) => {
 	});
 
 	if (at.current < 0) throw new Error(`no "${word}" in the document`);
-	view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, at.current)));
+	return at.current;
+};
+
+const select = (ctx: Ctx, anchor: number, head: number): void => {
+	const view = ctx.get(editorViewCtx);
+	const { state } = view;
+	view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, anchor, head)));
+};
+
+const cursorIn = (word: string) => (ctx: Ctx) => {
+	const at = positionOf(ctx, word);
+	select(ctx, at, at);
+};
+
+/** From inside the first word to inside the last, as a drag across them selects. */
+const selectFrom = (first: string, last: string) => (ctx: Ctx) => {
+	select(ctx, positionOf(ctx, first), positionOf(ctx, last));
 };
 
 afterEach(async () => {
@@ -99,5 +116,46 @@ describe('switching between list kinds', () => {
 		withCtx(cursorIn('one'));
 
 		expect(withCtx((ctx) => listAround(ctx.get(editorViewCtx).state)?.kind)).toBe('task');
+	});
+});
+
+/**
+ * Lines selected and a list pressed: a list with an item for each. The
+ * preset's `wrapIn` put one item around the lot, so three paragraphs became a
+ * single bullet holding all three.
+ */
+describe('making a list out of selected paragraphs', () => {
+	it.each([
+		['bullet', '- one\n- two\n- three\n'],
+		['ordered', '1. one\n2. two\n3. three\n'],
+		['task', '- [ ] one\n- [ ] two\n- [ ] three\n'],
+	] as const)('gives each paragraph an item of its own in a %s list', async (kind, expected) => {
+		const withCtx = await mount('one\n\ntwo\n\nthree\n');
+		withCtx(selectFrom('one', 'three'));
+
+		withCtx(applyList(kind));
+
+		expect(withCtx(currentMarkdown)).toBe(expected);
+	});
+
+	it('leaves the paragraphs outside the selection as they were', async () => {
+		const withCtx = await mount('before\n\none\n\ntwo\n\nafter\n');
+		withCtx(selectFrom('two', 'one'));
+
+		withCtx(applyList('bullet'));
+
+		expect(withCtx(currentMarkdown)).toBe('before\n\n- one\n- two\n\nafter\n');
+	});
+
+	it('is one step to undo', async () => {
+		const withCtx = await mount('one\n\ntwo\n');
+		withCtx(selectFrom('one', 'two'));
+		withCtx(applyList('task'));
+
+		withCtx((ctx) =>
+			undoCommand(ctx.get(editorViewCtx).state, ctx.get(editorViewCtx).dispatch)
+		);
+
+		expect(withCtx(currentMarkdown)).toBe('one\n\ntwo\n');
 	});
 });
