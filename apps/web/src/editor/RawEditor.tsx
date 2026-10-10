@@ -5,6 +5,7 @@ import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef } from 'react';
 
+import { rawCaretAboveKeyboard } from './aboveKeyboard.js';
 import { type AttachmentHost, NO_ATTACHMENTS } from './attachHost.js';
 import { isUserEdit, programmatic } from './dirty.js';
 import { findExtension, rawFindTarget } from './findRaw.js';
@@ -103,6 +104,7 @@ export const RawEditor = ({
 					rawWithoutNul(),
 					rawAttachments(() => files.current ?? NO_ATTACHMENTS),
 					EditorView.lineWrapping,
+					rawCaretAboveKeyboard(),
 					EditorView.updateListener.of((update) => {
 						if (!isUserEdit(update)) return;
 						const edited = update.state.doc.toString();
