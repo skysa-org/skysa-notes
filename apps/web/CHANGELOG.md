@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.0.9
+
+### Patch Changes
+
+- ee22844: On Android, the installed app's navigation bar is now the brand's colour (the light theme's `brand` in `brand.json`), in both light and dark mode. Since 1.0.6 it was the splash background, which was a pale bar under the app in dark mode, as the light title-bar colour had been before. A phone picks this up once Android updates the installed app, which can take a day or more; `chrome://webapks` → "Update" makes it sooner.
+- @skysa/core@1.0.9
+
 ## 1.0.8
 
 ### Patch Changes
