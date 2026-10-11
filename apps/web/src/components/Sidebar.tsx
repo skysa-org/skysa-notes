@@ -18,7 +18,7 @@ import { t } from '../i18n/t.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
-import { type FolderNode, LOOSE_NOTES_LABEL } from '../store/tree.js';
+import { type FolderNode, LOOSE_NOTES_LABEL, notesUnder } from '../store/tree.js';
 import { AttachedFiles } from './AttachedFiles.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type NotebookActions, notebookMenuItems } from './NotebookMenu.js';
@@ -455,13 +455,6 @@ const Row = ({
 		</button>
 	);
 };
-
-/**
- * Every live note beneath a notebook: what its row counts, what its list
- * shows, and what deleting it would take.
- */
-const notesUnder = (node: FolderNode): number =>
-	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
 
 interface DisclosureProps {
 	path: string;

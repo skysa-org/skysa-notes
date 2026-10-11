@@ -10,6 +10,7 @@ import {
 	rememberOpen,
 } from '../src/store/lastOpen.js';
 import { createNote, deleteNote } from '../src/store/notes.js';
+import { buildFolderTree, withPins } from '../src/store/tree.js';
 import { updateNote } from './noteRows.js';
 
 let db: NotesDatabase;
@@ -135,6 +136,44 @@ describe('which note to open', () => {
 
 	it('is none for an empty notebook', async () => {
 		expect(await pick('Work', 'nothing', 'nothing either')).toBeNull();
+	});
+
+	it('is the notebook’s own first note before any in a notebook inside it', async () => {
+		const deep = await createNote(db, { folderPath: 'Work/Alpha', title: 'Deep' });
+		const own = await createNote(db, { folderPath: 'Work', title: 'Own' });
+		await updateNote(db, deep.id, { createdAt: 2_000 });
+		await updateNote(db, own.id, { createdAt: 1_000 });
+
+		expect(await pick('Work')).toBe(own.id);
+	});
+
+	it('is the first listed in the notebooks inside one with none of its own, the pinned first', async () => {
+		const alpha = await createNote(db, { folderPath: 'Work/Alpha', title: 'Alpha' });
+		const older = await createNote(db, { folderPath: 'Work/Beta', title: 'Older' });
+		const newer = await createNote(db, { folderPath: 'Work/Beta', title: 'Newer' });
+		await updateNote(db, alpha.id, { createdAt: 3_000 });
+		await updateNote(db, older.id, { createdAt: 1_000 });
+		await updateNote(db, newer.id, { createdAt: 2_000 });
+		const built = buildFolderTree({
+			paths: ['Work', 'Work/Alpha', 'Work/Beta'],
+			notePaths: [alpha.path, older.path, newer.path],
+		});
+		const first = (pinnedNotebooks: string[], pinned?: Set<string>) =>
+			pickNote(db, {
+				connectionId: LOCAL_CONNECTION_ID,
+				folderPath: 'Work',
+				open: undefined,
+				remembered: undefined,
+				pinned,
+				tree: withPins(built, new Set(pinnedNotebooks)),
+			});
+
+		// In the sidebar's order, as the list has them, rather than a note begun.
+		expect(await first([])).toBe(alpha.id);
+		// A pinned notebook is listed first, and so is its newest note…
+		expect(await first(['Work/Beta'])).toBe(newer.id);
+		// …or the note pinned in it.
+		expect(await first(['Work/Beta'], new Set([older.id]))).toBe(older.id);
 	});
 });
 

@@ -233,6 +233,27 @@ describe('the compact bar', () => {
 		expect(await screen.findByRole('button', { name: /^Minutes/ })).toBeDefined();
 	});
 
+	it('opens the notes of a notebook whose notes are all in notebooks inside it', async () => {
+		await twoNotebooks();
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: 'Archive', name: '2025' });
+		await createNote(db, { folderPath: 'Archive/2025', title: 'Taxes', body: 'Taxes\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+
+		await user.click(await screen.findByRole('button', { name: /^Archive/ }));
+
+		// Its list, to choose from, with the note it opens on behind it rather
+		// than shown in its place.
+		expect(panel()).toBe('notes');
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Taxes');
+		});
+		expect(panel()).toBe('notes');
+		expect(notebookTrigger().textContent).toBe('Archive');
+	});
+
 	it('shows the source as its mark alone, and its name to a screen reader', async () => {
 		// Asked for on a phone: which storage it is is what the mark says, and
 		// the name took the room the notebook's and the note's need.

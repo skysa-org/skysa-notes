@@ -131,6 +131,13 @@ export const findFolder = (tree: readonly FolderNode[], path: string): FolderNod
 		undefined
 	);
 
+/**
+ * Every live note beneath a notebook: what its row counts, what its list
+ * shows, and what deleting it would take.
+ */
+export const notesUnder = (node: FolderNode): number =>
+	node.children.reduce((total, child) => total + notesUnder(child), node.noteCount);
+
 /** A notebook and every notebook inside it, at any depth, as the sidebar lists them. */
 const inSidebarOrder = (node: FolderNode): string[] => [
 	node.path,
