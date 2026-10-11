@@ -120,10 +120,10 @@ describe('the web app manifest', () => {
 		expect(manifest.background_color).toBeDefined();
 	});
 
-	// Chrome paints an installed app's navigation bar with `theme_color`, one
-	// value for both themes. Without one, the bar showed the splash's light
-	// background under the app in dark mode (2026-10-11).
-	it("colours the navigation bar with the brand's own colour", () => {
+	// Chrome paints an installed app's navigation bar with `theme_color` where
+	// it can, Android 14 and older; from Android 15 the bar is the
+	// `background_color` under it, the brand's `background` (2026-10-11).
+	it("colours the navigation bar with the brand's own colour, where Chrome can paint it", () => {
 		expect(manifest.theme_color).toBe(brand.colors.light.brand);
 	});
 });

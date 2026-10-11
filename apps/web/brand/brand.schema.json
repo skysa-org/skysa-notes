@@ -30,7 +30,7 @@
 						"brand": {
 							"type": "string",
 							"pattern": "^#[0-9a-fA-F]{6}$",
-							"description": "Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android."
+							"description": "Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android 14 and older."
 						},
 						"onBrand": {
 							"type": "string",
@@ -52,7 +52,7 @@
 						"brand": {
 							"type": "string",
 							"pattern": "^#[0-9a-fA-F]{6}$",
-							"description": "Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android."
+							"description": "Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android 14 and older."
 						},
 						"onBrand": {
 							"type": "string",
@@ -71,7 +71,7 @@
 				"background": {
 					"type": "string",
 					"pattern": "^#[0-9a-fA-F]{6}$",
-					"description": "The splash screen behind the icon while the app opens."
+					"description": "The splash screen behind the icon while the app opens, and the installed app's navigation bar on Android 15 and later, in both themes."
 				}
 			},
 			"required": ["light", "dark", "background"],

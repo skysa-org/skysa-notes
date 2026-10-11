@@ -80,21 +80,22 @@ export const pwaManifest = (brand: Brand): Partial<ManifestOptions> => ({
 	name: brand.name,
 	short_name: brand.shortName,
 	description: brand.description,
-	// The brand's colour, its light theme's, as the deployment's `brand.json`
-	// gives it. On Android, Chrome paints an installed app's navigation bar
-	// with `theme_color`, and a manifest has one value, with no dark variant
-	// (Chrome's dark fields are an experiment it no longer reads). Without one
-	// the bar is not painted, and what shows there is the app's window, which
-	// Chrome fills with `background_color`: the splash's, light, so a pale bar
-	// under the app in dark mode (2026-10-11). Both themes' colours are a pale
-	// bar in one of them; the brand's is chosen to stand out in either. The page
-	// cannot paint the bar itself: Chrome draws an installed app edge to edge
-	// only for its media viewer (`supportsEdgeToEdge` in
-	// chrome/android/java/src/org/chromium/chrome/browser/customtabs/
-	// BaseCustomTabRootUiCoordinator.java; the bar's colour is
-	// `WebappIntentDataProvider.ColorProviderImpl.getNavigationBarColor`, the
-	// window's `WebappActivity.getBackgroundDrawable`). The page's two
-	// `theme-color` tags colour the status bar once it is open (`brand.ts`).
+	// The navigation bar under an installed app on Android, as far as the
+	// manifest can say what it is: one colour for both themes, with no dark
+	// variant (Chrome's dark fields are an experiment it no longer reads).
+	// Where Chrome can paint the bar, Android 14 and older, it paints it with
+	// `theme_color`, here the brand's own colour, its light theme's. From
+	// Android 15 an app cannot paint it: it is transparent over the app's
+	// window, which Chrome fills with `background_color`, so there the bar is
+	// the brand's `background`, the splash's colour (measured on a Pixel on
+	// Android 17, 2026-10-11; a light one was a pale bar under the app in dark
+	// mode). A deployment that gives the two one colour has one bar on every
+	// phone. The page cannot paint the bar itself: Chrome lays an installed
+	// app out between the system bars, with no inset for the page to fill
+	// (`WebappIntentDataProvider.ColorProviderImpl.getNavigationBarColor`,
+	// `CustomTabNavigationBarController`, `WebappActivity.getBackgroundDrawable`
+	// in Chromium). The page's two `theme-color` tags colour the status bar
+	// once it is open (`brand.ts`).
 	theme_color: brand.colors.light.brand,
 	background_color: brand.colors.background,
 	display: 'standalone',
