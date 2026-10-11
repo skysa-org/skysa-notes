@@ -238,7 +238,9 @@ NOTES_BRAND="$PWD/../my-brand/brand.json" pnpm run deploy
 (The file itself is plain JSON; the comments are only for this page.)
 
 - `brand` fills buttons and colours links, `onBrand` is the text on it, and
-  `theme` colours the browser's and the installed app's title bar. Pick
+  `theme` colours the browser's and the installed app's title bar. The light
+  theme's `brand` also colours the installed app's navigation bar on Android,
+  in both themes, since an app's manifest has one colour for it. Pick
   `brand` and `onBrand` with enough contrast between them, and `brand`
   against the page, in each theme.
 - The icon folder holds six PNGs at these names and sizes: `favicon-16x16.png`,

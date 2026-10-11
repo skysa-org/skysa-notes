@@ -44,7 +44,9 @@ const MONO_STACK = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace";
 const colour = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a colour is #RRGGBB');
 
 const scheme = z.strictObject({
-	brand: colour.describe('Filled buttons, links and the progress bar.'),
+	brand: colour.describe(
+		"Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android."
+	),
 	onBrand: colour.describe('Text on `brand`.'),
 	theme: colour.describe("The browser's and the installed app's title bar."),
 });

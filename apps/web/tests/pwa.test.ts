@@ -120,14 +120,11 @@ describe('the web app manifest', () => {
 		expect(manifest.background_color).toBeDefined();
 	});
 
-	// Chrome paints an installed app's navigation bar with `theme_color`, and
-	// a manifest has no dark variant: the light colour was a pale bar under the
-	// app in dark mode. Without one, the bar follows the phone's theme.
-	it("names no theme colour, so the navigation bar follows the phone's theme", () => {
-		expect(manifest.theme_color).toBeUndefined();
-		// Named all the same: vite-plugin-pwa assigns the manifest over its own
-		// defaults, and a key left out would get the plugin's green.
-		expect(Object.hasOwn(manifest, 'theme_color')).toBe(true);
+	// Chrome paints an installed app's navigation bar with `theme_color`, one
+	// value for both themes. Without one, the bar showed the splash's light
+	// background under the app in dark mode (2026-10-11).
+	it("colours the navigation bar with the brand's own colour", () => {
+		expect(manifest.theme_color).toBe(brand.colors.light.brand);
 	});
 });
 
