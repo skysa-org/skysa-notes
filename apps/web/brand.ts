@@ -45,7 +45,7 @@ const colour = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'a colour is #RRGGBB');
 
 const scheme = z.strictObject({
 	brand: colour.describe(
-		"Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android."
+		"Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android 14 and older."
 	),
 	onBrand: colour.describe('Text on `brand`.'),
 	theme: colour.describe("The browser's and the installed app's title bar."),
@@ -93,7 +93,9 @@ export const brandSchema = z.strictObject({
 	colors: z.strictObject({
 		light: scheme,
 		dark: scheme,
-		background: colour.describe('The splash screen behind the icon while the app opens.'),
+		background: colour.describe(
+			"The splash screen behind the icon while the app opens, and the installed app's navigation bar on Android 15 and later, in both themes."
+		),
 	}),
 	icons: z
 		.string()
