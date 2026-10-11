@@ -30,7 +30,7 @@
 						"brand": {
 							"type": "string",
 							"pattern": "^#[0-9a-fA-F]{6}$",
-							"description": "Filled buttons, links and the progress bar."
+							"description": "Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android."
 						},
 						"onBrand": {
 							"type": "string",
@@ -52,7 +52,7 @@
 						"brand": {
 							"type": "string",
 							"pattern": "^#[0-9a-fA-F]{6}$",
-							"description": "Filled buttons, links and the progress bar."
+							"description": "Filled buttons, links and the progress bar. The light theme's is also the installed app's navigation bar on Android."
 						},
 						"onBrand": {
 							"type": "string",
