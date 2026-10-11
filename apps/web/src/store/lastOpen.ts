@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
 import { getNote, listNotes } from './notes.js';
-import { pinnedFirst } from './pins.js';
+import { type FolderNode, listedUnder } from './tree.js';
 
 /**
  * Where the user was, per source, on this device: the notebook open last, and
@@ -147,19 +147,29 @@ export interface PickNoteInput {
 	 * under load, to lose the race a notebook just moved has to win.
 	 */
 	pinned?: ReadonlySet<string> | undefined;
+	/**
+	 * The source's notebooks, the pinned first at each level (`withPins`), in
+	 * whose order the notes of the notebooks inside this one are listed. Handed
+	 * in for the reason `pinned` is.
+	 */
+	tree?: readonly FolderNode[] | undefined;
 }
 
 /**
- * Which note should be open, or `null` for none: the notebook holds nothing.
+ * Which note should be open, or `null` for none: the notebook holds nothing,
+ * nor does any notebook inside it.
  *
  * The note the URL names, for as long as it is there to show — wherever it is,
  * since the user put it there. Otherwise the one open last in this notebook,
  * if it is still there and still in it. Otherwise the notebook's first, as its
- * list has it: a pinned note before the rest (`store/pins.ts`).
+ * list has it (`listedUnder`): its own notes before those of the notebooks
+ * inside it, and a pinned notebook or note before the rest (`store/pins.ts`).
+ * A notebook that holds only notebooks opens on the first note the user sees
+ * listed under it, not a new one beside them.
  */
 export const pickNote = async (
 	db: NotesDatabase,
-	{ connectionId, folderPath, open, remembered, pinned }: PickNoteInput
+	{ connectionId, folderPath, open, remembered, pinned, tree }: PickNoteInput
 ): Promise<string | null> => {
 	const live = async (id: string | undefined) => {
 		if (id === undefined) return undefined;
@@ -170,8 +180,11 @@ export const pickNote = async (
 	if ((await live(open)) !== undefined) return open ?? null;
 	const last = await live(remembered);
 	if (last !== undefined && noteIsUnder(last.path, folderPath)) return last.id;
-	const notes = await listNotes(db, { connectionId, folderPath });
-	const [first] =
-		pinned === undefined ? notes : pinnedFirst(notes, (note) => pinned.has(note.id));
+	// The same read as the notebook's own notes alone: `listNotes` reads every
+	// note in the source and filters.
+	const notes = (await listNotes(db, { connectionId })).filter((note) =>
+		noteIsUnder(note.path, folderPath)
+	);
+	const [first] = listedUnder(notes, folderPath, tree, (note) => pinned?.has(note.id) === true);
 	return first?.id ?? null;
 };

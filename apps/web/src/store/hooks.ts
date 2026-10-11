@@ -326,6 +326,7 @@ export const useNoteToOpen = ({
 	open,
 	remembered,
 	pinned,
+	tree,
 	ready,
 }: {
 	connectionId: string | undefined;
@@ -334,6 +335,11 @@ export const useNoteToOpen = ({
 	remembered: string | undefined;
 	/** The source's pinned notes, the first of which a notebook opens on. */
 	pinned: ReadonlySet<string> | undefined;
+	/**
+	 * The source's notebooks as the sidebar has them (`usePinnedTree`), in
+	 * whose order a notebook with no notes of its own opens on one inside it.
+	 */
+	tree: readonly FolderNode[] | undefined;
 	/** The remembered place has been read; until then `remembered` means nothing. */
 	ready: boolean;
 }): NoteToOpen | undefined =>
@@ -345,9 +351,10 @@ export const useNoteToOpen = ({
 			open,
 			remembered,
 			pinned,
+			tree,
 		});
 		return { folder, open, pick };
-	}, [connectionId, folder, open, remembered, pinned, ready]);
+	}, [connectionId, folder, open, remembered, pinned, tree, ready]);
 
 /** The mode a note opens in unless it remembers one of its own. */
 export const useDefaultEditorMode = (): EditorMode | undefined =>

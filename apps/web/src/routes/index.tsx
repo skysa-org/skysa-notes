@@ -109,7 +109,13 @@ import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { titleShown } from '../store/titles.js';
-import { findFolder, type FolderNode, listedUnder, selectedFolderPath } from '../store/tree.js';
+import {
+	findFolder,
+	type FolderNode,
+	listedUnder,
+	notesUnder,
+	selectedFolderPath,
+} from '../store/tree.js';
 import { PROVIDER_LABELS, sourceName, tabName } from '../sync/account.js';
 import {
 	findNamedPlace,
@@ -990,6 +996,7 @@ const useOpenPlace = ({
 		open: noteId,
 		remembered,
 		pinned: pinnedNotes,
+		tree,
 		ready: lastOpen !== undefined && settled,
 	});
 
@@ -1078,6 +1085,7 @@ const useOpenPlace = ({
 			open: noteId,
 			remembered,
 			pinned: pinnedNotes,
+			tree,
 		}).then((again) => {
 			if (asking.current) show(again ?? blank());
 		});
@@ -1091,6 +1099,7 @@ const useOpenPlace = ({
 		requestedFolder,
 		remembered,
 		pinnedNotes,
+		tree,
 		router,
 		go,
 		standing,
@@ -1711,20 +1720,19 @@ const Home = () => {
 
 	/**
 	 * What a compact window shows once a notebook is chosen: its notes, to
-	 * choose one from next, as a source chosen goes on to its notebooks. Not
-	 * for a notebook with no notes, where a note begins and is what shows
-	 * (`useBegunInView`) — the notes would be opened only to be shut on it.
+	 * choose one from next, as a source chosen goes on to its notebooks. So
+	 * does a notebook whose notes are all in notebooks inside it: they are its
+	 * list, and the note it opens on waits behind them (`pickNote`) rather than
+	 * showing in their place. Not for a notebook with no notes in it at any
+	 * depth, where a note begins and is what shows (`useBegunInView`) — the
+	 * notes would be opened only to be shut on it.
 	 */
-	const afterFolder = (path: string): Pane | null =>
-		compact &&
-		!(
-			path !== ROOT &&
-			tree !== undefined &&
-			findFolder(tree, path)?.noteCount === 0 &&
-			canBegin(source, held)
-		)
-			? 'notes'
-			: null;
+	const afterFolder = (path: string): Pane | null => {
+		if (!compact) return null;
+		const node = path === ROOT || tree === undefined ? undefined : findFolder(tree, path);
+		const empty = node !== undefined && notesUnder(node) === 0;
+		return empty && canBegin(source, held) ? null : 'notes';
+	};
 
 	/**
 	 * How many times an empty state has asked for a new notebook. The field is
