@@ -87,6 +87,9 @@ const onApple = (): boolean => {
 	return /mac|iphone|ipad|ipod/i.test(`${modern} ${navigator.platform} ${navigator.userAgent}`);
 };
 
+/** The key `Mod` is on the user's own keyboard: ⌘ on a Mac, Ctrl elsewhere. */
+export const modKeyLabel = (apple = onApple()): string => (apple ? '⌘' : t('shell.keys.ctrl'));
+
 // The arrows and Enter are symbols, as are the Apple modifiers below: the same
 // in every language. The keys that are words come from the catalog.
 const keyLabels = (): Record<string, string> => ({
@@ -104,7 +107,7 @@ export const chordLabel = (chord: Chord, apple = onApple()): string => {
 	const key =
 		keyLabels()[chord.key] ?? (chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
 	const parts = [
-		...(chord.mod ? [apple ? '⌘' : t('shell.keys.ctrl')] : []),
+		...(chord.mod ? [modKeyLabel(apple)] : []),
 		...(chord.alt ? [apple ? '⌥' : t('shell.keys.alt')] : []),
 		...(chord.shift ? [apple ? '⇧' : t('shell.keys.shift')] : []),
 		key,

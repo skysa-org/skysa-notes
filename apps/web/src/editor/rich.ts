@@ -56,6 +56,7 @@ import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
 import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } from './image.js';
 import { createLanguageSource } from './languages.js';
+import { linkChipPlugin, openLinkAtCursor } from './linkRich.js';
 import { richWithoutNul } from './noNul.js';
 import { tailPlugin } from './tail.js';
 import { taskPlugin, toggleTaskCommand } from './tasks.js';
@@ -514,6 +515,10 @@ export const createRichEditor = ({
 		// preset draws a task item and offers no way to tick one.
 		.use($prose(() => taskPlugin))
 		.use($prose(() => keymap({ 'Mod-Enter': toggleTaskCommand })))
+		// A link opened in the browser: its chip, Cmd- or Ctrl-click, and
+		// Alt+Enter (`linkRich.ts`).
+		.use($prose(linkChipPlugin))
+		.use($prose(() => keymap({ 'Alt-Enter': openLinkAtCursor })))
 		// The caret shown above a phone's keyboard as it comes up (`aboveKeyboard.ts`).
 		.use($prose(richCaretAboveKeyboard))
 		.use(onStateChange === undefined ? [] : $prose(() => watchState(onStateChange)))

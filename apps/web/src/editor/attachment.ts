@@ -10,6 +10,7 @@ import { t } from '../i18n/t.js';
 import { attachHostCtx, type AttachmentHost } from './attachHost.js';
 import { type FileBrowser, openFile, saveFile } from './fileActions.js';
 import { FILE_ICONS, iconElement, type IconName } from './icons.js';
+import { opensOnClick } from './links.js';
 
 /**
  * A file beside a note that is not a picture (#187): `[Q3 report.pdf](q3-report-1a2b3c4d.pdf)`
@@ -148,9 +149,6 @@ export const barButton = (icon: IconName, label: string): HTMLButtonElement => {
 /** Open the file a chip names. */
 const open = (host: AttachmentHost, node: ProseNode, browser?: FileBrowser): Promise<void> =>
 	openFile({ host, href: attributeOf(node, 'href'), label: shownName(node), browser });
-
-/** A click that opens a chip rather than selecting it: Cmd or Ctrl held. */
-const opensOnClick = (event: MouseEvent): boolean => event.metaKey || event.ctrlKey;
 
 /** What the keyboard can do with a chip, or a picture, selected whole (`selectedKey`). */
 export interface SelectedKeys {

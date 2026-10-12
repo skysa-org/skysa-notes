@@ -181,6 +181,16 @@ export const editor = {
 		/** On the bar under a chip, or over a picture, selected whole. */
 		remove: 'Remove from note',
 	},
+	/** A link the cursor is in, and the chip under it that opens it in the browser. */
+	link: {
+		/** The chip, as a screen reader names it: `{address}` is where the link goes, shortened. */
+		open: 'Open {address}',
+		/**
+		 * On the chip, with a mouse or a trackpad: the click that opens a link
+		 * without it. `{key}` is ⌘ on a Mac and Ctrl elsewhere.
+		 */
+		clickHint: '{key}+click',
+	},
 	/**
 	 * Why a file a chip names could not be opened or saved: `{name}` is the
 	 * name the chip shows. `unnamed` is for a chip that shows none.
