@@ -82,6 +82,12 @@ export type PreviewEmbed = Readonly<
 export interface PreviewRun {
 	readonly text: string;
 	readonly marks: readonly PreviewMark[];
+	/**
+	 * Where a link's words go, as the link has it: what a scratch card opens
+	 * when they are pressed. Not a reference's, whose address is in a
+	 * definition elsewhere in the note.
+	 */
+	readonly href?: string;
 	/** A picture or a chip, where the run is one: drawn whole, or not at all. */
 	readonly embed?: PreviewEmbed;
 }
@@ -114,26 +120,28 @@ export interface PreviewLine {
 type LineKind = Omit<PreviewLine, 'runs'>;
 
 /** A run of inline content as it looks on screen, in runs of one style each. */
-const inline = (node: PhrasingContent, marks: readonly PreviewMark[]): PreviewRun[] => {
-	const inside = (mark: PreviewMark | undefined) =>
+const inline = (
+	node: PhrasingContent,
+	marks: readonly PreviewMark[],
+	href?: string
+): PreviewRun[] => {
+	const inside = (mark: PreviewMark, to: string | undefined) =>
 		'children' in node
 			? node.children.flatMap((child) =>
-					inline(
-						child,
-						mark === undefined || marks.includes(mark) ? marks : [...marks, mark]
-					)
+					inline(child, marks.includes(mark) ? marks : [...marks, mark], to)
 				)
 			: [];
+	const linked = href === undefined ? {} : { href };
 	switch (node.type) {
 		// Inline html is shown as written, as the rich editor shows it: an atom
 		// holding the tag.
 		case 'text':
 		case 'html':
-			return [{ text: node.value, marks }];
+			return [{ text: node.value, marks, ...linked }];
 		case 'inlineCode':
-			return [{ text: node.value, marks: [...marks, 'code'] }];
+			return [{ text: node.value, marks: [...marks, 'code'], ...linked }];
 		case 'break':
-			return [{ text: '\n', marks }];
+			return [{ text: '\n', marks, ...linked }];
 		case 'image':
 			return [
 				{
@@ -151,15 +159,15 @@ const inline = (node: PhrasingContent, marks: readonly PreviewMark[]): PreviewRu
 		case 'footnoteReference':
 			return [{ text: `[^${node.label ?? node.identifier}]`, marks }];
 		case 'link':
-			return isChip(node) ? [chip(node, marks)] : inside('link');
+			return isChip(node) ? [chip(node, marks)] : inside('link', node.url);
 		case 'emphasis':
-			return inside('emphasis');
+			return inside('emphasis', href);
 		case 'strong':
-			return inside('strong');
+			return inside('strong', href);
 		case 'delete':
-			return inside('delete');
+			return inside('delete', href);
 		case 'linkReference':
-			return inside('link');
+			return inside('link', undefined);
 		default:
 			return [];
 	}

@@ -21,6 +21,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { Icon } from '../editor/icons.js';
+import { openableLink, openLink } from '../editor/links.js';
 import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { keepRows } from '../store/kept.js';
@@ -196,13 +197,33 @@ const MARK_TAG = {
 	code: 'code',
 } as const satisfies Record<Exclude<PreviewMark, 'link'>, string>;
 
-/** Words in their marks. A link is only drawn as one: the card is a button, and one press opens it. */
-const marked = (text: string, marks: readonly PreviewMark[]): ReactNode =>
+/**
+ * Words in their marks. A link is drawn as words that say where they go, not
+ * as a link: the card is a button, and a link inside a button is not one a
+ * page may have. The card's press opens it instead (`linkPressed`), where it
+ * goes somewhere this app opens (`openableLink`); one that goes nowhere it
+ * opens is words, and a press on it opens the card.
+ */
+const marked = (text: string, marks: readonly PreviewMark[], href?: string): ReactNode =>
 	marks.reduce<ReactNode>((inside, mark) => {
-		if (mark === 'link') return <span className="scratch-card-link">{inside}</span>;
+		if (mark === 'link') {
+			const to = href === undefined ? undefined : openableLink(href)?.href;
+			return (
+				<span className="scratch-card-link" data-href={to} title={to}>
+					{inside}
+				</span>
+			);
+		}
 		const Tag = MARK_TAG[mark];
 		return <Tag>{inside}</Tag>;
 	}, text);
+
+/** The link a press on a card landed on, where it is one to open (`marked`). */
+const linkPressed = (target: EventTarget): URL | undefined => {
+	const words = target instanceof Element ? target.closest<HTMLElement>('[data-href]') : null;
+	const href = words?.dataset.href;
+	return href === undefined ? undefined : openableLink(href);
+};
 
 /** A list's bullets by depth, as a browser draws them: disc, circle, square. */
 const BULLETS = ['•', '◦', '▪'] as const;
@@ -247,7 +268,7 @@ const CardLine = ({ line }: { line: PreviewLine }) => {
 				{line.runs.map((run, at) => (
 					<Fragment key={at}>
 						{run.embed === undefined ? (
-							marked(run.text, run.marks)
+							marked(run.text, run.marks, run.href)
 						) : (
 							<CardEmbed embed={run.embed} words={run.text} />
 						)}
@@ -348,8 +369,12 @@ const CardView = ({
 				className="scratch-card-open"
 				data-card={row.id}
 				aria-busy={pressed || undefined}
-				onClick={() => {
-					onOpen(row);
+				onClick={(event) => {
+					// A link's words open the link, in the browser; anywhere
+					// else, and Enter, opens the card.
+					const link = linkPressed(event.target);
+					if (link === undefined) onOpen(row);
+					else openLink(link);
 				}}
 			>
 				{named && <span className="scratch-card-title">{titleShown(note.title)}</span>}

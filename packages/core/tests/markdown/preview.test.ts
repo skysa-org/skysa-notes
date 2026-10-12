@@ -274,6 +274,30 @@ describe('how each line is set', () => {
 		]);
 	});
 
+	it('says where a link goes on each run of its words, and on no other', () => {
+		const hrefs = (body: string) =>
+			previewBlocks(body).map((line) => line.runs.map((run) => [run.text, run.href]));
+		expect(hrefs('See [the **bay** map](https://example.com/bay) today\n')).toEqual([
+			[
+				['See ', undefined],
+				['the ', 'https://example.com/bay'],
+				['bay', 'https://example.com/bay'],
+				[' map', 'https://example.com/bay'],
+				[' today', undefined],
+			],
+		]);
+		// A reference's address is in its definition, and a chip is a file.
+		expect(
+			hrefs('[ref][1] and [Q3.pdf](q3-1a2b3c4d.pdf)\n\n[1]: https://example.com\n')
+		).toEqual([
+			[
+				['ref', undefined],
+				[' and ', undefined],
+				['Q3.pdf', undefined],
+			],
+		]);
+	});
+
 	it('keeps a mark inside another, once', () => {
 		expect(runs('**bold *and slanted* bold**\n')).toEqual([
 			[

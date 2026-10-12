@@ -3,6 +3,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
+import { Autolink } from '@lezer/markdown';
 import { useEffect, useRef } from 'react';
 
 import { rawCaretAboveKeyboard } from './aboveKeyboard.js';
@@ -13,6 +14,7 @@ import { useOfferFindTarget } from './findTarget.js';
 import { CODE_HIGHLIGHTER } from './highlight.js';
 import { useIncomingBody } from './incoming.js';
 import { markdownCodeLanguages } from './languages.js';
+import { rawLinks } from './linkRaw.js';
 import { rawWithoutNul } from './noNul.js';
 import { rawAttachments } from './rawAttach.js';
 
@@ -90,6 +92,8 @@ export const RawEditor = ({
 				extensions: [
 					lineNumbers(),
 					undoHistory.of(history()),
+					// Ahead of the default keymap, for Alt+Enter (`linkRaw.ts`).
+					rawLinks(),
 					keymap.of([...defaultKeymap, ...historyKeymap]),
 					// The inside of a fence is another language, and raw mode
 					// colours it with the same grammars and the same token
@@ -98,7 +102,11 @@ export const RawEditor = ({
 					// black and white: raw mode is the mode where the characters
 					// are the formatting, and `CODE_HIGHLIGHTER` deliberately
 					// names no tag that `lang-markdown` emits.
-					markdown({ codeLanguages: markdownCodeLanguages() }),
+					//
+					// A bare `https://…` is a link, as remark-gfm reads it in rich
+					// text (`linkRaw.ts`). GFM's autolinks alone: the rest of GFM
+					// would also change what Enter does in a task list.
+					markdown({ codeLanguages: markdownCodeLanguages(), extensions: [Autolink] }),
 					syntaxHighlighting(CODE_HIGHLIGHTER),
 					findExtension(),
 					rawWithoutNul(),

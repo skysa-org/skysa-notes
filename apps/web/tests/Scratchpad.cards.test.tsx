@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ScratchModal, Scratchpad, type ScratchpadProps } from '../src/components/Scratchpad.js';
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { CARD_WORDS } from '../src/store/scratchpad.js';
+import { linksOpened as opened } from './linksOpened.js';
 
 /**
  * The scratchpad on screen (docs/ARCHITECTURE.md §7, "The scratchpad"): the
@@ -147,8 +148,48 @@ describe('what a card shows', () => {
 		expect(words?.querySelector('em')?.textContent).toBe('slanted');
 		expect(words?.querySelector('code')?.textContent).toBe('code');
 		expect(words?.querySelector('.scratch-card-link')?.textContent).toBe('a link');
-		// Words only: one press opens the card, wherever on it.
+		// Words that say where they go, not a link: a link inside the card's
+		// button is not one a page may have.
 		expect(words?.querySelector('a')).toBeNull();
+		expect(words?.querySelector('.scratch-card-link')?.getAttribute('data-href')).toBe(
+			'https://example.com/'
+		);
+	});
+
+	describe('with a link in it', () => {
+		it('opens the link in the browser when its words are pressed, and not the card', () => {
+			const seen = opened();
+			const calls = renderPad({
+				notes: [
+					card('1', { body: 'See [the **bay** map](https://example.com/bay) today\n' }),
+				],
+			});
+			fireEvent.click(screen.getByText('bay'));
+			expect(seen).toEqual(['https://example.com/bay']);
+			expect(calls.onOpen).not.toHaveBeenCalled();
+		});
+
+		it('opens the card when pressed anywhere else', () => {
+			const seen = opened();
+			const note = card('1', { body: 'See [the map](https://example.com/bay) today\n' });
+			const calls = renderPad({ notes: [note] });
+			fireEvent.click(screen.getByText('today', { exact: false }));
+			expect(seen).toEqual([]);
+			expect(calls.onOpen).toHaveBeenCalledWith(note);
+		});
+
+		it('is words, and opens the card, where it goes nowhere this app opens', () => {
+			const seen = opened();
+			const note = card('1', {
+				body: '[A note](other.md) and [a script](javascript:alert(1))\n',
+			});
+			const calls = renderPad({ notes: [note] });
+			const links = [...document.querySelectorAll('.scratch-card-link')];
+			expect(links.map((link) => link.getAttribute('data-href'))).toEqual([null, null]);
+			fireEvent.click(screen.getByText('a script'));
+			expect(seen).toEqual([]);
+			expect(calls.onOpen).toHaveBeenCalledWith(note);
+		});
 	});
 
 	it('draws a picture where it is in the note, and says it in the card’s name', async () => {
