@@ -15,9 +15,9 @@ import {
 import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
+import { type LiveEdit, type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
-import { nameless, titleShown, wordsShown } from '../store/titles.js';
+import { nameless, shownName } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useFontsStatus, useMediaQuery } from './layout.js';
 import { middleEllipsis } from './middleEllipsis.js';
@@ -435,6 +435,19 @@ const PaneTrigger = ({
 );
 
 /**
+ * What the bar calls the note open: its name as it is typed, and with none its
+ * first words as they were last stored (`shownName`). The bar is as wide as
+ * what it says, and the panels open out of where its triggers are, which the
+ * shell holds (`onOrigins`): words that changed with every keystroke drew the
+ * whole shell again with each.
+ */
+const barName = (note: NoteRecord | undefined, edit: LiveEdit | undefined) => {
+	if (note === undefined) return undefined;
+	const shown = shownNote(note, edit);
+	return shownName(nameless(shown) ? note : shown);
+};
+
+/**
  * A scratch card's name, open over the whole window: said, as a note's would
  * be, but not a dropdown, since a card is not one of a list to choose from.
  * Back, or its Close, is the way out of it.
@@ -507,16 +520,13 @@ export const CompactBar = ({
 	const renaming = useRenaming(renamings);
 	const source = useShowingSource(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
-	const shown = note === undefined ? undefined : shownNote(note, edit);
-	// A note with no name goes by its first words, cut at their end rather than
-	// in their middle: it is how they start that says which note it is.
-	const words =
-		shown === undefined ? undefined : wordsShown(shown, { keep: shown.body === note?.body });
-	const title =
-		shown === undefined ? t('shell.compact.noNote') : (words ?? titleShown(shown.title));
-	const keep = words === undefined ? '' : undefined;
+	const name = barName(note, edit);
+	const title = name?.text ?? t('shell.compact.noNote');
+	// Words are cut at their end, since how they start is what says which note
+	// it is; a name in its middle, its end telling two alike apart.
+	const keep = name?.from === 'words' ? undefined : '';
 	// A card with neither a name nor words is said by "Scratchpad" alone.
-	const card = scratchpad && shown !== undefined && (words !== undefined || !nameless(shown));
+	const card = scratchpad && name !== undefined && name.from !== 'nothing';
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);

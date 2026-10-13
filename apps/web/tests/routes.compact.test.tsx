@@ -1,3 +1,4 @@
+import { EditorView } from '@codemirror/view';
 import {
 	createMemoryHistory,
 	createRouter,
@@ -222,6 +223,36 @@ describe('the compact bar', () => {
 		expect(noteTrigger().querySelector('.compact-picker-label')?.textContent).toBe(
 			'Remember to ask about the quarterly…'
 		);
+	});
+
+	it('names a note with no name by the words it was last stored with, not as they are typed', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', body: 'Pick up' });
+		await openApp();
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Pick up');
+		});
+
+		act(() => {
+			const editor = EditorView.findFromDOM(document.body);
+			editor?.dispatch({
+				changes: { from: editor.state.doc.length, insert: ' the parcel' },
+				userEvent: 'input.type',
+			});
+		});
+		// The bar moving with each keystroke moved the panels' origins, and
+		// drew the whole shell again with every one.
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		});
+		expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Pick up');
+
+		act(() => {
+			window.dispatchEvent(new Event('pagehide'));
+		});
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Pick up the parcel');
+		});
 	});
 
 	it('names a note with no name and no words “Untitled”, as before', async () => {

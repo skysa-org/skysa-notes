@@ -154,10 +154,11 @@ describe('deleting a note', () => {
 		});
 	});
 
-	it('says where it went when its source was disconnected meanwhile, and what can be done there', async () => {
-		const user = userEvent.setup();
-		const held = (id: string) =>
-			db.credentials.put({ id, credential: `sk1_${id}`, provider: 'dropbox', createdAt: 0 });
+	const held = (id: string) =>
+		db.credentials.put({ id, credential: `sk1_${id}`, provider: 'dropbox', createdAt: 0 });
+
+	/** Ada's Dropbox, the source showing. */
+	const connectAda = async () => {
 		await held('c-ada');
 		await bindConnection(db, {
 			connectionId: 'c-ada',
@@ -166,13 +167,16 @@ describe('deleting a note', () => {
 			displayName: 'ada@example.com',
 		});
 		await finishImport(db, 'c-ada');
-		const { notes } = await openApp('Alpha');
-		const id = notes[0]?.id ?? '';
-		// The remote has it, so its delete is owed — which is what keeps the
-		// tombstone, and the source, on the device through the disconnect.
-		await db.notes.update(['c-ada', id], { remoteId: 'ada:1', dirty: 0 });
-		const notice = await openAndDelete(user, 'Alpha');
-		// Inside the undo window: another source connected, and Ada's let go.
+	};
+
+	/**
+	 * Its note on the remote, so its delete is owed — which is what keeps the
+	 * tombstone, and the source, on the device through the disconnect.
+	 */
+	const sent = (id: string) => db.notes.update(['c-ada', id], { remoteId: 'ada:1', dirty: 0 });
+
+	/** Inside the undo window: another source connected, and Ada's let go. */
+	const letAdaGo = async () => {
 		await held('c-bob');
 		await act(async () => {
 			await bindConnection(db, {
@@ -183,6 +187,16 @@ describe('deleting a note', () => {
 			await finishImport(db, 'c-bob');
 			await detachConnection(db, { connectionId: 'c-ada' });
 		});
+	};
+
+	it('says where it went when its source was disconnected meanwhile, and what can be done there', async () => {
+		const user = userEvent.setup();
+		await connectAda();
+		const { notes } = await openApp('Alpha');
+		const id = notes[0]?.id ?? '';
+		await sent(id);
+		const notice = await openAndDelete(user, 'Alpha');
+		await letAdaGo();
 
 		await user.click(within(notice).getByRole('button', { name: 'Undo' }));
 
@@ -197,6 +211,27 @@ describe('deleting a note', () => {
 		// In its own source — not Bob's, and not the device's own pile.
 		expect(await db.notes.get(['c-ada', id])).toMatchObject({ deletedLocally: 0 });
 		expect(await db.notes.where('connectionId').notEqual('c-ada').count()).toBe(0);
+	});
+
+	it('says a note with no name is back by its first words', async () => {
+		const user = userEvent.setup();
+		await connectAda();
+		await openApp();
+		const note = await createNote(db, { folderPath: 'Work', body: 'Pick up the parcel\n' });
+		await sent(note.id);
+		await user.click(await screen.findByRole('button', { name: 'Options for “Untitled”' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+		const notice = await screen.findByRole('status');
+		await letAdaGo();
+
+		await user.click(within(notice).getByRole('button', { name: 'Undo' }));
+
+		const back = await screen.findByRole('alert');
+		expect(
+			within(back).getByText(
+				'“Pick up the parcel” is back, in Dropbox · ada@example.com, which is disconnected. Reconnect it, or download the note.'
+			)
+		).toBeTruthy();
 	});
 
 	it('can be dismissed', async () => {

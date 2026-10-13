@@ -2052,8 +2052,8 @@ const Home = () => {
 					compact ? (
 						<CompactBar
 							folder={folder}
-							// In the scratchpad, a card's name after "Scratchpad",
-							// and only a card's that has one.
+							// In the scratchpad, the card open, named after
+							// "Scratchpad" if it has a name or words to go by.
 							note={scratch.barNote(openNote)}
 							scratchpad={inScratchpad}
 							liveEdits={liveEdits}

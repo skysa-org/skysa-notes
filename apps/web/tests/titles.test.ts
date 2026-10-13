@@ -2,7 +2,7 @@ import { deriveTitle, UNTITLED_TITLE } from '@skysa/core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
-import { nameShown, titleShown, wordsShown } from '../src/store/titles.js';
+import { nameShown, shownName, titleShown } from '../src/store/titles.js';
 
 // Another language's words, to tell what is shown from what is kept.
 vi.mock('../src/i18n/t.js', () => ({ t: (key: string) => `«${key}»` }));
@@ -47,9 +47,19 @@ describe('nameShown', () => {
 		expect(nameShown(note({ body }))).toBe('Remember to ask about the quarterly…');
 	});
 
-	it('keeps a line that ends where the cut is whole, and cuts one long word where it reaches', () => {
+	it('keeps a word the cut ends on whole, and cuts one long word where it reaches', () => {
 		const exactly = 'Remember to ask about the quarterly fore';
 		expect(nameShown(note({ body: `${exactly} cast\n` }))).toBe(`${exactly}…`);
+		expect(nameShown(note({ body: `${exactly}, then more\n` }))).toBe(`${exactly}…`);
+		expect(nameShown(note({ body: `${exactly}. Then more\n` }))).toBe(`${exactly}…`);
+		// An apostrophe inside a word does not end it.
+		expect(nameShown(note({ body: 'Remember to ask about the quarterly don’t\n' }))).toBe(
+			'Remember to ask about the quarterly…'
+		);
+		// Nor is punctuation left before the "…".
+		expect(nameShown(note({ body: 'Remember to ask about the quarterly, forecasts\n' }))).toBe(
+			'Remember to ask about the quarterly…'
+		);
 		const address = `https://example.com/${'a'.repeat(60)}`;
 		expect(nameShown(note({ body: `${address}\n` }))).toBe(`${address.slice(0, 40)}…`);
 	});
@@ -59,13 +69,44 @@ describe('nameShown', () => {
 		expect(nameShown(note({ body }))).toBe(`${'a'.repeat(39)}👩‍👩‍👧…`);
 	});
 
+	it('cuts a line of thousands as one of forty', () => {
+		const line = `${'word '.repeat(20_000)}end`;
+		expect(nameShown(note({ body: `${line}\n` }))).toBe(`${'word '.repeat(8).trimEnd()}…`);
+	});
+
 	it('is “Untitled” for a note with no words', () => {
 		expect(nameShown(note({ body: '' }))).toBe('«notes.untitled»');
 		expect(nameShown(note({ body: '![](photo.png)\n' }))).toBe('«notes.untitled»');
-		expect(wordsShown(note({ body: '' }))).toBeUndefined();
+		expect(shownName(note({ body: '' })).from).toBe('nothing');
 	});
 
-	it('is the title of a note with a name', () => {
+	it('goes by a picture’s words, as its row in the list does', () => {
+		expect(nameShown(note({ body: '![Sunset at the beach](sunset.png)\n' }))).toBe(
+			'Sunset at the beach'
+		);
+	});
+
+	it('keeps a first line that says “Untitled”, which is the user’s own', () => {
+		expect(nameShown(note({ body: 'Untitled\n\nSecond line\n' }))).toBe('Untitled');
+		expect(nameShown(note({ title: 'untitled', body: 'untitled\n\nSecond\n' }))).toBe(
+			'untitled'
+		);
+	});
+
+	it('is the title of a note with a name, “Untitled” too if the user gave it', () => {
+		expect(
+			nameShown(
+				note({
+					path: 'Work/foo.md',
+					frontmatter: 'title: Untitled\n',
+					body: 'Some words\n',
+				})
+			)
+		).toBe('«notes.untitled»');
+		expect(shownName(note({ path: 'Work/q3.md', title: 'Q3', body: 'Q3\n' })).from).toBe(
+			'name'
+		);
+
 		expect(nameShown(note({ path: 'Work/q3.md', title: 'Q3', body: 'Q3\n\nPlan\n' }))).toBe(
 			'Q3'
 		);
