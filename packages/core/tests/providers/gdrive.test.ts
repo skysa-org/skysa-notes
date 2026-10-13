@@ -1410,6 +1410,40 @@ describe('changes', () => {
 		]);
 	});
 
+	it('list the folders new to a round a level at a time, four at once, in the order one at a time gave', async () => {
+		// After notebooks moved on another device, every folder of them is new
+		// here, and asked about one after another, each was a request's wait.
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		const names = ['A', 'B', 'C', 'D', 'E', 'F'];
+		names.forEach((name) => {
+			world.add({ id: name, name, parent: world.root.id, mimeType: FOLDER });
+			world.add({ id: `${name}-top`, name: 'top.md', parent: name });
+			world.add({ id: `${name}-sub`, name: 'Sub', parent: name, mimeType: FOLDER });
+			world.add({ id: `${name}-deep`, name: 'deep.md', parent: `${name}-sub` });
+		});
+		const listing = { now: 0, most: 0 };
+		const provider = over(async (raw, init) => {
+			if (!CHILDREN.test(new URL(raw).searchParams.get('q') ?? '')) {
+				return world.doFetch(raw, init);
+			}
+			listing.now += 1;
+			listing.most = Math.max(listing.most, listing.now);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			listing.now -= 1;
+			return world.doFetch(raw, init);
+		});
+
+		const { entries } = await drainChanges(provider, cursor);
+
+		expect(listing.most).toBe(4);
+		// Each folder's notes, then those of the folders inside it, all the
+		// way down, before the next folder's: as a listing one at a time put them.
+		expect(livePaths(entries).filter((path) => path.endsWith('.md'))).toEqual(
+			names.flatMap((name) => [`${name}/top.md`, `${name}/Sub/deep.md`])
+		);
+	});
+
 	describe('with two items at one path', () => {
 		it('rename the later-made one beside it, and report both', async () => {
 			const world = driveWorld();
