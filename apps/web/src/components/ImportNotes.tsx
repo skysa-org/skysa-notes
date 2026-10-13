@@ -13,6 +13,7 @@ import {
 	ImportTooLargeError,
 	MAX_IMPORT_BYTES,
 	planImport,
+	planScratchImport,
 	readPicked,
 	type Skipped,
 	type SkipReason,
@@ -23,7 +24,8 @@ import { type OptionsMenuItem } from './OptionsMenu.js';
 /**
  * Notes brought in from a folder or a ZIP (docs/ARCHITECTURE.md §7, "Getting a
  * library in"), from the storage panel: picked, read, asked about — what comes
- * in, what stays out and why — and only then written.
+ * in, what stays out and why — and only then written. Into the source, or
+ * into its scratchpad as cards (`planScratchImport`).
  *
  * Asked about because it cannot be taken back in one step: a few thousand
  * notes in, each owed to the remote, is a few thousand notes to delete. And
@@ -36,10 +38,14 @@ const ACCEPT = '.zip,application/zip,.md,text/markdown';
 
 type Pick = typeof pickFiles;
 
+/** Where an import puts what it brings: where it was in what was picked, or the scratchpad. */
+export type ImportInto = 'library' | 'scratchpad';
+
 type Step =
 	| { kind: 'idle' }
+	| { kind: 'choosing'; into: ImportInto }
 	| { kind: 'reading' }
-	| { kind: 'asking'; plan: ImportPlan }
+	| { kind: 'asking'; plan: ImportPlan; into: ImportInto }
 	| { kind: 'importing' };
 
 /** "a, b, c and 4 more": enough to find them by, not a wall of paths. */
@@ -65,6 +71,13 @@ const WHY: Record<SkipReason, (count: number, names: string) => string> = {
 			megabytes: MAX_ATTACHMENT_BYTES / (1024 * 1024),
 		}),
 	unreadable: (count, names) => t('importing.leftOut.unreadable', { count, names }),
+	'in-folder': (count, names) =>
+		t('importing.leftOut.inFolder', {
+			count,
+			names,
+			importNotes: t('importing.importNotes'),
+		}),
+	'not-linked': (count, names) => t('importing.leftOut.notLinked', { count, names }),
 };
 
 /** One line per reason anything stays out, each naming a few of them. */
@@ -112,9 +125,22 @@ const whatComesIn = ({ notes, files, folders }: ImportPlan, label: string): stri
 	});
 };
 
+/** The same, for an import into the scratchpad: notes, and the files they link to. */
+const whatComesInScratchpad = ({ notes, files }: ImportPlan): string =>
+	files.length === 0
+		? t('importing.scratchpad.question.notes', { count: notes.length })
+		: t('importing.scratchpad.question.notesAndFiles', {
+				count: notes.length,
+				files: t('importing.counts.files', { count: files.length }),
+			});
+
 /** What an import would bring, as the user is asked about it. */
-export const importQuestion = (plan: ImportPlan, label: string): string[] => [
-	`${whatComesIn(plan, label)} ${t('importing.question.unchanged')}`,
+export const importQuestion = (
+	plan: ImportPlan,
+	label: string,
+	into: ImportInto = 'library'
+): string[] => [
+	`${into === 'scratchpad' ? whatComesInScratchpad(plan) : whatComesIn(plan, label)} ${t('importing.question.unchanged')}`,
 	...leftOut(plan.skipped),
 	...(plan.renamed.length > 0
 		? [
@@ -152,12 +178,16 @@ export const importOutcome = (outcome: ImportOutcome, label: string, syncs: bool
 	].join(' ');
 
 /** Said when what was picked holds nothing to bring in. */
-export const nothingToImport = (plan: ImportPlan): string =>
-	[t('importing.nothing'), ...leftOut(plan.skipped)].join(' ');
+export const nothingToImport = (plan: ImportPlan, into: ImportInto = 'library'): string =>
+	[
+		into === 'scratchpad' ? t('importing.scratchpad.nothing') : t('importing.nothing'),
+		...leftOut(plan.skipped),
+	].join(' ');
 
 /**
- * Picking, reading, asking and importing, for one source. `start` is called
- * from inside the press that asked for it, and opens the picker before
+ * Choosing, picking, reading, asking and importing, for one source. `choose`
+ * asks for a folder or files, since no browser's picker takes both; `start` is
+ * called from inside the press on one of those, and opens the picker before
  * anything is awaited: a browser opens one only for a page the user has just
  * acted on (`pickFiles`).
  *
@@ -171,19 +201,28 @@ export const useImportNotes = (
 	const [step, setStep] = useState<Step>({ kind: 'idle' });
 	const [said, setSaid] = useState<string | null>(null);
 
-	const start = (how: 'folder' | 'files') => {
+	const choose = (into: ImportInto) => {
 		setSaid(null);
+		setStep({ kind: 'choosing', into });
+	};
+
+	const start = (how: 'folder' | 'files', into: ImportInto) => {
+		setSaid(null);
+		setStep({ kind: 'idle' });
 		void pick(how === 'folder' ? { folder: true } : { accept: ACCEPT })
 			.then(async (files) => {
 				if (files.length === 0) return;
 				setStep({ kind: 'reading' });
-				const plan = planImport(await readPicked(files, how));
+				// A folder zipped is the folder, for the scratchpad, which takes
+				// only what is at the top of it.
+				const picked = await readPicked(files, how, { unwrap: into === 'scratchpad' });
+				const plan = into === 'scratchpad' ? planScratchImport(picked) : planImport(picked);
 				if (!bringsAnything(plan)) {
 					setStep({ kind: 'idle' });
-					setSaid(nothingToImport(plan));
+					setSaid(nothingToImport(plan, into));
 					return;
 				}
-				setStep({ kind: 'asking', plan });
+				setStep({ kind: 'asking', plan, into });
 			})
 			.catch((error: unknown) => {
 				setStep({ kind: 'idle' });
@@ -219,27 +258,38 @@ export const useImportNotes = (
 		setStep({ kind: 'idle' });
 	};
 
-	return { step, said, busy: step.kind !== 'idle', start, confirm, cancel, label };
+	return { step, said, busy: step.kind !== 'idle', choose, start, confirm, cancel, label };
 };
 
 export type Importing = ReturnType<typeof useImportNotes>;
 
-/** The two ways in, as items of a source's `⋯` menu. */
-export const importItems = (importing: Importing): OptionsMenuItem[] => [
+/**
+ * The ways in, as items of a source's `⋯` menu: into the source, and into its
+ * scratchpad while it is shown — into a hidden one, the notes would go out of
+ * sight as they came in.
+ */
+export const importItems = (
+	importing: Importing,
+	{ scratchpad }: { scratchpad: boolean }
+): OptionsMenuItem[] => [
 	{
-		label: t('importing.importFolder'),
+		label: t('importing.importNotes'),
 		onChoose: () => {
-			importing.start('folder');
+			importing.choose('library');
 		},
 		disabled: importing.busy,
 	},
-	{
-		label: t('importing.importFiles'),
-		onChoose: () => {
-			importing.start('files');
-		},
-		disabled: importing.busy,
-	},
+	...(scratchpad
+		? [
+				{
+					label: t('importing.importScratchpad'),
+					onChoose: () => {
+						importing.choose('scratchpad');
+					},
+					disabled: importing.busy,
+				},
+			]
+		: []),
 ];
 
 /**
@@ -265,15 +315,44 @@ export const ImportNotes = ({ importing }: { importing: Importing }) => {
 					{said}
 				</p>
 			)}
+			{step.kind === 'choosing' && (
+				<ConfirmDialog
+					title={
+						step.into === 'scratchpad'
+							? t('importing.importScratchpad')
+							: t('importing.importNotes')
+					}
+					confirmLabel={t('importing.choose.folder')}
+					tone="primary"
+					onConfirm={() => {
+						importing.start('folder', step.into);
+					}}
+					also={{
+						label: t('importing.choose.files'),
+						onChoose: () => {
+							importing.start('files', step.into);
+						},
+					}}
+					onCancel={importing.cancel}
+				>
+					{step.into === 'scratchpad'
+						? t('importing.choose.scratchpad')
+						: t('importing.choose.library')}
+				</ConfirmDialog>
+			)}
 			{step.kind === 'asking' && (
 				<ConfirmDialog
-					title={t('importing.title', { label: importing.label })}
+					title={
+						step.into === 'scratchpad'
+							? t('importing.scratchpad.title')
+							: t('importing.title', { label: importing.label })
+					}
 					confirmLabel={t('importing.confirm')}
 					tone="primary"
 					onConfirm={importing.confirm}
 					onCancel={importing.cancel}
 				>
-					{importQuestion(step.plan, importing.label).map((line) => (
+					{importQuestion(step.plan, importing.label, step.into).map((line) => (
 						<span key={line} className="import-line wrap-anywhere">
 							{line}
 						</span>

@@ -26,7 +26,7 @@ export const account = {
 	unseen: {
 		gdrive: {
 			summary: 'Notes added on the Drive website do not appear here',
-			detail: '{provider} lets this app see only the files it made. Notes added to the {folder} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here. To bring notes in, use Import a folder or Import files here.',
+			detail: '{provider} lets this app see only the files it made. Notes added to the {folder} folder any other way, such as on the Drive website, with Drive for desktop or by another app, do not appear here. To bring notes in, use Import notes here.',
 		},
 	},
 	/** Where to withdraw the app's access by hand, under the question before a disconnect. Each tag is a link. */

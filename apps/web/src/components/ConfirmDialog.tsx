@@ -5,7 +5,8 @@ import { useSuspendShortcuts } from '../commands/context.js';
 import { t } from '../i18n/t.js';
 
 /**
- * A question the app asks over everything, with one answer and Cancel.
+ * A question the app asks over everything, with one answer and Cancel, or two
+ * where they are alike (`also`).
  *
  * At the end of the page rather than where it was asked from. The `+` menu
  * (z-index 20) and the compact source panel (15) are each a stacking context,
@@ -29,6 +30,8 @@ export interface ConfirmDialogProps {
 	tone: 'primary' | 'danger';
 	onConfirm: () => void;
 	onCancel: () => void;
+	/** A second answer, after the first and drawn plainly: "Choose folder", then "Choose files". */
+	also?: { label: string; onChoose: () => void };
 	/**
 	 * Where the focus goes when the dialog does. Without it, back to whatever
 	 * had it before, if that is still on the page.
@@ -43,6 +46,7 @@ export const ConfirmDialog = ({
 	tone,
 	onConfirm,
 	onCancel,
+	also,
 	returnFocus,
 }: ConfirmDialogProps) => {
 	const titleId = useId();
@@ -100,6 +104,11 @@ export const ConfirmDialog = ({
 					<button type="button" className={tone} onClick={onConfirm}>
 						{confirmLabel}
 					</button>
+					{also !== undefined && (
+						<button type="button" onClick={also.onChoose}>
+							{also.label}
+						</button>
+					)}
 					<button ref={cancel} type="button" onClick={onCancel}>
 						{t('common.cancel')}
 					</button>

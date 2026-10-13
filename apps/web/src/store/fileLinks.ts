@@ -145,6 +145,16 @@ const namedIn = (body: ReadBody, name: string): boolean => {
 /** Whether `body` names the file `name` anywhere, in any spelling a link could give it. */
 export const namesFile = (body: string, name: string): boolean => namedIn(readBody(body), name);
 
+/**
+ * Whether any of `bodies` names a file (`namesFile`), each body read once
+ * however many files are asked about: an import asks it of every file beside
+ * every note.
+ */
+export const namedByAny = (bodies: readonly string[]): ((name: string) => boolean) => {
+	const read = bodies.map(readBody);
+	return (name) => read.some((body) => namedIn(body, name));
+};
+
 /** The notes that may link each of `files`, by the file's id; each list by title. */
 const linking = (
 	notes: readonly NoteRecord[],
