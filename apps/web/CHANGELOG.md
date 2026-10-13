@@ -1,5 +1,15 @@
 # @skysa/web
 
+## 1.2.0
+
+### Minor Changes
+
+- 5f6b460: Importing is now one item in the storage menu, "Import notes". It asks whether to choose a folder or files (notes and ZIP files), and replaces the separate "Import a folder" and "Import files" items. While the scratchpad is shown, "Import to scratchpad" sits beside it. That brings in the notes at the top of the folder or files you choose as scratchpad cards, along with the pictures and files those notes link to. Notes inside folders are left out, and the question before importing names them, so you can bring them in with "Import notes" instead, where their folders become notebooks. A file a note links to inside a folder comes too, into the same folder in the scratchpad, so the link keeps working. A ZIP of a single folder counts as that folder.
+
+### Patch Changes
+
+- @skysa/core@1.2.0
+
 ## 1.1.2
 
 ### Patch Changes
