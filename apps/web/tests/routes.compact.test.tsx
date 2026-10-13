@@ -504,11 +504,47 @@ describe('the compact bar', () => {
 		const user = userEvent.setup();
 		await openApp();
 
-		await user.click(notebookTrigger());
 		await user.click(noteTrigger());
+		await user.click(notebookTrigger());
 
+		expect(panel()).toBe('notebooks');
+		expect(noteTrigger().getAttribute('aria-expanded')).toBe('false');
+	});
+
+	it('says nothing after the open dropdown, until it shuts', async () => {
+		// Asked for on a phone: while the sources are open, the notebook and
+		// the note are what is about to be chosen, not what is open.
+		await twoNotebooks();
+		const user = userEvent.setup();
+		await openApp();
+		await waitFor(() => {
+			expect(shownOn(noteTrigger())).toBe('Groceries');
+		});
+		const source = screen.getByRole('button', { name: /^Source: / });
+		// What the stylesheet hides, keeping its room.
+		const hidden = () =>
+			[source, notebookTrigger(), noteTrigger()].map((trigger) =>
+				trigger.hasAttribute('inert')
+			);
+		expect(hidden()).toEqual([false, false, false]);
+
+		await user.click(source);
+		expect(hidden()).toEqual([false, true, true]);
+
+		const sources = screen.getByRole('region', { name: 'Sources' });
+		await user.click(await within(sources).findByRole('button', { name: 'This device' }));
+		expect(panel()).toBe('notebooks');
+		expect(hidden()).toEqual([false, false, true]);
+
+		await user.click(await screen.findByRole('button', { name: /^Work/ }));
 		expect(panel()).toBe('notes');
-		expect(notebookTrigger().getAttribute('aria-expanded')).toBe('false');
+		expect(hidden()).toEqual([false, false, false]);
+
+		await user.click(notebookTrigger());
+		expect(hidden()).toEqual([false, false, true]);
+		await user.keyboard('{Escape}');
+		expect(panel()).toBeNull();
+		expect(hidden()).toEqual([false, false, false]);
 	});
 
 	it('opens the notebooks for a move begun from the palette, since they are where it ends', async () => {
@@ -575,9 +611,9 @@ describe('Back in a compact window', () => {
 		expect(step(router)).toBe(at);
 
 		// One swapped for another is still the one step.
-		await user.click(notebookTrigger());
 		await user.click(noteTrigger());
-		expect(panel()).toBe('notes');
+		await user.click(notebookTrigger());
+		expect(panel()).toBe('notebooks');
 		expect(step(router)).toBe(at + 1);
 		await back(router);
 		expect(panel()).toBeNull();

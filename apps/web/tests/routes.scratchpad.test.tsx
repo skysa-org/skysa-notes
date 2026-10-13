@@ -478,10 +478,13 @@ describe('in a window too narrow for three panes', () => {
 
 		await user.click(notebookTrigger());
 		expect(panel()).toBe('notebooks');
+		// Not said over the notebooks, as a note's name is not.
+		expect(cardName()?.hasAttribute('inert')).toBe(true);
 		await user.keyboard('{Escape}');
 
 		expect(panel()).toBeNull();
 		expect(cardName()?.title).toBe('Trip');
+		expect(cardName()?.hasAttribute('inert')).toBe(false);
 	});
 
 	it('goes back to the scratchpad from the notebooks over it, then to the notebooks it came from', async () => {
