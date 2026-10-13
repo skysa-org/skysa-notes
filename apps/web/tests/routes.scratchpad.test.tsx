@@ -416,6 +416,23 @@ describe('in a window too narrow for three panes', () => {
 		expect(panel()).toBe('notes');
 	});
 
+	it('names a card with no name by its first words in the bar', async () => {
+		fake = windowWidth(390);
+		await inbox();
+		await scratch({ body: 'Pick up the parcel\n\nat the post office\n' });
+		const user = userEvent.setup();
+		await openApp();
+		await user.click(notebookTrigger());
+		await user.click(await row());
+
+		await user.click(await screen.findByRole('button', { name: /^Pick up the parcel/ }));
+
+		await waitFor(() => {
+			expect(cardName()?.title).toBe('Pick up the parcel');
+		});
+		expect(cardName()?.textContent).toBe('Pick up the parcel');
+	});
+
 	it('goes back to the scratchpad as the notebooks over it are shut, however they are', async () => {
 		fake = windowWidth(390);
 		await inbox();
@@ -498,16 +515,16 @@ describe('in a window too narrow for three panes', () => {
 		expect(panel()).toBe('notebooks');
 	});
 
-	it('names no note in the bar for a card with no name', async () => {
+	it('names no note in the bar for a card with no name and no words', async () => {
 		fake = windowWidth(390);
 		await inbox();
-		await scratch({ body: 'Milk\n' });
+		await scratch({ body: '' });
 		const user = userEvent.setup();
 		await openApp();
 
 		await user.click(notebookTrigger());
 		await user.click(await row());
-		await user.click(await screen.findByRole('button', { name: /^Milk/ }));
+		await user.click(await screen.findByRole('button', { name: /^Empty note/ }));
 
 		await waitFor(() => {
 			expect(panel()).toBeNull();

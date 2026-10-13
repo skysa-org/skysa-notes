@@ -15,9 +15,9 @@ import {
 import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
-import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
+import { type LiveEdit, type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
-import { titleShown } from '../store/titles.js';
+import { nameless, shownName } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useFontsStatus, useMediaQuery } from './layout.js';
 import { middleEllipsis } from './middleEllipsis.js';
@@ -377,6 +377,17 @@ const MiddleLabel = ({ value, keep }: { value: string; keep: string }) => {
 	);
 };
 
+/**
+ * A trigger's words: shortened in their middle where `keep` is given
+ * (`MiddleLabel`), and otherwise at their end, by the stylesheet.
+ */
+const Words = ({ value, keep }: { value: string; keep: string | undefined }) =>
+	keep === undefined ? (
+		<span className="compact-picker-label">{value}</span>
+	) : (
+		<MiddleLabel value={value} keep={keep} />
+	);
+
 const PaneTrigger = ({
 	pane,
 	label,
@@ -416,12 +427,7 @@ const PaneTrigger = ({
 			onPanel(panel === pane ? null : pane);
 		}}
 	>
-		{icon ??
-			(keep === undefined ? (
-				<span className="compact-picker-label">{value}</span>
-			) : (
-				<MiddleLabel value={value} keep={keep} />
-			))}
+		{icon ?? <Words value={value} keep={keep} />}
 		<span className="compact-picker-chevron">
 			<Icon name="chevron" />
 		</span>
@@ -429,13 +435,26 @@ const PaneTrigger = ({
 );
 
 /**
+ * What the bar calls the note open: its name as it is typed, and with none its
+ * first words as they were last stored (`shownName`). The bar is as wide as
+ * what it says, and the panels open out of where its triggers are, which the
+ * shell holds (`onOrigins`): words that changed with every keystroke drew the
+ * whole shell again with each.
+ */
+const barName = (note: NoteRecord | undefined, edit: LiveEdit | undefined) => {
+	if (note === undefined) return undefined;
+	const shown = shownNote(note, edit);
+	return shownName(nameless(shown) ? note : shown);
+};
+
+/**
  * A scratch card's name, open over the whole window: said, as a note's would
  * be, but not a dropdown, since a card is not one of a list to choose from.
  * Back, or its Close, is the way out of it.
  */
-const CardName = ({ title }: { title: string }) => (
+const CardName = ({ title, keep }: { title: string; keep: string | undefined }) => (
 	<span className="compact-picker compact-picker-static" title={title}>
-		<MiddleLabel value={title} keep="" />
+		<Words value={title} keep={keep} />
 	</span>
 );
 
@@ -467,8 +486,8 @@ export interface CompactBarProps {
 	/**
 	 * The scratchpad is open (docs/ARCHITECTURE.md §7, "The scratchpad"): the
 	 * notebook's dropdown says so, as `folderLabel` has it, and there is no
-	 * note's dropdown — only the name of a card open with one, which the route
-	 * gives as `note`.
+	 * note's dropdown — only the name of a card open, which the route gives as
+	 * `note`, or with none its first words.
 	 */
 	scratchpad?: boolean;
 }
@@ -501,8 +520,13 @@ export const CompactBar = ({
 	const renaming = useRenaming(renamings);
 	const source = useShowingSource(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
-	const title =
-		note === undefined ? t('shell.compact.noNote') : titleShown(shownNote(note, edit).title);
+	const name = barName(note, edit);
+	const title = name?.text ?? t('shell.compact.noNote');
+	// Words are cut at their end, since how they start is what says which note
+	// it is; a name in its middle, its end telling two alike apart.
+	const keep = name?.from === 'words' ? undefined : '';
+	// A card with neither a name nor words is said by "Scratchpad" alone.
+	const card = scratchpad && name !== undefined && name.from !== 'nothing';
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);
@@ -599,13 +623,13 @@ export const CompactBar = ({
 					onPanel={onPanel}
 				/>
 				{scratchpad ? (
-					note !== undefined && <CardName title={title} />
+					card && <CardName title={title} keep={keep} />
 				) : (
 					<PaneTrigger
 						pane="notes"
 						label={t('shell.compact.note', { value: title })}
 						value={title}
-						keep=""
+						keep={keep}
 						panel={panel}
 						onPanel={onPanel}
 					/>

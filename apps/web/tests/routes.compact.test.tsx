@@ -1,3 +1,4 @@
+import { EditorView } from '@codemirror/view';
 import {
 	createMemoryHistory,
 	createRouter,
@@ -200,6 +201,69 @@ describe('the compact bar', () => {
 			);
 		});
 		expect(shownOn(noteTrigger())).toBe('Quarterly…cond half');
+	});
+
+	it('names a note with no name by its first words, cut at their end', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, {
+			folderPath: 'Work',
+			body: 'Remember to ask about the quarterly forecast before Friday\n',
+		});
+		await openApp();
+
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe(
+				'Note: Remember to ask about the quarterly…'
+			);
+		});
+		expect(noteTrigger().title).toBe('Remember to ask about the quarterly…');
+		// Its start is what says which note it is, so the stylesheet cuts its
+		// end, and nothing cuts its middle.
+		expect(noteTrigger().querySelector('.compact-picker-middle')).toBeNull();
+		expect(noteTrigger().querySelector('.compact-picker-label')?.textContent).toBe(
+			'Remember to ask about the quarterly…'
+		);
+	});
+
+	it('names a note with no name by the words it was last stored with, not as they are typed', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', body: 'Pick up' });
+		await openApp();
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Pick up');
+		});
+
+		act(() => {
+			const editor = EditorView.findFromDOM(document.body);
+			editor?.dispatch({
+				changes: { from: editor.state.doc.length, insert: ' the parcel' },
+				userEvent: 'input.type',
+			});
+		});
+		// The bar moving with each keystroke moved the panels' origins, and
+		// drew the whole shell again with every one.
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		});
+		expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Pick up');
+
+		act(() => {
+			window.dispatchEvent(new Event('pagehide'));
+		});
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Pick up the parcel');
+		});
+	});
+
+	it('names a note with no name and no words “Untitled”, as before', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', body: '' });
+		await openApp();
+
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Untitled');
+		});
+		expect(noteTrigger().querySelector('.compact-picker-middle')).not.toBeNull();
 	});
 
 	it('is the ordinary bar again once the window is wide enough', async () => {

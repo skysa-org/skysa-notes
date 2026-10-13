@@ -283,12 +283,10 @@ export const useScratchpad = ({
 		modal: !compact && card !== undefined,
 		/**
 		 * What the compact bar names as the note: in the scratchpad, a card
-		 * open with a name, after "Scratchpad"; anywhere else, `open`.
+		 * open, after "Scratchpad" — by its name, or with none its first words,
+		 * and with neither not at all (`CompactBar`); anywhere else, `open`.
 		 */
-		barNote: (open: NoteRecord | undefined) => {
-			if (!active) return open;
-			return card !== undefined && !isUnnamed(card) ? card : undefined;
-		},
+		barNote: (open: NoteRecord | undefined) => (active ? card : open),
 		/** How the note open goes into a notebook, where it is a scratch note's. */
 		moveOpen: active ? promote : undefined,
 		/**
