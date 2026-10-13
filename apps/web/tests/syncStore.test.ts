@@ -129,6 +129,81 @@ describeSyncStoreContract('Dexie', async () => {
 });
 
 describe('the Dexie sync store, beyond the contract', () => {
+	it('reads only the notes beneath a folder, and none whose path only starts like it', async () => {
+		// The engine asks once or more for every note a round names, and a read
+		// of the whole table each time cost a round the notes it moved times the
+		// notes held. `Work 2` and `Work.md` sort just before `Work/`, and
+		// `Workshop` just after where it ends.
+		const db = freshDatabase();
+		const read = { notes: 0 };
+		db.use({
+			stack: 'dbcore',
+			name: 'rowsRead',
+			create: (down) => ({
+				...down,
+				table: (name) => {
+					const table = down.table(name);
+					if (name !== 'notes') return table;
+					return {
+						...table,
+						query: async (req) => {
+							const answer = await table.query(req);
+							read.notes += answer.result.length;
+							return answer;
+						},
+					};
+				},
+			}),
+		});
+		const store = await boundStore(db, { connectionId: CONNECTION });
+		const seed = async (id: string, path: string, connectionId = CONNECTION) => {
+			await db.notes.put(
+				noteRecordFromFile({
+					id,
+					connectionId,
+					path,
+					source: 'x\n',
+					hash: await contentHash('x\n'),
+					now: 0,
+				})
+			);
+		};
+		await seed('n3', 'Work/a.md');
+		await seed('n1', 'Work/Deep/b.md');
+		await seed('n2', 'Work/c.md');
+		await seed('o1', 'Work 2/d.md');
+		await seed('o2', 'Work.md');
+		await seed('o3', 'Workshop/e.md');
+		await seed('o4', 'Work0/f.md');
+		await seed('o5', 'loose.md');
+		await seed('o6', 'Work/a.md', 'elsewhere');
+		await deleteNote(db, 'n2', { connectionId: CONNECTION });
+
+		read.notes = 0;
+		const under = await store.notesUnder('Work');
+		// In id order, as the whole-table read gave them; the tombstone too.
+		expect(under.map((note) => note.id)).toEqual(['n1', 'n2', 'n3']);
+		expect(read.notes).toBe(3);
+
+		expect((await store.notesUnder('Work/')).map((note) => note.id)).toEqual([
+			'n1',
+			'n2',
+			'n3',
+		]);
+		expect((await store.notesUnder('Work/Deep')).map((note) => note.id)).toEqual(['n1']);
+		expect(await store.notesUnder('Wor')).toEqual([]);
+		expect((await store.notesUnder('')).map((note) => note.id).sort()).toEqual([
+			'n1',
+			'n2',
+			'n3',
+			'o1',
+			'o2',
+			'o3',
+			'o4',
+			'o5',
+		]);
+	});
+
 	it('lists the files it could not read on the connection’s own row, and leaves the rest of the row alone', async () => {
 		// The storage panel reads the row, so that is where the list has to be;
 		// and the row is also the token, the root and the account's name, which a
