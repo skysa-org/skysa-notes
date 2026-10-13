@@ -255,6 +255,23 @@ describe('the compact panels', () => {
 	});
 });
 
+describe('a menu’s items', () => {
+	it('draws one that cannot be chosen now as one, and lights it under no pointer', () => {
+		// Sync now and Re-scan are disabled while a sync is going, and looked
+		// like every other item: a tap on one did nothing it could be seen not
+		// to do.
+		expect(declarations('.toolbar-item:disabled')).toMatch(/opacity: 0\.5;/);
+		expect(declarations('.toolbar-item:disabled')).toMatch(/cursor: default;/);
+		const hovers = styles
+			.split('}')
+			// The selector right before the declarations, inside a media query too.
+			.map((block) => block.split('{').slice(-2, -1)[0] ?? '')
+			.filter((selector) => selector.includes('.toolbar-item:hover'));
+		expect(hovers.length).toBeGreaterThan(0);
+		for (const selector of hovers) expect(selector).toContain(':not(:disabled)');
+	});
+});
+
 describe('the note header', () => {
 	it('is laid out by the note, not the window', () => {
 		// The same window gives the note very different room with the columns

@@ -2611,9 +2611,18 @@ button.danger {
 }
 
 @media (hover: hover) {
-	.toolbar-item:hover {
+	.toolbar-item:hover:not(:disabled) {
 		background: var(--hover-bg);
 	}
+}
+
+/* An item that cannot be chosen now — Sync now while a sync is going — drawn
+   as one, as a toolbar's button is. It was drawn as every other item, lit
+   under the pointer, so it looked like a choice that did nothing. */
+.toolbar-item:disabled {
+	color: var(--muted);
+	opacity: 0.5;
+	cursor: default;
 }
 
 /* The tick, which is the only thing in a row that follows the words. */
