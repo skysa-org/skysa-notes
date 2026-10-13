@@ -2823,8 +2823,8 @@ button.danger {
 /* The line's words, while a sync is going or paused: a button that opens what
    it is doing (`SyncDetails`), drawn as the words it is, but for a dotted
    underline that says it can be pressed, a pointer, and the hover and focus
-   every control has. */
-.account-status-button {
+   every control has. Over `.account button:not(.icon)`, whose box it has not. */
+.account .account-status .account-status-button {
 	padding: 0;
 	font: inherit;
 	color: inherit;
@@ -2838,7 +2838,7 @@ button.danger {
 }
 
 @media (hover: hover) {
-	.account-status-button:hover {
+	.account .account-status .account-status-button:hover {
 		color: var(--fg);
 	}
 }
