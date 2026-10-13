@@ -4178,6 +4178,21 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	cursor: pointer;
 }
 
+/* One after the open one's, while it is open (`afterOpen`): it fades as the
+   panel opens and is back as it shuts, its room kept throughout. Hidden as
+   well as see-through, once it has faded, and `inert` from the start. */
+.compact-picker {
+	transition: opacity var(--duration-m) var(--ease-out);
+}
+
+.compact-picker[inert] {
+	visibility: hidden;
+	opacity: 0;
+	transition:
+		opacity var(--duration-m) var(--ease-in),
+		visibility var(--duration-m);
+}
+
 /* The first one's words over the note's title. */
 .compact-picker:first-child {
 	padding-inline-start: var(--control-inline);

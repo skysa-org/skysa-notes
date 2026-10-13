@@ -102,6 +102,17 @@ const slide = (from: Pane, to: Pane): Slide =>
 	PANES.indexOf(to) > PANES.indexOf(from) ? 'onward' : 'back';
 
 /**
+ * Whether `pane`'s trigger comes after the open one's along the bar. What it
+ * says is what the open panel is there to choose — a source being chosen has
+ * no notebook yet to name, nor a notebook a note — so it says nothing until
+ * the panel shuts (2026-10-13). It keeps its room, so opening a panel moves
+ * nothing along the bar, and is `inert`, out of reach of a press, the focus
+ * and a screen reader; the stylesheet hides it.
+ */
+const afterOpen = (pane: Pane, panel: Pane | null): boolean =>
+	panel !== null && PANES.indexOf(pane) > PANES.indexOf(panel);
+
+/**
  * What a history entry holds about the dropdowns, beside its place
  * (`routes/place.ts`): which one is open over the place, and whether opening
  * it was the step that made the entry (docs/ARCHITECTURE.md §7, "A dropdown
@@ -418,6 +429,7 @@ const PaneTrigger = ({
 		type="button"
 		className="compact-picker"
 		data-pane={pane}
+		inert={afterOpen(pane, panel)}
 		{...{ [KEEPS_PANEL]: '' }}
 		aria-label={label}
 		aria-haspopup="true"
@@ -450,10 +462,24 @@ const barName = (note: NoteRecord | undefined, edit: LiveEdit | undefined) => {
 /**
  * A scratch card's name, open over the whole window: said, as a note's would
  * be, but not a dropdown, since a card is not one of a list to choose from.
- * Back, or its Close, is the way out of it.
+ * Back, or its Close, is the way out of it. It is in the notes' place, and
+ * says nothing while a panel before it is open, as their trigger would not
+ * (`afterOpen`).
  */
-const CardName = ({ title, keep }: { title: string; keep: string | undefined }) => (
-	<span className="compact-picker compact-picker-static" title={title}>
+const CardName = ({
+	title,
+	keep,
+	panel,
+}: {
+	title: string;
+	keep: string | undefined;
+	panel: Pane | null;
+}) => (
+	<span
+		className="compact-picker compact-picker-static"
+		title={title}
+		inert={afterOpen('notes', panel)}
+	>
 		<Words value={title} keep={keep} />
 	</span>
 );
@@ -623,7 +649,7 @@ export const CompactBar = ({
 					onPanel={onPanel}
 				/>
 				{scratchpad ? (
-					card && <CardName title={title} keep={keep} />
+					card && <CardName title={title} keep={keep} panel={panel} />
 				) : (
 					<PaneTrigger
 						pane="notes"
