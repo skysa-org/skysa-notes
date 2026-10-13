@@ -17,7 +17,7 @@ export const importing = {
 		library:
 			'Choose a folder to bring in everything in it, with its folders as notebooks, or choose notes and ZIP files.',
 		scratchpad:
-			'Choose a folder, or notes and ZIP files. The notes at the top come in as cards, with the files they link to; notes in folders are left out.',
+			'Choose a folder, or choose notes with the files they link to, or ZIP files. The notes at the top come in as cards, with the files they link to; notes in folders are left out.',
 		folder: 'Choose folder',
 		files: 'Choose files',
 	},
@@ -122,6 +122,11 @@ export const importing = {
 		notLinked: {
 			one: 'Left out: {count} file none of these notes links to: {names}.',
 			other: 'Left out: {count} files none of these notes link to: {names}.',
+		},
+		/** An import into the scratchpad: files in folders that the notes coming in link to. */
+		linkedInFolder: {
+			one: 'Left out: {count} file one of these notes links to is in a folder, and only what is at the top comes into the scratchpad, so that link will not work: {names}.',
+			other: 'Left out: {count} files these notes link to are in folders, and only what is at the top comes into the scratchpad, so those links will not work: {names}.',
 		},
 	},
 	/**

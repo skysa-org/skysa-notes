@@ -1493,6 +1493,26 @@ describe('AccountPanel, with an account connected', () => {
 			]);
 		});
 
+		it('picks any file for the scratchpad, since its notes bring what they link to', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick, asked } = picker([
+				new File(['Milk\n\n![](photo.png)\n'], 'milk.md'),
+				new File(['png'], 'photo.png'),
+			]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await importBy(user, 'Import to scratchpad', 'Choose files');
+
+			const dialog = await screen.findByRole('alertdialog', {
+				name: 'Import into the scratchpad?',
+			});
+			expect(asked).toEqual([{}]);
+			expect(dialog.textContent).toContain(
+				'1 note and 1 file it links to will be added to the scratchpad'
+			);
+		});
+
 		it('says only notes in folders were found, for a scratchpad import with none at the top', async () => {
 			const user = userEvent.setup();
 			const db = freshDatabase();

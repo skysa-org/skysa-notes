@@ -78,6 +78,7 @@ const WHY: Record<SkipReason, (count: number, names: string) => string> = {
 			importNotes: t('importing.importNotes'),
 		}),
 	'not-linked': (count, names) => t('importing.leftOut.notLinked', { count, names }),
+	'linked-in-folder': (count, names) => t('importing.leftOut.linkedInFolder', { count, names }),
 };
 
 /** One line per reason anything stays out, each naming a few of them. */
@@ -209,13 +210,14 @@ export const useImportNotes = (
 	const start = (how: 'folder' | 'files', into: ImportInto) => {
 		setSaid(null);
 		setStep({ kind: 'idle' });
-		void pick(how === 'folder' ? { folder: true } : { accept: ACCEPT })
+		// Anything, for the scratchpad: its notes bring the files they link to.
+		void pick(
+			how === 'folder' ? { folder: true } : into === 'scratchpad' ? {} : { accept: ACCEPT }
+		)
 			.then(async (files) => {
 				if (files.length === 0) return;
 				setStep({ kind: 'reading' });
-				// A folder zipped is the folder, for the scratchpad, which takes
-				// only what is at the top of it.
-				const picked = await readPicked(files, how, { unwrap: into === 'scratchpad' });
+				const picked = await readPicked(files, how, { scratchpad: into === 'scratchpad' });
 				const plan = into === 'scratchpad' ? planScratchImport(picked) : planImport(picked);
 				if (!bringsAnything(plan)) {
 					setStep({ kind: 'idle' });
