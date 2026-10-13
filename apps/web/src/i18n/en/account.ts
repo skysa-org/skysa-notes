@@ -85,6 +85,15 @@ export const account = {
 			one: '{provider} · Looking for notes: {count} found',
 			other: '{provider} · Looking for notes: {count} found',
 		},
+		/** A re-scan before it has found enough to count. */
+		lookingStart: '{provider} · Looking for notes…',
+		/** Reading what has changed since the last sync, before it has found enough to count. */
+		checking: '{provider} · Checking for changes…',
+		/** The same, with how many changed notes it has found so far. */
+		checkingFound: {
+			one: '{provider} · Checking for changes: {count} found',
+			other: '{provider} · Checking for changes: {count} found',
+		},
 	},
 	/** Who the source's account is, as the status line's tooltip begins. */
 	title: {
@@ -111,6 +120,12 @@ export const account = {
 		looking: {
 			one: 'Looking for notes in {provider}: {count} found so far.',
 			other: 'Looking for notes in {provider}: {count} found so far.',
+		},
+		lookingStart: 'Looking for notes in {provider}…',
+		checking: 'Checking {provider} for changes…',
+		checkingFound: {
+			one: 'Checking {provider} for changes: {count} changed note found so far.',
+			other: 'Checking {provider} for changes: {count} changed notes found so far.',
 		},
 		cannotSync: 'This app cannot sync with {provider} yet.',
 		refused: {

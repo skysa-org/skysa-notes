@@ -15,7 +15,7 @@ import {
 const LONG: SchedulerStatus = {
 	phase: 'syncing',
 	conflicts: [],
-	progress: { stage: 'receiving', done: 3, total: 200 },
+	progress: { stage: 'receiving', done: 3, total: 200, listing: false },
 };
 const IDLE: SchedulerStatus = { phase: 'idle', conflicts: [] };
 
@@ -163,7 +163,10 @@ describe('keeping the screen on while syncing', () => {
 		expect(browser.held()).toBe(1);
 
 		// Progress arrives several times a second: one lock for the run.
-		scheduler.publish({ ...LONG, progress: { stage: 'receiving', done: 4, total: 200 } });
+		scheduler.publish({
+			...LONG,
+			progress: { stage: 'receiving', done: 4, total: 200, listing: false },
+		});
 		await settled();
 		expect(browser.requests()).toBe(1);
 

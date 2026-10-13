@@ -216,8 +216,8 @@ const when = (at: number): string => {
 /**
  * How far a long run has got: the status line, with a few words after the
  * source's name, the sentence for its tooltip and for the panel in a compact
- * window, and how full its bar is — `null` while a scan is still listing,
- * which knows how many so far and not of how many.
+ * window, and how full its bar is — `null` while a scan or a round is still
+ * listing, which knows how many so far and not of how many.
  */
 interface SyncCount {
 	text: string;
@@ -229,6 +229,14 @@ interface SyncCount {
 const syncCount = (progress: SyncProgress | undefined, label: string): SyncCount | undefined => {
 	if (!isLongRun(progress)) return undefined;
 	if (progress.stage === 'scanning') return scanCount(progress, label);
+	if (progress.stage === 'receiving' && progress.listing) {
+		const found = { provider: label, count: progress.total };
+		return {
+			text: t('account.line.checkingFound', found),
+			sentence: t('account.status.checkingFound', found),
+			bar: null,
+		};
+	}
 	const of = { provider: label, done: progress.done, total: progress.total };
 	const bar = { value: progress.done, max: progress.total };
 	return progress.stage === 'uploading'
@@ -260,8 +268,34 @@ const scanCount = (
 };
 
 /**
+ * What a run is looking through, before it has found enough to count
+ * (`PROGRESS_FROM`): the pages of what has changed, or of a re-scan. Said from
+ * the first, since that can be long — another device's notebooks moved was
+ * minutes of "Syncing…" on a phone (2026-10-13) — but with no bar, which on
+ * every quiet sync would flash under the line.
+ */
+const listingWords = (
+	progress: SyncProgress | undefined,
+	label: string
+): { text: string; sentence: string } | undefined => {
+	if (progress?.stage === 'receiving' && progress.listing) {
+		return {
+			text: t('account.line.checking', { provider: label }),
+			sentence: t('account.status.checking', { provider: label }),
+		};
+	}
+	if (progress?.stage === 'scanning' && progress.listing) {
+		return {
+			text: t('account.line.lookingStart', { provider: label }),
+			sentence: t('account.status.lookingStart', { provider: label }),
+		};
+	}
+	return undefined;
+};
+
+/**
  * How full a long run is, under what says how far it has got: a fraction, or,
- * while a scan is still listing, a bar that does not pretend to know.
+ * while a scan or a round is still listing, a bar that does not pretend to know.
  */
 const SyncBar = ({ count }: { count: SyncCount }) =>
 	count.bar === null ? (
@@ -289,7 +323,11 @@ const statusMessage = (
 			return null;
 		case 'syncing':
 			if (status.waiting === true) return t('account.status.waiting');
-			return syncCount(status.progress, label)?.sentence ?? t('account.status.syncing');
+			return (
+				syncCount(status.progress, label)?.sentence ??
+				listingWords(status.progress, label)?.sentence ??
+				t('account.status.syncing')
+			);
 		case 'idle':
 			return status.lastSyncAt === undefined
 				? t('account.status.synced')
@@ -401,8 +439,12 @@ const syncingLine = (
 	label: string
 ): { text: string; title: string | null } => {
 	const count = syncCount(progress, label);
-	if (count === undefined)
-		return { text: t('account.line.syncing', { provider: label }), title: null };
+	if (count === undefined) {
+		const words = listingWords(progress, label);
+		return words === undefined
+			? { text: t('account.line.syncing', { provider: label }), title: null }
+			: { text: words.text, title: words.sentence };
+	}
 	return {
 		text: count.text,
 		title: [count.sentence, progress?.path].filter((line) => line !== undefined).join('\n'),
