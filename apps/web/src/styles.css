@@ -2324,8 +2324,10 @@ button.danger {
 }
 
 @media (hover: hover) {
+	/* The tint over the chip's own surface, not in place of it: `--hover-bg`
+	   is see-through, and the chip floats over the note's words. */
 	.link-chip-open:hover {
-		background: var(--hover-bg);
+		background-image: linear-gradient(var(--hover-bg), var(--hover-bg));
 	}
 
 	.link-chip-open:hover .link-chip-address {
