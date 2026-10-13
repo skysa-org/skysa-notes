@@ -123,11 +123,6 @@ export const importing = {
 			one: 'Left out: {count} file none of these notes links to: {names}.',
 			other: 'Left out: {count} files none of these notes link to: {names}.',
 		},
-		/** An import into the scratchpad: files in folders that the notes coming in link to. */
-		linkedInFolder: {
-			one: 'Left out: {count} file one of these notes links to is in a folder, and only what is at the top comes into the scratchpad, so that link will not work: {names}.',
-			other: 'Left out: {count} files these notes link to are in folders, and only what is at the top comes into the scratchpad, so those links will not work: {names}.',
-		},
 	},
 	/**
 	 * A few paths, as `{names}` in the messages above: the first three, enough to

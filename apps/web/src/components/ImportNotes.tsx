@@ -78,7 +78,6 @@ const WHY: Record<SkipReason, (count: number, names: string) => string> = {
 			importNotes: t('importing.importNotes'),
 		}),
 	'not-linked': (count, names) => t('importing.leftOut.notLinked', { count, names }),
-	'linked-in-folder': (count, names) => t('importing.leftOut.linkedInFolder', { count, names }),
 };
 
 /** One line per reason anything stays out, each naming a few of them. */

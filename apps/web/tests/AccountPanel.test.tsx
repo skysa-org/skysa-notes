@@ -1460,10 +1460,12 @@ describe('AccountPanel, with an account connected', () => {
 			const user = userEvent.setup();
 			const db = freshDatabase();
 			const { pick, asked } = picker([
-				inFolder('old/milk.md', 'Milk\n\n![](photo.png)\n'),
+				inFolder('old/milk.md', 'Milk\n\n![](photo.png)\n![](Work/chart.png)\n'),
 				inFolder('old/photo.png', 'png'),
 				inFolder('old/spare.pdf', 'pdf'),
 				inFolder('old/Work/plan.md', '# Plan\n'),
+				inFolder('old/Work/chart.png', 'chart'),
+				inFolder('old/Work/unused.png', 'unused'),
 				inFolder('old/Work/Q3/budget.md', '# Budget\n'),
 			]);
 			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
@@ -1474,7 +1476,7 @@ describe('AccountPanel, with an account connected', () => {
 			});
 			expect(asked).toEqual([{ folder: true }]);
 			expect(dialog.textContent).toContain(
-				'1 note and 1 file it links to will be added to the scratchpad'
+				'1 note and 2 files it links to will be added to the scratchpad'
 			);
 			expect(dialog.textContent).toContain(
 				'Left out: 2 notes are in folders, and only notes at the top come into the scratchpad: Work/plan.md, Work/Q3/budget.md. To bring them in with their folders as notebooks, use Import notes.'
@@ -1485,12 +1487,15 @@ describe('AccountPanel, with an account connected', () => {
 
 			await user.click(within(dialog).getByRole('button', { name: 'Import' }));
 
-			expect(await screen.findByText(/Imported 1 note and 1 file\./)).toBeTruthy();
+			expect(await screen.findByText(/Imported 1 note and 2 files\./)).toBeTruthy();
 			const rows = await db.notes.toArray();
 			expect(rows.map((note) => note.path)).toEqual(['.scratchpad/milk.md']);
-			expect((await db.files.toArray()).map((file) => file.path)).toEqual([
+			// The one in a folder in that folder, where the note's link reaches it.
+			expect((await db.files.toArray()).map((file) => file.path).sort()).toEqual([
+				'.scratchpad/Work/chart.png',
 				'.scratchpad/photo.png',
 			]);
+			expect(await db.folders.toArray()).toEqual([]);
 		});
 
 		it('picks any file for the scratchpad, since its notes bring what they link to', async () => {

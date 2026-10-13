@@ -7,6 +7,7 @@ import {
 	foldName,
 	isHidden,
 	joinPath,
+	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
 	normalizePath,
 	NOTE_EXTENSION,
@@ -96,9 +97,7 @@ export type SkipReason =
 	 */
 	| 'in-folder'
 	/** A file beside them that none of the notes an import into the scratchpad brings links to. */
-	| 'not-linked'
-	/** A file one of those notes links to, in a folder, which the scratchpad does not take either. */
-	| 'linked-in-folder';
+	| 'not-linked';
 
 export interface Skipped {
 	path: string;
@@ -113,7 +112,8 @@ export interface Picked {
 	skipped: Skipped[];
 	/**
 	 * Files an import into the scratchpad has no use for but their names: those
-	 * below the top of a folder picked (`readPicked`'s `scratchpad`).
+	 * below the top of a folder picked that no note at the top links to
+	 * (`readPicked`'s `scratchpad`).
 	 */
 	unread?: string[];
 }
@@ -324,11 +324,9 @@ const unpacks = (file: File, how: 'folder' | 'files'): boolean =>
  * a 2 GB video, or a `.git` of a few hundred megabytes, picked with a folder is
  * not read into the tab only to be left out.
  */
-const readable = (file: File, how: 'folder' | 'files', scratchpad: boolean): boolean =>
+const readable = (file: File, how: 'folder' | 'files'): boolean =>
 	unpacks(file, how) ||
-	(excluded(pickedPath(file, how)) === undefined &&
-		file.size <= MAX_ATTACHMENT_BYTES &&
-		(!scratchpad || atScratchTop(pickedPath(file, how))));
+	(excluded(pickedPath(file, how)) === undefined && file.size <= MAX_ATTACHMENT_BYTES);
 
 /**
  * One picked file read, or an archive unpacked into what it holds. One the
@@ -347,7 +345,6 @@ const readOne = async (
 	const why = excluded(path);
 	if (why === 'hidden-note') return skip(path, 'hidden');
 	if (why !== undefined) return NOTHING;
-	if (scratchpad && !atScratchTop(path)) return { ...NOTHING, unread: [path] };
 	if (file.size > MAX_ATTACHMENT_BYTES) return skip(path, 'too-large');
 	try {
 		return {
@@ -400,29 +397,32 @@ const withoutWrapper = (archive: Picked): Picked => {
  * files, each `.zip` unpacked and anything else as it is. One file at a time,
  * so at most one archive is being unpacked at once.
  *
- * For an import into the `scratchpad`, which takes only what is at the top: an
- * archive of one folder is that folder's insides (`withoutWrapper`), and a
- * file below the top of a folder is not read, nor counted against the most an
+ * For an import into the `scratchpad`, which takes only the notes at the top
+ * and what they link to: an archive of one folder is that folder's insides
+ * (`withoutWrapper`); and a file below the top of a folder is read only once
+ * the notes at the top are, and only where one of them links to it
+ * (`linkedBelow`). The rest are not read, nor counted against the most an
  * import reads, only named (`unread`) — a few notes beside gigabytes of
- * pictures in folders are a few notes.
+ * pictures in folders are a few notes and their pictures.
  *
  * Refused (`ImportTooLargeError`) before a byte is read where what would be
- * read comes to more than `MAX_IMPORT_BYTES`, and as soon as unpacked archives
- * have taken it past that.
+ * read first comes to more than `MAX_IMPORT_BYTES`, and as soon as what has
+ * been read, unpacked or linked, has taken it past that.
  */
-export const readPicked = (
+export const readPicked = async (
 	files: readonly File[],
 	how: 'folder' | 'files',
 	{ scratchpad = false }: { scratchpad?: boolean } = {}
 ): Promise<Picked> => {
+	const later = (file: File) =>
+		scratchpad && !unpacks(file, how) && !atScratchTop(pickedPath(file, how));
 	const size = files
-		.filter((file) => readable(file, how, scratchpad))
+		.filter((file) => readable(file, how) && !later(file))
 		.reduce((total, file) => total + file.size, 0);
-	if (size > MAX_IMPORT_BYTES)
-		return Promise.reject(new ImportTooLargeError('Too much to import'));
+	if (size > MAX_IMPORT_BYTES) throw new ImportTooLargeError('Too much to import');
 	const read = { current: 0 };
-	return files.reduce<Promise<Picked>>(
-		async (sofar, file) => {
+	const readEach = (some: readonly File[], into: Picked): Promise<Picked> =>
+		some.reduce<Promise<Picked>>(async (sofar, file) => {
 			const done = await sofar;
 			const one = await readOne(file, how, scratchpad);
 			read.current += one.files.reduce((total, each) => total + each.bytes.length, 0);
@@ -436,12 +436,23 @@ export const readPicked = (
 			done.folders.push(...one.folders);
 			// eslint-disable-next-line functional/immutable-data
 			done.skipped.push(...one.skipped);
-			// eslint-disable-next-line functional/immutable-data
-			done.unread?.push(...(one.unread ?? []));
 			return done;
-		},
-		Promise.resolve({ files: [], folders: [], skipped: [], unread: [] })
+		}, Promise.resolve(into));
+	const first = await readEach(
+		files.filter((file) => !later(file)),
+		{ files: [], folders: [], skipped: [] }
 	);
+	if (!scratchpad) return first;
+	const linked = linkedBelow(first.files);
+	const below = files.filter(
+		(file) => later(file) && excluded(pickedPath(file, how)) === undefined
+	);
+	const wanted = (file: File) => linked(pickedPath(file, how));
+	const done = await readEach(below.filter(wanted), first);
+	return {
+		...done,
+		unread: below.filter((file) => !wanted(file)).map((file) => pickedPath(file, how)),
+	};
 };
 
 /**
@@ -516,33 +527,58 @@ const fromScratchpad = (path: string): string => {
 const atScratchTop = (path: string): boolean => depth(fromScratchpad(path)) === 1;
 
 /**
+ * Whether a file below the top of what was picked is one a note at the top
+ * links to: by the link parser a note's move carries its files by
+ * (`linkedFiles`), so only a link that reaches it, from where the note lands,
+ * brings it. A file beside the notes is asked more loosely (`namedByAny`):
+ * one of them is in no folder to be reached wrongly.
+ */
+const linkedBelow = (files: readonly { path: string; bytes: Bytes }[]) => {
+	const linked = new Set(
+		files
+			.filter(
+				(file) =>
+					atScratchTop(file.path) &&
+					isNote(file.path) &&
+					excluded(file.path) === undefined
+			)
+			.flatMap((file) => {
+				const source = textOf(file.bytes);
+				return source === undefined
+					? []
+					: linkedFiles(splitFrontmatter(source).body, fromScratchpad(file.path));
+			})
+			.filter((path) => depth(path) > 1)
+			.map(foldPath)
+	);
+	return (path: string): boolean => linked.has(foldPath(fromScratchpad(path)));
+};
+
+/**
  * What an import into the scratchpad would bring in (docs/ARCHITECTURE.md §7,
  * "Into the scratchpad"): the notes at the top of what was picked, each a
- * card, and the files beside them that those notes link to (`namedByAny`, by
- * the names they were picked by, in the notes' bodies), all at the top of the
- * scratchpad's folder. The rest is planned as an import into the source is.
+ * card at the top of the scratchpad's folder, and the files they link to
+ * where they are beside each note's link: one beside the notes (`namedByAny`,
+ * by the name it was picked by, in the notes' bodies) beside the cards, and
+ * one in a folder (`linkedBelow`) in that folder in the scratchpad's, so the
+ * link still reaches it and no note is rewritten. The rest is planned as an
+ * import into the source is.
  *
  * Said, by the paths they were picked by: a note in a folder, which "Import
- * notes" brings in with its folder as a notebook; a file beside the notes none
- * of them links to, where any note comes in, since it would only be a file
- * nothing shows; and a file in a folder one of them links to, since that link
- * will not work. What the picking left out is said only where it was at the
- * top. Any other file in a folder is left out without a word.
+ * notes" brings in with its folder as a notebook; and a file beside the notes
+ * none of them links to, where any note comes in, since it would only be a
+ * file nothing shows. What the picking left out is said only where it was at
+ * the top or linked. Any other file in a folder is left out without a word.
  */
 export const planScratchImport = (picked: Picked): ImportPlan => {
-	const top = picked.files
-		.filter((file) => atScratchTop(file.path))
-		.map((file) => ({
-			path: fromScratchpad(file.path),
-			bytes: file.bytes,
-			was: tidy(file.path),
-		}));
-	const below = [
-		...picked.files.filter((file) => !atScratchTop(file.path)).map((file) => file.path),
-		...(picked.unread ?? []),
-	]
-		.map(tidy)
-		.filter((path) => excluded(path) === undefined && !isHidden(path));
+	const linkedDown = linkedBelow(picked.files);
+	const lands = (file: { path: string; bytes: Bytes }) => ({
+		path: fromScratchpad(file.path),
+		bytes: file.bytes,
+		was: tidy(file.path),
+	});
+	const top = picked.files.filter((file) => atScratchTop(file.path)).map(lands);
+	const down = picked.files.filter((file) => !atScratchTop(file.path));
 	const bodies = top.flatMap((file) => {
 		if (excluded(file.path) !== undefined || !isNote(file.path)) return [];
 		const source = textOf(file.bytes);
@@ -552,18 +588,25 @@ export const planScratchImport = (picked: Picked): ImportPlan => {
 	// What stays out by its name goes on to be said or not as an import says it.
 	const comes = (file: { path: string }) =>
 		isNote(file.path) || excluded(file.path) !== undefined || linked(basename(file.path));
-	const coming = top.filter(comes);
 	const library = planImport({
-		files: coming.map(({ path, bytes }) => ({ path, bytes })),
+		files: [
+			...top.filter(comes),
+			...down.filter((file) => !isNote(file.path) && linkedDown(file.path)).map(lands),
+		].map(({ path, bytes }) => ({ path, bytes })),
 		folders: [],
-		skipped: picked.skipped.filter((skipped) => atScratchTop(skipped.path)),
+		skipped: picked.skipped.filter(
+			(skipped) => atScratchTop(skipped.path) || linkedDown(skipped.path)
+		),
 	});
 	const into = (path: string) => joinPath(SCRATCHPAD_FOLDER, path);
+	const inFolders = [...down.map((file) => file.path), ...(picked.unread ?? [])]
+		.map(tidy)
+		.filter((path) => isNote(path) && excluded(path) === undefined && !isHidden(path));
 	return {
 		notes: library.notes.map((note) => ({ ...note, path: into(note.path) })),
 		files: library.files.map((file) => ({ ...file, path: into(file.path) })),
-		// No row and no `mkdir`, as a card written here makes none: the push
-		// makes the folder, and a row would outlive the last card.
+		// No row and no `mkdir`, as a card written here makes none: a write
+		// makes the folders it needs, and a row would outlive the last card.
 		folders: [],
 		skipped: [
 			...library.skipped,
@@ -572,10 +615,7 @@ export const planScratchImport = (picked: Picked): ImportPlan => {
 				: top
 						.filter((file) => !comes(file))
 						.map((file): Skipped => ({ path: file.was, reason: 'not-linked' }))),
-			...below
-				.filter((path) => !isNote(path) && linked(basename(path)))
-				.map((path): Skipped => ({ path, reason: 'linked-in-folder' })),
-			...below.filter(isNote).map((path): Skipped => ({ path, reason: 'in-folder' })),
+			...inFolders.map((path): Skipped => ({ path, reason: 'in-folder' })),
 		],
 		renamed: library.renamed,
 	};
