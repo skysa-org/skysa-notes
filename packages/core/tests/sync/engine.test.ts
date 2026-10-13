@@ -7684,10 +7684,11 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		expect(store.ops()).toEqual([]);
 	});
 
-	it('does nothing where the provider cannot see what it would delete', async () => {
+	it('leaves the directory, rather than deleting it, where the provider cannot see what it would delete', async () => {
 		// Drive's scope hides files the user added themselves (§5.1), so a
 		// listing that comes back empty proves nothing — and deleting a folder
-		// takes what is under it whether the app can see it or not.
+		// takes what is under it whether the app can see it or not. It is
+		// marked as left instead, which touches nothing in it.
 		const blind = createFakeProvider({ listsEverything: false });
 		const theirs = createMemoryStore();
 		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
@@ -7699,15 +7700,61 @@ describe('a notebook removed here, whose directory the remote still has', () => 
 		const result = await theirEngine.push();
 
 		expect(result.status).toBe('ok');
-		// Finished rather than retried for ever, and the directory stays.
 		expect(theirs.ops()).toEqual([]);
 		expect(blind.callLog().some((call) => call.op === 'delete')).toBe(false);
+		expect(
+			blind
+				.callLog()
+				.filter((call) => call.op === 'leaveFolder')
+				.map((call) => call.path)
+		).toEqual(['Work']);
 		expect(
 			blind
 				.snapshot()
 				.filter((entry) => entry.kind === 'folder')
 				.map((entry) => entry.path)
 		).toEqual(['Work']);
+	});
+
+	it('does not leave a directory a file it can see is still in', async () => {
+		// Another device's, written after this one last pulled: the same gate
+		// that keeps a delete from taking it keeps the directory a notebook.
+		const blind = createFakeProvider({ listsEverything: false });
+		const theirs = createMemoryStore();
+		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const made = await blind.createFolder('Work');
+		await theirEngine.pull();
+		await blind.write('Work/theirs.md', 'theirs\n', {});
+		theirs.removeFolder('Work');
+		theirs.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+
+		const result = await theirEngine.push();
+
+		expect(result.status).toBe('ok');
+		expect(theirs.ops()).toEqual([]);
+		expect(
+			blind.callLog().some((call) => call.op === 'leaveFolder' || call.op === 'delete')
+		).toBe(false);
+	});
+
+	it('does nothing where the provider can neither delete nor leave a directory', async () => {
+		const fake = createFakeProvider({ listsEverything: false });
+		const blind: StorageProvider = { ...fake, leaveFolder: undefined };
+		const theirs = createMemoryStore();
+		const theirEngine = createSyncEngine({ provider: blind, store: theirs, now: () => AT });
+		const made = await blind.createFolder('Work');
+		await theirEngine.pull();
+		theirs.removeFolder('Work');
+		theirs.queue({ op: 'rmdir', path: 'Work', remoteId: made.remoteId });
+		const asked = fake.callLog().length;
+
+		const result = await theirEngine.push();
+
+		expect(result.status).toBe('ok');
+		// Finished rather than retried for ever, with nothing asked of the
+		// provider, and the directory stays.
+		expect(theirs.ops()).toEqual([]);
+		expect(fake.callLog().slice(asked)).toEqual([]);
 	});
 
 	it('gives up on a directory it cannot remove rather than holding up the queue', async () => {
