@@ -74,6 +74,19 @@ describe('deleting a note', () => {
 		expect((await getNote(db, notes[0]?.id ?? ''))?.deletedLocally).toBe(1);
 	});
 
+	it('names a note with no name by its first words', async () => {
+		const user = userEvent.setup();
+		await openApp();
+		await createNote(db, { folderPath: 'Work', body: 'Pick up the parcel\n' });
+
+		await user.click(await screen.findByRole('button', { name: 'Options for “Untitled”' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+		expect((await screen.findByRole('status')).textContent).toContain(
+			'Deleted “Pick up the parcel”.'
+		);
+	});
+
 	it('brings the same note back, open, when undone before the delete has been sent', async () => {
 		const user = userEvent.setup();
 		const { notes, router } = await openApp('Alpha');

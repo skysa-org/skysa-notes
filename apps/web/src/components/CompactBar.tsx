@@ -17,7 +17,7 @@ import { t } from '../i18n/t.js';
 import { type NoteRecord } from '../store/db.js';
 import { type LiveEdits, shownNote, useLiveEdit } from '../store/liveEdits.js';
 import { type Renamings, shownFolder, useRenaming } from '../store/renaming.js';
-import { titleShown } from '../store/titles.js';
+import { nameless, titleShown, wordsShown } from '../store/titles.js';
 import { folderLabel } from '../store/tree.js';
 import { COMPACT, rems, useElementWidth, useFontsStatus, useMediaQuery } from './layout.js';
 import { middleEllipsis } from './middleEllipsis.js';
@@ -377,6 +377,17 @@ const MiddleLabel = ({ value, keep }: { value: string; keep: string }) => {
 	);
 };
 
+/**
+ * A trigger's words: shortened in their middle where `keep` is given
+ * (`MiddleLabel`), and otherwise at their end, by the stylesheet.
+ */
+const Words = ({ value, keep }: { value: string; keep: string | undefined }) =>
+	keep === undefined ? (
+		<span className="compact-picker-label">{value}</span>
+	) : (
+		<MiddleLabel value={value} keep={keep} />
+	);
+
 const PaneTrigger = ({
 	pane,
 	label,
@@ -416,12 +427,7 @@ const PaneTrigger = ({
 			onPanel(panel === pane ? null : pane);
 		}}
 	>
-		{icon ??
-			(keep === undefined ? (
-				<span className="compact-picker-label">{value}</span>
-			) : (
-				<MiddleLabel value={value} keep={keep} />
-			))}
+		{icon ?? <Words value={value} keep={keep} />}
 		<span className="compact-picker-chevron">
 			<Icon name="chevron" />
 		</span>
@@ -433,9 +439,9 @@ const PaneTrigger = ({
  * be, but not a dropdown, since a card is not one of a list to choose from.
  * Back, or its Close, is the way out of it.
  */
-const CardName = ({ title }: { title: string }) => (
+const CardName = ({ title, keep }: { title: string; keep: string | undefined }) => (
 	<span className="compact-picker compact-picker-static" title={title}>
-		<MiddleLabel value={title} keep="" />
+		<Words value={title} keep={keep} />
 	</span>
 );
 
@@ -467,8 +473,8 @@ export interface CompactBarProps {
 	/**
 	 * The scratchpad is open (docs/ARCHITECTURE.md §7, "The scratchpad"): the
 	 * notebook's dropdown says so, as `folderLabel` has it, and there is no
-	 * note's dropdown — only the name of a card open with one, which the route
-	 * gives as `note`.
+	 * note's dropdown — only the name of a card open, which the route gives as
+	 * `note`, or with none its first words.
 	 */
 	scratchpad?: boolean;
 }
@@ -501,8 +507,16 @@ export const CompactBar = ({
 	const renaming = useRenaming(renamings);
 	const source = useShowingSource(renaming);
 	const edit = useDeferredValue(useLiveEdit(liveEdits, note));
+	const shown = note === undefined ? undefined : shownNote(note, edit);
+	// A note with no name goes by its first words, cut at their end rather than
+	// in their middle: it is how they start that says which note it is.
+	const words =
+		shown === undefined ? undefined : wordsShown(shown, { keep: shown.body === note?.body });
 	const title =
-		note === undefined ? t('shell.compact.noNote') : titleShown(shownNote(note, edit).title);
+		shown === undefined ? t('shell.compact.noNote') : (words ?? titleShown(shown.title));
+	const keep = words === undefined ? '' : undefined;
+	// A card with neither a name nor words is said by "Scratchpad" alone.
+	const card = scratchpad && shown !== undefined && (words !== undefined || !nameless(shown));
 	// Measured rather than a container query, since it changes what is drawn.
 	// Unmeasured — jsdom — is the icon: the one that fits any bar.
 	const [bar, setBar] = useState<HTMLDivElement | null>(null);
@@ -599,13 +613,13 @@ export const CompactBar = ({
 					onPanel={onPanel}
 				/>
 				{scratchpad ? (
-					note !== undefined && <CardName title={title} />
+					card && <CardName title={title} keep={keep} />
 				) : (
 					<PaneTrigger
 						pane="notes"
 						label={t('shell.compact.note', { value: title })}
 						value={title}
-						keep=""
+						keep={keep}
 						panel={panel}
 						onPanel={onPanel}
 					/>

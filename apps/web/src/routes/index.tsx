@@ -108,7 +108,7 @@ import { type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { scratchMarks } from '../store/scratchpad.js';
-import { titleShown } from '../store/titles.js';
+import { nameShown, titleShown } from '../store/titles.js';
 import {
 	findFolder,
 	type FolderNode,
@@ -1558,13 +1558,13 @@ const Home = () => {
 						home?.detached === undefined
 							? {
 									message: t('shell.note.back', {
-										title: titleShown(restored.title),
+										title: nameShown(restored),
 									}),
 									tone: 'success',
 								}
 							: {
 									message: backDisconnected(
-										titleShown(restored.title),
+										nameShown(restored),
 										sourceName(home)
 									),
 									tone: 'warning',
@@ -2258,7 +2258,7 @@ const Home = () => {
 						// A second delete is a new notice with a new clock, not the
 						// first one's time running on under another note's name.
 						key={noteRef(deleted)}
-						title={titleShown(deleted.title)}
+						title={nameShown(deleted)}
 						onUndo={undoDelete}
 						onDismiss={dismissDeleted}
 						keep={undoFailed === noteRef(deleted)}

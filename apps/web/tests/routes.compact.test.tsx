@@ -202,6 +202,39 @@ describe('the compact bar', () => {
 		expect(shownOn(noteTrigger())).toBe('Quarterly…cond half');
 	});
 
+	it('names a note with no name by its first words, cut at their end', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, {
+			folderPath: 'Work',
+			body: 'Remember to ask about the quarterly forecast before Friday\n',
+		});
+		await openApp();
+
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe(
+				'Note: Remember to ask about the quarterly…'
+			);
+		});
+		expect(noteTrigger().title).toBe('Remember to ask about the quarterly…');
+		// Its start is what says which note it is, so the stylesheet cuts its
+		// end, and nothing cuts its middle.
+		expect(noteTrigger().querySelector('.compact-picker-middle')).toBeNull();
+		expect(noteTrigger().querySelector('.compact-picker-label')?.textContent).toBe(
+			'Remember to ask about the quarterly…'
+		);
+	});
+
+	it('names a note with no name and no words “Untitled”, as before', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await createNote(db, { folderPath: 'Work', body: '' });
+		await openApp();
+
+		await waitFor(() => {
+			expect(noteTrigger().getAttribute('aria-label')).toBe('Note: Untitled');
+		});
+		expect(noteTrigger().querySelector('.compact-picker-middle')).not.toBeNull();
+	});
+
 	it('is the ordinary bar again once the window is wide enough', async () => {
 		await openApp(961);
 
