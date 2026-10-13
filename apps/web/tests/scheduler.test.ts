@@ -2726,4 +2726,62 @@ describe('a run held up on another tab', () => {
 		await own;
 		await reaches(h.scheduler, 'idle');
 	});
+
+	it('says so behind another tab’s sync of the same source, and stops once it has its turn', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const theirs = deferred();
+		const theirSync = h.env.environment.withLock('skysa-notes:sync:c1', () => theirs.promise);
+		const held = deferred();
+		h.remote.gate.set('changes', held.promise);
+		const arrived = h.remote.gated();
+
+		h.env.fire('focus');
+		await reaches(h.scheduler, 'syncing');
+		h.env.advance(SYNC_WAIT_MS - 1);
+		expect(h.scheduler.status().waiting).toBeUndefined();
+		h.env.advance(1);
+		expect(h.scheduler.status()).toMatchObject({ phase: 'syncing', waiting: true });
+
+		theirs.resolve();
+		await theirSync;
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 1);
+		});
+		expect(h.scheduler.status().phase).toBe('syncing');
+		expect(h.scheduler.status().waiting).toBeUndefined();
+
+		h.remote.gate.delete('changes');
+		held.resolve();
+		await reaches(h.scheduler, 'idle');
+	});
+
+	it('does not take a wait behind this tab’s own paused run for another tab', async () => {
+		// Its requests are aborted, but it puts away what it has before it lets
+		// go of the lock, and Sync now can come first.
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const held = deferred();
+		h.remote.gate.set('changes', held.promise);
+		const arrived = h.remote.gated();
+		h.env.fire('focus');
+		await vi.waitFor(() => {
+			expect(h.remote.gated()).toBe(arrived + 1);
+		});
+		h.scheduler.pause();
+		h.remote.gate.delete('changes');
+
+		void h.scheduler.syncNow();
+		await reaches(h.scheduler, 'syncing');
+		h.env.advance(SYNC_WAIT_MS);
+		expect(h.scheduler.status().waiting).toBeUndefined();
+		// Asked again a while later, since another tab may be next.
+		expect(h.env.pending()).toContain(SYNC_WAIT_MS);
+
+		held.resolve();
+		await reaches(h.scheduler, 'idle');
+		expect(h.scheduler.status().waiting).toBeUndefined();
+	});
 });

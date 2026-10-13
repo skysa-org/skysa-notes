@@ -120,8 +120,9 @@ export interface SchedulerStatus {
 	readonly progress?: SyncProgress;
 	/**
 	 * The run is under way and this tab has been waiting on another tab or
-	 * window of the app, for the database, for `SYNC_WAIT_MS` and is waiting
-	 * still (`store/heldUp.ts`). While `syncing`, and only then.
+	 * window of the app for `SYNC_WAIT_MS`, and is waiting still: for the
+	 * database (`store/heldUp.ts`), or for the sync of this source that one is
+	 * running. While `syncing`, and only then.
 	 */
 	readonly waiting?: true;
 }
@@ -845,13 +846,14 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const stopWatching = watchWaits(session);
 		// One engine at a time per connection, across sessions and tabs: a
 		// session ended mid-run, or another tab, may still be at the network.
-		const result = await environment
-			.withLock(`skysa-notes:sync:${session.connectionId}`, () =>
-				isCurrent(session)
-					? attempt(session, provider, engine)
-					: Promise.resolve<RunResult>({ kind: 'superseded' })
-			)
-			.catch((error: unknown): RunResult => ({ kind: 'failed', error }));
+		const stopWaiting = waitForLock(session);
+		const result = await underSyncLock(session.connectionId, () => {
+			stopWaiting();
+			return isCurrent(session)
+				? attempt(session, provider, engine)
+				: Promise.resolve<RunResult>({ kind: 'superseded' });
+		}).catch((error: unknown): RunResult => ({ kind: 'failed', error }));
+		stopWaiting();
 		// Whatever it had still to say is about a run that has ended.
 		cancelProgress();
 		if (isCurrent(session)) {
@@ -919,15 +921,70 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		flush();
 	};
 
-	/** The run has started, or stopped, waiting on another tab. */
+	/**
+	 * The run has started, or stopped, waiting on another tab. Behind another
+	 * tab's sync it is waiting whatever the database says (`waitForLock`).
+	 */
 	const reportWaiting = (session: Session, waiting: boolean) => {
 		const now = status();
+		const said = waiting || lockWaits.has(session);
 		// Said already, either way: every wait that ends, however short, asks.
-		if (!isCurrent(session) || now.phase !== 'syncing' || (now.waiting === true) === waiting) {
+		if (!isCurrent(session) || now.phase !== 'syncing' || (now.waiting === true) === said) {
 			return;
 		}
 		const { waiting: _was, ...rest } = now;
-		publish(waiting ? { ...rest, waiting } : rest);
+		publish(said ? { ...rest, waiting: true } : rest);
+	};
+
+	/** Connections whose sync lock this tab's own work holds (`underSyncLock`). */
+	const heldHere = new Set<string>();
+
+	/** Run `work` holding the connection's sync lock, known here to be this tab's. */
+	const underSyncLock = <T>(connectionId: string, work: () => Promise<T>): Promise<T> =>
+		environment.withLock(`skysa-notes:sync:${connectionId}`, async () => {
+			heldHere.add(connectionId);
+			try {
+				return await work();
+			} finally {
+				heldHere.delete(connectionId);
+			}
+		});
+
+	/** Runs that have waited `SYNC_WAIT_MS` for the sync lock, and are waiting still. */
+	const lockWaits = new Set<Session>();
+
+	/**
+	 * Say so once a run has waited `SYNC_WAIT_MS` for its connection's sync
+	 * lock: another tab or window of the app is syncing the same source, and
+	 * this one goes after it. IndexedDB is not what it waits on, so
+	 * `watchWaits` does not see it. A lock this tab's own work holds is not
+	 * another tab's — a run a pause let go of, still putting its batch away;
+	 * a re-scan clearing the cursor — so then it asks again a while later.
+	 * Returns the way to stop, for when the lock comes, or the run gives up.
+	 */
+	const waitForLock = (session: Session): (() => void) => {
+		const timer = new Map<'timer', () => void>();
+		const time = () => {
+			timer.set(
+				'timer',
+				environment.setTimer(() => {
+					timer.delete('timer');
+					if (!isCurrent(session)) return;
+					if (heldHere.has(session.connectionId)) {
+						time();
+						return;
+					}
+					lockWaits.add(session);
+					reportWaiting(session, true);
+				}, SYNC_WAIT_MS)
+			);
+		};
+		time();
+		return () => {
+			timer.get('timer')?.();
+			timer.delete('timer');
+			if (lockWaits.delete(session)) reportWaiting(session, false);
+		};
 	};
 
 	/**
@@ -1220,7 +1277,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			// lands. Clearing outside the lock would put that cursor back after
 			// ours went, and the re-scan the user asked for would never happen —
 			// silently, since the run that overwrote it reports success.
-			await environment.withLock(`skysa-notes:sync:${session.connectionId}`, () =>
+			await underSyncLock(session.connectionId, () =>
 				// One transaction: the cursor and the attempts go together, so a
 				// scan that is about to run cannot start against a half-reset queue.
 				db.transaction('rw', db.syncState, db.opQueue, async () => {
