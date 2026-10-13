@@ -5,10 +5,39 @@
  * go into, as the storage panel names it: "Google Drive", "this device".
  */
 export const importing = {
-	/** An item of a source's `⋯` menu. */
-	importFolder: 'Import a folder',
-	/** An item of a source's `⋯` menu: a ZIP, or notes picked on their own. */
-	importFiles: 'Import files',
+	/** An item of a source's `⋯` menu: a folder, or notes and ZIPs picked on their own. */
+	importNotes: 'Import notes',
+	/** An item of a source's `⋯` menu, while its scratchpad is shown: notes into it as cards. */
+	importScratchpad: 'Import to scratchpad',
+	/**
+	 * Asked when either is chosen, since no browser's picker takes a folder and
+	 * files at once. Its title is the item's own words.
+	 */
+	choose: {
+		library:
+			'Choose a folder to bring in everything in it, with its folders as notebooks, or choose notes and ZIP files.',
+		scratchpad:
+			'Choose a folder, or choose notes with the files they link to, or ZIP files. The notes at the top come in as cards, with the files they link to; notes in folders are left out.',
+		folder: 'Choose folder',
+		files: 'Choose files',
+	},
+	/** The question and what is said for an import into the scratchpad, where they differ from a source's. */
+	scratchpad: {
+		title: 'Import into the scratchpad?',
+		/** `{files}` is `counts.files`: the files the notes link to. */
+		question: {
+			notes: {
+				one: '{count} note will be added to the scratchpad, beside what is there.',
+				other: '{count} notes will be added to the scratchpad, beside what is there.',
+			},
+			notesAndFiles: {
+				one: '{count} note and {files} it links to will be added to the scratchpad, beside what is there.',
+				other: '{count} notes and {files} they link to will be added to the scratchpad, beside what is there.',
+			},
+		},
+		/** Followed by what was left out, notes in folders among it. */
+		nothing: 'Nothing to import: no notes were found at the top of what was chosen.',
+	},
 	reading: 'Reading the files…',
 	importing: 'Importing…',
 	/** The question's title. */
@@ -80,6 +109,19 @@ export const importing = {
 		unreadable: {
 			one: 'Left out: {count} file could not be read from its archive: {names}.',
 			other: 'Left out: {count} files could not be read from their archive: {names}.',
+		},
+		/**
+		 * An import into the scratchpad, which takes only the notes at the top.
+		 * `{importNotes}` is the item that brings them in with their folders.
+		 */
+		inFolder: {
+			one: 'Left out: {count} note is in a folder, and only notes at the top come into the scratchpad: {names}. To bring it in with its folder as a notebook, use {importNotes}.',
+			other: 'Left out: {count} notes are in folders, and only notes at the top come into the scratchpad: {names}. To bring them in with their folders as notebooks, use {importNotes}.',
+		},
+		/** An import into the scratchpad: files beside the notes that none of them links to. */
+		notLinked: {
+			one: 'Left out: {count} file none of these notes links to: {names}.',
+			other: 'Left out: {count} files none of these notes link to: {names}.',
 		},
 	},
 	/**

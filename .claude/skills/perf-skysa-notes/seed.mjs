@@ -65,9 +65,14 @@ export const storedCounts = (page) =>
 const importZip = async (page, zip) => {
 	await page.getByRole('button', { name: 'Storage options' }).click();
 	const chooser = page.waitForEvent('filechooser');
-	await page.getByRole('button', { name: 'Import files', exact: true }).click();
+	// One item, then a folder or files from the question it asks.
+	await page.getByRole('button', { name: 'Import notes', exact: true }).click();
+	await page
+		.getByRole('alertdialog', { name: 'Import notes' })
+		.getByRole('button', { name: 'Choose files', exact: true })
+		.click();
 	await (await chooser).setFiles(zip);
-	const dialog = page.getByRole('alertdialog');
+	const dialog = page.getByRole('alertdialog', { name: /^Import into/ });
 	await dialog.waitFor({ timeout: 300_000 });
 	const question = (await dialog.textContent()) ?? '';
 	await dialog.getByRole('button', { name: 'Import', exact: true }).click();

@@ -857,7 +857,11 @@ const NotConnected = ({
 			? settings.providers.filter((provider) => CONNECTABLE.includes(provider))
 			: [];
 	const scratchpad = useScratchpadItem(database, LOCAL_CONNECTION_ID);
-	const items = [...downloadItem(holds, downloading), ...importItems(importing), ...scratchpad];
+	const items = [
+		...downloadItem(holds, downloading),
+		...importItems(importing, { scratchpad: scratchpad.shown === true }),
+		...scratchpad.items,
+	];
 
 	return (
 		<section className="account" aria-label={t('account.region')}>
@@ -1661,25 +1665,33 @@ const clipboardItem = (
  * §7, "The scratchpad"). Offered for every source, the device's own among
  * them, since a scratch note is a note like any other and needs no sync to be
  * one. Shown, the route opens it (`useOpenWhenShown`); hidden, its notes stay
- * where they are, and come back as they were.
+ * where they are, and come back as they were. With whether it is shown, which
+ * the import into it asks (`importItems`).
  */
-const useScratchpadItem = (database: NotesDatabase, connectionId: string): OptionsMenuItem[] => {
+const useScratchpadItem = (
+	database: NotesDatabase,
+	connectionId: string
+): { shown: boolean | undefined; items: OptionsMenuItem[] } => {
 	const shown = useLiveQuery(
 		() => getScratchpadShown(database, connectionId),
 		[database, connectionId]
 	);
-	return shown === undefined
-		? []
-		: [
-				{
-					label: shown
-						? t('account.menu.hideScratchpad')
-						: t('account.menu.showScratchpad'),
-					onChoose: () => {
-						void setScratchpadShown(database, connectionId, !shown);
-					},
-				},
-			];
+	return {
+		shown,
+		items:
+			shown === undefined
+				? []
+				: [
+						{
+							label: shown
+								? t('account.menu.hideScratchpad')
+								: t('account.menu.showScratchpad'),
+							onChoose: () => {
+								void setScratchpadShown(database, connectionId, !shown);
+							},
+						},
+					],
+	};
 };
 
 /**
@@ -1743,10 +1755,12 @@ const ConnectedFoot = ({
 		bound,
 		phase: status.phase,
 		download: downloadable ? downloadItem(holds, downloading) : [],
-		imports: downloadable ? importItems(importing) : [],
+		imports: downloadable
+			? importItems(importing, { scratchpad: scratchpad.shown === true })
+			: [],
 		clipboard: clipboardItem(bound, status.phase, onClipboard),
 		// Not while a first import holds the source, as the clipboard is not.
-		scratchpad: importingHere(bound) ? [] : scratchpad,
+		scratchpad: importingHere(bound) ? [] : scratchpad.items,
 		about: unseenItem(bound.provider, label, () => {
 			setAbout(true);
 		}),

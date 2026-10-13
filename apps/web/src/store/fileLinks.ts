@@ -132,18 +132,39 @@ const readBody = (body: string): ReadBody => {
 /** The hash a name the app gave a file carries (`attachmentName` in `core`). */
 const STAMP = /-([0-9a-f]{8}|[0-9a-f]{16})\.[^.]+$/;
 
-const namedIn = (body: ReadBody, name: string): boolean => {
+/** A file's name as a body is searched for it: folded, and the hash a name the app gave it carries. */
+interface Sought {
+	readonly folded: string;
+	readonly stamp: string | undefined;
+}
+
+const sought = (name: string): Sought => {
 	const folded = foldName(name);
-	const stamp = STAMP.exec(folded)?.[1];
-	return (
-		body.written.includes(folded) ||
-		(body.decoded?.includes(folded) ?? false) ||
-		(stamp !== undefined && body.written.includes(stamp))
-	);
+	return { folded, stamp: STAMP.exec(folded)?.[1] };
 };
+
+const holds = (body: ReadBody, { folded, stamp }: Sought): boolean =>
+	body.written.includes(folded) ||
+	(body.decoded?.includes(folded) ?? false) ||
+	(stamp !== undefined && body.written.includes(stamp));
+
+const namedIn = (body: ReadBody, name: string): boolean => holds(body, sought(name));
 
 /** Whether `body` names the file `name` anywhere, in any spelling a link could give it. */
 export const namesFile = (body: string, name: string): boolean => namedIn(readBody(body), name);
+
+/**
+ * Whether any of `bodies` names a file (`namesFile`), each body read once and
+ * each name folded once, however many are asked about: an import asks it of
+ * every file beside every note.
+ */
+export const namedByAny = (bodies: readonly string[]): ((name: string) => boolean) => {
+	const read = bodies.map(readBody);
+	return (name) => {
+		const key = sought(name);
+		return read.some((body) => holds(body, key));
+	};
+};
 
 /** The notes that may link each of `files`, by the file's id; each list by title. */
 const linking = (

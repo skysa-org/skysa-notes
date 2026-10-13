@@ -35,7 +35,7 @@ import { createFolder } from '../src/store/folders.js';
 import { beforeClosing } from '../src/store/heldEdits.js';
 import { createKeeping, type Keeping } from '../src/store/keeping.js';
 import { createNote, deleteNote, saveNoteBody } from '../src/store/notes.js';
-import { getScratchpadShown } from '../src/store/scratchpad.js';
+import { getScratchpadShown, setScratchpadShown } from '../src/store/scratchpad.js';
 import { UNSEEN_AT_PROVIDER } from '../src/sync/account.js';
 import { PROGRESS_FROM } from '../src/sync/progress.js';
 import { type SchedulerStatus } from '../src/sync/scheduler.js';
@@ -436,14 +436,14 @@ describe('AccountPanel, with nothing connected', () => {
 		await settled();
 		await openGear(user);
 		// Nothing to download on a device that holds nothing.
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Hide scratchpad']);
+		expect(gearLabels()).toEqual(['Import notes', 'Import to scratchpad', 'Hide scratchpad']);
 
 		await createNote(db, { title: 'First' });
 		await waitFor(() => {
 			expect(gearLabels()).toEqual([
 				'Download all notes',
-				'Import a folder',
-				'Import files',
+				'Import notes',
+				'Import to scratchpad',
 				'Hide scratchpad',
 			]);
 		});
@@ -1047,8 +1047,8 @@ describe('AccountPanel, with an account connected', () => {
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
-				'Import a folder',
-				'Import files',
+				'Import notes',
+				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
 				'Disconnect',
@@ -1342,6 +1342,19 @@ describe('AccountPanel, with an account connected', () => {
 			Object.defineProperty(file, 'webkitRelativePath', { value: relative });
 			return file;
 		};
+		/**
+		 * One item of the menu, then a folder or files from the question it asks,
+		 * since no browser's picker takes both.
+		 */
+		const importBy = async (
+			user: User,
+			item: 'Import notes' | 'Import to scratchpad',
+			how: 'Choose folder' | 'Choose files'
+		) => {
+			await choose(user, item);
+			const asked = await screen.findByRole('alertdialog', { name: item });
+			await user.click(within(asked).getByRole('button', { name: how }));
+		};
 
 		it('asks what will come in and what stays out, then brings it in', async () => {
 			const user = userEvent.setup();
@@ -1366,7 +1379,7 @@ describe('AccountPanel, with an account connected', () => {
 				pick
 			);
 
-			await choose(user, 'Import a folder');
+			await importBy(user, 'Import notes', 'Choose folder');
 			const dialog = await screen.findByRole('alertdialog', {
 				name: 'Import into Google Drive?',
 			});
@@ -1399,7 +1412,7 @@ describe('AccountPanel, with an account connected', () => {
 			const { pick, asked } = picker([new File(['# One'], 'one.md')]);
 			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
 
-			await choose(user, 'Import files');
+			await importBy(user, 'Import notes', 'Choose files');
 			expect(asked[0]?.accept).toContain('.zip');
 			const dialog = await screen.findByRole('alertdialog', {
 				name: 'Import into this device?',
@@ -1416,12 +1429,130 @@ describe('AccountPanel, with an account connected', () => {
 			const { pick } = picker([inFolder('old/.DS_Store', 'x')]);
 			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
 
-			await choose(user, 'Import a folder');
+			await importBy(user, 'Import notes', 'Choose folder');
 
 			expect(
 				await screen.findByText('Nothing to import: no notes or files were found.')
 			).toBeTruthy();
 			expect(screen.queryByRole('alertdialog')).toBeNull();
+		});
+
+		it('asks for a folder or files, and picks neither when that is cancelled', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick, asked } = picker([new File(['# One'], 'one.md')]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await choose(user, 'Import notes');
+			const question = await screen.findByRole('alertdialog', { name: 'Import notes' });
+			expect(
+				within(question)
+					.getAllByRole('button')
+					.map((button) => button.textContent)
+			).toEqual(['Choose folder', 'Choose files', 'Cancel']);
+			await user.click(within(question).getByRole('button', { name: 'Cancel' }));
+
+			expect(screen.queryByRole('alertdialog')).toBeNull();
+			expect(asked).toEqual([]);
+		});
+
+		it('brings the notes at the top into the scratchpad, with what they link to, and says what stays out', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick, asked } = picker([
+				inFolder('old/milk.md', 'Milk\n\n![](photo.png)\n![](Work/chart.png)\n'),
+				inFolder('old/photo.png', 'png'),
+				inFolder('old/spare.pdf', 'pdf'),
+				inFolder('old/Work/plan.md', '# Plan\n'),
+				inFolder('old/Work/chart.png', 'chart'),
+				inFolder('old/Work/unused.png', 'unused'),
+				inFolder('old/Work/Q3/budget.md', '# Budget\n'),
+			]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await importBy(user, 'Import to scratchpad', 'Choose folder');
+			const dialog = await screen.findByRole('alertdialog', {
+				name: 'Import into the scratchpad?',
+			});
+			expect(asked).toEqual([{ folder: true }]);
+			expect(dialog.textContent).toContain(
+				'1 note and 2 files it links to will be added to the scratchpad'
+			);
+			expect(dialog.textContent).toContain(
+				'Left out: 2 notes are in folders, and only notes at the top come into the scratchpad: Work/plan.md, Work/Q3/budget.md. To bring them in with their folders as notebooks, use Import notes.'
+			);
+			expect(dialog.textContent).toContain(
+				'Left out: 1 file none of these notes links to: spare.pdf.'
+			);
+
+			await user.click(within(dialog).getByRole('button', { name: 'Import' }));
+
+			expect(await screen.findByText(/Imported 1 note and 2 files\./)).toBeTruthy();
+			const rows = await db.notes.toArray();
+			expect(rows.map((note) => note.path)).toEqual(['.scratchpad/milk.md']);
+			// The one in a folder in that folder, where the note's link reaches it.
+			expect((await db.files.toArray()).map((file) => file.path).sort()).toEqual([
+				'.scratchpad/Work/chart.png',
+				'.scratchpad/photo.png',
+			]);
+			expect(await db.folders.toArray()).toEqual([]);
+		});
+
+		it('picks any file for the scratchpad, since its notes bring what they link to', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick, asked } = picker([
+				new File(['Milk\n\n![](photo.png)\n'], 'milk.md'),
+				new File(['png'], 'photo.png'),
+			]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await importBy(user, 'Import to scratchpad', 'Choose files');
+
+			const dialog = await screen.findByRole('alertdialog', {
+				name: 'Import into the scratchpad?',
+			});
+			expect(asked).toEqual([{}]);
+			expect(dialog.textContent).toContain(
+				'1 note and 1 file it links to will be added to the scratchpad'
+			);
+		});
+
+		it('says only notes in folders were found, for a scratchpad import with none at the top', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			const { pick } = picker([inFolder('old/Work/plan.md', '# Plan\n')]);
+			renderPanel(clientWith(), db, '/', undefined, undefined, undefined, undefined, pick);
+
+			await importBy(user, 'Import to scratchpad', 'Choose folder');
+
+			expect(
+				await screen.findByText(
+					/^Nothing to import: no notes were found at the top of what was chosen\. Left out: 1 note is in a folder/
+				)
+			).toBeTruthy();
+			expect(screen.queryByRole('alertdialog')).toBeNull();
+		});
+
+		it('offers the import into the scratchpad only while the scratchpad is shown', async () => {
+			const user = userEvent.setup();
+			const db = freshDatabase();
+			await setScratchpadShown(db, LOCAL_CONNECTION_ID, false);
+			renderPanel(clientWith(), db);
+			await settled();
+
+			await openGear(user);
+			expect(gearLabels()).toEqual(['Import notes', 'Show scratchpad']);
+			await user.click(screen.getByRole('button', { name: 'Show scratchpad' }));
+
+			await openGear(user);
+			await waitFor(() => {
+				expect(gearLabels()).toEqual([
+					'Import notes',
+					'Import to scratchpad',
+					'Hide scratchpad',
+				]);
+			});
 		});
 
 		it('is not offered while a first import is filling the source', async () => {
@@ -1435,8 +1566,8 @@ describe('AccountPanel, with an account connected', () => {
 
 			expect(await statusLine()).toBeTruthy();
 			const menu = await openGear(user);
-			expect(within(menu).queryByRole('button', { name: 'Import a folder' })).toBeNull();
-			expect(within(menu).queryByRole('button', { name: 'Import files' })).toBeNull();
+			expect(within(menu).queryByRole('button', { name: 'Import notes' })).toBeNull();
+			expect(within(menu).queryByRole('button', { name: 'Import to scratchpad' })).toBeNull();
 			// Only the way to let the source go, which an import does not hold up.
 			expect(gearLabels()).toEqual(['Disconnect']);
 		});
@@ -2684,8 +2815,8 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		await openGear(user);
 		// Nothing about syncing at all, and the rest as ever.
 		expect(gearLabels()).toEqual([
-			'Import a folder',
-			'Import files',
+			'Import notes',
+			'Import to scratchpad',
 			'Hide scratchpad',
 			'Disconnect',
 		]);
@@ -4669,8 +4800,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
-				'Import a folder',
-				'Import files',
+				'Import notes',
+				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
 				'Disconnect',
@@ -4751,8 +4882,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Sync now',
 				'Re-scan from scratch',
 				'Download all notes',
-				'Import a folder',
-				'Import files',
+				'Import notes',
+				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
 				'Disconnect',
@@ -4946,7 +5077,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(screen.getByText(NOTHING_CONNECTED)).toBeTruthy();
 		await settled();
 		await openGear(user);
-		expect(gearLabels()).toEqual(['Import a folder', 'Import files', 'Hide scratchpad']);
+		expect(gearLabels()).toEqual(['Import notes', 'Import to scratchpad', 'Hide scratchpad']);
 		await user.keyboard('{Escape}');
 
 		await createNote(db, { title: 'Loose' });
@@ -4955,8 +5086,8 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		await screen.findByRole('group', { name: 'Source “This device”' });
 		expect(labels('This device')).toEqual([
 			'Download all notes',
-			'Import a folder',
-			'Import files',
+			'Import notes',
+			'Import to scratchpad',
 			'Hide scratchpad',
 		]);
 	});

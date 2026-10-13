@@ -7,6 +7,7 @@ import {
 	foldName,
 	isHidden,
 	joinPath,
+	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
 	normalizePath,
 	NOTE_EXTENSION,
@@ -14,6 +15,8 @@ import {
 	type ParsedNoteFile,
 	parseNoteFile,
 	pathSegments,
+	SCRATCHPAD_FOLDER,
+	splitFrontmatter,
 	titleFromFilename,
 	UNTITLED_TITLE,
 	withoutNul,
@@ -27,6 +30,7 @@ import {
 	type NoteRecord,
 	type NotesDatabase,
 } from './db.js';
+import { namedByAny } from './fileLinks.js';
 import { foldPath, freePath } from './naming.js';
 import { noteRecordFromFile } from './notes.js';
 import { queueByNotebook } from './queue.js';
@@ -86,7 +90,14 @@ export type SkipReason =
 	/** Over `MAX_ATTACHMENT_BYTES`. */
 	| 'too-large'
 	/** An archive, or an entry in one, that could not be read. */
-	| 'unreadable';
+	| 'unreadable'
+	/**
+	 * A note in a folder of what was picked, which an import into the
+	 * scratchpad leaves out: only the notes at the top come in as cards.
+	 */
+	| 'in-folder'
+	/** A file beside them that none of the notes an import into the scratchpad brings links to. */
+	| 'not-linked';
 
 export interface Skipped {
 	path: string;
@@ -99,6 +110,12 @@ export interface Picked {
 	/** Folders an archive lists, which may be empty: the export's empty notebooks. */
 	folders: string[];
 	skipped: Skipped[];
+	/**
+	 * Files an import into the scratchpad has no use for but their names: those
+	 * below the top of a folder picked that no note at the top links to
+	 * (`readPicked`'s `scratchpad`).
+	 */
+	unread?: string[];
 }
 
 /** What an import would bring in, before anything is written: what the user is asked about. */
@@ -295,7 +312,7 @@ const unpack = async (file: File, path: string): Promise<Picked> => {
 /**
  * Whether a picked file is an archive to unpack: one picked as a file, or one
  * a folder picker handed over with no path inside a folder — which is what a
- * phone's picker does, having no folders to offer, when "Import a folder"
+ * phone's picker does, having no folders to offer, when "Choose folder"
  * opens it.
  */
 const unpacks = (file: File, how: 'folder' | 'files'): boolean =>
@@ -317,9 +334,14 @@ const readable = (file: File, how: 'folder' | 'files'): boolean =>
  * a cloud drive has not downloaded — is said to be unreadable, and the rest
  * still come in.
  */
-const readOne = async (file: File, how: 'folder' | 'files'): Promise<Picked> => {
+const readOne = async (
+	file: File,
+	how: 'folder' | 'files',
+	scratchpad: boolean
+): Promise<Picked> => {
 	const path = pickedPath(file, how);
-	if (unpacks(file, how)) return unpack(file, path);
+	if (unpacks(file, how))
+		return scratchpad ? withoutWrapper(await unpack(file, path)) : unpack(file, path);
 	const why = excluded(path);
 	if (why === 'hidden-note') return skip(path, 'hidden');
 	if (why !== undefined) return NOTHING;
@@ -336,25 +358,73 @@ const readOne = async (file: File, how: 'folder' | 'files'): Promise<Picked> => 
 };
 
 /**
+ * An archive of one folder, as a system makes one of a folder, as what is in
+ * that folder: what picking the folder would have brought. For an import into
+ * the scratchpad (`planScratchImport`), which takes only what is at the top,
+ * and so would find nothing at all in a folder zipped. What stays out by its
+ * name anyway — what the system leaves (`__MACOSX`), a `.gitignore` — is no
+ * second thing beside it.
+ */
+const withoutWrapper = (archive: Picked): Picked => {
+	const segments = (path: string) => pathSegments(tidy(path));
+	const named = [
+		...archive.files.map((file) => ({ path: file.path, folder: false })),
+		...archive.skipped.map((skipped) => ({ path: skipped.path, folder: false })),
+		...archive.folders.map((folder) => ({ path: folder, folder: true })),
+	].filter(({ path }) => tidy(path) !== '' && excluded(path) === undefined);
+	const top = named.map(({ path }) => segments(path)[0]).find((first) => first !== undefined);
+	const wrapped =
+		top !== undefined &&
+		named.some(({ path }) => segments(path).length > 1) &&
+		named.every(({ path, folder }) => {
+			const [first, ...rest] = segments(path);
+			return first === top && (rest.length > 0 || folder);
+		});
+	if (!wrapped) return archive;
+	const inside = (path: string): string => {
+		const [first, ...rest] = segments(path);
+		return first === top ? rest.join('/') : path;
+	};
+	return {
+		files: archive.files.map((file) => ({ ...file, path: inside(file.path) })),
+		folders: archive.folders.map(inside).filter((folder) => folder !== ''),
+		skipped: archive.skipped.map((skipped) => ({ ...skipped, path: inside(skipped.path) })),
+	};
+};
+
+/**
  * What the user picked, read: from a folder, every file in it; from a pick of
  * files, each `.zip` unpacked and anything else as it is. One file at a time,
  * so at most one archive is being unpacked at once.
  *
+ * For an import into the `scratchpad`, which takes only the notes at the top
+ * and what they link to: an archive of one folder is that folder's insides
+ * (`withoutWrapper`); and a file below the top of a folder is read only once
+ * the notes at the top are, and only where one of them links to it
+ * (`linkedBelow`). The rest are not read, nor counted against the most an
+ * import reads, only named (`unread`) — a few notes beside gigabytes of
+ * pictures in folders are a few notes and their pictures.
+ *
  * Refused (`ImportTooLargeError`) before a byte is read where what would be
- * read comes to more than `MAX_IMPORT_BYTES`, and as soon as unpacked archives
- * have taken it past that.
+ * read first comes to more than `MAX_IMPORT_BYTES`, and as soon as what has
+ * been read, unpacked or linked, has taken it past that.
  */
-export const readPicked = (files: readonly File[], how: 'folder' | 'files'): Promise<Picked> => {
+export const readPicked = async (
+	files: readonly File[],
+	how: 'folder' | 'files',
+	{ scratchpad = false }: { scratchpad?: boolean } = {}
+): Promise<Picked> => {
+	const later = (file: File) =>
+		scratchpad && !unpacks(file, how) && !atScratchTop(pickedPath(file, how));
 	const size = files
-		.filter((file) => readable(file, how))
+		.filter((file) => readable(file, how) && !later(file))
 		.reduce((total, file) => total + file.size, 0);
-	if (size > MAX_IMPORT_BYTES)
-		return Promise.reject(new ImportTooLargeError('Too much to import'));
+	if (size > MAX_IMPORT_BYTES) throw new ImportTooLargeError('Too much to import');
 	const read = { current: 0 };
-	return files.reduce<Promise<Picked>>(
-		async (sofar, file) => {
+	const readEach = (some: readonly File[], into: Picked): Promise<Picked> =>
+		some.reduce<Promise<Picked>>(async (sofar, file) => {
 			const done = await sofar;
-			const one = await readOne(file, how);
+			const one = await readOne(file, how, scratchpad);
 			read.current += one.files.reduce((total, each) => total + each.bytes.length, 0);
 			if (read.current > MAX_IMPORT_BYTES)
 				throw new ImportTooLargeError('Too much to import');
@@ -367,9 +437,22 @@ export const readPicked = (files: readonly File[], how: 'folder' | 'files'): Pro
 			// eslint-disable-next-line functional/immutable-data
 			done.skipped.push(...one.skipped);
 			return done;
-		},
-		Promise.resolve({ files: [], folders: [], skipped: [] })
+		}, Promise.resolve(into));
+	const first = await readEach(
+		files.filter((file) => !later(file)),
+		{ files: [], folders: [], skipped: [] }
 	);
+	if (!scratchpad) return first;
+	const linked = linkedBelow(first.files);
+	const below = files.filter(
+		(file) => later(file) && excluded(pickedPath(file, how)) === undefined
+	);
+	const wanted = (file: File) => linked(pickedPath(file, how));
+	const done = await readEach(below.filter(wanted), first);
+	return {
+		...done,
+		unread: below.filter((file) => !wanted(file)).map((file) => pickedPath(file, how)),
+	};
 };
 
 /**
@@ -430,6 +513,113 @@ export const planImport = (picked: Picked): ImportPlan => {
 };
 
 const depth = (path: string): number => pathSegments(path).length;
+
+/**
+ * A picked path as an import into the scratchpad reads it: a `.scratchpad`
+ * folder at the top of what was picked is a scratchpad already, as "Download
+ * all notes" writes one, and what is in it is at the top.
+ */
+const fromScratchpad = (path: string): string => {
+	const [first, ...rest] = pathSegments(tidy(path));
+	return first === SCRATCHPAD_FOLDER && rest.length > 0 ? rest.join('/') : tidy(path);
+};
+
+const atScratchTop = (path: string): boolean => depth(fromScratchpad(path)) === 1;
+
+/**
+ * Whether a file below the top of what was picked is one a note at the top
+ * links to: by the link parser a note's move carries its files by
+ * (`linkedFiles`), so only a link that reaches it, from where the note lands,
+ * brings it. A file beside the notes is asked more loosely (`namedByAny`):
+ * one of them is in no folder to be reached wrongly.
+ */
+const linkedBelow = (files: readonly { path: string; bytes: Bytes }[]) => {
+	const linked = new Set(
+		files
+			.filter(
+				(file) =>
+					atScratchTop(file.path) &&
+					isNote(file.path) &&
+					excluded(file.path) === undefined
+			)
+			.flatMap((file) => {
+				const source = textOf(file.bytes);
+				return source === undefined
+					? []
+					: linkedFiles(splitFrontmatter(source).body, fromScratchpad(file.path));
+			})
+			.filter((path) => depth(path) > 1)
+			.map(foldPath)
+	);
+	return (path: string): boolean => linked.has(foldPath(fromScratchpad(path)));
+};
+
+/**
+ * What an import into the scratchpad would bring in (docs/ARCHITECTURE.md §7,
+ * "Into the scratchpad"): the notes at the top of what was picked, each a
+ * card at the top of the scratchpad's folder, and the files they link to
+ * where they are beside each note's link: one beside the notes (`namedByAny`,
+ * by the name it was picked by, in the notes' bodies) beside the cards, and
+ * one in a folder (`linkedBelow`) in that folder in the scratchpad's, so the
+ * link still reaches it and no note is rewritten. The rest is planned as an
+ * import into the source is.
+ *
+ * Said, by the paths they were picked by: a note in a folder, which "Import
+ * notes" brings in with its folder as a notebook; and a file beside the notes
+ * none of them links to, where any note comes in, since it would only be a
+ * file nothing shows. What the picking left out is said only where it was at
+ * the top or linked. Any other file in a folder is left out without a word.
+ */
+export const planScratchImport = (picked: Picked): ImportPlan => {
+	const linkedDown = linkedBelow(picked.files);
+	const lands = (file: { path: string; bytes: Bytes }) => ({
+		path: fromScratchpad(file.path),
+		bytes: file.bytes,
+		was: tidy(file.path),
+	});
+	const top = picked.files.filter((file) => atScratchTop(file.path)).map(lands);
+	const down = picked.files.filter((file) => !atScratchTop(file.path));
+	const bodies = top.flatMap((file) => {
+		if (excluded(file.path) !== undefined || !isNote(file.path)) return [];
+		const source = textOf(file.bytes);
+		return source === undefined ? [] : [splitFrontmatter(source).body];
+	});
+	const linked = namedByAny(bodies);
+	// What stays out by its name goes on to be said or not as an import says it.
+	const comes = (file: { path: string }) =>
+		isNote(file.path) || excluded(file.path) !== undefined || linked(basename(file.path));
+	const library = planImport({
+		files: [
+			...top.filter(comes),
+			...down.filter((file) => !isNote(file.path) && linkedDown(file.path)).map(lands),
+		].map(({ path, bytes }) => ({ path, bytes })),
+		folders: [],
+		skipped: picked.skipped.filter(
+			(skipped) => atScratchTop(skipped.path) || linkedDown(skipped.path)
+		),
+	});
+	const into = (path: string) => joinPath(SCRATCHPAD_FOLDER, path);
+	const inFolders = [...down.map((file) => file.path), ...(picked.unread ?? [])]
+		.map(tidy)
+		.filter((path) => isNote(path) && excluded(path) === undefined && !isHidden(path));
+	return {
+		notes: library.notes.map((note) => ({ ...note, path: into(note.path) })),
+		files: library.files.map((file) => ({ ...file, path: into(file.path) })),
+		// No row and no `mkdir`, as a card written here makes none: a write
+		// makes the folders it needs, and a row would outlive the last card.
+		folders: [],
+		skipped: [
+			...library.skipped,
+			...(bodies.length === 0
+				? []
+				: top
+						.filter((file) => !comes(file))
+						.map((file): Skipped => ({ path: file.was, reason: 'not-linked' }))),
+			...inFolders.map((path): Skipped => ({ path, reason: 'in-folder' })),
+		],
+		renamed: library.renamed,
+	};
+};
 
 /** The bytes as a buffer of their own, which is what a `fileBytes` row holds. */
 const ownBuffer = (bytes: Bytes): ArrayBuffer =>

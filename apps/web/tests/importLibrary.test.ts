@@ -15,6 +15,7 @@ import {
 	MAX_IMPORT_BYTES,
 	type Picked,
 	planImport,
+	planScratchImport,
 	readPicked,
 } from '../src/store/importLibrary.js';
 import { createNote, importNoteFile } from '../src/store/notes.js';
@@ -170,6 +171,178 @@ describe('planImport', () => {
 
 	it('brings nothing from a pick of nothing it can use', () => {
 		expect(bringsAnything(planImport(picked({ '.DS_Store': 'x' })))).toBe(false);
+	});
+});
+
+describe('planScratchImport', () => {
+	it('takes the notes at the top as cards, with the files beside them they link to', () => {
+		const plan = planScratchImport(
+			picked({
+				'milk.md': 'Milk\n\n![](photo.png)\n',
+				'eggs.md': 'Eggs, see [the list](list%20of%20things.pdf)\n',
+				'photo.png': Uint8Array.from([1, 2, 3]),
+				'list of things.pdf': 'pdf',
+				'spare.pdf': 'pdf',
+				'Work/plan.md': '# Plan\n',
+				'Work/Q3/budget.md': '# Budget\n',
+				'Work/chart.png': 'png',
+			})
+		);
+
+		expect(plan.notes.map((note) => note.path)).toEqual([
+			'.scratchpad/milk.md',
+			'.scratchpad/eggs.md',
+		]);
+		expect(plan.files.map((file) => file.path)).toEqual([
+			'.scratchpad/photo.png',
+			'.scratchpad/list of things.pdf',
+		]);
+		// No row for the scratchpad's folder, as a card written here makes none.
+		expect(plan.folders).toEqual([]);
+		// A note in a folder is said, so it can be brought in on its own; a
+		// file in one is not, since it would only be the notes' file.
+		expect(plan.skipped).toEqual([
+			{ path: 'spare.pdf', reason: 'not-linked' },
+			{ path: 'Work/plan.md', reason: 'in-folder' },
+			{ path: 'Work/Q3/budget.md', reason: 'in-folder' },
+		]);
+	});
+
+	it('brings a file a note links to in a folder into that folder, where the link reaches it', () => {
+		const plan = planScratchImport({
+			...picked({
+				'milk.md':
+					'![](attachments/photo.png)\n[scan](<scans/the receipt.png>)\n![](other.png)\n',
+				'attachments/photo.png': 'png',
+				// Its name is in the note, but the link is to one beside it.
+				'attachments/other.png': 'png',
+				'scans/the receipt.png': 'png',
+			}),
+			skipped: [
+				{ path: 'Photos/film.mov', reason: 'too-large' },
+				{ path: 'Photos/other.mov', reason: 'too-large' },
+			],
+		});
+
+		expect(plan.notes.map((note) => note.path)).toEqual(['.scratchpad/milk.md']);
+		expect(plan.files.map((file) => file.path)).toEqual([
+			'.scratchpad/attachments/photo.png',
+			'.scratchpad/scans/the receipt.png',
+		]);
+		expect(plan.notes[0]?.source).toBe(
+			'![](attachments/photo.png)\n[scan](<scans/the receipt.png>)\n![](other.png)\n'
+		);
+		expect(plan.folders).toEqual([]);
+		expect(plan.skipped).toEqual([]);
+	});
+
+	it('says a file a note links to in a folder was left out, where the picking left it out', () => {
+		const plan = planScratchImport({
+			...picked({ 'milk.md': '![](Photos/film.mov)\n' }),
+			skipped: [
+				{ path: 'Photos/film.mov', reason: 'too-large' },
+				{ path: 'Photos/other.mov', reason: 'too-large' },
+			],
+		});
+
+		expect(plan.skipped).toEqual([{ path: 'Photos/film.mov', reason: 'too-large' }]);
+	});
+
+	it('finds a link by the name the file was picked by, in the note’s body', () => {
+		const plan = planScratchImport(
+			picked({
+				'milk.md': '---\ncover: cover.png\n---\n![](photo%3F.png)\n',
+				'photo?.png': 'png',
+				'cover.png': 'png',
+			})
+		);
+
+		// Brought, under a name a provider takes; a name only the frontmatter
+		// says is no link, as "Attached files" reads links.
+		expect(plan.files.map((file) => file.path)).toEqual(['.scratchpad/photo_.png']);
+		expect(plan.renamed).toEqual(['photo?.png']);
+		expect(plan.skipped).toEqual([{ path: 'cover.png', reason: 'not-linked' }]);
+	});
+
+	it('takes a scratchpad already in what was picked as the top, as the download writes one', () => {
+		const plan = planScratchImport(
+			picked({
+				'.scratchpad/card.md': 'A card\n![](att/pic.png)\n',
+				'.scratchpad/att/pic.png': 'png',
+				'.scratchpad/Old/deep.md': 'Deep\n',
+				'loose.md': 'Loose\n',
+			})
+		);
+
+		expect(plan.notes.map((note) => note.path)).toEqual([
+			'.scratchpad/card.md',
+			'.scratchpad/loose.md',
+		]);
+		expect(plan.files.map((file) => file.path)).toEqual(['.scratchpad/att/pic.png']);
+		expect(plan.skipped).toEqual([{ path: '.scratchpad/Old/deep.md', reason: 'in-folder' }]);
+	});
+
+	it('says what the picking left out only where it was at the top', () => {
+		const plan = planScratchImport(
+			picked({
+				'.hidden.md': 'h',
+				'Work/.draft.md': 'd',
+				'latin.md': Uint8Array.from([0x63, 0x61, 0x66, 0xe9]),
+				'Work/latin.md': Uint8Array.from([0x63, 0x61, 0x66, 0xe9]),
+				'note?.md': 'Q',
+				'Work/odd?.md': 'Q',
+			})
+		);
+
+		expect(plan.notes.map((note) => note.path)).toEqual(['.scratchpad/note_.md']);
+		// Each by the path it was picked by.
+		expect(plan.skipped).toEqual([
+			{ path: '.hidden.md', reason: 'hidden' },
+			{ path: 'latin.md', reason: 'not-text' },
+			// Below the top, a note is left out whatever is in it: it is not read.
+			{ path: 'Work/latin.md', reason: 'in-folder' },
+			{ path: 'Work/odd?.md', reason: 'in-folder' },
+		]);
+		expect(plan.renamed).toEqual(['note?.md']);
+	});
+
+	it('brings nothing when every note is in a folder, and says nothing of links with no note', () => {
+		const plan = planScratchImport(picked({ 'Work/plan.md': '# Plan\n', 'photo.png': 'png' }));
+
+		expect(bringsAnything(plan)).toBe(false);
+		expect(plan.skipped).toEqual([{ path: 'Work/plan.md', reason: 'in-folder' }]);
+	});
+
+	it('lands in the scratchpad beside its cards, a name taken numbered, and syncs there', async () => {
+		const db = await bound();
+		await createNote(db, { ...scope, folderPath: '.scratchpad', title: 'milk', body: 'Old\n' });
+		const plan = planScratchImport(
+			picked({ 'milk.md': 'Milk\n\n![](photo.png)\n', 'photo.png': 'png' })
+		);
+
+		const outcome = await importLibrary(db, CONNECTION, plan);
+
+		expect(outcome).toMatchObject({ notes: 1, files: 1, numbered: 1 });
+		const paths = (await db.notes.where('connectionId').equals(CONNECTION).toArray())
+			.map((note) => note.path)
+			.sort();
+		expect(paths).toEqual(['.scratchpad/milk-2.md', '.scratchpad/milk.md']);
+
+		const fake = createFakeProvider();
+		await fake.ensureRoot();
+		const engine = createSyncEngine({ provider: fake, store: createDexieSyncStore(db, scope) });
+		expect((await engine.sync()).status).toBe('ok');
+		expect(
+			fake
+				.snapshot()
+				.filter((entry) => !isHidden(entry.path))
+				.map((entry) => [entry.kind, entry.path])
+		).toEqual([
+			['folder', '.scratchpad'],
+			['file', '.scratchpad/milk-2.md'],
+			['file', '.scratchpad/milk.md'],
+			['file', '.scratchpad/photo.png'],
+		]);
 	});
 });
 
@@ -581,6 +754,86 @@ describe('readPicked', () => {
 		);
 		expect(read.folders).toEqual(['Empty/']);
 		expect(read.skipped).toEqual([{ path: 'broken.zip', reason: 'unreadable' }]);
+	});
+
+	it('takes an archive of one folder as what is in it, for the scratchpad', async () => {
+		const archive = zipOf(
+			[
+				{ path: 'Notes/a.md', content: 'A' },
+				{ path: 'Notes/Sub/b.md', content: 'B' },
+				{ path: '__MACOSX/Notes/._a.md', content: 'x' },
+				// Left out by its name anyway, so no second thing beside the folder.
+				{ path: '.gitignore', content: 'x' },
+			],
+			[{ path: 'Notes' }, { path: 'Notes/Empty' }]
+		);
+		const zip = () => new File([archive], 'notes.zip', { type: 'application/zip' });
+
+		const unwrapped = await readPicked([zip()], 'files', { scratchpad: true });
+		expect(unwrapped.files.map((file) => file.path)).toEqual([
+			'a.md',
+			'Sub/b.md',
+			'__MACOSX/Notes/._a.md',
+			'.gitignore',
+		]);
+		expect(unwrapped.folders).toEqual(['Empty']);
+
+		// An import into a source keeps the archive's own tree.
+		const kept = await readPicked([zip()], 'files');
+		expect(kept.files.map((file) => file.path)).toEqual([
+			'Notes/a.md',
+			'Notes/Sub/b.md',
+			'__MACOSX/Notes/._a.md',
+			'.gitignore',
+		]);
+	});
+
+	it('reads only the top of a folder for the scratchpad, and what it links to, and names the rest', async () => {
+		const unreadable = (relative: string, size: number): File => {
+			const file = fileAt(relative, 'x');
+			Object.defineProperty(file, 'size', { value: size });
+			Object.defineProperty(file, 'arrayBuffer', {
+				value: () => Promise.reject(new Error('read, and it should not have been')),
+			});
+			return file;
+		};
+
+		const read = await readPicked(
+			[
+				// Read after the note that links it, wherever it was picked.
+				fileAt('picked/Photos/cat.png', 'png'),
+				fileAt('picked/milk.md', 'Milk\n\n![](Photos/cat.png)\n![](Photos/film.mov)\n'),
+				// More than an import may read, and below the top: not counted.
+				unreadable('picked/Photos/huge.mov', MAX_IMPORT_BYTES + 1),
+				unreadable('picked/Photos/film.mov', MAX_ATTACHMENT_BYTES + 1),
+				unreadable('picked/Work/plan.md', 10),
+				unreadable('picked/.obsidian/app.json', 10),
+			],
+			'folder',
+			{ scratchpad: true }
+		);
+
+		expect(read.files.map((file) => file.path)).toEqual(['milk.md', 'Photos/cat.png']);
+		expect(read.skipped).toEqual([{ path: 'Photos/film.mov', reason: 'too-large' }]);
+		expect(read.unread).toEqual(['Photos/huge.mov', 'Work/plan.md']);
+	});
+
+	it('leaves an archive with anything beside its one folder as it is', async () => {
+		const archive = zipOf(
+			[
+				{ path: 'Notes/a.md', content: 'A' },
+				{ path: 'top.md', content: 'T' },
+			],
+			[]
+		);
+
+		const read = await readPicked(
+			[new File([archive], 'notes.zip', { type: 'application/zip' })],
+			'files',
+			{ scratchpad: true }
+		);
+
+		expect(read.files.map((file) => file.path)).toEqual(['Notes/a.md', 'top.md']);
 	});
 
 	it('keeps an archive picked inside a folder as the file it is', async () => {
