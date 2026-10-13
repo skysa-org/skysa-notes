@@ -10,6 +10,7 @@ import { db, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
+import { RunProgress } from './RunProgress.js';
 
 /**
  * A source's first import, as it happens, and the way out of it.
@@ -46,6 +47,10 @@ export const importMessage = (status: SchedulerStatus, label: string): string =>
 				: t('firstImport.stopped', { error: status.error, provider: label });
 		case 'local':
 			return t('firstImport.gettingReady');
+		// Not offered while an import holds the source (`SyncDetails`), but said
+		// should it come to be.
+		case 'paused':
+			return t('account.status.paused', { provider: label });
 	}
 };
 
@@ -72,37 +77,6 @@ const progressMessage = (progress: SyncProgress | undefined, label: string): str
 	return progress.listing
 		? t('firstImport.listing', { provider: label, count: found })
 		: t('firstImport.downloading', { provider: label, done, total: found });
-};
-
-/** How full the bar is, or nothing for a bar that cannot know. */
-const fraction = (status: SchedulerStatus): { value: number; max: number } | undefined => {
-	const { progress } = status;
-	if (status.phase !== 'syncing' || progress === undefined) return undefined;
-	if (progress.stage === 'receiving' && progress.listing) return undefined;
-	if (progress.stage !== 'scanning') return { value: progress.done, max: progress.total };
-	if (progress.listing || progress.found === 0) return undefined;
-	return { value: progress.done, max: progress.found };
-};
-
-/** How much of a path's end is kept whole when it is cut. */
-const KEPT_END = 24;
-
-/**
- * A path too long for its line, cut in the middle: its start says where the
- * file is and its end which file it is, and the end is the half that matters.
- * CSS cuts only the end of a line, so the text is two spans and only the first
- * gives way (`.import-file-start`); a path that fits shows whole. Split by code
- * point, so a character outside the BMP is never cut in half.
- */
-const MiddleCut = ({ text }: { text: string }) => {
-	const points = [...text];
-	const at = Math.max(0, points.length - KEPT_END);
-	return (
-		<>
-			<span className="import-file-start">{points.slice(0, at).join('')}</span>
-			<span className="import-file-end">{points.slice(at).join('')}</span>
-		</>
-	);
 };
 
 type Cancelling =
@@ -186,9 +160,7 @@ const ImportBody = ({
 }) => {
 	const label = labelOf(source);
 	const status = useSyncStatus(seams.sync ?? syncScheduler);
-	const path = status.phase === 'syncing' ? status.progress?.path : undefined;
 	const { state, cancel, dismiss } = useCancel(source, label, seams);
-	const bar = fraction(status);
 	const busy = state.kind === 'busy';
 	return (
 		<div className="import-body">
@@ -197,23 +169,7 @@ const ImportBody = ({
 			<p id={messageId} role="status" aria-live="polite">
 				{busy ? t('firstImport.canceling') : importMessage(status, label)}
 			</p>
-			{bar === undefined ? (
-				<progress className="import-bar" aria-label={t('firstImport.progress')} />
-			) : (
-				<progress
-					className="import-bar"
-					aria-label={t('firstImport.progress')}
-					value={bar.value}
-					max={Math.max(bar.max, 1)}
-				/>
-			)}
-			{/* Not live: it changes with every file, faster than anyone could
-			    listen, and the count above already says how far it has got. A
-			    space holds its line, so the buttons do not jump as it comes and
-			    goes. */}
-			<p className="import-file" title={path}>
-				{path === undefined ? '\u00a0' : <MiddleCut text={path} />}
-			</p>
+			<RunProgress status={status} label={t('firstImport.progress')} />
 			{(state.kind === 'said' || state.kind === 'unreached') && (
 				<p className="import-problem" role="alert">
 					{state.message}

@@ -76,6 +76,7 @@ import { type Importing, importItems, ImportNotes, useImportNotes } from './Impo
 import { InfoDialog } from './InfoDialog.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
+import { RunProgress } from './RunProgress.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
 import { useEscape } from './useEscape.js';
 
@@ -99,7 +100,7 @@ type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
 
 type Sync = Pick<
 	SyncScheduler,
-	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'clipboard'
+	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'pause' | 'clipboard'
 >;
 
 export interface AccountPanelProps {
@@ -334,6 +335,8 @@ const statusMessage = (
 				: t('account.status.syncedAt', { time: when(status.lastSyncAt) });
 		case 'offline':
 			return t('account.status.offline');
+		case 'paused':
+			return t('account.status.paused', { provider: label });
 		case 'retrying':
 			return t('account.status.retrying', { provider: label, error: errorOf(status) });
 		case 'attention':
@@ -427,6 +430,11 @@ const lineStatus = (
 			};
 		case 'attention':
 			return { text: t('account.line.notSyncing', provider), title: null };
+		case 'paused':
+			return {
+				text: t('account.line.paused', provider),
+				title: statusMessage(status, label, syncable),
+			};
 	}
 };
 
@@ -695,19 +703,99 @@ const ActionsMenu = ({
 const StatusLine = ({
 	text,
 	title,
+	onDetails,
+	detailsRef,
 	children,
 }: {
 	text: string;
 	title: string | null;
+	/**
+	 * Given while a sync is going or paused: the words are a button that
+	 * opens what it is doing (`SyncDetails`). Inside the line rather than in
+	 * its place, so the line is the same element whatever it says.
+	 */
+	onDetails?: () => void;
+	detailsRef?: RefObject<HTMLButtonElement | null>;
 	children: ReactNode;
 }) => (
 	<div className="account-line">
 		<p className="account-status muted" {...(title === null ? {} : { title })}>
-			{text}
+			{onDetails === undefined ? (
+				text
+			) : (
+				<button
+					ref={detailsRef}
+					type="button"
+					className="account-status-button"
+					aria-haspopup="dialog"
+					onClick={onDetails}
+				>
+					{text}
+				</button>
+			)}
 		</p>
 		{children}
 	</div>
 );
+
+/**
+ * What a sync is doing, at more length than the line has room for, and the
+ * way to pause it — or, paused, to resume it (2026-10-13). Opened from the
+ * status line while it syncs or is paused, and live while open: once the run
+ * it was opened on has ended, it says how syncing stands, with Close alone.
+ * Paused, nothing syncs on this device until Sync now, a re-scan, the source
+ * shown again after another, or a reload (`pause` in `sync/scheduler.ts`).
+ */
+const SyncDetails = ({
+	status,
+	label,
+	syncable,
+	onPause,
+	onResume,
+	onClose,
+	returnFocus,
+}: {
+	status: SchedulerStatus;
+	label: string;
+	syncable: boolean;
+	onPause: () => void;
+	onResume: () => void;
+	onClose: () => void;
+	returnFocus: RefObject<HTMLElement | null>;
+}) => {
+	const syncing = status.phase === 'syncing';
+	const paused = status.phase === 'paused';
+	const action = syncing ? (
+		<button type="button" onClick={onPause}>
+			{t('account.details.pause')}
+		</button>
+	) : paused ? (
+		<button type="button" onClick={onResume}>
+			{t('account.details.resume')}
+		</button>
+	) : undefined;
+	return (
+		<InfoDialog
+			title={
+				paused
+					? t('account.details.pausedTitle')
+					: t('account.details.title', { provider: label })
+			}
+			onClose={onClose}
+			actions={action}
+			returnFocus={returnFocus}
+		>
+			<div className="run-body">
+				{/* Polite, as an import's is: it changes every few files. */}
+				<p role="status" aria-live="polite">
+					{statusMessage(status, label, syncable) ?? label}
+				</p>
+				{syncing && <RunProgress status={status} label={t('account.progress')} />}
+				{syncing && <p className="muted">{t('account.details.pauseHint')}</p>}
+			</div>
+		</InfoDialog>
+	);
+};
 
 /**
  * The panel's actions, behind a gear at the end of its status line: what the
@@ -1760,6 +1848,7 @@ const ConnectedFoot = ({
 	downloading,
 	importing,
 	onClipboard,
+	onPause,
 	...actions
 }: Omit<
 	Parameters<typeof storageItems>[0],
@@ -1768,6 +1857,8 @@ const ConnectedFoot = ({
 	slot: AccountSlot | undefined;
 	/** Show or hide the clipboard. */
 	onClipboard: () => void;
+	/** Pause syncing, from its details (`SyncDetails`). */
+	onPause: () => void;
 	/**
 	 * Whether the source can be downloaded or imported into now: not while a
 	 * first import is filling it, nor while the disconnect question is open.
@@ -1790,6 +1881,12 @@ const ConnectedFoot = ({
 	onGrantsChanged: () => void;
 }) => {
 	const [about, setAbout] = useState(false);
+	const [details, setDetails] = useState(false);
+	const detailsButton = useRef<HTMLButtonElement>(null);
+	// Not while a first import holds the source: its dialog says all of it,
+	// and has its own way out.
+	const tappable =
+		!importingHere(bound) && (status.phase === 'syncing' || status.phase === 'paused');
 	const menus = useMenuButtons(openButton);
 	const scratchpad = useScratchpadItem(database, bound.connectionId);
 	const items = storageItems({
@@ -1830,7 +1927,31 @@ const ConnectedFoot = ({
 					returnFocus={openButton}
 				/>
 			)}
-			<StatusLine text={said.text} title={title}>
+			{details && (
+				<SyncDetails
+					status={status}
+					label={label}
+					syncable={isSyncable(bound)}
+					onPause={onPause}
+					onResume={actions.syncNow}
+					onClose={() => {
+						setDetails(false);
+					}}
+					returnFocus={detailsButton}
+				/>
+			)}
+			<StatusLine
+				text={said.text}
+				title={title}
+				{...(tappable
+					? {
+							onDetails: () => {
+								setDetails(true);
+							},
+							detailsRef: detailsButton,
+						}
+					: {})}
+			>
 				<Devices
 					client={client}
 					database={database}
@@ -2113,6 +2234,9 @@ const Connected = ({
 					disconnectBlocked={disconnectBlocked}
 					syncNow={() => {
 						void sync.syncNow();
+					}}
+					onPause={() => {
+						sync.pause();
 					}}
 					onClipboard={() => {
 						const shown = showsClipboard(bound);

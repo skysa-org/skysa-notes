@@ -225,6 +225,7 @@ const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 		listening: () => listeners.size > 0,
 		syncNow: vi.fn(() => Promise.resolve()),
 		resync: vi.fn(() => Promise.resolve()),
+		pause: vi.fn(),
 		// Nothing to stop: resolves straight away with a release that does nothing.
 		halt: vi.fn(() => Promise.resolve(() => undefined)),
 		// The clipboard's own tests are in `ClipboardPanel.test.tsx`; here,
@@ -2452,6 +2453,105 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 		expect((await statusLine()).textContent).toBe('Dropbox · Looking for notes…');
 		expect(screen.queryByRole('progressbar')).toBeNull();
+	});
+
+	it('opens what a sync is doing from its line, and pauses it there', async () => {
+		// Asked for on a phone: "Syncing…" for a long time, with nothing to say
+		// what it was doing and no way to stop it.
+		const user = userEvent.setup();
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: {
+				stage: 'receiving',
+				done: 120,
+				total: 1000,
+				listing: false,
+				path: 'Work/Plan.md',
+			},
+		});
+		await connected(sync);
+		const thousand = (1000).toLocaleString();
+
+		await user.click(
+			await screen.findByRole('button', { name: `Dropbox · Receiving 120 of ${thousand}` })
+		);
+
+		const details = screen.getByRole('dialog', { name: 'Syncing with Dropbox' });
+		expect(within(details).getByRole('status').textContent).toBe(
+			`Receiving notes from Dropbox: 120 of ${thousand}.`
+		);
+		const bar = within(details).getByRole('progressbar', { name: 'Sync progress' });
+		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['120', '1000']);
+		expect(details.querySelector('.run-file')?.getAttribute('title')).toBe('Work/Plan.md');
+		await user.click(within(details).getByRole('button', { name: 'Pause syncing' }));
+		expect(sync.pause).toHaveBeenCalledTimes(1);
+
+		// Paused: said so, and the way back.
+		sync.say({ phase: 'paused' });
+		const paused = await screen.findByRole('dialog', { name: 'Syncing paused' });
+		expect(within(paused).getByRole('status').textContent).toBe(
+			'Syncing with Dropbox is paused on this device. Your edits are kept here and sent when it resumes.'
+		);
+		expect(within(paused).queryByRole('progressbar')).toBeNull();
+		await user.click(within(paused).getByRole('button', { name: 'Resume syncing' }));
+		expect(sync.syncNow).toHaveBeenCalledTimes(1);
+
+		// Once the run is over, how syncing stands, and Close alone.
+		sync.say({ phase: 'idle' });
+		const over = await screen.findByRole('dialog', { name: 'Syncing with Dropbox' });
+		expect(within(over).getByRole('status').textContent).toBe('Synced');
+		expect(
+			within(over)
+				.getAllByRole('button')
+				.map((button) => button.textContent)
+		).toEqual(['Close']);
+		await user.click(within(over).getByRole('button', { name: 'Close' }));
+		expect(screen.queryByRole('dialog')).toBeNull();
+	});
+
+	it('says it is paused, and resumes from the gear as well', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'paused' });
+		await connected(sync);
+
+		const line = await naming('ada@example.com');
+		expect(line.textContent).toBe('Dropbox · Paused');
+		expect(line.title).toBe(
+			'Syncing with Dropbox · ada@example.com\nSyncing with Dropbox is paused on this device. Your edits are kept here and sent when it resumes.'
+		);
+		await choose(user, 'Sync now');
+		expect(sync.syncNow).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps its words as words while it is not syncing', async () => {
+		const sync = fakeSync({ phase: 'idle' });
+		await connected(sync);
+		const line = await statusLine();
+		expect(line.querySelector('button')).toBeNull();
+
+		sync.say({ phase: 'syncing' });
+		await waitFor(() => {
+			expect(line.querySelector('button')?.textContent).toBe('Dropbox · Syncing…');
+		});
+		sync.say({ phase: 'retrying', error: 'timed out' });
+		await waitFor(() => {
+			expect(line.querySelector('button')).toBeNull();
+		});
+	});
+
+	it('offers no details while a first import holds the source, whose dialog says it all', async () => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await holding(db, 'c1');
+		const sync = fakeSync({ phase: 'syncing' });
+		renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db,
+			'/',
+			sync
+		);
+
+		expect((await statusLine()).querySelector('button')).toBeNull();
 	});
 
 	it('says nothing, and offers nothing, before the scheduler has picked the connection up', async () => {
@@ -4975,6 +5075,31 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		await waitFor(() => {
 			expect(screen.queryByRole('progressbar')).toBeNull();
 		});
+	});
+
+	it('opens what a sync is doing from the line there too, and pauses it', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: 0, listing: true },
+		});
+		await connected(sync);
+
+		await user.click(
+			await screen.findByRole('button', { name: 'Dropbox · Checking for changes…' })
+		);
+		const details = screen.getByRole('dialog', { name: 'Syncing with Dropbox' });
+		expect(within(details).getByRole('status').textContent).toBe(
+			'Checking Dropbox for changes…'
+		);
+		// Of how many it cannot say yet.
+		expect(
+			within(details)
+				.getByRole('progressbar', { name: 'Sync progress' })
+				.hasAttribute('value')
+		).toBe(false);
+		await user.click(within(details).getByRole('button', { name: 'Pause syncing' }));
+		expect(sync.pause).toHaveBeenCalledTimes(1);
 	});
 
 	it('offers another source’s actions on its own row, and shows that source to do them', async () => {

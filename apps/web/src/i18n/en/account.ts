@@ -85,6 +85,8 @@ export const account = {
 			one: '{provider} · Looking for notes: {count} found',
 			other: '{provider} · Looking for notes: {count} found',
 		},
+		/** The user paused syncing (`SyncDetails`), until they resume it. */
+		paused: '{provider} · Paused',
 		/** A re-scan before it has found enough to count. */
 		lookingStart: '{provider} · Looking for notes…',
 		/** Reading what has changed since the last sync, before it has found enough to count. */
@@ -104,6 +106,19 @@ export const account = {
 	/** The bar under the status line during a long sync. */
 	progress: 'Sync progress',
 	/**
+	 * What a sync is doing, opened from the status line while it syncs or is
+	 * paused (`SyncDetails`), and the way to pause it or resume it.
+	 */
+	details: {
+		title: 'Syncing with {provider}',
+		pausedTitle: 'Syncing paused',
+		pause: 'Pause syncing',
+		/** Under Pause syncing, before it is pressed. */
+		pauseHint:
+			'Pausing stops this sync now. Nothing syncs on this device until you resume it, choose Sync now, or open the app again.',
+		resume: 'Resume syncing',
+	},
+	/**
 	 * How syncing is going, as a sentence. `{error}` is what the provider or the
 	 * browser said went wrong, as it said it, or `unknownError`.
 	 */
@@ -121,6 +136,7 @@ export const account = {
 			one: 'Looking for notes in {provider}: {count} found so far.',
 			other: 'Looking for notes in {provider}: {count} found so far.',
 		},
+		paused: 'Syncing with {provider} is paused on this device. Your edits are kept here and sent when it resumes.',
 		lookingStart: 'Looking for notes in {provider}…',
 		checking: 'Checking {provider} for changes…',
 		checkingFound: {
