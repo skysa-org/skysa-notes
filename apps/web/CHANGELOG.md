@@ -1,5 +1,18 @@
 # @skysa/web
 
+## 1.2.2
+
+### Patch Changes
+
+- e8f23b6: A menu item that can't be chosen right now looks greyed out. Sync now and Re-scan from scratch were already turned off while a sync is running, but they looked like every other item and were highlighted under the pointer, so a tap on one seemed to do nothing. They now show as unavailable, as a toolbar's buttons do.
+- 23ec5b2: A sync waiting for another tab or window of the app to finish syncing the same source now says "Waiting for another tab" after a few seconds, as it already did while waiting on that tab for the notes on this device, instead of a plain "Syncing…".
+- 1c48f21: Syncing after notes or notebooks were moved on another device is much faster on a large library: deciding where each moved note goes no longer reads every note on the device, once per note.
+- 123f4d2: You can see what a sync is doing, and pause it. While the storage panel's status says it is syncing, tap the status to open a window showing what it is doing, how far it has got and the file it is on, with **Pause syncing**. Paused, nothing syncs on this device: your edits are kept here and sent once you choose **Resume syncing** or **Sync now**, re-scan, switch to another source and back, or open the app again. The status says "Paused" meanwhile.
+- 7bf7bfb: While a sync reads what has changed on another device, the status says so. It used to say just "Syncing…" until it started counting notes, which after a lot of notebooks were moved on another device could take minutes. Now the line says "Checking for changes…" from the start, and once it has found twenty or more changed notes, how many so far, with a bar. A re-scan says "Looking for notes…" before it has found any. For other code using `@skysa/core`: the `receiving` progress now carries `listing`, which is true while the pages of changes are still being read.
+- Updated dependencies [14aafce]
+- Updated dependencies [7bf7bfb]
+  - @skysa/core@1.2.2
+
 ## 1.2.1
 
 ### Patch Changes

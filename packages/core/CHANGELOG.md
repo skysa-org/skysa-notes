@@ -1,5 +1,12 @@
 # @skysa/core
 
+## 1.2.2
+
+### Patch Changes
+
+- 14aafce: Google Drive: a sync after notebooks were moved or made on another device reads what is in the new folders four at a time, a level at a time, instead of one folder after another, so it gets to "Checking for changes" counts and downloads sooner.
+- 7bf7bfb: While a sync reads what has changed on another device, the status says so. It used to say just "Syncing…" until it started counting notes, which after a lot of notebooks were moved on another device could take minutes. Now the line says "Checking for changes…" from the start, and once it has found twenty or more changed notes, how many so far, with a bar. A re-scan says "Looking for notes…" before it has found any. For other code using `@skysa/core`: the `receiving` progress now carries `listing`, which is true while the pages of changes are still being read.
+
 ## 1.2.1
 
 No changes in this release.
