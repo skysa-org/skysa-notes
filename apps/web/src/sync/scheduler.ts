@@ -63,7 +63,14 @@ export type SyncPhase =
 	 * token, the provider refused a fresh one, or an op has failed too often to
 	 * go on retrying. Pulls continue where they can.
 	 */
-	| 'attention';
+	| 'attention'
+	/**
+	 * The user paused it (`pause`): nothing syncs, and edits wait on this
+	 * device, until Sync now, a re-scan, the source being shown again after
+	 * another, or a reload. Not the engine's `paused` outcome, which is an
+	 * account that needs connecting again, and `attention`.
+	 */
+	| 'paused';
 
 /**
  * The op a `blocked` sync is about: the first one out of attempts, which is
@@ -232,6 +239,15 @@ export interface SyncScheduler {
 	 * the run has finished.
 	 */
 	readonly syncNow: () => Promise<void>;
+	/**
+	 * Stop the run under way and start no other until the user asks — Sync now
+	 * or a re-scan — or the source is shown again after another, or the app is
+	 * opened again: the status says `paused` meanwhile. The run's requests are
+	 * aborted; a batch it was already writing is written whole, its cursor with
+	 * it, so nothing is lost and nothing is applied in part. Files beside notes
+	 * are still read when they are opened.
+	 */
+	readonly pause: () => void;
 	readonly status: () => SchedulerStatus;
 	/** Called with every status change. Returns the way to unsubscribe. */
 	readonly subscribe: (listener: (status: SchedulerStatus) => void) => () => void;
@@ -371,6 +387,10 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	const relistMs = options.relistMs ?? RELIST_MS;
 
 	const current = new Map<'session', Session>();
+	/** The connection the user has paused (`pause`), until they ask again. */
+	const pausedFor = new Map<'connection', string>();
+	const isPaused = (connectionId: string): boolean =>
+		pausedFor.get('connection') === connectionId;
 	const generations = new Map<'count', number>([['count', 0]]);
 	const timers = new Map<Timer, () => void>();
 	const unsubscribers = new Set<() => void>();
@@ -785,7 +805,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 	 * after it — unless it was only a nudge and that run ended backing off.
 	 */
 	const run = (session: Session, asked: 'again' | 'nudged' = 'again'): Promise<void> => {
-		if (!isCurrent(session)) return Promise.resolve();
+		// Every trigger comes through here — the minute, an edit, focus, the
+		// network back, another device's notice — so a pause holds against all.
+		if (!isCurrent(session) || isPaused(session.connectionId)) return Promise.resolve();
 		const inFlight = session.inFlight.get('run');
 		if (inFlight !== undefined) {
 			session.flags.add(asked);
@@ -1002,6 +1024,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		const live = showing?.detached === undefined ? showing : undefined;
 		// Held by a cancel, which is about to ask the server to let it go.
 		const state = live !== undefined && halted.has(live.connectionId) ? undefined : live;
+		// Another source shown, or none, ends a pause: showing a source is what
+		// syncs it, and coming back to it is asking again.
+		if (state === undefined || !isPaused(state.connectionId)) pausedFor.delete('connection');
 		const active = current.get('session');
 		if (state?.connectionId === active?.connectionId && active !== undefined) return;
 		endSession();
@@ -1065,14 +1090,21 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		current.set('session', session);
 		const { relay } = session;
 		if (relay !== undefined) sessionUnsubscribers.add(relay.close);
-		publish({ phase: 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
+		const paused = isPaused(connectionId);
+		publish({ phase: paused ? 'paused' : 'idle', lastSyncAt: state.lastSyncAt, conflicts: [] });
 		watchEdits(session);
+		if (paused) return;
 		void run(session);
 		// What the clipboard holds now, and what was pasted here while nothing
 		// sent it. Neither waits for the run: a refresh asks only for the
 		// folder, and a flush waits for the run itself.
 		void clipboard.refresh(connectionId);
 		void clipboard.flush(connectionId);
+	};
+
+	/** The user asking again: a pause of this session's connection is over. */
+	const resume = (session: Session) => {
+		if (isPaused(session.connectionId)) pausedFor.delete('connection');
 	};
 
 	const reader = createFileReader({
@@ -1156,6 +1188,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				environment.listen('offline', () => {
 					const session = current.get('session');
 					if (session === undefined || session.inFlight.has('run')) return;
+					// Paused says more than offline does, and `online` would not
+					// say it again, since it starts no run.
+					if (isPaused(session.connectionId)) return;
 					cancel('next');
 					publish({
 						...status(),
@@ -1179,6 +1214,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		resync: async () => {
 			const session = current.get('session');
 			if (session === undefined) return;
+			resume(session);
 			// Inside the lock every run takes: a run already at the network is
 			// holding a cursor of its own and writes it back when its round
 			// lands. Clearing outside the lock would put that cursor back after
@@ -1218,8 +1254,33 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		syncNow: async () => {
 			const session = current.get('session');
 			if (session === undefined) return;
+			resume(session);
 			await released(session);
 			await run(session);
+		},
+
+		pause: () => {
+			const session = current.get('session');
+			if (session === undefined) return;
+			pausedFor.set('connection', session.connectionId);
+			const running = session.inFlight.get('run');
+			const { conflicts } = status();
+			// A session of its own, as `halt` makes one: ending this one aborts
+			// every request the run has out, and the next is made paused, so
+			// it runs nothing and still reads a file beside a note when it is
+			// opened.
+			endSession();
+			follow(shown.get('state'));
+			const paused = current.get('session');
+			if (paused === undefined) return;
+			// The copies the last sync wrote are still on the device to be seen.
+			if (conflicts.length > 0) publish({ ...status(), conflicts });
+			// An op the run was sending when its request was aborted had an
+			// attempt counted against it, which the user's pause is no evidence
+			// for: given back once the run has let go.
+			void running
+				?.catch(() => undefined)
+				.then(() => (isCurrent(paused) ? released(paused) : undefined));
 		},
 		status,
 

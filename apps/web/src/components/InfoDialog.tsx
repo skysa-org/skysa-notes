@@ -21,6 +21,8 @@ export interface InfoDialogProps {
 	title: string;
 	children: ReactNode;
 	onClose: () => void;
+	/** What can be done about what it says, beside Close and before it. */
+	actions?: ReactNode;
 	/**
 	 * Where the focus goes when the dialog does. Without it, back to whatever
 	 * had it before, if that is still on the page.
@@ -30,7 +32,7 @@ export interface InfoDialogProps {
 
 const REACHABLE = 'button:not(:disabled), a[href]';
 
-export const InfoDialog = ({ title, children, onClose, returnFocus }: InfoDialogProps) => {
+export const InfoDialog = ({ title, children, onClose, actions, returnFocus }: InfoDialogProps) => {
 	const titleId = useId();
 	const dialog = useRef<HTMLDivElement>(null);
 	const close = useRef<HTMLButtonElement>(null);
@@ -81,6 +83,7 @@ export const InfoDialog = ({ title, children, onClose, returnFocus }: InfoDialog
 				<h2 id={titleId}>{title}</h2>
 				{children}
 				<div className="modal-actions">
+					{actions}
 					<button ref={close} type="button" onClick={onClose}>
 						{t('common.close')}
 					</button>

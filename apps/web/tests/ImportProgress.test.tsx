@@ -138,7 +138,7 @@ describe('the import dialog', () => {
 		);
 		expect(bar().getAttribute('value')).toBe('3');
 		expect(bar().getAttribute('max')).toBe('12');
-		const file = () => document.querySelector('.import-file');
+		const file = () => document.querySelector('.run-file');
 		expect(file()?.textContent).toBe('Work/Plan.md');
 
 		sync.say(syncing({ stage: 'uploading', done: 2, total: 5, path: 'Loose.md' }));
@@ -154,8 +154,8 @@ describe('the import dialog', () => {
 		sync.say(syncing({ stage: 'uploading', done: 3, total: 5, path: long }));
 
 		expect(file()?.getAttribute('title')).toBe(long);
-		expect(file()?.querySelector('.import-file-start')?.textContent).toBe(long.slice(0, -24));
-		expect(file()?.querySelector('.import-file-end')?.textContent).toBe(long.slice(-24));
+		expect(file()?.querySelector('.run-file-start')?.textContent).toBe(long.slice(0, -24));
+		expect(file()?.querySelector('.run-file-end')?.textContent).toBe(long.slice(-24));
 	});
 
 	it('cancels, and the device is as it was', async () => {

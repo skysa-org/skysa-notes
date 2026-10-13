@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient } from '../src/api/client.js';
 import { addClips, setClipboardShown } from '../src/store/clipboard.js';
-import { bindConnection, detachConnection } from '../src/store/connection.js';
+import { bindConnection, detachConnection, showConnection } from '../src/store/connection.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { addAttachment } from '../src/store/files.js';
 import { heldUpOf } from '../src/store/heldUp.js';
@@ -2063,6 +2063,155 @@ describe('a first import', () => {
 		await vi.waitFor(() => {
 			expect(theRemote.pulls()).toBeGreaterThan(pulls);
 		});
+	});
+});
+
+describe('pausing', () => {
+	it('aborts the run under way, and says it is paused whatever that run comes to', async () => {
+		const db = await bound();
+		const signals: (AbortSignal | undefined)[] = [];
+		const theRemote = remote();
+		const held = deferred();
+		theRemote.gate.set('changes', held.promise);
+		const h = started(db, {
+			createProvider: (input) => {
+				signals.push(input.signal);
+				return theRemote.factory(input);
+			},
+		});
+		await vi.waitFor(() => {
+			expect(theRemote.gated()).toBe(1);
+		});
+
+		h.scheduler.pause();
+
+		expect(signals[0]?.aborted).toBe(true);
+		// A session of its own, whose requests are not aborted: a file beside a
+		// note is still read when it is opened.
+		expect(signals).toHaveLength(2);
+		expect(signals[1]?.aborted).toBe(false);
+		expect(h.scheduler.status().phase).toBe('paused');
+		theRemote.gate.delete('changes');
+		held.resolve();
+		await quiet();
+		expect(h.scheduler.status().phase).toBe('paused');
+	});
+
+	it('starts nothing while paused, whatever asks', async () => {
+		const db = await bound();
+		const notices: (() => void)[] = [];
+		const h = started(db, {
+			relay: ({ onChanged }) => {
+				notices.push(onChanged);
+				return { pushed: () => undefined, close: () => undefined };
+			},
+		});
+		await reaches(h.scheduler, 'idle');
+		h.scheduler.pause();
+		const before = h.remote.pulls();
+
+		await createNote(db, { title: 'Later', body: 'kept here\n' });
+		await quiet();
+		h.env.advance(DEBOUNCE);
+		h.env.fire('focus');
+		h.env.advance(INTERVAL);
+		h.env.state.online = false;
+		h.env.fire('offline');
+		h.env.state.online = true;
+		h.env.fire('online');
+		notices.at(-1)?.();
+		h.env.advance(10_000);
+		await quiet();
+
+		expect(h.remote.pulls()).toBe(before);
+		// Not said to be offline over it either: `online` would not say paused again.
+		expect(h.scheduler.status().phase).toBe('paused');
+	});
+
+	it('syncs again when the user asks, by Sync now or a re-scan', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		const note = await createNote(db, { title: 'Kept', body: 'kept here\n' });
+		h.scheduler.pause();
+
+		await h.scheduler.syncNow();
+
+		expect(h.remote.fake.contentAt(note.path)).toContain('kept here');
+		expect(h.scheduler.status().phase).toBe('idle');
+
+		h.scheduler.pause();
+		await h.scheduler.resync();
+
+		expect(h.remote.cursors.at(-1)).toBeUndefined();
+		expect(h.scheduler.status().phase).toBe('idle');
+	});
+
+	it('is over once the source is shown again after another', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		h.scheduler.pause();
+
+		await bindConnection(db, { ...ACCOUNT, connectionId: 'c2' });
+		await holdCredential(db, 'c2');
+		await vi.waitFor(() => {
+			expect(h.server.withCredential).toHaveBeenLastCalledWith('sk1_c2');
+		});
+		await reaches(h.scheduler, 'idle');
+		const before = h.remote.pulls();
+		await showConnection(db, 'c1');
+
+		await vi.waitFor(() => {
+			expect(h.remote.pulls()).toBeGreaterThan(before);
+		});
+		await reaches(h.scheduler, 'idle');
+	});
+
+	it('gives back the attempt a send it aborted was counted', async () => {
+		const db = await bound();
+		const theRemote = remote();
+		const held = deferred();
+		const aborted = new Map<'write', true>();
+		const h = started(db, {
+			createProvider: (input) => {
+				const provider = theRemote.factory(input);
+				if (provider === undefined) return provider;
+				return {
+					...provider,
+					// As a real request does: refused once its signal is aborted.
+					write: async (path, content, expectedVersion) => {
+						await held.promise;
+						if (input.signal?.aborted === true) {
+							aborted.set('write', true);
+							throw new DOMException('The operation was aborted.', 'AbortError');
+						}
+						return provider.write(path, content, expectedVersion);
+					},
+				};
+			},
+		});
+		await reaches(h.scheduler, 'idle');
+		await createNote(db, { title: 'Sent', body: 'on its way\n' });
+		await quiet();
+		h.env.advance(DEBOUNCE);
+		await vi.waitFor(async () => {
+			expect(await db.opQueue.count()).toBeGreaterThan(0);
+			expect(h.scheduler.status().phase).toBe('syncing');
+		});
+		await quiet();
+
+		h.scheduler.pause();
+		held.resolve();
+		await vi.waitFor(() => {
+			expect(aborted.has('write')).toBe(true);
+		});
+		await quiet();
+
+		const ops = await db.opQueue.toArray();
+		expect(ops.length).toBeGreaterThan(0);
+		expect(ops.every((op) => op.attempts === 0)).toBe(true);
+		expect(h.scheduler.status().phase).toBe('paused');
 	});
 });
 
