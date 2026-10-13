@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.1.1
+
+### Patch Changes
+
+- d6dff86: The chip under a link no longer turns see-through when the pointer is over it. Before, the words of the note behind it showed through the chip on hover.
+- @skysa/core@1.1.1
+
 ## 1.1.0
 
 ### Minor Changes
