@@ -13,6 +13,7 @@ import type { FetchLike } from './dropbox.js';
 import {
 	applyItem,
 	arrivals,
+	hideLeftFolders,
 	nodeSchema,
 	nodesOf,
 	type Page,
@@ -89,8 +90,18 @@ const FOLDER = 'application/vnd.google-apps.folder';
 const NOTE_TYPE = 'text/markdown';
 const ROOT_KEY = 'notesapp';
 const ROOT_VALUE = 'root';
+/**
+ * The mark on a folder the app has left (`leaveFolder`). A key of its own, so
+ * that setting or clearing it can never touch the app folder's `notesapp`. Set
+ * and cleared by `files.update` with `appProperties`, whose keys are merged —
+ * a key set to `null` is removed and the others are kept — and private to the
+ * OAuth client that set them.
+ * https://developers.google.com/workspace/drive/api/guides/properties
+ */
+const LEFT_KEY = 'notesappLeft';
+const LEFT_VALUE = '1';
 const FIELDS =
-	'id,name,mimeType,parents,headRevisionId,modifiedTime,createdTime,size,md5Checksum,trashed';
+	'id,name,mimeType,parents,headRevisionId,modifiedTime,createdTime,size,md5Checksum,trashed,appProperties';
 const PAGE_SIZE = '1000';
 /**
  * The most a multipart upload is for: "Use this upload type to quickly
@@ -133,6 +144,8 @@ interface DriveFile {
 	/** Absent for folders and for Google's own documents, which have no bytes. */
 	md5Checksum?: string;
 	trashed?: boolean;
+	/** Only this app's; absent where it has set none. */
+	appProperties?: Record<string, string>;
 }
 
 interface FileList {
@@ -319,6 +332,9 @@ const toEntry = (file: DriveFile, path: string): RemoteEntry => {
 	};
 };
 
+/** Whether the app has left it (`leaveFolder`). */
+const isLeft = (file: DriveFile): boolean => file.appProperties?.[LEFT_KEY] !== undefined;
+
 /** By id wherever both have one, as in the other adapters; otherwise by path, exactly. */
 const isSelf = (entry: EntryRef, current: RemoteEntry): boolean =>
 	entry.remoteId === '' || current.remoteId === ''
@@ -341,6 +357,7 @@ const treeItemOf = (file: DriveFile): TreeItem => {
 		parent: file.parents?.[0] ?? '',
 		name: file.name,
 		folder,
+		...(folder && isLeft(file) ? { left: true } : {}),
 		version: folder ? '' : (file.headRevisionId ?? ''),
 		modifiedAt: file.modifiedTime ?? '',
 		size: file.size === undefined ? -1 : Number(file.size),
@@ -1006,7 +1023,9 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		const parentId = await folderIdAt(parentPath(target));
 		// Idempotent, so a replayed `mkdir` op is harmless.
 		const existing = earliest(await named(parentId, name));
-		if (existing !== undefined && isFolder(existing)) return toEntry(existing, target);
+		if (existing !== undefined && isFolder(existing)) {
+			return toEntry(await takenBack(existing), target);
+		}
 		if (existing !== undefined) throw new ConflictError(toEntry(existing, target));
 
 		const made = await call<DriveFile>(
@@ -1014,9 +1033,42 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 			`${FILES}?fields=${FIELDS}`,
 			json({ name, mimeType: FOLDER, parents: [parentId] })
 		);
+		// Another device's, made in the same moment, may be one the app had left.
 		const winner = await settleCreate(parentId, made);
 		if (!isFolder(winner)) throw new ConflictError(toEntry(winner, target));
-		return toEntry(winner, target);
+		return toEntry(await takenBack(winner), target);
+	};
+
+	/**
+	 * A folder made again where the app had left it (`leaveFolder`): the mark
+	 * comes off, so it is a notebook again on every device, which the user
+	 * making it here asked for. Nothing is sent for a folder never left.
+	 */
+	const takenBack = async (folder: DriveFile): Promise<DriveFile> =>
+		folder.id !== undefined && isLeft(folder)
+			? call<DriveFile>(
+					'PATCH',
+					fileUrl(folder.id),
+					json({ appProperties: { [LEFT_KEY]: null } })
+				)
+			: folder;
+
+	/**
+	 * In place of trashing a folder the engine has emptied, which would take
+	 * with it whatever the user put there that `drive.file` hides: the folder is
+	 * marked as left, and nothing in it is touched (`StorageProvider`). Already
+	 * gone is the outcome the caller wanted.
+	 */
+	const leaveFolder = async (entry: EntryRef): Promise<void> => {
+		const id = await idOf(entry);
+		if (id === undefined) return;
+		const result = await attempt<unknown>(
+			'PATCH',
+			fileUrl(id),
+			json({ appProperties: { [LEFT_KEY]: LEFT_VALUE } })
+		);
+		if (result.ok || result.failure.status === 404) return;
+		raise(result.failure);
 	};
 
 	const move = async (entry: EntryRef, newPath: string): Promise<RemoteEntry> => {
@@ -1308,7 +1360,15 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		// listed is in the tree. A parent it still does not know is outside the
 		// app folder, or a folder the user made in Drive, which `drive.file`
 		// cannot see — and either way the item has left.
-		const settled = settlePage(page, fetched.roundEnds);
+		// A folder the app has left is still in the tree, since what is inside
+		// it is placed through it, but is not reported while it holds nothing
+		// the app can see (`leaveFolder`).
+		const settled = hideLeftFolders(
+			page,
+			settlePage(page, fetched.roundEnds),
+			from.phase === 'scan',
+			fetched.roundEnds
+		);
 		const scanning = from.phase === 'scan' && !fetched.roundEnds;
 		const written: DriveCursor = {
 			v: 1,
@@ -1328,6 +1388,8 @@ export const createGDriveProvider = (options: GDriveProviderOptions): StoragePro
 		// `drive.file` hides what the app did not make (§5.1), so a listing
 		// cannot say a folder is empty.
 		listsEverything: false,
+		// So a folder the engine has emptied is marked rather than trashed.
+		leaveFolder,
 		// A note is three or four requests end to end (`StorageProvider`).
 		writesAtOnce: 4,
 		ensureRoot,

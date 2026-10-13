@@ -56,6 +56,7 @@ export type FakeOperation =
 	| 'createFolder'
 	| 'move'
 	| 'delete'
+	| 'leaveFolder'
 	| 'changes';
 
 export interface FakeCall {
@@ -92,6 +93,9 @@ export interface FakeProviderOptions {
 	/**
 	 * Whether a listing is the whole truth about a folder. Set false to stand in
 	 * for Drive, whose scope hides what the user put there (`StorageProvider`).
+	 * The fake then has a `leaveFolder` too, which is logged and does nothing
+	 * else: what a left folder looks like to the feed is the Drive adapter's,
+	 * and is tested over its stub.
 	 */
 	listsEverything?: boolean;
 	/** How many notes a push may write at once (`StorageProvider`). */
@@ -470,6 +474,9 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 			drop(node, true);
 		});
 
+	const leaveFolder = (ref: EntryRef): Promise<void> =>
+		settle('leaveFolder', ref.path, () => undefined);
+
 	const scanPage = (offset: number, seqAtStart: number): ChangeSet => {
 		const all = [...nodes.values()].sort(byPath).map(toEntry);
 		const page = all.slice(offset, offset + pageSize);
@@ -513,6 +520,7 @@ export const createFakeProvider = (options: FakeProviderOptions = {}): FakeProvi
 	return {
 		kind,
 		listsEverything,
+		...(listsEverything ? {} : { leaveFolder }),
 		...(writesAtOnce === undefined ? {} : { writesAtOnce }),
 		ensureRoot,
 		list,

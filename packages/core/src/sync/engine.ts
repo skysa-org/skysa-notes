@@ -3910,10 +3910,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * app. So the op is refused at five gates before it sends anything:
 	 *
 	 * 1. A provider whose listings are not the whole truth about a folder is
-	 *    never asked: `listsEverything` is false on Drive, where the app cannot
-	 *    see what the user put in the folder themselves, so nothing there can be
-	 *    shown to be empty. The directory stays, as it did before this op
-	 *    existed.
+	 *    never asked to delete one: `listsEverything` is false on Drive, where
+	 *    the app cannot see what the user put in the folder themselves, so
+	 *    nothing there can be shown to be empty. There the folder is *left*
+	 *    instead (`leaveFolder`), past the same gates: marked, with nothing in
+	 *    it touched, and hidden on every device while it holds nothing the app
+	 *    can see. A provider that can do neither keeps the directory.
 	 * 2. Without the id recorded when it was queued, nothing: a folder cannot be
 	 *    confirmed as the one this op is about by its path alone.
 	 * 3. A folder row at the path, or a live note or a file row at or under
@@ -3922,7 +3924,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 * 4. Nothing at the name on the remote, or something with another id — it was
 	 *    renamed or replaced elsewhere — and the op is about a folder that is
 	 *    already gone.
-	 * 5. Anything at all under it that is a file.
+	 * 5. Anything at all under it that is a file — on Drive, that the app can
+	 *    see, which is all a mark needs: it hides nothing that holds a file.
 	 *
 	 * Known gap (docs/ARCHITECTURE.md §7): a file written between the walk and the
 	 * delete goes with the folder, into the provider's trash or recycle bin.
@@ -3930,7 +3933,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	const runRmdir = async (op: SyncOp): Promise<void> => {
 		const { remoteId } = op;
 		const finish = (): Promise<void> => store.completeOp(op.seq, { kind: 'done' });
-		if (!provider.listsEverything) return finish();
+		const remove = provider.listsEverything ? provider.delete : provider.leaveFolder;
+		if (remove === undefined) return finish();
 		// The app folder itself is never a row and never removed (`reconcile`,
 		// `decideFolder`): an op for it could only be a mistake, and the mistake
 		// would take every note the user has.
@@ -3956,7 +3960,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		}
 		if (!(await holdsNoFile(op.path))) return finish();
 
-		await provider.delete({ remoteId, path: op.path }).catch((error: unknown) => {
+		await remove({ remoteId, path: op.path }).catch((error: unknown) => {
 			if (isNotFoundError(error)) return;
 			throw error;
 		});

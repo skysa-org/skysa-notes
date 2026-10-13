@@ -69,6 +69,7 @@ interface DriveFile {
 	createdTime: string;
 	size?: string;
 	trashed: boolean;
+	appProperties?: Record<string, string>;
 }
 
 interface UploadMetadata {
@@ -169,6 +170,8 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 	const sessions = new Map<string, UploadMetadata>();
 	/** The type each file was uploaded as, which Drive keeps through a move. */
 	const mimeTypes = new Map<string, string>();
+	/** Each file's `appProperties`, absent where it has none. */
+	const properties = new Map<string, Record<string, string>>();
 
 	const tick = () => {
 		counter += 1;
@@ -206,7 +209,23 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 			createdTime: createdAt.get(entry.remoteId) ?? '',
 			...(folder ? {} : { size: String(entry.size ?? 0) }),
 			trashed: false,
+			...(properties.has(entry.remoteId)
+				? { appProperties: { ...properties.get(entry.remoteId) } }
+				: {}),
 		};
+	};
+
+	/**
+	 * Drive's merge: each key given is set, one given as `null` is removed, and
+	 * the rest are kept. A file left with none has none.
+	 * https://developers.google.com/workspace/drive/api/guides/properties
+	 */
+	const mergeProperties = (id: string, given: Record<string, string | null>): void => {
+		const merged = Object.entries({ ...properties.get(id), ...given }).flatMap(
+			([key, value]) => (value === null ? [] : [[key, value] as const])
+		);
+		if (merged.length === 0) properties.delete(id);
+		else properties.set(id, Object.fromEntries(merged));
 	};
 
 	/**
@@ -244,7 +263,8 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 				before === undefined ||
 				before.file.name !== file.name ||
 				before.file.parents[0] !== file.parents[0] ||
-				before.file.headRevisionId !== file.headRevisionId
+				before.file.headRevisionId !== file.headRevisionId ||
+				JSON.stringify(before.file.appProperties) !== JSON.stringify(file.appProperties)
 			) {
 				changedAt.set(entry.remoteId, next);
 				changed = true;
@@ -421,11 +441,16 @@ export const createGDriveStub = (options: GDriveStubOptions = {}): GDriveStub =>
 		if (existing === undefined) {
 			return trashed.has(id) ? json(trashed.get(id)) : driveError(404, 'notFound');
 		}
-		const request = JSON.parse(body) as { name?: string; trashed?: boolean };
+		const request = JSON.parse(body) as {
+			name?: string;
+			trashed?: boolean;
+			appProperties?: Record<string, string | null>;
+		};
 		if (request.trashed === true) {
 			await trash(existing);
 			return json(trashed.get(id));
 		}
+		if (request.appProperties !== undefined) mergeProperties(id, request.appProperties);
 		const add = url.searchParams.get('addParents');
 		const from = idOfPath(parentPath(existing.path));
 		if (add !== null && url.searchParams.get('removeParents') !== from) {

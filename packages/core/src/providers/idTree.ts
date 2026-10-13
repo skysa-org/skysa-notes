@@ -21,8 +21,16 @@ import type { ChangeEntry, RemoteEntry } from './types.js';
 // the feed resumes, and whatever its provider needs besides.
 // ---------------------------------------------------------------------------
 
-/** One item of the tree: `[id, parentId, name, isFolder]`. */
-export const nodeSchema = z.tuple([z.string(), z.string(), z.string(), z.boolean()]);
+/**
+ * One item of the tree: `[id, parentId, name, isFolder]`, and `true` after them
+ * for a folder the app has left (`StorageProvider.leaveFolder`). Only a left
+ * folder has the fifth, so a cursor stored before there was one still reads,
+ * and a provider that never leaves a folder writes what it always did.
+ */
+export const nodeSchema = z.union([
+	z.tuple([z.string(), z.string(), z.string(), z.boolean()]),
+	z.tuple([z.string(), z.string(), z.string(), z.boolean(), z.literal(true)]),
+]);
 
 /**
  * A live item not yet reported because its parent chain does not reach the
@@ -63,6 +71,8 @@ export type TreeItem =
 			parent: string;
 			name: string;
 			folder: boolean;
+			/** A folder the app has left (`StorageProvider.leaveFolder`). */
+			left?: true;
 			version: string;
 			modifiedAt: string;
 			size: number;
@@ -72,6 +82,7 @@ interface TreeNode {
 	parent: string;
 	name: string;
 	folder: boolean;
+	left?: true;
 }
 
 type Tree = ReadonlyMap<string, TreeNode>;
@@ -170,8 +181,11 @@ const wasOf = (page: Page, id: string): string | undefined => {
 };
 
 export const pageFrom = (from: TreeState): Page => {
-	const before = new Map(
-		from.nodes.map(([id, parent, name, folder]) => [id, { parent, name, folder }])
+	const before = new Map<string, TreeNode>(
+		from.nodes.map(([id, parent, name, folder, left]) => [
+			id,
+			{ parent, name, folder, ...(left === true ? { left } : {}) },
+		])
 	);
 	return {
 		root: from.root,
@@ -210,7 +224,12 @@ export const applyItem = (page: Page, item: TreeItem): void => {
 		page.changes.set(item.id, { kind: 'gone', id: item.id });
 		return;
 	}
-	page.nodes.set(item.id, { parent: item.parent, name: item.name, folder: item.folder });
+	page.nodes.set(item.id, {
+		parent: item.parent,
+		name: item.name,
+		folder: item.folder,
+		...(item.left === true ? { left: true } : {}),
+	});
 	page.changes.set(item.id, {
 		kind: 'live',
 		id: item.id,
@@ -352,6 +371,107 @@ export const settlePage = (page: Page, roundEnds: boolean): Settled => {
 };
 
 /**
+ * The folders of `tree` the app has left that hold nothing it can see: placed,
+ * left, and with nothing beneath them but folders left too. A file anywhere
+ * beneath one keeps it, and so does a folder not left — a notebook someone
+ * made — so a folder left with something still in it stays a notebook.
+ *
+ * Found by walking up from everything that keeps a folder, and each walk
+ * stops where an earlier one got to, so the tree is walked about once
+ * however deep it goes. Nothing is walked in a tree with no folder left.
+ */
+const hiddenIn = (tree: Tree, root: string): ReadonlySet<string> => {
+	const left = [...tree].flatMap(([id, node]) => (node.left === true ? [id] : []));
+	if (left.length === 0) return new Set();
+	const kept = new Set<string>();
+	tree.forEach((node) => {
+		if (node.left === true || node.parent === root || kept.has(node.parent)) return;
+		chain(node.parent, (at) =>
+			at === root || kept.has(at) ? undefined : tree.get(at)?.parent
+		)?.forEach((at) => {
+			kept.add(at);
+		});
+	});
+	return new Set(left.filter((id) => !kept.has(id) && pathIn(tree, root, id) !== undefined));
+};
+
+/** A folder reported where the page has no change of its own to report it from. */
+const folderAt = (id: string, path: string): RemoteEntry => ({
+	remoteId: id,
+	path,
+	kind: 'folder',
+	version: '',
+	modifiedAt: '',
+});
+
+/**
+ * What `settlePage` reports, without the folders the app has left that hold
+ * nothing it can see (`StorageProvider.leaveFolder`), for an adapter whose
+ * provider marks them. Asked after `settlePage`, with the tree it settled.
+ *
+ * - In a scan, a folder's contents may be on a later page, so a left folder
+ *   is held back from every page, and the page that ends the round reports
+ *   the ones something keeps. One nothing keeps is never mentioned, so a
+ *   device that holds it as a notebook loses it as it does anything else a
+ *   scan did not find. What is inside a kept one may come first; the notebook
+ *   made to hold it takes the folder's id when the folder's own entry comes.
+ * - In a feed, what changes is whether a folder is hidden, and that can change
+ *   without a word about the folder: the last note in it moved out. So the
+ *   tree before the page is compared with the tree after it. A folder hidden
+ *   now and not before is reported deleted, outermost first and after
+ *   everything else the page says, so whatever the page moved out of it is out
+ *   first. One hidden before and not now is reported as a folder again, and
+ *   one hidden both times is not reported at all.
+ *
+ * Only what is reported changes. The tree keeps every left folder, since
+ * what is inside one is placed through it.
+ */
+export const hideLeftFolders = (
+	page: Page,
+	settled: Settled,
+	scan: boolean,
+	roundEnds: boolean
+): Settled => {
+	const isLeft = (node: TreeNode): boolean => node.left === true;
+	const anyLeft =
+		[...page.nodes.values()].some(isLeft) || (!scan && [...page.before.values()].some(isLeft));
+	if (!anyLeft) return settled;
+
+	const now = hiddenIn(page.nodes, page.root);
+	const placed = (id: string): RemoteEntry[] => {
+		const path = pathIn(page.nodes, page.root, id);
+		return path === undefined ? [] : [folderAt(id, path)];
+	};
+
+	if (scan) {
+		const others = settled.entries.filter(
+			(entry) =>
+				entry.deleted === true ||
+				entry.kind !== 'folder' ||
+				page.nodes.get(entry.remoteId)?.left !== true
+		);
+		if (!roundEnds) return { ...settled, entries: others };
+		const kept = [...page.nodes].flatMap(([id, node]) =>
+			isLeft(node) && !now.has(id) ? placed(id) : []
+		);
+		return { ...settled, entries: foldersFirst([...others, ...kept]) };
+	}
+
+	const before = hiddenIn(page.before, page.root);
+	const others = settled.entries.filter(
+		(entry) => entry.deleted === true || !now.has(entry.remoteId)
+	);
+	const listed = new Set(
+		others.flatMap((entry) => (entry.deleted === true ? [] : [entry.remoteId]))
+	);
+	const back = [...before].filter((id) => !now.has(id) && !listed.has(id)).flatMap(placed);
+	const hidden = [...[...now].filter((id) => !before.has(id)).flatMap(placed)]
+		.sort((one, two) => depth(one.path) - depth(two.path))
+		.map((entry) => gone(entry.path, entry.remoteId));
+	return { ...settled, entries: [...foldersFirst([...others, ...back]), ...hidden] };
+};
+
+/**
  * Folders this page places that were not placed before it: made in the round,
  * moved back in from outside the root, or rescued from a folder deleted earlier
  * in the round. Asked after every item is applied and before `settlePage`.
@@ -393,4 +513,8 @@ export const pathOf = (page: Page, id: string): string | undefined =>
 
 /** The tree as a page leaves it, in the form a cursor stores. */
 export const nodesOf = (page: Page): TreeRow[] =>
-	[...page.nodes].map(([id, node]) => [id, node.parent, node.name, node.folder]);
+	[...page.nodes].map(([id, node]) =>
+		node.left === true
+			? [id, node.parent, node.name, node.folder, true]
+			: [id, node.parent, node.name, node.folder]
+	);

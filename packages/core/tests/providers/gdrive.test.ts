@@ -127,8 +127,18 @@ const driveWorld = () => {
 		return parent !== undefined && depth < 100 && trashedOrUnder(parent, depth + 1);
 	};
 	const shown = (file: WorldFile) => {
-		const { content: _content, appProperties: _props, ...rest } = file;
+		const { content: _content, ...rest } = file;
 		return { ...rest, trashed: trashedOrUnder(file) };
+	};
+	/** Drive's merge: a key given is set, one given as `null` removed, the rest kept. */
+	const merged = (
+		file: WorldFile,
+		given: Record<string, string | null>
+	): Record<string, string> | undefined => {
+		const kept = Object.entries({ ...file.appProperties, ...given }).flatMap(([key, value]) =>
+			value === null ? [] : [[key, value] as const]
+		);
+		return kept.length === 0 ? undefined : Object.fromEntries(kept);
 	};
 
 	const add = (fields: Partial<WorldFile> & { id: string; name: string; parent: string }) => {
@@ -253,9 +263,18 @@ const driveWorld = () => {
 			return new Response(null, { status: 204 });
 		}
 		const to = url.searchParams.get('addParents');
-		const fields = JSON.parse(body) as Partial<WorldFile>;
+		const { appProperties: given, ...fields } = JSON.parse(body) as Omit<
+			Partial<WorldFile>,
+			'appProperties'
+		> & { appProperties?: Record<string, string | null> };
 		return json(
-			shown(patch(file.id, { ...fields, ...(to === null ? {} : { parents: [to] }) }))
+			shown(
+				patch(file.id, {
+					...fields,
+					...(given === undefined ? {} : { appProperties: merged(file, given) }),
+					...(to === null ? {} : { parents: [to] }),
+				})
+			)
 		);
 	};
 
@@ -1735,5 +1754,142 @@ describe('changes', () => {
 			expect(livePaths(entries).sort()).toEqual([MARKER_FILE, 'a.md', renamed].sort());
 			expect(world.find('two')?.name).toBe(renamed);
 		});
+	});
+});
+
+describe('a folder the app has left', () => {
+	// Marked rather than trashed, since `drive.file` hides what the user put in
+	// it, and not reported while nothing the app can see is in it (§5.1).
+	const LEFT = { notesappLeft: '1' };
+	const patches = (world: ReturnType<typeof driveWorld>) =>
+		world.seen
+			.filter((request) => request.method === 'PATCH')
+			.map((request) => [request.url.pathname, JSON.parse(request.body) as unknown]);
+
+	it('is marked, with nothing trashed and nothing else sent', async () => {
+		const world = driveWorld();
+		world.add({ id: 'work', name: 'Work', parent: world.root.id, mimeType: FOLDER });
+		world.add({ id: 'theirs', name: 'theirs.pdf', parent: 'work' });
+
+		await world.provider.leaveFolder?.({ remoteId: 'work', path: 'Work' });
+
+		expect(patches(world)).toEqual([
+			['/drive/v3/files/work', { appProperties: { notesappLeft: '1' } }],
+		]);
+		expect(world.seen.some((request) => request.body.includes('trashed'))).toBe(false);
+		expect(world.find('work')).toMatchObject({ trashed: false, appProperties: LEFT });
+		expect(world.find('theirs')?.trashed).toBe(false);
+	});
+
+	it('is done when it is already gone', async () => {
+		const world = driveWorld();
+
+		await expect(
+			world.provider.leaveFolder?.({ remoteId: 'gone', path: 'Work' })
+		).resolves.toBeUndefined();
+	});
+
+	it('loses its mark when a folder is made at its name, and one never left is sent nothing', async () => {
+		const world = driveWorld();
+		world.add({
+			id: 'work',
+			name: 'Work',
+			parent: world.root.id,
+			mimeType: FOLDER,
+			appProperties: LEFT,
+		});
+		world.add({ id: 'play', name: 'Play', parent: world.root.id, mimeType: FOLDER });
+
+		expect(await world.provider.createFolder('Work')).toMatchObject({ remoteId: 'work' });
+		expect(await world.provider.createFolder('Play')).toMatchObject({ remoteId: 'play' });
+
+		expect(patches(world)).toEqual([
+			['/drive/v3/files/work', { appProperties: { notesappLeft: null } }],
+		]);
+		expect(world.find('work')?.appProperties).toBeUndefined();
+	});
+
+	it('loses its mark when it is the earlier of two made at once', async () => {
+		// Another device's, which the search missed before the create and
+		// found after it: ours goes to the trash, and theirs is the notebook.
+		const world = driveWorld();
+		world.hooks.intercept = (request) => {
+			if (request.method !== 'POST' || world.find('theirs') !== undefined) return undefined;
+			world.add({
+				id: 'theirs',
+				name: 'Work',
+				parent: world.root.id,
+				mimeType: FOLDER,
+				createdTime: '2025-01-01T00:00:00Z',
+				appProperties: LEFT,
+			});
+			return undefined;
+		};
+
+		expect(await world.provider.createFolder('Work')).toMatchObject({ remoteId: 'theirs' });
+		expect(world.find('theirs')?.appProperties).toBeUndefined();
+	});
+
+	it('is reported deleted when another device leaves it, and again when one is made there', async () => {
+		const world = driveWorld();
+		world.add({ id: 'work', name: 'Work', parent: world.root.id, mimeType: FOLDER });
+		world.add({ id: 'a', name: 'a.md', parent: 'work' });
+		const first = await drainChanges(world.provider);
+		expect(livePaths(first.entries)).toContain('Work');
+
+		// The other device moves the note out, then leaves the folder.
+		world.patch('a', { parents: [world.root.id] });
+		world.patch('work', { appProperties: LEFT });
+		const left = await drainChanges(world.provider, first.cursor);
+		expect(livePaths(left.entries)).toEqual(['a.md']);
+		expect(left.entries.at(-1)).toEqual({ path: 'Work', deleted: true, remoteId: 'work' });
+
+		// The note is still the only thing in the tree's way of the folder:
+		// nothing more is said while it stays hidden.
+		world.patch('work', { name: 'Old', appProperties: LEFT });
+		const quiet = await drainChanges(world.provider, left.cursor);
+		expect(quiet.entries).toEqual([]);
+
+		world.patch('work', { name: 'Work', appProperties: LEFT });
+		await world.provider.createFolder('Work');
+		const back = await drainChanges(world.provider, quiet.cursor);
+		expect(livePaths(back.entries)).toEqual(['Work']);
+	});
+
+	it('is not in a scan while nothing is in it, and is with a file, however the scan is paged', async () => {
+		const world = driveWorld();
+		world.hooks.pageSize = 1;
+		world.add({
+			id: 'kept',
+			name: 'Kept',
+			parent: world.root.id,
+			mimeType: FOLDER,
+			appProperties: LEFT,
+		});
+		// On a page before the end, so it is reported ahead of its folder,
+		// which waits for the scan to end.
+		world.add({ id: 'x', name: 'x.md', parent: 'kept' });
+		world.add({
+			id: 'gone',
+			name: 'Gone',
+			parent: world.root.id,
+			mimeType: FOLDER,
+			appProperties: LEFT,
+		});
+		world.add({
+			id: 'inner',
+			name: 'Inner',
+			parent: 'gone',
+			mimeType: FOLDER,
+			appProperties: LEFT,
+		});
+
+		const { entries } = await drainChanges(world.provider);
+
+		expect(livePaths(entries).filter((path) => !path.startsWith('.'))).toEqual([
+			'Kept/x.md',
+			'Kept',
+		]);
+		expect(deletedPaths(entries)).toEqual([]);
 	});
 });

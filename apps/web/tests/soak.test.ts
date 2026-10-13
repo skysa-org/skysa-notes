@@ -584,15 +584,13 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 			[plan.path, notes.path].map((path) => path.replace('Work/', 'Projects/')).sort()
 		);
 		// The directory the notes left is removed — except on Drive, where no
-		// listing can prove it empty, so it stays and both browsers keep its
-		// row. That is the documented cost of `drive.file`, not a failure.
+		// listing can prove it empty, so it stays, left (`leaveFolder`). Either
+		// way neither browser keeps a notebook for it.
 		expect(remoteFolders(remote)).toEqual(
 			remote.provesEmpty ? ['Projects'] : ['Projects', 'Work']
 		);
-		const folders = await b.db.folders.toArray();
-		expect(folders.map((folder) => folder.path).sort()).toEqual(
-			remote.provesEmpty ? ['Projects'] : ['Projects', 'Work']
-		);
+		expect(await notebooks(a)).toEqual(['Projects']);
+		expect(await notebooks(b)).toEqual(['Projects']);
 	});
 
 	it('does not put the old tree back when a notebook is dragged in and then out', async () => {
@@ -636,21 +634,41 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		expect(Object.keys(files)).toEqual(['B/C/deep.md']);
 
 		// Every directory the notebook left is removed, and no row anywhere
-		// survives naming one.
-		//
-		// Drive is left out of this half. No listing there can prove a folder
-		// empty, so the directories stay and come back as notebooks on
-		// whichever device pulls them next — the documented cost of
-		// `drive.file` (§7, "A folder is removed only where a listing can
-		// prove it empty"), already covered by the rename and the delete
-		// above, and which device has adopted which leftover at the end is a
-		// matter of when each one last pulled. The bug this is about left the
-		// subtree behind on the providers that *can* prove it.
-		if (remote.provesEmpty) {
-			expect(await notebooks(a)).toEqual(['A', 'B', 'B/C']);
-			expect(await notebooks(b)).toEqual(['A', 'B', 'B/C']);
-			expect(remoteFolders(remote)).toEqual(['A', 'B', 'B/C']);
-		}
+		// survives naming one. On Drive, where no listing can prove a folder
+		// empty, the directories stay on the remote, left (§7, "A folder is
+		// removed only where a listing can prove it empty"), and are no
+		// notebook on either device.
+		expect(await notebooks(a)).toEqual(['A', 'B', 'B/C']);
+		expect(await notebooks(b)).toEqual(['A', 'B', 'B/C']);
+		if (remote.provesEmpty) expect(remoteFolders(remote)).toEqual(['A', 'B', 'B/C']);
+	});
+
+	it('shows no notebook a move left behind, and a re-scan does not bring one back', async () => {
+		// As reported on Drive: notebooks moved into a new one on one device,
+		// and the other showed each of them still there, empty — and again
+		// after a re-scan, since the directories were still on the remote.
+		const { remote, a, b } = await setUp(make);
+		await createFolder(a.db, { name: 'Work' });
+		await createFolder(a.db, { name: 'Sub', parentPath: 'Work' });
+		await createNote(a.db, { title: 'Plan', body: 'one\n', folderPath: 'Work' });
+		await createNote(a.db, { title: 'Deep', body: 'two\n', folderPath: 'Work/Sub' });
+		await createFolder(a.db, { name: 'Archive' });
+		await quiet(remote, a, b);
+		expect(await notebooks(b)).toEqual(['Archive', 'Work', 'Work/Sub']);
+
+		await moveFolder(a.db, 'Work', 'Archive/Work');
+
+		await converged(remote, a, b);
+		const moved = ['Archive', 'Archive/Work', 'Archive/Work/Sub'];
+		expect(await notebooks(a)).toEqual(moved);
+		expect(await notebooks(b)).toEqual(moved);
+		expect(remoteFolders(remote)).toEqual(
+			remote.provesEmpty ? moved : [...moved, 'Work', 'Work/Sub']
+		);
+
+		await b.scheduler.resync();
+		await converged(remote, a, b);
+		expect(await notebooks(b)).toEqual(moved);
 	});
 
 	it('carries a deletion across, and leaves no directory behind', async () => {
@@ -664,11 +682,11 @@ describe.each(REMOTES)('two browsers over %s', (_, make) => {
 		const files = await converged(remote, a, b);
 		expect(files).toEqual({});
 		// Same again: the notes are gone everywhere, and only a provider whose
-		// listing can prove the folder empty removes the directory too.
+		// listing can prove the folder empty removes the directory too. Drive
+		// leaves it, and neither browser shows it.
 		expect(remoteFolders(remote)).toEqual(remote.provesEmpty ? [] : ['Work']);
-		expect((await b.db.folders.toArray()).map((folder) => folder.path)).toEqual(
-			remote.provesEmpty ? [] : ['Work']
-		);
+		expect(await notebooks(a)).toEqual([]);
+		expect(await notebooks(b)).toEqual([]);
 	});
 
 	it('keeps an edit made here while the note was deleted there', async () => {

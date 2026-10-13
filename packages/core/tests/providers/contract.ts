@@ -904,5 +904,102 @@ export const describeProviderContract = (
 				expect(paths(await provider.list('Work'))).toEqual([]);
 			});
 		});
+
+		describe('a folder the app has left', () => {
+			// Only a provider that leaves folders rather than deleting them
+			// (`StorageProvider.leaveFolder`) — Google Drive. Against a live
+			// account the first scenario is also the proof that its feed reports
+			// a change to a folder's `appProperties` alone.
+			const opened = async (
+				skip: () => void
+			): Promise<{
+				provider: StorageProvider;
+				leave: (entry: RemoteEntry) => Promise<void>;
+			}> => {
+				const provider = await open();
+				const { leaveFolder } = provider;
+				if (leaveFolder === undefined) skip();
+				return {
+					provider,
+					leave: (entry) => leaveFolder?.(entry) ?? Promise.resolve(),
+				};
+			};
+			const folders = (entries: readonly ChangeEntry[]): string[] =>
+				entries.flatMap((entry) =>
+					entry.deleted !== true && entry.kind === 'folder' ? [entry.path] : []
+				);
+
+			it(
+				'is reported deleted, left out of a scan, and still listed',
+				config,
+				async ({ skip }) => {
+					const { provider, leave } = await opened(skip);
+					const work = await provider.createFolder('Work');
+					const cursor = await quietCursor(provider);
+
+					await leave(work);
+
+					const seen = await drainUntil(provider, cursor, (entries) =>
+						entries.some((entry) => entry.deleted === true && entry.path === 'Work')
+					);
+					expect(seen.entries).toContainEqual(
+						expect.objectContaining({ deleted: true, path: 'Work' })
+					);
+					expect(folders((await drainSettled(provider)).entries)).toEqual([]);
+					expect(paths(await provider.list(''))).toContain('Work');
+				}
+			);
+
+			it('is a folder again once one is made at its name', config, async ({ skip }) => {
+				const { provider, leave } = await opened(skip);
+				const work = await provider.createFolder('Work');
+				await leave(work);
+				const cursor = await quietCursor(provider);
+
+				expect(await provider.createFolder('Work')).toMatchObject({
+					remoteId: work.remoteId,
+				});
+
+				const seen = await drainUntil(provider, cursor, (entries) =>
+					folders(entries).includes('Work')
+				);
+				expect(folders(seen.entries)).toEqual(['Work']);
+				expect(folders((await drainSettled(provider)).entries)).toEqual(['Work']);
+			});
+
+			it('is a folder again once a file is written into it', config, async ({ skip }) => {
+				const { provider, leave } = await opened(skip);
+				const work = await provider.createFolder('Work');
+				await leave(work);
+				const cursor = await quietCursor(provider);
+
+				await seedFile(provider, 'Work/a.md');
+
+				const seen = await drainUntil(provider, cursor, (entries) =>
+					folders(entries).includes('Work')
+				);
+				expect(paths(seen.entries)).toEqual(['Work', 'Work/a.md']);
+				expect(folders((await drainSettled(provider)).entries)).toEqual(['Work']);
+			});
+
+			it(
+				'stays while a folder not left is in it, and goes once that is left',
+				config,
+				async ({ skip }) => {
+					const { provider, leave } = await opened(skip);
+					const work = await provider.createFolder('Work');
+					const sub = await provider.createFolder('Work/Sub');
+
+					await leave(work);
+					expect(folders((await drainSettled(provider)).entries)).toEqual([
+						'Work',
+						'Work/Sub',
+					]);
+
+					await leave(sub);
+					expect(folders((await drainSettled(provider)).entries)).toEqual([]);
+				}
+			);
+		});
 	});
 };

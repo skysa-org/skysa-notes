@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	applyItem,
 	arrivals,
+	hideLeftFolders,
+	nodeSchema,
 	nodesOf,
 	pageFrom,
 	type Settled,
@@ -410,5 +412,122 @@ describe('an id tree', () => {
 
 			expect(middle.arrived).toEqual(['g']);
 		});
+	});
+});
+
+describe('folders the app has left', () => {
+	// `StorageProvider.leaveFolder`: still in the tree, since what is inside one
+	// is placed through it, and not reported while nothing it holds is.
+	const left = (id: string, parent: string, name: string): TreeItem => ({
+		id,
+		gone: false,
+		parent,
+		name,
+		folder: true,
+		left: true,
+		version: '',
+		modifiedAt: '',
+		size: -1,
+	});
+
+	const runLeft = (
+		from: TreeState,
+		items: readonly TreeItem[],
+		{ scan = false, roundEnds = true } = {}
+	): Settled & { next: TreeState } => {
+		const page = pageFrom(from);
+		items.forEach((item) => {
+			applyItem(page, item);
+		});
+		const settled = hideLeftFolders(page, settlePage(page, roundEnds), scan, roundEnds);
+		return {
+			...settled,
+			next: { root: from.root, nodes: nodesOf(page), pending: settled.pending },
+		};
+	};
+
+	/** `Work`, left, with nothing in it: hidden. */
+	const hidden = () => runLeft(seeded(), [gone('a'), left('f', ROOT_ID, 'Work')]).next;
+
+	it('reports one left with nothing in it as deleted, after the rest of the page', () => {
+		const settled = runLeft(seeded(), [left('f', ROOT_ID, 'Work'), gone('a')]);
+
+		expect(paths(settled)).toEqual(['-Work/a.md', '-Work']);
+		expect(settled.entries.at(-1)).toEqual({ path: 'Work', deleted: true, remoteId: 'f' });
+	});
+
+	it('says nothing more of it while it stays hidden, wherever it goes', () => {
+		const settled = runLeft(hidden(), [left('f', ROOT_ID, 'Old')]);
+
+		expect(paths(settled)).toEqual([]);
+	});
+
+	it('keeps one a file is still in', () => {
+		const settled = runLeft(seeded(), [left('f', ROOT_ID, 'Work')]);
+
+		expect(paths(settled)).toEqual(['+Work']);
+	});
+
+	it('reports it deleted when its last file leaves, with nothing said of the folder', () => {
+		const kept = runLeft(seeded(), [left('f', ROOT_ID, 'Work')]).next;
+
+		const settled = runLeft(kept, [file('a', ROOT_ID, 'a.md')]);
+
+		expect(paths(settled)).toEqual(['+a.md', '-Work']);
+	});
+
+	it('reports it again when a file arrives in it', () => {
+		const settled = runLeft(hidden(), [file('b', 'f', 'b.md')]);
+
+		expect(paths(settled)).toEqual(['+Work', '+Work/b.md']);
+	});
+
+	it('reports it again when the mark comes off', () => {
+		const settled = runLeft(hidden(), [folder('f', ROOT_ID, 'Work')]);
+
+		expect(paths(settled)).toEqual(['+Work']);
+	});
+
+	it('keeps one a folder not left is in, and hides both once that is left too', () => {
+		const tree = run(EMPTY, [folder('f', ROOT_ID, 'Work'), folder('s', 'f', 'Sub')]).next;
+		const outer = runLeft(tree, [left('f', ROOT_ID, 'Work')]);
+		expect(paths(outer)).toEqual(['+Work']);
+
+		const settled = runLeft(outer.next, [left('s', 'f', 'Sub')]);
+
+		expect(paths(settled)).toEqual(['-Work', '-Work/Sub']);
+	});
+
+	it('holds left folders back from a scan until it ends, and then reports the ones kept', () => {
+		const first = runLeft(EMPTY, [left('k', ROOT_ID, 'Keep'), left('g', ROOT_ID, 'Gone')], {
+			scan: true,
+			roundEnds: false,
+		});
+		expect(paths(first)).toEqual([]);
+
+		const last = runLeft(first.next, [file('x', 'k', 'x.md')], { scan: true });
+
+		expect(paths(last)).toEqual(['+Keep', '+Keep/x.md']);
+	});
+
+	it('hands back what it was given in a tree with no folder left', () => {
+		const page = pageFrom(seeded());
+		applyItem(page, file('a', 'f', 'a.md', 'v2'));
+		const settled = settlePage(page, true);
+
+		expect(hideLeftFolders(page, settled, false, true)).toBe(settled);
+	});
+
+	it('keeps the mark in the cursor, and reads a cursor written before there was one', () => {
+		const rows = runLeft(seeded(), [left('f', ROOT_ID, 'Work')]).next.nodes;
+
+		expect(rows).toEqual([
+			['f', ROOT_ID, 'Work', true, true],
+			['a', 'f', 'a.md', false],
+		]);
+		expect(rows.map((row) => nodeSchema.parse(row))).toEqual(rows);
+		expect(nodeSchema.safeParse(['f', ROOT_ID, 'Work', true, false]).success).toBe(false);
+		const read = runLeft({ root: ROOT_ID, nodes: rows, pending: [] }, [gone('a')]);
+		expect(paths(read)).toEqual(['-Work/a.md', '-Work']);
 	});
 });
