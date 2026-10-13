@@ -1,5 +1,12 @@
 # @skysa/web
 
+## 1.1.2
+
+### Patch Changes
+
+- 6677029: A note with no name now goes by its first words wherever one line has to say which note it is. On a phone, the note's dropdown in the bar at the top, and a scratchpad card's name there, show the start of the note's first line, cut to about 40 characters, instead of "Untitled"; the bar catches up with what is typed when the note is saved. So does the notice after a note is deleted ("Deleted “Pick up the parcel”."), and the one after Undo brings it back to another storage account. A note with no text is still "Untitled", and a scratchpad card with no text still shows no name in the bar.
+- @skysa/core@1.1.2
+
 ## 1.1.1
 
 ### Patch Changes
