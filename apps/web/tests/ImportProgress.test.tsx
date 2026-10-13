@@ -40,7 +40,11 @@ describe('what an import says', () => {
 			'Downloading notes from Dropbox: 12 of 40.',
 		],
 		[
-			syncing({ stage: 'receiving', done: 5, total: 30 }),
+			syncing({ stage: 'receiving', done: 0, total: 40, listing: true }),
+			'Checking Dropbox for changes: 40 changed notes found so far.',
+		],
+		[
+			syncing({ stage: 'receiving', done: 5, total: 30, listing: false }),
 			'Downloading notes from Dropbox: 5 of 30.',
 		],
 		[syncing({ stage: 'uploading', done: 3, total: 9 }), 'Uploading notes to Dropbox: 3 of 9.'],

@@ -129,7 +129,8 @@ export interface SyncEngineOptions {
 	reauthorize?: () => Promise<void>;
 	/**
 	 * Told how far a run has got: a full scan, as notes are found and read; a
-	 * round from a stored cursor, note by note; and a push, op by op. Called
+	 * round from a stored cursor, as its pages are read and then note by note;
+	 * and a push, op by op. Called
 	 * synchronously, as often as every file, so a caller that draws from it
 	 * decides how often to — and whether a run of a few notes is worth showing.
 	 */
@@ -151,14 +152,19 @@ export interface SyncEngineOptions {
  * (`drainRound`), so it knows how many notes it names before it reads the
  * first: `done` counts each as it is decided, read or already held. Another
  * device's import of a thousand notes is one round, and nothing of it shows
- * until all of it is read, so this is what there is to see meanwhile.
+ * until all of it is read, so this is what there is to see meanwhile. While
+ * it is still reading its pages it is `listing`, as a scan is, and `total` is
+ * how many notes the pages read so far name — said before the first page as
+ * none, so a round that takes long over its pages says what it is doing
+ * (2026-10-13: another device's notebooks moved was minutes of plain
+ * "Syncing…" on a phone, before the first note was counted).
  * A push knows its queue before it starts, so it gives a total. `path` is the
  * file just read or decided, or the one about to be sent, for a caller that
  * shows it.
  */
 export type SyncProgress =
 	| { stage: 'scanning'; found: number; done: number; listing: boolean; path?: string }
-	| { stage: 'receiving'; done: number; total: number; path?: string }
+	| { stage: 'receiving'; done: number; total: number; listing: boolean; path?: string }
 	| { stage: 'uploading'; done: number; total: number; path?: string };
 
 export interface SyncEngine {
@@ -243,10 +249,10 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	/**
 	 * The round under way, for `onProgress`, and none during a scan: how many
-	 * notes it names, and how many of them are decided. Kept here for the
-	 * reason the scan's count is.
+	 * notes it names, how many of them are decided, and whether it is still
+	 * reading its pages. Kept here for the reason the scan's count is.
 	 */
-	const rounds = new Map<'current', { total: number; done: number }>();
+	const rounds = new Map<'current', { total: number; done: number; listing: boolean }>();
 
 	/**
 	 * Notes a pull has read whose batch has not been committed, by remote id.
@@ -283,11 +289,12 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 
 	const reportRound = (path?: string) => {
 		const round = rounds.get('current');
-		if (round === undefined || round.total === 0) return;
+		if (round === undefined) return;
 		onProgress({
 			stage: 'receiving',
 			done: round.done,
 			total: round.total,
+			listing: round.listing,
 			...(path === undefined ? {} : { path }),
 		});
 	};
@@ -3326,22 +3333,42 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 	 */
 	const readRound = async (
 		cursor: string,
-		entries: readonly ChangeEntry[]
+		entries: readonly ChangeEntry[],
+		/** The notes the pages so far name, by remote id, for the count. */
+		named: Set<string>
 	): Promise<{ entries: ChangeEntry[]; cursor: string }> => {
 		const set = await provider.changes(cursor);
 		const all = [...entries, ...set.entries];
-		return set.more ? readRound(set.cursor, all) : { entries: all, cursor: set.cursor };
+		const before = named.size;
+		set.entries.filter(isNoteEntry).forEach((entry) => named.add(entry.remoteId));
+		const round = rounds.get('current');
+		if (round !== undefined && named.size !== before) {
+			rounds.set('current', { ...round, total: named.size });
+			reportRound();
+		}
+		return set.more ? readRound(set.cursor, all, named) : { entries: all, cursor: set.cursor };
 	};
 
-	const drainRound = async (cursor: string): Promise<SyncOutcome> => {
-		const round = await readRound(cursor, []);
-		// Counted as `decideAll` will see them, one entry per file.
+	/** A round's pages, then its decisions, counted as it goes (`rounds`). */
+	const countedRound = async (
+		cursor: string
+	): Promise<{ round: { entries: ChangeEntry[]; cursor: string }; changes: PullChange[] }> => {
+		rounds.set('current', { total: 0, done: 0, listing: true });
+		reportRound();
+		const round = await readRound(cursor, [], new Set());
+		// Counted as `decideAll` will see them, one entry per file. Said even
+		// when it is none, so that what is said is no longer that it is reading.
 		rounds.set('current', {
 			total: deduped(round.entries).filter(isNoteEntry).length,
 			done: 0,
+			listing: false,
 		});
 		reportRound();
-		const changes = await decideAll(round.entries, false).finally(() => {
+		return { round, changes: await decideAll(round.entries, false) };
+	};
+
+	const drainRound = async (cursor: string): Promise<SyncOutcome> => {
+		const { round, changes } = await countedRound(cursor).finally(() => {
 			rounds.delete('current');
 		});
 		await store.applyPull({ changes, cursor: round.cursor });
@@ -3472,6 +3499,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		/** A scan from the top, counted from nothing. */
 		const scan = (upload = false): Promise<SyncOutcome> => {
 			scans.set('current', { notes: new Set(), settled: 0, reading: 0, listing: true });
+			// Before the first page, which can be long in coming, as a round's is.
+			reportScan();
 			return drainScan(upload).finally(() => {
 				scans.delete('current');
 			});

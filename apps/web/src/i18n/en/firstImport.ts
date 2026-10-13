@@ -24,6 +24,11 @@ export const firstImport = {
 		one: 'Looking for notes in {provider}: {count} found so far.',
 		other: 'Looking for notes in {provider}: {count} found so far.',
 	},
+	/** Reading what has changed since it last looked, so the total is not known yet. */
+	checking: {
+		one: 'Checking {provider} for changes: {count} changed note found so far.',
+		other: 'Checking {provider} for changes: {count} changed notes found so far.',
+	},
 	/** {done} of {total} notes so far. */
 	downloading: 'Downloading notes from {provider}: {done} of {total}.',
 	uploading: 'Uploading notes to {provider}: {done} of {total}.',

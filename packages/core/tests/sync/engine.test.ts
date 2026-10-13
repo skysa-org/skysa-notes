@@ -10118,7 +10118,9 @@ describe('progress', () => {
 
 		const scans = said.filter((p) => p.stage === 'scanning');
 		const listing = scans.filter((p) => p.listing);
-		// While listing: a count so far, and nothing read yet.
+		// Before the first page, none found; while listing, a count so far,
+		// and nothing read yet.
+		expect(said[0]).toEqual({ stage: 'scanning', found: 0, done: 0, listing: true });
 		expect(listing.length).toBeGreaterThan(1);
 		expect(listing.every((p) => p.done === 0 && p.path === undefined)).toBe(true);
 		// Then the whole of it, and a count up to it, naming each file read.
@@ -10168,10 +10170,37 @@ describe('progress', () => {
 
 		// The folder is not a note, so the count is of the two notes alone.
 		expect(said).toEqual([
-			{ stage: 'receiving', done: 0, total: 2 },
-			{ stage: 'receiving', done: 1, total: 2, path: 'b.md' },
-			{ stage: 'receiving', done: 2, total: 2, path: 'c.md' },
+			{ stage: 'receiving', done: 0, total: 0, listing: true },
+			{ stage: 'receiving', done: 0, total: 2, listing: true },
+			{ stage: 'receiving', done: 0, total: 2, listing: false },
+			{ stage: 'receiving', done: 1, total: 2, listing: false, path: 'b.md' },
+			{ stage: 'receiving', done: 2, total: 2, listing: false, path: 'c.md' },
 		]);
+	});
+
+	it('says it is reading a round’s pages before the first, and how many notes they name as each is read', async () => {
+		// Reported on a phone: another device's notebooks moved was minutes of
+		// plain "Syncing…" while the round's pages were read, before the first
+		// note was counted.
+		provider = createFakeProvider({ pageSize: 1 });
+		await provider.ensureRoot();
+		const { said, counted } = reporting(provider);
+		await counted.pull();
+		await provider.write('a.md', '1\n', {});
+		await provider.createFolder('Work');
+		await provider.write('b.md', '2\n', {});
+		said.length = 0;
+
+		await counted.pull();
+
+		// A page that names no note — the folder's — says nothing new.
+		expect(said.slice(0, 4)).toEqual([
+			{ stage: 'receiving', done: 0, total: 0, listing: true },
+			{ stage: 'receiving', done: 0, total: 1, listing: true },
+			{ stage: 'receiving', done: 0, total: 2, listing: true },
+			{ stage: 'receiving', done: 0, total: 2, listing: false },
+		]);
+		expect(said.slice(4).every((p) => p.stage === 'receiving' && !p.listing)).toBe(true);
 	});
 
 	it('counts a note a round names that it already holds, without reading it', async () => {
@@ -10192,10 +10221,16 @@ describe('progress', () => {
 		await counted.pull();
 
 		expect(reads).toEqual([]);
-		expect(said.at(-1)).toEqual({ stage: 'receiving', done: 1, total: 1, path: 'a.md' });
+		expect(said.at(-1)).toEqual({
+			stage: 'receiving',
+			done: 1,
+			total: 1,
+			listing: false,
+			path: 'a.md',
+		});
 	});
 
-	it('says nothing for a round that names no note', async () => {
+	it('says only that it is reading the pages of a round that names no note, and then that it is not', async () => {
 		await remoteFile('a.md', '1\n');
 		await engine.pull();
 		await provider.createFolder('Work');
@@ -10203,7 +10238,10 @@ describe('progress', () => {
 
 		await counted.pull();
 
-		expect(said).toEqual([]);
+		expect(said).toEqual([
+			{ stage: 'receiving', done: 0, total: 0, listing: true },
+			{ stage: 'receiving', done: 0, total: 0, listing: false },
+		]);
 	});
 
 	it('counts a push against its queue', async () => {

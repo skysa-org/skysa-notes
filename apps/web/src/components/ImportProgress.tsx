@@ -58,6 +58,9 @@ const progressMessage = (progress: SyncProgress | undefined, label: string): str
 			total: progress.total,
 		});
 	}
+	if (progress.stage === 'receiving' && progress.listing) {
+		return t('firstImport.checking', { provider: label, count: progress.total });
+	}
 	if (progress.stage === 'receiving') {
 		return t('firstImport.downloading', {
 			provider: label,
@@ -75,6 +78,7 @@ const progressMessage = (progress: SyncProgress | undefined, label: string): str
 const fraction = (status: SchedulerStatus): { value: number; max: number } | undefined => {
 	const { progress } = status;
 	if (status.phase !== 'syncing' || progress === undefined) return undefined;
+	if (progress.stage === 'receiving' && progress.listing) return undefined;
 	if (progress.stage !== 'scanning') return { value: progress.done, max: progress.total };
 	if (progress.listing || progress.found === 0) return undefined;
 	return { value: progress.done, max: progress.found };

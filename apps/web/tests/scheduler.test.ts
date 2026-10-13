@@ -2533,7 +2533,11 @@ describe('a run held up on another tab', () => {
 
 		h.remote.gate.delete('read');
 		gate.open();
+		// Said at most every `progressMs` (150 by default), on a clock that
+		// moves here only when it is told to: the round's reports while it read
+		// its pages left the next one waiting on it.
 		await vi.waitFor(() => {
+			h.env.advance(150);
 			expect(h.scheduler.status().progress?.done).toBeGreaterThan(0);
 		});
 		expect(h.scheduler.status().waiting).toBeUndefined();

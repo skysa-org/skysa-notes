@@ -2339,7 +2339,10 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['120', '1000']);
 
 		// Another device's import, read before any of it is applied.
-		sync.say({ phase: 'syncing', progress: { stage: 'receiving', done: 5, total: 30 } });
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 5, total: 30, listing: false },
+		});
 		await waitFor(() => {
 			expect(line.textContent).toBe('Dropbox · Receiving 5 of 30');
 		});
@@ -2397,6 +2400,58 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
 		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['10', '40']);
+	});
+
+	it('says it is checking for changes while it reads them, counting from enough to count', async () => {
+		// Reported on a phone: another device's notebooks moved was minutes of
+		// plain "Syncing…" while the round's pages were read.
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: 0, listing: true },
+		});
+		await connected(sync);
+		const line = await naming('ada@example.com');
+		expect(line.textContent).toBe('Dropbox · Checking for changes…');
+		expect(line.title).toBe(
+			'Syncing with Dropbox · ada@example.com\nChecking Dropbox for changes…'
+		);
+		// No bar for a few, which every quiet sync would flash.
+		expect(screen.queryByRole('progressbar')).toBeNull();
+
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: PROGRESS_FROM, listing: true },
+		});
+		await waitFor(() => {
+			expect(line.textContent).toBe(
+				`Dropbox · Checking for changes: ${String(PROGRESS_FROM)} found`
+			);
+		});
+		expect(line.title).toBe(
+			`Syncing with Dropbox · ada@example.com\nChecking Dropbox for changes: ${String(PROGRESS_FROM)} changed notes found so far.`
+		);
+		expect(
+			screen.getByRole('progressbar', { name: 'Sync progress' }).hasAttribute('value')
+		).toBe(false);
+
+		sync.say({
+			phase: 'syncing',
+			progress: { stage: 'receiving', done: 0, total: 30, listing: false },
+		});
+		await waitFor(() => {
+			expect(line.textContent).toBe('Dropbox · Receiving 0 of 30');
+		});
+	});
+
+	it('says it is looking for notes from the start of a re-scan, before it has found any', async () => {
+		const sync = fakeSync({
+			phase: 'syncing',
+			progress: { stage: 'scanning', found: 0, done: 0, listing: true },
+		});
+		await connected(sync);
+
+		expect((await statusLine()).textContent).toBe('Dropbox · Looking for notes…');
+		expect(screen.queryByRole('progressbar')).toBeNull();
 	});
 
 	it('says nothing, and offers nothing, before the scheduler has picked the connection up', async () => {
@@ -4901,7 +4956,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 	it('says how far a long run has got in the line, with the bar under it', async () => {
 		const sync = fakeSync({
 			phase: 'syncing',
-			progress: { stage: 'receiving', done: 25, total: 400 },
+			progress: { stage: 'receiving', done: 25, total: 400, listing: false },
 		});
 		await connected(sync);
 
