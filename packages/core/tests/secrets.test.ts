@@ -2,25 +2,23 @@ import { describe, expect, it } from 'vitest';
 
 import { encrypt } from '../src/age/age.js';
 import { armor } from '../src/age/armor.js';
+import { parseRecipient } from '../src/age/curve.js';
 import { AgeError } from '../src/age/errors.js';
 import {
 	encodeIdentity,
 	encodeRecipient,
 	generateIdentity,
 	parseIdentity,
-	parseRecipient,
 } from '../src/age/keys.js';
 import { previewLines } from '../src/markdown/preview.js';
+import { openSecret, opensSecret, sealSecret } from '../src/sealing.js';
 import {
 	buildEncryptionFile,
 	isEncryptionFile,
 	isSecretBlock,
-	openSecret,
-	opensSecret,
 	parseEncryptionFile,
 	readRecoveryKey,
 	recoveryKeyGroups,
-	sealSecret,
 	secretBlocksIn,
 	secretFile,
 	serializeEncryptionFile,

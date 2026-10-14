@@ -16,6 +16,7 @@ import { rows } from './rows.js';
 import { scheduler } from './scheduler.js';
 import { scratchpad } from './scratchpad.js';
 import { search } from './search.js';
+import { secrets } from './secrets.js';
 import { share } from './share.js';
 import { shell } from './shell.js';
 import { sources } from './sources.js';
@@ -39,6 +40,7 @@ export const en = {
 	exporting,
 	clipboard,
 	scratchpad,
+	secrets,
 	notebooks,
 	notes,
 	rows,

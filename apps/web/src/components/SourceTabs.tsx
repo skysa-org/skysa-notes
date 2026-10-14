@@ -44,6 +44,7 @@ import { type OptionsMenuItem } from './OptionsMenu.js';
 import { ProviderIcon, type SourceKind, sourceKind } from './ProviderIcon.js';
 import { RowOptions } from './RowOptions.js';
 import { RowRename } from './RowRename.js';
+import { secretsLabel } from './SecretsDialog.js';
 import { useEscape } from './useEscape.js';
 
 export interface SourceTabsProps {
@@ -922,7 +923,7 @@ const Menu = ({
  */
 export interface SourceAsk {
 	connectionId: string;
-	action: 'rescan' | 'download' | 'disconnect';
+	action: 'rescan' | 'download' | 'secrets' | 'disconnect';
 }
 
 /** What the source panel hands the storage panel under it. */
@@ -1008,6 +1009,12 @@ export const SourcePanel = ({
 		const holds = await Promise.all(ids.map((id) => holdsAnything(db, id)));
 		return new Set(ids.filter((_, index) => holds[index] === true));
 	}, [db, ids.join(' ')]);
+	// What each source's key file for secrets was last read as, which says
+	// whether its `⋯` offers to set them up or to open them.
+	const keyFiles = useLiveQuery(
+		async () => new Map((await db.keyFiles.toArray()).map((read) => [read.connectionId, read])),
+		[db]
+	);
 	const showing = ordered.find((source) => source.active);
 	/** The source whose name is being typed, if one is. */
 	const [renaming, setRenaming] = useState<string | null>(null);
@@ -1074,6 +1081,10 @@ export const SourcePanel = ({
 				? [
 						{ label: t('sources.options.sync'), onChoose: show() },
 						{ label: t('sources.options.rescan'), onChoose: show('rescan') },
+						{
+							label: secretsLabel(keyFiles?.get(source.connectionId)),
+							onChoose: show('secrets'),
+						},
 					]
 				: []),
 			...download,
