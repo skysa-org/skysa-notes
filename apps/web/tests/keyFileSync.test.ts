@@ -167,6 +167,75 @@ describe('reading the key file', () => {
 	});
 });
 
+describe('reading it after a pull met it', () => {
+	it('keeps what it finds', async () => {
+		const h = await setup();
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+		await h.setUpElsewhere();
+		await h.sync.heard('c1');
+		expect((await h.read())?.recipient).toBe(RECIPIENT);
+	});
+
+	it('leaves it unread where it finds none, for a listing that trails the feed, and the next session start reads it', async () => {
+		const h = await setup();
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+		await h.sync.heard('c1');
+		expect(await h.read()).toBeUndefined();
+
+		await h.setUpElsewhere();
+		await h.sync.started('c1');
+		expect((await h.read())?.state).toBe('ok');
+	});
+
+	it('leaves it unread where the folder cannot be listed, or the read is not made', async () => {
+		const failed = await setup();
+		await failed.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+		failed.fake.setFault((call) => (call.op === 'list' ? new Error('429') : undefined));
+		await failed.sync.heard('c1');
+
+		const offline = await setup();
+		await offline.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+		offline.network.clear();
+		await offline.sync.heard('c1');
+
+		for (const h of [failed, offline]) {
+			expect(await h.read()).toBeUndefined();
+		}
+	});
+
+	it('leaves a key file it read as it was where the folder cannot be listed', async () => {
+		const h = await setup();
+		await h.setUpElsewhere();
+		await h.sync.refresh('c1');
+		h.fake.setFault((call) => (call.op === 'list' ? new Error('502') : undefined));
+		await h.sync.heard('c1');
+		expect((await h.read())?.state).toBe('ok');
+	});
+
+	it('is its own read, not one asked for otherwise that waits', async () => {
+		const h = await setup();
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+		const listing = Promise.withResolvers<void>();
+		h.held.set('listing', listing.promise);
+		const first = h.sync.refresh('c1');
+		await vi.waitFor(() => {
+			expect(h.asked.has('listing')).toBe(true);
+		});
+		const asked = h.sync.refresh('c1');
+		const heard = h.sync.heard('c1');
+		listing.resolve();
+		await Promise.all([first, asked, heard]);
+		expect(await h.read()).toBeUndefined();
+	});
+
+	it('reads once for those asked for while one waits', async () => {
+		const h = await setup();
+		await Promise.all([h.sync.heard('c1'), h.sync.heard('c1'), h.sync.heard('c1')]);
+		const listings = h.fake.callLog().filter((call) => call.op === 'list');
+		expect(listings.length).toBeLessThanOrEqual(2);
+	});
+});
+
 describe('reading it as a session starts', () => {
 	it('reads it where this device has not', async () => {
 		const h = await setup();
@@ -287,6 +356,16 @@ describe('writing it', () => {
 		h.live.clear();
 		expect(await h.sync.write('c1', RECIPIENT)).toEqual({ status: 'unavailable' });
 		expect(h.fake.contentAt(ENCRYPTION_FILE)).toBeUndefined();
+	});
+
+	it('says a write refused for another device’s file changed, though the file cannot then be read', async () => {
+		const h = await setup();
+		await h.sync.refresh('c1');
+		await h.setUpElsewhere(OTHER);
+		h.fake.setFault((call) => (call.op === 'list' ? new Error('502') : undefined));
+
+		expect(await h.sync.write('c1', RECIPIENT)).toEqual({ status: 'changed' });
+		expect(h.fake.contentAt(ENCRYPTION_FILE)).toContain(OTHER);
 	});
 
 	it('says a write the provider refused failed, and keeps no read of it', async () => {

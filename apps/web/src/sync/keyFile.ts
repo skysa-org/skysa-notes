@@ -19,8 +19,8 @@ import { type ReadingSession } from './fileReads.js';
  * last read it (`keyFiles`).
  *
  * `refresh` reads it again. The scheduler asks when the source's session
- * starts (`started`), and after any pull that met the file
- * (`SyncOutcome.encryption`): another device may have set the source up, or
+ * starts (`started`), and after any pull that met the file (`heard`,
+ * `SyncOutcome.encryption`): another device may have set the source up, or
  * replaced its key.
  *
  * `write` sets the source up, only where no other device has, or replaces the
@@ -69,6 +69,13 @@ export interface KeyFileSync {
 	 */
 	readonly started: (connectionId: string) => Promise<void>;
 	/**
+	 * Read it again after a pull met it. Found nowhere, it is left unread rather
+	 * than read as none: a listing can trail the feed that reported a new file,
+	 * and none would stop the next session start from reading it (`started`).
+	 * Unread is where a read that fails, or never comes, leaves it too.
+	 */
+	readonly heard: (connectionId: string) => Promise<void>;
+	/**
 	 * Write `recipient` as the source's, over `over`, the recipient the caller
 	 * saw there, or where there was none.
 	 */
@@ -86,7 +93,7 @@ export const createKeyFileSync = (options: KeyFileSyncOptions): KeyFileSync => {
 	const now = options.now ?? (() => new Date());
 	/** Each source's last job, which the next one follows. */
 	const chains = new Map<string, Promise<unknown>>();
-	/** Reads asked for and not started: asked again, they are the same read. */
+	/** Reads asked for and not started, by source and why: asked again, they are the same read. */
 	const waiting = new Map<string, Promise<void>>();
 
 	const enqueue = <T>(connectionId: string, work: () => Promise<T>): Promise<T> => {
@@ -137,24 +144,39 @@ export const createKeyFileSync = (options: KeyFileSyncOptions): KeyFileSync => {
 		}
 	};
 
-	const refreshNow = async (connectionId: string): Promise<void> => {
+	/** A read of none let go of, so that the next session start reads it. */
+	const unread = (connectionId: string): Promise<void> =>
+		db.transaction('rw', db.keyFiles, async () => {
+			const read = await db.keyFiles.get(connectionId);
+			if (read?.state === 'none') await db.keyFiles.delete(connectionId);
+		});
+
+	const refreshNow = async (connectionId: string, heard: boolean): Promise<void> => {
 		const session = sessionFor(connectionId);
 		// Not before the first round has found the app folder: Drive cannot
 		// say what is in it until then.
 		if (session === undefined || !isOnline() || !(await live(connectionId))) return;
-		await keep(await readNow(session, connectionId));
+		const read = await readNow(session, connectionId);
+		if (heard && read.state === 'none') return;
+		await keep(read);
 	};
 
-	const refresh = (connectionId: string): Promise<void> => {
-		const asked = waiting.get(connectionId);
+	const reread = (connectionId: string, heard: boolean): Promise<void> => {
+		const key = `${heard ? 'heard' : 'asked'}:${connectionId}`;
+		const asked = waiting.get(key);
 		if (asked !== undefined) return asked;
-		const run = enqueue(connectionId, () => {
-			waiting.delete(connectionId);
-			return refreshNow(connectionId);
+		const run = enqueue(connectionId, async () => {
+			waiting.delete(key);
+			if (heard) await unread(connectionId);
+			await refreshNow(connectionId, heard);
 		}).catch(() => undefined);
-		waiting.set(connectionId, run);
+		waiting.set(key, run);
 		return run;
 	};
+
+	const refresh = (connectionId: string): Promise<void> => reread(connectionId, false);
+
+	const heard = (connectionId: string): Promise<void> => reread(connectionId, true);
 
 	const started = async (connectionId: string): Promise<void> => {
 		const [read, keys] = await Promise.all([
@@ -201,7 +223,10 @@ export const createKeyFileSync = (options: KeyFileSyncOptions): KeyFileSync => {
 			);
 		if (written === 'failed') return { status: 'failed' };
 		if (written === 'changed') {
-			await keep(await readNow(session, connectionId)).catch(() => undefined);
+			// Said whether or not the read goes: the write was refused either way.
+			await readNow(session, connectionId)
+				.then(keep)
+				.catch(() => undefined);
 			return { status: 'changed' };
 		}
 		await keep({
@@ -220,5 +245,5 @@ export const createKeyFileSync = (options: KeyFileSyncOptions): KeyFileSync => {
 			(): KeyFileWrite => ({ status: 'failed' })
 		);
 
-	return { refresh, started, write };
+	return { refresh, started, heard, write };
 };

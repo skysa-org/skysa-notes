@@ -328,7 +328,10 @@ export const changeUnlock = async (
 		});
 		return true;
 	});
-	return changed ? { ...keys, sealing, sealedAs: fields.iv } : undefined;
+	// Copies: holding these locks the keys given, which fills theirs with zeros.
+	return changed
+		? { ...keys, identities: copied(keys.identities), sealing, sealedAs: fields.iv }
+		: undefined;
 };
 
 /** Let go of a source's keys on this device. */

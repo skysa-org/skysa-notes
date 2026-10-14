@@ -109,6 +109,16 @@ describe('holding keys', () => {
 		expect(h.lock.keys('c1')?.identities[0]?.[0]).toBe(5);
 	});
 
+	it('keeps what the keys it is given hold of the ones it held', () => {
+		const h = setup();
+		const before = keysFor('c1', 3);
+		const [shared] = before.identities;
+		h.lock.hold(before);
+		h.lock.hold({ ...before, identities: [shared as Uint8Array] });
+		expect(h.lock.keys('c1')?.identities[0]?.[0]).toBe(3);
+		expect(before.identities[1]?.[0]).toBe(0);
+	});
+
 	it('says nothing of a lock with nothing to lock', () => {
 		const h = setup();
 		h.lock.lock();
@@ -135,6 +145,25 @@ describe('locking on its own', () => {
 		h.hide();
 		expect(h.lock.isUnlocked('c1')).toBe(false);
 		expect(zeroed(keys)).toBe(true);
+	});
+
+	it('locks at once keys it is given while the page is hidden, but not while a prompt of the app’s own is open', async () => {
+		const h = setup();
+		h.hide();
+		const keys = keysFor('c1');
+		h.lock.hold(keys);
+		expect(h.lock.isUnlocked('c1')).toBe(false);
+		expect(zeroed(keys)).toBe(true);
+
+		const answer = Promise.withResolvers<void>();
+		const asked = h.lock.prompting(async () => {
+			h.lock.hold(keysFor('c2'));
+			expect(h.lock.isUnlocked('c2')).toBe(true);
+			await answer.promise;
+		});
+		answer.resolve();
+		await asked;
+		expect(h.lock.isUnlocked('c2')).toBe(false);
 	});
 
 	it('does not for a prompt of the app’s own, and does once it closes on a hidden page', async () => {

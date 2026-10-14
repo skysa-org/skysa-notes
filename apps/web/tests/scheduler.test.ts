@@ -2464,11 +2464,64 @@ describe('the key file for secrets (§7)', () => {
 		await setUpElsewhere(theRemote.fake);
 		await focused(h);
 		await quiet();
-		expect((await keyFile(db))?.state).toBe('none');
+		expect(await keyFile(db)).toBeUndefined();
 
 		h.env.advance(3000);
 		await vi.waitFor(async () => {
 			expect((await keyFile(db))?.state).toBe('ok');
+		});
+	});
+
+	it('leaves it unread where the listing still does not name it a moment later', async () => {
+		const db = await bound();
+		const theRemote = remote();
+		const stale = new Map<'listing', RemoteEntry[]>();
+		const h = started(db, {
+			createProvider: (input) => {
+				const provider = theRemote.factory(input);
+				if (provider === undefined) return undefined;
+				return {
+					...provider,
+					list: async (path) => stale.get('listing') ?? provider.list(path),
+				};
+			},
+		});
+		await reaches(h.scheduler, 'idle');
+		await db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+
+		stale.set('listing', await theRemote.fake.list(''));
+		await setUpElsewhere(theRemote.fake);
+		await focused(h);
+		await quiet();
+		h.env.advance(3000);
+		await quiet();
+
+		expect(await keyFile(db)).toBeUndefined();
+	});
+
+	it('reads it as the next session starts, where the reads after the round that met it failed', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		await db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+
+		// A 429 with a long wait, say, on every listing of the root.
+		h.remote.fake.setFault((call) =>
+			call.op === 'list' && call.path === '' ? new Error('429') : undefined
+		);
+		await setUpElsewhere(h.remote.fake);
+		await focused(h);
+		await quiet();
+		h.env.advance(3000);
+		await quiet();
+		h.scheduler.stop();
+		expect(await keyFile(db)).toBeUndefined();
+
+		h.remote.fake.setFault((call) => (call.op === 'changes' ? new Error('502') : undefined));
+		const next = started(db, { createProvider: h.remote.factory });
+		await reaches(next.scheduler, 'retrying');
+		await vi.waitFor(async () => {
+			expect(await keyFile(db)).toMatchObject({ state: 'ok', recipient: RECIPIENT });
 		});
 	});
 

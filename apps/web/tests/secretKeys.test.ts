@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createSecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import {
 	changeUnlock,
@@ -256,11 +257,35 @@ describe('changing how a device unlocks', () => {
 		const changed = await changeUnlock(db, keys, PATTERN, ROUNDS);
 
 		expect(changed?.identities).toEqual(keys.identities);
+		expect(changed?.identities[0]).not.toBe(keys.identities[0]);
 		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pattern');
 		expect((await unlockKeys(db, 'c1', PIN, AT)).status).toBe('wrong');
 		expect(unlocked(await unlockKeys(db, 'c1', PATTERN, AT)).identities).toEqual(
 			keys.identities
 		);
+	});
+
+	it('gives keys of their own, which a tab can hold in place of the ones it had, and change again', async () => {
+		const { db, enrolled } = await setup();
+		const lock = createSecretsLock({
+			target: {
+				visibilityState: 'visible',
+				addEventListener: () => undefined,
+				removeEventListener: () => undefined,
+			},
+		});
+		lock.hold(await enrolled(PIN));
+
+		const once = await changeUnlock(db, lock.keys('c1') as UnlockedKeys, PATTERN, ROUNDS);
+		lock.hold(once as UnlockedKeys);
+		const twice = await changeUnlock(db, lock.keys('c1') as UnlockedKeys, PASSWORD, ROUNDS);
+		lock.hold(twice as UnlockedKeys);
+		lock.lock();
+
+		expect(unlocked(await unlockKeys(db, 'c1', PASSWORD, AT)).identities).toEqual([
+			identity(7),
+			identity(9),
+		]);
 	});
 
 	it('changes nothing where the keys were sealed again in another tab since these were opened', async () => {

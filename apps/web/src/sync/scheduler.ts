@@ -811,9 +811,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// key. Read twice, as the clipboard is listed: a listing can trail the
 		// feed that reported a new file.
 		if (result.outcome.encryption === true) {
-			void keyFile.refresh(session.connectionId);
+			void keyFile.heard(session.connectionId);
 			arm('keyFile', relistMs, () => {
-				void keyFile.refresh(session.connectionId);
+				void keyFile.heard(session.connectionId);
 			});
 		}
 	};

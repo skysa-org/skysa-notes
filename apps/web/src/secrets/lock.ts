@@ -58,9 +58,10 @@ export const IDLE_MS = 30_000;
 const ACTIVITY = ['keydown', 'pointerdown', 'pointermove', 'touchstart', 'wheel', 'scroll'];
 const HEARD: AddEventListenerOptions = { capture: true, passive: true };
 
-const wipe = (keys: UnlockedKeys): void => {
+/** Fill the keys' identities with zeros, but for any `kept` holds as well. */
+const wipe = (keys: UnlockedKeys, kept: readonly Uint8Array[] = []): void => {
 	keys.identities.forEach((identity) => {
-		identity.fill(0);
+		if (!kept.includes(identity)) identity.fill(0);
 	});
 };
 
@@ -145,12 +146,15 @@ export const createSecretsLock = (options: SecretsLockOptions): SecretsLock => {
 
 	const hold = (keys: UnlockedKeys): void => {
 		const before = held.get(keys.connectionId);
-		if (before !== undefined && before !== keys) wipe(before);
+		if (before !== undefined && before !== keys) wipe(before, keys.identities);
 		const first = held.size === 0;
 		held.set(keys.connectionId, keys);
 		if (first) startListening();
 		else onActivity();
 		notify();
+		// Unlocked as the page was hidden, after the derivation it waited on:
+		// no `visibilitychange` is coming to lock it.
+		onVisibility();
 	};
 
 	const prompting = async <T>(work: () => Promise<T>): Promise<T> => {
