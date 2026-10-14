@@ -9,6 +9,7 @@
  */
 
 const CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const MAX_LENGTH = 128;
 const GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
 
 const polymod = (values: readonly number[]): number =>
@@ -74,6 +75,10 @@ export const encodeBech32 = (prefix: string, bytes: Uint8Array): string => {
 export const decodeBech32 = (
 	text: string
 ): Readonly<{ prefix: string; bytes: Uint8Array }> | undefined => {
+	// Every key read here is under 80 characters, and `regroup` is quadratic in
+	// the length: a paste of tens of thousands that happened to check out would
+	// hold the page for seconds.
+	if (text.length > MAX_LENGTH) return undefined;
 	if (text !== text.toLowerCase() && text !== text.toUpperCase()) return undefined;
 	const lower = text.toLowerCase();
 	const separator = lower.lastIndexOf('1');

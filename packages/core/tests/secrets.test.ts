@@ -73,6 +73,11 @@ describe('sealing and opening', () => {
 		expect(await openSecret(sealed, [identity])).toBe(words);
 	});
 
+	it('keeps a byte order mark, as age -d does, so sealing again changes nothing', async () => {
+		const words = '\uFEFFpassword';
+		expect(await openSecret(await sealSecret(words, recipient), [identity])).toBe(words);
+	});
+
 	it('is the armor without a line ending after it, which the fence supplies', async () => {
 		const sealed = await sealSecret('x', recipient);
 		expect(sealed.startsWith('-----BEGIN AGE ENCRYPTED FILE-----\n')).toBe(true);
