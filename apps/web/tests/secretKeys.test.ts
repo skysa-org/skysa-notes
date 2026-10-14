@@ -103,6 +103,24 @@ describe('enrolling a device', () => {
 		});
 	});
 
+	it('keeps the keys as they were given, where the caller wipes its own while they are sealed', async () => {
+		const { db } = await setup();
+		const given = [identity(7)];
+
+		const enrolling = enrol(db, {
+			connectionId: 'c1',
+			recipient: RECIPIENT,
+			identities: given,
+			unlock: PIN,
+			rounds: ROUNDS,
+		});
+		given.forEach((each) => each.fill(0));
+		const keys = await enrolling;
+
+		expect(keys?.identities).toEqual([identity(7)]);
+		expect(unlocked(await unlockKeys(db, 'c1', PIN, AT)).identities).toEqual([identity(7)]);
+	});
+
 	it('keeps neither the keys nor the unlock as they are', async () => {
 		const { db, enrolled } = await setup();
 		await enrolled(PASSWORD, [identity(0xab)]);
@@ -286,6 +304,38 @@ describe('changing how a device unlocks', () => {
 			identity(7),
 			identity(9),
 		]);
+	});
+
+	it('keeps the keys it was given where the tab locks while the new unlock is derived', async () => {
+		const { db, enrolled } = await setup();
+		const lock = createSecretsLock({
+			target: {
+				visibilityState: 'visible',
+				addEventListener: () => undefined,
+				removeEventListener: () => undefined,
+			},
+		});
+		lock.hold(await enrolled(PIN));
+
+		const changing = changeUnlock(db, lock.keys('c1') as UnlockedKeys, PATTERN, ROUNDS);
+		lock.lock();
+		const changed = await changing;
+
+		expect(changed?.identities).toEqual([identity(7), identity(9)]);
+		expect(unlocked(await unlockKeys(db, 'c1', PATTERN, AT)).identities).toEqual([
+			identity(7),
+			identity(9),
+		]);
+	});
+
+	it('refuses keys that were wiped, and keeps the record it had', async () => {
+		const { db, enrolled } = await setup();
+		const keys = await enrolled(PIN);
+
+		await expect(
+			changeUnlock(db, { ...keys, identities: [identity(7), identity(0)] }, PATTERN, ROUNDS)
+		).rejects.toThrow();
+		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pin');
 	});
 
 	it('changes nothing where the keys were sealed again in another tab since these were opened', async () => {

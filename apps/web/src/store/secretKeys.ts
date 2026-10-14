@@ -164,7 +164,20 @@ const sameBytes = (a: ArrayBuffer, b: ArrayBuffer): boolean => {
 const copied = (identities: readonly Uint8Array[]): Uint8Array[] =>
 	identities.map((identity) => Uint8Array.from(identity));
 
-/** A record's keys sealed under a new unlock, with a salt and a key of their own. */
+/**
+ * A key of nothing but zeros: one that was wiped, since no key is made so.
+ * Sealed, it would unlock to nothing that opens a secret, while the record
+ * looks as good as any.
+ */
+const isWiped = (identity: Uint8Array): boolean => identity.every((byte) => byte === 0);
+
+/**
+ * A record's keys sealed under a new unlock, with a salt and a key of their own.
+ *
+ * `identities` are the caller's own copies, taken before its first await: the
+ * derivation is long enough for the page to be hidden, and the lock then
+ * fills the keys it holds with zeros in place.
+ */
 const sealedUnder = async (
 	unlock: Unlock,
 	identities: readonly Uint8Array[],
@@ -172,6 +185,7 @@ const sealedUnder = async (
 ): Promise<{ sealing: CryptoKey; fields: Omit<SecretKeyRecord, 'connectionId' | 'recipient'> }> => {
 	if (!isAcceptedUnlock(unlock)) throw new Error('an unlock this short is not accepted');
 	if (identities.length === 0) throw new Error('there is no key to keep');
+	if (identities.some(isWiped)) throw new Error('a key that was wiped is not kept');
 	const salt = randomBuffer(SALT_SIZE);
 	const sealing = await sealingKey(unlock, salt, rounds);
 	const { iv, sealed } = await seal(sealing, identities);
@@ -199,9 +213,10 @@ export const enrol = async (
 	input: EnrolInput
 ): Promise<UnlockedKeys | undefined> => {
 	const { connectionId, recipient } = input;
+	const identities = copied(input.identities);
 	const { sealing, fields } = await sealedUnder(
 		input.unlock,
-		input.identities,
+		identities,
 		input.rounds ?? PBKDF2_ROUNDS
 	);
 	// After the derivation, which is not IndexedDB's and would end the
@@ -212,13 +227,7 @@ export const enrol = async (
 		return true;
 	});
 	if (!kept) return undefined;
-	return {
-		connectionId,
-		recipient,
-		identities: copied(input.identities),
-		sealing,
-		sealedAs: fields.iv,
-	};
+	return { connectionId, recipient, identities, sealing, sealedAs: fields.iv };
 };
 
 export type UnlockResult =
@@ -317,7 +326,11 @@ export const changeUnlock = async (
 	unlock: Unlock,
 	rounds: number = PBKDF2_ROUNDS
 ): Promise<UnlockedKeys | undefined> => {
-	const { sealing, fields } = await sealedUnder(unlock, keys.identities, rounds);
+	// Copies, taken before anything is awaited: the keys given are the ones a
+	// tab's lock holds, and fills with zeros where the page is hidden meanwhile.
+	// Holding these in their place locks the ones given in the same way.
+	const identities = copied(keys.identities);
+	const { sealing, fields } = await sealedUnder(unlock, identities, rounds);
 	const changed = await db.transaction('rw', db.secretKeys, async () => {
 		const stored = await db.secretKeys.get(keys.connectionId);
 		if (stored === undefined || !sameBytes(stored.iv, keys.sealedAs)) return false;
@@ -328,10 +341,7 @@ export const changeUnlock = async (
 		});
 		return true;
 	});
-	// Copies: holding these locks the keys given, which fills theirs with zeros.
-	return changed
-		? { ...keys, identities: copied(keys.identities), sealing, sealedAs: fields.iv }
-		: undefined;
+	return changed ? { ...keys, identities, sealing, sealedAs: fields.iv } : undefined;
 };
 
 /** Let go of a source's keys on this device. */
