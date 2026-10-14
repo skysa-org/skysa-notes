@@ -313,6 +313,20 @@ const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * A file's own name, as the user gave it, but for what would break on a
+ * provider or a disk: the characters a notebook's name loses
+ * (`sanitizeFolderName`), so its spaces and capitals stay.
+ */
+const keptStem = (stem: string): string =>
+	stem
+		.normalize('NFC')
+		.replace(LONE_SURROGATE, ' ')
+		.replace(CONTROL, ' ')
+		.replace(UNSAFE, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+
+/**
  * The stem's share of an attachment's name, in bytes: the 255 a filesystem
  * allows, less a conflict suffix and its counter (28 + 4), less `-` and a hash
  * of up to 16 hex (17), less `.` and an extension of up to 16 (17).
@@ -338,6 +352,10 @@ const ATTACHMENT_STEM_BYTES = MAX_NAME_BYTES - 32 - 17 - 17;
  * The extension is the name's own, folded, where it is plain letters and
  * digits, and from `type` where it is not. `undefined` for `.md`: a file by
  * that name is a note to every device that pulls it.
+ *
+ * `kept`: the stem as the user gave it (`keptStem`) rather than its slug, for
+ * a file known by the name it is stored under — a clipboard item, which has
+ * no link to hold its name (2026-10-14).
  */
 export const attachmentName = ({
 	name,
@@ -345,12 +363,14 @@ export const attachmentName = ({
 	type = '',
 	pasted = false,
 	hashLength = 8,
+	kept = false,
 }: {
 	name: string;
 	hash: string;
 	type?: string;
 	pasted?: boolean;
 	hashLength?: number;
+	kept?: boolean;
 }): string | undefined => {
 	if (!Number.isInteger(hashLength) || hashLength < 8 || hashLength > 16) {
 		throw new RangeError(
@@ -367,7 +387,10 @@ export const attachmentName = ({
 	if (`.${extension}` === NOTE_EXTENSION) return undefined;
 
 	const nameless = pasted && IMAGE_EXTENSIONS.has(extension);
-	const slug = fitBytes(toSlug(nameless ? '' : name.slice(0, at)), ATTACHMENT_STEM_BYTES);
-	const stem = slug.replace(/-+$/, '') || (nameless ? 'pasted-image' : 'attachment');
+	const given = nameless ? '' : name.slice(0, at);
+	const fitted = fitBytes(kept ? keptStem(given) : toSlug(given), ATTACHMENT_STEM_BYTES);
+	// What a cut leaves at the end: a space, or a slug's hyphen.
+	const stem =
+		fitted.replace(kept ? /\s+$/ : /-+$/, '') || (nameless ? 'pasted-image' : 'attachment');
 	return `${stem}-${hash.slice(0, hashLength).toLowerCase()}.${extension}`;
 };

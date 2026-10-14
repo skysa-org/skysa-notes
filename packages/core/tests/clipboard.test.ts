@@ -18,15 +18,40 @@ describe('clipName', () => {
 		).toBe('20261006T153012123Z-pasted-image-3f9a1c2b.png');
 	});
 
-	it('keeps a file’s own name, as a slug', () => {
+	it('keeps a file’s own name, spaces and capitals and all', () => {
+		// It is shown and saved by the name read back from here (2026-10-14):
+		// a slug brought "Q3 Report.pdf" back as `q3-report.pdf`. The extension
+		// is folded, which a version before then needs to read the name at all.
 		expect(clipName({ at: AT, hash: HASH, name: 'Q3 Report.PDF' })).toBe(
-			'20261006T153012123Z-q3-report-3f9a1c2b.pdf'
+			'20261006T153012123Z-Q3 Report-3f9a1c2b.pdf'
 		);
+		expect(clipName({ at: AT, hash: HASH, name: 'Café menu.v2.txt' })).toBe(
+			'20261006T153012123Z-Café menu.v2-3f9a1c2b.txt'
+		);
+	});
+
+	it('gives up only what a provider or a disk refuses, as a notebook’s name does', () => {
+		expect(clipName({ at: AT, hash: HASH, name: 'Q3: draft? <v2>|final*.pdf' })).toBe(
+			'20261006T153012123Z-Q3 draft v2 final-3f9a1c2b.pdf'
+		);
+		expect(clipName({ at: AT, hash: HASH, name: 'Line\u0000one\ttwo .txt' })).toBe(
+			'20261006T153012123Z-Line one two-3f9a1c2b.txt'
+		);
+		expect(clipName({ at: AT, hash: HASH, name: '???.pdf' })).toBe(
+			'20261006T153012123Z-attachment-3f9a1c2b.pdf'
+		);
+	});
+
+	it('cuts a long name to fit, at a character, with no space left at the cut', () => {
+		const name = clipName({ at: AT, hash: HASH, name: `${'é '.repeat(200)}.txt` });
+		expect(new TextEncoder().encode(name).length).toBeLessThanOrEqual(255);
+		expect(name).toMatch(/é-3f9a1c2b\.txt$/);
+		expect(readClipName(name)?.label).toMatch(/^(é )+é\.txt$/);
 	});
 
 	it('keeps .md, which is no note in the hidden folder', () => {
 		expect(clipName({ at: AT, hash: HASH, name: 'Minutes.md' })).toBe(
-			'20261006T153012123Z-minutes-3f9a1c2b.md'
+			'20261006T153012123Z-Minutes-3f9a1c2b.md'
 		);
 	});
 
@@ -54,9 +79,18 @@ describe('readClipName', () => {
 			at: AT,
 			hash: '3f9a1c2b',
 			kind: 'image',
-			label: 'holiday.jpg',
+			label: 'Holiday.jpg',
 		});
 		expect(readClipName(clipName({ at: AT, hash: HASH, name: 'Q3 report.pdf' }))).toEqual({
+			at: AT,
+			hash: '3f9a1c2b',
+			kind: 'file',
+			label: 'Q3 report.pdf',
+		});
+	});
+
+	it('reads the slug an item pasted before 2026-10-14 was stored under', () => {
+		expect(readClipName('20261006T153012123Z-q3-report-3f9a1c2b.pdf')).toEqual({
 			at: AT,
 			hash: '3f9a1c2b',
 			kind: 'file',

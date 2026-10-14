@@ -11,7 +11,8 @@ import { isWithin, joinPath } from './paths.js';
  * once would each write their own version of it, and one would be lost. A name
  * is written once, by the device that pasted, and never written into again.
  *
- * `<stamp>-<attachmentName>` — `20261006T153012123Z-pasted-image-3f9a1c2b.png`.
+ * `<stamp>-<attachmentName>` — `20261006T153012123Z-pasted-image-3f9a1c2b.png`,
+ * `20261006T153012123Z-Q3 Report-3f9a1c2b.pdf`.
  * The stamp orders the items, newest first, and the hash says when a paste is
  * one already there, which then goes to the top rather than in twice.
  */
@@ -26,9 +27,10 @@ export interface ClipName {
 	hash: string;
 	kind: ClipKind;
 	/**
-	 * Its own name, as it is shown and saved: `q3-report.pdf`. None for text, or
-	 * for a picture pasted with no name of its own, which the app calls
-	 * something in the user's language.
+	 * Its own name, as it is shown and saved: `Q3 Report.pdf`, or for an item
+	 * pasted before 2026-10-14 its slug, `q3-report.pdf`. None for text, or for
+	 * a picture pasted with no name of its own, which the app calls something
+	 * in the user's language.
 	 */
 	label: string | undefined;
 }
@@ -60,7 +62,12 @@ export const clipStamp = (now: number, newest: number | undefined): number =>
 /**
  * The name an item is stored under. Text is `text-<hash>.txt`; a picture from
  * the clipboard, whose own name says nothing, `pasted-image-<hash>.png`; any
- * other file its own name's slug, as an attachment's is (`attachmentName`).
+ * other file its own name, spaces and capitals and all, but for the characters
+ * a provider or a disk refuses (`attachmentName`'s `kept`). It was the name's
+ * slug, as an attachment's is, until 2026-10-14: the item is shown and saved
+ * by the name read back from here, and "Q3 Report.pdf" came back
+ * `q3-report.pdf`. Its extension is still folded, which a version before then
+ * needs to read the name at all (`NAME`).
  *
  * A `.md` file keeps `.md`, which `attachmentName` refuses beside a note: in
  * the hidden folder it is no note to any device, since the engine asks
@@ -83,12 +90,13 @@ export const clipName = ({
 }): string => {
 	const stamp = stampOf(at);
 	if (text) return `${stamp}-${attachmentName({ name: `${TEXT_STEM}.txt`, hash })}`;
-	const named = attachmentName({ name, type, hash, pasted });
+	const named = attachmentName({ name, type, hash, pasted, kept: true });
 	if (named !== undefined) return `${stamp}-${named}`;
 	// `.md`, named as `.txt` would be and given its own extension back. The
 	// shorter extension fits wherever the longer one did.
 	const stem = name.slice(0, -NOTE_EXTENSION.length);
-	const asText = attachmentName({ name: `${stem}.txt`, hash }) ?? `attachment-${hash}.txt`;
+	const asText =
+		attachmentName({ name: `${stem}.txt`, hash, kept: true }) ?? `attachment-${hash}.txt`;
 	return `${stamp}-${asText.slice(0, -'.txt'.length)}${NOTE_EXTENSION}`;
 };
 

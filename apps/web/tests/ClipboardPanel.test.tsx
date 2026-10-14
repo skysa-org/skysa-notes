@@ -488,13 +488,13 @@ describe('the clipboard panel', () => {
 		await userEvent
 			.setup()
 			.click(
-				await screen.findByRole('button', { name: 'Save q3-report.pdf, waiting to send' })
+				await screen.findByRole('button', { name: 'Save Q3 report.pdf, waiting to send' })
 			);
 		await waitFor(() => {
 			expect(said().textContent).toBe('Saved.');
 		});
 		expect(items()[0]?.querySelector('.clipboard-done')?.textContent).toBe('Saved');
-		expect(saved.map((entry) => entry.name)).toEqual(['q3-report.pdf']);
+		expect(saved.map((entry) => entry.name)).toEqual(['Q3 report.pdf']);
 		expect(await saved[0]?.file.text()).toBe('%PDF');
 	});
 
