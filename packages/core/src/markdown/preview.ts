@@ -1,5 +1,6 @@
 import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
+import { isSecretBlock } from '../secrets.js';
 import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 import { decodeCharacterReferences } from './references.js';
@@ -12,8 +13,10 @@ import { decodeCharacterReferences } from './references.js';
  * thematic breaks all go. So does inline syntax: `**bold**` reads "bold", and a
  * link reads as its words without its URL. A code block keeps every character it
  * holds, because inside one nothing is markdown, and that is also what the
- * editor shows there. Whitespace is collapsed throughout, this being one line of
- * grey text and not a listing.
+ * editor shows there — except a secret (`isSecretBlock`), whose ciphertext is no
+ * words of the note's and is left out, so no list, card or search ever holds a
+ * run of base64 (docs/ARCHITECTURE.md §7, "Secrets in a note"). Whitespace is
+ * collapsed throughout, this being one line of grey text and not a listing.
  *
  * It is what the note list's preview and the search excerpt are both cut from,
  * so neither can find different words in a note than the other.
@@ -224,7 +227,9 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 		case 'heading':
 			return as(phrasing(node.children), { heading: node.depth });
 		case 'code':
-			return as(plainLines(node.value), { code: true });
+			return isSecretBlock(node.lang, node.value)
+				? []
+				: as(plainLines(node.value), { code: true });
 		case 'html':
 			return EDITOR_BREAK.test(node.value)
 				? []

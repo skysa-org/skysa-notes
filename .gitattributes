@@ -1,0 +1,3 @@
+# The C2SP age test vectors are bytes, some with CRLF and some zlib-compressed:
+# never converted, never diffed as text.
+packages/core/tests/age/testkit/* binary
