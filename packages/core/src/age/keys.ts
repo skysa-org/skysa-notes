@@ -51,17 +51,28 @@ const isUsable = (publicKey: Uint8Array): boolean => {
 	}
 };
 
+const decodeRecipient = (text: string): Uint8Array | undefined => {
+	const decoded = decodeBech32(text);
+	return decoded?.prefix === RECIPIENT_PREFIX && decoded.bytes.length === KEY_SIZE
+		? decoded.bytes
+		: undefined;
+};
+
+/**
+ * Whether `text` is written as a recipient is: `age1…`, a key's length, and a
+ * checksum that holds. Whether a file could be encrypted to it is a question
+ * for the curve, which `parseRecipient` asks and this does not, so what only
+ * reads a recipient, as syncing the key file does, does not load the curve.
+ */
+export const spellsRecipient = (text: string): boolean => decodeRecipient(text) !== undefined;
+
 /**
  * The public key `text` spells, or nothing if it spells none, or spells one
  * nothing could be encrypted to.
  */
 export const parseRecipient = (text: string): Uint8Array | undefined => {
-	const decoded = decodeBech32(text);
-	return decoded?.prefix === RECIPIENT_PREFIX &&
-		decoded.bytes.length === KEY_SIZE &&
-		isUsable(decoded.bytes)
-		? decoded.bytes
-		: undefined;
+	const publicKey = decodeRecipient(text);
+	return publicKey !== undefined && isUsable(publicKey) ? publicKey : undefined;
 };
 
 /** The recipient an identity opens files for, as age writes it. */

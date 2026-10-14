@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { decrypt, encrypt, opens } from './age/age.js';
 import { armor, dearmor } from './age/armor.js';
 import { AgeError } from './age/errors.js';
-import { encodeIdentity, parseIdentity, parseRecipient } from './age/keys.js';
+import { encodeIdentity, parseIdentity, spellsRecipient } from './age/keys.js';
 import { ENCRYPTION_FILE, ENCRYPTION_SCHEMA_VERSION } from './config.js';
 import { parse } from './markdown/pipeline.js';
 import { normalizePath } from './paths.js';
@@ -118,13 +118,16 @@ export const readRecoveryKey = (text: string): Uint8Array | undefined => {
 
 const encryptionFileSchema = z.object({
 	schemaVersion: z.number().int().positive(),
-	recipient: z.string().refine((text) => parseRecipient(text) !== undefined),
+	recipient: z.string().refine(spellsRecipient),
 	setAt: z.string().min(1),
 });
 
 /**
  * `.encryption.json`: the recipient every new secret in the source is encrypted
- * to, the public half of the source's key (docs/ARCHITECTURE.md §3).
+ * to, the public half of the source's key (docs/ARCHITECTURE.md §3). Read when
+ * a source syncs, so its recipient is checked only for its shape, without the
+ * curve; `parseRecipient` refuses one nothing could be encrypted to when a
+ * secret is sealed.
  */
 export type EncryptionFile = z.infer<typeof encryptionFileSchema>;
 

@@ -5,6 +5,7 @@ import { armor } from '../src/age/armor.js';
 import { AgeError } from '../src/age/errors.js';
 import {
 	encodeIdentity,
+	encodeRecipient,
 	generateIdentity,
 	parseIdentity,
 	parseRecipient,
@@ -214,6 +215,13 @@ describe('the key file', () => {
 		],
 	])('is invalid with %s', (_, text) => {
 		expect(parseEncryptionFile(text)).toEqual({ status: 'invalid' });
+	});
+
+	it('reads its recipient by shape alone, and sealing refuses one no file opens for', () => {
+		const lowOrder = encodeRecipient(new Uint8Array(32));
+		const text = JSON.stringify({ schemaVersion: 1, recipient: lowOrder, setAt: 'x' });
+		expect(parseEncryptionFile(text).status).toBe('ok');
+		expect(parseRecipient(lowOrder)).toBeUndefined();
 	});
 
 	it('is at the root and nowhere else', () => {

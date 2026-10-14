@@ -14,6 +14,7 @@ import {
 	parseRecipient,
 	publicKeyOf,
 	recipientOf,
+	spellsRecipient,
 } from '../../src/age/keys.js';
 import { IDENTITY, RECIPIENT } from './known.js';
 
@@ -62,6 +63,13 @@ describe('keys', () => {
 		// The all-zero point is of low order: a share with it is the all-zero
 		// secret, which age forbids, so nothing could ever be encrypted to it.
 		expect(parseRecipient(encodeRecipient(new Uint8Array(32)))).toBeUndefined();
+	});
+
+	it('says whether text is written as a recipient without asking the curve', () => {
+		expect(spellsRecipient(RECIPIENT)).toBe(true);
+		expect(spellsRecipient(encodeRecipient(new Uint8Array(32)))).toBe(true);
+		expect(spellsRecipient(IDENTITY)).toBe(false);
+		expect(spellsRecipient(`${RECIPIENT.slice(0, -1)}q`)).toBe(false);
 	});
 
 	it('makes a different identity each time', () => {

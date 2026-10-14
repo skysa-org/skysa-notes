@@ -9,4 +9,5 @@ export {
 	parseRecipient,
 	publicKeyOf,
 	recipientOf,
+	spellsRecipient,
 } from './keys.js';
