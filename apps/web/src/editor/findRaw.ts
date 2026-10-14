@@ -1,6 +1,5 @@
-import { type Extension, StateEffect, StateField } from '@codemirror/state';
+import { type EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
-import { armorSpans } from '@skysa/core';
 
 import {
 	EMPTY_QUERY,
@@ -10,6 +9,7 @@ import {
 	type Match,
 	matchesIn,
 } from './find.js';
+import { allSecrets } from './secretRaw.js';
 
 /**
  * Find and replace in the raw editor.
@@ -31,19 +31,21 @@ import {
 const setQuery = StateEffect.define<FindQuery>();
 
 /**
- * The matches in `text`, but none in a secret's armor (docs/ARCHITECTURE.md
+ * The matches in the note, but none in a secret's fence (docs/ARCHITECTURE.md
  * §7, "Secrets in a note"): its ciphertext is no words of the note's, a match
  * in it would be a run of base64 a short search found by chance, and a
- * replace there would leave a secret no key opens. The rich editor's find
- * never sees armor, which is no text of its document.
+ * replace there, or in the `age` that makes it a secret, would leave a secret
+ * no key opens. The fences are the ones the parser finds, as Reveal's are, so
+ * armor written about in the note's words is searched as they are. The rich
+ * editor's find never sees armor, which is no text of its document.
  */
-const found = (text: string, query: FindQuery): readonly Match[] => {
-	const matches = matchesIn(text, query);
-	const armor = matches.length === 0 ? [] : armorSpans(text);
-	return armor.length === 0
+const found = (state: EditorState, query: FindQuery): readonly Match[] => {
+	const matches = matchesIn(state.doc.toString(), query);
+	const fences = matches.length === 0 ? [] : allSecrets(state);
+	return fences.length === 0
 		? matches
 		: matches.filter((match) =>
-				armor.every((span) => match.to <= span.from || match.from >= span.to)
+				fences.every((fence) => match.to <= fence.start || match.from >= fence.end)
 			);
 };
 
@@ -57,7 +59,7 @@ const decorate = (view: EditorView, query: FindQuery): DecorationSet => {
 	if (query.search === '') return Decoration.none;
 	const selection = view.state.selection.main;
 	return Decoration.set(
-		found(view.state.doc.toString(), query).map((match) =>
+		found(view.state, query).map((match) =>
 			(match.from === selection.from && match.to === selection.to ? CURRENT : MATCH).range(
 				match.from,
 				match.to
@@ -130,7 +132,7 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 	const show = (query: FindQuery): void => {
 		view.dispatch({ effects: setQuery.of(query) });
 	};
-	const foundNow = (query: FindQuery) => found(view.state.doc.toString(), query);
+	const foundNow = (query: FindQuery) => found(view.state, query);
 
 	const goTo = (query: FindQuery, back: boolean): void => {
 		show(query);

@@ -1,10 +1,11 @@
-import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, language, syntaxTree } from '@codemirror/language';
 import {
 	type ChangeSpec,
-	type EditorState,
+	EditorState,
 	type Extension,
 	StateEffect,
 	StateField,
+	Text,
 } from '@codemirror/state';
 import {
 	Decoration,
@@ -15,7 +16,7 @@ import {
 	type ViewUpdate,
 	WidgetType,
 } from '@codemirror/view';
-import { isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
+import { armor as armorOf, isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import type { SecretHost } from './secretHost.js';
@@ -24,6 +25,7 @@ import {
 	createSecretPanels,
 	DRAFT,
 	insertSecret,
+	keepAll,
 	leftBehind,
 	lockAll,
 	NOT_REVEALED,
@@ -47,10 +49,13 @@ import {
  * is its armor's lines, and keeping new words rewrites them.
  */
 
-type SyntaxNode = ReturnType<ReturnType<typeof syntaxTree>['resolveInner']>;
+type Tree = ReturnType<typeof syntaxTree>;
+type SyntaxNode = ReturnType<Tree['resolveInner']>;
 
 export interface RawSecret {
 	readonly armor: string;
+	/** Where its fence begins, after the marks of whatever holds it. */
+	readonly start: number;
 	/** The end of the fence's opening line, where Reveal goes. */
 	readonly opening: number;
 	/** The armor's lines, from the start of the first to the end of the last. */
@@ -103,6 +108,7 @@ const secretAt = (state: EditorState, node: SyntaxNode, wanted?: string): RawSec
 	if (!isSecretBlock(SECRET_LANGUAGE, armor)) return undefined;
 	return {
 		armor,
+		start: node.from,
 		opening: open.to,
 		from: doc.line(open.number + 1).from,
 		to: last.to,
@@ -111,15 +117,19 @@ const secretAt = (state: EditorState, node: SyntaxNode, wanted?: string): RawSec
 	};
 };
 
-/** The secrets from `from` to `to`, in the text the parser has reached: what is on screen. */
+/**
+ * The secrets from `from` to `to`, in `tree`: by default the state's own,
+ * which is as far as the parser has reached — what is on screen.
+ */
 export const secretsIn = (
 	state: EditorState,
 	from: number,
 	to: number,
-	wanted?: string
+	wanted?: string,
+	tree: Tree = syntaxTree(state)
 ): RawSecret[] => {
 	const found = new Map<number, RawSecret>();
-	syntaxTree(state).iterate({
+	tree.iterate({
 		from,
 		to,
 		enter: (node) => {
@@ -132,65 +142,211 @@ export const secretsIn = (
 	return [...found.values()];
 };
 
+/** Every secret in a note, by the state it is in: worked out once for each. */
+const known = new WeakMap<EditorState, RawSecret[]>();
+
 /**
- * Every secret in the note. The parser may not have reached the end of a long
- * one; it is asked to, for a moment, since a secret missed here would look
- * gone.
+ * Every secret in the note: with the armor `wanted`, if asked. The parser may
+ * not have reached the end of a long note; it is asked to, for a moment,
+ * since a secret missed here would look gone, and the tree it reaches the end
+ * with is read, not the state's own, which stays as the state was made.
  */
 export const allSecrets = (state: EditorState, wanted?: string): RawSecret[] => {
-	const length = state.doc.length;
-	return ensureSyntaxTree(state, length, 200) === null ? [] : secretsIn(state, 0, length, wanted);
+	const all =
+		known.get(state) ??
+		(() => {
+			const length = state.doc.length;
+			const tree = ensureSyntaxTree(state, length, 200);
+			if (tree === null) return [];
+			const found = secretsIn(state, 0, length, undefined, tree);
+			known.set(state, found);
+			return found;
+		})();
+	return wanted === undefined ? all : all.filter((secret) => secret.armor === wanted);
 };
 
 /** The first secret in the note with `armor`. */
 export const findRawSecret = (state: EditorState, armor: string): RawSecret | undefined =>
 	allSecrets(state, armor).at(0);
 
+/** `text`'s lines inside whatever holds them: an empty one with no space after a mark. */
+const within = (text: string, prefix: string): string =>
+	text
+		.split('\n')
+		.map((line) => (line === '' ? prefix.trimEnd() : `${prefix}${line}`))
+		.join('\n');
+
 /** `secret`'s armor replaced by `armor`, inside whatever holds it. */
 export const rearmor = (secret: RawSecret, armor: string): ChangeSpec => ({
 	from: secret.from,
 	to: secret.to,
-	insert: armor
-		.split('\n')
-		.map((line) => `${secret.prefix}${line}`)
-		.join('\n'),
+	insert: within(armor, secret.prefix),
 });
 
 /** The fence a new secret is written as. */
 const fence = (armor: string): string => `\`\`\`${SECRET_LANGUAGE}\n${armor}\n\`\`\``;
 
 /**
- * Where a new secret goes for the cursor at `at`: after its line, or after
- * the fence it is in, since a fence written inside another would be its text.
+ * Where a new secret is written: in place of `from` to `to`, its fence after
+ * `pre` and before `post`, each of its lines after `prefix`. Its panel is
+ * drawn there before it is: below the line `to` is on (`side` 1), or above
+ * the line `from` begins (-1).
  */
-export const lineFor = (state: EditorState, at: number): number => {
-	const clamped = Math.min(at, state.doc.length);
-	const outer = (node: SyntaxNode | null): SyntaxNode | null => {
-		if (node === null || node.name === 'FencedCode') return node;
-		return outer(node.parent);
-	};
-	const code = outer(syntaxTree(state).resolveInner(clamped, 1));
-	const line = state.doc.lineAt(clamped);
-	return code === null ? line.to : state.doc.lineAt(Math.max(code.to, line.to)).to;
+export interface Place {
+	readonly from: number;
+	readonly to: number;
+	readonly pre: string;
+	readonly post: string;
+	readonly prefix: string;
+	readonly side: 1 | -1;
+}
+
+/** What `place` writes for a new secret with `armor`. */
+export const writtenAt = (place: Place, armor: string): string =>
+	`${place.pre}${within(fence(armor), place.prefix)}${place.post}`;
+
+/** Whether line `number` is there, with something in it besides the marks of what holds it. */
+const filled = (doc: Text, number: number, prefix: string): boolean => {
+	if (number < 1 || number > doc.lines) return false;
+	const text = doc.line(number).text.trim();
+	return text !== '' && text !== prefix.trim();
 };
 
-/**
- * A new secret with `armor`, as a block of its own at the line ending at
- * `end`: in place of that line, if it is empty, or after it, with a blank
- * line between it and what is either side.
- */
-export const fenceAt = (state: EditorState, end: number, armor: string): ChangeSpec => {
-	const { doc } = state;
-	const line = doc.lineAt(end);
-	const filled = (number: number) =>
-		number >= 1 && number <= doc.lines && doc.line(number).text.trim() !== '';
-	const after = filled(line.number + 1) ? '\n' : '';
-	if (line.text.trim() !== '') return { from: line.to, insert: `\n\n${fence(armor)}${after}` };
-	const before = filled(line.number - 1) ? '\n' : '';
-	// The note's last line, empty: it still ends with a line break.
-	const last = line.number === doc.lines && line.number > 1 ? '\n' : '';
-	return { from: line.from, to: line.to, insert: `${before}${fence(armor)}${after}${last}` };
+/** After line `number`, a blank line between the fence and what is either side. */
+const after = (doc: Text, number: number, prefix: string): Place => {
+	const { to } = doc.line(number);
+	const blank = prefix.trimEnd();
+	return {
+		from: to,
+		to,
+		pre: `\n${blank}\n`,
+		post: filled(doc, number + 1, prefix) ? `\n${blank}` : '',
+		prefix,
+		side: 1,
+	};
 };
+
+/** Before line `number`, the same. */
+const before = (doc: Text, number: number, prefix: string): Place => {
+	const { from } = doc.line(number);
+	const blank = prefix.trimEnd();
+	return {
+		from,
+		to: from,
+		pre: filled(doc, number - 1, prefix) ? `${blank}\n` : '',
+		post: `\n${blank}\n`,
+		prefix,
+		side: -1,
+	};
+};
+
+/** In place of empty line `number`, between blocks of the note's own. */
+const onBlank = (doc: Text, number: number): Place => {
+	const line = doc.line(number);
+	// The note's last line, empty: it still ends with a line break.
+	const last = number === doc.lines && number > 1 ? '\n' : '';
+	return {
+		from: line.from,
+		to: line.to,
+		pre: filled(doc, number - 1, '') ? '\n' : '',
+		post: `${filled(doc, number + 1, '') ? '\n' : ''}${last}`,
+		prefix: '',
+		side: 1,
+	};
+};
+
+/** What holds blocks: the note, a quote, a list's item. */
+const HOLDERS = new Set(['Document', 'Blockquote', 'ListItem']);
+
+/** The block around `node` that is one of a holder's own: a paragraph, a heading, a fence, a list. */
+const blockAround = (node: SyntaxNode | null): SyntaxNode | null => {
+	if (node === null || node.parent === null) return null;
+	return HOLDERS.has(node.parent.name) ? node : blockAround(node.parent);
+};
+
+/** The block around `node` that is the note's own. */
+const outermost = (node: SyntaxNode): SyntaxNode =>
+	node.parent === null || node.parent.parent === null ? node : outermost(node.parent);
+
+/**
+ * Where a new secret could go for the cursor at `at`, best first: after the
+ * block the cursor is in, as rich mode puts one, inside the list or quote
+ * that holds it; before it, where it runs to the end of the note open, as an
+ * unclosed fence or comment does; then the same around the note's own block;
+ * then the note's end.
+ */
+const placesFor = (state: EditorState, at: number): Place[] => {
+	const { doc } = state;
+	const line = doc.lineAt(Math.min(at, doc.length));
+	const tree = ensureSyntaxTree(state, line.to, 200) ?? syntaxTree(state);
+	const block = blockAround(tree.resolveInner(line.to, -1));
+	const end = doc.line(doc.lines);
+	const atEnd = end.text.trim() === '' ? onBlank(doc, end.number) : after(doc, end.number, '');
+	if (block === null) {
+		return [
+			line.text.trim() === '' ? onBlank(doc, line.number) : after(doc, line.number, ''),
+			atEnd,
+		];
+	}
+	const lines = (node: SyntaxNode) =>
+		[
+			doc.lineAt(node.from).number,
+			doc.lineAt(Math.max(node.from, node.to - 1)).number,
+		] as const;
+	const [first, last] = lines(block);
+	const prefix = prefixFor(doc.sliceString(doc.lineAt(block.from).from, block.from));
+	const [top, bottom] = lines(outermost(block));
+	return [
+		after(doc, last, prefix),
+		before(doc, first, prefix),
+		after(doc, bottom, ''),
+		before(doc, top, ''),
+		atEnd,
+	];
+};
+
+/** Armor to try a place with: any will do, as the parser reads a fence by its marks. */
+const TRIED = armorOf(new Uint8Array(1)).replace(/\n$/u, '');
+
+/**
+ * Whether a new secret at `place` would be one, as the note is parsed with it
+ * there: nothing, where that cannot be told in time.
+ */
+const holds = (state: EditorState, place: Place): boolean | undefined => {
+	const parsing = state.facet(language);
+	if (parsing === null) return undefined;
+	const insert = writtenAt(place, TRIED);
+	const doc = state.doc.replace(place.from, place.to, Text.of(insert.split('\n')));
+	// A state of its own: the editor's would draw this note's panels for it.
+	const tried = EditorState.create({ doc, extensions: parsing.extension });
+	const tree = ensureSyntaxTree(tried, doc.length, 200);
+	if (tree === null) return undefined;
+	return secretsIn(tried, place.from, place.from + insert.length, TRIED, tree).length > 0;
+};
+
+/** Where a new secret goes, by the state and the cursor: worked out once for each. */
+const placed = new WeakMap<EditorState, Map<number, Place>>();
+
+/** Where a new secret goes for the cursor at `at`: the first place it would be one. */
+export const placeFor = (state: EditorState, at: number): Place => {
+	const each = placed.get(state) ?? new Map<number, Place>();
+	placed.set(state, each);
+	const kept = each.get(at);
+	if (kept !== undefined) return kept;
+	const places = placesFor(state, at);
+	const [first] = places;
+	const place = places.find((tried) => holds(state, tried) !== false) ?? first;
+	if (place === undefined) throw new Error('a note has a line');
+	each.set(at, place);
+	return place;
+};
+
+/** What a new secret's first words replaced, and what was written around its fence. */
+interface Written {
+	readonly replaced: string;
+	readonly pre: string;
+	readonly post: string;
+}
 
 /**
  * `secret` taken out, with its lines: and a blank line either side of it made
@@ -212,6 +368,23 @@ const removal = (state: EditorState, secret: RawSecret): ChangeSpec => {
 	return { from: blank ? above.from : first.from, to: below.from };
 };
 
+/**
+ * A new secret taken out as it went in, where what was written around it is
+ * still there; or else as `removal` takes one out.
+ */
+const takenOut = (state: EditorState, secret: RawSecret, written?: Written): ChangeSpec => {
+	if (written === undefined) return removal(state, secret);
+	const start = state.doc.lineAt(secret.opening).from;
+	const from = start - written.pre.length;
+	const to = secret.end + written.post.length;
+	const around =
+		from >= 0 &&
+		to <= state.doc.length &&
+		state.sliceDoc(from, start) === written.pre &&
+		state.sliceDoc(secret.end, to) === written.post;
+	return around ? { from, to, insert: written.replaced } : removal(state, secret);
+};
+
 /** Where a new secret's panel is: where the cursor was when it was begun. */
 const setDraft = StateEffect.define<number | null>();
 
@@ -230,42 +403,65 @@ const panelsMoved = StateEffect.define<null>();
 /**
  * Raw mode's text, as the panels ask for it. Every change is the user's edit:
  * not annotated as the app's, so the note is dirty, and saved, as when the
- * user types.
+ * user types. What is kept is typing (`input.type`), so the history joins
+ * one word after another as it joins them typed in the note. A new secret's
+ * fence is not, so it begins a step of its own rather than joining what was
+ * typed in the note just before; Cancel is an edit of its own.
  */
-const documentOf = (view: EditorView, gone: Readonly<{ current: boolean }>): SecretDocument => ({
-	closed: () => gone.current,
-	has: (key) => findRawSecret(view.state, key) !== undefined,
-	put: (key, armor, at) => {
-		const { state } = view;
-		const block = key === DRAFT ? undefined : findRawSecret(state, key);
-		view.dispatch({
-			changes:
-				block === undefined
-					? fenceAt(state, lineFor(state, at ?? state.doc.length), armor)
-					: rearmor(block, armor),
-			effects: key === DRAFT ? setDraft.of(null) : [],
-			userEvent: 'input',
-		});
-	},
-	putBack: (key, from) => {
-		const block = findRawSecret(view.state, key);
-		if (block === undefined) return;
-		view.dispatch({
-			changes: from === undefined ? removal(view.state, block) : rearmor(block, from),
-			userEvent: 'input',
-		});
-	},
-	draftAt: () => view.state.field(draftField) ?? undefined,
-	beginDraft: () => {
-		view.dispatch({ effects: setDraft.of(view.state.selection.main.head) });
-	},
-	endDraft: () => {
-		view.dispatch({ effects: setDraft.of(null) });
-	},
-	focus: () => {
-		view.focus();
-	},
-});
+const documentOf = (view: EditorView, gone: Readonly<{ current: boolean }>): SecretDocument => {
+	/** What each new secret's first words wrote, by its armor now, so Cancel puts the note back as it was. */
+	const written = new Map<string, Written>();
+	return {
+		closed: () => gone.current,
+		has: (key) => findRawSecret(view.state, key) !== undefined,
+		put: (key, armor, at) => {
+			const { state } = view;
+			const block = key === DRAFT ? undefined : findRawSecret(state, key);
+			const effects = key === DRAFT ? setDraft.of(null) : [];
+			if (block === undefined) {
+				const place = placeFor(state, at ?? state.doc.length);
+				written.set(armor, {
+					replaced: state.sliceDoc(place.from, place.to),
+					pre: place.pre,
+					post: place.post,
+				});
+				view.dispatch({
+					changes: { from: place.from, to: place.to, insert: writtenAt(place, armor) },
+					effects,
+					userEvent: 'input',
+				});
+				return;
+			}
+			const made = written.get(key);
+			if (made !== undefined) {
+				written.delete(key);
+				written.set(armor, made);
+			}
+			view.dispatch({ changes: rearmor(block, armor), effects, userEvent: 'input.type' });
+		},
+		putBack: (key, from) => {
+			const { state } = view;
+			const block = findRawSecret(state, key);
+			const made = written.get(key);
+			written.delete(key);
+			if (block === undefined) return;
+			view.dispatch({
+				changes: from === undefined ? takenOut(state, block, made) : rearmor(block, from),
+				userEvent: 'input',
+			});
+		},
+		draftAt: () => view.state.field(draftField) ?? undefined,
+		beginDraft: () => {
+			view.dispatch({ effects: setDraft.of(view.state.selection.main.head) });
+		},
+		endDraft: () => {
+			view.dispatch({ effects: setDraft.of(null) });
+		},
+		focus: () => {
+			view.focus();
+		},
+	};
+};
 
 /**
  * A widget drawing `draw()`. Its events are its own.
@@ -315,15 +511,15 @@ const panelsIn = (state: EditorState, panels: SecretPanels): DecorationSet => {
 	const draft = state.field(draftField);
 	return Decoration.set(
 		open.flatMap(([key, { panel }]) => {
+			const place = key === DRAFT && draft !== null ? placeFor(state, draft) : undefined;
 			const at =
 				key === DRAFT
-					? draft === null
-						? undefined
-						: lineFor(state, draft)
+					? place && (place.side === 1 ? place.to : place.from)
 					: findRawSecret(state, key)?.end;
 			if (at === undefined) return [];
 			const widget = panelWidget(panel);
-			return [Decoration.widget({ widget, block: true, side: 1 }).range(at)];
+			const side = place?.side ?? 1;
+			return [Decoration.widget({ widget, block: true, side }).range(at)];
 		}),
 		true
 	);
@@ -356,6 +552,19 @@ const revealWidget = (
 		bar.append(button, said);
 		return bar;
 	});
+
+/** What is in each editor's panels kept, by the editor: what it does as it goes. */
+const keepers = new WeakMap<EditorView, () => void>();
+
+/**
+ * What is typed in `view`'s panels kept, a character an input method is
+ * still composing with it, before the editor goes: once it has, the words
+ * would go with it. Its owner calls it while the editor is there to take
+ * the edit and whatever saves the note is there to save it.
+ */
+export const keepSecrets = (view: EditorView): void => {
+	keepers.get(view)?.();
+};
 
 /**
  * Secrets in raw mode, through the host the editor is given as it is made:
@@ -422,6 +631,9 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 			const stopReceiving = host.receive(() => {
 				void insertSecret(doc, host, panels);
 			});
+			keepers.set(view, () => {
+				keepAll(doc, panels);
+			});
 			return {
 				shown,
 				press,
@@ -439,6 +651,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 				},
 				destroy: () => {
 					gone.current = true;
+					keepers.delete(view);
 					stopShowing();
 					stopLock();
 					stopReceiving();

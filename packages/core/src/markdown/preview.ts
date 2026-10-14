@@ -1,6 +1,7 @@
 import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
-import { isSecretBlock } from '../secrets.js';
+import { looksArmored } from '../age/armor.js';
+import { isSecretBlock, SECRET_LANGUAGE } from '../secrets.js';
 import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 import { decodeCharacterReferences } from './references.js';
@@ -231,7 +232,11 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 		case 'heading':
 			return as(phrasing(node.children), { heading: node.depth });
 		case 'code':
-			return isSecretBlock(node.lang, node.value)
+			// A secret cut short is one still: a list row's opening is cut at a
+			// length (`visibleText.ts` in the web app), and what is left of the
+			// armor would otherwise be shown as the code it is not.
+			return isSecretBlock(node.lang, node.value) ||
+				(node.lang === SECRET_LANGUAGE && looksArmored(node.value))
 				? as([[{ text: '', marks: [], embed: { kind: 'secret' } }]])
 				: as(plainLines(node.value), { code: true });
 		case 'html':

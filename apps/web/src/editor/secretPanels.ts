@@ -240,8 +240,10 @@ export const reveal = async (
 	const opened = await host.open(armor);
 	if (opened.state === 'locked') return undefined;
 	if (opened.state !== 'opened') return opened.state;
-	// Revealed meanwhile, by a second press: one panel.
-	if (panels.get(armor) !== undefined || doc.closed()) return undefined;
+	// Revealed meanwhile, by a second press: one panel. Or gone meanwhile, as
+	// a pull changed it under the unlock: a panel for no block would hold the
+	// words, undrawn, until the next edit closed it.
+	if (panels.get(armor) !== undefined || doc.closed() || !doc.has(armor)) return undefined;
 	const panel = panelFor(doc, host, panels, opened.words);
 	panels.set(armor, { panel, from: armor, seal: opened.seal });
 	panel.focus();
@@ -278,14 +280,21 @@ export const insertSecret = async (
 };
 
 /**
- * Every panel closed as the tab locks, at once: what the lock is for is that
- * the words are not on screen. What is in them is in the note already, but
- * for a character an input method was still composing, kept first.
+ * What is in every panel kept: all of it is in the note already, but for a
+ * character an input method is still composing.
  */
-export const lockAll = (doc: SecretDocument, panels: SecretPanels): void => {
+export const keepAll = (doc: SecretDocument, panels: SecretPanels): void => {
 	panels.all().forEach(([, { panel }]) => {
 		keep(doc, panels, panel);
 	});
+};
+
+/**
+ * Every panel closed as the tab locks, at once: what the lock is for is that
+ * the words are not on screen. What is typed in them is kept first.
+ */
+export const lockAll = (doc: SecretDocument, panels: SecretPanels): void => {
+	keepAll(doc, panels);
 	const draft = doc.draftAt();
 	panels.takeAll();
 	if (draft !== undefined) doc.endDraft();

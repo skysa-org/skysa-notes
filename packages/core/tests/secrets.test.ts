@@ -121,6 +121,14 @@ describe('a secret in a preview', () => {
 		expect(JSON.stringify(lines)).not.toContain('BEGIN AGE');
 	});
 
+	it('is one still where the note is cut short partway through its armor, so none of it shows', () => {
+		const cut = `Server key\n\n\`\`\`age\n${SEALED_HERE.slice(0, 120)}`;
+		expect(previewLines(cut)).toEqual(['Server key']);
+		expect(previewBlocks(cut)[1]?.runs).toEqual([
+			{ text: '', marks: [], embed: { kind: 'secret' } },
+		]);
+	});
+
 	it('leaves an `age` fence that is not armor as the code it is', () => {
 		expect(previewLines('```age\nnot a secret\n```\n')).toEqual(['not a secret']);
 	});

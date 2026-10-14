@@ -1,4 +1,10 @@
-import { basename, parentPath, SCRATCHPAD_FOLDER } from '@skysa/core';
+import {
+	basename,
+	parentPath,
+	type PreviewLine,
+	previewLineText,
+	SCRATCHPAD_FOLDER,
+} from '@skysa/core';
 import { useRouter } from '@tanstack/react-router';
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -11,7 +17,7 @@ import { deleteNote, getNote, isUnnamed, renameNote, setScratchMarks } from '../
 import type { Moving } from '../store/rearrange.js';
 import { scratchMarks } from '../store/scratchpad.js';
 import { titleShown } from '../store/titles.js';
-import { visibleLines } from '../store/visibleText.js';
+import { visibleBlocks } from '../store/visibleText.js';
 import type { Pane } from './CompactBar.js';
 import { COARSE_POINTER, useMediaQuery } from './layout.js';
 import type { NoteViewHandle, ScratchEditing } from './NoteView.js';
@@ -31,11 +37,15 @@ import type { MarkChange } from './Scratchpad.js';
 
 type Select = (next: Place, how?: { replace?: boolean; note?: NoteRecord }) => void;
 
+/** Whether a line shows anything: words, or a picture, a file or a secret, which have none. */
+const showsSomething = (line: PreviewLine): boolean =>
+	previewLineText(line) !== '' || line.runs.some((run) => run.embed !== undefined);
+
 /** A note stored by the box and left with nothing in it: nothing the user would miss. */
 const leftBlank = (note: NoteRecord): boolean => {
 	const marks = scratchMarks(note);
 	return (
-		visibleLines(note.body).length === 0 &&
+		!visibleBlocks(note.body).some(showsSomething) &&
 		isUnnamed(note) &&
 		!marks.pinned &&
 		marks.color === undefined

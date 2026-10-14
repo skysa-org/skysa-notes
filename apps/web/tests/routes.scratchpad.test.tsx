@@ -11,6 +11,7 @@ import { createNote, getNote, listScratchNotes, setScratchMarks } from '../src/s
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 import { setScratchpadShown } from '../src/store/scratchpad.js';
 import { hashIn } from './entry.js';
+import { fence, sealed } from './secretHostFake.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -255,6 +256,50 @@ describe('the box to take a note in', () => {
 
 		expect(await screen.findByRole('button', { name: /^Trip ideas/ })).toBeDefined();
 		expect(screen.getByRole('button', { name: 'Take a note…' })).toBeDefined();
+	});
+
+	it.each([
+		['a secret', `${fence(sealed('the alarm code is 4711'))}\n`, '-----END AGE'],
+		['a picture', '![](https://example.com/harbour.png)\n', 'harbour.png'],
+	])('keeps one that holds only %s as it is put down', async (_, pasted, kept) => {
+		await inbox();
+		const { user } = await openScratchpad();
+		await user.click(screen.getByRole('button', { name: 'Take a note…' }));
+		const box = document.querySelector<HTMLElement>('.take-note')!;
+		await within(box).findByLabelText('Note title');
+		const editor = await waitFor(() => {
+			const found = box.querySelector<HTMLElement>('.ProseMirror');
+			expect(found).not.toBeNull();
+			return found!;
+		});
+		editor.focus();
+		const paste = new Event('paste', { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, 'clipboardData', {
+			value: {
+				getData: (type: string) => (type === 'text/plain' ? pasted : ''),
+				types: ['text/plain'],
+				files: [],
+				items: [],
+			},
+		});
+		act(() => {
+			editor.dispatchEvent(paste);
+		});
+		await waitFor(
+			async () => {
+				const [stored] = await listScratchNotes(db, LOCAL_CONNECTION_ID);
+				expect(stored?.body).toContain(kept);
+			},
+			{ timeout: 6000 }
+		);
+
+		await user.click(within(box).getByRole('button', { name: 'Close' }));
+
+		expect(await screen.findByRole('button', { name: 'Take a note…' })).toBeDefined();
+		const notes = await listScratchNotes(db, LOCAL_CONNECTION_ID);
+		expect(notes).toHaveLength(1);
+		expect(notes[0]?.body).toContain(kept);
+		expect(notes[0]?.deletedLocally).toBe(0);
 	});
 
 	it('leaves nothing behind for one put down untouched', async () => {

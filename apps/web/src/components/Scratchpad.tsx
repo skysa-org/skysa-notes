@@ -178,6 +178,12 @@ const TakeNote = ({
 	);
 };
 
+/** What an unnamed card is called whose first line has no words: what that line shows. */
+const namedByShown = (line: PreviewLine): string =>
+	line.runs.some((run) => run.embed?.kind === 'secret')
+		? t('editor.secret.label')
+		: t('scratchpad.card.pictureOnly');
+
 /** A note's opening lines after its name and the date it was made, as a list row has them (`noteOpening`). */
 const opening = (
 	body: string,
@@ -340,7 +346,7 @@ const CardView = ({
 		? titleShown(note.title)
 		: first === undefined
 			? t('scratchpad.card.emptyNote')
-			: previewLineText(first) || t('scratchpad.card.pictureOnly');
+			: previewLineText(first) || namedByShown(first);
 	const shown = lines.map((line, at) => (
 		// Lines of one note, in order, and drawn again whole when it changes.
 		<CardLine key={at} line={line} />
