@@ -116,7 +116,7 @@ describe('pasting here', () => {
 
 		const listed = (await listClips(db, 'c1')).map((row) => readClipName(row.name));
 		expect(listed.map((read) => read?.label ?? read?.kind)).toEqual([
-			'q3-report.pdf',
+			'Q3 Report.pdf',
 			'text',
 			'text',
 		]);
