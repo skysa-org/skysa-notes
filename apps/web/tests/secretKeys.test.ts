@@ -194,7 +194,7 @@ describe('unlocking', () => {
 		expect(result.status).toBe('unlocked');
 	});
 
-	it('counts a wrong try, and one of another kind that spells the same', async () => {
+	it('counts a wrong try, and says what the device unlocks with, uncounted, to a try of another kind', async () => {
 		const { db, enrolled } = await setup();
 		await enrolled(PIN);
 		expect(await unlockKeys(db, 'c1', { kind: 'pin', digits: '1357' }, AT)).toEqual({
@@ -202,10 +202,10 @@ describe('unlocking', () => {
 			triesLeft: MAX_TRIES - 1,
 		});
 		expect(await unlockKeys(db, 'c1', { kind: 'pattern', dots: [2, 4, 6, 8] }, AT)).toEqual({
-			status: 'wrong',
-			triesLeft: MAX_TRIES - 2,
+			status: 'otherWay',
+			unlock: 'pin',
 		});
-		expect((await db.secretKeys.get('c1'))?.tries).toBe(2);
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(1);
 	});
 
 	it('sets the count back with a right try', async () => {
@@ -280,7 +280,10 @@ describe('changing how a device unlocks', () => {
 		expect(changed?.identities).toEqual(keys.identities);
 		expect(changed?.identities[0]).not.toBe(keys.identities[0]);
 		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pattern');
-		expect((await unlockKeys(db, 'c1', PIN, AT)).status).toBe('wrong');
+		expect(await unlockKeys(db, 'c1', PIN, AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'pattern',
+		});
 		expect(unlocked(await unlockKeys(db, 'c1', PATTERN, AT)).identities).toEqual(
 			keys.identities
 		);
@@ -483,12 +486,29 @@ describe('the device’s own lock', () => {
 		expect(unlocked(await unlockKeys(db, 'c1', answered(), AT)).identities).toHaveLength(2);
 	});
 
-	it('says the lock no longer opens them where the device unlocks another way now', async () => {
+	it('says what the device unlocks with where it unlocks another way now', async () => {
 		const { db, enrolled } = await setup();
 		await enrolled(PIN);
 
-		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({ status: 'changed' });
+		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'pin',
+		});
 		expect((await db.secretKeys.get('c1'))?.tries).toBe(0);
+	});
+
+	it('says the device unlocks another way now where another passkey was made since', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(answered());
+
+		expect(
+			await unlockKeys(
+				db,
+				'c1',
+				{ ...answered(), credentialId: new Uint8Array([8]).buffer },
+				AT
+			)
+		).toEqual({ status: 'otherWay', unlock: 'device' });
 	});
 
 	it('says when the device holds no keys for the source', async () => {
@@ -526,13 +546,19 @@ describe('the device’s own lock', () => {
 
 		const toDevice = await changeUnlock(db, keys, answered(), ROUNDS);
 		expect((await db.secretKeys.get('c1'))?.unlock).toBe('device');
-		expect((await unlockKeys(db, 'c1', PIN, AT)).status).toBe('wrong');
+		expect(await unlockKeys(db, 'c1', PIN, AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'device',
+		});
 		expect(unlocked(await unlockKeys(db, 'c1', answered(), AT)).identities).toHaveLength(2);
 
 		await changeUnlock(db, toDevice as UnlockedKeys, PASSWORD, ROUNDS);
 		const record = await db.secretKeys.get('c1');
 		expect(record).toMatchObject({ unlock: 'password', rounds: ROUNDS });
 		expect(record?.credentialId).toBeUndefined();
-		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({ status: 'changed' });
+		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'password',
+		});
 	});
 });

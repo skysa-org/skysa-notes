@@ -25,6 +25,8 @@ import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEn
  * Or the device's own lock, asked when Unlock is pressed, which counts its own
  * tries: where it does not answer, the recovery key is offered beside a try
  * again, since a passkey deleted and one refused look the same from here.
+ * Where the unlock was changed in another tab since the form was shown, the
+ * form for the new one takes its place, and says so.
  *
  * `UnlockForm` is the asking; `UnlockDialog` asks it over everything, for a
  * secret revealed while the device was locked. The setup dialog asks it within
@@ -55,6 +57,17 @@ type Said =
 	| Readonly<{ kind: 'unanswered' }>
 	| Readonly<{ kind: 'gone'; why: Gone }>;
 
+/** What each way of asking is given beside the form's own props. */
+interface Asking {
+	/** Shown in place of the form given, as the unlock changed: it says so until a try says more. */
+	readonly moved: boolean;
+	/** A try found the device unlocks with `kind` now. */
+	readonly onOtherWay: (kind: UnlockKind) => void;
+}
+
+/** Whether to say the unlock was just changed: until a try says something else. */
+const changedNow = (moved: boolean, said: Said): boolean => moved && said.kind === 'nothing';
+
 const ASK: Readonly<Record<EnteredKind, 'pattern' | 'pin' | 'password'>> = {
 	pattern: 'pattern',
 	pin: 'pin',
@@ -83,12 +96,15 @@ const answered = async (
 ): Promise<UnlockResult | 'unanswered'> => {
 	const found = await enrolment(database, connectionId);
 	if (found === undefined) return { status: 'none' };
+	if (found.unlock !== 'device') return { status: 'otherWay', unlock: found.unlock };
 	const { device } = found;
 	if (device === undefined) return { status: 'changed' };
 	const answer = await lock.prompting(() =>
 		deviceLock.answer(device.credentialId, new Uint8Array(device.salt))
 	);
-	if (answer === undefined) return 'unanswered';
+	if (answer === 'refused') return 'unanswered';
+	// A passkey that answers and gives nothing for the salt cannot open the keys.
+	if (answer === 'unsupported') return { status: 'changed' };
 	try {
 		return await unlockKeys(database, connectionId, { kind: 'device', ...device, answer });
 	} finally {
@@ -103,7 +119,9 @@ const DeviceUnlockForm = ({
 	onUnlocked,
 	onRecovery,
 	deviceLock,
-}: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & { deviceLock: DeviceLock }) => {
+	moved,
+	onOtherWay,
+}: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & Asking & { deviceLock: DeviceLock }) => {
 	const askId = useId();
 	const [busy, setBusy] = useState(false);
 	const [said, setSaid] = useState<Said>({ kind: 'nothing' });
@@ -129,6 +147,11 @@ const DeviceUnlockForm = ({
 			setSaid({ kind: 'gone', why: result.status });
 			return;
 		}
+		if (result?.status === 'otherWay') {
+			// Another passkey, made in another tab, as well: the next try asks it.
+			onOtherWay(result.unlock);
+			return;
+		}
 		setSaid({ kind: 'failed' });
 	};
 
@@ -144,6 +167,7 @@ const DeviceUnlockForm = ({
 		>
 			<p id={askId}>{t('secrets.unlock.device')}</p>
 			<div className="secrets-said" role="status">
+				{changedNow(moved, said) && <p>{t('secrets.unlock.otherWay')}</p>}
 				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
 				{said.kind === 'unanswered' && <p>{t('secrets.unlock.unanswered')}</p>}
 			</div>
@@ -183,12 +207,24 @@ export const UnlockForm = ({
 	now = Date.now,
 	deviceLock = BROWSER_DEVICE_LOCK,
 	...form
-}: UnlockFormProps) =>
-	kind === 'device' ? (
-		<DeviceUnlockForm {...form} deviceLock={deviceLock} />
+}: UnlockFormProps) => {
+	// The unlock a try found the device has now, for as long as `kind` is
+	// still what the form was given.
+	const [found, setFound] = useState<Readonly<{ given: UnlockKind; to: UnlockKind }>>();
+	const moved = found?.given === kind;
+	const shown = moved ? found.to : kind;
+	const asking: Asking = {
+		moved,
+		onOtherWay: (to) => {
+			setFound({ given: kind, to });
+		},
+	};
+	return shown === 'device' ? (
+		<DeviceUnlockForm key={shown} {...form} {...asking} deviceLock={deviceLock} />
 	) : (
-		<EnteredUnlockForm {...form} kind={kind} now={now} />
+		<EnteredUnlockForm key={shown} {...form} {...asking} kind={shown} now={now} />
 	);
+};
 
 const EnteredUnlockForm = ({
 	database,
@@ -198,10 +234,13 @@ const EnteredUnlockForm = ({
 	onUnlocked,
 	onRecovery,
 	now,
-}: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & {
-	kind: EnteredKind;
-	now: () => number;
-}) => {
+	moved,
+	onOtherWay,
+}: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> &
+	Asking & {
+		kind: EnteredKind;
+		now: () => number;
+	}) => {
 	const askId = useId();
 	const [entered, setEntered] = useState<Entered>(NOTHING_ENTERED);
 	const [busy, setBusy] = useState(false);
@@ -236,6 +275,10 @@ const EnteredUnlockForm = ({
 			setWaitUntil(result.waitUntil);
 			return;
 		}
+		if (result.status === 'otherWay') {
+			onOtherWay(result.unlock);
+			return;
+		}
 		setSaid({ kind: 'gone', why: result.status });
 	};
 
@@ -262,6 +305,7 @@ const EnteredUnlockForm = ({
 				describedBy={askId}
 			/>
 			<div className="secrets-said" role="status">
+				{changedNow(moved, said) && <p>{t('secrets.unlock.otherWay')}</p>}
 				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
 				{said.kind === 'wrong' && <p>{t('secrets.unlock.wrong')}</p>}
 				{said.kind === 'wrong' && said.left <= FREE_TRIES && (

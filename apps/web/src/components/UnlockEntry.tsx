@@ -190,13 +190,13 @@ export const ChooseUnlock = ({
 				}}
 			>
 				<Kinds kinds={kinds} kind={kind} busy={busy} onKind={choose} />
-				<p>{t('secrets.choose.useDevice')}</p>
+				<p id={askId}>{t('secrets.choose.useDevice')}</p>
 				{error !== undefined && (
 					<p className="secrets-error" role="alert">
 						{error}
 					</p>
 				)}
-				<button type="submit" className="primary" disabled={busy}>
+				<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
 					{t('secrets.choose.done')}
 				</button>
 			</form>

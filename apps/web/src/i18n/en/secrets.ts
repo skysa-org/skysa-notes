@@ -106,7 +106,7 @@ export const secrets = {
 		device: 'This device’s lock',
 		/** The device's own lock chosen: what happens next, before it does. */
 		useDevice:
-			'Your device asks for your fingerprint, face or screen lock: once to make a key for this, and again to check it.',
+			'Your device asks for your fingerprint, face or screen lock to make a key for this, and to check it.',
 		deviceRefused: 'Your device’s lock did not answer. Try again, or choose another way.',
 		deviceUnsupported:
 			'This device’s lock cannot keep secrets in this browser. Choose another way.',
@@ -138,6 +138,8 @@ export const secrets = {
 		device: 'Unlock with this device’s lock.',
 		unlock: 'Unlock',
 		unanswered: 'Your device’s lock did not answer. Try again, or use the recovery key.',
+		/** The unlock was changed in another tab since this was shown. */
+		otherWay: 'This device’s unlock was just changed. Unlock with the new one.',
 		wrong: 'That is not right.',
 		/** Shown once a wrong try is one of the last few. */
 		left: {

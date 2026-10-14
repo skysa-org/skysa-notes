@@ -299,7 +299,12 @@ export type UnlockResult =
 	 * passkey replaced, or a platform that answers otherwise now. The recovery
 	 * key is what is left; the copy stays until the device is set up again.
 	 */
-	| Readonly<{ status: 'changed' }>;
+	| Readonly<{ status: 'changed' }>
+	/**
+	 * The device unlocks with `unlock` now, changed since it was asked for
+	 * another way, in another tab: nothing was tried, or counted.
+	 */
+	| Readonly<{ status: 'otherWay'; unlock: UnlockKind }>;
 
 /** When a record's next try may be made, where it has to wait. */
 export const nextTryAt = (record: SecretKeyRecord): number | undefined =>
@@ -341,7 +346,13 @@ const unlockByDevice = async (
 ): Promise<UnlockResult> => {
 	const record = await db.secretKeys.get(connectionId);
 	if (record === undefined) return { status: 'none' };
-	if (record.unlock !== 'device') return { status: 'changed' };
+	if (
+		record.unlock !== 'device' ||
+		record.credentialId === undefined ||
+		!sameBytes(record.credentialId, unlock.credentialId)
+	) {
+		return { status: 'otherWay', unlock: record.unlock };
+	}
 	const sealing = await answeredKey(unlock.answer, record.salt);
 	const identities = await open(sealing, record);
 	if (identities === undefined || identities.length === 0) return { status: 'changed' };
@@ -361,7 +372,9 @@ const unlockByDevice = async (
  * Unlock a source's keys on this device. Each try at an entered unlock is
  * counted before it is checked, so tries made at once are all counted, and
  * one cut short by the tab closing still is; a right one sets the count back
- * to nothing.
+ * to nothing. A try of another kind than the device's is not counted: what
+ * kind it is, is no secret, and one asked for by a form opened before the
+ * unlock changed is no guess.
  */
 export const unlockKeys = async (
 	db: NotesDatabase,
@@ -373,6 +386,9 @@ export const unlockKeys = async (
 	const counted = await db.transaction('rw', db.secretKeys, async () => {
 		const record = await db.secretKeys.get(connectionId);
 		if (record === undefined) return { status: 'none' } as const;
+		if (record.unlock !== unlock.kind) {
+			return { status: 'otherWay', unlock: record.unlock } as const;
+		}
 		const until = nextTryAt(record);
 		if (until !== undefined && now < until) return { status: 'wait', until } as const;
 		const next: SecretKeyRecord = { ...record, tries: record.tries + 1, triedAt: now };
@@ -381,8 +397,6 @@ export const unlockKeys = async (
 	});
 	if (counted.status !== 'counted') return counted;
 	const { record } = counted;
-	// Wrong without the derivation, which would only come to the same.
-	if (record.unlock !== unlock.kind) return wrongTry(db, record);
 	const sealing = await sealingKey(unlock, record.salt, record.rounds);
 	const identities = await open(sealing, record);
 	if (identities === undefined || identities.length === 0) return wrongTry(db, record);

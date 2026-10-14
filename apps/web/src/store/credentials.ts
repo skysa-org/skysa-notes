@@ -37,7 +37,7 @@ const CREDENTIAL_BYTES = 32;
  */
 const PENDING_TTL_MS = 60 * 60 * 1000;
 
-const toBase64Url = (bytes: Uint8Array): string =>
+export const toBase64Url = (bytes: Uint8Array): string =>
 	btoa(String.fromCharCode(...bytes))
 		.replace(/\+/g, '-')
 		.replace(/\//g, '_')

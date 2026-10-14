@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { drawTo, PatternGrid } from '../src/components/PatternGrid.js';
 import { UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
-import type { DeviceLock } from '../src/secrets/deviceLock.js';
+import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
-import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import { createDatabase, type NotesDatabase, type UnlockKind } from '../src/store/db.js';
 import { enrol, FREE_TRIES, MAX_TRIES, TRY_WAIT_MS, type Unlock } from '../src/store/secretKeys.js';
 
 /**
@@ -142,10 +142,13 @@ describe('choosing an unlock', () => {
 		await user.click(screen.getByRole('radio', { name: 'This device’s lock' }));
 
 		expect(screen.queryByLabelText('PIN')).toBeNull();
-		expect(
-			screen.getByText(/Your device asks for your fingerprint, face or screen lock/u)
-		).toBeTruthy();
-		await user.click(screen.getByRole('button', { name: 'Set unlock' }));
+		const said = screen.getByText(
+			/Your device asks for your fingerprint, face or screen lock/u
+		);
+		const set = screen.getByRole('button', { name: 'Set unlock' });
+		// What pressing it asks of the device is read out with it.
+		expect(set.getAttribute('aria-describedby')).toBe(said.id);
+		await user.click(set);
 		expect(onChosen).toHaveBeenCalledWith({ kind: 'device' });
 	});
 
@@ -190,21 +193,34 @@ describe('unlocking', () => {
 		const onUnlocked = vi.fn();
 		const onRecovery = vi.fn();
 		const user = userEvent.setup();
-		render(
+		const form = (kind: UnlockKind) => (
 			<UnlockForm
 				database={db}
 				connectionId="c1"
-				kind={unlock.kind}
+				kind={kind}
 				lock={lock}
 				onUnlocked={onUnlocked}
 				onRecovery={onRecovery}
 				now={() => clock.now}
 			/>
 		);
+		const { rerender } = render(form(unlock.kind));
 		const tryPin = async (digits: string) => {
 			await user.type(screen.getByLabelText('PIN'), `${digits}{Enter}`);
 		};
-		return { db, lock, clock, onUnlocked, onRecovery, user, tryPin };
+		return {
+			db,
+			lock,
+			clock,
+			onUnlocked,
+			onRecovery,
+			user,
+			tryPin,
+			/** Shown again as a parent that reads the kind as it is would show it. */
+			shownAs: (kind: UnlockKind) => {
+				rerender(form(kind));
+			},
+		};
 	};
 
 	it('holds the keys it unlocked', async () => {
@@ -280,6 +296,61 @@ describe('unlocking', () => {
 		expect(screen.getByLabelText('PIN').hasAttribute('disabled')).toBe(true);
 	});
 
+	it('asks for the new unlock, counting nothing, where it was changed in another tab since the form was shown', async () => {
+		const h = await setup();
+		await h.tryPin('1111');
+		expect(await screen.findByText('That is not right.')).toBeTruthy();
+		await vi.waitFor(() => {
+			expect(screen.getByLabelText('PIN').hasAttribute('disabled')).toBe(false);
+		});
+		await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: 'age1…',
+			identities: [new Uint8Array(32).fill(7)],
+			unlock: { kind: 'password', text: 'correct horse' },
+			rounds: 1000,
+		});
+
+		await h.tryPin('2468');
+
+		expect(
+			await screen.findByText(
+				'This device’s unlock was just changed. Unlock with the new one.'
+			)
+		).toBeTruthy();
+		expect(screen.queryByLabelText('PIN')).toBeNull();
+		expect(screen.queryByText('That is not right.')).toBeNull();
+		expect((await h.db.secretKeys.get('c1'))?.tries).toBe(0);
+		await h.user.type(screen.getByLabelText('Password'), 'wrong horse{Enter}');
+		expect(await screen.findByText('That is not right.')).toBeTruthy();
+		expect(screen.queryByText(/was just changed/u)).toBeNull();
+		await vi.waitFor(() => {
+			expect(screen.getByLabelText('Password').hasAttribute('disabled')).toBe(false);
+		});
+		await h.user.type(screen.getByLabelText('Password'), 'correct horse{Enter}');
+		await vi.waitFor(() => {
+			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	it('says nothing of the change once it is given the new unlock', async () => {
+		const h = await setup();
+		await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: 'age1…',
+			identities: [new Uint8Array(32).fill(7)],
+			unlock: { kind: 'password', text: 'correct horse' },
+			rounds: 1000,
+		});
+		await h.tryPin('2468');
+		await screen.findByText('This device’s unlock was just changed. Unlock with the new one.');
+
+		h.shownAs('password');
+
+		expect(screen.queryByText(/was just changed/u)).toBeNull();
+		expect(screen.getByLabelText('Password')).toBeTruthy();
+	});
+
 	it('leaves only the recovery key once the device’s copy is gone', async () => {
 		const h = await setup();
 		await h.db.secretKeys.delete('c1');
@@ -305,16 +376,17 @@ describe('unlocking with the device’s own lock', () => {
 		prompting: Readonly<{ current: boolean }>,
 		whilePrompting: (was: boolean) => void
 	) => {
-		const asked = vi.fn((id: ArrayBuffer, given: Uint8Array) => {
+		const asked = vi.fn((id: ArrayBuffer, given: Uint8Array): Promise<Answer> => {
 			whilePrompting(prompting.current);
 			expect(new Uint8Array(id)).toEqual(new Uint8Array(credentialId));
 			expect(given).toEqual(new Uint8Array(salt));
-			return Promise.resolve(fill === undefined ? undefined : new Uint8Array(32).fill(fill));
+			return Promise.resolve(fill === undefined ? 'refused' : new Uint8Array(32).fill(fill));
 		});
 		const device: DeviceLock = {
 			offered: () => Promise.resolve(true),
 			create: () => Promise.resolve({ state: 'refused' }),
 			answer: asked,
+			forget: vi.fn(() => Promise.resolve()),
 		};
 		return device;
 	};
@@ -417,12 +489,73 @@ describe('unlocking with the device’s own lock', () => {
 		expect(await h.db.secretKeys.get('c1')).toBeDefined();
 	});
 
-	it('asks nothing of the device, and says its lock no longer opens the keys, where the device unlocks another way now', async () => {
+	it('asks nothing of the device, and asks for the PIN, where the device was changed to one since', async () => {
 		const h = await setup(RIGHT);
-		const record = await h.db.secretKeys.get('c1');
-		if (record === undefined) throw new Error('not enrolled');
-		const { credentialId: _credentialId, ...rest } = record;
-		await h.db.secretKeys.put({ ...rest, unlock: 'pin' });
+		await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: 'age1…',
+			identities: [new Uint8Array(32).fill(7)],
+			unlock: { kind: 'pin', digits: '2468' },
+			rounds: 1000,
+		});
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		expect(
+			await screen.findByText(
+				'This device’s unlock was just changed. Unlock with the new one.'
+			)
+		).toBeTruthy();
+		expect(h.deviceLock.answer).not.toHaveBeenCalled();
+		await h.user.type(screen.getByLabelText('PIN'), '2468{Enter}');
+		await vi.waitFor(() => {
+			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	it('says so, and asks the new passkey on the next try, where another was made while it asked', async () => {
+		const h = await setup(RIGHT);
+		const other = new Uint8Array([4, 5, 6]).buffer;
+		const asked: ArrayBuffer[] = [];
+		vi.mocked(h.deviceLock.answer).mockImplementation(async (id) => {
+			asked.push(id);
+			if (asked.length === 1) {
+				await enrol(h.db, {
+					connectionId: 'c1',
+					recipient: 'age1…',
+					identities: [new Uint8Array(32).fill(7)],
+					unlock: {
+						kind: 'device',
+						credentialId: other,
+						salt,
+						answer: new Uint8Array(32).fill(9),
+					},
+				});
+			}
+			return new Uint8Array(32).fill(asked.length === 1 ? RIGHT : 9);
+		});
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		expect(
+			await screen.findByText(
+				'This device’s unlock was just changed. Unlock with the new one.'
+			)
+		).toBeTruthy();
+		expect(h.onUnlocked).not.toHaveBeenCalled();
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		await vi.waitFor(() => {
+			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
+		expect(asked.map((id) => [...new Uint8Array(id)])).toEqual([
+			[1, 2, 3],
+			[4, 5, 6],
+		]);
+	});
+
+	it('leaves only the recovery key where the passkey answers nothing for the salt now', async () => {
+		const h = await setup(RIGHT);
+		vi.mocked(h.deviceLock.answer).mockResolvedValue('unsupported');
 
 		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 
@@ -431,7 +564,6 @@ describe('unlocking with the device’s own lock', () => {
 				'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.'
 			)
 		).toBeTruthy();
-		expect(h.deviceLock.answer).not.toHaveBeenCalled();
 	});
 
 	it('asks nothing of the device where it holds no keys, and says so', async () => {
