@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 
 import { StaleTabGate } from './components/StaleTabGate.js';
 import { routeTree } from './routeTree.gen';
+import { makeWayWhenAsked, updateChannel } from './sync/beforeUpdate.js';
 import { syncScheduler } from './sync/runtime.js';
 import { keepAwakeWhileSyncing } from './sync/wakeLock.js';
 
@@ -33,6 +34,9 @@ syncScheduler.start();
 // The screen kept on through a long sync, so a phone's timeout does not stop
 // an import part-way. Never stopped either, for the same reason.
 keepAwakeWhileSyncing(syncScheduler);
+// Another tab's Reload pauses syncing here too, so the new build can take over
+// (`sync/beforeUpdate.ts`). Never stopped either.
+makeWayWhenAsked(syncScheduler, updateChannel());
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('#root is missing from index.html');

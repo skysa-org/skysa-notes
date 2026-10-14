@@ -12,6 +12,8 @@ export const shell = {
 	},
 	update: {
 		available: 'A new version is available.',
+		updating: 'Updating…',
+		slow: 'Still updating. If the app has not reloaded in a few minutes, close all of its windows and open it again.',
 	},
 	staleTab: {
 		title: 'This tab is out of date',
