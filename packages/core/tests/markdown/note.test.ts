@@ -281,3 +281,144 @@ describe('a note file whose block ends in `...`', () => {
 		expect(conflictContent(unclosed, 'copy-id')).toContain(unclosed);
 	});
 });
+
+/**
+ * Edited in Google Docs, Drive's default handler for `.md` (#101). Docs reads
+ * the block as CommonMark does, a rule and then a setext heading, and writes
+ * that back as an ATX heading with the lines joined by spaces — escaping, on
+ * the way out, what markdown might read as its own (`!` to `\!`).
+ */
+const asDocsWritesIt = (file: string): string => {
+	const [, block = '', body = ''] = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(file) ?? [];
+	const line = block
+		.split('\n')
+		.map((each) => each.trim())
+		.join(' ')
+		.replaceAll('!', '\\!');
+	return `---\n\n## ${line}\n${body}`;
+};
+
+describe('a note edited in Google Docs, its block flattened into a heading', () => {
+	const ID = 'e4be6d39-1954-4580-b273-debc06e94846';
+
+	// The file the issue saw, byte for byte.
+	const docs = [
+		'---',
+		'',
+		`## id: ${ID} created: 2026-09-21T21:47:18.740Z updated: 2026-09-21T21:47:33.923Z title: First Note`,
+		'',
+		'This is nice.',
+		'',
+		'Cool\\!',
+		'',
+	].join('\n');
+
+	it('is the note it was: its id, its title, its times, and a body without the heading', () => {
+		expect(parseNoteFile(docs)).toEqual({
+			id: ID,
+			title: 'First Note',
+			createdAt: Date.parse('2026-09-21T21:47:18.740Z'),
+			updatedAt: Date.parse('2026-09-21T21:47:33.923Z'),
+			body: '\nThis is nice.\n\nCool\\!\n',
+			frontmatter: [
+				`id: ${ID}`,
+				'created: 2026-09-21T21:47:18.740Z',
+				'updated: 2026-09-21T21:47:33.923Z',
+				'title: First Note',
+			].join('\n'),
+			tags: [],
+		});
+	});
+
+	it('goes back between fences on the next write, and the rule and the heading go', () => {
+		const parsed = parseNoteFile(docs);
+		const written = serializeNoteFile({
+			frontmatter: parsed.frontmatter,
+			body: parsed.body,
+			metadata: { id: ID, title: parsed.title, updated: '2026-10-14T09:00:00.000Z' },
+		});
+		expect(written).toBe(
+			[
+				'---',
+				`id: ${ID}`,
+				'created: 2026-09-21T21:47:18.740Z',
+				'updated: 2026-10-14T09:00:00.000Z',
+				'title: First Note',
+				'---',
+				'',
+				'This is nice.',
+				'',
+				'Cool\\!',
+				'',
+			].join('\n')
+		);
+	});
+
+	/**
+	 * Splitting the line looks like guessing where a value ends, and these are
+	 * the titles that would defeat a guess. None reaches the file unquoted where
+	 * it could: the writer quotes a value holding `: ` or ` #`, and folds a long
+	 * one onto a second line, which YAML reads as the space Docs joins it with.
+	 */
+	it('keeps every title the app writes, whatever is in it', () => {
+		[
+			'First Note',
+			'Meeting: updated: plan',
+			'Note:',
+			'title: created: updated:',
+			'a #b',
+			'C# notes',
+			'Cool!',
+			"it's",
+			'"quoted"',
+			'- dash',
+			'123',
+			'true',
+			'*draft* plan',
+			`${'long '.repeat(30)}end`,
+			`"${'quoted and long: '.repeat(8)}end"`,
+		].forEach((title) => {
+			const file = serializeNoteFile({
+				frontmatter: null,
+				body: 'Body.\n',
+				metadata: {
+					id: ID,
+					title,
+					created: '2026-09-21T21:47:18.740Z',
+					updated: '2026-09-21T21:47:33.923Z',
+					pinned: true,
+					color: 'blue',
+				},
+			});
+			const read = parseNoteFile(asDocsWritesIt(file));
+			expect(read.title, title).toBe(title);
+			expect(read.id, title).toBe(ID);
+			expect(read.body, title).toBe(parseNoteFile(file).body);
+		});
+	});
+
+	/**
+	 * The one title the writer escapes, `\"`, and markdown reads that escape
+	 * as its own: the quote it kept is gone by the time Docs writes the line.
+	 */
+	it('leaves a title holding both kinds of quote as it was read before', () => {
+		const file = serializeNoteFile({
+			frontmatter: null,
+			body: 'Body.\n',
+			metadata: {
+				id: ID,
+				title: `'single' and "double"`,
+				created: '2026-09-21T21:47:18.740Z',
+				updated: '2026-09-21T21:47:33.923Z',
+			},
+		});
+		const docsFile = asDocsWritesIt(file.replaceAll('\\"', '"'));
+		expect(parseNoteFile(docsFile)).toMatchObject({ frontmatter: null, body: docsFile });
+	});
+
+	it('gives a conflict copy a block of its own, with the title it had', () => {
+		const copy = conflictContent(docs, 'copy-id');
+		expect(parseNoteFile(copy)).toMatchObject({ id: 'copy-id', title: 'First Note' });
+		expect(copy).not.toContain('## id:');
+	});
+});

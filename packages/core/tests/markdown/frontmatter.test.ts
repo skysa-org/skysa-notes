@@ -734,6 +734,10 @@ describe('splitFrontmatter, against what it did before', () => {
 			'U+2028 is not a line ending, so a fence after one closes nothing',
 			'---\ntitle: "a\u2028---\u2028b"\nid: abc\n---\nbody\n',
 		],
+		[
+			'a block Google Docs flattened into a heading is read back as one (#101)',
+			'---\n\n## id: e4be6d39-1954-4580-b273-debc06e94846 created: 2026-09-21T21:47:18.740Z updated: 2026-09-21T21:47:33.923Z\n\nbody\n',
+		],
 	];
 
 	it('and differs on these, each for a reason', () => {
@@ -1252,5 +1256,87 @@ describe('writeFrontmatter, over blocks put together at random', () => {
 
 			expect(writeFrontmatter(written, patch), `again, ${about}`).toBe(written);
 		});
+	});
+});
+
+/**
+ * A block Google Docs read as markdown and wrote back (#101): the opening fence
+ * a rule, the YAML a setext heading that the closing fence made, written out as
+ * one ATX heading with its lines joined by spaces.
+ */
+describe('a block another editor flattened into a heading', () => {
+	const ID = 'e4be6d39-1954-4580-b273-debc06e94846';
+	const PAIRS = [
+		`id: ${ID}`,
+		'created: 2026-09-21T21:47:18.740Z',
+		'updated: 2026-09-21T21:47:33.923Z',
+		'title: First Note',
+	];
+	const flattened = (line: string): string => `---\n\n## ${line}\n\nThis is nice.\n`;
+
+	it('is read back as the block it was, its lines where they were, in every line ending', () => {
+		inEachEnding(flattened(PAIRS.join(' '))).forEach((source) => {
+			const eol = /\r\n|\n|\r/.exec(source)?.[0] ?? '';
+			expect(splitFrontmatter(source)).toEqual({
+				frontmatter: PAIRS.join(eol),
+				body: `${eol}This is nice.${eol}`,
+			});
+		});
+	});
+
+	it('takes off the escapes Docs writes, and space it left between pairs', () => {
+		const { frontmatter } = splitFrontmatter(flattened(`${PAIRS.join('   ')} pinned: true  `));
+		expect(frontmatter).toBe([...PAIRS, 'pinned: true'].join('\n'));
+		expect(
+			readFrontmatter(splitFrontmatter(flattened(`${PAIRS.join(' ')}\\!`)).frontmatter).title
+		).toBe('First Note!');
+	});
+
+	it('reads to the end of a file that ends on the heading', () => {
+		expect(splitFrontmatter(`---\n\n## ${PAIRS.join(' ')}`)).toEqual({
+			frontmatter: PAIRS.join('\n'),
+			body: '',
+		});
+	});
+
+	/** Each of these is all body, as it was before. */
+	const LEFT: readonly (readonly [why: string, source: string])[] = [
+		[
+			'a note that opens with a rule and a heading of its own',
+			'---\n\n## Plan: next steps\n\nBody\n',
+		],
+		['an id that is no UUID', flattened(PAIRS.join(' ').replace(ID, 'abc'))],
+		['no id at all', flattened(PAIRS.slice(1).join(' '))],
+		['no times, which every block the app writes has', flattened(`id: ${ID} title: X`)],
+		[
+			'a time that is none',
+			flattened(PAIRS.join(' ').replace('2026-09-21T21:47:18.740Z', 'soon')),
+		],
+		['a key the app does not write', flattened(`${PAIRS.join(' ')} aliases: x`)],
+		[
+			'another tool’s key with a space in it, read at its last word',
+			flattened(`${PAIRS.join(' ')} date created: 2024-01-01`),
+		],
+		['a key the cut read twice', flattened(`${PAIRS.join(' ')} title: Again`)],
+		[
+			'a quote that never closes',
+			flattened(`${PAIRS.slice(0, 3).join(' ')} title: "First Note`),
+		],
+		['a pin the app would not write', flattened(`${PAIRS.join(' ')} pinned: false`)],
+		['text before the first key', flattened(`Notes ${PAIRS.join(' ')}`)],
+		['a paragraph between the rule and the heading', `---\n\nIntro\n\n## ${PAIRS.join(' ')}\n`],
+		['a heading that is not under the first line', `\n---\n\n## ${PAIRS.join(' ')}\n`],
+	];
+
+	it('is only a block the app wrote, read whole, and otherwise left as it was', () => {
+		LEFT.forEach(([why, source]) => {
+			expect(splitFrontmatter(source), why).toEqual({ frontmatter: null, body: source });
+		});
+	});
+
+	it('is never asked of a file with a block of its own', () => {
+		// A commented-out line opening a real block looks like the heading.
+		const source = `---\n# id: ${ID} created: 2026-09-21T21:47:18.740Z updated: 2026-09-21T21:47:33.923Z\ntitle: Kept\n---\nbody\n`;
+		expect(readFrontmatter(splitFrontmatter(source).frontmatter)).toEqual({ title: 'Kept' });
 	});
 });

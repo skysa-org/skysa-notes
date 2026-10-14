@@ -642,6 +642,45 @@ describe('importNoteFile — the rule that a note is dirty only on a real edit',
 		const note = await importNoteFile(db, { path: 'work/quick-thought.md', source: 'Text.\n' });
 		expect(note.title).toBe('quick thought');
 	});
+
+	/**
+	 * Edited in Google Docs, which writes the block back as a rule and a heading
+	 * (#101). The note is read as the one it was, and the file is left as Docs
+	 * wrote it until the user edits the note: then the block goes back between
+	 * its fences, and the rule and the heading are gone.
+	 */
+	it('reads a block Google Docs flattened, and writes it back only on an edit', async () => {
+		const id = 'e4be6d39-1954-4580-b273-debc06e94846';
+		const created = '2026-09-21T21:47:18.740Z';
+		const source = `---\n\n## id: ${id} created: ${created} updated: 2026-09-21T21:47:33.923Z title: First Note\n\nThis is nice.\n`;
+		const note = await importNoteFile(db, { path: 'first-note.md', source });
+
+		expect(note).toMatchObject({
+			id,
+			title: 'First Note',
+			body: '\nThis is nice.\n',
+			dirty: 0,
+		});
+		expect(note.createdAt).toBe(Date.parse(created));
+		expect(noteFile(note)).toBe(source);
+
+		const edited = await saveNoteBody(db, id, '\nThis is nice.\n\nMore.\n');
+		expect(noteFile(edited)).toBe(
+			[
+				'---',
+				`id: ${id}`,
+				`created: ${created}`,
+				`updated: ${new Date(edited.updatedAt).toISOString()}`,
+				'title: First Note',
+				'---',
+				'',
+				'This is nice.',
+				'',
+				'More.',
+				'',
+			].join('\n')
+		);
+	});
 });
 
 describe('listDirtyNotes', () => {
