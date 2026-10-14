@@ -2786,6 +2786,8 @@ button.danger {
 }
 
 .account {
+	/* For the bar of a long sync, drawn in its bottom padding (`.account-bar`). */
+	position: relative;
 	flex: none;
 	padding: var(--space-m) var(--gutter);
 	font-size: 0.85rem;
@@ -2825,10 +2827,12 @@ button.danger {
 	cursor: default;
 }
 
-/* Where the panel ends, when nothing needs the user (`StatusLine`): the
-   source and how it is going, and at the end the count of the other devices
-   and, at the foot of the sidebar, the gear. The words wrap in their own
-   column, so a long one does not push the buttons off the line. */
+/* Where the panel ends, when nothing needs the user (`StatusLine`): how
+   syncing is going, and at the end the count of the other devices and the
+   gear. The words are one line in their own column, and cut with "…" where
+   they do not fit: wrapped, the panel grew a line and shrank again as they
+   changed, from "Synced" to "Checking for changes…" and back (2026-10-14).
+   The whole of them is in the tooltip, and in the dialog they open. */
 .account-line {
 	display: flex;
 	align-items: center;
@@ -2838,7 +2842,9 @@ button.danger {
 .account-status {
 	flex: 1;
 	min-width: 0;
-	overflow-wrap: anywhere;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 
 /* The line's words: a button that opens how syncing is going (`SyncDetails`),
@@ -2846,6 +2852,13 @@ button.danger {
    pressed, a pointer, and the hover and focus every control has. Over
    `.account button:not(.icon)`, whose box it has not. */
 .account .account-status .account-status-button {
+	/* A block, so that it is what is cut with "…": a button inline in the
+	   line is cut by nothing, and runs under the gear. */
+	display: block;
+	max-width: 100%;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 	padding: 0;
 	font: inherit;
 	color: inherit;
@@ -2864,12 +2877,18 @@ button.danger {
 	}
 }
 
-/* How far a long sync has got, under the line that says so. */
+/* How far a long sync has got, under the line that says so: in the panel's
+   bottom padding, centred in it, rather than in a row of its own, which moved
+   everything above it up as it came and down as it went (2026-10-14). */
 .account-bar {
+	--bar: 0.375rem;
+	position: absolute;
+	inset-inline-start: var(--gutter);
+	inset-block-end: calc((var(--space-m) - var(--bar)) / 2);
 	display: block;
-	width: 100%;
-	height: 0.375rem;
-	margin: 0.25rem 0 0;
+	width: calc(100% - 2 * var(--gutter));
+	height: var(--bar);
+	margin: 0;
 	accent-color: var(--brand);
 }
 
