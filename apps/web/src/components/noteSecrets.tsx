@@ -2,12 +2,18 @@ import { AgeError } from '@skysa/core';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AttachmentProblem } from '../editor/attachHost.js';
-import type { Opened, Sealed, SecretHost } from '../editor/secretHost.js';
+import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
 import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';
 import { tabLock } from '../secrets/tabLock.js';
-import { db as appDb, type NoteRecord, type NotesDatabase, type UnlockKind } from '../store/db.js';
+import {
+	db as appDb,
+	type KeyFileRecord,
+	type NoteRecord,
+	type NotesDatabase,
+	type UnlockKind,
+} from '../store/db.js';
 import { enrolment, type UnlockedKeys } from '../store/secretKeys.js';
 import { UnlockDialog } from './UnlockDialog.js';
 
@@ -21,8 +27,9 @@ import { UnlockDialog } from './UnlockDialog.js';
  * (`UnlockDialog`), once however many secrets ask at the same time. The
  * identities are copied for each opening and the copies wiped after it, so
  * the lock wiping its own meanwhile cannot make a secret look made with
- * another key. Setting a source up, and enrolling a device, are the source's
- * Secrets dialog's: where either is wanted, the host says where it is.
+ * another key; and a secret opened as the lock closed is not shown. Setting
+ * a source up, and enrolling a device, are the source's Secrets dialog's:
+ * where either is wanted, the host says where it is.
  */
 
 export interface NoteSecretsOptions {
@@ -54,14 +61,50 @@ const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(
 
 const warning = (message: string): AttachmentProblem => ({ message, tone: 'warning' });
 
-const copied = (keys: UnlockedKeys | undefined): Uint8Array[] | undefined =>
-	keys?.identities.map((identity) => identity.slice());
+/** What opening needs of the keys, copied: the lock wipes its own in place. */
+interface Held {
+	readonly identities: Uint8Array[];
+	readonly recipient: string;
+}
+
+const copied = (keys: UnlockedKeys | undefined): Held | undefined =>
+	keys === undefined
+		? undefined
+		: {
+				identities: keys.identities.map((identity) => identity.slice()),
+				recipient: keys.recipient,
+			};
 
 /** What opening came to, from what it threw. */
 const failedOpening = (error: unknown): Opened =>
 	error instanceof AgeError && error.failure === 'no match'
 		? { state: 'other' }
 		: { state: 'unreadable' };
+
+/**
+ * Why a new secret cannot be made in a source, for its key file as last read
+ * and this device's keys; none where it can. The recipient sealed to is the
+ * one the device enrolled with, so a key file that names another means the
+ * key was replaced on another device.
+ */
+const notHere = (
+	file: KeyFileRecord | undefined,
+	enrolled: Awaited<ReturnType<typeof enrolment>>
+): string | undefined => {
+	if (file?.state === 'newer') return t('secrets.newer');
+	if (file?.state === 'invalid') return t('secrets.invalid');
+	if (enrolled === undefined) {
+		return file?.state === 'ok' ? t('editor.secret.notEnrolled') : t('editor.secret.notSetUp');
+	}
+	if (file?.state !== 'ok') return t('editor.secret.lost');
+	return enrolled.recipient === file.recipient ? undefined : t('editor.secret.replaced');
+};
+
+/** Sealing to `recipient`, with the age code loaded. */
+const sealerOf = (age: Age, recipient: string): Sealer | undefined => {
+	const to = age.parseRecipient(recipient);
+	return to === undefined ? undefined : (words) => age.sealSecret(words, to);
+};
 
 export const useNoteSecrets = (
 	note: Pick<NoteRecord, 'connectionId'>,
@@ -91,7 +134,7 @@ export const useNoteSecrets = (
 	 * are locked; or none. Copied as they are read, with nothing awaited
 	 * between: the lock wipes its own in place, the moment the page hides.
 	 */
-	const unlocked = useCallback(async (): Promise<Uint8Array[] | undefined> => {
+	const unlocked = useCallback(async (): Promise<Held | undefined> => {
 		const { connectionId, lock: held, db: database, report: say } = latest.current;
 		const keys = held.keys(connectionId);
 		if (keys !== undefined) return copied(keys);
@@ -114,61 +157,56 @@ export const useNoteSecrets = (
 		return (await waiting.current) ? copied(held.keys(connectionId)) : undefined;
 	}, []);
 
+	/** `held`'s words for `armor`, and how to seal what they become; wiped after. */
+	const opening = useCallback(async (armor: string, held: Held): Promise<Opened> => {
+		const { connectionId, lock, report: say } = latest.current;
+		try {
+			const loaded = await latest.current.age();
+			const seal = sealerOf(loaded, held.recipient);
+			if (seal === undefined) return { state: 'unreadable' };
+			const words = loaded.openSecret(armor, held.identities);
+			// Locked while the age code loaded: the words are not to be shown.
+			if (!lock.isUnlocked(connectionId)) return { state: 'locked' };
+			return { state: 'opened', words, seal };
+		} catch (error) {
+			if (error instanceof AgeError) return failedOpening(error);
+			say(warning(t('secrets.failed')));
+			return { state: 'locked' };
+		} finally {
+			held.identities.forEach((identity) => identity.fill(0));
+		}
+	}, []);
+
 	const host = useMemo<SecretHost>(
 		() => ({
-			sealable: async () => {
+			begin: async () => {
 				const { connectionId, db: database, report: say } = latest.current;
-				const [file, enrolled] = await Promise.all([
-					database.keyFiles.get(connectionId),
-					enrolment(database, connectionId),
-				]);
-				const why =
-					file?.state !== 'ok'
-						? t('editor.secret.notSetUp')
-						: enrolled === undefined
-							? t('editor.secret.notEnrolled')
-							: enrolled.recipient === file.recipient
-								? undefined
-								: t('editor.secret.replaced');
-				if (why !== undefined) say(warning(why));
-				return why === undefined;
+				try {
+					const [file, enrolled] = await Promise.all([
+						database.keyFiles.get(connectionId),
+						enrolment(database, connectionId),
+					]);
+					const why = notHere(file, enrolled);
+					if (why !== undefined || enrolled === undefined) {
+						say(warning(why ?? t('editor.secret.notEnrolled')));
+						return undefined;
+					}
+					// To the recipient this device enrolled with, which needs no
+					// unlock.
+					const seal = sealerOf(await latest.current.age(), enrolled.recipient);
+					if (seal === undefined) say(warning(t('secrets.failed')));
+					return seal;
+				} catch {
+					say(warning(t('secrets.failed')));
+					return undefined;
+				}
 			},
 			open: async (armor) => {
-				const identities = await unlocked();
-				if (identities === undefined) return { state: 'locked' };
-				try {
-					const loaded = await latest.current.age().catch(() => undefined);
-					if (loaded === undefined) {
-						latest.current.report(warning(t('secrets.failed')));
-						return { state: 'locked' };
-					}
-					return { state: 'opened', words: await loaded.openSecret(armor, identities) };
-				} catch (error) {
-					return failedOpening(error);
-				} finally {
-					identities.forEach((identity) => identity.fill(0));
-				}
-			},
-			// To the recipient this device enrolled with, which needs no unlock.
-			// Where the key file names another, the key was replaced elsewhere;
-			// words already revealed here are kept all the same, and opened by
-			// this device, rather than lost.
-			seal: async (words): Promise<Sealed> => {
-				const { connectionId, db: database, report: say } = latest.current;
-				const enrolled = await enrolment(database, connectionId);
-				if (enrolled === undefined) {
-					say(warning(t('editor.secret.notEnrolled')));
-					return { state: 'refused' };
-				}
-				try {
-					const { parseRecipient, sealSecret } = await latest.current.age();
-					const recipient = parseRecipient(enrolled.recipient);
-					if (recipient === undefined) throw new Error('not a recipient');
-					return { state: 'sealed', armor: await sealSecret(words, recipient) };
-				} catch {
-					say(warning(t('editor.secret.notSealed')));
-					return { state: 'refused' };
-				}
+				const held = await unlocked().catch(() => {
+					latest.current.report(warning(t('secrets.failed')));
+					return undefined;
+				});
+				return held === undefined ? { state: 'locked' } : opening(armor, held);
 			},
 			copy: (words) =>
 				latest.current.copy(words).then(
@@ -191,7 +229,7 @@ export const useNoteSecrets = (
 				};
 			},
 		}),
-		[unlocked]
+		[opening, unlocked]
 	);
 
 	const insert = useCallback(() => {

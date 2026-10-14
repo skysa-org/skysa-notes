@@ -11,6 +11,7 @@ import {
 	recipientOf,
 	sealSecret,
 } from '../src/secrets/age.js';
+import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { enrol, type Unlock, type UnlockedKeys, unlockKeys } from '../src/store/secretKeys.js';
@@ -34,12 +35,20 @@ const PIN: Unlock = { kind: 'pin', digits: '2468' };
 const setup = async ({
 	keyFile = 'ours',
 	enrolled = true,
-}: { keyFile?: 'ours' | 'theirs' | 'none'; enrolled?: boolean } = {}) => {
+	age,
+}: {
+	keyFile?: 'ours' | 'theirs' | 'none' | 'newer' | 'invalid';
+	enrolled?: boolean;
+	age?: () => Promise<Age>;
+} = {}) => {
 	const db = createDatabase(`note-secrets-${crypto.randomUUID()}`);
 	opened.push(db);
 	await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
 	const identity = generateIdentity();
-	if (keyFile !== 'none') {
+	if (keyFile === 'newer' || keyFile === 'invalid') {
+		await db.keyFiles.put({ connectionId: 'c1', state: keyFile, version: 'v1' });
+	}
+	if (keyFile === 'ours' || keyFile === 'theirs') {
 		await db.keyFiles.put({
 			connectionId: 'c1',
 			state: 'ok',
@@ -69,7 +78,13 @@ const setup = async ({
 	const Probe = () => {
 		const secrets = useNoteSecrets(
 			{ connectionId: 'c1' },
-			{ db, lock, copy, report: (problem) => told.push(problem) }
+			{
+				db,
+				lock,
+				copy,
+				...(age === undefined ? {} : { age }),
+				report: (problem) => told.push(problem),
+			}
 		);
 		held.current = secrets;
 		return <>{secrets.dialog}</>;
@@ -84,7 +99,7 @@ const setup = async ({
 		if (result.status !== 'unlocked') throw new Error('not unlocked');
 		lock.hold(result.keys);
 	};
-	const sealedFor = async (words: string, key = identity) => {
+	const sealedFor = (words: string, key = identity) => {
 		const to = parseRecipient(recipientOf(key));
 		if (to === undefined) throw new Error('not a recipient');
 		return sealSecret(words, to);
@@ -95,59 +110,77 @@ const setup = async ({
 describe('whether a secret can be made here', () => {
 	it('is so where the source is set up and this device holds its key, locked or not', async () => {
 		const h = await setup();
-		expect(await h.secrets().host.sealable()).toBe(true);
+		const seal = await h.secrets().host.begin();
+
+		expect(seal).toBeDefined();
+		expect(h.lock.isUnlocked('c1')).toBe(false);
+		expect(openSecret(seal?.('the door code') ?? '', [h.identity])).toBe('the door code');
 		expect(h.told).toEqual([]);
 	});
 
-	it('says why not, where it is not', async () => {
-		const none = await setup({ keyFile: 'none' });
-		expect(await none.secrets().host.sealable()).toBe(false);
-		expect(none.told.at(-1)?.message).toMatch(/^This source is not set up for secrets/u);
-		cleanup();
+	it.each([
+		[
+			'the source is not set up',
+			{ keyFile: 'none', enrolled: false },
+			/^This source is not set up for secrets/u,
+		],
+		['the device is not enrolled', { enrolled: false }, /^This device cannot open secrets/u],
+		[
+			'the key was replaced elsewhere',
+			{ keyFile: 'theirs' },
+			/key was replaced on another device/u,
+		],
+		['the folder names no key', { keyFile: 'none' }, /no longer names its key/u],
+		['a newer app set it up', { keyFile: 'newer' }, /set up by a newer version of the app/u],
+		['the key file is not this app’s', { keyFile: 'invalid' }, /that this app did not write/u],
+	] as const)('is not, and says so, where %s', async (_, options, said) => {
+		const h = await setup(options);
 
-		const notHere = await setup({ enrolled: false });
-		expect(await notHere.secrets().host.sealable()).toBe(false);
-		expect(notHere.told.at(-1)?.message).toMatch(/^This device cannot open secrets/u);
-		cleanup();
+		expect(await h.secrets().host.begin()).toBeUndefined();
+		expect(h.told.at(-1)?.message).toMatch(said);
+	});
 
-		const replaced = await setup({ keyFile: 'theirs' });
-		expect(await replaced.secrets().host.sealable()).toBe(false);
-		expect(replaced.told.at(-1)?.message).toMatch(/key was replaced on another device/u);
+	it('is not, and says so, where the device’s storage fails', async () => {
+		const h = await setup();
+		vi.spyOn(h.db.keyFiles, 'get').mockRejectedValueOnce(new Error('gone'));
+
+		expect(await h.secrets().host.begin()).toBeUndefined();
+		expect(h.told.at(-1)?.message).toBe('That did not work. Try again.');
 	});
 });
 
-describe('sealing and opening', () => {
-	it('seals to this device’s key with the device locked, and opens what it sealed once unlocked', async () => {
+describe('opening', () => {
+	it('opens a secret once unlocked, handing back how to seal what it becomes', async () => {
 		const h = await setup();
-		const sealed = await h.secrets().host.seal('the door code');
-		if (sealed.state !== 'sealed') throw new Error('not sealed');
-		expect(h.lock.isUnlocked('c1')).toBe(false);
-		expect(await openSecret(sealed.armor, [h.identity])).toBe('the door code');
-
+		const armor = h.sealedFor('the door code');
 		await h.unlock();
-		expect(await h.secrets().host.open(sealed.armor)).toEqual({
-			state: 'opened',
-			words: 'the door code',
-		});
+
+		const opened = await h.secrets().host.open(armor);
+
+		if (opened.state !== 'opened') throw new Error('not opened');
+		expect(opened.words).toBe('the door code');
+		expect(openSecret(opened.seal('changed'), [h.identity])).toBe('changed');
 	});
 
 	it('asks for the unlock over the note once, for every secret waiting on it', async () => {
 		const h = await setup();
-		const armor = await h.sealedFor('the door code');
+		const armor = h.sealedFor('the door code');
 
 		const first = h.secrets().host.open(armor);
 		const second = h.secrets().host.open(armor);
 		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
 
-		expect(await first).toEqual({ state: 'opened', words: 'the door code' });
-		expect(await second).toEqual({ state: 'opened', words: 'the door code' });
-		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(await first).toMatchObject({ state: 'opened', words: 'the door code' });
+		expect(await second).toMatchObject({ state: 'opened', words: 'the door code' });
+		await vi.waitFor(() => {
+			expect(screen.queryByRole('dialog')).toBeNull();
+		});
 		expect(h.lock.isUnlocked('c1')).toBe(true);
 	});
 
 	it('opens nothing where the unlock is cancelled', async () => {
 		const h = await setup();
-		const opening = h.secrets().host.open(await h.sealedFor('the door code'));
+		const opening = h.secrets().host.open(h.sealedFor('the door code'));
 		await screen.findByLabelText('PIN');
 		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -157,28 +190,54 @@ describe('sealing and opening', () => {
 	it('says a secret was made with another key, rather than that the unlock was wrong', async () => {
 		const h = await setup();
 		await h.unlock();
-		const theirs = await h.sealedFor('theirs', generateIdentity());
+		const theirs = h.sealedFor('theirs', generateIdentity());
 
 		expect(await h.secrets().host.open(theirs)).toEqual({ state: 'other' });
 		expect(await h.secrets().host.open('not armor')).toEqual({ state: 'unreadable' });
 	});
 
-	it('opens with copies, so the lock wiping its own meanwhile changes nothing', async () => {
-		const h = await setup();
+	/**
+	 * The lock wipes its keys in place as it closes. Opened with copies, the
+	 * secret still opens, not "made with another key"; and, the device locked
+	 * by then, it is not shown.
+	 */
+	it('shows nothing opened as the lock closed, and never says another key made it', async () => {
+		const gate = { open: (): void => undefined };
+		const age = vi.fn(
+			() =>
+				new Promise<Age>((resolve) => {
+					gate.open = () => {
+						void loadAge().then(resolve);
+					};
+				})
+		);
+		const h = await setup({ age });
 		await h.unlock();
-		const armor = await h.sealedFor('the door code');
+		const armor = h.sealedFor('the door code');
 
 		const opening = h.secrets().host.open(armor);
+		// The keys copied, and the age code on its way.
+		await vi.waitFor(() => {
+			expect(age).toHaveBeenCalled();
+		});
 		h.lock.lock();
+		gate.open();
 
-		expect(await opening).toEqual({ state: 'opened', words: 'the door code' });
+		expect(await opening).toEqual({ state: 'locked' });
+	});
+
+	it('opens nothing, and says so, where the device’s storage fails', async () => {
+		const h = await setup();
+		vi.spyOn(h.db.secretKeys, 'get').mockRejectedValueOnce(new Error('gone'));
+
+		expect(await h.secrets().host.open(h.sealedFor('x'))).toEqual({ state: 'locked' });
+		expect(h.told.at(-1)?.message).toBe('That did not work. Try again.');
 	});
 
 	it('says where this device cannot open the source’s secrets at all', async () => {
 		const h = await setup({ enrolled: false });
-		expect(await h.secrets().host.open(await h.sealedFor('x'))).toEqual({ state: 'locked' });
+		expect(await h.secrets().host.open(h.sealedFor('x'))).toEqual({ state: 'locked' });
 		expect(h.told.at(-1)?.message).toMatch(/^This device cannot open secrets/u);
-		expect(await h.secrets().host.seal('x')).toEqual({ state: 'refused' });
 	});
 });
 

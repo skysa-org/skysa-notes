@@ -1998,10 +1998,6 @@ button.danger {
 	gap: 0.5rem;
 }
 
-.secret-panel[aria-busy='true'] {
-	cursor: progress;
-}
-
 /*
  * The tools, under the block being edited (`editor/codeTools.ts` says which
  * one that is). Absolute, so the note's text does not move when they appear

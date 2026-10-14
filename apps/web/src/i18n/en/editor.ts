@@ -280,6 +280,9 @@ export const editor = {
 			'This device cannot open secrets in this source yet. Choose Secrets… in its menu, and type its recovery key.',
 		replaced:
 			'This source’s key was replaced on another device. Choose Secrets… in its menu, and type the new recovery key.',
-		notSealed: 'The secret could not be encrypted. Try again.',
+		lost: 'This source’s folder no longer names its key. Choose Secrets… in its menu to put it back.',
+		/** Said in the panel, where what was typed could not be encrypted into the note. */
+		notSealed:
+			'What you typed could not be encrypted, and is not saved yet. Keep typing to try again.',
 	},
 } as const;

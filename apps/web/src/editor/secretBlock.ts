@@ -15,10 +15,19 @@ import { isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { selectedKeys } from './attachment.js';
-import { userEditKey } from './dirty.js';
 import { iconElement } from './icons.js';
-import { type SecretHost, secretHostCtx } from './secretHost.js';
-import { createSecretPanel, type SecretPanel } from './secretPanel.js';
+import { secretHostCtx } from './secretHost.js';
+import {
+	createSecretPanels,
+	DRAFT,
+	insertSecret,
+	leftBehind,
+	lockAll,
+	NOT_REVEALED,
+	reveal as revealSecret,
+	type SecretDocument,
+	type SecretPanels,
+} from './secretPanels.js';
 
 /**
  * A secret in the rich editor (docs/ARCHITECTURE.md §7, "Secrets in a note"):
@@ -32,27 +41,14 @@ import { createSecretPanel, type SecretPanel } from './secretPanel.js';
  * (`codeBlockWithoutSecrets`); a fence that says `age` and holds anything else
  * is still a code block.
  *
- * **The words never enter the document.** Revealed, they are in a panel
- * (`secretPanel.ts`) held apart from the document and from the node view
- * that shows it, in `SecretPanels`, by the armor of the block it shows.
- * Revealing and hiding dispatch nothing. What is typed is kept as the focus
- * leaves the panel, and by Done: sealed again, only where it changed, and put
- * in the block's place in one transaction — a user edit, so the note is dirty
- * then and only then, and saved as anything typed in it is. Cancel puts the
- * block back as it was revealed. A new secret ("Insert secret") is a panel in
- * a widget where it will go, and nothing typed in it inserts nothing.
- *
- * When the tab locks the source, every panel closes at once; the words in
- * any that changed are sealed and saved first, which needs only the
- * recipient, so no edit is lost to the lock. Nor to a pull: a block that
- * goes from under a panel holding new words, by a change that is not the
- * user's, has them put back where it was.
+ * **The words never enter the document.** Revealed, they are in a panel held
+ * apart from the document and from the node view that shows it
+ * (`secretPanels.ts`, which says what Done, Cancel, leaving, the lock and a
+ * pull do). Revealing and hiding dispatch nothing. A new secret's panel is in
+ * a widget where it will go.
  */
 
 export const SECRET = 'secret';
-
-/** The key a new secret's panel is held under, which no armor can be. */
-const DRAFT = '';
 
 const valueOf = (node: ProseNode): string => {
 	const value: unknown = node.attrs.value;
@@ -95,6 +91,11 @@ export const secretSchema = $nodeSchema(SECRET, () => ({
 	parseDOM: [
 		{
 			tag: 'pre[data-secret]',
+			// Ahead of the code block's `pre`, which would take it: a secret
+			// copied, cut or dragged, and pasted, is a secret still. Milkdown
+			// draws pasted markdown and reads it back, so a fence pasted as
+			// text comes this way too.
+			priority: 60,
 			getAttrs: (dom) => {
 				if (!(dom instanceof HTMLElement)) return false;
 				const value = dom.textContent;
@@ -116,85 +117,6 @@ export const secretSchema = $nodeSchema(SECRET, () => ({
 		},
 	},
 }));
-
-/**
- * A panel open. `from` is the armor its block had when it was revealed, which
- * Cancel puts back; none for a new secret, whose Cancel takes out the block
- * its words were kept in, if any were.
- */
-interface Open {
-	readonly panel: SecretPanel;
-	readonly from: string | undefined;
-}
-
-/**
- * The panels open in one editor, by the armor of the block each shows — or
- * `DRAFT`, for a new secret's until its words are first kept. Apart from the
- * node views, which ProseMirror may draw again: a view drawn again shows the
- * panel its block had.
- */
-export interface SecretPanels {
-	readonly get: (key: string) => Open | undefined;
-	readonly set: (key: string, open: Open) => void;
-	/** Where `panel` is held, and what with. */
-	readonly find: (panel: SecretPanel) => readonly [string, Open] | undefined;
-	/** `panel` held under another key: its block's armor changed, by its own words. */
-	readonly rekey: (panel: SecretPanel, key: string) => void;
-	readonly remove: (panel: SecretPanel) => void;
-	/** Every panel open, by its key, and none after. */
-	readonly takeAll: () => readonly (readonly [string, Open])[];
-	readonly all: () => readonly (readonly [string, Open])[];
-	/** Every view asked to show its panel again: where the blocks are has changed. */
-	readonly refresh: () => void;
-	readonly subscribe: (listener: () => void) => () => void;
-}
-
-export const createSecretPanels = (): SecretPanels => {
-	const open = new Map<string, Open>();
-	const listeners = new Set<() => void>();
-	const changed = () => {
-		listeners.forEach((listener) => {
-			listener();
-		});
-	};
-	const find = (panel: SecretPanel) =>
-		[...open.entries()].find(([, each]) => each.panel === panel);
-	return {
-		get: (key) => open.get(key),
-		set: (key, held) => {
-			open.set(key, held);
-			changed();
-		},
-		find,
-		rekey: (panel, key) => {
-			const found = find(panel);
-			if (found === undefined) return;
-			open.delete(found[0]);
-			open.set(key, found[1]);
-			changed();
-		},
-		remove: (panel) => {
-			const found = find(panel);
-			if (found === undefined) return;
-			open.delete(found[0]);
-			changed();
-		},
-		takeAll: () => {
-			const all = [...open.entries()];
-			open.clear();
-			if (all.length > 0) changed();
-			return all;
-		},
-		all: () => [...open.entries()],
-		refresh: changed,
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => {
-				listeners.delete(listener);
-			};
-		},
-	};
-};
 
 export const secretPanelsCtx = $ctx<SecretPanels, 'skysaSecretPanels'>(
 	createSecretPanels(),
@@ -248,19 +170,14 @@ const findSecret = (
 
 /**
  * `armor` in the document as the user's edit: in place of the block with the
- * armor `key`, or — a new secret's first words, or a block gone, or no `key`
- * at all — as a block of its own where `at` says, or at the end of the note.
+ * armor `key`, or — a new secret's first words — as a block of its own where
+ * `at` says, or at the end of the note.
  */
-const put = (
-	view: EditorView,
-	key: string | undefined,
-	armor: string,
-	at: number | undefined
-): void => {
+const put = (view: EditorView, key: string, armor: string, at: number | undefined): void => {
 	const type = view.state.schema.nodes[SECRET];
 	if (type === undefined) return;
 	const { tr, doc } = view.state;
-	const block = key === undefined || key === DRAFT ? undefined : findSecret(doc, key);
+	const block = key === DRAFT ? undefined : findSecret(doc, key);
 	if (block !== undefined) {
 		view.dispatch(tr.setNodeMarkup(block.pos, undefined, { value: armor }));
 		return;
@@ -276,197 +193,42 @@ const put = (
 /** Where a new secret's panel is: where its block goes in. */
 const draftAt = (state: EditorState): number | undefined => draftKey.getState(state) ?? undefined;
 
-/** Each panel's keeping, one after another: a later one's words are the later words. */
-const keeping = new WeakMap<SecretPanel, Promise<boolean>>();
-
-/**
- * What is in `panel` kept, where it is new: sealed, and put in its block as
- * the user's edit, the panel left open. Whether it was, or there was nothing
- * new; not where it could not be sealed, or the panel closed meanwhile.
- */
-const keep = (
-	view: EditorView,
-	host: SecretHost,
-	panels: SecretPanels,
-	panel: SecretPanel
-): Promise<boolean> => {
-	const after = keeping.get(panel) ?? Promise.resolve(true);
-	const kept = after.then(async () => {
-		if (panels.find(panel) === undefined) return false;
-		if (!panel.changed()) return true;
-		const words = panel.words();
-		const sealed = await host.seal(words);
-		// Looked for again: closed meanwhile — cancelled, or taken by the lock,
-		// which keeps the words itself — it is not this to keep.
-		const still = panels.find(panel);
-		if (sealed.state !== 'sealed' || still === undefined || view.isDestroyed) return false;
-		const [key] = still;
-		// Typed in again while this was sealing: a new secret's panel moves
-		// into its block's view as that is drawn, which takes the focus from it.
-		const focused = panel.dom.contains(document.activeElement);
-		// Held under the new armor first: the block changes under the panel as
-		// it is put in, and the view showing it looks for it by that.
-		panel.mark(words);
-		panels.rekey(panel, sealed.armor);
-		put(view, key, sealed.armor, draftAt(view.state));
-		// After the view has shown it, which it does once ProseMirror has drawn.
-		if (focused) {
-			queueMicrotask(() => {
-				panel.focus();
-			});
-		}
-		return true;
-	});
-	keeping.set(
-		panel,
-		kept.catch(() => false)
-	);
-	return kept;
-};
-
-/** Done: what is in the panel kept, and the panel closed; or, where it could not be, left open. */
-const done = async (
-	view: EditorView,
-	host: SecretHost,
-	panels: SecretPanels,
-	panel: SecretPanel
-): Promise<void> => {
-	panel.busy(true);
-	const kept = await keep(view, host, panels, panel);
-	panel.busy(false);
-	const found = panels.find(panel);
-	if (!kept || found === undefined) return;
-	panels.remove(panel);
-	// A new secret with nothing in it: its place let go of.
-	if (found[0] === DRAFT && draftAt(view.state) !== undefined) {
+/** The rich editor's document, as the panels ask for it. */
+const documentOf = (view: EditorView): SecretDocument => ({
+	closed: () => view.isDestroyed,
+	has: (key) => findSecret(view.state.doc, key) !== undefined,
+	put: (key, armor, at) => {
+		put(view, key, armor, at);
+	},
+	putBack: (key, from) => {
+		const block = findSecret(view.state.doc, key);
+		if (block === undefined) return;
+		const { tr } = view.state;
+		view.dispatch(
+			from === undefined
+				? tr.delete(block.pos, block.pos + block.node.nodeSize)
+				: tr.setNodeMarkup(block.pos, undefined, { value: from })
+		);
+	},
+	draftAt: () => draftAt(view.state),
+	beginDraft: () => {
+		view.dispatch(view.state.tr.setMeta(draftKey, view.state.selection.from));
+	},
+	endDraft: () => {
 		view.dispatch(view.state.tr.setMeta(draftKey, null));
-	}
-	view.focus();
-};
-
-/** Cancel: the panel closed, and its block put back as it was revealed. */
-const cancel = (view: EditorView, panels: SecretPanels, panel: SecretPanel): void => {
-	const found = panels.find(panel);
-	panels.remove(panel);
-	if (found === undefined) return;
-	const [key, { from }] = found;
-	putBack(view, key, from);
-	view.focus();
-};
-
-/** The block whose armor is `key` as it was revealed: `from`, or none for a new secret. */
-const putBack = (view: EditorView, key: string, from: string | undefined): void => {
-	const { tr } = view.state;
-	if (key === DRAFT) {
-		if (draftAt(view.state) !== undefined) view.dispatch(tr.setMeta(draftKey, null));
-		return;
-	}
-	const block = key === from ? undefined : findSecret(view.state.doc, key);
-	if (block === undefined) return;
-	view.dispatch(
-		from === undefined
-			? tr.delete(block.pos, block.pos + block.node.nodeSize)
-			: tr.setNodeMarkup(block.pos, undefined, { value: from })
-	);
-};
-
-const panelFor = (
-	view: EditorView,
-	host: SecretHost,
-	panels: SecretPanels,
-	words: string
-): SecretPanel => {
-	const panel: SecretPanel = createSecretPanel({
-		words,
-		onDone: () => {
-			void done(view, host, panels, panel);
-		},
-		onLeave: () => {
-			void keep(view, host, panels, panel);
-		},
-		onCancel: () => {
-			cancel(view, panels, panel);
-		},
-		onCopy: host.copy,
-	});
-	return panel;
-};
-
-/**
- * Begin a new secret at the cursor: a panel where it will go, empty. Only
- * where one can be sealed: the host says why not, where not.
- */
-export const insertSecret = async (view: EditorView, host: SecretHost, panels: SecretPanels) => {
-	if (panels.get(DRAFT) === undefined && !(await host.sealable())) return;
-	const begun = panels.get(DRAFT);
-	if (begun !== undefined) {
-		begun.panel.focus();
-		return;
-	}
-	if (view.isDestroyed) return;
-	const panel = panelFor(view, host, panels, '');
-	panels.set(DRAFT, { panel, from: undefined });
-	view.dispatch(view.state.tr.setMeta(draftKey, view.state.selection.from));
-	panel.focus();
-};
+	},
+	focus: () => {
+		view.focus();
+	},
+});
 
 /** The slash menu's "Secret". */
 export const insertSecretCommand = (ctx: Ctx): void => {
 	void insertSecret(
-		ctx.get(editorViewCtx),
+		documentOf(ctx.get(editorViewCtx)),
 		ctx.get(secretHostCtx.key),
 		ctx.get(secretPanelsCtx.key)
 	);
-};
-
-/**
- * Every panel closed as the tab locks, the words in any that changed sealed
- * and saved first. Taken out of sight at once, before the sealing, which is
- * not quick: what the lock is for is that the words are not on screen.
- */
-const lockAll = (view: EditorView, host: SecretHost, panels: SecretPanels): void => {
-	const at = draftAt(view.state);
-	const kept = panels
-		.takeAll()
-		.filter(([, open]) => open.panel.changed())
-		.map(([key, open]) => ({ key, words: open.panel.words() }));
-	if (at !== undefined) view.dispatch(view.state.tr.setMeta(draftKey, null));
-	void kept.reduce(
-		(before, { key, words }) =>
-			before.then(async () => {
-				const sealed = await host.seal(words);
-				if (sealed.state === 'sealed' && !view.isDestroyed)
-					put(view, key, sealed.armor, at);
-			}),
-		Promise.resolve()
-	);
-};
-
-/**
- * Panels whose block is no longer in the document. Gone by the user's own
- * edit, it is let go of, as anything deleted is. Gone from under it — a pull
- * that changed or removed the block — new words in it are sealed and put
- * back where the block was, beside whatever came in its place.
- */
-const leftBehind = (
-	view: EditorView,
-	before: EditorState,
-	host: SecretHost,
-	panels: SecretPanels
-): void => {
-	const byUser = (userEditKey.getState(view.state) ?? 0) > (userEditKey.getState(before) ?? 0);
-	panels.all().forEach(([key, { panel }]) => {
-		if (key === DRAFT || findSecret(view.state.doc, key) !== undefined) return;
-		panels.remove(panel);
-		if (byUser || !panel.changed()) return;
-		// After where it ended: after what came in its place, where anything did.
-		const was = findSecret(before.doc, key);
-		const at = was === undefined ? undefined : was.pos + was.node.nodeSize;
-		void host.seal(panel.words()).then((sealed) => {
-			if (sealed.state === 'sealed' && !view.isDestroyed)
-				put(view, undefined, sealed.armor, at);
-		});
-	});
 };
 
 /**
@@ -518,16 +280,17 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 			},
 		},
 		view: (view) => {
+			const doc = documentOf(view);
 			const stopLock = host.locked(() => {
-				lockAll(view, host, panels);
+				lockAll(doc, panels);
 			});
 			const stopReceiving = host.receive(() => {
-				void insertSecret(view, host, panels);
+				void insertSecret(doc, host, panels);
 			});
 			return {
 				update: (updated, before) => {
 					if (updated.state.doc === before.doc || panels.all().length === 0) return;
-					leftBehind(updated, before, host, panels);
+					leftBehind(doc, panels);
 					// A block with the same armor as the one showing a panel may
 					// be the first of them now.
 					panels.refresh();
@@ -543,17 +306,12 @@ export const secretPlugin = (ctx: Ctx): Plugin<number | null> => {
 	});
 };
 
-/** Why a secret could not be revealed, said on its bar. */
-const SAID: Readonly<Record<'other' | 'unreadable', () => string>> = {
-	other: () => t('editor.secret.differentKey'),
-	unreadable: () => t('editor.secret.unreadable'),
-};
-
 const secretView = (ctx: Ctx) => {
 	// Read once, as `secretPlugin` reads them.
 	const host = ctx.get(secretHostCtx.key);
 	const panels = ctx.get(secretPanelsCtx.key);
 	return (initial: ProseNode, view: EditorView, getPos: () => number | undefined): NodeView => {
+		const doc = documentOf(view);
 		const held = { current: initial };
 		const gone = { current: false };
 
@@ -605,26 +363,11 @@ const secretView = (ctx: Ctx) => {
 		};
 
 		const open = () => {
-			const armor = valueOf(held.current);
-			const shown = panels.get(armor);
-			if (shown !== undefined) {
-				shown.panel.focus();
-				return;
-			}
 			said.replaceChildren();
 			reveal.setAttribute('disabled', '');
-			void host.open(armor).then((opened) => {
+			void revealSecret(doc, host, panels, valueOf(held.current)).then((problem) => {
 				reveal.removeAttribute('disabled');
-				if (opened.state === 'locked') return;
-				if (opened.state !== 'opened') {
-					said.replaceChildren(SAID[opened.state]());
-					return;
-				}
-				// Revealed meanwhile, by a second press: one panel.
-				if (panels.get(armor) !== undefined || view.isDestroyed) return;
-				const panel = panelFor(view, host, panels, opened.words);
-				panels.set(armor, { panel, from: armor });
-				panel.focus();
+				if (problem !== undefined) said.replaceChildren(NOT_REVEALED[problem]());
 			});
 		};
 		reveal.addEventListener('click', open);
@@ -634,6 +377,12 @@ const secretView = (ctx: Ctx) => {
 				return true;
 			},
 			toBar: () => {
+				// Revealed, its panel is where Reveal was.
+				const shown = panels.get(valueOf(held.current));
+				if (shown !== undefined && slot.contains(shown.panel.dom)) {
+					shown.panel.focus();
+					return;
+				}
 				reveal.focus();
 			},
 		});

@@ -5,26 +5,36 @@ import { t } from '../i18n/t.js';
  * a plain-text field of its own, outside the note's document, with Done,
  * Copy and Cancel. The same panel under a revealed block and where a new
  * secret is being written, in either editor. What is typed in it is kept as
- * the focus leaves it, as what is typed in the note is.
+ * it is typed, as what is typed in the note is.
  *
  * Built by hand, as the code block's bar is (`codeBlock.ts`): what holds it
  * is a node view or a widget, not React. The field keeps the browser's
  * helpers out of the words: spell check, which in Chrome's enhanced mode
  * sends text to Google, and autocomplete, autocorrect, capitalising and
- * writing suggestions.
+ * writing suggestions. Words dragged out of it go nowhere: dropped in the
+ * note, they would be in it as they are.
  */
 
 export interface SecretPanelOptions {
 	/** The words it opens with: a revealed secret's, or none for a new one. */
 	readonly words: string;
-	/** Done, or Escape: what is in the field is to be kept, and the panel closed. */
+	/**
+	 * What is in the field changed: it is to be kept. Not while an input
+	 * method is still composing a character, which is kept as it ends.
+	 */
+	readonly onInput: () => void;
+	/** Done, or Escape: the panel closed. */
 	readonly onDone: () => void;
-	/** The focus left the panel: what is in the field is to be kept, and the panel left open. */
-	readonly onLeave: () => void;
 	/** Cancel: the secret is put back as it was revealed. */
 	readonly onCancel: () => void;
 	/** Copy: the words to the system clipboard, answering whether they went. */
 	readonly onCopy: (words: string) => Promise<boolean>;
+}
+
+/** Where the caret is in the field. */
+export interface Caret {
+	readonly start: number;
+	readonly end: number;
 }
 
 export interface SecretPanel {
@@ -35,11 +45,12 @@ export interface SecretPanel {
 	readonly changed: () => boolean;
 	/** `words` kept: what is in the field is new only where it is not them. */
 	readonly mark: (words: string) => void;
-	readonly focus: () => void;
+	/** Where the caret is, while the field has the focus. */
+	readonly caret: () => Caret | undefined;
+	/** The focus in the field, the caret at `at` if the focus was not there already. */
+	readonly focus: (at?: Caret) => void;
 	/** Something said under the field, or nothing. */
 	readonly say: (message: string | undefined) => void;
-	/** While Done is sealing the words: nothing in it can be pressed or typed. */
-	readonly busy: (on: boolean) => void;
 }
 
 const button = (label: string, className: string, press: () => void): HTMLButtonElement => {
@@ -57,8 +68,8 @@ const rowsFor = (words: string): string =>
 
 export const createSecretPanel = ({
 	words,
+	onInput,
 	onDone,
-	onLeave,
 	onCancel,
 	onCopy,
 }: SecretPanelOptions): SecretPanel => {
@@ -75,8 +86,13 @@ export const createSecretPanel = ({
 	field.setAttribute('data-lpignore', 'true');
 	field.setAttribute('rows', rowsFor(words));
 	field.append(words);
-	field.addEventListener('input', () => {
+	field.addEventListener('input', (event) => {
 		field.setAttribute('rows', rowsFor(field.value));
+		if (!(event instanceof InputEvent && event.isComposing)) onInput();
+	});
+	field.addEventListener('compositionend', onInput);
+	field.addEventListener('dragstart', (event) => {
+		event.preventDefault();
 	});
 
 	const said = document.createElement('p');
@@ -106,19 +122,13 @@ export const createSecretPanel = ({
 	dom.append(field, said, actions);
 
 	// The field's keys are its own, and the note's editor never hears them
-	// (the view stops them). Escape keeps what was typed, as Done does: a key
-	// pressed to get out of a field is not a request to lose what is in it.
+	// (the view stops them). Escape closes the panel, as Done does: what was
+	// typed is in the note already.
 	dom.addEventListener('keydown', (event) => {
 		if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) {
 			event.preventDefault();
 			onDone();
 		}
-	});
-	// Out of the panel, not between its own controls: the Copy button is still
-	// the panel, and a press on Cancel is not a reason to keep anything.
-	dom.addEventListener('focusout', (event) => {
-		if (event.relatedTarget instanceof Node && dom.contains(event.relatedTarget)) return;
-		onLeave();
 	});
 
 	return {
@@ -128,15 +138,15 @@ export const createSecretPanel = ({
 		mark: (words) => {
 			kept.current = words;
 		},
-		focus: () => {
+		caret: () =>
+			document.activeElement === field
+				? { start: field.selectionStart, end: field.selectionEnd }
+				: undefined,
+		focus: (at) => {
+			if (document.activeElement === field) return;
 			field.focus();
+			if (at !== undefined) field.setSelectionRange(at.start, at.end);
 		},
 		say,
-		busy: (on) => {
-			[field, copy, cancel, done].forEach((control) => {
-				control.toggleAttribute('disabled', on);
-			});
-			dom.toggleAttribute('aria-busy', on);
-		},
 	};
 };

@@ -62,13 +62,13 @@ import { linkChipPlugin, openLinkAtCursor } from './linkRich.js';
 import { richWithoutNul } from './noNul.js';
 import {
 	codeBlockWithoutSecrets,
-	createSecretPanels,
 	secretPanelsCtx,
 	secretPlugin,
 	secretSchema,
 	secretViewPlugin,
 } from './secretBlock.js';
 import { type SecretHost, secretHostCtx } from './secretHost.js';
+import { createSecretPanels } from './secretPanels.js';
 import { tailPlugin } from './tail.js';
 import { taskPlugin, toggleTaskCommand } from './tasks.js';
 
