@@ -1,7 +1,7 @@
 import { ancestorPaths, basename, isScratchPath, parentPath, ROOT } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { pinnedFirst } from './pins.js';
+import { type NotebookPin, pinnedFirst, pinnedToEnds } from './pins.js';
 import { SCRATCHPAD_LABEL } from './scratchpad.js';
 
 /**
@@ -17,8 +17,8 @@ export interface FolderNode {
 	noteCount: number;
 	/** Number of files that are not notes directly inside it (#187). */
 	fileCount: number;
-	/** Pinned to the top of its level on this device (`withPins`). */
-	pinned?: boolean;
+	/** Pinned to the top or the bottom of its level on this device (`withPins`). */
+	pinned?: NotebookPin;
 }
 
 export interface BuildFolderTreeInput {
@@ -105,17 +105,24 @@ export const keptTree = (before: FolderNode[] | undefined, next: FolderNode[]): 
 		: kept;
 };
 
+const NONE: ReadonlySet<string> = new Set();
+
 /**
- * The tree with the pinned notebooks first at each level: a pinned notebook
- * goes to the top of the notebooks beside it, under its own parent, and the
- * rest keep their order (`store/pins.ts`).
+ * The tree with the pinned notebooks first at each level, and those pinned to
+ * the bottom last: a pinned notebook goes to the top, or the bottom, of the
+ * notebooks beside it, under its own parent, and the rest keep their order
+ * (`store/pins.ts`).
  */
-export const withPins = (tree: readonly FolderNode[], pinned: ReadonlySet<string>): FolderNode[] =>
-	pinnedFirst(
+export const withPins = (
+	tree: readonly FolderNode[],
+	top: ReadonlySet<string>,
+	bottom: ReadonlySet<string> = NONE
+): FolderNode[] =>
+	pinnedToEnds(
 		tree.map((node) => ({
 			...node,
-			pinned: pinned.has(node.path),
-			children: withPins(node.children, pinned),
+			pinned: top.has(node.path) ? 'top' : bottom.has(node.path) ? 'bottom' : undefined,
+			children: withPins(node.children, top, bottom),
 		})),
 		(node) => node.pinned
 	);
@@ -165,8 +172,8 @@ export const byParent = <T extends Readonly<{ path: string }>>(
 /**
  * A notebook's list, from every note under it: its own notes first, then each
  * notebook's inside it, at any depth, together and in the order the sidebar
- * has the notebooks — the pinned first at each level (`withPins`), and each
- * notebook before the ones inside it. In each, the pinned notes first, and
+ * has the notebooks — the pinned first at each level and those pinned to the
+ * bottom last (`withPins`), and each notebook before the ones inside it. In each, the pinned notes first, and
  * otherwise the order the notes came in.
  *
  * The tree and the notes are separate queries, so a note can arrive in a

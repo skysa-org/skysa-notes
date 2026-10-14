@@ -1246,6 +1246,17 @@ button.row.pinned.selected:where(:not(.compact :is(.sidebar, .note-list) *)) {
 	}
 }
 
+/* Notebooks pinned to the bottom are not tinted: a thin rule sets them apart
+   from the rest above them, at their own level, from where the names there
+   start (`--rule-start`, `rowIndent`) to the pane's gutter. A border rather
+   than a background, so forced colours keep it. */
+.pinned-bottom-rule::before {
+	content: '';
+	display: block;
+	margin-inline: var(--rule-start, var(--gutter)) var(--gutter);
+	border-block-start: 1px solid var(--border);
+}
+
 /* A move is on, and this row is not somewhere the thing being moved can go.
    The rows are `disabled` for the length of it, so this is the same treatment
    `button.icon:disabled` gets — a control that is there and cannot be used,

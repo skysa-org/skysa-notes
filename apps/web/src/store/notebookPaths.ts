@@ -6,7 +6,7 @@ import { type NotesDatabase } from './db.js';
 /**
  * Some of a source's notebooks, by path, as this device keeps them in `prefs`:
  * the ones open in the sidebar (`openNotebooks.ts`) and the ones pinned to the
- * top of their level (`pins.ts`). How one device has its tree is that device's,
+ * top or the bottom of their level (`pins.ts`). How one device has its tree is that device's,
  * and each source is its own notebooks, so one row per source and none synced.
  *
  * Kept by path, and so moved with the notebook when it is renamed or moved and

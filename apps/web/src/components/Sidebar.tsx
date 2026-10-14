@@ -1,5 +1,6 @@
 import { ancestorPaths, basename, isScratchPath, ROOT } from '@skysa/core';
 import {
+	type CSSProperties,
 	type KeyboardEvent,
 	memo,
 	type ReactNode,
@@ -15,6 +16,7 @@ import { useCommand } from '../commands/context.js';
 import { Icon } from '../editor/icons.js';
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
+import { type NotebookPin } from '../store/pins.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
@@ -112,10 +114,11 @@ export interface SidebarProps {
 	/** Open or shut these notebooks. */
 	onOpenNotebooks?: (paths: string[], open: boolean) => void;
 	/**
-	 * Pin a notebook to the top of its level, or unpin it. Which are pinned is
-	 * in the tree (`withPins`), which comes in that order.
+	 * Pin a notebook to the top or the bottom of its level, or unpin it
+	 * (`undefined`). Which are pinned is in the tree (`withPins`), which comes
+	 * in that order.
 	 */
-	onPinFolder?: (path: string, pinned: boolean) => void;
+	onPinFolder?: (path: string, pin: NotebookPin | undefined) => void;
 	/**
 	 * The source's scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"), a
 	 * row above the notebooks while this device shows it: open or not, and the
@@ -349,8 +352,8 @@ interface RowProps {
 	 * that something is inside and whether it is showing.
 	 */
 	expanded?: boolean;
-	/** Pinned to the top of its level on this device (`store/pins.ts`). */
-	pinned?: boolean;
+	/** Pinned to the top or the bottom of its level on this device (`store/pins.ts`). */
+	pinned?: NotebookPin | undefined;
 }
 
 /**
@@ -375,13 +378,13 @@ const Row = ({
 	onMenu,
 	onKeyDown,
 	expanded,
-	pinned = false,
+	pinned,
 }: RowProps) => {
 	const pinId = useId();
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
 		'row',
-		pinned ? 'pinned' : undefined,
+		pinned === 'top' ? 'pinned' : undefined,
 		selected && moving === null ? 'selected' : undefined,
 		moving?.kind === 'notebook' && moving.path === path ? 'moving' : undefined,
 		allowed && over === path ? 'drop-over' : undefined,
@@ -403,8 +406,9 @@ const Row = ({
 			aria-current={selected && moving === null ? 'true' : undefined}
 			aria-expanded={expanded}
 			// Said beside the name rather than in it, which is what the row is
-			// found by, and in words as well as the tint (`.row.pinned`).
-			aria-describedby={pinned ? pinId : undefined}
+			// found by, and in words as well as the tint (`.row.pinned`) or the
+			// rule above the bottom's (`.pinned-bottom-rule`).
+			aria-describedby={pinned === undefined ? undefined : pinId}
 			draggable={onPickUp !== undefined}
 			onContextMenu={(event) => {
 				// The browser's own menu where this row has none of its own: the
@@ -447,9 +451,9 @@ const Row = ({
 		>
 			<span className="row-label">{name}</span>
 			{count !== undefined && count > 0 && <span className="count">{count}</span>}
-			{pinned && (
+			{pinned !== undefined && (
 				<span id={pinId} hidden>
-					{t('rows.pinned')}
+					{pinned === 'top' ? t('rows.pinned') : t('rows.pinnedBottom')}
 				</span>
 			)}
 		</button>
@@ -623,10 +627,11 @@ const NONE_OPEN: ReadonlySet<string> = new Set();
  */
 const FolderRows = ({ nodes, ...rest }: FolderRowsProps) => (
 	<>
-		{nodes.map((node) => (
+		{nodes.map((node, at) => (
 			<FolderItem
 				key={node.path}
 				node={node}
+				ruled={node.pinned === 'bottom' && at > 0 && nodes[at - 1]?.pinned !== 'bottom'}
 				{...rest}
 				// Each row is told of the notebook selected, the one under the
 				// pointer and the one being renamed only where it is the row or
@@ -665,7 +670,18 @@ const countBeneath = (node: FolderNode): number => {
 	return count;
 };
 
-type FolderItemProps = Omit<FolderRowsProps, 'nodes'> & { node: FolderNode };
+type FolderItemProps = Omit<FolderRowsProps, 'nodes'> & {
+	node: FolderNode;
+	/**
+	 * The first of those pinned to the bottom, under the rest: a rule above it,
+	 * from where the names at its level start, is what sets them apart.
+	 */
+	ruled: boolean;
+};
+
+const ruleStyle = (depth: number): CSSProperties & Record<`--${string}`, string> => ({
+	'--rule-start': rowIndent(depth),
+});
 
 /** One notebook's row, and the rows of the notebooks inside it when it is open. */
 const FolderItemView = ({
@@ -687,6 +703,7 @@ const FolderItemView = ({
 	openNotebooks,
 	onToggle,
 	onDwell,
+	ruled,
 }: FolderItemProps) => {
 	const hasChildren = node.children.length > 0;
 	const open = hasChildren && openNotebooks.has(node.path);
@@ -697,7 +714,10 @@ const FolderItemView = ({
 	// list shows: opening it does not change what is in it.
 	const count = countBeneath(node);
 	return (
-		<li>
+		<li
+			className={ruled ? 'pinned-bottom-rule' : undefined}
+			style={ruled ? ruleStyle(depth) : undefined}
+		>
 			<div
 				className="row-item"
 				// On the row's box rather than its button, which may be
@@ -764,7 +784,7 @@ const FolderItemView = ({
 						}}
 						onKeyDown={treeKeys(hasChildren, open, toggle)}
 						expanded={hasChildren ? open : undefined}
-						pinned={node.pinned === true}
+						pinned={node.pinned}
 					/>
 				)}
 				{/* Not while its name is being typed, when the row is a field;
@@ -1085,11 +1105,10 @@ export const Sidebar = ({
 		node: FolderNode | undefined
 	): Pick<NotebookActions, 'pinned' | 'onPin'> => {
 		if (onPinFolder === undefined) return {};
-		const pinned = node?.pinned === true;
 		return {
-			pinned,
-			onPin: () => {
-				onPinFolder(path, !pinned);
+			pinned: node?.pinned,
+			onPin: (pin) => {
+				onPinFolder(path, pin);
 			},
 		};
 	};

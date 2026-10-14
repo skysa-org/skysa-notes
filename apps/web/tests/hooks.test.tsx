@@ -18,7 +18,7 @@ import {
 	useScratchNotes,
 } from '../src/store/hooks.js';
 import { createNote, deleteNote, purgeNote } from '../src/store/notes.js';
-import { setNotebookPinned, setNotePinned } from '../src/store/pins.js';
+import { setNotebookPin, setNotePinned } from '../src/store/pins.js';
 import { getCodeDisplay, setCodeDisplay } from '../src/store/prefs.js';
 import { holdTheNotes } from './heldNotes.js';
 
@@ -116,7 +116,7 @@ describe('useScratchNotes', () => {
 
 describe('usePinnedTree', () => {
 	const names = (tree: ReturnType<typeof usePinnedTree>['tree']) =>
-		tree?.map((node) => `${node.path}${node.pinned === true ? '*' : ''}`);
+		tree?.map((node) => `${node.path}${node.pinned === 'top' ? '*' : ''}`);
 
 	it('brings each source’s notebooks with that source’s pins, together', async () => {
 		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
@@ -125,7 +125,7 @@ describe('usePinnedTree', () => {
 			await createFolder(db, { connectionId: 'dropbox-1', name });
 		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Alpha' });
 		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Beta' });
-		await setNotebookPinned(db, LOCAL_CONNECTION_ID, 'Beta', true);
+		await setNotebookPin(db, LOCAL_CONNECTION_ID, 'Beta', 'top');
 		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: LOCAL_CONNECTION_ID });
 		const seen: (string[] | undefined)[] = [];
 		const { result } = renderHook(() => {

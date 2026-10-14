@@ -23,7 +23,11 @@ export const rows = {
 	rename: 'Rename {name}',
 	/** Read out after a row's name when it is pinned to the top of its list. */
 	pinned: 'Pinned',
+	/** Read out after a notebook's name when it is pinned to the bottom of its list. */
+	pinnedBottom: 'Pinned to bottom',
 	/** In a notebook's or a note's menu. */
 	pin: 'Pin to top',
+	/** In a notebook's menu. */
+	pinBottom: 'Pin to bottom',
 	unpin: 'Unpin',
 } as const;

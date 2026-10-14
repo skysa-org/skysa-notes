@@ -2,14 +2,15 @@ import { isWithin } from '@skysa/core';
 import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
-import { notebookPaths } from './notebookPaths.js';
+import { type NotebookPaths, notebookPaths } from './notebookPaths.js';
 
 /**
  * Notebooks and notes pinned to the top of their list, per source, on this
  * device (docs/ARCHITECTURE.md §7, "Pinned to the top"). A pinned notebook
- * comes first among the notebooks beside it, under its own parent; a pinned
- * note first in its notebook's list. Neither is synced: a provider has
- * nowhere to keep it but the note itself, and the markdown is the note.
+ * comes first among the notebooks beside it, under its own parent, or last
+ * where it is pinned to the bottom; a pinned note first in its notebook's
+ * list. Neither is synced: a provider has nowhere to keep it but the note
+ * itself, and the markdown is the note.
  */
 
 /**
@@ -18,50 +19,79 @@ import { notebookPaths } from './notebookPaths.js';
  */
 const LIMIT = 500;
 
+/** Which end of the notebooks beside it a notebook is pinned to. */
+export type NotebookPin = 'top' | 'bottom';
+
 /**
  * Notebooks, by path, as open notebooks are kept (`notebookPaths`): moved with
- * a notebook renamed or moved, and let go of with one deleted.
+ * a notebook renamed or moved, and let go of with one deleted. One list for
+ * each end, the bottom's in a row of its own (2026-10-14), so a version from
+ * before it reads the top's as it always did, and sees the rest unpinned.
  */
-const notebooks = notebookPaths('pinnedNotebooks', LIMIT);
+const notebooks = {
+	top: notebookPaths('pinnedNotebooks', LIMIT),
+	bottom: notebookPaths('bottomPinnedNotebooks', LIMIT),
+} as const satisfies Record<NotebookPin, NotebookPaths>;
 
-export const getPinnedNotebooks = notebooks.get;
+export const getPinnedNotebooks = notebooks.top.get;
+
+export const getBottomPinnedNotebooks = notebooks.bottom.get;
 
 /**
- * Pin or unpin a notebook, letting go of any pinned notebook that is no longer
- * there. A notebook with a row is let go of when it is deleted; one there only
- * because something is in it goes when the last thing leaves, with nothing to
- * say so, and a notebook made later at its path would come up pinned. There as
- * the tree has it (`buildFolderTree`): a row, a row inside it, or a live note.
+ * Pin a notebook to the top or the bottom, or unpin it (`undefined`), letting
+ * go of any pinned notebook that is no longer there. Pinned to one end, it is
+ * no longer pinned to the other. A notebook with a row is let go of when it is
+ * deleted; one there only because something is in it goes when the last thing
+ * leaves, with nothing to say so, and a notebook made later at its path would
+ * come up pinned. There as the tree has it (`buildFolderTree`): a row, a row
+ * inside it, or a live note.
  */
-export const setNotebookPinned = (
+export const setNotebookPin = (
 	db: NotesDatabase,
 	connectionId: string,
 	path: string,
-	pinned: boolean
+	pin: NotebookPin | undefined
 ): Promise<void> =>
 	db.transaction('rw', [db.prefs, db.folders, db.notes], async () => {
-		const [folders, notes, kept] = await Promise.all([
+		const [folders, notes, top, bottom] = await Promise.all([
 			db.folders.where('connectionId').equals(connectionId).toArray(),
 			db.notes.where('connectionId').equals(connectionId).toArray(),
-			notebooks.get(db, connectionId),
+			notebooks.top.get(db, connectionId),
+			notebooks.bottom.get(db, connectionId),
 		]);
 		const inside = [
 			...folders.map((folder) => folder.path),
 			...notes.filter((note) => note.deletedLocally === 0).map((note) => note.path),
 		];
 		const there = (each: string) => inside.some((held) => isWithin(held, each));
-		await notebooks.set(
-			db,
-			connectionId,
-			kept.filter((each) => each !== path && !there(each)),
-			false
-		);
-		await notebooks.set(db, connectionId, [path], pinned);
+		// This one, wherever it was pinned, and every one no longer there.
+		const lettingGo = (kept: readonly string[]) =>
+			kept.filter((each) => each === path || !there(each));
+		await notebooks.top.set(db, connectionId, lettingGo(top), false);
+		await notebooks.bottom.set(db, connectionId, lettingGo(bottom), false);
+		if (pin !== undefined) await notebooks[pin].set(db, connectionId, [path], true);
 	});
 
-export const movePinnedNotebooks = notebooks.move;
+/** A notebook moved: its pin, at either end, and those inside it, go with it. */
+export const movePinnedNotebooks = async (
+	db: Pick<NotesDatabase, 'prefs'>,
+	connectionId: string,
+	from: string,
+	to: string
+): Promise<void> => {
+	await notebooks.top.move(db, connectionId, from, to);
+	await notebooks.bottom.move(db, connectionId, from, to);
+};
 
-export const forgetPinnedNotebooks = notebooks.forget;
+/** A notebook deleted: its pin, at either end, and those inside it, go. */
+export const forgetPinnedNotebooks = async (
+	db: Pick<NotesDatabase, 'prefs'>,
+	connectionId: string,
+	gone: string
+): Promise<void> => {
+	await notebooks.top.forget(db, connectionId, gone);
+	await notebooks.bottom.forget(db, connectionId, gone);
+};
 
 /**
  * Notes, by id, which a note keeps through a rename and a move, so nothing has
@@ -111,11 +141,14 @@ export const setNotePinned = (
 
 /** What a source has pinned, as a list shows it. */
 export interface Pins {
+	/** Notebooks pinned to the top. */
 	readonly notebooks: ReadonlySet<string>;
+	/** Notebooks pinned to the bottom. */
+	readonly bottomNotebooks: ReadonlySet<string>;
 	readonly notes: ReadonlySet<string>;
 }
 
-const keyShape = z.tuple([z.array(z.string()), z.array(z.string())]);
+const keyShape = z.tuple([z.array(z.string()), z.array(z.string()), z.array(z.string())]);
 
 /**
  * Pins as a string, the same for the same pins: what a live query hands back,
@@ -124,22 +157,23 @@ const keyShape = z.tuple([z.array(z.string()), z.array(z.string())]);
  * source with every cursor it writes.
  */
 export const pinsKey = (pins: Pins): string =>
-	JSON.stringify([[...pins.notebooks], [...pins.notes]]);
+	JSON.stringify([[...pins.notebooks], [...pins.bottomNotebooks], [...pins.notes]]);
 
 export const pinsFromKey = (key: string): Pins => {
-	const [paths, ids] = keyShape.parse(JSON.parse(key));
-	return { notebooks: new Set(paths), notes: new Set(ids) };
+	const [top, bottom, ids] = keyShape.parse(JSON.parse(key));
+	return { notebooks: new Set(top), bottomNotebooks: new Set(bottom), notes: new Set(ids) };
 };
 
 export const getPins = async (
 	db: Pick<NotesDatabase, 'prefs'>,
 	connectionId: string
 ): Promise<Pins> => {
-	const [paths, ids] = await Promise.all([
+	const [top, bottom, ids] = await Promise.all([
 		getPinnedNotebooks(db, connectionId),
+		getBottomPinnedNotebooks(db, connectionId),
 		getPinnedNotes(db, connectionId),
 	]);
-	return { notebooks: new Set(paths), notes: new Set(ids) };
+	return { notebooks: new Set(top), bottomNotebooks: new Set(bottom), notes: new Set(ids) };
 };
 
 /**
@@ -149,4 +183,17 @@ export const getPins = async (
 export const pinnedFirst = <T>(items: readonly T[], pinned: (item: T) => boolean): T[] => [
 	...items.filter(pinned),
 	...items.filter((item) => !pinned(item)),
+];
+
+/**
+ * Those pinned to the top first, then the rest, then those pinned to the
+ * bottom, each in the order it came in, as `pinnedFirst` has it.
+ */
+export const pinnedToEnds = <T>(
+	items: readonly T[],
+	pinOf: (item: T) => NotebookPin | undefined
+): T[] => [
+	...items.filter((item) => pinOf(item) === 'top'),
+	...items.filter((item) => pinOf(item) === undefined),
+	...items.filter((item) => pinOf(item) === 'bottom'),
 ];

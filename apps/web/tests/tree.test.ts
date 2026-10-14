@@ -86,11 +86,12 @@ describe('withPins', () => {
 	const tree = buildFolderTree({
 		paths: ['Alpha', 'Beta', 'Gamma', 'Beta/One', 'Beta/Two', 'Beta/Three'],
 	});
+	/** A notebook's name, `*` after it for one pinned to the top, `↓` to the bottom. */
+	const named = (node: FolderNode) =>
+		`${node.name}${{ top: '*', bottom: '↓', none: '' }[node.pinned ?? 'none']}`;
 	const shape = (nodes: readonly FolderNode[]): unknown[] =>
 		nodes.map((node) =>
-			node.children.length === 0
-				? `${node.name}${node.pinned === true ? '*' : ''}`
-				: { [`${node.name}${node.pinned === true ? '*' : ''}`]: shape(node.children) }
+			node.children.length === 0 ? named(node) : { [named(node)]: shape(node.children) }
 		);
 
 	it('puts a pinned notebook first among those beside it, the rest in their order', () => {
@@ -106,6 +107,22 @@ describe('withPins', () => {
 			'Alpha',
 			{ Beta: ['Three*', 'Two*', 'One'] },
 			'Gamma',
+		]);
+	});
+
+	it('puts a notebook pinned to the bottom last among those beside it, the rest in their order', () => {
+		expect(shape(withPins(tree, new Set(), new Set(['Alpha', 'Beta/One'])))).toEqual([
+			{ Beta: ['Three', 'Two', 'One↓'] },
+			'Gamma',
+			'Alpha↓',
+		]);
+	});
+
+	it('puts the top’s first and the bottom’s last at the same level', () => {
+		expect(shape(withPins(tree, new Set(['Gamma']), new Set(['Alpha'])))).toEqual([
+			'Gamma*',
+			{ Beta: ['One', 'Three', 'Two'] },
+			'Alpha↓',
 		]);
 	});
 
@@ -152,7 +169,7 @@ describe('keptTree', () => {
 			before,
 			withPins(buildFolderTree({ paths: PATHS }), new Set(['archive']))
 		);
-		expect(at(after, 'archive')?.pinned).toBe(true);
+		expect(at(after, 'archive')?.pinned).toBe('top');
 		expect(at(after, 'archive')).not.toBe(at(before, 'archive'));
 		expect(at(after, 'work')).toBe(at(before, 'work'));
 	});
@@ -208,6 +225,19 @@ describe('listedUnder', () => {
 
 	it('follows the pinned notebooks to the top of their level, as the sidebar does', () => {
 		const pinned = withPins(tree, new Set(['Work/Projects']));
+
+		expect(paths(listedUnder(notes, 'Work', pinned, none))).toEqual([
+			'Work/plan.md',
+			'Work/todo.md',
+			'Work/Projects/launch.md',
+			'Work/Projects/Q3/budget.md',
+			'Work/Meetings/standup.md',
+			'Work/Meetings/retro.md',
+		]);
+	});
+
+	it('follows a notebook pinned to the bottom to the end of its level', () => {
+		const pinned = withPins(tree, new Set(), new Set(['Work/Meetings']));
 
 		expect(paths(listedUnder(notes, 'Work', pinned, none))).toEqual([
 			'Work/plan.md',

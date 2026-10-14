@@ -1,5 +1,5 @@
 import { t } from '../i18n/t.js';
-import { pinItem } from './noteMenu.js';
+import { type NotebookPin } from '../store/pins.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
@@ -16,10 +16,10 @@ import { type OptionsMenuItem } from './OptionsMenu.js';
  */
 
 export interface NotebookActions {
-	/** Pinned to the top of its level on this device (`store/pins.ts`). */
-	pinned?: boolean;
-	/** Pin or unpin it, whichever it is not. */
-	onPin?: () => void;
+	/** Pinned to the top or the bottom of its level on this device (`store/pins.ts`). */
+	pinned?: NotebookPin;
+	/** Pin it to an end, or unpin it (`undefined`). */
+	onPin?: (pin: NotebookPin | undefined) => void;
 	onNewInside: () => void;
 	onRename: () => void;
 	onMove: () => void;
@@ -28,12 +28,39 @@ export interface NotebookActions {
 	onDelete: () => void;
 }
 
+/**
+ * "Pin to top" and "Pin to bottom", the end it is pinned to said as "Unpin":
+ * each in its own place, so a notebook pinned to one end goes to the other in
+ * one choice, and the menu does not move about under the pointer.
+ */
+const pinItems = (
+	pinned: NotebookPin | undefined,
+	onPin: NotebookActions['onPin']
+): OptionsMenuItem[] => {
+	if (onPin === undefined) return [];
+	const end = (pin: NotebookPin, label: string): OptionsMenuItem =>
+		pinned === pin
+			? {
+					label: t('rows.unpin'),
+					onChoose: () => {
+						onPin(undefined);
+					},
+				}
+			: {
+					label,
+					onChoose: () => {
+						onPin(pin);
+					},
+				};
+	return [end('top', t('rows.pin')), end('bottom', t('rows.pinBottom'))];
+};
+
 /** What can be done to a notebook, wherever it is offered from. */
 export const notebookMenuItems = (
 	name: string,
 	{ pinned, onPin, onNewInside, onRename, onMove, onFiles, onDelete }: NotebookActions
 ): OptionsMenuItem[] => [
-	...pinItem(pinned, onPin),
+	...pinItems(pinned, onPin),
 	{ label: t('notebooks.menu.newInside', { name }), onChoose: onNewInside },
 	{ label: t('notebooks.menu.rename'), onChoose: onRename },
 	{ label: t('notebooks.menu.move'), onChoose: onMove },
