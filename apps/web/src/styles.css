@@ -3023,32 +3023,37 @@ button.icon.account-devices-count {
 	transition: box-shadow var(--duration-state) var(--ease-out);
 }
 
-/* What a drag over the window is told, over the panel. Out of the flow, so
-   the panel does not move under the pointer as it appears. */
-.clipboard > .clipboard-drop-hint {
-	position: absolute;
+/* The window as the clipboard's drop target, while files are dragged over it
+   anywhere but a note's text (`useWindowDrop`): an edge around the whole of
+   it, the brand's, and what a drop does, at its foot. Over everything but a
+   dialog, which a drop is not taken behind, and pressing on nothing: a drag's
+   events go to what is under it. */
+.clipboard-window-drop {
+	position: fixed;
 	inset: 0;
-	margin: 0;
+	z-index: 90;
 	display: flex;
-	align-items: center;
+	align-items: flex-end;
 	justify-content: center;
-	padding: var(--space-m) var(--gutter);
-	text-align: center;
-	font-weight: 600;
-	/* The brand's colour, a third of the way to the text's: readable on the
-	   wash under it whatever colour a brand gives itself. */
-	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
-	background: color-mix(in srgb, var(--bg) 80%, transparent);
+	padding: var(--space-l) var(--gutter) calc(var(--space-l) + env(safe-area-inset-bottom));
+	box-shadow: inset 0 0 0 3px var(--brand, var(--accent));
 	pointer-events: none;
 	animation: fade-in var(--duration-s) var(--ease-out);
 }
 
-.clipboard-drop-over > .clipboard-drop-hint {
-	background: color-mix(
-		in srgb,
-		var(--brand, var(--accent)) 14%,
-		color-mix(in srgb, var(--bg) 70%, transparent)
-	);
+.clipboard-window-drop > .clipboard-drop-hint {
+	margin: 0;
+	padding: var(--space-s) var(--space-l);
+	border-radius: 999px;
+	text-align: center;
+	font-weight: 600;
+	/* The brand's colour, a third of the way to the text's: readable on the
+	   page's own colour whatever colour a brand gives itself. */
+	color: color-mix(in srgb, var(--brand, var(--accent)) 70%, var(--fg));
+	background: var(--bg);
+	box-shadow:
+		inset 0 0 0 1px color-mix(in srgb, var(--brand, var(--accent)) 42%, transparent),
+		0 0 20px color-mix(in srgb, var(--brand, var(--accent)) 30%, transparent);
 }
 
 /* Said to a screen reader, and shown over the item it is about instead. */

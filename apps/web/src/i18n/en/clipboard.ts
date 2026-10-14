@@ -10,8 +10,8 @@ export const clipboard = {
 	/** The button that reads the browser's clipboard into this one. */
 	paste: 'Paste',
 	empty: 'What you paste here is on your other devices too. Click or tap an item to use it.',
-	/** Shown while files are dragged over the window. */
-	dropHint: 'Drop here to add to clipboard',
+	/** Shown over the window while files are dragged over it, anywhere but a note's text. */
+	dropHint: 'Drop to add to clipboard',
 	/** What a pasted text is called where a message names an item, as `{name}`. */
 	text: 'Text',
 	/**
