@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 
+import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 
 /**
@@ -72,9 +73,8 @@ export interface ToastProps {
  * only, deliberately — a keystroke in the editor does not take it away, so an
  * error can be read with the cursor still in the text it is about.
  *
- * The undo notice does **not** do this, and the difference is the point: a
- * click anywhere taking away the only route back from a delete would lose
- * work. It keeps its own clock, which stops while it is hovered or focused.
+ * The undo notice goes the same way (`DeletedNotice`, 2026-10-14), and keeps a
+ * clock as well.
  */
 export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 	const card = useRef<HTMLDivElement>(null);
@@ -108,9 +108,23 @@ export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 					{action.label}
 				</a>
 			)}
-			<button type="button" className="ghost" onClick={onDismiss}>
-				{t('common.dismiss')}
-			</button>
+			<DismissButton onDismiss={onDismiss} />
 		</div>
 	);
 };
+
+/**
+ * A notice's way out: an × in its corner (`.toast-close`). A Dismiss button of
+ * the same weight beside Undo, or beside a link, competed with the one thing
+ * the notice offers to do.
+ */
+export const DismissButton = ({ onDismiss }: { onDismiss: () => void }) => (
+	<button
+		type="button"
+		className="icon icon-quiet toast-close"
+		aria-label={t('common.dismiss')}
+		onClick={onDismiss}
+	>
+		<Icon name="close" />
+	</button>
+);

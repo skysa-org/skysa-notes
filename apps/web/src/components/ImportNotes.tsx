@@ -19,6 +19,7 @@ import {
 	type SkipReason,
 } from '../store/importLibrary.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { useNotify } from './notify.js';
 import { type OptionsMenuItem } from './OptionsMenu.js';
 
 /**
@@ -199,15 +200,15 @@ export const useImportNotes = (
 	{ label, syncs, pick = pickFiles }: { label: string; syncs: boolean; pick?: Pick }
 ) => {
 	const [step, setStep] = useState<Step>({ kind: 'idle' });
-	const [said, setSaid] = useState<string | null>(null);
+	// How it went is said over the page, where it outlives the panel it was
+	// asked from (`useNotify`).
+	const notify = useNotify();
 
 	const choose = (into: ImportInto) => {
-		setSaid(null);
 		setStep({ kind: 'choosing', into });
 	};
 
 	const start = (how: 'folder' | 'files', into: ImportInto) => {
-		setSaid(null);
 		setStep({ kind: 'idle' });
 		// Anything, for the scratchpad: its notes bring the files they link to.
 		void pick(
@@ -220,18 +221,20 @@ export const useImportNotes = (
 				const plan = into === 'scratchpad' ? planScratchImport(picked) : planImport(picked);
 				if (!bringsAnything(plan)) {
 					setStep({ kind: 'idle' });
-					setSaid(nothingToImport(plan, into));
+					notify({ message: nothingToImport(plan, into), tone: 'warning' });
 					return;
 				}
 				setStep({ kind: 'asking', plan, into });
 			})
 			.catch((error: unknown) => {
 				setStep({ kind: 'idle' });
-				setSaid(
-					error instanceof ImportTooLargeError
-						? t('importing.tooLarge', { gigabytes: MAX_IMPORT_BYTES / 1024 ** 3 })
-						: t('importing.unreadable')
-				);
+				notify({
+					message:
+						error instanceof ImportTooLargeError
+							? t('importing.tooLarge', { gigabytes: MAX_IMPORT_BYTES / 1024 ** 3 })
+							: t('importing.unreadable'),
+					tone: 'error',
+				});
 			});
 	};
 
@@ -241,14 +244,16 @@ export const useImportNotes = (
 		setStep({ kind: 'importing' });
 		void importLibrary(database, connectionId, plan)
 			.then((outcome) => {
-				setSaid(importOutcome(outcome, label, syncs));
+				notify({ message: importOutcome(outcome, label, syncs), tone: 'success' });
 			})
 			.catch((error: unknown) => {
-				setSaid(
-					error instanceof ImportRefusedError
-						? t('importing.refused', { label })
-						: t('importing.failed')
-				);
+				notify({
+					message:
+						error instanceof ImportRefusedError
+							? t('importing.refused', { label })
+							: t('importing.failed'),
+					tone: 'error',
+				});
 			})
 			.finally(() => {
 				setStep({ kind: 'idle' });
@@ -259,7 +264,7 @@ export const useImportNotes = (
 		setStep({ kind: 'idle' });
 	};
 
-	return { step, said, busy: step.kind !== 'idle', choose, start, confirm, cancel, label };
+	return { step, busy: step.kind !== 'idle', choose, start, confirm, cancel, label };
 };
 
 export type Importing = ReturnType<typeof useImportNotes>;
@@ -294,11 +299,12 @@ export const importItems = (
 ];
 
 /**
- * What an import says, wherever its source's panel is: that it is working, the
- * question, and how it went. The ways in are menu items (`importItems`).
+ * What an import says in its source's panel: that it is working, and the
+ * question. How it went is said over the page (`useNotify`), and the ways in
+ * are menu items (`importItems`).
  */
 export const ImportNotes = ({ importing }: { importing: Importing }) => {
-	const { step, said } = importing;
+	const { step } = importing;
 	return (
 		<>
 			{step.kind === 'reading' && (
@@ -309,11 +315,6 @@ export const ImportNotes = ({ importing }: { importing: Importing }) => {
 			{step.kind === 'importing' && (
 				<p className="muted" role="status">
 					{t('importing.importing')}
-				</p>
-			)}
-			{said !== null && step.kind === 'idle' && (
-				<p className="muted wrap-anywhere" role="alert">
-					{said}
 				</p>
 			)}
 			{step.kind === 'choosing' && (

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
+import { DismissButton } from './Toast.js';
 
 /**
  * How long a delete can be taken back from here. Long enough to notice the note
@@ -18,7 +19,8 @@ export interface DeletedNoticeProps {
 	onDismiss: () => void;
 	/**
 	 * Stay until dismissed. For an undo that failed: the notice may hold the only
-	 * copy of text the store never took, and a clock must not be what loses it.
+	 * copy of text the store never took, and neither a clock nor a click
+	 * somewhere else must be what loses it.
 	 */
 	keep?: boolean;
 }
@@ -36,8 +38,17 @@ export interface DeletedNoticeProps {
  * tabbing out must not start the clock under a pointer still resting there. And
  * a touch is not a pointer resting anywhere — it sends a `mouseenter` and never
  * the `mouseleave`, which held the notice up for good.
+ *
+ * It also goes as soon as the user presses anywhere else on the page, as a
+ * toast does (`Toast`; 2026-10-14, the owner's call). It stood until then on
+ * the reasoning that a click elsewhere should not take away the way back, and
+ * in practice it sat over the page after the user had moved on. Pointers only,
+ * as there: a key pressed elsewhere is how a keyboard reaches the Undo button
+ * at all, by tabbing to it. A notice that `keep`s is the exception, since what
+ * it holds may be text that is nowhere else.
  */
 export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: DeletedNoticeProps) => {
+	const card = useRef<HTMLDivElement>(null);
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
 	const touchedAt = useRef(0);
@@ -49,9 +60,30 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 			clearTimeout(timer);
 		};
 	}, [held, onDismiss]);
+	useEffect(() => {
+		if (keep) return undefined;
+		const away = (event: PointerEvent) => {
+			const target = event.target;
+			if (target instanceof Node && card.current?.contains(target) === true) return;
+			// Nor a press in a dialog over the page, which is not the page: the
+			// command palette offers this same Undo, and choosing it there by
+			// pointer would otherwise take it away before the click arrived.
+			if (target instanceof Element && target.closest('[aria-modal="true"]') !== null) {
+				return;
+			}
+			onDismiss();
+		};
+		// From an effect, as `Toast` does: by the time it listens, the press that
+		// deleted the note has finished dispatching and cannot take this away.
+		document.addEventListener('pointerdown', away);
+		return () => {
+			document.removeEventListener('pointerdown', away);
+		};
+	}, [keep, onDismiss]);
 
 	return (
 		<div
+			ref={card}
 			className="toast"
 			role="status"
 			onTouchStart={() => {
@@ -76,9 +108,7 @@ export const DeletedNotice = ({ title, onUndo, onDismiss, keep = false }: Delete
 			<button type="button" onClick={onUndo}>
 				{t('shell.deleted.undo')}
 			</button>
-			<button type="button" className="ghost" onClick={onDismiss}>
-				{t('common.dismiss')}
-			</button>
+			<DismissButton onDismiss={onDismiss} />
 		</div>
 	);
 };

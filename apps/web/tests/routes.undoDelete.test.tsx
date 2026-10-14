@@ -130,7 +130,7 @@ describe('deleting a note', () => {
 		await openAndDelete(user, 'Beta');
 		await waitFor(() => {
 			expect(screen.getAllByRole('status').map((each) => each.textContent)).toEqual([
-				'Deleted “Beta”.UndoDismiss',
+				'Deleted “Beta”.Undo',
 			]);
 		});
 		await user.click(within(screen.getByRole('status')).getByRole('button', { name: 'Undo' }));
@@ -243,9 +243,71 @@ describe('deleting a note', () => {
 
 		expect(screen.queryByRole('status')).toBeNull();
 	});
+
+	it('goes when the user presses anything else on the page', async () => {
+		const user = userEvent.setup();
+		const { notes } = await openApp('Alpha', 'Beta');
+		await openAndDelete(user, 'Beta');
+
+		await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+
+		await waitFor(() => {
+			expect(screen.queryByRole('status')).toBeNull();
+		});
+		const beta = notes.find((note) => note.title === 'Beta');
+		expect((await getNote(db, beta?.id ?? ''))?.deletedLocally).toBe(1);
+	});
 });
 
 describe('the notice of a delete', () => {
+	/** The notice, and something else on the page to press. */
+	const withElsewhere = (keep = false) => {
+		const onDismiss = vi.fn();
+		render(
+			<>
+				<button type="button">Elsewhere</button>
+				<div role="dialog" aria-modal="true">
+					<button type="button">In a dialog</button>
+				</div>
+				<DeletedNotice
+					title="Alpha"
+					onUndo={() => undefined}
+					onDismiss={onDismiss}
+					keep={keep}
+				/>
+			</>
+		);
+		return onDismiss;
+	};
+
+	it('goes at a press anywhere else, but not on itself or in a dialog over the page', () => {
+		const onDismiss = withElsewhere();
+
+		fireEvent.pointerDown(screen.getByRole('button', { name: 'Undo' }));
+		fireEvent.pointerDown(screen.getByRole('status'));
+		fireEvent.pointerDown(screen.getByRole('button', { name: 'In a dialog' }));
+		expect(onDismiss).not.toHaveBeenCalled();
+
+		fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }));
+		expect(onDismiss).toHaveBeenCalledTimes(1);
+	});
+
+	it('stays at a press elsewhere when it keeps, since it may hold the only copy', () => {
+		const onDismiss = withElsewhere(true);
+
+		fireEvent.pointerDown(screen.getByRole('button', { name: 'Elsewhere' }));
+
+		expect(onDismiss).not.toHaveBeenCalled();
+	});
+
+	it('is dismissed by an × in its corner, which is named for what it does', () => {
+		withElsewhere();
+
+		const dismiss = screen.getByRole('button', { name: 'Dismiss' });
+		expect(dismiss.classList.contains('toast-close')).toBe(true);
+		expect(dismiss.textContent).toBe('');
+	});
+
 	it('goes after its window, and not while the user is reaching for it', () => {
 		vi.useFakeTimers();
 		const onDismiss = vi.fn();

@@ -21,6 +21,17 @@ describe('Toast', () => {
 		expect(screen.queryByRole('link')).toBeNull();
 	});
 
+	it('is dismissed by an × in its corner, which is named for what it does', () => {
+		const onDismiss = vi.fn();
+		render(<Toast message="Imported 1 note." tone="success" onDismiss={onDismiss} />);
+
+		const dismiss = screen.getByRole('button', { name: 'Dismiss' });
+		expect(dismiss.classList.contains('toast-close')).toBe(true);
+		expect(dismiss.textContent).toBe('');
+		fireEvent.click(dismiss);
+		expect(onDismiss).toHaveBeenCalledTimes(1);
+	});
+
 	it('links out in a new tab that cannot reach back, where there is somewhere to go', () => {
 		const onDismiss = vi.fn();
 		render(

@@ -7,12 +7,14 @@ import {
 } from '@tanstack/react-router';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { StrictMode } from 'react';
+import { type ReactNode, StrictMode, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type ApiClient, ApiError, type InstanceConfig } from '../src/api/client.js';
 import { AccountPanel, returnPath } from '../src/components/AccountPanel.js';
+import { type Notice, NotifyContext } from '../src/components/notify.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
+import { Toast } from '../src/components/Toast.js';
 import { type pickFiles } from '../src/editor/pickFiles.js';
 import {
 	bindConnection,
@@ -250,6 +252,28 @@ const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 type FakeSync = ReturnType<typeof fakeSync>;
 
 /** The panel at `url`, inside a router, since it reads where it is. */
+/**
+ * What the shell does with what the panel says over the page (`useNotify`): one
+ * toast, until it is dismissed.
+ */
+const WithNotices = ({ children }: { children: ReactNode }) => {
+	const [told, setTold] = useState<Notice | null>(null);
+	return (
+		<NotifyContext.Provider value={setTold}>
+			{children}
+			{told !== null && (
+				<Toast
+					message={told.message}
+					tone={told.tone}
+					onDismiss={() => {
+						setTold(null);
+					}}
+				/>
+			)}
+		</NotifyContext.Provider>
+	);
+};
+
 const renderPanel = (
 	client: Client,
 	database: NotesDatabase,
@@ -280,7 +304,7 @@ const renderPanel = (
 	const Shell = () => {
 		const href = useRouterState({ select: (state) => state.location.href });
 		return (
-			<>
+			<WithNotices>
 				<SourceTabs
 					db={database}
 					client={client}
@@ -312,7 +336,7 @@ const renderPanel = (
 						});
 					}}
 				/>
-			</>
+			</WithNotices>
 		);
 	};
 	const router = createRouter({
@@ -386,24 +410,26 @@ const renderDropdown = (
 	sync: FakeSync = fakeSync({ phase: 'local' })
 ) => {
 	const Shell = () => (
-		<SourcePanel
-			db={database}
-			client={client}
-			returnTo="/"
-			navigate={() => undefined}
-			account={(slot) => (
-				<AccountPanel
-					client={client}
-					database={database}
-					sync={sync}
-					navigate={() => undefined}
-					download={() => undefined}
-					downloadAll={() => undefined}
-					keeping={createKeeping(() => undefined)}
-					slot={slot}
-				/>
-			)}
-		/>
+		<WithNotices>
+			<SourcePanel
+				db={database}
+				client={client}
+				returnTo="/"
+				navigate={() => undefined}
+				account={(slot) => (
+					<AccountPanel
+						client={client}
+						database={database}
+						sync={sync}
+						navigate={() => undefined}
+						download={() => undefined}
+						downloadAll={() => undefined}
+						keeping={createKeeping(() => undefined)}
+						slot={slot}
+					/>
+				)}
+			/>
+		</WithNotices>
 	);
 	const router = createRouter({
 		routeTree: createRootRoute({ component: Shell }),
@@ -1394,11 +1420,11 @@ describe('AccountPanel, with an account connected', () => {
 
 			await user.click(within(dialog).getByRole('button', { name: 'Import' }));
 
-			expect(
-				await screen.findByText(
-					/Imported 1 note\. They go up to Google Drive as it syncs\./
-				)
-			).toBeTruthy();
+			// Over the page, where it outlives a sources dropdown that has closed.
+			const said = await screen.findByText(
+				/Imported 1 note\. They go up to Google Drive as it syncs\./
+			);
+			expect(said.closest('.toast-success')?.getAttribute('role')).toBe('status');
 			const note = await db.notes
 				.where('[connectionId+path]')
 				.equals(['c1', 'Work/plan.md'])
@@ -1432,9 +1458,10 @@ describe('AccountPanel, with an account connected', () => {
 
 			await importBy(user, 'Import notes', 'Choose folder');
 
-			expect(
-				await screen.findByText('Nothing to import: no notes or files were found.')
-			).toBeTruthy();
+			const said = await screen.findByText(
+				'Nothing to import: no notes or files were found.'
+			);
+			expect(said.closest('.toast-warning')?.getAttribute('role')).toBe('alert');
 			expect(screen.queryByRole('alertdialog')).toBeNull();
 		});
 
@@ -3187,11 +3214,13 @@ describe('AccountPanel, when another tab changes the connection', () => {
 		const router = createRouter({
 			routeTree: createRootRoute({
 				component: () => (
-					<AccountPanel
-						client={clientWith({ connection })}
-						database={db}
-						sync={fakeSync({ phase: 'local' })}
-					/>
+					<WithNotices>
+						<AccountPanel
+							client={clientWith({ connection })}
+							database={db}
+							sync={fakeSync({ phase: 'local' })}
+						/>
+					</WithNotices>
 				),
 			}),
 			history: createMemoryHistory({ initialEntries: ['/'] }),
