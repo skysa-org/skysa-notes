@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decrypt, encrypt } from '../../src/age/age.js';
+import { decrypt, encrypt, opens } from '../../src/age/age.js';
 import { armor, dearmor, looksArmored } from '../../src/age/armor.js';
 import { decodeBase64, encodeBase64 } from '../../src/age/base64.js';
 import { decodeBech32, encodeBech32 } from '../../src/age/bech32.js';
@@ -164,6 +164,23 @@ describe('encrypting and decrypting', () => {
 		expect(await failureOf(decrypt(new TextEncoder().encode('not age\n'), [identity]))).toBe(
 			'header'
 		);
+	});
+});
+
+describe('whether a key opens a file', () => {
+	it('is the header alone: a stanza for the key, and a MAC that matches', async () => {
+		const identity = generateIdentity();
+		const file = await encrypt(bytes(100), [publicKeyOf(identity)]);
+		expect(await opens(file, [identity])).toBe(true);
+		expect(await opens(file, [generateIdentity()])).toBe(false);
+		expect(await opens(new TextEncoder().encode('not age\n'), [identity])).toBe(false);
+
+		// The payload is not read, so a file damaged past its header still opens
+		// as far as this asks; `decrypt` is what refuses it.
+		const damaged = Uint8Array.from(file);
+		new DataView(damaged.buffer).setUint8(file.length - 1, (file.at(-1) ?? 0) ^ 1);
+		expect(await opens(damaged, [identity])).toBe(true);
+		expect(await failureOf(decrypt(damaged, [identity]))).toBe('payload');
 	});
 });
 

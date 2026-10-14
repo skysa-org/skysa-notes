@@ -40,6 +40,16 @@ export const HIDDEN_PREFIX = '.';
  */
 export const CLIPBOARD_FOLDER = '.clipboard';
 
+/**
+ * Where a source keeps the public half of its key for secrets, at the root of
+ * the app folder (docs/ARCHITECTURE.md §3 "Secrets", §7 "Secrets in a note").
+ * Hidden, so the engine makes nothing of it, and nothing secret is in it.
+ */
+export const ENCRYPTION_FILE = '.encryption.json';
+
+/** The version of `.encryption.json` this build writes, and the newest it reads. */
+export const ENCRYPTION_SCHEMA_VERSION = 1;
+
 /** How many items the clipboard keeps; a paste past this lets go of the oldest. */
 export const CLIPBOARD_ITEMS = 10;
 

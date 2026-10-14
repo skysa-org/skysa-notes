@@ -1,4 +1,4 @@
-export { decrypt, encrypt } from './age.js';
+export { decrypt, encrypt, opens } from './age.js';
 export { armor, dearmor, looksArmored } from './armor.js';
 export { AgeError, type AgeFailure } from './errors.js';
 export {

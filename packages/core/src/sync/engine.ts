@@ -29,6 +29,7 @@ import {
 	type RemoteEntry,
 	type StorageProvider,
 } from '../providers/types.js';
+import { isEncryptionFile } from '../secrets.js';
 import {
 	conflictContent,
 	conflictFilePath,
@@ -116,6 +117,14 @@ export interface SyncOutcome {
 	 * alone, which may have been an item there. Absent otherwise.
 	 */
 	clipboard?: true;
+	/**
+	 * The pull met the source's key file for secrets, `.encryption.json`, which
+	 * it decides nothing about either, so the device can read it again: another
+	 * device may have set the key up or replaced it (docs/ARCHITECTURE.md §7,
+	 * "Secrets in a note"). Set for a deletion by id alone as the clipboard's
+	 * flag is. Absent otherwise.
+	 */
+	encryption?: true;
 }
 
 export interface SyncEngineOptions {
@@ -204,18 +213,32 @@ interface ScanCount {
 	listing: boolean;
 }
 
+/** What a pull met that it decides nothing about: the flags of `SyncOutcome` that say so. */
+type Met = Pick<SyncOutcome, 'clipboard' | 'encryption'>;
+
 /**
- * The flag for an outcome whose pull met the clipboard's folder, or may have,
- * or nothing. A deletion by id alone may have: an id feed's path comes from its
- * tree, and an item this device pasted is not in the tree until the feed
- * reports it back. Let go of on another device before then, it is an id and
- * nothing else, and the folder would never be read again for it. Counted, it
- * costs one listing where the clipboard is shown.
+ * The flags for an outcome whose pull met the clipboard's folder or the key
+ * file, or may have, or none. A deletion by id alone may have: an id feed's
+ * path comes from its tree, and an item this device pasted is not in the tree
+ * until the feed reports it back. Let go of on another device before then, it
+ * is an id and nothing else, and the folder would never be read again for it.
+ * Counted, it costs one listing where the clipboard is shown, and one read of
+ * the key file where the device keeps secrets.
  */
-const clipboardIn = (entries: readonly ChangeEntry[]): { clipboard?: true } =>
-	entries.some((entry) => entry.path === undefined || isClipPath(entry.path))
+const metIn = (entries: readonly ChangeEntry[]): Met => ({
+	...(entries.some((entry) => entry.path === undefined || isClipPath(entry.path))
 		? { clipboard: true }
-		: {};
+		: {}),
+	...(entries.some((entry) => entry.path === undefined || isEncryptionFile(entry.path))
+		? { encryption: true }
+		: {}),
+});
+
+/** The flags of `metIn` that either of two outcomes carries. */
+const metOf = (outcome: Met): Met => ({
+	...(outcome.clipboard === true ? { clipboard: true } : {}),
+	...(outcome.encryption === true ? { encryption: true } : {}),
+});
 
 /** A file the pull would make a note of, by the rule `decide` applies. */
 const isNoteEntry = (entry: ChangeEntry): entry is RemoteEntry =>
@@ -3322,6 +3345,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		seen: ReadonlySet<string>;
 		/** Whether a page so far met the clipboard's folder. */
 		clipboard?: true;
+		/** Whether a page so far met the key file. */
+		encryption?: true;
 	}
 
 	/**
@@ -3380,7 +3405,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		return ok({
 			pulled: changes.length,
 			conflicts: conflictPathsIn(changes),
-			...clipboardIn(round.entries),
+			...metIn(round.entries),
 		});
 	};
 
@@ -3438,7 +3463,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			return ok({
 				pulled: progress.pulled,
 				conflicts: progress.conflicts,
-				...(progress.clipboard === true ? { clipboard: true } : {}),
+				...metOf(progress),
 			});
 		}
 		const more = rest.length > 0;
@@ -3478,7 +3503,8 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 				pulled: progress.pulled + batch.length,
 				conflicts: [...progress.conflicts, ...conflictPathsIn(batch)],
 				seen,
-				...(progress.clipboard === true ? { clipboard: true } : clipboardIn(set.entries)),
+				...metOf(progress),
+				...metIn(set.entries),
 			},
 			upload
 		);
@@ -5010,7 +5036,7 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 			...pushed,
 			pulled: pulled.pulled,
 			conflicts: [...pulled.conflicts, ...pushed.conflicts],
-			...(pulled.clipboard === true ? { clipboard: true } : {}),
+			...metOf(pulled),
 		};
 	};
 
