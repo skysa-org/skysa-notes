@@ -1,5 +1,9 @@
 # @skysa/core
 
+## 1.2.4
+
+No changes in this release.
+
 ## 1.2.3
 
 ### Patch Changes
