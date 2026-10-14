@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SecretsDialog, type SecretsDialogProps } from '../src/components/SecretsDialog.js';
 import { generateIdentity, parseRecipient, recipientOf, sealSecret } from '../src/secrets/age.js';
+import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock, type SecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
-import { enrol, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
+import { enrol, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
 import { type KeyFileWrite } from '../src/sync/keyFile.js';
 
 /**
@@ -249,6 +250,165 @@ describe('setting a source up', () => {
 		expect(h.lock.isUnlocked('c1')).toBe(false);
 	});
 
+	it('takes no key it cannot check where the folder names none after another device wrote first', async () => {
+		const h = await setup({ record: { state: 'none' }, written: { status: 'changed' } });
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(generateIdentity()));
+		await choosePin(h);
+
+		expect((await screen.findByRole('alert')).textContent).toMatch(/^Another device set up/u);
+		// Where it starts again: the folder said nothing that a key could be checked against.
+		expect(screen.getByRole('button', { name: 'Make a recovery key' })).toBeTruthy();
+		expect(screen.queryByLabelText('Recovery key')).toBeNull();
+	});
+
+	it('says what the folder holds where another device wrote something it cannot use', async () => {
+		const h = await setup({ record: { state: 'none' }, written: { status: 'changed' } });
+		h.keyFile.write.mockImplementation(async (connectionId: string) => {
+			await h.db.keyFiles.put({ connectionId, state: 'newer' });
+			return { status: 'changed' };
+		});
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(generateIdentity()));
+		await choosePin(h);
+
+		expect(await screen.findByText(/set up by a newer version of the app/u)).toBeTruthy();
+		expect(screen.queryByLabelText('Recovery key')).toBeNull();
+		expect(await h.db.secretKeys.get('c1')).toBeUndefined();
+	});
+
+	it('says a step that failed, and finishes on a second try with the key file it wrote on the first', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		const identity = generateIdentity();
+		// Written once; after that, the folder has it, and a create-only write is refused.
+		h.keyFile.write.mockImplementation(async (connectionId: string, recipient: string) => {
+			const was = await h.db.keyFiles.get(connectionId);
+			if (was?.state === 'ok') return { status: 'changed' };
+			await h.db.keyFiles.put({ connectionId, state: 'ok', recipient, version: 'v1' });
+			return { status: 'written' };
+		});
+		const put = vi.spyOn(h.db.secretKeys, 'put').mockRejectedValueOnce(new Error('quota'));
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(identity));
+		await choosePin(h);
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'That did not work. Try again.'
+		);
+		expect(await h.db.secretKeys.get('c1')).toBeUndefined();
+
+		// What was chosen is still there, to set again.
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		expect(put).toHaveBeenCalledTimes(2);
+		expect((await h.db.secretKeys.get('c1'))?.recipient).toBe(recipientOf(identity));
+	});
+
+	it('says it failed where the age code does not load, and can be tried again', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		const age = vi
+			.fn<() => Promise<Age>>()
+			.mockRejectedValueOnce(new Error('stale chunk'))
+			.mockImplementation(loadAge);
+		h.open({ age });
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'That did not work. Try again.'
+		);
+		await h.user.click(screen.getByRole('button', { name: 'Make a recovery key' }));
+		expect(await screen.findAllByRole('listitem')).toHaveLength(12);
+	});
+
+	it('says it is looking while it tries the key, and checks only once', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		const scanned = { release: () => undefined as void };
+		const age = async (): Promise<Age> => {
+			const real = await loadAge();
+			return {
+				...real,
+				scanSecrets: async (...args) => {
+					await new Promise<void>((resolve) => {
+						scanned.release = resolve;
+					});
+					return real.scanSecrets(...args);
+				},
+			};
+		};
+		h.open({ age });
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		await h.user.type(screen.getByLabelText('Group 2'), shown[1] ?? '');
+		await h.user.type(screen.getByLabelText('Group 7'), shown[6] ?? '');
+		await h.user.click(screen.getByRole('button', { name: 'Check' }));
+
+		expect(await screen.findByText('Looking for secrets in this source’s notes…')).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Check' }).hasAttribute('disabled')).toBe(true);
+		scanned.release();
+		expect(await screen.findByText('How should this device unlock secrets?')).toBeTruthy();
+	});
+
+	it('fills the keys it made with zeros once they are kept, and as it closes', async () => {
+		const made: Uint8Array[] = [];
+		const age = async (): Promise<Age> => {
+			const real = await loadAge();
+			return {
+				...real,
+				generateIdentity: () => {
+					const identity = real.generateIdentity();
+					made.push(identity);
+					return identity;
+				},
+			};
+		};
+		const h = await setup({ record: { state: 'none' } });
+		h.open({ age });
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
+		const recipient = recipientOf(made[0] ?? new Uint8Array());
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		await h.user.type(screen.getByLabelText('Group 2'), shown[1] ?? '');
+		await h.user.type(screen.getByLabelText('Group 7'), shown[6] ?? '');
+		await h.user.click(screen.getByRole('button', { name: 'Check' }));
+		await choosePin(h);
+		await screen.findByText('Secrets are set up, and this device can unlock them.');
+
+		expect(made[0]?.every((byte) => byte === 0)).toBe(true);
+		// What was kept is the key, not the zeros.
+		const unlocked = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		expect(
+			unlocked.status === 'unlocked' && recipientOf(unlocked.keys.identities[0] ?? made[0]!)
+		).toBe(recipient);
+
+		cleanup();
+		const again = await setup({ record: { state: 'none' } });
+		const view = again.open({ age });
+		await again.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		await screen.findAllByRole('listitem');
+		expect(made[1]?.some((byte) => byte !== 0)).toBe(true);
+		view.unmount();
+		expect(made[1]?.every((byte) => byte === 0)).toBe(true);
+	});
+
+	it('keeps the focus in the dialog as its steps change, so Escape still closes it', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		await screen.findAllByRole('listitem');
+
+		await waitFor(() => {
+			expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+		});
+		// And wherever the focus is: a click on the page behind leaves it there.
+		(document.activeElement as HTMLElement).blur();
+		await h.user.keyboard('{Escape}');
+		expect(h.onClose).toHaveBeenCalledTimes(1);
+	});
+
 	it('says the storage could not be reached, and keeps nothing', async () => {
 		const h = await setup({ record: { state: 'none' }, written: { status: 'unavailable' } });
 		h.open();
@@ -307,6 +467,78 @@ describe('a source already set up', () => {
 				'This source’s key was replaced on another device. Type the new recovery key to open its secrets here.'
 			)
 		).toBeTruthy();
+	});
+
+	/** The device enrolled with an old key and another, and the source's key since replaced. */
+	const replacedOn = async ({ heldAlready = false } = {}) => {
+		const source = generateIdentity();
+		const old = generateIdentity();
+		// Added as well, before it became the source's: kept once.
+		const extra = heldAlready ? source : generateIdentity();
+		const h = await setup({ record: { state: 'ok', recipient: recipientOf(source) } });
+		const keys = await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: recipientOf(old),
+			identities: [old, extra],
+			unlock: PIN,
+			rounds: ROUNDS,
+		});
+		return { ...h, source, old, extra, keys };
+	};
+
+	const heldAfter = async (h: Harness): Promise<string[]> => {
+		const unlocked = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		return unlocked.status === 'unlocked' ? unlocked.keys.identities.map(encodeIdentity) : [];
+	};
+
+	it('keeps the keys the device held beside the new one, unlocking it first', async () => {
+		const h = await replacedOn();
+		h.open();
+		await typeKey(h, encodeIdentity(generateIdentity()));
+		expect(screen.getByRole('alert').textContent).toBe(
+			'That is a recovery key, but not this source’s.'
+		);
+		await h.user.clear(screen.getByLabelText('Recovery key'));
+		await typeKey(h, encodeIdentity(h.source));
+
+		expect(await screen.findByText(/^Unlock this device too/u)).toBeTruthy();
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+
+		expect(
+			await screen.findByText(
+				'This device opens secrets with the new key now, and still with the keys it had.'
+			)
+		).toBeTruthy();
+		expect((await h.db.secretKeys.get('c1'))?.recipient).toBe(recipientOf(h.source));
+		expect(await heldAfter(h)).toEqual([h.source, h.old, h.extra].map(encodeIdentity));
+		expect(h.lock.isUnlocked('c1')).toBe(true);
+		expect(h.keyFile.write).not.toHaveBeenCalled();
+	});
+
+	it('asks nothing more where the device is unlocked, and holds the key once', async () => {
+		const h = await replacedOn({ heldAlready: true });
+		const unlocked = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		if (unlocked.status !== 'unlocked') throw new Error('not unlocked');
+		h.lock.hold(unlocked.keys);
+		h.open();
+		// Typed as well as held: kept once, in the source's place.
+		await typeKey(h, encodeIdentity(h.source));
+
+		await screen.findByText(
+			'This device opens secrets with the new key now, and still with the keys it had.'
+		);
+		expect(await heldAfter(h)).toEqual([h.source, h.old].map(encodeIdentity));
+	});
+
+	it('keeps only the new key where the user says so', async () => {
+		const h = await replacedOn();
+		h.open();
+		await typeKey(h, encodeIdentity(h.source));
+		await h.user.click(await screen.findByRole('button', { name: 'Keep only the new key' }));
+		await choosePin(h);
+
+		await screen.findByText('This device can unlock secrets now.');
+		expect(await heldAfter(h)).toEqual([encodeIdentity(h.source)]);
 	});
 
 	it('says what it cannot use', async () => {
@@ -416,6 +648,36 @@ describe('an enrolled device', () => {
 				'This source has secrets. To open them on this device, type its recovery key.'
 			)
 		).toBeTruthy();
+	});
+
+	it('puts back a key file the folder lost, naming the key it holds, rather than setting up anew', async () => {
+		const h = await enrolled();
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+		h.open();
+		expect(await screen.findByText(/no longer has the file that names it/u)).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Make a recovery key' })).toBeNull();
+
+		await h.user.click(screen.getByRole('button', { name: 'Put it back' }));
+		expect(await screen.findByText('The source’s folder names its key again.')).toBeTruthy();
+		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipientOf(h.identity));
+		expect((await unlockKeys(h.db, 'c1', PIN, Date.now())).status === 'unlocked').toBe(true);
+	});
+
+	it('takes no unchecked key where the folder names none by the time the device’s copy is gone', async () => {
+		const h = await enrolled();
+		const record = await h.db.secretKeys.get('c1');
+		if (record === undefined) throw new Error('not enrolled');
+		await h.db.secretKeys.put({ ...record, tries: MAX_TRIES - 1 });
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
+		await h.user.type(await screen.findByLabelText('PIN'), '1357{Enter}');
+		await h.user.click(await screen.findByRole('button', { name: 'Use the recovery key' }));
+		expect(await screen.findByLabelText('Recovery key')).toBeTruthy();
+
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+
+		expect(await screen.findByRole('button', { name: 'Make a recovery key' })).toBeTruthy();
+		expect(screen.queryByLabelText('Recovery key')).toBeNull();
 	});
 
 	it('closes on Escape', async () => {

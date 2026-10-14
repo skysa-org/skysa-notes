@@ -22,6 +22,21 @@ export const secrets = {
 	newer: 'Secrets in this source were set up by a newer version of the app. Update the app on this device to use them here.',
 	invalid:
 		'This source has a file named .encryption.json that this app did not write, so secrets cannot be set up in it.',
+	/** Something failed that nothing more can be said of: the age code not loading, or the device's storage. */
+	failed: 'That did not work. Try again.',
+	/** While a key is tried on the source's secrets. */
+	scanning: 'Looking for secrets in this source’s notes…',
+	/** This device holds a key for the source, and its folder has no key file. */
+	lost: {
+		text: 'This device has a key for this source’s secrets, but the source’s folder no longer has the file that names it. Put it back so your other devices can open secrets here too.',
+		putBack: 'Put it back',
+		done: 'The source’s folder names its key again.',
+	},
+	/** The source's key replaced on another device, typed here, while this device holds the old one. */
+	replace: {
+		text: 'Unlock this device too, so the keys it already has are kept beside the new one, and secrets made with them still open.',
+		skip: 'Keep only the new key',
+	},
 	/** The new recovery key, shown once. */
 	key: {
 		title: 'Your recovery key',
@@ -154,6 +169,7 @@ export const secrets = {
 	done: {
 		setUp: 'Secrets are set up, and this device can unlock them.',
 		enrolled: 'This device can unlock secrets now.',
+		replaced: 'This device opens secrets with the new key now, and still with the keys it had.',
 		changed: 'This device unlocks secrets its new way now.',
 	},
 } as const;

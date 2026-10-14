@@ -10,6 +10,7 @@ import {
 	isAcceptedUnlock,
 	MAX_TRIES,
 	PBKDF2_ROUNDS,
+	replaceKeys,
 	TRY_WAIT_MS,
 	type Unlock,
 	type UnlockedKeys,
@@ -354,5 +355,59 @@ describe('changing how a device unlocks', () => {
 			changeUnlock(db, keys, { kind: 'password', text: 'short' }, ROUNDS)
 		).rejects.toThrow();
 		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pin');
+	});
+});
+
+describe('replacing the source’s key on a device', () => {
+	const NEW = 'age1newrecipient';
+
+	it('keeps the given keys under the same unlock, for the new recipient', async () => {
+		const { db, enrolled } = await setup();
+		const keys = await enrolled(PIN);
+
+		const replaced = await replaceKeys(db, keys, NEW, [identity(3), ...keys.identities]);
+
+		expect(replaced?.recipient).toBe(NEW);
+		expect(replaced?.identities).toEqual([identity(3), identity(7), identity(9)]);
+		expect(await enrolment(db, 'c1')).toMatchObject({ recipient: NEW, unlock: 'pin' });
+		expect(unlocked(await unlockKeys(db, 'c1', PIN, AT)).identities).toEqual([
+			identity(3),
+			identity(7),
+			identity(9),
+		]);
+	});
+
+	it('keeps the keys it was given where the tab locks while they are sealed', async () => {
+		const { db, enrolled } = await setup();
+		const lock = createSecretsLock({
+			target: {
+				visibilityState: 'visible',
+				addEventListener: () => undefined,
+				removeEventListener: () => undefined,
+			},
+		});
+		lock.hold(await enrolled(PIN));
+		const held = lock.keys('c1') as UnlockedKeys;
+
+		const replacing = replaceKeys(db, held, NEW, [identity(3), ...held.identities]);
+		lock.lock();
+		await replacing;
+
+		expect(unlocked(await unlockKeys(db, 'c1', PIN, AT)).identities).toEqual([
+			identity(3),
+			identity(7),
+			identity(9),
+		]);
+	});
+
+	it('changes nothing where the keys were sealed again in another tab, or were wiped', async () => {
+		const { db, enrolled } = await setup();
+		const here = await enrolled(PIN);
+		await enrolled(PASSWORD, [identity(7), identity(9), identity(11)]);
+
+		expect(await replaceKeys(db, here, NEW, [identity(3)])).toBeUndefined();
+		await expect(replaceKeys(db, here, NEW, [identity(0)])).rejects.toThrow();
+		await expect(replaceKeys(db, here, NEW, [])).rejects.toThrow();
+		expect(await enrolment(db, 'c1')).toMatchObject({ recipient: RECIPIENT, unlock: 'password' });
 	});
 });

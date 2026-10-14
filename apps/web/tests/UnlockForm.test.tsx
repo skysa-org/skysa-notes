@@ -184,6 +184,19 @@ describe('unlocking', () => {
 		expect(h.lock.keys('c1')?.identities[0]?.[0]).toBe(7);
 	});
 
+	it('says a try that failed in the device’s storage, and can be tried again', async () => {
+		const h = await setup();
+		vi.spyOn(h.db.secretKeys, 'get').mockRejectedValueOnce(new Error('closing'));
+		await h.tryPin('2468');
+		expect(await screen.findByText('That did not work. Try again.')).toBeTruthy();
+		expect(h.onUnlocked).not.toHaveBeenCalled();
+
+		await h.tryPin('2468');
+		await vi.waitFor(() => {
+			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
+	});
+
 	it('tries a pattern as it is let go of', async () => {
 		const h = await setup({ kind: 'pattern', dots: [0, 4, 8, 5] });
 		const grid = screen.getByRole('group', { name: 'Pattern' });

@@ -42,9 +42,12 @@ export const scanSecrets = async (
 	connectionId: string,
 	identities: readonly Uint8Array[]
 ): Promise<SecretScan> => {
-	const notes = (await db.notes.where('connectionId').equals(connectionId).toArray()).filter(
-		(note) => note.deletedLocally === 0 && note.body.includes(ARMOR_LINE)
-	);
+	// Filtered as they are read, so only the notes with armor in them are held.
+	const notes = await db.notes
+		.where('connectionId')
+		.equals(connectionId)
+		.filter((note) => note.deletedLocally === 0 && note.body.includes(ARMOR_LINE))
+		.toArray();
 	const found = await Promise.all(
 		notes.map(async (note) => {
 			const blocks = secretBlocksIn(note.body);

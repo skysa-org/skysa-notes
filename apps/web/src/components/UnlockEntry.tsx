@@ -39,8 +39,11 @@ export interface UnlockEntryProps {
 }
 
 /**
- * The field for one kind. The browser is told to keep none of it: a password
- * manager would carry the unlock off the device, and it belongs to this one.
+ * The field for one kind. The browser is asked to keep none of it, with
+ * `autocomplete="off"` and the marks the common password managers read; most
+ * browsers offer to save a password field anyway, and that is the user's to
+ * refuse. Saved, it unlocks nothing anywhere else: what it unlocks is sealed in
+ * this device's storage, and never leaves it.
  */
 export const UnlockEntry = ({
 	kind,

@@ -32,6 +32,8 @@ export interface UnlockFormProps {
 
 type Said =
 	| Readonly<{ kind: 'nothing' }>
+	/** The try itself failed: the device's storage, not the unlock. */
+	| Readonly<{ kind: 'failed' }>
 	| Readonly<{ kind: 'wrong'; left: number }>
 	| Readonly<{ kind: 'gone'; why: 'forgotten' | 'none' }>;
 
@@ -80,9 +82,15 @@ export const UnlockForm = ({
 	const attempt = async (unlock: Unlock = unlockOf(kind, entered)) => {
 		if (!ready(unlock)) return;
 		setBusy(true);
-		const result = await unlockKeys(database, connectionId, unlock, now());
+		const result = await unlockKeys(database, connectionId, unlock, now()).catch(
+			() => undefined
+		);
 		setBusy(false);
 		setEntered(NOTHING_ENTERED);
+		if (result === undefined) {
+			setSaid({ kind: 'failed' });
+			return;
+		}
 		if (result.status === 'unlocked') {
 			lock.hold(result.keys);
 			onUnlocked();
@@ -136,6 +144,7 @@ export const UnlockForm = ({
 				describedBy={askId}
 			/>
 			<div className="secrets-said" role="status">
+				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
 				{said.kind === 'wrong' && <p>{t('secrets.unlock.wrong')}</p>}
 				{said.kind === 'wrong' && said.left <= FREE_TRIES && (
 					<p>{t('secrets.unlock.left', { count: said.left })}</p>
@@ -186,10 +195,13 @@ export const SecretsModal = ({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	// On the document, not the dialog: a step that goes takes the focus with
+	// it, to the page's body, and the keys must still reach the dialog then.
 	useEffect(() => {
 		const element = dialog.current;
 		if (element === null) return undefined;
 		const onKey = (event: KeyboardEvent) => {
+			if (event.defaultPrevented) return;
 			if (event.key === 'Escape') {
 				event.preventDefault();
 				onClose();
@@ -198,15 +210,32 @@ export const SecretsModal = ({
 			if (event.key !== 'Tab') return;
 			const reachable = [...element.querySelectorAll<HTMLElement>(REACHABLE)];
 			const at = reachable.indexOf(document.activeElement as HTMLElement);
-			const next = (at + (event.shiftKey ? -1 : 1) + reachable.length) % reachable.length;
+			const from = at === -1 && event.shiftKey ? 0 : at;
+			const next = (from + (event.shiftKey ? -1 : 1) + reachable.length) % reachable.length;
 			event.preventDefault();
 			reachable[next]?.focus();
 		};
-		element.addEventListener('keydown', onKey);
+		document.addEventListener('keydown', onKey);
 		return () => {
-			element.removeEventListener('keydown', onKey);
+			document.removeEventListener('keydown', onKey);
 		};
 	}, [onClose]);
+
+	// A step that goes takes the focus with it. The next one's first control
+	// has it then, as the first step's did, so it is not left on the page
+	// behind the dialog.
+	useEffect(() => {
+		const element = dialog.current;
+		if (element === null) return undefined;
+		const observer = new MutationObserver(() => {
+			if (element.contains(document.activeElement)) return;
+			element.querySelector<HTMLElement>(REACHABLE)?.focus();
+		});
+		observer.observe(element, { childList: true, subtree: true });
+		return () => {
+			observer.disconnect();
+		};
+	}, []);
 
 	return createPortal(
 		<div className="modal-backdrop">

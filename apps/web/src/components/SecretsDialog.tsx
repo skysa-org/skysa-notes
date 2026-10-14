@@ -10,6 +10,7 @@ import {
 	type RefObject,
 	useEffect,
 	useId,
+	useRef,
 	useState,
 	useSyncExternalStore,
 } from 'react';
@@ -24,6 +25,7 @@ import {
 	enrolment,
 	forgetKeys,
 	PBKDF2_ROUNDS,
+	replaceKeys,
 	type Unlock,
 } from '../store/secretKeys.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
@@ -71,7 +73,7 @@ type Purpose = 'setup' | 'enrol' | 'replaced' | 'another';
 type Step =
 	| Readonly<{ kind: 'show'; identity: Uint8Array }>
 	| Readonly<{ kind: 'check'; identity: Uint8Array; groups: readonly [number, number] }>
-	| Readonly<{ kind: 'paste'; purpose: Purpose; base?: readonly Uint8Array[]; note?: string }>
+	| Readonly<{ kind: 'paste'; purpose: Purpose; base?: readonly Uint8Array[] }>
 	| Readonly<{
 			kind: 'different';
 			identities: readonly Uint8Array[];
@@ -81,6 +83,8 @@ type Step =
 	/** Choosing how this device unlocks, then keeping the keys: `setUp` writes the key file first. */
 	| Readonly<{ kind: 'choose'; identities: readonly Uint8Array[]; then: 'setUp' | 'enrol' }>
 	| Readonly<{ kind: 'unlock'; then: 'device' | 'change' }>
+	/** The source's new key typed, and the device locked: unlocked, to keep what it holds beside it. */
+	| Readonly<{ kind: 'unlock'; then: 'replace'; identity: Uint8Array }>
 	| Readonly<{ kind: 'change' }>
 	| Readonly<{ kind: 'remove' }>
 	| Readonly<{ kind: 'done'; said: string }>;
@@ -191,11 +195,13 @@ const ShowKey = ({
 const CheckKey = ({
 	identity,
 	groups,
+	busy,
 	onBack,
 	onChecked,
 }: {
 	identity: Uint8Array;
 	groups: readonly [number, number];
+	busy: boolean;
 	onBack: () => void;
 	onChecked: () => void;
 }) => {
@@ -203,6 +209,7 @@ const CheckKey = ({
 	const [typed, setTyped] = useState<readonly [string, string]>(['', '']);
 	const [wrong, setWrong] = useState<number | undefined>(undefined);
 	const check = () => {
+		if (busy) return;
 		const miss = groups.findIndex((group, at) => asGroup(typed[at] ?? '') !== all[group]);
 		if (miss === -1) {
 			onChecked();
@@ -250,7 +257,7 @@ const CheckKey = ({
 				<button
 					type="submit"
 					className="primary"
-					disabled={typed.some((text) => asGroup(text) === '')}
+					disabled={busy || typed.some((text) => asGroup(text) === '')}
 				>
 					{t('secrets.check.check')}
 				</button>
@@ -269,38 +276,49 @@ const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'ano
 /** A recovery key typed or pasted, read however it was, and checked where it has to be the source's. */
 const PasteKey = ({
 	purpose,
-	note,
 	recipient,
 	age,
+	busy: working,
 	onKey,
 }: {
 	purpose: Purpose;
-	note: string | undefined;
 	/** The source's, where the key has to be its. */
 	recipient: string | undefined;
 	age: () => Promise<Age>;
+	/** While what the last key was typed for is still under way. */
+	busy: boolean;
 	onKey: (identity: Uint8Array) => void;
 }) => {
 	const textId = useId();
 	const [text, setText] = useState('');
 	const [error, setError] = useState<string | undefined>(undefined);
-	const [busy, setBusy] = useState(false);
+	const [checking, setChecking] = useState(false);
+	const busy = working || checking;
+	/** Whose key it is, where that matters: the source's own, or not. */
+	const isTheSources = async (identity: Uint8Array): Promise<boolean> => {
+		if (recipient === undefined) return true;
+		setChecking(true);
+		try {
+			const { recipientOf } = await age();
+			return recipientOf(identity) === recipient;
+		} finally {
+			setChecking(false);
+		}
+	};
 	const submit = async () => {
+		if (busy) return;
 		const identity = readRecoveryKey(text);
 		if (identity === undefined) {
 			setError(t('secrets.recovery.notKey'));
 			return;
 		}
-		if (recipient !== undefined) {
-			setBusy(true);
-			const { recipientOf } = await age();
-			setBusy(false);
-			if (recipientOf(identity) !== recipient) {
-				setError(t('secrets.recovery.notThis'));
-				return;
-			}
+		const its = await isTheSources(identity).catch(() => undefined);
+		if (its === true) {
+			onKey(identity);
+			return;
 		}
-		onKey(identity);
+		identity.fill(0);
+		setError(its === false ? t('secrets.recovery.notThis') : t('secrets.failed'));
 	};
 	return (
 		<form
@@ -310,7 +328,6 @@ const PasteKey = ({
 				void submit();
 			}}
 		>
-			{note !== undefined && <p role="alert">{note}</p>}
 			<p id={textId}>{t(`secrets.recovery.${PASTE_TEXT[purpose]}`)}</p>
 			<textarea
 				className="recovery-field"
@@ -447,13 +464,44 @@ const Device = ({
 	</div>
 );
 
+/** This device holds a key, and the source's folder names none: written back, or let go of. */
+const Lost = ({
+	busy,
+	onPutBack,
+	onRemove,
+}: {
+	busy: boolean;
+	onPutBack: () => void;
+	onRemove: () => void;
+}) => (
+	<div className="secrets-step">
+		<p>{t('secrets.lost.text')}</p>
+		<div className="secrets-buttons">
+			<button type="button" className="primary" disabled={busy} onClick={onPutBack}>
+				{t('secrets.lost.putBack')}
+			</button>
+			<button type="button" className="danger" disabled={busy} onClick={onRemove}>
+				{t('secrets.device.remove')}
+			</button>
+		</div>
+	</div>
+);
+
 /** Letting go of this device's copy of the keys, asked first. */
-const RemoveKey = ({ onRemove, onCancel }: { onRemove: () => void; onCancel: () => void }) => (
+const RemoveKey = ({
+	busy,
+	onRemove,
+	onCancel,
+}: {
+	busy: boolean;
+	onRemove: () => void;
+	onCancel: () => void;
+}) => (
 	<div className="secrets-step">
 		<h3>{t('secrets.device.removeTitle')}</h3>
 		<p>{t('secrets.device.removeText')}</p>
 		<div className="secrets-buttons">
-			<button type="button" className="danger" onClick={onRemove}>
+			<button type="button" className="danger" disabled={busy} onClick={onRemove}>
 				{t('secrets.device.removeConfirm')}
 			</button>
 			<button type="button" onClick={onCancel}>
@@ -470,7 +518,7 @@ export const secretsLabel = (record: KeyFileRecord | undefined): string =>
 		: t('secrets.menu.open');
 
 /** Where the dialog is when no flow is under way, as a step or a state to say. */
-type Home = Step | 'checking' | 'unavailable' | 'intro' | 'newer' | 'invalid' | 'device';
+type Home = Step | 'checking' | 'unavailable' | 'intro' | 'newer' | 'invalid' | 'device' | 'lost';
 
 const homeOf = (
 	record: KeyFileRecord | undefined,
@@ -478,8 +526,11 @@ const homeOf = (
 	enrolled: Enrolled | null | undefined
 ): Home => {
 	if (record === undefined) return read ? 'unavailable' : 'checking';
-	if (record.state !== 'ok') return record.state === 'none' ? 'intro' : record.state;
+	if (record.state === 'newer' || record.state === 'invalid') return record.state;
 	if (enrolled === undefined) return 'checking';
+	// The folder names no key, and this device holds one: setting up again
+	// would put another in its place, and leave what it opens locked.
+	if (record.state === 'none') return enrolled === null ? 'intro' : 'lost';
 	if (enrolled === null) return { kind: 'paste', purpose: 'enrol' };
 	if (enrolled.recipient !== record.recipient) return { kind: 'paste', purpose: 'replaced' };
 	return 'device';
@@ -492,6 +543,15 @@ const SAID: Readonly<Record<'checking' | 'unavailable' | 'newer' | 'invalid', ()
 	newer: () => <p>{t('secrets.newer')}</p>,
 	invalid: () => <p>{t('secrets.invalid')}</p>,
 };
+
+/** Keys filled with zeros, and let go of. */
+const wipe = (identities: Set<Uint8Array>) => {
+	identities.forEach((identity) => identity.fill(0));
+	identities.clear();
+};
+
+const sameIdentity = (a: Uint8Array, b: Uint8Array): boolean =>
+	a.length === b.length && a.every((byte, at) => byte === b[at]);
 
 export const SecretsDialog = ({
 	database,
@@ -510,6 +570,8 @@ export const SecretsDialog = ({
 	const [read, setRead] = useState(false);
 	const [step, setStep] = useState<Step | null>(null);
 	const [busy, setBusy] = useState(false);
+	/** What is under way, said while it is; nothing where that is quick. */
+	const [doing, setDoing] = useState<string | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const record = useLiveQuery(
 		() => database.keyFiles.get(connectionId),
@@ -520,6 +582,26 @@ export const SecretsDialog = ({
 		[database, connectionId]
 	);
 	const unlocked = useSyncExternalStore(lock.subscribe, () => lock.isUnlocked(connectionId));
+
+	/**
+	 * The keys this dialog made or read from what was typed: filled with zeros
+	 * once they are kept, sealed, on the device, and as it closes. Its own
+	 * copies only; the lock's are the lock's to wipe.
+	 */
+	const owned = useRef(new Set<Uint8Array>());
+	const own = (identity: Uint8Array): Uint8Array => {
+		owned.current.add(identity);
+		return identity;
+	};
+	const wipeOwned = () => {
+		wipe(owned.current);
+	};
+	useEffect(() => {
+		const identities = owned.current;
+		return () => {
+			wipe(identities);
+		};
+	}, []);
 
 	useEffect(() => {
 		// What the folder says now, which another device may have changed.
@@ -533,94 +615,163 @@ export const SecretsDialog = ({
 		setStep(next);
 	};
 
-	/** The secrets `identities` would leave locked, said where there are any; and on, where not. */
-	const scanned = async (identities: readonly Uint8Array[]) => {
+	/**
+	 * `work`, with the dialog busy until it ends, however it ends: one that
+	 * fails says so, rather than leaving every button disabled and nothing said.
+	 */
+	const run = async (work: () => Promise<void>, saying?: string) => {
 		setBusy(true);
-		const { scanSecrets } = await age();
-		const scan = await scanSecrets(database, connectionId, identities);
-		setBusy(false);
-		go(
-			scan.others > 0
-				? { kind: 'different', identities, secrets: scan.others, notes: scan.otherNotes }
-				: { kind: 'choose', identities, then: 'setUp' }
-		);
+		setDoing(saying);
+		try {
+			await work();
+		} catch {
+			setError(t('secrets.failed'));
+		} finally {
+			setBusy(false);
+			setDoing(undefined);
+		}
 	};
 
-	/** Why the key file was not written, said; or nothing, where it was. */
+	/** The secrets `identities` would leave locked, said where there are any; and on, where not. */
+	const scanned = (identities: readonly Uint8Array[]) =>
+		run(async () => {
+			const { scanSecrets } = await age();
+			const scan = await scanSecrets(database, connectionId, identities);
+			go(
+				scan.others > 0
+					? { kind: 'different', identities, secrets: scan.others, notes: scan.otherNotes }
+					: { kind: 'choose', identities, then: 'setUp' }
+			);
+		}, t('secrets.scanning'));
+
+	/**
+	 * Whether the key file names `recipient` now: written here, or already. A
+	 * write refused because another device wrote first goes back to where
+	 * the dialog starts, which is decided by what the folder says now.
+	 */
 	const setUp = async (recipient: string): Promise<boolean> => {
 		const written = await keyFile.write(connectionId, recipient);
 		if (written.status === 'written') return true;
-		setBusy(false);
 		if (written.status === 'changed') {
-			go({ kind: 'paste', purpose: 'enrol', note: t('secrets.written.changed') });
-		} else {
-			setError(
-				written.status === 'unavailable'
-					? t('secrets.unavailable')
-					: t('secrets.written.failed')
-			);
+			// Written by this dialog on a try that failed after it.
+			const now = await database.keyFiles.get(connectionId);
+			if (now?.state === 'ok' && now.recipient === recipient) return true;
+			go(null);
+			setError(t('secrets.written.changed'));
+			return false;
 		}
+		setError(
+			written.status === 'unavailable' ? t('secrets.unavailable') : t('secrets.written.failed')
+		);
 		return false;
 	};
 
 	/** The device's keys kept under `unlock`, the key file written first where the source is being set up. */
-	const keep = async (
-		identities: readonly Uint8Array[],
-		then: 'setUp' | 'enrol',
-		unlock: Unlock
-	) => {
-		const [own] = identities;
-		if (own === undefined) return;
-		setBusy(true);
-		const { recipientOf } = await age();
-		const recipient = recipientOf(own);
-		if (then === 'setUp' && !(await setUp(recipient))) return;
-		const keys = await enrol(database, { connectionId, recipient, identities, unlock, rounds });
-		setBusy(false);
-		// The source was let go of meanwhile.
-		if (keys === undefined) {
-			onClose();
-			return;
-		}
-		lock.hold(keys);
-		go({
-			kind: 'done',
-			said: then === 'setUp' ? t('secrets.done.setUp') : t('secrets.done.enrolled'),
-		});
-	};
+	const keep = (identities: readonly Uint8Array[], then: 'setUp' | 'enrol', unlock: Unlock) =>
+		run(async () => {
+			const [first] = identities;
+			if (first === undefined) return;
+			const { recipientOf } = await age();
+			const recipient = recipientOf(first);
+			if (then === 'setUp' && !(await setUp(recipient))) return;
+			const keys = await enrol(database, {
+				connectionId,
+				recipient,
+				identities,
+				unlock,
+				rounds,
+			});
+			// The source was let go of meanwhile.
+			if (keys === undefined) {
+				onClose();
+				return;
+			}
+			wipeOwned();
+			lock.hold(keys);
+			go({
+				kind: 'done',
+				said: then === 'setUp' ? t('secrets.done.setUp') : t('secrets.done.enrolled'),
+			});
+		}, t('secrets.written.saving'));
 
-	const changeTo = async (unlock: Unlock) => {
-		const keys = lock.keys(connectionId);
-		// Locked meanwhile: unlocked again, and asked again.
-		if (keys === undefined) {
-			go({ kind: 'unlock', then: 'change' });
-			return;
-		}
-		setBusy(true);
-		const changed = await changeUnlock(database, keys, unlock, rounds);
-		setBusy(false);
-		if (changed === undefined) {
+	/**
+	 * The source's new key kept with the keys this device holds, under the
+	 * unlock it has: unlocked first where it is locked.
+	 */
+	const replaceWith = (identity: Uint8Array) =>
+		run(async () => {
+			const { recipientOf } = await age();
+			// Read after that wait, and handed on with none: `replaceKeys`
+			// copies them before its own, and the lock can wipe them at either.
+			const keys = lock.keys(connectionId);
+			if (keys === undefined) {
+				go({ kind: 'unlock', then: 'replace', identity });
+				return;
+			}
+			const held = keys.identities.filter((each) => !sameIdentity(each, identity));
+			const replaced = await replaceKeys(database, keys, recipientOf(identity), [
+				identity,
+				...held,
+			]);
+			if (replaced === undefined) {
+				lock.lock(connectionId);
+				go(null);
+				setError(t('secrets.device.changedElsewhere'));
+				return;
+			}
+			wipeOwned();
+			lock.hold(replaced);
+			go({ kind: 'done', said: t('secrets.done.replaced') });
+		});
+
+	const changeTo = (unlock: Unlock) =>
+		run(async () => {
+			const keys = lock.keys(connectionId);
+			// Locked meanwhile: unlocked again, and asked again.
+			if (keys === undefined) {
+				go({ kind: 'unlock', then: 'change' });
+				return;
+			}
+			const changed = await changeUnlock(database, keys, unlock, rounds);
+			if (changed === undefined) {
+				lock.lock(connectionId);
+				go(null);
+				setError(t('secrets.device.changedElsewhere'));
+				return;
+			}
+			lock.hold(changed);
+			go({ kind: 'done', said: t('secrets.done.changed') });
+		}, t('secrets.written.saving'));
+
+	const make = () =>
+		run(async () => {
+			const { generateIdentity } = await age();
+			go({ kind: 'show', identity: own(generateIdentity()) });
+		});
+
+	const putBack = (recipient: string) =>
+		run(async () => {
+			if (await setUp(recipient)) go({ kind: 'done', said: t('secrets.lost.done') });
+		});
+
+	const remove = () =>
+		run(async () => {
 			lock.lock(connectionId);
+			await forgetKeys(database, connectionId);
 			go(null);
-			setError(t('secrets.device.changedElsewhere'));
-			return;
-		}
-		lock.hold(changed);
-		go({ kind: 'done', said: t('secrets.done.changed') });
-	};
-
-	const make = () => {
-		setBusy(true);
-		void age().then(({ generateIdentity }) => {
-			setBusy(false);
-			go({ kind: 'show', identity: generateIdentity() });
 		});
-	};
 
 	/** A recovery key typed, taken on by what it was typed for. */
 	const typed = (at: Extract<Step, { kind: 'paste' }>, identity: Uint8Array) => {
+		own(identity);
 		if (at.purpose === 'setup') {
 			void scanned([identity]);
+			return;
+		}
+		// The keys this device holds are kept beside the new one: unlocked
+		// first, where it is locked.
+		if (at.purpose === 'replaced' && enrolled !== null && enrolled !== undefined) {
+			void replaceWith(identity);
 			return;
 		}
 		if (at.purpose !== 'another') {
@@ -628,47 +779,111 @@ export const SecretsDialog = ({
 			return;
 		}
 		const base = at.base ?? [];
-		const known = base.some((held) => encodeIdentity(held) === encodeIdentity(identity));
+		const known = base.some((held) => sameIdentity(held, identity));
 		go({ kind: 'choose', identities: known ? base : [...base, identity], then: 'setUp' });
 	};
 
 	const recipient = record?.state === 'ok' ? record.recipient : undefined;
 	const kind = enrolled?.unlock ?? 'pin';
 
-	const bodyOf = (at: Home): ReactNode => {
-		if (typeof at === 'string') {
-			if (at === 'intro') {
+	const unlockStep = (at: Extract<Step, { kind: 'unlock' }>): ReactNode => {
+		const form = (
+			<UnlockForm
+				database={database}
+				connectionId={connectionId}
+				kind={kind}
+				lock={lock}
+				onUnlocked={() => {
+					if (at.then === 'replace') {
+						void replaceWith(at.identity);
+						return;
+					}
+					go(at.then === 'change' ? { kind: 'change' } : null);
+				}}
+				onRecovery={() => {
+					// The device's copy is gone: the new key is all there is to keep.
+					go(
+						at.then === 'replace'
+							? { kind: 'choose', identities: [at.identity], then: 'enrol' }
+							: { kind: 'paste', purpose: 'enrol' }
+					);
+				}}
+			/>
+		);
+		if (at.then !== 'replace') return form;
+		return (
+			<div className="secrets-step">
+				<p>{t('secrets.replace.text')}</p>
+				{form}
+				<div className="secrets-buttons">
+					<button
+						type="button"
+						onClick={() => {
+							go({ kind: 'choose', identities: [at.identity], then: 'enrol' });
+						}}
+					>
+						{t('secrets.replace.skip')}
+					</button>
+				</div>
+			</div>
+		);
+	};
+
+	const homeBody = (at: Exclude<Home, Step>): ReactNode => {
+		switch (at) {
+			case 'intro':
 				return (
 					<Intro
 						busy={busy}
-						onMake={make}
+						onMake={() => {
+							void make();
+						}}
 						onPaste={() => {
 							go({ kind: 'paste', purpose: 'setup' });
 						}}
 					/>
 				);
-			}
-			if (at !== 'device') return SAID[at]();
-			return (
-				<Device
-					kind={kind}
-					unlocked={unlocked}
-					error={error}
-					onUnlock={() => {
-						go({ kind: 'unlock', then: 'device' });
-					}}
-					onLock={() => {
-						lock.lock(connectionId);
-					}}
-					onChange={() => {
-						go(unlocked ? { kind: 'change' } : { kind: 'unlock', then: 'change' });
-					}}
-					onRemove={() => {
-						go({ kind: 'remove' });
-					}}
-				/>
-			);
+			case 'lost':
+				return (
+					<Lost
+						busy={busy}
+						onPutBack={() => {
+							if (enrolled !== null && enrolled !== undefined) {
+								void putBack(enrolled.recipient);
+							}
+						}}
+						onRemove={() => {
+							go({ kind: 'remove' });
+						}}
+					/>
+				);
+			case 'device':
+				return (
+					<Device
+						kind={kind}
+						unlocked={unlocked}
+						error={error}
+						onUnlock={() => {
+							go({ kind: 'unlock', then: 'device' });
+						}}
+						onLock={() => {
+							lock.lock(connectionId);
+						}}
+						onChange={() => {
+							go(unlocked ? { kind: 'change' } : { kind: 'unlock', then: 'change' });
+						}}
+						onRemove={() => {
+							go({ kind: 'remove' });
+						}}
+					/>
+				);
+			default:
+				return SAID[at]();
 		}
+	};
+
+	const bodyOf = (at: Home): ReactNode => {
+		if (typeof at === 'string') return homeBody(at);
 		switch (at.kind) {
 			case 'show':
 				return (
@@ -688,6 +903,7 @@ export const SecretsDialog = ({
 					<CheckKey
 						identity={at.identity}
 						groups={at.groups}
+						busy={busy}
 						onBack={() => {
 							go({ kind: 'show', identity: at.identity });
 						}}
@@ -696,23 +912,24 @@ export const SecretsDialog = ({
 						}}
 					/>
 				);
-			case 'paste':
+			case 'paste': {
+				const checked = at.purpose === 'enrol' || at.purpose === 'replaced';
+				// A key typed as the source's is checked against the key file;
+				// where the file names none now, what it does say is shown.
+				if (checked && recipient === undefined) return bodyOf(homeOf(record, read, enrolled));
 				return (
 					<PasteKey
-						key={`${at.purpose}-${at.note ?? ''}`}
+						key={at.purpose}
 						purpose={at.purpose}
-						note={at.note}
-						recipient={
-							at.purpose === 'enrol' || at.purpose === 'replaced'
-								? recipient
-								: undefined
-						}
+						recipient={checked ? recipient : undefined}
 						age={age}
+						busy={busy}
 						onKey={(identity) => {
 							typed(at, identity);
 						}}
 					/>
 				);
+			}
 			case 'different':
 				return (
 					<Different
@@ -744,32 +961,16 @@ export const SecretsDialog = ({
 									: keep(at.identities, at.then, unlock));
 							}}
 						/>
-						{busy && <p role="status">{t('secrets.written.saving')}</p>}
 					</div>
 				);
 			case 'unlock':
-				return (
-					<UnlockForm
-						database={database}
-						connectionId={connectionId}
-						kind={kind}
-						lock={lock}
-						onUnlocked={() => {
-							go(at.then === 'change' ? { kind: 'change' } : null);
-						}}
-						onRecovery={() => {
-							go({ kind: 'paste', purpose: 'enrol' });
-						}}
-					/>
-				);
+				return unlockStep(at);
 			case 'remove':
 				return (
 					<RemoveKey
+						busy={busy}
 						onRemove={() => {
-							lock.lock(connectionId);
-							void forgetKeys(database, connectionId).then(() => {
-								go(null);
-							});
+							void remove();
 						}}
 						onCancel={() => {
 							go(null);
@@ -784,6 +985,9 @@ export const SecretsDialog = ({
 	const at = step ?? homeOf(record, read, enrolled);
 	// Where nothing is under way, there is nothing to cancel.
 	const finished = typeof at === 'string' || at.kind === 'done' || at.kind === 'remove';
+	// The device's step and choosing an unlock say what went wrong in their own place.
+	const saysOwnError =
+		at === 'device' || (typeof at !== 'string' && (at.kind === 'choose' || at.kind === 'change'));
 
 	return (
 		<SecretsModal
@@ -792,7 +996,17 @@ export const SecretsDialog = ({
 			closeLabel={finished ? t('common.close') : t('common.cancel')}
 			returnFocus={returnFocus}
 		>
+			{error !== undefined && !saysOwnError && (
+				<p className="secrets-error" role="alert">
+					{error}
+				</p>
+			)}
 			{bodyOf(at)}
+			{doing !== undefined && (
+				<p className="secrets-said" role="status">
+					{doing}
+				</p>
+			)}
 		</SecretsModal>
 	);
 };
