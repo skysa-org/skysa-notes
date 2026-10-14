@@ -19,6 +19,7 @@ export {
 	type NoteTimes,
 } from './frontmatter.js';
 export { readTime } from './time.js';
+export { decodeCharacterReferences } from './references.js';
 export { headings, type Heading } from './outline.js';
 export {
 	previewBlocks,

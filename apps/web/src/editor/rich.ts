@@ -54,6 +54,7 @@ import { deleteSelectedNode } from './deleteSelected.js';
 import { holdUserEdits, PROGRAMMATIC_META, userEditKey, userEditPlugin } from './dirty.js';
 import { findPlugin } from './findRich.js';
 import { codeHighlightPlugin } from './highlight.js';
+import { htmlViewPlugin } from './htmlView.js';
 import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } from './image.js';
 import { createLanguageSource } from './languages.js';
 import { linkChipPlugin, openLinkAtCursor } from './linkRich.js';
@@ -496,6 +497,8 @@ export const createRichEditor = ({
 		.use(codeBlockViewPlugin(display))
 		// A picture beside the note, from the note's storage, when it is on screen.
 		.use(imageViewPlugin)
+		// Html drawn with its character references read (`htmlView.ts`).
+		.use(htmlViewPlugin)
 		.use(unloadablePicturesInWords)
 		.use(attachmentViewPlugin)
 		// Code is text: a chip or a picture is never lost to it (`codeAtoms.ts`).

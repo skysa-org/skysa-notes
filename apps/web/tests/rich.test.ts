@@ -598,6 +598,48 @@ describe('an empty list item', () => {
 	});
 });
 
+/**
+ * Html is kept as written, and drawn as the text it is written in, but with its
+ * character references read (`htmlView.ts`). Google Keep's export put
+ * `<RESPONSE>` directly above a reply, which makes the reply's first paragraph
+ * html, and `you&rsquo;re` in it was on screen as written.
+ */
+describe('html as it is drawn', () => {
+	const kept = '<RESPONSE>\nIf you want one, you&rsquo;re choosing between **two**.\n\nAfter.\n';
+
+	it('shows its character references as the characters, and its tags and markers as written', async () => {
+		await mount(kept);
+
+		const drawn = document.querySelector<HTMLElement>('[data-type="html"]');
+		expect(drawn?.textContent).toBe(
+			'<RESPONSE>\nIf you want one, you’re choosing between **two**.'
+		);
+		// What a paste of it is read back from.
+		expect(drawn?.dataset.value).toBe(
+			'<RESPONSE>\nIf you want one, you&rsquo;re choosing between **two**.'
+		);
+	});
+
+	it('leaves the file as written, and the note clean', async () => {
+		const onUserEdit = vi.fn();
+		const { withCtx } = await mount(kept, onUserEdit);
+
+		expect(withCtx(currentMarkdown)).toBe(kept);
+		expect(onUserEdit).not.toHaveBeenCalled();
+	});
+
+	it('writes the reference back as written after an edit elsewhere', async () => {
+		const onUserEdit = vi.fn();
+		const { type } = await mount(kept, onUserEdit);
+
+		type('!');
+
+		expect(onUserEdit.mock.calls[0]?.[0]).toBe(
+			'<RESPONSE>\nIf you want one, you&rsquo;re choosing between **two**.\n\nAfter.!\n'
+		);
+	});
+});
+
 describe('representsFaithfully', () => {
 	it('passes a note that uses everything the editor supports', async () => {
 		const body = [

@@ -2,6 +2,7 @@ import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
 import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
+import { decodeCharacterReferences } from './references.js';
 
 /**
  * A note's body as the lines a list can show: the text the rich editor puts on
@@ -133,11 +134,13 @@ const inline = (
 			: [];
 	const linked = href === undefined ? {} : { href };
 	switch (node.type) {
-		// Inline html is shown as written, as the rich editor shows it: an atom
-		// holding the tag.
 		case 'text':
-		case 'html':
 			return [{ text: node.value, marks, ...linked }];
+		// Inline html is shown as written, as the rich editor shows it: an atom
+		// holding the tag, with its character references read
+		// (`decodeCharacterReferences`).
+		case 'html':
+			return [{ text: decodeCharacterReferences(node.value), marks, ...linked }];
 		case 'inlineCode':
 			return [{ text: node.value, marks: [...marks, 'code'], ...linked }];
 		case 'break':
@@ -223,7 +226,9 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 		case 'code':
 			return as(plainLines(node.value), { code: true });
 		case 'html':
-			return EDITOR_BREAK.test(node.value) ? [] : as(plainLines(node.value));
+			return EDITOR_BREAK.test(node.value)
+				? []
+				: as(plainLines(decodeCharacterReferences(node.value)));
 		case 'table':
 			return as(
 				node.children.map((row) =>
