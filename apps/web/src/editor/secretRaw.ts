@@ -147,16 +147,19 @@ const known = new WeakMap<EditorState, RawSecret[]>();
 
 /**
  * Every secret in the note: with the armor `wanted`, if asked. The parser may
- * not have reached the end of a long note; it is asked to, for a moment,
- * since a secret missed here would look gone, and the tree it reaches the end
- * with is read, not the state's own, which stays as the state was made.
+ * not have reached the end of a long note; it is made to, however long that
+ * takes, since a secret missed here would look gone, and find would replace
+ * inside its armor. Once it has, an edit parses again only what it changed.
+ * The tree it reaches the end with is read, not the state's own, which stays
+ * as the state was made.
  */
 export const allSecrets = (state: EditorState, wanted?: string): RawSecret[] => {
 	const all =
 		known.get(state) ??
 		(() => {
 			const length = state.doc.length;
-			const tree = ensureSyntaxTree(state, length, 200);
+			// Nothing only where there is no parser, and so no markdown.
+			const tree = ensureSyntaxTree(state, length, Infinity);
 			if (tree === null) return [];
 			const found = secretsIn(state, 0, length, undefined, tree);
 			known.set(state, found);
