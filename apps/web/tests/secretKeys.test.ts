@@ -408,6 +408,9 @@ describe('replacing the source’s key on a device', () => {
 		expect(await replaceKeys(db, here, NEW, [identity(3)])).toBeUndefined();
 		await expect(replaceKeys(db, here, NEW, [identity(0)])).rejects.toThrow();
 		await expect(replaceKeys(db, here, NEW, [])).rejects.toThrow();
-		expect(await enrolment(db, 'c1')).toMatchObject({ recipient: RECIPIENT, unlock: 'password' });
+		expect(await enrolment(db, 'c1')).toMatchObject({
+			recipient: RECIPIENT,
+			unlock: 'password',
+		});
 	});
 });

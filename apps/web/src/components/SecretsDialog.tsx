@@ -639,7 +639,12 @@ export const SecretsDialog = ({
 			const scan = await scanSecrets(database, connectionId, identities);
 			go(
 				scan.others > 0
-					? { kind: 'different', identities, secrets: scan.others, notes: scan.otherNotes }
+					? {
+							kind: 'different',
+							identities,
+							secrets: scan.others,
+							notes: scan.otherNotes,
+						}
 					: { kind: 'choose', identities, then: 'setUp' }
 			);
 		}, t('secrets.scanning'));
@@ -661,7 +666,9 @@ export const SecretsDialog = ({
 			return false;
 		}
 		setError(
-			written.status === 'unavailable' ? t('secrets.unavailable') : t('secrets.written.failed')
+			written.status === 'unavailable'
+				? t('secrets.unavailable')
+				: t('secrets.written.failed')
 		);
 		return false;
 	};
@@ -916,7 +923,8 @@ export const SecretsDialog = ({
 				const checked = at.purpose === 'enrol' || at.purpose === 'replaced';
 				// A key typed as the source's is checked against the key file;
 				// where the file names none now, what it does say is shown.
-				if (checked && recipient === undefined) return bodyOf(homeOf(record, read, enrolled));
+				if (checked && recipient === undefined)
+					return bodyOf(homeOf(record, read, enrolled));
 				return (
 					<PasteKey
 						key={at.purpose}
@@ -987,7 +995,8 @@ export const SecretsDialog = ({
 	const finished = typeof at === 'string' || at.kind === 'done' || at.kind === 'remove';
 	// The device's step and choosing an unlock say what went wrong in their own place.
 	const saysOwnError =
-		at === 'device' || (typeof at !== 'string' && (at.kind === 'choose' || at.kind === 'change'));
+		at === 'device' ||
+		(typeof at !== 'string' && (at.kind === 'choose' || at.kind === 'change'));
 
 	return (
 		<SecretsModal
