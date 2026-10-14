@@ -3,9 +3,18 @@ import { createPortal } from 'react-dom';
 
 import { useSuspendShortcuts } from '../commands/context.js';
 import { t } from '../i18n/t.js';
+import { BROWSER_DEVICE_LOCK, type DeviceLock } from '../secrets/deviceLock.js';
 import { type SecretsLock } from '../secrets/lock.js';
 import { type NotesDatabase, type UnlockKind } from '../store/db.js';
-import { FREE_TRIES, isAcceptedUnlock, type Unlock, unlockKeys } from '../store/secretKeys.js';
+import {
+	enrolment,
+	type EnteredKind,
+	FREE_TRIES,
+	isAcceptedUnlock,
+	type Unlock,
+	unlockKeys,
+	type UnlockResult,
+} from '../store/secretKeys.js';
 import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEntry.js';
 
 /**
@@ -13,6 +22,9 @@ import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEn
  * "Secrets in a note"): its pattern, PIN or password, tried against the keys
  * the device holds. A wrong try says so, the last few say how many are left,
  * one too soon after the fifth waits, and the tenth leaves the recovery key.
+ * Or the device's own lock, asked when Unlock is pressed, which counts its own
+ * tries: where it does not answer, the recovery key is offered beside a try
+ * again, since a passkey deleted and one refused look the same from here.
  *
  * `UnlockForm` is the asking; `UnlockDialog` asks it over everything, for a
  * secret revealed while the device was locked. The setup dialog asks it within
@@ -28,19 +40,123 @@ export interface UnlockFormProps {
 	/** The device's copy is gone: only the recovery key is left. */
 	onRecovery: () => void;
 	now?: () => number;
+	/** How the device's own lock is asked, where that is how it unlocks. */
+	deviceLock?: DeviceLock;
 }
+
+type Gone = 'forgotten' | 'none' | 'changed';
 
 type Said =
 	| Readonly<{ kind: 'nothing' }>
 	/** The try itself failed: the device's storage, not the unlock. */
 	| Readonly<{ kind: 'failed' }>
 	| Readonly<{ kind: 'wrong'; left: number }>
-	| Readonly<{ kind: 'gone'; why: 'forgotten' | 'none' }>;
+	/** The device's own lock did not answer. */
+	| Readonly<{ kind: 'unanswered' }>
+	| Readonly<{ kind: 'gone'; why: Gone }>;
 
-const ASK: Readonly<Record<UnlockKind, 'pattern' | 'pin' | 'password'>> = {
+const ASK: Readonly<Record<EnteredKind, 'pattern' | 'pin' | 'password'>> = {
 	pattern: 'pattern',
 	pin: 'pin',
 	password: 'password',
+};
+
+/** The keys gone from the device, or no longer opened by its lock: the recovery key is what is left. */
+const GoneForm = ({ why, onRecovery }: { why: Gone; onRecovery: () => void }) => (
+	<div className="unlock-form">
+		<p role="alert">{t(`secrets.unlock.${why}`)}</p>
+		<button type="button" className="primary" onClick={onRecovery}>
+			{t('secrets.unlock.useRecovery')}
+		</button>
+	</div>
+);
+
+/**
+ * What the device's own lock answers, tried against the keys. The prompt is
+ * the app's own, so the page hidden behind it does not lock.
+ */
+const answered = async (
+	database: NotesDatabase,
+	connectionId: string,
+	lock: SecretsLock,
+	deviceLock: DeviceLock
+): Promise<UnlockResult | 'unanswered'> => {
+	const found = await enrolment(database, connectionId);
+	if (found === undefined) return { status: 'none' };
+	const { device } = found;
+	if (device === undefined) return { status: 'changed' };
+	const answer = await lock.prompting(() =>
+		deviceLock.answer(device.credentialId, new Uint8Array(device.salt))
+	);
+	if (answer === undefined) return 'unanswered';
+	try {
+		return await unlockKeys(database, connectionId, { kind: 'device', ...device, answer });
+	} finally {
+		answer.fill(0);
+	}
+};
+
+const DeviceUnlockForm = ({
+	database,
+	connectionId,
+	lock,
+	onUnlocked,
+	onRecovery,
+	deviceLock,
+}: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & { deviceLock: DeviceLock }) => {
+	const askId = useId();
+	const [busy, setBusy] = useState(false);
+	const [said, setSaid] = useState<Said>({ kind: 'nothing' });
+
+	const attempt = async () => {
+		if (busy) return;
+		setBusy(true);
+		setSaid({ kind: 'nothing' });
+		const result = await answered(database, connectionId, lock, deviceLock).catch(
+			() => undefined
+		);
+		setBusy(false);
+		if (result === 'unanswered') {
+			setSaid({ kind: 'unanswered' });
+			return;
+		}
+		if (result?.status === 'unlocked') {
+			lock.hold(result.keys);
+			onUnlocked();
+			return;
+		}
+		if (result?.status === 'none' || result?.status === 'changed') {
+			setSaid({ kind: 'gone', why: result.status });
+			return;
+		}
+		setSaid({ kind: 'failed' });
+	};
+
+	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} />;
+
+	return (
+		<form
+			className="unlock-form"
+			onSubmit={(event) => {
+				event.preventDefault();
+				void attempt();
+			}}
+		>
+			<p id={askId}>{t('secrets.unlock.device')}</p>
+			<div className="secrets-said" role="status">
+				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
+				{said.kind === 'unanswered' && <p>{t('secrets.unlock.unanswered')}</p>}
+			</div>
+			<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
+				{t('secrets.unlock.unlock')}
+			</button>
+			{said.kind === 'unanswered' && (
+				<button type="button" onClick={onRecovery}>
+					{t('secrets.unlock.useRecovery')}
+				</button>
+			)}
+		</form>
+	);
 };
 
 /** Whole seconds until `until`, counted down while there are any. */
@@ -63,14 +179,29 @@ const useSecondsUntil = (until: number | undefined, now: () => number): number =
 };
 
 export const UnlockForm = ({
+	kind,
+	now = Date.now,
+	deviceLock = BROWSER_DEVICE_LOCK,
+	...form
+}: UnlockFormProps) =>
+	kind === 'device' ? (
+		<DeviceUnlockForm {...form} deviceLock={deviceLock} />
+	) : (
+		<EnteredUnlockForm {...form} kind={kind} now={now} />
+	);
+
+const EnteredUnlockForm = ({
 	database,
 	connectionId,
 	kind,
 	lock,
 	onUnlocked,
 	onRecovery,
-	now = Date.now,
-}: UnlockFormProps) => {
+	now,
+}: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & {
+	kind: EnteredKind;
+	now: () => number;
+}) => {
 	const askId = useId();
 	const [entered, setEntered] = useState<Entered>(NOTHING_ENTERED);
 	const [busy, setBusy] = useState(false);
@@ -108,20 +239,7 @@ export const UnlockForm = ({
 		setSaid({ kind: 'gone', why: result.status });
 	};
 
-	if (said.kind === 'gone') {
-		return (
-			<div className="unlock-form">
-				<p role="alert">
-					{said.why === 'forgotten'
-						? t('secrets.unlock.forgotten')
-						: t('secrets.unlock.none')}
-				</p>
-				<button type="button" className="primary" onClick={onRecovery}>
-					{t('secrets.unlock.useRecovery')}
-				</button>
-			</div>
-		);
-	}
+	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} />;
 
 	return (
 		<form

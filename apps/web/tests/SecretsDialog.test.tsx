@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SecretsDialog, type SecretsDialogProps } from '../src/components/SecretsDialog.js';
 import { generateIdentity, parseRecipient, recipientOf, sealSecret } from '../src/secrets/age.js';
+import { type DeviceLock, type Made } from '../src/secrets/deviceLock.js';
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock, type SecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
@@ -686,5 +687,253 @@ describe('an enrolled device', () => {
 		await screen.findByText('This device unlocks secrets with a PIN.');
 		await h.user.keyboard('{Escape}');
 		expect(h.onClose).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the device’s own lock', () => {
+	const CREDENTIAL = new Uint8Array([1, 2, 3]).buffer;
+	const DEVICE = 'This device’s lock';
+
+	/**
+	 * A device whose passkey is made as `made` says, and answers each ask with
+	 * the same bytes, noting each answer it gave and whether the app was
+	 * prompting as it was asked. `onAsked` runs as the passkey is made.
+	 */
+	const deviceWith = (
+		h: Harness,
+		made: Made = { state: 'made', credentialId: CREDENTIAL },
+		onAsked: () => void = () => undefined
+	) => {
+		const given: Uint8Array[] = [];
+		const prompted: boolean[] = [];
+		const inPrompt = { current: false };
+		const prompting = h.lock.prompting;
+		vi.spyOn(h.lock, 'prompting').mockImplementation(async (work) => {
+			inPrompt.current = true;
+			try {
+				return await prompting(work);
+			} finally {
+				inPrompt.current = false;
+			}
+		});
+		const device: DeviceLock = {
+			offered: () => Promise.resolve(true),
+			create: vi.fn(() => {
+				prompted.push(inPrompt.current);
+				onAsked();
+				return Promise.resolve(made);
+			}),
+			answer: vi.fn(() => {
+				prompted.push(inPrompt.current);
+				const answer = new Uint8Array(32).fill(7);
+				given.push(answer);
+				return Promise.resolve(answer);
+			}),
+		};
+		return { device, given, prompted };
+	};
+
+	const wiped = (given: readonly Uint8Array[]) =>
+		given.length > 0 && given.every((answer) => answer.every((byte) => byte === 0));
+
+	const enrolledWithPin = async () => {
+		const identity = generateIdentity();
+		const h = await setup({ record: { state: 'ok', recipient: recipientOf(identity) } });
+		await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: recipientOf(identity),
+			identities: [identity],
+			unlock: PIN,
+			rounds: ROUNDS,
+		});
+		return { ...h, identity };
+	};
+
+	it('is not offered where the device has none', async () => {
+		const identity = generateIdentity();
+		const h = await setup({ record: { state: 'ok', recipient: recipientOf(identity) } });
+		h.open({ deviceLock: { ...deviceWith(h).device, offered: () => Promise.resolve(false) } });
+		await typeKey(h, encodeIdentity(identity));
+
+		expect(await screen.findByLabelText('PIN')).toBeTruthy();
+		expect(screen.getAllByRole('radio').map((radio) => radio.textContent)).not.toContain(
+			DEVICE
+		);
+		expect(screen.queryByRole('radio', { name: DEVICE })).toBeNull();
+	});
+
+	it('enrolls the device with it, asked as a prompt of the app’s own, and unlocks with it', async () => {
+		const identity = generateIdentity();
+		const h = await setup({ record: { state: 'ok', recipient: recipientOf(identity) } });
+		const { device, given, prompted } = deviceWith(h);
+		h.open({ deviceLock: device });
+		await typeKey(h, encodeIdentity(identity));
+		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
+		expect(
+			screen.getByText(
+				'Your device asks for your fingerprint, face or screen lock: once to make a key for this, and again to check it.'
+			)
+		).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+
+		await screen.findByText('This device can unlock secrets now.');
+		expect(device.create).toHaveBeenCalledWith(
+			expect.any(Uint8Array),
+			'Unlocks secrets on this device: Work'
+		);
+		// Made, then asked twice: what it answered as it was made was nothing.
+		expect(prompted).toEqual([true, true, true]);
+		const record = await h.db.secretKeys.get('c1');
+		expect(record?.unlock).toBe('device');
+		expect(new Uint8Array(record?.credentialId ?? new ArrayBuffer(0))).toEqual(
+			new Uint8Array(CREDENTIAL)
+		);
+		expect(h.lock.isUnlocked('c1')).toBe(true);
+		expect(h.keyFile.write).not.toHaveBeenCalled();
+		// What the device answered is let go of once the keys are sealed under it.
+		expect(wiped(given)).toBe(true);
+
+		cleanup();
+		h.open({ deviceLock: device });
+		expect(
+			await screen.findByText('This device unlocks secrets with its own lock.')
+		).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Lock now' }));
+		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
+		expect(await screen.findByText('Unlock with this device’s lock.')).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		expect(await screen.findByText(/^Unlocked now\./u)).toBeTruthy();
+		expect(h.lock.isUnlocked('c1')).toBe(true);
+		expect(prompted).toEqual([true, true, true, true]);
+	});
+
+	it('sets a source up with it, writing the key file only once the device has answered', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		const identity = generateIdentity();
+		const { device } = deviceWith(h);
+		h.open({ deviceLock: device });
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(identity));
+		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+
+		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipientOf(identity));
+		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('device');
+	});
+
+	it('says the device’s lock did not answer, writes and keeps nothing, and can be tried again', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		const { device } = deviceWith(h, { state: 'refused' });
+		h.open({ deviceLock: device });
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(generateIdentity()));
+		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'Your device’s lock did not answer. Try again, or choose another way.'
+		);
+		expect(h.keyFile.write).not.toHaveBeenCalled();
+		expect(await h.db.secretKeys.get('c1')).toBeUndefined();
+		expect(h.lock.isUnlocked('c1')).toBe(false);
+
+		vi.mocked(device.create).mockResolvedValue({ state: 'made', credentialId: CREDENTIAL });
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('device');
+	});
+
+	it('is not offered again where it cannot keep a key, and the device enrolls another way', async () => {
+		const identity = generateIdentity();
+		const h = await setup({ record: { state: 'ok', recipient: recipientOf(identity) } });
+		const { device } = deviceWith(h, { state: 'unsupported' });
+		h.open({ deviceLock: device });
+		await typeKey(h, encodeIdentity(identity));
+		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+
+		expect(
+			await screen.findByText(
+				'This device’s lock cannot keep secrets in this browser. Choose another way.'
+			)
+		).toBeTruthy();
+		expect(screen.queryByRole('radio', { name: DEVICE })).toBeNull();
+		expect(await h.db.secretKeys.get('c1')).toBeUndefined();
+
+		await choosePin(h);
+		await screen.findByText('This device can unlock secrets now.');
+		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
+	});
+
+	it('changes to it and back, letting go of the passkey’s id', async () => {
+		const h = await enrolledWithPin();
+		const { device, given } = deviceWith(h);
+		h.open({ deviceLock: device });
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Change how this device unlocks' })
+		);
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+
+		expect(
+			await screen.findByText('This device unlocks secrets its new way now.')
+		).toBeTruthy();
+		const changed = await h.db.secretKeys.get('c1');
+		expect(changed?.unlock).toBe('device');
+		expect(new Uint8Array(changed?.credentialId ?? new ArrayBuffer(0))).toEqual(
+			new Uint8Array(CREDENTIAL)
+		);
+		expect(wiped(given)).toBe(true);
+		// Sealed under what the device answers, and that alone.
+		const asDevice = await unlockKeys(
+			h.db,
+			'c1',
+			{
+				kind: 'device',
+				credentialId: CREDENTIAL,
+				salt: changed?.salt ?? new ArrayBuffer(0),
+				answer: new Uint8Array(32).fill(7),
+			},
+			Date.now()
+		);
+		expect(asDevice.status === 'unlocked' && asDevice.keys.identities[0]).toEqual(h.identity);
+
+		// Held as changed: changing again needs no unlock.
+		cleanup();
+		h.open({ deviceLock: device });
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Change how this device unlocks' })
+		);
+		await choosePin(h, '1357');
+		expect(
+			await screen.findByText('This device unlocks secrets its new way now.')
+		).toBeTruthy();
+		const back = await h.db.secretKeys.get('c1');
+		expect(back?.unlock).toBe('pin');
+		expect(back?.credentialId).toBeUndefined();
+		const opened = await unlockKeys(h.db, 'c1', { kind: 'pin', digits: '1357' }, Date.now());
+		expect(opened.status === 'unlocked' && opened.keys.identities[0]).toEqual(h.identity);
+	});
+
+	it('asks for the unlock again where the device locked while its lock was asked, and changes nothing', async () => {
+		const h = await enrolledWithPin();
+		const { device, given } = deviceWith(h, undefined, () => {
+			h.lock.lock('c1');
+		});
+		h.open({ deviceLock: device });
+		await h.user.click(
+			await screen.findByRole('button', { name: 'Change how this device unlocks' })
+		);
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
+		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
+
+		expect(await screen.findByLabelText('PIN')).toBeTruthy();
+		expect(screen.queryByRole('radio')).toBeNull();
+		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
+		expect(wiped(given)).toBe(true);
 	});
 });

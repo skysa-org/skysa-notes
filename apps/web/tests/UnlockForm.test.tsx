@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { drawTo, PatternGrid } from '../src/components/PatternGrid.js';
 import { UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
+import type { DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import { enrol, FREE_TRIES, MAX_TRIES, TRY_WAIT_MS, type Unlock } from '../src/store/secretKeys.js';
@@ -129,6 +130,37 @@ describe('choosing an unlock', () => {
 		await user.type(screen.getByLabelText('PIN'), '1234{Enter}');
 		await user.type(screen.getByLabelText('PIN'), '1234{Enter}');
 		expect(onChosen).toHaveBeenCalledWith({ kind: 'pin', digits: '1234' });
+	});
+
+	it('offers the device’s own lock only where it is offered, which is entered nowhere', async () => {
+		const user = userEvent.setup();
+		const onChosen = vi.fn();
+		const { rerender } = render(<ChooseUnlock onChosen={onChosen} />);
+		expect(screen.queryByRole('radio', { name: 'This device’s lock' })).toBeNull();
+
+		rerender(<ChooseUnlock onChosen={onChosen} device />);
+		await user.click(screen.getByRole('radio', { name: 'This device’s lock' }));
+
+		expect(screen.queryByLabelText('PIN')).toBeNull();
+		expect(
+			screen.getByText(/Your device asks for your fingerprint, face or screen lock/u)
+		).toBeTruthy();
+		await user.click(screen.getByRole('button', { name: 'Set unlock' }));
+		expect(onChosen).toHaveBeenCalledWith({ kind: 'device' });
+	});
+
+	it('goes back to the PIN where the device’s lock is no longer offered, as making its passkey found', async () => {
+		const user = userEvent.setup();
+		const { rerender } = render(<ChooseUnlock onChosen={vi.fn()} device />);
+		await user.click(screen.getByRole('radio', { name: 'This device’s lock' }));
+
+		rerender(<ChooseUnlock onChosen={vi.fn()} device={false} error="Choose another way." />);
+
+		expect(screen.getByRole('radio', { name: 'PIN' }).getAttribute('aria-checked')).toBe(
+			'true'
+		);
+		expect(screen.getByLabelText('PIN')).toBeTruthy();
+		expect(screen.getByRole('alert').textContent).toBe('Choose another way.');
 	});
 });
 
@@ -259,5 +291,173 @@ describe('unlocking', () => {
 		).toBeTruthy();
 		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
 		expect(h.onRecovery).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('unlocking with the device’s own lock', () => {
+	const credentialId = new Uint8Array([1, 2, 3]).buffer;
+	const salt = new Uint8Array(32).fill(5).buffer;
+	const RIGHT = 0x42;
+
+	/** A device whose passkey answers with `fill`, or not at all, noting whether the app was prompting as it was asked. */
+	const deviceAnswering = (
+		fill: number | undefined,
+		prompting: Readonly<{ current: boolean }>,
+		whilePrompting: (was: boolean) => void
+	) => {
+		const asked = vi.fn((id: ArrayBuffer, given: Uint8Array) => {
+			whilePrompting(prompting.current);
+			expect(new Uint8Array(id)).toEqual(new Uint8Array(credentialId));
+			expect(given).toEqual(new Uint8Array(salt));
+			return Promise.resolve(fill === undefined ? undefined : new Uint8Array(32).fill(fill));
+		});
+		const device: DeviceLock = {
+			offered: () => Promise.resolve(true),
+			create: () => Promise.resolve({ state: 'refused' }),
+			answer: asked,
+		};
+		return device;
+	};
+
+	const setup = async (fill: number | undefined) => {
+		const db = createDatabase(`unlock-device-${crypto.randomUUID()}`);
+		opened.push(db);
+		await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
+		await enrol(db, {
+			connectionId: 'c1',
+			recipient: 'age1…',
+			identities: [new Uint8Array(32).fill(7)],
+			unlock: { kind: 'device', credentialId, salt, answer: new Uint8Array(32).fill(RIGHT) },
+		});
+		const lock = createSecretsLock({
+			target: {
+				visibilityState: 'visible',
+				addEventListener: () => undefined,
+				removeEventListener: () => undefined,
+			},
+		});
+		const inPrompt = { current: false };
+		const prompting = vi.spyOn(lock, 'prompting').mockImplementation(async (work) => {
+			inPrompt.current = true;
+			try {
+				return await work();
+			} finally {
+				inPrompt.current = false;
+			}
+		});
+		const whilePrompting = vi.fn();
+		const deviceLock = deviceAnswering(fill, inPrompt, whilePrompting);
+		const onUnlocked = vi.fn();
+		const onRecovery = vi.fn();
+		const user = userEvent.setup();
+		render(
+			<UnlockForm
+				database={db}
+				connectionId="c1"
+				kind="device"
+				lock={lock}
+				onUnlocked={onUnlocked}
+				onRecovery={onRecovery}
+				deviceLock={deviceLock}
+			/>
+		);
+		return { db, lock, prompting, whilePrompting, deviceLock, onUnlocked, onRecovery, user };
+	};
+
+	it('asks the device only when Unlock is pressed, as a prompt of the app’s own, and holds the keys', async () => {
+		const h = await setup(RIGHT);
+		expect(screen.getByText('Unlock with this device’s lock.')).toBeTruthy();
+		expect(h.deviceLock.answer).not.toHaveBeenCalled();
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		await vi.waitFor(() => {
+			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
+		expect(h.prompting).toHaveBeenCalledTimes(1);
+		expect(h.whilePrompting).toHaveBeenCalledWith(true);
+		expect(h.lock.keys('c1')?.identities[0]?.[0]).toBe(7);
+		// What the device answered is let go of once the keys are open.
+		const given = (await vi.mocked(h.deviceLock.answer).mock.results[0]?.value) as Uint8Array;
+		expect(given).toHaveLength(32);
+		expect(given.every((byte) => byte === 0)).toBe(true);
+	});
+
+	it('offers the recovery key beside another try, where the device’s lock did not answer', async () => {
+		const h = await setup(undefined);
+		expect(screen.queryByRole('button', { name: 'Use the recovery key' })).toBeNull();
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		expect(
+			await screen.findByText(
+				'Your device’s lock did not answer. Try again, or use the recovery key.'
+			)
+		).toBeTruthy();
+		expect(screen.getByRole('button', { name: 'Unlock' })).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
+		expect(h.onRecovery).toHaveBeenCalledTimes(1);
+		expect(h.onUnlocked).not.toHaveBeenCalled();
+		expect((await h.db.secretKeys.get('c1'))?.tries).toBe(0);
+	});
+
+	it('leaves only the recovery key where what the device answers no longer opens the keys', async () => {
+		const h = await setup(0x43);
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		expect(
+			await screen.findByText(
+				'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.'
+			)
+		).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
+		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
+		expect(h.onRecovery).toHaveBeenCalledTimes(1);
+		expect(await h.db.secretKeys.get('c1')).toBeDefined();
+	});
+
+	it('asks nothing of the device, and says its lock no longer opens the keys, where the device unlocks another way now', async () => {
+		const h = await setup(RIGHT);
+		const record = await h.db.secretKeys.get('c1');
+		if (record === undefined) throw new Error('not enrolled');
+		const { credentialId: _credentialId, ...rest } = record;
+		await h.db.secretKeys.put({ ...rest, unlock: 'pin' });
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		expect(
+			await screen.findByText(
+				'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.'
+			)
+		).toBeTruthy();
+		expect(h.deviceLock.answer).not.toHaveBeenCalled();
+	});
+
+	it('asks nothing of the device where it holds no keys, and says so', async () => {
+		const h = await setup(RIGHT);
+		await h.db.secretKeys.delete('c1');
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+
+		expect(
+			await screen.findByText(
+				'This device has no key for this source’s secrets. Type the recovery key to set it up.'
+			)
+		).toBeTruthy();
+		expect(h.deviceLock.answer).not.toHaveBeenCalled();
+	});
+
+	it('says a try that failed in the device’s storage, and can be tried again', async () => {
+		const h = await setup(RIGHT);
+		vi.spyOn(h.db.secretKeys, 'get').mockRejectedValueOnce(new Error('closing'));
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		expect(await screen.findByText('That did not work. Try again.')).toBeTruthy();
+
+		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		await vi.waitFor(() => {
+			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
 	});
 });

@@ -103,6 +103,13 @@ export const secrets = {
 		pattern: 'Pattern',
 		pin: 'PIN',
 		password: 'Password',
+		device: 'This device’s lock',
+		/** The device's own lock chosen: what happens next, before it does. */
+		useDevice:
+			'Your device asks for your fingerprint, face or screen lock: once to make a key for this, and again to check it.',
+		deviceRefused: 'Your device’s lock did not answer. Try again, or choose another way.',
+		deviceUnsupported:
+			'This device’s lock cannot keep secrets in this browser. Choose another way.',
 		drawPattern: 'Draw a pattern through at least 4 dots.',
 		typePin: 'Type a PIN of at least 4 digits.',
 		typePassword: 'Type a password of at least 8 characters.',
@@ -128,7 +135,9 @@ export const secrets = {
 		pattern: 'Draw this device’s pattern.',
 		pin: 'Type this device’s PIN.',
 		password: 'Type this device’s password.',
+		device: 'Unlock with this device’s lock.',
 		unlock: 'Unlock',
+		unanswered: 'Your device’s lock did not answer. Try again, or use the recovery key.',
 		wrong: 'That is not right.',
 		/** Shown once a wrong try is one of the last few. */
 		left: {
@@ -142,6 +151,8 @@ export const secrets = {
 		forgotten:
 			'Too many wrong tries, so this device’s copy of the key was removed. Type the recovery key to set this device up again.',
 		none: 'This device has no key for this source’s secrets. Type the recovery key to set it up.',
+		changed:
+			'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.',
 		useRecovery: 'Use the recovery key',
 	},
 	/** This device, in a source set up for secrets. */
@@ -150,7 +161,10 @@ export const secrets = {
 			pattern: 'This device unlocks secrets with a pattern.',
 			pin: 'This device unlocks secrets with a PIN.',
 			password: 'This device unlocks secrets with a password.',
+			device: 'This device unlocks secrets with its own lock.',
 		},
+		/** The passkey the device's own lock answers through, as a password manager lists it. */
+		passkeyName: 'Unlocks secrets on this device: {source}',
 		unlocked:
 			'Unlocked now. It locks when you leave the app, or after 30 seconds with nothing done.',
 		locked: 'Locked now.',

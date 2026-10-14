@@ -423,8 +423,8 @@ export interface KeyFileRecord {
 	version?: string;
 }
 
-/** How a device unlocks a source's secrets. */
-export type UnlockKind = 'pattern' | 'pin' | 'password';
+/** How a device unlocks a source's secrets: entered, or the device's own lock. */
+export type UnlockKind = 'pattern' | 'pin' | 'password' | 'device';
 
 /**
  * A source's keys for secrets on this device (docs/ARCHITECTURE.md §7, "Secrets
@@ -440,9 +440,14 @@ export interface SecretKeyRecord {
 	 */
 	recipient: string;
 	unlock: UnlockKind;
-	/** PBKDF2's salt and rounds, which make the sealing key from the unlock. */
+	/**
+	 * PBKDF2's salt and rounds, which make the sealing key from the unlock; or,
+	 * for the device's own lock, the salt its passkey is asked, and no rounds.
+	 */
 	salt: ArrayBuffer;
 	rounds: number;
+	/** The passkey the device's own lock answers through, where that is how it unlocks. */
+	credentialId?: ArrayBuffer;
 	/** AES-GCM's nonce, new for each sealing, and the identities it sealed. */
 	iv: ArrayBuffer;
 	sealed: ArrayBuffer;
