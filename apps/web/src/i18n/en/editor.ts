@@ -264,6 +264,8 @@ export const editor = {
 		reveal: 'Reveal',
 		/** Said on the block where it cannot be revealed. */
 		differentKey: 'This secret was made with a different key, which this device does not have.',
+		/** Beside the above: the way to give the device that key. */
+		addKey: 'Add its key',
 		unreadable: 'This secret cannot be read by this version of the app.',
 		/** The panel a secret's words are revealed and written in. */
 		panel: 'Secret',

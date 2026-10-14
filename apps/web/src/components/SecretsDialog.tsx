@@ -1,15 +1,9 @@
-import {
-	encodeIdentity,
-	readRecoveryKey,
-	RECOVERY_KEY_PREFIX,
-	recoveryKeyGroups,
-} from '@skysa/core';
+import { encodeIdentity, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type ReactNode,
 	type RefObject,
 	useEffect,
-	useId,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -31,6 +25,7 @@ import {
 	type UnlockedKeys,
 } from '../store/secretKeys.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
+import { PasteKey } from './PasteKey.js';
 import { SecretsModal, UnlockForm } from './UnlockDialog.js';
 import { ChooseUnlock, type Chosen } from './UnlockEntry.js';
 
@@ -295,96 +290,6 @@ const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'ano
 	enrol: 'enrol',
 	replaced: 'replaced',
 	another: 'another',
-};
-
-/** A recovery key typed or pasted, read however it was, and checked where it has to be the source's. */
-const PasteKey = ({
-	purpose,
-	recipient,
-	age,
-	busy: working,
-	onKey,
-}: {
-	purpose: Purpose;
-	/** The source's, where the key has to be its. */
-	recipient: string | undefined;
-	age: () => Promise<Age>;
-	/** While what the last key was typed for is still under way. */
-	busy: boolean;
-	onKey: (identity: Uint8Array) => void;
-}) => {
-	const textId = useId();
-	const [text, setText] = useState('');
-	const [error, setError] = useState<string | undefined>(undefined);
-	const [checking, setChecking] = useState(false);
-	const busy = working || checking;
-	/** Whose key it is, where that matters: the source's own, or not. */
-	const isTheSources = async (identity: Uint8Array): Promise<boolean> => {
-		if (recipient === undefined) return true;
-		setChecking(true);
-		try {
-			const { recipientOf } = await age();
-			return recipientOf(identity) === recipient;
-		} finally {
-			setChecking(false);
-		}
-	};
-	const submit = async () => {
-		if (busy) return;
-		const identity = readRecoveryKey(text);
-		if (identity === undefined) {
-			setError(t('secrets.recovery.notKey'));
-			return;
-		}
-		const its = await isTheSources(identity).catch(() => undefined);
-		if (its === true) {
-			onKey(identity);
-			return;
-		}
-		identity.fill(0);
-		setError(its === false ? t('secrets.recovery.notThis') : t('secrets.failed'));
-	};
-	return (
-		<form
-			className="secrets-step"
-			onSubmit={(event) => {
-				event.preventDefault();
-				void submit();
-			}}
-		>
-			<p id={textId}>{t(`secrets.recovery.${PASTE_TEXT[purpose]}`)}</p>
-			<textarea
-				className="recovery-field"
-				aria-label={t('secrets.recovery.label')}
-				aria-describedby={textId}
-				autoComplete="off"
-				autoCapitalize="characters"
-				autoCorrect="off"
-				spellCheck={false}
-				rows={3}
-				value={text}
-				onChange={(event) => {
-					setText(event.target.value);
-					setError(undefined);
-				}}
-				onKeyDown={(event) => {
-					if (event.key !== 'Enter' || event.shiftKey) return;
-					event.preventDefault();
-					void submit();
-				}}
-			/>
-			{error !== undefined && (
-				<p className="secrets-error" role="alert">
-					{error}
-				</p>
-			)}
-			<div className="secrets-buttons">
-				<button type="submit" className="primary" disabled={busy || text.trim() === ''}>
-					{t('secrets.recovery.continue')}
-				</button>
-			</div>
-		</form>
-	);
 };
 
 /** Secrets already in the source that the key does not open, said before it is used. */
@@ -905,6 +810,14 @@ export const SecretsDialog = ({
 	const recipient = record?.state === 'ok' ? record.recipient : undefined;
 	const kind = enrolled?.unlock ?? 'pin';
 
+	/** Why a key typed as the source's is not `recipient`'s, where it is not. */
+	const keyOf =
+		(of: string) =>
+		async (identity: Uint8Array): Promise<string | undefined> => {
+			const { recipientOf } = await age();
+			return recipientOf(identity) === of ? undefined : t('secrets.recovery.notThis');
+		};
+
 	const unlockStep = (at: Extract<Step, { kind: 'unlock' }>): ReactNode => {
 		const form = (
 			<UnlockForm
@@ -1038,12 +951,12 @@ export const SecretsDialog = ({
 				// where the file names none now, what it does say is shown.
 				if (checked && recipient === undefined)
 					return bodyOf(homeOf(record, read, enrolled));
+				const check = checked && recipient !== undefined ? keyOf(recipient) : undefined;
 				return (
 					<PasteKey
 						key={at.purpose}
-						purpose={at.purpose}
-						recipient={checked ? recipient : undefined}
-						age={age}
+						text={t(`secrets.recovery.${PASTE_TEXT[at.purpose]}`)}
+						{...(check === undefined ? {} : { check })}
 						busy={busy}
 						onKey={(identity) => {
 							typed(at, identity);

@@ -18,6 +18,7 @@ import { selectedKeys } from './attachment.js';
 import { iconElement } from './icons.js';
 import { secretHostCtx } from './secretHost.js';
 import {
+	addKeyButton,
 	createSecretPanels,
 	DRAFT,
 	insertSecret,
@@ -362,12 +363,21 @@ const secretView = (ctx: Ctx) => {
 			queueMicrotask(show);
 		};
 
+		/** "Add its key", where the last Reveal found it made with a key the device does not have. */
+		const adding: { current: HTMLButtonElement | undefined } = { current: undefined };
 		const open = () => {
 			said.replaceChildren();
+			adding.current?.remove();
+			adding.current = undefined;
 			reveal.setAttribute('disabled', '');
-			void revealSecret(doc, host, panels, valueOf(held.current)).then((problem) => {
+			const armor = valueOf(held.current);
+			void revealSecret(doc, host, panels, armor).then((problem) => {
 				reveal.removeAttribute('disabled');
-				if (problem !== undefined) said.replaceChildren(NOT_REVEALED[problem]());
+				if (problem === undefined) return;
+				said.replaceChildren(NOT_REVEALED[problem]());
+				if (problem !== 'other' || gone.current) return;
+				adding.current = addKeyButton(host, armor, open);
+				bar.append(adding.current);
 			});
 		};
 		reveal.addEventListener('click', open);

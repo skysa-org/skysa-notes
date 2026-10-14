@@ -55,6 +55,7 @@ export const fakeHost = (sealable = true) => {
 			}
 		}),
 		copy: vi.fn(() => Promise.resolve(true)),
+		addKey: vi.fn(() => Promise.resolve(false)),
 		locked: (listener) => {
 			locks.add(listener);
 			return () => {
