@@ -657,11 +657,15 @@ export const createSyncEngine = (options: SyncEngineOptions): SyncEngine => {
 		if (at !== undefined && at !== entry.path) return undefined;
 		const own = byPath.remoteId;
 		if (own !== undefined && batch.live.has(own)) return undefined;
-		// Except a note the user has deleted. Its file went on another device
-		// too, and this is a new one there that took the name: brought back as
-		// that note, it is still deleted here, and its queued delete removes the
-		// other device's note from the remote.
-		if (at === undefined) return batch.deleting.has(byPath.id) ? undefined : byPath;
+		// Nor a note the user has deleted, wherever it stands. Its file went on
+		// another device too, and this is a new one there that took the name:
+		// brought back as that note, it is still deleted here, and its queued
+		// delete removes the other device's note from the remote. A feed reports
+		// the old file gone first, so the batch has removed the note by now; a
+		// scan never says what was removed, so the note is still at the path —
+		// and claimed below, as a file replaced while the cursor was dead.
+		if (batch.deleting.has(byPath.id)) return undefined;
+		if (at === undefined) return byPath;
 		// The user's own rename, not yet pushed: the note is at this path because
 		// they put it here, and its file is still wherever it was. Claimed, it
 		// takes the arriving file's bytes and forgets its own — which the feed

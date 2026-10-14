@@ -8741,6 +8741,26 @@ describe('two devices at random', () => {
 		expect(provider.contentAt('a.md')).toBe('theirs\n');
 	});
 
+	it('does not let it take that file in a rescan either, which never says the old one went', async () => {
+		// The two-device soak over Drive, seed 36, once a long feed became a
+		// scan: the other device deleted this note's file and moved one of its
+		// own to the name. A scan lists the newcomer and nothing about the old
+		// file, so the note was still at the path, was claimed as a file
+		// replaced while the cursor was dead, and its queued delete took the
+		// other device's note from the remote.
+		const { entry, note } = await pulledNote('a.md', 'one\n');
+		store.queue({ op: 'delete', noteId: note.id, path: 'a.md' });
+		await provider.delete(entry);
+		await remoteFile('a.md', 'theirs\n');
+		killTheCursor();
+
+		expect((await engine.sync()).status).toBe('ok');
+
+		expect(provider.contentAt('a.md')).toBe('theirs\n');
+		expect(noteAt('a.md')?.content).toBe('theirs\n');
+		expect(store.notes().map((each) => each.id)).not.toContain(note.id);
+	});
+
 	it('does not let a note renamed here onto a name take the file made there', async () => {
 		// Not even when the batch says what was there before went, which is what
 		// lets a note whose own file was replaced be claimed. The rename's file
