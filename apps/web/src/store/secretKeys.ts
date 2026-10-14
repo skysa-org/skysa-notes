@@ -282,6 +282,7 @@ export const unlockKeys = async (
 	});
 	if (counted.status !== 'counted') return counted;
 	const { record } = counted;
+	// Wrong without the derivation, which would only come to the same.
 	if (record.unlock !== unlock.kind) return wrongTry(db, record);
 	const sealing = await sealingKey(unlock, record.salt, record.rounds);
 	const identities = await open(sealing, record);

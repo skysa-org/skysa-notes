@@ -39,8 +39,19 @@ const setup = async ({ found = true } = {}) => {
 	const told = vi.fn();
 	const live = new Set<'on'>(['on']);
 	const network = new Set<'up'>(['up']);
+	/** A listing held until the test lets it go, and whether one has been asked for. */
+	const held = new Map<'listing', Promise<void>>();
+	const asked = new Set<'listing'>();
+	const provider = {
+		...fake,
+		list: async (path: string) => {
+			asked.add('listing');
+			await held.get('listing');
+			return fake.list(path);
+		},
+	};
 	const session = (): KeyFileSession => ({
-		provider: fake,
+		provider,
 		withAuth: (work) => work(),
 		told,
 		idle: () => Promise.resolve(),
@@ -56,7 +67,7 @@ const setup = async ({ found = true } = {}) => {
 	const setUpElsewhere = (recipient = RECIPIENT) =>
 		fake.write(ENCRYPTION_FILE, serializeEncryptionFile(buildEncryptionFile(recipient)), {});
 	const read = () => db.keyFiles.get('c1');
-	return { db, fake, sync, told, live, network, setUpElsewhere, read };
+	return { db, fake, sync, told, live, network, setUpElsewhere, read, held, asked };
 };
 
 describe('reading the key file', () => {
@@ -124,6 +135,21 @@ describe('reading the key file', () => {
 		expect(early.fake.callLog().filter((call) => call.op === 'list')).toEqual([]);
 	});
 
+	it('keeps nothing it read for a source let go of while it was reading', async () => {
+		const h = await setup();
+		await h.setUpElsewhere();
+		const listing = Promise.withResolvers<void>();
+		h.held.set('listing', listing.promise);
+		const reading = h.sync.refresh('c1');
+		await vi.waitFor(() => {
+			expect(h.asked.has('listing')).toBe(true);
+		});
+		await h.db.syncState.update('c1', { detached: { at: 1, reason: 'disconnected' } });
+		listing.resolve();
+		await reading;
+		expect(await h.read()).toBeUndefined();
+	});
+
 	it('leaves the last read as it was when the folder cannot be listed', async () => {
 		const h = await setup();
 		await h.setUpElsewhere();
@@ -158,9 +184,9 @@ describe('reading it as a session starts', () => {
 		expect(h.fake.callLog().filter((call) => call.op === 'list')).toEqual([]);
 	});
 
-	it('does where the device holds a key, to hear that it was replaced', async () => {
+	it('does where the device holds a key, even where it last found none: it may have been put back', async () => {
 		const h = await setup();
-		await h.db.keyFiles.put({ connectionId: 'c1', state: 'ok', recipient: RECIPIENT });
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
 		await h.db.secretKeys.put({
 			connectionId: 'c1',
 			recipient: RECIPIENT,

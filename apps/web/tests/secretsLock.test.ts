@@ -188,7 +188,8 @@ describe('locking on its own', () => {
 		const answer = Promise.withResolvers<void>();
 		const asked = h.lock.prompting(() => answer.promise);
 
-		vi.advanceTimersByTime(3 * IDLE_MS);
+		// Answered between two of the lock's looks at the page.
+		vi.advanceTimersByTime(3 * IDLE_MS + 10_000);
 		expect(h.lock.isUnlocked('c1')).toBe(true);
 		answer.resolve();
 		await asked;
