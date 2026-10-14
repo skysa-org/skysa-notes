@@ -102,23 +102,34 @@ export const recoveryKeyGroups = (identity: Uint8Array): string[] =>
 		.slice(RECOVERY_KEY_PREFIX.length)
 		.match(/.{1,5}/g) ?? [];
 
+/** The prefix as it reads once spaces and hyphens are taken out. */
+const PREFIX_LETTERS = RECOVERY_KEY_PREFIX.replaceAll('-', '');
+
 /**
  * The identity a typed recovery key spells, however it was typed: in either
- * case, with spaces, line breaks or hyphens between the groups, and with or
- * without its prefix. Bech32's checksum still has to hold, so a mistyped
- * character is refused rather than read as some other key.
+ * case, with spaces, line breaks or hyphens anywhere, and with or without its
+ * prefix. The prefix ends in `1`, which bech32 never uses in what follows, so
+ * the two cannot be mistaken for each other. The checksum still has to hold,
+ * so a mistyped character is refused rather than read as some other key.
  */
 export const readRecoveryKey = (text: string): Uint8Array | undefined => {
-	const compact = text.replace(/\s+/gu, '').toUpperCase();
-	const rest = compact.startsWith(RECOVERY_KEY_PREFIX)
-		? compact.slice(RECOVERY_KEY_PREFIX.length)
+	const compact = text.replace(/[\s-]+/gu, '').toUpperCase();
+	const rest = compact.startsWith(PREFIX_LETTERS)
+		? compact.slice(PREFIX_LETTERS.length)
 		: compact;
-	return parseIdentity(`${RECOVERY_KEY_PREFIX}${rest.replaceAll('-', '')}`);
+	return parseIdentity(`${RECOVERY_KEY_PREFIX}${rest}`);
 };
+
+/** The version alone, read first: a newer build's file may be any other shape. */
+const versionSchema = z.object({ schemaVersion: z.number().int().positive() });
 
 const encryptionFileSchema = z.object({
 	schemaVersion: z.number().int().positive(),
-	recipient: z.string().refine(spellsRecipient),
+	// In lower case, as age writes it, so that it can be compared as a string.
+	recipient: z
+		.string()
+		.refine(spellsRecipient)
+		.transform((text) => text.toLowerCase()),
 	setAt: z.string().min(1),
 });
 
@@ -134,16 +145,17 @@ export type EncryptionFile = z.infer<typeof encryptionFileSchema>;
 export type EncryptionFileRead =
 	| { status: 'ok'; file: EncryptionFile }
 	/**
-	 * Written by a newer build, which may encrypt differently. This one neither
-	 * encrypts to it nor writes over it.
+	 * Written by a newer build, which may encrypt differently and say so in a
+	 * shape this one does not know. This one neither encrypts to it nor writes
+	 * over it.
 	 */
-	| { status: 'newer'; file: EncryptionFile }
+	| { status: 'newer' }
 	/** Not a key file this app wrote, or not JSON at all. */
 	| { status: 'invalid' };
 
 export const buildEncryptionFile = (recipient: string, now: Date = new Date()): EncryptionFile => ({
 	schemaVersion: ENCRYPTION_SCHEMA_VERSION,
-	recipient,
+	recipient: recipient.toLowerCase(),
 	setAt: now.toISOString(),
 });
 
@@ -151,17 +163,18 @@ export const serializeEncryptionFile = (file: EncryptionFile): string =>
 	`${JSON.stringify(file, null, 2)}\n`;
 
 export const parseEncryptionFile = (text: string): EncryptionFileRead => {
-	const parsed = (() => {
+	const json = ((): unknown => {
 		try {
-			return encryptionFileSchema.safeParse(JSON.parse(text));
+			return JSON.parse(text) as unknown;
 		} catch {
 			return undefined;
 		}
 	})();
-	if (parsed?.success !== true) return { status: 'invalid' };
-	return parsed.data.schemaVersion > ENCRYPTION_SCHEMA_VERSION
-		? { status: 'newer', file: parsed.data }
-		: { status: 'ok', file: parsed.data };
+	const version = versionSchema.safeParse(json);
+	if (!version.success) return { status: 'invalid' };
+	if (version.data.schemaVersion > ENCRYPTION_SCHEMA_VERSION) return { status: 'newer' };
+	const parsed = encryptionFileSchema.safeParse(json);
+	return parsed.success ? { status: 'ok', file: parsed.data } : { status: 'invalid' };
 };
 
 /** Whether a path is the source's key file. */

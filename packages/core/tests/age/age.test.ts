@@ -202,6 +202,17 @@ describe('whether a key opens a file', () => {
 		expect(await opens(damaged, [identity])).toBe(true);
 		expect(await failureOf(decrypt(damaged, [identity]))).toBe('payload');
 	});
+
+	it('is not, for a file that ends before its nonce, which `decrypt` refuses as a header', async () => {
+		const identity = generateIdentity();
+		const file = await encrypt(bytes(100), [publicKeyOf(identity)]);
+		const headerEnds = file.length - 16 - (100 + 16);
+		for (const kept of [headerEnds, headerEnds + 5]) {
+			const short = file.subarray(0, kept);
+			expect(await opens(short, [identity])).toBe(false);
+			expect(await failureOf(decrypt(short, [identity]))).toBe('header');
+		}
+	});
 });
 
 describe('armor', () => {
