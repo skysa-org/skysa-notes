@@ -74,6 +74,31 @@ describe('the find bar', () => {
 		expect(doc(editor)).toBe(`B before\n\n\`\`\`age\n${secret}\n\`\`\`\n\nB after\n`);
 	});
 
+	it('finds words that only mention armor, and leaves the `age` that makes a fence a secret', async () => {
+		const user = userEvent.setup();
+		const secret = [
+			'-----BEGIN AGE ENCRYPTED FILE-----',
+			'YWdlAAAAcnlwdGlvbi5vcmcvdjEKLT4gWDI1NTE5IEFBQUFB',
+			'-----END AGE ENCRYPTED FILE-----',
+		].join('\n');
+		const fenced = `\`\`\`age\n${secret}\n\`\`\``;
+		const { editor } = open(
+			`It opens -----BEGIN AGE ENCRYPTED FILE----- then a cat.\n\n${fenced}\n\nA cat of some age.\n`
+		);
+
+		await user.type(find(), 'cat');
+		expect(count()).toBe('1 of 2');
+
+		await user.clear(find());
+		await user.type(find(), 'age');
+		await user.click(screen.getByLabelText('Show replace'));
+		await user.type(screen.getByLabelText('Replace with'), 'years');
+		await user.click(screen.getByRole('button', { name: 'All' }));
+
+		expect(doc(editor)).toContain(`\n\n${fenced}\n\n`);
+		expect(doc(editor)).toContain('A cat of some years.');
+	});
+
 	it('says so when there is nothing to find', async () => {
 		const user = userEvent.setup();
 		open();

@@ -5,6 +5,7 @@ import { ScratchModal, Scratchpad, type ScratchpadProps } from '../src/component
 import { LOCAL_CONNECTION_ID, type NoteRecord } from '../src/store/db.js';
 import { CARD_WORDS } from '../src/store/scratchpad.js';
 import { linksOpened as opened } from './linksOpened.js';
+import { fence, sealed } from './secretHostFake.js';
 
 /**
  * The scratchpad on screen (docs/ARCHITECTURE.md §7, "The scratchpad"): the
@@ -121,6 +122,11 @@ describe('what a card shows', () => {
 		const open = screen.getByRole('button', { name: /^Milk/ });
 		expect(open.querySelector('.scratch-card-title')).toBeNull();
 		expect(screen.queryByText('Untitled')).toBeNull();
+	});
+
+	it('is "Secret" for a note with no name that opens with one, and never a picture', () => {
+		renderPad({ notes: [card('1', { body: `${fence(sealed('the code'))}\n\nMilk\n` })] });
+		expect(screen.getByRole('button', { name: 'Options for “Secret”' })).toBeDefined();
 	});
 
 	it('is "Empty note" for a note with nothing in it', () => {

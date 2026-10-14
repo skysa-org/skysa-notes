@@ -1,3 +1,4 @@
+import { secretBlocksIn } from '@skysa/core';
 import { vi } from 'vitest';
 
 import type { SecretHost } from '../src/editor/secretHost.js';
@@ -31,11 +32,9 @@ export const sealedForAnother = (words: string): string => {
 
 export const fence = (armor: string) => `\`\`\`age\n${armor}\n\`\`\``;
 
-/** The words each secret in `markdown` opens to, in order. */
+/** The words each secret in `markdown` opens to, in order: at any depth, as remark finds them. */
 export const openedIn = (markdown: string) =>
-	[...markdown.matchAll(/```age\n([\s\S]*?)\n```/gu)].map((match) =>
-		openSecret(match[1] ?? '', [identity])
-	);
+	secretBlocksIn(markdown).map((text) => openSecret(text, [identity]));
 
 /**
  * A host over one key, which opens what it made, and is told when to lock.

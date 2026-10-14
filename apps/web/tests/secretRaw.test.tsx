@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RawEditor } from '../src/editor/RawEditor.js';
 import { NO_SECRETS, type Opened, type SecretHost } from '../src/editor/secretHost.js';
+import { allSecrets } from '../src/editor/secretRaw.js';
 import { fakeHost, fence, openedIn, sealed, sealedForAnother } from './secretHostFake.js';
 
 /**
@@ -91,6 +92,35 @@ const mount = (body: string, host: SecretHost = NO_SECRETS) => {
 		/** The words each secret opens to in the last text the editor reported as the user's. */
 		reported: () => openedIn(String(onUserEdit.mock.lastCall?.[0] ?? '')),
 	};
+};
+
+/** Whether `target` is taken out of `container` while watched. */
+const watchRemoval = (container: HTMLElement, target: Element | null) => {
+	const removed = vi.fn();
+	const watching = new MutationObserver((records) => {
+		if (
+			records.some((record) =>
+				[...record.removedNodes].some((node) => target !== null && node.contains(target))
+			)
+		)
+			removed();
+	});
+	watching.observe(container, { childList: true, subtree: true });
+	return {
+		removed,
+		stop: () => {
+			watching.disconnect();
+		},
+	};
+};
+
+/** How many undos take the editor back to `body`. */
+const undosTo = (view: EditorView, body: string): number => {
+	const undone = { count: 0 };
+	while (view.state.doc.toString() !== body && undone.count < 20 && undo(view)) {
+		undone.count += 1;
+	}
+	return undone.count;
 };
 
 describe('a secret in raw mode', () => {
@@ -196,6 +226,68 @@ describe('a secret in raw mode', () => {
 		expect(h.field()).toBeNull();
 		expect(h.text()).toBe(`${fence(armor)}\n`);
 		expect(h.onUserEdit).toHaveBeenCalledTimes(2);
+	});
+
+	it('joins the words typed into one step of the history, as typing in the note does', async () => {
+		const body = `Front.\n\n${fence(sealed('one'))}\n`;
+		const h = mount(body, fakeHost().host);
+		await h.revealed();
+		['one,', 'one, t', 'one, tw', 'one, two', 'one, two!'].forEach((words) => {
+			h.type(words);
+		});
+		h.press('Done');
+
+		expect(undosTo(h.view, body)).toBe(1);
+	});
+
+	it('makes a new secret a step of its own in the history, apart from what was typed just before', async () => {
+		const fake = fakeHost();
+		const h = mount('First line\n', fake.host);
+		h.view.dispatch({
+			changes: { from: 10, insert: '!' },
+			selection: EditorSelection.cursor(11),
+			userEvent: 'input.type',
+		});
+		const typed = h.text();
+		fake.insert();
+		await vi.waitFor(() => {
+			expect(h.field()).not.toBeNull();
+		});
+		['n', 'ne', 'new'].forEach((words) => {
+			h.type(words);
+		});
+		h.press('Done');
+
+		expect(undosTo(h.view, typed)).toBe(1);
+		expect(h.text()).toBe(typed);
+	});
+
+	it('keeps the lines around a new secret apart with Cancel, where the quote’s mark under it was taken out', async () => {
+		const fake = fakeHost();
+		const h = mount('> # A\n> b\n', fake.host);
+		await h.inserted(fake.insert, 4);
+		h.type('words');
+		const [secret] = allSecrets(h.view.state);
+		if (secret === undefined) throw new Error('not written');
+		expect(h.view.state.sliceDoc(secret.end, secret.end + 2)).toBe('\n>');
+		h.view.dispatch({ changes: { from: secret.end + 1, to: secret.end + 2 } });
+
+		h.press('Cancel');
+
+		expect(h.opened()).toEqual([]);
+		expect(h.text().split('\n')).toEqual(expect.arrayContaining(['> # A', '> b']));
+	});
+
+	it('puts back exactly what was there with Cancel, in a list, a blank line in its fence', async () => {
+		const armor = sealed('listed');
+		const body = `- item\n\n  \`\`\`age\n  ${armor.split('\n').join('\n  ')}\n\n  \`\`\`\n`;
+		const h = mount(body, fakeHost().host);
+		await h.revealed('listed');
+		h.type('changed');
+
+		h.press('Cancel');
+
+		expect(h.text()).toBe(body);
 	});
 
 	it('keeps a character an input method is composing as it ends', async () => {
@@ -414,6 +506,60 @@ describe('inserting a secret in raw mode', () => {
 		expect(h.text()).toBe('Only line');
 	});
 
+	it.each([
+		['words right under its line', 'First line\nSecond line\n', 3],
+		['a list item’s', '- one\n  more of one\n- two\n', 2],
+		['a quote’s', '> a\n> b\n', 2],
+		['two empty lines', 'a\n\n\nb\n', 3],
+		['a heading’s underline', 'Title\n=====\nmore\n', 2],
+	])('leaves the note as it was with Cancel, begun above %s', async (_, body, at) => {
+		const fake = fakeHost();
+		const h = mount(body, fake.host);
+		await h.inserted(fake.insert, at);
+		h.type('then');
+		h.type('then cancelled');
+		expect(h.opened()).toEqual(['then cancelled']);
+
+		h.press('Cancel');
+
+		expect(h.text()).toBe(body);
+	});
+
+	it('writes a secret, and goes on keeping it, with the cursor in a fence left open', async () => {
+		const fake = fakeHost();
+		const body = 'Text\n\n```js\ncode\n';
+		const h = mount(body, fake.host);
+		await h.inserted(fake.insert, body.indexOf('code'));
+		const below = h.container.querySelector('.secret-raw-panel')?.nextElementSibling;
+		expect(below?.textContent).toBe('```js');
+
+		h.type('first');
+		h.type('first, then more');
+		await Promise.resolve();
+
+		expect(h.field()).not.toBeNull();
+		expect(h.opened()).toEqual(['first, then more']);
+		expect(allSecrets(h.view.state)).toHaveLength(1);
+		expect(h.text().endsWith('```js\ncode\n')).toBe(true);
+	});
+
+	it('stays where it was begun, as a pull changes the note above it', async () => {
+		const fake = fakeHost();
+		const body = 'First.\n\nSecond.\n\nThird.\n';
+		const h = mount(body, fake.host);
+		await h.inserted(fake.insert, body.indexOf('Third'));
+
+		h.pulled(body.replace('First.', 'First, edited.'));
+		await Promise.resolve();
+		const panelLine = h.container.querySelector('.secret-raw-panel')?.previousElementSibling;
+		expect(panelLine?.textContent).toBe('Third.');
+		h.type('words');
+
+		expect(h.text()).toMatch(
+			/^First, edited\.\n\nSecond\.\n\nThird\.\n\n```age\n[\s\S]+\n```\n$/u
+		);
+	});
+
 	it('goes at the end of a note whose last line is empty, which still ends with a line break', async () => {
 		const fake = fakeHost();
 		const h = mount('Only line\n', fake.host);
@@ -471,6 +617,19 @@ describe('the editor going in raw mode', () => {
 
 		expect(h.reported()).toEqual(['typed, then the note closed']);
 	});
+
+	it('keeps a word an input method is still composing as it goes', async () => {
+		const fake = fakeHost();
+		const h = mount(`${fence(sealed('pin'))}\n`, fake.host);
+		await h.revealed();
+		h.type('pin 1234');
+		h.type('pin 1234 hunter2', { composing: true });
+		expect(h.reported()).toEqual(['pin 1234']);
+
+		h.unmount();
+
+		expect(h.reported()).toEqual(['pin 1234 hunter2']);
+	});
 });
 
 describe('a secret that goes from under its panel in raw mode', () => {
@@ -488,6 +647,47 @@ describe('a secret that goes from under its panel in raw mode', () => {
 		});
 		expect(h.reported()).toEqual(['typed before the pull']);
 		expect(h.opened()).toEqual(['changed on another device']);
+	});
+
+	it('keeps the panel, its words and the focus in it, where a pull changes the note elsewhere', async () => {
+		const fake = fakeHost();
+		const h = mount(`Front.\n\n${fence(sealed('mine'))}\n\nBack.\n`, fake.host);
+		await h.revealed();
+		h.type('mine, typed', { caret: 4 });
+		await Promise.resolve();
+		const field = h.field();
+		const watched = watchRemoval(h.container, field);
+
+		h.pulled(h.text().replace('Front.', 'Front, edited elsewhere.'));
+		await Promise.resolve();
+		watched.stop();
+
+		expect(watched.removed).not.toHaveBeenCalled();
+		expect(h.field()).toBe(field);
+		expect(document.activeElement).toBe(field);
+		expect(field?.selectionStart).toBe(4);
+		h.type('mine, typed on');
+		expect(h.opened()).toEqual(['mine, typed on']);
+	});
+
+	it('opens no panel for a secret a pull took away while it was being opened', async () => {
+		const fake = fakeHost();
+		const armor = sealed('mine');
+		const h = mount(`${fence(armor)}\n`, fake.host);
+		const opening = Promise.withResolvers<Opened>();
+		vi.mocked(fake.host.open).mockReturnValueOnce(opening.promise);
+		h.press('Reveal');
+
+		h.pulled('Gone.\n');
+		opening.resolve({ state: 'opened', words: 'mine', seal: fake.seal });
+		await vi.waitFor(() => {
+			expect(h.button('Reveal')).toBeUndefined();
+		});
+		await Promise.resolve();
+
+		h.pulled(`${fence(armor)}\n`);
+		expect(h.field()).toBeNull();
+		expect(h.button('Reveal')).toBeDefined();
 	});
 
 	it('is let go of, with its panel, where the user changed its armor', async () => {

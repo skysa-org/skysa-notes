@@ -4,11 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	allSecrets,
-	fenceAt,
 	findRawSecret,
-	lineFor,
+	placeFor,
 	rearmor,
 	secretsIn,
+	writtenAt,
 } from '../src/editor/secretRaw.js';
 import { sealed } from './secretHostFake.js';
 
@@ -78,6 +78,13 @@ describe('finding a secret', () => {
 		);
 	});
 
+	it('finds one far down a long note, which the parser had not reached', () => {
+		const armor = sealed('far down');
+		const doc = `${'A line of words.\n\n'.repeat(30_000)}\`\`\`age\n${armor}\n\`\`\`\n`;
+
+		expect(allSecrets(stateOf(doc)).map((each) => each.armor)).toEqual([armor]);
+	});
+
 	it('finds only what is in the range asked for', () => {
 		const first = sealed('first');
 		const second = sealed('second');
@@ -107,29 +114,121 @@ describe('writing a secret', () => {
 		expect(allSecrets(stateOf(after)).map((each) => each.armor)).toEqual([next]);
 	});
 
-	it('puts a new secret after the cursor’s line, or in place of an empty one', () => {
-		const armor = sealed('new');
-		const doc = 'First line\n\nSecond line\n';
+	/** `doc` with a new secret put where the cursor at `at` puts one, and the secrets found in it then. */
+	const inserted = (doc: string, at: number, armor: string) => {
 		const state = stateOf(doc);
+		const place = placeFor(state, at);
+		const after = edited(state, {
+			from: place.from,
+			to: place.to,
+			insert: writtenAt(place, armor),
+		});
+		return { after, found: allSecrets(stateOf(after)).map((each) => each.armor) };
+	};
 
-		expect(edited(state, fenceAt(state, lineFor(state, 3), armor))).toBe(
-			`First line\n\n\`\`\`age\n${armor}\n\`\`\`\n\nSecond line\n`
+	it('puts a new secret after the paragraph the cursor is in, or in place of an empty line', () => {
+		const armor = sealed('new');
+		const doc = 'First line\nsame paragraph\n\nSecond paragraph\n';
+		const fenced = `\`\`\`age\n${armor}\n\`\`\``;
+
+		expect(inserted(doc, 3, armor).after).toBe(
+			`First line\nsame paragraph\n\n${fenced}\n\nSecond paragraph\n`
 		);
-		expect(edited(state, fenceAt(state, lineFor(state, doc.indexOf('\n\n') + 1), armor))).toBe(
-			`First line\n\n\`\`\`age\n${armor}\n\`\`\`\n\nSecond line\n`
+		expect(inserted(doc, doc.indexOf('\n\n') + 1, armor).after).toBe(
+			`First line\nsame paragraph\n\n${fenced}\n\nSecond paragraph\n`
 		);
-		expect(edited(state, fenceAt(state, lineFor(state, doc.length), armor))).toBe(
-			`First line\n\nSecond line\n\n\`\`\`age\n${armor}\n\`\`\`\n`
+		expect(inserted(doc, doc.length, armor).after).toBe(`${doc}\n${fenced}\n`);
+	});
+
+	it('puts a new secret after a fence or heading the cursor is in, not inside it', () => {
+		const armor = sealed('new');
+		const fenced = `\`\`\`age\n${armor}\n\`\`\``;
+
+		const code = '```js\nlet a;\n```\n';
+		expect(inserted(code, code.indexOf('let'), armor).after).toBe(
+			`${code.trimEnd()}\n\n${fenced}\n`
+		);
+		const heading = 'Title\n=====\nmore\n';
+		expect(inserted(heading, 2, armor).after).toBe(`Title\n=====\n\n${fenced}\n\nmore\n`);
+	});
+
+	it('puts a new secret in the list item or quote the cursor is in, as one of its blocks', () => {
+		const armor = sealed('new');
+
+		const listed = '- one\n  more of one\n- two\n';
+		const inList = inserted(listed, 3, armor);
+		expect(inList.after).toBe(
+			`- one\n  more of one\n\n  \`\`\`age\n  ${within(armor, '  ')}\n  \`\`\`\n\n- two\n`
+		);
+		expect(inList.found).toEqual([armor]);
+
+		const quoted = '> a\n> b\n\nAfter\n';
+		const inQuote = inserted(quoted, 2, armor);
+		expect(inQuote.after).toBe(
+			`> a\n> b\n>\n> \`\`\`age\n> ${within(armor, '> ')}\n> \`\`\`\n\nAfter\n`
+		);
+		expect(inQuote.found).toEqual([armor]);
+	});
+
+	it.each([
+		['a fence left open', 'Text\n\n```js\ncode\n', 'code'],
+		['a comment left open', 'Text\n\n<!-- note\nmore\n', 'more'],
+		['a secret left open', `Text\n\n\`\`\`age\n${sealed('old')}\n`, 'BEGIN'],
+	])('puts a new secret before %s, which runs to the note’s end', (_, doc, inside) => {
+		const armor = sealed('new');
+		const { after, found } = inserted(doc, doc.indexOf(inside), armor);
+
+		expect(after).toBe(doc.replace('Text\n\n', `Text\n\n\`\`\`age\n${armor}\n\`\`\`\n\n`));
+		expect(found).toContain(armor);
+		expect(found).toHaveLength(doc.includes('```age') ? 2 : 1);
+	});
+
+	it('leaves a quote’s empty line under the block as it is, not doubled', () => {
+		const armor = sealed('new');
+		const quoted = '> a\n>\n> b\n';
+
+		expect(inserted(quoted, 2, armor).after).toBe(
+			`> a\n>\n> \`\`\`age\n> ${within(armor, '> ')}\n> \`\`\`\n>\n> b\n`
 		);
 	});
 
-	it('puts a new secret after a fence the cursor is in, not inside it', () => {
+	it('goes after the whole block in a quote, where the cursor is at the end of a mark', () => {
 		const armor = sealed('new');
-		const doc = '```js\nlet a;\n```\n';
-		const state = stateOf(doc);
+		const quoted = '> Para *one*\n> more\n';
+		const { after, found } = inserted(quoted, quoted.indexOf('\n'), armor);
 
-		expect(edited(state, fenceAt(state, lineFor(state, doc.indexOf('let')), armor))).toBe(
-			`\`\`\`js\nlet a;\n\`\`\`\n\n\`\`\`age\n${armor}\n\`\`\`\n`
+		expect(after).toBe(
+			`> Para *one*\n> more\n>\n> \`\`\`age\n> ${within(armor, '> ')}\n> \`\`\`\n`
 		);
+		expect(found).toEqual([armor]);
+	});
+
+	it('parts a new secret from the paragraph right above a fence left open', () => {
+		const armor = sealed('new');
+		const doc = 'Text\n```js\ncode\n';
+		const { after, found } = inserted(doc, doc.indexOf('code'), armor);
+
+		expect(after).toBe(`Text\n\n\`\`\`age\n${armor}\n\`\`\`\n\n\`\`\`js\ncode\n`);
+		expect(found).toEqual([armor]);
+	});
+
+	it('keeps a new secret in the list item that holds a fence left open, before the fence', () => {
+		const armor = sealed('new');
+		const doc = '- item\n\n  ```js\n  code\n';
+		const { after, found } = inserted(doc, doc.indexOf('code'), armor);
+
+		expect(after).toBe(
+			`- item\n\n  \`\`\`age\n  ${within(armor, '  ')}\n  \`\`\`\n\n  \`\`\`js\n  code\n`
+		);
+		expect(found).toEqual([armor]);
+	});
+
+	it('puts a new secret at the note’s start, before a fence left open on its first line', () => {
+		const armor = sealed('new');
+		const doc = '```js\ncode';
+		const { after, found } = inserted(doc, doc.length, armor);
+
+		expect(after).toBe(`\`\`\`age\n${armor}\n\`\`\`\n\n${doc}`);
+		expect(found).toEqual([armor]);
 	});
 });
