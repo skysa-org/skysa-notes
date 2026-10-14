@@ -694,23 +694,32 @@ describe('pinning a notebook', () => {
 		expect(onPinFolder).toHaveBeenCalledWith('work/meetings', undefined);
 	});
 
-	it('shows one pinned to the bottom last under its parent, tinted, said so, and moves it to the top', async () => {
+	it('shows those pinned to the bottom last under their parent, ruled off, said so, and moves one to the top', async () => {
 		const onPinFolder = vi.fn();
 		renderSidebar({
 			tree: withPins(
-				buildFolderTree({ paths: ['personal', 'work', 'work/archive', 'work/meetings'] }),
+				buildFolderTree({
+					paths: ['personal', 'work', 'work/archive', 'work/meetings', 'work/old'],
+				}),
 				new Set(),
-				new Set(['work/archive'])
+				new Set(['work/archive', 'work/old'])
 			),
 			onPinFolder,
 		});
 
 		expect(
 			[...document.querySelectorAll('.row-label')].map((label) => label.textContent)
-		).toEqual(['personal', 'work', 'meetings', 'archive']);
+		).toEqual(['personal', 'work', 'meetings', 'archive', 'old']);
 		const pinned = screen.getByRole('button', { name: /^archive/ });
-		expect(pinned.classList.contains('pinned')).toBe(true);
+		// Not tinted: one rule above the first of them sets them apart.
+		expect(pinned.classList.contains('pinned')).toBe(false);
+		expect(
+			[...document.querySelectorAll('.pinned-bottom-rule .row-label')].map(
+				(label) => label.textContent
+			)
+		).toEqual(['archive']);
 		expect(description(pinned)).toBe('Pinned to bottom');
+		expect(description(screen.getByRole('button', { name: /^old/ }))).toBe('Pinned to bottom');
 
 		await openMenu('archive');
 		const menu = screen.getByRole('group', { name: 'Notebook “archive”' });
@@ -723,6 +732,18 @@ describe('pinning a notebook', () => {
 		await userEvent.click(within(menu).getByRole('button', { name: 'Pin to top' }));
 
 		expect(onPinFolder).toHaveBeenCalledWith('work/archive', 'top');
+	});
+
+	it('draws no rule where every notebook at a level is pinned to the bottom', () => {
+		renderSidebar({
+			tree: withPins(
+				buildFolderTree({ paths: ['personal', 'work'] }),
+				new Set(),
+				new Set(['personal', 'work'])
+			),
+		});
+
+		expect(document.querySelectorAll('.pinned-bottom-rule')).toHaveLength(0);
 	});
 });
 

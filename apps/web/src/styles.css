@@ -109,10 +109,9 @@
 	--on-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 	--on-fg: var(--accent);
 	--hover-bg: color-mix(in srgb, var(--fg) 8%, transparent);
-	/* A row pinned to the top of its list, or a notebook's to the bottom
-	   (`store/pins.ts`), either end alike: a wash of the "on" colour,
-	   lighter than a pressed toggle's, since it is a row that is kept
-	   somewhere rather than a control that is on. */
+	/* A row pinned to the top of its list (`store/pins.ts`): a wash of the
+	   "on" colour, lighter than a pressed toggle's, since it is a row that is
+	   kept somewhere rather than a control that is on. */
 	--pinned-bg: color-mix(in srgb, var(--accent) 9%, transparent);
 	/* Keyboard focus: a ring, drawn outside the control, so it never reads
 	   as the control's own state. */
@@ -1245,6 +1244,17 @@ button.row.pinned.selected:where(:not(.compact :is(.sidebar, .note-list) *)) {
 		outline: 1px solid CanvasText;
 		outline-offset: -1px;
 	}
+}
+
+/* Notebooks pinned to the bottom are not tinted: a thin rule sets them apart
+   from the rest above them, at their own level, from where the names there
+   start (`--rule-start`, `rowIndent`) to the pane's gutter. A border rather
+   than a background, so forced colours keep it. */
+.pinned-bottom-rule::before {
+	content: '';
+	display: block;
+	margin-inline: var(--rule-start, var(--gutter)) var(--gutter);
+	border-block-start: 1px solid var(--border);
 }
 
 /* A move is on, and this row is not somewhere the thing being moved can go.

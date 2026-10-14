@@ -1,5 +1,6 @@
 import { ancestorPaths, basename, isScratchPath, ROOT } from '@skysa/core';
 import {
+	type CSSProperties,
 	type KeyboardEvent,
 	memo,
 	type ReactNode,
@@ -383,7 +384,7 @@ const Row = ({
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
 		'row',
-		pinned === undefined ? undefined : 'pinned',
+		pinned === 'top' ? 'pinned' : undefined,
 		selected && moving === null ? 'selected' : undefined,
 		moving?.kind === 'notebook' && moving.path === path ? 'moving' : undefined,
 		allowed && over === path ? 'drop-over' : undefined,
@@ -405,7 +406,8 @@ const Row = ({
 			aria-current={selected && moving === null ? 'true' : undefined}
 			aria-expanded={expanded}
 			// Said beside the name rather than in it, which is what the row is
-			// found by, and in words as well as the tint (`.row.pinned`).
+			// found by, and in words as well as the tint (`.row.pinned`) or the
+			// rule above the bottom's (`.pinned-bottom-rule`).
 			aria-describedby={pinned === undefined ? undefined : pinId}
 			draggable={onPickUp !== undefined}
 			onContextMenu={(event) => {
@@ -625,10 +627,11 @@ const NONE_OPEN: ReadonlySet<string> = new Set();
  */
 const FolderRows = ({ nodes, ...rest }: FolderRowsProps) => (
 	<>
-		{nodes.map((node) => (
+		{nodes.map((node, at) => (
 			<FolderItem
 				key={node.path}
 				node={node}
+				ruled={node.pinned === 'bottom' && at > 0 && nodes[at - 1]?.pinned !== 'bottom'}
 				{...rest}
 				// Each row is told of the notebook selected, the one under the
 				// pointer and the one being renamed only where it is the row or
@@ -667,7 +670,18 @@ const countBeneath = (node: FolderNode): number => {
 	return count;
 };
 
-type FolderItemProps = Omit<FolderRowsProps, 'nodes'> & { node: FolderNode };
+type FolderItemProps = Omit<FolderRowsProps, 'nodes'> & {
+	node: FolderNode;
+	/**
+	 * The first of those pinned to the bottom, under the rest: a rule above it,
+	 * from where the names at its level start, is what sets them apart.
+	 */
+	ruled: boolean;
+};
+
+const ruleStyle = (depth: number): CSSProperties & Record<`--${string}`, string> => ({
+	'--rule-start': rowIndent(depth),
+});
 
 /** One notebook's row, and the rows of the notebooks inside it when it is open. */
 const FolderItemView = ({
@@ -689,6 +703,7 @@ const FolderItemView = ({
 	openNotebooks,
 	onToggle,
 	onDwell,
+	ruled,
 }: FolderItemProps) => {
 	const hasChildren = node.children.length > 0;
 	const open = hasChildren && openNotebooks.has(node.path);
@@ -699,7 +714,10 @@ const FolderItemView = ({
 	// list shows: opening it does not change what is in it.
 	const count = countBeneath(node);
 	return (
-		<li>
+		<li
+			className={ruled ? 'pinned-bottom-rule' : undefined}
+			style={ruled ? ruleStyle(depth) : undefined}
+		>
 			<div
 				className="row-item"
 				// On the row's box rather than its button, which may be
