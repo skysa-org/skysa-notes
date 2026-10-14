@@ -169,6 +169,8 @@ describe('the recovery key', () => {
 			groups.join(' '),
 			groups.join('-'),
 			` ${groups.slice(0, 6).join(' ')}\n${groups.slice(6).join(' ').toLowerCase()} `,
+			`AGE SECRET KEY 1 ${groups.join(' ')}`,
+			`age-secret-key-1-${groups.join('-')}`,
 		].forEach((typed) => {
 			expect(readRecoveryKey(typed)).toEqual(identity);
 		});
@@ -200,9 +202,25 @@ describe('the key file', () => {
 		expect(parseEncryptionFile(text)).toEqual({ status: 'ok', file });
 	});
 
-	it('is one a newer build wrote, which this one does not use or replace', () => {
-		const text = JSON.stringify({ schemaVersion: 2, recipient: RECIPIENT, setAt: 'later' });
-		expect(parseEncryptionFile(text).status).toBe('newer');
+	it('is one a newer build wrote, whatever else it says, which this one does not use or replace', () => {
+		[
+			{ schemaVersion: 2, recipient: RECIPIENT, setAt: 'later' },
+			{ schemaVersion: 2, recipients: [RECIPIENT, 'age1pq1…'] },
+			{ schemaVersion: 2 },
+		].forEach((file) => {
+			expect(parseEncryptionFile(JSON.stringify(file))).toEqual({ status: 'newer' });
+		});
+	});
+
+	it('gives its recipient in lower case, as age writes it, however it was written', () => {
+		const text = JSON.stringify({
+			schemaVersion: 1,
+			recipient: RECIPIENT.toUpperCase(),
+			setAt: 'x',
+		});
+		const read = parseEncryptionFile(text);
+		expect(read.status === 'ok' ? read.file.recipient : undefined).toBe(RECIPIENT);
+		expect(buildEncryptionFile(RECIPIENT.toUpperCase()).recipient).toBe(RECIPIENT);
 	});
 
 	it.each([

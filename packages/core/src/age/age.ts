@@ -160,9 +160,26 @@ const openHeader = async (
 };
 
 /**
- * Whether one of `identities` opens `file`: a stanza is for it, and the header
- * is authentic. The payload is not read, so this is cheap for a file of any
- * size; it is what asking whether a key is the one a secret was made with
+ * A file's key and its payload, the nonce first, once one of `identities` has
+ * opened its header: everything `decrypt` checks before the payload.
+ */
+const openFile = async (
+	file: Uint8Array,
+	identities: readonly Uint8Array[]
+): Promise<{ fileKey: Uint8Array; payload: Uint8Array }> => {
+	const { header, payload } = parseHeader(file);
+	const fileKey = await openHeader(header, identities);
+	// The nonce is read with the header in age, and a file too short to hold one
+	// fails as a header does.
+	if (payload.length < NONCE_SIZE) throw new AgeError('header', 'the file ends before its nonce');
+	return { fileKey, payload };
+};
+
+/**
+ * Whether one of `identities` opens `file`: a stanza is for it, the header is
+ * authentic, and the nonce is there, which is everything `decrypt` checks
+ * before the payload. The payload is not read, so this is cheap for a file of
+ * any size; it is what asking whether a key is the one a secret was made with
  * needs. A file that does not parse is one no key opens.
  */
 export const opens = async (
@@ -170,7 +187,7 @@ export const opens = async (
 	identities: readonly Uint8Array[]
 ): Promise<boolean> => {
 	try {
-		await openHeader(parseHeader(file).header, identities);
+		await openFile(file, identities);
 		return true;
 	} catch (error) {
 		if (error instanceof AgeError) return false;
@@ -183,11 +200,7 @@ export const decrypt = async (
 	file: Uint8Array,
 	identities: readonly Uint8Array[]
 ): Promise<Uint8Array> => {
-	const { header, payload } = parseHeader(file);
-	const fileKey = await openHeader(header, identities);
-	// The nonce is read with the header in age, and a file too short to hold one
-	// fails as a header does.
-	if (payload.length < NONCE_SIZE) throw new AgeError('header', 'the file ends before its nonce');
+	const { fileKey, payload } = await openFile(file, identities);
 	const nonce = payload.subarray(0, NONCE_SIZE);
 	return openPayload(await hkdf(fileKey, nonce, 'payload'), payload.subarray(NONCE_SIZE));
 };
