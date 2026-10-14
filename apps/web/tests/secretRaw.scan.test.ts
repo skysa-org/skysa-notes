@@ -1,6 +1,6 @@
 import { markdown } from '@codemirror/lang-markdown';
 import { type ChangeSpec, EditorState } from '@codemirror/state';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
 	allSecrets,
@@ -83,6 +83,20 @@ describe('finding a secret', () => {
 		const doc = `${'A line of words.\n\n'.repeat(30_000)}\`\`\`age\n${armor}\n\`\`\`\n`;
 
 		expect(allSecrets(stateOf(doc)).map((each) => each.armor)).toEqual([armor]);
+	});
+
+	it('finds one however slowly the note is parsed, as on a slow phone', () => {
+		const armor = sealed('far down');
+		const doc = `${'A line of words.\n\n'.repeat(3_000)}\`\`\`age\n${armor}\n\`\`\`\n`;
+		const state = stateOf(doc);
+		// Each look at the clock a second later than the last.
+		const clock = { now: Date.now() };
+		const now = vi.spyOn(Date, 'now').mockImplementation(() => (clock.now += 1000));
+		try {
+			expect(allSecrets(state).map((each) => each.armor)).toEqual([armor]);
+		} finally {
+			now.mockRestore();
+		}
 	});
 
 	it('finds only what is in the range asked for', () => {
