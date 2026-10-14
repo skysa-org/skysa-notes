@@ -1,10 +1,19 @@
 import { MAX_ATTACHMENT_BYTES, readClipName } from '@skysa/core';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+	cleanup,
+	fireEvent,
+	render,
+	renderHook,
+	screen,
+	waitFor,
+	within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ClipboardPanel, DRAG_GONE_MS } from '../src/components/ClipboardPanel.js';
 import { type SystemClipboard, type SystemRead } from '../src/components/systemClipboard.js';
+import { useFileDropGuard } from '../src/components/useFileDropGuard.js';
 import { type FileBrowser } from '../src/editor/fileActions.js';
 import { type ObjectUrlCache } from '../src/editor/objectUrls.js';
 import { type PictureShrinker } from '../src/pictures/shrinker.js';
@@ -22,6 +31,8 @@ const opened: NotesDatabase[] = [];
 
 afterEach(async () => {
 	cleanup();
+	// What a test put in the window beside the panel: a note's text, a dialog.
+	document.body.replaceChildren();
 	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
@@ -254,14 +265,18 @@ describe('the clipboard panel', () => {
 		expect(await rows()).toHaveLength(2);
 	});
 
-	it('says where files dragged over the window can go, and glows brighter with them over it', async () => {
+	it('says over the window that a drop adds to it, and glows brighter with files over it', async () => {
 		await setup();
-		const files = { types: ['Files'] };
-		const hint = () => within(region()).queryByText('Drop here to add to clipboard');
+		const files = { types: ['Files'], files: [], getData: () => '' };
+		const hint = () => screen.queryByText('Drop to add to clipboard');
 		expect(hint()).toBeNull();
 
 		fireEvent.dragEnter(document.body, { dataTransfer: files });
+		fireEvent.dragOver(document.body, { dataTransfer: files });
 		expect(hint()).not.toBeNull();
+		// Over the window, which takes the drop: in a compact window the panel
+		// is in a dropdown, shut.
+		expect(region().contains(hint())).toBe(false);
 		expect(region().className).toContain('clipboard-drop-ready');
 		expect(region().className).not.toContain('clipboard-drop-over');
 
@@ -278,6 +293,79 @@ describe('the clipboard panel', () => {
 		fireEvent.drop(document.body, { dataTransfer: files });
 		expect(hint()).toBeNull();
 		expect(region().className).not.toContain('clipboard-drop-ready');
+	});
+
+	/** A drag of `files`, as much of a `DataTransfer` as the window reads and writes. */
+	const carrying = (files: File[]) => ({
+		types: ['Files'],
+		files,
+		getData: () => '',
+		dropEffect: 'none',
+	});
+
+	/** Somewhere in the window that is not the panel, as `html` makes it. */
+	const elsewhere = (html: string): HTMLElement => {
+		const holder = document.createElement('div');
+		holder.innerHTML = html;
+		document.body.append(holder);
+		return holder.firstElementChild as HTMLElement;
+	};
+
+	it('takes files dropped anywhere in the window, which the drop guard then leaves alone', async () => {
+		// Asked for (2026-10-14): the panel is a small target at the foot of
+		// the sidebar, and in a compact window is not on screen at all.
+		renderHook(useFileDropGuard);
+		const { rows } = await setup();
+		const list = elsewhere('<ul><li><button>Plan</button></li></ul>').querySelector('button')!;
+		const over = carrying([]);
+
+		expect(fireEvent.dragOver(list, { dataTransfer: over })).toBe(false);
+		// Copied in, where the guard would have said "none".
+		expect(over.dropEffect).toBe('copy');
+		expect(fireEvent.drop(list, { dataTransfer: carrying([new File(['a'], 'one.txt')]) })).toBe(
+			false
+		);
+		await waitFor(async () => {
+			expect((await rows()).map((row) => readClipName(row.name)?.label)).toEqual(['one.txt']);
+		});
+	});
+
+	it('leaves a drop on a note’s text to the note, and says nothing over it', async () => {
+		const { rows } = await setup();
+		const line = elsewhere('<div contenteditable="true"><p>text</p></div>').querySelector('p')!;
+		const over = carrying([]);
+
+		fireEvent.dragEnter(line, { dataTransfer: over });
+		expect(fireEvent.dragOver(line, { dataTransfer: over })).toBe(true);
+		expect(over.dropEffect).toBe('none');
+		expect(screen.queryByText('Drop to add to clipboard')).toBeNull();
+		expect(
+			fireEvent.drop(line, { dataTransfer: carrying([new File(['a'], 'note.txt')]) })
+		).toBe(true);
+
+		// Taken, the next drop is the only one there.
+		fireEvent.drop(document.body, { dataTransfer: carrying([new File(['b'], 'clip.txt')]) });
+		await waitFor(async () => {
+			expect((await rows()).map((row) => readClipName(row.name)?.label)).toEqual([
+				'clip.txt',
+			]);
+		});
+	});
+
+	it('takes nothing dropped on a dialog over the window', async () => {
+		const { rows } = await setup();
+		const dialog = elsewhere('<div role="dialog" aria-modal="true"><p>Sure?</p></div>');
+
+		expect(fireEvent.dragOver(dialog, { dataTransfer: carrying([]) })).toBe(true);
+		expect(
+			fireEvent.drop(dialog, { dataTransfer: carrying([new File(['a'], 'one.txt')]) })
+		).toBe(true);
+		dialog.remove();
+
+		fireEvent.drop(document.body, { dataTransfer: carrying([new File(['b'], 'two.txt')]) });
+		await waitFor(async () => {
+			expect((await rows()).map((row) => readClipName(row.name)?.label)).toEqual(['two.txt']);
+		});
 	});
 
 	it('says nothing of a drag that carries no files, and lets go of one that has gone quiet', async () => {

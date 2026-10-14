@@ -4,8 +4,9 @@ import { useEffect } from 'react';
  * A file dragged over the app where nothing takes it is refused, rather than
  * left to the browser — which opens a dropped file in place of the app, and a
  * note being written goes with it (#187). The editors take files, and
- * whatever else takes a drop says so first (`preventDefault`), so the guard
- * stands aside for both: for anything already taken, and for anything an
+ * whatever else takes a drop says so first (`preventDefault`) — the clipboard,
+ * while it is shown, everywhere else in the window (`ClipboardPanel`) — so the
+ * guard stands aside for both: for anything already taken, and for anything an
  * editor can be typed into, which CodeMirror accepts without saying so (an
  * editable element takes a drop by default).
  *
@@ -18,7 +19,8 @@ import { useEffect } from 'react';
 const carriesFiles = (event: DragEvent): boolean =>
 	event.dataTransfer?.types.includes('Files') === true;
 
-const inEditor = (target: EventTarget | null): boolean => {
+/** Whether a drag is over text that can be typed into, which takes a dropped file itself. */
+export const inEditor = (target: EventTarget | null): boolean => {
 	const element =
 		target instanceof Node && !(target instanceof Element) ? target.parentElement : target;
 	// Anything but `false` is editable: `true`, the empty string, `plaintext-only`.

@@ -11,9 +11,11 @@ import {
 	type DragEvent,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useRef,
 	useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import { chordLabel, parseChord } from '../commands/chord.js';
 import { filesToAttach } from '../editor/addFiles.js';
@@ -36,6 +38,7 @@ import {
 	systemClipboard,
 	type SystemRead,
 } from './systemClipboard.js';
+import { inEditor } from './useFileDropGuard.js';
 
 /**
  * A source's clipboard, shared by its devices (docs/ARCHITECTURE.md §7, "The
@@ -44,12 +47,11 @@ import {
  * window's source dropdown. Shown where the user has asked for it on this
  * device, from the storage menu. Holding anything, it is featured, edged and
  * glowing in the brand's colour; the edge thickens inward while files are
- * dragged over the window, most of all over itself, where they can be dropped
- * (`styles.css`).
+ * dragged over the window, most of all over itself (`styles.css`).
  *
  * Things come in by Paste, which reads the browser's clipboard (text or a
- * picture); by a keyboard paste or a drop on the panel, and by "Add a file",
- * which bring files too. Pressing an item puts it back on the clipboard, or,
+ * picture); by a keyboard paste, a drop anywhere in the window but on a
+ * note's text (`useWindowDrop`), and "Add a file", which bring files too. Pressing an item puts it back on the clipboard, or,
  * for a file — which no browser puts on a clipboard — saves it.
  */
 
@@ -221,6 +223,50 @@ const useFilesDragged = (): boolean => {
 		};
 	}, []);
 	return dragged;
+};
+
+/**
+ * The whole window as the clipboard's drop target, while the clipboard is
+ * shown (2026-10-14, the owner's choice): files dropped anywhere are added to
+ * it, but on a note's text, which takes them into the note (`attachDrop.ts`)
+ * as it always has, and but while a dialog is open over the window. Caught on
+ * the way down, before anything under the pointer, so the drop guard
+ * (`useFileDropGuard`), which refuses what nothing has taken, finds it taken;
+ * and taken once, should a second panel ever be listening. In a compact
+ * window too, where the panel is mounted in the source dropdown, shut.
+ *
+ * Says whether a drop where the drag is now would come here.
+ */
+const useWindowDrop = (onFiles: (files: readonly File[]) => void): boolean => {
+	const [taking, setTaking] = useState(false);
+	const latest = useRef(onFiles);
+	useLayoutEffect(() => {
+		latest.current = onFiles;
+	});
+	useEffect(() => {
+		const passed = (event: globalThis.DragEvent) =>
+			inEditor(event.target) || document.querySelector('[aria-modal="true"]') !== null;
+		const over = (event: globalThis.DragEvent) => {
+			if (!holdsFiles(event.dataTransfer)) return;
+			const here = !passed(event) && !event.defaultPrevented;
+			setTaking(here);
+			if (!here) return;
+			event.preventDefault();
+			if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'copy';
+		};
+		const drop = (event: globalThis.DragEvent) => {
+			if (!holdsFiles(event.dataTransfer) || event.defaultPrevented || passed(event)) return;
+			event.preventDefault();
+			latest.current(filesToAttach(event.dataTransfer, 'drop'));
+		};
+		window.addEventListener('dragover', over, true);
+		window.addEventListener('drop', drop, true);
+		return () => {
+			window.removeEventListener('dragover', over, true);
+			window.removeEventListener('drop', drop, true);
+		};
+	}, []);
+	return taking;
 };
 
 /** The default cache: a URL per picture, kept for every view of it. */
@@ -488,6 +534,11 @@ export const ClipboardPanel = ({
 		).then(add);
 	};
 
+	const taking = useWindowDrop((files) => {
+		notOver();
+		addFiles(files, false);
+	});
+
 	const paste = () => {
 		void system.read().then(
 			(got) => (got.kind === 'read' ? add(got.inputs) : say(NOT_READ[got.kind]())),
@@ -530,17 +581,6 @@ export const ClipboardPanel = ({
 				if (!carriesFiles(event)) return;
 				overDepth.current -= 1;
 				if (overDepth.current <= 0) notOver();
-			}}
-			onDragOver={(event) => {
-				if (!carriesFiles(event)) return;
-				event.preventDefault();
-				event.dataTransfer.dropEffect = 'copy';
-			}}
-			onDrop={(event) => {
-				if (!carriesFiles(event)) return;
-				event.preventDefault();
-				notOver();
-				addFiles(filesToAttach(event.dataTransfer, 'drop'), false);
 			}}
 		>
 			<div className="clipboard-head">
@@ -594,11 +634,17 @@ export const ClipboardPanel = ({
 			>
 				{said.words}
 			</p>
-			{dragged && (
-				<p className="clipboard-drop-hint" aria-hidden="true">
-					{t('clipboard.dropHint')}
-				</p>
-			)}
+			{/* Over the whole window, which is where a drop is taken: in a compact
+			    window the panel is in a dropdown, shut. Not over a note's text,
+			    which takes a drop into the note. */}
+			{dragged &&
+				taking &&
+				createPortal(
+					<div className="clipboard-window-drop" aria-hidden="true">
+						<p className="clipboard-drop-hint">{t('clipboard.dropHint')}</p>
+					</div>,
+					document.body
+				)}
 		</section>
 	);
 };
