@@ -67,34 +67,36 @@ export const account = {
 		line: 'On this device only',
 	},
 	/**
-	 * The status line: the source, and how its syncing is going in a few
-	 * words. `{time}` is a time today, or a date.
+	 * The status line: how the source's syncing is going, in a few words. It
+	 * does not name the source, whose tab is selected above it; its tooltip and
+	 * the dialog it opens (`details`) do, with the account. `{time}` is a time
+	 * today, or a date.
 	 */
 	line: {
-		syncing: '{provider} · Syncing…',
+		syncing: 'Syncing…',
 		/** Syncing, held up on this device behind another tab or window of the app (`status.waiting`). */
-		waiting: '{provider} · Waiting for another tab',
-		synced: '{provider} · Synced',
-		syncedAt: '{provider} · Synced {time}',
-		offline: '{provider} · Offline',
-		retrying: '{provider} · Trying again shortly',
-		notSyncing: '{provider} · Not syncing',
-		sending: '{provider} · Sending {done} of {total}',
-		receiving: '{provider} · Receiving {done} of {total}',
+		waiting: 'Waiting for another tab',
+		synced: 'Synced',
+		syncedAt: 'Synced {time}',
+		offline: 'Offline',
+		retrying: 'Trying again shortly',
+		notSyncing: 'Not syncing',
+		sending: 'Sending {done} of {total}',
+		receiving: 'Receiving {done} of {total}',
 		looking: {
-			one: '{provider} · Looking for notes: {count} found',
-			other: '{provider} · Looking for notes: {count} found',
+			one: 'Looking for notes: {count} found',
+			other: 'Looking for notes: {count} found',
 		},
 		/** The user paused syncing (`SyncDetails`), until they resume it. */
-		paused: '{provider} · Paused',
+		paused: 'Paused',
 		/** A re-scan before it has found enough to count. */
-		lookingStart: '{provider} · Looking for notes…',
+		lookingStart: 'Looking for notes…',
 		/** Reading what has changed since the last sync, before it has found enough to count. */
-		checking: '{provider} · Checking for changes…',
+		checking: 'Checking for changes…',
 		/** The same, with how many changed notes it has found so far. */
 		checkingFound: {
-			one: '{provider} · Checking for changes: {count} found',
-			other: '{provider} · Checking for changes: {count} found',
+			one: 'Checking for changes: {count} found',
+			other: 'Checking for changes: {count} found',
 		},
 	},
 	/** Who the source's account is, as the status line's tooltip begins. */
@@ -106,11 +108,14 @@ export const account = {
 	/** The bar under the status line during a long sync. */
 	progress: 'Sync progress',
 	/**
-	 * What a sync is doing, opened from the status line while it syncs or is
-	 * paused (`SyncDetails`), and the way to pause it or resume it.
+	 * How syncing is going, opened from the status line (`SyncDetails`): the
+	 * source and its account, what a sync is doing, and the way to pause it or
+	 * resume it.
 	 */
 	details: {
 		title: 'Syncing with {provider}',
+		/** `{account}` is the account's name at the provider, often an email address. */
+		titleAs: 'Syncing with {provider} · {account}',
 		pausedTitle: 'Syncing paused',
 		pause: 'Pause syncing',
 		/** Under Pause syncing, before it is pressed. */
