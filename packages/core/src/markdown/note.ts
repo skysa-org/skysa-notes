@@ -22,7 +22,10 @@ export interface ParsedNoteFile {
 	title: string;
 	/** Markdown with the frontmatter block removed. */
 	body: string;
-	/** Raw YAML between the fences, or null when the file had none. */
+	/**
+	 * Raw YAML between the fences, or null when the file had none. A block
+	 * another editor flattened into a heading is read back as one (#101).
+	 */
 	frontmatter: string | null;
 	/** When the note was made, as an instant, where the file says (`readNoteTimes`). */
 	createdAt?: number;

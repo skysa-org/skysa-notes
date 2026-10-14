@@ -84,7 +84,11 @@ const yamlOf = (frontmatter: string): string =>
 	EXPLICIT_DOCUMENT.exec(frontmatter)?.[1] ?? frontmatter;
 
 export interface SplitDocument {
-	/** YAML source between the fences, or null when the file has no frontmatter. */
+	/**
+	 * YAML source between the fences, or null when the file has no frontmatter.
+	 * For a block another editor turned into a heading, its lines put back
+	 * (`flattenedReading`).
+	 */
 	frontmatter: string | null;
 	/** Everything after the closing fence. */
 	body: string;
@@ -322,6 +326,128 @@ const endedReading = (source: string): Reading | undefined => {
 const closedEarlier = (source: string, ended: Reading, fenced: Reading): boolean =>
 	source.slice(ended.length, fenced.length).replace(CLOSING_FENCE, '').trim() !== '';
 
+/** The opening fence, any blank lines, and an ATX heading on the next line: its text. */
+const FLATTENED = new RegExp(
+	String.raw`^---[ \t]*(${EOL})(?:[ \t]*${EOL})* {0,3}#{1,6}[ \t]+([^\r\n]*)(?:${EOL}|$)`
+);
+/** A pair's key, as the app writes one: a word, a colon, and a space or the end. */
+const PAIR = /^[a-z]+:(?=[ \t]|$)/u;
+/** The space before the next pair. */
+const NEXT_PAIR = /[ \t](?=[a-z]+:(?:[ \t]|$))/u;
+/** A quoted scalar, to its closing quote. */
+const QUOTED = { '"': /^"(?:[^"\\]|\\.)*"/u, "'": /^'(?:[^']|'')*'/u } as const;
+/** A backslash escape in markdown: any ASCII punctuation. */
+const ESCAPED = /\\([!-/:-@[-`{-~])/gu;
+const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu;
+
+/**
+ * A line of `key: value` pairs, cut into them, or undefined where it does not
+ * cut cleanly from its first character to its last.
+ *
+ * A quoted value is read to its closing quote before the next key is looked
+ * for, so `title: "Meeting: updated: plan"` is one pair. A value that is not
+ * quoted runs to the next `key:`: YAML's plain scalars cannot hold `: `, so in
+ * a block that was YAML no `key:` inside one is found.
+ *
+ * No more pairs than the app has keys, since a block it wrote has no others
+ * and names none twice (`isAppBlock`).
+ */
+const pairsIn = (
+	line: string,
+	room: number = WRITTEN_KEYS.length
+): readonly string[] | undefined => {
+	if (line === '') return [];
+	if (room === 0) return undefined;
+	const key = PAIR.exec(line)?.[0];
+	if (key === undefined) return undefined;
+	const value = line.slice(key.length).trimStart();
+	const opens = value[0];
+	const quoted =
+		opens === '"' || opens === "'" ? QUOTED[opens].exec(value)?.[0].length : undefined;
+	if ((opens === '"' || opens === "'") && quoted === undefined) return undefined;
+	const from = quoted === undefined ? key.length : line.length - value.length + quoted;
+	const next = NEXT_PAIR.exec(line.slice(from));
+	if (next === null) return [line.trimEnd()];
+	const tail = pairsIn(line.slice(from + next.index + 1), room - 1);
+	return tail === undefined ? undefined : [line.slice(0, from + next.index).trimEnd(), ...tail];
+};
+
+/**
+ * Do these pairs make a block the app wrote? Its keys and no others; an `id`
+ * that is a UUID, the app's own mark; `created` and `updated`, which it writes
+ * on every save, as times; and a pin as the app writes one.
+ *
+ * Only the app's keys, because a key of another tool's may have a space in it
+ * (Obsidian writes `date created:`), and a line cut at its last word reads it
+ * as the app's `created`, with `date` run onto the value above. Against the
+ * app's own block that cut makes a second `created`, which the parser refuses;
+ * against another tool's keys nothing would.
+ */
+const isAppBlock = (yaml: string): boolean => {
+	try {
+		const doc = parseDocument(yaml);
+		if (doc.errors.length > 0 || !isMap(doc.contents)) return false;
+		const record = doc.toJS() as Record<string, unknown>;
+		const { id, created, updated, pinned } = record;
+		const isTimeValue = (value: unknown): boolean =>
+			typeof value === 'string' && readTime(value) !== undefined;
+		return (
+			Object.keys(record).every((key) => WRITTEN_KEYS.some((known) => known === key)) &&
+			typeof id === 'string' &&
+			UUID.test(id) &&
+			isTimeValue(created) &&
+			isTimeValue(updated) &&
+			(pinned === undefined || pinned === true)
+		);
+	} catch {
+		return false;
+	}
+};
+
+/**
+ * A block another editor read as markdown and wrote back (#101).
+ *
+ * Google Docs is Drive's default handler for `.md`, and by CommonMark it reads
+ * the block correctly: the opening fence is a thematic break, the lines of YAML
+ * are one paragraph, and the closing fence makes that paragraph a setext
+ * heading. Docs writes it back as an ATX heading with its lines joined by
+ * spaces, over the same file:
+ *
+ *     ---
+ *
+ *     ## id: e4be6d39-… created: 2026-09-21T21:47:18.740Z updated: … title: First Note
+ *
+ * Nothing is lost, since every key and value is still in the heading. Read as it
+ * stands, though, the note has no `id`, its title is the joined line, and the
+ * next write puts a new block above the rule and the heading.
+ *
+ * Splitting the line back into pairs looks like guessing at where values end,
+ * and a title such as `Meeting: updated: plan` looks like it defeats the guess.
+ * It cannot reach the file that way: a plain scalar cannot hold `: ` or ` #`, so
+ * the writer quotes a value that does, and a quoted value is read to its quote
+ * (`pairsIn`). A value folded onto a second line comes back whole too, since
+ * YAML reads a fold as the one space Docs joined the lines with. Docs' own
+ * escapes (`Cool\!`) are markdown's, and come off before the line is read. The
+ * one title this cannot bring back is one holding both kinds of quote: the
+ * writer escapes the `"` in it as `\"`, markdown takes that for its own escape,
+ * and in the line Docs writes the quoted title ends at the first of them.
+ *
+ * Asked only of a file with no block of its own, and only all or nothing: the
+ * heading has to come apart into pairs from end to end, and the pairs have to
+ * be a block the app wrote (`isAppBlock`). Anything less is left as it was read
+ * before, all body, where the user can see it. What is read is a block like
+ * any other, the body is what follows the heading, and the file is not
+ * touched: the block goes back between fences on the next real edit, and not
+ * before (docs/ARCHITECTURE.md §7).
+ */
+const flattenedReading = (source: string): SplitDocument | undefined => {
+	const match = FLATTENED.exec(source);
+	if (match === null) return undefined;
+	const pairs = pairsIn((match[2] ?? '').replaceAll(ESCAPED, '$1'));
+	if (pairs === undefined || !isAppBlock(pairs.join('\n'))) return undefined;
+	return { frontmatter: pairs.join(match[1] ?? '\n'), body: source.slice(match[0].length) };
+};
+
 export const splitFrontmatter = (source: string): SplitDocument => {
 	if (!source.startsWith(FENCE)) return NO_FRONTMATTER(source);
 
@@ -330,9 +456,8 @@ export const splitFrontmatter = (source: string): SplitDocument => {
 	const chosen =
 		fenced !== undefined && !(ended && closedEarlier(source, ended, fenced)) ? fenced : ended;
 
-	return chosen === undefined
-		? NO_FRONTMATTER(source)
-		: { frontmatter: chosen.frontmatter, body: chosen.body };
+	if (chosen === undefined) return flattenedReading(source) ?? NO_FRONTMATTER(source);
+	return { frontmatter: chosen.frontmatter, body: chosen.body };
 };
 
 /** Inverse of `splitFrontmatter`. */
