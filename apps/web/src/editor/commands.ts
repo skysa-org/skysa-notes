@@ -22,6 +22,7 @@ import { attachPicked } from './attachDrop.js';
 import { ATTACHMENT } from './attachment.js';
 import { detectLanguage } from './detect.js';
 import { applyList } from './lists.js';
+import { insertSecretCommand } from './secretBlock.js';
 
 /**
  * What the slash menu and the formatting toolbars can do, as data.
@@ -387,6 +388,18 @@ const FILE: EditorCommand = {
 	apply: attachPicked(),
 };
 
+/**
+ * A secret, written in a panel where it will go and encrypted before it is
+ * put in the note (`secretBlock.ts`). Only where the note's source is set up
+ * for secrets: the host says why not, where not.
+ */
+const SECRET: EditorCommand = {
+	id: 'secret',
+	label: t('editor.commands.secret'),
+	keywords: ['encrypt', 'password', 'private', 'hidden', 'age'],
+	apply: insertSecretCommand,
+};
+
 /** The toolbar's paperclip: any file, a picture among them. */
 const ATTACH: EditorCommand = {
 	id: 'attach',
@@ -410,8 +423,8 @@ export const BLOCK_COMMANDS: readonly EditorCommand[] = [
 	PLAIN_TEXT,
 ];
 
-/** What the slash menu offers: the blocks, then a file beside the note. */
-export const SLASH_COMMANDS: readonly EditorCommand[] = [...BLOCK_COMMANDS, IMAGE, FILE];
+/** What the slash menu offers: the blocks, then a file beside the note, then a secret. */
+export const SLASH_COMMANDS: readonly EditorCommand[] = [...BLOCK_COMMANDS, IMAGE, FILE, SECRET];
 
 /** Inline marks, in the order they appear in the selection toolbar. */
 export const INLINE_COMMANDS: readonly EditorCommand[] = [BOLD, ITALIC, STRIKETHROUGH, INLINE_CODE];

@@ -15,6 +15,7 @@ import { history } from '@milkdown/kit/plugin/history';
 import { slashFactory } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory } from '@milkdown/kit/plugin/tooltip';
 import {
+	codeBlockSchema,
 	commonmark,
 	imageSchema,
 	paragraphSchema,
@@ -59,6 +60,15 @@ import { imageViewPlugin, imageWithoutStrayTitles, unloadablePicturesInWords } f
 import { createLanguageSource } from './languages.js';
 import { linkChipPlugin, openLinkAtCursor } from './linkRich.js';
 import { richWithoutNul } from './noNul.js';
+import {
+	codeBlockWithoutSecrets,
+	createSecretPanels,
+	secretPanelsCtx,
+	secretPlugin,
+	secretSchema,
+	secretViewPlugin,
+} from './secretBlock.js';
+import { type SecretHost, secretHostCtx } from './secretHost.js';
 import { tailPlugin } from './tail.js';
 import { taskPlugin, toggleTaskCommand } from './tasks.js';
 
@@ -121,6 +131,11 @@ export interface RichEditorSetup {
 	 * picture beside the note says it is not on this device (`NO_ATTACHMENTS`).
 	 */
 	attachments?: AttachmentHost;
+	/**
+	 * What opens and seals the note's secrets. None, and a secret stays
+	 * closed, and none can be made (`NO_SECRETS`).
+	 */
+	secrets?: SecretHost;
 }
 
 /**
@@ -446,6 +461,7 @@ export const createRichEditor = ({
 	menus,
 	display = codeDisplay,
 	attachments,
+	secrets,
 }: RichEditorSetup): Editor =>
 	Editor.make()
 		.config((ctx) => {
@@ -458,6 +474,11 @@ export const createRichEditor = ({
 			ctx.update(extendListItemSchemaForTask.key, itemWithoutEmptyLine);
 			ctx.update(imageSchema.key, imageWithoutStrayTitles);
 			if (attachments !== undefined) ctx.set(attachHostCtx.key, attachments);
+			// A secret's fence is a secret's, not a code block's (`secretBlock.ts`).
+			ctx.update(codeBlockSchema.key, codeBlockWithoutSecrets);
+			if (secrets !== undefined) ctx.set(secretHostCtx.key, secrets);
+			// This editor's own: the words revealed in it are in no other.
+			ctx.set(secretPanelsCtx.key, createSecretPanels());
 			ctx.update(editorViewOptionsCtx, (options) => ({
 				...options,
 				attributes: { class: 'editor-rich-surface', 'aria-label': t('editor.noteBody') },
@@ -479,9 +500,14 @@ export const createRichEditor = ({
 			ctx.set(tooltip.key, menus.tooltip);
 		})
 		.use(attachHostCtx)
+		.use(secretHostCtx)
+		.use(secretPanelsCtx)
 		.use(commonmarkWithoutBreakEater)
 		// A file beside the note, as a chip rather than a link (`attachment.ts`).
 		.use(attachmentSchema)
+		// A secret: an `age` fence, closed, its words revealed outside the
+		// document (`secretBlock.ts`).
+		.use(secretSchema)
 		// After the preset, so that its html transformer has already put a
 		// block of html into a paragraph, which has no position of its own.
 		.use(emptyLinePlugin)
@@ -501,6 +527,8 @@ export const createRichEditor = ({
 		.use(htmlViewPlugin)
 		.use(unloadablePicturesInWords)
 		.use(attachmentViewPlugin)
+		.use(secretViewPlugin)
+		.use($prose(secretPlugin))
 		// Code is text: a chip or a picture is never lost to it (`codeAtoms.ts`).
 		.use($prose(() => codeSpansHoldText))
 		.use($prose(codeBlocksKeepAtoms))

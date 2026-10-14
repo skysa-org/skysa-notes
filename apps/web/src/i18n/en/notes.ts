@@ -79,6 +79,7 @@ export const notes = {
 	/** In the command palette, in the group `shell.commands.group.note`, about the open note. */
 	commands: {
 		attach: 'Attach files',
+		insertSecret: 'Insert secret',
 		showOutline: 'Show outline',
 		hideOutline: 'Hide outline',
 		find: 'Find in note',

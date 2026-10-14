@@ -56,6 +56,7 @@ import {
 	useMediaQuery,
 } from './layout.js';
 import { useNoteAttachments } from './noteAttachments.js';
+import { useNoteSecrets } from './noteSecrets.js';
 import { useOpeningNotice } from './opening.js';
 import { Outline } from './Outline.js';
 import { PinButton, ScratchBar } from './ScratchControls.js';
@@ -408,6 +409,15 @@ const NoteBody = ({
 		enabled: mode !== undefined,
 		run: attachments.pick,
 	});
+	const secrets = useNoteSecrets(note, { report: onProblem });
+	// The rich editor's, for now: raw mode has no secret of its own yet.
+	useCommand({
+		id: 'note.insertSecret',
+		label: t('notes.commands.insertSecret'),
+		group: t('shell.commands.group.note'),
+		enabled: mode === 'rich',
+		run: secrets.insert,
+	});
 	const attach = useCallback(
 		(element: HTMLDivElement | null) => {
 			body.current = element;
@@ -437,10 +447,12 @@ const NoteBody = ({
 					onAdopted={onAdopted}
 					toolbar={toolbar}
 					attachments={attachments}
+					secrets={secrets.host}
 					basic={basic}
 					toolbarEnd={toolbarEnd}
 				/>
 			)}
+			{secrets.dialog}
 			{showOutline && (
 				<Outline
 					body={note.body}

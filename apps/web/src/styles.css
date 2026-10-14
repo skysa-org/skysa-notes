@@ -1899,6 +1899,110 @@ button.danger {
 }
 
 /*
+ * A secret (`editor/secretBlock.ts`): closed, a slab like a code block's with
+ * one line on it — what it is, and Reveal — and nothing of its armor. Revealed,
+ * its words are in a panel under that line, which is the view's own and not
+ * the note's text, so it can be typed in and selected as a form is.
+ */
+.editor-rich-surface .secret-block {
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--code-surface);
+	user-select: none;
+}
+
+.editor-rich-surface .secret-block[data-selected] {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+.secret-bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.4rem 0.75rem;
+}
+
+.secret-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	color: var(--muted);
+	font-size: 0.875rem;
+}
+
+.secret-label svg {
+	width: 1em;
+	height: 1em;
+}
+
+.secret-reveal {
+	font: inherit;
+	font-size: 0.875rem;
+}
+
+.secret-note {
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+.secret-note:empty {
+	display: none;
+}
+
+.secret-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	padding: 0 0.75rem 0.75rem;
+	user-select: text;
+}
+
+/* Where a new secret is being written: the panel alone, in a slab of its own. */
+.editor-rich-surface .secret-draft {
+	padding-block-start: 0.75rem;
+	border: 1px dashed var(--border);
+	border-radius: 0.5rem;
+	background: var(--code-surface);
+}
+
+.secret-words {
+	box-sizing: border-box;
+	inline-size: 100%;
+	padding: 0.5rem 0.6rem;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--surface);
+	color: var(--fg);
+	font-family: var(--font-mono);
+	font-size: 0.875rem;
+	line-height: 1.5;
+	resize: vertical;
+}
+
+.secret-said {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+.secret-said:empty {
+	display: none;
+}
+
+.secret-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 0.5rem;
+}
+
+.secret-panel[aria-busy='true'] {
+	cursor: progress;
+}
+
+/*
  * The tools, under the block being edited (`editor/codeTools.ts` says which
  * one that is). Absolute, so the note's text does not move when they appear
  * and settle back when they go; over whatever follows, because a bar that

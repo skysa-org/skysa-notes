@@ -288,11 +288,12 @@ describe('the catalogue', () => {
 		expect(new Set(ids).size).toBe(ids.length);
 	});
 
-	it('offers a picture and a file in the slash menu, after the blocks', () => {
+	it('offers a picture, a file and a secret in the slash menu, after the blocks', () => {
 		expect(SLASH_COMMANDS.slice(0, BLOCK_COMMANDS.length)).toEqual(BLOCK_COMMANDS);
 		expect(SLASH_COMMANDS.slice(BLOCK_COMMANDS.length).map((command) => command.id)).toEqual([
 			'image',
 			'file',
+			'secret',
 		]);
 		expect(INSERT_COMMANDS.map((command) => command.id)).toEqual(['code-block', 'attach']);
 	});
