@@ -1303,6 +1303,152 @@ describe('changes', () => {
 		expect(stub.requests.at(-1)?.url).toContain('/drive/v3/changes');
 	});
 
+	/**
+	 * A round of `pages` pages with nothing on them the app can see, as Drive
+	 * pages through other apps' changes under `drive.file`, the last of them the
+	 * feed's end.
+	 */
+	const emptyFeed = (world: ReturnType<typeof driveWorld>, pages: number) => {
+		world.hooks.intercept = (request) => {
+			if (request.url.pathname !== '/drive/v3/changes') return undefined;
+			const token = request.url.searchParams.get('pageToken') ?? '';
+			const at = token.startsWith('empty-') ? Number(token.slice('empty-'.length)) : 0;
+			return new Response(
+				JSON.stringify(
+					at + 1 < pages
+						? { changes: [], nextPageToken: `empty-${String(at + 1)}` }
+						: { changes: [], newStartPageToken: String(world.feed.length) }
+				)
+			);
+		};
+	};
+	const feedRequests = (world: ReturnType<typeof driveWorld>) =>
+		world.seen.filter((request) => request.url.pathname === '/drive/v3/changes').length;
+	const tagSearches = (world: ReturnType<typeof driveWorld>) =>
+		world.seen.filter(
+			(request) => request.url.searchParams.get('q')?.startsWith('appProperties has') === true
+		).length;
+
+	it('look for the app folder once a round, at its first page, in a feed and in a scan alike', async () => {
+		const world = driveWorld();
+		['a', 'b', 'c'].forEach((name) => {
+			world.add({ id: name, name: `${name}.md`, parent: world.root.id });
+		});
+		world.hooks.pageSize = 1;
+
+		const { cursor } = await drainChanges(world.provider);
+		// A page an item, and one search, as the round begins.
+		expect(tagSearches(world)).toBe(1);
+
+		world.add({ id: 'd', name: 'd.md', parent: world.root.id });
+		world.add({ id: 'e', name: 'e.md', parent: world.root.id });
+		world.seen.length = 0;
+		const { entries } = await drainChanges(world.provider, cursor);
+
+		expect(entries.map((entry) => entry.remoteId).sort()).toEqual(['d', 'e']);
+		expect(feedRequests(world)).toBe(2);
+		expect(tagSearches(world)).toBe(1);
+	});
+
+	it('look for it again on a cursor stored mid-round and read by another session', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		world.add({ id: 'd', name: 'd.md', parent: world.root.id });
+		world.add({ id: 'e', name: 'e.md', parent: world.root.id });
+		world.hooks.pageSize = 1;
+		const half = await world.provider.changes(cursor);
+		expect(half.more).toBe(true);
+
+		world.seen.length = 0;
+		await over(world.doFetch).changes(half.cursor);
+
+		expect(tagSearches(world)).toBe(1);
+	});
+
+	it('read a feed that ends within twice what a scan would take, page by page', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		// A tree of a few items scans in a page, so four pages of feed is the most.
+		emptyFeed(world, 4);
+		world.seen.length = 0;
+
+		const pages = await [1, 2, 3].reduce<Promise<string[]>>(async (done) => {
+			const written = await done;
+			const page = await world.provider.changes(written.at(-1) ?? cursor);
+			expect(page.more).toBe(true);
+			return [...written, page.cursor];
+		}, Promise.resolve([]));
+		const last = await world.provider.changes(pages.at(-1) ?? '');
+
+		expect(last.more).toBe(false);
+		expect(feedRequests(world)).toBe(4);
+		expect(pages.map((page) => (JSON.parse(page) as { walked?: number }).walked)).toEqual([
+			1, 2, 3,
+		]);
+		// A round's end starts the count again.
+		expect(JSON.parse(last.cursor)).not.toHaveProperty('walked');
+	});
+
+	it('reset a feed that runs longer, so the round scans instead', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		emptyFeed(world, 5);
+		world.seen.length = 0;
+
+		await expect(drainChanges(world.provider, cursor)).rejects.toThrow(
+			new CursorResetError('gdrive change feed is longer than a scan')
+		);
+		expect(feedRequests(world)).toBe(4);
+	});
+
+	it('allow a larger library a longer feed: twice its scan', async () => {
+		const world = driveWorld();
+		const { cursor } = await drainChanges(world.provider);
+		// 2,500 items scan in three pages of a thousand, so eight pages of feed.
+		const written = JSON.parse(cursor) as { nodes: unknown[] };
+		const large = JSON.stringify({
+			...written,
+			nodes: [
+				...written.nodes,
+				...Array.from({ length: 2500 }, (_, at) => [
+					`n${String(at)}`,
+					world.root.id,
+					`n${String(at)}.md`,
+					false,
+				]),
+			],
+		});
+
+		emptyFeed(world, 8);
+		await expect(drainChanges(world.provider, large)).resolves.toBeDefined();
+		emptyFeed(world, 9);
+		world.seen.length = 0;
+		await expect(drainChanges(world.provider, large)).rejects.toThrow(CursorResetError);
+		expect(feedRequests(world)).toBe(8);
+	});
+
+	it('scan through the engine when the feed runs long, and find what it would have said', async () => {
+		const world = driveWorld();
+		const store = createMemoryStore();
+		const engine = createSyncEngine({ provider: world.provider, store, now: () => AT });
+		expect((await engine.sync()).status).toBe('ok');
+		// Made since, and on no page the feed will send.
+		world.add({ id: 'new', name: 'new.md', parent: world.root.id, content: 'N' });
+		emptyFeed(world, 50);
+		world.seen.length = 0;
+
+		expect((await engine.sync()).status).toBe('ok');
+
+		expect(feedRequests(world)).toBe(4);
+		expect(
+			world.seen.some((request) => request.url.searchParams.get('q') === 'trashed = false')
+		).toBe(true);
+		expect(store.notes().map((note) => [note.path, note.content])).toContainEqual([
+			'new.md',
+			'N',
+		]);
+	});
+
 	it('do not reset over a 400 about anything but the page token, or a rate limit', async () => {
 		const world = driveWorld();
 		const { cursor } = await drainChanges(world.provider);
