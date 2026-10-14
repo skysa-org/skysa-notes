@@ -118,6 +118,9 @@ export const encrypt = async (
 	plaintext: Uint8Array,
 	recipients: readonly Uint8Array[]
 ): Promise<Uint8Array> => {
+	// A file with no stanza is one nothing can ever open, which age refuses to
+	// write and refuses to read.
+	if (recipients.length === 0) throw new Error('there is no recipient to encrypt to');
 	const fileKey = crypto.getRandomValues(new Uint8Array(FILE_KEY_SIZE));
 	const stanzas = await Promise.all(recipients.map((recipient) => wrap(fileKey, recipient)));
 	const mac = await crypto.subtle.sign(

@@ -8,6 +8,7 @@ import { AgeError } from '../../src/age/errors.js';
 import { encodeHeader, parseHeader } from '../../src/age/header.js';
 import {
 	encodeIdentity,
+	encodeRecipient,
 	generateIdentity,
 	parseIdentity,
 	parseRecipient,
@@ -57,6 +58,12 @@ describe('keys', () => {
 		);
 	});
 
+	it('refuses a recipient no share can be made with', () => {
+		// The all-zero point is of low order: a share with it is the all-zero
+		// secret, which age forbids, so nothing could ever be encrypted to it.
+		expect(parseRecipient(encodeRecipient(new Uint8Array(32)))).toBeUndefined();
+	});
+
 	it('makes a different identity each time', () => {
 		expect(generateIdentity()).not.toEqual(generateIdentity());
 	});
@@ -82,6 +89,7 @@ describe('bech32', () => {
 		['too short a checksum', 'li1dgmt3'],
 		['a checksum over the upper-case prefix', 'A1G7SGD8'],
 		['mixed case', 'A12uEL5L'],
+		['anything longer than a key could be', `a1${'q'.repeat(200)}`],
 	])('refuses %s', (_, text) => {
 		expect(decodeBech32(text)).toBeUndefined();
 	});
@@ -130,6 +138,10 @@ describe('encrypting and decrypting', () => {
 		expect(header.stanzas.map(({ type }) => type)).toEqual(['X25519', 'X25519']);
 		expect(await decrypt(file, [other])).toEqual(bytes(10));
 		expect(await decrypt(file, [identity])).toEqual(bytes(10));
+	});
+
+	it('refuses to write a file no one could open', async () => {
+		await expect(encrypt(bytes(10), [])).rejects.toThrow('no recipient');
 	});
 
 	it('tries each identity it is given', async () => {
@@ -187,6 +199,12 @@ describe('armor', () => {
 
 	it('reads armor without the line ending after it, as a fenced block holds it', () => {
 		expect(dearmor(armor(bytes(50)).trimEnd())).toEqual(bytes(50));
+	});
+
+	it('takes only ASCII whitespace around it', () => {
+		const text = armor(bytes(50));
+		expect(dearmor(`\n \t\r\n${text}\n\n`)).toEqual(bytes(50));
+		expect(() => dearmor(`\uFEFF\n${text}`)).toThrow(AgeError);
 	});
 
 	it('is an armor failure for anything else', () => {

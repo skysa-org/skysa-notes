@@ -37,10 +37,29 @@ export const publicKeyOf = (identity: Uint8Array): Uint8Array => x25519.getPubli
 export const encodeRecipient = (publicKey: Uint8Array): string =>
 	encodeBech32(RECIPIENT_PREFIX, publicKey);
 
-/** The public key `text` spells, or nothing if it spells none. */
+/**
+ * Whether a public key is one a share can be made with: not one of the few
+ * low-order points, which `@noble` refuses rather than give the all-zero
+ * secret age forbids. Asked by making a share with it once.
+ */
+const isUsable = (publicKey: Uint8Array): boolean => {
+	try {
+		x25519.getSharedSecret(new Uint8Array(KEY_SIZE).fill(1), publicKey);
+		return true;
+	} catch {
+		return false;
+	}
+};
+
+/**
+ * The public key `text` spells, or nothing if it spells none, or spells one
+ * nothing could be encrypted to.
+ */
 export const parseRecipient = (text: string): Uint8Array | undefined => {
 	const decoded = decodeBech32(text);
-	return decoded?.prefix === RECIPIENT_PREFIX && decoded.bytes.length === KEY_SIZE
+	return decoded?.prefix === RECIPIENT_PREFIX &&
+		decoded.bytes.length === KEY_SIZE &&
+		isUsable(decoded.bytes)
 		? decoded.bytes
 		: undefined;
 };

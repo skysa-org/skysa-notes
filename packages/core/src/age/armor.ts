@@ -9,9 +9,11 @@ import { AgeError } from './errors.js';
  *
  * Read as age's own reader (`armor` in FiloSottile/age) reads it, which the C2SP
  * vectors hold. A line may end `\n` or `\r\n`. Blank lines may come before the
- * armor and whitespace after it, up to 1 KiB of each. Nothing else is taken: a
- * space at the end of a line, an empty line inside, a short line before the
- * last, or base64 that is not canonical.
+ * armor and whitespace after it, up to 1 KiB of each — ASCII whitespace, where
+ * age's reader also takes Unicode's; the armor is not authenticated, so that
+ * changes only what a hand-edited file may be wrapped in. Nothing else is
+ * taken: a space at the end of a line, an empty line inside, a short line
+ * before the last, or base64 that is not canonical.
  */
 
 const BEGIN = '-----BEGIN AGE ENCRYPTED FILE-----';
@@ -63,7 +65,7 @@ export const dearmor = (text: string): Uint8Array => {
 	const first = { current: nextLine() };
 	// A loop, as in age's reader: each blank line skipped is counted against 1 KiB.
 	// eslint-disable-next-line functional/no-loop-statements
-	while (first.current.trim() === '') {
+	while (WHITESPACE.test(first.current)) {
 		skipped.current += first.current.length + 1;
 		if (skipped.current > MAX_WHITESPACE) throw failure('too much whitespace before the armor');
 		first.current = nextLine();

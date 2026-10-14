@@ -43,7 +43,8 @@ export const sealSecret = async (words: string, recipient: Uint8Array): Promise<
  * A secret's words, opened by whichever of `identities` it was made for. The
  * failure is an `AgeError`, which says which case it was: a block no identity
  * opens is `no match`, and one that opens to bytes that are not UTF-8, which
- * another age tool could have made, is `text`.
+ * another age tool could have made, is `text`. A byte order mark is kept as a
+ * character, as `age -d` keeps it, so sealing the words again changes nothing.
  */
 export const openSecret = async (
 	text: string,
@@ -51,7 +52,7 @@ export const openSecret = async (
 ): Promise<string> => {
 	const bytes = await decrypt(dearmor(text), identities);
 	try {
-		return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+		return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 	} catch {
 		throw new AgeError('text', 'the secret is not UTF-8 text');
 	}
