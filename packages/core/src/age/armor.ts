@@ -34,6 +34,22 @@ export const armor = (file: Uint8Array): string => {
 	return [BEGIN, ...lines, END, ''].join('\n');
 };
 
+/**
+ * Where armor is in `text`: each run from a begin line to the end line after
+ * it, as offsets. What the raw editor's find keeps clear of, so a search never
+ * lands in a secret's ciphertext and a replace never rewrites it. By the two
+ * lines alone, without reading what is between them: a quick look, run on
+ * every keystroke while a search is open.
+ */
+export const armorSpans = (text: string, start = 0): { from: number; to: number }[] => {
+	const from = text.indexOf(BEGIN, start);
+	if (from === -1) return [];
+	const end = text.indexOf(END, from + BEGIN.length);
+	if (end === -1) return [];
+	const to = end + END.length;
+	return [{ from, to }, ...armorSpans(text, to)];
+};
+
 /** Whether `text` opens as armor does, which is all a quick look needs. */
 export const looksArmored = (text: string): boolean => text.trimStart().startsWith(BEGIN);
 

@@ -290,6 +290,18 @@ describe('what a card shows', () => {
 		expect(shown[1]?.runs).toEqual([...picture('').runs, { text: '…', marks: [] }]);
 	});
 
+	it('keeps a secret, which has no words, as the line it is', () => {
+		const secret: PreviewLine = {
+			depth: 0,
+			runs: [{ text: '', marks: [], embed: { kind: 'secret' } }],
+		};
+		expect(cardLines([plain('Front door'), secret, plain('Back door')])).toEqual([
+			plain('Front door'),
+			secret,
+			plain('Back door'),
+		]);
+	});
+
 	it('cuts a line at a picture or a chip only whole', () => {
 		const chip: PreviewLine = {
 			depth: 0,

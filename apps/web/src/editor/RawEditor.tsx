@@ -17,6 +17,8 @@ import { markdownCodeLanguages } from './languages.js';
 import { rawLinks } from './linkRaw.js';
 import { rawWithoutNul } from './noNul.js';
 import { rawAttachments } from './rawAttach.js';
+import { NO_SECRETS, type SecretHost } from './secretHost.js';
+import { rawSecrets } from './secretRaw.js';
 
 /**
  * Raw markdown mode: CodeMirror 6 over the note body. The body string is the
@@ -43,6 +45,12 @@ export interface RawEditorProps {
 	 * same host the rich editor is given. None, and a file is not taken.
 	 */
 	attachments?: AttachmentHost;
+	/**
+	 * How a secret in the note is opened and sealed (`secretHost.ts`): the
+	 * same host the rich editor is given, read as the editor is made. None,
+	 * and a secret is its armor and nothing more.
+	 */
+	secrets?: SecretHost;
 }
 
 /**
@@ -59,6 +67,7 @@ export const RawEditor = ({
 	onUserEdit,
 	onAdopted,
 	attachments,
+	secrets,
 }: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
@@ -76,6 +85,10 @@ export const RawEditor = ({
 	useEffect(() => {
 		files.current = attachments;
 	}, [attachments]);
+	const sealing = useRef(secrets);
+	useEffect(() => {
+		sealing.current = secrets;
+	}, [secrets]);
 	const incoming = useIncomingBody(noteId, body, origin);
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
@@ -111,6 +124,7 @@ export const RawEditor = ({
 					findExtension(),
 					rawWithoutNul(),
 					rawAttachments(() => files.current ?? NO_ATTACHMENTS),
+					rawSecrets(() => sealing.current ?? NO_SECRETS),
 					EditorView.lineWrapping,
 					rawCaretAboveKeyboard(),
 					EditorView.updateListener.of((update) => {

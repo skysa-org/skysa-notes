@@ -1,5 +1,6 @@
 import { type Extension, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
+import { armorSpans } from '@skysa/core';
 
 import {
 	EMPTY_QUERY,
@@ -29,6 +30,23 @@ import {
 
 const setQuery = StateEffect.define<FindQuery>();
 
+/**
+ * The matches in `text`, but none in a secret's armor (docs/ARCHITECTURE.md
+ * §7, "Secrets in a note"): its ciphertext is no words of the note's, a match
+ * in it would be a run of base64 a short search found by chance, and a
+ * replace there would leave a secret no key opens. The rich editor's find
+ * never sees armor, which is no text of its document.
+ */
+const found = (text: string, query: FindQuery): readonly Match[] => {
+	const matches = matchesIn(text, query);
+	const armor = matches.length === 0 ? [] : armorSpans(text);
+	return armor.length === 0
+		? matches
+		: matches.filter((match) =>
+				armor.every((span) => match.to <= span.from || match.from >= span.to)
+			);
+};
+
 const MATCH = Decoration.mark({ class: 'cm-find-match' });
 const CURRENT = Decoration.mark({ class: 'cm-find-match cm-find-current' });
 
@@ -39,7 +57,7 @@ const decorate = (view: EditorView, query: FindQuery): DecorationSet => {
 	if (query.search === '') return Decoration.none;
 	const selection = view.state.selection.main;
 	return Decoration.set(
-		matchesIn(view.state.doc.toString(), query).map((match) =>
+		found(view.state.doc.toString(), query).map((match) =>
 			(match.from === selection.from && match.to === selection.to ? CURRENT : MATCH).range(
 				match.from,
 				match.to
@@ -112,16 +130,16 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 	const show = (query: FindQuery): void => {
 		view.dispatch({ effects: setQuery.of(query) });
 	};
-	const found = (query: FindQuery) => matchesIn(view.state.doc.toString(), query);
+	const foundNow = (query: FindQuery) => found(view.state.doc.toString(), query);
 
 	const goTo = (query: FindQuery, back: boolean): void => {
 		show(query);
-		const target = step(found(query), cursorOf(view), back);
+		const target = step(foundNow(query), cursorOf(view), back);
 		if (target !== undefined) reveal(view, target);
 	};
 
 	return {
-		count: (query) => locate(found(query), cursorOf(view)),
+		count: (query) => locate(foundNow(query), cursorOf(view)),
 		highlight: show,
 		next: (query, back = false) => {
 			goTo(query, back);
@@ -132,7 +150,7 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 			// finds one. Without that, the first press of Replace — before
 			// anything has been found — would rewrite whatever the cursor
 			// happened to be sitting next to.
-			const on = found(query).find(
+			const on = foundNow(query).find(
 				(match) => match.from === cursor.from && match.to === cursor.to
 			);
 			if (on === undefined) {
@@ -148,7 +166,7 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 			goTo(query, false);
 		},
 		replaceAll: (query) => {
-			const matches = found(query);
+			const matches = foundNow(query);
 			if (matches.length === 0) return;
 			// One transaction, so one entry in the undo history: a replace-all the
 			// user regrets is undone by one press of undo, not by one per match.

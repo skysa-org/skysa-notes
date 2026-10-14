@@ -10,7 +10,7 @@ import {
 	generateIdentity,
 	parseIdentity,
 } from '../src/age/keys.js';
-import { previewLines } from '../src/markdown/preview.js';
+import { previewBlocks, previewLines } from '../src/markdown/preview.js';
 import { openSecret, opensSecret, sealSecret } from '../src/sealing.js';
 import {
 	buildEncryptionFile,
@@ -101,11 +101,24 @@ describe('sealing and opening', () => {
 });
 
 describe('a secret in a preview', () => {
-	it('is left out, so no list, card or search holds its ciphertext', () => {
+	it('is left out of the words, so no list, card or search holds its ciphertext', () => {
 		expect(previewLines(`before\n\n\`\`\`age\n${SEALED_HERE}\n\`\`\`\n\nafter\n`)).toEqual([
 			'before',
 			'after',
 		]);
+	});
+
+	it('is a line of its own with only a secret’s mark, for a card to say where one is', () => {
+		const lines = previewBlocks(
+			`before\n\n- \`\`\`age\n  ${SEALED_HERE.replaceAll('\n', '\n  ')}\n  \`\`\`\n`
+		);
+		expect(lines).toHaveLength(2);
+		expect(lines[1]).toEqual({
+			depth: 1,
+			marker: { kind: 'bullet' },
+			runs: [{ text: '', marks: [], embed: { kind: 'secret' } }],
+		});
+		expect(JSON.stringify(lines)).not.toContain('BEGIN AGE');
 	});
 
 	it('leaves an `age` fence that is not armor as the code it is', () => {

@@ -289,3 +289,11 @@ describe('a picture on a card', () => {
 		expect(roomOf(picture())).toBeUndefined();
 	});
 });
+
+describe('a secret on a card', () => {
+	it('says it is one, and nothing of it', () => {
+		const { container } = render(<CardEmbed embed={{ kind: 'secret' }} words="" />);
+		expect(container.textContent).toBe('Secret');
+		expect(container.querySelector('.scratch-card-secret')).not.toBeNull();
+	});
+});

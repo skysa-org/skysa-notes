@@ -193,8 +193,10 @@ export const cardLines = (lines: readonly PreviewLine[]): readonly PreviewLine[]
 			.split(/\s+/u)
 			.filter((word) => word !== '');
 		const height = heightOf(line);
-		// A line of nothing but a picture with no words is still a picture.
-		if (card.cut || (words.length === 0 && height === 1)) return card;
+		// A line of nothing but a picture with no words is still a picture,
+		// and a secret, which has none, still a secret.
+		const shown = words.length > 0 || line.runs.some((run) => run.embed !== undefined);
+		if (card.cut || !shown) return card;
 		if (card.left <= 0 || card.room < height) return { ...card, cut: true };
 		const room = card.room - height;
 		if (words.length <= card.left) {

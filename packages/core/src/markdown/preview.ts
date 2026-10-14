@@ -14,8 +14,10 @@ import { decodeCharacterReferences } from './references.js';
  * link reads as its words without its URL. A code block keeps every character it
  * holds, because inside one nothing is markdown, and that is also what the
  * editor shows there — except a secret (`isSecretBlock`), whose ciphertext is no
- * words of the note's and is left out, so no list, card or search ever holds a
- * run of base64 (docs/ARCHITECTURE.md §7, "Secrets in a note"). Whitespace is
+ * words of the note's: it is a line of its own with no words in it, only a
+ * secret's mark (`PreviewEmbed`), so no list, card or search ever holds a run of
+ * base64, and a card can say "Secret" where the note has one
+ * (docs/ARCHITECTURE.md §7, "Secrets in a note"). Whitespace is
  * collapsed throughout, this being one line of grey text and not a listing.
  *
  * It is what the note list's preview and the search excerpt are both cut from,
@@ -75,11 +77,13 @@ export type PreviewMark = 'strong' | 'emphasis' | 'delete' | 'code' | 'link';
  * scratchpad card draws there too (`apps/web/src/components/Scratchpad.tsx`).
  * The run it is on still says it in words — its alt text, the chip's name —
  * for all that reads only words, so `previewLines` is the same with or
- * without it.
+ * without it. A secret's run says nothing: what the app calls one is the
+ * app's to say, in the reader's language.
  */
 export type PreviewEmbed = Readonly<
 	| { kind: 'image'; src: string; alt: string }
 	| { kind: 'file'; href: string; name: string; fileName: string }
+	| { kind: 'secret' }
 >;
 
 /** Words set one way: a line is a row of these. */
@@ -228,7 +232,7 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 			return as(phrasing(node.children), { heading: node.depth });
 		case 'code':
 			return isSecretBlock(node.lang, node.value)
-				? []
+				? as([[{ text: '', marks: [], embed: { kind: 'secret' } }]])
 				: as(plainLines(node.value), { code: true });
 		case 'html':
 			return EDITOR_BREAK.test(node.value)

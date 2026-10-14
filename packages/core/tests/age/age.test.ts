@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { decrypt, encrypt, opens } from '../../src/age/age.js';
-import { armor, dearmor, looksArmored } from '../../src/age/armor.js';
+import { armor, armorSpans, dearmor, looksArmored } from '../../src/age/armor.js';
 import { decodeBase64, encodeBase64 } from '../../src/age/base64.js';
 import { decodeBech32, encodeBech32 } from '../../src/age/bech32.js';
 import { parseRecipient, publicKeyOf, recipientOf } from '../../src/age/curve.js';
@@ -215,6 +215,18 @@ describe('whether a key opens a file', () => {
 });
 
 describe('armor', () => {
+	it('is found in a text by its two lines, each run once, and none left open', () => {
+		const one = armor(new Uint8Array([1, 2, 3]));
+		const text = `a\n${one}b\n${one}\n-----BEGIN AGE ENCRYPTED FILE-----\nno end`;
+		const spans = armorSpans(text);
+		expect(spans).toHaveLength(2);
+		expect(spans.map((span) => text.slice(span.from, span.to))).toEqual([
+			one.trimEnd(),
+			one.trimEnd(),
+		]);
+		expect(armorSpans('nothing here')).toEqual([]);
+	});
+
 	it('is lines of 64 between the two age lines, ending with a line ending', () => {
 		const text = armor(encrypt(bytes(300), [parseRecipient(RECIPIENT) ?? bytes(32)]));
 		const lines = text.split('\n');

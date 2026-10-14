@@ -410,12 +410,12 @@ const NoteBody = ({
 		run: attachments.pick,
 	});
 	const secrets = useNoteSecrets(note, { report: onProblem });
-	// The rich editor's, for now: raw mode has no secret of its own yet.
+	// Either editor's, as "Attach files" is.
 	useCommand({
 		id: 'note.insertSecret',
 		label: t('notes.commands.insertSecret'),
 		group: t('shell.commands.group.note'),
-		enabled: mode === 'rich',
+		enabled: mode !== undefined,
 		run: secrets.insert,
 	});
 	const attach = useCallback(
@@ -435,6 +435,7 @@ const NoteBody = ({
 					onUserEdit={onUserEdit}
 					onAdopted={onAdopted}
 					attachments={attachments}
+					secrets={secrets.host}
 				/>
 			)}
 			{mode === 'rich' && (

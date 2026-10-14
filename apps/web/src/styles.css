@@ -1999,6 +1999,37 @@ button.danger {
 }
 
 /*
+ * A secret in raw mode (`editor/secretRaw.ts`): Reveal after the fence's
+ * opening, in the app's type rather than the note's, and the panel under the
+ * closing fence, in a slab as a new secret's is in rich mode.
+ */
+.editor-raw .secret-raw-bar {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	margin-inline-start: 0.75rem;
+	font-family: var(--font-sans);
+}
+
+/* No taller than the line it is on, so the fence's lines stay evenly spaced. */
+.editor-raw .secret-raw-bar .secret-reveal {
+	padding-block: 0;
+	font-size: 0.8125rem;
+	line-height: 1.25;
+}
+
+/* In from the gutter as the lines' text is (CodeMirror's `.cm-line` padding). */
+.editor-raw .secret-raw-panel {
+	margin: 0.25rem 2px 0.25rem 6px;
+	padding-block-start: 0.75rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--code-surface);
+	font-family: var(--font-sans);
+	white-space: normal;
+}
+
+/*
  * The tools, under the block being edited (`editor/codeTools.ts` says which
  * one that is). Absolute, so the note's text does not move when they appear
  * and settle back when they go; over whatever follows, because a bar that

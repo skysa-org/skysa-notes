@@ -1,5 +1,5 @@
 export { decrypt, encrypt, opens } from './age.js';
-export { armor, dearmor, looksArmored } from './armor.js';
+export { armor, armorSpans, dearmor, looksArmored } from './armor.js';
 export { AgeError, type AgeFailure } from './errors.js';
 export { parseRecipient, publicKeyOf, recipientOf } from './curve.js';
 export {
