@@ -39,11 +39,12 @@ import {
 	type NoteViewHandle,
 	type ScratchEditing,
 } from '../components/NoteView.js';
+import { type Notice, NotifyContext } from '../components/notify.js';
 import { CardSheet, ScratchModal, Scratchpad } from '../components/Scratchpad.js';
 import { NoteSearchField, SearchQuery } from '../components/SearchField.js';
 import { Sidebar } from '../components/Sidebar.js';
 import { SourcePanel, SourceTabs } from '../components/SourceTabs.js';
-import { Toast, type ToastAction, type ToastTone } from '../components/Toast.js';
+import { Toast } from '../components/Toast.js';
 import { useOpenWhenShown, useScratchpad } from '../components/useScratchpad.js';
 import { t } from '../i18n/t.js';
 import { InstallBanner } from '../install/InstallBanner.js';
@@ -140,18 +141,6 @@ import { type AppSearch, type ConnectOutcome, parseSearch } from './search.js';
  * reopening the PWA at its start URL, or showing a source again, lands them
  * where they were.
  */
-
-/**
- * Something to say to the user, and what kind of thing it is. The tone is
- * settled where the words are: only here is it known whether "it is back, but
- * somewhere else" is good news or a warning.
- */
-interface Notice {
-	readonly message: string;
-	readonly tone: ToastTone;
-	/** Somewhere to go about it, when there is somewhere. */
-	readonly action?: ToastAction | undefined;
-}
 
 /**
  * What to tell the user on the way back from connecting a storage account, or
@@ -1335,6 +1324,14 @@ const Home = () => {
 	 * put this the user acts and the app shows nothing at all.
 	 */
 	const [problem, setProblem] = useState<Notice | null>(null);
+	/**
+	 * What a component inside the shell had to say (`useNotify`): how an import
+	 * went, said over the page rather than in the panel it was started from.
+	 */
+	const [told, setTold] = useState<Notice | null>(null);
+	const dismissTold = useCallback(() => {
+		setTold(null);
+	}, []);
 	/** What is typed into the open note before it is saved, for the list to show. */
 	const [liveEdits] = useState(createLiveEdits);
 	/** A notebook or source being renamed, for everything else that names it. */
@@ -2040,247 +2037,257 @@ const Home = () => {
 		// above the panes goes in the frame around them instead. The toasts are
 		// not laid out at all — they are fixed to the viewport — but they are
 		// here for the same reason: a stack in the grid would take a column.
-		<div className={frameClassName} inert={covered(held, scratch.modal)}>
-			{/*
-			 * Above everything, because it says which app this is: each source
-			 * is its own notes, its own notebooks and its own sync (§6), so the
-			 * panes below all mean something different depending on which of
-			 * these is lit.
-			 */}
-			<SearchQuery>
-				{(query, setQuery) =>
-					compact ? (
-						<CompactBar
-							folder={folder}
-							// In the scratchpad, the card open, named after
-							// "Scratchpad" if it has a name or words to go by.
-							note={scratch.barNote(openNote)}
-							scratchpad={inScratchpad}
-							liveEdits={liveEdits}
-							renamings={renamings}
-							panel={panel}
-							onPanel={setPanel}
-							query={query}
-							onQuery={(next) => {
-								setQuery(next);
-								// The answers hang from the field, over whatever
-								// else is open; a dropdown left open under them
-								// would be a second list behind the first. Only
-								// when one is: shutting none draws the page again,
-								// once, for a letter that changed nothing in it.
-								if (panel !== null) setPanel(null);
-							}}
-							onChoose={openResult}
-							sourceName={resultSourceName}
-							searchOpen={searchOpen}
-							onSearchOpen={setSearchOpen}
-							fieldRef={searchField}
-							onOrigins={setOrigins}
-						/>
+		<NotifyContext.Provider value={setTold}>
+			<div className={frameClassName} inert={covered(held, scratch.modal)}>
+				{/*
+				 * Above everything, because it says which app this is: each source
+				 * is its own notes, its own notebooks and its own sync (§6), so the
+				 * panes below all mean something different depending on which of
+				 * these is lit.
+				 */}
+				<SearchQuery>
+					{(query, setQuery) =>
+						compact ? (
+							<CompactBar
+								folder={folder}
+								// In the scratchpad, the card open, named after
+								// "Scratchpad" if it has a name or words to go by.
+								note={scratch.barNote(openNote)}
+								scratchpad={inScratchpad}
+								liveEdits={liveEdits}
+								renamings={renamings}
+								panel={panel}
+								onPanel={setPanel}
+								query={query}
+								onQuery={(next) => {
+									setQuery(next);
+									// The answers hang from the field, over whatever
+									// else is open; a dropdown left open under them
+									// would be a second list behind the first. Only
+									// when one is: shutting none draws the page again,
+									// once, for a letter that changed nothing in it.
+									if (panel !== null) setPanel(null);
+								}}
+								onChoose={openResult}
+								sourceName={resultSourceName}
+								searchOpen={searchOpen}
+								onSearchOpen={setSearchOpen}
+								fieldRef={searchField}
+								onOrigins={setOrigins}
+							/>
+						) : (
+							<SourceTabs
+								returnTo={returnPath(href)}
+								enterCode={enterCode}
+								search={
+									<NoteSearchField
+										query={query}
+										onQuery={setQuery}
+										onChoose={openResult}
+										sourceName={resultSourceName}
+										fieldRef={searchField}
+									/>
+								}
+							/>
+						)
+					}
+				</SearchQuery>
+				{/*
+				 * Under the bar rather than over it: the bar is the top of the window
+				 * to a compact window's search, which hangs from it to the foot.
+				 */}
+				<InstallBanner />
+				{/*
+				 * For as long as a detached source is the one showing, and not
+				 * dismissable: its notes look like any others, can be opened and
+				 * written in like any others, and sync nowhere. `role="note"` rather
+				 * than `status`, as a standing remark about what is on screen and not
+				 * news of something that has just happened.
+				 */}
+				{source?.detached !== undefined && (
+					<p className="banner" role="note">
+						{detachedText(source)}
+					</p>
+				)}
+				{paletteOpen && (
+					<CommandPalette
+						onClose={() => {
+							setPaletteOpen(false);
+						}}
+					/>
+				)}
+
+				{/* `data-panel` is which pane a compact window is showing as a
+			    dropdown; the stylesheet ignores it in a wide one. */}
+				<div className="app-shell" {...shellProps} {...scratch.shellProps(panel)}>
+					{/* Positioned, like the two panes in a compact window, so it is
+				    never a grid item and takes no column. */}
+					<SourceDropdown
+						compact={compact}
+						enterCode={enterCode}
+						renamings={renamings}
+						returnTo={returnPath(href)}
+						onChosen={() => {
+							setPanel('notebooks');
+						}}
+					/>
+					<Sidebar
+						tree={tree}
+						selectedFolder={folder}
+						onSelectFolder={(path) => {
+							openFolder(path, afterFolder(path));
+						}}
+						onCreateFolder={onCreateFolder}
+						onRenameFolder={onRenameFolder}
+						onDeleteFolder={onDeleteFolder}
+						renamings={renamings}
+						looseNoteCount={looseNoteCount}
+						// In a compact window it is in the source dropdown instead,
+						// which is where a phone user goes for anything about storage.
+						{...(compact ? {} : { footer: <AccountPanel /> })}
+						moving={moving}
+						onPickUp={setMoving}
+						onDrop={onDropInto}
+						onCancelMove={cancelMove}
+						onReveal={() => {
+							if (compact) setPanel('notebooks');
+						}}
+						newNotebookAsked={newNotebookAsked}
+						openNotebooks={openNotebooks}
+						onOpenNotebooks={onOpenNotebooks}
+						onPinFolder={(path, pinned) => {
+							if (activeConnection !== undefined)
+								void setNotebookPinned(db, activeConnection, path, pinned);
+						}}
+						scratchpad={scratchpadRow(scratchpadShown, inScratchpad, scratch.show)}
+					/>
+
+					{inScratchpad ? (
+						scratchPane()
 					) : (
-						<SourceTabs
-							returnTo={returnPath(href)}
-							enterCode={enterCode}
-							search={
-								<NoteSearchField
-									query={query}
-									onQuery={setQuery}
-									onChoose={openResult}
-									sourceName={resultSourceName}
-									fieldRef={searchField}
-								/>
+						<NoteList
+							notes={notes}
+							renamings={renamings}
+							selectedNoteId={noteId}
+							// A note listed from a notebook inside the open one opens that
+							// notebook with it, as a search result does: the sidebar then
+							// lights the notebook the note is in.
+							// Each a step with no dropdown over it, which shuts the notes.
+							onSelectNote={(note) => {
+								select({ folder: parentPath(note.path), note: note.id }, { note });
+							}}
+							onCreateNote={onCreateNote}
+							onCreateNotebook={askNewNotebook}
+							folderPath={folder}
+							// Both queries, not just the tree: the notebooks alone cannot tell
+							// an empty app from one whose notes all sit loose at the root.
+							storeLoaded={tree !== undefined && looseNoteCount !== undefined}
+							onPickUpNote={(note) => {
+								setMoving({
+									kind: 'note',
+									id: note.id,
+									path: note.path,
+									name: titleShown(note.title),
+								});
+							}}
+							onCancelMove={cancelMove}
+							movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
+							unsavedNoteId={unsavedNoteId}
+							liveEdits={liveEdits}
+							// The note's own menu, about the note on the row its `⋯` or
+							// a right-click is on, which need not be the one open. Delete goes through the note pane,
+							// which holds what autosave has not stored yet.
+							pinnedNoteIds={pins?.notes}
+							menuFor={(note) =>
+								noteMenuItems({
+									pinned: pins?.notes.has(note.id),
+									onPin: () => {
+										void setNotePinned(
+											db,
+											note.connectionId,
+											note.id,
+											pins?.notes.has(note.id) !== true
+										);
+									},
+									onMove:
+										moving === null
+											? () => {
+													pickUp({
+														kind: 'note',
+														id: note.id,
+														path: note.path,
+														name: titleShown(note.title),
+													});
+												}
+											: undefined,
+									onDelete: () => {
+										noteView.current?.deleteNote(note);
+									},
+								})
 							}
 						/>
-					)
-				}
-			</SearchQuery>
-			{/*
-			 * Under the bar rather than over it: the bar is the top of the window
-			 * to a compact window's search, which hangs from it to the foot.
-			 */}
-			<InstallBanner />
-			{/*
-			 * For as long as a detached source is the one showing, and not
-			 * dismissable: its notes look like any others, can be opened and
-			 * written in like any others, and sync nowhere. `role="note"` rather
-			 * than `status`, as a standing remark about what is on screen and not
-			 * news of something that has just happened.
-			 */}
-			{source?.detached !== undefined && (
-				<p className="banner" role="note">
-					{detachedText(source)}
-				</p>
-			)}
-			{paletteOpen && (
-				<CommandPalette
-					onClose={() => {
-						setPaletteOpen(false);
-					}}
-				/>
-			)}
+					)}
 
-			{/* `data-panel` is which pane a compact window is showing as a
-			    dropdown; the stylesheet ignores it in a wide one. */}
-			<div className="app-shell" {...shellProps} {...scratch.shellProps(panel)}>
-				{/* Positioned, like the two panes in a compact window, so it is
-				    never a grid item and takes no column. */}
-				<SourceDropdown
-					compact={compact}
-					enterCode={enterCode}
-					renamings={renamings}
-					returnTo={returnPath(href)}
-					onChosen={() => {
-						setPanel('notebooks');
-					}}
-				/>
-				<Sidebar
-					tree={tree}
-					selectedFolder={folder}
-					onSelectFolder={(path) => {
-						openFolder(path, afterFolder(path));
-					}}
-					onCreateFolder={onCreateFolder}
-					onRenameFolder={onRenameFolder}
-					onDeleteFolder={onDeleteFolder}
-					renamings={renamings}
-					looseNoteCount={looseNoteCount}
-					// In a compact window it is in the source dropdown instead,
-					// which is where a phone user goes for anything about storage.
-					{...(compact ? {} : { footer: <AccountPanel /> })}
-					moving={moving}
-					onPickUp={setMoving}
-					onDrop={onDropInto}
-					onCancelMove={cancelMove}
-					onReveal={() => {
-						if (compact) setPanel('notebooks');
-					}}
-					newNotebookAsked={newNotebookAsked}
-					openNotebooks={openNotebooks}
-					onOpenNotebooks={onOpenNotebooks}
-					onPinFolder={(path, pinned) => {
-						if (activeConnection !== undefined)
-							void setNotebookPinned(db, activeConnection, path, pinned);
-					}}
-					scratchpad={scratchpadRow(scratchpadShown, inScratchpad, scratch.show)}
-				/>
+					{noteColumn()}
+				</div>
 
-				{inScratchpad ? (
-					scratchPane()
-				) : (
-					<NoteList
-						notes={notes}
-						renamings={renamings}
-						selectedNoteId={noteId}
-						// A note listed from a notebook inside the open one opens that
-						// notebook with it, as a search result does: the sidebar then
-						// lights the notebook the note is in.
-						// Each a step with no dropdown over it, which shuts the notes.
-						onSelectNote={(note) => {
-							select({ folder: parentPath(note.path), note: note.id }, { note });
-						}}
-						onCreateNote={onCreateNote}
-						onCreateNotebook={askNewNotebook}
-						folderPath={folder}
-						// Both queries, not just the tree: the notebooks alone cannot tell
-						// an empty app from one whose notes all sit loose at the root.
-						storeLoaded={tree !== undefined && looseNoteCount !== undefined}
-						onPickUpNote={(note) => {
-							setMoving({
-								kind: 'note',
-								id: note.id,
-								path: note.path,
-								name: titleShown(note.title),
-							});
-						}}
-						onCancelMove={cancelMove}
-						movingNoteId={moving?.kind === 'note' ? moving.id : undefined}
-						unsavedNoteId={unsavedNoteId}
-						liveEdits={liveEdits}
-						// The note's own menu, about the note on the row its `⋯` or
-						// a right-click is on, which need not be the one open. Delete goes through the note pane,
-						// which holds what autosave has not stored yet.
-						pinnedNoteIds={pins?.notes}
-						menuFor={(note) =>
-							noteMenuItems({
-								pinned: pins?.notes.has(note.id),
-								onPin: () => {
-									void setNotePinned(
-										db,
-										note.connectionId,
-										note.id,
-										pins?.notes.has(note.id) !== true
-									);
-								},
-								onMove:
-									moving === null
-										? () => {
-												pickUp({
-													kind: 'note',
-													id: note.id,
-													path: note.path,
-													name: titleShown(note.title),
-												});
-											}
-										: undefined,
-								onDelete: () => {
-									noteView.current?.deleteNote(note);
-								},
-							})
-						}
-					/>
-				)}
+				{scratchOverlays()}
 
-				{noteColumn()}
+				{/*
+				 * One stack for everything this screen floats over the page. Two
+				 * notices at once is ordinary — a failed create while the account
+				 * just connected is still being read — and in a stack they sit above
+				 * one another instead of on one another.
+				 *
+				 * The undo notice is here rather than placing itself, which is what
+				 * it did while it was the only other card on the screen.
+				 */}
+				<HeldImport source={held} />
+				<TakeShare
+					share={share}
+					source={source}
+					sources={sources}
+					onRead={shareRead}
+					onAdded={shareAdded}
+				/>
+				<div className="toast-stack">
+					{deleted !== null && (
+						<DeletedNotice
+							// A second delete is a new notice with a new clock, not the
+							// first one's time running on under another note's name.
+							key={noteRef(deleted)}
+							title={nameShown(deleted)}
+							onUndo={undoDelete}
+							onDismiss={dismissDeleted}
+							keep={undoFailed === noteRef(deleted)}
+						/>
+					)}
+					{connectNotice !== undefined && (
+						<Toast
+							message={connectNotice.message}
+							tone={connectNotice.tone}
+							action={connectNotice.action}
+							onDismiss={dismissConnect}
+						/>
+					)}
+					{problem !== null && (
+						<Toast
+							message={problem.message}
+							tone={problem.tone}
+							onDismiss={dismissProblem}
+						/>
+					)}
+					{told !== null && (
+						<Toast
+							message={told.message}
+							tone={told.tone}
+							action={told.action}
+							onDismiss={dismissTold}
+						/>
+					)}
+				</div>
 			</div>
-
-			{scratchOverlays()}
-
-			{/*
-			 * One stack for everything this screen floats over the page. Two
-			 * notices at once is ordinary — a failed create while the account
-			 * just connected is still being read — and in a stack they sit above
-			 * one another instead of on one another.
-			 *
-			 * The undo notice is here rather than placing itself, which is what
-			 * it did while it was the only other card on the screen.
-			 */}
-			<HeldImport source={held} />
-			<TakeShare
-				share={share}
-				source={source}
-				sources={sources}
-				onRead={shareRead}
-				onAdded={shareAdded}
-			/>
-			<div className="toast-stack">
-				{deleted !== null && (
-					<DeletedNotice
-						// A second delete is a new notice with a new clock, not the
-						// first one's time running on under another note's name.
-						key={noteRef(deleted)}
-						title={nameShown(deleted)}
-						onUndo={undoDelete}
-						onDismiss={dismissDeleted}
-						keep={undoFailed === noteRef(deleted)}
-					/>
-				)}
-				{connectNotice !== undefined && (
-					<Toast
-						message={connectNotice.message}
-						tone={connectNotice.tone}
-						action={connectNotice.action}
-						onDismiss={dismissConnect}
-					/>
-				)}
-				{problem !== null && (
-					<Toast
-						message={problem.message}
-						tone={problem.tone}
-						onDismiss={dismissProblem}
-					/>
-				)}
-			</div>
-		</div>
+		</NotifyContext.Provider>
 	);
 };
 

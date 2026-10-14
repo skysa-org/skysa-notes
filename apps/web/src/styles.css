@@ -415,10 +415,16 @@ code {
 .update-prompt span,
 .toast span {
 	flex: 1;
+	/* A name with no break in it — a scratch note that is only a URL — wraps
+	   where it has to, rather than holding the card's buttons out past its
+	   edge. */
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 .update-prompt button,
 .toast button {
+	flex: none;
 	font: inherit;
 	padding: 0.35rem 0.75rem;
 	border-radius: 0.375rem;
@@ -433,6 +439,21 @@ code {
 	border-color: transparent;
 	background: transparent;
 	color: var(--muted);
+}
+
+/* A notice's way out (`DismissButton`): an × in the corner, the card leaving
+   it room, so that it does not stand beside Undo, or a link, as a second
+   button of the same weight. */
+.toast {
+	position: relative;
+	padding-inline-end: calc(var(--toast-close) + 0.75rem);
+	--toast-close: 1.75rem;
+}
+
+.toast button.toast-close {
+	position: absolute;
+	inset-block-start: 0.375rem;
+	inset-inline-end: 0.375rem;
 }
 
 /* ---- The sources, across the top --------------------------------------- */
@@ -5009,6 +5030,11 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	.compact-icon {
 		width: var(--tap);
 		height: var(--tap);
+	}
+
+	/* A notice's × is one of them, and its card leaves it that much room. */
+	.toast {
+		--toast-close: var(--tap);
 	}
 
 	/* The editor's pair of tabs: their outline and its padding are inside the
