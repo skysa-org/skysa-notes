@@ -12,9 +12,10 @@ import { setNotePinned } from '../src/store/pins.js';
 import { setDefaultEditorMode } from '../src/store/prefs.js';
 
 /**
- * Pinning, from the `⋯` on a row: the row goes to the top of its list, under
- * its own parent for a notebook inside another, and is tinted; and it stays
- * there when the app is opened again, since it is kept on this device.
+ * Pinning, from the `⋯` on a row: the row goes to the top of its list, or a
+ * notebook to the bottom, under its own parent for a notebook inside another,
+ * and is tinted; and it stays there when the app is opened again, since it is
+ * kept on this device.
  */
 
 afterEach(async () => {
@@ -141,5 +142,41 @@ describe('pinning', () => {
 		expect(
 			within(sidebar()).getByRole('button', { name: /^Beta/ }).classList.contains('pinned')
 		).toBe(true);
+	});
+
+	it('puts a notebook at the bottom, keeps it there, and takes it from the top to the bottom', async () => {
+		await createFolder(db, { parentPath: undefined, name: 'Archive' });
+		await createFolder(db, { parentPath: undefined, name: 'Home' });
+		await createFolder(db, { parentPath: undefined, name: 'Work' });
+		await openApp();
+		await waitFor(() => {
+			expect(notebookNames()).toEqual(['Archive', 'Home', 'Work']);
+		});
+
+		await choose('Archive', 'Pin to bottom');
+
+		await waitFor(() => {
+			expect(notebookNames()).toEqual(['Home', 'Work', 'Archive']);
+		});
+
+		// Opened again, as after a reload: kept on this device.
+		cleanup();
+		await openApp();
+		await waitFor(() => {
+			expect(notebookNames()).toEqual(['Home', 'Work', 'Archive']);
+		});
+
+		await choose('Work', 'Pin to top');
+		await waitFor(() => {
+			expect(notebookNames()).toEqual(['Work', 'Home', 'Archive']);
+		});
+		await choose('Work', 'Pin to bottom');
+		await waitFor(() => {
+			expect(notebookNames()).toEqual(['Home', 'Archive', 'Work']);
+		});
+		await choose('Work', 'Unpin');
+		await waitFor(() => {
+			expect(notebookNames()).toEqual(['Home', 'Work', 'Archive']);
+		});
 	});
 });

@@ -105,7 +105,7 @@ import {
 	undeleteNote,
 } from '../store/notes.js';
 import { setNotebooksOpen } from '../store/openNotebooks.js';
-import { type Pins, setNotebookPinned, setNotePinned } from '../store/pins.js';
+import { type Pins, setNotebookPin, setNotePinned } from '../store/pins.js';
 import { dropMove, type Moving } from '../store/rearrange.js';
 import { createRenamings, type Renamings } from '../store/renaming.js';
 import { scratchMarks } from '../store/scratchpad.js';
@@ -2155,9 +2155,9 @@ const Home = () => {
 						newNotebookAsked={newNotebookAsked}
 						openNotebooks={openNotebooks}
 						onOpenNotebooks={onOpenNotebooks}
-						onPinFolder={(path, pinned) => {
+						onPinFolder={(path, pin) => {
 							if (activeConnection !== undefined)
-								void setNotebookPinned(db, activeConnection, path, pinned);
+								void setNotebookPin(db, activeConnection, path, pin);
 						}}
 						scratchpad={scratchpadRow(scratchpadShown, inScratchpad, scratch.show)}
 					/>

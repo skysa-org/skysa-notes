@@ -15,6 +15,7 @@ import { useCommand } from '../commands/context.js';
 import { Icon } from '../editor/icons.js';
 import { rich } from '../i18n/rich.js';
 import { t } from '../i18n/t.js';
+import { type NotebookPin } from '../store/pins.js';
 import { canDrop, type Moving } from '../store/rearrange.js';
 import { type Renamings } from '../store/renaming.js';
 import { SCRATCHPAD_LABEL } from '../store/scratchpad.js';
@@ -112,10 +113,11 @@ export interface SidebarProps {
 	/** Open or shut these notebooks. */
 	onOpenNotebooks?: (paths: string[], open: boolean) => void;
 	/**
-	 * Pin a notebook to the top of its level, or unpin it. Which are pinned is
-	 * in the tree (`withPins`), which comes in that order.
+	 * Pin a notebook to the top or the bottom of its level, or unpin it
+	 * (`undefined`). Which are pinned is in the tree (`withPins`), which comes
+	 * in that order.
 	 */
-	onPinFolder?: (path: string, pinned: boolean) => void;
+	onPinFolder?: (path: string, pin: NotebookPin | undefined) => void;
 	/**
 	 * The source's scratchpad (docs/ARCHITECTURE.md §7, "The scratchpad"), a
 	 * row above the notebooks while this device shows it: open or not, and the
@@ -349,8 +351,8 @@ interface RowProps {
 	 * that something is inside and whether it is showing.
 	 */
 	expanded?: boolean;
-	/** Pinned to the top of its level on this device (`store/pins.ts`). */
-	pinned?: boolean;
+	/** Pinned to the top or the bottom of its level on this device (`store/pins.ts`). */
+	pinned?: NotebookPin | undefined;
 }
 
 /**
@@ -375,13 +377,13 @@ const Row = ({
 	onMenu,
 	onKeyDown,
 	expanded,
-	pinned = false,
+	pinned,
 }: RowProps) => {
 	const pinId = useId();
 	const allowed = moving !== null && canDrop(moving, path);
 	const classes = [
 		'row',
-		pinned ? 'pinned' : undefined,
+		pinned === undefined ? undefined : 'pinned',
 		selected && moving === null ? 'selected' : undefined,
 		moving?.kind === 'notebook' && moving.path === path ? 'moving' : undefined,
 		allowed && over === path ? 'drop-over' : undefined,
@@ -404,7 +406,7 @@ const Row = ({
 			aria-expanded={expanded}
 			// Said beside the name rather than in it, which is what the row is
 			// found by, and in words as well as the tint (`.row.pinned`).
-			aria-describedby={pinned ? pinId : undefined}
+			aria-describedby={pinned === undefined ? undefined : pinId}
 			draggable={onPickUp !== undefined}
 			onContextMenu={(event) => {
 				// The browser's own menu where this row has none of its own: the
@@ -447,9 +449,9 @@ const Row = ({
 		>
 			<span className="row-label">{name}</span>
 			{count !== undefined && count > 0 && <span className="count">{count}</span>}
-			{pinned && (
+			{pinned !== undefined && (
 				<span id={pinId} hidden>
-					{t('rows.pinned')}
+					{pinned === 'top' ? t('rows.pinned') : t('rows.pinnedBottom')}
 				</span>
 			)}
 		</button>
@@ -764,7 +766,7 @@ const FolderItemView = ({
 						}}
 						onKeyDown={treeKeys(hasChildren, open, toggle)}
 						expanded={hasChildren ? open : undefined}
-						pinned={node.pinned === true}
+						pinned={node.pinned}
 					/>
 				)}
 				{/* Not while its name is being typed, when the row is a field;
@@ -1085,11 +1087,10 @@ export const Sidebar = ({
 		node: FolderNode | undefined
 	): Pick<NotebookActions, 'pinned' | 'onPin'> => {
 		if (onPinFolder === undefined) return {};
-		const pinned = node?.pinned === true;
 		return {
-			pinned,
-			onPin: () => {
-				onPinFolder(path, !pinned);
+			pinned: node?.pinned,
+			onPin: (pin) => {
+				onPinFolder(path, pin);
 			},
 		};
 	};

@@ -646,16 +646,24 @@ const description = (row: HTMLElement): string | null | undefined => {
 };
 
 describe('pinning a notebook', () => {
-	it('is offered first in its menu, and pins the notebook it is about', async () => {
+	it('is offered first in its menu, to either end, and pins the notebook it is about', async () => {
 		const onPinFolder = vi.fn();
 		renderSidebar({ selectedFolder: 'work', onPinFolder });
 
 		await openMenu('personal');
 		const menu = screen.getByRole('group', { name: 'Notebook “personal”' });
-		expect(within(menu).getAllByRole('button')[0]?.textContent).toBe('Pin to top');
+		expect(
+			within(menu)
+				.getAllByRole('button')
+				.slice(0, 2)
+				.map((item) => item.textContent)
+		).toEqual(['Pin to top', 'Pin to bottom']);
 		await userEvent.click(within(menu).getByRole('button', { name: 'Pin to top' }));
+		expect(onPinFolder).toHaveBeenCalledWith('personal', 'top');
 
-		expect(onPinFolder).toHaveBeenCalledWith('personal', true);
+		await openMenu('personal');
+		await userEvent.click(await screen.findByRole('button', { name: 'Pin to bottom' }));
+		expect(onPinFolder).toHaveBeenLastCalledWith('personal', 'bottom');
 	});
 
 	it('shows one inside another first under its parent, tinted, said to be pinned, and unpins it', async () => {
@@ -683,7 +691,38 @@ describe('pinning a notebook', () => {
 		await openMenu('meetings');
 		await userEvent.click(await screen.findByRole('button', { name: 'Unpin' }));
 
-		expect(onPinFolder).toHaveBeenCalledWith('work/meetings', false);
+		expect(onPinFolder).toHaveBeenCalledWith('work/meetings', undefined);
+	});
+
+	it('shows one pinned to the bottom last under its parent, tinted, said so, and moves it to the top', async () => {
+		const onPinFolder = vi.fn();
+		renderSidebar({
+			tree: withPins(
+				buildFolderTree({ paths: ['personal', 'work', 'work/archive', 'work/meetings'] }),
+				new Set(),
+				new Set(['work/archive'])
+			),
+			onPinFolder,
+		});
+
+		expect(
+			[...document.querySelectorAll('.row-label')].map((label) => label.textContent)
+		).toEqual(['personal', 'work', 'meetings', 'archive']);
+		const pinned = screen.getByRole('button', { name: /^archive/ });
+		expect(pinned.classList.contains('pinned')).toBe(true);
+		expect(description(pinned)).toBe('Pinned to bottom');
+
+		await openMenu('archive');
+		const menu = screen.getByRole('group', { name: 'Notebook “archive”' });
+		expect(
+			within(menu)
+				.getAllByRole('button')
+				.slice(0, 2)
+				.map((item) => item.textContent)
+		).toEqual(['Pin to top', 'Unpin']);
+		await userEvent.click(within(menu).getByRole('button', { name: 'Pin to top' }));
+
+		expect(onPinFolder).toHaveBeenCalledWith('work/archive', 'top');
 	});
 });
 

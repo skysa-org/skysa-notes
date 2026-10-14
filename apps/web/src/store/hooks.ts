@@ -131,7 +131,7 @@ export const usePinnedTree = (connectionId: string | undefined): PinnedTree => {
 			notePaths: notes.map((note) => note.path).filter((path) => !isScratchPath(path)),
 			filePaths: filePaths.filter((path) => !isScratchPath(path)),
 		});
-		const kept = keptTree(before.current, withPins(tree, pins.notebooks));
+		const kept = keptTree(before.current, withPins(tree, pins.notebooks, pins.bottomNotebooks));
 		before.current = kept;
 		return { connectionId, tree: kept, pinned: pinsKey(pins) };
 	}, [connectionId]);

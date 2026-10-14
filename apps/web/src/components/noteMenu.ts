@@ -25,7 +25,7 @@ export const noteMenuItems = ({
 	{ label: t('notes.menu.delete'), onChoose: onDelete, danger: true },
 ];
 
-/** "Pin to top", or "Unpin" where it is pinned: a notebook's and a note's. */
+/** "Pin to top", or "Unpin" where it is pinned: a note's. */
 export const pinItem = (
 	pinned: boolean | undefined,
 	onPin: (() => void) | undefined
