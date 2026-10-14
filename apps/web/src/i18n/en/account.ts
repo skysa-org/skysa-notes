@@ -69,34 +69,40 @@ export const account = {
 	/**
 	 * The status line: how the source's syncing is going, in a few words. It
 	 * does not name the source, whose tab is selected above it; its tooltip and
-	 * the dialog it opens (`details`) do, with the account. `{time}` is a time
-	 * today, or a date.
+	 * the dialog it opens (`details`) do, with the account. One line, whatever
+	 * it says, and cut with "…" where the sidebar is too narrow for it: each
+	 * fits beside the gear and the count of the other devices in a sidebar at
+	 * its widest, and a count comes first, so a cut leaves the numbers
+	 * (2026-10-14). `{time}` is a time today, or a date.
 	 */
 	line: {
 		syncing: 'Syncing…',
 		/** Syncing, held up on this device behind another tab or window of the app (`status.waiting`). */
-		waiting: 'Waiting for another tab',
+		waiting: 'Waiting for a tab',
 		synced: 'Synced',
 		syncedAt: 'Synced {time}',
 		offline: 'Offline',
 		retrying: 'Trying again shortly',
 		notSyncing: 'Not syncing',
-		sending: 'Sending {done} of {total}',
-		receiving: 'Receiving {done} of {total}',
+		/** Changes sent so far in a long sync, of how many there are to send. */
+		sending: '{done} of {total} sent',
+		/** Notes received so far in a long sync, of how many there are to receive. */
+		receiving: '{done} of {total} received',
+		/** A re-scan, with how many notes it has found so far. */
 		looking: {
-			one: 'Looking for notes: {count} found',
-			other: 'Looking for notes: {count} found',
+			one: '{count} note found',
+			other: '{count} notes found',
 		},
 		/** The user paused syncing (`SyncDetails`), until they resume it. */
 		paused: 'Paused',
 		/** A re-scan before it has found enough to count. */
 		lookingStart: 'Looking for notes…',
 		/** Reading what has changed since the last sync, before it has found enough to count. */
-		checking: 'Checking for changes…',
+		checking: 'Checking…',
 		/** The same, with how many changed notes it has found so far. */
 		checkingFound: {
-			one: 'Checking for changes: {count} found',
-			other: 'Checking for changes: {count} found',
+			one: '{count} change found',
+			other: '{count} changes found',
 		},
 	},
 	/** Who the source's account is, as the status line's tooltip begins. */

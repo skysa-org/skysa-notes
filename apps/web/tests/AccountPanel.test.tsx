@@ -2357,7 +2357,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 		const thousand = (1000).toLocaleString();
 		await waitFor(() => {
-			expect(line.textContent).toBe(`Sending 120 of ${thousand}`);
+			expect(line.textContent).toBe(`120 of ${thousand} sent`);
 		});
 		expect(line.title).toBe(
 			`Syncing with Dropbox · ada@example.com\nSending changes to Dropbox: 120 of ${thousand}.\nWork/Plan.md`
@@ -2371,7 +2371,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			progress: { stage: 'receiving', done: 5, total: 30, listing: false },
 		});
 		await waitFor(() => {
-			expect(line.textContent).toBe('Receiving 5 of 30');
+			expect(line.textContent).toBe('5 of 30 received');
 		});
 		expect(line.title).toBe(
 			'Syncing with Dropbox · ada@example.com\nReceiving notes from Dropbox: 5 of 30.'
@@ -2390,11 +2390,11 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		await connected(sync);
 		const line = await naming('ada@example.com');
 		const thousand = (1000).toLocaleString();
-		expect(line.textContent).toBe(`Sending 120 of ${thousand}`);
+		expect(line.textContent).toBe(`120 of ${thousand} sent`);
 
 		sync.say({ phase: 'syncing', progress, waiting: true });
 		await waitFor(() => {
-			expect(line.textContent).toBe('Waiting for another tab');
+			expect(line.textContent).toBe('Waiting for a tab');
 		});
 		expect(line.title).toBe(
 			'Syncing with Dropbox · ada@example.com\nSyncing is waiting for another tab or window of this app to finish with the notes on this device. If this does not go away, close the app’s other tabs.'
@@ -2402,7 +2402,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 
 		sync.say({ phase: 'syncing', progress });
 		await waitFor(() => {
-			expect(line.textContent).toBe(`Sending 120 of ${thousand}`);
+			expect(line.textContent).toBe(`120 of ${thousand} sent`);
 		});
 	});
 
@@ -2413,7 +2413,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 		await connected(sync);
 		const line = await statusLine();
-		expect(line.textContent).toBe('Looking for notes: 40 found');
+		expect(line.textContent).toBe('40 notes found');
 		expect(
 			screen.getByRole('progressbar', { name: 'Sync progress' }).hasAttribute('value')
 		).toBe(false);
@@ -2423,7 +2423,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			progress: { stage: 'scanning', found: 40, done: 10, listing: false },
 		});
 		await waitFor(() => {
-			expect(line.textContent).toBe('Receiving 10 of 40');
+			expect(line.textContent).toBe('10 of 40 received');
 		});
 		const bar = screen.getByRole('progressbar', { name: 'Sync progress' });
 		expect([bar.getAttribute('value'), bar.getAttribute('max')]).toEqual(['10', '40']);
@@ -2438,7 +2438,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		});
 		await connected(sync);
 		const line = await naming('ada@example.com');
-		expect(line.textContent).toBe('Checking for changes…');
+		expect(line.textContent).toBe('Checking…');
 		expect(line.title).toBe(
 			'Syncing with Dropbox · ada@example.com\nChecking Dropbox for changes…'
 		);
@@ -2450,7 +2450,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			progress: { stage: 'receiving', done: 0, total: PROGRESS_FROM, listing: true },
 		});
 		await waitFor(() => {
-			expect(line.textContent).toBe(`Checking for changes: ${String(PROGRESS_FROM)} found`);
+			expect(line.textContent).toBe(`${String(PROGRESS_FROM)} changes found`);
 		});
 		expect(line.title).toBe(
 			`Syncing with Dropbox · ada@example.com\nChecking Dropbox for changes: ${String(PROGRESS_FROM)} changed notes found so far.`
@@ -2464,7 +2464,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 			progress: { stage: 'receiving', done: 0, total: 30, listing: false },
 		});
 		await waitFor(() => {
-			expect(line.textContent).toBe('Receiving 0 of 30');
+			expect(line.textContent).toBe('0 of 30 received');
 		});
 	});
 
@@ -2497,7 +2497,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		const thousand = (1000).toLocaleString();
 
 		await user.click(
-			await screen.findByRole('button', { name: `Receiving 120 of ${thousand}` })
+			await screen.findByRole('button', { name: `120 of ${thousand} received` })
 		);
 
 		const details = await screen.findByRole('dialog', {
@@ -5129,7 +5129,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 
 		const line = await naming('ada@example.com');
 		await waitFor(() => {
-			expect(line.textContent).toBe('Receiving 25 of 400');
+			expect(line.textContent).toBe('25 of 400 received');
 		});
 		expect(line.getAttribute('title')).toBe(
 			'Syncing with Dropbox · ada@example.com\nReceiving notes from Dropbox: 25 of 400.'
@@ -5152,7 +5152,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		});
 		await connected(sync);
 
-		await user.click(await screen.findByRole('button', { name: 'Checking for changes…' }));
+		await user.click(await screen.findByRole('button', { name: 'Checking…' }));
 		const details = await screen.findByRole('dialog', {
 			name: 'Syncing with Dropbox · ada@example.com',
 		});
