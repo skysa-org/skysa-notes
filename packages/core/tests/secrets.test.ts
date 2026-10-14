@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { encrypt } from '../src/age/age.js';
 import { armor } from '../src/age/armor.js';
-import { parseRecipient } from '../src/age/curve.js';
+import { parseRecipient, recipientOf } from '../src/age/curve.js';
 import { AgeError } from '../src/age/errors.js';
 import {
 	encodeIdentity,
@@ -11,7 +11,7 @@ import {
 	parseIdentity,
 } from '../src/age/keys.js';
 import { previewBlocks, previewLines } from '../src/markdown/preview.js';
-import { openSecret, opensSecret, sealSecret } from '../src/sealing.js';
+import { openSecret, opensSecret, resealSecret, sealSecret } from '../src/sealing.js';
 import {
 	buildEncryptionFile,
 	isEncryptionFile,
@@ -19,6 +19,7 @@ import {
 	parseEncryptionFile,
 	readRecoveryKey,
 	recoveryKeyGroups,
+	rewriteSecrets,
 	secretBlocksIn,
 	secretFile,
 	serializeEncryptionFile,
@@ -92,6 +93,25 @@ describe('sealing and opening', () => {
 
 	it('says when no key it is given opens the block', () => {
 		expect(failureOf(() => openSecret(SEALED_HERE, [generateIdentity()]))).toBe('no match');
+	});
+
+	it('seals the same bytes again to another key, text or not', () => {
+		const bytes = new Uint8Array([0xff, 0xfe, 0x00, 0x41]);
+		const block = armor(encrypt(bytes, [recipient])).replace(/\n$/u, '');
+		const other = generateIdentity();
+		const to = parseRecipient(recipientOf(other)) ?? new Uint8Array();
+
+		const resealed = resealSecret(block, [identity], to);
+
+		expect(opensSecret(resealed, [identity])).toBe(false);
+		expect(failureOf(() => openSecret(resealed, [other]))).toBe('text');
+		expect(resealSecret(resealed, [other], recipient)).toMatch(
+			/^-----BEGIN AGE ENCRYPTED FILE-----\n/u
+		);
+		expect(openSecret(resealSecret(SEALED_HERE, [identity], to), [other])).toBe(
+			SEALED_HERE_WORDS
+		);
+		expect(failureOf(() => resealSecret(SEALED_HERE, [other], to))).toBe('no match');
 	});
 
 	it('says when a block opens to bytes that are not text', () => {
@@ -170,6 +190,86 @@ describe('the secrets in a note', () => {
 		expect(opensSecret(SEALED_HERE, [generateIdentity(), identity])).toBe(true);
 		expect(opensSecret(SEALED_HERE, [generateIdentity()])).toBe(false);
 		expect(opensSecret('not armor', [identity])).toBe(false);
+	});
+});
+
+describe('rewriting the secrets in a note', () => {
+	const other = sealSecret('other words', recipient);
+	const fresh = (armor: string): string | undefined =>
+		armor === SEALED_HERE ? other : undefined;
+	const within = (prefix: string, armor: string) =>
+		armor.split('\n').map((line) => `${prefix}${line}`);
+
+	it('writes the new armor in each one’s place, inside its list or quote, and nothing else', () => {
+		const body = [
+			'# Note',
+			'',
+			'```age',
+			SEALED_HERE,
+			'```',
+			'',
+			'- item',
+			'',
+			'  ```age',
+			...within('  ', SEALED_HERE),
+			'  ```',
+			'',
+			'- ```age',
+			...within('  ', SEALED_HERE),
+			'  ```',
+			'',
+			'> ```age',
+			...within('> ', SEALED_HERE),
+			'> ```',
+			'',
+			'```age',
+			SEALED_BY_AGE,
+			'```',
+			'',
+			'```text',
+			SEALED_HERE,
+			'```',
+			'',
+		].join('\n');
+		const rewritten = rewriteSecrets(body, fresh);
+		expect(secretBlocksIn(rewritten)).toEqual([other, other, other, other, SEALED_BY_AGE]);
+		expect(rewritten).toBe(
+			body
+				.replace(`\`\`\`age\n${SEALED_HERE}`, `\`\`\`age\n${other}`)
+				.replaceAll(within('  ', SEALED_HERE).join('\n'), within('  ', other).join('\n'))
+				.replace(within('> ', SEALED_HERE).join('\n'), within('> ', other).join('\n'))
+		);
+	});
+
+	it('gives the body back as it was where nothing changes', () => {
+		const body = `\`\`\`age\n${SEALED_BY_AGE}\n\`\`\`\n`;
+		expect(rewriteSecrets(body, fresh)).toBe(body);
+		// Its lines' endings too, however mixed.
+		const mixed = `a\r\nb\nc\r\n\r\n\`\`\`age\r\n${SEALED_BY_AGE}\r\n\`\`\`\n`;
+		expect(rewriteSecrets(mixed, fresh)).toBe(mixed);
+	});
+
+	it('ends the lines as the body’s first one does', () => {
+		const body = ['a', '', '```age', SEALED_HERE, '```', ''].join('\r\n');
+		expect(rewriteSecrets(body, fresh)).toBe(
+			['a', '', '```age', other, '```', ''].join('\n').replaceAll('\n', '\r\n')
+		);
+	});
+
+	it('rewrites one left open at the end of the note, and leaves it open', () => {
+		expect(rewriteSecrets(`a\n\n\`\`\`age\n${SEALED_HERE}`, fresh)).toBe(
+			`a\n\n\`\`\`age\n${other}`
+		);
+	});
+
+	it('leaves one whose lines are not its armor under the same marks, as only one written by hand is', () => {
+		// The fence is indented, and a line of the armor is not: the parser
+		// takes the line as it is, and writing the fence's indent before it
+		// would change what the block is.
+		const [first = '', ...rest] = SEALED_HERE.split('\n');
+		const body = ['  ```age', first, ...within('  ', rest.join('\n')), '  ```', ''].join('\n');
+		expect(secretBlocksIn(body)).toEqual([SEALED_HERE]);
+		expect(rewriteSecrets(body, () => other)).toBe(body);
 	});
 });
 

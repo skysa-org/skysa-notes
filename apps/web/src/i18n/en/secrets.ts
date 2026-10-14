@@ -70,6 +70,7 @@ export const secrets = {
 			'This source’s key was replaced on another device. Type the new recovery key to open its secrets here.',
 		another:
 			'Paste or type the other key. It is kept on this device beside this source’s own key.',
+		rekey: 'Paste or type the key this source will use from now on. It starts with AGE-SECRET-KEY-1.',
 		notKey: 'That is not a recovery key. Check each group for a mistyped character.',
 		notThis: 'That is a recovery key, but not this source’s.',
 		continue: 'Continue',
@@ -157,6 +158,32 @@ export const secrets = {
 			'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.',
 		useRecovery: 'Use the recovery key',
 	},
+	/** Replacing the source's key with a new one, on an unlocked device. */
+	rekey: {
+		title: 'Replace this source’s key',
+		text: 'A new key takes the place of this source’s key. Secrets made with the old key are encrypted to the new one, and your other devices ask for the new key before they open secrets again.',
+		history:
+			'Copies of your notes kept from before, such as your storage’s version history, can still be opened with the old key.',
+		make: 'Make a new key',
+		paste: 'Use a key I have',
+		same: 'That is this source’s key now. Use another.',
+		/** What replacing the key will do, said before it is done. */
+		resealing: {
+			one: 'One secret will be encrypted to the new key.',
+			other: '{count} secrets will be encrypted to the new key.',
+		},
+		nothing: 'No secrets in this source need to be encrypted again.',
+		others: {
+			one: 'One secret in this source was made with a different key. The new key won’t open it, and it stays as it is.',
+			other: '{count} secrets in this source were made with a different key. The new key won’t open them, and they stay as they are.',
+		},
+		replace: 'Replace key',
+		failed: 'The key could not be replaced in your storage. Try again.',
+		encrypting: 'Encrypting secrets to the new key…',
+		/** The key file names a key this device did not write since the dialog began. */
+		changed:
+			'This source’s key was replaced on another device first, so this key was not used.',
+	},
 	/** A note's secret made with a key the device does not have, and that key typed. */
 	addKey: {
 		title: 'Add this secret’s key',
@@ -179,6 +206,7 @@ export const secrets = {
 		unlock: 'Unlock',
 		lockNow: 'Lock now',
 		change: 'Change how this device unlocks',
+		replaceKey: 'Replace key…',
 		remove: 'Remove from this device',
 		removeTitle: 'Remove the key from this device?',
 		removeText:
@@ -193,5 +221,13 @@ export const secrets = {
 		enrolled: 'This device can unlock secrets now.',
 		replaced: 'This device opens secrets with the new key now, and still with the keys it had.',
 		changed: 'This device unlocks secrets its new way now.',
+		rekeyed: {
+			one: 'The key was replaced, and one secret was encrypted to it.',
+			other: 'The key was replaced, and {count} secrets were encrypted to it.',
+		},
+		rekeyedNone: 'The key was replaced.',
+		/** Stopped before every secret was encrypted to the new key: the device locked, or a write failed. */
+		rekeyedPart:
+			'The key was replaced. Some secrets are still made with the old key, and are encrypted to the new one the next time this device is unlocked.',
 	},
 } as const;

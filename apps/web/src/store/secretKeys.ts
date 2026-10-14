@@ -441,6 +441,7 @@ export const changeUnlock = async (
 		await db.secretKeys.put({
 			connectionId: stored.connectionId,
 			recipient: stored.recipient,
+			...(stored.former === undefined ? {} : { former: stored.former }),
 			...fields,
 		});
 		return true;
@@ -449,11 +450,20 @@ export const changeUnlock = async (
 };
 
 /**
- * The keys an unlocked device holds, replaced by `given` for a new
- * `recipient`, and sealed under the same unlock: the source's key replaced on
- * another device and typed here, with the keys this device held kept beside it
- * so that secrets made with them still open. Nothing, where another tab sealed
- * the keys again meanwhile.
+ * The recipients a source's key had before, once it has `recipient`: the one
+ * it has now added, where that is replaced, and `recipient` taken out, where
+ * the key goes back to one it had.
+ */
+const formerFor = (stored: SecretKeyRecord, recipient: string): string[] =>
+	[...new Set([...(stored.former ?? []), stored.recipient])].filter((each) => each !== recipient);
+
+/**
+ * The keys an unlocked device holds, replaced by `given` for `recipient`, and
+ * sealed under the same unlock: the source's key replaced, here or on another
+ * device and typed here, with the keys this device held kept beside it so that
+ * secrets made with them still open; or one more key kept, with the recipient
+ * as it was. A recipient replaced is remembered (`former`). Nothing, where
+ * another tab sealed the keys again meanwhile.
  */
 export const replaceKeys = async (
 	db: NotesDatabase,
@@ -469,7 +479,13 @@ export const replaceKeys = async (
 	const replaced = await db.transaction('rw', db.secretKeys, async () => {
 		const stored = await db.secretKeys.get(keys.connectionId);
 		if (stored === undefined || !sameBytes(stored.iv, keys.sealedAs)) return false;
-		await db.secretKeys.put({ ...stored, recipient, iv, sealed });
+		await db.secretKeys.put({
+			...stored,
+			recipient,
+			iv,
+			sealed,
+			former: formerFor(stored, recipient),
+		});
 		return true;
 	});
 	return replaced ? { ...keys, recipient, identities, sealedAs: iv } : undefined;
@@ -488,6 +504,8 @@ export interface DevicePasskey {
 export type Enrolment = Pick<SecretKeyRecord, 'recipient' | 'unlock' | 'tries' | 'triedAt'> & {
 	/** Where the device unlocks with its own lock. */
 	device?: DevicePasskey;
+	/** The recipients the source's key had before (`SecretKeyRecord.former`): none, where it was never replaced here. */
+	former: readonly string[];
 };
 
 /** What `UnlockKind` a stored record unlocks with, and its recipient, without unlocking. */
@@ -497,11 +515,12 @@ export const enrolment = (
 ): Promise<Enrolment | undefined> =>
 	db.secretKeys.get(connectionId).then((record) => {
 		if (record === undefined) return undefined;
-		const { recipient, unlock, tries, triedAt, credentialId, salt } = record;
+		const { recipient, unlock, tries, triedAt, credentialId, salt, former } = record;
 		return {
 			recipient,
 			unlock,
 			tries,
+			former: former ?? [],
 			...(triedAt === undefined ? {} : { triedAt }),
 			...(unlock === 'device' && credentialId !== undefined
 				? { device: { credentialId, salt } }

@@ -6,6 +6,13 @@ import { CommandsProvider, useCommands } from '../src/commands/context.js';
 import type { Command } from '../src/commands/registry.js';
 import { NoteView } from '../src/components/NoteView.js';
 import type { AttachmentProblem } from '../src/editor/attachHost.js';
+import {
+	generateIdentity,
+	parseRecipient,
+	recipientOf,
+	resealSecrets,
+	sealSecret,
+} from '../src/secrets/age.js';
 import { db } from '../src/store/db.js';
 import { useNote } from '../src/store/hooks.js';
 import { createNote } from '../src/store/notes.js';
@@ -85,4 +92,44 @@ describe('"Insert secret" from the palette', () => {
 			});
 		}
 	);
+});
+
+describe('a note open as its secrets are encrypted to a new key', () => {
+	it('shows them as they are written, as it would a pull', async () => {
+		await setDefaultEditorMode(db, 'raw');
+		const old = generateIdentity();
+		const fresh = generateIdentity();
+		const to = parseRecipient(recipientOf(old));
+		if (to === undefined) throw new Error('not a recipient');
+		const armor = sealSecret('the door code', to);
+		const note = await createNote(db, {
+			title: 'Codes',
+			body: `Front:\n\n\`\`\`age\n${armor}\n\`\`\`\n`,
+		});
+		render(
+			<CommandsProvider>
+				<Harness id={note.id} onProblem={() => undefined} />
+			</CommandsProvider>
+		);
+		const [, firstLine = ''] = armor.split('\n');
+		await screen.findByText(firstLine);
+
+		const done = await act(() =>
+			resealSecrets(db, note.connectionId, {
+				fresh: [fresh],
+				recipient: recipientOf(fresh),
+				old: [old],
+				going: () => true,
+			})
+		);
+
+		expect(done.secrets).toBe(1);
+		const stored = (await db.notes.toArray()).map((each) => each.body);
+		expect(stored).toHaveLength(1);
+		// The new armor's first line after the one every armor opens with.
+		const [, written = ''] = (stored[0] ?? '').split('\n').slice(3);
+		expect(written).not.toBe(firstLine);
+		await screen.findByText(written);
+		expect(screen.queryByText(firstLine)).toBeNull();
+	});
 });
