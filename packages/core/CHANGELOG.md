@@ -1,5 +1,13 @@
 # @skysa/core
 
+## 1.2.6
+
+### Patch Changes
+
+- b6cd1a1: A file added to the clipboard keeps its name: "Q3 Report.pdf" is shown and saved as "Q3 Report.pdf", not "q3-report.pdf". Only characters a storage provider or a disk refuses are replaced, and the extension is lowercased. Items already on the clipboard keep the names they have.
+- d0ea2ce: A note edited in Google Docs keeps its title, its dates and its place in the app. Docs turns the details at the top of a note into a heading, and the app showed that heading as the note's title, with the details in the note itself. It now reads them back as they were, and tidies the file the next time you edit the note.
+- 81dc561: A note with html in it shows characters such as ’ and “ where the file has `&rsquo;` and `&ldquo;`, in the editor and in the note list. Notes exported from Google Keep showed them as written. The file itself is unchanged.
+
 ## 1.2.5
 
 ### Patch Changes

@@ -1,5 +1,19 @@
 # @skysa/web
 
+## 1.2.6
+
+### Patch Changes
+
+- b6cd1a1: A file added to the clipboard keeps its name: "Q3 Report.pdf" is shown and saved as "Q3 Report.pdf", not "q3-report.pdf". Only characters a storage provider or a disk refuses are replaced, and the extension is lowercased. Items already on the clipboard keep the names they have.
+- 4fc5a58: With the clipboard shown, a file dropped anywhere in the window is added to it, not only on the clipboard itself, and in a compact window too, where the clipboard is in the source menu. A file dropped on a note's text still goes into the note. While files are dragged where a drop would add them, the window says so.
+- 81dc561: A note with html in it shows characters such as ’ and “ where the file has `&rsquo;` and `&ldquo;`, in the editor and in the note list. Notes exported from Google Keep showed them as written. The file itself is unchanged.
+- 283f0f5: The sync status at the foot of the sidebar no longer names the source, so it stays on one line as it changes: "Synced 12:04" instead of "Dropbox · Synced 12:04". The tab above still says which source it is. The status can now be clicked whatever it says, and opens a dialog naming the source and its account.
+- 218f31b: The notice after deleting a note now goes away as soon as you click or tap anywhere else, and closes with an × in its corner, so Undo is the one button on it. A long name with no spaces in it, such as a scratch note that is only a link, now wraps inside the notice instead of pushing its buttons out of the box. How an import went is now said in a notice over the page, like the others, instead of under the storage panel or in the sources menu.
+- Updated dependencies [b6cd1a1]
+- Updated dependencies [d0ea2ce]
+- Updated dependencies [81dc561]
+  - @skysa/core@1.2.6
+
 ## 1.2.5
 
 ### Patch Changes
