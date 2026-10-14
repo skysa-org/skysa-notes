@@ -231,19 +231,23 @@ const syncCount = (progress: SyncProgress | undefined, label: string): SyncCount
 	if (!isLongRun(progress)) return undefined;
 	if (progress.stage === 'scanning') return scanCount(progress, label);
 	if (progress.stage === 'receiving' && progress.listing) {
-		const found = { provider: label, count: progress.total };
 		return {
-			text: t('account.line.checkingFound', found),
-			sentence: t('account.status.checkingFound', found),
+			text: t('account.line.checkingFound', { count: progress.total }),
+			sentence: t('account.status.checkingFound', { provider: label, count: progress.total }),
 			bar: null,
 		};
 	}
-	const of = { provider: label, done: progress.done, total: progress.total };
+	const counted = { done: progress.done, total: progress.total };
+	const of = { provider: label, ...counted };
 	const bar = { value: progress.done, max: progress.total };
 	return progress.stage === 'uploading'
-		? { text: t('account.line.sending', of), sentence: t('account.status.sending', of), bar }
+		? {
+				text: t('account.line.sending', counted),
+				sentence: t('account.status.sending', of),
+				bar,
+			}
 		: {
-				text: t('account.line.receiving', of),
+				text: t('account.line.receiving', counted),
 				sentence: t('account.status.receiving', of),
 				bar,
 			};
@@ -255,14 +259,14 @@ const scanCount = (
 ): SyncCount => {
 	if (listing) {
 		return {
-			text: t('account.line.looking', { provider: label, count: found }),
+			text: t('account.line.looking', { count: found }),
 			sentence: t('account.status.looking', { provider: label, count: found }),
 			bar: null,
 		};
 	}
 	const of = { provider: label, done, total: found };
 	return {
-		text: t('account.line.receiving', of),
+		text: t('account.line.receiving', { done, total: found }),
 		sentence: t('account.status.receiving', of),
 		bar: { value: done, max: found },
 	};
@@ -281,13 +285,13 @@ const listingWords = (
 ): { text: string; sentence: string } | undefined => {
 	if (progress?.stage === 'receiving' && progress.listing) {
 		return {
-			text: t('account.line.checking', { provider: label }),
+			text: t('account.line.checking'),
 			sentence: t('account.status.checking', { provider: label }),
 		};
 	}
 	if (progress?.stage === 'scanning' && progress.listing) {
 		return {
-			text: t('account.line.lookingStart', { provider: label }),
+			text: t('account.line.lookingStart'),
 			sentence: t('account.status.lookingStart', { provider: label }),
 		};
 	}
@@ -384,8 +388,10 @@ const attentionMessage = (
 
 /**
  * How syncing is going, as the status line at the foot of the sidebar says it:
- * a few words after the source's name, with the whole sentence, where there is
- * more to say, as its tooltip. Where syncing has stopped on something the user
+ * a few words, with the whole sentence, where there is more to say, as its
+ * tooltip. Not the source's name, which the selected tab above says: with it,
+ * the line wrapped onto a second line and back as its words changed
+ * (2026-10-14). Where syncing has stopped on something the user
  * has to deal with, the line says only that, and the sentence is said above it
  * (`SyncState`), where it stays until it is dealt with.
  */
@@ -394,7 +400,6 @@ const lineStatus = (
 	label: string,
 	syncable: boolean
 ): { text: string; title: string | null } => {
-	const provider = { provider: label };
 	switch (status.phase) {
 		case 'local':
 			return { text: label, title: null };
@@ -402,7 +407,7 @@ const lineStatus = (
 			// Said over a count: how far it had got is not what is happening.
 			if (status.waiting === true) {
 				return {
-					text: t('account.line.waiting', provider),
+					text: t('account.line.waiting'),
 					title: t('account.status.waiting'),
 				};
 			}
@@ -411,28 +416,25 @@ const lineStatus = (
 			return {
 				text:
 					status.lastSyncAt === undefined
-						? t('account.line.synced', provider)
-						: t('account.line.syncedAt', {
-								...provider,
-								time: when(status.lastSyncAt),
-							}),
+						? t('account.line.synced')
+						: t('account.line.syncedAt', { time: when(status.lastSyncAt) }),
 				title: null,
 			};
 		case 'offline':
 			return {
-				text: t('account.line.offline', provider),
+				text: t('account.line.offline'),
 				title: statusMessage(status, label, syncable),
 			};
 		case 'retrying':
 			return {
-				text: t('account.line.retrying', provider),
+				text: t('account.line.retrying'),
 				title: statusMessage(status, label, syncable),
 			};
 		case 'attention':
-			return { text: t('account.line.notSyncing', provider), title: null };
+			return { text: t('account.line.notSyncing'), title: null };
 		case 'paused':
 			return {
-				text: t('account.line.paused', provider),
+				text: t('account.line.paused'),
 				title: statusMessage(status, label, syncable),
 			};
 	}
@@ -450,7 +452,7 @@ const syncingLine = (
 	if (count === undefined) {
 		const words = listingWords(progress, label);
 		return words === undefined
-			? { text: t('account.line.syncing', { provider: label }), title: null }
+			? { text: t('account.line.syncing'), title: null }
 			: { text: words.text, title: words.sentence };
 	}
 	return {
@@ -710,9 +712,11 @@ const StatusLine = ({
 	text: string;
 	title: string | null;
 	/**
-	 * Given while a sync is going or paused: the words are a button that
-	 * opens what it is doing (`SyncDetails`). Inside the line rather than in
-	 * its place, so the line is the same element whatever it says.
+	 * Given while the source syncs, but during a first import: the words are a
+	 * button that opens how syncing is going, and with which account
+	 * (`SyncDetails`). Inside the
+	 * line rather than in its place, so the line is the same element whatever
+	 * it says.
 	 */
 	onDetails?: () => void;
 	detailsRef?: RefObject<HTMLButtonElement | null>;
@@ -741,14 +745,17 @@ const StatusLine = ({
 /**
  * What a sync is doing, at more length than the line has room for, and the
  * way to pause it — or, paused, to resume it (2026-10-13). Opened from the
- * status line while it syncs or is paused, and live while open: once the run
- * it was opened on has ended, it says how syncing stands, with Close alone.
+ * status line, and live while open: once the run it was opened on has ended,
+ * it says how syncing stands, with Close alone. Opened from it whatever it
+ * says (2026-10-14), since the line no longer names the source, and this
+ * does, with its account, on a phone that has no tooltip to show.
  * Paused, nothing syncs on this device until Sync now, a re-scan, the source
  * shown again after another, or a reload (`pause` in `sync/scheduler.ts`).
  */
 const SyncDetails = ({
 	status,
 	label,
+	displayName,
 	syncable,
 	onPause,
 	onResume,
@@ -757,6 +764,7 @@ const SyncDetails = ({
 }: {
 	status: SchedulerStatus;
 	label: string;
+	displayName: string | null;
 	syncable: boolean;
 	onPause: () => void;
 	onResume: () => void;
@@ -779,7 +787,9 @@ const SyncDetails = ({
 			title={
 				paused
 					? t('account.details.pausedTitle')
-					: t('account.details.title', { provider: label })
+					: displayName === null
+						? t('account.details.title', { provider: label })
+						: t('account.details.titleAs', { provider: label, account: displayName })
 			}
 			onClose={onClose}
 			actions={action}
@@ -788,7 +798,8 @@ const SyncDetails = ({
 			<div className="run-body">
 				{/* Polite, as an import's is: it changes every few files. */}
 				<p role="status" aria-live="polite">
-					{statusMessage(status, label, syncable) ?? label}
+					{statusMessage(status, label, syncable) ??
+						lineStatus(status, label, syncable).text}
 				</p>
 				{syncing && <RunProgress status={status} label={t('account.progress')} />}
 				{syncing && <p className="muted">{t('account.details.pauseHint')}</p>}
@@ -1884,9 +1895,9 @@ const ConnectedFoot = ({
 	const [details, setDetails] = useState(false);
 	const detailsButton = useRef<HTMLButtonElement>(null);
 	// Not while a first import holds the source: its dialog says all of it,
-	// and has its own way out.
-	const tappable =
-		!importingHere(bound) && (status.phase === 'syncing' || status.phase === 'paused');
+	// and has its own way out. Nor while nothing syncs it, when the line is
+	// the source's name and has nothing to open.
+	const tappable = !importingHere(bound) && status.phase !== 'local';
 	const menus = useMenuButtons(openButton);
 	const scratchpad = useScratchpadItem(database, bound.connectionId);
 	const items = storageItems({
@@ -1931,6 +1942,7 @@ const ConnectedFoot = ({
 				<SyncDetails
 					status={status}
 					label={label}
+					displayName={displayName}
 					syncable={isSyncable(bound)}
 					onPause={onPause}
 					onResume={actions.syncNow}
