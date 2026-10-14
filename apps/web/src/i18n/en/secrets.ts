@@ -188,6 +188,9 @@ export const secrets = {
 	addKey: {
 		title: 'Add this secret’s key',
 		text: 'Paste or type the key this secret was made with. This device keeps it beside this source’s own key, to open secrets made with it.',
+		/** The folder names a key this device does not hold: the source's key was replaced on another device. */
+		replaced:
+			'This source’s key was replaced on another device. Type the new recovery key, or the key this secret was made with.',
 		notIt: 'That key does not open this secret.',
 	},
 	/** This device, in a source set up for secrets. */
