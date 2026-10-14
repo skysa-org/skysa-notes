@@ -959,3 +959,107 @@ describe('a save that arrives after its source has gone', () => {
 		expect(await pathsUnder(db, ADA.connectionId)).toEqual(['plan.md', 'unsent.md']);
 	});
 });
+
+describe('a source’s keys for secrets (§7)', () => {
+	const RECIPIENT = 'age1320ux0hct0gutc9fu789mqlqjns4fv84w9cz3ytr9mh8fx86fsasr4slrh';
+	const OTHER = 'age1sd0r6pa4qjt322tp349nupczfwr0frplh2fjmecl9qptk8ruggws7teph3';
+
+	const keysOf = (connectionId: string, recipient = RECIPIENT) => ({
+		connectionId,
+		recipient,
+		unlock: 'pin' as const,
+		salt: new ArrayBuffer(16),
+		rounds: 1,
+		iv: new ArrayBuffer(12),
+		sealed: new ArrayBuffer(48),
+		tries: 0,
+	});
+
+	/** The source set up for secrets, with this device enrolled. */
+	const withSecrets = async (db: NotesDatabase, connectionId: string = ADA.connectionId) => {
+		await db.secretKeys.put(keysOf(connectionId));
+		await db.keyFiles.put({ connectionId, state: 'ok', recipient: RECIPIENT });
+	};
+
+	/** Ada's source set up for secrets, and let go of with a note it was never sent. */
+	const detachedHolding = async () => {
+		const db = await connected();
+		await createNote(db, { ...ada, title: 'Unsent' });
+		await withSecrets(db);
+		await detachConnection(db, ada);
+		return db;
+	};
+
+	it('go with the source when its notes leave the device', async () => {
+		const db = await connected();
+		await pushed(db, 'plan.md');
+		await withSecrets(db);
+
+		await detachConnection(db, ada);
+
+		expect(await db.syncState.get(ADA.connectionId)).toBeUndefined();
+		expect(await db.secretKeys.count()).toBe(0);
+		expect(await db.keyFiles.count()).toBe(0);
+	});
+
+	it('stay while notes it was never sent do, and the key file’s last read goes with the binding', async () => {
+		const db = await detachedHolding();
+
+		expect((await db.syncState.get(ADA.connectionId))?.detached).toBeDefined();
+		expect(await db.secretKeys.get(ADA.connectionId)).toBeDefined();
+		expect(await db.keyFiles.count()).toBe(0);
+	});
+
+	it('go when those notes are discarded', async () => {
+		const db = await detachedHolding();
+
+		expect(
+			await releaseConnection(db, {
+				connectionId: ADA.connectionId,
+				unsynced: 'discard',
+				seen: await shownNow(db),
+			})
+		).toBe('released');
+
+		expect(await db.secretKeys.count()).toBe(0);
+	});
+
+	it('go home with the notes, under a new id for the same account', async () => {
+		const db = await detachedHolding();
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect(await db.secretKeys.get(ADA.connectionId)).toBeUndefined();
+		expect(await db.secretKeys.get('c-ada-2')).toMatchObject({ recipient: RECIPIENT });
+	});
+
+	it('give way to keys the connection they go home to already holds', async () => {
+		const db = await detachedHolding();
+		await db.secretKeys.put(keysOf('c-ada-2', OTHER));
+
+		await bindConnection(db, { ...ADA, connectionId: 'c-ada-2' });
+
+		expect(await db.secretKeys.get(ADA.connectionId)).toBeUndefined();
+		expect((await db.secretKeys.get('c-ada-2'))?.recipient).toBe(OTHER);
+	});
+
+	it('stay where they are under the same id, live again', async () => {
+		const db = await detachedHolding();
+
+		await bindConnection(db, ADA);
+
+		expect((await db.secretKeys.get(ADA.connectionId))?.recipient).toBe(RECIPIENT);
+	});
+
+	it('touch nothing of another source', async () => {
+		const db = await connected();
+		await bindConnection(db, BOB);
+		await withSecrets(db);
+		await withSecrets(db, BOB.connectionId);
+
+		await detachConnection(db, ada);
+
+		expect(await db.secretKeys.get(BOB.connectionId)).toBeDefined();
+		expect(await db.keyFiles.get(BOB.connectionId)).toBeDefined();
+	});
+});

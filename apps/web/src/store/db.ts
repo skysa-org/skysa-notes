@@ -416,7 +416,7 @@ export interface PictureBytesRecord {
 export interface KeyFileRecord {
 	connectionId: string;
 	state: 'none' | 'ok' | 'newer' | 'invalid';
-	/** Where it is `ok` or `newer`: `age1…`. */
+	/** Where it is `ok`: `age1…`, in lower case. */
 	recipient?: string;
 	/** Where there is a file: what a replacement writes over. */
 	remoteId?: string;

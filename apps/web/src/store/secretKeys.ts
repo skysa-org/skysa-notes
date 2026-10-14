@@ -88,7 +88,7 @@ const sealingKey = async (
 			'deriveKey',
 		]);
 		return await crypto.subtle.deriveKey(
-			{ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: rounds },
+			{ name: 'PBKDF2', hash: 'SHA-256', salt: new Uint8Array(salt), iterations: rounds },
 			material,
 			{ name: 'AES-GCM', length: 256 },
 			false,
@@ -99,6 +99,9 @@ const sealingKey = async (
 	}
 };
 
+// WebCrypto is handed views, never bare buffers, which are kept for IndexedDB:
+// a browser takes either, but Node's WebCrypto under jsdom, where the tests
+// run, refuses a buffer.
 const randomBuffer = (size: number): ArrayBuffer =>
 	crypto.getRandomValues(new Uint8Array(size)).buffer;
 
@@ -113,7 +116,14 @@ const seal = async (
 	});
 	const iv = randomBuffer(IV_SIZE);
 	try {
-		return { iv, sealed: await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain) };
+		return {
+			iv,
+			sealed: await crypto.subtle.encrypt(
+				{ name: 'AES-GCM', iv: new Uint8Array(iv) },
+				key,
+				plain
+			),
+		};
 	} finally {
 		plain.fill(0);
 	}
@@ -125,7 +135,11 @@ const open = async (
 	record: Pick<SecretKeyRecord, 'iv' | 'sealed'>
 ): Promise<Uint8Array[] | undefined> => {
 	const plain = await crypto.subtle
-		.decrypt({ name: 'AES-GCM', iv: record.iv }, key, record.sealed)
+		.decrypt(
+			{ name: 'AES-GCM', iv: new Uint8Array(record.iv) },
+			key,
+			new Uint8Array(record.sealed)
+		)
 		.then(
 			(bytes) => new Uint8Array(bytes),
 			() => undefined
@@ -280,7 +294,13 @@ export const unlockKeys = async (
 	});
 	return {
 		status: 'unlocked',
-		keys: { connectionId, recipient: record.recipient, identities, sealing, sealedAs: record.iv },
+		keys: {
+			connectionId,
+			recipient: record.recipient,
+			identities,
+			sealing,
+			sealedAs: record.iv,
+		},
 	};
 };
 
@@ -300,7 +320,11 @@ export const changeUnlock = async (
 	const changed = await db.transaction('rw', db.secretKeys, async () => {
 		const stored = await db.secretKeys.get(keys.connectionId);
 		if (stored === undefined || !sameBytes(stored.iv, keys.sealedAs)) return false;
-		await db.secretKeys.put({ connectionId: stored.connectionId, recipient: stored.recipient, ...fields });
+		await db.secretKeys.put({
+			connectionId: stored.connectionId,
+			recipient: stored.recipient,
+			...fields,
+		});
 		return true;
 	});
 	return changed ? { ...keys, sealing, sealedAs: fields.iv } : undefined;

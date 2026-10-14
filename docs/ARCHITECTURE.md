@@ -527,6 +527,11 @@ pictures     [connectionId + fileId], remoteId?, version? (the original's, as re
              info (what its header says, or null), copies { [variant]: type, width, height,
              size, lastUsedAt }
 pictureBytes [connectionId + fileId + variant], [connectionId + fileId], bytes (ArrayBuffer)
+keyFiles     connectionId, state ('none'|'ok'|'newer'|'invalid'), recipient?, remoteId?, version?
+             (the last read of `.encryption.json`, §7; gone with the binding)
+secretKeys   connectionId, recipient, unlock ('pattern'|'pin'|'password'), salt, rounds, iv,
+             sealed (ArrayBuffers: the identities under AES-GCM), tries, triedAt?
+             (§7; gone when the source's notes leave the device, and carried home with them)
 ```
 
 `syncState` also carries `clipboard?: true`, whether this device shows that source's clipboard (§7, "The clipboard"); not indexed.
@@ -950,7 +955,7 @@ Measured on a real library (2,892 `.md` files and 62 others in 235 folders, 24 M
 - *A new key is shown once*, in groups of five, with Print and Copy. Print is a print stylesheet over the dialog, so the key never becomes a file or a URL of the app's. Setup does not finish until two groups, chosen at random, have been typed back.
 - *It is never stored*: not in the folder, not on the server, and not on a device as it is. If it is lost, and every device's unlock is forgotten or gone, the secrets are gone. The dialog says so in those words before the key is made.
 
-**What the folder holds is the public half** (`.encryption.json` at the root, §3): the recipient (`age1…`) every new secret in the source is encrypted to. A typed recovery key is checked against it at once, since its public half must be the one written there, and it is how a device learns that the key was replaced. It is hidden, so the engine passes over it. A device reads it when a session starts, and again when a pull meets it, as the clipboard's folder is (`SyncOutcome`). Setup writes it only if no other device has: a source that is already set up asks for its recovery key instead.
+**What the folder holds is the public half** (`.encryption.json` at the root, §3): the recipient (`age1…`) every new secret in the source is encrypted to. A typed recovery key is checked against it at once, since its public half must be the one written there, and it is how a device learns that the key was replaced. It is hidden, so the engine passes over it. A device reads it when a session starts, and again when a pull meets it, as the clipboard's folder is (`SyncOutcome.encryption`, `sync/keyFile.ts`, kept in `keyFiles`). A device whose last read found none, and which holds no key for the source, does not ask at a session start, so a device that never uses secrets asks nothing of the folder for them: the pull that meets the file is how it hears that another device set the source up. A file a newer build wrote is read by its version alone, whatever else it says, and is neither encrypted to nor written over. Setup writes it only if no other device has: a source that is already set up asks for its recovery key instead.
 
 **A key that does not open what is already there is said before it is used** (the owner's ask). Setup, and "Replace key" (below), try the key on every `age` block in the source's notes. If any do not open, the dialog says "N secrets in M notes were made with a different key" and offers "Use that key instead", "Add it as well", and "Continue", which leaves those secrets locked. On an unlocked device, a block that no key on the device opens says it was made with a different key and offers "Add its key", rather than saying the unlock was wrong.
 
@@ -960,9 +965,9 @@ Measured on a real library (2,892 `.md` files and 62 others in 235 folders, 24 M
 - a password of at least eight characters;
 - or the device's own lock, where it has one (below).
 
-The identity is wrapped under that unlock and kept in IndexedDB (`secretKeys`, by source), with the recipient the device enrolled with. Nothing about the unlock is written to the folder, and that is the reason for the design. A wrapped copy in the folder could be tried offline by anyone who can read it, the provider included, with nothing counting the tries. A pattern is one of 389,112 and a four-digit PIN one of 10,000, and no key stretching makes either last against that. On the device, a pattern stops someone holding the phone, and a password holds up against a copy of the disk.
+The identity is wrapped under that unlock and kept in IndexedDB (`secretKeys`, by source, `store/secretKeys.ts`), with the recipient the device enrolled with. A device's keys stay while the source's notes do, a detached source's included, and go home with them when the account is connected again. Nothing about the unlock is written to the folder, and that is the reason for the design. A wrapped copy in the folder could be tried offline by anyone who can read it, the provider included, with nothing counting the tries. A pattern is one of 389,112 and a four-digit PIN one of 10,000, and no key stretching makes either last against that. On the device, a pattern stops someone holding the phone, and a password holds up against a copy of the disk.
 - *Wrapping.* Pattern, PIN and password wrap the key with AES-GCM under PBKDF2-SHA-256 (600,000 rounds, a salt per device), both from WebCrypto. Argon2 would be better, but it needs WebAssembly, or a JavaScript port too slow to help, and `script-src` takes nothing for it.
-- *Wrong tries.* After 5 wrong tries, each further try waits 30 s. After 10, the device's copy is deleted and the recovery key is asked for.
+- *Wrong tries.* After 5 wrong tries, each further try waits 30 s. After 10, the device's copy is deleted and the recovery key is asked for. Each try is counted before it is checked, so tries made at once are all counted, and a right one sets the count back.
 - *Changing how a device unlocks* takes the device unlocked by its current unlock, and wraps the key again under the new one. It does not ask for the recovery key (the owner's choice): an unlocked device already holds the key, so asking for it again would protect nothing. A device whose unlock has been forgotten is enrolled again with the recovery key.
 
 **The device's own lock, where there is one** (the owner's choice, 2026-10-14). This is the one thing in the app offered on some devices and not others. It uses WebAuthn's PRF extension: a passkey made on this device (`authenticatorAttachment: 'platform'`, `userVerification: 'required'`) returns the same 32 bytes for the same salt, but only after the device's own check, and those bytes, through HKDF, wrap the identity. The hardware counts the tries.
@@ -986,7 +991,7 @@ The identity is wrapped under that unlock and kept in IndexedDB (`secretKeys`, b
 - *What it lets go.* The identity's bytes are filled with zeros and let go. A typed array can be wiped and a string cannot, which is why the words in a panel are only ever let go of.
 - *No edit is lost.* Every revealed panel closes, but an edit in one is encrypted and saved first, which locking can do because encrypting needs no secret.
 - *The app's own prompts don't count.* A page hidden behind a prompt the app opened itself, such as the device's lock or Print, does not lock.
-- *Each tab* locks and unlocks for itself.
+- *Each tab* locks and unlocks for itself (`secrets/lock.ts`).
 
 **Where else the words could have gone, and why they do not.**
 - *Search, the note list and cards.* `previewBlocks` (`core`) makes a secret a single "Secret" line, with nothing of its ciphertext. Search, the note list's openings and the scratchpad's cards all read from it, so none of them indexes or shows the words, or a run of base64 a short search would match.

@@ -1,0 +1,283 @@
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { createDatabase, type NotesDatabase } from '../src/store/db.js';
+import {
+	changeUnlock,
+	enrol,
+	enrolment,
+	FREE_TRIES,
+	isAcceptedUnlock,
+	MAX_TRIES,
+	PBKDF2_ROUNDS,
+	TRY_WAIT_MS,
+	type Unlock,
+	type UnlockedKeys,
+	unlockKeys,
+} from '../src/store/secretKeys.js';
+
+/**
+ * A source's keys on this device, sealed under how it unlocks
+ * (docs/ARCHITECTURE.md §7, "Secrets in a note"). PBKDF2 runs at a few rounds
+ * here, and at its full count once, to see that it is what is kept.
+ */
+
+const opened: NotesDatabase[] = [];
+
+afterEach(async () => {
+	await Promise.all(opened.splice(0).map((db) => db.delete()));
+});
+
+const ROUNDS = 1000;
+const RECIPIENT = 'age1320ux0hct0gutc9fu789mqlqjns4fv84w9cz3ytr9mh8fx86fsasr4slrh';
+const AT = 1_000_000;
+
+const PIN: Unlock = { kind: 'pin', digits: '2468' };
+const PATTERN: Unlock = { kind: 'pattern', dots: [0, 4, 8, 5] };
+const PASSWORD: Unlock = { kind: 'password', text: 'correct horse' };
+
+const identity = (fill: number) => new Uint8Array(32).fill(fill);
+
+const setup = async () => {
+	const db = createDatabase(`secret-keys-${crypto.randomUUID()}`);
+	opened.push(db);
+	await db.syncState.put({ connectionId: 'c1', clientId: 'install' });
+	const enrolled = async (unlock: Unlock = PIN, identities = [identity(7), identity(9)]) => {
+		const keys = await enrol(db, {
+			connectionId: 'c1',
+			recipient: RECIPIENT,
+			identities,
+			unlock,
+			rounds: ROUNDS,
+		});
+		if (keys === undefined) throw new Error('not enrolled');
+		return keys;
+	};
+	return { db, enrolled };
+};
+
+const unlocked = (result: Awaited<ReturnType<typeof unlockKeys>>): UnlockedKeys => {
+	if (result.status !== 'unlocked') throw new Error(`not unlocked: ${result.status}`);
+	return result.keys;
+};
+
+describe('an unlock', () => {
+	it.each<[string, Unlock, boolean]>([
+		['a pattern of four dots', PATTERN, true],
+		['a pattern of three', { kind: 'pattern', dots: [0, 1, 2] }, false],
+		['a pattern through a dot twice', { kind: 'pattern', dots: [0, 1, 2, 1] }, false],
+		['a pattern off the grid', { kind: 'pattern', dots: [0, 1, 2, 9] }, false],
+		['a PIN of four digits', PIN, true],
+		['a PIN of three', { kind: 'pin', digits: '246' }, false],
+		['a PIN with a letter in it', { kind: 'pin', digits: '24a8' }, false],
+		['a password of eight characters', { kind: 'password', text: 'abcdefgh' }, true],
+		['a password of seven', { kind: 'password', text: 'abcdefg' }, false],
+		[
+			'a password of four emoji, eight UTF-16 units',
+			{ kind: 'password', text: '🔑🔑🔑🔑' },
+			false,
+		],
+	])('is %s: %s', (_, unlock, accepted) => {
+		expect(isAcceptedUnlock(unlock)).toBe(accepted);
+	});
+});
+
+describe('enrolling a device', () => {
+	it('keeps the keys sealed, with the recipient they were enrolled with, and holds them unlocked', async () => {
+		const { db, enrolled } = await setup();
+		const keys = await enrolled();
+
+		expect(keys.recipient).toBe(RECIPIENT);
+		expect(keys.identities).toEqual([identity(7), identity(9)]);
+		const record = await db.secretKeys.get('c1');
+		expect(record).toMatchObject({
+			recipient: RECIPIENT,
+			unlock: 'pin',
+			rounds: ROUNDS,
+			tries: 0,
+		});
+		expect(await enrolment(db, 'c1')).toEqual({
+			recipient: RECIPIENT,
+			unlock: 'pin',
+			tries: 0,
+		});
+	});
+
+	it('keeps neither the keys nor the unlock as they are', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PASSWORD, [identity(0xab)]);
+		const record = await db.secretKeys.get('c1');
+		const stored = new Uint8Array(record?.sealed ?? new ArrayBuffer(0));
+
+		// 32 bytes of key and AES-GCM's 16-byte tag, and no run of the key in it.
+		expect(stored.length).toBe(48);
+		expect(stored.filter((byte) => byte === 0xab).length).toBeLessThan(8);
+		expect(JSON.stringify(record)).not.toContain('correct horse');
+	});
+
+	it('makes the key with PBKDF2 at 600,000 rounds where it is not told otherwise', async () => {
+		const { db } = await setup();
+		await enrol(db, {
+			connectionId: 'c1',
+			recipient: RECIPIENT,
+			identities: [identity(1)],
+			unlock: PIN,
+		});
+		expect((await db.secretKeys.get('c1'))?.rounds).toBe(PBKDF2_ROUNDS);
+		expect(PBKDF2_ROUNDS).toBe(600_000);
+	});
+
+	it('keeps nothing for a source that has left the device', async () => {
+		const { db } = await setup();
+		await db.syncState.delete('c1');
+		expect(
+			await enrol(db, {
+				connectionId: 'c1',
+				recipient: RECIPIENT,
+				identities: [identity(1)],
+				unlock: PIN,
+				rounds: ROUNDS,
+			})
+		).toBeUndefined();
+		expect(await db.secretKeys.count()).toBe(0);
+	});
+
+	it('refuses an unlock that is too short, and no keys at all', async () => {
+		const { db } = await setup();
+		const input = { connectionId: 'c1', recipient: RECIPIENT, rounds: ROUNDS };
+		await expect(
+			enrol(db, {
+				...input,
+				identities: [identity(1)],
+				unlock: { kind: 'pin', digits: '12' },
+			})
+		).rejects.toThrow();
+		await expect(enrol(db, { ...input, identities: [], unlock: PIN })).rejects.toThrow();
+		expect(await db.secretKeys.count()).toBe(0);
+	});
+});
+
+describe('unlocking', () => {
+	it('opens the keys with the unlock they were sealed under', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PATTERN);
+		const keys = unlocked(await unlockKeys(db, 'c1', PATTERN, AT));
+		expect(keys.identities).toEqual([identity(7), identity(9)]);
+		expect(keys.recipient).toBe(RECIPIENT);
+	});
+
+	it('takes a password typed in another normal form as the same password', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled({ kind: 'password', text: 'café au lait' });
+		const result = await unlockKeys(db, 'c1', { kind: 'password', text: 'café au lait' }, AT);
+		expect(result.status).toBe('unlocked');
+	});
+
+	it('counts a wrong try, and one of another kind that spells the same', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PIN);
+		expect(await unlockKeys(db, 'c1', { kind: 'pin', digits: '1357' }, AT)).toEqual({
+			status: 'wrong',
+			triesLeft: MAX_TRIES - 1,
+		});
+		expect(await unlockKeys(db, 'c1', { kind: 'pattern', dots: [2, 4, 6, 8] }, AT)).toEqual({
+			status: 'wrong',
+			triesLeft: MAX_TRIES - 2,
+		});
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(2);
+	});
+
+	it('sets the count back with a right try', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PIN);
+		await unlockKeys(db, 'c1', { kind: 'pin', digits: '0000' }, AT);
+		await unlockKeys(db, 'c1', PIN, AT);
+		const record = await db.secretKeys.get('c1');
+		expect(record?.tries).toBe(0);
+		expect(record?.triedAt).toBeUndefined();
+	});
+
+	it('makes each try after the fifth wrong one wait 30 s, and tries nothing sooner', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PIN);
+		const wrong: Unlock = { kind: 'pin', digits: '0000' };
+		for (let at = 1; at < FREE_TRIES; at += 1) {
+			expect(await unlockKeys(db, 'c1', wrong, AT)).not.toHaveProperty('waitUntil');
+		}
+		expect(await unlockKeys(db, 'c1', wrong, AT)).toEqual({
+			status: 'wrong',
+			triesLeft: MAX_TRIES - FREE_TRIES,
+			waitUntil: AT + TRY_WAIT_MS,
+		});
+
+		// Even the right one waits, and is not counted.
+		expect(await unlockKeys(db, 'c1', PIN, AT + TRY_WAIT_MS - 1)).toEqual({
+			status: 'wait',
+			until: AT + TRY_WAIT_MS,
+		});
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(FREE_TRIES);
+		expect((await unlockKeys(db, 'c1', PIN, AT + TRY_WAIT_MS)).status).toBe('unlocked');
+	});
+
+	it('deletes the device’s copy at the tenth wrong try in a row', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PIN);
+		const wrong: Unlock = { kind: 'pin', digits: '0000' };
+		const results = [];
+		for (let at = 0; at < MAX_TRIES; at += 1) {
+			results.push(await unlockKeys(db, 'c1', wrong, AT + at * TRY_WAIT_MS));
+		}
+		expect(results.at(-2)).toMatchObject({ status: 'wrong', triesLeft: 1 });
+		expect(results.at(-1)).toEqual({ status: 'forgotten' });
+		expect(await db.secretKeys.get('c1')).toBeUndefined();
+		expect(await unlockKeys(db, 'c1', PIN, AT + MAX_TRIES * TRY_WAIT_MS)).toEqual({
+			status: 'none',
+		});
+	});
+
+	it('counts tries made at once, before any is checked', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PIN);
+		const wrong: Unlock = { kind: 'pin', digits: '0000' };
+		await Promise.all([0, 1, 2].map(() => unlockKeys(db, 'c1', wrong, AT)));
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(3);
+	});
+
+	it('says when the device holds no keys for the source', async () => {
+		const { db } = await setup();
+		expect(await unlockKeys(db, 'c1', PIN, AT)).toEqual({ status: 'none' });
+	});
+});
+
+describe('changing how a device unlocks', () => {
+	it('takes the keys unlocked, with no recovery key, and the old unlock opens nothing after', async () => {
+		const { db, enrolled } = await setup();
+		const keys = await enrolled(PIN);
+
+		const changed = await changeUnlock(db, keys, PATTERN, ROUNDS);
+
+		expect(changed?.identities).toEqual(keys.identities);
+		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pattern');
+		expect((await unlockKeys(db, 'c1', PIN, AT)).status).toBe('wrong');
+		expect(unlocked(await unlockKeys(db, 'c1', PATTERN, AT)).identities).toEqual(
+			keys.identities
+		);
+	});
+
+	it('changes nothing where the keys were sealed again in another tab since these were opened', async () => {
+		const { db, enrolled } = await setup();
+		const here = await enrolled(PIN);
+		await enrolled(PASSWORD, [identity(7), identity(9), identity(11)]);
+
+		expect(await changeUnlock(db, here, PATTERN, ROUNDS)).toBeUndefined();
+		expect((await db.secretKeys.get('c1'))?.unlock).toBe('password');
+	});
+
+	it('refuses an unlock that is too short', async () => {
+		const { db, enrolled } = await setup();
+		const keys = await enrolled(PIN);
+		await expect(
+			changeUnlock(db, keys, { kind: 'password', text: 'short' }, ROUNDS)
+		).rejects.toThrow();
+		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pin');
+	});
+});
