@@ -51,6 +51,8 @@ export const secrets = {
 		/** Printed above the key. {source} is the source's name. */
 		printedFor: 'Recovery key for secrets in {source}',
 		printedNote: 'Anyone who has this key can read the secrets. Keep it somewhere safe.',
+		/** The key as a QR code, shown and printed beside its groups, read out. */
+		qr: 'Recovery key as a QR code',
 	},
 	/** Two of the new key's groups, typed back before setup goes on. */
 	check: {
@@ -74,6 +76,13 @@ export const secrets = {
 		notKey: 'That is not a recovery key. Check each group for a mistyped character.',
 		notThis: 'That is a recovery key, but not this source’s.',
 		continue: 'Continue',
+		/** Reading the key from its QR code with the camera, in place of typing it. */
+		scan: 'Scan QR code',
+		scanCancel: 'Cancel scanning',
+		scanning: 'Hold the recovery key’s QR code up to the camera.',
+		notKeyCode: 'That QR code is not a recovery key.',
+		cameraRefused: 'Camera access was refused. Type the key instead.',
+		noCamera: 'No camera could be used. Type the key instead.',
 	},
 	/** Secrets already in the source that the key does not open. */
 	different: {
