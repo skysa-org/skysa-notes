@@ -15,7 +15,13 @@ import {
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
-import { enrol, type Unlock, type UnlockedKeys, unlockKeys } from '../src/store/secretKeys.js';
+import {
+	enrol,
+	enrolment,
+	type Unlock,
+	type UnlockedKeys,
+	unlockKeys,
+} from '../src/store/secretKeys.js';
 
 /**
  * The host an open note's editor opens and seals its secrets through
@@ -312,6 +318,12 @@ describe('adding the key a secret was made with', () => {
 		expect((await screen.findByRole('alert')).textContent).toBe(
 			'That key does not open this secret.'
 		);
+		// What the folder says has been read by now: the key was not replaced.
+		expect(
+			screen.getByText(
+				'Paste or type the key this secret was made with. This device keeps it beside this source’s own key, to open secrets made with it.'
+			)
+		).toBeTruthy();
 		await typeKey(h, theirs);
 
 		expect(await adding).toBe(true);
@@ -327,6 +339,71 @@ describe('adding the key a secret was made with', () => {
 		if (reopened.status !== 'unlocked') throw new Error('not unlocked');
 		expect(reopened.keys.identities).toEqual([h.identity, theirs]);
 		expect(reopened.keys.recipient).toBe(recipientOf(h.identity));
+	});
+
+	it('keeps the key the folder names as the source’s, first, where it was replaced on another device', async () => {
+		const h = await setup();
+		await h.unlock();
+		const fresh = generateIdentity();
+		await h.db.keyFiles.put({
+			connectionId: 'c1',
+			state: 'ok',
+			recipient: recipientOf(fresh),
+			version: 'v2',
+		});
+		const armor = h.sealedFor('after the change', fresh);
+		expect(await h.secrets().host.open(armor)).toEqual({ state: 'other' });
+
+		const adding = h.secrets().host.addKey(armor);
+		expect(
+			await screen.findByText(
+				'This source’s key was replaced on another device. Type the new recovery key, or the key this secret was made with.'
+			)
+		).toBeTruthy();
+		await typeKey(h, fresh);
+
+		expect(await adding).toBe(true);
+		expect(await h.secrets().host.open(armor)).toMatchObject({
+			state: 'opened',
+			words: 'after the change',
+		});
+		expect(await enrolment(h.db, 'c1')).toMatchObject({
+			recipient: recipientOf(fresh),
+			former: [recipientOf(h.identity)],
+		});
+		// New secrets are made with it from now on.
+		const seal = await h.secrets().host.begin();
+		expect(openSecret(seal?.('new') ?? '', [fresh])).toBe('new');
+		h.lock.lock();
+		const reopened = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		if (reopened.status !== 'unlocked') throw new Error('not unlocked');
+		expect(reopened.keys.identities).toEqual([fresh, h.identity]);
+	});
+
+	it('keeps a secret’s own key beside the others where the source’s was replaced and it is another', async () => {
+		const h = await setup();
+		await h.unlock();
+		await h.db.keyFiles.put({
+			connectionId: 'c1',
+			state: 'ok',
+			recipient: recipientOf(generateIdentity()),
+			version: 'v2',
+		});
+		const theirs = generateIdentity();
+		const armor = h.sealedFor('from the old notes', theirs);
+
+		const adding = h.secrets().host.addKey(armor);
+		await typeKey(h, theirs);
+
+		expect(await adding).toBe(true);
+		expect(await enrolment(h.db, 'c1')).toMatchObject({
+			recipient: recipientOf(h.identity),
+			former: [],
+		});
+		h.lock.lock();
+		const reopened = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		if (reopened.status !== 'unlocked') throw new Error('not unlocked');
+		expect(reopened.keys.identities).toEqual([h.identity, theirs]);
 	});
 
 	it('lets go of each key typed, the one that opens it and the one that does not', async () => {

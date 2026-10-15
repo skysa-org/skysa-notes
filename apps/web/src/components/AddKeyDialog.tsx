@@ -1,10 +1,11 @@
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 
 import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';
 import type { NotesDatabase } from '../store/db.js';
-import { replaceKeys } from '../store/secretKeys.js';
+import { enrolment, replaceKeys } from '../store/secretKeys.js';
 import { PasteKey } from './PasteKey.js';
 import { SecretsModal } from './UnlockDialog.js';
 
@@ -27,6 +28,12 @@ export interface AddKeyDialogProps {
  * sealed with the keys this device holds for the source, under the unlock it
  * has. It belongs to this device; other devices ask for it as they meet
  * such a secret.
+ *
+ * Where the folder names a key the device does not hold, the source's key was
+ * replaced on another device (§7, "Replacing the key"), and a secret made
+ * with it is one this device cannot open. That key, typed here, is kept as
+ * the source's, first, with the keys the device held beside it, as the
+ * Secrets dialog keeps it.
  */
 export const AddKeyDialog = ({
 	database,
@@ -39,6 +46,15 @@ export const AddKeyDialog = ({
 }: AddKeyDialogProps) => {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>(undefined);
+	const replacedElsewhere = useLiveQuery(async () => {
+		const [file, enrolled] = await Promise.all([
+			database.keyFiles.get(connectionId),
+			enrolment(database, connectionId),
+		]);
+		return (
+			file?.state === 'ok' && enrolled !== undefined && file.recipient !== enrolled.recipient
+		);
+	}, [database, connectionId]);
 
 	const opens = async (identity: Uint8Array): Promise<string | undefined> => {
 		const { opensSecret } = await age();
@@ -49,6 +65,8 @@ export const AddKeyDialog = ({
 		setBusy(true);
 		setError(undefined);
 		try {
+			const { recipientOf } = await age();
+			const file = await database.keyFiles.get(connectionId);
 			// Read now, and handed on with nothing awaited between: `replaceKeys`
 			// copies them before its own, and the lock wipes its own as the page hides.
 			const keys = lock.keys(connectionId);
@@ -56,10 +74,12 @@ export const AddKeyDialog = ({
 				onCancel();
 				return;
 			}
-			const replaced = await replaceKeys(database, keys, keys.recipient, [
-				...keys.identities,
-				identity,
-			]);
+			const named = file?.state === 'ok' ? file.recipient : undefined;
+			// The key the folder names, which the device does not hold, or the
+			// typed key would not have been needed: the source's, replaced.
+			const replaced = await (named === recipientOf(identity)
+				? replaceKeys(database, keys, named, [identity, ...keys.identities])
+				: replaceKeys(database, keys, keys.recipient, [...keys.identities, identity]));
 			if (replaced === undefined) {
 				lock.lock(connectionId);
 				setError(t('secrets.device.changedElsewhere'));
@@ -78,7 +98,11 @@ export const AddKeyDialog = ({
 	return (
 		<SecretsModal title={t('secrets.addKey.title')} onClose={onCancel}>
 			<PasteKey
-				text={t('secrets.addKey.text')}
+				text={
+					replacedElsewhere === true
+						? t('secrets.addKey.replaced')
+						: t('secrets.addKey.text')
+				}
 				check={opens}
 				busy={busy}
 				onKey={(identity) => {
