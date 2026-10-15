@@ -455,6 +455,12 @@ export interface SecretKeyRecord {
 	tries: number;
 	/** When the last try was made, which a try after the fifth waits on. */
 	triedAt?: number;
+	/**
+	 * The recipients the source's key had before it was replaced, whose keys
+	 * the device still holds: a secret made with one of them is encrypted
+	 * afresh to `recipient`. Absent where the key was never replaced here.
+	 */
+	former?: string[];
 }
 
 export interface OpQueueRecord {

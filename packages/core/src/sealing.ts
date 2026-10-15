@@ -34,6 +34,26 @@ export const openSecret = (text: string, identities: readonly Uint8Array[]): str
 };
 
 /**
+ * A secret encrypted afresh to `recipient`, opened by whichever of
+ * `identities` it was made for: what replacing a source's key does to each of
+ * its secrets (docs/ARCHITECTURE.md §7). The bytes inside are sealed again as
+ * they are, text or not, and filled with zeros once they are. Fails as
+ * `openSecret` does.
+ */
+export const resealSecret = (
+	text: string,
+	identities: readonly Uint8Array[],
+	recipient: Uint8Array
+): string => {
+	const bytes = decrypt(dearmor(text), identities);
+	try {
+		return armor(encrypt(bytes, [recipient])).replace(/\n$/, '');
+	} finally {
+		bytes.fill(0);
+	}
+};
+
+/**
  * Whether a block's ciphertext opens with one of `identities`, which is what
  * asking "was this made with this key?" comes to. Only the header is read.
  */

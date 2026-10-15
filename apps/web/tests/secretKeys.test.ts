@@ -103,6 +103,7 @@ describe('enrolling a device', () => {
 			recipient: RECIPIENT,
 			unlock: 'pin',
 			tries: 0,
+			former: [],
 		});
 	});
 
@@ -374,12 +375,35 @@ describe('replacing the source’s key on a device', () => {
 
 		expect(replaced?.recipient).toBe(NEW);
 		expect(replaced?.identities).toEqual([identity(3), identity(7), identity(9)]);
-		expect(await enrolment(db, 'c1')).toMatchObject({ recipient: NEW, unlock: 'pin' });
+		expect(await enrolment(db, 'c1')).toMatchObject({
+			recipient: NEW,
+			unlock: 'pin',
+			former: [RECIPIENT],
+		});
 		expect(unlocked(await unlockKeys(db, 'c1', PIN, AT)).identities).toEqual([
 			identity(3),
 			identity(7),
 			identity(9),
 		]);
+	});
+
+	it('remembers each recipient the key had, through a change of unlock, and not one it goes back to', async () => {
+		const { db, enrolled } = await setup();
+		const first = await replaceKeys(db, await enrolled(PIN), NEW, [identity(3), identity(7)]);
+		if (first === undefined) throw new Error('not replaced');
+		const added = await replaceKeys(db, first, NEW, [...first.identities, identity(5)]);
+		expect((await enrolment(db, 'c1'))?.former).toEqual([RECIPIENT]);
+		if (added === undefined) throw new Error('not added');
+
+		const again = await replaceKeys(db, added, 'age1third', added.identities);
+		if (again === undefined) throw new Error('not replaced');
+		expect((await enrolment(db, 'c1'))?.former).toEqual([RECIPIENT, NEW]);
+		const changed = await changeUnlock(db, again, PASSWORD, ROUNDS);
+		expect((await enrolment(db, 'c1'))?.former).toEqual([RECIPIENT, NEW]);
+		if (changed === undefined) throw new Error('not changed');
+
+		await replaceKeys(db, changed, RECIPIENT, changed.identities);
+		expect((await enrolment(db, 'c1'))?.former).toEqual([NEW, 'age1third']);
 	});
 
 	it('keeps the keys it was given where the tab locks while they are sealed', async () => {
@@ -454,6 +478,7 @@ describe('the device’s own lock', () => {
 			unlock: 'device',
 			tries: 0,
 			device: { credentialId, salt },
+			former: [],
 		});
 		const stored = new Uint8Array(
 			(await db.secretKeys.get('c1'))?.sealed ?? new ArrayBuffer(0)

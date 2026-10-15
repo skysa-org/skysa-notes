@@ -19,6 +19,7 @@ import {
 	purgeNote,
 	renameNote,
 	restoreNote,
+	rewriteNoteBody,
 	saveNoteBody,
 	setNoteEditorMode,
 	setNoteTags,
@@ -121,6 +122,60 @@ describe('saveNoteBody', () => {
 
 	it('rejects an unknown id', async () => {
 		await expect(saveNoteBody(db, 'nope', 'x')).rejects.toThrow(/No note with id/);
+	});
+});
+
+describe('rewriteNoteBody', () => {
+	it('writes the change as an edit made outside the editors: dirty, owed to the remote, from a new origin', async () => {
+		const note = await importNoteFile(db, { path: 'a.md', source: '# A\n\nold\n' });
+
+		const written = await rewriteNoteBody(db, noteKey(note), (body) =>
+			body.replace('old', 'new')
+		);
+
+		expect(written?.body).toBe('# A\n\nnew\n');
+		expect(written?.dirty).toBe(1);
+		expect(written?.title).toBe('A');
+		expect(written?.bodyOrigin).toEqual(expect.any(String));
+		expect(written?.bodyOrigin).not.toBe(note.bodyOrigin);
+		expect(await noteById(db, note.id)).toEqual(written);
+		expect(await db.opQueue.where('noteId').equals(note.id).toArray()).toMatchObject([
+			{ op: 'write' },
+		]);
+	});
+
+	it('changes the body as it is when the write lands', async () => {
+		const note = await importNoteFile(db, { path: 'a.md', source: 'one\n' });
+		await saveNoteBody(db, note.id, 'two\n');
+
+		await rewriteNoteBody(db, noteKey(note), (body) => `${body}three\n`);
+
+		expect((await noteById(db, note.id))?.body).toBe('two\nthree\n');
+	});
+
+	it('keeps an edit typed before it beside the note, rather than writing over it', async () => {
+		const note = await importNoteFile(db, { path: 'a.md', source: 'old\n' });
+		await rewriteNoteBody(db, noteKey(note), () => 'new\n');
+
+		const saved = await saveNoteBody(db, note.id, 'old, and typed\n', {
+			origin: note.bodyOrigin ?? '',
+			note,
+		});
+
+		expect((await noteById(db, note.id))?.body).toBe('new\n');
+		expect(saved.id).not.toBe(note.id);
+		expect(saved.body.trim()).toBe('old, and typed');
+	});
+
+	it('writes nothing where the body stays as it is, or the note is deleted or gone', async () => {
+		const note = await importNoteFile(db, { path: 'a.md', source: 'same\n' });
+
+		expect(await rewriteNoteBody(db, noteKey(note), (body) => body)).toBeUndefined();
+		expect((await noteById(db, note.id))?.dirty).toBe(0);
+		await updateNote(db, note.id, { deletedLocally: 1 });
+		expect(await rewriteNoteBody(db, noteKey(note), () => 'other\n')).toBeUndefined();
+		expect((await noteById(db, note.id))?.body).toBe('same\n');
+		expect(await rewriteNoteBody(db, [note.connectionId, 'gone'], () => 'x')).toBeUndefined();
 	});
 });
 

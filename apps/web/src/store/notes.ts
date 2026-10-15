@@ -644,6 +644,32 @@ const applyBody = (
 		scope
 	);
 
+/**
+ * A note's body changed by `change`, as it is when the write lands, and
+ * written as a user edit made outside this device's editors: what encrypting a
+ * source's secrets to a new key does to each note holding one
+ * (docs/ARCHITECTURE.md §7, "Replacing the key"). Under a new `bodyOrigin`, as
+ * a pull's body is, so an editor open on the note takes it in, and an edit
+ * typed there before it is kept beside it rather than written over it
+ * (`saveNoteBody`). Nothing, where the note is gone, deleted, or `change`
+ * leaves it as it is.
+ */
+export const rewriteNoteBody = (
+	db: NotesDatabase,
+	key: NoteKey,
+	change: (body: string) => string
+): Promise<NoteRecord | undefined> =>
+	db.transaction('rw', writerTables(db), async () => {
+		const note = await db.notes.get(key);
+		if (note === undefined || note.deletedLocally === 1) return undefined;
+		const body = change(note.body);
+		if (body === note.body) return undefined;
+		const [connectionId, id] = key;
+		return applyEdit(db, id, () => ({ body, bodyOrigin: crypto.randomUUID() }), {
+			connectionId,
+		});
+	});
+
 /** Write a new dirty note and owe the remote its file. Inside the caller's transaction. */
 const addEdited = async (db: NotesDatabase, record: NoteRecord): Promise<NoteRecord> => {
 	const source = record.source ?? noteFileContents(record);

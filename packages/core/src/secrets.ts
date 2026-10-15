@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { dearmor } from './age/armor.js';
 import { encodeIdentity, parseIdentity, spellsRecipient } from './age/keys.js';
 import { ENCRYPTION_FILE, ENCRYPTION_SCHEMA_VERSION } from './config.js';
+import { firstLineEnding, toLf, withLineEnding } from './markdown/lineEndings.js';
 import { parse } from './markdown/pipeline.js';
 import { normalizePath } from './paths.js';
 
@@ -48,6 +49,70 @@ export const secretBlocksIn = (body: string): string[] => {
 		return children === undefined ? [] : children.flatMap(inside);
 	};
 	return inside(parse(body));
+};
+
+/** A secret's fence, as the lines of the body it is written on. */
+interface Fence {
+	readonly armor: string;
+	/** The line its fence opens on, counted from 0. */
+	readonly opening: number;
+	/** What each of its lines begins with: the marks of the list or quote it is in. */
+	readonly prefix: string;
+}
+
+/** A line of a fence inside whatever holds it. Armor has no empty line. */
+const lineWithin = (line: string, prefix: string): string => `${prefix}${line}`;
+
+/** Every secret's fence in `text`, whose lines end in `\n`, at any depth. */
+const fencesIn = (text: string, lines: readonly string[]): Fence[] => {
+	const inside = (node: Node): Fence[] => {
+		if (node.type === 'code') {
+			const { lang, value, position } = node as Node & {
+				lang?: string | null;
+				value: string;
+			};
+			if (!isSecretBlock(lang, value) || position === undefined) return [];
+			const opening = position.start.line - 1;
+			const lead = (lines[opening] ?? '').slice(0, position.start.column - 1);
+			// A quote's mark stays, and a list's is as many spaces.
+			return [{ armor: value, opening, prefix: lead.replace(/[^>\s]/gu, ' ') }];
+		}
+		const { children } = node as Partial<Parent>;
+		return children === undefined ? [] : children.flatMap(inside);
+	};
+	return inside(parse(text));
+};
+
+/**
+ * `body` with the armor of each secret in it replaced by what `change` gives
+ * for it, inside whatever list or quote holds its fence: what encrypting a
+ * note's secrets to a new key writes (docs/ARCHITECTURE.md §7, "Replacing the
+ * key"). A secret it gives nothing for is left as it is, as is one whose lines
+ * are not its armor under its list's or quote's marks, which only a fence
+ * written by hand could be. Where a secret is rewritten, the body's lines end
+ * as its first one does.
+ */
+export const rewriteSecrets = (
+	body: string,
+	change: (armor: string) => string | undefined
+): string => {
+	const text = toLf(body);
+	const lines = text.split('\n');
+	const rewritten = fencesIn(text, lines).reduceRight((sofar, fence) => {
+		const held = fence.armor.split('\n');
+		const from = fence.opening + 1;
+		const written = held.every(
+			(line, at) => sofar[from + at] === lineWithin(line, fence.prefix)
+		);
+		const armor = written ? change(fence.armor) : undefined;
+		if (armor === undefined) return sofar;
+		const replaced = armor.split('\n').map((line) => lineWithin(line, fence.prefix));
+		return [...sofar.slice(0, from), ...replaced, ...sofar.slice(from + held.length)];
+	}, lines);
+	if (rewritten === lines) return body;
+	const joined = rewritten.join('\n');
+	const ending = firstLineEnding(body);
+	return ending === undefined || ending === '\n' ? joined : withLineEnding(joined, ending);
 };
 
 /**

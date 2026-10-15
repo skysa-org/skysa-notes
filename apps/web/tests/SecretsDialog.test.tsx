@@ -1,16 +1,23 @@
-import { encodeIdentity, recoveryKeyGroups } from '@skysa/core';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { encodeIdentity, readRecoveryKey, recoveryKeyGroups, secretBlocksIn } from '@skysa/core';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SecretsDialog, type SecretsDialogProps } from '../src/components/SecretsDialog.js';
-import { generateIdentity, parseRecipient, recipientOf, sealSecret } from '../src/secrets/age.js';
+import {
+	generateIdentity,
+	openSecret,
+	opensSecret,
+	parseRecipient,
+	recipientOf,
+	sealSecret,
+} from '../src/secrets/age.js';
 import { type DeviceLock, type Made } from '../src/secrets/deviceLock.js';
 import { type Age, loadAge } from '../src/secrets/loadAge.js';
 import { createSecretsLock, type SecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
-import { enrol, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
+import { enrol, enrolment, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
 import { type KeyFileWrite } from '../src/sync/keyFile.js';
 
 /**
@@ -687,6 +694,401 @@ describe('an enrolled device', () => {
 		await screen.findByText('This device unlocks secrets with a PIN.');
 		await h.user.keyboard('{Escape}');
 		expect(h.onClose).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('replacing the source’s key', () => {
+	/** A device enrolled with the source's key, and any `added` beside it, and unlocked. */
+	const ready = async (written?: KeyFileWrite, added: readonly Uint8Array[] = []) => {
+		const identity = generateIdentity();
+		const recipient = recipientOf(identity);
+		const h = await setup({
+			record: { state: 'ok', recipient },
+			...(written === undefined ? {} : { written }),
+		});
+		const keys = await enrol(h.db, {
+			connectionId: 'c1',
+			recipient,
+			identities: [identity, ...added],
+			unlock: PIN,
+			rounds: ROUNDS,
+		});
+		if (keys === undefined) throw new Error('not enrolled');
+		h.lock.hold(keys);
+		return { ...h, identity, recipient };
+	};
+
+	/** Every secret in the source's notes. */
+	const secretsNow = async (db: NotesDatabase) =>
+		(await db.notes.where('connectionId').equals('c1').toArray()).flatMap((note) =>
+			secretBlocksIn(note.body)
+		);
+
+	/** Replace key…, Use a key I have, and `identity` typed: what replacing with it will do is said. */
+	const pasted = async (h: Harness, identity: Uint8Array) => {
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(identity));
+		await screen.findByRole('button', { name: 'Replace key' });
+	};
+
+	it('makes a new key, has it typed back, and encrypts the secrets made with the old one to it', async () => {
+		const h = await ready();
+		const other = generateIdentity();
+		await secretIn(h.db, h.identity);
+		await secretIn(h.db, h.identity);
+		await secretIn(h.db, other);
+		const before = await h.db.notes.toArray();
+		h.open();
+
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		expect(
+			screen.getByText(/version history, can still be opened with the old key\.$/u)
+		).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Make a new key' }));
+		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		await h.user.type(screen.getByLabelText('Group 2'), shown[1] ?? '');
+		await h.user.type(screen.getByLabelText('Group 7'), shown[6] ?? '');
+		await h.user.click(screen.getByRole('button', { name: 'Check' }));
+
+		expect(await screen.findByText('2 secrets will be encrypted to the new key.')).toBeTruthy();
+		expect(screen.getByRole('alert').textContent).toBe(
+			'One secret in this source was made with a different key. The new key won’t open it, and it stays as it is.'
+		);
+		expect(h.keyFile.write).not.toHaveBeenCalled();
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect(
+			await screen.findByText('The key was replaced, and 2 secrets were encrypted to it.')
+		).toBeTruthy();
+		const fresh = readRecoveryKey(`AGE-SECRET-KEY-1${shown.join('')}`) ?? new Uint8Array();
+		const recipient = recipientOf(fresh);
+		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipient, h.recipient);
+		expect(await enrolment(h.db, 'c1')).toMatchObject({ recipient, former: [h.recipient] });
+		const opened = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		expect(opened.status === 'unlocked' && opened.keys.identities).toEqual([fresh, h.identity]);
+		expect(h.lock.keys('c1')?.recipient).toBe(recipient);
+
+		const blocks = await secretsNow(h.db);
+		const resealed = blocks.filter((block) => opensSecret(block, [fresh]));
+		expect(resealed.map((block) => openSecret(block, [fresh]))).toEqual([
+			'the door code',
+			'the door code',
+		]);
+		expect(blocks.filter((block) => opensSecret(block, [h.identity]))).toEqual([]);
+		expect(blocks.filter((block) => opensSecret(block, [other]))).toHaveLength(1);
+		// Written in from outside the editors, and only where a secret changed.
+		const after = await h.db.notes.toArray();
+		const moved = after.filter(
+			(note) => before.find((was) => was.id === note.id)?.bodyOrigin !== note.bodyOrigin
+		);
+		expect(moved).toHaveLength(2);
+		expect(moved.every((note) => note.dirty === 1)).toBe(true);
+	});
+
+	it('uses a key the user has, but not the one the source has now', async () => {
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
+
+		await typeKey(h, encodeIdentity(h.identity));
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'That is this source’s key now. Use another.'
+		);
+		const theirs = generateIdentity();
+		await h.user.clear(screen.getByLabelText('Recovery key'));
+		await typeKey(h, encodeIdentity(theirs));
+
+		expect(
+			await screen.findByText('One secret will be encrypted to the new key.')
+		).toBeTruthy();
+		expect(screen.queryByRole('alert')).toBeNull();
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+		expect(
+			await screen.findByText('The key was replaced, and one secret was encrypted to it.')
+		).toBeTruthy();
+		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipientOf(theirs), h.recipient);
+		expect((await secretsNow(h.db)).map((block) => opensSecret(block, [theirs]))).toEqual([
+			true,
+		]);
+	});
+
+	it('leaves secrets made with a key added from another source as they are, and keeps it', async () => {
+		const added = generateIdentity();
+		const h = await ready(undefined, [added]);
+		await secretIn(h.db, h.identity);
+		await secretIn(h.db, added);
+		const theirs = generateIdentity();
+		h.open();
+		await pasted(h, theirs);
+
+		expect(screen.getByText('One secret will be encrypted to the new key.')).toBeTruthy();
+		expect(screen.getByRole('alert').textContent).toMatch(
+			/^One secret in this source was made with a different key\./u
+		);
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+		await screen.findByText('The key was replaced, and one secret was encrypted to it.');
+
+		const blocks = await secretsNow(h.db);
+		expect(blocks.map((block) => opensSecret(block, [theirs]))).toContain(true);
+		expect(blocks.filter((block) => opensSecret(block, [added]))).toHaveLength(1);
+		const opened = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		expect(opened.status === 'unlocked' && opened.keys.identities).toEqual([
+			theirs,
+			h.identity,
+			added,
+		]);
+		expect(await enrolment(h.db, 'c1')).toMatchObject({ former: [h.recipient] });
+	});
+
+	it('encrypts what a key the source had before opens, where it was replaced on this device already', async () => {
+		const older = generateIdentity();
+		const h = await ready(undefined, [older]);
+		// Put whole: Dexie's `update` does not keep the record's ArrayBuffers.
+		const record = await h.db.secretKeys.get('c1');
+		if (record === undefined) throw new Error('not enrolled');
+		await h.db.secretKeys.put({ ...record, former: [recipientOf(older)] });
+		await secretIn(h.db, older);
+		await secretIn(h.db, h.identity);
+		const theirs = generateIdentity();
+		h.open();
+		await pasted(h, theirs);
+
+		expect(screen.getByText('2 secrets will be encrypted to the new key.')).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+		await screen.findByText('The key was replaced, and 2 secrets were encrypted to it.');
+		expect((await secretsNow(h.db)).map((block) => opensSecret(block, [theirs]))).toEqual([
+			true,
+			true,
+		]);
+		expect(await enrolment(h.db, 'c1')).toMatchObject({
+			former: [recipientOf(older), h.recipient],
+		});
+	});
+
+	it('takes no key to replace it with where the folder names none by the time it is typed', async () => {
+		const h = await ready();
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
+		expect(await screen.findByLabelText('Recovery key')).toBeTruthy();
+
+		await h.db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+
+		expect(await screen.findByRole('button', { name: 'Put it back' })).toBeTruthy();
+		expect(screen.queryByLabelText('Recovery key')).toBeNull();
+	});
+
+	it('says some are left where encrypting them fails', async () => {
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		const age = async (): Promise<Age> => ({
+			...(await loadAge()),
+			resealSecrets: () => Promise.reject(new Error('the disk is full')),
+		});
+		h.open({ age });
+		await pasted(h, generateIdentity());
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect(
+			await screen.findByText(/^The key was replaced\. Some secrets are still made/u)
+		).toBeTruthy();
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it('says where there is nothing to encrypt again', async () => {
+		const h = await ready();
+		h.open();
+		await pasted(h, generateIdentity());
+
+		expect(
+			screen.getByText('No secrets in this source need to be encrypted again.')
+		).toBeTruthy();
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+		expect(await screen.findByText('The key was replaced.')).toBeTruthy();
+	});
+
+	it('changes nothing where another device replaced the key first, and asks for that key', async () => {
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		const elsewhere = recipientOf(generateIdentity());
+		h.keyFile.write.mockImplementation(async () => {
+			await h.db.keyFiles.put({ connectionId: 'c1', state: 'ok', recipient: elsewhere });
+			return { status: 'changed' };
+		});
+		const before = await h.db.notes.toArray();
+		h.open();
+		await pasted(h, generateIdentity());
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect(
+			await screen.findByText(
+				'This source’s key was replaced on another device first, so this key was not used.'
+			)
+		).toBeTruthy();
+		expect(
+			screen.getByText(/replaced on another device\. Type the new recovery key/u)
+		).toBeTruthy();
+		expect(await enrolment(h.db, 'c1')).toMatchObject({ recipient: h.recipient, former: [] });
+		expect(await h.db.notes.toArray()).toEqual(before);
+	});
+
+	it('goes on where the key file was written on a try that failed after it', async () => {
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		const theirs = generateIdentity();
+		h.keyFile.write.mockImplementation(async (connectionId: string, recipient: string) => {
+			await h.db.keyFiles.put({ connectionId, state: 'ok', recipient });
+			return { status: 'changed' };
+		});
+		h.open();
+		await pasted(h, theirs);
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect(
+			await screen.findByText('The key was replaced, and one secret was encrypted to it.')
+		).toBeTruthy();
+		expect(await enrolment(h.db, 'c1')).toMatchObject({ recipient: recipientOf(theirs) });
+	});
+
+	it('says where the folder could not be written, and changes nothing', async () => {
+		const h = await ready({ status: 'failed' });
+		await secretIn(h.db, h.identity);
+		h.open();
+		await pasted(h, generateIdentity());
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'The key could not be replaced in your storage. Try again.'
+		);
+		expect(screen.getByRole('button', { name: 'Replace key' })).toBeTruthy();
+		expect(await enrolment(h.db, 'c1')).toMatchObject({ recipient: h.recipient, former: [] });
+		expect((await secretsNow(h.db)).map((block) => opensSecret(block, [h.identity]))).toEqual([
+			true,
+		]);
+	});
+
+	it('changes nothing where the keys were sealed again in another window', async () => {
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		const theirs = generateIdentity();
+		h.open();
+		await pasted(h, theirs);
+		await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: h.recipient,
+			identities: [h.identity],
+			unlock: PIN,
+			rounds: ROUNDS,
+		});
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect(
+			await screen.findByText(
+				'The key on this device changed in another window. Unlock it again, then try again.'
+			)
+		).toBeTruthy();
+		expect(h.lock.isUnlocked('c1')).toBe(false);
+		expect((await secretsNow(h.db)).map((block) => opensSecret(block, [h.identity]))).toEqual([
+			true,
+		]);
+	});
+
+	it('unlocks first, where the device is locked, and again where it locks before the key is replaced', async () => {
+		const h = await ready();
+		h.lock.lock();
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await h.user.click(await screen.findByRole('button', { name: 'Use a key I have' }));
+		await typeKey(h, encodeIdentity(generateIdentity()));
+		await screen.findByRole('button', { name: 'Replace key' });
+
+		act(() => {
+			h.lock.lock();
+		});
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key' }));
+
+		expect(await screen.findByText('The key was replaced.')).toBeTruthy();
+		expect(h.keyFile.write).toHaveBeenCalledTimes(1);
+	});
+
+	it('stops where the device locks as it encrypts, keeping the old key for what is left', async () => {
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		const theirs = generateIdentity();
+		const age = async (): Promise<Age> => {
+			const real = await loadAge();
+			return {
+				...real,
+				resealSecrets: (...args) => {
+					h.lock.lock();
+					return real.resealSecrets(...args);
+				},
+			};
+		};
+		h.open({ age });
+		await pasted(h, theirs);
+		await h.user.click(screen.getByRole('button', { name: 'Replace key' }));
+
+		expect(
+			await screen.findByText(
+				'The key was replaced. Some secrets are still made with the old key, and are encrypted to the new one the next time this device is unlocked.'
+			)
+		).toBeTruthy();
+		expect(await enrolment(h.db, 'c1')).toMatchObject({
+			recipient: recipientOf(theirs),
+			former: [h.recipient],
+		});
+		expect((await secretsNow(h.db)).map((block) => opensSecret(block, [h.identity]))).toEqual([
+			true,
+		]);
+	});
+
+	it('fills each copy of a key it used with zeros, and leaves the lock’s own', async () => {
+		const used: Uint8Array[] = [];
+		const age = async (): Promise<Age> => {
+			const real = await loadAge();
+			return {
+				...real,
+				generateIdentity: () => {
+					const made = real.generateIdentity();
+					used.push(made);
+					return made;
+				},
+				scanReplacing: (db, connectionId, fresh, old) => {
+					used.push(...fresh, ...old);
+					return real.scanReplacing(db, connectionId, fresh, old);
+				},
+				resealSecrets: (db, connectionId, input) => {
+					used.push(...input.fresh, ...input.old);
+					return real.resealSecrets(db, connectionId, input);
+				},
+			};
+		};
+		const h = await ready();
+		await secretIn(h.db, h.identity);
+		h.open({ age });
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key…' }));
+		await h.user.click(screen.getByRole('button', { name: 'Make a new key' }));
+		const shown = (await screen.findAllByRole('listitem')).map((group) => group.textContent);
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		await h.user.type(screen.getByLabelText('Group 2'), shown[1] ?? '');
+		await h.user.type(screen.getByLabelText('Group 7'), shown[6] ?? '');
+		await h.user.click(screen.getByRole('button', { name: 'Check' }));
+		await h.user.click(await screen.findByRole('button', { name: 'Replace key' }));
+		await screen.findByText('The key was replaced, and one secret was encrypted to it.');
+
+		expect(used).toHaveLength(5);
+		expect(used.every((key) => key.every((byte) => byte === 0))).toBe(true);
+		const held = h.lock.keys('c1')?.identities ?? [];
+		expect(held).toHaveLength(2);
+		expect(held.every((key) => key.some((byte) => byte !== 0))).toBe(true);
 	});
 });
 

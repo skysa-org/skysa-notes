@@ -10,6 +10,7 @@ import {
 } from 'react';
 
 import { t } from '../i18n/t.js';
+import { type ReplaceScan } from '../secrets/age.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock, setUpDeviceLock } from '../secrets/deviceLock.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import { type SecretsLock } from '../secrets/lock.js';
@@ -32,8 +33,8 @@ import { ChooseUnlock, type Chosen } from './UnlockEntry.js';
 /**
  * Secrets for a source (docs/ARCHITECTURE.md §7, "Secrets in a note"): setting
  * it up, with a new recovery key or one the user has; enrolling this device
- * with the key; and, once it is, unlocking it, changing how it unlocks, and
- * letting go of its copy.
+ * with the key; and, once it is, unlocking it, changing how it unlocks,
+ * replacing the source's key, and letting go of its copy.
  *
  * Where it starts is what the source's key file and this device's keys say,
  * read again as it opens: not set up, set up by a newer build, something else
@@ -67,11 +68,19 @@ export interface SecretsDialogProps {
 type Enrolled = NonNullable<Awaited<ReturnType<typeof enrolment>>>;
 
 /** Why a recovery key is being typed. */
-type Purpose = 'setup' | 'enrol' | 'replaced' | 'another';
+type Purpose = 'setup' | 'enrol' | 'replaced' | 'another' | 'rekey';
+
+/** What a new key is made for: setting the source up, or replacing its key. */
+type Making = 'setUp' | 'rekey';
 
 type Step =
-	| Readonly<{ kind: 'show'; identity: Uint8Array }>
-	| Readonly<{ kind: 'check'; identity: Uint8Array; groups: readonly [number, number] }>
+	| Readonly<{ kind: 'show'; identity: Uint8Array; making: Making }>
+	| Readonly<{
+			kind: 'check';
+			identity: Uint8Array;
+			groups: readonly [number, number];
+			making: Making;
+	  }>
 	| Readonly<{ kind: 'paste'; purpose: Purpose; base?: readonly Uint8Array[] }>
 	| Readonly<{
 			kind: 'different';
@@ -84,7 +93,13 @@ type Step =
 	| Readonly<{ kind: 'unlock'; then: 'device' | 'change' }>
 	/** The source's new key typed, and the device locked: unlocked, to keep what it holds beside it. */
 	| Readonly<{ kind: 'unlock'; then: 'replace'; identity: Uint8Array }>
+	/** Replacing the source's key, and the device locked: unlocked, to begin, or to go on with the key chosen. */
+	| Readonly<{ kind: 'unlock'; then: 'rekey'; identity?: Uint8Array }>
 	| Readonly<{ kind: 'change' }>
+	/** Replacing the source's key: what it does, and the two ways to begin. */
+	| Readonly<{ kind: 'rekey' }>
+	/** The new key chosen, and what replacing the key with it will do, said before it is done. */
+	| Readonly<{ kind: 'rekeyReady'; identity: Uint8Array; scan: ReplaceScan }>
 	| Readonly<{ kind: 'remove' }>
 	| Readonly<{ kind: 'done'; said: string }>;
 
@@ -285,12 +300,14 @@ const CheckKey = ({
 	);
 };
 
-const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'another'>> = {
-	setup: 'paste',
-	enrol: 'enrol',
-	replaced: 'replaced',
-	another: 'another',
-};
+const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'another' | 'rekey'>> =
+	{
+		setup: 'paste',
+		enrol: 'enrol',
+		replaced: 'replaced',
+		another: 'another',
+		rekey: 'rekey',
+	};
 
 /** Secrets already in the source that the key does not open, said before it is used. */
 const Different = ({
@@ -347,6 +364,57 @@ const Intro = ({
 	</div>
 );
 
+/** Replacing the source's key: what it does, and the two ways to begin. */
+const Rekey = ({
+	busy,
+	onMake,
+	onPaste,
+}: {
+	busy: boolean;
+	onMake: () => void;
+	onPaste: () => void;
+}) => (
+	<div className="secrets-step">
+		<h3>{t('secrets.rekey.title')}</h3>
+		<p>{t('secrets.rekey.text')}</p>
+		<p>{t('secrets.rekey.history')}</p>
+		<div className="secrets-buttons">
+			<button type="button" className="primary" disabled={busy} onClick={onMake}>
+				{t('secrets.rekey.make')}
+			</button>
+			<button type="button" disabled={busy} onClick={onPaste}>
+				{t('secrets.rekey.paste')}
+			</button>
+		</div>
+	</div>
+);
+
+/** What replacing the key will do, said before it is done. */
+const RekeyReady = ({
+	scan,
+	busy,
+	onReplace,
+}: {
+	scan: ReplaceScan;
+	busy: boolean;
+	onReplace: () => void;
+}) => (
+	<div className="secrets-step">
+		<p>
+			{scan.resealing > 0
+				? t('secrets.rekey.resealing', { count: scan.resealing })
+				: t('secrets.rekey.nothing')}
+		</p>
+		{scan.others > 0 && <p role="alert">{t('secrets.rekey.others', { count: scan.others })}</p>}
+		{scan.others > 1 && <p>{t('secrets.different.notes', { count: scan.otherNotes })}</p>}
+		<div className="secrets-buttons">
+			<button type="button" className="primary" disabled={busy} onClick={onReplace}>
+				{t('secrets.rekey.replace')}
+			</button>
+		</div>
+	</div>
+);
+
 /** This device, enrolled: how it unlocks, whether it is unlocked now, and what can be done. */
 const Device = ({
 	kind,
@@ -355,6 +423,7 @@ const Device = ({
 	onUnlock,
 	onLock,
 	onChange,
+	onReplaceKey,
 	onRemove,
 }: {
 	kind: UnlockKind;
@@ -363,6 +432,7 @@ const Device = ({
 	onUnlock: () => void;
 	onLock: () => void;
 	onChange: () => void;
+	onReplaceKey: () => void;
 	onRemove: () => void;
 }) => (
 	<div className="secrets-step">
@@ -385,6 +455,9 @@ const Device = ({
 			)}
 			<button type="button" onClick={onChange}>
 				{t('secrets.device.change')}
+			</button>
+			<button type="button" onClick={onReplaceKey}>
+				{t('secrets.device.replaceKey')}
 			</button>
 			<button type="button" className="danger" onClick={onRemove}>
 				{t('secrets.device.remove')}
@@ -582,26 +655,28 @@ export const SecretsDialog = ({
 		}, t('secrets.scanning'));
 
 	/**
-	 * Whether the key file names `recipient` now: written here, or already. A
-	 * write refused because another device wrote first goes back to where
-	 * the dialog starts, which is decided by what the folder says now.
+	 * Whether the key file names `recipient` now: written here, where it named
+	 * none, or `over`, the source's key being replaced; or already. A write
+	 * refused because another device wrote first goes back to where the
+	 * dialog starts, which is decided by what the folder says now.
 	 */
-	const setUp = async (recipient: string): Promise<boolean> => {
-		const written = await keyFile.write(connectionId, recipient);
+	const setUp = async (recipient: string, over?: string): Promise<boolean> => {
+		const written = await (over === undefined
+			? keyFile.write(connectionId, recipient)
+			: keyFile.write(connectionId, recipient, over));
 		if (written.status === 'written') return true;
 		if (written.status === 'changed') {
 			// Written by this dialog on a try that failed after it.
 			const now = await database.keyFiles.get(connectionId);
 			if (now?.state === 'ok' && now.recipient === recipient) return true;
 			go(null);
-			setError(t('secrets.written.changed'));
+			setError(
+				over === undefined ? t('secrets.written.changed') : t('secrets.rekey.changed')
+			);
 			return false;
 		}
-		setError(
-			written.status === 'unavailable'
-				? t('secrets.unavailable')
-				: t('secrets.written.failed')
-		);
+		if (written.status === 'unavailable') setError(t('secrets.unavailable'));
+		else setError(over === undefined ? t('secrets.written.failed') : t('secrets.rekey.failed'));
 		return false;
 	};
 
@@ -765,10 +840,101 @@ export const SecretsDialog = ({
 			go({ kind: 'done', said: t('secrets.done.changed') });
 		}, t('secrets.written.saving'));
 
-	const make = () =>
+	/** The recipients of the keys the source has had, which this device holds: the ones replacing the key encrypts afresh. */
+	const sourceRecipients = (keys: UnlockedKeys): readonly string[] => [
+		keys.recipient,
+		...(enrolled?.former ?? []),
+	];
+
+	/** What replacing the source's key with `identity` would do, said before it is done. */
+	const rekeyScanned = (identity: Uint8Array) =>
+		run(async () => {
+			const { keysFor, scanReplacing } = await age();
+			const keys = lock.keys(connectionId);
+			if (keys === undefined) {
+				go({ kind: 'unlock', then: 'rekey', identity });
+				return;
+			}
+			// Copies, taken as they are read: the lock wipes its own as the page hides.
+			const old = keysFor(keys.identities, sourceRecipients(keys)).map((each) =>
+				Uint8Array.from(each)
+			);
+			try {
+				const scan = await scanReplacing(database, connectionId, [identity], old);
+				go({ kind: 'rekeyReady', identity, scan });
+			} finally {
+				old.forEach((each) => each.fill(0));
+			}
+		}, t('secrets.scanning'));
+
+	/**
+	 * The source's key replaced by `identity` (docs/ARCHITECTURE.md §7,
+	 * "Replacing the key"). The key file first, written over the recipient
+	 * this device has, so a replacement made on another device meanwhile
+	 * refuses this one before anything changes; from then on, new secrets
+	 * everywhere are made with the new key. Then the device's keys, the new
+	 * one first and the ones it held kept beside it. Then every secret the
+	 * source's old keys open, encrypted to the new one. Where that stops
+	 * short, the device locked or a write failed, the rest still opens here
+	 * and is encrypted afresh on a later unlock.
+	 */
+	const rekey = (identity: Uint8Array) =>
+		run(async () => {
+			const { recipientOf, keysFor, resealSecrets } = await age();
+			const before = lock.keys(connectionId);
+			if (before === undefined) {
+				go({ kind: 'unlock', then: 'rekey', identity });
+				return;
+			}
+			const old = sourceRecipients(before);
+			const recipient = recipientOf(identity);
+			if (!(await setUp(recipient, before.recipient))) return;
+			// Read after that wait, and handed on with none: `replaceKeys`
+			// copies them before its own, and the lock can wipe them at either.
+			const keys = lock.keys(connectionId);
+			if (keys === undefined) {
+				go({ kind: 'unlock', then: 'rekey', identity });
+				return;
+			}
+			const held = keys.identities.filter((each) => !sameIdentity(each, identity));
+			const replaced = await replaceKeys(database, keys, recipient, [identity, ...held]);
+			if (replaced === undefined) {
+				lock.lock(connectionId);
+				go(null);
+				setError(t('secrets.device.changedElsewhere'));
+				return;
+			}
+			// Copies to encrypt with, taken before anything is awaited.
+			const [fresh = new Uint8Array(), ...kept] = replaced.identities.map((each) =>
+				Uint8Array.from(each)
+			);
+			const former = keysFor(kept, old);
+			lock.hold(replaced);
+			wipeOwned();
+			setDoing(t('secrets.rekey.encrypting'));
+			const resealed = await resealSecrets(database, connectionId, {
+				fresh: [fresh],
+				recipient,
+				old: former,
+				going: () => lock.isUnlocked(connectionId),
+			})
+				.catch(() => undefined)
+				.finally(() => {
+					[fresh, ...kept].forEach((each) => each.fill(0));
+				});
+			const said = (() => {
+				if (resealed === undefined || resealed.stopped)
+					return t('secrets.done.rekeyedPart');
+				if (resealed.secrets === 0) return t('secrets.done.rekeyedNone');
+				return t('secrets.done.rekeyed', { count: resealed.secrets });
+			})();
+			go({ kind: 'done', said });
+		}, t('secrets.written.saving'));
+
+	const make = (making: Making) =>
 		run(async () => {
 			const { generateIdentity } = await age();
-			go({ kind: 'show', identity: own(generateIdentity()) });
+			go({ kind: 'show', identity: own(generateIdentity()), making });
 		});
 
 	const putBack = (recipient: string) =>
@@ -790,6 +956,10 @@ export const SecretsDialog = ({
 		own(identity);
 		if (at.purpose === 'setup') {
 			void scanned([identity]);
+			return;
+		}
+		if (at.purpose === 'rekey') {
+			void rekeyScanned(identity);
 			return;
 		}
 		// The keys this device holds are kept beside the new one: unlocked
@@ -818,6 +988,14 @@ export const SecretsDialog = ({
 			return recipientOf(identity) === of ? undefined : t('secrets.recovery.notThis');
 		};
 
+	/** Why a key typed to replace the source's, `of`, is refused: it is that one. */
+	const otherThan =
+		(of: string) =>
+		async (identity: Uint8Array): Promise<string | undefined> => {
+			const { recipientOf } = await age();
+			return recipientOf(identity) === of ? t('secrets.rekey.same') : undefined;
+		};
+
 	const unlockStep = (at: Extract<Step, { kind: 'unlock' }>): ReactNode => {
 		const form = (
 			<UnlockForm
@@ -829,6 +1007,11 @@ export const SecretsDialog = ({
 				onUnlocked={() => {
 					if (at.then === 'replace') {
 						void replaceWith(at.identity);
+						return;
+					}
+					if (at.then === 'rekey') {
+						if (at.identity === undefined) go({ kind: 'rekey' });
+						else void rekeyScanned(at.identity);
 						return;
 					}
 					go(at.then === 'change' ? { kind: 'change' } : null);
@@ -869,7 +1052,7 @@ export const SecretsDialog = ({
 					<Intro
 						busy={busy}
 						onMake={() => {
-							void make();
+							void make('setUp');
 						}}
 						onPaste={() => {
 							go({ kind: 'paste', purpose: 'setup' });
@@ -905,6 +1088,9 @@ export const SecretsDialog = ({
 						onChange={() => {
 							go(unlocked ? { kind: 'change' } : { kind: 'unlock', then: 'change' });
 						}}
+						onReplaceKey={() => {
+							go(unlocked ? { kind: 'rekey' } : { kind: 'unlock', then: 'rekey' });
+						}}
 						onRemove={() => {
 							go({ kind: 'remove' });
 						}}
@@ -927,7 +1113,12 @@ export const SecretsDialog = ({
 						copy={copy}
 						lock={lock}
 						onNext={() => {
-							go({ kind: 'check', identity: at.identity, groups: pickGroups() });
+							go({
+								kind: 'check',
+								identity: at.identity,
+								groups: pickGroups(),
+								making: at.making,
+							});
 						}}
 					/>
 				);
@@ -938,20 +1129,27 @@ export const SecretsDialog = ({
 						groups={at.groups}
 						busy={busy}
 						onBack={() => {
-							go({ kind: 'show', identity: at.identity });
+							go({ kind: 'show', identity: at.identity, making: at.making });
 						}}
 						onChecked={() => {
-							void scanned([at.identity]);
+							void (at.making === 'rekey'
+								? rekeyScanned(at.identity)
+								: scanned([at.identity]));
 						}}
 					/>
 				);
 			case 'paste': {
 				const checked = at.purpose === 'enrol' || at.purpose === 'replaced';
-				// A key typed as the source's is checked against the key file;
-				// where the file names none now, what it does say is shown.
-				if (checked && recipient === undefined)
+				// A key typed as the source's, or to replace it, is checked
+				// against the key file; where the file names none now, what it
+				// does say is shown.
+				if ((checked || at.purpose === 'rekey') && recipient === undefined)
 					return bodyOf(homeOf(record, read, enrolled));
-				const check = checked && recipient !== undefined ? keyOf(recipient) : undefined;
+				const check = (() => {
+					if (recipient === undefined) return undefined;
+					if (at.purpose === 'rekey') return otherThan(recipient);
+					return checked ? keyOf(recipient) : undefined;
+				})();
 				return (
 					<PasteKey
 						key={at.purpose}
@@ -1000,6 +1198,28 @@ export const SecretsDialog = ({
 				);
 			case 'unlock':
 				return unlockStep(at);
+			case 'rekey':
+				return (
+					<Rekey
+						busy={busy}
+						onMake={() => {
+							void make('rekey');
+						}}
+						onPaste={() => {
+							go({ kind: 'paste', purpose: 'rekey' });
+						}}
+					/>
+				);
+			case 'rekeyReady':
+				return (
+					<RekeyReady
+						scan={at.scan}
+						busy={busy}
+						onReplace={() => {
+							void rekey(at.identity);
+						}}
+					/>
+				);
 			case 'remove':
 				return (
 					<RemoveKey
