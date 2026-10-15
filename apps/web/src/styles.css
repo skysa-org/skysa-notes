@@ -1992,13 +1992,6 @@ button.danger {
 	display: none;
 }
 
-.secret-actions {
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	gap: 0.5rem;
-}
-
 /*
  * A secret in raw mode (`editor/secretRaw.ts`): Reveal after the fence's
  * opening, in the app's type rather than the note's, and the panel under the
@@ -2841,12 +2834,11 @@ button.danger {
 	border-radius: 0.375rem;
 }
 
-.toolbar-link-actions {
-	display: flex;
+.toolbar-link .dialog-actions {
 	gap: 0.35rem;
 }
 
-.toolbar-link-actions button {
+.toolbar-link .dialog-actions button {
 	font: inherit;
 	font-size: 0.85rem;
 	padding: 0.3rem 0.7rem;
@@ -2857,7 +2849,7 @@ button.danger {
 	cursor: pointer;
 }
 
-.toolbar-link-actions button:disabled {
+.toolbar-link .dialog-actions button:disabled {
 	color: var(--muted);
 	cursor: default;
 }
@@ -3051,7 +3043,8 @@ button.icon.account-devices-count {
 	gap: 0.5rem;
 }
 
-.account-confirm p {
+.account-confirm p,
+.account-confirm .dialog-actions {
 	flex-basis: 100%;
 }
 
@@ -4881,7 +4874,6 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	display: contents;
 }
 
-.tab-notice-backdrop,
 .modal-backdrop {
 	position: fixed;
 	inset: 0;
@@ -4893,7 +4885,6 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	animation: dim-in var(--duration-l) var(--ease-out);
 }
 
-.tab-notice,
 .modal {
 	max-width: 28rem;
 	padding: 1.25rem 1.5rem;
@@ -4906,7 +4897,6 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 
 /* A dialog rises into the middle of the page as its backdrop dims, as the
    palette does into the top of it. */
-.tab-notice,
 .modal,
 .palette {
 	--arrive-y: 0.5rem;
@@ -4914,13 +4904,11 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	animation: arrive var(--duration-l) var(--ease-out);
 }
 
-.tab-notice h2,
 .modal h2 {
 	margin: 0 0 0.5rem;
 	font-size: 1.1rem;
 }
 
-.tab-notice button,
 .modal button {
 	font: inherit;
 	padding: 0.35rem 0.75rem;
@@ -4931,14 +4919,28 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	cursor: pointer;
 }
 
-.tab-notice-actions,
-.modal-actions {
+/* A dialog's buttons (`DialogActions`), over everything or asked in place:
+   one row at its end, the way out first and the answer last, to the right. */
+.dialog-actions {
 	display: flex;
 	flex-wrap: wrap;
+	justify-content: flex-end;
 	gap: 0.5rem;
 }
 
-/* A question the app asks over everything: the stale-tab notice's card. */
+/* The answer's slot places it and marks it for the focus; its button sits in
+   the row as the others do. */
+.dialog-primary {
+	display: contents;
+}
+
+/* What is under way, over the row: room kept for it, so the card does not jump. */
+.modal .dialog-status {
+	min-height: 1.6em;
+	margin: 0 0 0.5rem;
+}
+
+/* A question the app asks over everything. */
 .modal {
 	font-size: 0.9rem;
 }
@@ -4947,9 +4949,11 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	margin: 0 0 1rem;
 }
 
-/* The answer the question expects, filled, so it is the one the eye lands on.
-   Cancel keeps the focus all the same. */
-.modal button.primary {
+/* The answer the question expects, filled, so it is the one the eye lands on;
+   it has the focus too. A question asked in the storage panel draws it the
+   same way. */
+.modal button.primary,
+.account button.primary {
 	color: var(--on-brand);
 	background: var(--brand);
 	border-color: var(--brand);
@@ -5548,7 +5552,7 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	.slash-item,
 	.outline button,
 	.code-tool-language,
-	.toolbar-link-actions button,
+	.toolbar-link .dialog-actions button,
 	.toolbar-link input,
 	.connect-code-form input,
 	.connect-code-form button,
@@ -5558,7 +5562,6 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	.clipboard button,
 	.toast button,
 	.update-prompt button,
-	.tab-notice button,
 	.modal button,
 	.error-actions button,
 	.find-row button,

@@ -2,7 +2,7 @@ import { readRecoveryKey, RECOVERY_KEY_PREFIX } from '@skysa/core';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
-import { SecretsActions } from './SecretsActions.js';
+import { DialogActions } from './Dialog.js';
 
 export interface PasteKeyProps {
 	/** What is asked for, over the field. */
@@ -199,15 +199,17 @@ export const PasteKey = ({ text: asked, check, busy: working, onKey }: PasteKeyP
 					{error}
 				</p>
 			)}
-			<SecretsActions>
-				<button
-					type="submit"
-					className="primary"
-					disabled={busy || groups.every((group) => group === '')}
-				>
-					{t('secrets.recovery.continue')}
-				</button>
-			</SecretsActions>
+			<DialogActions
+				primary={
+					<button
+						type="submit"
+						className="primary"
+						disabled={busy || groups.every((group) => group === '')}
+					>
+						{t('secrets.recovery.continue')}
+					</button>
+				}
+			/>
 		</form>
 	);
 };

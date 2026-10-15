@@ -72,6 +72,7 @@ import { type SchedulerStatus, type StuckOp, type SyncScheduler } from '../sync/
 import { ClipboardPanel } from './ClipboardPanel.js';
 import { ConnectButton } from './ConnectButton.js';
 import { DetachedSource } from './DetachedSource.js';
+import { DialogActions, InlineDialog } from './Dialog.js';
 import { DisconnectDialog } from './DisconnectDialog.js';
 import { type Importing, importItems, ImportNotes, useImportNotes } from './ImportNotes.js';
 import { InfoDialog } from './InfoDialog.js';
@@ -1210,28 +1211,30 @@ const SyncState = ({
 			 * from the gear's menu, or the `⋯`.
 			 */}
 			{status.phase !== 'local' && syncable && rescanning && (
-				<div className="account-confirm">
+				<InlineDialog
+					className="account-confirm"
+					label={t('account.rescan.confirm')}
+					onClose={() => {
+						setRescanning(false);
+					}}
+				>
 					<p className="muted">{t('account.rescan.question', { provider: label })}</p>
-					<button
-						type="button"
-						disabled={status.phase === 'syncing'}
-						onClick={() => {
-							setRescanning(false);
-							void sync.resync();
-						}}
-					>
-						{t('account.rescan.confirm')}
-					</button>
-					<button
-						type="button"
-						className="ghost"
-						onClick={() => {
-							setRescanning(false);
-						}}
-					>
-						{t('common.cancel')}
-					</button>
-				</div>
+					<DialogActions
+						primary={
+							<button
+								type="button"
+								className="primary"
+								disabled={status.phase === 'syncing'}
+								onClick={() => {
+									setRescanning(false);
+									void sync.resync();
+								}}
+							>
+								{t('account.rescan.confirm')}
+							</button>
+						}
+					/>
+				</InlineDialog>
 			)}
 		</>
 	);
@@ -2100,17 +2103,16 @@ const Connected = ({
 	const busy = disconnecting?.busy === true;
 	const problem = disconnecting?.problem ?? null;
 	const stranded = disconnecting?.stranded === true;
-	// Focus follows the step the user is on, rather than falling to the page
-	// when the button they pressed goes away. Not on first render.
-	const focusNext = useRef<'cancel' | 'open' | null>(null);
-	const cancelButton = useRef<HTMLButtonElement>(null);
+	// The question takes the focus as every question does (`InlineDialog`);
+	// closed, the focus goes back to the menu it was asked from, rather than
+	// falling to the page when the button pressed goes away.
+	const focusBack = useRef(false);
 	const openButton = useRef<HTMLButtonElement>(null);
 	const panel = useRef<HTMLElement>(null);
 	// Which question the answer coming back belongs to (`ask`).
 	const asking = useRef(0);
 	const open = step.kind !== 'closed';
 	useEffect(() => {
-		const target = focusNext.current === 'cancel' ? cancelButton : openButton;
 		// Only focus that is still here to move. A disconnect can take seconds
 		// to answer, and a user who went back to a note meanwhile keeps typing
 		// into the note, not into a button.
@@ -2119,14 +2121,14 @@ const Connected = ({
 			focused === null ||
 			focused === document.body ||
 			panel.current?.contains(focused) === true;
-		if (focusNext.current !== null && here) target.current?.focus();
-		focusNext.current = null;
+		if (focusBack.current && here) openButton.current?.focus();
+		focusBack.current = false;
 	}, [step.kind]);
 	const cancel = useCallback(() => {
 		// A question nobody is waiting for the answer to: whatever the last push
 		// is doing, it can go on doing.
 		asking.current += 1;
-		focusNext.current = 'open';
+		focusBack.current = true;
 		setStep({ kind: 'closed' });
 	}, []);
 	useEscape(panel, open, cancel);
@@ -2145,7 +2147,6 @@ const Connected = ({
 	const ask = (onServer: boolean) => {
 		asking.current += 1;
 		const mine = asking.current;
-		focusNext.current = 'cancel';
 		setTrouble(null);
 		setStep({ kind: 'pushing', onServer });
 		// Again, for the question's sake: whether this is the last device decides
@@ -2154,10 +2155,6 @@ const Connected = ({
 		void prepare(database, connectionId, pushable ? () => sync.syncNow() : undefined)
 			.then((ready) => {
 				if (asking.current !== mine) return;
-				// Again: the Cancel the focus was on belonged to the step that is
-				// about to go, and the question is the one that has to be answered
-				// safely by a stray Enter.
-				focusNext.current = 'cancel';
 				setStep({ kind: 'asking', onServer, ...ready });
 			})
 			.catch(() => {
@@ -2257,16 +2254,14 @@ const Connected = ({
 					</p>
 				)}
 				{step.kind === 'pushing' && (
-					<div
+					<InlineDialog
 						className="account-confirm"
-						role="group"
-						aria-label={t('account.disconnect.sending')}
+						label={t('account.disconnect.sending')}
+						onClose={cancel}
 					>
 						<p className="muted">{t('account.disconnect.sendingNow')}</p>
-						<button ref={cancelButton} type="button" className="ghost" onClick={cancel}>
-							{t('common.cancel')}
-						</button>
-					</div>
+						<DialogActions />
+					</InlineDialog>
 				)}
 				{step.kind === 'asking' && (
 					<DisconnectDialog
@@ -2283,7 +2278,6 @@ const Connected = ({
 						download={download}
 						onAnswer={answered}
 						onCancel={cancel}
-						cancelRef={cancelButton}
 					/>
 				)}
 				<ConnectedFoot

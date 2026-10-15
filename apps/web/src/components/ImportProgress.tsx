@@ -1,15 +1,14 @@
 import { type SyncProgress } from '@skysa/core';
-import { type Ref, useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useId, useState } from 'react';
 
 import { api, type ApiClient } from '../api/client.js';
-import { useSuspendShortcuts } from '../commands/context.js';
 import { saying } from '../errors/reached.js';
 import { t } from '../i18n/t.js';
 import { db, type NotesDatabase, type SyncStateRecord } from '../store/db.js';
 import { cancelImport, type CancelImportResult, PROVIDER_LABELS } from '../sync/account.js';
 import { syncScheduler, useSyncStatus } from '../sync/runtime.js';
 import { type SchedulerStatus, type SyncScheduler } from '../sync/scheduler.js';
+import { Dialog, DialogActions } from './Dialog.js';
 import { RunProgress } from './RunProgress.js';
 
 /**
@@ -148,20 +147,24 @@ const labelOf = (source: SyncStateRecord): string =>
 		? t('firstImport.unknownProvider')
 		: PROVIDER_LABELS[source.provider];
 
-/** The words, the bar and the buttons, wherever they are shown. */
+/**
+ * The words, the bar and the buttons. Cancel is the one button while the
+ * import runs. Where the server could not be asked, the question is whether
+ * to try again, which is the answer and has the focus; Keep importing is its
+ * way out, and comes first.
+ */
 const ImportBody = ({
 	source,
-	cancelRef,
 	messageId,
 	...seams
 }: ImportPanelProps & {
-	cancelRef?: Ref<HTMLButtonElement>;
 	messageId?: string;
 }) => {
 	const label = labelOf(source);
 	const status = useSyncStatus(seams.sync ?? syncScheduler);
 	const { state, cancel, dismiss } = useCancel(source, label, seams);
 	const busy = state.kind === 'busy';
+	const unreached = state.kind === 'unreached';
 	return (
 		<div className="import-body">
 			{/* Polite: it changes every few files, and a reader should hear it
@@ -175,19 +178,26 @@ const ImportBody = ({
 					{state.message}
 				</p>
 			)}
-			<div className="modal-actions">
-				<button
-					ref={cancelRef}
-					type="button"
-					disabled={busy}
-					onClick={() => {
-						cancel(true);
-					}}
-				>
-					{state.kind === 'unreached' ? t('common.tryAgain') : t('common.cancel')}
-				</button>
-				{state.kind === 'unreached' && (
+			<DialogActions
+				primary={
+					unreached ? (
+						<button
+							type="button"
+							className="primary"
+							onClick={() => {
+								cancel(true);
+							}}
+						>
+							{t('common.tryAgain')}
+						</button>
+					) : undefined
+				}
+			>
+				{unreached ? (
 					<>
+						<button type="button" onClick={dismiss}>
+							{t('firstImport.keepImporting')}
+						</button>
 						<button
 							type="button"
 							onClick={() => {
@@ -196,67 +206,39 @@ const ImportBody = ({
 						>
 							{t('firstImport.cancelHere')}
 						</button>
-						<button type="button" onClick={dismiss}>
-							{t('firstImport.keepImporting')}
-						</button>
 					</>
+				) : (
+					<button
+						type="button"
+						disabled={busy}
+						onClick={() => {
+							cancel(true);
+						}}
+					>
+						{t('common.cancel')}
+					</button>
 				)}
-			</div>
+			</DialogActions>
 		</div>
 	);
 };
 
 /**
- * Over everything: the app behind it is `inert`
- * (`routes/index.tsx`), so this is all there is to press. Cancel has the focus,
- * Tab stays in the dialog, and the shortcuts are held, as for any modal
- * question (`ConfirmDialog`). Escape does nothing: an import of many minutes
- * is not something a stray key should throw away.
+ * Over everything: the app behind it is `inert` (`routes/index.tsx`), so this
+ * is all there is to press. A `Dialog` with no way out of its own: Escape
+ * does nothing, since an import of many minutes is not something a stray key
+ * should throw away, and Cancel is the import's, in its row.
  */
 export const ImportDialog = (props: ImportPanelProps) => {
-	const { source } = props;
-	const titleId = useId();
 	const messageId = useId();
-	const dialog = useRef<HTMLDivElement>(null);
-	const cancel = useRef<HTMLButtonElement>(null);
-	useSuspendShortcuts();
-
-	useEffect(() => {
-		cancel.current?.focus();
-	}, []);
-
-	useEffect(() => {
-		const element = dialog.current;
-		if (element === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key !== 'Tab') return;
-			const buttons = [...element.querySelectorAll('button:not(:disabled)')];
-			const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
-			const next = (at + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
-			event.preventDefault();
-			(buttons[next] as HTMLElement | undefined)?.focus();
-		};
-		element.addEventListener('keydown', onKey);
-		return () => {
-			element.removeEventListener('keydown', onKey);
-		};
-	}, []);
-
-	return createPortal(
-		<div className="modal-backdrop">
-			<div
-				ref={dialog}
-				className="modal import-dialog"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				aria-describedby={messageId}
-			>
-				<h2 id={titleId}>{t('firstImport.title', { provider: labelOf(source) })}</h2>
-				<ImportBody {...props} cancelRef={cancel} messageId={messageId} />
-			</div>
-		</div>,
-		document.body
+	return (
+		<Dialog
+			title={t('firstImport.title', { provider: labelOf(props.source) })}
+			className="import-dialog"
+			describedBy={messageId}
+		>
+			<ImportBody {...props} messageId={messageId} />
+		</Dialog>
 	);
 };
 

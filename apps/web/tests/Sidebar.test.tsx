@@ -498,8 +498,9 @@ describe('deleting a notebook', () => {
 		expect(within(asked).getByText(/will be deleted/).textContent).toBe(
 			'“work” and the 3 notes in it will be deleted.'
 		);
-		// Cancel holds the focus: the answer that deletes is never the default.
-		expect(document.activeElement).toBe(within(asked).getByRole('button', { name: 'Cancel' }));
+		// The answer holds the focus, as in every dialog (the owner's rule,
+		// 2026-10-15); Cancel comes first, and Escape is Cancel.
+		expect(document.activeElement).toBe(within(asked).getByRole('button', { name: 'Delete' }));
 		expect(onDeleteFolder).not.toHaveBeenCalled();
 	});
 

@@ -3,8 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { Dialog } from '../src/components/Dialog.js';
 import { drawTo, PatternGrid } from '../src/components/PatternGrid.js';
-import { SecretsModal, UnlockDialog, UnlockForm } from '../src/components/UnlockDialog.js';
+import { UnlockDialog, UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
 import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
@@ -598,11 +599,11 @@ describe('in a dialog', () => {
 	/** The buttons in the row Cancel is in. */
 	const rowOfCancel = () => {
 		const row = screen.getByRole('button', { name: 'Cancel' }).parentElement;
-		expect(row?.className).toBe('modal-actions');
+		expect(row?.className).toBe('dialog-actions');
 		return [...(row?.querySelectorAll('button') ?? [])].map((button) => button.textContent);
 	};
 
-	it('has Unlock and Cancel side by side, in one row, as the app’s other dialogs do', async () => {
+	it('has Cancel and then Unlock, in one row, as the app’s other dialogs do', async () => {
 		const db = createDatabase(`unlock-dialog-${crypto.randomUUID()}`);
 		opened.push(db);
 		await enrol(db, {
@@ -631,19 +632,21 @@ describe('in a dialog', () => {
 			/>
 		);
 
-		expect(rowOfCancel()).toEqual(['Unlock', 'Cancel']);
+		expect(rowOfCancel()).toEqual(['Cancel', 'Unlock']);
+		expect(document.activeElement).toBe(screen.getByLabelText('PIN'));
 		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		expect(onCancel).toHaveBeenCalledOnce();
 	});
 
-	it('has choosing a pattern’s Next beside Cancel', async () => {
+	it('has choosing a pattern’s Next after Cancel, and its first dot the focus', async () => {
 		render(
-			<SecretsModal title="Secrets" onClose={() => undefined}>
+			<Dialog title="Secrets" onClose={() => undefined}>
 				<ChooseUnlock onChosen={() => undefined} />
-			</SecretsModal>
+			</Dialog>
 		);
 		await userEvent.click(screen.getByRole('radio', { name: 'Pattern' }));
 
-		expect(rowOfCancel()).toEqual(['Next', 'Cancel']);
+		expect(rowOfCancel()).toEqual(['Cancel', 'Next']);
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dot 1' }));
 	});
 });

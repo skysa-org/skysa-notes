@@ -94,29 +94,50 @@ describe('Attached files', () => {
 		expect(screen.getByText('coast.png')).toBeDefined();
 	});
 
-	it('keeps it when the second answer is Keep', async () => {
+	it('keeps it when the second answer is Cancel', async () => {
 		const db = await seeded();
 		show(db);
 		const user = userEvent.setup();
 
 		const loose = await rowOf('old-map.pdf');
 		await user.click(await loose.findByRole('button', { name: 'Delete old-map.pdf' }));
-		await user.click(loose.getByRole('button', { name: 'Keep' }));
+		await user.click(loose.getByRole('button', { name: 'Cancel' }));
 
 		expect(loose.getByRole('button', { name: 'Delete old-map.pdf' })).toBeDefined();
 		expect(await db.files.get([LOCAL_CONNECTION_ID, 'loose'])).toBeDefined();
 	});
 
-	it('keeps the focus on the question, and back on Delete when kept', async () => {
+	it('asks as every dialog does: Cancel, then Delete, which has the focus', async () => {
 		const db = await seeded();
 		show(db);
 		const user = userEvent.setup();
 
 		const loose = await rowOf('old-map.pdf');
 		await user.click(await loose.findByRole('button', { name: 'Delete old-map.pdf' }));
-		expect(document.activeElement).toBe(loose.getByRole('button', { name: 'Keep' }));
+		const asked = within(loose.getByRole('group', { name: 'Delete old-map.pdf' }));
+		expect(asked.getAllByRole('button').map((button) => button.textContent)).toEqual([
+			'Cancel',
+			'Delete',
+		]);
+		expect(document.activeElement).toBe(asked.getByRole('button', { name: 'Delete' }));
 
-		await user.click(loose.getByRole('button', { name: 'Keep' }));
+		await user.click(asked.getByRole('button', { name: 'Cancel' }));
+		expect(document.activeElement).toBe(
+			loose.getByRole('button', { name: 'Delete old-map.pdf' })
+		);
+	});
+
+	it('takes Escape in the question as its Cancel, and leaves the dialog up', async () => {
+		const db = await seeded();
+		const onClose = show(db);
+		const user = userEvent.setup();
+
+		const loose = await rowOf('old-map.pdf');
+		await user.click(await loose.findByRole('button', { name: 'Delete old-map.pdf' }));
+		await user.keyboard('{Escape}');
+
+		expect(loose.queryByRole('group', { name: 'Delete old-map.pdf' })).toBeNull();
+		expect(onClose).not.toHaveBeenCalled();
 		expect(document.activeElement).toBe(
 			loose.getByRole('button', { name: 'Delete old-map.pdf' })
 		);

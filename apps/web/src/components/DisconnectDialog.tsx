@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import { t } from '../i18n/t.js';
 import { type ConnectedSource } from '../store/connection.js';
@@ -7,6 +7,7 @@ import { downloadProblem, hasUnsentDownload } from '../store/exportNotes.js';
 import { titleShown } from '../store/titles.js';
 import { countedFolders, countOf, isEmpty, type Unsynced } from '../store/unsynced.js';
 import { type UnsentAnswer } from '../sync/account.js';
+import { DialogActions, InlineDialog } from './Dialog.js';
 import { canMove, leftBehind, MoveUnsent } from './MoveUnsent.js';
 
 /**
@@ -21,9 +22,11 @@ import { canMove, leftBehind, MoveUnsent } from './MoveUnsent.js';
  * With nothing unsent there is nothing to decide and it is the plain confirm it
  * always was. With something unsent the choice is the owner's four: move it to
  * another connected source, download it, discard it by name, or cancel — and on
- * an only source, the last three. Cancel has the focus in every case, and in
- * every step of every case: the button that was pressed goes with the step it
- * belonged to, and focus left on the page is a user who cannot press Escape.
+ * an only source, the last three. Asked as every question is (`InlineDialog`):
+ * Cancel first and the answer last, and the answer has the focus, in every
+ * step — Disconnect, or Discard for good, each drawn as what it is. Where
+ * there is more than one thing to do and none of them is the answer, Cancel
+ * has it, or the first account to move them to where there is a choice.
  *
  * Moving is not offered at all where it would be a promise this cannot keep —
  * nowhere to move to, nothing of the kind a move takes, or a source whose files
@@ -72,8 +75,6 @@ export interface DisconnectDialogProps {
 	download: (listed: Unsynced) => Promise<void>;
 	onAnswer: (answer: UnsentAnswer) => void;
 	onCancel: () => void;
-	/** The parent moves the focus here, and keeps it off a button that has gone. */
-	cancelRef: RefObject<HTMLButtonElement | null>;
 }
 
 /**
@@ -199,7 +200,6 @@ export const DisconnectDialog = ({
 	download,
 	onAnswer,
 	onCancel,
-	cancelRef,
 }: DisconnectDialogProps) => {
 	const [discarding, setDiscarding] = useState(false);
 	// Why the last download did not happen. Said here, beside the button: one
@@ -226,69 +226,79 @@ export const DisconnectDialog = ({
 			{(others === undefined || others === 0) && leftAtProvider}
 		</>
 	) : null;
-	useEffect(() => {
-		// The button that was pressed has gone with the step, and the focus would
-		// fall to the page — where Escape reaches nothing, since it is listened for
-		// on the panel. Only on the way in: the parent put the focus here when the
-		// question opened, and may have decided not to.
-		if (discarding) cancelRef.current?.focus();
-	}, [discarding, cancelRef]);
-
-	const cancel = (
-		<button ref={cancelRef} type="button" className="ghost" onClick={onCancel} disabled={busy}>
-			{t('common.cancel')}
-		</button>
+	// One question throughout, its steps drawn in it in turn: the button pressed
+	// goes with its step, and the next step's answer takes the focus.
+	const asked = (question: string, children: ReactNode) => (
+		<InlineDialog className="account-confirm" label={question} onClose={onCancel} busy={busy}>
+			{children}
+		</InlineDialog>
 	);
 
 	// Nothing here that the remote lacks: there is nothing to decide, and the
 	// question is only whether to disconnect.
 	if (isEmpty(listed)) {
-		return (
-			<div className="account-confirm" role="group" aria-label={t('unsent.disconnect.group')}>
+		return asked(
+			t('unsent.disconnect.group'),
+			<>
 				<p className="muted">
 					{t('unsent.disconnect.plain', { name: named, provider: label })}
 				</p>
 				{after}
-				<button
-					type="button"
-					disabled={busy}
-					onClick={() => {
-						onAnswer('discard');
-					}}
-				>
-					{t('unsent.disconnect.confirm')}
-				</button>
-				{cancel}
-			</div>
+				<DialogActions
+					primary={
+						<button
+							type="button"
+							className="danger"
+							disabled={busy}
+							onClick={() => {
+								onAnswer('discard');
+							}}
+						>
+							{t('unsent.disconnect.confirm')}
+						</button>
+					}
+				/>
+			</>
 		);
 	}
 
 	if (discarding) {
-		return (
-			<div className="account-confirm" role="group" aria-label={t('unsent.discard.forGood')}>
+		return asked(
+			t('unsent.discard.forGood'),
+			<>
 				<p>{discardQuestion(listed, label)}</p>
 				<Titles notes={listed.notes} />
-				<button
-					type="button"
-					disabled={busy}
-					onClick={() => {
-						onAnswer('discard');
-					}}
-				>
-					{t('unsent.discard.forGood')}
-				</button>
-				<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
-					{t('unsent.discard.downloadFirst')}
-				</button>
 				{failure}
-				{cancel}
-			</div>
+				<DialogActions
+					primary={
+						<button
+							type="button"
+							className="danger"
+							disabled={busy}
+							onClick={() => {
+								onAnswer('discard');
+							}}
+						>
+							{t('unsent.discard.forGood')}
+						</button>
+					}
+				>
+					<button
+						type="button"
+						disabled={busy || !hasUnsentDownload(listed)}
+						onClick={save}
+					>
+						{t('unsent.discard.downloadFirst')}
+					</button>
+				</DialogActions>
+			</>
 		);
 	}
 
 	const leaves = canMove(listed, targets) ? leftBehind(listed, label) : null;
-	return (
-		<div className="account-confirm" role="group" aria-label={t('unsent.disconnect.group')}>
+	return asked(
+		t('unsent.disconnect.group'),
+		<>
 			<p className="muted">
 				{headline(listed, label)}
 				{stopped !== null && ` ${why(stopped)}`}
@@ -321,20 +331,21 @@ export const DisconnectDialog = ({
 					onAnswer({ moveTo });
 				}}
 			/>
-			<button
-				type="button"
-				disabled={busy || failing}
-				onClick={() => {
-					setDiscarding(true);
-				}}
-			>
-				{t('unsent.disconnect.discardThem')}
-			</button>
-			<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
-				{t('unsent.disconnect.downloadThem')}
-			</button>
 			{failure}
-			{cancel}
-		</div>
+			<DialogActions>
+				<button type="button" disabled={busy || !hasUnsentDownload(listed)} onClick={save}>
+					{t('unsent.disconnect.downloadThem')}
+				</button>
+				<button
+					type="button"
+					disabled={busy || failing}
+					onClick={() => {
+						setDiscarding(true);
+					}}
+				>
+					{t('unsent.disconnect.discardThem')}
+				</button>
+			</DialogActions>
+		</>
 	);
 };

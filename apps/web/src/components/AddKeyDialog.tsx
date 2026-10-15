@@ -6,8 +6,8 @@ import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';
 import type { NotesDatabase } from '../store/db.js';
 import { enrolment, replaceKeys } from '../store/secretKeys.js';
+import { Dialog } from './Dialog.js';
 import { PasteKey } from './PasteKey.js';
-import { SecretsModal } from './UnlockDialog.js';
 
 export interface AddKeyDialogProps {
 	database: NotesDatabase;
@@ -96,7 +96,7 @@ export const AddKeyDialog = ({
 	};
 
 	return (
-		<SecretsModal title={t('secrets.addKey.title')} onClose={onCancel}>
+		<Dialog title={t('secrets.addKey.title')} className="secrets-dialog" onClose={onCancel}>
 			{/* Above the key, as the Secrets dialog says its own: under it are the buttons. */}
 			{error !== undefined && (
 				<p className="secrets-error" role="alert">
@@ -115,6 +115,6 @@ export const AddKeyDialog = ({
 					void add(identity);
 				}}
 			/>
-		</SecretsModal>
+		</Dialog>
 	);
 };

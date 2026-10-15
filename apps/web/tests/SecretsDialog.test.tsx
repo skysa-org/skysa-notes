@@ -437,21 +437,25 @@ describe('setting a source up', () => {
 
 /** The one row of buttons the dialog has, by what each says. */
 const buttonRow = (): (string | null)[] => {
-	const rows = document.querySelectorAll('.modal-actions');
+	const rows = document.querySelectorAll('.dialog-actions');
 	expect(rows).toHaveLength(1);
 	return [...(rows[0]?.querySelectorAll('button') ?? [])].map((button) => button.textContent);
 };
 
 describe('each step’s buttons', () => {
-	it('end in the dialog’s own way out, in one row, as the app’s other dialogs do', async () => {
+	it('start with the dialog’s own way out and end in the answer, which has the focus', async () => {
 		const h = await setup({ record: { state: 'none' } });
 		h.open();
-		await screen.findByRole('button', { name: 'Make a recovery key' });
-		expect(buttonRow()).toEqual(['Make a recovery key', 'Use a key I have', 'Close']);
+		const make = await screen.findByRole('button', { name: 'Make a recovery key' });
+		expect(buttonRow()).toEqual(['Close', 'Use a key I have', 'Make a recovery key']);
+		expect(document.activeElement).toBe(make);
 
 		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
-		await screen.findByLabelText('Group 1');
-		expect(buttonRow()).toEqual(['Continue', 'Cancel']);
+		// Where there is something to type, it is where the focus goes.
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByLabelText('Group 1'));
+		});
+		expect(buttonRow()).toEqual(['Cancel', 'Continue']);
 	});
 });
 
@@ -666,10 +670,13 @@ describe('an enrolled device', () => {
 		h.open();
 		await h.user.click(await screen.findByRole('button', { name: 'Remove from this device' }));
 
-		expect(buttonRow()).toEqual(['Remove', 'Cancel']);
+		expect(buttonRow()).toEqual(['Cancel', 'Remove']);
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove' }));
+		});
 		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
 		expect(await screen.findByRole('button', { name: 'Remove from this device' })).toBeTruthy();
-		expect(buttonRow().at(-1)).toBe('Close');
+		expect(buttonRow()[0]).toBe('Close');
 	});
 
 	it('lets go of its key once asked', async () => {

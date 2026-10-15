@@ -2,8 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
 import { type EnteredKind, type EnteredUnlock, isAcceptedUnlock } from '../store/secretKeys.js';
+import { DialogActions } from './Dialog.js';
 import { PatternGrid } from './PatternGrid.js';
-import { SecretsActions } from './SecretsActions.js';
 
 /**
  * How this device unlocks secrets, as it is entered (docs/ARCHITECTURE.md §7,
@@ -56,14 +56,16 @@ export const UnlockEntry = ({
 	describedBy,
 }: UnlockEntryProps) => {
 	const field = useRef<HTMLInputElement>(null);
-	// The field is what was asked for, so the typing goes in it (Sidebar's
-	// `NewFolderField` says why this is not `autoFocus`).
+	const pattern = useRef<HTMLDivElement>(null);
+	// The field is what was asked for, so the typing goes in it, or the drawing
+	// starts from its first dot (Sidebar's `NewFolderField` says why this is
+	// not `autoFocus`).
 	useEffect(() => {
-		field.current?.focus();
+		(field.current ?? pattern.current?.querySelector<HTMLElement>('[data-dot]'))?.focus();
 	}, []);
 	if (kind === 'pattern') {
 		return (
-			<div className="unlock-pattern">
+			<div ref={pattern} className="unlock-pattern">
 				<PatternGrid
 					dots={entered.dots}
 					disabled={disabled}
@@ -197,11 +199,18 @@ export const ChooseUnlock = ({
 						{error}
 					</p>
 				)}
-				<SecretsActions>
-					<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
-						{t('secrets.choose.done')}
-					</button>
-				</SecretsActions>
+				<DialogActions
+					primary={
+						<button
+							type="submit"
+							className="primary"
+							disabled={busy}
+							aria-describedby={askId}
+						>
+							{t('secrets.choose.done')}
+						</button>
+					}
+				/>
 			</form>
 		);
 	}
@@ -256,11 +265,13 @@ export const ChooseUnlock = ({
 					{error}
 				</p>
 			)}
-			<SecretsActions>
-				<button type="submit" className="primary" disabled={!ready}>
-					{first === null ? t('secrets.choose.next') : t('secrets.choose.done')}
-				</button>
-			</SecretsActions>
+			<DialogActions
+				primary={
+					<button type="submit" className="primary" disabled={!ready}>
+						{first === null ? t('secrets.choose.next') : t('secrets.choose.done')}
+					</button>
+				}
+			/>
 		</form>
 	);
 };

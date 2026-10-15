@@ -1,9 +1,7 @@
 import { fileKind } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useRef, useState } from 'react';
 
-import { useSuspendShortcuts } from '../commands/context.js';
 import { FILE_ICONS, Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { activeConnectionId, db, type NotesDatabase } from '../store/db.js';
@@ -14,6 +12,7 @@ import {
 	everyNoteHeld,
 } from '../store/fileLinks.js';
 import { titleShown } from '../store/titles.js';
+import { Dialog, DialogActions, InlineDialog } from './Dialog.js';
 
 /**
  * The files in a notebook, each with the notes that link it under its name,
@@ -81,19 +80,15 @@ const FileRow = ({
 	const [busy, setBusy] = useState(false);
 	const offered = file.linkedBy.length === 0 && deletable;
 	const deleteButton = useRef<HTMLButtonElement>(null);
-	const keepButton = useRef<HTMLButtonElement>(null);
 	const asked = useRef(false);
 
-	// The button pressed goes as the question comes and goes: the focus goes
-	// to Keep, which answers it safely, and back to Delete after.
+	// The button pressed goes as the question comes, which takes the focus as
+	// every question does (`InlineDialog`); answered without deleting, it is
+	// given back to Delete.
 	useEffect(() => {
 		const was = asked.current;
 		asked.current = asking;
-		if (asking) {
-			keepButton.current?.focus();
-			return;
-		}
-		if (was) deleteButton.current?.focus();
+		if (was && !asking) deleteButton.current?.focus();
 	}, [asking]);
 
 	return (
@@ -118,49 +113,41 @@ const FileRow = ({
 				</button>
 			)}
 			{offered && asking && (
-				<span
+				<InlineDialog
 					className="attached-file-confirm"
-					role="group"
-					aria-label={t('attachedFiles.deleteLabel', { name: file.name })}
+					label={t('attachedFiles.deleteLabel', { name: file.name })}
+					onClose={() => {
+						if (!busy) setAsking(false);
+					}}
 				>
 					<span>{t('attachedFiles.confirm')}</span>
-					<button
-						type="button"
-						className="danger"
-						disabled={busy}
-						onClick={() => {
-							setBusy(true);
-							void onDelete(file).finally(() => {
-								setBusy(false);
-								setAsking(false);
-							});
-						}}
-					>
-						{t('attachedFiles.delete')}
-					</button>
-					<button
-						ref={keepButton}
-						type="button"
-						disabled={busy}
-						onClick={() => {
-							setAsking(false);
-						}}
-					>
-						{t('attachedFiles.keep')}
-					</button>
-				</span>
+					<DialogActions
+						primary={
+							<button
+								type="button"
+								className="danger"
+								disabled={busy}
+								onClick={() => {
+									setBusy(true);
+									void onDelete(file).finally(() => {
+										setBusy(false);
+										setAsking(false);
+									});
+								}}
+							>
+								{t('attachedFiles.delete')}
+							</button>
+						}
+					/>
+				</InlineDialog>
 			)}
 		</li>
 	);
 };
 
 export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFilesProps) => {
-	const titleId = useId();
-	const dialog = useRef<HTMLDivElement>(null);
-	const close = useRef<HTMLButtonElement>(null);
 	const [connectionId, setConnectionId] = useState<string>();
 	const [problem, setProblem] = useState<string>();
-	useSuspendShortcuts();
 
 	useEffect(() => {
 		void activeConnectionId(database).then(setConnectionId);
@@ -176,38 +163,6 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 		[database, connectionId]
 	);
 
-	useEffect(() => {
-		const back = document.activeElement;
-		close.current?.focus();
-		return () => {
-			if (back instanceof HTMLElement && back.isConnected) back.focus();
-		};
-	}, []);
-
-	// On the document, not the dialog: a button that goes as it is pressed
-	// leaves the focus nowhere, and Escape and Tab must still be the dialog's.
-	useEffect(() => {
-		const element = dialog.current;
-		if (element === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				onClose();
-				return;
-			}
-			if (event.key !== 'Tab') return;
-			const buttons = [...element.querySelectorAll('button:not(:disabled)')];
-			const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
-			const next = (at + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
-			event.preventDefault();
-			(buttons[next] as HTMLButtonElement | undefined)?.focus();
-		};
-		document.addEventListener('keydown', onKey);
-		return () => {
-			document.removeEventListener('keydown', onKey);
-		};
-	}, [onClose]);
-
 	const remove = async (file: AttachedFile): Promise<void> => {
 		if (connectionId === undefined) return;
 		setProblem(undefined);
@@ -218,49 +173,39 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 		} catch {
 			setProblem(t('attachedFiles.failed', { name: file.name }));
 		}
-		close.current?.focus();
 	};
 
-	return createPortal(
-		<div className="modal-backdrop">
-			<div
-				ref={dialog}
-				className="modal attached-files"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-			>
-				<h2 id={titleId}>{t('attachedFiles.title', { name })}</h2>
-				{files !== undefined && files.length === 0 && (
-					<p className="muted">{t('attachedFiles.none')}</p>
-				)}
-				{held === false && files !== undefined && files.length > 0 && (
-					<p className="muted">{t('attachedFiles.notAllHere')}</p>
-				)}
-				{files !== undefined && files.length > 0 && (
-					<ul className="attached-file-list">
-						{files.map((file) => (
-							<FileRow
-								key={file.id}
-								file={file}
-								deletable={held === true}
-								onDelete={remove}
-							/>
-						))}
-					</ul>
-				)}
-				{problem !== undefined && (
-					<p className="muted" role="alert">
-						{problem}
-					</p>
-				)}
-				<div className="modal-actions">
-					<button ref={close} type="button" onClick={onClose}>
-						{t('common.close')}
-					</button>
-				</div>
-			</div>
-		</div>,
-		document.body
+	return (
+		<Dialog
+			title={t('attachedFiles.title', { name })}
+			className="attached-files"
+			onClose={onClose}
+			closeLabel={t('common.close')}
+		>
+			{files !== undefined && files.length === 0 && (
+				<p className="muted">{t('attachedFiles.none')}</p>
+			)}
+			{held === false && files !== undefined && files.length > 0 && (
+				<p className="muted">{t('attachedFiles.notAllHere')}</p>
+			)}
+			{files !== undefined && files.length > 0 && (
+				<ul className="attached-file-list">
+					{files.map((file) => (
+						<FileRow
+							key={file.id}
+							file={file}
+							deletable={held === true}
+							onDelete={remove}
+						/>
+					))}
+				</ul>
+			)}
+			{problem !== undefined && (
+				<p className="muted" role="alert">
+					{problem}
+				</p>
+			)}
+			<DialogActions />
+		</Dialog>
 	);
 };

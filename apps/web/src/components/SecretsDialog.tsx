@@ -26,9 +26,9 @@ import {
 	type UnlockedKeys,
 } from '../store/secretKeys.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
+import { Dialog, DialogActions } from './Dialog.js';
 import { PasteKey } from './PasteKey.js';
-import { SecretsActions } from './SecretsActions.js';
-import { SecretsModal, UnlockForm } from './UnlockDialog.js';
+import { UnlockForm } from './UnlockDialog.js';
 import { ChooseUnlock, type Chosen } from './UnlockEntry.js';
 
 /**
@@ -194,7 +194,13 @@ const ShowKey = ({
 			<p className="secrets-said" role="status">
 				{said}
 			</p>
-			<SecretsActions>
+			<DialogActions
+				primary={
+					<button type="button" className="primary" onClick={onNext}>
+						{t('secrets.key.next')}
+					</button>
+				}
+			>
 				<button
 					type="button"
 					onClick={() => {
@@ -220,10 +226,7 @@ const ShowKey = ({
 				>
 					{t('secrets.key.copy')}
 				</button>
-				<button type="button" className="primary" onClick={onNext}>
-					{t('secrets.key.next')}
-				</button>
-			</SecretsActions>
+			</DialogActions>
 		</div>
 	);
 };
@@ -287,18 +290,21 @@ const CheckKey = ({
 					{t('secrets.check.wrong', { number: wrong + 1 })}
 				</p>
 			)}
-			<SecretsActions>
+			<DialogActions
+				primary={
+					<button
+						type="submit"
+						className="primary"
+						disabled={busy || typed.some((text) => asGroup(text) === '')}
+					>
+						{t('secrets.check.check')}
+					</button>
+				}
+			>
 				<button type="button" onClick={onBack}>
 					{t('secrets.check.back')}
 				</button>
-				<button
-					type="submit"
-					className="primary"
-					disabled={busy || typed.some((text) => asGroup(text) === '')}
-				>
-					{t('secrets.check.check')}
-				</button>
-			</SecretsActions>
+			</DialogActions>
 		</form>
 	);
 };
@@ -329,17 +335,20 @@ const Different = ({
 	<div className="secrets-step">
 		<p role="alert">{t('secrets.different.secrets', { count: secrets })}</p>
 		{secrets > 1 && <p>{t('secrets.different.notes', { count: notes })}</p>}
-		<SecretsActions>
+		<DialogActions
+			primary={
+				<button type="button" className="primary" onClick={onContinue}>
+					{t('secrets.different.continue')}
+				</button>
+			}
+		>
 			<button type="button" onClick={onUseThat}>
 				{t('secrets.different.useThat')}
 			</button>
 			<button type="button" onClick={onAddIt}>
 				{t('secrets.different.addIt')}
 			</button>
-			<button type="button" className="primary" onClick={onContinue}>
-				{t('secrets.different.continue')}
-			</button>
-		</SecretsActions>
+		</DialogActions>
 	</div>
 );
 
@@ -356,14 +365,17 @@ const Intro = ({
 	<div className="secrets-step">
 		<p>{t('secrets.intro.what')}</p>
 		<p>{t('secrets.intro.key')}</p>
-		<SecretsActions>
-			<button type="button" className="primary" disabled={busy} onClick={onMake}>
-				{t('secrets.intro.make')}
-			</button>
+		<DialogActions
+			primary={
+				<button type="button" className="primary" disabled={busy} onClick={onMake}>
+					{t('secrets.intro.make')}
+				</button>
+			}
+		>
 			<button type="button" disabled={busy} onClick={onPaste}>
 				{t('secrets.intro.paste')}
 			</button>
-		</SecretsActions>
+		</DialogActions>
 	</div>
 );
 
@@ -381,14 +393,17 @@ const Rekey = ({
 		<h3>{t('secrets.rekey.title')}</h3>
 		<p>{t('secrets.rekey.text')}</p>
 		<p>{t('secrets.rekey.history')}</p>
-		<SecretsActions>
-			<button type="button" className="primary" disabled={busy} onClick={onMake}>
-				{t('secrets.rekey.make')}
-			</button>
+		<DialogActions
+			primary={
+				<button type="button" className="primary" disabled={busy} onClick={onMake}>
+					{t('secrets.rekey.make')}
+				</button>
+			}
+		>
 			<button type="button" disabled={busy} onClick={onPaste}>
 				{t('secrets.rekey.paste')}
 			</button>
-		</SecretsActions>
+		</DialogActions>
 	</div>
 );
 
@@ -410,11 +425,13 @@ const RekeyReady = ({
 		</p>
 		{scan.others > 0 && <p role="alert">{t('secrets.rekey.others', { count: scan.others })}</p>}
 		{scan.others > 1 && <p>{t('secrets.different.notes', { count: scan.otherNotes })}</p>}
-		<SecretsActions>
-			<button type="button" className="primary" disabled={busy} onClick={onReplace}>
-				{t('secrets.rekey.replace')}
-			</button>
-		</SecretsActions>
+		<DialogActions
+			primary={
+				<button type="button" className="primary" disabled={busy} onClick={onReplace}>
+					{t('secrets.rekey.replace')}
+				</button>
+			}
+		/>
 	</div>
 );
 
@@ -446,14 +463,19 @@ const Device = ({
 				{error}
 			</p>
 		)}
-		<SecretsActions>
-			{unlocked ? (
+		{/* Unlocked, there is nothing it asks: Close has the focus. */}
+		<DialogActions
+			primary={
+				unlocked ? undefined : (
+					<button type="button" className="primary" onClick={onUnlock}>
+						{t('secrets.device.unlock')}
+					</button>
+				)
+			}
+		>
+			{unlocked && (
 				<button type="button" onClick={onLock}>
 					{t('secrets.device.lockNow')}
-				</button>
-			) : (
-				<button type="button" className="primary" onClick={onUnlock}>
-					{t('secrets.device.unlock')}
 				</button>
 			)}
 			<button type="button" onClick={onChange}>
@@ -465,7 +487,7 @@ const Device = ({
 			<button type="button" className="danger" onClick={onRemove}>
 				{t('secrets.device.remove')}
 			</button>
-		</SecretsActions>
+		</DialogActions>
 	</div>
 );
 
@@ -481,14 +503,17 @@ const Lost = ({
 }) => (
 	<div className="secrets-step">
 		<p>{t('secrets.lost.text')}</p>
-		<SecretsActions>
-			<button type="button" className="primary" disabled={busy} onClick={onPutBack}>
-				{t('secrets.lost.putBack')}
-			</button>
+		<DialogActions
+			primary={
+				<button type="button" className="primary" disabled={busy} onClick={onPutBack}>
+					{t('secrets.lost.putBack')}
+				</button>
+			}
+		>
 			<button type="button" className="danger" disabled={busy} onClick={onRemove}>
 				{t('secrets.device.remove')}
 			</button>
-		</SecretsActions>
+		</DialogActions>
 	</div>
 );
 
@@ -506,14 +531,18 @@ const RemoveKey = ({
 		<h3>{t('secrets.device.removeTitle')}</h3>
 		<p>{t('secrets.device.removeText')}</p>
 		{/* Its Cancel goes back to the device's step; Escape still closes the dialog. */}
-		<SecretsActions close={false}>
-			<button type="button" className="danger" disabled={busy} onClick={onRemove}>
-				{t('secrets.device.removeConfirm')}
-			</button>
+		<DialogActions
+			close={false}
+			primary={
+				<button type="button" className="danger" disabled={busy} onClick={onRemove}>
+					{t('secrets.device.removeConfirm')}
+				</button>
+			}
+		>
 			<button type="button" onClick={onCancel}>
 				{t('common.cancel')}
 			</button>
-		</SecretsActions>
+		</DialogActions>
 	</div>
 );
 
@@ -1106,7 +1135,7 @@ export const SecretsDialog = ({
 				return (
 					<>
 						{SAID[at]()}
-						<SecretsActions />
+						<DialogActions />
 					</>
 				);
 		}
@@ -1247,7 +1276,7 @@ export const SecretsDialog = ({
 				return (
 					<>
 						<p role="status">{at.said}</p>
-						<SecretsActions />
+						<DialogActions />
 					</>
 				);
 		}
@@ -1262,8 +1291,9 @@ export const SecretsDialog = ({
 		(typeof at !== 'string' && (at.kind === 'choose' || at.kind === 'change'));
 
 	return (
-		<SecretsModal
+		<Dialog
 			title={t('secrets.title')}
+			className="secrets-dialog"
 			onClose={onClose}
 			closeLabel={finished ? t('common.close') : t('common.cancel')}
 			status={doing}
@@ -1275,6 +1305,6 @@ export const SecretsDialog = ({
 				</p>
 			)}
 			{bodyOf(at)}
-		</SecretsModal>
+		</Dialog>
 	);
 };

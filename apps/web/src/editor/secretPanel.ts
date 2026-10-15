@@ -2,10 +2,11 @@ import { t } from '../i18n/t.js';
 
 /**
  * A secret's words, revealed (docs/ARCHITECTURE.md §7, "Secrets in a note"):
- * a plain-text field of its own, outside the note's document, with Done,
- * Copy and Cancel. The same panel under a revealed block and where a new
- * secret is being written, in either editor. What is typed in it is kept as
- * it is typed, as what is typed in the note is.
+ * a plain-text field of its own, outside the note's document, with Cancel,
+ * Copy and Done, in that order, as every dialog's row is (`DialogActions`).
+ * The same panel under a revealed block and where a new secret is being
+ * written, in either editor. What is typed in it is kept as it is typed, as
+ * what is typed in the note is.
  *
  * Built by hand, as the code block's bar is (`codeBlock.ts`): what holds it
  * is a node view or a widget, not React. The field keeps the browser's
@@ -23,9 +24,9 @@ export interface SecretPanelOptions {
 	 * method is still composing a character, which is kept as it ends.
 	 */
 	readonly onInput: () => void;
-	/** Done, or Escape: the panel closed. */
+	/** Done, or Mod+Enter: the panel closed. */
 	readonly onDone: () => void;
-	/** Cancel: the secret is put back as it was revealed. */
+	/** Cancel, or Escape: the secret is put back as it was revealed. */
 	readonly onCancel: () => void;
 	/** Copy: the words to the system clipboard, answering whether they went. */
 	readonly onCopy: (words: string) => Promise<boolean>;
@@ -109,11 +110,17 @@ export const createSecretPanel = ({
 		});
 	});
 	const cancel = button(t('editor.secret.cancel'), 'secret-cancel', onCancel);
+	cancel.setAttribute('data-dialog-close', '');
 	const done = button(t('editor.secret.done'), 'secret-done', onDone);
+	const answer = document.createElement('span');
+	answer.setAttribute('class', 'dialog-primary');
+	answer.setAttribute('data-dialog-primary', '');
+	answer.append(done);
 
+	// The row every dialog has (`DialogActions`), built as it builds it.
 	const actions = document.createElement('div');
-	actions.setAttribute('class', 'secret-actions');
-	actions.append(copy, cancel, done);
+	actions.setAttribute('class', 'dialog-actions');
+	actions.append(cancel, copy, answer);
 
 	const dom = document.createElement('div');
 	dom.setAttribute('class', 'secret-panel');
@@ -122,10 +129,15 @@ export const createSecretPanel = ({
 	dom.append(field, said, actions);
 
 	// The field's keys are its own, and the note's editor never hears them
-	// (the view stops them). Escape closes the panel, as Done does: what was
-	// typed is in the note already.
+	// (the view stops them). Escape is Cancel, as in every dialog (the owner's
+	// rule, 2026-10-15), and Mod+Enter is Done.
 	dom.addEventListener('keydown', (event) => {
-		if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			onCancel();
+			return;
+		}
+		if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
 			event.preventDefault();
 			onDone();
 		}
