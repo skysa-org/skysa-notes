@@ -1,5 +1,17 @@
 # @skysa/core
 
+## 1.4.0
+
+### Minor Changes
+
+- 2b44f26: Secrets in the raw editor. A secret's fence shows its encrypted text as it is written, with Reveal at the end of its first line (or Alt+Enter inside it), which opens the same panel as in the rich editor, under the fence. What you type there is encrypted into the fence as you type it, and one undo takes back what was typed. "Insert secret" in the palette works in raw mode too, and writes a new fence after the paragraph, heading or code block you are in, inside its list or quote; Cancel leaves the note exactly as it was. Find in raw mode passes over a secret's fence, so a search never lands in it and Replace never changes it. A scratchpad card shows "Secret" where its note has one, and a scratch note holding only a secret or only a picture is no longer deleted when the "Take a note" box closes. A sync that changes the note elsewhere no longer moves the cursor or takes the focus from an open secret. In `core`, `previewBlocks` gives a secret a line of its own that carries a secret's mark, including one cut short by a preview's length.
+- a87444b: Secrets: "Replace key…" in a source's Secrets dialog makes a new key, or takes one you have, and encrypts the secrets made with the old key to it.
+- 68cd617: Secrets in the rich editor. A secret shows as a closed block that says "Secret" and offers Reveal, which unlocks the device if it is locked and opens the words in a panel under the block, with Copy, Cancel and Done. What you type there is encrypted into the note as you type it, so closing the note, switching mode, the app locking or a sync never finds words that are not saved; Done closes the panel, and Cancel puts the secret back as it was. "Secret" in the slash menu, and "Insert secret" in the palette, write a new one. When the app locks, every open secret closes. A secret copied and pasted, or pasted as markdown, is a secret still. In `core`, sealing and opening an age file no longer wait: `encrypt`, `decrypt`, `opens`, `sealSecret`, `openSecret` and `opensSecret` answer at once, with HKDF and HMAC from `@noble/hashes`.
+
+### Patch Changes
+
+- 8852470: A secret in a note, an `age` block holding age's armor, is left out of the note list's preview, the scratchpad's cards and search, which would otherwise show its base64. The age format itself (X25519 keys, the header, the payload and the armor) is now in core, checked against age's published test vectors.
+
 ## 1.3.0
 
 No changes in this release.
