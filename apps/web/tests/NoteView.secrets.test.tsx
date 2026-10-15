@@ -64,7 +64,7 @@ describe('"Insert secret" from the palette', () => {
 		async (mode) => {
 			await setDefaultEditorMode(db, mode);
 			const note = await createNote(db, { title: 'Day', body: 'Before.\n' });
-			const onProblem = vi.fn();
+			const onProblem = vi.fn<(problem: AttachmentProblem) => void>();
 			render(
 				<CommandsProvider>
 					<Harness id={note.id} onProblem={onProblem} />
@@ -84,11 +84,11 @@ describe('"Insert secret" from the palette', () => {
 			});
 
 			await waitFor(() => {
-				expect(onProblem).toHaveBeenCalledWith({
-					message:
-						'This source is not set up for secrets. Choose Set up secrets… in its menu to set it up.',
-					tone: 'warning',
-				});
+				const told = onProblem.mock.lastCall?.[0];
+				expect(told?.message).toBe('This source is not set up for secrets.');
+				expect(told?.tone).toBe('warning');
+				// With the way on, rather than where to find it.
+				expect(told?.action?.label).toBe('Set up secrets');
 			});
 		}
 	);
@@ -98,7 +98,7 @@ describe('"Insert secret" on the rich editor’s toolbar', () => {
 	it('reaches the note’s host, which says the source is not set up', async () => {
 		await setDefaultEditorMode(db, 'rich');
 		const note = await createNote(db, { title: 'Day', body: 'Before.\n' });
-		const onProblem = vi.fn();
+		const onProblem = vi.fn<(problem: AttachmentProblem) => void>();
 		render(
 			<CommandsProvider>
 				<Harness id={note.id} onProblem={onProblem} />
@@ -109,11 +109,9 @@ describe('"Insert secret" on the rich editor’s toolbar', () => {
 		fireEvent.mouseDown(await screen.findByRole('button', { name: 'Insert secret' }));
 
 		await waitFor(() => {
-			expect(onProblem).toHaveBeenCalledWith({
-				message:
-					'This source is not set up for secrets. Choose Set up secrets… in its menu to set it up.',
-				tone: 'warning',
-			});
+			const told = onProblem.mock.lastCall?.[0];
+			expect(told?.message).toBe('This source is not set up for secrets.');
+			expect(told?.action?.label).toBe('Set up secrets');
 		});
 	});
 });

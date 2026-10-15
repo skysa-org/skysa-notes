@@ -1918,10 +1918,19 @@ button.danger {
 
 .secret-bar {
 	display: flex;
+	gap: 0.5rem;
+	padding: 0.4rem 0.75rem;
+}
+
+/* What it is, Reveal, and why not: centred against the bar beside it, which
+   on a touch screen is the taller. */
+.secret-line {
+	display: flex;
+	flex: 1;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 0.5rem;
-	padding: 0.4rem 0.75rem;
+	min-inline-size: 0;
 }
 
 .secret-label {
@@ -1950,6 +1959,21 @@ button.danger {
 
 .secret-note:empty {
 	display: none;
+}
+
+/* Selected, a secret's bar (Delete secret), as a picture has: at the end of
+   its first line, in the line rather than over it. Its room is kept while it
+   is not shown, so selecting the secret moves nothing. */
+.attachment-actions.secret-actions {
+	position: static;
+	align-self: flex-start;
+	margin: 0;
+	box-shadow: none;
+}
+
+.attachment-actions.secret-actions[hidden] {
+	display: flex;
+	visibility: hidden;
 }
 
 .secret-panel {
@@ -5196,11 +5220,32 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	font-size: 0.875rem;
 }
 
-/* Which way the device unlocks: one of three, as a row of toggles. */
+/* Which way the device unlocks: one of three, or four where the device's own
+   lock is offered, as a row of toggles. */
 .unlock-kinds {
 	display: flex;
 	gap: 0.25rem;
 	margin: 0 0 0.75rem;
+}
+
+/* Where the kinds are chosen (`ChooseUnlock`): a container, so the choice
+   folds to the room the form has rather than to the window's. */
+.choose-unlock {
+	container: choose-unlock / inline-size;
+}
+
+/* All four kinds, with the device's own lock offered, crush one another in a
+   row as narrow as a phone's dialog: two by two there (2026-10-15, the
+   owner's ask). Three fit in a row at any width. */
+@container choose-unlock (width < 24rem) {
+	.unlock-kinds:has(> :nth-child(4)) {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.unlock-kinds button {
+		text-wrap: balance;
+	}
 }
 
 .modal .unlock-kinds button[aria-checked='true'] {

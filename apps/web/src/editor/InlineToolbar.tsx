@@ -52,10 +52,14 @@ export const shouldShowInlineToolbar =
 
 		if (mediaMatches(COARSE_POINTER)) return false;
 		if (codeBlockAround(state) !== null) return false;
-		// A picture or a file selected whole holds no text to format, and a mark
-		// over it changes nothing a reader sees (#187). A file's chip has a bar
-		// of its own.
-		if (selection instanceof NodeSelection && selection.node.isInline) return false;
+		// A picture, a file or a secret selected whole holds no text to format,
+		// and a mark over it changes nothing a reader sees (#187). A file's chip
+		// and a secret have a bar of their own.
+		if (
+			selection instanceof NodeSelection &&
+			(selection.node.isInline || selection.node.isAtom)
+		)
+			return false;
 
 		if (!view.editable) return false;
 		if (!view.hasFocus() && !content.contains(document.activeElement)) return false;

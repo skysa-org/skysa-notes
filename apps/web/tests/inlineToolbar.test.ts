@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { shouldShowInlineToolbar } from '../src/editor/InlineToolbar.js';
 import { createRichEditor } from '../src/editor/rich.js';
+import { fence, sealed } from './secretHostFake.js';
 import { type FakeWindow, windowWidth } from './windowWidth.js';
 
 /**
@@ -121,6 +122,17 @@ describe('the floating formatting toolbar', () => {
 
 		editor.view.dispatch(
 			editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, 3))
+		);
+
+		expect(editor.view.state.selection).toBeInstanceOf(NodeSelection);
+		expect(editor.shows()).toBe(false);
+	});
+
+	it('stays away from a secret selected whole, which has a bar of its own', async () => {
+		const editor = await mount(`${fence(sealed('the door code'))}\n\nAfter.\n`);
+
+		editor.view.dispatch(
+			editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, 0))
 		);
 
 		expect(editor.view.state.selection).toBeInstanceOf(NodeSelection);
