@@ -204,6 +204,9 @@ describe('scanning a key’s QR code', () => {
 
 		harness(camera([]).scanner);
 		expect(scan()).not.toBeNull();
+		// Another way to fill the groups, by them: the row is Continue's.
+		expect(scan()?.closest('.dialog-tools')).not.toBeNull();
+		expect(scan()?.closest('.dialog-actions')).toBeNull();
 	});
 
 	it('fills the groups from a key’s code, lets the camera go, and moves on to Continue', async () => {

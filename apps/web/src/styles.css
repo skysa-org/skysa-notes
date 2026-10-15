@@ -5092,6 +5092,66 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	margin: 0 0 1rem;
 }
 
+/* What a step can go on to besides its answer (the secrets dialog's
+   `Options`): a list in the dialog's middle, a row each saying where it goes,
+   rather than more buttons in the row at its foot. */
+.dialog-options {
+	display: grid;
+	margin: 0 0 1rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	overflow: hidden;
+}
+
+.modal button.dialog-option {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.75rem;
+	min-height: 2.75rem;
+	padding: 0.5rem 0.75rem;
+	border: 0;
+	border-radius: 0;
+	background: none;
+	text-align: start;
+}
+
+.modal button.dialog-option + .dialog-option {
+	border-block-start: 1px solid var(--border);
+}
+
+/* The chevron turned to point on, to the step the row goes to. */
+.dialog-option-icon {
+	flex: none;
+	width: 1rem;
+	height: 1rem;
+	color: var(--muted);
+	rotate: -90deg;
+}
+
+@media (hover: hover) {
+	.modal button.dialog-option:hover {
+		background: var(--hover-bg);
+	}
+}
+
+/* What is done with what a step shows or asks for, beside it: Print and Copy
+   under a new key, Scan QR code under the key's groups. The row at the foot
+   keeps to going on. */
+.dialog-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem 0.75rem;
+	margin: 0 0 1rem;
+}
+
+.modal .dialog-tools .secrets-said {
+	flex: 1 1 8rem;
+	margin: 0;
+	color: var(--muted);
+}
+
 /* The answer the question expects, filled, so it is the one the eye lands on;
    it has the focus too. A question asked in the storage panel draws it the
    same way. */
@@ -5283,12 +5343,13 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 
 /* The key as a QR code, under its groups (`RecoveryQr`): white around it
    whatever the theme, which is its quiet zone, and sized for a camera across
-   a desk to read from the screen. */
+   a desk to read from the screen. On the groups' edge, as Print and Copy
+   under it are. */
 .recovery-qr {
 	display: block;
 	inline-size: 10rem;
 	block-size: 10rem;
-	margin: 0.75rem auto 0;
+	margin: 0 0 1rem;
 	border-radius: 0.25rem;
 }
 

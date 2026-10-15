@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
 import { DialogActions } from './Dialog.js';
+import { asTyped, GroupCells, SIZES, spilled, type Typed } from './GroupCells.js';
 import { browserScanner, ScanKey, type Scanner } from './ScanKey.js';
 
 export interface PasteKeyProps {
@@ -20,36 +21,16 @@ export interface PasteKeyProps {
 	scanner?: Scanner | undefined;
 }
 
-/**
- * How many characters each group holds: eleven of five, then three, as the key
- * is shown and printed (`recoveryKeyGroups`).
- */
-const SIZES: readonly number[] = [...Array.from({ length: 11 }, () => 5), 3];
-
 const NO_GROUPS: readonly string[] = SIZES.map(() => '');
+
+/** Each group's place in the key: all twelve, in order. */
+const NUMBERS: readonly number[] = SIZES.map((_, at) => at);
 
 /** The whole key, after its prefix. */
 const KEY_LENGTH = SIZES.reduce((sum, size) => sum + size, 0);
 
 /** The prefix as it reads once spaces and hyphens are taken out. */
 const PREFIX_LETTERS = RECOVERY_KEY_PREFIX.replaceAll('-', '');
-
-/** What was typed in a group, as the key spells it: no spaces or hyphens, in capitals. */
-const asTyped = (text: string): string => text.replace(/[\s-]+/gu, '').toUpperCase();
-
-/** `text` in the groups from `from` on, as far as it goes; the groups before kept. */
-const filledFrom = (groups: readonly string[], from: number, text: string) => {
-	// Where in `text` each group from `from` on begins.
-	const starts = SIZES.map((_, index) =>
-		SIZES.slice(from, index).reduce((sum, size) => sum + size, 0)
-	);
-	const reached = (index: number) => index >= from && (starts[index] ?? 0) < text.length;
-	const next = groups.map((group, index) => {
-		const start = starts[index] ?? 0;
-		return reached(index) ? text.slice(start, start + (SIZES[index] ?? 0)) : group;
-	});
-	return { groups: next, last: SIZES.findLastIndex((_, index) => reached(index)) };
-};
 
 /**
  * What typing `value` into group `at` makes of the groups, and the group the
@@ -59,30 +40,18 @@ const filledFrom = (groups: readonly string[], from: number, text: string) => {
  * group: the prefix ends in `1`, which no group can hold, so it is never taken
  * for one. So is a whole key without it, wherever it is pasted.
  */
-export const typedIn = (
-	groups: readonly string[],
-	at: number,
-	value: string
-): Readonly<{ groups: readonly string[]; focus: number }> => {
+export const typedIn = (groups: readonly string[], at: number, value: string): Typed => {
 	const typed = asTyped(value);
 	const sofar = `${groups.slice(0, at).join('')}${typed}`;
 	const prefix = sofar.lastIndexOf(PREFIX_LETTERS);
 	const whole = prefix === -1 && typed.length >= KEY_LENGTH ? typed : undefined;
 	if (prefix !== -1 || whole !== undefined) {
 		const key = whole ?? sofar.slice(prefix + PREFIX_LETTERS.length);
-		const filled = filledFrom(NO_GROUPS, 0, key);
+		const filled = spilled(SIZES, NO_GROUPS, 0, key);
 		const empty = filled.groups.findIndex((group, index) => group.length < (SIZES[index] ?? 0));
 		return { groups: filled.groups, focus: empty === -1 ? SIZES.length - 1 : empty };
 	}
-	if (typed === '') {
-		return { groups: groups.map((group, index) => (index === at ? '' : group)), focus: at };
-	}
-	const filled = filledFrom(groups, at, typed);
-	const full = (filled.groups[filled.last]?.length ?? 0) === SIZES[filled.last];
-	return {
-		groups: filled.groups,
-		focus: full ? Math.min(filled.last + 1, SIZES.length - 1) : filled.last,
-	};
+	return spilled(SIZES, groups, at, typed);
 };
 
 /**
@@ -103,7 +72,6 @@ export const PasteKey = ({
 }: PasteKeyProps) => {
 	const textId = useId();
 	const [groups, setGroups] = useState<readonly string[]>(NO_GROUPS);
-	const fields = useRef<(HTMLInputElement | null)[]>([]);
 	const [scanner] = useState(() => given ?? browserScanner());
 	const [scanning, setScanning] = useState(false);
 	const scan = useRef<HTMLButtonElement>(null);
@@ -128,17 +96,6 @@ export const PasteKey = ({
 		setScanning(false);
 		return true;
 	};
-	// The group to go on to, once what was typed is drawn: its own words
-	// selected, to be typed over, unless what was typed went on into them.
-	const going = useRef<Readonly<{ at: number; over: boolean }> | undefined>(undefined);
-	useLayoutEffect(() => {
-		const to = going.current;
-		going.current = undefined;
-		const field = to === undefined ? null : fields.current[to.at];
-		if (to === undefined || field === null || field === undefined) return;
-		field.focus();
-		field.setSelectionRange(to.over ? 0 : field.value.length, field.value.length);
-	});
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [checking, setChecking] = useState(false);
 	const busy = working || checking;
@@ -184,60 +141,43 @@ export const PasteKey = ({
 				<span className="recovery-prefix" aria-hidden="true">
 					{RECOVERY_KEY_PREFIX}
 				</span>
-				<div className="recovery-cells">
-					{groups.map((group, at) => (
-						// The groups are the key: their place is what tells them apart.
-						<label key={at} className="recovery-cell">
-							<span aria-hidden="true">{at + 1}</span>
-							<input
-								ref={(element) => {
-									fields.current[at] = element;
-								}}
-								className="group-field"
-								aria-label={t('secrets.check.group', { number: at + 1 })}
-								autoComplete="off"
-								autoCapitalize="characters"
-								autoCorrect="off"
-								spellCheck={false}
-								value={group}
-								onChange={(event) => {
-									const next = typedIn(groups, at, event.target.value);
-									if (next.focus !== at) {
-										going.current = {
-											at: next.focus,
-											over: next.groups[next.focus] === groups[next.focus],
-										};
-									}
-									setGroups(next.groups);
-									setError(undefined);
-								}}
-								onKeyDown={(event) => {
-									// Back over an empty group, to the end of the one before it.
-									if (event.key !== 'Backspace' || group !== '' || at === 0)
-										return;
-									event.preventDefault();
-									const before = fields.current[at - 1];
-									before?.focus();
-									before?.setSelectionRange(
-										before.value.length,
-										before.value.length
-									);
-								}}
-							/>
-						</label>
-					))}
-				</div>
-			</div>
-			{scanning && scanner !== undefined && (
-				<ScanKey
-					scanner={scanner}
-					accept={read}
-					onCancel={() => {
-						scanned.current = 'cancelled';
-						setScanning(false);
+				<GroupCells
+					numbers={NUMBERS}
+					groups={groups}
+					typedIn={typedIn}
+					onChange={(next) => {
+						setGroups(next);
+						setError(undefined);
 					}}
 				/>
-			)}
+			</div>
+			{scanner !== undefined &&
+				(scanning ? (
+					<ScanKey
+						scanner={scanner}
+						accept={read}
+						onCancel={() => {
+							scanned.current = 'cancelled';
+							setScanning(false);
+						}}
+					/>
+				) : (
+					// Another way to fill the groups, so beside them: the row is for
+					// what is done with them once they are.
+					<div className="dialog-tools">
+						<button
+							ref={scan}
+							type="button"
+							disabled={busy}
+							onClick={() => {
+								setError(undefined);
+								setScanning(true);
+							}}
+						>
+							{t('secrets.recovery.scan')}
+						</button>
+					</div>
+				))}
 			{error !== undefined && (
 				<p className="secrets-error" role="alert">
 					{error}
@@ -254,21 +194,7 @@ export const PasteKey = ({
 						{t('secrets.recovery.continue')}
 					</button>
 				}
-			>
-				{scanner !== undefined && !scanning && (
-					<button
-						ref={scan}
-						type="button"
-						disabled={busy}
-						onClick={() => {
-							setError(undefined);
-							setScanning(true);
-						}}
-					>
-						{t('secrets.recovery.scan')}
-					</button>
-				)}
-			</DialogActions>
+			/>
 		</form>
 	);
 };

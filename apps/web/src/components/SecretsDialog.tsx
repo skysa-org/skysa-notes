@@ -4,11 +4,13 @@ import {
 	type ReactNode,
 	type RefObject,
 	useEffect,
+	useId,
 	useRef,
 	useState,
 	useSyncExternalStore,
 } from 'react';
 
+import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { type ReplaceScan } from '../secrets/age.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock, setUpDeviceLock } from '../secrets/deviceLock.js';
@@ -27,6 +29,7 @@ import {
 } from '../store/secretKeys.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
 import { Dialog, DialogActions } from './Dialog.js';
+import { GroupCells, SIZES, spilled } from './GroupCells.js';
 import { PasteKey } from './PasteKey.js';
 import { RecoveryQr } from './RecoveryQr.js';
 import { UnlockForm } from './UnlockDialog.js';
@@ -130,9 +133,6 @@ const printPage = (): Promise<void> =>
 
 const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
 
-/** A group as typed back: in either case, spaces and hyphens no matter. */
-const asGroup = (text: string): string => text.replace(/[\s-]+/gu, '').toUpperCase();
-
 /**
  * The device's own lock, and whether it is offered: asked as the dialog
  * opens, and not offered again once making a passkey found it cannot keep a
@@ -196,16 +196,8 @@ const ShowKey = ({
 				{qr}
 				<p>{t('secrets.key.printedNote')}</p>
 			</div>
-			<p className="secrets-said" role="status">
-				{said}
-			</p>
-			<DialogActions
-				primary={
-					<button type="button" className="primary" onClick={onNext}>
-						{t('secrets.key.next')}
-					</button>
-				}
-			>
+			{/* What is done with the key, by it; the row is for going on. */}
+			<div className="dialog-tools">
 				<button
 					type="button"
 					onClick={() => {
@@ -231,12 +223,26 @@ const ShowKey = ({
 				>
 					{t('secrets.key.copy')}
 				</button>
-			</DialogActions>
+				<p className="secrets-said" role="status">
+					{said}
+				</p>
+			</div>
+			<DialogActions
+				primary={
+					<button type="button" className="primary" onClick={onNext}>
+						{t('secrets.key.next')}
+					</button>
+				}
+			/>
 		</div>
 	);
 };
 
-/** Two of the new key's groups, typed back. */
+/**
+ * Two of the new key's groups, typed back: in cells side by side, numbered and
+ * drawn as the whole key's are where it is typed, and going on from the first
+ * to the second as it fills.
+ */
 const CheckKey = ({
 	identity,
 	groups,
@@ -250,12 +256,14 @@ const CheckKey = ({
 	onBack: () => void;
 	onChecked: () => void;
 }) => {
+	const textId = useId();
 	const all = recoveryKeyGroups(identity);
-	const [typed, setTyped] = useState<readonly [string, string]>(['', '']);
+	const sizes = groups.map((group) => SIZES[group] ?? 0);
+	const [typed, setTyped] = useState<readonly string[]>(['', '']);
 	const [wrong, setWrong] = useState<number | undefined>(undefined);
 	const check = () => {
 		if (busy) return;
-		const miss = groups.findIndex((group, at) => asGroup(typed[at] ?? '') !== all[group]);
+		const miss = groups.findIndex((group, at) => typed[at] !== all[group]);
 		if (miss === -1) {
 			onChecked();
 			return;
@@ -270,26 +278,25 @@ const CheckKey = ({
 				check();
 			}}
 		>
-			<p>{t('secrets.check.text')}</p>
-			{groups.map((group, at) => (
-				<label key={group} className="secrets-field">
-					<span>{t('secrets.check.group', { number: group + 1 })}</span>
-					<input
-						className="group-field"
-						autoComplete="off"
-						autoCapitalize="characters"
-						autoCorrect="off"
-						spellCheck={false}
-						maxLength={8}
-						value={typed[at]}
-						onChange={(event) => {
-							const value = event.target.value;
-							setTyped(at === 0 ? [value, typed[1]] : [typed[0], value]);
-							setWrong(undefined);
-						}}
-					/>
-				</label>
-			))}
+			<p id={textId}>
+				{t('secrets.check.text', { first: groups[0] + 1, second: groups[1] + 1 })}
+			</p>
+			<div
+				className="recovery-entry"
+				role="group"
+				aria-label={t('secrets.check.label')}
+				aria-describedby={textId}
+			>
+				<GroupCells
+					numbers={groups}
+					groups={typed}
+					typedIn={(cells, at, value) => spilled(sizes, cells, at, value)}
+					onChange={(next) => {
+						setTyped(next);
+						setWrong(undefined);
+					}}
+				/>
+			</div>
 			{wrong !== undefined && (
 				<p className="secrets-error" role="alert">
 					{t('secrets.check.wrong', { number: wrong + 1 })}
@@ -300,7 +307,7 @@ const CheckKey = ({
 					<button
 						type="submit"
 						className="primary"
-						disabled={busy || typed.some((text) => asGroup(text) === '')}
+						disabled={busy || typed.some((text) => text === '')}
 					>
 						{t('secrets.check.check')}
 					</button>
@@ -323,6 +330,22 @@ const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'ano
 		rekey: 'rekey',
 	};
 
+/**
+ * Where a step goes on to another way of doing what it does, or to something
+ * else that can be done from it: a list in the step itself, each a row that
+ * says where it goes, so the dialog's row keeps to its answer.
+ */
+const Options = ({ children }: { children: ReactNode }) => (
+	<div className="dialog-options">{children}</div>
+);
+
+const Option = ({ onClick, children }: { onClick: () => void; children: ReactNode }) => (
+	<button type="button" className="dialog-option" onClick={onClick}>
+		<span>{children}</span>
+		<Icon name="chevron" className="dialog-option-icon" />
+	</button>
+);
+
 /** Secrets already in the source that the key does not open, said before it is used. */
 const Different = ({
 	secrets,
@@ -340,20 +363,17 @@ const Different = ({
 	<div className="secrets-step">
 		<p role="alert">{t('secrets.different.secrets', { count: secrets })}</p>
 		{secrets > 1 && <p>{t('secrets.different.notes', { count: notes })}</p>}
+		<Options>
+			<Option onClick={onUseThat}>{t('secrets.different.useThat')}</Option>
+			<Option onClick={onAddIt}>{t('secrets.different.addIt')}</Option>
+		</Options>
 		<DialogActions
 			primary={
 				<button type="button" className="primary" onClick={onContinue}>
 					{t('secrets.different.continue')}
 				</button>
 			}
-		>
-			<button type="button" onClick={onUseThat}>
-				{t('secrets.different.useThat')}
-			</button>
-			<button type="button" onClick={onAddIt}>
-				{t('secrets.different.addIt')}
-			</button>
-		</DialogActions>
+		/>
 	</div>
 );
 
@@ -468,6 +488,10 @@ const Device = ({
 				{error}
 			</p>
 		)}
+		<Options>
+			<Option onClick={onChange}>{t('secrets.device.change')}</Option>
+			<Option onClick={onReplaceKey}>{t('secrets.device.replaceKey')}</Option>
+		</Options>
 		{/* Unlocked, there is nothing it asks: the ✕ has the focus. */}
 		<DialogActions
 			primary={
@@ -483,12 +507,6 @@ const Device = ({
 					{t('secrets.device.lockNow')}
 				</button>
 			)}
-			<button type="button" onClick={onChange}>
-				{t('secrets.device.change')}
-			</button>
-			<button type="button" onClick={onReplaceKey}>
-				{t('secrets.device.replaceKey')}
-			</button>
 			<button type="button" className="danger" onClick={onRemove}>
 				{t('secrets.device.remove')}
 			</button>
