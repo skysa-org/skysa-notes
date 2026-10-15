@@ -264,6 +264,8 @@ export const editor = {
 		/** What the closed block says in place of its words. */
 		label: 'Secret',
 		reveal: 'Reveal',
+		/** On the block's bar while it is selected: takes it out of the note. */
+		remove: 'Delete secret',
 		/** Said on the block where it cannot be revealed. */
 		differentKey: 'This secret was made with a different key, which this device does not have.',
 		/** Beside the above: the way to give the device that key. */

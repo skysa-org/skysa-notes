@@ -14,7 +14,7 @@ import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
 import { isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
-import { selectedKeys } from './attachment.js';
+import { barButton, selectedKeys } from './attachment.js';
 import { iconElement } from './icons.js';
 import { secretHostCtx } from './secretHost.js';
 import {
@@ -47,6 +47,11 @@ import {
  * (`secretPanels.ts`, which says what Done, Cancel, leaving, the lock and a
  * pull do). Revealing and hiding dispatch nothing. A new secret's panel is in
  * a widget where it will go.
+ *
+ * Selected whole, it has a bar of its own, as a picture has: Delete secret,
+ * since a phone's keyboard may delete nothing for a block selected (2026-10-04),
+ * and in place of the formatting a selection floats (`InlineToolbar`), which
+ * has nothing to format in it.
  */
 
 export const SECRET = 'secret';
@@ -329,9 +334,19 @@ const secretView = (ctx: Ctx) => {
 		said.setAttribute('class', 'secret-note');
 		said.setAttribute('role', 'status');
 
+		const remover = barButton('trash', t('editor.secret.remove'));
+		const actions = document.createElement('span');
+		actions.setAttribute('class', 'attachment-actions secret-actions');
+		actions.setAttribute('hidden', '');
+		actions.append(remover);
+
+		const line = document.createElement('div');
+		line.setAttribute('class', 'secret-line');
+		line.append(label, reveal, said);
+
 		const bar = document.createElement('div');
 		bar.setAttribute('class', 'secret-bar');
-		bar.append(label, reveal, said);
+		bar.append(line, actions);
 
 		const slot = document.createElement('div');
 		slot.setAttribute('class', 'secret-slot');
@@ -377,10 +392,29 @@ const secretView = (ctx: Ctx) => {
 				said.replaceChildren(NOT_REVEALED[problem]());
 				if (problem !== 'other' || gone.current) return;
 				adding.current = addKeyButton(host, armor, open);
-				bar.append(adding.current);
+				line.append(adding.current);
 			});
 		};
 		reveal.addEventListener('click', open);
+		actions.addEventListener('mousedown', (event) => {
+			// The block stays selected, and with it the bar.
+			event.preventDefault();
+		});
+		// Back to the block, still selected, from a bar reached with Tab.
+		actions.addEventListener('keydown', (event) => {
+			if (event.key !== 'Escape') return;
+			event.preventDefault();
+			view.focus();
+		});
+		// The user taking the secret out of the note: an edit like any other,
+		// so the note is dirty and saved, and undone as one. A panel open on it
+		// goes with it (`leftBehind`).
+		remover.addEventListener('click', () => {
+			const at = getPos();
+			if (at === undefined) return;
+			view.dispatch(view.state.tr.delete(at, at + held.current.nodeSize));
+			view.focus();
+		});
 		selectedKeys.set(dom, {
 			open: () => {
 				open();
@@ -408,14 +442,18 @@ const secretView = (ctx: Ctx) => {
 			},
 			selectNode: () => {
 				dom.setAttribute('data-selected', '');
+				actions.removeAttribute('hidden');
 			},
 			deselectNode: () => {
 				dom.removeAttribute('data-selected');
+				actions.setAttribute('hidden', '');
 			},
-			/** The panel and Reveal are the view's own: pressing or typing in them is not editing. */
+			/** The panel, Reveal and the bar are the view's own: pressing or typing in them is not editing. */
 			stopEvent: (event) =>
 				event.target instanceof Node &&
-				(slot.contains(event.target) || reveal.contains(event.target)),
+				(slot.contains(event.target) ||
+					reveal.contains(event.target) ||
+					actions.contains(event.target)),
 			ignoreMutation: () => true,
 			destroy: () => {
 				gone.current = true;

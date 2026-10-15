@@ -1918,10 +1918,19 @@ button.danger {
 
 .secret-bar {
 	display: flex;
+	gap: 0.5rem;
+	padding: 0.4rem 0.75rem;
+}
+
+/* What it is, Reveal, and why not: centred against the bar beside it, which
+   on a touch screen is the taller. */
+.secret-line {
+	display: flex;
+	flex: 1;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 0.5rem;
-	padding: 0.4rem 0.75rem;
+	min-inline-size: 0;
 }
 
 .secret-label {
@@ -1950,6 +1959,21 @@ button.danger {
 
 .secret-note:empty {
 	display: none;
+}
+
+/* Selected, a secret's bar (Delete secret), as a picture has: at the end of
+   its first line, in the line rather than over it. Its room is kept while it
+   is not shown, so selecting the secret moves nothing. */
+.attachment-actions.secret-actions {
+	position: static;
+	align-self: flex-start;
+	margin: 0;
+	box-shadow: none;
+}
+
+.attachment-actions.secret-actions[hidden] {
+	display: flex;
+	visibility: hidden;
 }
 
 .secret-panel {
