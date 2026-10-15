@@ -180,7 +180,7 @@ export const AttachedFiles = ({ name, path, onClose, database = db }: AttachedFi
 			title={t('attachedFiles.title', { name })}
 			className="attached-files"
 			onClose={onClose}
-			closeLabel={t('common.close')}
+			cancel={false}
 		>
 			{files !== undefined && files.length === 0 && (
 				<p className="muted">{t('attachedFiles.none')}</p>

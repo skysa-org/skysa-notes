@@ -1482,11 +1482,12 @@ describe('AccountPanel, with an account connected', () => {
 
 			await choose(user, 'Import notes');
 			const question = await screen.findByRole('alertdialog', { name: 'Import notes' });
+			// By name: the ✕ in the corner says what it is only to a screen reader.
 			expect(
 				within(question)
 					.getAllByRole('button')
-					.map((button) => button.textContent)
-			).toEqual(['Cancel', 'Choose files', 'Choose folder']);
+					.map((button) => button.getAttribute('aria-label') ?? button.textContent)
+			).toEqual(['Close', 'Cancel', 'Choose files', 'Choose folder']);
 			await user.click(within(question).getByRole('button', { name: 'Cancel' }));
 
 			expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -2579,7 +2580,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		await user.click(within(paused).getByRole('button', { name: 'Resume syncing' }));
 		expect(sync.syncNow).toHaveBeenCalledTimes(1);
 
-		// Once the run is over, how syncing stands, and Close alone.
+		// Once the run is over, how syncing stands, and the ✕ alone.
 		sync.say({ phase: 'idle' });
 		const over = await screen.findByRole('dialog', {
 			name: 'Syncing with Dropbox · ada@example.com',
@@ -2588,7 +2589,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(
 			within(over)
 				.getAllByRole('button')
-				.map((button) => button.textContent)
+				.map((button) => button.getAttribute('aria-label') ?? button.textContent)
 		).toEqual(['Close']);
 		await user.click(within(over).getByRole('button', { name: 'Close' }));
 		expect(screen.queryByRole('dialog')).toBeNull();
@@ -2629,7 +2630,7 @@ describe('AccountPanel, reporting how syncing is going', () => {
 		expect(
 			within(details)
 				.getAllByRole('button')
-				.map((button) => button.textContent)
+				.map((button) => button.getAttribute('aria-label') ?? button.textContent)
 		).toEqual(['Close']);
 	});
 
