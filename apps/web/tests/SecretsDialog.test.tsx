@@ -192,6 +192,36 @@ describe('setting a source up', () => {
 		expect(await screen.findByRole('radio', { name: 'PIN' })).toBeTruthy();
 	});
 
+	it('titles the page after the key while it is shown, so a PDF saved of its print is named for it', async () => {
+		document.title = 'Groceries';
+		const h = await setup({ record: { state: 'none' } });
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		await screen.findAllByRole('listitem');
+		expect(document.title).toBe('Recovery key for secrets in Work');
+
+		// The note renamed meanwhile, and its title put back: a print takes it again.
+		document.title = 'Shopping';
+		window.dispatchEvent(new Event('beforeprint'));
+		expect(document.title).toBe('Recovery key for secrets in Work');
+
+		// Gone with the step, back to the note's latest.
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		expect(document.title).toBe('Shopping');
+	});
+
+	it('leaves a title the note has taken since, as the key goes', async () => {
+		document.title = 'Groceries';
+		const h = await setup({ record: { state: 'none' } });
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
+		await screen.findAllByRole('listitem');
+
+		document.title = 'Shopping';
+		await h.user.click(screen.getByRole('button', { name: 'Next' }));
+		expect(document.title).toBe('Shopping');
+	});
+
 	it('says which group was wrong, and goes back to the key', async () => {
 		const h = await setup({ record: { state: 'none' } });
 		h.open();
