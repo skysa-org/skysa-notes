@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
 import { DialogActions } from './Dialog.js';
+import { browserScanner, ScanKey, type Scanner } from './ScanKey.js';
 
 export interface PasteKeyProps {
 	/** What is asked for, over the field. */
@@ -15,6 +16,8 @@ export interface PasteKeyProps {
 	/** While what the last key was typed for is still under way. */
 	busy: boolean;
 	onKey: (identity: Uint8Array) => void;
+	/** The camera a key's QR code is scanned with: the browser's, where it has one to offer. */
+	scanner?: Scanner | undefined;
 }
 
 /**
@@ -88,12 +91,43 @@ export const typedIn = (
  * it has to be one key in particular: the source's own, in its Secrets dialog,
  * or the one a secret was made with, as a note adds it (docs/ARCHITECTURE.md
  * §7, "Secrets in a note"). One that is not is filled with zeros as it is
- * turned away.
+ * turned away. Or scanned, from the QR code printed and shown beside it
+ * (`ScanKey`), which fills the groups as a paste would, for Continue.
  */
-export const PasteKey = ({ text: asked, check, busy: working, onKey }: PasteKeyProps) => {
+export const PasteKey = ({
+	text: asked,
+	check,
+	busy: working,
+	onKey,
+	scanner: given,
+}: PasteKeyProps) => {
 	const textId = useId();
 	const [groups, setGroups] = useState<readonly string[]>(NO_GROUPS);
 	const fields = useRef<(HTMLInputElement | null)[]>([]);
+	const [scanner] = useState(() => given ?? browserScanner());
+	const [scanning, setScanning] = useState(false);
+	const scan = useRef<HTMLButtonElement>(null);
+	const proceed = useRef<HTMLButtonElement>(null);
+	// Where the focus goes once a scan ends: on to Continue with a key read,
+	// back to Scan QR code without one.
+	const scanned = useRef<'read' | 'cancelled' | undefined>(undefined);
+	useLayoutEffect(() => {
+		const after = scanned.current;
+		scanned.current = undefined;
+		if (after === 'read') proceed.current?.focus();
+		if (after === 'cancelled') scan.current?.focus();
+	});
+	/** A code's text taken where it spells a key: in the groups, as a paste puts it. */
+	const read = (text: string): boolean => {
+		const identity = readRecoveryKey(text);
+		if (identity === undefined) return false;
+		identity.fill(0);
+		setGroups(typedIn(NO_GROUPS, 0, text).groups);
+		setError(undefined);
+		scanned.current = 'read';
+		setScanning(false);
+		return true;
+	};
 	// The group to go on to, once what was typed is drawn: its own words
 	// selected, to be typed over, unless what was typed went on into them.
 	const going = useRef<Readonly<{ at: number; over: boolean }> | undefined>(undefined);
@@ -194,6 +228,16 @@ export const PasteKey = ({ text: asked, check, busy: working, onKey }: PasteKeyP
 					))}
 				</div>
 			</div>
+			{scanning && scanner !== undefined && (
+				<ScanKey
+					scanner={scanner}
+					accept={read}
+					onCancel={() => {
+						scanned.current = 'cancelled';
+						setScanning(false);
+					}}
+				/>
+			)}
 			{error !== undefined && (
 				<p className="secrets-error" role="alert">
 					{error}
@@ -202,6 +246,7 @@ export const PasteKey = ({ text: asked, check, busy: working, onKey }: PasteKeyP
 			<DialogActions
 				primary={
 					<button
+						ref={proceed}
 						type="submit"
 						className="primary"
 						disabled={busy || groups.every((group) => group === '')}
@@ -209,7 +254,21 @@ export const PasteKey = ({ text: asked, check, busy: working, onKey }: PasteKeyP
 						{t('secrets.recovery.continue')}
 					</button>
 				}
-			/>
+			>
+				{scanner !== undefined && !scanning && (
+					<button
+						ref={scan}
+						type="button"
+						disabled={busy}
+						onClick={() => {
+							setError(undefined);
+							setScanning(true);
+						}}
+					>
+						{t('secrets.recovery.scan')}
+					</button>
+				)}
+			</DialogActions>
 		</form>
 	);
 };

@@ -1,4 +1,4 @@
-import { RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
+import { encodeIdentity, RECOVERY_KEY_PREFIX, recoveryKeyGroups } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
 	type ReactNode,
@@ -28,6 +28,7 @@ import {
 import { type KeyFileSync } from '../sync/keyFile.js';
 import { Dialog, DialogActions } from './Dialog.js';
 import { PasteKey } from './PasteKey.js';
+import { RecoveryQr } from './RecoveryQr.js';
 import { UnlockForm } from './UnlockDialog.js';
 import { ChooseUnlock, type Chosen } from './UnlockEntry.js';
 
@@ -170,6 +171,8 @@ const ShowKey = ({
 }) => {
 	const [said, setSaid] = useState<string | undefined>(undefined);
 	const groups = recoveryKeyGroups(identity);
+	// The QR code holds the key as age writes it, with no spaces.
+	const qr = <RecoveryQr text={encodeIdentity(identity)} />;
 	const key = (
 		<div className="recovery-key" role="group" aria-label={t('secrets.key.label')}>
 			<span className="recovery-prefix">{RECOVERY_KEY_PREFIX}</span>
@@ -186,9 +189,11 @@ const ShowKey = ({
 			<h3>{t('secrets.key.title')}</h3>
 			<p>{t('secrets.key.text')}</p>
 			{key}
+			{qr}
 			<div className="recovery-print" aria-hidden="true">
 				<h1>{t('secrets.key.printedFor', { source: sourceName })}</h1>
 				{key}
+				{qr}
 				<p>{t('secrets.key.printedNote')}</p>
 			</div>
 			<p className="secrets-said" role="status">

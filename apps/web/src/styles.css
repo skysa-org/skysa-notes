@@ -5111,6 +5111,7 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 .recovery-key {
 	margin: 0 0 1rem;
 	font-family: var(--font-mono);
+	container: recovery-key / inline-size;
 }
 
 .recovery-prefix {
@@ -5127,6 +5128,14 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	margin: 0;
 	padding: 0;
 	list-style: none;
+}
+
+/* Three to a row where four would run past a phone's dialog, and be missed
+   as the key is written down. */
+@container recovery-key (width < 22rem) {
+	.recovery-groups {
+		grid-template-columns: repeat(3, max-content);
+	}
 }
 
 .recovery-groups li {
@@ -5147,6 +5156,44 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 /* What Print prints, and only then. */
 .recovery-print {
 	display: none;
+}
+
+/* The key as a QR code, under its groups (`RecoveryQr`): white around it
+   whatever the theme, which is its quiet zone, and sized for a camera across
+   a desk to read from the screen. */
+.recovery-qr {
+	display: block;
+	inline-size: 10rem;
+	block-size: 10rem;
+	margin: 0.75rem auto 0;
+	border-radius: 0.25rem;
+}
+
+/* Reading the key from a QR code with the camera (`ScanKey`). */
+.scan-key {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.5rem;
+	margin-block-start: 0.75rem;
+}
+
+.scan-key-video {
+	inline-size: 100%;
+	max-block-size: 16rem;
+	border-radius: 0.5rem;
+	background: #000;
+	object-fit: cover;
+}
+
+.scan-key-video[hidden] {
+	display: none;
+}
+
+.scan-key-said {
+	margin: 0;
+	color: var(--muted);
+	font-size: 0.875rem;
 }
 
 /* Which way the device unlocks: one of three, as a row of toggles. */
@@ -5278,6 +5325,13 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 
 	.recovery-print h1 {
 		font-size: 14pt;
+	}
+
+	/* Beside the groups on paper, at a size a phone reads from a hand's width. */
+	.recovery-print .recovery-qr {
+		inline-size: 4cm;
+		block-size: 4cm;
+		margin: 0.5cm 0;
 	}
 
 	.recovery-print .recovery-groups li {
