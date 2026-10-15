@@ -143,7 +143,7 @@ describe('the focus', () => {
 	const Finding = () => {
 		const [known, setKnown] = useState(false);
 		return (
-			<Dialog title="Secrets" onClose={vi.fn()} cancel={known}>
+			<Dialog title="Vault" onClose={vi.fn()} cancel={known}>
 				{known ? (
 					<DialogActions primary={<button type="button">Make a key</button>} />
 				) : (

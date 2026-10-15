@@ -33,7 +33,7 @@ export interface AddKeyDialogProps {
  * replaced on another device (§7, "Replacing the key"), and a secret made
  * with it is one this device cannot open. That key, typed here, is kept as
  * the source's, first, with the keys the device held beside it, as the
- * Secrets dialog keeps it.
+ * Vault dialog keeps it.
  */
 export const AddKeyDialog = ({
 	database,
@@ -97,7 +97,7 @@ export const AddKeyDialog = ({
 
 	return (
 		<Dialog title={t('secrets.addKey.title')} className="secrets-dialog" onClose={onCancel}>
-			{/* Above the key, as the Secrets dialog says its own: under it are the buttons. */}
+			{/* Above the key, as the Vault dialog says its own: under it are the buttons. */}
 			{error !== undefined && (
 				<p className="secrets-error" role="alert">
 					{error}

@@ -30,7 +30,7 @@ const ROLE: Record<ToastTone, 'alert' | 'status'> = {
  * Somewhere to go about it. A link out, to a page the operator named (the
  * connect gate's action, `@skysa/core`'s `ConnectGate`): only ever an `https:`
  * URL the client has already checked (`api/client.ts`). Or what the app can
- * open for it where it is, as a button: the source's Secrets dialog, for a
+ * open for it where it is, as a button: the source's Vault dialog, for a
  * secret this device cannot open yet (`noteSecrets.tsx`). A link leaves the
  * toast to come back to; the button takes it away, since what it said is being
  * seen to.

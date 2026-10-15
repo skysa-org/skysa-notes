@@ -16,6 +16,7 @@ import { type Notice, NotifyContext } from '../src/components/notify.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { Toast } from '../src/components/Toast.js';
 import { type pickFiles } from '../src/editor/pickFiles.js';
+import { t } from '../src/i18n/t.js';
 import {
 	bindConnection,
 	detachConnection,
@@ -860,7 +861,7 @@ describe('AccountPanel, downloading every note', () => {
 			'Re-scan from scratch',
 			'Show clipboard',
 			'Hide scratchpad',
-			'Set up secrets…',
+			'Set up vault…',
 		]);
 	});
 
@@ -1085,7 +1086,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
-				'Set up secrets…',
+				'Set up vault…',
 				'Disconnect',
 			]);
 		});
@@ -2303,17 +2304,17 @@ describe('AccountPanel, secrets for a source', () => {
 		return db;
 	};
 
-	it('opens them from the gear, reading the key file again, and gives the focus back on close', async () => {
+	it('opens the vault from the gear, reading the key file again, and gives the focus back on close', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle' });
 		await connected(sync);
 
-		await choose(user, 'Set up secrets…');
-		const dialog = await screen.findByRole('dialog', { name: 'Secrets' });
+		await choose(user, 'Set up vault…');
+		const dialog = await screen.findByRole('dialog', { name: 'Vault' });
 		expect(sync.keyFile.refresh).toHaveBeenCalledWith('c1');
 
 		await user.keyboard('{Escape}');
-		expect(screen.queryByRole('dialog', { name: 'Secrets' })).toBeNull();
+		expect(screen.queryByRole('dialog', { name: 'Vault' })).toBeNull();
 		expect(dialog.isConnected).toBe(false);
 		expect(document.activeElement).toBe(await gear());
 	});
@@ -2323,15 +2324,17 @@ describe('AccountPanel, secrets for a source', () => {
 		const db = await connected(fakeSync({ phase: 'idle' }));
 		await db.keyFiles.put({ connectionId: 'c1', state: 'ok', recipient: 'age1…' });
 
-		await offered(user, 'Secrets…');
-		expect(gearLabels()).not.toContain('Set up secrets…');
+		await offered(user, 'Vault…');
+		expect(gearLabels()).not.toContain('Set up vault…');
 	});
 
 	it('is not offered where nothing syncs the source', async () => {
 		const user = userEvent.setup();
 		await connected(fakeSync({ phase: 'local' }));
 		await openGear(user);
-		expect(gearLabels()).not.toContain('Set up secrets…');
+		// From the catalog, so a later rename cannot make this pass for nothing.
+		expect(gearLabels()).not.toContain(t('secrets.menu.setUp'));
+		expect(gearLabels()).not.toContain(t('secrets.menu.open'));
 	});
 });
 
@@ -5104,7 +5107,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
-				'Set up secrets…',
+				'Set up vault…',
 				'Disconnect',
 			]);
 		});
@@ -5187,7 +5190,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
-				'Set up secrets…',
+				'Set up vault…',
 				'Disconnect',
 			]);
 		});
@@ -5249,15 +5252,15 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(sync.pause).toHaveBeenCalledTimes(1);
 	});
 
-	it('opens another source’s secrets from its row, once it is showing', async () => {
+	it('opens another source’s vault from its row, once it is showing', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle' });
 		const db = await connected(sync);
 
 		await openOptions(user, 'OneDrive');
-		await user.click(await screen.findByRole('button', { name: 'Set up secrets…' }));
+		await user.click(await screen.findByRole('button', { name: 'Set up vault…' }));
 
-		expect(await screen.findByRole('dialog', { name: 'Secrets' })).toBeTruthy();
+		expect(await screen.findByRole('dialog', { name: 'Vault' })).toBeTruthy();
 		expect(await activeConnectionId(db)).toBe('c2');
 		expect(sync.keyFile.refresh).toHaveBeenCalledWith('c2');
 	});
@@ -5272,7 +5275,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Rename',
 				'Sync now',
 				'Re-scan from scratch',
-				'Set up secrets…',
+				'Set up vault…',
 				'Download all notes',
 				'Disconnect',
 			]);

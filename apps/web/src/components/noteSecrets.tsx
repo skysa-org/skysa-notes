@@ -36,7 +36,7 @@ import { UnlockDialog } from './UnlockDialog.js';
  * another key; and a secret opened as the lock closed is not shown. A
  * secret none of the device's keys opens can have its key added here, over
  * the note (`AddKeyDialog`). Setting a source up, and enrolling a device, are
- * the source's Secrets dialog's: where either is wanted, the host says so with
+ * the source's Vault dialog's: where either is wanted, the host says so with
  * a button that opens it over the note (`SecretsDialog`), rather than sending
  * the user to the source's menu for it (2026-10-15, the owner's ask). So does
  * Use the recovery key, in the unlock asked for here, without the detour.
@@ -50,7 +50,7 @@ export interface NoteSecretsOptions {
 	age?: () => Promise<Age>;
 	/** Words to the system clipboard. */
 	copy?: (text: string) => Promise<void>;
-	/** The source's key file, read again and written, for its Secrets dialog. */
+	/** The source's key file, read again and written, for its Vault dialog. */
 	keyFile?: Pick<KeyFileSync, 'refresh' | 'write'>;
 }
 
@@ -171,7 +171,7 @@ export const useNoteSecrets = (
 	const waiting = useRef<Promise<boolean> | undefined>(undefined);
 	/** The editor open now, offering itself for "Insert secret". */
 	const receiver = useRef<(() => void) | undefined>(undefined);
-	/** The source's Secrets dialog, open over the note, and what the source is called. */
+	/** The source's Vault dialog, open over the note, and what the source is called. */
 	const [secretsOf, setSecretsOf] = useState<Readonly<{
 		connectionId: string;
 		name: string;
@@ -186,7 +186,7 @@ export const useNoteSecrets = (
 			});
 	}, []);
 
-	/** `why`, as a warning, with the way to the Secrets dialog where that is the way on. */
+	/** `why`, as a warning, with the way to the Vault dialog where that is the way on. */
 	const said = useCallback(
 		({ message, way }: Why): AttachmentProblem =>
 			way === undefined

@@ -85,10 +85,10 @@ describe('"Insert secret" from the palette', () => {
 
 			await waitFor(() => {
 				const told = onProblem.mock.lastCall?.[0];
-				expect(told?.message).toBe('This source is not set up for secrets.');
+				expect(told?.message).toBe('This source has no vault set up.');
 				expect(told?.tone).toBe('warning');
 				// With the way on, rather than where to find it.
-				expect(told?.action?.label).toBe('Set up secrets');
+				expect(told?.action?.label).toBe('Set up vault');
 			});
 		}
 	);
@@ -110,8 +110,8 @@ describe('"Insert secret" on the rich editor’s toolbar', () => {
 
 		await waitFor(() => {
 			const told = onProblem.mock.lastCall?.[0];
-			expect(told?.message).toBe('This source is not set up for secrets.');
-			expect(told?.action?.label).toBe('Set up secrets');
+			expect(told?.message).toBe('This source has no vault set up.');
+			expect(told?.action?.label).toBe('Set up vault');
 		});
 	});
 });
