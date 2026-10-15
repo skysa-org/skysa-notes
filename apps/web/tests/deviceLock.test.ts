@@ -110,7 +110,10 @@ describe('making the passkey', () => {
 		);
 		const fetching = vi.spyOn(globalThis, 'fetch');
 
-		const made = await browserDeviceLock().create(salt, 'Unlocks secrets on this device: Work');
+		const made = await browserDeviceLock().create(
+			salt,
+			'Unlocks the vault on this device: Work'
+		);
 
 		expect(made).toEqual({
 			state: 'made',
@@ -120,8 +123,8 @@ describe('making the passkey', () => {
 		const [{ publicKey }] = create.mock.calls[0] as [CredentialCreationOptions];
 		expect(publicKey).toMatchObject({
 			user: {
-				name: 'Unlocks secrets on this device: Work',
-				displayName: 'Unlocks secrets on this device: Work',
+				name: 'Unlocks the vault on this device: Work',
+				displayName: 'Unlocks the vault on this device: Work',
 			},
 			authenticatorSelection: {
 				authenticatorAttachment: 'platform',

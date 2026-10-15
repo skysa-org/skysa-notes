@@ -57,7 +57,7 @@ export const typedIn = (groups: readonly string[], at: number, value: string): T
 /**
  * A recovery key typed or pasted into its twelve groups, numbered as it is
  * shown and printed, read however it was (`readRecoveryKey`), and checked where
- * it has to be one key in particular: the source's own, in its Secrets dialog,
+ * it has to be one key in particular: the source's own, in its Vault dialog,
  * or the one a secret was made with, as a note adds it (docs/ARCHITECTURE.md
  * §7, "Secrets in a note"). One that is not is filled with zeros as it is
  * turned away. Or scanned, from the QR code printed and shown beside it

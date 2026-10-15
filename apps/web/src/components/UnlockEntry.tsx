@@ -6,7 +6,7 @@ import { DialogActions } from './Dialog.js';
 import { PatternGrid } from './PatternGrid.js';
 
 /**
- * How this device unlocks secrets, as it is entered (docs/ARCHITECTURE.md §7,
+ * How this device unlocks the vault, as it is entered (docs/ARCHITECTURE.md §7,
  * "Secrets in a note"): a pattern on a grid of dots, a PIN or a password.
  * `UnlockEntry` takes one; `ChooseUnlock` has one chosen, entered twice, or
  * the device's own lock chosen, where it is offered, which is entered nowhere.

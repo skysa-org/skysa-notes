@@ -60,15 +60,15 @@ describe('Toast', () => {
 		const onChoose = vi.fn();
 		render(
 			<Toast
-				message="This device cannot open secrets in this source yet."
+				message="This device cannot open this source’s vault yet."
 				tone="warning"
-				action={{ label: 'Open Secrets', onChoose }}
+				action={{ label: 'Open Vault', onChoose }}
 				onDismiss={onDismiss}
 			/>
 		);
 
 		expect(screen.queryByRole('link')).toBeNull();
-		const open = screen.getByRole('button', { name: 'Open Secrets' });
+		const open = screen.getByRole('button', { name: 'Open Vault' });
 		fireEvent.pointerDown(open);
 		expect(onDismiss).not.toHaveBeenCalled();
 		fireEvent.click(open);

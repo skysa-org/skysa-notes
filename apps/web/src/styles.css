@@ -5097,7 +5097,7 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	margin: 0 0 1rem;
 }
 
-/* What a step can go on to besides its answer (the secrets dialog's
+/* What a step can go on to besides its answer (the Vault dialog's
    `Options`): a list in the dialog's middle, a row each saying where it goes,
    rather than more buttons in the row at its foot. */
 .dialog-options {
