@@ -99,8 +99,9 @@ const choosePin = async (h: Harness, digits = '2468') => {
 	await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
 };
 
+/** A key pasted into its first group: with its prefix, it fills them all. */
 const typeKey = async (h: Harness, text: string) => {
-	await h.user.click(await screen.findByLabelText('Recovery key'));
+	await h.user.click(await screen.findByLabelText('Group 1'));
 	await h.user.paste(text);
 	await h.user.click(screen.getByRole('button', { name: 'Continue' }));
 };
@@ -129,8 +130,10 @@ describe('setting a source up', () => {
 		expect(shown).toHaveLength(12);
 
 		await h.user.click(screen.getByRole('button', { name: 'Copy' }));
-		const [copied] = h.copy.mock.calls[0] ?? [];
-		expect(copied).toMatch(/^AGE-SECRET-KEY-1/u);
+		const [copied = ''] = h.copy.mock.calls[0] ?? [];
+		// In its groups, as it is shown: read back, it is the key.
+		expect(copied).toBe(['AGE-SECRET-KEY-1', ...shown].join(' '));
+		const key = readRecoveryKey(copied);
 		expect(await screen.findByText('Copied.')).toBeTruthy();
 
 		await h.user.click(screen.getByRole('button', { name: 'Print' }));
@@ -156,7 +159,7 @@ describe('setting a source up', () => {
 		expect(
 			unlocked.status === 'unlocked' &&
 				encodeIdentity(unlocked.keys.identities[0] ?? new Uint8Array())
-		).toBe(copied);
+		).toBe(key && encodeIdentity(key));
 	});
 
 	it('says which group was wrong, and goes back to the key', async () => {
@@ -189,7 +192,6 @@ describe('setting a source up', () => {
 			'That is not a recovery key. Check each group for a mistyped character.'
 		);
 
-		await h.user.clear(screen.getByLabelText('Recovery key'));
 		await typeKey(h, `AGE-SECRET-KEY-1 ${recoveryKeyGroups(identity).join('-').toLowerCase()}`);
 		await choosePin(h);
 
@@ -433,6 +435,26 @@ describe('setting a source up', () => {
 	});
 });
 
+/** The one row of buttons the dialog has, by what each says. */
+const buttonRow = (): (string | null)[] => {
+	const rows = document.querySelectorAll('.modal-actions');
+	expect(rows).toHaveLength(1);
+	return [...(rows[0]?.querySelectorAll('button') ?? [])].map((button) => button.textContent);
+};
+
+describe('each step’s buttons', () => {
+	it('end in the dialog’s own way out, in one row, as the app’s other dialogs do', async () => {
+		const h = await setup({ record: { state: 'none' } });
+		h.open();
+		await screen.findByRole('button', { name: 'Make a recovery key' });
+		expect(buttonRow()).toEqual(['Make a recovery key', 'Use a key I have', 'Close']);
+
+		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
+		await screen.findByLabelText('Group 1');
+		expect(buttonRow()).toEqual(['Continue', 'Cancel']);
+	});
+});
+
 describe('a source already set up', () => {
 	it('enrolls this device with the source’s key, and no other, writing nothing', async () => {
 		const identity = generateIdentity();
@@ -448,7 +470,6 @@ describe('a source already set up', () => {
 		expect(screen.getByRole('alert').textContent).toBe(
 			'That is a recovery key, but not this source’s.'
 		);
-		await h.user.clear(screen.getByLabelText('Recovery key'));
 		await typeKey(h, encodeIdentity(identity));
 		await choosePin(h);
 
@@ -506,7 +527,6 @@ describe('a source already set up', () => {
 		expect(screen.getByRole('alert').textContent).toBe(
 			'That is a recovery key, but not this source’s.'
 		);
-		await h.user.clear(screen.getByLabelText('Recovery key'));
 		await typeKey(h, encodeIdentity(h.source));
 
 		expect(await screen.findByText(/^Unlock this device too/u)).toBeTruthy();
@@ -639,6 +659,17 @@ describe('an enrolled device', () => {
 			await screen.findByText('This device unlocks secrets its new way now.')
 		).toBeTruthy();
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
+	});
+
+	it('leaves the dialog’s Close off removing, whose Cancel goes back', async () => {
+		const h = await enrolled();
+		h.open();
+		await h.user.click(await screen.findByRole('button', { name: 'Remove from this device' }));
+
+		expect(buttonRow()).toEqual(['Remove', 'Cancel']);
+		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(await screen.findByRole('button', { name: 'Remove from this device' })).toBeTruthy();
+		expect(buttonRow().at(-1)).toBe('Close');
 	});
 
 	it('lets go of its key once asked', async () => {
@@ -799,7 +830,6 @@ describe('replacing the source’s key', () => {
 			'That is this source’s key now. Use another.'
 		);
 		const theirs = generateIdentity();
-		await h.user.clear(screen.getByLabelText('Recovery key'));
 		await typeKey(h, encodeIdentity(theirs));
 
 		expect(

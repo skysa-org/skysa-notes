@@ -5031,13 +5031,6 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	font-size: 1rem;
 }
 
-.secrets-buttons {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-	margin: 0 0 1rem;
-}
-
 .modal .secrets-error {
 	color: var(--bad);
 }
@@ -5059,7 +5052,6 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 }
 
 .group-field,
-.recovery-field,
 .unlock-field {
 	width: 100%;
 	padding: 0.35rem 0.5rem;
@@ -5070,15 +5062,39 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	color: var(--fg);
 }
 
-.group-field,
-.recovery-field {
+.group-field {
 	font-family: var(--font-mono);
 	text-transform: uppercase;
 }
 
-.recovery-field {
+/* A key typed back (`PasteKey.tsx`), in its groups, numbered and laid out as
+   it is shown and printed: three rows of four. Each group's number is over
+   it, so a phone's narrow card leaves the field the room for its five. */
+.recovery-entry {
 	margin: 0 0 0.75rem;
-	resize: vertical;
+	font-family: var(--font-mono);
+}
+
+.recovery-cells {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 0.5rem;
+}
+
+.recovery-cell {
+	display: grid;
+	gap: 0.125rem;
+}
+
+.recovery-cell span {
+	color: var(--muted);
+	font-size: 0.75rem;
+}
+
+.recovery-cell .group-field {
+	padding-inline: 0.25rem;
+	text-align: center;
+	letter-spacing: 0.05em;
 }
 
 .unlock-field {
@@ -5220,8 +5236,14 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 }
 
 /* Printing the recovery key prints that and nothing else: not the app behind
-   the dialog, nor the dialog's own buttons. */
+   the dialog, nor the dialog's own buttons. The page says its own margin: a
+   browser's default is about a centimetre, which put the key near the edge of
+   the paper. */
 @media print {
+	@page {
+		margin: 2cm;
+	}
+
 	body:has(.recovery-print) > :not(.modal-backdrop) {
 		display: none;
 	}

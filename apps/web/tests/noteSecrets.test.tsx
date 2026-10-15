@@ -299,10 +299,9 @@ describe('what the editor is told', () => {
 });
 
 describe('adding the key a secret was made with', () => {
+	/** Typed a character at a time, prefix and all: each group goes on to the next. */
 	const typeKey = async (h: Awaited<ReturnType<typeof setup>>, key: Uint8Array) => {
-		const field = await screen.findByLabelText('Recovery key');
-		await h.user.clear(field);
-		await h.user.type(field, `${encodeIdentity(key)}{Enter}`);
+		await h.user.type(await screen.findByLabelText('Group 1'), `${encodeIdentity(key)}{Enter}`);
 	};
 
 	it('takes the key that opens it, keeps it beside the source’s own, and opens the secret', async () => {

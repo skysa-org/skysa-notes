@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { t } from '../i18n/t.js';
 import { type EnteredKind, type EnteredUnlock, isAcceptedUnlock } from '../store/secretKeys.js';
 import { PatternGrid } from './PatternGrid.js';
+import { SecretsActions } from './SecretsActions.js';
 
 /**
  * How this device unlocks secrets, as it is entered (docs/ARCHITECTURE.md §7,
@@ -196,9 +197,11 @@ export const ChooseUnlock = ({
 						{error}
 					</p>
 				)}
-				<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
-					{t('secrets.choose.done')}
-				</button>
+				<SecretsActions>
+					<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
+						{t('secrets.choose.done')}
+					</button>
+				</SecretsActions>
 			</form>
 		);
 	}
@@ -253,9 +256,11 @@ export const ChooseUnlock = ({
 					{error}
 				</p>
 			)}
-			<button type="submit" className="primary" disabled={!ready}>
-				{first === null ? t('secrets.choose.next') : t('secrets.choose.done')}
-			</button>
+			<SecretsActions>
+				<button type="submit" className="primary" disabled={!ready}>
+					{first === null ? t('secrets.choose.next') : t('secrets.choose.done')}
+				</button>
+			</SecretsActions>
 		</form>
 	);
 };

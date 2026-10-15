@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { drawTo, PatternGrid } from '../src/components/PatternGrid.js';
-import { UnlockForm } from '../src/components/UnlockDialog.js';
+import { SecretsModal, UnlockDialog, UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
 import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
@@ -591,5 +591,59 @@ describe('unlocking with the device’s own lock', () => {
 		await vi.waitFor(() => {
 			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
 		});
+	});
+});
+
+describe('in a dialog', () => {
+	/** The buttons in the row Cancel is in. */
+	const rowOfCancel = () => {
+		const row = screen.getByRole('button', { name: 'Cancel' }).parentElement;
+		expect(row?.className).toBe('modal-actions');
+		return [...(row?.querySelectorAll('button') ?? [])].map((button) => button.textContent);
+	};
+
+	it('has Unlock and Cancel side by side, in one row, as the app’s other dialogs do', async () => {
+		const db = createDatabase(`unlock-dialog-${crypto.randomUUID()}`);
+		opened.push(db);
+		await enrol(db, {
+			connectionId: 'c1',
+			recipient: 'age1…',
+			identities: [new Uint8Array(32).fill(7)],
+			unlock: { kind: 'pin', digits: '2468' },
+			rounds: 1000,
+		});
+		const onCancel = vi.fn();
+		render(
+			<UnlockDialog
+				database={db}
+				connectionId="c1"
+				kind="pin"
+				lock={createSecretsLock({
+					target: {
+						visibilityState: 'visible',
+						addEventListener: () => undefined,
+						removeEventListener: () => undefined,
+					},
+				})}
+				onUnlocked={() => undefined}
+				onRecovery={() => undefined}
+				onCancel={onCancel}
+			/>
+		);
+
+		expect(rowOfCancel()).toEqual(['Unlock', 'Cancel']);
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(onCancel).toHaveBeenCalledOnce();
+	});
+
+	it('has choosing a pattern’s Next beside Cancel', async () => {
+		render(
+			<SecretsModal title="Secrets" onClose={() => undefined}>
+				<ChooseUnlock onChosen={() => undefined} />
+			</SecretsModal>
+		);
+		await userEvent.click(screen.getByRole('radio', { name: 'Pattern' }));
+
+		expect(rowOfCancel()).toEqual(['Next', 'Cancel']);
 	});
 });

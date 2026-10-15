@@ -15,6 +15,7 @@ import {
 	unlockKeys,
 	type UnlockResult,
 } from '../store/secretKeys.js';
+import { ClosingContext, SecretsActions } from './SecretsActions.js';
 import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEntry.js';
 
 /**
@@ -44,6 +45,8 @@ export interface UnlockFormProps {
 	now?: () => number;
 	/** How the device's own lock is asked, where that is how it unlocks. */
 	deviceLock?: DeviceLock;
+	/** Buttons of the step the form is in, in its row after Unlock's. */
+	extra?: ReactNode;
 }
 
 type Gone = 'forgotten' | 'none' | 'changed';
@@ -75,12 +78,23 @@ const ASK: Readonly<Record<EnteredKind, 'pattern' | 'pin' | 'password'>> = {
 };
 
 /** The keys gone from the device, or no longer opened by its lock: the recovery key is what is left. */
-const GoneForm = ({ why, onRecovery }: { why: Gone; onRecovery: () => void }) => (
+const GoneForm = ({
+	why,
+	onRecovery,
+	extra,
+}: {
+	why: Gone;
+	onRecovery: () => void;
+	extra: ReactNode;
+}) => (
 	<div className="unlock-form">
 		<p role="alert">{t(`secrets.unlock.${why}`)}</p>
-		<button type="button" className="primary" onClick={onRecovery}>
-			{t('secrets.unlock.useRecovery')}
-		</button>
+		<SecretsActions>
+			<button type="button" className="primary" onClick={onRecovery}>
+				{t('secrets.unlock.useRecovery')}
+			</button>
+			{extra}
+		</SecretsActions>
 	</div>
 );
 
@@ -121,6 +135,7 @@ const DeviceUnlockForm = ({
 	deviceLock,
 	moved,
 	onOtherWay,
+	extra,
 }: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & Asking & { deviceLock: DeviceLock }) => {
 	const askId = useId();
 	const [busy, setBusy] = useState(false);
@@ -155,7 +170,7 @@ const DeviceUnlockForm = ({
 		setSaid({ kind: 'failed' });
 	};
 
-	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} />;
+	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} extra={extra} />;
 
 	return (
 		<form
@@ -171,14 +186,17 @@ const DeviceUnlockForm = ({
 				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
 				{said.kind === 'unanswered' && <p>{t('secrets.unlock.unanswered')}</p>}
 			</div>
-			<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
-				{t('secrets.unlock.unlock')}
-			</button>
-			{said.kind === 'unanswered' && (
-				<button type="button" onClick={onRecovery}>
-					{t('secrets.unlock.useRecovery')}
+			<SecretsActions>
+				<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
+					{t('secrets.unlock.unlock')}
 				</button>
-			)}
+				{said.kind === 'unanswered' && (
+					<button type="button" onClick={onRecovery}>
+						{t('secrets.unlock.useRecovery')}
+					</button>
+				)}
+				{extra}
+			</SecretsActions>
 		</form>
 	);
 };
@@ -236,6 +254,7 @@ const EnteredUnlockForm = ({
 	now,
 	moved,
 	onOtherWay,
+	extra,
 }: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> &
 	Asking & {
 		kind: EnteredKind;
@@ -282,7 +301,7 @@ const EnteredUnlockForm = ({
 		setSaid({ kind: 'gone', why: result.status });
 	};
 
-	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} />;
+	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} extra={extra} />;
 
 	return (
 		<form
@@ -313,9 +332,12 @@ const EnteredUnlockForm = ({
 				)}
 				{seconds > 0 && <p>{t('secrets.unlock.wait', { count: seconds })}</p>}
 			</div>
-			<button type="submit" className="primary" disabled={!ready(unlockOf(kind, entered))}>
-				{t('secrets.unlock.unlock')}
-			</button>
+			<SecretsActions>
+				<button type="submit" className="primary" disabled={!ready(unlockOf(kind, entered))}>
+					{t('secrets.unlock.unlock')}
+				</button>
+				{extra}
+			</SecretsActions>
 		</form>
 	);
 };
@@ -326,19 +348,23 @@ const REACHABLE = 'input, textarea, button:not(:disabled), a[href]';
  * Held as the app's other dialogs are (`ConfirmDialog`): at the end of the
  * page, modal, the shortcuts held, Escape as the way out, the focus given back.
  * Tab goes between what can be used in it, and the first of that has the focus
- * to begin with.
+ * to begin with. Its Cancel or Close is the last of the step's own buttons, in
+ * their row (`SecretsActions`), as a confirmation's Cancel is beside its answer.
  */
 export const SecretsModal = ({
 	title,
 	children,
 	onClose,
 	closeLabel = t('common.cancel'),
+	status,
 	returnFocus,
 }: {
 	title: string;
 	children: ReactNode;
 	onClose: () => void;
 	closeLabel?: string;
+	/** What is under way, said above the step's buttons. */
+	status?: string | undefined;
 	returnFocus?: RefObject<HTMLElement | null> | undefined;
 }) => {
 	const titleId = useId();
@@ -409,12 +435,10 @@ export const SecretsModal = ({
 				aria-labelledby={titleId}
 			>
 				<h2 id={titleId}>{title}</h2>
-				{children}
-				<div className="modal-actions">
-					<button type="button" onClick={onClose}>
-						{closeLabel}
-					</button>
-				</div>
+				{/* Each step ends in its buttons and this way out, in one row (`SecretsActions`). */}
+				<ClosingContext.Provider value={{ label: closeLabel, onClose, status }}>
+					{children}
+				</ClosingContext.Provider>
 			</div>
 		</div>,
 		document.body

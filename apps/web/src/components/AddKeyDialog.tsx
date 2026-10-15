@@ -97,6 +97,12 @@ export const AddKeyDialog = ({
 
 	return (
 		<SecretsModal title={t('secrets.addKey.title')} onClose={onCancel}>
+			{/* Above the key, as the Secrets dialog says its own: under it are the buttons. */}
+			{error !== undefined && (
+				<p className="secrets-error" role="alert">
+					{error}
+				</p>
+			)}
 			<PasteKey
 				text={
 					replacedElsewhere === true
@@ -109,11 +115,6 @@ export const AddKeyDialog = ({
 					void add(identity);
 				}}
 			/>
-			{error !== undefined && (
-				<p className="secrets-error" role="alert">
-					{error}
-				</p>
-			)}
 		</SecretsModal>
 	);
 };
