@@ -153,6 +153,31 @@ const useDeviceLock = (given: DeviceLock | undefined) => {
 	return { deviceLock, deviceOffered, setDeviceOffered };
 };
 
+/**
+ * The page's title while the new key is shown: what a PDF saved from its
+ * print is named, by Print or the browser's own, rather than after the note
+ * open behind the dialog (the owner, 2026-10-15). Set again as a print
+ * begins, where the note's title was put back meanwhile — renamed on another
+ * device — and given back as the step goes, unless the note's title has
+ * already taken its place.
+ */
+const usePrintTitle = (title: string): void => {
+	useEffect(() => {
+		const was = { current: document.title };
+		document.title = title;
+		const printing = () => {
+			if (document.title === title) return;
+			was.current = document.title;
+			document.title = title;
+		};
+		window.addEventListener('beforeprint', printing);
+		return () => {
+			window.removeEventListener('beforeprint', printing);
+			if (document.title === title) document.title = was.current;
+		};
+	}, [title]);
+};
+
 /** The new key, once, with Print and Copy. */
 const ShowKey = ({
 	identity,
@@ -170,6 +195,8 @@ const ShowKey = ({
 	lock: SecretsLock;
 }) => {
 	const [said, setSaid] = useState<string | undefined>(undefined);
+	const printedFor = t('secrets.key.printedFor', { source: sourceName });
+	usePrintTitle(printedFor);
 	const groups = recoveryKeyGroups(identity);
 	// The QR code holds the key as age writes it, with no spaces.
 	const qr = <RecoveryQr text={encodeIdentity(identity)} />;
@@ -191,7 +218,7 @@ const ShowKey = ({
 			{key}
 			{qr}
 			<div className="recovery-print" aria-hidden="true">
-				<h1>{t('secrets.key.printedFor', { source: sourceName })}</h1>
+				<h1>{printedFor}</h1>
 				{key}
 				{qr}
 				<p>{t('secrets.key.printedNote')}</p>
