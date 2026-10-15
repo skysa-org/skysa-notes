@@ -87,6 +87,13 @@ const PATHS = {
 	// What can be done to the source showing, at the foot of the sidebar: eight
 	// teeth round a hole, the conventional mark for settings.
 	gear: 'M10.43 5.18L10.68 2.59L13.32 2.59L13.57 5.18A7 7 0 0 1 15.71 6.06L17.72 4.41L19.59 6.28L17.94 8.29A7 7 0 0 1 18.82 10.43L21.41 10.68L21.41 13.32L18.82 13.57A7 7 0 0 1 17.94 15.71L19.59 17.72L17.72 19.59L15.71 17.94A7 7 0 0 1 13.57 18.82L13.32 21.41L10.68 21.41L10.43 18.82A7 7 0 0 1 8.29 17.94L6.28 19.59L4.41 17.72L6.06 15.71A7 7 0 0 1 5.18 13.57L2.59 13.32L2.59 10.68L5.18 10.43A7 7 0 0 1 6.06 8.29L4.41 6.28L6.28 4.41L8.29 6.06A7 7 0 0 1 10.43 5.18zM15 12a3 3 0 1 0-6 0a3 3 0 1 0 6 0',
+	// The vault's passwords (docs/ARCHITECTURE.md §7, "Passwords in the
+	// vault"): their row, a key; and a password shown or hidden, an eye open and
+	// one struck through.
+	key: 'M8 19a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM10.8 12.2 19 4M16 7l2.5 2.5M13.5 9.5l2 2',
+	eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+	'eye-off':
+		'M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-2.4 3.3M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2',
 } as const satisfies Record<string, string>;
 
 export type IconName = keyof typeof PATHS;

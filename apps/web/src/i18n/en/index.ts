@@ -12,6 +12,7 @@ import { importing } from './importing.js';
 import { install } from './install.js';
 import { notebooks } from './notebooks.js';
 import { notes } from './notes.js';
+import { passwords } from './passwords.js';
 import { rows } from './rows.js';
 import { scheduler } from './scheduler.js';
 import { scratchpad } from './scratchpad.js';
@@ -41,6 +42,7 @@ export const en = {
 	clipboard,
 	scratchpad,
 	secrets,
+	passwords,
 	notebooks,
 	notes,
 	rows,

@@ -5,6 +5,7 @@ import {
 	contentHash,
 	deriveTitle,
 	isScratchPath,
+	isVaultPath,
 	joinPath,
 	normalizeTag,
 	NOTE_EXTENSION,
@@ -78,13 +79,15 @@ export interface NoteScope {
  * scratchpad `untitled-2.md` and on as well. Most scratch notes are never
  * named, so the second is as unnamed as the first; in a notebook a numbered one
  * may be another tool's file, whose name is its own (docs/ARCHITECTURE.md §7,
- * "The scratchpad").
+ * "The scratchpad"). The same in the vault's passwords, where a new item is
+ * stored before it has a label ("Passwords in the vault").
  */
 const atFallbackName = (path: string): boolean => {
 	const name = basename(path);
 	if (name === `${UNTITLED_SLUG}${NOTE_EXTENSION}`) return true;
 	const numbered = `${UNTITLED_SLUG}-`;
-	if (!isScratchPath(path) || !name.startsWith(numbered) || !name.endsWith(NOTE_EXTENSION)) {
+	const appFolder = isScratchPath(path) || isVaultPath(path);
+	if (!appFolder || !name.startsWith(numbered) || !name.endsWith(NOTE_EXTENSION)) {
 		return false;
 	}
 	return /^\d+$/u.test(name.slice(numbered.length, -NOTE_EXTENSION.length));
@@ -668,6 +671,47 @@ export const rewriteNoteBody = (
 		return applyEdit(db, id, () => ({ body, bodyOrigin: crypto.randomUUID() }), {
 			connectionId,
 		});
+	});
+
+/**
+ * A password's label and body as its form holds them (docs/ARCHITECTURE.md §7,
+ * "Passwords in the vault"): a user edit, kept as it is typed, as an editor's
+ * is (`saveNoteBody`), and beside the item, as a conflict copy, where a pull
+ * replaced it since it was opened. The label is the item's title, written into
+ * its frontmatter, or taken out of it where it is empty; the file keeps its
+ * name until `renameNote`, so it is not renamed at every character.
+ */
+export const saveVaultItem = (
+	db: NotesDatabase,
+	typed: Readonly<{ title: string; body: string }>,
+	base: EditBase
+): Promise<NoteRecord> =>
+	db.transaction('rw', writerTables(db), async () => {
+		const label = withoutNul(typed.title).trim();
+		const body = withoutNul(typed.body);
+		const labelled = (note: NoteRecord): Pick<NoteRecord, 'title' | 'frontmatter'> => ({
+			title: label === '' ? UNTITLED_TITLE : label,
+			frontmatter: writeFrontmatter(note.frontmatter, {
+				title: label === '' ? undefined : label,
+			}),
+		});
+		// What a copy beside it, or the item brought back, is written from:
+		// the item as it was shown, with the label as typed.
+		const shown: EditBase = { ...base, note: { ...base.note, ...labelled(base.note) } };
+		const current = await whereShown(db, base.note);
+		if (current === undefined) {
+			return (await deletedHere.has(db, base.note)) ? base.note : bringBack(db, shown, body);
+		}
+		if (current.deletedLocally === 0) {
+			deletedHere.delete(current);
+			deletedHere.delete(base.note);
+		}
+		const there = { connectionId: current.connectionId };
+		if (current.deletedLocally === 1 || (current.bodyOrigin ?? '') === base.origin) {
+			return applyEdit(db, current.id, (note) => ({ body, ...labelled(note) }), there);
+		}
+		if (current.body === body && current.title === labelled(current).title) return current;
+		return copyBeside(db, current, shown.note, body);
 	});
 
 /** Write a new dirty note and owe the remote its file. Inside the caller's transaction. */
