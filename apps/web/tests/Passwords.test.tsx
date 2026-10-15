@@ -46,7 +46,13 @@ const list = (items: readonly NoteRecord[], more: Partial<Parameters<typeof Pass
 
 describe('the passwords’ list', () => {
 	it('is the labels, A to Z, case and numbers as a reader sorts them', () => {
-		list([item('zoom'), item('Bank 10'), item('apple'), item('Bank 9'), item('Éclair', 'eclair')]);
+		list([
+			item('zoom'),
+			item('Bank 10'),
+			item('apple'),
+			item('Bank 9'),
+			item('Éclair', 'eclair'),
+		]);
 
 		expect(labels()).toEqual(['apple', 'Bank 9', 'Bank 10', 'Éclair', 'zoom']);
 	});

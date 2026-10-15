@@ -51,7 +51,8 @@ export const passwords = {
 		unlock: 'Unlock',
 		/** Said while the item is opened, the device's own lock perhaps being asked. */
 		opening: 'Opening…',
-		differentKey: 'This password was made with a different key, which this device does not have.',
+		differentKey:
+			'This password was made with a different key, which this device does not have.',
 		addKey: 'Add its key',
 		unreadable: 'This password cannot be read by this version of the app.',
 		/** Said in the form, where what was typed could not be encrypted into the item. */

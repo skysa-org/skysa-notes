@@ -76,9 +76,13 @@ export const Passwords = ({
 				</div>
 			)}
 
-			{items?.length === 0 && <p className="muted placeholder">{t('passwords.list.empty')}</p>}
+			{items?.length === 0 && (
+				<p className="muted placeholder">{t('passwords.list.empty')}</p>
+			)}
 			{items !== undefined && items.length > 0 && shown?.length === 0 && (
-				<p className="muted placeholder">{t('passwords.list.noMatch', { query: query.trim() })}</p>
+				<p className="muted placeholder">
+					{t('passwords.list.noMatch', { query: query.trim() })}
+				</p>
 			)}
 
 			{shown !== undefined && shown.length > 0 && (

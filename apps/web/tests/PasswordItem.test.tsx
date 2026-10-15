@@ -49,7 +49,9 @@ const item = (title: string, fields: VaultFields = FIELDS, body?: string) =>
 const storedFields = async (id: string) => {
 	const stored = await getNote(db, id, scope);
 	const armor = vaultArmor(stored?.body ?? '');
-	return armor === undefined ? undefined : readVaultPayload(openSecret(armor, [identity]))?.fields;
+	return armor === undefined
+		? undefined
+		: readVaultPayload(openSecret(armor, [identity]))?.fields;
 };
 
 const Harness = ({
@@ -79,7 +81,11 @@ const Harness = ({
 	);
 };
 
-const show = async (note: NoteRecord, host: SecretHost, more: Partial<Parameters<typeof Harness>[0]> = {}) => {
+const show = async (
+	note: NoteRecord,
+	host: SecretHost,
+	more: Partial<Parameters<typeof Harness>[0]> = {}
+) => {
 	const user = userEvent.setup();
 	render(<Harness id={note.id} host={host} {...more} />);
 	await screen.findByRole('heading', { name: note.title });
@@ -152,7 +158,11 @@ describe('a password that does not open', () => {
 
 	it('offers to add its key where it was made with another', async () => {
 		const { host } = fakeHost();
-		const note = await item('GitHub', FIELDS, vaultBody(sealedForAnother(vaultPayload(FIELDS))));
+		const note = await item(
+			'GitHub',
+			FIELDS,
+			vaultBody(sealedForAnother(vaultPayload(FIELDS)))
+		);
 		const user = await show(note, host);
 
 		await user.click(await screen.findByRole('button', { name: 'Add its key' }));
@@ -162,7 +172,10 @@ describe('a password that does not open', () => {
 	});
 
 	it.each([
-		['words beside its fence', `${vaultBody(sealed(vaultPayload(FIELDS)))}\nAdded elsewhere.\n`],
+		[
+			'words beside its fence',
+			`${vaultBody(sealed(vaultPayload(FIELDS)))}\nAdded elsewhere.\n`,
+		],
 		['a fence that opens to no object', vaultBody(sealed('hunter2'))],
 		['no fence at all', 'Just words.\n'],
 	])('says it cannot be read, with Delete and no Edit, for %s', async (_, body) => {
@@ -206,7 +219,9 @@ describe('editing a password', () => {
 
 		await user.click(screen.getByRole('button', { name: 'Done' }));
 		await waitFor(async () => {
-			expect((await getNote(db, note.id, scope))?.path).toBe(`${VAULT_FOLDER}/github-work.md`);
+			expect((await getNote(db, note.id, scope))?.path).toBe(
+				`${VAULT_FOLDER}/github-work.md`
+			);
 		});
 		expect(await screen.findByText('grace')).toBeDefined();
 	});
@@ -273,16 +288,32 @@ describe('editing a password', () => {
 
 describe('a new password', () => {
 	const begun = () =>
-		draftNote({ ...scope, connectionId: LOCAL_CONNECTION_ID, folderPath: VAULT_FOLDER, taken: [] });
+		draftNote({
+			...scope,
+			connectionId: LOCAL_CONNECTION_ID,
+			folderPath: VAULT_FOLDER,
+			taken: [],
+		});
 
 	/** The draft's harness: the note shown is the draft until it is stored, as the route has it. */
-	const New = ({ draft, host, onClose }: { draft: NoteRecord; host: SecretHost; onClose: () => void }) => {
+	const New = ({
+		draft,
+		host,
+		onClose,
+	}: {
+		draft: NoteRecord;
+		host: SecretHost;
+		onClose: () => void;
+	}) => {
 		const stored = useNote(draft.id);
 		return (
 			<PasswordItem
 				note={stored ?? draft}
 				draft={{
-					store: () => createNote(db, { ...scope, folderPath: VAULT_FOLDER, id: draft.id }).then(() => true),
+					store: () =>
+						createNote(db, { ...scope, folderPath: VAULT_FOLDER, id: draft.id }).then(
+							() => true
+						),
 					setMode: () => undefined,
 				}}
 				host={host}

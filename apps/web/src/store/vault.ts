@@ -61,10 +61,7 @@ export const listVaultNotes = async (
 
 /** Text folded as the filter compares it: case and accents let go of. */
 const folded = (text: string): string =>
-	text
-		.normalize('NFD')
-		.replace(/\p{M}/gu, '')
-		.toLocaleLowerCase();
+	text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 
 /** The passwords whose label holds `query`, case and accents ignored; all of them for none. */
 export const filterByLabel = (notes: readonly NoteRecord[], query: string): NoteRecord[] => {

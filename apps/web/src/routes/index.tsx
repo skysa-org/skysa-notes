@@ -980,13 +980,10 @@ const useOpenPlace = ({
 	// before the one it names.
 	const folder = resolving
 		? undefined
-		: openFolderPath(
-				tree,
-				requestedFolder,
-				looseNoteCount,
-				rememberedFolder(lastOpen),
-				{ [SCRATCHPAD_FOLDER]: scratchpad, [VAULT_FOLDER]: passwords }
-			);
+		: openFolderPath(tree, requestedFolder, looseNoteCount, rememberedFolder(lastOpen), {
+				[SCRATCHPAD_FOLDER]: scratchpad,
+				[VAULT_FOLDER]: passwords,
+			});
 	/** The scratchpad or the passwords: a place that is no notebook. */
 	const inAppPlace = isAppFolder(folder);
 	const remembered = folder === undefined ? undefined : lastOpen?.notes[folder];
@@ -2073,7 +2070,8 @@ const Home = () => {
 				/>
 			);
 		}
-		if (compact) return <section className="note-view empty" aria-label={t('shell.notePane')} />;
+		if (compact)
+			return <section className="note-view empty" aria-label={t('shell.notePane')} />;
 		return (
 			<section className="note-view empty" aria-label={t('shell.notePane')}>
 				<p className="muted placeholder">

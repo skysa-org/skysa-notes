@@ -184,7 +184,13 @@ export const PasswordItem = ({
 	const [editing, setEditing] = useState<Editing | null>(null);
 	const [revealed, setRevealed] = useState(false);
 	const [said, setSaid] = useState<string | undefined>();
-	const ids = { label: useId(), hint: useId(), username: useId(), password: useId(), notes: useId() };
+	const ids = {
+		label: useId(),
+		hint: useId(),
+		username: useId(),
+		password: useId(),
+		notes: useId(),
+	};
 
 	/** What the edits are written over (`EditBase`), moved on as each is written. */
 	const base = useRef<EditBase>({ origin: note.bodyOrigin ?? '', note });
@@ -416,7 +422,11 @@ export const PasswordItem = ({
 		}
 		const { start } = editing;
 		setEditing(null);
-		setShown({ armor: vaultArmor(start.body), attempt, is: { ...opened, fields: start.fields } });
+		setShown({
+			armor: vaultArmor(start.body),
+			attempt,
+			is: { ...opened, fields: start.fields },
+		});
 		if (editing.changed) write({ title: start.label, body: start.body });
 	};
 
@@ -587,7 +597,9 @@ export const PasswordItem = ({
 									<FieldButton
 										icon={revealed ? 'eye-off' : 'eye'}
 										label={
-											revealed ? t('passwords.item.hide') : t('passwords.item.show')
+											revealed
+												? t('passwords.item.hide')
+												: t('passwords.item.show')
 										}
 										pressed={revealed}
 										onClick={() => {
@@ -614,7 +626,11 @@ export const PasswordItem = ({
 						)}
 					</Field>
 					<Field label={t('passwords.item.notes')}>
-						{fields.notes === '' ? blank : <span className="password-notes">{fields.notes}</span>}
+						{fields.notes === '' ? (
+							blank
+						) : (
+							<span className="password-notes">{fields.notes}</span>
+						)}
 					</Field>
 				</dl>
 				<p className="password-said" role="status">
