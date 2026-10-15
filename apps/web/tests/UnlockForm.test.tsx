@@ -358,7 +358,7 @@ describe('unlocking', () => {
 		await h.tryPin('2468');
 		expect(
 			await screen.findByText(
-				'This device has no key for this source’s secrets. Type the recovery key to set it up.'
+				'This device has no key for this source’s vault. Type the recovery key to set it up.'
 			)
 		).toBeTruthy();
 		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
@@ -503,7 +503,7 @@ describe('unlocking with the device’s own lock', () => {
 
 		expect(
 			await screen.findByText(
-				'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.'
+				'This device’s lock no longer opens its key for this vault. Type the recovery key to set this device up again.'
 			)
 		).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
@@ -591,7 +591,7 @@ describe('unlocking with the device’s own lock', () => {
 
 		expect(
 			await screen.findByText(
-				'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.'
+				'This device’s lock no longer opens its key for this vault. Type the recovery key to set this device up again.'
 			)
 		).toBeTruthy();
 	});
@@ -601,7 +601,7 @@ describe('unlocking with the device’s own lock', () => {
 
 		expect(
 			await screen.findByText(
-				'This device has no key for this source’s secrets. Type the recovery key to set it up.'
+				'This device has no key for this source’s vault. Type the recovery key to set it up.'
 			)
 		).toBeTruthy();
 		expect(h.deviceLock.answer).not.toHaveBeenCalled();

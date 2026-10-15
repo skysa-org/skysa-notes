@@ -152,7 +152,7 @@ describe('setting a source up', () => {
 
 		await choosePin(h);
 		expect(
-			await screen.findByText('Secrets are set up, and this device can unlock them.')
+			await screen.findByText('The vault is set up, and this device can unlock it.')
 		).toBeTruthy();
 
 		const recipient = h.keyFile.write.mock.calls[0]?.[1];
@@ -198,12 +198,12 @@ describe('setting a source up', () => {
 		h.open();
 		await h.user.click(await screen.findByRole('button', { name: 'Make a recovery key' }));
 		await screen.findAllByRole('listitem');
-		expect(document.title).toBe('Recovery key for secrets in Work');
+		expect(document.title).toBe('Vault recovery key for Work');
 
 		// The note renamed meanwhile, and its title put back: a print takes it again.
 		document.title = 'Shopping';
 		window.dispatchEvent(new Event('beforeprint'));
-		expect(document.title).toBe('Recovery key for secrets in Work');
+		expect(document.title).toBe('Vault recovery key for Work');
 
 		// Gone with the step, back to the note's latest.
 		await h.user.click(screen.getByRole('button', { name: 'Next' }));
@@ -255,7 +255,7 @@ describe('setting a source up', () => {
 		await typeKey(h, `AGE-SECRET-KEY-1 ${recoveryKeyGroups(identity).join('-').toLowerCase()}`);
 		await choosePin(h);
 
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipientOf(identity));
 	});
 
@@ -283,7 +283,7 @@ describe('setting a source up', () => {
 		await h.user.click(screen.getByRole('button', { name: 'Add it as well' }));
 		await typeKey(h, encodeIdentity(older));
 		await choosePin(h);
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 
 		const unlocked = await unlockKeys(h.db, 'c1', PIN, Date.now());
 		expect(unlocked.status === 'unlocked' && unlocked.keys.identities.length).toBe(2);
@@ -304,7 +304,7 @@ describe('setting a source up', () => {
 		await typeKey(h, encodeIdentity(older));
 		await choosePin(h);
 
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipientOf(older));
 	});
 
@@ -316,8 +316,11 @@ describe('setting a source up', () => {
 		await choosePin(h);
 
 		expect(
-			(await screen.findByText(/Another device set up secrets for this source a moment ago/u))
-				.textContent
+			(
+				await screen.findByText(
+					/Another device set up the vault for this source a moment ago/u
+				)
+			).textContent
 		).toBeTruthy();
 		expect(await h.db.secretKeys.get('c1')).toBeUndefined();
 		expect(h.lock.isUnlocked('c1')).toBe(false);
@@ -375,7 +378,7 @@ describe('setting a source up', () => {
 
 		// What was chosen is still there, to set again.
 		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 		expect(put).toHaveBeenCalledTimes(2);
 		expect((await h.db.secretKeys.get('c1'))?.recipient).toBe(recipientOf(identity));
 	});
@@ -422,7 +425,7 @@ describe('setting a source up', () => {
 		expect(await screen.findByText('Looking for secrets in this source’s notes…')).toBeTruthy();
 		expect(screen.getByRole('button', { name: 'Check' }).hasAttribute('disabled')).toBe(true);
 		scanned.release();
-		expect(await screen.findByText('How should this device unlock secrets?')).toBeTruthy();
+		expect(await screen.findByText('How should this device unlock the vault?')).toBeTruthy();
 	});
 
 	it('fills the keys it made with zeros once they are kept, and as it closes', async () => {
@@ -448,7 +451,7 @@ describe('setting a source up', () => {
 		await h.user.type(screen.getByLabelText('Group 7'), shown[6] ?? '');
 		await h.user.click(screen.getByRole('button', { name: 'Check' }));
 		await choosePin(h);
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 
 		expect(made[0]?.every((byte) => byte === 0)).toBe(true);
 		// What was kept is the key, not the zeros.
@@ -543,7 +546,7 @@ describe('a source already set up', () => {
 		h.open();
 		expect(
 			await screen.findByText(
-				'This source has secrets. To open them on this device, type its recovery key.'
+				'This source has a vault. To open it on this device, type its recovery key.'
 			)
 		).toBeTruthy();
 
@@ -554,7 +557,7 @@ describe('a source already set up', () => {
 		await typeKey(h, encodeIdentity(identity));
 		await choosePin(h);
 
-		await screen.findByText('This device can unlock secrets now.');
+		await screen.findByText('This device can unlock the vault now.');
 		expect(h.keyFile.write).not.toHaveBeenCalled();
 		expect((await h.db.secretKeys.get('c1'))?.recipient).toBe(recipientOf(identity));
 	});
@@ -574,7 +577,7 @@ describe('a source already set up', () => {
 		h.open();
 		expect(
 			await screen.findByText(
-				'This source’s key was replaced on another device. Type the new recovery key to open its secrets here.'
+				'This source’s key was replaced on another device. Type the new recovery key to open its vault here.'
 			)
 		).toBeTruthy();
 	});
@@ -615,7 +618,7 @@ describe('a source already set up', () => {
 
 		expect(
 			await screen.findByText(
-				'This device opens secrets with the new key now, and still with the keys it had.'
+				'This device opens the vault with the new key now, and still with the keys it had.'
 			)
 		).toBeTruthy();
 		expect((await h.db.secretKeys.get('c1'))?.recipient).toBe(recipientOf(h.source));
@@ -634,7 +637,7 @@ describe('a source already set up', () => {
 		await typeKey(h, encodeIdentity(h.source));
 
 		await screen.findByText(
-			'This device opens secrets with the new key now, and still with the keys it had.'
+			'This device opens the vault with the new key now, and still with the keys it had.'
 		);
 		expect(await heldAfter(h)).toEqual([h.source, h.old].map(encodeIdentity));
 	});
@@ -646,7 +649,7 @@ describe('a source already set up', () => {
 		await h.user.click(await screen.findByRole('button', { name: 'Keep only the new key' }));
 		await choosePin(h);
 
-		await screen.findByText('This device can unlock secrets now.');
+		await screen.findByText('This device can unlock the vault now.');
 		expect(await heldAfter(h)).toEqual([encodeIdentity(h.source)]);
 	});
 
@@ -688,7 +691,7 @@ describe('an enrolled device', () => {
 	it('unlocks, says wrong tries, and locks again', async () => {
 		const h = await enrolled();
 		h.open();
-		expect(await screen.findByText('This device unlocks secrets with a PIN.')).toBeTruthy();
+		expect(await screen.findByText('This device unlocks the vault with a PIN.')).toBeTruthy();
 		expect(screen.getByText('Locked now.')).toBeTruthy();
 
 		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
@@ -739,7 +742,7 @@ describe('an enrolled device', () => {
 		await h.user.type(await screen.findByLabelText('Password'), 'correct horse{Enter}');
 
 		expect(
-			await screen.findByText('This device unlocks secrets its new way now.')
+			await screen.findByText('This device unlocks the vault its new way now.')
 		).toBeTruthy();
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('password');
 		const opened = await unlockKeys(
@@ -758,7 +761,7 @@ describe('an enrolled device', () => {
 		);
 		await choosePin(h, '1357');
 		expect(
-			await screen.findByText('This device unlocks secrets its new way now.')
+			await screen.findByText('This device unlocks the vault its new way now.')
 		).toBeTruthy();
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
 	});
@@ -792,7 +795,7 @@ describe('an enrolled device', () => {
 		});
 		expect(
 			await screen.findByText(
-				'This source has secrets. To open them on this device, type its recovery key.'
+				'This source has a vault. To open it on this device, type its recovery key.'
 			)
 		).toBeTruthy();
 	});
@@ -830,7 +833,7 @@ describe('an enrolled device', () => {
 	it('closes on Escape', async () => {
 		const h = await enrolled();
 		h.open();
-		await screen.findByText('This device unlocks secrets with a PIN.');
+		await screen.findByText('This device unlocks the vault with a PIN.');
 		await h.user.keyboard('{Escape}');
 		expect(h.onClose).toHaveBeenCalledTimes(1);
 	});
@@ -1353,10 +1356,10 @@ describe('the device’s own lock', () => {
 		).toBeTruthy();
 		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
 
-		await screen.findByText('This device can unlock secrets now.');
+		await screen.findByText('This device can unlock the vault now.');
 		expect(device.create).toHaveBeenCalledWith(
 			expect.any(Uint8Array),
-			'Unlocks secrets on this device: Work'
+			'Unlocks the vault on this device: Work'
 		);
 		// Made, then asked twice: what it answered as it was made was nothing.
 		expect(prompted).toEqual([true, true, true]);
@@ -1374,7 +1377,7 @@ describe('the device’s own lock', () => {
 		cleanup();
 		h.open({ deviceLock: device });
 		expect(
-			await screen.findByText('This device unlocks secrets with its own lock.')
+			await screen.findByText('This device unlocks the vault with its own lock.')
 		).toBeTruthy();
 		await h.user.click(screen.getByRole('button', { name: 'Lock now' }));
 		// One press: the device's lock is asked as the unlock is drawn, with no
@@ -1396,7 +1399,7 @@ describe('the device’s own lock', () => {
 		await h.user.click(await screen.findByRole('radio', { name: DEVICE }));
 		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
 
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 		expect(h.keyFile.write).toHaveBeenCalledWith('c1', recipientOf(identity));
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('device');
 	});
@@ -1438,7 +1441,7 @@ describe('the device’s own lock', () => {
 
 		vi.mocked(device.create).mockResolvedValue({ state: 'made', credentialId: CREDENTIAL });
 		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
-		await screen.findByText('Secrets are set up, and this device can unlock them.');
+		await screen.findByText('The vault is set up, and this device can unlock it.');
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('device');
 	});
 
@@ -1453,7 +1456,7 @@ describe('the device’s own lock', () => {
 
 		expect(
 			await screen.findByText(
-				'This device’s lock cannot keep secrets in this browser. Choose another way.'
+				'This device’s lock cannot unlock the vault in this browser. Choose another way.'
 			)
 		).toBeTruthy();
 		expect(screen.queryByRole('radio', { name: DEVICE })).toBeNull();
@@ -1462,7 +1465,7 @@ describe('the device’s own lock', () => {
 		expect(forgotten(device)).toEqual([[1, 2, 3]]);
 
 		await choosePin(h);
-		await screen.findByText('This device can unlock secrets now.');
+		await screen.findByText('This device can unlock the vault now.');
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
 	});
 
@@ -1478,7 +1481,7 @@ describe('the device’s own lock', () => {
 		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
 
 		expect(
-			await screen.findByText('This device unlocks secrets its new way now.')
+			await screen.findByText('This device unlocks the vault its new way now.')
 		).toBeTruthy();
 		const changed = await h.db.secretKeys.get('c1');
 		expect(changed?.unlock).toBe('device');
@@ -1509,7 +1512,7 @@ describe('the device’s own lock', () => {
 		);
 		await choosePin(h, '1357');
 		expect(
-			await screen.findByText('This device unlocks secrets its new way now.')
+			await screen.findByText('This device unlocks the vault its new way now.')
 		).toBeTruthy();
 		const back = await h.db.secretKeys.get('c1');
 		expect(back?.unlock).toBe('pin');
@@ -1573,7 +1576,7 @@ describe('the device’s own lock', () => {
 		await h.user.click(screen.getByRole('button', { name: 'Set unlock' }));
 
 		expect(
-			await screen.findByText('This device unlocks secrets its new way now.')
+			await screen.findByText('This device unlocks the vault its new way now.')
 		).toBeTruthy();
 		const changed = await h.db.secretKeys.get('c1');
 		expect(new Uint8Array(changed?.credentialId ?? new ArrayBuffer(0))).toEqual(
@@ -1592,7 +1595,7 @@ describe('the device’s own lock', () => {
 		expect(device.forget).not.toHaveBeenCalled();
 		await choosePin(h);
 
-		await screen.findByText('This device can unlock secrets now.');
+		await screen.findByText('This device can unlock the vault now.');
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
 		expect(forgotten(device)).toEqual([[1, 2, 3]]);
 	});

@@ -35,7 +35,7 @@ import { UnlockForm } from './UnlockDialog.js';
 import { ChooseUnlock, type Chosen } from './UnlockEntry.js';
 
 /**
- * Secrets for a source (docs/ARCHITECTURE.md §7, "Secrets in a note"): setting
+ * A source's vault (docs/ARCHITECTURE.md §7, "The vault"): setting
  * it up, with a new recovery key or one the user has; enrolling this device
  * with the key; and, once it is, unlocking it, changing how it unlocks,
  * replacing the source's key, and letting go of its copy.

@@ -1,34 +1,34 @@
 /**
- * Secrets in a note (docs/ARCHITECTURE.md §7, "Secrets in a note"): setting a
- * source up for them, its recovery key, how this device unlocks them, and the
- * dialog that unlocks it.
+ * The vault (docs/ARCHITECTURE.md §7, "The vault"), which keeps the secrets in
+ * a source's notes: setting a source up for it, its recovery key, how this
+ * device unlocks it, and the dialog that unlocks it.
  */
 export const secrets = {
 	/** In the gear's menu and a source's `⋯`. */
 	menu: {
-		setUp: 'Set up secrets…',
-		open: 'Secrets…',
+		setUp: 'Set up vault…',
+		open: 'Vault…',
 	},
-	title: 'Secrets',
-	checking: 'Checking whether this source has secrets set up…',
+	title: 'Vault',
+	checking: 'Checking whether this source has a vault set up…',
 	/** Why nothing can be set up now: the source's storage cannot be asked. */
 	unavailable: 'This source cannot be reached right now. Try again once it syncs.',
 	intro: {
-		what: 'A secret is text in a note that is encrypted on this device before it is saved anywhere. Your storage provider, and anyone who can open the folder, sees only scrambled text.',
-		key: 'Secrets open with a recovery key. If it is lost, and every device that unlocks them is reset or lost, no one can recover the secrets.',
+		what: 'The vault keeps secrets in your notes. They are encrypted on this device before they are saved anywhere, so your storage provider, and anyone who can open the folder, sees only scrambled text.',
+		key: 'The vault opens with a recovery key. If it is lost, and every device that unlocks the vault is reset or lost, no one can recover what is in it.',
 		make: 'Make a recovery key',
 		paste: 'Use a key I have',
 	},
-	newer: 'Secrets in this source were set up by a newer version of the app. Update the app on this device to use them here.',
+	newer: 'The vault in this source was set up by a newer version of the app. Update the app on this device to use it here.',
 	invalid:
-		'This source has a file named .encryption.json that this app did not write, so secrets cannot be set up in it.',
+		'This source has a file named .encryption.json that this app did not write, so a vault cannot be set up in it.',
 	/** Something failed that nothing more can be said of: the age code not loading, or the device's storage. */
 	failed: 'That did not work. Try again.',
 	/** While a key is tried on the source's secrets. */
 	scanning: 'Looking for secrets in this source’s notes…',
 	/** This device holds a key for the source, and its folder has no key file. */
 	lost: {
-		text: 'This device has a key for this source’s secrets, but the source’s folder no longer has the file that names it. Put it back so your other devices can open secrets here too.',
+		text: 'This device has a key for this source’s vault, but the source’s folder no longer has the file that names it. Put it back so your other devices can open the vault here too.',
 		putBack: 'Put it back',
 		done: 'The source’s folder names its key again.',
 	},
@@ -49,8 +49,8 @@ export const secrets = {
 		notCopied: 'The key could not be put on the clipboard.',
 		next: 'Next',
 		/** Printed above the key. {source} is the source's name. */
-		printedFor: 'Recovery key for secrets in {source}',
-		printedNote: 'Anyone who has this key can read the secrets. Keep it somewhere safe.',
+		printedFor: 'Vault recovery key for {source}',
+		printedNote: 'Anyone who has this key can open the vault. Keep it somewhere safe.',
 		/** The key as a QR code, shown and printed beside its groups, read out. */
 		qr: 'Recovery key as a QR code',
 	},
@@ -70,9 +70,9 @@ export const secrets = {
 	recovery: {
 		label: 'Recovery key',
 		paste: 'Paste or type the recovery key. It starts with AGE-SECRET-KEY-1.',
-		enrol: 'This source has secrets. To open them on this device, type its recovery key.',
+		enrol: 'This source has a vault. To open it on this device, type its recovery key.',
 		replaced:
-			'This source’s key was replaced on another device. Type the new recovery key to open its secrets here.',
+			'This source’s key was replaced on another device. Type the new recovery key to open its vault here.',
 		another:
 			'Paste or type the other key. It is kept on this device beside this source’s own key.',
 		rekey: 'Paste or type the key this source will use from now on. It starts with AGE-SECRET-KEY-1.',
@@ -106,12 +106,12 @@ export const secrets = {
 	written: {
 		saving: 'Setting up…',
 		changed:
-			'Another device set up secrets for this source a moment ago. Type the recovery key it showed to use them here.',
-		failed: 'Secrets could not be set up in your storage. Try again.',
+			'Another device set up the vault for this source a moment ago. Type the recovery key it showed to use it here.',
+		failed: 'The vault could not be set up in your storage. Try again.',
 	},
 	/** Choosing how this device unlocks. */
 	choose: {
-		title: 'How should this device unlock secrets?',
+		title: 'How should this device unlock the vault?',
 		text: 'Only this device uses it. Each of your devices unlocks its own way.',
 		pattern: 'Pattern',
 		pin: 'PIN',
@@ -122,7 +122,7 @@ export const secrets = {
 			'Your device asks for your fingerprint, face or screen lock to make a key for this, and to check it.',
 		deviceRefused: 'Your device’s lock did not answer. Try again, or choose another way.',
 		deviceUnsupported:
-			'This device’s lock cannot keep secrets in this browser. Choose another way.',
+			'This device’s lock cannot unlock the vault in this browser. Choose another way.',
 		drawPattern: 'Draw a pattern through at least 4 dots.',
 		typePin: 'Type a PIN of at least 4 digits.',
 		typePassword: 'Type a password of at least 8 characters.',
@@ -142,9 +142,9 @@ export const secrets = {
 	},
 	pinLabel: 'PIN',
 	passwordLabel: 'Password',
-	/** The dialog that unlocks this device's secrets for a source. */
+	/** The dialog that unlocks this device's vault for a source. */
 	unlock: {
-		title: 'Unlock secrets',
+		title: 'Unlock vault',
 		pattern: 'Draw this device’s pattern.',
 		pin: 'Type this device’s PIN.',
 		password: 'Type this device’s password.',
@@ -165,15 +165,15 @@ export const secrets = {
 		},
 		forgotten:
 			'Too many wrong tries, so this device’s copy of the key was removed. Type the recovery key to set this device up again.',
-		none: 'This device has no key for this source’s secrets. Type the recovery key to set it up.',
+		none: 'This device has no key for this source’s vault. Type the recovery key to set it up.',
 		changed:
-			'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.',
+			'This device’s lock no longer opens its key for this vault. Type the recovery key to set this device up again.',
 		useRecovery: 'Use the recovery key',
 	},
 	/** Replacing the source's key with a new one, on an unlocked device. */
 	rekey: {
 		title: 'Replace this source’s key',
-		text: 'A new key takes the place of this source’s key. Secrets made with the old key are encrypted to the new one, and your other devices ask for the new key before they open secrets again.',
+		text: 'A new key takes the place of this source’s key. Secrets made with the old key are encrypted to the new one, and your other devices ask for the new key before they open the vault again.',
 		history:
 			'Copies of your notes kept from before, such as your storage’s version history, can still be opened with the old key.',
 		make: 'Make a new key',
@@ -205,16 +205,16 @@ export const secrets = {
 			'This source’s key was replaced on another device. Type the new recovery key, or the key this secret was made with.',
 		notIt: 'That key does not open this secret.',
 	},
-	/** This device, in a source set up for secrets. */
+	/** This device, in a source with a vault. */
 	device: {
 		unlocksWith: {
-			pattern: 'This device unlocks secrets with a pattern.',
-			pin: 'This device unlocks secrets with a PIN.',
-			password: 'This device unlocks secrets with a password.',
-			device: 'This device unlocks secrets with its own lock.',
+			pattern: 'This device unlocks the vault with a pattern.',
+			pin: 'This device unlocks the vault with a PIN.',
+			password: 'This device unlocks the vault with a password.',
+			device: 'This device unlocks the vault with its own lock.',
 		},
 		/** The passkey the device's own lock answers through, as a password manager lists it. */
-		passkeyName: 'Unlocks secrets on this device: {source}',
+		passkeyName: 'Unlocks the vault on this device: {source}',
 		unlocked:
 			'Unlocked now. It locks when you leave the app, or after 30 seconds with nothing done.',
 		locked: 'Locked now.',
@@ -225,17 +225,18 @@ export const secrets = {
 		remove: 'Remove from this device',
 		removeTitle: 'Remove the key from this device?',
 		removeText:
-			'This device will need the recovery key to open secrets again. Nothing in your notes changes.',
+			'This device will need the recovery key to open the vault again. Nothing in your notes changes.',
 		removeConfirm: 'Remove',
 		/** Changing the unlock, where another window sealed the keys again meanwhile. */
 		changedElsewhere:
 			'The key on this device changed in another window. Unlock it again, then try again.',
 	},
 	done: {
-		setUp: 'Secrets are set up, and this device can unlock them.',
-		enrolled: 'This device can unlock secrets now.',
-		replaced: 'This device opens secrets with the new key now, and still with the keys it had.',
-		changed: 'This device unlocks secrets its new way now.',
+		setUp: 'The vault is set up, and this device can unlock it.',
+		enrolled: 'This device can unlock the vault now.',
+		replaced:
+			'This device opens the vault with the new key now, and still with the keys it had.',
+		changed: 'This device unlocks the vault its new way now.',
 		rekeyed: {
 			one: 'The key was replaced, and one secret was encrypted to it.',
 			other: 'The key was replaced, and {count} secrets were encrypted to it.',
