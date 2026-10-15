@@ -3,9 +3,28 @@ import { describe, expect, it } from 'vitest';
 import { encrypt } from '../src/age/age.js';
 import { armor } from '../src/age/armor.js';
 import { AgeError } from '../src/age/errors.js';
-import { generateIdentity, parseIdentity, parseRecipient } from '../src/age/keys.js';
+import {
+	encodeIdentity,
+	encodeRecipient,
+	generateIdentity,
+	parseIdentity,
+	parseRecipient,
+} from '../src/age/keys.js';
 import { previewLines } from '../src/markdown/preview.js';
-import { isSecretBlock, openSecret, sealSecret, secretFile } from '../src/secrets.js';
+import {
+	buildEncryptionFile,
+	isEncryptionFile,
+	isSecretBlock,
+	openSecret,
+	opensSecret,
+	parseEncryptionFile,
+	readRecoveryKey,
+	recoveryKeyGroups,
+	sealSecret,
+	secretBlocksIn,
+	secretFile,
+	serializeEncryptionFile,
+} from '../src/secrets.js';
 import {
 	IDENTITY,
 	RECIPIENT,
@@ -90,5 +109,143 @@ describe('a secret in a preview', () => {
 
 	it('leaves an `age` fence that is not armor as the code it is', () => {
 		expect(previewLines('```age\nnot a secret\n```\n')).toEqual(['not a secret']);
+	});
+});
+
+describe('the secrets in a note', () => {
+	it('are found at any depth, in order', () => {
+		const body = [
+			'# Note',
+			'',
+			'```age',
+			SEALED_HERE,
+			'```',
+			'',
+			'- item',
+			'',
+			'  > ```age',
+			...SEALED_BY_AGE.split('\n').map((line) => `  > ${line}`),
+			'  > ```',
+			'',
+			'```age',
+			'not armor',
+			'```',
+			'',
+			'```text',
+			SEALED_HERE,
+			'```',
+			'',
+		].join('\n');
+		expect(secretBlocksIn(body)).toEqual([SEALED_HERE, SEALED_BY_AGE]);
+	});
+
+	it('are none in a note without any', () => {
+		expect(secretBlocksIn('just words\n')).toEqual([]);
+	});
+
+	it('say whether a key is the one they were made with, reading only the header', async () => {
+		expect(await opensSecret(SEALED_HERE, [identity])).toBe(true);
+		expect(await opensSecret(SEALED_HERE, [generateIdentity(), identity])).toBe(true);
+		expect(await opensSecret(SEALED_HERE, [generateIdentity()])).toBe(false);
+		expect(await opensSecret('not armor', [identity])).toBe(false);
+	});
+});
+
+describe('the recovery key', () => {
+	it('is printed as its prefix and twelve groups, the last of three', () => {
+		const groups = recoveryKeyGroups(identity);
+		expect(groups).toHaveLength(12);
+		expect(groups.slice(0, 11).every((group) => group.length === 5)).toBe(true);
+		expect(groups[11]).toHaveLength(3);
+		expect(`AGE-SECRET-KEY-1${groups.join('')}`).toBe(IDENTITY);
+	});
+
+	it('is read however it was typed', () => {
+		const groups = recoveryKeyGroups(identity);
+		[
+			IDENTITY,
+			IDENTITY.toLowerCase(),
+			`AGE-SECRET-KEY-1 ${groups.join(' ')}`,
+			groups.join(' '),
+			groups.join('-'),
+			` ${groups.slice(0, 6).join(' ')}\n${groups.slice(6).join(' ').toLowerCase()} `,
+			`AGE SECRET KEY 1 ${groups.join(' ')}`,
+			`age-secret-key-1-${groups.join('-')}`,
+		].forEach((typed) => {
+			expect(readRecoveryKey(typed)).toEqual(identity);
+		});
+	});
+
+	it('is refused with a character mistyped, or one left out', () => {
+		const groups = recoveryKeyGroups(identity);
+		const first = groups[0] ?? '';
+		const typo = `${first.slice(0, 4)}${first[4] === 'Q' ? 'P' : 'Q'}`;
+		expect(readRecoveryKey([typo, ...groups.slice(1)].join(' '))).toBeUndefined();
+		expect(readRecoveryKey(groups.join(' ').slice(0, -1))).toBeUndefined();
+		expect(readRecoveryKey('')).toBeUndefined();
+	});
+
+	it('round trips a new one', () => {
+		const made = generateIdentity();
+		expect(readRecoveryKey(recoveryKeyGroups(made).join(' '))).toEqual(made);
+		expect(encodeIdentity(made).startsWith('AGE-SECRET-KEY-1')).toBe(true);
+	});
+});
+
+describe('the key file', () => {
+	it('round trips', () => {
+		const file = buildEncryptionFile(RECIPIENT, new Date('2026-10-14T18:02:11Z'));
+		const text = serializeEncryptionFile(file);
+		expect(text).toBe(
+			`{\n  "schemaVersion": 1,\n  "recipient": "${RECIPIENT}",\n  "setAt": "2026-10-14T18:02:11.000Z"\n}\n`
+		);
+		expect(parseEncryptionFile(text)).toEqual({ status: 'ok', file });
+	});
+
+	it('is one a newer build wrote, whatever else it says, which this one does not use or replace', () => {
+		[
+			{ schemaVersion: 2, recipient: RECIPIENT, setAt: 'later' },
+			{ schemaVersion: 2, recipients: [RECIPIENT, 'age1pq1…'] },
+			{ schemaVersion: 2 },
+		].forEach((file) => {
+			expect(parseEncryptionFile(JSON.stringify(file))).toEqual({ status: 'newer' });
+		});
+	});
+
+	it('gives its recipient in lower case, as age writes it, however it was written', () => {
+		const text = JSON.stringify({
+			schemaVersion: 1,
+			recipient: RECIPIENT.toUpperCase(),
+			setAt: 'x',
+		});
+		const read = parseEncryptionFile(text);
+		expect(read.status === 'ok' ? read.file.recipient : undefined).toBe(RECIPIENT);
+		expect(buildEncryptionFile(RECIPIENT.toUpperCase()).recipient).toBe(RECIPIENT);
+	});
+
+	it.each([
+		['not JSON', '{'],
+		['no recipient', '{"schemaVersion":1,"setAt":"x"}'],
+		['a recipient that is not one', '{"schemaVersion":1,"recipient":"age1nope","setAt":"x"}'],
+		[
+			'an identity for a recipient',
+			`{"schemaVersion":1,"recipient":"${IDENTITY}","setAt":"x"}`,
+		],
+	])('is invalid with %s', (_, text) => {
+		expect(parseEncryptionFile(text)).toEqual({ status: 'invalid' });
+	});
+
+	it('reads its recipient by shape alone, and sealing refuses one no file opens for', () => {
+		const lowOrder = encodeRecipient(new Uint8Array(32));
+		const text = JSON.stringify({ schemaVersion: 1, recipient: lowOrder, setAt: 'x' });
+		expect(parseEncryptionFile(text).status).toBe('ok');
+		expect(parseRecipient(lowOrder)).toBeUndefined();
+	});
+
+	it('is at the root and nowhere else', () => {
+		expect(isEncryptionFile('.encryption.json')).toBe(true);
+		expect(isEncryptionFile('/.encryption.json')).toBe(true);
+		expect(isEncryptionFile('notes/.encryption.json')).toBe(false);
+		expect(isEncryptionFile('.encryption.json.bak')).toBe(false);
 	});
 });

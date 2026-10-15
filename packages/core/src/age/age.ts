@@ -4,7 +4,7 @@ import { x25519 } from '@noble/curves/ed25519.js';
 import { decodeBase64, encodeBase64 } from './base64.js';
 import { asciiBytes, concatBytes } from './bytes.js';
 import { AgeError } from './errors.js';
-import { encodeHeader, headerWithoutMac, parseHeader, type Stanza } from './header.js';
+import { encodeHeader, type Header, headerWithoutMac, parseHeader, type Stanza } from './header.js';
 import { publicKeyOf } from './keys.js';
 import { openPayload, sealPayload } from './stream.js';
 
@@ -133,12 +133,14 @@ export const encrypt = async (
 	return concatBytes([asciiBytes(encodeHeader(stanzas, new Uint8Array(mac))), nonce, payload]);
 };
 
-/** An age file's plaintext, opened with whichever of `identities` it was made for. */
-export const decrypt = async (
-	file: Uint8Array,
+/**
+ * The file key of a header, from whichever of `identities` a stanza is for, once
+ * the header's MAC says the header is the one it was written as.
+ */
+const openHeader = async (
+	header: Header,
 	identities: readonly Uint8Array[]
 ): Promise<Uint8Array> => {
-	const { header, payload } = parseHeader(file);
 	if (header.stanzas.some(({ type }) => type === 'scrypt') && header.stanzas.length !== 1) {
 		throw new AgeError('header', 'an scrypt stanza must be the only one');
 	}
@@ -154,9 +156,51 @@ export const decrypt = async (
 		asciiBytes(headerWithoutMac(header.stanzas))
 	);
 	if (!authentic) throw new AgeError('hmac', 'the header MAC does not match');
+	return fileKey;
+};
+
+/**
+ * A file's key and its payload, the nonce first, once one of `identities` has
+ * opened its header: everything `decrypt` checks before the payload.
+ */
+const openFile = async (
+	file: Uint8Array,
+	identities: readonly Uint8Array[]
+): Promise<{ fileKey: Uint8Array; payload: Uint8Array }> => {
+	const { header, payload } = parseHeader(file);
+	const fileKey = await openHeader(header, identities);
 	// The nonce is read with the header in age, and a file too short to hold one
 	// fails as a header does.
 	if (payload.length < NONCE_SIZE) throw new AgeError('header', 'the file ends before its nonce');
+	return { fileKey, payload };
+};
+
+/**
+ * Whether one of `identities` opens `file`: a stanza is for it, the header is
+ * authentic, and the nonce is there, which is everything `decrypt` checks
+ * before the payload. The payload is not read, so this is cheap for a file of
+ * any size; it is what asking whether a key is the one a secret was made with
+ * needs. A file that does not parse is one no key opens.
+ */
+export const opens = async (
+	file: Uint8Array,
+	identities: readonly Uint8Array[]
+): Promise<boolean> => {
+	try {
+		await openFile(file, identities);
+		return true;
+	} catch (error) {
+		if (error instanceof AgeError) return false;
+		throw error;
+	}
+};
+
+/** An age file's plaintext, opened with whichever of `identities` it was made for. */
+export const decrypt = async (
+	file: Uint8Array,
+	identities: readonly Uint8Array[]
+): Promise<Uint8Array> => {
+	const { fileKey, payload } = await openFile(file, identities);
 	const nonce = payload.subarray(0, NONCE_SIZE);
 	return openPayload(await hkdf(fileKey, nonce, 'payload'), payload.subarray(NONCE_SIZE));
 };

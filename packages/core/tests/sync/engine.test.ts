@@ -3184,6 +3184,59 @@ describe("the clipboard's folder", () => {
 	});
 });
 
+describe('the key file for secrets', () => {
+	// `.encryption.json` at the root holds the public half of the source's key
+	// (§7, "Secrets in a note"). The engine decides nothing about it, as about
+	// any hidden path; it says it met it, so the device reads it again.
+	const keyFile = '{"schemaVersion":1,"recipient":"age1…","setAt":"2026-10-14T00:00:00Z"}\n';
+
+	it('says a round met it, and makes nothing of it', async () => {
+		await engine.pull();
+		await provider.write('.encryption.json', keyFile, {});
+
+		const result = await engine.pull();
+
+		expect(result).toMatchObject({ status: 'ok', pulled: 0, encryption: true });
+		expect(result.clipboard).toBeUndefined();
+		expect(store.notes()).toEqual([]);
+		expect(store.files()).toEqual([]);
+	});
+
+	it('says a scan met it', async () => {
+		await provider.write('.encryption.json', keyFile, {});
+
+		expect(await engine.pull()).toMatchObject({ status: 'ok', encryption: true });
+	});
+
+	it('says it may have met it, for something gone by its id alone', async () => {
+		await engine.pull();
+
+		const result = await pullNow([{ deleted: true, remoteId: 'gone-by-id' }]);
+
+		expect(result).toMatchObject({ status: 'ok', clipboard: true, encryption: true });
+	});
+
+	it('says nothing of a round that did not meet it', async () => {
+		await provider.write('.encryption.json', keyFile, {});
+		await engine.pull();
+		await remoteFile('a.md', 'x\n');
+		await provider.createFolder('notes');
+		await provider.write('notes/.encryption.json', keyFile, {});
+
+		const result = await engine.pull();
+
+		expect(result.pulled).toBeGreaterThan(0);
+		expect(result.encryption).toBeUndefined();
+	});
+
+	it('carries it through a whole sync', async () => {
+		await engine.pull();
+		await provider.write('.encryption.json', keyFile, {});
+
+		expect((await engine.sync()).encryption).toBe(true);
+	});
+});
+
 describe("the scratchpad's folder", () => {
 	// Notes the scratchpad shows, in `.scratchpad/` (§7, "The scratchpad"):
 	// hidden from the notebooks by its dot, but notes all the same, synced as
