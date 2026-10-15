@@ -295,7 +295,11 @@ describe('the catalogue', () => {
 			'file',
 			'secret',
 		]);
-		expect(INSERT_COMMANDS.map((command) => command.id)).toEqual(['code-block', 'attach']);
+		expect(INSERT_COMMANDS.map((command) => command.id)).toEqual([
+			'code-block',
+			'attach',
+			'insert-secret',
+		]);
 	});
 
 	it('holds everything the menus offer', () => {

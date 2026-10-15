@@ -49,6 +49,8 @@ export const editor = {
 		attach: 'Attach files',
 		/** The slash menu's: a secret, written in a panel and encrypted before it is put in the note. */
 		secret: 'Secret',
+		/** The toolbar's lock, which makes a secret as the slash menu's does. */
+		insertSecret: 'Insert secret',
 	},
 	/** The formatting toolbar across the editor. */
 	toolbar: {

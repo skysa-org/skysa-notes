@@ -42,8 +42,9 @@ import { fitToolbar, sameFit } from './toolbarFit.js';
  * no text colour, no highlight and no alignment in a `.md` file, and a button
  * that wrote one would put something in the user's note that the file format
  * loses on the next save. Insert — tables, quotes, dividers — is the slash
- * menu's job here and is deliberately not duplicated; the code block and a file
- * are the exceptions, and `INSERT_COMMANDS` says why each earns a button.
+ * menu's job here and is deliberately not duplicated; the code block, a file and
+ * a secret are the exceptions, and `INSERT_COMMANDS` says why each earns a
+ * button.
  *
  * Every button is a view of `FormatState` and an action on the editor, and
  * nothing else: the component holds no document state, so it cannot disagree
@@ -68,6 +69,7 @@ const ICONS: Record<string, IconName> = {
 	code: 'code',
 	'code-block': 'code-block',
 	attach: 'paperclip',
+	'insert-secret': 'lock',
 	'clear-formatting': 'clear',
 	'bullet-list': 'bullets',
 	'ordered-list': 'numbers',
@@ -155,6 +157,7 @@ const SLOTS: readonly Slot[] = [
 	{ id: 'indentation', group: 'indentation' },
 	{ id: 'code-block', group: 'insert' },
 	{ id: 'attach', group: 'insert' },
+	{ id: 'insert-secret', group: 'insert' },
 	{ id: 'link', group: 'link' },
 ];
 
@@ -209,6 +212,8 @@ const GIVE_UP_ORDER: readonly string[] = [
 	'indentation',
 	'more-formatting',
 	'task-list',
+	// Before the link: made less often than one, and in the menu still.
+	'insert-secret',
 	'link',
 	// After the link: on a phone, the way to put a photo in a note.
 	'attach',
