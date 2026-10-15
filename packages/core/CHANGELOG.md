@@ -1,5 +1,12 @@
 # @skysa/core
 
+## 1.6.0
+
+### Minor Changes
+
+- cc56bd0: Search no longer finds a note by a secret's encrypted text. A short search could match a run of a secret's base64 by chance, or the `age` its fence opens with; the index now holds each secret as its label alone, so a note is still found by its secrets' labels. `withoutArmor` (core) gives a note's body that way.
+- f4a5239: A secret can be given a label: a Label field over its words in the panel. The closed secret shows the label in place of "Secret", as do scratchpad cards, and search finds the note by it. The label is plain text on the secret's first line in the file (```` ```age Wi-Fi password ````), not encrypted, and the field says so. With no label, it still says "Secret". A version before this one opens a note with a labelled secret in raw mode, losing nothing.
+
 ## 1.5.0
 
 No changes in this release.

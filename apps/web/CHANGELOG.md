@@ -1,5 +1,22 @@
 # @skysa/web
 
+## 1.6.0
+
+### Minor Changes
+
+- 88c22f7: The recovery key now comes with a QR code, on screen and on the printed page. Wherever the key is asked for, Scan QR code reads it with the camera instead of typing it. The frames are read on the device, and the camera is let go of as soon as a key is read or the scan is cancelled. On a phone, the key's groups now sit three to a row, so none is cut off at the dialog's edge.
+- f4a5239: A secret can be given a label: a Label field over its words in the panel. The closed secret shows the label in place of "Secret", as do scratchpad cards, and search finds the note by it. The label is plain text on the secret's first line in the file (```` ```age Wi-Fi password ````), not encrypted, and the field says so. With no label, it still says "Secret". A version before this one opens a note with a labelled secret in raw mode, losing nothing.
+
+### Patch Changes
+
+- cc56bd0: Search no longer finds a note by a secret's encrypted text. A short search could match a run of a secret's base64 by chance, or the `age` its fence opens with; the index now holds each secret as its label alone, so a note is still found by its secrets' labels. `withoutArmor` (core) gives a note's body that way.
+- fbfe2d5: A secret selected in the rich editor shows Delete secret at the end of its line, as a selected picture shows Remove from note, instead of the formatting bar, which had nothing to format in it.
+- 888a5f0: Where a secret cannot be made or opened because this device or the source still needs setting up, the warning now has a button that opens the source's Secrets dialog over the note ("Set up secrets" or "Open Secrets"), instead of saying where in the source's menu to find it. "Use the recovery key" in the unlock over a note opens the dialog directly.
+- 888a5f0: Choosing how secrets unlock on a phone: the four kinds (Pattern, PIN, Password, This device's lock) now sit two by two where one row would squeeze them, instead of crushing into a row.
+- Updated dependencies [cc56bd0]
+- Updated dependencies [f4a5239]
+  - @skysa/core@1.6.0
+
 ## 1.5.0
 
 ### Minor Changes
