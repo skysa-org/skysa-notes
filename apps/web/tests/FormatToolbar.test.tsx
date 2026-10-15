@@ -186,6 +186,21 @@ describe('FormatToolbar', () => {
 		picker?.dispatchEvent(new Event('cancel'));
 	});
 
+	it('offers a new secret beside the paperclip, as a lock', async () => {
+		await harness('plain\n');
+
+		expect(
+			within(screen.getByRole('group', { name: 'Insert' }))
+				.getAllByRole('button')
+				.map((button) => button.getAttribute('aria-label'))
+		).toEqual(['Code block', 'Attach files', 'Insert secret']);
+		const secret = screen.getByRole('button', { name: 'Insert secret' });
+		expect(secret.querySelector('svg')).not.toBeNull();
+		expect(secret.getAttribute('title')).toBe('Insert secret');
+		// It makes one; it is not on or off.
+		expect(secret.hasAttribute('aria-pressed')).toBe(false);
+	});
+
 	// A button that does something rather than being on or off is not one a
 	// screen reader should call "not pressed".
 	it('says pressed or not only of what is on or off', async () => {

@@ -426,6 +426,18 @@ export const BLOCK_COMMANDS: readonly EditorCommand[] = [
 /** What the slash menu offers: the blocks, then a file beside the note, then a secret. */
 export const SLASH_COMMANDS: readonly EditorCommand[] = [...BLOCK_COMMANDS, IMAGE, FILE, SECRET];
 
+/**
+ * The toolbar's lock: a new secret, as the slash menu's "Secret" makes one.
+ * Its own command, as the paperclip is beside the slash menu's "File", since
+ * on a button the label says what pressing it does.
+ */
+const INSERT_SECRET: EditorCommand = {
+	id: 'insert-secret',
+	label: t('editor.commands.insertSecret'),
+	keywords: ['encrypt', 'password', 'private', 'hidden', 'age'],
+	apply: insertSecretCommand,
+};
+
 /** Inline marks, in the order they appear in the selection toolbar. */
 export const INLINE_COMMANDS: readonly EditorCommand[] = [BOLD, ITALIC, STRIKETHROUGH, INLINE_CODE];
 
@@ -476,7 +488,7 @@ export const LIST_COMMANDS: readonly EditorCommand[] = [BULLET_LIST, ORDERED_LIS
 export const INDENT_COMMANDS: readonly EditorCommand[] = [OUTDENT, INDENT];
 
 /**
- * The two things the toolbar inserts. Everything else a note can hold —
+ * The three things the toolbar inserts. Everything else a note can hold —
  * tables, quotes, dividers — is reached from the slash menu, and the code
  * block would be too if it were only a matter of getting one: it has a button
  * because it is the one construct people go looking for in a toolbar, and
@@ -486,8 +498,12 @@ export const INDENT_COMMANDS: readonly EditorCommand[] = [OUTDENT, INDENT];
  * A file has a button because on a phone it is the way to put a photo in a
  * note: there is no dragging there, and a paste of a photo is several steps
  * in another app first.
+ *
+ * A secret has one because nothing else on the screen says a note can hold
+ * one: the slash menu and the palette are found by those who already know
+ * what to type (the owner's ask, 2026-10-15).
  */
-export const INSERT_COMMANDS: readonly EditorCommand[] = [CODE_BLOCK, ATTACH];
+export const INSERT_COMMANDS: readonly EditorCommand[] = [CODE_BLOCK, ATTACH, INSERT_SECRET];
 
 /**
  * Every command in the catalogue, once each, for the suite that runs them all.
