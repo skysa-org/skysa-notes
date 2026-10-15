@@ -47,6 +47,8 @@ export const editor = {
 		file: 'File',
 		/** The toolbar's paperclip. */
 		attach: 'Attach files',
+		/** The slash menu's: a secret, written in a panel and encrypted before it is put in the note. */
+		secret: 'Secret',
 	},
 	/** The formatting toolbar across the editor. */
 	toolbar: {
@@ -254,5 +256,33 @@ export const editor = {
 			image: 'Image',
 			file: 'Attachment',
 		},
+	},
+	/** A secret in a note (docs/ARCHITECTURE.md §7, "Secrets in a note"). */
+	secret: {
+		/** What the closed block says in place of its words. */
+		label: 'Secret',
+		reveal: 'Reveal',
+		/** Said on the block where it cannot be revealed. */
+		differentKey: 'This secret was made with a different key, which this device does not have.',
+		unreadable: 'This secret cannot be read by this version of the app.',
+		/** The panel a secret's words are revealed and written in. */
+		panel: 'Secret',
+		words: 'Secret text',
+		copy: 'Copy',
+		copied: 'Copied.',
+		notCopied: 'The secret could not be put on the clipboard.',
+		cancel: 'Cancel',
+		done: 'Done',
+		/** Why a secret cannot be made or opened here, where the source's Secrets dialog is the way on. */
+		notSetUp:
+			'This source is not set up for secrets. Choose Set up secrets… in its menu to set it up.',
+		notEnrolled:
+			'This device cannot open secrets in this source yet. Choose Secrets… in its menu, and type its recovery key.',
+		replaced:
+			'This source’s key was replaced on another device. Choose Secrets… in its menu, and type the new recovery key.',
+		lost: 'This source’s folder no longer names its key. Choose Secrets… in its menu to put it back.',
+		/** Said in the panel, where what was typed could not be encrypted into the note. */
+		notSealed:
+			'What you typed could not be encrypted, and is not saved yet. Keep typing to try again.',
 	},
 } as const;

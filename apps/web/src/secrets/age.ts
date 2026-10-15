@@ -31,11 +31,16 @@ export interface SecretScan {
 	readonly otherNotes: number;
 }
 
+/** How long trying keys runs before it lets the page draw. */
+const BREATH_MS = 50;
+
 /**
  * Try `identities` on every secret in a source's notes: what setup and
  * replacing the key say before a key is used, where it would leave some
  * locked. Only the header of each is read, and only a note with armor in it is
  * parsed, so a library of thousands is read once and parsed hardly at all.
+ * Each header is a curve operation, and none of them waits, so the page is let
+ * draw between notes every so often: the dialog says it is looking meanwhile.
  */
 export const scanSecrets = async (
 	db: NotesDatabase,
@@ -48,19 +53,22 @@ export const scanSecrets = async (
 		.equals(connectionId)
 		.filter((note) => note.deletedLocally === 0 && note.body.includes(ARMOR_LINE))
 		.toArray();
-	const found = await Promise.all(
-		notes.map(async (note) => {
+	const drawn = { current: Date.now() };
+	return notes.reduce<Promise<SecretScan>>(
+		async (sofar, note) => {
+			const total = await sofar;
+			if (Date.now() - drawn.current > BREATH_MS) {
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				drawn.current = Date.now();
+			}
 			const blocks = secretBlocksIn(note.body);
-			const opened = await Promise.all(blocks.map((block) => opensSecret(block, identities)));
-			return { secrets: blocks.length, others: opened.filter((opens) => !opens).length };
-		})
-	);
-	return found.reduce<SecretScan>(
-		(total, note) => ({
-			secrets: total.secrets + note.secrets,
-			others: total.others + note.others,
-			otherNotes: total.otherNotes + (note.others > 0 ? 1 : 0),
-		}),
-		{ secrets: 0, others: 0, otherNotes: 0 }
+			const others = blocks.filter((block) => !opensSecret(block, identities)).length;
+			return {
+				secrets: total.secrets + blocks.length,
+				others: total.others + others,
+				otherNotes: total.otherNotes + (others > 0 ? 1 : 0),
+			};
+		},
+		Promise.resolve({ secrets: 0, others: 0, otherNotes: 0 })
 	);
 };

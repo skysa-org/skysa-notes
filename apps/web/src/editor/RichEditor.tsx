@@ -30,6 +30,7 @@ import { useIncomingBody } from './incoming.js';
 import { InlineToolbar } from './InlineToolbar.js';
 import type { PressedBy } from './press.js';
 import { adoptBody, createRichEditor, whatIsLost } from './rich.js';
+import type { SecretHost } from './secretHost.js';
 import { SlashMenu } from './SlashMenu.js';
 
 /**
@@ -71,6 +72,11 @@ export interface RichEditorProps {
 	 * is now, so it needs no rebuilding when the note moves.
 	 */
 	attachments?: AttachmentHost;
+	/**
+	 * What opens and seals the note's secrets (`secretHost.ts`). Read when the
+	 * editor is built, as `attachments` is.
+	 */
+	secrets?: SecretHost;
 	/**
 	 * A scratch note's editor (docs/ARCHITECTURE.md §7, "The scratchpad"): the
 	 * basic bar (`BASIC_SLOTS`) and no slash menu. Read when the editor is
@@ -124,6 +130,7 @@ const EditorBody = ({
 	onAdopted,
 	toolbar = 'top',
 	attachments,
+	secrets,
 	basic = false,
 	toolbarEnd,
 }: RichEditorProps) => {
@@ -182,6 +189,7 @@ const EditorBody = ({
 					tooltip: { view: pluginView({ component: InlineToolbar }) },
 				},
 				attachments,
+				secrets,
 			}),
 		[noteId]
 	);

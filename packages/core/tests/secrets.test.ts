@@ -35,11 +35,14 @@ import {
 const identity = parseIdentity(IDENTITY) ?? new Uint8Array();
 const recipient = parseRecipient(RECIPIENT) ?? new Uint8Array();
 
-const failureOf = async (attempt: Promise<unknown>): Promise<string> =>
-	attempt.then(
-		() => 'success',
-		(error: unknown) => (error instanceof AgeError ? error.failure : String(error))
-	);
+const failureOf = (attempt: () => unknown): string => {
+	try {
+		attempt();
+		return 'success';
+	} catch (error) {
+		return error instanceof AgeError ? error.failure : String(error);
+	}
+};
 
 describe('a secret block', () => {
 	it('is an `age` fence holding armor', () => {
@@ -60,40 +63,40 @@ describe('a secret block', () => {
 });
 
 describe('sealing and opening', () => {
-	it('opens a secret this made, and one the age tool made', async () => {
-		expect(await openSecret(SEALED_HERE, [identity])).toBe(SEALED_HERE_WORDS);
-		expect(await openSecret(SEALED_BY_AGE, [identity])).toBe(SEALED_BY_AGE_WORDS);
+	it('opens a secret this made, and one the age tool made', () => {
+		expect(openSecret(SEALED_HERE, [identity])).toBe(SEALED_HERE_WORDS);
+		expect(openSecret(SEALED_BY_AGE, [identity])).toBe(SEALED_BY_AGE_WORDS);
 	});
 
-	it('round trips words in any script, and their line endings', async () => {
+	it('round trips words in any script, and their line endings', () => {
 		const words = 'Пароль: 🔑 ключ\n\n  indented\r\nand a trailing newline\n';
-		const sealed = await sealSecret(words, recipient);
+		const sealed = sealSecret(words, recipient);
 		expect(isSecretBlock('age', sealed)).toBe(true);
-		expect(await openSecret(sealed, [identity])).toBe(words);
+		expect(openSecret(sealed, [identity])).toBe(words);
 	});
 
-	it('keeps a byte order mark, as age -d does, so sealing again changes nothing', async () => {
+	it('keeps a byte order mark, as age -d does, so sealing again changes nothing', () => {
 		const words = '\uFEFFpassword';
-		expect(await openSecret(await sealSecret(words, recipient), [identity])).toBe(words);
+		expect(openSecret(sealSecret(words, recipient), [identity])).toBe(words);
 	});
 
-	it('is the armor without a line ending after it, which the fence supplies', async () => {
-		const sealed = await sealSecret('x', recipient);
+	it('is the armor without a line ending after it, which the fence supplies', () => {
+		const sealed = sealSecret('x', recipient);
 		expect(sealed.startsWith('-----BEGIN AGE ENCRYPTED FILE-----\n')).toBe(true);
 		expect(sealed.endsWith('\n-----END AGE ENCRYPTED FILE-----')).toBe(true);
 	});
 
-	it('is a different block each time it is sealed', async () => {
-		expect(await sealSecret('x', recipient)).not.toBe(await sealSecret('x', recipient));
+	it('is a different block each time it is sealed', () => {
+		expect(sealSecret('x', recipient)).not.toBe(sealSecret('x', recipient));
 	});
 
-	it('says when no key it is given opens the block', async () => {
-		expect(await failureOf(openSecret(SEALED_HERE, [generateIdentity()]))).toBe('no match');
+	it('says when no key it is given opens the block', () => {
+		expect(failureOf(() => openSecret(SEALED_HERE, [generateIdentity()]))).toBe('no match');
 	});
 
-	it('says when a block opens to bytes that are not text', async () => {
-		const binary = armor(await encrypt(Uint8Array.of(0xff, 0xfe, 0xfd), [recipient]));
-		expect(await failureOf(openSecret(binary, [identity]))).toBe('text');
+	it('says when a block opens to bytes that are not text', () => {
+		const binary = armor(encrypt(Uint8Array.of(0xff, 0xfe, 0xfd), [recipient]));
+		expect(failureOf(() => openSecret(binary, [identity]))).toBe('text');
 	});
 });
 
@@ -141,11 +144,11 @@ describe('the secrets in a note', () => {
 		expect(secretBlocksIn('just words\n')).toEqual([]);
 	});
 
-	it('say whether a key is the one they were made with, reading only the header', async () => {
-		expect(await opensSecret(SEALED_HERE, [identity])).toBe(true);
-		expect(await opensSecret(SEALED_HERE, [generateIdentity(), identity])).toBe(true);
-		expect(await opensSecret(SEALED_HERE, [generateIdentity()])).toBe(false);
-		expect(await opensSecret('not armor', [identity])).toBe(false);
+	it('say whether a key is the one they were made with, reading only the header', () => {
+		expect(opensSecret(SEALED_HERE, [identity])).toBe(true);
+		expect(opensSecret(SEALED_HERE, [generateIdentity(), identity])).toBe(true);
+		expect(opensSecret(SEALED_HERE, [generateIdentity()])).toBe(false);
+		expect(opensSecret('not armor', [identity])).toBe(false);
 	});
 });
 

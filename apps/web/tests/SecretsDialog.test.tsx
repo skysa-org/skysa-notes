@@ -101,7 +101,7 @@ const typeKey = async (h: Harness, text: string) => {
 const secretIn = async (db: NotesDatabase, identity: Uint8Array) => {
 	const recipient = parseRecipient(recipientOf(identity));
 	if (recipient === undefined) throw new Error('not a recipient');
-	const sealed = await sealSecret('the door code', recipient);
+	const sealed = sealSecret('the door code', recipient);
 	await createNote(db, {
 		connectionId: 'c1',
 		title: 'Codes',

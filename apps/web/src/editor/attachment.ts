@@ -163,8 +163,12 @@ export interface SelectedKeys {
  */
 export const selectedKeys = new WeakMap<Node, SelectedKeys>();
 
-/** The nodes drawn with a bar under them while selected whole: a chip, and a picture (`image.ts`). */
-const WITH_BAR: ReadonlySet<string> = new Set([ATTACHMENT, 'image']);
+/**
+ * The nodes that take Enter and Tab selected whole: a chip and a picture
+ * (`image.ts`), drawn with a bar under them, and a secret (`secretBlock.ts`),
+ * which Enter reveals.
+ */
+const WITH_BAR: ReadonlySet<string> = new Set([ATTACHMENT, 'image', 'secret']);
 
 export const attachmentView =
 	(

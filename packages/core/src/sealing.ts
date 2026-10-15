@@ -14,8 +14,8 @@ import { SECRET_LANGUAGE, secretFile } from './secrets.js';
  * `words` encrypted to `recipient`, as the text of the block that holds them:
  * the armor, without the line ending after it, which the fence supplies.
  */
-export const sealSecret = async (words: string, recipient: Uint8Array): Promise<string> =>
-	armor(await encrypt(new TextEncoder().encode(words), [recipient])).replace(/\n$/, '');
+export const sealSecret = (words: string, recipient: Uint8Array): string =>
+	armor(encrypt(new TextEncoder().encode(words), [recipient])).replace(/\n$/, '');
 
 /**
  * A secret's words, opened by whichever of `identities` it was made for. The
@@ -24,11 +24,8 @@ export const sealSecret = async (words: string, recipient: Uint8Array): Promise<
  * another age tool could have made, is `text`. A byte order mark is kept as a
  * character, as `age -d` keeps it, so sealing the words again changes nothing.
  */
-export const openSecret = async (
-	text: string,
-	identities: readonly Uint8Array[]
-): Promise<string> => {
-	const bytes = await decrypt(dearmor(text), identities);
+export const openSecret = (text: string, identities: readonly Uint8Array[]): string => {
+	const bytes = decrypt(dearmor(text), identities);
 	try {
 		return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
 	} catch {
@@ -40,10 +37,7 @@ export const openSecret = async (
  * Whether a block's ciphertext opens with one of `identities`, which is what
  * asking "was this made with this key?" comes to. Only the header is read.
  */
-export const opensSecret = async (
-	text: string,
-	identities: readonly Uint8Array[]
-): Promise<boolean> => {
+export const opensSecret = (text: string, identities: readonly Uint8Array[]): boolean => {
 	const file = secretFile(SECRET_LANGUAGE, text);
 	return file !== undefined && opens(file, identities);
 };

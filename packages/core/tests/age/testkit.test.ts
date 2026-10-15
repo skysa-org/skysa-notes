@@ -78,7 +78,7 @@ const runnable = vectors.filter(
 const fileOf = (vector: Vector): Uint8Array =>
 	vector.armored ? dearmor(vector.file.toString('latin1')) : vector.file;
 
-const open = async (vector: Vector): Promise<Uint8Array> =>
+const open = (vector: Vector): Uint8Array =>
 	decrypt(
 		fileOf(vector),
 		vector.identities.map((identity) => parseIdentity(identity) ?? new Uint8Array())
@@ -94,15 +94,19 @@ it('runs all but the vectors for recipient kinds it does not open', () => {
 
 describe.each(runnable)('$name', (vector) => {
 	if (vector.expected === 'success') {
-		it('opens to the expected payload', async () => {
-			expect(sha256(await open(vector))).toBe(vector.payload);
+		it('opens to the expected payload', () => {
+			expect(sha256(open(vector))).toBe(vector.payload);
 		});
 	} else {
-		it(`fails as ${vector.expected}`, async () => {
-			const failure = await open(vector).then(
-				() => 'success',
-				(error: unknown) => (error instanceof AgeError ? error.failure : String(error))
-			);
+		it(`fails as ${vector.expected}`, () => {
+			const failure = (() => {
+				try {
+					open(vector);
+					return 'success';
+				} catch (error) {
+					return error instanceof AgeError ? error.failure : String(error);
+				}
+			})();
 			expect(failure).toBe(vector.expected);
 		});
 	}

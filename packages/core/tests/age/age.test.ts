@@ -16,11 +16,14 @@ import {
 } from '../../src/age/keys.js';
 import { IDENTITY, RECIPIENT } from './known.js';
 
-const failureOf = async (attempt: Promise<unknown>): Promise<string> =>
-	attempt.then(
-		() => 'success',
-		(error: unknown) => (error instanceof AgeError ? error.failure : String(error))
-	);
+const failureOf = (attempt: () => unknown): string => {
+	try {
+		attempt();
+		return 'success';
+	} catch (error) {
+		return error instanceof AgeError ? error.failure : String(error);
+	}
+};
 
 const bytes = (length: number): Uint8Array =>
 	Uint8Array.from({ length }, (_, at) => (at * 7 + 3) & 0xff);
@@ -125,50 +128,48 @@ describe('encrypting and decrypting', () => {
 	const identity = generateIdentity();
 	const recipient = publicKeyOf(identity);
 
-	it.each([0, 1, 65535, 65536, 65537, 131072, 200000])('round trips %i bytes', async (length) => {
+	it.each([0, 1, 65535, 65536, 65537, 131072, 200000])('round trips %i bytes', (length) => {
 		const plaintext = bytes(length);
-		expect(await decrypt(await encrypt(plaintext, [recipient]), [identity])).toEqual(plaintext);
+		expect(decrypt(encrypt(plaintext, [recipient]), [identity])).toEqual(plaintext);
 	});
 
-	it('ends on a full chunk, not an empty one, when the plaintext fills it', async () => {
-		const { payload } = parseHeader(await encrypt(bytes(65536), [recipient]));
+	it('ends on a full chunk, not an empty one, when the plaintext fills it', () => {
+		const { payload } = parseHeader(encrypt(bytes(65536), [recipient]));
 		expect(payload.length).toBe(16 + 65536 + 16);
-		const empty = parseHeader(await encrypt(bytes(0), [recipient]));
+		const empty = parseHeader(encrypt(bytes(0), [recipient]));
 		expect(empty.payload.length).toBe(16 + 16);
 	});
 
-	it('writes one X25519 stanza per recipient, each of which opens it', async () => {
+	it('writes one X25519 stanza per recipient, each of which opens it', () => {
 		const other = generateIdentity();
-		const file = await encrypt(bytes(10), [recipient, publicKeyOf(other)]);
+		const file = encrypt(bytes(10), [recipient, publicKeyOf(other)]);
 		const { header } = parseHeader(file);
 		expect(header.stanzas.map(({ type }) => type)).toEqual(['X25519', 'X25519']);
-		expect(await decrypt(file, [other])).toEqual(bytes(10));
-		expect(await decrypt(file, [identity])).toEqual(bytes(10));
+		expect(decrypt(file, [other])).toEqual(bytes(10));
+		expect(decrypt(file, [identity])).toEqual(bytes(10));
 	});
 
-	it('refuses to write a file no one could open', async () => {
-		await expect(encrypt(bytes(10), [])).rejects.toThrow('no recipient');
+	it('refuses to write a file no one could open', () => {
+		expect(() => encrypt(bytes(10), [])).toThrow('no recipient');
 	});
 
-	it('tries each identity it is given', async () => {
-		const file = await encrypt(bytes(10), [recipient]);
-		expect(await decrypt(file, [generateIdentity(), identity])).toEqual(bytes(10));
+	it('tries each identity it is given', () => {
+		const file = encrypt(bytes(10), [recipient]);
+		expect(decrypt(file, [generateIdentity(), identity])).toEqual(bytes(10));
 	});
 
-	it('is a different file each time, for the same words to the same key', async () => {
-		expect(await encrypt(bytes(10), [recipient])).not.toEqual(
-			await encrypt(bytes(10), [recipient])
-		);
+	it('is a different file each time, for the same words to the same key', () => {
+		expect(encrypt(bytes(10), [recipient])).not.toEqual(encrypt(bytes(10), [recipient]));
 	});
 
-	it('says which part failed', async () => {
-		const file = await encrypt(bytes(100), [recipient]);
-		expect(await failureOf(decrypt(file, [generateIdentity()]))).toBe('no match');
-		expect(await failureOf(decrypt(file, []))).toBe('no match');
+	it('says which part failed', () => {
+		const file = encrypt(bytes(100), [recipient]);
+		expect(failureOf(() => decrypt(file, [generateIdentity()]))).toBe('no match');
+		expect(failureOf(() => decrypt(file, []))).toBe('no match');
 
 		const flipped = Uint8Array.from(file);
 		new DataView(flipped.buffer).setUint8(file.length - 1, (file.at(-1) ?? 0) ^ 1);
-		expect(await failureOf(decrypt(flipped, [identity]))).toBe('payload');
+		expect(failureOf(() => decrypt(flipped, [identity]))).toBe('payload');
 
 		const { header, payload } = parseHeader(file);
 		const mac = Uint8Array.from(header.mac);
@@ -177,45 +178,45 @@ describe('encrypting and decrypting', () => {
 			...new TextEncoder().encode(encodeHeader(header.stanzas, mac)),
 			...payload,
 		]);
-		expect(await failureOf(decrypt(forged, [identity]))).toBe('hmac');
+		expect(failureOf(() => decrypt(forged, [identity]))).toBe('hmac');
 
-		expect(await failureOf(decrypt(new TextEncoder().encode('not age\n'), [identity]))).toBe(
+		expect(failureOf(() => decrypt(new TextEncoder().encode('not age\n'), [identity]))).toBe(
 			'header'
 		);
 	});
 });
 
 describe('whether a key opens a file', () => {
-	it('is the header alone: a stanza for the key, and a MAC that matches', async () => {
+	it('is the header alone: a stanza for the key, and a MAC that matches', () => {
 		const identity = generateIdentity();
-		const file = await encrypt(bytes(100), [publicKeyOf(identity)]);
-		expect(await opens(file, [identity])).toBe(true);
-		expect(await opens(file, [generateIdentity()])).toBe(false);
-		expect(await opens(new TextEncoder().encode('not age\n'), [identity])).toBe(false);
+		const file = encrypt(bytes(100), [publicKeyOf(identity)]);
+		expect(opens(file, [identity])).toBe(true);
+		expect(opens(file, [generateIdentity()])).toBe(false);
+		expect(opens(new TextEncoder().encode('not age\n'), [identity])).toBe(false);
 
 		// The payload is not read, so a file damaged past its header still opens
 		// as far as this asks; `decrypt` is what refuses it.
 		const damaged = Uint8Array.from(file);
 		new DataView(damaged.buffer).setUint8(file.length - 1, (file.at(-1) ?? 0) ^ 1);
-		expect(await opens(damaged, [identity])).toBe(true);
-		expect(await failureOf(decrypt(damaged, [identity]))).toBe('payload');
+		expect(opens(damaged, [identity])).toBe(true);
+		expect(failureOf(() => decrypt(damaged, [identity]))).toBe('payload');
 	});
 
-	it('is not, for a file that ends before its nonce, which `decrypt` refuses as a header', async () => {
+	it('is not, for a file that ends before its nonce, which `decrypt` refuses as a header', () => {
 		const identity = generateIdentity();
-		const file = await encrypt(bytes(100), [publicKeyOf(identity)]);
+		const file = encrypt(bytes(100), [publicKeyOf(identity)]);
 		const headerEnds = file.length - 16 - (100 + 16);
 		for (const kept of [headerEnds, headerEnds + 5]) {
 			const short = file.subarray(0, kept);
-			expect(await opens(short, [identity])).toBe(false);
-			expect(await failureOf(decrypt(short, [identity]))).toBe('header');
+			expect(opens(short, [identity])).toBe(false);
+			expect(failureOf(() => decrypt(short, [identity]))).toBe('header');
 		}
 	});
 });
 
 describe('armor', () => {
-	it('is lines of 64 between the two age lines, ending with a line ending', async () => {
-		const text = armor(await encrypt(bytes(300), [parseRecipient(RECIPIENT) ?? bytes(32)]));
+	it('is lines of 64 between the two age lines, ending with a line ending', () => {
+		const text = armor(encrypt(bytes(300), [parseRecipient(RECIPIENT) ?? bytes(32)]));
 		const lines = text.split('\n');
 		expect(lines[0]).toBe('-----BEGIN AGE ENCRYPTED FILE-----');
 		expect(lines.at(-2)).toBe('-----END AGE ENCRYPTED FILE-----');

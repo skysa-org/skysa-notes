@@ -80,6 +80,7 @@ const PATHS = {
 	// page going into a notebook.
 	scratchpad: 'M5 4h14v10l-6 6H5zM13 20v-6h6',
 	pin: 'M9 4h6M10 4v5.5L7 14h10l-3-4.5V4M12 14v6',
+	lock: 'M8 11V7.5a4 4 0 0 1 8 0V11M5.5 11h13v9.5h-13zM12 15v2',
 	palette:
 		'M12 21a9 9 0 1 1 9-9c0 1.7-1.3 3-3 3h-2.2a1.8 1.8 0 0 0-1.2 3.2c.6.5.4 1.6-.4 1.9-.7.2-1.5-.1-2.2-.1zM7.5 12h.01M9 7.5h.01M14 6.5h.01M17.5 10h.01',
 	'make-note': 'M3 7h6l2 2h10v10H3zM9 14h7M13 11l3 3-3 3',
