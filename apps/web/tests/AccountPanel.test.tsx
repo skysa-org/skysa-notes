@@ -16,6 +16,7 @@ import { type Notice, NotifyContext } from '../src/components/notify.js';
 import { SourcePanel, SourceTabs } from '../src/components/SourceTabs.js';
 import { Toast } from '../src/components/Toast.js';
 import { type pickFiles } from '../src/editor/pickFiles.js';
+import { t } from '../src/i18n/t.js';
 import {
 	bindConnection,
 	detachConnection,
@@ -2303,7 +2304,7 @@ describe('AccountPanel, secrets for a source', () => {
 		return db;
 	};
 
-	it('opens them from the gear, reading the key file again, and gives the focus back on close', async () => {
+	it('opens the vault from the gear, reading the key file again, and gives the focus back on close', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle' });
 		await connected(sync);
@@ -2331,7 +2332,9 @@ describe('AccountPanel, secrets for a source', () => {
 		const user = userEvent.setup();
 		await connected(fakeSync({ phase: 'local' }));
 		await openGear(user);
-		expect(gearLabels()).not.toContain('Set up vault…');
+		// From the catalog, so a later rename cannot make this pass for nothing.
+		expect(gearLabels()).not.toContain(t('secrets.menu.setUp'));
+		expect(gearLabels()).not.toContain(t('secrets.menu.open'));
 	});
 });
 
@@ -5249,7 +5252,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(sync.pause).toHaveBeenCalledTimes(1);
 	});
 
-	it('opens another source’s secrets from its row, once it is showing', async () => {
+	it('opens another source’s vault from its row, once it is showing', async () => {
 		const user = userEvent.setup();
 		const sync = fakeSync({ phase: 'idle' });
 		const db = await connected(sync);

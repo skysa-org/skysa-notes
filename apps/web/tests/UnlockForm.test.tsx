@@ -358,7 +358,7 @@ describe('unlocking', () => {
 		await h.tryPin('2468');
 		expect(
 			await screen.findByText(
-				'This device has no key for this source’s vault. Type the recovery key to set it up.'
+				'This device has no key for this source’s vault. Type the recovery key to set this device up.'
 			)
 		).toBeTruthy();
 		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
@@ -601,7 +601,7 @@ describe('unlocking with the device’s own lock', () => {
 
 		expect(
 			await screen.findByText(
-				'This device has no key for this source’s vault. Type the recovery key to set it up.'
+				'This device has no key for this source’s vault. Type the recovery key to set this device up.'
 			)
 		).toBeTruthy();
 		expect(h.deviceLock.answer).not.toHaveBeenCalled();
@@ -715,7 +715,7 @@ describe('in a dialog', () => {
 
 	it('has choosing a pattern’s Next after Cancel, and its first dot the focus', async () => {
 		render(
-			<Dialog title="Secrets" onClose={() => undefined}>
+			<Dialog title="Vault" onClose={() => undefined}>
 				<ChooseUnlock onChosen={() => undefined} />
 			</Dialog>
 		);

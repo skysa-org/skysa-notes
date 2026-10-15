@@ -81,7 +81,7 @@ const setup = async ({
 	});
 	const told: AttachmentProblem[] = [];
 	const copy = vi.fn((_text: string) => Promise.resolve());
-	// The source's key file, for its Secrets dialog: read as the test wrote it.
+	// The source's key file, for its Vault dialog: read as the test wrote it.
 	const keyFileSync = {
 		refresh: vi.fn(() => Promise.resolve()),
 		write: vi.fn(() => Promise.resolve({ status: 'unavailable' as const })),
@@ -179,12 +179,12 @@ describe('whether a secret can be made here', () => {
 
 		expect(await h.secrets().host.begin()).toBeUndefined();
 		expect(h.told.at(-1)?.message).toMatch(said);
-		// The way on, where the Secrets dialog is it, rather than where to find it.
+		// The way on, where the Vault dialog is it, rather than where to find it.
 		expect(h.told.at(-1)?.message).not.toMatch(/menu/u);
 		expect(h.told.at(-1)?.action?.label).toBe(way);
 	});
 
-	it('opens the source’s Secrets dialog over the note when its way on is chosen', async () => {
+	it('opens the source’s Vault dialog over the note when its way on is chosen', async () => {
 		const h = await setup({ enrolled: false });
 		await h.secrets().host.begin();
 

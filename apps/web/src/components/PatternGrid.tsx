@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { t } from '../i18n/t.js';
 
 /**
- * A pattern on a 3×3 grid of dots, for unlocking secrets on this device
+ * A pattern on a 3×3 grid of dots, for unlocking the vault on this device
  * (docs/ARCHITECTURE.md §7, "Secrets in a note"). Drawn by dragging across the
  * dots, as a phone's lock screen is; or a dot at a time, with a press, Enter or
  * Space on each, or by typing its number, 1 to 9, left to right and top to

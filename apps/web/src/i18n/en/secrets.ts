@@ -14,12 +14,12 @@ export const secrets = {
 	/** Why nothing can be set up now: the source's storage cannot be asked. */
 	unavailable: 'This source cannot be reached right now. Try again once it syncs.',
 	intro: {
-		what: 'The vault keeps secrets in your notes. They are encrypted on this device before they are saved anywhere, so your storage provider, and anyone who can open the folder, sees only scrambled text.',
-		key: 'The vault opens with a recovery key. If it is lost, and every device that unlocks the vault is reset or lost, no one can recover what is in it.',
+		what: 'The vault keeps secrets in your notes: text that is encrypted on this device before it is saved anywhere, so your storage provider, and anyone who can open the folder, sees only scrambled text.',
+		key: 'The vault opens with a recovery key. If the key is lost, and every device that unlocks the vault is reset or lost, no one can recover what is in it.',
 		make: 'Make a recovery key',
 		paste: 'Use a key I have',
 	},
-	newer: 'The vault in this source was set up by a newer version of the app. Update the app on this device to use it here.',
+	newer: 'This source’s vault was set up by a newer version of the app. Update the app on this device to use it here.',
 	invalid:
 		'This source has a file named .encryption.json that this app did not write, so a vault cannot be set up in it.',
 	/** Something failed that nothing more can be said of: the age code not loading, or the device's storage. */
@@ -106,7 +106,7 @@ export const secrets = {
 	written: {
 		saving: 'Setting up…',
 		changed:
-			'Another device set up the vault for this source a moment ago. Type the recovery key it showed to use it here.',
+			'Another device set up this source’s vault a moment ago. Type the recovery key it showed to open the vault here.',
 		failed: 'The vault could not be set up in your storage. Try again.',
 	},
 	/** Choosing how this device unlocks. */
@@ -122,7 +122,7 @@ export const secrets = {
 			'Your device asks for your fingerprint, face or screen lock to make a key for this, and to check it.',
 		deviceRefused: 'Your device’s lock did not answer. Try again, or choose another way.',
 		deviceUnsupported:
-			'This device’s lock cannot unlock the vault in this browser. Choose another way.',
+			'This device’s lock cannot be used for the vault in this browser. Choose another way.',
 		drawPattern: 'Draw a pattern through at least 4 dots.',
 		typePin: 'Type a PIN of at least 4 digits.',
 		typePassword: 'Type a password of at least 8 characters.',
@@ -165,7 +165,7 @@ export const secrets = {
 		},
 		forgotten:
 			'Too many wrong tries, so this device’s copy of the key was removed. Type the recovery key to set this device up again.',
-		none: 'This device has no key for this source’s vault. Type the recovery key to set it up.',
+		none: 'This device has no key for this source’s vault. Type the recovery key to set this device up.',
 		changed:
 			'This device’s lock no longer opens its key for this vault. Type the recovery key to set this device up again.',
 		useRecovery: 'Use the recovery key',

@@ -316,11 +316,8 @@ describe('setting a source up', () => {
 		await choosePin(h);
 
 		expect(
-			(
-				await screen.findByText(
-					/Another device set up the vault for this source a moment ago/u
-				)
-			).textContent
+			(await screen.findByText(/Another device set up this source’s vault a moment ago/u))
+				.textContent
 		).toBeTruthy();
 		expect(await h.db.secretKeys.get('c1')).toBeUndefined();
 		expect(h.lock.isUnlocked('c1')).toBe(false);
@@ -1456,7 +1453,7 @@ describe('the device’s own lock', () => {
 
 		expect(
 			await screen.findByText(
-				'This device’s lock cannot unlock the vault in this browser. Choose another way.'
+				'This device’s lock cannot be used for the vault in this browser. Choose another way.'
 			)
 		).toBeTruthy();
 		expect(screen.queryByRole('radio', { name: DEVICE })).toBeNull();
