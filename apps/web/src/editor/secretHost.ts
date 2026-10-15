@@ -43,6 +43,12 @@ export interface SecretHost {
 	/** Words on the system clipboard, and nowhere else, answering whether they went. */
 	readonly copy: (words: string) => Promise<boolean>;
 	/**
+	 * The key a secret none of this device's keys opens was made with, asked
+	 * for and kept on this device beside the source's own ("Add its key"),
+	 * answering whether it was.
+	 */
+	readonly addKey: (armor: string) => Promise<boolean>;
+	/**
 	 * Called when this tab locks the note's source: every revealed secret is
 	 * closed. Returns the way to stop.
 	 */
@@ -59,6 +65,7 @@ export const NO_SECRETS: SecretHost = {
 	begin: () => Promise.resolve(undefined),
 	open: () => Promise.resolve({ state: 'locked' }),
 	copy: () => Promise.resolve(false),
+	addKey: () => Promise.resolve(false),
 	locked: () => () => undefined,
 	receive: () => () => undefined,
 };

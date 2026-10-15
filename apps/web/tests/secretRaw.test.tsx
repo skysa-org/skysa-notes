@@ -402,6 +402,45 @@ describe('a secret in raw mode', () => {
 		expect(h.field()).toBeNull();
 	});
 
+	it('offers to add the key a secret was made with, and reveals it once that key is added', async () => {
+		const fake = fakeHost();
+		const armor = sealed('from the old notes');
+		vi.mocked(fake.host.open).mockResolvedValueOnce({ state: 'other' });
+		vi.mocked(fake.host.addKey).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		const h = mount(`${fence(armor)}\n`, fake.host);
+		h.press('Reveal');
+		await vi.waitFor(() => {
+			expect(h.button('Add its key')).toBeDefined();
+		});
+
+		h.press('Add its key');
+		await vi.waitFor(() => {
+			expect(h.button('Add its key')?.disabled).toBe(false);
+		});
+		expect(fake.host.addKey).toHaveBeenCalledWith(armor);
+		expect(h.field()).toBeNull();
+
+		h.press('Add its key');
+		await vi.waitFor(() => {
+			expect(h.field()?.value).toBe('from the old notes');
+		});
+		expect(h.button('Add its key')).toBeUndefined();
+		expect(h.text()).toBe(`${fence(armor)}\n`);
+	});
+
+	it('offers no key to add for a secret this app cannot read', async () => {
+		const fake = fakeHost();
+		vi.mocked(fake.host.open).mockResolvedValueOnce({ state: 'unreadable' });
+		const h = mount(`${fence(sealed('x'))}\n`, fake.host);
+		h.press('Reveal');
+		await vi.waitFor(() => {
+			expect(h.container.querySelector('.secret-note')?.textContent).toBe(
+				'This secret cannot be read by this version of the app.'
+			);
+		});
+		expect(h.button('Add its key')).toBeUndefined();
+	});
+
 	it('says nothing more of why once Reveal is pressed again', async () => {
 		const fake = fakeHost();
 		vi.mocked(fake.host.open)

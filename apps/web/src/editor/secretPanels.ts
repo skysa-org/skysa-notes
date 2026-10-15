@@ -231,7 +231,7 @@ export const reveal = async (
 	host: SecretHost,
 	panels: SecretPanels,
 	armor: string
-): Promise<'other' | 'unreadable' | undefined> => {
+): Promise<NotRevealed | undefined> => {
 	const shown = panels.get(armor);
 	if (shown !== undefined) {
 		shown.panel.focus();
@@ -250,10 +250,39 @@ export const reveal = async (
 	return undefined;
 };
 
+/** Why a secret could not be revealed: made with another key, or not one this app reads. */
+export type NotRevealed = 'other' | 'unreadable';
+
 /** Why a secret could not be revealed, said where it is. */
-export const NOT_REVEALED: Readonly<Record<'other' | 'unreadable', () => string>> = {
+export const NOT_REVEALED: Readonly<Record<NotRevealed, () => string>> = {
 	other: () => t('editor.secret.differentKey'),
 	unreadable: () => t('editor.secret.unreadable'),
+};
+
+/**
+ * "Add its key", for a secret made with a key the device does not have:
+ * pressed, the host asks for that key, and `added` runs once it is kept.
+ */
+export const addKeyButton = (
+	host: SecretHost,
+	armor: string,
+	added: () => void
+): HTMLButtonElement => {
+	const button = document.createElement('button');
+	button.setAttribute('type', 'button');
+	button.setAttribute('class', 'secret-add-key');
+	button.append(t('editor.secret.addKey'));
+	button.addEventListener('click', () => {
+		button.setAttribute('disabled', '');
+		void host
+			.addKey(armor)
+			.catch(() => false)
+			.then((kept) => {
+				button.removeAttribute('disabled');
+				if (kept) added();
+			});
+	});
+	return button;
 };
 
 /**

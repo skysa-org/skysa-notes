@@ -15,6 +15,7 @@ import {
 	type UnlockKind,
 } from '../store/db.js';
 import { enrolment, type UnlockedKeys } from '../store/secretKeys.js';
+import { AddKeyDialog } from './AddKeyDialog.js';
 import { UnlockDialog } from './UnlockDialog.js';
 
 /**
@@ -27,9 +28,11 @@ import { UnlockDialog } from './UnlockDialog.js';
  * (`UnlockDialog`), once however many secrets ask at the same time. The
  * identities are copied for each opening and the copies wiped after it, so
  * the lock wiping its own meanwhile cannot make a secret look made with
- * another key; and a secret opened as the lock closed is not shown. Setting
- * a source up, and enrolling a device, are the source's Secrets dialog's:
- * where either is wanted, the host says where it is.
+ * another key; and a secret opened as the lock closed is not shown. A
+ * secret none of the device's keys opens can have its key added here, over
+ * the note (`AddKeyDialog`). Setting a source up, and enrolling a device, are
+ * the source's Secrets dialog's: where either is wanted, the host says where
+ * it is.
  */
 
 export interface NoteSecretsOptions {
@@ -55,6 +58,13 @@ interface Asking {
 	readonly connectionId: string;
 	readonly kind: UnlockKind;
 	readonly answer: (unlocked: boolean) => void;
+}
+
+/** A secret's key asked for, and whoever is waiting on it. */
+interface Adding {
+	readonly connectionId: string;
+	readonly armor: string;
+	readonly answer: (added: boolean) => void;
 }
 
 const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
@@ -124,24 +134,20 @@ export const useNoteSecrets = (
 	});
 
 	const [asking, setAsking] = useState<Asking | null>(null);
+	const [adding, setAdding] = useState<Adding | null>(null);
 	/** The unlock being asked for, which a second secret waits on too. */
 	const waiting = useRef<Promise<boolean> | undefined>(undefined);
 	/** The editor open now, offering itself for "Insert secret". */
 	const receiver = useRef<(() => void) | undefined>(undefined);
 
-	/**
-	 * Copies of this device's keys for the source, unlocked first where they
-	 * are locked; or none. Copied as they are read, with nothing awaited
-	 * between: the lock wipes its own in place, the moment the page hides.
-	 */
-	const unlocked = useCallback(async (): Promise<Held | undefined> => {
+	/** Whether the source is unlocked, the unlock asked for over the note where it is not. */
+	const unlockedNow = useCallback(async (): Promise<boolean> => {
 		const { connectionId, lock: held, db: database, report: say } = latest.current;
-		const keys = held.keys(connectionId);
-		if (keys !== undefined) return copied(keys);
+		if (held.isUnlocked(connectionId)) return true;
 		const enrolled = await enrolment(database, connectionId);
 		if (enrolled === undefined) {
 			say(warning(t('editor.secret.notEnrolled')));
-			return undefined;
+			return false;
 		}
 		waiting.current ??= new Promise<boolean>((resolve) => {
 			setAsking({
@@ -154,8 +160,20 @@ export const useNoteSecrets = (
 				},
 			});
 		});
-		return (await waiting.current) ? copied(held.keys(connectionId)) : undefined;
+		return waiting.current;
 	}, []);
+
+	/**
+	 * Copies of this device's keys for the source, unlocked first where they
+	 * are locked; or none. Copied as they are read, with nothing awaited
+	 * between: the lock wipes its own in place, the moment the page hides.
+	 */
+	const unlocked = useCallback(async (): Promise<Held | undefined> => {
+		const { connectionId, lock: held } = latest.current;
+		const keys = held.keys(connectionId);
+		if (keys !== undefined) return copied(keys);
+		return (await unlockedNow()) ? copied(held.keys(connectionId)) : undefined;
+	}, [unlockedNow]);
 
 	/** `held`'s words for `armor`, and how to seal what they become; wiped after. */
 	const opening = useCallback(async (armor: string, held: Held): Promise<Opened> => {
@@ -213,6 +231,25 @@ export const useNoteSecrets = (
 					() => true,
 					() => false
 				),
+			addKey: async (armor) => {
+				// Unlocked first: the key is sealed with the ones the device holds.
+				const ready = await unlockedNow().catch(() => {
+					latest.current.report(warning(t('secrets.failed')));
+					return false;
+				});
+				if (!ready) return false;
+				const { connectionId } = latest.current;
+				return new Promise<boolean>((resolve) => {
+					setAdding({
+						connectionId,
+						armor,
+						answer: (added) => {
+							setAdding(null);
+							resolve(added);
+						},
+					});
+				});
+			},
 			locked: (listener) => {
 				const { connectionId, lock: held } = latest.current;
 				const was = { current: held.isUnlocked(connectionId) };
@@ -229,15 +266,34 @@ export const useNoteSecrets = (
 				};
 			},
 		}),
-		[opening, unlocked]
+		[opening, unlocked, unlockedNow]
 	);
 
 	const insert = useCallback(() => {
 		receiver.current?.();
 	}, []);
 
+	const keyDialog =
+		adding === null ? null : (
+			<AddKeyDialog
+				database={db}
+				connectionId={adding.connectionId}
+				armor={adding.armor}
+				lock={lock}
+				age={age}
+				onAdded={() => {
+					adding.answer(true);
+				}}
+				onCancel={() => {
+					adding.answer(false);
+				}}
+			/>
+		);
+
 	const dialog =
-		asking === null ? null : (
+		asking === null ? (
+			keyDialog
+		) : (
 			<UnlockDialog
 				database={db}
 				connectionId={asking.connectionId}

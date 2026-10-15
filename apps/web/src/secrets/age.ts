@@ -17,7 +17,7 @@ import { type NotesDatabase } from '../store/db.js';
  * secret blocks and the key file without them.
  */
 
-export { generateIdentity, openSecret, parseRecipient, recipientOf, sealSecret };
+export { generateIdentity, openSecret, opensSecret, parseRecipient, recipientOf, sealSecret };
 
 /** The line every armored age file starts with, which a note holding a secret has in it. */
 const ARMOR_LINE = '-----BEGIN AGE ENCRYPTED FILE-----';

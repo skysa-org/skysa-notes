@@ -314,6 +314,63 @@ describe('a secret in the rich editor', () => {
 		expect(h.field()).toBeNull();
 	});
 
+	it('offers to add the key a secret was made with, and reveals it once that key is added', async () => {
+		const fake = fakeHost();
+		const armor = sealed('from the old notes');
+		vi.mocked(fake.host.open).mockResolvedValueOnce({ state: 'other' });
+		vi.mocked(fake.host.addKey).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		const h = await mount(`${fence(armor)}\n`, fake.host);
+		h.press('Reveal');
+		await vi.waitFor(() => {
+			expect(h.button('Add its key')).toBeDefined();
+		});
+
+		h.press('Add its key');
+		await vi.waitFor(() => {
+			expect(h.button('Add its key')?.disabled).toBe(false);
+		});
+		expect(fake.host.addKey).toHaveBeenCalledWith(armor);
+		expect(h.field()).toBeNull();
+
+		h.press('Add its key');
+		await vi.waitFor(() => {
+			expect(h.field()?.value).toBe('from the old notes');
+		});
+		expect(h.button('Add its key')).toBeUndefined();
+		expect(h.root.querySelector('.secret-note')?.textContent).toBe('');
+	});
+
+	it('can be asked again where adding the key failed', async () => {
+		const fake = fakeHost();
+		vi.mocked(fake.host.open).mockResolvedValueOnce({ state: 'other' });
+		vi.mocked(fake.host.addKey).mockRejectedValueOnce(new Error('gone'));
+		const h = await mount(`${fence(sealed('x'))}\n`, fake.host);
+		h.press('Reveal');
+		await vi.waitFor(() => {
+			expect(h.button('Add its key')).toBeDefined();
+		});
+
+		h.press('Add its key');
+
+		await vi.waitFor(() => {
+			expect(h.button('Add its key')?.disabled).toBe(false);
+		});
+		expect(h.field()).toBeNull();
+	});
+
+	it('offers no key to add for a secret this app cannot read', async () => {
+		const fake = fakeHost();
+		vi.mocked(fake.host.open).mockResolvedValueOnce({ state: 'unreadable' });
+		const h = await mount(`${fence(sealed('x'))}\n`, fake.host);
+		h.press('Reveal');
+		await vi.waitFor(() => {
+			expect(h.root.querySelector('.secret-note')?.textContent).toBe(
+				'This secret cannot be read by this version of the app.'
+			);
+		});
+		expect(h.button('Add its key')).toBeUndefined();
+	});
+
 	it('puts revealed words on the clipboard, and says so', async () => {
 		const fake = fakeHost();
 		const h = await mount(`${fence(sealed('the door code'))}\n`, fake.host);

@@ -157,6 +157,12 @@ export const secrets = {
 			'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.',
 		useRecovery: 'Use the recovery key',
 	},
+	/** A note's secret made with a key the device does not have, and that key typed. */
+	addKey: {
+		title: 'Add this secret’s key',
+		text: 'Paste or type the key this secret was made with. This device keeps it beside this source’s own key, to open secrets made with it.',
+		notIt: 'That key does not open this secret.',
+	},
 	/** This device, in a source set up for secrets. */
 	device: {
 		unlocksWith: {

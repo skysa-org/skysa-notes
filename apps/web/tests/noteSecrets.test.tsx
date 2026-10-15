@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { encodeIdentity } from '@skysa/core';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -288,5 +289,144 @@ describe('what the editor is told', () => {
 		expect(h.copy).toHaveBeenCalledWith('the door code');
 		h.copy.mockRejectedValueOnce(new Error('denied'));
 		expect(await h.secrets().host.copy('again')).toBe(false);
+	});
+});
+
+describe('adding the key a secret was made with', () => {
+	const typeKey = async (h: Awaited<ReturnType<typeof setup>>, key: Uint8Array) => {
+		const field = await screen.findByLabelText('Recovery key');
+		await h.user.clear(field);
+		await h.user.type(field, `${encodeIdentity(key)}{Enter}`);
+	};
+
+	it('takes the key that opens it, keeps it beside the source’s own, and opens the secret', async () => {
+		const h = await setup();
+		await h.unlock();
+		const theirs = generateIdentity();
+		const armor = h.sealedFor('from the old notes', theirs);
+		expect(await h.secrets().host.open(armor)).toEqual({ state: 'other' });
+
+		const adding = h.secrets().host.addKey(armor);
+		expect(await screen.findByRole('dialog', { name: 'Add this secret’s key' })).toBeTruthy();
+		await typeKey(h, generateIdentity());
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'That key does not open this secret.'
+		);
+		await typeKey(h, theirs);
+
+		expect(await adding).toBe(true);
+		// Closed as the promise settles, outside any act: rendered a moment later.
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(await h.secrets().host.open(armor)).toMatchObject({
+			state: 'opened',
+			words: 'from the old notes',
+		});
+		// Sealed with the device's keys, under its unlock: the source's own first.
+		h.lock.lock();
+		const reopened = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		if (reopened.status !== 'unlocked') throw new Error('not unlocked');
+		expect(reopened.keys.identities).toEqual([h.identity, theirs]);
+		expect(reopened.keys.recipient).toBe(recipientOf(h.identity));
+	});
+
+	it('lets go of each key typed, the one that opens it and the one that does not', async () => {
+		const typed: Uint8Array[] = [];
+		const age = async (): Promise<Age> => {
+			const real = await loadAge();
+			return {
+				...real,
+				opensSecret: (armor, identities) => {
+					typed.push(...identities);
+					return real.opensSecret(armor, identities);
+				},
+			};
+		};
+		const h = await setup({ age });
+		await h.unlock();
+		const theirs = generateIdentity();
+		const armor = h.sealedFor('x', theirs);
+
+		const adding = h.secrets().host.addKey(armor);
+		await typeKey(h, generateIdentity());
+		await screen.findByRole('alert');
+		await typeKey(h, theirs);
+
+		expect(await adding).toBe(true);
+		expect(typed).toHaveLength(2);
+		expect(typed.every((key) => key.every((byte) => byte === 0))).toBe(true);
+		expect(theirs.some((byte) => byte !== 0)).toBe(true);
+	});
+
+	it('unlocks the device first, where it is locked', async () => {
+		const h = await setup();
+		const theirs = generateIdentity();
+		const armor = h.sealedFor('x', theirs);
+
+		const adding = h.secrets().host.addKey(armor);
+		await h.user.type(await screen.findByLabelText('PIN'), '2468{Enter}');
+		await typeKey(h, theirs);
+
+		expect(await adding).toBe(true);
+		expect(h.lock.keys('c1')?.identities).toHaveLength(2);
+	});
+
+	it('adds nothing where it is asked away, or the unlock is', async () => {
+		const h = await setup();
+		const armor = h.sealedFor('x', generateIdentity());
+
+		const unlocking = h.secrets().host.addKey(armor);
+		await screen.findByLabelText('PIN');
+		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(await unlocking).toBe(false);
+
+		await h.unlock();
+		const adding = h.secrets().host.addKey(armor);
+		await screen.findByLabelText('Recovery key');
+		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(await adding).toBe(false);
+		expect(h.lock.keys('c1')?.identities).toHaveLength(1);
+		expect(screen.queryByRole('dialog')).toBeNull();
+	});
+
+	it('adds nothing where the device locked as the key was typed', async () => {
+		const h = await setup();
+		await h.unlock();
+		const theirs = generateIdentity();
+		const armor = h.sealedFor('x', theirs);
+
+		const adding = h.secrets().host.addKey(armor);
+		await screen.findByLabelText('Recovery key');
+		h.lock.lock();
+		await typeKey(h, theirs);
+
+		expect(await adding).toBe(false);
+		const record = await unlockKeys(h.db, 'c1', PIN, Date.now());
+		expect(record.status === 'unlocked' && record.keys.identities).toHaveLength(1);
+	});
+
+	it('says so, and locks, where another window sealed the keys again meanwhile', async () => {
+		const h = await setup();
+		await h.unlock();
+		const theirs = generateIdentity();
+		const armor = h.sealedFor('x', theirs);
+		const adding = h.secrets().host.addKey(armor);
+		await screen.findByLabelText('Recovery key');
+		// Another window sealed them again.
+		await enrol(h.db, {
+			connectionId: 'c1',
+			recipient: recipientOf(h.identity),
+			identities: [h.identity],
+			unlock: PIN,
+			rounds: 1000,
+		});
+
+		await typeKey(h, theirs);
+
+		expect((await screen.findByRole('alert')).textContent).toBe(
+			'The key on this device changed in another window. Unlock it again, then try again.'
+		);
+		expect(h.lock.isUnlocked('c1')).toBe(false);
+		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(await adding).toBe(false);
 	});
 });

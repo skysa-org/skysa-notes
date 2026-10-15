@@ -1937,7 +1937,8 @@ button.danger {
 	height: 1em;
 }
 
-.secret-reveal {
+.secret-reveal,
+.secret-add-key {
 	font: inherit;
 	font-size: 0.875rem;
 }
@@ -2012,7 +2013,8 @@ button.danger {
 }
 
 /* No taller than the line it is on, so the fence's lines stay evenly spaced. */
-.editor-raw .secret-raw-bar .secret-reveal {
+.editor-raw .secret-raw-bar .secret-reveal,
+.editor-raw .secret-raw-bar .secret-add-key {
 	padding-block: 0;
 	font-size: 0.8125rem;
 	line-height: 1.25;

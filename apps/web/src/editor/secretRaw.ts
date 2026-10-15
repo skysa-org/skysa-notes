@@ -22,6 +22,7 @@ import { t } from '../i18n/t.js';
 import type { SecretHost } from './secretHost.js';
 import type { SecretPanel } from './secretPanel.js';
 import {
+	addKeyButton,
 	createSecretPanels,
 	DRAFT,
 	insertSecret,
@@ -29,6 +30,7 @@ import {
 	leftBehind,
 	lockAll,
 	NOT_REVEALED,
+	type NotRevealed,
 	reveal,
 	type SecretDocument,
 	type SecretPanels,
@@ -528,11 +530,15 @@ const panelsIn = (state: EditorState, panels: SecretPanels): DecorationSet => {
 	);
 };
 
-/** Reveal, and why it could not, at the end of a secret's opening line. */
+/**
+ * Reveal, and why it could not, at the end of a secret's opening line; and
+ * "Add its key", where it was made with a key the device does not have.
+ */
 const revealWidget = (
 	armor: string,
-	{ hidden, note }: { hidden: boolean; note: string },
-	press: (armor: string) => Promise<void>
+	{ hidden, problem }: { hidden: boolean; problem: NotRevealed | undefined },
+	press: (armor: string) => Promise<void>,
+	host: SecretHost
 ): WidgetType =>
 	widgetOf(() => {
 		const button = document.createElement('button');
@@ -549,10 +555,17 @@ const revealWidget = (
 		const said = document.createElement('span');
 		said.setAttribute('class', 'secret-note');
 		said.setAttribute('role', 'status');
-		said.append(note);
+		said.append(problem === undefined ? '' : NOT_REVEALED[problem]());
 		const bar = document.createElement('span');
 		bar.setAttribute('class', 'secret-raw-bar');
 		bar.append(button, said);
+		if (problem === 'other') {
+			bar.append(
+				addKeyButton(host, armor, () => {
+					void press(armor);
+				})
+			);
+		}
 		return bar;
 	});
 
@@ -591,7 +604,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 			const gone = { current: false };
 			const doc = documentOf(view, gone);
 			/** Why a secret could not be revealed, by its armor, until it is pressed again. */
-			const notes = new Map<string, string>();
+			const notes = new Map<string, NotRevealed>();
 			const said = () => {
 				if (!gone.current) view.dispatch({ effects: panelsMoved.of(null) });
 			};
@@ -599,7 +612,7 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 				if (notes.delete(armor)) said();
 				const problem = await reveal(doc, host, panels, armor);
 				if (problem === undefined) return;
-				notes.set(armor, NOT_REVEALED[problem]());
+				notes.set(armor, problem);
 				said();
 			};
 			/** The Reveal bars drawn last, by what each shows: the same, drawn again, is kept. */
@@ -612,11 +625,11 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 							const hidden =
 								panels.get(secret.armor) !== undefined &&
 								findRawSecret(view.state, secret.armor)?.opening === secret.opening;
-							const note = notes.get(secret.armor) ?? '';
-							const key = `${String(hidden)}:${note}:${secret.armor}`;
+							const problem = notes.get(secret.armor);
+							const key = `${String(hidden)}:${problem ?? ''}:${secret.armor}`;
 							const widget =
 								bars.current.get(key) ??
-								revealWidget(secret.armor, { hidden, note }, press);
+								revealWidget(secret.armor, { hidden, problem }, press, host);
 							drawn.set(key, widget);
 							return Decoration.widget({ widget, side: 1 }).range(secret.opening);
 						})
