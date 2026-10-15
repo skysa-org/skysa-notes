@@ -110,6 +110,8 @@ type Scope = Pick<
 	| 'clipThumbs'
 	| 'pictures'
 	| 'pictureBytes'
+	| 'keyFiles'
+	| 'secretKeys'
 >;
 
 /** `accountId` on a `syncState` row, or nothing where the API did not name one. */
@@ -620,6 +622,8 @@ const inTransaction = <T>(db: NotesDatabase, work: () => Promise<T>): Promise<T>
 			db.clipThumbs,
 			db.pictures,
 			db.pictureBytes,
+			db.keyFiles,
+			db.secretKeys,
 		],
 		work
 	);
@@ -768,7 +772,8 @@ export const bindConnection = (db: NotesDatabase, input: BindInput): Promise<boo
 		// Gone home, every row: the source they waited under has nothing left to
 		// stand for. It held no credential, cursor or token to let go of.
 		await db.syncState.bulkDelete(from);
-		await forgetClips(db, from);
+		await forgetBinding(db, from);
+		await carryKeys(db, from, input.connectionId);
 		// The same connection, back: the rows it kept never left it.
 		const waiting =
 			current?.detached === undefined
@@ -1143,8 +1148,9 @@ const forgetRows = async (db: Scope, connectionId: string): Promise<void> => {
 	await db.opQueue.where('connectionId').equals(connectionId).delete();
 	await db.files.where('connectionId').equals(connectionId).delete();
 	await db.fileBytes.where('connectionId').equals(connectionId).delete();
-	await forgetClips(db, [connectionId]);
+	await forgetBinding(db, [connectionId]);
 	await forgetPictures(db, [connectionId]);
+	await db.secretKeys.delete(connectionId);
 };
 
 /**
@@ -1164,6 +1170,32 @@ const forgetClips = (db: Scope, connectionIds: readonly string[]) =>
 		.delete()
 		.then(() => db.clipBytes.where('connectionId').anyOf(connectionIds).delete())
 		.then(() => db.clipThumbs.where('connectionId').anyOf(connectionIds).delete());
+
+/**
+ * What only a live binding has besides its rows: its clipboard, and the last
+ * read of its key file for secrets, which a detached source has no folder to
+ * read again (docs/ARCHITECTURE.md §7). Its keys stay while its notes do.
+ */
+const forgetBinding = (db: Scope, connectionIds: readonly string[]) =>
+	forgetClips(db, connectionIds).then(() => db.keyFiles.bulkDelete([...connectionIds]));
+
+/**
+ * A detached source's keys for secrets, going home with its rows to the
+ * connection bound for its account (docs/ARCHITECTURE.md §7), where that holds
+ * none of its own: the notes keep their secrets, and the keys that open them
+ * go with them.
+ */
+const carryKeys = async (
+	db: Scope,
+	from: readonly string[],
+	connectionId: string
+): Promise<void> => {
+	if (from.length === 0) return;
+	const carried = (await db.secretKeys.bulkGet([...from])).find((row) => row !== undefined);
+	await db.secretKeys.bulkDelete([...from]);
+	if (carried === undefined || (await db.secretKeys.get(connectionId)) !== undefined) return;
+	await db.secretKeys.put({ ...carried, connectionId });
+};
 
 /** Of `files`, the ones whose current bytes this device holds: the ones `placeFiles` can send. */
 const withBytes = async (db: Scope, files: readonly FileRecord[]): Promise<FileRecord[]> => {
@@ -1360,7 +1392,7 @@ export const detachConnection = (db: NotesDatabase, input: DetachInput): Promise
 			return { applied: true, gone: state };
 		}
 		await db.credentials.delete(connectionId);
-		await forgetClips(db, [connectionId]);
+		await forgetBinding(db, [connectionId]);
 		// Still the source showing, if it was: the user is looking at what they
 		// have to decide about, and moving them off it would hide it again.
 		await db.syncState.put(detachedFrom(state, input.reason ?? 'revoked', Date.now()));
@@ -1464,7 +1496,7 @@ export const releaseConnection = (
 				(file) => !seen.files.has(file.id)
 			);
 			await db.credentials.delete(connectionId);
-			await forgetClips(db, [connectionId]);
+			await forgetBinding(db, [connectionId]);
 			await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
 			// Held text is the one of the two the user can do something about, so
 			// it is what they are told about where both are true.
@@ -1628,7 +1660,7 @@ export const moveUnsyncedTo = (db: NotesDatabase, input: MoveInput): Promise<Mov
 			(file) => !seen.files.has(file.id)
 		);
 		await db.credentials.delete(connectionId);
-		await forgetClips(db, [connectionId]);
+		await forgetBinding(db, [connectionId]);
 		await db.syncState.put(detachedFrom(state, 'disconnected', Date.now()));
 		return { outcome: held.length > 0 ? 'holding' : 'detached' };
 	}).then(({ outcome, gone }) => {

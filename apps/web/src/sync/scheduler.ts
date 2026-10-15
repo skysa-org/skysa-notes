@@ -26,6 +26,7 @@ import { heldUpOf } from '../store/heldUp.js';
 import { MAX_OP_ATTEMPTS, outOfAttempts } from '../store/queue.js';
 import { type ClipboardSync, createClipboardSync } from './clipboard.js';
 import { createFileReader, type FileRead } from './fileReads.js';
+import { createKeyFileSync, type KeyFileSync } from './keyFile.js';
 import { type RelayFactory, type RelayLink } from './relay.js';
 import { createDexieSyncStore } from './store.js';
 import { createTokenSource, type TokenSource } from './tokens.js';
@@ -276,6 +277,12 @@ export interface SyncScheduler {
 	 * does nothing, or answers `unavailable`, for a source not being synced.
 	 */
 	readonly clipboard: ClipboardSync;
+	/**
+	 * A source's key file for secrets, through the session running for it
+	 * (`sync/keyFile.ts`): read again, and written. Each does nothing, or
+	 * answers `unavailable`, for a source not being synced.
+	 */
+	readonly keyFile: KeyFileSync;
 }
 
 /**
@@ -370,9 +377,9 @@ const RELIST_MS = 3000;
 /**
  * `next`: the poll, or a backoff's retry. `debounce`: a local edit's sync.
  * `notice`: a look after the relay's last notice. `relist`: the clipboard's
- * second listing.
+ * second listing. `keyFile`: the key file's second read, for the same reason.
  */
-type Timer = 'next' | 'debounce' | 'notice' | 'relist';
+type Timer = 'next' | 'debounce' | 'notice' | 'relist' | 'keyFile';
 
 export const createSyncScheduler = (options: SyncSchedulerOptions): SyncScheduler => {
 	const { db, client, createProvider } = options;
@@ -504,6 +511,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 				pulled: pulled.pulled,
 				conflicts: [...pulled.conflicts, ...pushed.conflicts],
 				...(pulled.clipboard === true ? { clipboard: true } : {}),
+				...(pulled.encryption === true ? { encryption: true } : {}),
 			},
 			pulledAt,
 		};
@@ -799,6 +807,15 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 			});
 		}
 		void clipboard.flush(session.connectionId);
+		// Another device may have set the source up for secrets, or replaced its
+		// key. Read twice, as the clipboard is listed: a listing can trail the
+		// feed that reported a new file.
+		if (result.outcome.encryption === true) {
+			void keyFile.heard(session.connectionId);
+			arm('keyFile', relistMs, () => {
+				void keyFile.heard(session.connectionId);
+			});
+		}
 	};
 
 	/**
@@ -878,6 +895,7 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		cancel('debounce');
 		cancel('notice');
 		cancel('relist');
+		cancel('keyFile');
 		cancelProgress();
 		current.get('session')?.abort.abort();
 		current.delete('session');
@@ -1157,6 +1175,9 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		// folder, and a flush waits for the run itself.
 		void clipboard.refresh(connectionId);
 		void clipboard.flush(connectionId);
+		// Whether the source is set up for secrets, and with which key, where
+		// that could have changed since this device last asked.
+		void keyFile.started(connectionId);
 	};
 
 	/** The user asking again: a pause of this session's connection is over. */
@@ -1184,22 +1205,31 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 		await idle(session);
 	};
 
+	/** The session for `connectionId`, for what is synced beside the notes. */
+	const besideNotes = (connectionId: string) => {
+		const session = current.get('session');
+		const provider = session?.provider;
+		if (session?.connectionId !== connectionId || provider === undefined) return undefined;
+		return {
+			provider,
+			withAuth: <T>(work: () => Promise<T>) => withAuth(session, work),
+			told: () => {
+				session.relay?.pushed();
+			},
+			idle: () => idle(session),
+		};
+	};
+
 	const clipboard = createClipboardSync({
 		db,
 		isOnline: environment.isOnline,
-		sessionFor: (connectionId) => {
-			const session = current.get('session');
-			const provider = session?.provider;
-			if (session?.connectionId !== connectionId || provider === undefined) return undefined;
-			return {
-				provider,
-				withAuth: (work) => withAuth(session, work),
-				told: () => {
-					session.relay?.pushed();
-				},
-				idle: () => idle(session),
-			};
-		},
+		sessionFor: besideNotes,
+	});
+
+	const keyFile = createKeyFileSync({
+		db,
+		isOnline: environment.isOnline,
+		sessionFor: besideNotes,
 	});
 
 	const nudgeCurrent = (): Promise<void> => {
@@ -1363,5 +1393,6 @@ export const createSyncScheduler = (options: SyncSchedulerOptions): SyncSchedule
 
 		readFile: reader.read,
 		clipboard,
+		keyFile,
 	};
 };

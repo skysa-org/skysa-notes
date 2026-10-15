@@ -1,10 +1,13 @@
 import {
 	AuthError,
+	buildEncryptionFile,
 	CLIPBOARD_FOLDER,
 	createFakeProvider,
+	ENCRYPTION_FILE,
 	type FakeProvider,
 	RateLimitError,
 	type RemoteEntry,
+	serializeEncryptionFile,
 	type StorageProvider,
 } from '@skysa/core';
 import Dexie from 'dexie';
@@ -291,6 +294,8 @@ const reconnectAtOnce = (db: NotesDatabase) =>
 			db.clipThumbs,
 			db.pictures,
 			db.pictureBytes,
+			db.keyFiles,
+			db.secretKeys,
 		],
 		() => reconnect(db)
 	);
@@ -2340,7 +2345,11 @@ describe('the clipboard (§7)', () => {
 		await quiet();
 
 		expect(await db.clips.count()).toBe(0);
-		expect(h.remote.fake.callLog().filter((call) => call.op === 'list')).toEqual([]);
+		expect(
+			h.remote.fake
+				.callLog()
+				.filter((call) => call.op === 'list' && call.path === CLIPBOARD_FOLDER)
+		).toEqual([]);
 	});
 
 	it('sends what was pasted here before the session began, once the round has found the folder', async () => {
@@ -2378,6 +2387,204 @@ describe('the clipboard (§7)', () => {
 
 		expect(links[0]?.told).toBe(before + 1);
 		expect(await h.remote.fake.list(CLIPBOARD_FOLDER)).toHaveLength(1);
+	});
+});
+
+describe('the key file for secrets (§7)', () => {
+	const RECIPIENT = 'age1320ux0hct0gutc9fu789mqlqjns4fv84w9cz3ytr9mh8fx86fsasr4slrh';
+
+	/** Another device sets the source up. */
+	const setUpElsewhere = (fake: FakeProvider) =>
+		fake.write(ENCRYPTION_FILE, serializeEncryptionFile(buildEncryptionFile(RECIPIENT)), {});
+
+	const keyFile = (db: NotesDatabase) => db.keyFiles.get('c1');
+
+	/** Listings of the folder's root, which is where the key file is looked for. */
+	const rootListings = (fake: FakeProvider) =>
+		fake.callLog().filter((call) => call.op === 'list' && call.path === '');
+
+	/** A first session, which finds the folder, and a second over the same remote that pulls nothing. */
+	const secondSession = async (
+		db: NotesDatabase,
+		between: (fake: FakeProvider) => Promise<unknown>
+	) => {
+		const first = started(db);
+		await reaches(first.scheduler, 'idle');
+		first.scheduler.stop();
+		await between(first.remote.fake);
+		const listedBefore = rootListings(first.remote.fake).length;
+		// What the session start reads is all it reads: the pull fails.
+		first.remote.fake.setFault((call) =>
+			call.op === 'changes' ? new Error('502') : undefined
+		);
+		const second = started(db, { createProvider: first.remote.factory });
+		await reaches(second.scheduler, 'retrying');
+		await quiet();
+		return {
+			fake: first.remote.fake,
+			listed: () => rootListings(first.remote.fake).length - listedBefore,
+		};
+	};
+
+	it('reads it again after a round that met it', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+
+		await setUpElsewhere(h.remote.fake);
+		await focused(h);
+
+		await vi.waitFor(async () => {
+			expect(await keyFile(db)).toMatchObject({ state: 'ok', recipient: RECIPIENT });
+		});
+	});
+
+	it('reads it once more a moment later, where the listing did not name it yet', async () => {
+		const db = await bound();
+		const theRemote = remote();
+		const stale = new Map<'listing', RemoteEntry[]>();
+		const h = started(db, {
+			createProvider: (input) => {
+				const provider = theRemote.factory(input);
+				if (provider === undefined) return undefined;
+				return {
+					...provider,
+					list: async (path) => {
+						const held = path === '' ? stale.get('listing') : undefined;
+						stale.delete('listing');
+						return held ?? provider.list(path);
+					},
+				};
+			},
+		});
+		await reaches(h.scheduler, 'idle');
+
+		// Drive's search can list a folder as it was a moment ago.
+		stale.set('listing', await theRemote.fake.list(''));
+		await setUpElsewhere(theRemote.fake);
+		await focused(h);
+		await quiet();
+		expect(await keyFile(db)).toBeUndefined();
+
+		h.env.advance(3000);
+		await vi.waitFor(async () => {
+			expect((await keyFile(db))?.state).toBe('ok');
+		});
+	});
+
+	it('leaves it unread where the listing still does not name it a moment later', async () => {
+		const db = await bound();
+		const theRemote = remote();
+		const stale = new Map<'listing', RemoteEntry[]>();
+		const h = started(db, {
+			createProvider: (input) => {
+				const provider = theRemote.factory(input);
+				if (provider === undefined) return undefined;
+				return {
+					...provider,
+					list: async (path) => stale.get('listing') ?? provider.list(path),
+				};
+			},
+		});
+		await reaches(h.scheduler, 'idle');
+		await db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+
+		stale.set('listing', await theRemote.fake.list(''));
+		await setUpElsewhere(theRemote.fake);
+		await focused(h);
+		await quiet();
+		h.env.advance(3000);
+		await quiet();
+
+		expect(await keyFile(db)).toBeUndefined();
+	});
+
+	it('reads it as the next session starts, where the reads after the round that met it failed', async () => {
+		const db = await bound();
+		const h = started(db);
+		await reaches(h.scheduler, 'idle');
+		await db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+
+		// A 429 with a long wait, say, on every listing of the root.
+		h.remote.fake.setFault((call) =>
+			call.op === 'list' && call.path === '' ? new Error('429') : undefined
+		);
+		await setUpElsewhere(h.remote.fake);
+		await focused(h);
+		await quiet();
+		h.env.advance(3000);
+		await quiet();
+		h.scheduler.stop();
+		expect(await keyFile(db)).toBeUndefined();
+
+		h.remote.fake.setFault((call) => (call.op === 'changes' ? new Error('502') : undefined));
+		const next = started(db, { createProvider: h.remote.factory });
+		await reaches(next.scheduler, 'retrying');
+		await vi.waitFor(async () => {
+			expect(await keyFile(db)).toMatchObject({ state: 'ok', recipient: RECIPIENT });
+		});
+	});
+
+	it('reads it as a session starts, where this device has not read it', async () => {
+		const db = await bound();
+		const { listed } = await secondSession(db, setUpElsewhere);
+
+		expect(listed()).toBe(1);
+		expect(await keyFile(db)).toMatchObject({ state: 'ok', recipient: RECIPIENT });
+	});
+
+	it('asks nothing of the folder for it as a session starts, where it found none and the device holds no key', async () => {
+		const db = await bound();
+		const { listed } = await secondSession(db, () =>
+			db.keyFiles.put({ connectionId: 'c1', state: 'none' })
+		);
+
+		expect(listed()).toBe(0);
+	});
+
+	it('reads it as a session starts where the device holds a key, which may have been replaced', async () => {
+		const db = await bound();
+		const { listed } = await secondSession(db, async (fake) => {
+			await db.keyFiles.put({ connectionId: 'c1', state: 'none' });
+			await db.secretKeys.put({
+				connectionId: 'c1',
+				recipient: RECIPIENT,
+				unlock: 'pin',
+				salt: new ArrayBuffer(16),
+				rounds: 1,
+				iv: new ArrayBuffer(12),
+				sealed: new ArrayBuffer(48),
+				tries: 0,
+			});
+			await setUpElsewhere(fake);
+		});
+
+		expect(listed()).toBe(1);
+		expect((await keyFile(db))?.state).toBe('ok');
+	});
+
+	it('writes it through the session, and tells the other devices', async () => {
+		const db = await bound();
+		const links: { told: number }[] = [];
+		const relay = vi.fn<RelayFactory>(() => {
+			const link = { told: 0 };
+			links.push(link);
+			return {
+				pushed: () => {
+					link.told += 1;
+				},
+				close: () => undefined,
+			};
+		});
+		const h = started(db, { relay });
+		await reaches(h.scheduler, 'idle');
+		const before = links[0]?.told ?? 0;
+
+		expect(await h.scheduler.keyFile.write('c1', RECIPIENT)).toEqual({ status: 'written' });
+
+		expect(links[0]?.told).toBe(before + 1);
+		expect(h.remote.fake.contentAt(ENCRYPTION_FILE)).toContain(RECIPIENT);
+		expect(await h.scheduler.keyFile.write('c2', RECIPIENT)).toEqual({ status: 'unavailable' });
 	});
 });
 

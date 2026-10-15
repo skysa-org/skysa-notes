@@ -402,6 +402,56 @@ export interface PictureBytesRecord {
 	bytes: ArrayBuffer;
 }
 
+/**
+ * What this device last read of a source's key file for secrets,
+ * `.encryption.json` (docs/ARCHITECTURE.md §7, "Secrets in a note"): read when
+ * the source's session starts and again when a pull meets the file
+ * (`sync/keyFile.ts`). Absent until it has been read once.
+ *
+ * `none`: the folder has no key file, so the source is not set up. `ok`: it
+ * names the recipient every new secret is encrypted to. `newer`: a newer build
+ * wrote it, and this one neither encrypts to it nor writes over it. `invalid`:
+ * something is there that this app did not write, and setup leaves it alone.
+ */
+export interface KeyFileRecord {
+	connectionId: string;
+	state: 'none' | 'ok' | 'newer' | 'invalid';
+	/** Where it is `ok`: `age1…`, in lower case. */
+	recipient?: string;
+	/** Where there is a file: what a replacement writes over. */
+	remoteId?: string;
+	version?: string;
+}
+
+/** How a device unlocks a source's secrets. */
+export type UnlockKind = 'pattern' | 'pin' | 'password';
+
+/**
+ * A source's keys for secrets on this device (docs/ARCHITECTURE.md §7, "Secrets
+ * in a note"): its identities, the source's own first, sealed under how the
+ * device unlocks (`store/secretKeys.ts`). Never sent anywhere, and gone when
+ * the source's notes leave the device.
+ */
+export interface SecretKeyRecord {
+	connectionId: string;
+	/**
+	 * The recipient the device enrolled with, `age1…`: what a secret inserted
+	 * here is encrypted to, which takes no unlocking. Not secret.
+	 */
+	recipient: string;
+	unlock: UnlockKind;
+	/** PBKDF2's salt and rounds, which make the sealing key from the unlock. */
+	salt: ArrayBuffer;
+	rounds: number;
+	/** AES-GCM's nonce, new for each sealing, and the identities it sealed. */
+	iv: ArrayBuffer;
+	sealed: ArrayBuffer;
+	/** Tries since the last right one, each counted before it is checked. */
+	tries: number;
+	/** When the last try was made, which a try after the fifth waits on. */
+	triedAt?: number;
+}
+
 export interface OpQueueRecord {
 	seq?: number;
 	connectionId: string;
@@ -439,6 +489,8 @@ export type NotesDatabase = Dexie & {
 	clipThumbs: Table<ClipThumbRecord, [string, string]>;
 	pictures: Table<PictureRecord, [string, string]>;
 	pictureBytes: Table<PictureBytesRecord, [string, string, PictureVariant]>;
+	keyFiles: Table<KeyFileRecord, string>;
+	secretKeys: Table<SecretKeyRecord, string>;
 };
 
 export const DATABASE_NAME = 'skysa-notes';
@@ -612,6 +664,15 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 						.map(({ cursor: _cursor, ...kept }) => kept)
 				);
 		});
+
+	// Secrets in a note (docs/ARCHITECTURE.md §7): the last read of each source's
+	// key file, and the keys this device holds for it. One row each per source,
+	// apart from `syncState`, which every sync run writes and the scheduler
+	// watches.
+	db.version(11).stores({
+		keyFiles: 'connectionId',
+		secretKeys: 'connectionId',
+	});
 
 	// A build with a later version than the last one above, opening this database
 	// in another tab, must find this tab stopped rather than still writing —
