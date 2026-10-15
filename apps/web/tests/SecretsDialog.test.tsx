@@ -440,6 +440,10 @@ describe('setting a source up', () => {
 	});
 });
 
+/** The ✕ in the dialog's corner, where it has one. */
+const closeButton = () =>
+	document.querySelector<HTMLButtonElement>('.modal-head button[aria-label="Close"]');
+
 /** The one row of buttons the dialog has, by what each says. */
 const buttonRow = (): (string | null)[] => {
 	const rows = document.querySelectorAll('.dialog-actions');
@@ -448,11 +452,13 @@ const buttonRow = (): (string | null)[] => {
 };
 
 describe('each step’s buttons', () => {
-	it('start with the dialog’s own way out and end in the answer, which has the focus', async () => {
+	it('end in the answer, which has the focus, and start with Cancel only where something is asked', async () => {
 		const h = await setup({ record: { state: 'none' } });
 		h.open();
 		const make = await screen.findByRole('button', { name: 'Make a recovery key' });
-		expect(buttonRow()).toEqual(['Close', 'Use a key I have', 'Make a recovery key']);
+		// Nothing asked yet: the ✕ is the way out, and the row has none.
+		expect(buttonRow()).toEqual(['Use a key I have', 'Make a recovery key']);
+		expect(closeButton()).toBeTruthy();
 		expect(document.activeElement).toBe(make);
 
 		await h.user.click(screen.getByRole('button', { name: 'Use a key I have' }));
@@ -670,7 +676,7 @@ describe('an enrolled device', () => {
 		expect((await h.db.secretKeys.get('c1'))?.unlock).toBe('pin');
 	});
 
-	it('leaves the dialog’s Close off removing, whose Cancel goes back', async () => {
+	it('leaves the dialog’s way out off removing’s row, whose Cancel goes back', async () => {
 		const h = await enrolled();
 		h.open();
 		await h.user.click(await screen.findByRole('button', { name: 'Remove from this device' }));
@@ -681,7 +687,10 @@ describe('an enrolled device', () => {
 		});
 		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
 		expect(await screen.findByRole('button', { name: 'Remove from this device' })).toBeTruthy();
-		expect(buttonRow()[0]).toBe('Close');
+		// Back where nothing is asked: the ✕, and no Cancel or Close in the row.
+		expect(buttonRow()).not.toContain('Cancel');
+		expect(buttonRow()).not.toContain('Close');
+		expect(closeButton()).toBeTruthy();
 	});
 
 	it('lets go of its key once asked', async () => {

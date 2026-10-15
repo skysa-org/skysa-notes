@@ -468,7 +468,7 @@ const Device = ({
 				{error}
 			</p>
 		)}
-		{/* Unlocked, there is nothing it asks: Close has the focus. */}
+		{/* Unlocked, there is nothing it asks: the ✕ has the focus. */}
 		<DialogActions
 			primary={
 				unlocked ? undefined : (
@@ -1300,7 +1300,7 @@ export const SecretsDialog = ({
 			title={t('secrets.title')}
 			className="secrets-dialog"
 			onClose={onClose}
-			closeLabel={finished ? t('common.close') : t('common.cancel')}
+			cancel={!finished}
 			status={doing}
 			returnFocus={returnFocus}
 		>
