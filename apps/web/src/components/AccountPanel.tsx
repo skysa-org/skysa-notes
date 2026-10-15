@@ -27,6 +27,7 @@ import { failedAt, saying } from '../errors/reached.js';
 import { rich } from '../i18n/rich.js';
 import { type MessageKey, t } from '../i18n/t.js';
 import { noteLink } from '../routes/place.js';
+import { tabLock } from '../secrets/tabLock.js';
 import { setClipboardShown, showsClipboard } from '../store/clipboard.js';
 import { connectedSources } from '../store/connection.js';
 import { credentialFor } from '../store/credentials.js';
@@ -77,6 +78,7 @@ import { InfoDialog } from './InfoDialog.js';
 import { otherLiveSources } from './MoveUnsent.js';
 import { OptionsMenu, type OptionsMenuItem } from './OptionsMenu.js';
 import { RunProgress } from './RunProgress.js';
+import { SecretsDialog, type SecretsDialogProps, secretsLabel } from './SecretsDialog.js';
 import { type AccountSlot, type SourceAsk } from './SourceTabs.js';
 import { useEscape } from './useEscape.js';
 
@@ -100,7 +102,7 @@ type Client = Pick<ApiClient, 'config' | 'withCredential' | 'startConnect'>;
 
 type Sync = Pick<
 	SyncScheduler,
-	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'pause' | 'clipboard'
+	'status' | 'subscribe' | 'syncNow' | 'resync' | 'halt' | 'pause' | 'clipboard' | 'keyFile'
 >;
 
 export interface AccountPanelProps {
@@ -1712,6 +1714,7 @@ const storageItems = ({
 	imports,
 	clipboard,
 	scratchpad,
+	secrets,
 	about,
 	stranded,
 	open,
@@ -1730,6 +1733,8 @@ const storageItems = ({
 	clipboard: readonly OptionsMenuItem[];
 	/** Showing or hiding the scratchpad (`useScratchpadItem`). */
 	scratchpad: readonly OptionsMenuItem[];
+	/** Secrets in the source (`useSecretsItem`). */
+	secrets: readonly OptionsMenuItem[];
 	/** What the provider keeps from the app (`unseenItem`). */
 	about: readonly OptionsMenuItem[];
 	stranded: boolean;
@@ -1752,6 +1757,7 @@ const storageItems = ({
 		...imports,
 		...clipboard,
 		...scratchpad,
+		...secrets,
 		...about,
 		...(stranded && !open
 			? [
@@ -1836,6 +1842,28 @@ const useScratchpadItem = (
 };
 
 /**
+ * Secrets in the source (docs/ARCHITECTURE.md §7, "Secrets in a note"):
+ * setting them up, or, once they are, unlocking and the rest. Only where the
+ * source syncs, since the key file is in its folder, and not while a first
+ * import holds it, as the clipboard is not.
+ */
+const useSecretsItem = (
+	database: NotesDatabase,
+	bound: SyncStateRecord,
+	phase: SchedulerStatus['phase'],
+	onChoose: () => void
+): OptionsMenuItem[] => {
+	const connectionId = bound.connectionId;
+	const read = useLiveQuery(
+		async () => ({ record: await database.keyFiles.get(connectionId) }),
+		[database, connectionId]
+	);
+	return read === undefined || importingHere(bound) || phase === 'local'
+		? []
+		: [{ label: secretsLabel(read.record), onChoose }];
+};
+
+/**
  * Where a connected source's panel ends: the status line (`StatusLine`), with
  * how syncing is going, the count of the other devices, and the gear. In a
  * compact window's source dropdown the gear's items are also the `⋯` at the
@@ -1859,15 +1887,22 @@ const ConnectedFoot = ({
 	downloading,
 	importing,
 	onClipboard,
+	secrets,
+	onSecrets,
+	keyFile,
 	onPause,
 	...actions
 }: Omit<
 	Parameters<typeof storageItems>[0],
-	'about' | 'phase' | 'download' | 'imports' | 'clipboard' | 'scratchpad'
+	'about' | 'phase' | 'download' | 'imports' | 'clipboard' | 'scratchpad' | 'secrets'
 > & {
 	slot: AccountSlot | undefined;
 	/** Show or hide the clipboard. */
 	onClipboard: () => void;
+	/** Whether secrets for the source are open (`SecretsDialog`), and opening or closing them. */
+	secrets: boolean;
+	onSecrets: (open: boolean) => void;
+	keyFile: SecretsDialogProps['keyFile'];
 	/** Pause syncing, from its details (`SyncDetails`). */
 	onPause: () => void;
 	/**
@@ -1900,6 +1935,9 @@ const ConnectedFoot = ({
 	const tappable = !importingHere(bound) && status.phase !== 'local';
 	const menus = useMenuButtons(openButton);
 	const scratchpad = useScratchpadItem(database, bound.connectionId);
+	const secretsItems = useSecretsItem(database, bound, status.phase, () => {
+		onSecrets(true);
+	});
 	const items = storageItems({
 		...actions,
 		bound,
@@ -1911,6 +1949,7 @@ const ConnectedFoot = ({
 		clipboard: clipboardItem(bound, status.phase, onClipboard),
 		// Not while a first import holds the source, as the clipboard is not.
 		scratchpad: importingHere(bound) ? [] : scratchpad.items,
+		secrets: secretsItems,
 		about: unseenItem(bound.provider, label, () => {
 			setAbout(true);
 		}),
@@ -1929,6 +1968,19 @@ const ConnectedFoot = ({
 		.join('\n');
 	return (
 		<>
+			{secrets && (
+				<SecretsDialog
+					database={database}
+					connectionId={bound.connectionId}
+					sourceName={slot?.name ?? label}
+					keyFile={keyFile}
+					lock={tabLock}
+					onClose={() => {
+						onSecrets(false);
+					}}
+					returnFocus={openButton}
+				/>
+			)}
 			{about && (
 				<UnseenDialog
 					provider={bound.provider}
@@ -2027,6 +2079,7 @@ const Connected = ({
 }: ConnectedProps) => {
 	const [step, setStep] = useState<Step>({ kind: 'closed' });
 	const [rescanning, setRescanning] = useState(false);
+	const [secrets, setSecrets] = useState(false);
 	const [trouble, setTrouble] = useState<string | null>(null);
 	const status = useSyncStatus(sync);
 	// Only ever this source's. Named once per render, so the click below is
@@ -2146,6 +2199,12 @@ const Connected = ({
 			setRescanning(true);
 			return true;
 		}
+		if (action === 'secrets') {
+			if (importingHere(bound)) return true;
+			if (status.phase === 'local') return false;
+			setSecrets(true);
+			return true;
+		}
 		if (open) return true;
 		if (disconnectBlocked) return false;
 		ask(true);
@@ -2250,6 +2309,9 @@ const Connected = ({
 					onPause={() => {
 						sync.pause();
 					}}
+					secrets={secrets}
+					onSecrets={setSecrets}
+					keyFile={sync.keyFile}
 					onClipboard={() => {
 						const shown = showsClipboard(bound);
 						void setClipboardShown(database, connectionId, !shown).then(() => {

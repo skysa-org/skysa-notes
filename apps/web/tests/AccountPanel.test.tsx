@@ -237,6 +237,12 @@ const fakeSync = (initial: Partial<SchedulerStatus> = {}) => {
 			flush: vi.fn(() => Promise.resolve()),
 			read: vi.fn(() => Promise.resolve({ state: 'gone' as const })),
 		},
+		keyFile: {
+			refresh: vi.fn(() => Promise.resolve()),
+			started: vi.fn(() => Promise.resolve()),
+			heard: vi.fn(() => Promise.resolve()),
+			write: vi.fn(() => Promise.resolve({ status: 'unavailable' as const })),
+		},
 		say: (next: Partial<SchedulerStatus>) => {
 			const status: SchedulerStatus = { phase: 'idle', conflicts: [], ...next };
 			box.set('status', status);
@@ -854,6 +860,7 @@ describe('AccountPanel, downloading every note', () => {
 			'Re-scan from scratch',
 			'Show clipboard',
 			'Hide scratchpad',
+			'Set up secrets…',
 		]);
 	});
 
@@ -1078,6 +1085,7 @@ describe('AccountPanel, with an account connected', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
+				'Set up secrets…',
 				'Disconnect',
 			]);
 		});
@@ -2274,6 +2282,54 @@ describe('AccountPanel, showing the scratchpad', () => {
 		await openGear(user);
 		expect(gearLabels()).not.toContain('Show scratchpad');
 		expect(gearLabels()).not.toContain('Hide scratchpad');
+	});
+});
+
+describe('AccountPanel, secrets for a source', () => {
+	const connected = async (sync: FakeSync) => {
+		const db = freshDatabase();
+		await bindConnection(db, { connectionId: 'c1', provider: 'dropbox' });
+		await finishImport(db, 'c1');
+		await holding(db, 'c1');
+		renderPanel(
+			clientWith({ connection: () => Promise.resolve({ ok: true, value: dropbox }) }),
+			db,
+			'/',
+			sync
+		);
+		await statusLine();
+		return db;
+	};
+
+	it('opens them from the gear, reading the key file again, and gives the focus back on close', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'idle' });
+		await connected(sync);
+
+		await choose(user, 'Set up secrets…');
+		const dialog = await screen.findByRole('dialog', { name: 'Secrets' });
+		expect(sync.keyFile.refresh).toHaveBeenCalledWith('c1');
+
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('dialog', { name: 'Secrets' })).toBeNull();
+		expect(dialog.isConnected).toBe(false);
+		expect(document.activeElement).toBe(await gear());
+	});
+
+	it('is called what it opens to once the source is set up', async () => {
+		const user = userEvent.setup();
+		const db = await connected(fakeSync({ phase: 'idle' }));
+		await db.keyFiles.put({ connectionId: 'c1', state: 'ok', recipient: 'age1…' });
+
+		await offered(user, 'Secrets…');
+		expect(gearLabels()).not.toContain('Set up secrets…');
+	});
+
+	it('is not offered where nothing syncs the source', async () => {
+		const user = userEvent.setup();
+		await connected(fakeSync({ phase: 'local' }));
+		await openGear(user);
+		expect(gearLabels()).not.toContain('Set up secrets…');
 	});
 });
 
@@ -5026,6 +5082,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
+				'Set up secrets…',
 				'Disconnect',
 			]);
 		});
@@ -5108,6 +5165,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Import to scratchpad',
 				'Show clipboard',
 				'Hide scratchpad',
+				'Set up secrets…',
 				'Disconnect',
 			]);
 		});
@@ -5169,6 +5227,19 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 		expect(sync.pause).toHaveBeenCalledTimes(1);
 	});
 
+	it('opens another source’s secrets from its row, once it is showing', async () => {
+		const user = userEvent.setup();
+		const sync = fakeSync({ phase: 'idle' });
+		const db = await connected(sync);
+
+		await openOptions(user, 'OneDrive');
+		await user.click(await screen.findByRole('button', { name: 'Set up secrets…' }));
+
+		expect(await screen.findByRole('dialog', { name: 'Secrets' })).toBeTruthy();
+		expect(await activeConnectionId(db)).toBe('c2');
+		expect(sync.keyFile.refresh).toHaveBeenCalledWith('c2');
+	});
+
 	it('offers another source’s actions on its own row, and shows that source to do them', async () => {
 		const user = userEvent.setup();
 		const db = await connected(fakeSync({ phase: 'idle' }));
@@ -5179,6 +5250,7 @@ describe('AccountPanel, in the source dropdown of a compact window', () => {
 				'Rename',
 				'Sync now',
 				'Re-scan from scratch',
+				'Set up secrets…',
 				'Download all notes',
 				'Disconnect',
 			]);

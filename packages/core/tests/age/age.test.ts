@@ -4,6 +4,7 @@ import { decrypt, encrypt, opens } from '../../src/age/age.js';
 import { armor, dearmor, looksArmored } from '../../src/age/armor.js';
 import { decodeBase64, encodeBase64 } from '../../src/age/base64.js';
 import { decodeBech32, encodeBech32 } from '../../src/age/bech32.js';
+import { parseRecipient, publicKeyOf, recipientOf } from '../../src/age/curve.js';
 import { AgeError } from '../../src/age/errors.js';
 import { encodeHeader, parseHeader } from '../../src/age/header.js';
 import {
@@ -11,9 +12,6 @@ import {
 	encodeRecipient,
 	generateIdentity,
 	parseIdentity,
-	parseRecipient,
-	publicKeyOf,
-	recipientOf,
 	spellsRecipient,
 } from '../../src/age/keys.js';
 import { IDENTITY, RECIPIENT } from './known.js';

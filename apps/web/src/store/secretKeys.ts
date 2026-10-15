@@ -344,6 +344,33 @@ export const changeUnlock = async (
 	return changed ? { ...keys, identities, sealing, sealedAs: fields.iv } : undefined;
 };
 
+/**
+ * The keys an unlocked device holds, replaced by `given` for a new
+ * `recipient`, and sealed under the same unlock: the source's key replaced on
+ * another device and typed here, with the keys this device held kept beside it
+ * so that secrets made with them still open. Nothing, where another tab sealed
+ * the keys again meanwhile.
+ */
+export const replaceKeys = async (
+	db: NotesDatabase,
+	keys: UnlockedKeys,
+	recipient: string,
+	given: readonly Uint8Array[]
+): Promise<UnlockedKeys | undefined> => {
+	// Copies, before anything is awaited, as `changeUnlock` takes them.
+	const identities = copied(given);
+	if (identities.length === 0) throw new Error('there is no key to keep');
+	if (identities.some(isWiped)) throw new Error('a key that was wiped is not kept');
+	const { iv, sealed } = await seal(keys.sealing, identities);
+	const replaced = await db.transaction('rw', db.secretKeys, async () => {
+		const stored = await db.secretKeys.get(keys.connectionId);
+		if (stored === undefined || !sameBytes(stored.iv, keys.sealedAs)) return false;
+		await db.secretKeys.put({ ...stored, recipient, iv, sealed });
+		return true;
+	});
+	return replaced ? { ...keys, recipient, identities, sealedAs: iv } : undefined;
+};
+
 /** Let go of a source's keys on this device. */
 export const forgetKeys = (db: NotesDatabase, connectionId: string): Promise<void> =>
 	db.secretKeys.delete(connectionId);

@@ -3,9 +3,9 @@ import { x25519 } from '@noble/curves/ed25519.js';
 
 import { decodeBase64, encodeBase64 } from './base64.js';
 import { asciiBytes, concatBytes } from './bytes.js';
+import { publicKeyOf } from './curve.js';
 import { AgeError } from './errors.js';
 import { encodeHeader, type Header, headerWithoutMac, parseHeader, type Stanza } from './header.js';
-import { publicKeyOf } from './keys.js';
 import { openPayload, sealPayload } from './stream.js';
 
 /**
