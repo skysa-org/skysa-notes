@@ -1,5 +1,17 @@
 # @skysa/web
 
+## 1.5.0
+
+### Minor Changes
+
+- 1ffc65f: Every dialog now works the same way. Its buttons are one row at the end: Cancel (or Close) first, and the answer last, on the right. The first field has the focus when there is one, and the answer when there is not. Escape is Cancel everywhere, including the secret panel in a note, where it used to be Done; Mod+Enter is Done there. The storage panel's questions, and Delete on a file in a notebook's attached files, follow the same rules. Disconnect and "Discard for good" are now drawn as the warnings they are.
+
+### Patch Changes
+
+- 1ffc65f: Secrets: a recovery key is copied in its groups, as it is shown, and is typed into twelve numbered fields, one for each group. Each field goes on to the next as it fills, and a key pasted whole fills them all. The printed key has a page margin of its own.
+- 19f1a98: The rich editor's toolbar has "Insert secret", a lock after the paperclip, which writes a new secret as "Secret" in the slash menu does. On a narrow toolbar it is in More tools.
+- @skysa/core@1.5.0
+
 ## 1.4.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @skysa/api
 
+## 1.5.0
+
+### Patch Changes
+
+- @skysa/core@1.5.0
+
 ## 1.4.0
 
 ### Patch Changes
