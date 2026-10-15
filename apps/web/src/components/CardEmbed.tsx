@@ -258,13 +258,16 @@ const CardChip = ({ embed }: { embed: Embedded<'file'> }) => (
 	</span>
 );
 
-/** A secret, closed, as the note shows one: nothing of it but that it is one. */
-const CardSecret = () => (
+/**
+ * A secret, closed, as the note shows one: nothing of it but that it is one,
+ * and what its fence calls it, if anything.
+ */
+const CardSecret = ({ embed }: { embed: Embedded<'secret'> }) => (
 	<span className="attachment-chip scratch-card-chip scratch-card-secret">
 		<span className="attachment-icon" aria-hidden="true">
 			<Icon name="lock" />
 		</span>
-		<span className="attachment-name">{t('editor.secret.label')}</span>
+		<span className="attachment-name">{embed.label ?? t('editor.secret.label')}</span>
 	</span>
 );
 
@@ -276,7 +279,7 @@ export const CardEmbed = ({ embed, words }: { embed: PreviewEmbed; words: string
 		case 'file':
 			return <CardChip embed={embed} />;
 		case 'secret':
-			return <CardSecret />;
+			return <CardSecret embed={embed} />;
 	}
 };
 

@@ -11,7 +11,7 @@ import {
 } from '@milkdown/kit/prose/view';
 import type { MarkdownNode, NodeSchema } from '@milkdown/kit/transformer';
 import { $ctx, $nodeSchema, $view } from '@milkdown/kit/utils';
-import { isSecretBlock, SECRET_LANGUAGE } from '@skysa/core';
+import { isSecretBlock, SECRET_LANGUAGE, secretLabel } from '@skysa/core';
 
 import { t } from '../i18n/t.js';
 import { barButton, selectedKeys } from './attachment.js';
@@ -61,6 +61,12 @@ const valueOf = (node: ProseNode): string => {
 	return typeof value === 'string' ? value : '';
 };
 
+/** What its fence says after `age`, exactly as it says it: its label, or nothing. */
+const labelOf = (node: ProseNode): string => {
+	const label: unknown = node.attrs.label;
+	return typeof label === 'string' ? label : '';
+};
+
 /** A fenced block that is a secret: `age`, and armor that reads (`isSecretBlock`). */
 const isSecretCode = (node: MarkdownNode): boolean =>
 	node.type === 'code' &&
@@ -85,15 +91,16 @@ export const codeBlockWithoutSecrets =
 
 /**
  * A block, and a leaf: the armor is an attribute, written back exactly as it
- * was read, under the fence's one word, `age`. Copied out, it is the fence's
- * text, which is what the file holds.
+ * was read, under the fence's `age` and the label after it, if it has one —
+ * an attribute too, since Milkdown's code block keeps only a fence's first
+ * word. Copied out, it is the fence's text, which is what the file holds.
  */
 export const secretSchema = $nodeSchema(SECRET, () => ({
 	group: 'block',
 	atom: true,
 	selectable: true,
 	draggable: true,
-	attrs: { value: { validate: 'string' } },
+	attrs: { value: { validate: 'string' }, label: { default: '', validate: 'string' } },
 	parseDOM: [
 		{
 			tag: 'pre[data-secret]',
@@ -105,21 +112,38 @@ export const secretSchema = $nodeSchema(SECRET, () => ({
 			getAttrs: (dom) => {
 				if (!(dom instanceof HTMLElement)) return false;
 				const value = dom.textContent;
-				return isSecretBlock(SECRET_LANGUAGE, value) ? { value } : false;
+				const label = dom.getAttribute('data-label') ?? '';
+				return isSecretBlock(SECRET_LANGUAGE, value) ? { value, label } : false;
 			},
 		},
 	],
-	toDOM: (node) => ['pre', { 'data-secret': '' }, ['code', valueOf(node)]],
+	toDOM: (node) => [
+		'pre',
+		labelOf(node) === ''
+			? { 'data-secret': '' }
+			: { 'data-secret': '', 'data-label': labelOf(node) },
+		['code', valueOf(node)],
+	],
 	parseMarkdown: {
 		match: isSecretCode,
 		runner: (state, node, type) => {
-			state.addNode(type, { value: typeof node.value === 'string' ? node.value : '' });
+			state.addNode(type, {
+				value: typeof node.value === 'string' ? node.value : '',
+				// As the fence has it, spaces and all: written back, it is the same.
+				label: typeof node.meta === 'string' ? node.meta : '',
+			});
 		},
 	},
 	toMarkdown: {
 		match: (node) => node.type.name === SECRET,
 		runner: (state, node) => {
-			state.addNode('code', undefined, valueOf(node), { lang: SECRET_LANGUAGE });
+			const label = labelOf(node);
+			state.addNode(
+				'code',
+				undefined,
+				valueOf(node),
+				label === '' ? { lang: SECRET_LANGUAGE } : { lang: SECRET_LANGUAGE, meta: label }
+			);
 		},
 	},
 }));
@@ -176,23 +200,31 @@ const findSecret = (
 
 /**
  * `armor` in the document as the user's edit: in place of the block with the
- * armor `key`, or — a new secret's first words — as a block of its own where
- * `at` says, or at the end of the note.
+ * armor `key`, its label as it is, or — a new secret's first words — as a
+ * block of its own called `label`, where `at` says, or at the end of the note.
  */
-const put = (view: EditorView, key: string, armor: string, at: number | undefined): void => {
+const put = (
+	view: EditorView,
+	key: string,
+	armor: string,
+	at: number | undefined,
+	label: string
+): void => {
 	const type = view.state.schema.nodes[SECRET];
 	if (type === undefined) return;
 	const { tr, doc } = view.state;
 	const block = key === DRAFT ? undefined : findSecret(doc, key);
 	if (block !== undefined) {
-		view.dispatch(tr.setNodeMarkup(block.pos, undefined, { value: armor }));
+		view.dispatch(
+			tr.setNodeMarkup(block.pos, undefined, { ...block.node.attrs, value: armor })
+		);
 		return;
 	}
 	const place =
 		at === undefined
 			? { from: doc.content.size, to: doc.content.size }
 			: placeFor(doc, at, type);
-	const placed = tr.replaceWith(place.from, place.to, type.create({ value: armor }));
+	const placed = tr.replaceWith(place.from, place.to, type.create({ value: armor, label }));
 	view.dispatch(key === DRAFT ? placed.setMeta(draftKey, null) : placed);
 };
 
@@ -203,18 +235,31 @@ const draftAt = (state: EditorState): number | undefined => draftKey.getState(st
 const documentOf = (view: EditorView): SecretDocument => ({
 	closed: () => view.isDestroyed,
 	has: (key) => findSecret(view.state.doc, key) !== undefined,
-	put: (key, armor, at) => {
-		put(view, key, armor, at);
+	put: (key, armor, at, label) => {
+		put(view, key, armor, at, label);
 	},
-	putBack: (key, from) => {
+	putBack: (key, from, label) => {
 		const block = findSecret(view.state.doc, key);
 		if (block === undefined) return;
 		const { tr } = view.state;
 		view.dispatch(
 			from === undefined
 				? tr.delete(block.pos, block.pos + block.node.nodeSize)
-				: tr.setNodeMarkup(block.pos, undefined, { value: from })
+				: tr.setNodeMarkup(block.pos, undefined, {
+						...block.node.attrs,
+						value: from,
+						label,
+					})
 		);
+	},
+	label: (key) => {
+		const block = findSecret(view.state.doc, key);
+		return block === undefined ? '' : labelOf(block.node);
+	},
+	relabel: (key, label) => {
+		const block = findSecret(view.state.doc, key);
+		if (block === undefined) return;
+		view.dispatch(view.state.tr.setNodeAttribute(block.pos, 'label', label));
 	},
 	draftAt: () => draftAt(view.state),
 	beginDraft: () => {
@@ -321,9 +366,18 @@ const secretView = (ctx: Ctx) => {
 		const held = { current: initial };
 		const gone = { current: false };
 
+		// What it is called: its label, or the app's word for a secret.
+		const name = document.createElement('span');
+		name.setAttribute('class', 'secret-name');
 		const label = document.createElement('span');
 		label.setAttribute('class', 'secret-label');
-		label.append(iconElement('lock'), t('editor.secret.label'));
+		label.append(iconElement('lock'), name);
+		const named = () => {
+			const called = secretLabel(labelOf(held.current));
+			name.replaceChildren(called ?? t('editor.secret.label'));
+			label.toggleAttribute('data-named', called !== undefined);
+		};
+		named();
 
 		const reveal = document.createElement('button');
 		reveal.setAttribute('type', 'button');
@@ -371,6 +425,8 @@ const secretView = (ctx: Ctx) => {
 			}
 			if (slot.firstChild !== open.panel.dom) slot.replaceChildren(open.panel.dom);
 			reveal.setAttribute('hidden', '');
+			// Its label changed in the note — undone, or pulled — and not in it.
+			open.panel.setLabel(secretLabel(labelOf(held.current)) ?? '');
 		};
 		const stopShowing = panels.subscribe(show);
 		// Not while ProseMirror is drawing: where this block is, is known after.
@@ -437,6 +493,7 @@ const secretView = (ctx: Ctx) => {
 			update: (node) => {
 				if (node.type !== held.current.type) return false;
 				held.current = node;
+				named();
 				showSoon();
 				return true;
 			},

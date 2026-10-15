@@ -22,6 +22,7 @@ import {
 	rewriteSecrets,
 	secretBlocksIn,
 	secretFile,
+	secretLabel,
 	serializeEncryptionFile,
 } from '../src/secrets.js';
 import {
@@ -60,6 +61,13 @@ describe('a secret block', () => {
 		expect(isSecretBlock('text', SEALED_HERE)).toBe(false);
 		expect(isSecretBlock(null, SEALED_HERE)).toBe(false);
 		expect(isSecretBlock(undefined, SEALED_HERE)).toBe(false);
+	});
+
+	it('is called by what its fence says after `age`, trimmed, or by nothing', () => {
+		expect(secretLabel(' Wi-Fi  password ')).toBe('Wi-Fi  password');
+		expect(secretLabel('   ')).toBeUndefined();
+		expect(secretLabel(null)).toBeUndefined();
+		expect(secretLabel(undefined)).toBeUndefined();
 	});
 });
 
@@ -147,6 +155,16 @@ describe('a secret in a preview', () => {
 		expect(previewBlocks(cut)[1]?.runs).toEqual([
 			{ text: '', marks: [], embed: { kind: 'secret' } },
 		]);
+	});
+
+	it('carries the label its fence names it by, and still says nothing of it in words', () => {
+		const lines = previewBlocks(
+			`before\n\n\`\`\`age  Wi-Fi password \n${SEALED_HERE}\n\`\`\`\n`
+		);
+		expect(lines[1]?.runs).toEqual([
+			{ text: '', marks: [], embed: { kind: 'secret', label: 'Wi-Fi password' } },
+		]);
+		expect(previewLines(`\`\`\`age Wi-Fi password\n${SEALED_HERE}\n\`\`\`\n`)).toEqual([]);
 	});
 
 	it('leaves an `age` fence that is not armor as the code it is', () => {

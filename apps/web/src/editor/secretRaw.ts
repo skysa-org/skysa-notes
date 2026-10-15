@@ -60,6 +60,11 @@ export interface RawSecret {
 	readonly start: number;
 	/** The end of the fence's opening line, where Reveal goes. */
 	readonly opening: number;
+	/** What its fence calls it after `age`, trimmed: its label, or nothing. */
+	readonly label: string;
+	/** Where that is on the opening line: from just after `age` to the end of what it says. */
+	readonly labelFrom: number;
+	readonly labelTo: number;
 	/** The armor's lines, from the start of the first to the end of the last. */
 	readonly from: number;
 	readonly to: number;
@@ -108,10 +113,15 @@ const secretAt = (state: EditorState, node: SyntaxNode, wanted?: string): RawSec
 	const armor = lines.join('\n');
 	if (wanted !== undefined && armor !== wanted) return undefined;
 	if (!isSecretBlock(SECRET_LANGUAGE, armor)) return undefined;
+	// The info string begins with its first word, `age`: what follows is the label.
+	const labelFrom = info.from + SECRET_LANGUAGE.length;
 	return {
 		armor,
 		start: node.from,
 		opening: open.to,
+		label: state.sliceDoc(labelFrom, info.to).trim(),
+		labelFrom,
+		labelTo: info.to,
 		from: doc.line(open.number + 1).from,
 		to: last.to,
 		end: closing === undefined ? last.to : doc.lineAt(closing.from).to,
@@ -188,8 +198,19 @@ export const rearmor = (secret: RawSecret, armor: string): ChangeSpec => ({
 	insert: within(armor, secret.prefix),
 });
 
+/** What follows `age` on a secret's opening line, for `label`. */
+const afterLanguage = (label: string): string => (label === '' ? '' : ` ${label}`);
+
+/** `secret`'s label replaced by `label`, its armor as it is. */
+export const relabelled = (secret: RawSecret, label: string): ChangeSpec => ({
+	from: secret.labelFrom,
+	to: secret.labelTo,
+	insert: afterLanguage(label),
+});
+
 /** The fence a new secret is written as. */
-const fence = (armor: string): string => `\`\`\`${SECRET_LANGUAGE}\n${armor}\n\`\`\``;
+const fence = (armor: string, label: string): string =>
+	`\`\`\`${SECRET_LANGUAGE}${afterLanguage(label)}\n${armor}\n\`\`\``;
 
 /**
  * Where a new secret is written: in place of `from` to `to`, its fence after
@@ -206,9 +227,9 @@ export interface Place {
 	readonly side: 1 | -1;
 }
 
-/** What `place` writes for a new secret with `armor`. */
-export const writtenAt = (place: Place, armor: string): string =>
-	`${place.pre}${within(fence(armor), place.prefix)}${place.post}`;
+/** What `place` writes for a new secret with `armor`, called `label`. */
+export const writtenAt = (place: Place, armor: string, label = ''): string =>
+	`${place.pre}${within(fence(armor, label), place.prefix)}${place.post}`;
 
 /** Whether line `number` is there, with something in it besides the marks of what holds it. */
 const filled = (doc: Text, number: number, prefix: string): boolean => {
@@ -419,7 +440,7 @@ const documentOf = (view: EditorView, gone: Readonly<{ current: boolean }>): Sec
 	return {
 		closed: () => gone.current,
 		has: (key) => findRawSecret(view.state, key) !== undefined,
-		put: (key, armor, at) => {
+		put: (key, armor, at, label) => {
 			const { state } = view;
 			const block = key === DRAFT ? undefined : findRawSecret(state, key);
 			const effects = key === DRAFT ? setDraft.of(null) : [];
@@ -431,7 +452,11 @@ const documentOf = (view: EditorView, gone: Readonly<{ current: boolean }>): Sec
 					post: place.post,
 				});
 				view.dispatch({
-					changes: { from: place.from, to: place.to, insert: writtenAt(place, armor) },
+					changes: {
+						from: place.from,
+						to: place.to,
+						insert: writtenAt(place, armor, label),
+					},
 					effects,
 					userEvent: 'input',
 				});
@@ -444,16 +469,26 @@ const documentOf = (view: EditorView, gone: Readonly<{ current: boolean }>): Sec
 			}
 			view.dispatch({ changes: rearmor(block, armor), effects, userEvent: 'input.type' });
 		},
-		putBack: (key, from) => {
+		putBack: (key, from, label) => {
 			const { state } = view;
 			const block = findRawSecret(state, key);
 			const made = written.get(key);
 			written.delete(key);
 			if (block === undefined) return;
-			view.dispatch({
-				changes: from === undefined ? takenOut(state, block, made) : rearmor(block, from),
-				userEvent: 'input',
-			});
+			const changes =
+				from === undefined
+					? [takenOut(state, block, made)]
+					: [
+							...(block.label === label ? [] : [relabelled(block, label)]),
+							...(block.armor === from ? [] : [rearmor(block, from)]),
+						];
+			if (changes.length > 0) view.dispatch({ changes, userEvent: 'input' });
+		},
+		label: (key) => findRawSecret(view.state, key)?.label ?? '',
+		relabel: (key, label) => {
+			const block = findRawSecret(view.state, key);
+			if (block === undefined) return;
+			view.dispatch({ changes: relabelled(block, label), userEvent: 'input.type' });
 		},
 		draftAt: () => view.state.field(draftField) ?? undefined,
 		beginDraft: () => {
@@ -662,7 +697,12 @@ export const rawSecrets = (given: () => SecretHost): Extension => {
 					if (!update.docChanged || panels.all().length === 0) return;
 					// Not while CodeMirror is drawing: closing a panel draws again.
 					queueMicrotask(() => {
-						if (!gone.current) leftBehind(doc, panels);
+						if (gone.current) return;
+						leftBehind(doc, panels);
+						// A label changed in the text, or undone, and not in its panel.
+						panels.all().forEach(([key, { panel }]) => {
+							if (key !== DRAFT) panel.setLabel(doc.label(key));
+						});
 					});
 				},
 				destroy: () => {

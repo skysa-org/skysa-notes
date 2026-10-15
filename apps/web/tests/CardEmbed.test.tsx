@@ -296,4 +296,11 @@ describe('a secret on a card', () => {
 		expect(container.textContent).toBe('Secret');
 		expect(container.querySelector('.scratch-card-secret')).not.toBeNull();
 	});
+
+	it('says what its fence calls it, where it calls it anything', () => {
+		const { container } = render(
+			<CardEmbed embed={{ kind: 'secret', label: 'Wi-Fi password' }} words="" />
+		);
+		expect(container.textContent).toBe('Wi-Fi password');
+	});
 });

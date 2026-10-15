@@ -178,11 +178,15 @@ const TakeNote = ({
 	);
 };
 
-/** What an unnamed card is called whose first line has no words: what that line shows. */
-const namedByShown = (line: PreviewLine): string =>
-	line.runs.some((run) => run.embed?.kind === 'secret')
-		? t('editor.secret.label')
-		: t('scratchpad.card.pictureOnly');
+/**
+ * What an unnamed card is called whose first line has no words: what that line
+ * shows. A secret, by its label where it has one.
+ */
+const namedByShown = (line: PreviewLine): string => {
+	const secret = line.runs.find((run) => run.embed?.kind === 'secret')?.embed;
+	if (secret?.kind !== 'secret') return t('scratchpad.card.pictureOnly');
+	return secret.label ?? t('editor.secret.label');
+};
 
 /** A note's opening lines after its name and the date it was made, as a list row has them (`noteOpening`). */
 const opening = (

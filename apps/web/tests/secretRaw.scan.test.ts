@@ -65,6 +65,19 @@ describe('finding a secret', () => {
 		expect(unclosed?.end).toBe(open.length - 1);
 	});
 
+	it('reads its label after `age`, trimmed, and where on the opening line it is', () => {
+		const armor = sealed('five');
+		const listed = `- item\n\n  \`\`\`age  Front door \n  ${within(armor, '  ')}\n  \`\`\`\n`;
+		const [secret] = allSecrets(stateOf(listed));
+
+		expect(secret?.label).toBe('Front door');
+		expect(listed.slice(secret?.labelFrom, secret?.labelTo)).toBe('  Front door');
+		const [bare] = allSecrets(stateOf(`\`\`\`age\n${armor}\n\`\`\`\n`));
+		expect(bare?.label).toBe('');
+		expect(bare?.labelFrom).toBe(bare?.labelTo);
+		expect(bare?.labelTo).toBe('```age'.length);
+	});
+
 	it('finds none where the fence says something else, or holds something else', () => {
 		const armor = sealed('four');
 

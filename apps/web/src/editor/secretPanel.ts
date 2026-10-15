@@ -4,6 +4,8 @@ import { t } from '../i18n/t.js';
  * A secret's words, revealed (docs/ARCHITECTURE.md §7, "Secrets in a note"):
  * a plain-text field of its own, outside the note's document, with Cancel,
  * Copy and Done, in that order, as every dialog's row is (`DialogActions`).
+ * Over the words, its label: what the closed secret is called, which is not
+ * encrypted, and says so.
  * The same panel under a revealed block and where a new secret is being
  * written, in either editor. What is typed in it is kept as it is typed, as
  * what is typed in the note is.
@@ -19,6 +21,10 @@ import { t } from '../i18n/t.js';
 export interface SecretPanelOptions {
 	/** The words it opens with: a revealed secret's, or none for a new one. */
 	readonly words: string;
+	/** The label it opens with: what its fence calls it, or nothing. */
+	readonly label: string;
+	/** What is in the label changed: it is to be kept, as the words are. */
+	readonly onLabel: () => void;
 	/**
 	 * What is in the field changed: it is to be kept. Not while an input
 	 * method is still composing a character, which is kept as it ends.
@@ -52,6 +58,18 @@ export interface SecretPanel {
 	readonly focus: (at?: Caret) => void;
 	/** Something said under the field, or nothing. */
 	readonly say: (message: string | undefined) => void;
+	/** What is in the label now, as typed. */
+	readonly label: () => string;
+	/** Whether that is not what was last kept, or what it opened with. */
+	readonly labelChanged: () => boolean;
+	/** `label` kept. */
+	readonly markLabel: (label: string) => void;
+	/**
+	 * The label as the note now has it, changed there — undone, or pulled —
+	 * and kept; not while it is being typed in, where what is typed is the
+	 * label.
+	 */
+	readonly setLabel: (label: string) => void;
 }
 
 const button = (label: string, className: string, press: () => void): HTMLButtonElement => {
@@ -63,18 +81,57 @@ const button = (label: string, className: string, press: () => void): HTMLButton
 	return element;
 };
 
+/** The longest label a secret is given: one line on its closed block. */
+export const LABEL_MAX = 80;
+
+/** Ids for each panel's label and what is said of it, apart from every other panel's. */
+const panelIds = { current: 0 };
+
 /** Lines enough for the words, and one to type on: from 2 to 12. */
 const rowsFor = (words: string): string =>
 	String(Math.min(12, Math.max(2, words.split('\n').length + 1)));
 
 export const createSecretPanel = ({
 	words,
+	label,
+	onLabel,
 	onInput,
 	onDone,
 	onCancel,
 	onCopy,
 }: SecretPanelOptions): SecretPanel => {
 	const kept = { current: words };
+	panelIds.current += 1;
+	const hintId = `secret-label-hint-${String(panelIds.current)}`;
+
+	// The label: not secret, but the browser's helpers kept out of it all the
+	// same, as a password manager would take it for a login's name.
+	const keptLabel = { current: label };
+	const name = document.createElement('input');
+	name.setAttribute('type', 'text');
+	name.setAttribute('class', 'secret-label-field');
+	name.setAttribute('placeholder', t('editor.secret.label'));
+	name.setAttribute('maxlength', String(LABEL_MAX));
+	name.setAttribute('aria-describedby', hintId);
+	name.setAttribute('spellcheck', 'false');
+	name.setAttribute('autocomplete', 'off');
+	name.setAttribute('data-1p-ignore', '');
+	name.setAttribute('data-lpignore', 'true');
+	name.setAttribute('value', label);
+	name.addEventListener('input', (event) => {
+		if (!(event instanceof InputEvent && event.isComposing)) onLabel();
+	});
+	name.addEventListener('compositionend', onLabel);
+
+	const caption = document.createElement('label');
+	caption.setAttribute('class', 'secret-label-row');
+	caption.append(t('editor.secret.labelField'), name);
+
+	const hint = document.createElement('p');
+	hint.setAttribute('class', 'secret-label-hint');
+	hint.setAttribute('id', hintId);
+	hint.append(t('editor.secret.labelHint'));
+
 	const field = document.createElement('textarea');
 	field.setAttribute('class', 'secret-words');
 	field.setAttribute('aria-label', t('editor.secret.words'));
@@ -126,12 +183,24 @@ export const createSecretPanel = ({
 	dom.setAttribute('class', 'secret-panel');
 	dom.setAttribute('role', 'group');
 	dom.setAttribute('aria-label', t('editor.secret.panel'));
-	dom.append(field, said, actions);
+	dom.append(caption, hint, field, said, actions);
 
 	// The field's keys are its own, and the note's editor never hears them
 	// (the view stops them). Escape is Cancel, as in every dialog (the owner's
 	// rule, 2026-10-15), and Mod+Enter is Done.
 	dom.addEventListener('keydown', (event) => {
+		// Enter in the label is on to the words, as a form's next field.
+		if (
+			event.target === name &&
+			event.key === 'Enter' &&
+			!event.isComposing &&
+			!event.metaKey &&
+			!event.ctrlKey
+		) {
+			event.preventDefault();
+			field.focus();
+			return;
+		}
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			onCancel();
@@ -160,5 +229,16 @@ export const createSecretPanel = ({
 			if (at !== undefined) field.setSelectionRange(at.start, at.end);
 		},
 		say,
+		label: () => name.value,
+		labelChanged: () => name.value !== keptLabel.current,
+		markLabel: (next) => {
+			keptLabel.current = next;
+		},
+		setLabel: (next) => {
+			if (document.activeElement === name || next === name.value) return;
+			// eslint-disable-next-line functional/immutable-data -- what is in a field is set by assigning to it
+			name.value = next;
+			keptLabel.current = next;
+		},
 	};
 };

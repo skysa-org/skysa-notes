@@ -7,6 +7,7 @@ import { selectedKey } from '../src/editor/attachment.js';
 import { adoptBody, createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 import { insertSecretCommand } from '../src/editor/secretBlock.js';
 import { NO_SECRETS, type Sealer, type SecretHost } from '../src/editor/secretHost.js';
+import { labelToWrite } from '../src/editor/secretPanels.js';
 import { fakeHost, fence, openedIn, sealed, sealedForAnother } from './secretHostFake.js';
 
 /**
@@ -393,6 +394,186 @@ describe('a secret in the rich editor', () => {
 		h.field()?.dispatchEvent(drag);
 
 		expect(drag.defaultPrevented).toBe(true);
+	});
+});
+
+/**
+ * A secret's label: what its fence says after `age`, in plain text, shown on
+ * the closed block in place of "Secret" and changed in its panel as it is
+ * typed, with nothing sealed.
+ */
+describe('a secret’s label', () => {
+	const labelField = (root: HTMLElement) =>
+		root.querySelector<HTMLInputElement>('.secret-label-field');
+	const shown = (h: { blocks: () => HTMLElement[] }) =>
+		h.blocks()[0]?.querySelector('.secret-label')?.textContent;
+	/** `words` in the label, as typing them leaves it. */
+	const name = (root: HTMLElement, words: string, { composing = false } = {}) => {
+		const into = labelField(root);
+		if (into === null) throw new Error('no label');
+		into.value = words;
+		into.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: composing }));
+	};
+
+	it('is what the closed block says, written back as the fence has it, spaces and all', async () => {
+		const body = `${fence(sealed('the door code'), 'Front door  ')}\n\nAfter.\n`;
+		const h = await mount(body);
+
+		expect(shown(h)).toBe('Front door');
+		expect(h.markdown()).toBe(body);
+	});
+
+	it('is written as one line, with no backtick, and no longer than its field', () => {
+		expect(labelToWrite('  Wi-Fi\r\n\t`home`  ')).toBe('Wi-Fi home');
+		expect(labelToWrite('``')).toBe('');
+		expect(labelToWrite(`${'a'.repeat(79)} more`)).toBe('a'.repeat(79));
+	});
+
+	it('is "Secret" where the fence says nothing after `age`', async () => {
+		const h = await mount(`${fence(sealed('the door code'))}\n`);
+
+		expect(shown(h)).toBe('Secret');
+	});
+
+	it('is changed as it is typed, the user’s edit, with nothing sealed', async () => {
+		const armor = sealed('the door code');
+		const fake = fakeHost();
+		const h = await mount(`${fence(armor)}\n`, fake.host);
+		await h.revealed();
+		expect(labelField(h.root)?.value).toBe('');
+
+		name(h.root, 'Front door');
+
+		expect(h.markdown()).toBe(`${fence(armor, 'Front door')}\n`);
+		expect(h.onUserEdit).toHaveBeenCalledTimes(1);
+		expect(fake.seal).not.toHaveBeenCalled();
+		expect(shown(h)).toBe('Front door');
+		expect(h.field()).not.toBeNull();
+	});
+
+	it('stays as it is as the words are sealed again, and both go back with Cancel', async () => {
+		const armor = sealed('the door code');
+		const fake = fakeHost();
+		const h = await mount(`${fence(armor, 'Front door')}\n`, fake.host);
+		await h.revealed();
+		expect(labelField(h.root)?.value).toBe('Front door');
+
+		h.type('the new code');
+		expect(h.markdown()).toContain('```age Front door\n');
+		name(h.root, 'Back door');
+		expect(h.markdown()).toContain('```age Back door\n');
+		expect(h.opened()).toEqual(['the new code']);
+
+		h.press('Cancel');
+
+		expect(h.markdown()).toBe(`${fence(armor, 'Front door')}\n`);
+	});
+
+	it('goes back with Cancel where it is all that changed', async () => {
+		const armor = sealed('the door code');
+		const fake = fakeHost();
+		const h = await mount(`${fence(armor, 'Front door')}\n`, fake.host);
+		await h.revealed();
+		name(h.root, 'Back door');
+
+		h.press('Cancel');
+
+		expect(h.markdown()).toBe(`${fence(armor, 'Front door')}\n`);
+		expect(shown(h)).toBe('Front door');
+	});
+
+	it('is taken off the fence where it is emptied, and the block is "Secret" again', async () => {
+		const armor = sealed('the door code');
+		const fake = fakeHost();
+		const h = await mount(`${fence(armor, 'Front door')}\n`, fake.host);
+		await h.revealed();
+
+		name(h.root, '   ');
+
+		expect(h.markdown()).toBe(`${fence(armor)}\n`);
+		expect(shown(h)).toBe('Secret');
+	});
+
+	it('is written with no backtick to end the fence’s first line, its spacing made one', async () => {
+		const armor = sealed('the door code');
+		const fake = fakeHost();
+		const h = await mount(`${fence(armor)}\n`, fake.host);
+		await h.revealed();
+
+		name(h.root, '  Wi-Fi\t`home`  ');
+
+		expect(h.markdown()).toBe(`${fence(armor, 'Wi-Fi home')}\n`);
+	});
+
+	it('goes in with a new secret’s first words, where it was typed before them', async () => {
+		const fake = fakeHost();
+		const h = await mount('Before.\n', fake.host);
+		fake.insert();
+		await vi.waitFor(() => {
+			expect(h.field()).not.toBeNull();
+		});
+
+		name(h.root, 'Locker');
+		expect(h.blocks()).toHaveLength(0);
+		expect(h.onUserEdit).not.toHaveBeenCalled();
+		h.type('1234');
+		await Promise.resolve();
+
+		expect(h.markdown()).toContain('```age Locker\n');
+		expect(h.opened()).toEqual(['1234']);
+		expect(labelField(h.root)?.value).toBe('Locker');
+	});
+
+	it('keeps a character an input method was still composing as the tab locks', async () => {
+		const fake = fakeHost();
+		const armor = sealed('one');
+		const h = await mount(`${fence(armor)}\n`, fake.host);
+		await h.revealed();
+		name(h.root, 'Door\u3042', { composing: true });
+		expect(h.markdown()).toBe(`${fence(armor)}\n`);
+
+		fake.lock();
+
+		expect(h.field()).toBeNull();
+		expect(h.markdown()).toBe(`${fence(armor, 'Door\u3042')}\n`);
+		expect(fake.seal).not.toHaveBeenCalled();
+	});
+
+	it('is shown in the panel as the note has it once undone', async () => {
+		const armor = sealed('the door code');
+		const fake = fakeHost();
+		const h = await mount(`${fence(armor, 'Front door')}\n`, fake.host);
+		await h.revealed();
+		name(h.root, 'Back door');
+
+		undo(h.view.state, (tr) => {
+			h.view.dispatch(tr);
+		});
+		await Promise.resolve();
+
+		expect(h.markdown()).toBe(`${fence(armor, 'Front door')}\n`);
+		expect(labelField(h.root)?.value).toBe('Front door');
+	});
+
+	it('is a secret’s still, pasted from the editor’s own copy', async () => {
+		const armor = sealed('the door code');
+		const h = await mount(`Before.\n\n${fence(armor, 'Front door')}\n\nAfter.\n`);
+		const { state } = h.view;
+		const at = state.doc.child(0).nodeSize;
+		const { dom } = h.view.serializeForClipboard(NodeSelection.create(state.doc, at).content());
+		const end = state.doc.content.size - 1;
+		h.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, end)));
+		vi.stubGlobal(
+			'ClipboardEvent',
+			class extends Event {
+				readonly clipboardData = null;
+			}
+		);
+
+		h.view.pasteHTML(dom.innerHTML);
+
+		expect(h.blocks()).toHaveLength(2);
+		expect(h.markdown().split(fence(armor, 'Front door'))).toHaveLength(3);
 	});
 });
 

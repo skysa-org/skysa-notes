@@ -1937,13 +1937,56 @@ button.danger {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.375rem;
+	max-inline-size: 100%;
+	min-inline-size: 0;
 	color: var(--muted);
 	font-size: 0.875rem;
 }
 
 .secret-label svg {
+	flex: none;
 	width: 1em;
 	height: 1em;
+}
+
+/* What it is called, on one line however long: its own label in the note's
+   colour, the app's word for a secret muted, as it was. */
+.secret-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.secret-label[data-named] {
+	color: var(--fg);
+}
+
+/* The label, over the words: what the closed secret is called, and that it is
+   not encrypted. */
+.secret-label-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	color: var(--muted);
+	font-size: 0.8125rem;
+}
+
+.secret-label-field {
+	flex: 1;
+	min-inline-size: 0;
+	padding: 0.35rem 0.6rem;
+	border: 1px solid var(--border);
+	border-radius: 0.375rem;
+	background: var(--surface);
+	color: var(--fg);
+	font: inherit;
+	font-size: 0.875rem;
+}
+
+.secret-label-hint {
+	margin: -0.25rem 0 0;
+	color: var(--muted);
+	font-size: 0.75rem;
 }
 
 .secret-reveal,

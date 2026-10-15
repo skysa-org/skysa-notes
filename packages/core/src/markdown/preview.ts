@@ -1,7 +1,7 @@
 import type { Link, Paragraph, PhrasingContent, RootContent } from 'mdast';
 
 import { looksArmored } from '../age/armor.js';
-import { isSecretBlock, SECRET_LANGUAGE } from '../secrets.js';
+import { isSecretBlock, SECRET_LANGUAGE, secretLabel } from '../secrets.js';
 import { hrefFileName, isAttachmentHref } from './attachments.js';
 import { parse } from './pipeline.js';
 import { decodeCharacterReferences } from './references.js';
@@ -78,13 +78,16 @@ export type PreviewMark = 'strong' | 'emphasis' | 'delete' | 'code' | 'link';
  * scratchpad card draws there too (`apps/web/src/components/Scratchpad.tsx`).
  * The run it is on still says it in words — its alt text, the chip's name —
  * for all that reads only words, so `previewLines` is the same with or
- * without it. A secret's run says nothing: what the app calls one is the
- * app's to say, in the reader's language.
+ * without it. A secret's run says nothing: what it is called is its label,
+ * the user's own words on its fence (`secretLabel`), which the embed carries
+ * for whatever draws it, or else the app's word for one, in the reader's
+ * language. So a list row's opening has nothing of it, as before it had a
+ * label.
  */
 export type PreviewEmbed = Readonly<
 	| { kind: 'image'; src: string; alt: string }
 	| { kind: 'file'; href: string; name: string; fileName: string }
-	| { kind: 'secret' }
+	| { kind: 'secret'; label?: string }
 >;
 
 /** Words set one way: a line is a row of these. */
@@ -222,6 +225,12 @@ const plainLines = (text: string, marks: readonly PreviewMark[] = []): PreviewRu
 const phrasing = (children: readonly PhrasingContent[]): PreviewRun[][] =>
 	atBreaks(children.flatMap((child) => inline(child, [])));
 
+/** A secret's mark, with its label where its fence has one. */
+const secretEmbed = (meta: string | null | undefined): PreviewEmbed => {
+	const label = secretLabel(meta);
+	return label === undefined ? { kind: 'secret' } : { kind: 'secret', label };
+};
+
 /** The lines a block puts on screen, before whitespace is collapsed. */
 const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 	const as = (lines: readonly PreviewRun[][], more: Partial<LineKind> = {}): PreviewLine[] =>
@@ -237,7 +246,7 @@ const blockLines = (node: RootContent, kind: LineKind): PreviewLine[] => {
 			// armor would otherwise be shown as the code it is not.
 			return isSecretBlock(node.lang, node.value) ||
 				(node.lang === SECRET_LANGUAGE && looksArmored(node.value))
-				? as([[{ text: '', marks: [], embed: { kind: 'secret' } }]])
+				? as([[{ text: '', marks: [], embed: secretEmbed(node.meta) }]])
 				: as(plainLines(node.value), { code: true });
 		case 'html':
 			return EDITOR_BREAK.test(node.value)
