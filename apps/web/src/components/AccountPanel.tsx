@@ -1,4 +1,9 @@
-import { type EntitlementCode, type ProviderKind, type SyncProgress } from '@skysa/core';
+import {
+	type EntitlementCode,
+	isVaultPath,
+	type ProviderKind,
+	type SyncProgress,
+} from '@skysa/core';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
@@ -1050,7 +1055,9 @@ const NotConnected = ({
 /**
  * The note a stuck op is about, when it is still here. A stuck `delete` is
  * about a note the user has already deleted — its row is a tombstone — and
- * offering to open that would be offering nothing.
+ * offering to open that would be offering nothing. Nor a password in the
+ * vault (docs/ARCHITECTURE.md §7, "Passwords in the vault"), which the link
+ * would open in the note editor, its fence's words and all.
  */
 const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: string }) => {
 	// Wrapped, so "not read yet" and "no such note" are not the same answer.
@@ -1063,7 +1070,7 @@ const StuckNote = ({ database, noteId }: { database: NotesDatabase; noteId: stri
 	// The paragraph is part of the answer: rendered outside, it would be an
 	// empty line under the message while the query is out, and for good after
 	// it for a note that is gone.
-	if (note === undefined || note.deletedLocally === 1) return null;
+	if (note === undefined || note.deletedLocally === 1 || isVaultPath(note.path)) return null;
 	return (
 		<p className="muted">
 			<Link to="/" {...noteLink(note)}>

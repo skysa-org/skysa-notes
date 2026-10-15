@@ -1,4 +1,4 @@
-import { SCRATCHPAD_FOLDER } from '@skysa/core';
+import { SCRATCHPAD_FOLDER, VAULT_FOLDER } from '@skysa/core';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -117,6 +117,19 @@ describe('useScratchNotes', () => {
 describe('usePinnedTree', () => {
 	const names = (tree: ReturnType<typeof usePinnedTree>['tree']) =>
 		tree?.map((node) => `${node.path}${node.pinned === 'top' ? '*' : ''}`);
+
+	it('leaves out the scratchpad’s folder and the vault’s, and what is in them', async () => {
+		await createFolder(db, { connectionId: LOCAL_CONNECTION_ID, name: 'Alpha' });
+		await createNote(db, { title: 'Milk', body: 'eggs\n', folderPath: SCRATCHPAD_FOLDER });
+		await createNote(db, { title: 'GitHub', body: '', folderPath: VAULT_FOLDER });
+		await db.prefs.put({ key: ACTIVE_CONNECTION_KEY, value: LOCAL_CONNECTION_ID });
+
+		const { result } = renderHook(() => usePinnedTree(useActiveConnectionId()));
+
+		await waitFor(() => {
+			expect(names(result.current.tree)).toEqual(['Alpha']);
+		});
+	});
 
 	it('brings each source’s notebooks with that source’s pins, together', async () => {
 		await bindConnection(db, { connectionId: 'dropbox-1', provider: 'dropbox' });
@@ -353,6 +366,15 @@ describe('useNoteSearch', () => {
 		expect(result.current).toBeUndefined();
 		await waitFor(() => {
 			expect(result.current?.length).toBe(1);
+		});
+	});
+
+	it('never finds a password, by its label or anything else', async () => {
+		await createNote(db, { title: 'Heap of logins', body: 'heap\n', folderPath: VAULT_FOLDER });
+		const { result } = renderHook(() => useNoteSearch('heap'));
+
+		await waitFor(() => {
+			expect(result.current?.map((hit) => hit.note.title)).toEqual(['Compost']);
 		});
 	});
 

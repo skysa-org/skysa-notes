@@ -156,6 +156,13 @@ describe('planImport', () => {
 		]);
 	});
 
+	it('brings the vault’s passwords in where they were, as a download of the source writes them', () => {
+		const plan = planImport(picked({ '.vault/github.md': '```age\n```\n', 'a.md': 'A\n' }));
+
+		expect(plan.notes.map((note) => note.path)).toEqual(['.vault/github.md', 'a.md']);
+		expect(plan.skipped).toEqual([]);
+	});
+
 	it('changes a name a provider would refuse, and says which', () => {
 		const plan = planImport(picked({ 'Q&A: 2024?/notes.md': 'x' }));
 
@@ -186,6 +193,7 @@ describe('planScratchImport', () => {
 				'Work/plan.md': '# Plan\n',
 				'Work/Q3/budget.md': '# Budget\n',
 				'Work/chart.png': 'png',
+				'.vault/github.md': '```age\n```\n',
 			})
 		);
 
@@ -200,7 +208,8 @@ describe('planScratchImport', () => {
 		// No row for the scratchpad's folder, as a card written here makes none.
 		expect(plan.folders).toEqual([]);
 		// A note in a folder is said, so it can be brought in on its own; a
-		// file in one is not, since it would only be the notes' file.
+		// file in one is not, since it would only be the notes' file. Nor is a
+		// password, which "Import notes" brings in as one, not as a notebook.
 		expect(plan.skipped).toEqual([
 			{ path: 'spare.pdf', reason: 'not-linked' },
 			{ path: 'Work/plan.md', reason: 'in-folder' },

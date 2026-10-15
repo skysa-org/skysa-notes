@@ -1,5 +1,5 @@
 import { type PictureInfo, type PictureVariant, type ProviderKind } from '@skysa/core';
-import Dexie, { type Table } from 'dexie';
+import Dexie, { type Table, type Transaction } from 'dexie';
 
 import { type EditorMode } from '../editor/mode.js';
 import { letGoWhenFrozen } from './frozenTab.js';
@@ -530,6 +530,23 @@ export const refIn = (ref: string, connectionId: string): boolean =>
 	ref.startsWith(`${JSON.stringify([connectionId]).slice(0, -1)},`);
 
 /**
+ * Every source's cursor dropped and `rootId` kept, as "Re-scan" does (`resync`
+ * in `sync/scheduler.ts`), so the next sync of each is a scan: what a change to
+ * what `isHidden` lets through needs, since a feed names a file again only when
+ * it changes. A scan reads nothing this device already holds at its version.
+ */
+const dropCursors = async (tx: Transaction): Promise<void> => {
+	const rows = (await tx.table('syncState').toArray()) as SyncStateRecord[];
+	await tx
+		.table('syncState')
+		.bulkPut(
+			rows
+				.filter((row) => row.cursor !== undefined)
+				.map(({ cursor: _cursor, ...kept }) => kept)
+		);
+};
+
+/**
  * Built without subclassing Dexie: the table properties are declared through the
  * cast instead, which keeps this module free of `this` and classes.
  */
@@ -656,25 +673,12 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		clipThumbs: '[connectionId+name], connectionId',
 	});
 
-	// Every source reads its remote once more, as "Re-scan" does: the cursor
-	// dropped and `rootId` kept (`resync` in `sync/scheduler.ts`). A build from
+	// Every source reads its remote once more (`dropCursors`). A build from
 	// before the scratchpad (#269) took `.scratchpad/` for hidden, so a cursor
 	// it moved on passed over every scratch note another device had sent by
-	// then, and a feed names a file again only when it changes: those notes
-	// never came, on a device that updated after they were made. A scan lists
-	// them, and reads nothing this device already holds at its version.
-	db.version(10)
-		.stores({})
-		.upgrade(async (tx) => {
-			const rows = (await tx.table('syncState').toArray()) as SyncStateRecord[];
-			await tx
-				.table('syncState')
-				.bulkPut(
-					rows
-						.filter((row) => row.cursor !== undefined)
-						.map(({ cursor: _cursor, ...kept }) => kept)
-				);
-		});
+	// then: those notes never came, on a device that updated after they were
+	// made.
+	db.version(10).stores({}).upgrade(dropCursors);
 
 	// Secrets in a note (docs/ARCHITECTURE.md §7): the last read of each source's
 	// key file, and the keys this device holds for it. One row each per source,
@@ -684,6 +688,12 @@ export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 		keyFiles: 'connectionId',
 		secretKeys: 'connectionId',
 	});
+
+	// Every source reads its remote once more, as at version 10, for the vault's
+	// passwords (docs/ARCHITECTURE.md §7, "Passwords in the vault"): a build from
+	// before them took `.vault/` for hidden, and its cursor passed over every
+	// item another device had sent by then.
+	db.version(12).stores({}).upgrade(dropCursors);
 
 	// A build with a later version than the last one above, opening this database
 	// in another tab, must find this tab stopped rather than still writing —

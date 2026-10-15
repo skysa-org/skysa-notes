@@ -11,6 +11,7 @@ export {
 	ENCRYPTION_FILE,
 	ENCRYPTION_SCHEMA_VERSION,
 	SCRATCHPAD_FOLDER,
+	VAULT_FOLDER,
 	type ProviderKind,
 } from './config.js';
 
@@ -166,6 +167,8 @@ export {
 export * from './age/index.js';
 export * from './hash.js';
 export * from './markdown/index.js';
+export * from './password.js';
 export * from './paths.js';
 export * from './sealing.js';
 export * from './secrets.js';
+export * from './vault.js';
