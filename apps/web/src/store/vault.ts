@@ -53,7 +53,7 @@ export const listVaultNotes = async (
 	(
 		await db.notes
 			.where('[connectionId+path]')
-			.between([connectionId, `${VAULT_FOLDER}/`], [connectionId, `${VAULT_FOLDER}/￿`])
+			.between([connectionId, `${VAULT_FOLDER}/`], [connectionId, `${VAULT_FOLDER}/\uffff`])
 			.toArray()
 	)
 		.filter((note) => note.deletedLocally === 0 && isVaultPath(note.path))

@@ -11,7 +11,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 import type { AttachmentProblem } from '../editor/attachHost.js';
 import { Icon } from '../editor/icons.js';
-import type { Opened, Sealer } from '../editor/secretHost.js';
+import type { Opened, Sealer, SecretHost } from '../editor/secretHost.js';
 import { t } from '../i18n/t.js';
 import { db, type NoteRecord } from '../store/db.js';
 import { deleteNote, type EditBase, isUnnamed, renameNote, saveVaultItem } from '../store/notes.js';
@@ -110,6 +110,8 @@ export interface PasswordItemProps {
 	onClose: () => void;
 	/** The edit went into another note, a copy beside this one, which is the one to show now. */
 	onOpen: (note: NoteRecord) => void;
+	/** The secrets host, in place of the note's own (`useNoteSecrets`): for tests. */
+	host?: SecretHost;
 }
 
 /** A field shown, with its button. */
@@ -162,9 +164,10 @@ export const PasswordItem = ({
 	onDelete,
 	onClose,
 	onOpen,
+	host: givenHost,
 }: PasswordItemProps) => {
 	const secrets = useNoteSecrets(note, { report: onProblem });
-	const { host } = secrets;
+	const host = givenHost ?? secrets.host;
 	/** A new item, until Done keeps it. */
 	const [fresh, setFresh] = useState(draft !== undefined);
 	/** Opening again where it was cancelled: the Unlock button, and a key added. */

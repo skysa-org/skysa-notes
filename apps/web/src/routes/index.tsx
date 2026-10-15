@@ -2062,8 +2062,10 @@ const Home = () => {
 					draft={place.noteDraft}
 					onProblem={setProblem}
 					onDelete={deletePassword}
+					// Not `select`, which would take down what the item had to
+					// say: why a new one could not be begun.
 					onClose={() => {
-						select({ folder: VAULT_FOLDER, note: undefined }, { replace: true });
+						go({ folder: VAULT_FOLDER }, { replace: true, notePath: undefined });
 					}}
 					onOpen={(note) => {
 						select({ folder: VAULT_FOLDER, note: note.id }, { replace: true, note });

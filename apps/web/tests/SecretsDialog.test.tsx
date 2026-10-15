@@ -18,6 +18,7 @@ import { createSecretsLock, type SecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type KeyFileRecord, type NotesDatabase } from '../src/store/db.js';
 import { createNote } from '../src/store/notes.js';
 import { enrol, enrolment, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
+import { getPasswordsShown } from '../src/store/vault.js';
 import { type KeyFileWrite } from '../src/sync/keyFile.js';
 import { readQr } from './qrRead.js';
 
@@ -504,7 +505,9 @@ const closeButton = () =>
 
 /** What a step can go on to besides its answer, in the step itself. */
 const optionsOf = (): (string | null)[] =>
-	[...document.querySelectorAll('.dialog-options button')].map((button) => button.textContent);
+	[...document.querySelectorAll('.dialog-options button:not([role="switch"])')].map(
+		(button) => button.textContent
+	);
 
 /** What is done with what a step shows, by it. */
 const toolsOf = (): (string | null)[] =>
@@ -724,6 +727,32 @@ describe('an enrolled device', () => {
 			'Change how this device unlocks',
 			'Replace this source’s key',
 		]);
+	});
+
+	it('shows the source’s passwords on this device by its switch, off until turned on', async () => {
+		const h = await enrolled();
+		h.open();
+		const passwords = await screen.findByRole('switch', { name: 'Passwords' });
+		await waitFor(() => {
+			expect(passwords.getAttribute('aria-checked')).toBe('false');
+		});
+		expect(passwords.getAttribute('aria-describedby')).not.toBeNull();
+		expect(
+			document.getElementById(passwords.getAttribute('aria-describedby') ?? '')?.textContent
+		).toBe('Show Passwords under the notebooks on this device.');
+
+		await h.user.click(passwords);
+		await waitFor(() => {
+			expect(passwords.getAttribute('aria-checked')).toBe('true');
+		});
+		expect(await getPasswordsShown(h.db, 'c1')).toBe(true);
+		// Locked or not: showing the list asks for no unlock.
+		expect(h.lock.isUnlocked('c1')).toBe(false);
+
+		await h.user.click(passwords);
+		await waitFor(async () => {
+			expect(await getPasswordsShown(h.db, 'c1')).toBe(false);
+		});
 	});
 
 	it('changes how it unlocks, unlocking first where it is locked', async () => {
