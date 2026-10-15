@@ -277,14 +277,18 @@ export const editor = {
 		notCopied: 'The secret could not be put on the clipboard.',
 		cancel: 'Cancel',
 		done: 'Done',
-		/** Why a secret cannot be made or opened here, where the source's Secrets dialog is the way on. */
-		notSetUp:
-			'This source is not set up for secrets. Choose Set up secrets… in its menu to set it up.',
+		/**
+		 * Why a secret cannot be made or opened here, where the source's Secrets
+		 * dialog is the way on: said with a button that opens it (`setUp`, `open`).
+		 */
+		notSetUp: 'This source is not set up for secrets.',
 		notEnrolled:
-			'This device cannot open secrets in this source yet. Choose Secrets… in its menu, and type its recovery key.',
+			'This device cannot open secrets in this source yet. It needs the source’s recovery key.',
 		replaced:
-			'This source’s key was replaced on another device. Choose Secrets… in its menu, and type the new recovery key.',
-		lost: 'This source’s folder no longer names its key. Choose Secrets… in its menu to put it back.',
+			'This source’s key was replaced on another device. This device needs the new recovery key.',
+		lost: 'This source’s folder no longer names its key.',
+		setUp: 'Set up secrets',
+		open: 'Open Secrets',
 		/** Said in the panel, where what was typed could not be encrypted into the note. */
 		notSealed:
 			'What you typed could not be encrypted, and is not saved yet. Keep typing to try again.',

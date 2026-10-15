@@ -7,6 +7,7 @@ import { t } from '../i18n/t.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import type { SecretsLock } from '../secrets/lock.js';
 import { tabLock } from '../secrets/tabLock.js';
+import { connectedSources } from '../store/connection.js';
 import {
 	db as appDb,
 	type KeyFileRecord,
@@ -15,7 +16,11 @@ import {
 	type UnlockKind,
 } from '../store/db.js';
 import { enrolment, type UnlockedKeys } from '../store/secretKeys.js';
+import { tabName, UNKNOWN_LABEL } from '../sync/account.js';
+import type { KeyFileSync } from '../sync/keyFile.js';
+import { syncScheduler } from '../sync/runtime.js';
 import { AddKeyDialog } from './AddKeyDialog.js';
+import { SecretsDialog } from './SecretsDialog.js';
 import { UnlockDialog } from './UnlockDialog.js';
 
 /**
@@ -31,8 +36,10 @@ import { UnlockDialog } from './UnlockDialog.js';
  * another key; and a secret opened as the lock closed is not shown. A
  * secret none of the device's keys opens can have its key added here, over
  * the note (`AddKeyDialog`). Setting a source up, and enrolling a device, are
- * the source's Secrets dialog's: where either is wanted, the host says where
- * it is.
+ * the source's Secrets dialog's: where either is wanted, the host says so with
+ * a button that opens it over the note (`SecretsDialog`), rather than sending
+ * the user to the source's menu for it (2026-10-15, the owner's ask). So does
+ * Use the recovery key, in the unlock asked for here, without the detour.
  */
 
 export interface NoteSecretsOptions {
@@ -43,6 +50,8 @@ export interface NoteSecretsOptions {
 	age?: () => Promise<Age>;
 	/** Words to the system clipboard. */
 	copy?: (text: string) => Promise<void>;
+	/** The source's key file, read again and written, for its Secrets dialog. */
+	keyFile?: Pick<KeyFileSync, 'refresh' | 'write'>;
 }
 
 export interface NoteSecrets {
@@ -70,6 +79,24 @@ interface Adding {
 const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(text);
 
 const warning = (message: string): AttachmentProblem => ({ message, tone: 'warning' });
+
+/**
+ * Why a secret cannot be made or opened here; and whether the source's Secrets
+ * dialog is the way on, to set the source up or to put the device right.
+ */
+interface Why {
+	readonly message: string;
+	readonly way?: 'setUp' | 'open';
+}
+
+const notEnrolled = (): Why => ({ message: t('editor.secret.notEnrolled'), way: 'open' });
+
+/** What the source is called, as its tab calls it, for its key's printed page. */
+const nameOf = async (database: NotesDatabase, connectionId: string): Promise<string> => {
+	const all = await connectedSources(database);
+	const source = all.find((each) => each.connectionId === connectionId);
+	return source === undefined ? UNKNOWN_LABEL : tabName(source, all);
+};
 
 /** What opening needs of the keys, copied: the lock wipes its own in place. */
 interface Held {
@@ -100,14 +127,18 @@ const failedOpening = (error: unknown): Opened =>
 const notHere = (
 	file: KeyFileRecord | undefined,
 	enrolled: Awaited<ReturnType<typeof enrolment>>
-): string | undefined => {
-	if (file?.state === 'newer') return t('secrets.newer');
-	if (file?.state === 'invalid') return t('secrets.invalid');
+): Why | undefined => {
+	if (file?.state === 'newer') return { message: t('secrets.newer') };
+	if (file?.state === 'invalid') return { message: t('secrets.invalid') };
 	if (enrolled === undefined) {
-		return file?.state === 'ok' ? t('editor.secret.notEnrolled') : t('editor.secret.notSetUp');
+		return file?.state === 'ok'
+			? notEnrolled()
+			: { message: t('editor.secret.notSetUp'), way: 'setUp' };
 	}
-	if (file?.state !== 'ok') return t('editor.secret.lost');
-	return enrolled.recipient === file.recipient ? undefined : t('editor.secret.replaced');
+	if (file?.state !== 'ok') return { message: t('editor.secret.lost'), way: 'open' };
+	return enrolled.recipient === file.recipient
+		? undefined
+		: { message: t('editor.secret.replaced'), way: 'open' };
 };
 
 /** Sealing to `recipient`, with the age code loaded. */
@@ -124,6 +155,7 @@ export const useNoteSecrets = (
 		lock = tabLock,
 		age = loadAge,
 		copy = copyText,
+		keyFile = syncScheduler.keyFile,
 	}: NoteSecretsOptions = {}
 ): NoteSecrets => {
 	// Read when asked, not when the host was made: the editor keeps the host
@@ -139,6 +171,38 @@ export const useNoteSecrets = (
 	const waiting = useRef<Promise<boolean> | undefined>(undefined);
 	/** The editor open now, offering itself for "Insert secret". */
 	const receiver = useRef<(() => void) | undefined>(undefined);
+	/** The source's Secrets dialog, open over the note, and what the source is called. */
+	const [secretsOf, setSecretsOf] = useState<Readonly<{
+		connectionId: string;
+		name: string;
+	}> | null>(null);
+
+	const openSecrets = useCallback(() => {
+		const { connectionId, db: database } = latest.current;
+		void nameOf(database, connectionId)
+			.catch(() => UNKNOWN_LABEL)
+			.then((name) => {
+				setSecretsOf({ connectionId, name });
+			});
+	}, []);
+
+	/** `why`, as a warning, with the way to the Secrets dialog where that is the way on. */
+	const said = useCallback(
+		({ message, way }: Why): AttachmentProblem =>
+			way === undefined
+				? warning(message)
+				: {
+						...warning(message),
+						action: {
+							label:
+								way === 'setUp'
+									? t('editor.secret.setUp')
+									: t('editor.secret.open'),
+							onChoose: openSecrets,
+						},
+					},
+		[openSecrets]
+	);
 
 	/** Whether the source is unlocked, the unlock asked for over the note where it is not. */
 	const unlockedNow = useCallback(async (): Promise<boolean> => {
@@ -146,7 +210,7 @@ export const useNoteSecrets = (
 		if (held.isUnlocked(connectionId)) return true;
 		const enrolled = await enrolment(database, connectionId);
 		if (enrolled === undefined) {
-			say(warning(t('editor.secret.notEnrolled')));
+			say(said(notEnrolled()));
 			return false;
 		}
 		waiting.current ??= new Promise<boolean>((resolve) => {
@@ -161,7 +225,7 @@ export const useNoteSecrets = (
 			});
 		});
 		return waiting.current;
-	}, []);
+	}, [said]);
 
 	/**
 	 * Copies of this device's keys for the source, unlocked first where they
@@ -206,7 +270,7 @@ export const useNoteSecrets = (
 					]);
 					const why = notHere(file, enrolled);
 					if (why !== undefined || enrolled === undefined) {
-						say(warning(why ?? t('editor.secret.notEnrolled')));
+						say(said(why ?? notEnrolled()));
 						return undefined;
 					}
 					// To the recipient this device enrolled with, which needs no
@@ -266,7 +330,7 @@ export const useNoteSecrets = (
 				};
 			},
 		}),
-		[opening, unlocked, unlockedNow]
+		[opening, unlocked, unlockedNow, said]
 	);
 
 	const insert = useCallback(() => {
@@ -290,9 +354,25 @@ export const useNoteSecrets = (
 			/>
 		);
 
+	const secretsDialog =
+		secretsOf === null ? null : (
+			<SecretsDialog
+				database={db}
+				connectionId={secretsOf.connectionId}
+				sourceName={secretsOf.name}
+				keyFile={keyFile}
+				lock={lock}
+				age={age}
+				copy={copy}
+				onClose={() => {
+					setSecretsOf(null);
+				}}
+			/>
+		);
+
 	const dialog =
 		asking === null ? (
-			keyDialog
+			(keyDialog ?? secretsDialog)
 		) : (
 			<UnlockDialog
 				database={db}
@@ -303,9 +383,10 @@ export const useNoteSecrets = (
 					asking.answer(true);
 				}}
 				onRecovery={() => {
-					// The device's copy is gone: what is left is the source's dialog.
+					// The device's copy is gone: what is left is the source's dialog,
+					// opened in the unlock's place.
 					asking.answer(false);
-					latest.current.report(warning(t('editor.secret.notEnrolled')));
+					openSecrets();
 				}}
 				onCancel={() => {
 					asking.answer(false);
