@@ -1,5 +1,25 @@
 # @skysa/web
 
+## 1.4.0
+
+### Minor Changes
+
+- 0c986a9: Secrets: a secret made with a key this device does not have offers "Add its key". The key is checked against that secret, then kept on this device beside the source's own, and the secret opens.
+- abfb776: Secrets: a device whose source key was replaced on another device asks for the new key when it meets a secret made with it, and keeps it as the source's key. A device that still holds the key from before encrypts what that key opens to the new one as it is unlocked, so a replacement that stopped short, or a secret made offline meanwhile, catches up.
+- aa44379: Secrets: a device can unlock a source's secrets with its own lock — fingerprint, face or screen lock — where the browser supports it. It uses a passkey that only ever opens this device's copy of the keys, and one the app stops using is let go of where the browser allows it.
+- 2b44f26: Secrets in the raw editor. A secret's fence shows its encrypted text as it is written, with Reveal at the end of its first line (or Alt+Enter inside it), which opens the same panel as in the rich editor, under the fence. What you type there is encrypted into the fence as you type it, and one undo takes back what was typed. "Insert secret" in the palette works in raw mode too, and writes a new fence after the paragraph, heading or code block you are in, inside its list or quote; Cancel leaves the note exactly as it was. Find in raw mode passes over a secret's fence, so a search never lands in it and Replace never changes it. A scratchpad card shows "Secret" where its note has one, and a scratch note holding only a secret or only a picture is no longer deleted when the "Take a note" box closes. A sync that changes the note elsewhere no longer moves the cursor or takes the focus from an open secret. In `core`, `previewBlocks` gives a secret a line of its own that carries a secret's mark, including one cut short by a preview's length.
+- a87444b: Secrets: "Replace key…" in a source's Secrets dialog makes a new key, or takes one you have, and encrypts the secrets made with the old key to it.
+- 68cd617: Secrets in the rich editor. A secret shows as a closed block that says "Secret" and offers Reveal, which unlocks the device if it is locked and opens the words in a panel under the block, with Copy, Cancel and Done. What you type there is encrypted into the note as you type it, so closing the note, switching mode, the app locking or a sync never finds words that are not saved; Done closes the panel, and Cancel puts the secret back as it was. "Secret" in the slash menu, and "Insert secret" in the palette, write a new one. When the app locks, every open secret closes. A secret copied and pasted, or pasted as markdown, is a secret still. In `core`, sealing and opening an age file no longer wait: `encrypt`, `decrypt`, `opens`, `sealSecret`, `openSecret` and `opensSecret` answer at once, with HKDF and HMAC from `@noble/hashes`.
+- c7f1089: "Set up secrets…", in a source's gear and its `⋯`, sets the source up for secrets: a new recovery key, shown once with Print and Copy and checked by typing two of its groups back, or a key you already have. Each device then unlocks with a pattern, a PIN or a password of its own, which can be changed later without the recovery key. A source already set up asks for its recovery key instead, and a key that would leave existing secrets locked says so first.
+
+### Patch Changes
+
+- Updated dependencies [8852470]
+- Updated dependencies [2b44f26]
+- Updated dependencies [a87444b]
+- Updated dependencies [68cd617]
+  - @skysa/core@1.4.0
+
 ## 1.3.0
 
 ### Minor Changes
