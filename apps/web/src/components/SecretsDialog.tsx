@@ -10,7 +10,6 @@ import {
 	useSyncExternalStore,
 } from 'react';
 
-import { Icon } from '../editor/icons.js';
 import { t } from '../i18n/t.js';
 import { type ReplaceScan } from '../secrets/age.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock, setUpDeviceLock } from '../secrets/deviceLock.js';
@@ -28,7 +27,7 @@ import {
 	type UnlockedKeys,
 } from '../store/secretKeys.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
-import { Dialog, DialogActions } from './Dialog.js';
+import { Dialog, DialogActions, DialogOption, DialogOptions } from './Dialog.js';
 import { GroupCells, SIZES, spilled } from './GroupCells.js';
 import { PasteKey } from './PasteKey.js';
 import { RecoveryQr } from './RecoveryQr.js';
@@ -330,22 +329,6 @@ const PASTE_TEXT: Readonly<Record<Purpose, 'paste' | 'enrol' | 'replaced' | 'ano
 		rekey: 'rekey',
 	};
 
-/**
- * Where a step goes on to another way of doing what it does, or to something
- * else that can be done from it: a list in the step itself, each a row that
- * says where it goes, so the dialog's row keeps to its answer.
- */
-const Options = ({ children }: { children: ReactNode }) => (
-	<div className="dialog-options">{children}</div>
-);
-
-const Option = ({ onClick, children }: { onClick: () => void; children: ReactNode }) => (
-	<button type="button" className="dialog-option" onClick={onClick}>
-		<span>{children}</span>
-		<Icon name="chevron" className="dialog-option-icon" />
-	</button>
-);
-
 /** Secrets already in the source that the key does not open, said before it is used. */
 const Different = ({
 	secrets,
@@ -363,10 +346,10 @@ const Different = ({
 	<div className="secrets-step">
 		<p role="alert">{t('secrets.different.secrets', { count: secrets })}</p>
 		{secrets > 1 && <p>{t('secrets.different.notes', { count: notes })}</p>}
-		<Options>
-			<Option onClick={onUseThat}>{t('secrets.different.useThat')}</Option>
-			<Option onClick={onAddIt}>{t('secrets.different.addIt')}</Option>
-		</Options>
+		<DialogOptions>
+			<DialogOption onClick={onUseThat}>{t('secrets.different.useThat')}</DialogOption>
+			<DialogOption onClick={onAddIt}>{t('secrets.different.addIt')}</DialogOption>
+		</DialogOptions>
 		<DialogActions
 			primary={
 				<button type="button" className="primary" onClick={onContinue}>
@@ -488,10 +471,10 @@ const Device = ({
 				{error}
 			</p>
 		)}
-		<Options>
-			<Option onClick={onChange}>{t('secrets.device.change')}</Option>
-			<Option onClick={onReplaceKey}>{t('secrets.device.replaceKey')}</Option>
-		</Options>
+		<DialogOptions>
+			<DialogOption onClick={onChange}>{t('secrets.device.change')}</DialogOption>
+			<DialogOption onClick={onReplaceKey}>{t('secrets.device.replaceKey')}</DialogOption>
+		</DialogOptions>
 		{/* Unlocked, there is nothing it asks: the ✕ has the focus. */}
 		<DialogActions
 			primary={

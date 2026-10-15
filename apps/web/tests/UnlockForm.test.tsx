@@ -392,7 +392,13 @@ describe('unlocking with the device’s own lock', () => {
 		return device;
 	};
 
-	const setup = async (fill: number | undefined) => {
+	/** What a test changes before the form is drawn, which asks the device straight away. */
+	type Prepare = (db: NotesDatabase, deviceLock: DeviceLock) => Promise<unknown> | undefined;
+
+	const setup = async (
+		fill: number | undefined,
+		{ prepare, dialog = false }: { prepare?: Prepare; dialog?: boolean } = {}
+	) => {
 		const db = createDatabase(`unlock-device-${crypto.randomUUID()}`);
 		opened.push(db);
 		await db.syncState.put({ connectionId: 'c1', clientId: 'install', rootId: 'root' });
@@ -420,33 +426,43 @@ describe('unlocking with the device’s own lock', () => {
 		});
 		const whilePrompting = vi.fn();
 		const deviceLock = deviceAnswering(fill, inPrompt, whilePrompting);
+		await prepare?.(db, deviceLock);
 		const onUnlocked = vi.fn();
 		const onRecovery = vi.fn();
+		const onCancel = vi.fn();
 		const user = userEvent.setup();
+		const props = {
+			database: db,
+			connectionId: 'c1',
+			kind: 'device',
+			lock,
+			onUnlocked,
+			onRecovery,
+			deviceLock,
+		} as const;
 		render(
-			<UnlockForm
-				database={db}
-				connectionId="c1"
-				kind="device"
-				lock={lock}
-				onUnlocked={onUnlocked}
-				onRecovery={onRecovery}
-				deviceLock={deviceLock}
-			/>
+			dialog ? <UnlockDialog {...props} onCancel={onCancel} /> : <UnlockForm {...props} />
 		);
-		return { db, lock, prompting, whilePrompting, deviceLock, onUnlocked, onRecovery, user };
+		return {
+			db,
+			lock,
+			prompting,
+			whilePrompting,
+			deviceLock,
+			onUnlocked,
+			onRecovery,
+			onCancel,
+			user,
+		};
 	};
 
-	it('asks the device only when Unlock is pressed, as a prompt of the app’s own, and holds the keys', async () => {
+	it('asks the device as the form is drawn, with no Unlock to press, as a prompt of the app’s own, and holds the keys', async () => {
 		const h = await setup(RIGHT);
-		expect(screen.getByText('Unlock with this device’s lock.')).toBeTruthy();
-		expect(h.deviceLock.answer).not.toHaveBeenCalled();
-
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 
 		await vi.waitFor(() => {
 			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
 		});
+		expect(h.deviceLock.answer).toHaveBeenCalledTimes(1);
 		expect(h.prompting).toHaveBeenCalledTimes(1);
 		expect(h.whilePrompting).toHaveBeenCalledWith(true);
 		expect(h.lock.keys('c1')?.identities[0]?.[0]).toBe(7);
@@ -456,19 +472,27 @@ describe('unlocking with the device’s own lock', () => {
 		expect(given.every((byte) => byte === 0)).toBe(true);
 	});
 
-	it('offers the recovery key beside another try, where the device’s lock did not answer', async () => {
+	it('has Try again where the device’s lock did not answer, and the recovery key on a line of its own', async () => {
 		const h = await setup(undefined);
-		expect(screen.queryByRole('button', { name: 'Use the recovery key' })).toBeNull();
-
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 
 		expect(
 			await screen.findByText(
 				'Your device’s lock did not answer. Try again, or use the recovery key.'
 			)
 		).toBeTruthy();
-		expect(screen.getByRole('button', { name: 'Unlock' })).toBeTruthy();
-		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
+		const again = screen.getByRole('button', { name: 'Try again' });
+		expect(again.closest('.dialog-actions')).not.toBeNull();
+		expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
+		const recovery = screen.getByRole('button', { name: 'Use the recovery key' });
+		// In the form's middle, not in the row.
+		expect(recovery.closest('.dialog-options')).not.toBeNull();
+		expect(recovery.closest('.dialog-actions')).toBeNull();
+
+		await h.user.click(again);
+		await vi.waitFor(() => {
+			expect(h.deviceLock.answer).toHaveBeenCalledTimes(2);
+		});
+		await h.user.click(await screen.findByRole('button', { name: 'Use the recovery key' }));
 		expect(h.onRecovery).toHaveBeenCalledTimes(1);
 		expect(h.onUnlocked).not.toHaveBeenCalled();
 		expect((await h.db.secretKeys.get('c1'))?.tries).toBe(0);
@@ -477,30 +501,29 @@ describe('unlocking with the device’s own lock', () => {
 	it('leaves only the recovery key where what the device answers no longer opens the keys', async () => {
 		const h = await setup(0x43);
 
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
-
 		expect(
 			await screen.findByText(
 				'This device’s lock no longer opens its key for these secrets. Type the recovery key to set this device up again.'
 			)
 		).toBeTruthy();
 		expect(screen.queryByRole('button', { name: 'Unlock' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
 		await h.user.click(screen.getByRole('button', { name: 'Use the recovery key' }));
 		expect(h.onRecovery).toHaveBeenCalledTimes(1);
 		expect(await h.db.secretKeys.get('c1')).toBeDefined();
 	});
 
 	it('asks nothing of the device, and asks for the PIN, where the device was changed to one since', async () => {
-		const h = await setup(RIGHT);
-		await enrol(h.db, {
-			connectionId: 'c1',
-			recipient: 'age1…',
-			identities: [new Uint8Array(32).fill(7)],
-			unlock: { kind: 'pin', digits: '2468' },
-			rounds: 1000,
+		const h = await setup(RIGHT, {
+			prepare: (db) =>
+				enrol(db, {
+					connectionId: 'c1',
+					recipient: 'age1…',
+					identities: [new Uint8Array(32).fill(7)],
+					unlock: { kind: 'pin', digits: '2468' },
+					rounds: 1000,
+				}),
 		});
-
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 
 		expect(
 			await screen.findByText(
@@ -515,34 +538,38 @@ describe('unlocking with the device’s own lock', () => {
 	});
 
 	it('says so, and asks the new passkey on the next try, where another was made while it asked', async () => {
-		const h = await setup(RIGHT);
 		const other = new Uint8Array([4, 5, 6]).buffer;
 		const asked: ArrayBuffer[] = [];
-		vi.mocked(h.deviceLock.answer).mockImplementation(async (id) => {
-			asked.push(id);
-			if (asked.length === 1) {
-				await enrol(h.db, {
-					connectionId: 'c1',
-					recipient: 'age1…',
-					identities: [new Uint8Array(32).fill(7)],
-					unlock: {
-						kind: 'device',
-						credentialId: other,
-						salt,
-						answer: new Uint8Array(32).fill(9),
-					},
+		const h = await setup(RIGHT, {
+			prepare: (db, deviceLock) => {
+				vi.mocked(deviceLock.answer).mockImplementation(async (id) => {
+					asked.push(id);
+					if (asked.length === 1) {
+						await enrol(db, {
+							connectionId: 'c1',
+							recipient: 'age1…',
+							identities: [new Uint8Array(32).fill(7)],
+							unlock: {
+								kind: 'device',
+								credentialId: other,
+								salt,
+								answer: new Uint8Array(32).fill(9),
+							},
+						});
+					}
+					return new Uint8Array(32).fill(asked.length === 1 ? RIGHT : 9);
 				});
-			}
-			return new Uint8Array(32).fill(asked.length === 1 ? RIGHT : 9);
+				return undefined;
+			},
 		});
 
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 		expect(
 			await screen.findByText(
 				'This device’s unlock was just changed. Unlock with the new one.'
 			)
 		).toBeTruthy();
 		expect(h.onUnlocked).not.toHaveBeenCalled();
+		// Nothing came to nothing: it is unlocked with, not tried again.
 		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 
 		await vi.waitFor(() => {
@@ -555,10 +582,12 @@ describe('unlocking with the device’s own lock', () => {
 	});
 
 	it('leaves only the recovery key where the passkey answers nothing for the salt now', async () => {
-		const h = await setup(RIGHT);
-		vi.mocked(h.deviceLock.answer).mockResolvedValue('unsupported');
-
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		await setup(RIGHT, {
+			prepare: (_db, deviceLock) => {
+				vi.mocked(deviceLock.answer).mockResolvedValue('unsupported');
+				return undefined;
+			},
+		});
 
 		expect(
 			await screen.findByText(
@@ -568,10 +597,7 @@ describe('unlocking with the device’s own lock', () => {
 	});
 
 	it('asks nothing of the device where it holds no keys, and says so', async () => {
-		const h = await setup(RIGHT);
-		await h.db.secretKeys.delete('c1');
-
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		const h = await setup(RIGHT, { prepare: (db) => db.secretKeys.delete('c1') });
 
 		expect(
 			await screen.findByText(
@@ -582,15 +608,64 @@ describe('unlocking with the device’s own lock', () => {
 	});
 
 	it('says a try that failed in the device’s storage, and can be tried again', async () => {
-		const h = await setup(RIGHT);
-		vi.spyOn(h.db.secretKeys, 'get').mockRejectedValueOnce(new Error('closing'));
-
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		const h = await setup(RIGHT, {
+			prepare: (db) => {
+				vi.spyOn(db.secretKeys, 'get').mockRejectedValueOnce(new Error('closing'));
+				return undefined;
+			},
+		});
 		expect(await screen.findByText('That did not work. Try again.')).toBeTruthy();
 
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
+		await h.user.click(screen.getByRole('button', { name: 'Try again' }));
 		await vi.waitFor(() => {
 			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe('in its dialog', () => {
+		const backdrop = () => document.querySelector<HTMLElement>('.modal-backdrop');
+
+		it('is never drawn where the device’s lock unlocks, and gives the focus back', async () => {
+			const opener = document.createElement('button');
+			document.body.append(opener);
+			opener.focus();
+			const h = await setup(RIGHT, { dialog: true });
+			// Asked, with nothing drawn over the page.
+			expect(backdrop()?.hidden).toBe(true);
+			expect(document.activeElement).toBe(opener);
+
+			await vi.waitFor(() => {
+				expect(h.onUnlocked).toHaveBeenCalledTimes(1);
+			});
+			expect(backdrop()?.hidden).toBe(true);
+			expect(h.onCancel).not.toHaveBeenCalled();
+		});
+
+		it('is drawn once the lock did not answer: Cancel and Try again in one row, Try again the focus', async () => {
+			const h = await setup(undefined, { dialog: true });
+			expect(backdrop()?.hidden).toBe(true);
+			// Escape, before it is drawn, is the device's prompt's, not the dialog's.
+			fireEvent.keyDown(document, { key: 'Escape' });
+			expect(h.onCancel).not.toHaveBeenCalled();
+
+			const again = await screen.findByRole('button', { name: 'Try again' });
+			expect(backdrop()?.hidden).toBe(false);
+			expect(
+				[...document.querySelectorAll('.dialog-actions button')].map(
+					(button) => button.textContent
+				)
+			).toEqual(['Cancel', 'Try again']);
+			expect(
+				[...document.querySelectorAll('.dialog-options button')].map(
+					(button) => button.textContent
+				)
+			).toEqual(['Use the recovery key']);
+			await vi.waitFor(() => {
+				expect(document.activeElement).toBe(again);
+			});
+
+			await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
+			expect(h.onCancel).toHaveBeenCalledOnce();
 		});
 	});
 });

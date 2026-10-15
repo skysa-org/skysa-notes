@@ -1347,9 +1347,9 @@ describe('the device’s own lock', () => {
 			await screen.findByText('This device unlocks secrets with its own lock.')
 		).toBeTruthy();
 		await h.user.click(screen.getByRole('button', { name: 'Lock now' }));
+		// One press: the device's lock is asked as the unlock is drawn, with no
+		// Unlock of its own to press.
 		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
-		expect(await screen.findByText('Unlock with this device’s lock.')).toBeTruthy();
-		await h.user.click(screen.getByRole('button', { name: 'Unlock' }));
 
 		expect(await screen.findByText(/^Unlocked now\./u)).toBeTruthy();
 		expect(h.lock.isUnlocked('c1')).toBe(true);
@@ -1510,11 +1510,31 @@ describe('the device’s own lock', () => {
 		expect(forgotten(device)).toEqual([[1, 2, 3]]);
 	});
 
+	it('asks the device as Unlock is pressed, and where it is refused has Cancel and Try again, and the recovery key above them', async () => {
+		const h = await enrolledWithDevice();
+		const { device } = deviceWith(h);
+		vi.mocked(device.answer).mockResolvedValueOnce('refused');
+		h.open({ deviceLock: device });
+		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
+
+		expect(
+			await screen.findByText(
+				'Your device’s lock did not answer. Try again, or use the recovery key.'
+			)
+		).toBeTruthy();
+		expect(device.answer).toHaveBeenCalledTimes(1);
+		expect(buttonRow()).toEqual(['Cancel', 'Try again']);
+		expect(optionsOf()).toEqual(['Use the recovery key']);
+
+		await h.user.click(screen.getByRole('button', { name: 'Try again' }));
+		expect(await screen.findByText(/^Unlocked now\./u)).toBeTruthy();
+		expect(device.answer).toHaveBeenCalledTimes(2);
+	});
+
 	it('lets go of the passkey it unlocked with, once a new one is made in its place', async () => {
 		const h = await enrolledWithDevice();
 		const { device } = deviceWith(h, { state: 'made', credentialId: OTHER });
 		h.open({ deviceLock: device });
-		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
 		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
 		await h.user.click(
 			await screen.findByRole('button', { name: 'Change how this device unlocks' })
@@ -1536,7 +1556,6 @@ describe('the device’s own lock', () => {
 		const h = await enrolledWithDevice(8);
 		const { device } = deviceWith(h);
 		h.open({ deviceLock: device });
-		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
 		await h.user.click(await screen.findByRole('button', { name: 'Unlock' }));
 		await h.user.click(await screen.findByRole('button', { name: 'Use the recovery key' }));
 		await typeKey(h, encodeIdentity(h.identity));
