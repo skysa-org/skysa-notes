@@ -530,10 +530,6 @@ export const refIn = (ref: string, connectionId: string): boolean =>
 	ref.startsWith(`${JSON.stringify([connectionId]).slice(0, -1)},`);
 
 /**
- * Built without subclassing Dexie: the table properties are declared through the
- * cast instead, which keeps this module free of `this` and classes.
- */
-/**
  * Every source's cursor dropped and `rootId` kept, as "Re-scan" does (`resync`
  * in `sync/scheduler.ts`), so the next sync of each is a scan: what a change to
  * what `isHidden` lets through needs, since a feed names a file again only when
@@ -550,6 +546,10 @@ const dropCursors = async (tx: Transaction): Promise<void> => {
 		);
 };
 
+/**
+ * Built without subclassing Dexie: the table properties are declared through the
+ * cast instead, which keeps this module free of `this` and classes.
+ */
 export const createDatabase = (name: string = DATABASE_NAME): NotesDatabase => {
 	const db = new Dexie(name) as NotesDatabase;
 

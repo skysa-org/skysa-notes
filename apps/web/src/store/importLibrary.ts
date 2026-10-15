@@ -6,6 +6,7 @@ import {
 	contentHash,
 	foldName,
 	isHidden,
+	isVaultPath,
 	joinPath,
 	linkedFiles,
 	MAX_ATTACHMENT_BYTES,
@@ -601,7 +602,15 @@ export const planScratchImport = (picked: Picked): ImportPlan => {
 	const into = (path: string) => joinPath(SCRATCHPAD_FOLDER, path);
 	const inFolders = [...down.map((file) => file.path), ...(picked.unread ?? [])]
 		.map(tidy)
-		.filter((path) => isNote(path) && excluded(path) === undefined && !isHidden(path));
+		// Not the vault's passwords, which "Import notes" brings in as passwords
+		// and not as a notebook.
+		.filter(
+			(path) =>
+				isNote(path) &&
+				excluded(path) === undefined &&
+				!isHidden(path) &&
+				!isVaultPath(path)
+		);
 	return {
 		notes: library.notes.map((note) => ({ ...note, path: into(note.path) })),
 		files: library.files.map((file) => ({ ...file, path: into(file.path) })),

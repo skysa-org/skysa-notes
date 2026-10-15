@@ -30,34 +30,47 @@ const randomBytes: RandomBytes = (bytes) => crypto.getRandomValues(bytes);
 
 /** `length` within the lengths a password may be. */
 export const passwordLength = (length: number): number =>
-	Number.isFinite(length)
-		? Math.min(PASSWORD_LENGTH.max, Math.max(PASSWORD_LENGTH.min, Math.round(length)))
-		: PASSWORD_LENGTH.initial;
+	Number.isNaN(length)
+		? PASSWORD_LENGTH.initial
+		: Math.min(PASSWORD_LENGTH.max, Math.max(PASSWORD_LENGTH.min, Math.round(length)));
+
+/**
+ * How many times bytes are drawn before the random source is given up on. A
+ * real one is through in one or two; this stops a source that can never be
+ * (one a caller passed that always gives the same byte) going on until the
+ * stack runs out, at odds of about 2⁻⁵⁸ of failing a real one.
+ */
+const ROUNDS = 64;
+
+/** Thrown where the random source gave too few bytes a password could be made of. */
+const exhausted = (): never => {
+	throw new Error('The random source gave too few usable bytes for a password.');
+};
 
 /** `count` characters of `alphabet` (at most 256 of them), each as likely as any other. */
-const pick = (alphabet: string, count: number, random: RandomBytes): string => {
+const pick = (alphabet: string, count: number, random: RandomBytes, round = 1): string => {
 	const below = 256 - (256 % alphabet.length);
-	const bytes = random(new Uint8Array(count * 2));
-	const taken = Array.from(bytes)
+	const taken = Array.from(random(new Uint8Array(count * 2)))
 		.filter((byte) => byte < below)
 		.slice(0, count)
 		.map((byte) => alphabet.charAt(byte % alphabet.length))
 		.join('');
-	bytes.fill(0);
-	return taken.length === count
-		? taken
-		: `${taken}${pick(alphabet, count - taken.length, random)}`;
+	if (taken.length === count) return taken;
+	return round < ROUNDS
+		? `${taken}${pick(alphabet, count - taken.length, random, round + 1)}`
+		: exhausted();
+};
+
+const draw = (options: PasswordOptions, random: RandomBytes, round: number): string => {
+	const classes = options.symbols ? [LOWER, UPPER, DIGITS, SYMBOLS] : [LOWER, UPPER, DIGITS];
+	const made = pick(classes.join(''), passwordLength(options.length), random);
+	// Made whole again until it has one of each: putting one of each in at a
+	// place chosen for it would make those places easier to guess.
+	if (classes.every((kind) => [...made].some((char) => kind.includes(char)))) return made;
+	return round < ROUNDS ? draw(options, random, round + 1) : exhausted();
 };
 
 export const generatePassword = (
 	options: PasswordOptions,
 	random: RandomBytes = randomBytes
-): string => {
-	const classes = options.symbols ? [LOWER, UPPER, DIGITS, SYMBOLS] : [LOWER, UPPER, DIGITS];
-	const made = pick(classes.join(''), passwordLength(options.length), random);
-	// Made whole again until it has one of each: putting one of each in at a
-	// place chosen for it would make those places easier to guess.
-	return classes.every((kind) => [...made].some((char) => kind.includes(char)))
-		? made
-		: generatePassword(options, random);
-};
+): string => draw(options, random, 1);

@@ -110,16 +110,16 @@ describe('isHidden', () => {
 		expect(isHidden('.Scratchpad/a.md')).toBe(true);
 		expect(isHidden('.clipboard/a.txt')).toBe(true);
 	});
-});
 
-it('leaves the vault’s passwords at the root to sync, and nothing hidden inside them', () => {
-	expect(isHidden('.vault')).toBe(false);
-	expect(isHidden('.vault/github.md')).toBe(false);
-	expect(isHidden('.vault/.DS_Store')).toBe(true);
-	expect(isHidden('work/.vault/a.md')).toBe(true);
-	expect(isHidden('.Vault/a.md')).toBe(true);
-	expect(isHidden('.vaults/a.md')).toBe(true);
-	expect(isHidden('.encryption.json')).toBe(true);
+	it('leaves the vault’s passwords at the root to sync, and nothing hidden inside them', () => {
+		expect(isHidden('.vault')).toBe(false);
+		expect(isHidden('.vault/github.md')).toBe(false);
+		expect(isHidden('.vault/.DS_Store')).toBe(true);
+		expect(isHidden('work/.vault/a.md')).toBe(true);
+		expect(isHidden('.Vault/a.md')).toBe(true);
+		expect(isHidden('.vaults/a.md')).toBe(true);
+		expect(isHidden('.encryption.json')).toBe(true);
+	});
 });
 
 describe('isScratchPath', () => {
