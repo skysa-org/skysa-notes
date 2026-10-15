@@ -5216,11 +5216,32 @@ body:has(.scratch-backdrop) .toolbar-panel.options-menu-items {
 	display: none;
 }
 
-/* Which way the device unlocks: one of three, as a row of toggles. */
+/* Which way the device unlocks: one of three, or four where the device's own
+   lock is offered, as a row of toggles. */
 .unlock-kinds {
 	display: flex;
 	gap: 0.25rem;
 	margin: 0 0 0.75rem;
+}
+
+/* Where the kinds are chosen (`ChooseUnlock`): a container, so the choice
+   folds to the room the form has rather than to the window's. */
+.choose-unlock {
+	container: choose-unlock / inline-size;
+}
+
+/* All four kinds, with the device's own lock offered, crush one another in a
+   row as narrow as a phone's dialog: two by two there (2026-10-15, the
+   owner's ask). Three fit in a row at any width. */
+@container choose-unlock (width < 24rem) {
+	.unlock-kinds:has(> :nth-child(4)) {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.unlock-kinds button {
+		text-wrap: balance;
+	}
 }
 
 .modal .unlock-kinds button[aria-checked='true'] {
