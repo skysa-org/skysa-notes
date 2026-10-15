@@ -24,6 +24,7 @@ import {
 	secretFile,
 	secretLabel,
 	serializeEncryptionFile,
+	withoutArmor,
 } from '../src/secrets.js';
 import {
 	IDENTITY,
@@ -208,6 +209,53 @@ describe('the secrets in a note', () => {
 		expect(opensSecret(SEALED_HERE, [generateIdentity(), identity])).toBe(true);
 		expect(opensSecret(SEALED_HERE, [generateIdentity()])).toBe(false);
 		expect(opensSecret('not armor', [identity])).toBe(false);
+	});
+});
+
+describe('a note’s words, for its search index', () => {
+	it('have each secret as its label, at any depth, and nothing of its armor or its fence', () => {
+		const body = [
+			'# Note',
+			'',
+			'```age Wi-Fi password',
+			SEALED_HERE,
+			'```',
+			'',
+			'- item',
+			'',
+			'  > ```age',
+			...SEALED_BY_AGE.split('\n').map((line) => `  > ${line}`),
+			'  > ```',
+			'',
+			'after',
+			'',
+		].join('\n');
+		expect(withoutArmor(body)).toBe(
+			['# Note', '', 'Wi-Fi password', '', '- item', '', '  > ', '', 'after', ''].join('\n')
+		);
+	});
+
+	it('keep an `age` fence that is not armor, and armor in a fence of another language, as the code they are', () => {
+		const code = ['```age', 'not armor', '```', '', '```text', SEALED_HERE, '```'].join('\n');
+		expect(withoutArmor(`${code}\n\n\`\`\`age\n${SEALED_HERE}\n\`\`\`\n`)).toBe(
+			`${code}\n\n\n`
+		);
+	});
+
+	it('leave out an `age` fence that opens as armor and does not read, as a preview does', () => {
+		expect(withoutArmor(`Server key\n\n\`\`\`age\n${SEALED_HERE.slice(0, 120)}`)).toBe(
+			'Server key\n\n'
+		);
+	});
+
+	it('are the body as it is, line endings and all, where there is no armor', () => {
+		const body = 'a\r\n\r\n```age\r\nnot armor\r\n```\r\n';
+		expect(withoutArmor(body)).toBe(body);
+	});
+
+	it('are found where the body’s lines end `\\r\\n`', () => {
+		const body = ['a', '', '```age key', SEALED_HERE, '```', 'b', ''].join('\r\n');
+		expect(withoutArmor(body)).toBe('a\n\nkey\nb\n');
 	});
 });
 

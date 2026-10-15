@@ -37,6 +37,9 @@ export const armor = (file: Uint8Array): string => {
 /** Whether `text` opens as armor does, which is all a quick look needs. */
 export const looksArmored = (text: string): boolean => text.trimStart().startsWith(BEGIN);
 
+/** Whether armor could be anywhere in `text`: a look that spares reading one with none. */
+export const mentionsArmor = (text: string): boolean => text.includes(BEGIN);
+
 /** The age file inside armor, or an `armor` failure. */
 export const dearmor = (text: string): Uint8Array => {
 	const at = { current: 0 };

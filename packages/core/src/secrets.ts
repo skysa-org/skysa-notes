@@ -1,7 +1,7 @@
 import type { Node, Parent } from 'mdast';
 import { z } from 'zod';
 
-import { dearmor } from './age/armor.js';
+import { dearmor, looksArmored, mentionsArmor } from './age/armor.js';
 import { encodeIdentity, parseIdentity, spellsRecipient } from './age/keys.js';
 import { ENCRYPTION_FILE, ENCRYPTION_SCHEMA_VERSION } from './config.js';
 import { firstLineEnding, toLf, withLineEnding } from './markdown/lineEndings.js';
@@ -60,6 +60,51 @@ export const secretBlocksIn = (body: string): string[] => {
 		return children === undefined ? [] : children.flatMap(inside);
 	};
 	return inside(parse(body));
+};
+
+/** Where a secret is written in a body, and the label it is to be indexed by. */
+interface Written {
+	readonly from: number;
+	readonly to: number;
+	readonly label: string;
+}
+
+/**
+ * `body` with each secret in it as its label, or as nothing where it has none:
+ * a note's words, for its search index (docs/ARCHITECTURE.md §7, "Secrets in a
+ * note"). The armor's base64 is no word of the note's, and indexed, a short
+ * query would find the note by a run of letters that happened to be in it; nor
+ * is the `age` its fence opens with. An `age` fence that opens as armor and
+ * does not read is taken out too, as a preview takes it (`previewBlocks`): it
+ * is ciphertext still.
+ *
+ * A body with no armor in it is handed back as it is, unread: that is nearly
+ * every note, and reading one as markdown is most of what indexing it would
+ * cost (#275). Its lines end in `\n` where it has a secret.
+ */
+export const withoutArmor = (body: string): string => {
+	if (!mentionsArmor(body)) return body;
+	const inside = (node: Node): Written[] => {
+		if (node.type === 'code') {
+			const { lang, meta, value, position } = node as Node & {
+				lang?: string | null;
+				meta?: string | null;
+				value: string;
+			};
+			const from = position?.start.offset;
+			const to = position?.end.offset;
+			if (lang !== SECRET_LANGUAGE || !looksArmored(value)) return [];
+			if (from === undefined || to === undefined) return [];
+			return [{ from, to, label: secretLabel(meta) ?? '' }];
+		}
+		const { children } = node as Partial<Parent>;
+		return children === undefined ? [] : children.flatMap(inside);
+	};
+	const text = toLf(body);
+	return inside(parse(text)).reduceRight(
+		(sofar, { from, to, label }) => `${sofar.slice(0, from)}${label}${sofar.slice(to)}`,
+		text
+	);
 };
 
 /** A secret's fence, as the lines of the body it is written on. */
