@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useId, useState } from 'react';
+import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock } from '../secrets/deviceLock.js';
@@ -13,7 +13,7 @@ import {
 	unlockKeys,
 	type UnlockResult,
 } from '../store/secretKeys.js';
-import { Dialog, DialogActions } from './Dialog.js';
+import { Dialog, DialogActions, DialogOption, DialogOptions } from './Dialog.js';
 import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEntry.js';
 
 /**
@@ -21,9 +21,11 @@ import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEn
  * "Secrets in a note"): its pattern, PIN or password, tried against the keys
  * the device holds. A wrong try says so, the last few say how many are left,
  * one too soon after the fifth waits, and the tenth leaves the recovery key.
- * Or the device's own lock, asked when Unlock is pressed, which counts its own
- * tries: where it does not answer, the recovery key is offered beside a try
- * again, since a passkey deleted and one refused look the same from here.
+ * Or the device's own lock, which counts its own tries, asked as soon as the
+ * form is: Unlock pressed only to be asked was a tap for nothing (the owner,
+ * 2026-10-15). Where it does not answer, Try again is the answer, and the
+ * recovery key is offered beside it, since a passkey deleted and one refused
+ * look the same from here.
  * Where the unlock was changed in another tab since the form was shown, the
  * form for the new one takes its place, and says so.
  *
@@ -45,6 +47,12 @@ export interface UnlockFormProps {
 	deviceLock?: DeviceLock;
 	/** Buttons of the step the form is in, in its row before Unlock. */
 	extra?: ReactNode;
+	/**
+	 * Told once the device's own lock, asked as the form is drawn, has said
+	 * anything but yes: a dialog that is only this form is drawn then, and not
+	 * before, so a yes asks nothing of the user but what the lock asked.
+	 */
+	onAsked?: () => void;
 }
 
 type Gone = 'forgotten' | 'none' | 'changed';
@@ -137,6 +145,7 @@ const DeviceUnlockForm = ({
 	moved,
 	onOtherWay,
 	extra,
+	onAsked,
 }: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & Asking & { deviceLock: DeviceLock }) => {
 	const askId = useId();
 	const [busy, setBusy] = useState(false);
@@ -150,13 +159,14 @@ const DeviceUnlockForm = ({
 			() => undefined
 		);
 		setBusy(false);
-		if (result === 'unanswered') {
-			setSaid({ kind: 'unanswered' });
-			return;
-		}
-		if (result?.status === 'unlocked') {
+		if (result !== 'unanswered' && result?.status === 'unlocked') {
 			lock.hold(result.keys);
 			onUnlocked();
+			return;
+		}
+		onAsked?.();
+		if (result === 'unanswered') {
+			setSaid({ kind: 'unanswered' });
 			return;
 		}
 		if (result?.status === 'none' || result?.status === 'changed') {
@@ -171,23 +181,48 @@ const DeviceUnlockForm = ({
 		setSaid({ kind: 'failed' });
 	};
 
+	// Asked as the form is drawn, once: a strict mode's second mount is the same
+	// form, and asks nothing more.
+	const asked = useRef(false);
+	useEffect(() => {
+		if (asked.current) return;
+		asked.current = true;
+		void attempt();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+	// A try that came to nothing is tried again, not unlocked as if for the first time.
+	const again = said.kind === 'unanswered' || said.kind === 'failed';
+
 	if (said.kind === 'gone')
 		return <GoneForm why={said.why} onRecovery={onRecovery} extra={extra} />;
 
 	return (
 		<form
-			className="unlock-form"
+			className="unlock-form unlock-device"
 			onSubmit={(event) => {
 				event.preventDefault();
 				void attempt();
 			}}
 		>
-			<p id={askId}>{t('secrets.unlock.device')}</p>
+			{/* Where the lock did not answer, that is what is said, in place of
+			    what is asked: the dialog is often drawn only then. */}
+			<p id={askId}>
+				{said.kind === 'unanswered'
+					? t('secrets.unlock.unanswered')
+					: t('secrets.unlock.device')}
+			</p>
 			<div className="secrets-said" role="status">
 				{changedNow(moved, said) && <p>{t('secrets.unlock.otherWay')}</p>}
 				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
-				{said.kind === 'unanswered' && <p>{t('secrets.unlock.unanswered')}</p>}
 			</div>
+			{/* The other way in, on a line of its own: the row is Try again's. */}
+			{said.kind === 'unanswered' && (
+				<DialogOptions>
+					<DialogOption onClick={onRecovery}>
+						{t('secrets.unlock.useRecovery')}
+					</DialogOption>
+				</DialogOptions>
+			)}
 			<DialogActions
 				primary={
 					<button
@@ -196,15 +231,10 @@ const DeviceUnlockForm = ({
 						disabled={busy}
 						aria-describedby={askId}
 					>
-						{t('secrets.unlock.unlock')}
+						{again ? t('common.tryAgain') : t('secrets.unlock.unlock')}
 					</button>
 				}
 			>
-				{said.kind === 'unanswered' && (
-					<button type="button" onClick={onRecovery}>
-						{t('secrets.unlock.useRecovery')}
-					</button>
-				)}
 				{extra}
 			</DialogActions>
 		</form>
@@ -367,13 +397,24 @@ export interface UnlockDialogProps extends Omit<UnlockFormProps, 'onUnlocked' | 
 	returnFocus?: RefObject<HTMLElement | null>;
 }
 
-export const UnlockDialog = ({ onCancel, returnFocus, ...form }: UnlockDialogProps) => (
-	<Dialog
-		title={t('secrets.unlock.title')}
-		className="secrets-dialog"
-		onClose={onCancel}
-		returnFocus={returnFocus}
-	>
-		<UnlockForm {...form} />
-	</Dialog>
-);
+export const UnlockDialog = ({ onCancel, returnFocus, ...form }: UnlockDialogProps) => {
+	// The device's own lock is asked with nothing drawn: the dialog is drawn
+	// once it says anything but yes, and never where it unlocks.
+	const [asked, setAsked] = useState(form.kind !== 'device');
+	return (
+		<Dialog
+			title={t('secrets.unlock.title')}
+			className="secrets-dialog"
+			onClose={onCancel}
+			returnFocus={returnFocus}
+			hidden={!asked}
+		>
+			<UnlockForm
+				{...form}
+				onAsked={() => {
+					setAsked(true);
+				}}
+			/>
+		</Dialog>
+	);
+};

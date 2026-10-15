@@ -367,6 +367,12 @@ export interface DialogProps {
 	 * had it before, if that is still on the page.
 	 */
 	returnFocus?: RefObject<HTMLElement | null> | undefined;
+	/**
+	 * Mounted, so what it holds can begin, but not drawn yet, and taking
+	 * neither the focus nor a key: the unlock dialog while the device's own
+	 * lock is asked, drawn only where that does not unlock (`UnlockDialog`).
+	 */
+	hidden?: boolean | undefined;
 	className?: string | undefined;
 }
 
@@ -382,6 +388,7 @@ export const Dialog = ({
 	status,
 	busy,
 	returnFocus,
+	hidden = false,
 	className,
 }: DialogProps) => {
 	const titleId = useId();
@@ -404,14 +411,19 @@ export const Dialog = ({
 	useEffect(() => {
 		// Read now: what it names is on the page for as long as the dialog is.
 		const back = returnFocus?.current ?? opener;
-		const element = dialog.current;
-		if (element !== null && !element.contains(document.activeElement)) focusFirst(element);
 		return () => {
 			if (back instanceof HTMLElement && back.isConnected) back.focus();
 		};
-		// Mount and unmount only: the focus is taken once and given back once.
+		// Mount and unmount only: the focus is given back once.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
+
+	// Taken as the dialog is first drawn: as it opens, or as it stops being hidden.
+	useEffect(() => {
+		const element = dialog.current;
+		if (hidden || element === null || element.contains(document.activeElement)) return;
+		focusFirst(element);
+	}, [hidden]);
 
 	// On the document, not the dialog: a step that goes takes the focus with
 	// it, to the page's body, for a moment, and the keys must still reach the
@@ -419,7 +431,7 @@ export const Dialog = ({
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
 			const element = dialog.current;
-			if (event.defaultPrevented || element === null || !onTop(element)) return;
+			if (hidden || event.defaultPrevented || element === null || !onTop(element)) return;
 			if (event.key === 'Escape') {
 				if (onClose === undefined) return;
 				event.preventDefault();
@@ -438,7 +450,7 @@ export const Dialog = ({
 		return () => {
 			document.removeEventListener('keydown', onKey);
 		};
-	}, [onClose, busy]);
+	}, [onClose, busy, hidden]);
 
 	const shell = {
 		ref: setDialog,
@@ -487,7 +499,7 @@ export const Dialog = ({
 	);
 
 	return createPortal(
-		<div ref={backdrop} className="modal-backdrop">
+		<div ref={backdrop} className="modal-backdrop" hidden={hidden}>
 			{onSubmit === undefined ? (
 				<div {...shell}>{inside}</div>
 			) : (
@@ -591,6 +603,28 @@ export const InlineDialog = ({
 		</div>
 	);
 };
+
+/**
+ * Where a step goes on to another way of doing what it does, or to something
+ * else that can be done from it: a list in the dialog's middle, a row each with
+ * a chevron saying it goes on, so the row at the foot keeps to its answer.
+ */
+export const DialogOptions = ({ children }: { children: ReactNode }) => (
+	<div className="dialog-options">{children}</div>
+);
+
+export const DialogOption = ({
+	onClick,
+	children,
+}: {
+	onClick: () => void;
+	children: ReactNode;
+}) => (
+	<button type="button" className="dialog-option" onClick={onClick}>
+		<span>{children}</span>
+		<Icon name="chevron" className="dialog-option-icon" />
+	</button>
+);
 
 export interface DialogActionsProps {
 	/** The answer: on the right, and where the focus starts if no field takes it. */
