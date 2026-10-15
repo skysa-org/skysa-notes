@@ -258,13 +258,27 @@ const CardChip = ({ embed }: { embed: Embedded<'file'> }) => (
 	</span>
 );
 
-/** A picture or a chip in a card's line, where `words` is what it says. */
-export const CardEmbed = ({ embed, words }: { embed: PreviewEmbed; words: string }) =>
-	embed.kind === 'image' ? (
-		<CardPicture embed={embed} words={words} />
-	) : (
-		<CardChip embed={embed} />
-	);
+/** A secret, closed, as the note shows one: nothing of it but that it is one. */
+const CardSecret = () => (
+	<span className="attachment-chip scratch-card-chip scratch-card-secret">
+		<span className="attachment-icon" aria-hidden="true">
+			<Icon name="lock" />
+		</span>
+		<span className="attachment-name">{t('editor.secret.label')}</span>
+	</span>
+);
+
+/** A picture, a chip or a secret in a card's line, where `words` is what it says. */
+export const CardEmbed = ({ embed, words }: { embed: PreviewEmbed; words: string }) => {
+	switch (embed.kind) {
+		case 'image':
+			return <CardPicture embed={embed} words={words} />;
+		case 'file':
+			return <CardChip embed={embed} />;
+		case 'secret':
+			return <CardSecret />;
+	}
+};
 
 /** Whether any of a card's lines has a picture in it, and so needs its files. */
 export const hasPictures = (lines: readonly { runs: readonly { embed?: PreviewEmbed }[] }[]) =>

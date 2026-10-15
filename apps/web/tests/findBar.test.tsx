@@ -39,7 +39,8 @@ const open = (body = BODY) => {
 };
 
 const find = () => screen.getByLabelText('Find');
-const count = () => screen.getByRole('status').textContent;
+// The bar's own: a secret in the note says why it will not reveal in one too.
+const count = () => document.querySelector('.find-count')?.textContent;
 const doc = (editor: EditorView) => editor.state.doc.toString();
 const marks = (editor: EditorView) => editor.dom.querySelectorAll('.cm-find-match').length;
 
@@ -51,6 +52,51 @@ describe('the find bar', () => {
 		await user.type(find(), 'one');
 
 		expect(count()).toBe('1 of 3');
+	});
+
+	it('finds nothing in a secret’s armor, and replaces nothing there', async () => {
+		const user = userEvent.setup();
+		const secret = [
+			'-----BEGIN AGE ENCRYPTED FILE-----',
+			'YWdlAAAAcnlwdGlvbi5vcmcvdjEKLT4gWDI1NTE5IEFBQUFB',
+			'-----END AGE ENCRYPTED FILE-----',
+		].join('\n');
+		const { editor } = open(`AAAA before\n\n\`\`\`age\n${secret}\n\`\`\`\n\nAAAA after\n`);
+
+		await user.type(find(), 'AAAA');
+		expect(count()).toBe('1 of 2');
+		expect(marks(editor)).toBe(2);
+
+		await user.click(screen.getByLabelText('Show replace'));
+		await user.type(screen.getByLabelText('Replace with'), 'B');
+		await user.click(screen.getByRole('button', { name: 'All' }));
+
+		expect(doc(editor)).toBe(`B before\n\n\`\`\`age\n${secret}\n\`\`\`\n\nB after\n`);
+	});
+
+	it('finds words that only mention armor, and leaves the `age` that makes a fence a secret', async () => {
+		const user = userEvent.setup();
+		const secret = [
+			'-----BEGIN AGE ENCRYPTED FILE-----',
+			'YWdlAAAAcnlwdGlvbi5vcmcvdjEKLT4gWDI1NTE5IEFBQUFB',
+			'-----END AGE ENCRYPTED FILE-----',
+		].join('\n');
+		const fenced = `\`\`\`age\n${secret}\n\`\`\``;
+		const { editor } = open(
+			`It opens -----BEGIN AGE ENCRYPTED FILE----- then a cat.\n\n${fenced}\n\nA cat of some age.\n`
+		);
+
+		await user.type(find(), 'cat');
+		expect(count()).toBe('1 of 2');
+
+		await user.clear(find());
+		await user.type(find(), 'age');
+		await user.click(screen.getByLabelText('Show replace'));
+		await user.type(screen.getByLabelText('Replace with'), 'years');
+		await user.click(screen.getByRole('button', { name: 'All' }));
+
+		expect(doc(editor)).toContain(`\n\n${fenced}\n\n`);
+		expect(doc(editor)).toContain('A cat of some years.');
 	});
 
 	it('says so when there is nothing to find', async () => {

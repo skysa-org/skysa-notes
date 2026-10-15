@@ -1,4 +1,4 @@
-import { type Extension, StateEffect, StateField } from '@codemirror/state';
+import { type EditorState, type Extension, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 
 import {
@@ -9,6 +9,7 @@ import {
 	type Match,
 	matchesIn,
 } from './find.js';
+import { allSecrets } from './secretRaw.js';
 
 /**
  * Find and replace in the raw editor.
@@ -29,6 +30,25 @@ import {
 
 const setQuery = StateEffect.define<FindQuery>();
 
+/**
+ * The matches in the note, but none in a secret's fence (docs/ARCHITECTURE.md
+ * §7, "Secrets in a note"): its ciphertext is no words of the note's, a match
+ * in it would be a run of base64 a short search found by chance, and a
+ * replace there, or in the `age` that makes it a secret, would leave a secret
+ * no key opens. The fences are the ones the parser finds, as Reveal's are, so
+ * armor written about in the note's words is searched as they are. The rich
+ * editor's find never sees armor, which is no text of its document.
+ */
+const found = (state: EditorState, query: FindQuery): readonly Match[] => {
+	const matches = matchesIn(state.doc.toString(), query);
+	const fences = matches.length === 0 ? [] : allSecrets(state);
+	return fences.length === 0
+		? matches
+		: matches.filter((match) =>
+				fences.every((fence) => match.to <= fence.start || match.from >= fence.end)
+			);
+};
+
 const MATCH = Decoration.mark({ class: 'cm-find-match' });
 const CURRENT = Decoration.mark({ class: 'cm-find-match cm-find-current' });
 
@@ -39,7 +59,7 @@ const decorate = (view: EditorView, query: FindQuery): DecorationSet => {
 	if (query.search === '') return Decoration.none;
 	const selection = view.state.selection.main;
 	return Decoration.set(
-		matchesIn(view.state.doc.toString(), query).map((match) =>
+		found(view.state, query).map((match) =>
 			(match.from === selection.from && match.to === selection.to ? CURRENT : MATCH).range(
 				match.from,
 				match.to
@@ -112,16 +132,16 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 	const show = (query: FindQuery): void => {
 		view.dispatch({ effects: setQuery.of(query) });
 	};
-	const found = (query: FindQuery) => matchesIn(view.state.doc.toString(), query);
+	const foundNow = (query: FindQuery) => found(view.state, query);
 
 	const goTo = (query: FindQuery, back: boolean): void => {
 		show(query);
-		const target = step(found(query), cursorOf(view), back);
+		const target = step(foundNow(query), cursorOf(view), back);
 		if (target !== undefined) reveal(view, target);
 	};
 
 	return {
-		count: (query) => locate(found(query), cursorOf(view)),
+		count: (query) => locate(foundNow(query), cursorOf(view)),
 		highlight: show,
 		next: (query, back = false) => {
 			goTo(query, back);
@@ -132,7 +152,7 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 			// finds one. Without that, the first press of Replace — before
 			// anything has been found — would rewrite whatever the cursor
 			// happened to be sitting next to.
-			const on = found(query).find(
+			const on = foundNow(query).find(
 				(match) => match.from === cursor.from && match.to === cursor.to
 			);
 			if (on === undefined) {
@@ -148,7 +168,7 @@ export const rawFindTarget = (view: EditorView): FindTarget => {
 			goTo(query, false);
 		},
 		replaceAll: (query) => {
-			const matches = found(query);
+			const matches = foundNow(query);
 			if (matches.length === 0) return;
 			// One transaction, so one entry in the undo history: a replace-all the
 			// user regrets is undone by one press of undo, not by one per match.

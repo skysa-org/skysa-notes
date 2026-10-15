@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RawEditor } from '../src/editor/RawEditor.js';
+import { changeBetween, RawEditor } from '../src/editor/RawEditor.js';
 
 /**
  * The editor half of the "dirty only on real edits" rule: loading a note, and
@@ -253,6 +253,44 @@ describe('RawEditor', () => {
 			undo(view);
 
 			expect(view.state.doc.toString()).toBe('Hello');
+		});
+	});
+});
+
+describe('a body adopted from outside', () => {
+	/** `current` with the change made. */
+	const made = (current: string, next: string) => {
+		const { from, to, insert } = changeBetween(current, next);
+		return current.slice(0, from) + insert + current.slice(to);
+	};
+
+	it.each([
+		['the same', 'one two three', 'one two three', { from: 13, to: 13, insert: '' }],
+		[
+			'changed in the middle',
+			'one two three',
+			'one TWO three',
+			{ from: 4, to: 7, insert: 'TWO' },
+		],
+		['added to at the start', 'two', 'one two', { from: 0, to: 0, insert: 'one ' }],
+		['added to at the end', 'one', 'one two', { from: 3, to: 3, insert: ' two' }],
+		['cut where it repeats', 'aaaa', 'aa', { from: 2, to: 4, insert: '' }],
+		['grown where it repeats', 'aa', 'aaaa', { from: 2, to: 2, insert: 'aa' }],
+		['emptied', 'all of it', '', { from: 0, to: 9, insert: '' }],
+		['filled', '', 'all of it', { from: 0, to: 0, insert: 'all of it' }],
+	])('is changed only where it differs, %s', (_, current, next, change) => {
+		expect(changeBetween(current, next)).toEqual(change);
+		expect(made(current, next)).toBe(next);
+	});
+
+	it('is changed only where it differs, in a long note', () => {
+		const long = 'A line of words.\n'.repeat(50_000);
+		const next = `${long.slice(0, 400_000)}changed${long.slice(400_010)}`;
+
+		expect(changeBetween(long, next)).toEqual({
+			from: 400_000,
+			to: 400_010,
+			insert: 'changed',
 		});
 	});
 });

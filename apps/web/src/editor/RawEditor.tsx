@@ -4,7 +4,7 @@ import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, Transaction } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { Autolink } from '@lezer/markdown';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 import { rawCaretAboveKeyboard } from './aboveKeyboard.js';
 import { type AttachmentHost, NO_ATTACHMENTS } from './attachHost.js';
@@ -17,6 +17,8 @@ import { markdownCodeLanguages } from './languages.js';
 import { rawLinks } from './linkRaw.js';
 import { rawWithoutNul } from './noNul.js';
 import { rawAttachments } from './rawAttach.js';
+import { NO_SECRETS, type SecretHost } from './secretHost.js';
+import { keepSecrets, rawSecrets } from './secretRaw.js';
 
 /**
  * Raw markdown mode: CodeMirror 6 over the note body. The body string is the
@@ -43,6 +45,12 @@ export interface RawEditorProps {
 	 * same host the rich editor is given. None, and a file is not taken.
 	 */
 	attachments?: AttachmentHost;
+	/**
+	 * How a secret in the note is opened and sealed (`secretHost.ts`): the
+	 * same host the rich editor is given, read as the editor is made. None,
+	 * and a secret is its armor and nothing more.
+	 */
+	secrets?: SecretHost;
 }
 
 /**
@@ -52,6 +60,44 @@ export interface RawEditorProps {
  */
 const undoHistory = new Compartment();
 
+/**
+ * How many characters `a` and `b` begin with alike, at most `most`: halved
+ * and tried, each try one comparison of the engine's, so a long note costs
+ * a few of them rather than one step a character.
+ */
+const alikeAtStart = (a: string, b: string, most: number, least = 0): number => {
+	if (least >= most) return least;
+	const half = Math.ceil((least + most) / 2);
+	return a.slice(0, half) === b.slice(0, half)
+		? alikeAtStart(a, b, most, half)
+		: alikeAtStart(a, b, half - 1, least);
+};
+
+/** The same at the end. */
+const alikeAtEnd = (a: string, b: string, most: number, least = 0): number => {
+	if (least >= most) return least;
+	const half = Math.ceil((least + most) / 2);
+	return a.slice(a.length - half) === b.slice(b.length - half)
+		? alikeAtEnd(a, b, most, half)
+		: alikeAtEnd(a, b, half - 1, least);
+};
+
+/**
+ * `current` made `next` by one change, from where they first differ to where
+ * they last do. What is alike either side stays as it is: the cursor, and a
+ * secret's panel open under a fence the change did not touch, which a change
+ * of the whole text would draw again, taking the focus from what is typed in
+ * it (docs/ARCHITECTURE.md §7).
+ */
+export const changeBetween = (
+	current: string,
+	next: string
+): { from: number; to: number; insert: string } => {
+	const start = alikeAtStart(current, next, Math.min(current.length, next.length));
+	const end = alikeAtEnd(current, next, Math.min(current.length, next.length) - start);
+	return { from: start, to: current.length - end, insert: next.slice(start, next.length - end) };
+};
+
 export const RawEditor = ({
 	noteId,
 	body,
@@ -59,6 +105,7 @@ export const RawEditor = ({
 	onUserEdit,
 	onAdopted,
 	attachments,
+	secrets,
 }: RawEditorProps) => {
 	const host = useRef<HTMLDivElement>(null);
 	const view = useRef<EditorView>(null);
@@ -76,6 +123,10 @@ export const RawEditor = ({
 	useEffect(() => {
 		files.current = attachments;
 	}, [attachments]);
+	const sealing = useRef(secrets);
+	useEffect(() => {
+		sealing.current = secrets;
+	}, [secrets]);
 	const incoming = useIncomingBody(noteId, body, origin);
 	// Offered from inside the effect that builds the editor, so the bar has one
 	// exactly as long as there is an editor to act on.
@@ -111,6 +162,7 @@ export const RawEditor = ({
 					findExtension(),
 					rawWithoutNul(),
 					rawAttachments(() => files.current ?? NO_ATTACHMENTS),
+					rawSecrets(() => sealing.current ?? NO_SECRETS),
 					EditorView.lineWrapping,
 					rawCaretAboveKeyboard(),
 					EditorView.updateListener.of((update) => {
@@ -135,6 +187,17 @@ export const RawEditor = ({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [noteId]);
 
+	// What is typed in a secret's panel kept before the editor goes: a word an
+	// input method is still composing is not in the note until then. A layout
+	// effect's cleanup, so it runs before any passive one: the note's autosave
+	// flushes in its own as the note is left, and must find the edit there.
+	useLayoutEffect(
+		() => () => {
+			if (view.current !== null) keepSecrets(view.current);
+		},
+		[noteId]
+	);
+
 	// Adopt a body that changed underneath us — a sync pull, or an edit made in
 	// the other mode. Annotated as programmatic so it cannot mark the note dirty.
 	//
@@ -151,7 +214,7 @@ export const RawEditor = ({
 		const current = instance.state.doc.toString();
 		if (current !== body) {
 			instance.dispatch({
-				changes: { from: 0, to: current.length, insert: body },
+				changes: changeBetween(current, body),
 				effects: undoHistory.reconfigure([]),
 				annotations: [programmatic.annotations, Transaction.addToHistory.of(false)],
 			});
