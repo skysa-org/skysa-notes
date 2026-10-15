@@ -1,4 +1,4 @@
-import { isWithin, parentPath, ROOT } from '@skysa/core';
+import { isVaultPath, isWithin, parentPath, ROOT } from '@skysa/core';
 import { z } from 'zod';
 
 import { type NotesDatabase } from './db.js';
@@ -160,7 +160,9 @@ export interface PickNoteInput {
  * nor does any notebook inside it.
  *
  * The note the URL names, for as long as it is there to show — wherever it is,
- * since the user put it there. Otherwise the one open last in this notebook,
+ * since the user put it there; but never a password, which opens only in the
+ * passwords' own place (docs/ARCHITECTURE.md §7, "Passwords in the vault"),
+ * not in the note editor, its fence and all. Otherwise the one open last in this notebook,
  * if it is still there and still in it. Otherwise the notebook's first, as its
  * list has it (`listedUnder`): its own notes before those of the notebooks
  * inside it, and a pinned notebook or note before the rest (`store/pins.ts`).
@@ -177,7 +179,8 @@ export const pickNote = async (
 		return note?.deletedLocally === 0 ? note : undefined;
 	};
 
-	if ((await live(open)) !== undefined) return open ?? null;
+	const named = await live(open);
+	if (named !== undefined && !isVaultPath(named.path)) return named.id;
 	const last = await live(remembered);
 	if (last !== undefined && noteIsUnder(last.path, folderPath)) return last.id;
 	// The same read as the notebook's own notes alone: `listNotes` reads every

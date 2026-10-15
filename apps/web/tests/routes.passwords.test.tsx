@@ -168,6 +168,9 @@ describe('a password', () => {
 
 		await screen.findByRole('heading', { name: 'Inbox' });
 		expect(screen.queryByRole('region', { name: 'Passwords' })).toBeNull();
+		// Nor in the note editor, its fence and all: the notebook's own note opens.
+		expect((await screen.findByLabelText<HTMLInputElement>('Note title')).value).toBe('Agenda');
+		expect(screen.queryByDisplayValue('GitHub')).toBeNull();
 	});
 
 	it('is deleted at once, and the undo brings it back open', async () => {

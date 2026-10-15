@@ -1001,7 +1001,15 @@ const useOpenPlace = ({
 	});
 
 	const found = useNoteRead(noteId);
-	const storedNote = found ?? undefined;
+	// A password is open only in the passwords: named anywhere else — by an
+	// address kept from while they were shown — it is no note to show there,
+	// and the place picks one of its own (`pickNote`).
+	const storedNote =
+		found === null ||
+		found === undefined ||
+		(isVaultPath(found.path) && folder !== VAULT_FOLDER)
+			? undefined
+			: found;
 	// A note asked for and not read yet: the pane says it is opening rather
 	// than that nothing is open, which is what it said while the read was held
 	// up behind another tab's write (2026-10-10).
@@ -1986,7 +1994,8 @@ const Home = () => {
 	});
 
 	// A note begun and not stored has nowhere to move from yet.
-	useNoteMove(storedNote, moving, pickUp, scratch.moveOpen);
+	// Nor a password, which is no note to put in a notebook.
+	useNoteMove(inPasswords ? undefined : storedNote, moving, pickUp, scratch.moveOpen);
 	useKeepOnInstall();
 
 	useShortcuts();
