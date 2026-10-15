@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,6 +92,30 @@ describe('"Insert secret" from the palette', () => {
 			});
 		}
 	);
+});
+
+describe('"Insert secret" on the rich editor’s toolbar', () => {
+	it('reaches the note’s host, which says the source is not set up', async () => {
+		await setDefaultEditorMode(db, 'rich');
+		const note = await createNote(db, { title: 'Day', body: 'Before.\n' });
+		const onProblem = vi.fn();
+		render(
+			<CommandsProvider>
+				<Harness id={note.id} onProblem={onProblem} />
+			</CommandsProvider>
+		);
+		await screen.findByText(/Before\./u);
+
+		fireEvent.mouseDown(await screen.findByRole('button', { name: 'Insert secret' }));
+
+		await waitFor(() => {
+			expect(onProblem).toHaveBeenCalledWith({
+				message:
+					'This source is not set up for secrets. Choose Set up secrets… in its menu to set it up.',
+				tone: 'warning',
+			});
+		});
+	});
 });
 
 describe('a note open as its secrets are encrypted to a new key', () => {

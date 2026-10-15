@@ -22,8 +22,8 @@ import { createRichEditor, currentMarkdown } from '../src/editor/rich.js';
 const SLOT = 30;
 const TEXT_STYLE = 100;
 const GROUP = 10;
-// Eleven slots in six groups: the text style, ten 30px slots, six groups' 10px.
-const EVERYTHING = TEXT_STYLE + 10 * SLOT + 6 * GROUP;
+// Twelve slots in six groups: the text style, eleven 30px slots, six groups' 10px.
+const EVERYTHING = TEXT_STYLE + 11 * SLOT + 6 * GROUP;
 
 let barWidth = EVERYTHING;
 /** The gap between two slots in one group, which the stylesheet has and the
@@ -192,8 +192,8 @@ describe('the toolbar on a bar too narrow for it', () => {
 
 	it('spreads a menu it has taken in into rows of its own', async () => {
 		// Room for the text style, bold, italic and two of the lists: the
-		// task list goes before the link does, and the link and the paperclip
-		// go too, the Insert group with them.
+		// task list goes before the link does, and the link, the paperclip and
+		// the lock go too, the Insert group with them.
 		barWidth = TEXT_STYLE + 5 * SLOT + 3 * GROUP + SLOT;
 		await harness('plain\n');
 
@@ -213,9 +213,24 @@ describe('the toolbar on a bar too narrow for it', () => {
 			'Increase indent',
 			'Code block',
 			'Attach files',
+			'Insert secret',
 			'Link',
 		]);
 		expect(within(bar()).queryByRole('group', { name: 'Insert' })).toBeNull();
+	});
+
+	it('gives up the lock before the link', async () => {
+		// Room for the text style, bold, italic, two of the lists, the
+		// paperclip and the link.
+		barWidth = TEXT_STYLE + 6 * SLOT + 5 * GROUP + SLOT;
+		await harness('plain\n');
+
+		expect(within(bar()).queryByRole('button', { name: 'Insert secret' })).toBeNull();
+		expect(within(bar()).getByRole('button', { name: 'Link' })).toBeDefined();
+		expect(within(bar()).getByRole('button', { name: 'Attach files' })).toBeDefined();
+
+		await press(overflow() as HTMLElement);
+		expect(screen.getByRole('button', { name: 'Insert secret' })).toBeDefined();
 	});
 
 	// On a phone, the way to put a photo in a note.
