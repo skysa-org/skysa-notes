@@ -1,14 +1,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { t } from '../i18n/t.js';
-import { type UnlockKind } from '../store/db.js';
-import { isAcceptedUnlock, type Unlock } from '../store/secretKeys.js';
+import { type EnteredKind, type EnteredUnlock, isAcceptedUnlock } from '../store/secretKeys.js';
 import { PatternGrid } from './PatternGrid.js';
 
 /**
  * How this device unlocks secrets, as it is entered (docs/ARCHITECTURE.md §7,
  * "Secrets in a note"): a pattern on a grid of dots, a PIN or a password.
- * `UnlockEntry` takes one; `ChooseUnlock` has one chosen, entered twice.
+ * `UnlockEntry` takes one; `ChooseUnlock` has one chosen, entered twice, or
+ * the device's own lock chosen, where it is offered, which is entered nowhere.
  */
 
 /** What has been entered so far, of whichever kind. */
@@ -19,16 +19,17 @@ export interface Entered {
 
 export const NOTHING_ENTERED: Entered = { dots: [], text: '' };
 
-export const unlockOf = (kind: UnlockKind, entered: Entered): Unlock => {
+export const unlockOf = (kind: EnteredKind, entered: Entered): EnteredUnlock => {
 	if (kind === 'pattern') return { kind, dots: entered.dots };
 	if (kind === 'pin') return { kind, digits: entered.text };
 	return { kind, text: entered.text };
 };
 
-const sameUnlock = (a: Unlock, b: Unlock): boolean => JSON.stringify(a) === JSON.stringify(b);
+const sameUnlock = (a: EnteredUnlock, b: EnteredUnlock): boolean =>
+	JSON.stringify(a) === JSON.stringify(b);
 
 export interface UnlockEntryProps {
-	kind: UnlockKind;
+	kind: EnteredKind;
 	entered: Entered;
 	onChange: (entered: Entered) => void;
 	/** A drawn pattern let go of, which is a pattern entered: as drawn, which may not be rendered yet. */
@@ -107,29 +108,101 @@ export const UnlockEntry = ({
 	);
 };
 
-const ASK: Readonly<Record<UnlockKind, 'drawPattern' | 'typePin' | 'typePassword'>> = {
+const ASK: Readonly<Record<EnteredKind, 'drawPattern' | 'typePin' | 'typePassword'>> = {
 	pattern: 'drawPattern',
 	pin: 'typePin',
 	password: 'typePassword',
 };
 
-const KINDS: readonly UnlockKind[] = ['pattern', 'pin', 'password'];
+const ENTERED_KINDS: readonly EnteredKind[] = ['pattern', 'pin', 'password'];
+
+/** The kinds to choose from, one of them chosen. */
+const Kinds = ({
+	kinds,
+	kind,
+	busy,
+	onKind,
+}: {
+	kinds: readonly (EnteredKind | 'device')[];
+	kind: EnteredKind | 'device';
+	busy: boolean;
+	onKind: (kind: EnteredKind | 'device') => void;
+}) => (
+	<div className="unlock-kinds" role="radiogroup" aria-label={t('secrets.choose.title')}>
+		{kinds.map((each) => (
+			<button
+				key={each}
+				type="button"
+				role="radio"
+				aria-checked={kind === each}
+				disabled={busy}
+				onClick={() => {
+					onKind(each);
+				}}
+			>
+				{t(`secrets.choose.${each}`)}
+			</button>
+		))}
+	</div>
+);
+
+/** What was chosen: an unlock entered the same way twice, or the device's own lock. */
+export type Chosen = EnteredUnlock | Readonly<{ kind: 'device' }>;
 
 export interface ChooseUnlockProps {
-	/** The unlock chosen, entered the same way twice. */
-	onChosen: (unlock: Unlock) => void;
+	onChosen: (chosen: Chosen) => void;
+	/** Whether the device's own lock is offered (`secrets/deviceLock.ts`). */
+	device?: boolean;
 	busy?: boolean;
 	/** What is said where the choosing went wrong after it was made. */
 	error?: string;
 }
 
-/** Which kind, then the unlock, then the same again. */
-export const ChooseUnlock = ({ onChosen, busy = false, error }: ChooseUnlockProps) => {
+/** Which kind, then the unlock, then the same again; or the device's own lock, as it is. */
+export const ChooseUnlock = ({
+	onChosen,
+	device = false,
+	busy = false,
+	error,
+}: ChooseUnlockProps) => {
 	const askId = useId();
-	const [kind, setKind] = useState<UnlockKind>('pin');
+	const [chosen, setKind] = useState<EnteredKind | 'device'>('pin');
+	// Not offered after all, as making the passkey found: the PIN, as at first.
+	const kind = chosen === 'device' && !device ? 'pin' : chosen;
 	const [entered, setEntered] = useState<Entered>(NOTHING_ENTERED);
-	const [first, setFirst] = useState<Unlock | null>(null);
+	const [first, setFirst] = useState<EnteredUnlock | null>(null);
 	const [mismatch, setMismatch] = useState(false);
+	const kinds = device ? [...ENTERED_KINDS, 'device' as const] : ENTERED_KINDS;
+	const choose = (each: EnteredKind | 'device') => {
+		setKind(each);
+		setEntered(NOTHING_ENTERED);
+		setFirst(null);
+		setMismatch(false);
+	};
+
+	if (kind === 'device') {
+		return (
+			<form
+				className="choose-unlock"
+				onSubmit={(event) => {
+					event.preventDefault();
+					if (!busy) onChosen({ kind });
+				}}
+			>
+				<Kinds kinds={kinds} kind={kind} busy={busy} onKind={choose} />
+				<p id={askId}>{t('secrets.choose.useDevice')}</p>
+				{error !== undefined && (
+					<p className="secrets-error" role="alert">
+						{error}
+					</p>
+				)}
+				<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
+					{t('secrets.choose.done')}
+				</button>
+			</form>
+		);
+	}
+
 	const unlock = unlockOf(kind, entered);
 	const ready = isAcceptedUnlock(unlock) && !busy;
 
@@ -158,25 +231,7 @@ export const ChooseUnlock = ({ onChosen, busy = false, error }: ChooseUnlockProp
 				next();
 			}}
 		>
-			<div className="unlock-kinds" role="radiogroup" aria-label={t('secrets.choose.title')}>
-				{KINDS.map((each) => (
-					<button
-						key={each}
-						type="button"
-						role="radio"
-						aria-checked={kind === each}
-						disabled={busy}
-						onClick={() => {
-							setKind(each);
-							setEntered(NOTHING_ENTERED);
-							setFirst(null);
-							setMismatch(false);
-						}}
-					>
-						{t(`secrets.choose.${each}`)}
-					</button>
-				))}
-			</div>
+			<Kinds kinds={kinds} kind={kind} busy={busy} onKind={choose} />
 			<p id={askId}>
 				{first === null ? t(`secrets.choose.${ASK[kind]}`) : t('secrets.choose.again')}
 			</p>

@@ -16,6 +16,7 @@ import {
 } from 'react';
 
 import { t } from '../i18n/t.js';
+import { BROWSER_DEVICE_LOCK, type DeviceLock, setUpDeviceLock } from '../secrets/deviceLock.js';
 import { type Age, loadAge } from '../secrets/loadAge.js';
 import { type SecretsLock } from '../secrets/lock.js';
 import { type KeyFileRecord, type NotesDatabase, type UnlockKind } from '../store/db.js';
@@ -27,10 +28,11 @@ import {
 	PBKDF2_ROUNDS,
 	replaceKeys,
 	type Unlock,
+	type UnlockedKeys,
 } from '../store/secretKeys.js';
 import { type KeyFileSync } from '../sync/keyFile.js';
 import { SecretsModal, UnlockForm } from './UnlockDialog.js';
-import { ChooseUnlock } from './UnlockEntry.js';
+import { ChooseUnlock, type Chosen } from './UnlockEntry.js';
 
 /**
  * Secrets for a source (docs/ARCHITECTURE.md §7, "Secrets in a note"): setting
@@ -63,6 +65,8 @@ export interface SecretsDialogProps {
 	pickGroups?: () => readonly [number, number];
 	print?: () => Promise<void>;
 	copy?: (text: string) => Promise<void>;
+	/** The device's own lock, offered where it can keep a key (`secrets/deviceLock.ts`). */
+	deviceLock?: DeviceLock;
 }
 
 type Enrolled = NonNullable<Awaited<ReturnType<typeof enrolment>>>;
@@ -116,6 +120,26 @@ const copyText = (text: string): Promise<void> => navigator.clipboard.writeText(
 
 /** A group as typed back: in either case, spaces and hyphens no matter. */
 const asGroup = (text: string): string => text.replace(/[\s-]+/gu, '').toUpperCase();
+
+/**
+ * The device's own lock, and whether it is offered: asked as the dialog
+ * opens, and not offered again once making a passkey found it cannot keep a
+ * key in this browser.
+ */
+const useDeviceLock = (given: DeviceLock | undefined) => {
+	const deviceLock = given ?? BROWSER_DEVICE_LOCK;
+	const [deviceOffered, setDeviceOffered] = useState(false);
+	useEffect(() => {
+		const open = { current: true };
+		void deviceLock.offered().then((offered) => {
+			if (open.current) setDeviceOffered(offered);
+		});
+		return () => {
+			open.current = false;
+		};
+	}, [deviceLock]);
+	return { deviceLock, deviceOffered, setDeviceOffered };
+};
 
 /** The new key, once, with Print and Copy. */
 const ShowKey = ({
@@ -566,6 +590,7 @@ export const SecretsDialog = ({
 	pickGroups = randomGroups,
 	print = printPage,
 	copy = copyText,
+	deviceLock: givenDeviceLock,
 }: SecretsDialogProps) => {
 	const [read, setRead] = useState(false);
 	const [step, setStep] = useState<Step | null>(null);
@@ -602,6 +627,8 @@ export const SecretsDialog = ({
 			wipe(identities);
 		};
 	}, []);
+
+	const { deviceLock, deviceOffered, setDeviceOffered } = useDeviceLock(givenDeviceLock);
 
 	useEffect(() => {
 		// What the folder says now, which another device may have changed.
@@ -673,26 +700,93 @@ export const SecretsDialog = ({
 		return false;
 	};
 
-	/** The device's keys kept under `unlock`, the key file written first where the source is being set up. */
-	const keep = (identities: readonly Uint8Array[], then: 'setUp' | 'enrol', unlock: Unlock) =>
+	/**
+	 * What `chosen` unlocks with: as it was entered, or the device's own lock,
+	 * its passkey made and checked now (`setUpDeviceLock`). Nothing where that
+	 * could not be, which is said; a device whose lock cannot keep a key in
+	 * this browser is not offered it again.
+	 */
+	const unlockFor = async (chosen: Chosen): Promise<Unlock | undefined> => {
+		if (chosen.kind !== 'device') return chosen;
+		const name = t('secrets.device.passkeyName', { source: sourceName });
+		// The device's prompt is the app's own: the page hidden behind it does not lock.
+		const set = await lock.prompting(() => setUpDeviceLock(deviceLock, name));
+		if (set.state === 'set') return set.unlock;
+		if (set.state === 'unsupported') setDeviceOffered(false);
+		setError(
+			set.state === 'unsupported'
+				? t('secrets.choose.deviceUnsupported')
+				: t('secrets.choose.deviceRefused')
+		);
+		return undefined;
+	};
+
+	/** The passkey this device unlocks with now, where it unlocks with one. */
+	const passkeyNow = async () => (await enrolment(database, connectionId))?.device?.credentialId;
+
+	/**
+	 * A passkey no unlock is sealed under any more, let go of
+	 * (`DeviceLock.forget`): one left in a password manager looks like one
+	 * that still unlocks.
+	 */
+	const forgetPasskey = (credentialId: ArrayBuffer | undefined) => {
+		if (credentialId !== undefined) void deviceLock.forget(credentialId);
+	};
+
+	/**
+	 * What `keeping` the keys under `unlock` comes to. What the device's lock
+	 * answered is let go of however it ends, and its passkey too where the
+	 * keys were not kept under it.
+	 */
+	const settled = async (
+		unlock: Unlock,
+		keeping: () => Promise<UnlockedKeys | undefined>
+	): Promise<UnlockedKeys | undefined> => {
+		const keys = await keeping().catch((error: unknown) => {
+			letGo(unlock, false);
+			throw error;
+		});
+		letGo(unlock, keys !== undefined);
+		return keys;
+	};
+
+	const letGo = (unlock: Unlock, kept: boolean) => {
+		if (unlock.kind !== 'device') return;
+		unlock.answer.fill(0);
+		if (!kept) forgetPasskey(unlock.credentialId);
+	};
+
+	/**
+	 * The device's keys kept under `unlock`, the key file written first where
+	 * the source is being set up, and the passkey of the unlock they replace
+	 * let go of. Nothing where they were not kept: that is said, or, where the
+	 * source was let go of meanwhile, the dialog closes.
+	 */
+	const keptUnder = async (
+		identities: readonly Uint8Array[],
+		first: Uint8Array,
+		then: 'setUp' | 'enrol',
+		unlock: Unlock
+	): Promise<UnlockedKeys | undefined> => {
+		const { recipientOf } = await age();
+		const recipient = recipientOf(first);
+		if (then === 'setUp' && !(await setUp(recipient))) return undefined;
+		const before = await passkeyNow();
+		const keys = await enrol(database, { connectionId, recipient, identities, unlock, rounds });
+		if (keys === undefined) onClose();
+		else forgetPasskey(before);
+		return keys;
+	};
+
+	/** The device's keys kept under the unlock chosen (`keptUnder`). */
+	const keep = (identities: readonly Uint8Array[], then: 'setUp' | 'enrol', chosen: Chosen) =>
 		run(async () => {
 			const [first] = identities;
 			if (first === undefined) return;
-			const { recipientOf } = await age();
-			const recipient = recipientOf(first);
-			if (then === 'setUp' && !(await setUp(recipient))) return;
-			const keys = await enrol(database, {
-				connectionId,
-				recipient,
-				identities,
-				unlock,
-				rounds,
-			});
-			// The source was let go of meanwhile.
-			if (keys === undefined) {
-				onClose();
-				return;
-			}
+			const unlock = await unlockFor(chosen);
+			if (unlock === undefined) return;
+			const keys = await settled(unlock, () => keptUnder(identities, first, then, unlock));
+			if (keys === undefined) return;
 			wipeOwned();
 			lock.hold(keys);
 			go({
@@ -731,15 +825,31 @@ export const SecretsDialog = ({
 			go({ kind: 'done', said: t('secrets.done.replaced') });
 		});
 
-	const changeTo = (unlock: Unlock) =>
+	const changeTo = (chosen: Chosen) =>
 		run(async () => {
-			const keys = lock.keys(connectionId);
 			// Locked meanwhile: unlocked again, and asked again.
-			if (keys === undefined) {
+			if (!lock.isUnlocked(connectionId)) {
 				go({ kind: 'unlock', then: 'change' });
 				return;
 			}
-			const changed = await changeUnlock(database, keys, unlock, rounds);
+			const unlock = await unlockFor(chosen);
+			if (unlock === undefined) return;
+			const before = await passkeyNow().catch((error: unknown) => {
+				letGo(unlock, false);
+				throw error;
+			});
+			// Read after the device's lock was asked, and handed on with none
+			// between: `changeUnlock` copies them before its own.
+			const keys = lock.keys(connectionId);
+			if (keys === undefined) {
+				letGo(unlock, false);
+				go({ kind: 'unlock', then: 'change' });
+				return;
+			}
+			const changed = await settled(unlock, () =>
+				changeUnlock(database, keys, unlock, rounds)
+			);
+			if (changed !== undefined) forgetPasskey(before);
 			if (changed === undefined) {
 				lock.lock(connectionId);
 				go(null);
@@ -764,7 +874,9 @@ export const SecretsDialog = ({
 	const remove = () =>
 		run(async () => {
 			lock.lock(connectionId);
+			const before = await passkeyNow();
 			await forgetKeys(database, connectionId);
+			forgetPasskey(before);
 			go(null);
 		});
 
@@ -800,6 +912,7 @@ export const SecretsDialog = ({
 				connectionId={connectionId}
 				kind={kind}
 				lock={lock}
+				deviceLock={deviceLock}
 				onUnlocked={() => {
 					if (at.then === 'replace') {
 						void replaceWith(at.identity);
@@ -961,6 +1074,7 @@ export const SecretsDialog = ({
 						<h3>{t('secrets.choose.title')}</h3>
 						<p>{t('secrets.choose.text')}</p>
 						<ChooseUnlock
+							device={deviceOffered}
 							busy={busy}
 							error={error}
 							onChosen={(unlock) => {

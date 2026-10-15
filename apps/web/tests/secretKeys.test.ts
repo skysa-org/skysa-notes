@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSecretsLock } from '../src/secrets/lock.js';
 import { createDatabase, type NotesDatabase } from '../src/store/db.js';
 import {
 	changeUnlock,
+	type DeviceUnlock,
 	enrol,
 	enrolment,
 	FREE_TRIES,
@@ -26,6 +27,7 @@ import {
 const opened: NotesDatabase[] = [];
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(opened.splice(0).map((db) => db.delete()));
 });
 
@@ -192,7 +194,7 @@ describe('unlocking', () => {
 		expect(result.status).toBe('unlocked');
 	});
 
-	it('counts a wrong try, and one of another kind that spells the same', async () => {
+	it('counts a wrong try, and says what the device unlocks with, uncounted, to a try of another kind', async () => {
 		const { db, enrolled } = await setup();
 		await enrolled(PIN);
 		expect(await unlockKeys(db, 'c1', { kind: 'pin', digits: '1357' }, AT)).toEqual({
@@ -200,10 +202,10 @@ describe('unlocking', () => {
 			triesLeft: MAX_TRIES - 1,
 		});
 		expect(await unlockKeys(db, 'c1', { kind: 'pattern', dots: [2, 4, 6, 8] }, AT)).toEqual({
-			status: 'wrong',
-			triesLeft: MAX_TRIES - 2,
+			status: 'otherWay',
+			unlock: 'pin',
 		});
-		expect((await db.secretKeys.get('c1'))?.tries).toBe(2);
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(1);
 	});
 
 	it('sets the count back with a right try', async () => {
@@ -278,7 +280,10 @@ describe('changing how a device unlocks', () => {
 		expect(changed?.identities).toEqual(keys.identities);
 		expect(changed?.identities[0]).not.toBe(keys.identities[0]);
 		expect((await db.secretKeys.get('c1'))?.unlock).toBe('pattern');
-		expect((await unlockKeys(db, 'c1', PIN, AT)).status).toBe('wrong');
+		expect(await unlockKeys(db, 'c1', PIN, AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'pattern',
+		});
 		expect(unlocked(await unlockKeys(db, 'c1', PATTERN, AT)).identities).toEqual(
 			keys.identities
 		);
@@ -410,6 +415,149 @@ describe('replacing the source’s key on a device', () => {
 		await expect(replaceKeys(db, here, NEW, [])).rejects.toThrow();
 		expect(await enrolment(db, 'c1')).toMatchObject({
 			recipient: RECIPIENT,
+			unlock: 'password',
+		});
+	});
+});
+
+describe('the device’s own lock', () => {
+	const credentialId = new Uint8Array([1, 2, 3, 4]).buffer;
+	const salt = new Uint8Array(32).fill(5).buffer;
+	/** What the passkey answers, as a fresh copy each time, as a browser gives it. */
+	const answered = (fill = 0x42): DeviceUnlock => ({
+		kind: 'device',
+		credentialId,
+		salt,
+		answer: new Uint8Array(32).fill(fill),
+	});
+
+	it('is an answer of 32 bytes from a passkey', () => {
+		expect(isAcceptedUnlock(answered())).toBe(true);
+		expect(
+			isAcceptedUnlock({ kind: 'device', credentialId, salt, answer: new Uint8Array(16) })
+		).toBe(false);
+		expect(isAcceptedUnlock({ ...answered(), credentialId: new ArrayBuffer(0) })).toBe(false);
+	});
+
+	it('seals the keys under what it answered, with the passkey and its salt kept, and no rounds', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(answered());
+
+		expect(await db.secretKeys.get('c1')).toMatchObject({
+			unlock: 'device',
+			rounds: 0,
+			credentialId,
+			salt,
+		});
+		expect(await enrolment(db, 'c1')).toEqual({
+			recipient: RECIPIENT,
+			unlock: 'device',
+			tries: 0,
+			device: { credentialId, salt },
+		});
+		const stored = new Uint8Array(
+			(await db.secretKeys.get('c1'))?.sealed ?? new ArrayBuffer(0)
+		);
+		expect(stored.filter((byte) => byte === 0x42).length).toBeLessThan(8);
+	});
+
+	it('opens the keys with the same answer, and leaves the answer it was given as it was', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(answered());
+		const given = answered();
+
+		expect(unlocked(await unlockKeys(db, 'c1', given, AT)).identities).toEqual([
+			identity(7),
+			identity(9),
+		]);
+		expect(given.answer.every((byte) => byte === 0x42)).toBe(true);
+	});
+
+	it('counts no try where another answer does not open them, and says the lock no longer does', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(answered());
+
+		const results = await Promise.all(
+			Array.from({ length: MAX_TRIES + 1 }, () => unlockKeys(db, 'c1', answered(0x43), AT))
+		);
+
+		expect(new Set(results.map((result) => result.status))).toEqual(new Set(['changed']));
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(0);
+		expect(unlocked(await unlockKeys(db, 'c1', answered(), AT)).identities).toHaveLength(2);
+	});
+
+	it('says what the device unlocks with where it unlocks another way now', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(PIN);
+
+		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'pin',
+		});
+		expect((await db.secretKeys.get('c1'))?.tries).toBe(0);
+	});
+
+	it('says the device unlocks another way now where another passkey was made since', async () => {
+		const { db, enrolled } = await setup();
+		await enrolled(answered());
+
+		expect(
+			await unlockKeys(
+				db,
+				'c1',
+				{ ...answered(), credentialId: new Uint8Array([8]).buffer },
+				AT
+			)
+		).toEqual({ status: 'otherWay', unlock: 'device' });
+	});
+
+	it('says when the device holds no keys for the source', async () => {
+		const { db } = await setup();
+		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({ status: 'none' });
+	});
+
+	it('lets go of the bytes each key is made from, once it is made', async () => {
+		const { db, enrolled } = await setup();
+		const madeFrom: Uint8Array[] = [];
+		const importKey = crypto.subtle.importKey.bind(crypto.subtle);
+		vi.spyOn(crypto.subtle, 'importKey').mockImplementation(((
+			...args: Parameters<SubtleCrypto['importKey']>
+		) => {
+			const [, data] = args;
+			if (ArrayBuffer.isView(data)) {
+				madeFrom.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+			}
+			return importKey(...args);
+		}) as SubtleCrypto['importKey']);
+
+		await enrolled(answered());
+		await unlockKeys(db, 'c1', answered(), AT);
+		const entered = await setup();
+		await entered.enrolled(PIN);
+		await unlockKeys(entered.db, 'c1', PIN, AT);
+
+		expect(madeFrom).toHaveLength(4);
+		expect(madeFrom.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+	});
+
+	it('is what a device can change to and from, the passkey let go of with it', async () => {
+		const { db, enrolled } = await setup();
+		const keys = await enrolled(PIN);
+
+		const toDevice = await changeUnlock(db, keys, answered(), ROUNDS);
+		expect((await db.secretKeys.get('c1'))?.unlock).toBe('device');
+		expect(await unlockKeys(db, 'c1', PIN, AT)).toEqual({
+			status: 'otherWay',
+			unlock: 'device',
+		});
+		expect(unlocked(await unlockKeys(db, 'c1', answered(), AT)).identities).toHaveLength(2);
+
+		await changeUnlock(db, toDevice as UnlockedKeys, PASSWORD, ROUNDS);
+		const record = await db.secretKeys.get('c1');
+		expect(record).toMatchObject({ unlock: 'password', rounds: ROUNDS });
+		expect(record?.credentialId).toBeUndefined();
+		expect(await unlockKeys(db, 'c1', answered(), AT)).toEqual({
+			status: 'otherWay',
 			unlock: 'password',
 		});
 	});

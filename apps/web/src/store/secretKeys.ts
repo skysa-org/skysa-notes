@@ -4,18 +4,35 @@ import { type NotesDatabase, type SecretKeyRecord, type UnlockKind } from './db.
  * A source's keys for secrets on this device (docs/ARCHITECTURE.md §7, "Secrets
  * in a note"), sealed under how the device unlocks: AES-GCM, under a key that
  * PBKDF2-SHA-256 makes from the unlock at 600,000 rounds with a salt of the
- * device's own, all WebCrypto. Nothing about the unlock leaves the device.
+ * device's own; or, for the device's own lock, that HKDF-SHA-256 makes from
+ * what its passkey answers (`secrets/deviceLock.ts`). All WebCrypto. Nothing
+ * about the unlock leaves the device.
  *
  * The identities are 32 bytes each, the source's own first. Nothing here knows
  * what they are for: what checks them against the key file and opens secrets
  * with them is loaded only when a secret is, and needs the curve.
  */
 
-/** A pattern is dots of a 3×3 grid, 0 to 8, in the order they were drawn. */
-export type Unlock =
+/** What is entered on the device. A pattern is dots of a 3×3 grid, 0 to 8, in the order they were drawn. */
+export type EnteredUnlock =
 	| Readonly<{ kind: 'pattern'; dots: readonly number[] }>
 	| Readonly<{ kind: 'pin'; digits: string }>
 	| Readonly<{ kind: 'password'; text: string }>;
+
+/**
+ * The device's own lock (`secrets/deviceLock.ts`): the passkey, the salt it
+ * is asked, and the 32 bytes it answered after the device's check.
+ */
+export type DeviceUnlock = Readonly<{
+	kind: 'device';
+	credentialId: ArrayBuffer;
+	salt: ArrayBuffer;
+	answer: Uint8Array;
+}>;
+
+export type Unlock = EnteredUnlock | DeviceUnlock;
+
+export type EnteredKind = EnteredUnlock['kind'];
 
 export const MIN_PATTERN_DOTS = 4;
 export const MIN_PIN_DIGITS = 4;
@@ -33,6 +50,10 @@ export const MAX_TRIES = 10;
 
 const IDENTITY_SIZE = 32;
 const SALT_SIZE = 16;
+/** What the device's lock answers with. */
+const ANSWER_SIZE = 32;
+/** HKDF's `info` for the device's lock: the key it makes is for this and nothing else. */
+const DEVICE_INFO = new TextEncoder().encode('secrets: the device lock seals the keys, v1');
 const IV_SIZE = 12;
 const GRID_DOTS = 9;
 
@@ -58,6 +79,8 @@ const isPattern = (dots: readonly number[]): boolean =>
 
 /** Whether a device may be set to unlock this way. */
 export const isAcceptedUnlock = (unlock: Unlock): boolean => {
+	if (unlock.kind === 'device')
+		return unlock.answer.length === ANSWER_SIZE && unlock.credentialId.byteLength > 0;
 	if (unlock.kind === 'pattern') return isPattern(unlock.dots);
 	if (unlock.kind === 'pin') return new RegExp(`^[0-9]{${MIN_PIN_DIGITS},}$`).test(unlock.digits);
 	return [...unlock.text].length >= MIN_PASSWORD_CHARACTERS;
@@ -68,7 +91,7 @@ export const isAcceptedUnlock = (unlock: Unlock): boolean => {
  * spell the same digits are different unlocks; a password is taken in NFC, so
  * the same characters typed through another keyboard are the same password.
  */
-const secretOf = (unlock: Unlock): Uint8Array<ArrayBuffer> => {
+const secretOf = (unlock: EnteredUnlock): Uint8Array<ArrayBuffer> => {
 	const text = (() => {
 		if (unlock.kind === 'pattern') return unlock.dots.join(',');
 		if (unlock.kind === 'pin') return unlock.digits;
@@ -77,11 +100,29 @@ const secretOf = (unlock: Unlock): Uint8Array<ArrayBuffer> => {
 	return Uint8Array.from(new TextEncoder().encode(`${unlock.kind}:${text}`));
 };
 
+/** What the device's lock answered, made a key by HKDF-SHA-256 with the salt its passkey was asked. */
+const answeredKey = async (answer: Uint8Array, salt: ArrayBuffer): Promise<CryptoKey> => {
+	const secret = Uint8Array.from(answer);
+	try {
+		const material = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
+		return await crypto.subtle.deriveKey(
+			{ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(salt), info: DEVICE_INFO },
+			material,
+			{ name: 'AES-GCM', length: 256 },
+			false,
+			['encrypt', 'decrypt']
+		);
+	} finally {
+		secret.fill(0);
+	}
+};
+
 const sealingKey = async (
 	unlock: Unlock,
 	salt: ArrayBuffer,
 	rounds: number
 ): Promise<CryptoKey> => {
+	if (unlock.kind === 'device') return answeredKey(unlock.answer, salt);
 	const secret = secretOf(unlock);
 	try {
 		const material = await crypto.subtle.importKey('raw', secret, 'PBKDF2', false, [
@@ -186,10 +227,23 @@ const sealedUnder = async (
 	if (!isAcceptedUnlock(unlock)) throw new Error('an unlock this short is not accepted');
 	if (identities.length === 0) throw new Error('there is no key to keep');
 	if (identities.some(isWiped)) throw new Error('a key that was wiped is not kept');
-	const salt = randomBuffer(SALT_SIZE);
+	// The device's lock is asked its salt before this, as its passkey is made.
+	const device = unlock.kind === 'device' ? unlock : undefined;
+	const salt = device?.salt ?? randomBuffer(SALT_SIZE);
 	const sealing = await sealingKey(unlock, salt, rounds);
 	const { iv, sealed } = await seal(sealing, identities);
-	return { sealing, fields: { unlock: unlock.kind, salt, rounds, iv, sealed, tries: 0 } };
+	return {
+		sealing,
+		fields: {
+			unlock: unlock.kind,
+			salt,
+			rounds: device === undefined ? rounds : 0,
+			iv,
+			sealed,
+			tries: 0,
+			...(device === undefined ? {} : { credentialId: device.credentialId }),
+		},
+	};
 };
 
 export interface EnrolInput {
@@ -239,7 +293,18 @@ export type UnlockResult =
 	/** That was the last wrong try: the device's copy is deleted, and the recovery key is what is left. */
 	| Readonly<{ status: 'forgotten' }>
 	/** The device holds no keys for the source. */
-	| Readonly<{ status: 'none' }>;
+	| Readonly<{ status: 'none' }>
+	/**
+	 * The device's own lock answered with what does not open the keys: a
+	 * passkey replaced, or a platform that answers otherwise now. The recovery
+	 * key is what is left; the copy stays until the device is set up again.
+	 */
+	| Readonly<{ status: 'changed' }>
+	/**
+	 * The device unlocks with `unlock` now, changed since it was asked for
+	 * another way, in another tab: nothing was tried, or counted.
+	 */
+	| Readonly<{ status: 'otherWay'; unlock: UnlockKind }>;
 
 /** When a record's next try may be made, where it has to wait. */
 export const nextTryAt = (record: SecretKeyRecord): number | undefined =>
@@ -270,9 +335,46 @@ const wrongTry = async (db: NotesDatabase, counted: SecretKeyRecord): Promise<Un
 };
 
 /**
- * Unlock a source's keys on this device. Each try is counted before it is
- * checked, so tries made at once are all counted, and one cut short by the tab
- * closing still is; a right one sets the count back to nothing.
+ * Unlock with what the device's own lock answered. Not counted: the device
+ * counts its own tries, and an answer that does not open the keys will not
+ * open them the next time either.
+ */
+const unlockByDevice = async (
+	db: NotesDatabase,
+	connectionId: string,
+	unlock: DeviceUnlock
+): Promise<UnlockResult> => {
+	const record = await db.secretKeys.get(connectionId);
+	if (record === undefined) return { status: 'none' };
+	if (
+		record.unlock !== 'device' ||
+		record.credentialId === undefined ||
+		!sameBytes(record.credentialId, unlock.credentialId)
+	) {
+		return { status: 'otherWay', unlock: record.unlock };
+	}
+	const sealing = await answeredKey(unlock.answer, record.salt);
+	const identities = await open(sealing, record);
+	if (identities === undefined || identities.length === 0) return { status: 'changed' };
+	return {
+		status: 'unlocked',
+		keys: {
+			connectionId,
+			recipient: record.recipient,
+			identities,
+			sealing,
+			sealedAs: record.iv,
+		},
+	};
+};
+
+/**
+ * Unlock a source's keys on this device. Each try at an entered unlock is
+ * counted before it is checked, so tries made at once are all counted, and
+ * one cut short by the tab closing still is; a right one sets the count back
+ * to nothing. A try of another kind than the device's is not counted: what
+ * kind it is, is no secret, and one asked for by a form opened before the
+ * unlock changed is no guess.
  */
 export const unlockKeys = async (
 	db: NotesDatabase,
@@ -280,9 +382,13 @@ export const unlockKeys = async (
 	unlock: Unlock,
 	now: number = Date.now()
 ): Promise<UnlockResult> => {
+	if (unlock.kind === 'device') return unlockByDevice(db, connectionId, unlock);
 	const counted = await db.transaction('rw', db.secretKeys, async () => {
 		const record = await db.secretKeys.get(connectionId);
 		if (record === undefined) return { status: 'none' } as const;
+		if (record.unlock !== unlock.kind) {
+			return { status: 'otherWay', unlock: record.unlock } as const;
+		}
 		const until = nextTryAt(record);
 		if (until !== undefined && now < until) return { status: 'wait', until } as const;
 		const next: SecretKeyRecord = { ...record, tries: record.tries + 1, triedAt: now };
@@ -291,8 +397,6 @@ export const unlockKeys = async (
 	});
 	if (counted.status !== 'counted') return counted;
 	const { record } = counted;
-	// Wrong without the derivation, which would only come to the same.
-	if (record.unlock !== unlock.kind) return wrongTry(db, record);
 	const sealing = await sealingKey(unlock, record.salt, record.rounds);
 	const identities = await open(sealing, record);
 	if (identities === undefined || identities.length === 0) return wrongTry(db, record);
@@ -375,15 +479,34 @@ export const replaceKeys = async (
 export const forgetKeys = (db: NotesDatabase, connectionId: string): Promise<void> =>
 	db.secretKeys.delete(connectionId);
 
+/** The passkey a device's own lock answers through, and the salt it is asked. */
+export interface DevicePasskey {
+	readonly credentialId: ArrayBuffer;
+	readonly salt: ArrayBuffer;
+}
+
+export type Enrolment = Pick<SecretKeyRecord, 'recipient' | 'unlock' | 'tries' | 'triedAt'> & {
+	/** Where the device unlocks with its own lock. */
+	device?: DevicePasskey;
+};
+
 /** What `UnlockKind` a stored record unlocks with, and its recipient, without unlocking. */
 export const enrolment = (
 	db: NotesDatabase,
 	connectionId: string
-): Promise<Pick<SecretKeyRecord, 'recipient' | 'unlock' | 'tries' | 'triedAt'> | undefined> =>
+): Promise<Enrolment | undefined> =>
 	db.secretKeys.get(connectionId).then((record) => {
 		if (record === undefined) return undefined;
-		const { recipient, unlock, tries, triedAt } = record;
-		return { recipient, unlock, tries, ...(triedAt === undefined ? {} : { triedAt }) };
+		const { recipient, unlock, tries, triedAt, credentialId, salt } = record;
+		return {
+			recipient,
+			unlock,
+			tries,
+			...(triedAt === undefined ? {} : { triedAt }),
+			...(unlock === 'device' && credentialId !== undefined
+				? { device: { credentialId, salt } }
+				: {}),
+		};
 	});
 
 /** For a test's sake: the kinds an unlock may be. */
