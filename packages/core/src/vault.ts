@@ -35,12 +35,18 @@ export const isEmptyVaultFields = (fields: VaultFields): boolean =>
 /**
  * The fields of an opened item, or `undefined` where what it opened to is not
  * an object whose fields are text: one this version cannot read, and must not
- * write over. A field it does not have is empty.
+ * write over. A field it does not have is empty. A byte order mark before the
+ * object, which a file encrypted on Windows can begin with, is not part of it.
+ *
+ * What a later version keeps beside the fields is written back as `JSON`
+ * reads it: text, `true` and `false`, objects and arrays as they were, but a
+ * number only to the precision of a double, and of two keys of one name only
+ * the last. So a later version writes what it adds as text, not as a number.
  */
 export const readVaultPayload = (text: string): VaultPayload | undefined => {
 	const read = ((): unknown => {
 		try {
-			return JSON.parse(text);
+			return JSON.parse(text.replace(/^\uFEFF/u, ''));
 		} catch {
 			return undefined;
 		}
@@ -80,10 +86,16 @@ export const vaultPayload = (
 export const vaultBody = (armor: string): string => `\`\`\`${SECRET_LANGUAGE}\n${armor}\n\`\`\`\n`;
 
 /**
- * The armor of an item's one secret, or `undefined` where its body holds none,
- * or more than one: not an item this version can read.
+ * The armor of an item's one secret, or `undefined` where its body is anything
+ * but that one fence, unlabelled, alone: none, more than one, words beside it
+ * (added in another app), a label on it, or the fence inside something else.
+ * Not an item this version can read: an edit writes the body whole
+ * (`vaultBody`), and would lose the rest.
  */
 export const vaultArmor = (body: string): string | undefined => {
 	const blocks = secretBlocksIn(body);
-	return blocks.length === 1 ? blocks[0] : undefined;
+	const armor = blocks.length === 1 ? blocks[0] : undefined;
+	if (armor === undefined) return undefined;
+	const alone = body.replace(/\r\n/gu, '\n').trim() === vaultBody(armor).trim();
+	return alone ? armor : undefined;
 };

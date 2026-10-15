@@ -26,6 +26,20 @@ describe('a new password', () => {
 		expect(generatePassword({ length: 500, symbols: true })).toHaveLength(PASSWORD_LENGTH.max);
 		expect(passwordLength(Number.NaN)).toBe(PASSWORD_LENGTH.initial);
 		expect(passwordLength(12.4)).toBe(12);
+		expect(passwordLength(Number.POSITIVE_INFINITY)).toBe(PASSWORD_LENGTH.max);
+		expect(passwordLength(Number.NEGATIVE_INFINITY)).toBe(PASSWORD_LENGTH.min);
+	});
+
+	it('is refused, not drawn for ever, from a random source that can never make one', () => {
+		// Every byte past the last whole multiple of the alphabet's size: none
+		// is ever taken.
+		expect(() => generatePassword({ length: 8, symbols: true }, bytesFrom([255]))).toThrow(
+			/random source/u
+		);
+		// Every byte the same character: never one of each kind.
+		expect(() => generatePassword({ length: 8, symbols: false }, bytesFrom([0]))).toThrow(
+			/random source/u
+		);
 	});
 
 	it('has at least one of each kind of character', () => {

@@ -50,6 +50,10 @@ describe('an item’s fields', () => {
 		);
 	});
 
+	it('are read past a byte order mark, as a file encrypted on Windows can begin', () => {
+		expect(readVaultPayload(`\uFEFF${vaultPayload(fields)}`)?.fields).toEqual(fields);
+	});
+
 	it('are not read from anything but an object of text fields', () => {
 		expect(readVaultPayload('hunter2')).toBeUndefined();
 		expect(readVaultPayload('"hunter2"')).toBeUndefined();
@@ -82,6 +86,27 @@ describe('an item’s body', () => {
 		expect(vaultArmor('hunter2\n')).toBeUndefined();
 		expect(vaultArmor('```age\nnot armor\n```\n')).toBeUndefined();
 		expect(vaultArmor(`${vaultBody(armor)}\n${vaultBody(armor)}`)).toBeUndefined();
+	});
+
+	it('is not an item where anything is beside its fence, which an edit would write over', () => {
+		const fence = vaultBody(armor);
+		// Words added in another app, before it or after.
+		expect(vaultArmor(`${fence}\nhello\n`)).toBeUndefined();
+		expect(vaultArmor(`hello\n\n${fence}`)).toBeUndefined();
+		// A label on the fence, which is a secret's and not an item's.
+		expect(vaultArmor(`\`\`\`age GitHub\n${armor}\n\`\`\`\n`)).toBeUndefined();
+		// The fence inside a list.
+		expect(
+			vaultArmor(`- \`\`\`age\n${armor.replaceAll('\n', '\n  ')}\n  \`\`\`\n`)
+		).toBeUndefined();
+		// A second fence, though not one that opens.
+		expect(vaultArmor(`${fence}\n\`\`\`age\nnot armor\n\`\`\`\n`)).toBeUndefined();
+	});
+
+	it('is an item still with Windows line endings, or blank lines round it', () => {
+		const fence = vaultBody(armor);
+		expect(vaultArmor(fence.replaceAll('\n', '\r\n'))).toBe(armor);
+		expect(vaultArmor(`\n\n${fence}\n\n`)).toBe(armor);
 	});
 
 	it('is indexed as nothing: only the label, the title, is searched', () => {

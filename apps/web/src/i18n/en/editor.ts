@@ -284,17 +284,17 @@ export const editor = {
 		cancel: 'Cancel',
 		done: 'Done',
 		/**
-		 * Why a secret cannot be made or opened here, where the source's Secrets
+		 * Why a secret cannot be made or opened here, where the source's Vault
 		 * dialog is the way on: said with a button that opens it (`setUp`, `open`).
 		 */
-		notSetUp: 'This source is not set up for secrets.',
+		notSetUp: 'This source has no vault set up.',
 		notEnrolled:
-			'This device cannot open secrets in this source yet. It needs the source’s recovery key.',
+			'This device cannot open this source’s vault yet. It needs the source’s recovery key.',
 		replaced:
 			'This source’s key was replaced on another device. This device needs the new recovery key.',
 		lost: 'This source’s folder no longer names its key.',
-		setUp: 'Set up secrets',
-		open: 'Open Secrets',
+		setUp: 'Set up vault',
+		open: 'Open Vault',
 		/** Said in the panel, where what was typed could not be encrypted into the note. */
 		notSealed:
 			'What you typed could not be encrypted, and is not saved yet. Keep typing to try again.',

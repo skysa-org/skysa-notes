@@ -81,7 +81,7 @@ const setup = async ({
 	});
 	const told: AttachmentProblem[] = [];
 	const copy = vi.fn((_text: string) => Promise.resolve());
-	// The source's key file, for its Secrets dialog: read as the test wrote it.
+	// The source's key file, for its Vault dialog: read as the test wrote it.
 	const keyFileSync = {
 		refresh: vi.fn(() => Promise.resolve()),
 		write: vi.fn(() => Promise.resolve({ status: 'unavailable' as const })),
@@ -146,27 +146,22 @@ describe('whether a secret can be made here', () => {
 		[
 			'the source is not set up',
 			{ keyFile: 'none', enrolled: false },
-			/^This source is not set up for secrets/u,
-			'Set up secrets',
+			/^This source has no vault set up/u,
+			'Set up vault',
 		],
 		[
 			'the device is not enrolled',
 			{ enrolled: false },
-			/^This device cannot open secrets/u,
-			'Open Secrets',
+			/^This device cannot open this source’s vault/u,
+			'Open Vault',
 		],
 		[
 			'the key was replaced elsewhere',
 			{ keyFile: 'theirs' },
 			/key was replaced on another device/u,
-			'Open Secrets',
+			'Open Vault',
 		],
-		[
-			'the folder names no key',
-			{ keyFile: 'none' },
-			/no longer names its key/u,
-			'Open Secrets',
-		],
+		['the folder names no key', { keyFile: 'none' }, /no longer names its key/u, 'Open Vault'],
 		[
 			'a newer app set it up',
 			{ keyFile: 'newer' },
@@ -184,12 +179,12 @@ describe('whether a secret can be made here', () => {
 
 		expect(await h.secrets().host.begin()).toBeUndefined();
 		expect(h.told.at(-1)?.message).toMatch(said);
-		// The way on, where the Secrets dialog is it, rather than where to find it.
+		// The way on, where the Vault dialog is it, rather than where to find it.
 		expect(h.told.at(-1)?.message).not.toMatch(/menu/u);
 		expect(h.told.at(-1)?.action?.label).toBe(way);
 	});
 
-	it('opens the source’s Secrets dialog over the note when its way on is chosen', async () => {
+	it('opens the source’s Vault dialog over the note when its way on is chosen', async () => {
 		const h = await setup({ enrolled: false });
 		await h.secrets().host.begin();
 
@@ -198,7 +193,7 @@ describe('whether a secret can be made here', () => {
 		});
 
 		// Where a device not yet enrolled starts: typing the recovery key.
-		const dialog = await screen.findByRole('dialog', { name: 'Secrets' });
+		const dialog = await screen.findByRole('dialog', { name: 'Vault' });
 		expect(await screen.findByLabelText('Group 1')).toBeTruthy();
 		expect(h.keyFileSync.refresh).toHaveBeenCalledWith('c1');
 		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -302,11 +297,11 @@ describe('opening', () => {
 	it('says where this device cannot open the source’s secrets at all, with the way on', async () => {
 		const h = await setup({ enrolled: false });
 		expect(await h.secrets().host.open(h.sealedFor('x'))).toEqual({ state: 'locked' });
-		expect(h.told.at(-1)?.message).toMatch(/^This device cannot open secrets/u);
-		expect(h.told.at(-1)?.action?.label).toBe('Open Secrets');
+		expect(h.told.at(-1)?.message).toMatch(/^This device cannot open this source’s vault/u);
+		expect(h.told.at(-1)?.action?.label).toBe('Open Vault');
 	});
 
-	it('goes on to the Secrets dialog from the unlock, where the device’s keys have gone', async () => {
+	it('goes on to the Vault dialog from the unlock, where the device’s keys have gone', async () => {
 		const h = await setup();
 		const opening = h.secrets().host.open(h.sealedFor('the door code'));
 		const pin = await screen.findByLabelText('PIN');
@@ -316,7 +311,7 @@ describe('opening', () => {
 		await h.user.click(await screen.findByRole('button', { name: 'Use the recovery key' }));
 
 		expect(await opening).toEqual({ state: 'locked' });
-		expect(await screen.findByRole('dialog', { name: 'Secrets' })).toBeTruthy();
+		expect(await screen.findByRole('dialog', { name: 'Vault' })).toBeTruthy();
 		expect(await screen.findByLabelText('Group 1')).toBeTruthy();
 		// Opened, not sent to the source's menu for.
 		expect(h.told).toEqual([]);
