@@ -630,6 +630,89 @@ describe('the editor going', () => {
 	});
 });
 
+/**
+ * A secret selected whole has a bar, as a picture has, with Delete secret: a
+ * phone's keyboard may delete nothing for a block selected.
+ */
+describe('a secret selected whole', () => {
+	const selected = async (host?: SecretHost) => {
+		const mounted = await mount(`${fence(sealed('the door code'))}\n\nAfter.\n`, host);
+		const { view } = mounted;
+		view.focus();
+		view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 0)));
+		const remover = () =>
+			mounted.root.querySelector<HTMLButtonElement>('[aria-label="Delete secret"]');
+		return { ...mounted, remover };
+	};
+
+	it('shows Delete secret while it is selected, and not after', async () => {
+		const { view, blocks, remover } = await selected();
+
+		expect(blocks()[0]?.hasAttribute('data-selected')).toBe(true);
+		expect(remover()?.closest('[hidden]')).toBeNull();
+
+		view.dispatch(
+			view.state.tr.setSelection(
+				TextSelection.create(view.state.doc, view.state.doc.content.size - 1)
+			)
+		);
+
+		expect(blocks()[0]?.hasAttribute('data-selected')).toBe(false);
+		expect(remover()?.closest('[hidden]')).not.toBeNull();
+	});
+
+	it('is taken out of the note by Delete secret, as the user’s edit, and comes back with undo', async () => {
+		const { view, blocks, remover, onUserEdit, opened } = await selected();
+
+		remover()?.click();
+
+		expect(blocks()).toHaveLength(0);
+		expect(onUserEdit).toHaveBeenLastCalledWith('After.\n');
+
+		undo(view.state, (tr) => {
+			view.dispatch(tr);
+		});
+
+		expect(opened()).toEqual(['the door code']);
+	});
+
+	it('takes its panel with it, where it was revealed', async () => {
+		const fake = fakeHost();
+		const { view, revealed, field, remover, markdown } = await selected(fake.host);
+		await revealed();
+		view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 0)));
+
+		remover()?.click();
+		await Promise.resolve();
+
+		expect(field()).toBeNull();
+		expect(markdown()).toBe('After.\n');
+	});
+
+	it('keeps a key pressed in its bar from the editor', async () => {
+		const { view, remover } = await selected();
+		const before = view.state.doc;
+
+		remover()?.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })
+		);
+
+		expect(view.state.doc.eq(before)).toBe(true);
+	});
+
+	it('goes back to the block, still selected, with Escape in its bar', async () => {
+		const { view, remover } = await selected();
+		remover()?.focus();
+
+		remover()?.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+		);
+
+		expect(view.hasFocus()).toBe(true);
+		expect(view.state.selection).toBeInstanceOf(NodeSelection);
+	});
+});
+
 describe('a block that goes from under its panel', () => {
 	it('closes the panel where a pull replaced it, what was typed reported before, a heading and all', async () => {
 		const fake = fakeHost();
