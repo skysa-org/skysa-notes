@@ -3,8 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { Dialog } from '../src/components/Dialog.js';
 import { drawTo, PatternGrid } from '../src/components/PatternGrid.js';
-import { UnlockForm } from '../src/components/UnlockDialog.js';
+import { UnlockDialog, UnlockForm } from '../src/components/UnlockDialog.js';
 import { ChooseUnlock } from '../src/components/UnlockEntry.js';
 import type { Answer, DeviceLock } from '../src/secrets/deviceLock.js';
 import { createSecretsLock } from '../src/secrets/lock.js';
@@ -591,5 +592,61 @@ describe('unlocking with the device’s own lock', () => {
 		await vi.waitFor(() => {
 			expect(h.onUnlocked).toHaveBeenCalledTimes(1);
 		});
+	});
+});
+
+describe('in a dialog', () => {
+	/** The buttons in the row Cancel is in. */
+	const rowOfCancel = () => {
+		const row = screen.getByRole('button', { name: 'Cancel' }).parentElement;
+		expect(row?.className).toBe('dialog-actions');
+		return [...(row?.querySelectorAll('button') ?? [])].map((button) => button.textContent);
+	};
+
+	it('has Cancel and then Unlock, in one row, as the app’s other dialogs do', async () => {
+		const db = createDatabase(`unlock-dialog-${crypto.randomUUID()}`);
+		opened.push(db);
+		await enrol(db, {
+			connectionId: 'c1',
+			recipient: 'age1…',
+			identities: [new Uint8Array(32).fill(7)],
+			unlock: { kind: 'pin', digits: '2468' },
+			rounds: 1000,
+		});
+		const onCancel = vi.fn();
+		render(
+			<UnlockDialog
+				database={db}
+				connectionId="c1"
+				kind="pin"
+				lock={createSecretsLock({
+					target: {
+						visibilityState: 'visible',
+						addEventListener: () => undefined,
+						removeEventListener: () => undefined,
+					},
+				})}
+				onUnlocked={() => undefined}
+				onRecovery={() => undefined}
+				onCancel={onCancel}
+			/>
+		);
+
+		expect(rowOfCancel()).toEqual(['Cancel', 'Unlock']);
+		expect(document.activeElement).toBe(screen.getByLabelText('PIN'));
+		await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(onCancel).toHaveBeenCalledOnce();
+	});
+
+	it('has choosing a pattern’s Next after Cancel, and its first dot the focus', async () => {
+		render(
+			<Dialog title="Secrets" onClose={() => undefined}>
+				<ChooseUnlock onChosen={() => undefined} />
+			</Dialog>
+		);
+		await userEvent.click(screen.getByRole('radio', { name: 'Pattern' }));
+
+		expect(rowOfCancel()).toEqual(['Cancel', 'Next']);
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Dot 1' }));
 	});
 });

@@ -19,7 +19,8 @@ export const useEscape = (
 		const element = within.current;
 		if (!open || element === null) return undefined;
 		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') cancel();
+			// Taken already by a question asked inside it (`InlineDialog`).
+			if (event.key === 'Escape' && !event.defaultPrevented) cancel();
 		};
 		element.addEventListener('keydown', onKey);
 		return () => {

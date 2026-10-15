@@ -1,8 +1,7 @@
-import { type ReactNode, type RefObject, useEffect, useId, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import type { ReactNode, RefObject } from 'react';
 
-import { useSuspendShortcuts } from '../commands/context.js';
 import { t } from '../i18n/t.js';
+import { Dialog, DialogActions } from './Dialog.js';
 
 /**
  * Something the app has to say at more length than the place it is asked from
@@ -10,18 +9,15 @@ import { t } from '../i18n/t.js';
  * source, and what its provider keeps from the app, asked for from the foot of
  * the sidebar (`AccountPanel`).
  *
- * A `ConfirmDialog` with nothing to confirm, and built as it is, for its
- * reasons: at the end of the page, so no stacking context below it can put it
- * under the toasts; modal, so Tab stays inside it and the shortcuts are held;
- * Escape is Close; and the focus goes back where it came from. What it holds
- * may have controls of its own — a device's Remove — so Tab goes between every
- * button and link in it, not only Close.
+ * A `Dialog` with nothing to answer: Close starts the row, and has the focus
+ * unless what it holds has a field. What it holds may have controls of its own
+ * — a device's Remove — and Tab goes between them too.
  */
 export interface InfoDialogProps {
 	title: string;
 	children: ReactNode;
 	onClose: () => void;
-	/** What can be done about what it says, beside Close and before it. */
+	/** What can be done about what it says, after Close. */
 	actions?: ReactNode;
 	/**
 	 * Where the focus goes when the dialog does. Without it, back to whatever
@@ -30,66 +26,15 @@ export interface InfoDialogProps {
 	returnFocus?: RefObject<HTMLElement | null>;
 }
 
-const REACHABLE = 'button:not(:disabled), a[href]';
-
-export const InfoDialog = ({ title, children, onClose, actions, returnFocus }: InfoDialogProps) => {
-	const titleId = useId();
-	const dialog = useRef<HTMLDivElement>(null);
-	const close = useRef<HTMLButtonElement>(null);
-	useSuspendShortcuts();
-
-	useEffect(() => {
-		// Read now: what it names is on the page for as long as the dialog is.
-		const back = returnFocus?.current ?? document.activeElement;
-		close.current?.focus();
-		return () => {
-			if (back instanceof HTMLElement && back.isConnected) back.focus();
-		};
-		// Mount and unmount only: the focus is taken once and given back once.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
-
-	useEffect(() => {
-		const element = dialog.current;
-		if (element === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				onClose();
-				return;
-			}
-			if (event.key !== 'Tab') return;
-			const reachable = [...element.querySelectorAll<HTMLElement>(REACHABLE)];
-			const at = reachable.indexOf(document.activeElement as HTMLElement);
-			const next = (at + (event.shiftKey ? -1 : 1) + reachable.length) % reachable.length;
-			event.preventDefault();
-			reachable[next]?.focus();
-		};
-		element.addEventListener('keydown', onKey);
-		return () => {
-			element.removeEventListener('keydown', onKey);
-		};
-	}, [onClose]);
-
-	return createPortal(
-		<div className="modal-backdrop">
-			<div
-				ref={dialog}
-				className="modal info-dialog"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-			>
-				<h2 id={titleId}>{title}</h2>
-				{children}
-				<div className="modal-actions">
-					{actions}
-					<button ref={close} type="button" onClick={onClose}>
-						{t('common.close')}
-					</button>
-				</div>
-			</div>
-		</div>,
-		document.body
-	);
-};
+export const InfoDialog = ({ title, children, onClose, actions, returnFocus }: InfoDialogProps) => (
+	<Dialog
+		title={title}
+		className="info-dialog"
+		onClose={onClose}
+		closeLabel={t('common.close')}
+		returnFocus={returnFocus}
+	>
+		{children}
+		<DialogActions>{actions}</DialogActions>
+	</Dialog>
+);

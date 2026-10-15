@@ -18,7 +18,6 @@ export const attachedFiles = {
 	deleteLabel: 'Delete {name}',
 	delete: 'Delete',
 	confirm: 'Delete it for good?',
-	keep: 'Keep',
 	kept: '{name} was kept: a note may link it now.',
 	failed: '{name} could not be deleted.',
 	/** A file's size, rounded: kilobytes whole, megabytes to a tenth. */

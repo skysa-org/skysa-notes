@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { flushSync } from 'react-dom';
 
+import { DialogActions } from '../components/Dialog.js';
 import { t } from '../i18n/t.js';
 import {
 	clearLink,
@@ -822,10 +823,15 @@ const LinkForm = ({
 					setHref(event.target.value);
 				}}
 			/>
-			<div className="toolbar-link-actions">
-				<button type="submit" disabled={href.trim() === ''}>
-					{t('editor.toolbar.applyLink')}
-				</button>
+			{/* A dialog's row (`DialogActions`): the answer last. Its way out is
+			    Escape, or a press outside it, as for any of the toolbar's panels. */}
+			<DialogActions
+				primary={
+					<button type="submit" disabled={href.trim() === ''}>
+						{t('editor.toolbar.applyLink')}
+					</button>
+				}
+			>
 				{current !== null && (
 					<button
 						type="button"
@@ -837,7 +843,7 @@ const LinkForm = ({
 						{t('editor.toolbar.removeLink')}
 					</button>
 				)}
-			</div>
+			</DialogActions>
 		</form>
 	);
 };

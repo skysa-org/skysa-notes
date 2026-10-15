@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
 import { LOCALE, t } from '../i18n/t.js';
 import {
@@ -15,6 +15,7 @@ import { settleEditors } from '../store/heldEdits.js';
 import { titleShown } from '../store/titles.js';
 import { countOf, isEmpty, seenIn, type Unsynced, unsyncedIn } from '../store/unsynced.js';
 import { PROVIDER_LABELS, sourceName, UNKNOWN_LABEL } from '../sync/account.js';
+import { DialogActions, InlineDialog } from './Dialog.js';
 import { MoveUnsent, otherLiveSources } from './MoveUnsent.js';
 import { useEscape } from './useEscape.js';
 
@@ -150,18 +151,21 @@ const DiscardConfirm = ({
 	listed,
 	busy,
 	download,
-	cancelRef,
 	onDiscard,
 	onCancel,
 }: {
 	listed: Unsynced;
 	busy: boolean;
 	download: (listed: Unsynced) => void;
-	cancelRef: RefObject<HTMLButtonElement | null>;
 	onDiscard: () => void;
 	onCancel: () => void;
 }) => (
-	<div className="account-confirm" role="group" aria-label={t('unsent.discard.forGood')}>
+	<InlineDialog
+		className="account-confirm"
+		label={t('unsent.discard.forGood')}
+		onClose={onCancel}
+		busy={busy}
+	>
 		<p className="muted">{question(listed)}</p>
 		{listed.notes.length > 0 && (
 			<ul aria-label={t('unsent.detached.toDiscard')}>
@@ -172,22 +176,26 @@ const DiscardConfirm = ({
 		)}
 		{alsoGoing(listed) !== null && <p className="muted">{alsoGoing(listed)}</p>}
 		{!isEmpty(listed) && <p>{t('unsent.detached.nowhereElse')}</p>}
-		<button type="button" disabled={busy} onClick={onDiscard}>
-			{isEmpty(listed) ? t('unsent.detached.removeButton') : t('unsent.discard.forGood')}
-		</button>
-		<button
-			type="button"
-			disabled={busy || !hasUnsentDownload(listed)}
-			onClick={() => {
-				download(listed);
-			}}
+		<DialogActions
+			primary={
+				<button type="button" className="danger" disabled={busy} onClick={onDiscard}>
+					{isEmpty(listed)
+						? t('unsent.detached.removeButton')
+						: t('unsent.discard.forGood')}
+				</button>
+			}
 		>
-			{t('unsent.discard.downloadFirst')}
-		</button>
-		<button ref={cancelRef} type="button" className="ghost" disabled={busy} onClick={onCancel}>
-			{t('common.cancel')}
-		</button>
-	</div>
+			<button
+				type="button"
+				disabled={busy || !hasUnsentDownload(listed)}
+				onClick={() => {
+					download(listed);
+				}}
+			>
+				{t('unsent.discard.downloadFirst')}
+			</button>
+		</DialogActions>
+	</InlineDialog>
 );
 
 export const DetachedSource = ({
@@ -212,15 +220,13 @@ export const DetachedSource = ({
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 
-	// Focus follows the step the user is on, as in the disconnect confirm, and
-	// lands on Cancel: the safe answer is the one a stray Enter gives.
-	const focusNext = useRef<'cancel' | 'open' | null>(null);
-	const cancelButton = useRef<HTMLButtonElement>(null);
+	// The question takes the focus as every question does (`InlineDialog`), as
+	// in the disconnect confirm; closed, it goes back to Discard.
+	const focusBack = useRef(false);
 	const openButton = useRef<HTMLButtonElement>(null);
 	const panel = useRef<HTMLElement>(null);
 	const confirming = listed !== null;
 	useEffect(() => {
-		const target = focusNext.current === 'cancel' ? cancelButton : openButton;
 		// Only focus that is still here to move: a user who went back to a note
 		// while the editors were being settled keeps typing into the note.
 		const focused = document.activeElement;
@@ -228,8 +234,8 @@ export const DetachedSource = ({
 			focused === null ||
 			focused === document.body ||
 			panel.current?.contains(focused) === true;
-		if (focusNext.current !== null && here) target.current?.focus();
-		focusNext.current = null;
+		if (focusBack.current && here) openButton.current?.focus();
+		focusBack.current = false;
 	}, [confirming]);
 
 	const name = sourceName(bound) ?? UNKNOWN_LABEL;
@@ -259,7 +265,6 @@ export const DetachedSource = ({
 					setProblem(t('unsent.cannotList'));
 					return;
 				}
-				focusNext.current = 'cancel';
 				setListed(await unsyncedIn(database, connectionId));
 			})
 			.catch(() => {
@@ -271,7 +276,7 @@ export const DetachedSource = ({
 	};
 
 	const close = useCallback(() => {
-		focusNext.current = 'open';
+		focusBack.current = true;
 		setListed(null);
 	}, []);
 	useEscape(panel, confirming, close);
@@ -404,7 +409,6 @@ export const DetachedSource = ({
 					listed={listed}
 					busy={busy}
 					download={save}
-					cancelRef={cancelButton}
 					onDiscard={() => {
 						discard(listed);
 					}}

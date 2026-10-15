@@ -5,6 +5,7 @@ import { type ConnectedSource } from '../store/connection.js';
 import { LOCAL_CONNECTION_ID } from '../store/db.js';
 import { countedFolders, movable, type Unsynced } from '../store/unsynced.js';
 import { connectedName, sourceName } from '../sync/account.js';
+import { DialogActions, InlineDialog } from './Dialog.js';
 
 /**
  * Taking what one source never sent into another connected source.
@@ -183,18 +184,15 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 	/** The list the second step is about, as it stood when the user asked for it. */
 	const [shown, setShown] = useState<Unsynced | null>(null);
 	const confirming = shown !== null;
-	const cancelButton = useRef<HTMLButtonElement>(null);
 	const openButton = useRef<HTMLButtonElement>(null);
-	// Not on the first render: the step is entered, not arrived at, and the
-	// component mounts while the focus is wherever the user left it.
-	const mounted = useRef(false);
+	const asked = useRef(false);
 	useEffect(() => {
-		// Focus follows the step, both ways: the button that was pressed has gone,
-		// and left to itself the focus falls to the page, where Escape reaches
-		// nothing (`useEscape` listens on the panel). On the way in it lands on
-		// Cancel, because the safe answer is the one a stray Enter gives.
-		if (mounted.current) (confirming ? cancelButton : openButton).current?.focus();
-		mounted.current = true;
+		// The second step takes the focus as every question does (`InlineDialog`);
+		// cancelled, it gives it back to the button that asked, rather than let
+		// it fall to the page, where Escape reaches nothing.
+		const was = asked.current;
+		asked.current = confirming;
+		if (was && !confirming) openButton.current?.focus();
 	}, [confirming]);
 
 	const target = targets.find((source) => source.connectionId === chosen) ?? targets[0];
@@ -241,33 +239,34 @@ export const MoveUnsent = ({ listed, from, targets, busy, disabled, onMove }: Mo
 	const also = leftBehind(shown, from);
 	const linked = linkedNote(shown, from);
 	return (
-		<div className="account-confirm" role="group" aria-label={t('unsent.move.group')}>
+		<InlineDialog
+			className="account-confirm"
+			label={t('unsent.move.group')}
+			onClose={() => {
+				setShown(null);
+			}}
+			busy={busy}
+		>
 			<p>
 				{going(shown, 'going', into)}
 				{older > 0 && ` ${t('unsent.move.alsoThere', { count: older, source: from })}`}
 				{also !== null && ` ${also}`}
 				{linked !== null && ` ${linked}`}
 			</p>
-			<button
-				type="button"
-				disabled={busy}
-				onClick={() => {
-					onMove(target.connectionId, shown);
-				}}
-			>
-				{t('unsent.move.confirm')}
-			</button>
-			<button
-				ref={cancelButton}
-				type="button"
-				className="ghost"
-				disabled={busy}
-				onClick={() => {
-					setShown(null);
-				}}
-			>
-				{t('common.cancel')}
-			</button>
-		</div>
+			<DialogActions
+				primary={
+					<button
+						type="button"
+						className="primary"
+						disabled={busy}
+						onClick={() => {
+							onMove(target.connectionId, shown);
+						}}
+					>
+						{t('unsent.move.confirm')}
+					</button>
+				}
+			/>
+		</InlineDialog>
 	);
 };

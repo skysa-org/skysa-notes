@@ -133,6 +133,8 @@ export const PatternGrid = ({ dots, onChange, onDrawn, disabled = false }: Patte
 			<div
 				ref={grid}
 				className="pattern-grid"
+				// Where the pattern is drawn: a dialog's field, so its first dot has the focus.
+				data-dialog-field=""
 				role="group"
 				aria-label={t('secrets.pattern.label')}
 			>

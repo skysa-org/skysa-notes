@@ -1,7 +1,5 @@
-import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { type ReactNode, type RefObject, useEffect, useId, useState } from 'react';
 
-import { useSuspendShortcuts } from '../commands/context.js';
 import { t } from '../i18n/t.js';
 import { BROWSER_DEVICE_LOCK, type DeviceLock } from '../secrets/deviceLock.js';
 import { type SecretsLock } from '../secrets/lock.js';
@@ -15,6 +13,7 @@ import {
 	unlockKeys,
 	type UnlockResult,
 } from '../store/secretKeys.js';
+import { Dialog, DialogActions } from './Dialog.js';
 import { type Entered, NOTHING_ENTERED, UnlockEntry, unlockOf } from './UnlockEntry.js';
 
 /**
@@ -44,6 +43,8 @@ export interface UnlockFormProps {
 	now?: () => number;
 	/** How the device's own lock is asked, where that is how it unlocks. */
 	deviceLock?: DeviceLock;
+	/** Buttons of the step the form is in, in its row before Unlock. */
+	extra?: ReactNode;
 }
 
 type Gone = 'forgotten' | 'none' | 'changed';
@@ -75,12 +76,26 @@ const ASK: Readonly<Record<EnteredKind, 'pattern' | 'pin' | 'password'>> = {
 };
 
 /** The keys gone from the device, or no longer opened by its lock: the recovery key is what is left. */
-const GoneForm = ({ why, onRecovery }: { why: Gone; onRecovery: () => void }) => (
+const GoneForm = ({
+	why,
+	onRecovery,
+	extra,
+}: {
+	why: Gone;
+	onRecovery: () => void;
+	extra: ReactNode;
+}) => (
 	<div className="unlock-form">
 		<p role="alert">{t(`secrets.unlock.${why}`)}</p>
-		<button type="button" className="primary" onClick={onRecovery}>
-			{t('secrets.unlock.useRecovery')}
-		</button>
+		<DialogActions
+			primary={
+				<button type="button" className="primary" onClick={onRecovery}>
+					{t('secrets.unlock.useRecovery')}
+				</button>
+			}
+		>
+			{extra}
+		</DialogActions>
 	</div>
 );
 
@@ -121,6 +136,7 @@ const DeviceUnlockForm = ({
 	deviceLock,
 	moved,
 	onOtherWay,
+	extra,
 }: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> & Asking & { deviceLock: DeviceLock }) => {
 	const askId = useId();
 	const [busy, setBusy] = useState(false);
@@ -155,7 +171,8 @@ const DeviceUnlockForm = ({
 		setSaid({ kind: 'failed' });
 	};
 
-	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} />;
+	if (said.kind === 'gone')
+		return <GoneForm why={said.why} onRecovery={onRecovery} extra={extra} />;
 
 	return (
 		<form
@@ -171,14 +188,25 @@ const DeviceUnlockForm = ({
 				{said.kind === 'failed' && <p>{t('secrets.failed')}</p>}
 				{said.kind === 'unanswered' && <p>{t('secrets.unlock.unanswered')}</p>}
 			</div>
-			<button type="submit" className="primary" disabled={busy} aria-describedby={askId}>
-				{t('secrets.unlock.unlock')}
-			</button>
-			{said.kind === 'unanswered' && (
-				<button type="button" onClick={onRecovery}>
-					{t('secrets.unlock.useRecovery')}
-				</button>
-			)}
+			<DialogActions
+				primary={
+					<button
+						type="submit"
+						className="primary"
+						disabled={busy}
+						aria-describedby={askId}
+					>
+						{t('secrets.unlock.unlock')}
+					</button>
+				}
+			>
+				{said.kind === 'unanswered' && (
+					<button type="button" onClick={onRecovery}>
+						{t('secrets.unlock.useRecovery')}
+					</button>
+				)}
+				{extra}
+			</DialogActions>
 		</form>
 	);
 };
@@ -236,6 +264,7 @@ const EnteredUnlockForm = ({
 	now,
 	moved,
 	onOtherWay,
+	extra,
 }: Omit<UnlockFormProps, 'kind' | 'now' | 'deviceLock'> &
 	Asking & {
 		kind: EnteredKind;
@@ -282,7 +311,8 @@ const EnteredUnlockForm = ({
 		setSaid({ kind: 'gone', why: result.status });
 	};
 
-	if (said.kind === 'gone') return <GoneForm why={said.why} onRecovery={onRecovery} />;
+	if (said.kind === 'gone')
+		return <GoneForm why={said.why} onRecovery={onRecovery} extra={extra} />;
 
 	return (
 		<form
@@ -313,111 +343,20 @@ const EnteredUnlockForm = ({
 				)}
 				{seconds > 0 && <p>{t('secrets.unlock.wait', { count: seconds })}</p>}
 			</div>
-			<button type="submit" className="primary" disabled={!ready(unlockOf(kind, entered))}>
-				{t('secrets.unlock.unlock')}
-			</button>
-		</form>
-	);
-};
-
-const REACHABLE = 'input, textarea, button:not(:disabled), a[href]';
-
-/**
- * Held as the app's other dialogs are (`ConfirmDialog`): at the end of the
- * page, modal, the shortcuts held, Escape as the way out, the focus given back.
- * Tab goes between what can be used in it, and the first of that has the focus
- * to begin with.
- */
-export const SecretsModal = ({
-	title,
-	children,
-	onClose,
-	closeLabel = t('common.cancel'),
-	returnFocus,
-}: {
-	title: string;
-	children: ReactNode;
-	onClose: () => void;
-	closeLabel?: string;
-	returnFocus?: RefObject<HTMLElement | null> | undefined;
-}) => {
-	const titleId = useId();
-	const dialog = useRef<HTMLDivElement>(null);
-	useSuspendShortcuts();
-
-	useEffect(() => {
-		// Read now: what it names is on the page for as long as the dialog is.
-		const back = returnFocus?.current ?? document.activeElement;
-		const first = dialog.current?.querySelector<HTMLElement>(REACHABLE);
-		if (dialog.current?.contains(document.activeElement) !== true) first?.focus();
-		return () => {
-			if (back instanceof HTMLElement && back.isConnected) back.focus();
-		};
-		// Mount and unmount only: the focus is taken once and given back once.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
-
-	// On the document, not the dialog: a step that goes takes the focus with
-	// it, to the page's body, and the keys must still reach the dialog then.
-	useEffect(() => {
-		const element = dialog.current;
-		if (element === null) return undefined;
-		const onKey = (event: KeyboardEvent) => {
-			if (event.defaultPrevented) return;
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				onClose();
-				return;
-			}
-			if (event.key !== 'Tab') return;
-			const reachable = [...element.querySelectorAll<HTMLElement>(REACHABLE)];
-			const at = reachable.indexOf(document.activeElement as HTMLElement);
-			const from = at === -1 && event.shiftKey ? 0 : at;
-			const next = (from + (event.shiftKey ? -1 : 1) + reachable.length) % reachable.length;
-			event.preventDefault();
-			reachable[next]?.focus();
-		};
-		document.addEventListener('keydown', onKey);
-		return () => {
-			document.removeEventListener('keydown', onKey);
-		};
-	}, [onClose]);
-
-	// A step that goes takes the focus with it. The next one's first control
-	// has it then, as the first step's did, so it is not left on the page
-	// behind the dialog.
-	useEffect(() => {
-		const element = dialog.current;
-		if (element === null) return undefined;
-		const observer = new MutationObserver(() => {
-			if (element.contains(document.activeElement)) return;
-			element.querySelector<HTMLElement>(REACHABLE)?.focus();
-		});
-		observer.observe(element, { childList: true, subtree: true });
-		return () => {
-			observer.disconnect();
-		};
-	}, []);
-
-	return createPortal(
-		<div className="modal-backdrop">
-			<div
-				ref={dialog}
-				className="modal secrets-dialog"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-			>
-				<h2 id={titleId}>{title}</h2>
-				{children}
-				<div className="modal-actions">
-					<button type="button" onClick={onClose}>
-						{closeLabel}
+			<DialogActions
+				primary={
+					<button
+						type="submit"
+						className="primary"
+						disabled={!ready(unlockOf(kind, entered))}
+					>
+						{t('secrets.unlock.unlock')}
 					</button>
-				</div>
-			</div>
-		</div>,
-		document.body
+				}
+			>
+				{extra}
+			</DialogActions>
+		</form>
 	);
 };
 
@@ -429,7 +368,12 @@ export interface UnlockDialogProps extends Omit<UnlockFormProps, 'onUnlocked' | 
 }
 
 export const UnlockDialog = ({ onCancel, returnFocus, ...form }: UnlockDialogProps) => (
-	<SecretsModal title={t('secrets.unlock.title')} onClose={onCancel} returnFocus={returnFocus}>
+	<Dialog
+		title={t('secrets.unlock.title')}
+		className="secrets-dialog"
+		onClose={onCancel}
+		returnFocus={returnFocus}
+	>
 		<UnlockForm {...form} />
-	</SecretsModal>
+	</Dialog>
 );

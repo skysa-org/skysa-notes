@@ -522,12 +522,12 @@ describe('AccountPanel, with nothing connected', () => {
 		expect(within(question).getByText(/will move/).textContent).toBe(
 			'Your 1 notebook and 2 notes on this device will move into Dropbox and sync there. Cancel to keep them on this device only.'
 		);
-		// Cancel has the focus, as in every question this app asks — once the
-		// dialog's effect has given it, which a loaded machine runs a moment
+		// The answer has the focus, as in every question this app asks — once
+		// the dialog's effect has given it, which a loaded machine runs a moment
 		// after the dialog is found.
 		await waitFor(() => {
 			expect(document.activeElement).toBe(
-				within(question).getByRole('button', { name: 'Cancel' })
+				within(question).getByRole('button', { name: 'Connect and move' })
 			);
 		});
 		// Nothing has been started while the question is out.
@@ -1486,7 +1486,7 @@ describe('AccountPanel, with an account connected', () => {
 				within(question)
 					.getAllByRole('button')
 					.map((button) => button.textContent)
-			).toEqual(['Choose folder', 'Choose files', 'Cancel']);
+			).toEqual(['Cancel', 'Choose files', 'Choose folder']);
 			await user.click(within(question).getByRole('button', { name: 'Cancel' }));
 
 			expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -1873,8 +1873,9 @@ describe('AccountPanel, with an account connected', () => {
 
 		await choose(user, 'Disconnect');
 		await screen.findByRole('button', { name: 'Disconnect' });
+		// The answer, as in every question the app asks.
 		await waitFor(() => {
-			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Disconnect' }));
 		});
 
 		// Back on the gear the question was asked from: the item that asked it
@@ -3605,7 +3606,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		expect(await db.notes.count()).toBe(2);
 	});
 
-	it('discards in two steps: the first only lists what would go, with the focus on Cancel', async () => {
+	it('discards in two steps: the first only lists what would go, Cancel first', async () => {
 		const user = userEvent.setup();
 		const { db } = await detached();
 		const { downloaded } = renderPanel(clientWith(), db);
@@ -3619,9 +3620,16 @@ describe('AccountPanel, with a detached source in front', () => {
 		]);
 		expect(screen.getByText('Discard these 2 notes?')).toBeTruthy();
 		expect(screen.getByText('These exist nowhere else. This cannot be undone.')).toBeTruthy();
-		// A stray Enter answers no.
-		expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
-		expect(screen.getByRole('button', { name: 'Discard for good' })).toBeTruthy();
+		// Asked as every question is: Cancel first, and the answer, which has the focus.
+		const asked = screen.getByRole('group', { name: 'Discard for good' });
+		expect(
+			within(asked)
+				.getAllByRole('button')
+				.map((button) => button.textContent)
+		).toEqual(['Cancel', 'Download them first', 'Discard for good']);
+		expect(document.activeElement).toBe(
+			screen.getByRole('button', { name: 'Discard for good' })
+		);
 		// Nothing has gone, and a download is within reach.
 		expect(await db.notes.count()).toBe(2);
 		await user.click(await enabled('Download them first'));
@@ -3782,7 +3790,7 @@ describe('AccountPanel, with a detached source in front', () => {
 		// Moved there by an effect after the render that shows the question, so
 		// waited for: under a loaded full run the question can be found first.
 		await waitFor(() => {
-			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }));
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Disconnect' }));
 		});
 
 		await user.keyboard('{Escape}');
@@ -4028,7 +4036,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		});
 	});
 
-	it('puts the focus on Cancel in the second step, and Escape closes the lot', async () => {
+	it('puts the focus on Move them in the second step, and Escape is its Cancel', async () => {
 		const user = userEvent.setup();
 		const { db, unsent } = await withSomewhereToPutIt();
 		renderPanel(answering(db), db);
@@ -4037,12 +4045,23 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await user.click(await screen.findByRole('button', { name: /^Move/ }));
 		const step = await screen.findByRole('group', { name: 'Move to another source' });
 
-		// A stray Enter answers no, here as everywhere else.
-		expect(document.activeElement).toBe(step.querySelector('button.ghost'));
+		// The answer has the focus, here as everywhere else, after Cancel.
+		expect(
+			within(step)
+				.getAllByRole('button')
+				.map((button) => button.textContent)
+		).toEqual(['Cancel', 'Move them']);
+		expect(document.activeElement).toBe(
+			within(step).getByRole('button', { name: 'Move them' })
+		);
 
+		// Back a step, as its Cancel goes; and again, out of the question.
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('button', { name: 'Move them' })).toBeNull();
+		expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Move/ }));
 		await user.keyboard('{Escape}');
 
-		expect(screen.queryByRole('button', { name: 'Move them' })).toBeNull();
+		expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
 		expect(await offered(user, 'Disconnect')).toBeTruthy();
 		expect((await noteById(db, unsent.id))?.connectionId).toBe('c1');
 	});
@@ -4298,7 +4317,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		).toBeTruthy();
 	});
 
-	it('puts the focus on Cancel in the discard step too, where Escape can reach it', async () => {
+	it('puts the focus on the discard step’s answer too, where Escape can reach it', async () => {
 		const user = userEvent.setup();
 		const { db, unsent } = await withSomewhereToPutIt();
 		renderPanel(answering(db), db);
@@ -4308,8 +4327,10 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		const step = await screen.findByRole('group', { name: 'Discard for good' });
 
 		// The button that was pressed went with the step. Left on the page, the
-		// focus is nowhere the panel's Escape listener can hear.
-		expect(document.activeElement).toBe(step.querySelector('button.ghost'));
+		// focus is nowhere the question's Escape listener can hear.
+		expect(document.activeElement).toBe(
+			within(step).getByRole('button', { name: 'Discard for good' })
+		);
 
 		await user.keyboard('{Escape}');
 
@@ -4327,7 +4348,7 @@ describe('AccountPanel, asked what becomes of what was never sent', () => {
 		await user.click(await screen.findByRole('button', { name: /^Move/ }));
 		const step = await screen.findByRole('group', { name: 'Move to another source' });
 		// The step's own Cancel, which goes back rather than closing the question.
-		await user.click(step.querySelector('button.ghost') as HTMLElement);
+		await user.click(within(step).getByRole('button', { name: 'Cancel' }));
 
 		const offer = await screen.findByRole('button', { name: /^Move/ });
 		expect(document.activeElement).toBe(offer);

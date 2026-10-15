@@ -197,7 +197,15 @@ describe('the import dialog', () => {
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect((await screen.findByRole('alert')).textContent).toMatch(/cannot be reached/);
-		expect(screen.getByRole('button', { name: 'Keep importing' })).toBeDefined();
+		// Its way out first and its answer last, which has the focus.
+		expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+			'Keep importing',
+			'Cancel here anyway',
+			'Try again',
+		]);
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Try again' }));
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Cancel here anyway' }));
 

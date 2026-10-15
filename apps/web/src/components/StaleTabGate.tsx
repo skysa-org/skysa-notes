@@ -1,7 +1,8 @@
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useState, useSyncExternalStore } from 'react';
 
 import { t } from '../i18n/t.js';
 import { subscribeTabState, tabState } from '../store/staleTab.js';
+import { Dialog, DialogActions } from './Dialog.js';
 
 /**
  * The app, and in front of it the two things `store/staleTab.ts` can have to
@@ -20,6 +21,9 @@ import { subscribeTabState, tabState } from '../store/staleTab.js';
  * its user to copy their text somewhere safe. So the notice can be put aside
  * for that: the app comes back, selectable, under a bar that goes on saying it
  * cannot save. Typing there is refused by the store and said by the note view.
+ *
+ * The notice is a `Dialog` with no way out — no Cancel, no Escape — since
+ * neither answer can be put off; Reload is the answer, and has the focus.
  */
 export const StaleTabGate = ({
 	children,
@@ -34,10 +38,6 @@ export const StaleTabGate = ({
 	const state = useSyncExternalStore(subscribeTabState, tabState);
 	const [copying, setCopying] = useState(false);
 	const blocked = state === 'stale' && !copying;
-	const button = useRef<HTMLButtonElement>(null);
-	useEffect(() => {
-		if (blocked) button.current?.focus();
-	}, [blocked]);
 
 	return (
 		<>
@@ -53,31 +53,28 @@ export const StaleTabGate = ({
 				</div>
 			)}
 			{blocked && (
-				<div className="tab-notice-backdrop">
-					<div
-						className="tab-notice"
-						role="alertdialog"
-						aria-modal="true"
-						aria-labelledby="tab-notice-title"
-						aria-describedby="tab-notice-text"
-					>
-						<h2 id="tab-notice-title">{t('shell.staleTab.title')}</h2>
-						<p id="tab-notice-text">{t('shell.staleTab.text')}</p>
-						<div className="tab-notice-actions">
-							<button ref={button} type="button" onClick={reload}>
+				<Dialog
+					title={t('shell.staleTab.title')}
+					text={t('shell.staleTab.text')}
+					role="alertdialog"
+				>
+					<DialogActions
+						primary={
+							<button type="button" className="primary" onClick={reload}>
 								{t('common.reload')}
 							</button>
-							<button
-								type="button"
-								onClick={() => {
-									setCopying(true);
-								}}
-							>
-								{t('shell.staleTab.copyFirst')}
-							</button>
-						</div>
-					</div>
-				</div>
+						}
+					>
+						<button
+							type="button"
+							onClick={() => {
+								setCopying(true);
+							}}
+						>
+							{t('shell.staleTab.copyFirst')}
+						</button>
+					</DialogActions>
+				</Dialog>
 			)}
 			{state === 'waiting' && (
 				<div className="update-prompt" role="status">
