@@ -1,3 +1,4 @@
+import { withoutArmor } from '@skysa/core';
 import MiniSearch from 'minisearch';
 
 import { type NoteRecord, noteRef } from './db.js';
@@ -48,7 +49,8 @@ const indexed = (note: NoteRecord): Indexed => ({
 	// As it is shown, so that it is found by what is on screen.
 	title: titleShown(note.title),
 	tags: note.tags.join(' '),
-	body: note.body,
+	// A secret by its label alone: its armor is base64, no word of the note's.
+	body: withoutArmor(note.body),
 });
 
 /**

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type NoteRecord } from '../src/store/db.js';
 import { createNoteSearch, type NoteHit, SEARCH_LIMIT } from '../src/store/search.js';
 import type * as VisibleText from '../src/store/visibleText.js';
+import { fence, sealed } from './secretHostFake.js';
 
 /**
  * Search is the one place the app answers a question about *every* note rather
@@ -248,6 +249,43 @@ describe('keeping up with the store', () => {
 		await search.refresh([note({ id: 'n', body: 'unchanged', dirty: 1 })]);
 
 		expect(search.find('unchanged')[0]?.note.dirty).toBe(1);
+	});
+});
+
+describe('a note with a secret in it', () => {
+	const armor = sealed('hunter2');
+	const search = createNoteSearch();
+	beforeAll(async () => {
+		await search.refresh([
+			note({
+				id: 'router',
+				title: 'Router',
+				body: `Settings for the attic.\n\n${fence(armor, 'Wi-Fi password')}\n`,
+			}),
+			note({ id: 'other', title: 'Other', body: 'Nothing here.' }),
+		]);
+	});
+
+	it('is found by the secret’s label, and by the rest of its words', () => {
+		expect(found(search.find('wi-fi password'))).toEqual(['router']);
+		expect(found(search.find('attic'))).toEqual(['router']);
+	});
+
+	it('is not found by a run of the secret’s base64, which is no word of the note’s', () => {
+		const runs = (armor.split('\n')[1] ?? '')
+			.split(/[^A-Za-z0-9]+/)
+			.filter((run) => run.length >= 6)
+			.map((run) => run.slice(0, 6));
+		expect(runs.length).toBeGreaterThan(0);
+		runs.forEach((run) => {
+			expect(found(search.find(run))).not.toContain('router');
+		});
+	});
+
+	it('is not found by the lines its armor opens and ends with, nor by its fence’s `age`', () => {
+		['begin', 'encrypted', 'file', 'age'].forEach((word) => {
+			expect(found(search.find(word))).toEqual([]);
+		});
 	});
 });
 
