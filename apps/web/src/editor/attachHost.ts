@@ -91,6 +91,8 @@ export type Added =
 export interface AttachmentProblem {
 	readonly message: string;
 	readonly tone: 'warning' | 'error';
+	/** What can be done about it here, as a button beside it: a dialog opened over the note. */
+	readonly action?: Readonly<{ label: string; onChoose: () => void }> | undefined;
 }
 
 export interface AttachmentHost {

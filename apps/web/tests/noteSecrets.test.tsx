@@ -81,6 +81,11 @@ const setup = async ({
 	});
 	const told: AttachmentProblem[] = [];
 	const copy = vi.fn((_text: string) => Promise.resolve());
+	// The source's key file, for its Secrets dialog: read as the test wrote it.
+	const keyFileSync = {
+		refresh: vi.fn(() => Promise.resolve()),
+		write: vi.fn(() => Promise.resolve({ status: 'unavailable' as const })),
+	};
 	const held = { current: undefined as NoteSecrets | undefined };
 	const Probe = () => {
 		const secrets = useNoteSecrets(
@@ -89,6 +94,7 @@ const setup = async ({
 				db,
 				lock,
 				copy,
+				keyFile: keyFileSync,
 				...(age === undefined ? {} : { age }),
 				report: (problem) => told.push(problem),
 			}
@@ -111,7 +117,18 @@ const setup = async ({
 		if (to === undefined) throw new Error('not a recipient');
 		return sealSecret(words, to);
 	};
-	return { db, identity, lock, told, copy, secrets, unlock, sealedFor, user: userEvent.setup() };
+	return {
+		db,
+		identity,
+		lock,
+		told,
+		copy,
+		keyFileSync,
+		secrets,
+		unlock,
+		sealedFor,
+		user: userEvent.setup(),
+	};
 };
 
 describe('whether a secret can be made here', () => {
@@ -130,21 +147,62 @@ describe('whether a secret can be made here', () => {
 			'the source is not set up',
 			{ keyFile: 'none', enrolled: false },
 			/^This source is not set up for secrets/u,
+			'Set up secrets',
 		],
-		['the device is not enrolled', { enrolled: false }, /^This device cannot open secrets/u],
+		[
+			'the device is not enrolled',
+			{ enrolled: false },
+			/^This device cannot open secrets/u,
+			'Open Secrets',
+		],
 		[
 			'the key was replaced elsewhere',
 			{ keyFile: 'theirs' },
 			/key was replaced on another device/u,
+			'Open Secrets',
 		],
-		['the folder names no key', { keyFile: 'none' }, /no longer names its key/u],
-		['a newer app set it up', { keyFile: 'newer' }, /set up by a newer version of the app/u],
-		['the key file is not this app’s', { keyFile: 'invalid' }, /that this app did not write/u],
-	] as const)('is not, and says so, where %s', async (_, options, said) => {
+		[
+			'the folder names no key',
+			{ keyFile: 'none' },
+			/no longer names its key/u,
+			'Open Secrets',
+		],
+		[
+			'a newer app set it up',
+			{ keyFile: 'newer' },
+			/set up by a newer version of the app/u,
+			undefined,
+		],
+		[
+			'the key file is not this app’s',
+			{ keyFile: 'invalid' },
+			/that this app did not write/u,
+			undefined,
+		],
+	] as const)('is not, and says so, where %s', async (_, options, said, way) => {
 		const h = await setup(options);
 
 		expect(await h.secrets().host.begin()).toBeUndefined();
 		expect(h.told.at(-1)?.message).toMatch(said);
+		// The way on, where the Secrets dialog is it, rather than where to find it.
+		expect(h.told.at(-1)?.message).not.toMatch(/menu/u);
+		expect(h.told.at(-1)?.action?.label).toBe(way);
+	});
+
+	it('opens the source’s Secrets dialog over the note when its way on is chosen', async () => {
+		const h = await setup({ enrolled: false });
+		await h.secrets().host.begin();
+
+		act(() => {
+			h.told.at(-1)?.action?.onChoose();
+		});
+
+		// Where a device not yet enrolled starts: typing the recovery key.
+		const dialog = await screen.findByRole('dialog', { name: 'Secrets' });
+		expect(await screen.findByLabelText('Group 1')).toBeTruthy();
+		expect(h.keyFileSync.refresh).toHaveBeenCalledWith('c1');
+		await h.user.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(dialog.isConnected).toBe(false);
 	});
 
 	it('is not, and says so, where the device’s storage fails', async () => {
@@ -241,10 +299,27 @@ describe('opening', () => {
 		expect(h.told.at(-1)?.message).toBe('That did not work. Try again.');
 	});
 
-	it('says where this device cannot open the source’s secrets at all', async () => {
+	it('says where this device cannot open the source’s secrets at all, with the way on', async () => {
 		const h = await setup({ enrolled: false });
 		expect(await h.secrets().host.open(h.sealedFor('x'))).toEqual({ state: 'locked' });
 		expect(h.told.at(-1)?.message).toMatch(/^This device cannot open secrets/u);
+		expect(h.told.at(-1)?.action?.label).toBe('Open Secrets');
+	});
+
+	it('goes on to the Secrets dialog from the unlock, where the device’s keys have gone', async () => {
+		const h = await setup();
+		const opening = h.secrets().host.open(h.sealedFor('the door code'));
+		const pin = await screen.findByLabelText('PIN');
+		// Let go of in another tab while the unlock was up.
+		await h.db.secretKeys.delete('c1');
+		await h.user.type(pin, '2468{Enter}');
+		await h.user.click(await screen.findByRole('button', { name: 'Use the recovery key' }));
+
+		expect(await opening).toEqual({ state: 'locked' });
+		expect(await screen.findByRole('dialog', { name: 'Secrets' })).toBeTruthy();
+		expect(await screen.findByLabelText('Group 1')).toBeTruthy();
+		// Opened, not sent to the source's menu for.
+		expect(h.told).toEqual([]);
 	});
 });
 

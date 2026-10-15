@@ -27,14 +27,16 @@ const ROLE: Record<ToastTone, 'alert' | 'status'> = {
 };
 
 /**
- * Somewhere to go about it: a link out, to a page the operator named (the
- * connect gate's action, `@skysa/core`'s `ConnectGate`). Only ever an `https:`
- * URL the client has already checked (`api/client.ts`).
+ * Somewhere to go about it. A link out, to a page the operator named (the
+ * connect gate's action, `@skysa/core`'s `ConnectGate`): only ever an `https:`
+ * URL the client has already checked (`api/client.ts`). Or what the app can
+ * open for it where it is, as a button: the source's Secrets dialog, for a
+ * secret this device cannot open yet (`noteSecrets.tsx`). A link leaves the
+ * toast to come back to; the button takes it away, since what it said is being
+ * seen to.
  */
-export interface ToastAction {
-	readonly label: string;
-	readonly url: string;
-}
+export type ToastAction =
+	Readonly<{ label: string; url: string }> | Readonly<{ label: string; onChoose: () => void }>;
 
 export interface ToastProps {
 	/** What happened, in the user's words. */
@@ -99,7 +101,7 @@ export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 	return (
 		<div ref={card} className={`toast toast-${tone}`} role={ROLE[tone]}>
 			<span>{message}</span>
-			{action !== undefined && (
+			{action !== undefined && 'url' in action && (
 				// In this window, as connecting storage is: a new one, in an app
 				// installed on a phone, had no way back but closing the app. The
 				// operator's page links back (`?enter=code`). `noreferrer` so it is
@@ -107,6 +109,17 @@ export const Toast = ({ message, tone, action, onDismiss }: ToastProps) => {
 				<a href={action.url} rel="noreferrer">
 					{action.label}
 				</a>
+			)}
+			{action !== undefined && 'onChoose' in action && (
+				<button
+					type="button"
+					onClick={() => {
+						onDismiss();
+						action.onChoose();
+					}}
+				>
+					{action.label}
+				</button>
 			)}
 			<DismissButton onDismiss={onDismiss} />
 		</div>

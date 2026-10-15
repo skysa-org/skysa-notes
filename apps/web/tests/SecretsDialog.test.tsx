@@ -19,6 +19,7 @@ import { createDatabase, type KeyFileRecord, type NotesDatabase } from '../src/s
 import { createNote } from '../src/store/notes.js';
 import { enrol, enrolment, MAX_TRIES, type Unlock, unlockKeys } from '../src/store/secretKeys.js';
 import { type KeyFileWrite } from '../src/sync/keyFile.js';
+import { readQr } from './qrRead.js';
 
 /**
  * Secrets for a source (docs/ARCHITECTURE.md §7, "Secrets in a note"): setting
@@ -138,6 +139,10 @@ describe('setting a source up', () => {
 
 		await h.user.click(screen.getByRole('button', { name: 'Print' }));
 		expect(h.print).toHaveBeenCalledTimes(1);
+		// Its QR code, on screen and on the printed page, reads as the key.
+		const code = screen.getByRole('img', { name: 'Recovery key as a QR code' });
+		expect(readQr(code)).toBe(['AGE-SECRET-KEY-1', ...shown].join(''));
+		expect(document.querySelector('.recovery-print .recovery-qr')).not.toBeNull();
 
 		await h.user.click(screen.getByRole('button', { name: 'Next' }));
 		// Typed in either case, with a space: the groups are what is checked.

@@ -2274,6 +2274,7 @@ const Home = () => {
 						<Toast
 							message={problem.message}
 							tone={problem.tone}
+							action={problem.action}
 							onDismiss={dismissProblem}
 						/>
 					)}
