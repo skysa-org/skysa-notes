@@ -1,4 +1,4 @@
-import { HIDDEN_PREFIX, SCRATCHPAD_FOLDER } from './config.js';
+import { HIDDEN_PREFIX, SCRATCHPAD_FOLDER, VAULT_FOLDER } from './config.js';
 
 /**
  * Paths are POSIX, relative to the app-owned root folder, and never begin or end
@@ -68,15 +68,22 @@ export const replaceBasename = (path: string, name: string): string =>
  * by sync, which is how the marker file, the clipboard and any provider
  * bookkeeping stay out of the way.
  *
- * Except the scratchpad's folder at the root: what is in it is notes, synced as
- * any are, which the scratchpad shows and the notebooks do not
- * (`isScratchPath`). Its dot keeps it out of other tools' lists of folders. A
- * dot-prefixed name inside it is hidden as anywhere else.
+ * Except two folders at the root, the scratchpad's and the vault's passwords':
+ * what is in them is notes, synced as any are, which the scratchpad and the
+ * passwords show and the notebooks do not (`isScratchPath`, `isVaultPath`).
+ * Their dot keeps them out of other tools' lists of folders. A dot-prefixed
+ * name inside either is hidden as anywhere else.
+ *
+ * A change to what this lets through needs every source's cursor dropped
+ * once, as the web app's schema versions 10 and 12 do: a cursor moved on while
+ * a folder was hidden passed over what was in it.
  */
+const SYNCED_AT_ROOT: readonly string[] = [SCRATCHPAD_FOLDER, VAULT_FOLDER];
+
 export const isHidden = (path: string): boolean =>
 	pathSegments(path).some(
 		(segment, at) =>
-			segment.startsWith(HIDDEN_PREFIX) && !(at === 0 && segment === SCRATCHPAD_FOLDER)
+			segment.startsWith(HIDDEN_PREFIX) && !(at === 0 && SYNCED_AT_ROOT.includes(segment))
 	);
 
 /** True when `path` is `folder` itself or sits anywhere beneath it. */
@@ -92,6 +99,12 @@ export const isWithin = (path: string, folder: string): boolean => {
  * one. Never a notebook, a notebook's note or anything the tree counts.
  */
 export const isScratchPath = (path: string): boolean => isWithin(path, SCRATCHPAD_FOLDER);
+
+/**
+ * The vault's passwords' folder, or anything in it: an item. Never a notebook,
+ * a notebook's note or anything the tree counts.
+ */
+export const isVaultPath = (path: string): boolean => isWithin(path, VAULT_FOLDER);
 
 /**
  * Rewrite a path that sits under `from` so it sits under `to` instead. Used when

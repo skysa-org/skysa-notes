@@ -3272,6 +3272,37 @@ describe("the scratchpad's folder", () => {
 	});
 });
 
+describe("the vault's passwords' folder", () => {
+	// Passwords in the vault, in `.vault/` (§7, "Passwords in the vault"):
+	// hidden from the notebooks by its dot, but notes all the same, synced as
+	// any are, as the scratchpad's are.
+	it('brings an item and its folder in', async () => {
+		await provider.createFolder('.vault');
+		await remoteFile('.vault/github.md', '---\ntitle: GitHub\n---\n');
+
+		expect((await engine.pull()).status).toBe('ok');
+		expect(noteAt('.vault/github.md')?.content).toBe('---\ntitle: GitHub\n---\n');
+		expect(store.folders().map((folder) => folder.path)).toEqual(['.vault']);
+	});
+
+	it('sends one written here', async () => {
+		store.put({ id: 'n1', path: '.vault/github.md', content: 'mine\n', dirty: true });
+		store.queue({ op: 'write', noteId: 'n1', path: '.vault/github.md' });
+
+		expect((await engine.push()).status).toBe('ok');
+		expect(provider.contentAt('.vault/github.md')).toBe('mine\n');
+	});
+
+	it('passes over what is hidden inside it', async () => {
+		await provider.createFolder('.vault');
+		await remoteFile('.vault/.draft.md', 'x\n');
+
+		await engine.pull();
+
+		expect(store.notes()).toEqual([]);
+	});
+});
+
 describe('deletions that are not about a note', () => {
 	it('says nothing when a file we never imported is deleted', async () => {
 		// The app owns the folder but not everything in it. A file it does not

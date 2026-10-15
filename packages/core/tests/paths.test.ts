@@ -4,6 +4,7 @@ import {
 	basename,
 	isHidden,
 	isScratchPath,
+	isVaultPath,
 	isWithin,
 	joinPath,
 	normalizePath,
@@ -111,6 +112,16 @@ describe('isHidden', () => {
 	});
 });
 
+it('leaves the vault’s passwords at the root to sync, and nothing hidden inside them', () => {
+	expect(isHidden('.vault')).toBe(false);
+	expect(isHidden('.vault/github.md')).toBe(false);
+	expect(isHidden('.vault/.DS_Store')).toBe(true);
+	expect(isHidden('work/.vault/a.md')).toBe(true);
+	expect(isHidden('.Vault/a.md')).toBe(true);
+	expect(isHidden('.vaults/a.md')).toBe(true);
+	expect(isHidden('.encryption.json')).toBe(true);
+});
+
 describe('isScratchPath', () => {
 	it('is the scratchpad folder and what is in it, and nothing else', () => {
 		expect(isScratchPath('.scratchpad')).toBe(true);
@@ -118,6 +129,16 @@ describe('isScratchPath', () => {
 		expect(isScratchPath('scratchpad/untitled.md')).toBe(false);
 		expect(isScratchPath('.scratchpadding/a.md')).toBe(false);
 		expect(isScratchPath('work/a.md')).toBe(false);
+	});
+});
+
+describe('isVaultPath', () => {
+	it('is the vault’s folder and what is in it, and nothing else', () => {
+		expect(isVaultPath('.vault')).toBe(true);
+		expect(isVaultPath('.vault/github.md')).toBe(true);
+		expect(isVaultPath('vault/github.md')).toBe(false);
+		expect(isVaultPath('.vaulted/a.md')).toBe(false);
+		expect(isVaultPath('.scratchpad/a.md')).toBe(false);
 	});
 });
 

@@ -1,4 +1,4 @@
-import { isScratchPath, ROOT } from '@skysa/core';
+import { isScratchPath, isVaultPath, ROOT } from '@skysa/core';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { startTransition, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
@@ -93,6 +93,13 @@ export interface PinnedTree {
 }
 
 /**
+ * Whether a path is a notebook's, or one: not the scratchpad's folder or the
+ * vault's passwords', nor anything in them (docs/ARCHITECTURE.md §7, "The
+ * scratchpad", "Passwords in the vault").
+ */
+const inNotebooks = (path: string): boolean => !isScratchPath(path) && !isVaultPath(path);
+
+/**
  * The showing source's notebooks and its pins (`store/pins.ts`), from one
  * query, so they come together: a notebook renamed or moved, or another source
  * shown, is never drawn with the pins from before.
@@ -124,12 +131,10 @@ export const usePinnedTree = (connectionId: string | undefined): PinnedTree => {
 			listFilePaths(db, { connectionId }),
 			getPins(db, connectionId),
 		]);
-		// The scratchpad's folder is no notebook, and its notes and files are
-		// no notebook's (docs/ARCHITECTURE.md §7, "The scratchpad").
 		const tree = buildFolderTree({
-			paths: paths.filter((path) => !isScratchPath(path)),
-			notePaths: notes.map((note) => note.path).filter((path) => !isScratchPath(path)),
-			filePaths: filePaths.filter((path) => !isScratchPath(path)),
+			paths: paths.filter(inNotebooks),
+			notePaths: notes.map((note) => note.path).filter(inNotebooks),
+			filePaths: filePaths.filter(inNotebooks),
 		});
 		const kept = keptTree(before.current, withPins(tree, pins.notebooks, pins.bottomNotebooks));
 		before.current = kept;
@@ -527,10 +532,11 @@ export const useNoteSearch = (query: string, focused = false): NoteHit[] | undef
 /**
  * Every note a search may find: all of them, but a scratch note only where its
  * source's scratchpad is shown on this device, since that is the only place
- * one can be opened (docs/ARCHITECTURE.md §7, "The scratchpad").
+ * one can be opened (docs/ARCHITECTURE.md §7, "The scratchpad"); and never a
+ * password, which no search result opens.
  */
 const searchable = async (): Promise<NoteRecord[]> => {
-	const notes = await listNotesEverywhere(db);
+	const notes = (await listNotesEverywhere(db)).filter((note) => !isVaultPath(note.path));
 	const sources = [...new Set(notes.filter(isScratchNote).map((note) => note.connectionId))];
 	const shown = new Set(
 		(

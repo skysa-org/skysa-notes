@@ -59,3 +59,10 @@ export const CLIPBOARD_ITEMS = 10;
  * notes in it are notes, which the scratchpad shows and nothing else does.
  */
 export const SCRATCHPAD_FOLDER = '.scratchpad';
+
+/**
+ * The vault's passwords, one note each, at the root of the app folder
+ * (docs/ARCHITECTURE.md §3, §7 "Passwords in the vault"). Hidden from the
+ * notebooks, but not from sync, as the scratchpad's folder is.
+ */
+export const VAULT_FOLDER = '.vault';
